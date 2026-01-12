@@ -1212,15 +1212,28 @@ export class ThreadManager {
           }
         }
       } else if (chunk.type === 'file_search') {
-        const placeholder = lastMessage.content.find(
-          (c) => c.type === 'file_search_call' && c.step_id === chunk.id
-        ) as api.FileSearchCallItem | undefined;
+        // Search across all assistant messages with the same run_id for the placeholder
+        let placeholder: api.FileSearchCallItem | undefined;
+        let targetMessage = lastMessage;
+
+        for (const msg of sortedMessages) {
+          if (msg.role === 'assistant' && (!chunk.run_id || msg.run_id === chunk.run_id)) {
+            const found = msg.content.find(
+              (c) => c.type === 'file_search_call' && c.step_id === chunk.id
+            ) as api.FileSearchCallItem | undefined;
+            if (found) {
+              placeholder = found;
+              targetMessage = msg;
+              break;
+            }
+          }
+        }
 
         if (placeholder) {
           placeholder.queries = chunk.queries || [];
           placeholder.status = chunk.status;
         } else {
-          lastMessage.content.push({
+          targetMessage.content.push({
             type: 'file_search_call',
             step_id: chunk.id,
             status: chunk.status,
@@ -1228,15 +1241,28 @@ export class ThreadManager {
           });
         }
       } else if (chunk.type === 'web_search') {
-        const placeholder = lastMessage.content.find(
-          (c) => c.type === 'web_search_call' && c.step_id === chunk.id
-        ) as api.WebSearchCallItem | undefined;
+        // Search across all assistant messages with the same run_id for the placeholder
+        let placeholder: api.WebSearchCallItem | undefined;
+        let targetMessage = lastMessage;
+
+        for (const msg of sortedMessages) {
+          if (msg.role === 'assistant' && (!chunk.run_id || msg.run_id === chunk.run_id)) {
+            const found = msg.content.find(
+              (c) => c.type === 'web_search_call' && c.step_id === chunk.id
+            ) as api.WebSearchCallItem | undefined;
+            if (found) {
+              placeholder = found;
+              targetMessage = msg;
+              break;
+            }
+          }
+        }
 
         if (placeholder) {
           placeholder.action = chunk.action || placeholder.action;
           placeholder.status = chunk.status;
         } else {
-          lastMessage.content.push({
+          targetMessage.content.push({
             type: 'web_search_call',
             step_id: chunk.id,
             action: chunk.action || null,
@@ -1244,9 +1270,24 @@ export class ThreadManager {
           });
         }
       } else if (chunk.type === 'mcp_call') {
-        const placeholder = lastMessage.content.find(
-          (c) => c.type === 'mcp_server_call' && c.step_id === chunk.id
-        ) as api.MCPServerCallItem | undefined;
+        // Search across all assistant messages with the same run_id for the placeholder
+        // This handles the case where early chunks go to an optimistic message
+        // but later chunks arrive after a real message is created
+        let placeholder: api.MCPServerCallItem | undefined;
+        let targetMessage = lastMessage;
+
+        for (const msg of sortedMessages) {
+          if (msg.role === 'assistant' && (!chunk.run_id || msg.run_id === chunk.run_id)) {
+            const found = msg.content.find(
+              (c) => c.type === 'mcp_server_call' && c.step_id === chunk.id
+            ) as api.MCPServerCallItem | undefined;
+            if (found) {
+              placeholder = found;
+              targetMessage = msg;
+              break;
+            }
+          }
+        }
 
         const nextArguments =
           typeof chunk.arguments_delta === 'string'
@@ -1270,7 +1311,7 @@ export class ThreadManager {
             placeholder.status = chunk.status;
           }
         } else {
-          lastMessage.content.push({
+          targetMessage.content.push({
             type: 'mcp_server_call',
             step_id: chunk.id,
             server_label: chunk.server_label ?? '',
@@ -1283,9 +1324,24 @@ export class ThreadManager {
           });
         }
       } else if (chunk.type === 'mcp_list_tools') {
-        const placeholder = lastMessage.content.find(
-          (c) => c.type === 'mcp_list_tools_call' && c.step_id === chunk.id
-        ) as api.MCPListToolsCallItem | undefined;
+        // Search across all assistant messages with the same run_id for the placeholder
+        // This handles the case where early chunks go to an optimistic message
+        // but later chunks arrive after a real message is created
+        let placeholder: api.MCPListToolsCallItem | undefined;
+        let targetMessage = lastMessage;
+
+        for (const msg of sortedMessages) {
+          if (msg.role === 'assistant' && (!chunk.run_id || msg.run_id === chunk.run_id)) {
+            const found = msg.content.find(
+              (c) => c.type === 'mcp_list_tools_call' && c.step_id === chunk.id
+            ) as api.MCPListToolsCallItem | undefined;
+            if (found) {
+              placeholder = found;
+              targetMessage = msg;
+              break;
+            }
+          }
+        }
 
         if (placeholder) {
           placeholder.server_label = chunk.server_label ?? placeholder.server_label;
@@ -1300,7 +1356,7 @@ export class ThreadManager {
             placeholder.status = chunk.status;
           }
         } else {
-          lastMessage.content.push({
+          targetMessage.content.push({
             type: 'mcp_list_tools_call',
             step_id: chunk.id,
             server_label: chunk.server_label ?? '',

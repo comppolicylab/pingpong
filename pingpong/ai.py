@@ -24,6 +24,7 @@ from pingpong.prompt import replace_random_blocks
 from pingpong.schemas import (
     APIKeyValidationResponse,
     AnnotationType,
+    BufferedStreamHandlerToolCallState,
     CodeInterpreterOutputType,
     FileSearchToolAnnotationResult,
     MessageStatus,
@@ -972,6 +973,7 @@ class BufferedResponseStreamHandler:
         self.prev_output_index = prev_output_index
         self.tool_call_id: int | None = None
         self.tool_call_external_id: int | None = None
+        self.tool_calls: dict[str, BufferedStreamHandlerToolCallState] = {}
         self.reasoning_id: int | None = None
         self.reasoning_external_id: str | None = None
         self.prev_reasoning_summary_part_index = -1
@@ -1894,12 +1896,6 @@ class BufferedResponseStreamHandler:
             )
             return
 
-        if self.tool_call_id:
-            logger.exception(
-                f"Received MCP tool call created with an existing tool call. Data: {data}"
-            )
-            return
-
         self.prev_output_index += 1
         self.last_output_item_type = "mcp_call"
 
@@ -1934,6 +1930,9 @@ class BufferedResponseStreamHandler:
             return tool_call
 
         tool_call = await add_cached_tool_call_on_mcp_tool_call_created()
+        self.tool_calls[tool_call.tool_call_id] = BufferedStreamHandlerToolCallState(
+            tool_call_id=tool_call.id, output_index=self.prev_output_index
+        )
         self.tool_call_id = tool_call.id
         self.tool_call_external_id = tool_call.tool_call_id
 
@@ -1962,14 +1961,10 @@ class BufferedResponseStreamHandler:
         )
 
     async def on_mcp_tool_call_in_progress(self, data: ResponseMcpCallInProgressEvent):
-        if not self.tool_call_id:
+        tool_call = self.tool_calls.get(data.item_id)
+        if not tool_call:
             logger.exception(
                 f"Received MCP call in progress without a current tool call. Data: {data}"
-            )
-            return
-        if self.tool_call_external_id != data.item_id:
-            logger.exception(
-                f"Received MCP call in progress with a different tool call ID. Data: {data}"
             )
             return
 
@@ -1977,11 +1972,11 @@ class BufferedResponseStreamHandler:
         async def add_cached_tool_call_on_mcp_tool_call_in_progress(
             session_: AsyncSession,
         ):
-            if not self.tool_call_id:
+            if not tool_call:
                 return
 
             await models.ToolCall.update_status(
-                session_, self.tool_call_id, ToolCallStatus.IN_PROGRESS
+                session_, tool_call.tool_call_id, ToolCallStatus.IN_PROGRESS
             )
             await session_.commit()
 
@@ -1990,14 +1985,10 @@ class BufferedResponseStreamHandler:
     async def on_mcp_tool_call_arguments_delta(
         self, data: ResponseMcpCallArgumentsDeltaEvent
     ):
-        if not self.tool_call_id:
+        tool_call = self.tool_calls.get(data.item_id)
+        if not tool_call:
             logger.exception(
                 f"Received MCP tool call arguments delta without a current tool call. Data: {data}"
-            )
-            return
-        if self.tool_call_external_id != data.item_id:
-            logger.exception(
-                f"Received MCP tool call arguments delta with a different tool call ID. Data: {data}"
             )
             return
 
@@ -2005,10 +1996,10 @@ class BufferedResponseStreamHandler:
         async def add_cached_tool_call_on_mcp_tool_call_arguments_delta(
             session_: AsyncSession,
         ):
-            if not self.tool_call_id:
+            if not tool_call:
                 return
             await models.ToolCall.add_mcp_arguments_delta(
-                session_, self.tool_call_id, data.delta
+                session_, tool_call.tool_call_id, data.delta
             )
             await session_.commit()
 
@@ -2030,14 +2021,10 @@ class BufferedResponseStreamHandler:
         )
 
     async def on_mcp_tool_call_completed(self, data: ResponseMcpCallCompletedEvent):
-        if not self.tool_call_id:
+        tool_call = self.tool_calls.get(data.item_id)
+        if not tool_call:
             logger.exception(
                 f"Received MCP call completed without a current tool call. Data: {data}"
-            )
-            return
-        if self.tool_call_external_id != data.item_id:
-            logger.exception(
-                f"Received MCP call completed with a different tool call ID. Data: {data}"
             )
             return
 
@@ -2047,11 +2034,11 @@ class BufferedResponseStreamHandler:
         async def add_cached_tool_call_on_mcp_tool_call_completed(
             session_: AsyncSession,
         ):
-            if not self.tool_call_id:
+            if not tool_call:
                 return
             await models.ToolCall.update_status(
                 session_,
-                self.tool_call_id,
+                tool_call.tool_call_id,
                 ToolCallStatus.COMPLETED,
                 completed=completed_at,
             )
@@ -2060,14 +2047,10 @@ class BufferedResponseStreamHandler:
         await add_cached_tool_call_on_mcp_tool_call_completed()
 
     async def on_mcp_tool_call_failed(self, data: ResponseMcpCallFailedEvent):
-        if not self.tool_call_id:
+        tool_call = self.tool_calls.get(data.item_id)
+        if not tool_call:
             logger.exception(
                 f"Received MCP call failed without a current tool call. Data: {data}"
-            )
-            return
-        if self.tool_call_external_id != data.item_id:
-            logger.exception(
-                f"Received MCP call failed with a different tool call ID. Data: {data}"
             )
             return
 
@@ -2077,11 +2060,11 @@ class BufferedResponseStreamHandler:
         async def add_cached_tool_call_on_mcp_tool_call_failed(
             session_: AsyncSession,
         ):
-            if not self.tool_call_id:
+            if not tool_call:
                 return
             await models.ToolCall.update_status(
                 session_,
-                self.tool_call_id,
+                tool_call.tool_call_id,
                 ToolCallStatus.FAILED,
                 completed=completed_at,
             )
@@ -2095,14 +2078,11 @@ class BufferedResponseStreamHandler:
                 f"Received MCP call done without a cached run. Data: {data}"
             )
             return
-        if not self.tool_call_id:
+
+        tool_call = self.tool_calls.get(data.id)
+        if not tool_call:
             logger.exception(
                 f"Received MCP call done without a current tool call. Data: {data}"
-            )
-            return
-        if self.tool_call_external_id != data.id:
-            logger.exception(
-                f"Received MCP call done with a different tool call ID. Data: {data}"
             )
             return
 
@@ -2110,11 +2090,11 @@ class BufferedResponseStreamHandler:
         async def add_cached_tool_call_on_mcp_call_done(
             session_: AsyncSession,
         ):
-            if not self.tool_call_id:
+            if not tool_call:
                 return
             await models.ToolCall.update_mcp_call(
                 session_,
-                self.tool_call_id,
+                tool_call.tool_call_id,
                 status=ToolCallStatus(data.status),
                 error=json.dumps(data.error) if data.error else None,
                 mcp_tool_name=data.name,
@@ -2149,17 +2129,12 @@ class BufferedResponseStreamHandler:
         )
         self.tool_call_id = None
         self.tool_call_external_id = None
+        self.tool_calls.pop(data.id, None)
 
     async def on_mcp_list_tools_call_created(self, data: McpListTools):
         if not self.run_id:
             logger.exception(
                 f"Received MCP list tools call created event without a cached run. Data: {data}"
-            )
-            return
-
-        if self.tool_call_id:
-            logger.exception(
-                f"Received MCP list tools call created with an existing tool call. Data: {data}"
             )
             return
 
@@ -2194,6 +2169,9 @@ class BufferedResponseStreamHandler:
             return tool_call
 
         tool_call = await add_cached_tool_call_on_mcp_list_tools_call_created()
+        self.tool_calls[tool_call.tool_call_id] = BufferedStreamHandlerToolCallState(
+            tool_call_id=tool_call.id, output_index=self.prev_output_index
+        )
         self.tool_call_id = tool_call.id
         self.tool_call_external_id = tool_call.tool_call_id
 
@@ -2220,14 +2198,10 @@ class BufferedResponseStreamHandler:
     async def on_mcp_list_tools_call_in_progress(
         self, data: ResponseMcpListToolsInProgressEvent
     ):
-        if not self.tool_call_id:
+        tool_call = self.tool_calls.get(data.item_id)
+        if not tool_call:
             logger.exception(
                 f"Received MCP list tools call in progress without a current tool call. Data: {data}"
-            )
-            return
-        if self.tool_call_external_id != data.item_id:
-            logger.exception(
-                f"Received MCP list tools call in progress with a different tool call ID. Data: {data}"
             )
             return
 
@@ -2239,7 +2213,7 @@ class BufferedResponseStreamHandler:
                 return
 
             await models.ToolCall.update_status(
-                session_, self.tool_call_id, ToolCallStatus.IN_PROGRESS
+                session_, tool_call.tool_call_id, ToolCallStatus.IN_PROGRESS
             )
             await session_.commit()
 
@@ -2248,14 +2222,10 @@ class BufferedResponseStreamHandler:
     async def on_mcp_list_tools_call_completed(
         self, data: ResponseMcpListToolsCompletedEvent
     ):
-        if not self.tool_call_id:
+        tool_call = self.tool_calls.get(data.item_id)
+        if not tool_call:
             logger.exception(
                 f"Received MCP list tools call completed without a current tool call. Data: {data}"
-            )
-            return
-        if self.tool_call_external_id != data.item_id:
-            logger.exception(
-                f"Received MCP list tools call completed with a different tool call ID. Data: {data}"
             )
             return
 
@@ -2265,11 +2235,11 @@ class BufferedResponseStreamHandler:
         async def add_cached_tool_call_on_mcp_list_tools_call_completed(
             session_: AsyncSession,
         ):
-            if not self.tool_call_id:
+            if not tool_call:
                 return
             await models.ToolCall.update_status(
                 session_,
-                self.tool_call_id,
+                tool_call.tool_call_id,
                 ToolCallStatus.COMPLETED,
                 completed=completed_at,
             )
@@ -2277,17 +2247,27 @@ class BufferedResponseStreamHandler:
 
         await add_cached_tool_call_on_mcp_list_tools_call_completed()
 
+        self.enqueue(
+            {
+                "type": "tool_call_delta",
+                "delta": {
+                    "type": "mcp_list_tools",
+                    "id": data.item_id,
+                    "index": tool_call.output_index,
+                    "output_index": tool_call.output_index,
+                    "run_id": str(self.run_id),
+                    "status": ToolCallStatus.COMPLETED.value,
+                },
+            }
+        )
+
     async def on_mcp_list_tools_call_failed(
         self, data: ResponseMcpListToolsFailedEvent
     ):
-        if not self.tool_call_id:
+        tool_call = self.tool_calls.get(data.item_id)
+        if not tool_call:
             logger.exception(
                 f"Received MCP list tools call failed without a current tool call. Data: {data}"
-            )
-            return
-        if self.tool_call_external_id != data.item_id:
-            logger.exception(
-                f"Received MCP list tools call failed with a different tool call ID. Data: {data}"
             )
             return
 
@@ -2297,11 +2277,11 @@ class BufferedResponseStreamHandler:
         async def add_cached_tool_call_on_mcp_list_tools_call_failed(
             session_: AsyncSession,
         ):
-            if not self.tool_call_id:
+            if not tool_call:
                 return
             await models.ToolCall.update_status(
                 session_,
-                self.tool_call_id,
+                tool_call.tool_call_id,
                 ToolCallStatus.FAILED,
                 completed=completed_at,
             )
@@ -2315,14 +2295,11 @@ class BufferedResponseStreamHandler:
                 f"Received MCP list tools call done without a cached run. Data: {data}"
             )
             return
-        if not self.tool_call_id:
+
+        tool_call = self.tool_calls.get(data.id)
+        if not tool_call:
             logger.exception(
                 f"Received MCP list tools call done without a current tool call. Data: {data}"
-            )
-            return
-        if self.tool_call_external_id != data.id:
-            logger.exception(
-                f"Received MCP list tools call done with a different tool call ID. Data: {data}"
             )
             return
 
@@ -2347,7 +2324,7 @@ class BufferedResponseStreamHandler:
                 "description": tool.description,
                 "input_schema": json.dumps(tool.input_schema),
                 "annotations": json.dumps(tool.annotations),
-                "tool_call_id": self.tool_call_id,
+                "tool_call_id": tool_call.tool_call_id,
                 "created": utcnow(),
             }
             await add_mcp_list_tools_tool_on_mcp_list_tools_call_done(
@@ -2358,11 +2335,11 @@ class BufferedResponseStreamHandler:
         async def add_cached_tool_call_on_mcp_list_tools_call_done(
             session_: AsyncSession,
         ):
-            if not self.tool_call_id:
+            if not tool_call:
                 return
             await models.ToolCall.update_mcp_call(
                 session_,
-                self.tool_call_id,
+                tool_call.tool_call_id,
                 error=json.dumps(data.error) if data.error else None,
             )
             await session_.commit()
@@ -2394,6 +2371,7 @@ class BufferedResponseStreamHandler:
         )
         self.tool_call_id = None
         self.tool_call_external_id = None
+        self.tool_calls.pop(data.id, None)
 
     async def on_web_search_call_created(self, data: ResponseFunctionWebSearch):
         if not self.run_id:
@@ -3322,6 +3300,13 @@ class BufferedResponseStreamHandler:
             )
             self.force_stop_incomplete_reason = None
             return
+
+        if isinstance(data, ResponseCompletedEvent):
+            for item in data.response.output:
+                if item.type == "mcp_list_tools" and self.tool_calls.get(item.id):
+                    await self.on_mcp_list_tools_call_done(item)
+                elif item.type == "mcp_server_call" and self.tool_calls.get(item.id):
+                    await self.on_mcp_tool_call_done(item)
 
         await self.cleanup(
             run_status=RunStatus(data.response.status),

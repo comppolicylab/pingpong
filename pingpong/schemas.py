@@ -535,6 +535,11 @@ class MCPServerToolsResponse(BaseModel):
     mcp_servers: list[MCPServerToolResponse]
 
 
+class BufferedStreamHandlerToolCallState(BaseModel):
+    tool_call_id: int
+    output_index: int
+
+
 class CreateAssistant(BaseModel):
     name: str = Field(..., min_length=3, max_length=100)
     code_interpreter_file_ids: list[str] | None = None
