@@ -655,7 +655,9 @@
         if (hasAnonymousShareToken()) {
           resetAnonymousSessionToken();
           await goto(
-            `/group/${classId}/shared/assistant/${$assistantId}?share_token=${getAnonymousShareToken()}`
+            resolve(
+              `/group/${classId}/shared/assistant/${$assistantId}?share_token=${getAnonymousShareToken()}`
+            )
           );
         } else {
           await goto(resolve(`/`), { invalidateAll: true });
@@ -1082,7 +1084,7 @@
     </div>
     {#if $canFetchMore}
       <div class="flex justify-center grow">
-        <Button size="sm" class="text-sky-600 hover:text-sky-800" on:click={fetchMoreMessages}>
+        <Button size="sm" class="text-sky-600 hover:text-sky-800" onclick={fetchMoreMessages}>
           <RefreshOutline class="w-3 h-3 me-2" /> Load earlier messages ...
         </Button>
       </div>
@@ -1184,7 +1186,7 @@
                           purpose="vision"
                           mimeType={data.uploadInfo.mimeType}
                           preventDeletion={true}
-                          on:delete={() => {}}
+                          ondelete={() => {}}
                         />
                       {/if}
                     {/each}
@@ -1228,8 +1230,8 @@
                       pill
                       size="xs"
                       color="alternative"
-                      on:click={() => fetchCodeInterpreterResult(content)}
-                      on:touchstart={() => fetchCodeInterpreterResult(content)}
+                      onclick={() => fetchCodeInterpreterResult(content)}
+                      ontouchstart={() => fetchCodeInterpreterResult(content)}
                     >
                       Load Code Interpreter Results
                     </Button>
@@ -1369,7 +1371,7 @@
                   <FilePlaceholder
                     info={allFiles[file_id]}
                     mimeType={data.uploadInfo.mimeType}
-                    on:delete={removeFile}
+                    ondelete={removeFile}
                   />
                 {:else}
                   <AttachmentDeletedPlaceholder {file_id} />
@@ -1399,7 +1401,7 @@
         value={shareLink}
       />
       <div class="flex justify-end pt-1">
-        <Button size="xs" color="alternative" on:click={() => (copyLinkModalOpen = false)}
+        <Button size="xs" color="alternative" onclick={() => (copyLinkModalOpen = false)}
           >Done</Button
         >
       </div>
@@ -1437,8 +1439,8 @@
             <Button
               class="flex flex-row py-1.5 px-4 gap-1.5 bg-blue-dark-40 text-white rounded-sm text-xs hover:bg-blue-dark-50 hover:text-blue-light-50 transition-all text-sm font-normal text-center"
               type="button"
-              on:click={handleSessionSetup}
-              on:touchstart={handleSessionSetup}
+              onclick={handleSessionSetup}
+              ontouchstart={handleSessionSetup}
             >
               Enable access
             </Button>
@@ -1485,8 +1487,8 @@
                 <span class="text-gray-700 text-sm font-normal"
                   ><Button
                     class="p-0 text-gray-700 text-sm underline font-normal"
-                    on:click={showModeratorsModal}
-                    on:touchstart={showModeratorsModal}>Moderators</Button
+                    onclick={showModeratorsModal}
+                    ontouchstart={showModeratorsModal}>Moderators</Button
                   > have enabled a setting for this thread only that allows them to see the thread,
                   <span class="font-semibold"
                     >your full name, and listen to a recording of your conversation</span
@@ -1502,8 +1504,8 @@
                   <Button
                     class="flex flex-row gap-1 bg-blue-dark-40 text-white rounded-lg hover:bg-blue-dark-50 transition-all text-sm font-normal text-center px-3 py-2"
                     type="button"
-                    on:click={handleSessionStart}
-                    on:touchstart={handleSessionStart}
+                    onclick={handleSessionStart}
+                    ontouchstart={handleSessionStart}
                     disabled={!microphoneAccess}
                   >
                     {#if startingAudioSession}
@@ -1517,8 +1519,8 @@
                   <Button
                     class="flex flex-row gap-1 bg-amber-700 text-white rounded-lg hover:bg-amber-800 transition-all text-sm font-normal text-center px-3 py-2"
                     type="button"
-                    on:click={handleSessionEnd}
-                    on:touchstart={handleSessionEnd}
+                    onclick={handleSessionEnd}
+                    ontouchstart={handleSessionEnd}
                     disabled={!microphoneAccess}
                   >
                     {#if endingAudioSession}
@@ -1556,7 +1558,7 @@
                     {#each audioDevices as audioDevice (audioDevice.deviceId)}
                       <DropdownItem
                         class="flex flex-row gap-2 items-center"
-                        on:click={() => {
+                        onclick={() => {
                           selectAudioDevice(audioDevice.deviceId);
                           openMicrophoneModal = false;
                         }}
@@ -1612,9 +1614,9 @@
               remove={handleRemove}
               threadVersion={$version}
               assistantVersion={resolvedAssistantVersion}
-              on:submit={handleSubmit}
-              on:dismissError={handleDismissError}
-              on:startNewChat={startNewChat}
+              onsubmit={handleSubmit}
+              ondismissError={handleDismissError}
+              onstartNewChat={startNewChat}
             />
           {:else if data.threadInteractionMode === 'voice' && ($messages.length > 0 || assistantInteractionMode === 'chat')}
             {#if threadRecording && $messages.length > 0 && assistantInteractionMode === 'voice'}
@@ -1636,7 +1638,7 @@
                       </div>
                       <Button
                         class="text-white bg-gradient-to-b from-blue-dark-30 to-blue-dark-40 py-1 px-2 rounded-lg w-fit shrink-0 hover:from-blue-dark-40 hover:to-blue-dark-50 transition-all text-xs font-normal"
-                        on:click={fetchRecording}
+                        onclick={fetchRecording}
                       >
                         Load Recording
                       </Button>
@@ -1682,8 +1684,8 @@
                 <Span class="text-gray-600 text-xs font-normal"
                   ><Button
                     class="p-0 text-gray-600 text-xs underline font-normal"
-                    on:click={showModeratorsModal}
-                    on:touchstart={showModeratorsModal}>Moderators</Button
+                    onclick={showModeratorsModal}
+                    ontouchstart={showModeratorsModal}>Moderators</Button
                   > <span class="font-semibold">cannot</span> see this thread or your name. {#if isCurrentUser}For
                     more information, please review <a
                       href={resolve('/privacy-policy')}
@@ -1700,8 +1702,8 @@
                       <Span class="text-gray-600 text-xs font-normal"
                         ><Button
                           class="p-0 text-gray-600 text-xs underline font-normal"
-                          on:click={showModeratorsModal}
-                          on:touchstart={showModeratorsModal}>Moderators</Button
+                          onclick={showModeratorsModal}
+                          ontouchstart={showModeratorsModal}>Moderators</Button
                         > can see this thread,
                         <span class="font-semibold"
                           >{isCurrentUser ? 'your' : "the user's"} full name, and listen to a recording
@@ -1720,8 +1722,8 @@
                       <Span class="text-gray-600 text-xs font-normal"
                         ><Button
                           class="p-0 text-gray-600 text-xs underline font-normal"
-                          on:click={showModeratorsModal}
-                          on:touchstart={showModeratorsModal}>Moderators</Button
+                          onclick={showModeratorsModal}
+                          ontouchstart={showModeratorsModal}>Moderators</Button
                         > can see this thread and
                         <span class="font-semibold"
                           >{isCurrentUser ? 'your' : "the user's"} full name</span
@@ -1739,8 +1741,8 @@
                   <Span class="text-gray-600 text-xs font-normal"
                     ><Button
                       class="p-0 text-gray-600 text-xs underline font-normal"
-                      on:click={showModeratorsModal}
-                      on:touchstart={showModeratorsModal}>Moderators</Button
+                      onclick={showModeratorsModal}
+                      ontouchstart={showModeratorsModal}>Moderators</Button
                     > can see this thread but not {isCurrentUser ? 'your' : "the user's"} name.
                     {#if isCurrentUser}For more information, please review <a
                         href={resolve('/privacy-policy')}
@@ -1757,8 +1759,8 @@
                     ? 'your'
                     : "the user's"} name. {#if displayUserInfo}{#if data.threadInteractionMode === 'voice'}<Button
                         class="p-0 text-gray-600 text-xs underline font-normal"
-                        on:click={showModeratorsModal}
-                        on:touchstart={showModeratorsModal}>Moderators</Button
+                        onclick={showModeratorsModal}
+                        ontouchstart={showModeratorsModal}>Moderators</Button
                       > can see this thread,
                       <span class="font-semibold"
                         >{isCurrentUser ? 'your' : "the user's"} full name, and listen to a recording
@@ -1766,8 +1768,8 @@
                         {isCurrentUser ? 'your' : 'the'} conversation</span
                       >.{:else}<Button
                         class="p-0 text-gray-600 text-xs underline font-normal"
-                        on:click={showModeratorsModal}
-                        on:touchstart={showModeratorsModal}>Moderators</Button
+                        onclick={showModeratorsModal}
+                        ontouchstart={showModeratorsModal}>Moderators</Button
                       > can see this thread and
                       <span class="font-semibold"
                         >{isCurrentUser ? 'your' : "the user's"} full name</span
@@ -1776,7 +1778,7 @@
               {/if}
             </div>
             <button
-              on:click|preventDefault={handleCopyLinkClick}
+              onclick|preventDefault={handleCopyLinkClick}
               title="Copy link"
               aria-label="Copy link"
               ><LinkOutline
@@ -1790,22 +1792,22 @@
                 <Dropdown bind:open={settingsOpen}>
                   {#if $threadInstructions}
                     <DropdownItem
-                      on:click={() => ((showAssistantPrompt = true), (settingsOpen = false))}
+                      onclick={() => ((showAssistantPrompt = true), (settingsOpen = false))}
                     >
                       <span>Prompt</span>
                     </DropdownItem>
                     <DropdownDivider />
                   {/if}
-                  <DropdownItem on:click={handlePrintThread} disabled={printingThread}>
+                  <DropdownItem onclick={handlePrintThread} disabled={printingThread}>
                     <span class:text-gray-300={printingThread}>Print</span>
                   </DropdownItem>
                   {#if threadRecording}
-                    <DropdownItem on:click={transcribeRecording} disabled={transcribingRecording}>
+                    <DropdownItem onclick={transcribeRecording} disabled={transcribingRecording}>
                       <span class:text-gray-300={transcribingRecording}>Transcribe</span>
                     </DropdownItem>
                   {/if}
                   <DropdownDivider />
-                  <DropdownItem on:click={togglePublish} disabled={!canPublishThread}>
+                  <DropdownItem onclick={togglePublish} disabled={!canPublishThread}>
                     <span class:text-gray-300={!canPublishThread}>
                       {#if $published}
                         Unpublish
@@ -1814,7 +1816,7 @@
                       {/if}
                     </span>
                   </DropdownItem>
-                  <DropdownItem on:click={deleteThread} disabled={!canDeleteThread}>
+                  <DropdownItem onclick={deleteThread} disabled={!canDeleteThread}>
                     <span class:text-gray-300={!canDeleteThread}>Delete</span>
                   </DropdownItem>
                 </Dropdown>

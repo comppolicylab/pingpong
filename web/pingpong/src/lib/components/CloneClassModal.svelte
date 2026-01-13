@@ -195,7 +195,7 @@
           name="allAssistants"
           value="all"
           bind:group={assistantCopy}
-          on:click={() => {
+          onclick={() => {
             userCopy = 'all';
           }}
           >Copy all&nbsp;<span class="italic">published</span>&nbsp;Assistants, including those
@@ -238,8 +238,8 @@
     </Accordion>
   </div>
   <div class="flex justify-center gap-4">
-    <Button pill color="alternative" on:click={() => dispatch('cancel')}>Cancel</Button>
-    <Button pill outline color="blue" on:click={() => dispatch('confirm', copyClassInfo)}
+    <Button pill color="alternative" onclick={() => dispatch('cancel')}>Cancel</Button>
+    <Button pill outline color="blue" onclick={() => dispatch('confirm', copyClassInfo)}
       >Clone Group</Button
     >
   </div>

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Heading, P, Modal, A } from 'flowbite-svelte';
   import PingPongDemoCarousel from '$lib/components/PingPongDemoCarousel.svelte';
+  import { resolve } from '$app/paths';
 
   export let nonAuthed: boolean;
   export let linksOpenInNewTab: boolean = false;
@@ -62,7 +63,7 @@
     <Heading tag="h3" class="my-4">What kinds of data do you collect?</Heading>
     <P class="ml-0.5 mt-4">
       Please read our <a
-        href="/privacy-policy"
+        href={resolve('/privacy-policy')}
         class="underline"
         rel="noopener noreferrer"
         target={linksOpenInNewTab ? '_blank' : undefined}>privacy policy</a
@@ -143,7 +144,7 @@
     <P class="text-xs w-full text-center text-gray-100 mt-4"
       >All content &copy; {year} Computational Policy Lab. All rights reserved. <A
         class="underline"
-        on:click={() => {
+        onclick={() => {
           acknowledgementsModal = true;
         }}>Acknowledgements</A
       ></P

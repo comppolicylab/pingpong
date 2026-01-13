@@ -47,7 +47,7 @@
       <Heading tag="h1" class="logo w-full text-center"><PingPongLogo size="full" /></Heading>
     </header>
     <div class="px-8 py-8 bg-white">
-      <form on:submit={saveName}>
+      <form onsubmit={saveName}>
         <section class="flex flex-col gap-2">
           <div class="w-full text-md">
             Welcome, {data.me.user?.email || 'Unknown'}.

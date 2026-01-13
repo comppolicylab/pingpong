@@ -467,7 +467,7 @@
                 </div>
                 <Button
                   class="border border-gray-800 from-gray-800 bg-gradient-to-t to-gray-600  text-white hover:bg-gradient-to-t hover:from-gray-700 hover:to-gray-500 hover:border-gray-700 shrink-0 py-1.5 px-3 text-xs md:text-sm"
-                  on:click={() => dispatcher('startNewChat')}
+                  onclick={() => dispatcher('startNewChat')}
                 >
                   Start a new chat
                 </Button>
@@ -488,7 +488,7 @@
                 {mimeType}
                 info={file}
                 purpose="fs_ci_multimodal"
-                on:delete={removeFile}
+                ondelete={removeFile}
               />
             {/each}
           </div>
@@ -511,7 +511,7 @@
               </div>
               <Button
                 class="text-brown-dark -mt-px hover:bg-red-light-50 p-1 rounded-lg"
-                on:click={dismissError}
+                onclick={dismissError}
               >
                 <CloseOutline class="cursor-pointer" />
               </Button>
@@ -540,8 +540,8 @@
               : 'Read-only thread: You no longer have permissions to interact with this assistant.'}
         class:text-gray-700={disabled}
         disabled={!canSubmit || assistantDeleted || !canViewAssistant}
-        on:keydown={maybeSubmit}
-        on:input={handleTextAreaInput}
+        onkeydown={maybeSubmit}
+        oninput={handleTextAreaInput}
         style={`max-height: ${maxHeight}px; font-size: 1rem; line-height: 1.5rem;`}
       />
       <textarea
@@ -571,15 +571,15 @@
             {threadCodeInterpreterMaxCount}
             {purpose}
             {upload}
-            on:error={(e) => sadToast(e.detail.message)}
-            on:change={handleFilesChange}
+            onerror={(e) => sadToast(e.detail.message)}
+            onchange={handleFilesChange}
           />
           {#if (codeInterpreterAcceptedFiles || fileSearchAcceptedFiles || finalVisionAcceptedFiles) && !(tooManyAttachments || tooManyVisionFiles) && !(loading || disabled || !upload) && !tooManyFileSearchFiles && !tooManyCodeInterpreterFiles}
             <Popover defaultClass="w-52" arrow={false}
               ><div class="flex flex-col h-fit align-center">
                 {#if visionSupportOverride === false && !useImageDescriptions}
                   <Button
-                    on:click={() => (visionOverrideModalOpen = true)}
+                    onclick={() => (visionOverrideModalOpen = true)}
                     class="flex flex-row justify-between items-center bg-amber-700 rounded-t-md rounded-b-none py-2 px-3"
                     ><span class="uppercase text-xs font-medium text-white leading-none"
                       >No Vision capabilities</span
@@ -587,7 +587,7 @@
                     <QuestionCircleOutline color="white" /></Button
                   >{:else if visionSupportOverride === false && useImageDescriptions}
                   <Button
-                    on:click={() => (visionUseImageDescriptionsModalOpen = true)}
+                    onclick={() => (visionUseImageDescriptionsModalOpen = true)}
                     class="flex flex-row justify-between items-center bg-sky-700 rounded-t-md rounded-b-none py-2 px-3"
                     ><span class="uppercase text-xs font-medium text-white leading-none text-start"
                       >Experimental<br />Vision Support</span
@@ -645,9 +645,9 @@
         {/if}
         <div>
           <Button
-            on:click={submit}
-            on:touchstart={submit}
-            on:keydown={maybeSubmit}
+            onclick={submit}
+            ontouchstart={submit}
+            onkeydown={maybeSubmit}
             class={`${loading ? 'animate-pulse cursor-progress' : ''} bg-orange w-8 h-8 p-1 hover:bg-orange-dark `}
             disabled={uploading || loading || disabled}
           >

@@ -115,7 +115,7 @@
   };
 </script>
 
-<Modal size="md" open on:close={() => dispatcher('close')} on:cancel={() => dispatcher('close')}>
+<Modal size="md" open onclose={() => dispatcher('close')} oncancel={() => dispatcher('close')}>
   <div class="flex flex-col">
     <div class="mx-auto my-10 flex w-2/3 flex-col items-center gap-4 text-center">
       <div
@@ -186,7 +186,7 @@
           >
           <ButtonGroup class="w-full">
             <InputAddon>
-              <button on:click={() => (showToken = !showToken)}>
+              <button onclick={() => (showToken = !showToken)}>
                 {#if showToken}
                   <EyeOutline class="h-6 w-6" />
                 {:else}
@@ -219,18 +219,18 @@
             {#each mcpServerHeaderRows as row, index (index)}
               <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
                 <div class="flex-1">
-                  <Input placeholder="header" bind:value={mcpServerHeaderRows[index].key} />
+                  <Input placeholder="header" bind:value={row.key} />
                 </div>
                 <span class="hidden text-gray-400 sm:block">:</span>
                 <div class="flex-1">
-                  <Input placeholder="value" bind:value={mcpServerHeaderRows[index].value} />
+                  <Input placeholder="value" bind:value={row.value} />
                 </div>
                 <Button
                   type="button"
                   size="xs"
                   color="light"
                   class="text-red-600 sm:ml-1"
-                  on:click={() => removeMcpServerHeaderRow(index)}
+                  onclick={() => removeMcpServerHeaderRow(index)}
                   disabled={mcpServerHeaderRows.length === 1}>Remove</Button
                 >
               </div>
@@ -240,15 +240,15 @@
               size="xs"
               color="light"
               class="w-fit"
-              on:click={addMcpServerHeaderRow}>Add header</Button
+              onclick={addMcpServerHeaderRow}>Add header</Button
             >
           </div>
         </div>
       {/if}
     </div>
     <div class="mt-6 flex w-full items-end justify-between">
-      <Button type="button" color="light" on:click={() => dispatcher('close')}>Cancel</Button>
-      <Button type="submit" color="blue" on:click={saveMcpServer}>Save</Button>
+      <Button type="button" color="light" onclick={() => dispatcher('close')}>Cancel</Button>
+      <Button type="submit" color="blue" onclick={saveMcpServer}>Save</Button>
     </div>
   </div>
 </Modal>

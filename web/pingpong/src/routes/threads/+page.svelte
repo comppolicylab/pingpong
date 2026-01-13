@@ -82,7 +82,7 @@
       >
       <Select
         items={classOptions}
-        on:change={(e) => updateSearch('class_id', getValue(e.target))}
+        onchange={(e) => updateSearch('class_id', getValue(e.target))}
         value={currentClass}
         name="class"
       />
@@ -172,7 +172,7 @@
           <div class="text-center py-8 tracking-wide uppercase">
             <Button
               class="text-blue-dark-40 uppercase tracking-wide hover:bg-gray-100"
-              on:click={fetchNextPage}>Load more ...</Button
+              onclick={fetchNextPage}>Load more ...</Button
             >
           </div>
         {/if}

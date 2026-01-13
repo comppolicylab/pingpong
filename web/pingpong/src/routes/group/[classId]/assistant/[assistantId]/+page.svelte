@@ -1290,7 +1290,7 @@
           size="sm"
           class="bg-white border border-red-700 text-red-700 hover:text-white hover:bg-red-700"
           type="button"
-          on:click={() => (deleteModal = true)}
+          onclick={() => (deleteModal = true)}
           disabled={$loading || uploadingFSPrivate || uploadingCIPrivate}>Delete assistant</Button
         >
 
@@ -1302,8 +1302,8 @@
             cancelButtonText="Cancel"
             confirmText="delete"
             confirmButtonText="Delete assistant"
-            on:cancel={() => (deleteModal = false)}
-            on:confirm={deleteAssistant}
+            oncancel={() => (deleteModal = false)}
+            onconfirm={deleteAssistant}
           />
         </Modal>
       </div>
@@ -1345,12 +1345,12 @@
       mcpServerRecordFromServer={mcpServerEditFromServer}
       mcpServerLocalDraft={mcpServerEdit}
       {mcpServerEditIndex}
-      on:save={(e) => saveMCPServerAndCloseModal(e.detail.mcpServer, e.detail.index)}
-      on:close={() => resetDraftMCPServerAndCloseModal()}
+      onsave={(e) => saveMCPServerAndCloseModal(e.detail.mcpServer, e.detail.index)}
+      onclose={() => resetDraftMCPServerAndCloseModal()}
     />
   {/if}
 
-  <form on:submit={submitForm} bind:this={assistantForm}>
+  <form onsubmit={submitForm} bind:this={assistantForm}>
     <div class="mb-4">
       <Label class="pb-1" for="name">Name</Label>
       <Input id="name" name="name" bind:value={assistantName} disabled={preventEdits} />
@@ -1364,7 +1364,7 @@
             value="chat"
             bind:group={interactionMode}
             disabled={preventEdits}
-            on:change={changeInteractionMode}
+            onchange={changeInteractionMode}
             class={`${preventEdits ? 'hover:bg-transparent' : ''} select-none`}
             ><div class="flex flex-row gap-2 items-center">
               {#if interactionMode === 'chat'}<MessageDotsSolid
@@ -1378,7 +1378,7 @@
             value="voice"
             bind:group={interactionMode}
             disabled={preventEdits}
-            on:change={changeInteractionMode}
+            onchange={changeInteractionMode}
             class={`${preventEdits ? 'hover:bg-transparent' : ''} select-none`}
             ><div class="flex flex-row gap-2 items-center">
               {#if interactionMode === 'voice'}<MicrophoneSolid
@@ -1532,7 +1532,7 @@
         </div>
         <Button
           class="flex flex-row items-center gap-x-2 py-0.5 px-2 mb-1 border rounded-lg text-xs normal-case bg-gradient-to-b border-gray-400 from-gray-100 to-gray-200 text-gray-800 shrink-0 max-w-fit max-h-fit"
-          on:click={previewInstructions}
+          onclick={previewInstructions}
           type="button"
           disabled={$loading || uploadingFSPrivate || uploadingCIPrivate}
         >
@@ -1600,7 +1600,7 @@
             color="light"
             class="shrink-0 py-0.5 px-3 bg-white/60 border-amber-400 text-amber-900 hover:bg-white"
             disabled={preventEdits}
-            on:click={async () => {
+            onclick={async () => {
               if (!advancedOptionsOpen) {
                 advancedOptionsOpen = true;
                 await tick();
@@ -1650,7 +1650,7 @@
           name={fileSearchMetadata.value}
           checked={supportsFileSearch && (fileSearchToolSelect || false)}
           disabled={!supportsFileSearch || preventEdits}
-          on:change={() => {
+          onchange={() => {
             fileSearchToolSelect = !fileSearchToolSelect;
           }}>{fileSearchMetadata.name}</Checkbox
         >
@@ -1690,7 +1690,7 @@
           name={codeInterpreterMetadata.value}
           disabled={preventEdits || !supportsCodeInterpreter}
           checked={supportsCodeInterpreter && (codeInterpreterToolSelect || false)}
-          on:change={() => {
+          onchange={() => {
             codeInterpreterToolSelect = !codeInterpreterToolSelect;
           }}>{codeInterpreterMetadata.name}</Checkbox
         >
@@ -1745,7 +1745,7 @@
             name={webSearchMetadata.value}
             disabled={preventEdits || !supportsWebSearch}
             checked={supportsWebSearch && (webSearchToolSelect || false)}
-            on:change={() => {
+            onchange={() => {
               webSearchToolSelect = !webSearchToolSelect;
             }}
             ><div class="flex flex-wrap gap-1.5">
@@ -1804,7 +1804,7 @@
             name={mcpServerMetadata.value}
             disabled={preventEdits || !supportsMCPServer}
             checked={supportsMCPServer && (mcpServerToolSelect || false)}
-            on:change={() => {
+            onchange={() => {
               mcpServerToolSelect = !mcpServerToolSelect;
             }}
             ><div class="flex flex-wrap gap-1.5">
@@ -1849,9 +1849,9 @@
           maxSize={data.uploadInfo.class_file_max_size}
           maxCount={fileSearchMetadata.max_count}
           uploadType="File Search"
-          on:error={(e) => sadToast(e.detail.message)}
-          on:change={handleFSPrivateFilesChange}
-          on:delete={removePrivateFiles}
+          onerror={(e) => sadToast(e.detail.message)}
+          onchange={handleFSPrivateFilesChange}
+          ondelete={removePrivateFiles}
         />
       </div>
     {/if}
@@ -1885,9 +1885,9 @@
           maxSize={data.uploadInfo.class_file_max_size}
           maxCount={codeInterpreterMetadata.max_count}
           uploadType="Code Interpreter"
-          on:error={(e) => sadToast(e.detail.message)}
-          on:change={handleCIPrivateFilesChange}
-          on:delete={removePrivateFiles}
+          onerror={(e) => sadToast(e.detail.message)}
+          onchange={handleCIPrivateFilesChange}
+          ondelete={removePrivateFiles}
         />
       </div>
     {/if}
@@ -1911,7 +1911,7 @@
               size="xs"
               color="light"
               class="w-fit"
-              on:click={() => (showMCPServerModal = true)}
+              onclick={() => (showMCPServerModal = true)}
               disabled={preventEdits}>Add MCP Server</Button
             >
           </div>
@@ -1958,7 +1958,7 @@
                       size="xs"
                       color="light"
                       class="w-fit"
-                      on:click={() => {
+                      onclick={() => {
                         mcpServerEditIndex = index;
                         showMCPServerModal = true;
                       }}
@@ -1969,7 +1969,7 @@
                       size="xs"
                       color="light"
                       class="w-fit text-red-600"
-                      on:click={() => removeServer(index)}
+                      onclick={() => removeServer(index)}
                       disabled={preventEdits}>Remove</Button
                     >
                   </div>
@@ -2372,17 +2372,17 @@
                   bind:value={temperatureValue}
                   step="0.1"
                   disabled={preventEdits}
-                  on:change={checkForLargeTemperatureChat}
+                  onchange={checkForLargeTemperatureChat}
                 />
                 <div class="grid grid-cols-20 gap-0 mx-2">
                   <button
                     type="button"
                     class="ml-1 col-span-4 flex flex-col items-center justify-start bg-transparent border-0"
-                    on:click={() => {
+                    onclick={() => {
                       temperatureValue = defaultChatTemperature;
                       _temperatureValue = defaultChatTemperature;
                     }}
-                    on:keydown={(e) => {
+                    onkeydown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         temperatureValue = defaultChatTemperature;
                         _temperatureValue = defaultChatTemperature;
@@ -2397,11 +2397,11 @@
                   <button
                     type="button"
                     class="col-start-6 col-span-4 flex flex-col items-center justify-start bg-transparent border-0"
-                    on:click={() => {
+                    onclick={() => {
                       temperatureValue = 0.7;
                       _temperatureValue = 0.7;
                     }}
-                    on:keydown={(e) => {
+                    onkeydown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         temperatureValue = 0.7;
                         _temperatureValue = 0.7;
@@ -2428,17 +2428,17 @@
                   bind:value={temperatureValue}
                   step="0.1"
                   disabled={preventEdits}
-                  on:change={checkForLargeTemperatureAudio}
+                  onchange={checkForLargeTemperatureAudio}
                 />
                 <div class="grid grid-cols-6 gap-0 mx-2">
                   <button
                     type="button"
                     class="ml-1 col-span-4 flex flex-col items-center justify-start bg-transparent border-0"
-                    on:click={() => {
+                    onclick={() => {
                       temperatureValue = defaultAudioTemperature;
                       _temperatureValue = defaultAudioTemperature;
                     }}
-                    on:keydown={(e) => {
+                    onkeydown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         temperatureValue = defaultAudioTemperature;
                         _temperatureValue = defaultAudioTemperature;
@@ -2595,7 +2595,7 @@
                   class={isClassicRequired ? 'text-gray-400 grayscale contrast-50' : ''}
                   disabled={preventEdits || isClassicRequired}
                   checked={createClassicAssistant}
-                  on:change={() => {
+                  onchange={() => {
                     createClassicAssistantByProviderOrUser =
                       !createClassicAssistantByProviderOrUser;
                   }}

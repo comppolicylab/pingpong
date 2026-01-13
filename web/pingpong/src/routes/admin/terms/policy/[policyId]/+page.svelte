@@ -133,7 +133,7 @@
         </div>
       </div>
     {/if}
-    <form class="flex flex-col gap-4" on:submit={handleSubmit}>
+    <form class="flex flex-col gap-4" onsubmit={handleSubmit}>
       <div>
         <Label for="name" class="mb-1">Agreement Policy Name</Label>
         <Helper class="mb-2"

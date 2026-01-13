@@ -93,7 +93,7 @@
         </div>
       </div>
     {/if}
-    <form class="flex flex-col gap-4" on:submit={handleSubmit}>
+    <form class="flex flex-col gap-4" onsubmit={handleSubmit}>
       <div>
         <Label for="name" class="mb-1">Agreement Name</Label>
         <Helper class="mb-2"
@@ -116,7 +116,7 @@
             size="sm"
             class="text-xs border border-blue-dark-40 text-blue-dark-40 shrink-0 flex flex-row gap-1.5 items-center justify-center bg-white rounded-full py-0.5 px-3 hover:text-white hover:bg-blue-dark-40 transition-all w-fit"
             disabled={$loading}
-            on:click={() => (showCodeModal = true)}
+            onclick={() => (showCodeModal = true)}
           >
             {preventEdits ? 'Preview' : 'Edit with Preview'}
           </Button>
@@ -159,9 +159,4 @@
   </div>
 </div>
 
-<Modal
-  bind:open={showCodeModal}
-  on:close={() => (showCodeModal = false)}
-  {preventEdits}
-  bind:code
-/>
+<Modal bind:open={showCodeModal} onclose={() => (showCodeModal = false)} {preventEdits} bind:code />

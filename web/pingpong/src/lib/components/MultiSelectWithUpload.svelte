@@ -305,7 +305,7 @@
   {accept}
   style="display: none;"
   bind:this={uploadRef}
-  on:change={handleFileInputChange}
+  onchange={handleFileInputChange}
   use:bindToForm={{ files: files, dispatch: dispatch, resetOnSubmit: false }}
 />
 <div id={name} class="flex justify-between">
@@ -318,7 +318,7 @@
       role="listbox"
       aria-label="Available files"
       tabindex="0"
-      on:keydown={(e) => handleKeydown(e, true)}
+      onkeydown={(e) => handleKeydown(e, true)}
     >
       {#each availableFileNames as name, index (name)}
         {@const isSelected = selectedAvailable.includes(index)}
@@ -330,7 +330,7 @@
           role="option"
           aria-selected={isSelected}
           class:focused={focusedListIsAvailable && focusedIndex === index}
-          on:click={(e) => toggleSelection(true, index, e)}
+          onclick={(e) => toggleSelection(true, index, e)}
         >
           {#if isSelected}
             <UsersGroupSolid />
@@ -370,7 +370,7 @@
       type="button"
       id="move-to-selected"
       class="my-1 mx-0 py-1 px-2.5 bg-none rounded-sm border border-inherit border-solid cursor-pointer enabled:hover:bg-slate-100 enabled:hover:text-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
-      on:click={moveToSelected}
+      onclick={moveToSelected}
       disabled={selectedAvailable.length === 0 ||
         disabled ||
         $loading ||
@@ -397,7 +397,7 @@
     <button
       type="button"
       class="my-1 mx-0 py-1 px-2.5 bg-none rounded-sm border border-inherit border-solid cursor-pointer enabled:hover:bg-slate-100 enabled:hover:text-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
-      on:click={moveToAvailable}
+      onclick={moveToAvailable}
       disabled={selectedSelected.length === 0 || disabled || $loading}
       aria-label="Move selected files to Available list">◀</button
     >
@@ -406,7 +406,7 @@
         type="button"
         id="upload"
         class="my-1 mx-0 py-1 px-2.5 bg-none rounded-sm border border-inherit border-solid cursor-pointer enabled:hover:bg-slate-100 enabled:hover:text-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
-        on:click={() => {
+        onclick={() => {
           uploadRef.click();
         }}
         disabled={!upload || disabled || $loading || selectedFiles.length >= maxCount}
@@ -442,7 +442,7 @@
       role="listbox"
       aria-label="Selected files"
       tabindex="0"
-      on:keydown={(e) => handleKeydown(e, false)}
+      onkeydown={(e) => handleKeydown(e, false)}
     >
       {#each selectedFileNames as [name, isPrivate], index (name)}
         {@const isSelected = selectedSelected.includes(index)}
@@ -454,7 +454,7 @@
           role="option"
           aria-selected={isSelected}
           class:focused={!focusedListIsAvailable && focusedIndex === index}
-          on:click={(e) => toggleSelection(false, index, e)}
+          onclick={(e) => toggleSelection(false, index, e)}
         >
           {#if isPrivate}
             {#if isSelected}

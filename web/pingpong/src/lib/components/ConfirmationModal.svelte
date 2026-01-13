@@ -33,13 +33,13 @@
     />
   </div>
   <div class="flex justify-center gap-4">
-    <Button pill color="alternative" on:click={() => dispatch('cancel')}>{cancelButtonText}</Button>
+    <Button pill color="alternative" onclick={() => dispatch('cancel')}>{cancelButtonText}</Button>
     <Button
       pill
       outline
       color="red"
       disabled={confirmInput.toLowerCase() !== confirmText}
-      on:click={() => dispatch('confirm')}
+      onclick={() => dispatch('confirm')}
     >
       {confirmButtonText}
     </Button>

@@ -180,7 +180,7 @@
                       pill
                       size="sm"
                       class="text-xs border border-green-800 text-green-800 shrink-0 flex flex-row gap-1.5 items-center justify-center bg-white rounded-full p-1 px-3 hover:text-white hover:bg-green-800 transition-all w-fit"
-                      on:click={() => handleEnablePolicy(policy)}
+                      onclick={() => handleEnablePolicy(policy)}
                     >
                       Enable Policy
                     </Button>
@@ -189,7 +189,7 @@
                       pill
                       size="sm"
                       class="text-xs border border-amber-800 text-amber-800 shrink-0 flex flex-row gap-1.5 items-center justify-center bg-white rounded-full p-1 px-3 hover:text-white hover:bg-amber-800 transition-all w-fit"
-                      on:click={() => handleDisablePolicy(policy)}
+                      onclick={() => handleDisablePolicy(policy)}
                     >
                       Archive Policy
                     </Button>

@@ -85,7 +85,7 @@
         <button
           type="button"
           class="flex w-full items-center gap-3 text-left text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-600 transition focus:outline-hidden focus-visible:ring-2 focus-visible:ring-sky-400/60 focus-visible:ring-offset-2 hover:text-gray-800"
-          on:click={() => (showAllIssues = !showAllIssues)}
+          onclick={() => (showAllIssues = !showAllIssues)}
           aria-expanded={showAllIssues}
         >
           <span class="flex flex-1 items-center" aria-hidden="true">

@@ -408,8 +408,8 @@
 
               {#each courseAssistants as asst (asst.id)}
                 <DropdownItem
-                  on:click={() => selectAi(asst)}
-                  on:touchstart={() => selectAi(asst)}
+                  onclick={() => selectAi(asst)}
+                  ontouchstart={() => selectAi(asst)}
                   class="normal-case tracking-tight font-normal rounded-lg hover:bg-gray-100 select-none max-w-full group"
                 >
                   <div class="flex flex-row justify-between gap-5 max-w-full items-center">
@@ -453,8 +453,8 @@
 
                 {#each myAssistants as asst (asst.id)}
                   <DropdownItem
-                    on:click={() => selectAi(asst)}
-                    on:touchstart={() => selectAi(asst)}
+                    onclick={() => selectAi(asst)}
+                    ontouchstart={() => selectAi(asst)}
                     class="normal-case tracking-tight font-normal rounded-lg hover:bg-gray-100 select-none max-w-full group"
                   >
                     <div class="flex flex-row justify-between gap-5 max-w-full items-center">
@@ -498,8 +498,8 @@
 
                 {#each otherAssistants as asst (asst.id)}
                   <DropdownItem
-                    on:click={() => selectAi(asst)}
-                    on:touchstart={() => selectAi(asst)}
+                    onclick={() => selectAi(asst)}
+                    ontouchstart={() => selectAi(asst)}
                     class="normal-case tracking-tight font-normal rounded-sm hover:bg-gray-100 select-none max-w-full group"
                   >
                     <div class="flex flex-row justify-between gap-5 max-w-full items-center">
@@ -559,8 +559,8 @@
             <div class="flex flex-row p-1.5">
               <Button
                 class="flex flex-row py-1.5 px-4 gap-1.5 bg-blue-dark-40 text-white rounded-lg text-xs hover:bg-blue-dark-50 hover:text-blue-light-50 transition-all"
-                on:click={handleAudioThreadCreate}
-                on:touchstart={handleAudioThreadCreate}
+                onclick={handleAudioThreadCreate}
+                ontouchstart={handleAudioThreadCreate}
                 type="button"
               >
                 <CirclePlusSolid size="sm" />
@@ -578,8 +578,8 @@
               <Span class="text-gray-700 text-xs font-normal"
                 ><Button
                   class="p-0 text-gray-700 text-xs underline font-normal"
-                  on:click={showModeratorsModal}
-                  on:touchstart={showModeratorsModal}>Moderators</Button
+                  onclick={showModeratorsModal}
+                  ontouchstart={showModeratorsModal}>Moderators</Button
                 > have enabled a setting for this thread only that allows them to see
                 <span class="font-semibold">your full name</span> and its content.</Span
               >
@@ -617,7 +617,7 @@
                 : null}
               upload={handleUpload}
               remove={handleRemove}
-              on:submit={handleSubmit}
+              onsubmit={handleSubmit}
             />
           </div>
         {:else if assistant.interaction_mode === 'chat' && (assistant.assistant_should_message_first ?? false)}
@@ -630,8 +630,8 @@
           <div class="flex flex-row p-1.5">
             <Button
               class="flex flex-row py-1.5 px-4 gap-1.5 bg-blue-dark-40 text-white rounded-lg text-xs hover:bg-blue-dark-50 hover:text-blue-light-50 transition-all"
-              on:click={handleChatThreadCreate}
-              on:touchstart={handleChatThreadCreate}
+              onclick={handleChatThreadCreate}
+              ontouchstart={handleChatThreadCreate}
               type="button"
             >
               <PaperPlaneOutline size="sm" />
@@ -650,8 +650,8 @@
               <Span class="text-gray-600 text-xs font-normal"
                 ><Button
                   class="p-0 text-gray-600 text-xs underline font-normal"
-                  on:click={showModeratorsModal}
-                  on:touchstart={showModeratorsModal}>Moderators</Button
+                  onclick={showModeratorsModal}
+                  ontouchstart={showModeratorsModal}>Moderators</Button
                 > <span class="font-semibold">cannot</span> see this thread or your name. For more
                 information, please review
                 <a href={resolve('/privacy-policy')} rel="noopener noreferrer" class="underline"
@@ -666,8 +666,8 @@
                 <Span class="text-gray-600 text-xs font-normal"
                   ><Button
                     class="p-0 text-gray-600 text-xs underline font-normal"
-                    on:click={showModeratorsModal}
-                    on:touchstart={showModeratorsModal}>Moderators</Button
+                    onclick={showModeratorsModal}
+                    ontouchstart={showModeratorsModal}>Moderators</Button
                   > can see this thread,
                   <span class="font-semibold"
                     >your full name, and listen to a recording of your conversation</span
@@ -683,8 +683,8 @@
                 <Span class="text-gray-600 text-xs font-normal"
                   ><Button
                     class="p-0 text-gray-600 text-xs underline font-normal"
-                    on:click={showModeratorsModal}
-                    on:touchstart={showModeratorsModal}>Moderators</Button
+                    onclick={showModeratorsModal}
+                    ontouchstart={showModeratorsModal}>Moderators</Button
                   > can see this thread and <span class="font-semibold">your full name</span>. For
                   more information, please review
                   <a href={resolve('/privacy-policy')} rel="noopener noreferrer" class="underline"
@@ -699,8 +699,8 @@
               <Span class="text-gray-600 text-xs font-normal"
                 ><Button
                   class="p-0 text-gray-600 text-xs underline font-normal"
-                  on:click={showModeratorsModal}
-                  on:touchstart={showModeratorsModal}>Moderators</Button
+                  onclick={showModeratorsModal}
+                  ontouchstart={showModeratorsModal}>Moderators</Button
                 > can see this thread but not your name. For more information, please review
                 <a href={resolve('/privacy-policy')} rel="noopener noreferrer" class="underline"
                   >PingPong's privacy statement</a

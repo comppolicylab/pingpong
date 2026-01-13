@@ -96,7 +96,7 @@
                   pill
                   size="sm"
                   class="text-xs border border-blue-dark-40 text-blue-dark-40 shrink-0 flex flex-row gap-1.5 items-center justify-center bg-white rounded-full p-1 px-3 hover:text-white hover:bg-blue-dark-40 transition-all"
-                  on:click={() => openEditModal(provider.id)}
+                  onclick={() => openEditModal(provider.id)}
                 >
                   Edit
                 </Button>
@@ -109,8 +109,8 @@
   </div>
 </div>
 
-<Modal bind:open={editModalOpen} size="sm" on:close={() => (providerToEdit = null)}>
-  <form class="flex flex-col space-y-6 pb-4" action="#" on:submit={handleSubmit}>
+<Modal bind:open={editModalOpen} size="sm" onclose={() => (providerToEdit = null)}>
+  <form class="flex flex-col space-y-6 pb-4" action="#" onsubmit={handleSubmit}>
     <h3 class="mb-2 text-xl font-medium text-gray-900 dark:text-white">
       Editing properties for <span class="font-mono">{providerToEdit?.name}</span>
     </h3>

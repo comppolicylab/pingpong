@@ -63,7 +63,7 @@
 <button
   type="button"
   class={buttonClass}
-  on:click={() => {
+  onclick={() => {
     if (url) {
       window.open(url, '_blank', 'noopener,noreferrer');
     }
@@ -75,8 +75,8 @@
       src={faviconUrl}
       class="w-4 rounded-full"
       loading={forceEagerLoad ? 'eager' : 'lazy'}
-      on:load={handleFaviconLoad}
-      on:error={() => (showFavicon = false)}
+      onload={handleFaviconLoad}
+      onerror={() => (showFavicon = false)}
     />
   {/if}
   <span>{domain}<span class="block"></span></span>
@@ -95,8 +95,8 @@
           src={faviconUrl}
           class="h-4 w-4 rounded-xs bg-white"
           loading={forceEagerLoad ? 'eager' : 'lazy'}
-          on:load={handleFaviconLoad}
-          on:error={() => (showFavicon = false)}
+          onload={handleFaviconLoad}
+          onerror={() => (showFavicon = false)}
         />
       {/if}
       <div class="text-gray-300 text-xs font-light truncate min-w-0">{url}</div>

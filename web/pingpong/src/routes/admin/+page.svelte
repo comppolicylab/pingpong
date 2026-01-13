@@ -41,7 +41,7 @@
           >
           <Select
             items={institutionOptions}
-            on:change={(e) => updateSearch('institution_id', getValue(e.target))}
+            onchange={(e) => updateSearch('institution_id', getValue(e.target))}
             value={`${instSearch}`}
             name="institution"
           />

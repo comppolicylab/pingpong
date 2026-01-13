@@ -81,7 +81,7 @@
             </div>
           {/if}
         </div>
-        <form on:submit={loginWithMagicLink}>
+        <form onsubmit={loginWithMagicLink}>
           <ButtonGroup class="w-full rounded-full bg-blue-light-50 shadow-inner p-4">
             <InputAddon class="rounded-none border-none bg-transparent text-blue-dark-30">
               <EnvelopeSolid />

@@ -75,7 +75,7 @@
   {/if}
   <div class={showServerLabel ? 'mt-1' : 'mt-0'}>
     {#if hasResult}
-      <button type="button" class="flex flex-row items-center gap-1" on:click={toggle}>
+      <button type="button" class="flex flex-row items-center gap-1" onclick={toggle}>
         <span class={statusClasses}>{statusLabel}</span>
         {#if content.status === 'failed'}
           <span class="inline-flex">

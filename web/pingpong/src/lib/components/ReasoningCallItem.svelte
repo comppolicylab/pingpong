@@ -52,7 +52,7 @@
     <button
       type="button"
       class="flex flex-row items-center gap-1 disabled:cursor-default"
-      on:click={toggle}
+      onclick={toggle}
       disabled={!hasSummary}
     >
       <span class={statusClasses}>

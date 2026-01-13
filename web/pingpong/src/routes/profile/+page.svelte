@@ -201,7 +201,7 @@
               name="firstName"
               color={inputState.first_name.error ? 'red' : 'base'}
               value={data.me.user?.first_name}
-              on:change={saveField('first_name')}
+              onchange={saveField('first_name')}
             >
               <div slot="right" class={inputState.first_name.loading ? '' : 'hidden'}>
                 <Spinner size="4" color="green" />
@@ -224,7 +224,7 @@
               name="lastName"
               color={inputState.last_name.error ? 'red' : 'base'}
               value={data.me.user?.last_name}
-              on:change={saveField('last_name')}
+              onchange={saveField('last_name')}
             >
               <div slot="right" class={inputState.last_name.loading ? '' : 'hidden'}>
                 <Spinner size="4" color="green" />
@@ -325,7 +325,7 @@
               pill
               size="sm"
               class="flex flex-row gap-2 bg-white text-blue-dark-40 border-solid border border-blue-dark-40 hover:text-white hover:bg-blue-dark-40"
-              on:click={subscribeToAllSummaries}><BellActiveAltSolid />Subscribe to all</Button
+              onclick={subscribeToAllSummaries}><BellActiveAltSolid />Subscribe to all</Button
             >
           {/if}
           {#if !noneSubscribed}
@@ -333,7 +333,7 @@
               pill
               size="sm"
               class="flex flex-row gap-2 bg-white text-blue-dark-40 border-solid border border-blue-dark-40 hover:text-white hover:bg-blue-dark-40"
-              on:click={unsubscribeFromAllSummaries}><TrashBinSolid />Unsubscribe from all</Button
+              onclick={unsubscribeFromAllSummaries}><TrashBinSolid />Unsubscribe from all</Button
             >
           {/if}
         </div>
@@ -439,7 +439,7 @@
                     <Toggle
                       color="blue"
                       checked={subscription.subscribed}
-                      on:change={(event) =>
+                      onchange={(event) =>
                         handleSubscriptionChange(
                           event,
                           subscription.class_id,
@@ -477,7 +477,7 @@
                     class="text-base font-normal"
                     color="blue"
                     checked={dnaAcCreate}
-                    on:change={handleDoNotAddWhenICreateChange}
+                    onchange={handleDoNotAddWhenICreateChange}
                     ><b>Do not add</b>&nbsp;an Activity Subscription for new groups I create.</Checkbox
                   >
                   <Checkbox
@@ -485,7 +485,7 @@
                     class="text-base font-normal"
                     color="blue"
                     checked={dnaAcJoin}
-                    on:change={handleDoNotAddWhenIJoinChange}
+                    onchange={handleDoNotAddWhenIJoinChange}
                     ><b>Do not add</b>&nbsp;an Activity Subscription for new groups I join.</Checkbox
                   >
                 </div>

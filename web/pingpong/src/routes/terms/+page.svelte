@@ -55,13 +55,13 @@
             <Button
               class="text-blue-dark-40 bg-white border border-blue-dark-40 rounded-full hover:bg-blue-dark-40 hover:text-white"
               type="button"
-              on:click={logout}
+              onclick={logout}
               disabled={$loading}>Exit PingPong</Button
             >
             <Button
               type="submit"
               class="text-white bg-orange rounded-full hover:bg-orange-dark"
-              on:click={acceptAgreement}
+              onclick={acceptAgreement}
               disabled={$loading}>Accept</Button
             >
           </div>
@@ -71,7 +71,7 @@
             <Button
               class="text-blue-dark-40 bg-white border border-blue-dark-40 rounded-full hover:bg-blue-dark-40 hover:text-white w-fit items"
               type="button"
-              on:click={goToDestination}
+              onclick={goToDestination}
               disabled={$loading}>Continue to PingPong</Button
             >
           </div>

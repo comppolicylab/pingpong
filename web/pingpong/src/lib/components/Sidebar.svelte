@@ -171,7 +171,7 @@
         {#if !(inIframe && sharedPage) && !showCollapsedSidebarOnly}
           <button
             class="menu-button bg-transparent border-none mr-3 mt-1 lg:hidden"
-            on:click={() => togglePanel()}
+            onclick={() => togglePanel()}
           >
             {#if $appMenuOpen}
               <CloseOutline size="xl" class="text-white menu-close" />
@@ -397,26 +397,26 @@
   triggeredBy=".user"
 >
   {#if $page.data.admin.showAdminPage}
-    <DropdownItem on:click={() => goToPage('/admin')} class="flex space-x-4 items-center">
+    <DropdownItem onclick={() => goToPage('/admin')} class="flex space-x-4 items-center">
       <CogOutline size="sm" />
       <span>Admin</span>
     </DropdownItem>
     <DropdownDivider />
   {/if}
-  <DropdownItem on:click={() => goToPage('/profile')} class="flex space-x-4 items-center">
+  <DropdownItem onclick={() => goToPage('/profile')} class="flex space-x-4 items-center">
     <UserSettingsOutline size="sm" />
     <span>Profile</span>
   </DropdownItem>
-  <DropdownItem on:click={() => goToPage('/about')} class="flex space-x-4 items-center">
+  <DropdownItem onclick={() => goToPage('/about')} class="flex space-x-4 items-center">
     <QuestionCircleOutline size="sm" />
     <span>About</span>
   </DropdownItem>
-  <DropdownItem on:click={() => goToPage('/privacy-policy')} class="flex space-x-4 items-center">
+  <DropdownItem onclick={() => goToPage('/privacy-policy')} class="flex space-x-4 items-center">
     <FileLinesOutline size="sm" />
     <span>Privacy Policy</span>
   </DropdownItem>
   <DropdownDivider />
-  <DropdownItem on:click={() => goToPage('/logout')} class="flex space-x-4 items-center">
+  <DropdownItem onclick={() => goToPage('/logout')} class="flex space-x-4 items-center">
     <ArrowRightToBracketOutline size="sm" />
     <span>Logout</span>
   </DropdownItem>

@@ -149,7 +149,7 @@
 </script>
 
 {#if showEmailForm}
-  <form on:submit={submitEmailForm}>
+  <form onsubmit={submitEmailForm}>
     <Label defaultClass="text-md font-normal rtl:text-right font-medium block" for="emails"
       >Emails</Label
     >
@@ -164,8 +164,8 @@
       >
       <Button
         class="flex flex-row items-center gap-1 text-sm font-normal text-gray-500 hover:underline p-0"
-        on:click={() => (permissionsModalOpen = !permissionsModalOpen)}
-        on:touchstart={() => (permissionsModalOpen = !permissionsModalOpen)}
+        onclick={() => (permissionsModalOpen = !permissionsModalOpen)}
+        ontouchstart={() => (permissionsModalOpen = !permissionsModalOpen)}
       >
         {permissionsModalOpen ? 'Hide' : 'Show'} permissions
         {#if permissionsModalOpen}
@@ -227,8 +227,8 @@
         pill
         class="bg-blue-light-50 border rounded-full border-blue-dark-40 text-blue-dark-50 hover:bg-blue-light-40"
         disabled={$loading}
-        on:click={() => dispatch('cancel')}
-        on:touchstart={() => dispatch('cancel')}>Cancel</Button
+        onclick={() => dispatch('cancel')}
+        ontouchstart={() => dispatch('cancel')}>Cancel</Button
       >
       <Button
         type="submit"
@@ -300,7 +300,7 @@
             <TableBodyCell class="px-3 py-1">
               <Button
                 type="button"
-                on:click={() => {
+                onclick={() => {
                   unverifiedEmails = unverifiedEmails.filter((_, i) => i !== index);
                 }}
                 class="p-0"
@@ -373,7 +373,7 @@
           <TableBodyCell class="px-3 py-1">
             <Button
               type="button"
-              on:click={() => {
+              onclick={() => {
                 verifiedEmails = verifiedEmails.filter((_, i) => i !== index);
               }}
               class="p-0"
@@ -387,7 +387,7 @@
   </Table>
   <Button
     class="text-blue-500 hover:underline"
-    on:click={() => {
+    onclick={() => {
       verifiedEmails = [
         ...verifiedEmails,
         { email: '', name: '', valid: false, isUser: false, error: '' }
@@ -402,8 +402,8 @@
       pill
       class="bg-blue-ligaddUsersht-50 border rounded-full border-blue-dark-40 text-blue-dark-50 hover:bg-blue-light-40"
       disabled={$loading}
-      on:click={() => dispatch('cancel')}
-      on:touchstart={() => dispatch('cancel')}>Cancel</Button
+      onclick={() => dispatch('cancel')}
+      ontouchstart={() => dispatch('cancel')}>Cancel</Button
     >
     {#if unverifiedEmails.length > 0 || newUsers}
       <Button
@@ -411,7 +411,7 @@
         pill
         class="bg-orange border border-orange-dark text-white hover:bg-orange-dark"
         disabled={$loading}
-        on:click={reverifyEmails}>Next</Button
+        onclick={reverifyEmails}>Next</Button
       >
     {:else if verifiedEmails.length > 0}
       <Button
@@ -419,7 +419,7 @@
         pill
         class="bg-orange border border-orange-dark text-white hover:bg-orange-dark"
         disabled={$loading}
-        on:click={submitRequest}>Add Users</Button
+        onclick={submitRequest}>Add Users</Button
       >
     {/if}
   </div>
@@ -470,8 +470,8 @@
     <Button
       pill
       class="bg-blue-ligaddUsersht-50 border rounded-full border-blue-dark-40 text-blue-dark-50 hover:bg-blue-light-40"
-      on:click={() => dispatch('close')}
-      on:touchstart={() => dispatch('close')}>Done</Button
+      onclick={() => dispatch('close')}
+      ontouchstart={() => dispatch('close')}>Done</Button
     >
   </div>
 {/if}

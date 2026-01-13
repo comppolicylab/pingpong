@@ -173,10 +173,7 @@
 
   <div class="flex flex-row items-center space-x-4">
     <!-- Skip Backward Button -->
-    <Button
-      on:click={skipBackwards}
-      class="text-gray-600 hover:text-gray-800 transition-colors p-0"
-    >
+    <Button onclick={skipBackwards} class="text-gray-600 hover:text-gray-800 transition-colors p-0">
       <svg
         xmlns="http://www.w3.org/2000/svg"
         width="24"
@@ -196,7 +193,7 @@
 
     <!-- Play/Pause Button -->
     <Button
-      on:click={togglePlay}
+      onclick={togglePlay}
       class="flex items-center justify-center bg-gray-800 text-white hover:bg-gray-700 transition-colors p-2 rounded-full"
     >
       {#if isPlaying}
@@ -207,7 +204,7 @@
     </Button>
 
     <!-- Skip Forward Button -->
-    <Button on:click={skipForward} class="text-gray-600 hover:text-gray-800 transition-colors p-0">
+    <Button onclick={skipForward} class="text-gray-600 hover:text-gray-800 transition-colors p-0">
       <svg
         xmlns="http://www.w3.org/2000/svg"
         width="24"
@@ -252,10 +249,10 @@
 
       <div
         class="progress-bar w-full h-2 bg-gray-200 rounded-full cursor-pointer relative"
-        on:mousedown={handleProgressMouseDown}
-        on:mouseenter={() => (isHoveringProgress = true)}
-        on:mouseleave={() => (isHoveringProgress = false)}
-        on:mousemove={handleProgressHover}
+        onmousedown={handleProgressMouseDown}
+        onmouseenter={() => (isHoveringProgress = true)}
+        onmouseleave={() => (isHoveringProgress = false)}
+        onmousemove={handleProgressHover}
         bind:this={progressBar}
         role="slider"
         tabindex="0"
@@ -292,8 +289,8 @@
     <!-- Volume Control -->
     <div
       class="relative volume-control-area"
-      on:mouseenter={() => (showVolumeSlider = true)}
-      on:mouseleave={() => (showVolumeSlider = false)}
+      onmouseenter={() => (showVolumeSlider = true)}
+      onmouseleave={() => (showVolumeSlider = false)}
       role="group"
     >
       <!-- Extended hover area -->
@@ -302,7 +299,7 @@
       ></div>
 
       <button
-        on:click={toggleMute}
+        onclick={toggleMute}
         id="volume-button"
         class="relative w-10 h-10 flex items-center justify-center text-gray-600 hover:text-gray-800"
       >
@@ -367,7 +364,7 @@
           max="1"
           step="0.01"
           value={volume}
-          on:input={handleVolumeChange}
+          oninput={handleVolumeChange}
           class="bg-gray-200 rounded-lg appearance-none cursor-pointer volume-slider"
         />
       </Popover>
@@ -388,7 +385,7 @@
       >
         {#each playbackSpeeds as speed (speed)}
           <DropdownItem
-            on:click={() => selectPlaybackRate(speed)}
+            onclick={() => selectPlaybackRate(speed)}
             class="block w-full px-3 py-1 text-sm font-light text-left hover:bg-gray-100 {speed ===
             playbackRate
               ? 'bg-blue-50 text-blue-600'

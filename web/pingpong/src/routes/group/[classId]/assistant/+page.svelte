@@ -298,8 +298,8 @@
                   <button
                     class="text-blue-dark-40 hover:text-blue-dark-100"
                     aria-label="Copy assistant link"
-                    on:click|preventDefault={() => {}}
-                    on:copy={showCopiedLink}
+                    onclick|preventDefault={() => {}}
+                    oncopy={showCopiedLink}
                     use:copy={assistantLink(assistant.id)}
                   >
                     <LinkOutline class="w-5 h-5" />
@@ -313,14 +313,14 @@
                     <button
                       class="text-blue-dark-40 hover:text-blue-dark-100"
                       aria-label="Copy assistant"
-                      on:click|preventDefault={() => openCopyModal(assistant.id, assistant.name)}
+                      onclick|preventDefault={() => openCopyModal(assistant.id, assistant.name)}
                     >
                       <FileCopyOutline class="w-5 h-5" />
                     </button>
                     <button
                       class="text-red-700 hover:text-red-900"
                       aria-label="Delete assistant"
-                      on:click|preventDefault={() => openDeleteModal(assistant.id)}
+                      onclick|preventDefault={() => openDeleteModal(assistant.id)}
                     >
                       <TrashBinOutline class="w-5 h-5" />
                     </button>
@@ -330,7 +330,7 @@
                 <Modal
                   open={!!copyModalState[assistant.id]}
                   size="md"
-                  on:close={() => closeCopyModal(assistant.id)}
+                  onclose={() => closeCopyModal(assistant.id)}
                 >
                   <div class="text-left whitespace-normal break-words">
                     <Heading tag="h3" class="text-2xl font-serif font-medium text-blue-dark-40"
@@ -350,7 +350,7 @@
                         id={`copy-name-${assistant.id}`}
                         name={`copy-name-${assistant.id}`}
                         value={copyNames[assistant.id] || ''}
-                        on:input={(event) => handleCopyNameInput(assistant.id, event)}
+                        oninput={(event) => handleCopyNameInput(assistant.id, event)}
                         placeholder={defaultCopyName(assistant.name)}
                       />
                     </div>
@@ -382,7 +382,7 @@
                         id={`copy-target-${assistant.id}`}
                         name={`copy-target-${assistant.id}`}
                         value={copyTargets[assistant.id] || ''}
-                        on:change={(event) => handleCopyTargetSelect(assistant.id, event)}
+                        onchange={(event) => handleCopyTargetSelect(assistant.id, event)}
                       >
                         {#each classOptions as option (option.id)}
                           <option value={`${option.id}`}>
@@ -392,14 +392,14 @@
                       </Select>
                     </div>
                     <div class="flex gap-3 justify-end">
-                      <Button color="light" on:click={() => closeCopyModal(assistant.id)}
+                      <Button color="light" onclick={() => closeCopyModal(assistant.id)}
                         >Cancel</Button
                       >
                       <Button
                         color="blue"
                         disabled={copyPermissionLoading[assistant.id] ||
                           copyPermissionAllowed[assistant.id] !== true}
-                        on:click={() => handleCopyAssistant(assistant.id)}>Copy</Button
+                        onclick={() => handleCopyAssistant(assistant.id)}>Copy</Button
                       >
                     </div>
                   </div>
@@ -409,7 +409,7 @@
                   open={!!deleteModalState[assistant.id]}
                   size="xs"
                   autoclose
-                  on:close={() => closeDeleteModal(assistant.id)}
+                  onclose={() => closeDeleteModal(assistant.id)}
                 >
                   <ConfirmationModal
                     warningTitle={`Delete ${assistant?.name || 'this assistant'}?`}
@@ -418,8 +418,8 @@
                     cancelButtonText="Cancel"
                     confirmText="delete"
                     confirmButtonText="Delete assistant"
-                    on:cancel={() => closeDeleteModal(assistant.id)}
-                    on:confirm={() => handleDeleteAssistant(assistant.id)}
+                    oncancel={() => closeDeleteModal(assistant.id)}
+                    onconfirm={() => handleDeleteAssistant(assistant.id)}
                   />
                 </Modal>
               </TableBodyCell>

@@ -82,12 +82,12 @@
       <Button
         pill
         class="p-2 bg-blue-light-50 opacity-90 hover:opacity-100 text-blue-dark-40 absolute top-1/2 -translate-y-1/2 start-4 font-bold"
-        on:click={() => changeSlide(false)}><AngleLeftOutline /></Button
+        onclick={() => changeSlide(false)}><AngleLeftOutline /></Button
       >
       <Button
         pill
         class="p-2 bg-blue-light-50 opacity-90 hover:opacity-100 text-blue-dark-40 absolute top-1/2 -translate-y-1/2 end-4 font-bold"
-        on:click={() => changeSlide(true)}><AngleRightOutline /></Button
+        onclick={() => changeSlide(true)}><AngleRightOutline /></Button
       >
     </Controls>
   </Carousel>

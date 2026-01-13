@@ -34,7 +34,7 @@
   }
 </script>
 
-<svelte:window on:keydown={handleKeydown} />
+<svelte:window onkeydown={handleKeydown} />
 
 {#if open}
   <!-- Backdrop -->
@@ -51,7 +51,7 @@
       type="button"
       class="absolute inset-0 w-full h-full cursor-default modal-backdrop"
       aria-label="Close modal"
-      on:click={handleClickOutside}
+      onclick={handleClickOutside}
     />
 
     <!-- Modal content -->
@@ -59,7 +59,7 @@
       <div class="flex flex-row items-center justify-between p-4">
         <Heading tag="h3" class="w-full text-2xl font-semibold ml-2">User Agreement Preview</Heading
         >
-        <CloseButton on:click={closeModal} label="Close modal" />
+        <CloseButton onclick={closeModal} label="Close modal" />
       </div>
 
       <div class="flex flex-row gap-0 w-full h-full">

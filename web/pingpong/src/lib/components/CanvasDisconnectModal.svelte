@@ -21,7 +21,7 @@
     imported users, you can edit their roles or remove their access to this group at any time.
   </h4>
   <div class="flex flex-row gap-2 justify-center">
-    <Button pill color="alternative" on:click={() => dispatch('keep')}>{leftAction}</Button>
-    <Button pill color="red" on:click={() => dispatch('remove')}>{rightAction}</Button>
+    <Button pill color="alternative" onclick={() => dispatch('keep')}>{leftAction}</Button>
+    <Button pill color="red" onclick={() => dispatch('remove')}>{rightAction}</Button>
   </div>
 </div>

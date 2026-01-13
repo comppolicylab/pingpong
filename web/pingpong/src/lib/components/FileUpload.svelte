@@ -376,13 +376,13 @@
 <div
   bind:this={dropzone}
   role="region"
-  on:dragover={(e) => e.preventDefault()}
+  ondragover={(e) => e.preventDefault()}
   class={`${wrapperClass} ${drop ? 'border-dashed border-2 rounded-lg p-4' : ''} ${
     dropzoneActive ? 'bg-gray-200 border-cyan-500' : drop ? 'bg-gray-100 border-gray-300' : ''
   }`}
-  on:drop={dropHandler}
-  on:dragenter={dropenterHandler}
-  on:dragleave={dropleaveHandler}
+  ondrop={dropHandler}
+  ondragenter={dropenterHandler}
+  ondragleave={dropleaveHandler}
 >
   <label class="flex items-center justify-center cursor-pointer">
     <input
@@ -391,7 +391,7 @@
       {accept}
       style="display: none;"
       bind:this={uploadRef}
-      on:change={handleFileInputChange}
+      onchange={handleFileInputChange}
       use:bindToForm={{ files: files, dispatch: dispatch }}
     />
     <Button
@@ -402,7 +402,7 @@
       class={`p-1.5 w-8 h-8 bg-blue-light-40 border-transparent ${
         drop ? 'bg-blue-light-40 border-transparent' : ''
       } ${dropzoneActive ? 'animate-bounce' : ''}`}
-      on:click={() => uploadRef.click()}
+      onclick={() => uploadRef.click()}
     >
       <slot name="icon">
         {#if type === 'file_search'}

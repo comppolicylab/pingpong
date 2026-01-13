@@ -159,7 +159,7 @@
               </span>
             </div>
             <div class="mt-6">
-              <form on:submit={handleSubmit}>
+              <form onsubmit={handleSubmit}>
                 <div class="flex flex-col gap-4">
                   <div class="flex flex-col gap-2">
                     <Label for="name">Name (optional)</Label>
@@ -208,10 +208,9 @@
                         >
                       </p>
                       <div class="flex justify-center gap-4">
-                        <Button pill color="alternative" on:click={handleModalCancel}
-                          >Go back</Button
+                        <Button pill color="alternative" onclick={handleModalCancel}>Go back</Button
                         >
-                        <Button pill outline color="red" on:click={handleModalConfirm}
+                        <Button pill outline color="red" onclick={handleModalConfirm}
                           >Send without contact information</Button
                         >
                       </div>

@@ -64,7 +64,7 @@
         {#each filteredClasses as cls (cls.id)}
           <DropdownItem
             class="flex items-center text-base font-semibold gap-4 py-4 text-sm tracking-wide font-medium uppercase hover:bg-blue-light-50"
-            on:click={() => goToClass(cls.id)}>{cls.name}</DropdownItem
+            onclick={() => goToClass(cls.id)}>{cls.name}</DropdownItem
           >
         {/each}
       </Dropdown>
