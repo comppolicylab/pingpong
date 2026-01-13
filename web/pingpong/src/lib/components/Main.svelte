@@ -25,7 +25,7 @@
   >
     {#if !!$navigating || $loading}
       <div
-        class="absolute top-0 left-0 flex h-full w-full items-center bg-white bg-opacity-75 z-[9999] print:!hidden"
+        class="absolute top-0 left-0 flex h-full w-full items-center bg-white/75 z-[9999] print:!hidden"
       >
         <div class="m-auto flex flex-col gap-5 items-center" transition:blur={{ amount: 10 }}>
           <Pulse color="#0ea5e9" />

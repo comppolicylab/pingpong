@@ -13,7 +13,7 @@
 </Modal>
 
 <button
-  class="hover:shadow relative rounded-lg items-center border-[1px] border-solid border-gray-300 bg-white flex px-2"
+  class="hover:shadow-sm relative rounded-lg items-center border-[1px] border-solid border-gray-300 bg-white flex px-2"
   on:click={() => (isOpen = true)}
   disabled={!quote}
 >

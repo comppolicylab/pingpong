@@ -38,7 +38,7 @@
 
 {#if open}
   <!-- Backdrop -->
-  <div class="fixed inset-0 z-40 bg-gray-900 bg-opacity-50" aria-hidden="true" />
+  <div class="fixed inset-0 z-40 bg-gray-900/50" aria-hidden="true" />
 
   <!-- Modal -->
   <div

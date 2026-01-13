@@ -84,7 +84,7 @@
       >
     </Controls>
   </Carousel>
-  <div class="rounded border-2 border-blue-light-40 bg-blue-light-50 p-2 my-2 mb-4 text-center">
+  <div class="rounded-sm border-2 border-blue-light-40 bg-blue-light-50 p-2 my-2 mb-4 text-center">
     {images[index].description}
   </div>
   <Thumbnails class="bg-transparent gap-3" let:Thumbnail let:image let:selected {images} bind:index>
@@ -96,7 +96,7 @@
       activeClass="outline outline-orange"
     />
     <Tooltip
-      defaultClass="text-wrap py-2 px-3 text-sm font-normal shadow-sm"
+      defaultClass="text-wrap py-2 px-3 text-sm font-normal shadow-xs"
       placement="bottom"
       arrow={false}>{image.title}</Tooltip
     >

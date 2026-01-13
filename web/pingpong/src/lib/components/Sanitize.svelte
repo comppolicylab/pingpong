@@ -6,18 +6,25 @@
    */
   export let html: string | Promise<string>;
 
-  let sanitized: string;
+  let sanitized = '';
 
   // Sanitize the document.
-  $: {
-    if (typeof html === 'string') {
-      sanitized = DOMPurify.sanitize(html);
-    } else {
-      sanitized = '';
-      html.then((content) => {
-        sanitized = DOMPurify.sanitize(content);
-      });
+  $: sanitizeInput(html);
+
+  function sanitizeInput(value: string | Promise<string>) {
+    if (typeof value === 'string') {
+      sanitized = DOMPurify.sanitize(value);
+      return;
     }
+
+    sanitized = '';
+    const pending = value;
+    pending.then((content) => {
+      // Only update if the same promise is still current to avoid stale writes.
+      if (pending === html) {
+        sanitized = DOMPurify.sanitize(content);
+      }
+    });
   }
 </script>
 
