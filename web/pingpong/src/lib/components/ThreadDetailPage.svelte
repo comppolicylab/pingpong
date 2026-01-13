@@ -995,7 +995,6 @@
       chunks.push(chunk as Uint8Array);
     }
 
-    // eslint-disable-next-line no-undef
     const blob = new Blob(chunks as BlobPart[], { type: 'audio/webm' });
     audioUrl = URL.createObjectURL(blob);
     showPlayer = true;
