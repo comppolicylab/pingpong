@@ -60,7 +60,7 @@ const getMarkdownRenderer = (options: MarkdownRendererOptions) => {
  */
 const keyFromOpts = (opts: MarkdownRendererOptions) => {
   return Object.entries(opts)
-    .filter(([_, v]) => v)
+    .filter(([, v]) => v)
     .map(([k]) => k)
     .sort()
     .join(',');
