@@ -18,6 +18,7 @@
   } from 'flowbite-svelte';
   import type { Tool, ServerFile, FileUploadInfo, MCPServerToolInput, MCPAuthType } from '$lib/api';
   import { beforeNavigate, goto, invalidate } from '$app/navigation';
+  import { resolve } from '$app/paths';
   import * as api from '$lib/api';
   import { setsEqual } from '$lib/set';
   import { happyToast, sadToast } from '$lib/toast';
@@ -440,7 +441,7 @@
     (model) => model.id === selectedModel
   )?.vision_support_override;
   $: finalVisionSupport = visionSupportOverride ?? supportsVision;
-  $: allowVisionUpload = true;
+  let allowVisionUpload = true;
   $: asstFSFiles = [...data.files, ...allFSPrivateFiles];
   $: asstCIFiles = [...data.files, ...allCIPrivateFiles];
 
@@ -1152,7 +1153,7 @@
     checkForChanges = false;
     happyToast('Assistant deleted');
     await invalidate(`/group/${$page.params.classId}`);
-    await goto(`/group/${data.class.id}/assistant`);
+    await goto(resolve(`/group/${data.class.id}/assistant`));
     return;
   };
 
@@ -1184,7 +1185,7 @@
         $loadingMessage = '';
         happyToast('Assistant saved.');
         checkForChanges = false;
-        await goto(`/group/${data.class.id}/assistant`, { invalidateAll: true });
+        await goto(resolve(`/group/${data.class.id}/assistant`), { invalidateAll: true });
         return;
       }
     }
@@ -1220,7 +1221,7 @@
       happyToast('Assistant saved');
       checkForChanges = false;
       await invalidate(`/group/${$page.params.classId}`);
-      await goto(`/group/${data.class.id}/assistant`);
+      await goto(resolve(`/group/${data.class.id}/assistant`));
     }
   };
 
@@ -2034,7 +2035,7 @@
         <AccordionItem
           bind:open={advancedOptionsOpen}
           paddingDefault="px-5 py-3"
-          defaultClass="px-6 py-4 flex items-center justify-between w-full font-medium text-left rounded border-gray-200 dark:border-gray-700"
+          defaultClass="px-6 py-4 flex items-center justify-between w-full font-medium text-left rounded-sm border-gray-200 dark:border-gray-700"
           activeClass="rounded-b-none"
           borderOpenClass="rounded-b-lg border-s border-e"
         >
@@ -2459,7 +2460,7 @@
                   >Select your desired reasoning effort, which gives the model guidance on how much
                   time it should spend "reasoning" before creating a response to the prompt. {#if reasoningEffortLabels.length !== 1}You
                     can specify one of
-                    {#each reasoningEffortLabels as label, idx}
+                    {#each reasoningEffortLabels as label, idx (label)}
                       <span class="font-mono">{label}</span>{idx < reasoningEffortLabels.length - 1
                         ? ','
                         : ''}
@@ -2502,7 +2503,7 @@
                 />
                 <div class="mt-2 flex flex-row justify-between">
                   {#if reasoningEffortLabels.length < 4}
-                    {#each reasoningEffortLabels as label}
+                    {#each reasoningEffortLabels as label (label)}
                       <p class="text-sm">{label}</p>
                     {/each}
                   {:else if supportsNoneReasoningEffort}

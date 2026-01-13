@@ -2,14 +2,10 @@
   import { getContext, onMount } from 'svelte';
   import { writable } from 'svelte/store';
   import type { Readable, Writable } from 'svelte/store';
+  import { resolve } from '$app/paths';
   import dayjs from '$lib/time';
   import * as api from '$lib/api';
-  import type {
-    FileUploadInfo,
-    ServerFile,
-    CreateClassUsersRequest,
-    LMSClass as CanvasClass
-  } from '$lib/api';
+  import type { FileUploadInfo, ServerFile, LMSClass as CanvasClass } from '$lib/api';
   import {
     Button,
     ButtonGroup,
@@ -62,7 +58,7 @@
   } from 'flowbite-svelte-icons';
   import { sadToast, happyToast } from '$lib/toast';
   import { humanSize } from '$lib/size';
-  import { afterNavigate, goto, invalidateAll, onNavigate } from '$app/navigation';
+  import { goto, invalidateAll, afterNavigate } from '$app/navigation';
   import { browser } from '$app/environment';
   import { submitParentForm } from '$lib/form';
   import { page } from '$app/stores';
@@ -321,7 +317,7 @@
    * Bulk add users to a class.
    */
   let timesAdded = 0;
-  const resetInterface = (e: CustomEvent<CreateClassUsersRequest>) => {
+  const resetInterface = () => {
     invalidateAll();
     usersModalOpen = false;
     timesAdded++;
@@ -392,7 +388,7 @@
     $loadingMessage = '';
     $loading = false;
     happyToast('Group deleted');
-    await goto(`/`, { invalidateAll: true });
+    await goto(resolve(`/`), { invalidateAll: true });
     return;
   };
 
@@ -817,11 +813,9 @@
   // Clean up state on navigation. Invalidate data so that any changes
   // are reflected in the rest of the app. (If performance suffers here,
   // we can be more selective about what we invalidate.)
-  onNavigate(() => {
+  afterNavigate(() => {
     uploads.set([]);
     trashFiles.set([]);
-  });
-  afterNavigate(() => {
     invalidateAll();
   });
 
@@ -927,7 +921,7 @@
             <div>Export threads</div>
           </DropdownItem>
           {#if makePrivate}
-            <Tooltip defaultClass="text-wrap py-2 px-3 text-sm font-normal shadow-sm" arrow={false}
+            <Tooltip defaultClass="text-wrap py-2 px-3 text-sm font-normal shadow-xs" arrow={false}
               >You can't export threads because they are private in this group.</Tooltip
             >
           {/if}
@@ -1221,7 +1215,7 @@
         <div class="flex flex-col gap-2">
           <Info>Manage your subscription to this group's Activity Summaries.</Info>
           <a
-            href="/profile"
+            href={resolve('/profile')}
             class="text-xs text-gray-600 shrink-0 flex flex-row gap-1 items-center justify-center font-light bg-white rounded-full p-1 px-3 hover:text-blue-dark-100 hover:bg-blue-dark-40 hover:text-white transition-all max-w-max border border-gray-400 hover:border-blue-dark-40"
             >Manage All Subscriptions <ArrowRightOutline size="md" class="inline-block" /></a
           >
@@ -1519,7 +1513,7 @@
                     Pick your institution...<ChevronSortOutline class="w-4 h-4 ms-2" /></Button
                   >
                   <Dropdown placement="bottom-start">
-                    {#each canvasInstances as instance}
+                    {#each canvasInstances as instance (instance.tenant)}
                       <DropdownItem
                         on:click={() => redirectToCanvas(instance.tenant)}
                         class="tracking-wide flex flex-col gap-1"
@@ -1567,7 +1561,7 @@
                       {#if canvasClassBeingVerified}
                         <Spinner color="yellow" class="w-6 h-6" />
                         <Tooltip
-                          defaultClass="text-wrap py-2 px-3 mr-5 text-sm font-light shadow-sm"
+                          defaultClass="text-wrap py-2 px-3 mr-5 text-sm font-light shadow-xs"
                           arrow={false}
                           >We're verifying your access to the class roster. This shouldn't take
                           long.</Tooltip
@@ -1575,19 +1569,19 @@
                       {:else if canvasClassVerified}
                         <CheckCircleOutline class="w-6 h-6 text-amber-800" />
                         <Tooltip
-                          defaultClass="text-wrap py-2 px-3 mr-5 text-sm font-light shadow-sm"
+                          defaultClass="text-wrap py-2 px-3 mr-5 text-sm font-light shadow-xs"
                           arrow={false}>Your access to the class roster has been verified.</Tooltip
                         >
                       {:else if canvasClassVerificationError}
                         <ExclamationCircleOutline class="w-6 h-6 text-amber-800" />
                         <Tooltip
-                          defaultClass="text-wrap py-2 px-3 mr-5 text-sm font-light shadow-sm"
+                          defaultClass="text-wrap py-2 px-3 mr-5 text-sm font-light shadow-xs"
                           arrow={false}>{canvasClassVerificationError}</Tooltip
                         >
                       {:else if !canvasClassVerified}
-                        <CheckCircleOutline class="w-6 h-6 text-amber-800 text-opacity-25" />
+                        <CheckCircleOutline class="w-6 h-6 text-amber-800/25" />
                         <Tooltip
-                          defaultClass="text-wrap py-2 px-3 mr-5 text-sm font-light shadow-sm"
+                          defaultClass="text-wrap py-2 px-3 mr-5 text-sm font-light shadow-xs"
                           arrow={false}
                           >We'll verify your permissions to access the class roster. Select a class
                           to begin.</Tooltip
@@ -2047,7 +2041,7 @@
             </FileUpload>
           </div>
           <div class="flex gap-2 flex-wrap">
-            {#each allFiles as file}
+            {#each allFiles as file, idx (idx)}
               <FilePlaceholder
                 mimeType={data.uploadInfo.mimeType}
                 info={file}
