@@ -1,6 +1,7 @@
 <script lang="ts">
   import { navigating, page } from '$app/stores';
-  import { beforeNavigate, goto, invalidateAll, onNavigate } from '$app/navigation';
+  import { beforeNavigate, goto, invalidateAll, afterNavigate } from '$app/navigation';
+  import { resolve } from '$app/paths';
   import * as api from '$lib/api';
   import {
     getAnonymousShareToken,
@@ -102,10 +103,11 @@
   $: threadRecording = data.threadRecording;
   $: displayUserInfo = data.threadDisplayUserInfo;
   let trashThreadFiles = writable<string[]>([]);
+  let allFiles: Record<string, api.FileUploadInfo> = {};
   $: threadAttachments = threadMgr.attachments;
   $: allFiles = Object.fromEntries(
     Object.entries($threadAttachments)
-      .filter(([k, v]) => !$trashThreadFiles.includes(k))
+      .filter(([k]) => !$trashThreadFiles.includes(k))
       .map(([k, v]) => [
         k,
         {
@@ -371,7 +373,7 @@
   };
 
   // Scroll to the bottom of the chat thread.
-  const scroll = (el: HTMLDivElement, messageList: unknown[]) => {
+  const scroll = (el: HTMLDivElement) => {
     // Scroll to the bottom of the element.
     el.scrollTo({
       top: el.scrollHeight,
@@ -493,13 +495,15 @@
       if (hasAnonymousShareToken()) {
         resetAnonymousSessionToken();
         await goto(
-          `/group/${classId}/shared/assistant/${$assistantId}?share_token=${getAnonymousShareToken()}`
+          resolve(
+            `/group/${classId}/shared/assistant/${$assistantId}?share_token=${api.getAnonymousShareToken()}`
+          )
         );
       } else {
         sadToast('Cannot start a new chat in this anonymous session.');
       }
     } else {
-      await goto(`/group/${classId}?assistant=${$assistantId}`);
+      await goto(resolve(`/group/${classId}?assistant=${$assistantId}`));
     }
   };
 
@@ -654,10 +658,10 @@
             `/group/${classId}/shared/assistant/${$assistantId}?share_token=${getAnonymousShareToken()}`
           );
         } else {
-          await goto(`/`, { invalidateAll: true });
+          await goto(resolve(`/`), { invalidateAll: true });
         }
       } else {
-        await goto(`/group/${classId}`, { invalidateAll: true });
+        await goto(resolve(`/group/${classId}`), { invalidateAll: true });
       }
     } catch (e) {
       sadToast(
@@ -955,12 +959,21 @@
   /*
    * Delete a file from the thread.
    */
+  const setFileState = (fileId: string, state: api.FileUploadInfo['state']) => {
+    const existing = allFiles[fileId];
+    if (!existing) return;
+    allFiles = {
+      ...allFiles,
+      [fileId]: { ...existing, state }
+    };
+  };
+
   const removeFile = async (evt: CustomEvent<api.FileUploadInfo>) => {
     const file = evt.detail;
     if (file.state === 'deleting' || !(file.response && 'file_id' in file.response)) {
       return;
     } else {
-      allFiles[(file.response as api.ServerFile).file_id].state = 'deleting';
+      setFileState((file.response as api.ServerFile).file_id, 'deleting');
       const result = await api.deleteThreadFile(
         fetch,
         data.class.id,
@@ -968,7 +981,7 @@
         (file.response as api.ServerFile).file_id
       );
       if (result.$status >= 300) {
-        allFiles[(file.response as api.ServerFile).file_id].state = 'success';
+        setFileState((file.response as api.ServerFile).file_id, 'success');
         sadToast(`Failed to delete file: ${result.detail || 'unknown error'}`);
       } else {
         trashThreadFiles.update((files) => [...files, (file.response as api.ServerFile).file_id]);
@@ -1026,7 +1039,7 @@
     }
   };
 
-  onNavigate(async () => {
+  afterNavigate(async () => {
     await resetAudioSession();
   });
 
@@ -1054,7 +1067,7 @@
       data.isSharedAssistantPage || data.isSharedThreadPage ? 'pt-10' : ''
     }`}
     bind:this={messagesContainer}
-    use:scroll={$messages}
+    use:scroll
   >
     <div class="print-only print-header">
       <div class="print-header__brand">
@@ -1074,7 +1087,7 @@
         </Button>
       </div>
     {/if}
-    {#each $messages as message}
+    {#each $messages as message (message.data.id)}
       {@const attachment_file_ids = message.data.attachments
         ? new Set(message.data.attachments.map((attachment) => attachment.file_id))
         : new Set([])}
@@ -1154,7 +1167,7 @@
                 </div>
                 {#if quoteCitations.length > 0}
                   <div class="flex flex-wrap gap-2">
-                    {#each quoteCitations as citation}
+                    {#each quoteCitations as citation (citation.file_citation.file_id)}
                       <FileCitation
                         name={citation.file_citation.file_name}
                         quote={citation.file_citation.quote}
@@ -1164,7 +1177,7 @@
                 {/if}
                 {#if attachment_file_ids.size > 0}
                   <div class="flex flex-wrap gap-2">
-                    {#each imageInfo as image}
+                    {#each imageInfo as image (image.response && 'file_id' in image.response ? image.response.file_id : image.file.name)}
                       {#if !(image.response && 'file_id' in image.response && image.response.file_id in allFiles)}
                         <FilePlaceholder
                           info={image}
@@ -1351,7 +1364,7 @@
           {/each}
           {#if attachment_file_ids.size > 0}
             <div class="flex flex-wrap gap-2 mt-4">
-              {#each attachment_file_ids as file_id}
+              {#each attachment_file_ids as file_id (file_id)}
                 {#if allFiles[file_id]}
                   <FilePlaceholder
                     info={allFiles[file_id]}
@@ -1422,7 +1435,7 @@
               </p>
             </div>
             <Button
-              class="flex flex-row py-1.5 px-4 gap-1.5 bg-blue-dark-40 text-white rounded rounded-lg text-xs hover:bg-blue-dark-50 hover:text-blue-light-50 transition-all text-sm font-normal text-center"
+              class="flex flex-row py-1.5 px-4 gap-1.5 bg-blue-dark-40 text-white rounded-sm rounded-lg text-xs hover:bg-blue-dark-50 hover:text-blue-light-50 transition-all text-sm font-normal text-center"
               type="button"
               on:click={handleSessionSetup}
               on:touchstart={handleSessionSetup}
@@ -1487,7 +1500,7 @@
               >
                 {#if !audioSessionStarted}
                   <Button
-                    class="flex flex-row gap-1 bg-blue-dark-40 text-white rounded rounded-lg text-xs hover:bg-blue-dark-50 transition-all text-sm font-normal text-center px-3 py-2"
+                    class="flex flex-row gap-1 bg-blue-dark-40 text-white rounded-sm rounded-lg text-xs hover:bg-blue-dark-50 transition-all text-sm font-normal text-center px-3 py-2"
                     type="button"
                     on:click={handleSessionStart}
                     on:touchstart={handleSessionStart}
@@ -1502,7 +1515,7 @@
                   </Button>
                 {:else}
                   <Button
-                    class="flex flex-row gap-1 bg-amber-700 text-white rounded rounded-lg text-xs hover:bg-amber-800 transition-all text-sm font-normal text-center px-3 py-2"
+                    class="flex flex-row gap-1 bg-amber-700 text-white rounded-sm rounded-lg text-xs hover:bg-amber-800 transition-all text-sm font-normal text-center px-3 py-2"
                     type="button"
                     on:click={handleSessionEnd}
                     on:touchstart={handleSessionEnd}
@@ -1540,7 +1553,7 @@
                   </Dropdown>
                 {:else}
                   <Dropdown placement="top" triggeredBy="#top-dd" bind:open={openMicrophoneModal}>
-                    {#each audioDevices as audioDevice}
+                    {#each audioDevices as audioDevice (audioDevice.deviceId)}
                       <DropdownItem
                         class="flex flex-row gap-2 items-center"
                         on:click={() => {
@@ -1673,7 +1686,7 @@
                     on:touchstart={showModeratorsModal}>Moderators</Button
                   > <span class="font-semibold">cannot</span> see this thread or your name. {#if isCurrentUser}For
                     more information, please review <a
-                      href="/privacy-policy"
+                      href={resolve('/privacy-policy')}
                       rel="noopener noreferrer"
                       class="underline">PingPong's privacy statement</a
                     >.
@@ -1694,8 +1707,10 @@
                           >{isCurrentUser ? 'your' : "the user's"} full name, and listen to a recording
                           of {isCurrentUser ? 'your' : 'the'} conversation</span
                         >. For more information, please review
-                        <a href="/privacy-policy" rel="noopener noreferrer" class="underline"
-                          >PingPong's privacy statement</a
+                        <a
+                          href={resolve('/privacy-policy')}
+                          rel="noopener noreferrer"
+                          class="underline">PingPong's privacy statement</a
                         >. Assistants can make mistakes. Check important info.</Span
                       >
                     </div>
@@ -1711,8 +1726,10 @@
                         <span class="font-semibold"
                           >{isCurrentUser ? 'your' : "the user's"} full name</span
                         >. For more information, please review
-                        <a href="/privacy-policy" rel="noopener noreferrer" class="underline"
-                          >PingPong's privacy statement</a
+                        <a
+                          href={resolve('/privacy-policy')}
+                          rel="noopener noreferrer"
+                          class="underline">PingPong's privacy statement</a
                         >. Assistants can make mistakes. Check important info.</Span
                       >
                     </div>
@@ -1726,7 +1743,7 @@
                       on:touchstart={showModeratorsModal}>Moderators</Button
                     > can see this thread but not {isCurrentUser ? 'your' : "the user's"} name.
                     {#if isCurrentUser}For more information, please review <a
-                        href="/privacy-policy"
+                        href={resolve('/privacy-policy')}
                         rel="noopener noreferrer"
                         class="underline">PingPong's privacy statement</a
                       >.
