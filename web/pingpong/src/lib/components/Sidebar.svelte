@@ -326,8 +326,8 @@
                 class="text-sm text-white hover:bg-blue-dark-30 p-2 rounded flex flex-wrap gap-2 rounded-lg"
                 spanClass="flex-1 truncate"
                 href={thread.anonymous_session
-                ? resolve(`/group/${thread.class_id}/shared/thread/${thread.id}`)
-                : resolve(`/group/${thread.class_id}/thread/${thread.id}`)}
+                  ? resolve(`/group/${thread.class_id}/shared/thread/${thread.id}`)
+                  : resolve(`/group/${thread.class_id}/thread/${thread.id}`)}
                 label={thread.name || 'New Conversation'}
                 activeClass="bg-blue-dark-40"
               >
