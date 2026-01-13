@@ -34,6 +34,7 @@
       happyToast('Profile information saved');
       // Get `forward` parameter from URL
       const destination = $page.url.searchParams.get('forward') || '/';
+      // eslint-disable-next-line svelte/no-navigation-without-resolve
       await goto(destination, { invalidateAll: true });
     }
     loading = false;

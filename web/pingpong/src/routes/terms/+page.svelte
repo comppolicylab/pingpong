@@ -2,6 +2,7 @@
   import { Button, Heading } from 'flowbite-svelte';
   import * as api from '$lib/api';
   import { happyToast, sadToast } from '$lib/toast';
+  import { resolve } from '$app/paths';
   import { goto } from '$app/navigation';
   import PingPongLogo from '$lib/components/PingPongLogo.svelte';
   import { page } from '$app/stores';
@@ -14,12 +15,13 @@
   $: policyId = data.policyId;
 
   const logout = async () => {
-    await goto('/logout');
+    await goto(resolve('/logout'));
   };
 
   const goToDestination = async () => {
     $loading = true;
     const destination = $page.url.searchParams.get('forward') || '/';
+    // eslint-disable-next-line svelte/no-navigation-without-resolve
     await goto(destination);
     $loading = false;
   };

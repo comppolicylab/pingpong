@@ -191,7 +191,7 @@
       </P>
       <div class="bg-gray-100 rounded-2xl p-6">
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div class="bg-white rounded-xl p-4 shadow-sm">
+          <div class="bg-white rounded-xl p-4 shadow-xs">
             <Label
               class="mb-2 font-medium text-md"
               for="firstName"
@@ -214,7 +214,7 @@
             {/if}
           </div>
 
-          <div class="bg-white rounded-xl p-4 shadow-sm">
+          <div class="bg-white rounded-xl p-4 shadow-xs">
             <Label
               class="mb-2 font-medium text-md"
               for="lastName"
@@ -237,7 +237,7 @@
             {/if}
           </div>
 
-          <div class="bg-white rounded-xl p-4 shadow-sm">
+          <div class="bg-white rounded-xl p-4 shadow-xs">
             <div class="flex flex-col gap-2">
               <div class="flex flex-row gap-2 items-center">
                 <span class="font-medium">Primary Email</span>
@@ -278,8 +278,8 @@
         <div class="w-full">
           <div class="bg-gray-100 rounded-2xl p-6">
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {#each sortedLogins as login}
-                <div class="flex flex-col bg-white rounded-xl p-4 shadow-sm">
+              {#each sortedLogins as login (login.id)}
+                <div class="flex flex-col bg-white rounded-xl p-4 shadow-xs">
                   <div class="flex items-center gap-3 mb-2">
                     <div class="flex items-center gap-2">
                       <span class="font-medium">
@@ -348,8 +348,8 @@
         </P>
         <div class="bg-gray-100 rounded-2xl p-6">
           <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {#each activitySubscription as subscription}
-              <div class="bg-white rounded-xl p-4 shadow-sm flex flex-col justify-between">
+            {#each activitySubscription as subscription (subscription.class_id)}
+              <div class="bg-white rounded-xl p-4 shadow-xs flex flex-col justify-between">
                 <div class="flex flex-col gap-2 mb-4">
                   <div class="font-medium text-lg text-blue-dark-40">{subscription.class_name}</div>
                   <div class="text-sm text-gray-600">

@@ -4,6 +4,7 @@
   import { Button, Select, Hr } from 'flowbite-svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import { updateSearch, getValue } from '$lib/urlstate';
+  import { resolve } from '$app/paths';
 
   export let data;
 
@@ -140,9 +141,9 @@
     <div class="sm:col-start-1 sm:col-end-2 sm:row-start-1 h-full overflow-y-auto">
       <h3 class="font-normal text-2xl border-b border-gray-200 pb-1">Groups</h3>
       <div class="flex flex-wrap flex-col">
-        {#each classes as cls}
+        {#each classes as cls (cls.id)}
           <a
-            href={`/group/${cls.id}`}
+            href={resolve(`/group/${cls.id}`)}
             class="border-b border-gray-200 pb-4 pt-4 transition-all duration-300 hover:bg-gray-100 hover:pl-4"
           >
             <div>

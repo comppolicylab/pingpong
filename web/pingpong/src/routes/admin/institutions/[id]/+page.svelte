@@ -19,6 +19,7 @@
   import * as api from '$lib/api';
   import { happyToast, sadToast } from '$lib/toast';
   import { loading } from '$lib/stores/general.js';
+  import { resolve } from '$app/paths';
 
   export let data;
 
@@ -183,7 +184,7 @@
     </div>
     <div slot="right">
       <a
-        href={`/admin/institutions`}
+        href={resolve(`/admin/institutions`)}
         class="text-sm text-blue-dark-50 font-medium bg-white rounded-full p-2 px-4 hover:text-white hover:bg-blue-dark-40 transition-all flex items-center gap-2"
         >All Institutions <ArrowRightOutline size="md" class="text-orange" /></a
       >
@@ -242,7 +243,7 @@
               </TableBodyCell>
             </TableBodyRow>
           {/if}
-          {#each institution.admins as admin}
+          {#each institution.admins as admin (admin.id)}
             <TableBodyRow>
               <TableBodyCell class="py-2 font-medium whitespace-normal">
                 {admin.name || 'Unknown'}
@@ -306,7 +307,7 @@
               </TableBodyCell>
             </TableBodyRow>
           {/if}
-          {#each institution.root_admins as admin}
+          {#each institution.root_admins as admin (admin.id)}
             <TableBodyRow>
               <TableBodyCell class="py-2 font-medium whitespace-normal">
                 {admin.name || 'Unknown'}

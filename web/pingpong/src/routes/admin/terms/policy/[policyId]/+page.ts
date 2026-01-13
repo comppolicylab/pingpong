@@ -2,7 +2,7 @@ import type { PageLoad } from './$types';
 import type { AgreementPolicyDetail } from '$lib/api';
 import { getAgreementPolicy, expandResponse } from '$lib/api';
 
-export const load: PageLoad = async ({ params, fetch, parent }) => {
+export const load: PageLoad = async ({ params, fetch }) => {
   const isCreating = params.policyId === 'new';
   let agreementPolicy: AgreementPolicyDetail | null = null;
 

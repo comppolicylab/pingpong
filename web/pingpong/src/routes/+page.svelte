@@ -1,3 +1,7 @@
+<script lang="ts">
+  import { resolve } from '$app/paths';
+</script>
+
 <!-- We don't really expect anyone to ever see this page.
   -- Just add some loose directions in case we're wrong about that!
   -->
@@ -6,7 +10,7 @@
   <p>It looks like you have not been added to any group and you are also not an admin.</p>
   <p>
     This suggests something might be misconfigured. Please contact your site admin, or see our <a
-      href="/about"
+      href={resolve('/about')}
       class="text-orange hover:text-orange-dark">about</a
     > page for more help.
   </p>
