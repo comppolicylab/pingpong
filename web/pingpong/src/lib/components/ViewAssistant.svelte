@@ -34,6 +34,7 @@
   import dayjs from 'dayjs';
   import { happyToast, sadToast } from '$lib/toast';
   import * as api from '$lib/api';
+  import { resolve } from '$app/paths';
   import {
     checkCopyPermission as sharedCheckCopyPermission,
     defaultCopyName,
@@ -217,7 +218,7 @@
         <TableHeadCell></TableHeadCell>
       </TableHead>
       <TableBody>
-        {#each shareLinks as link}
+        {#each shareLinks as link (link.id)}
           <TableBodyRow>
             <TableBodyCell class="py-2 font-medium whitespace-normal"
               ><Input
@@ -248,7 +249,7 @@
                 <button
                   class="text-xs border border-blue-dark-40 text-blue-dark-40 shrink-0 flex flex-row gap-1.5 items-center justify-center bg-white rounded-full p-1 px-3 hover:text-white hover:bg-blue-dark-40 transition-all w-fit"
                   on:click|preventDefault={() => {}}
-                  on:svelte-copy={showCopiedLink}
+                  on:copy={showCopiedLink}
                   use:copy={`${sharedAssistantLinkWithParam}${link.share_token}`}
                 >
                   <LinkOutline class="inline-block w-4 h-4" />
@@ -327,14 +328,12 @@
         >
         <a
           class="text-blue-dark-30 hover:text-blue-dark-50"
-          href="/group/{assistant.class_id}/assistant/{assistant.id}"><PenSolid size="md" /></a
+          href={resolve(`/group/${assistant.class_id}/assistant/${assistant.id}`)}
+          ><PenSolid size="md" /></a
         >
       {/if}
 
-      <button
-        on:click|preventDefault={() => {}}
-        on:svelte-copy={showCopiedLink}
-        use:copy={assistantLink}
+      <button on:click|preventDefault={() => {}} on:copy={showCopiedLink} use:copy={assistantLink}
         ><LinkOutline
           class="inline-block w-6 h-6 text-blue-dark-30 hover:text-blue-dark-50 active:animate-ping"
         /></button
@@ -357,11 +356,13 @@
     {assistant.description || '(No description provided)'}
   </div>
   <div>
+    <!-- eslint-disable svelte/no-navigation-without-resolve -->
     <a
       href={assistantLink}
       class="flex items-center w-36 gap-2 text-sm text-white font-medium bg-orange rounded-full p-2 px-4 hover:text-blue-dark-100 hover:bg-blue-dark-40 hover:text-white transition-all"
       >Start a chat <CirclePlusSolid size="sm" class="inline" /></a
     >
+    <!-- eslint-enable svelte/no-navigation-without-resolve -->
   </div>
 </div>
 
@@ -417,7 +418,7 @@
       class="w-full"
       on:change={() => checkCopyPermission(copyTargetClassId)}
     >
-      {#each classOptions as option}
+      {#each classOptions as option (option.id)}
         <option value={`${option.id}`}>
           {option.term ? `${option.name} (${option.term})` : option.name}
         </option>

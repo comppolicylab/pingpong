@@ -337,7 +337,7 @@
 <div class="relative">
   {#if loading}
     <div
-      class="absolute top-0 left-0 w-full h-full flex flex-col gap-4 items-center justify-center bg-white bg-opacity-90 dark:bg-black dark:bg-opacity-90 z-10"
+      class="absolute top-0 left-0 w-full h-full flex flex-col gap-4 items-center justify-center bg-white/90 dark:bg-black/90 z-10"
     >
       <div class="text-gray-500 animate-pulse">Loading users...</div>
     </div>
@@ -389,7 +389,7 @@
                       class="flex flex-row overflow-y-auto bg-gray-900 z-10 max-w-xs py-2 px-3 text-sm text-wrap font-light text-white"
                     >
                       <div class="whitespace-normal">
-                        <span class="font-medium">Role Change Not Allowed:</span>{' '}
+                        <span class="font-medium">Role Change Not Allowed:</span>&nbsp;&nbsp;
                         {noPermissions
                           ? `You do not have enough permissions to change ${roleInfo.label} user roles.`
                           : currentUser && !userIsAdmin

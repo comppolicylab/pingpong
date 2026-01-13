@@ -4,6 +4,7 @@
   import * as api from '$lib/api';
   import PageHeader, { mainTextClass } from './PageHeader.svelte';
   import { goto } from '$app/navigation';
+  import { resolve } from '$app/paths';
 
   export let classes: api.Class[];
   export let isOnClassPage: boolean;
@@ -20,7 +21,7 @@
   let classDropdownOpen = false;
   const goToClass = async (clsId: number) => {
     classDropdownOpen = false;
-    await goto(`/group/${clsId}`);
+    await goto(resolve(`/group/${clsId}`));
   };
 </script>
 
@@ -35,7 +36,7 @@
         <div class="eyebrow eyebrow-dark ml-4 mr-4">Requires Login</div>
 
         <a
-          href={`/group/${current.id}/assistant`}
+          href={resolve(`/group/${current.id}/assistant`)}
           class="text-sm text-blue-dark-50 font-medium bg-white rounded-full p-2 px-4 hover:text-blue-dark-100 hover:bg-blue-dark-40 hover:text-white transition-all"
           >View Group Page <ArrowRightOutline size="md" class="text-orange inline-block ml-1" /></a
         >
@@ -60,7 +61,7 @@
         <div slot="header" class="w-64 p-3">
           <Search size="md" bind:value={searchTerm} />
         </div>
-        {#each filteredClasses as cls}
+        {#each filteredClasses as cls (cls.id)}
           <DropdownItem
             class="flex items-center text-base font-semibold gap-4 py-4 text-sm tracking-wide font-medium uppercase hover:bg-blue-light-50"
             on:click={() => goToClass(cls.id)}>{cls.name}</DropdownItem
@@ -72,7 +73,7 @@
       {#if current}
         {#if !isOnClassPage}
           <a
-            href={`/group/${current.id}/assistant`}
+            href={resolve(`/group/${current.id}/assistant`)}
             class="text-sm text-blue-dark-50 font-medium bg-white rounded-full p-2 px-4 hover:text-blue-dark-100 hover:bg-blue-dark-40 hover:text-white transition-all"
             >View Group Page <ArrowRightOutline
               size="md"
@@ -81,7 +82,7 @@
           >
         {:else if canManage}
           <a
-            href={`/group/${current.id}/manage`}
+            href={resolve(`/group/${current.id}/manage`)}
             class="text-sm text-blue-dark-50 font-medium bg-white rounded-full p-2 px-4 hover:text-blue-dark-100 hover:bg-blue-dark-40 hover:text-white transition-all"
             >Manage Group <CogSolid
               size="sm"
