@@ -1435,7 +1435,7 @@
               </p>
             </div>
             <Button
-              class="flex flex-row py-1.5 px-4 gap-1.5 bg-blue-dark-40 text-white rounded-sm rounded-lg text-xs hover:bg-blue-dark-50 hover:text-blue-light-50 transition-all text-sm font-normal text-center"
+              class="flex flex-row py-1.5 px-4 gap-1.5 bg-blue-dark-40 text-white rounded-sm text-xs hover:bg-blue-dark-50 hover:text-blue-light-50 transition-all text-sm font-normal text-center"
               type="button"
               on:click={handleSessionSetup}
               on:touchstart={handleSessionSetup}
@@ -1500,7 +1500,7 @@
               >
                 {#if !audioSessionStarted}
                   <Button
-                    class="flex flex-row gap-1 bg-blue-dark-40 text-white rounded-sm rounded-lg text-xs hover:bg-blue-dark-50 transition-all text-sm font-normal text-center px-3 py-2"
+                    class="flex flex-row gap-1 bg-blue-dark-40 text-white rounded-lg hover:bg-blue-dark-50 transition-all text-sm font-normal text-center px-3 py-2"
                     type="button"
                     on:click={handleSessionStart}
                     on:touchstart={handleSessionStart}
@@ -1515,7 +1515,7 @@
                   </Button>
                 {:else}
                   <Button
-                    class="flex flex-row gap-1 bg-amber-700 text-white rounded-sm rounded-lg text-xs hover:bg-amber-800 transition-all text-sm font-normal text-center px-3 py-2"
+                    class="flex flex-row gap-1 bg-amber-700 text-white rounded-lg hover:bg-amber-800 transition-all text-sm font-normal text-center px-3 py-2"
                     type="button"
                     on:click={handleSessionEnd}
                     on:touchstart={handleSessionEnd}
