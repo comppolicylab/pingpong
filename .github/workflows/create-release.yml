@@ -1,0 +1,178 @@
+name: Create Release
+run-name: "Create Release v${{ inputs.version }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 7, 6.5, 6.5.1, v7, v6.5)'
+        required: true
+        type: string
+
+jobs:
+  create-release:
+    name: Bump version and create release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate and normalize version format
+        id: version
+        run: |
+          VERSION="${{ inputs.version }}"
+
+          # Strip leading 'v' if present
+          VERSION="${VERSION#v}"
+
+          # Validate format: X, X.Y, or X.Y.Z (with optional prerelease)
+          if [[ ! "$VERSION" =~ ^[0-9]+(\.[0-9]+)?(\.[0-9]+)?(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+            echo "Error: Invalid version format. Expected: X, X.Y, or X.Y.Z"
+            echo "Got: $VERSION"
+            exit 1
+          fi
+
+          # Extract prerelease suffix if present
+          PRERELEASE=""
+          if [[ "$VERSION" =~ -(.+)$ ]]; then
+            PRERELEASE="-${BASH_REMATCH[1]}"
+            VERSION="${VERSION%%-*}"
+          fi
+
+          # Normalize to X.Y.Z format
+          IFS='.' read -ra PARTS <<< "$VERSION"
+          MAJOR="${PARTS[0]:-0}"
+          MINOR="${PARTS[1]:-0}"
+          PATCH="${PARTS[2]:-0}"
+
+          NORMALIZED="${MAJOR}.${MINOR}.${PATCH}${PRERELEASE}"
+
+          echo "Input: ${{ inputs.version }}"
+          echo "Normalized: $NORMALIZED"
+          echo "VERSION=$NORMALIZED" >> $GITHUB_OUTPUT
+
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-tags: true
+
+      - name: Check if tag already exists
+        run: |
+          if git rev-parse "v${{ steps.version.outputs.VERSION }}" >/dev/null 2>&1; then
+            echo "Error: Tag v${{ steps.version.outputs.VERSION }} already exists"
+            echo "Cannot create the same release twice"
+            exit 1
+          fi
+          echo "Tag v${{ steps.version.outputs.VERSION }} does not exist, proceeding..."
+
+      - name: Check version is higher than latest release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Get the latest non-prerelease version
+          LATEST=$(gh release list --exclude-drafts --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName // empty')
+
+          if [[ -z "$LATEST" ]]; then
+            echo "No previous releases found, skipping version comparison"
+            exit 0
+          fi
+
+          NEW_VER="${{ steps.version.outputs.VERSION }}"
+          echo "Latest release: $LATEST"
+          echo "New version: v$NEW_VER"
+
+          # Strip 'v' prefix for comparison
+          LATEST_VER="${LATEST#v}"
+
+          # Compare versions using sort -V
+          HIGHER=$(printf '%s\n%s' "$LATEST_VER" "$NEW_VER" | sort -V | tail -n1)
+
+          if [[ "$HIGHER" == "$LATEST_VER" ]]; then
+            echo "Error: New version ($NEW_VER) must be higher than latest release ($LATEST_VER)"
+            exit 1
+          fi
+
+          if [[ "$HIGHER" == "$NEW_VER" && "$NEW_VER" != "$LATEST_VER" ]]; then
+            echo "Version check passed: $NEW_VER > $LATEST_VER"
+          fi
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Bump version in pyproject.toml
+        run: |
+          # Use sed to replace the version line in pyproject.toml
+          sed -i 's/^version = ".*"/version = "${{ steps.version.outputs.VERSION }}"/' pyproject.toml
+          echo "Updated pyproject.toml version to ${{ steps.version.outputs.VERSION }}"
+          grep '^version = ' pyproject.toml
+
+      - name: Bump version in package.json files
+        run: |
+          for dir in web/pingpong web/study; do
+            cd $dir
+            pnpm version ${{ steps.version.outputs.VERSION }} --no-git-tag-version
+            echo "Updated $dir/package.json version to ${{ steps.version.outputs.VERSION }}"
+            grep '"version"' package.json
+            cd - > /dev/null
+          done
+
+      - name: Commit version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml web/pingpong/package.json web/study/package.json
+          git commit -m "chore: bump version to ${{ steps.version.outputs.VERSION }}"
+          git push
+
+      - name: Create tag
+        run: |
+          git tag "v${{ steps.version.outputs.VERSION }}"
+          git push origin "v${{ steps.version.outputs.VERSION }}"
+          echo "Created and pushed tag v${{ steps.version.outputs.VERSION }}"
+
+      - name: Create draft GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cat > /tmp/release-notes.md << 'RELEASE_TEMPLATE'
+          # Release Notes
+
+          This update provides important bug fixes and improvements.
+
+          ## General
+          ### New Features
+          - Note
+          ### Updates & Improvements
+          - Note
+          ### Resolved Issues
+          - Note
+          ### Known Issues
+          - Note
+          ### Deprecations
+          - Note
+
+          ## Deployment Information
+          | Schema Upgrade | Migration Script | Permissions Update | Task Definition Update | Configuration Update |
+          | --- | --- | --- | --- | --- |
+          | No | No | No | No | No |
+          ### Deployment Details
+          - N/A
+
+          ## Related PRs
+
+          RELEASE_TEMPLATE
+
+          # Remove leading indentation
+          sed -i 's/^          //' /tmp/release-notes.md
+
+          gh release create "v${{ steps.version.outputs.VERSION }}" \
+            --title "v${{ steps.version.outputs.VERSION }}" \
+            --draft \
+            --prerelease \
+            --notes-file /tmp/release-notes.md
+
+          echo "Created draft release v${{ steps.version.outputs.VERSION }}"
+          echo ""
+          echo "Next steps:"
+          echo "1. Go to GitHub Releases"
+          echo "2. Edit the draft release and fill in release notes"
+          echo "3. Publish the release to trigger the build workflow"
