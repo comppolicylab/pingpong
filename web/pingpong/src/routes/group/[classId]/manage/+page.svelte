@@ -58,7 +58,7 @@
   } from 'flowbite-svelte-icons';
   import { sadToast, happyToast } from '$lib/toast';
   import { humanSize } from '$lib/size';
-  import { goto, invalidateAll, afterNavigate } from '$app/navigation';
+  import { goto, invalidateAll, afterNavigate, onNavigate } from '$app/navigation';
   import { browser } from '$app/environment';
   import { submitParentForm } from '$lib/form';
   import { page } from '$app/stores';
@@ -813,9 +813,12 @@
   // Clean up state on navigation. Invalidate data so that any changes
   // are reflected in the rest of the app. (If performance suffers here,
   // we can be more selective about what we invalidate.)
-  afterNavigate(() => {
+  onNavigate(() => {
     uploads.set([]);
     trashFiles.set([]);
+  });
+
+  afterNavigate(() => {
     invalidateAll();
   });
 
