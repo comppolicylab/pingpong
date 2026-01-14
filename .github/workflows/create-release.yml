@@ -1,5 +1,5 @@
 name: Create Release
-run-name: "Create Release v${{ inputs.version }}"
+run-name: "Create Release ${{ inputs.version }}"
 
 on:
   workflow_dispatch:
@@ -66,16 +66,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Get the latest non-prerelease version
-          LATEST=$(gh release list --exclude-drafts --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName // empty')
+          # Get the latest semver release (tags starting with 'v')
+          LATEST=$(gh release list --exclude-drafts --exclude-pre-releases --limit 100 --json tagName --jq '[.[] | select(.tagName | startswith("v"))][0].tagName // empty')
 
           if [[ -z "$LATEST" ]]; then
-            echo "No previous releases found, skipping version comparison"
+            echo "No previous semver releases found, skipping version comparison"
             exit 0
           fi
 
           NEW_VER="${{ steps.version.outputs.VERSION }}"
-          echo "Latest release: $LATEST"
+          echo "Latest semver release: $LATEST"
           echo "New version: v$NEW_VER"
 
           # Strip 'v' prefix for comparison
