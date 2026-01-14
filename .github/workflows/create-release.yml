@@ -160,7 +160,7 @@ jobs:
         run: |
           for dir in web/pingpong web/study; do
             cd $dir
-            pnpm version ${{ steps.version.outputs.VERSION }} --no-git-tag-version
+            pnpm version ${{ steps.version.outputs.VERSION }} --no-git-tag-version --allow-same-version
             echo "Updated $dir/package.json version to ${{ steps.version.outputs.VERSION }}"
             grep '"version"' package.json
             cd - > /dev/null
