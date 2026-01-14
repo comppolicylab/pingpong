@@ -1,11 +1,11 @@
 <script lang="ts">
-  import logo from './logo.svg?raw';
+	import logo from './logo.svg?raw';
 
-  export let size = 8;
-  export let extraClass = 'fill-amber-600';
+	export let size = 8;
+	export let extraClass = 'fill-amber-600';
 </script>
 
 <div class="w-{size} {extraClass}">
-  <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-  {@html logo}
+	<!-- eslint-disable-next-line svelte/no-at-html-tags -->
+	{@html logo}
 </div>

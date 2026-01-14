@@ -237,7 +237,7 @@ registerProcessor('audio_processor', AudioProcessor);
 `;
 
 const script = new Blob([AudioProcessorWorklet], {
-  type: 'application/javascript'
+	type: 'application/javascript'
 });
 const src: string = URL.createObjectURL(script);
 export const AudioProcessorSrc: string = src;
