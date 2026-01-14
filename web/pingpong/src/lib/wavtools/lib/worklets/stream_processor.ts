@@ -132,7 +132,7 @@ registerProcessor('stream_processor', StreamProcessor);
 `;
 
 const script = new Blob([StreamProcessorWorklet], {
-  type: 'application/javascript'
+	type: 'application/javascript'
 });
 const src: string = URL.createObjectURL(script);
 export const StreamProcessorSrc: string = src;

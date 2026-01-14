@@ -19,9 +19,9 @@ export const loadingMessage = writable('');
 export const isFirefox = writable(false);
 
 export function detectBrowser() {
-  if (typeof window !== 'undefined') {
-    isFirefox.set(navigator.userAgent.toLowerCase().includes('firefox'));
-  }
+	if (typeof window !== 'undefined') {
+		isFirefox.set(navigator.userAgent.toLowerCase().includes('firefox'));
+	}
 }
 
 export const modelsPromptsStore = writable<Record<number, AssistantModels>>({});

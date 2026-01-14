@@ -1,10 +1,10 @@
 <script lang="ts">
-  import ThreadDetailPage from '$lib/components/ThreadDetailPage.svelte';
+	import ThreadDetailPage from '$lib/components/ThreadDetailPage.svelte';
 
-  /**
-   * Application data.
-   */
-  export let data;
+	/**
+	 * Application data.
+	 */
+	export let data;
 </script>
 
 <ThreadDetailPage {data} />

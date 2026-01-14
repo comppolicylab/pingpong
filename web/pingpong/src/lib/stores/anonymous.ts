@@ -4,33 +4,33 @@ export const anonymousSessionToken = writable<string | null>(null);
 export const anonymousShareToken = writable<string | null>(null);
 
 export const setAnonymousSessionToken = (token: string | null) => {
-  anonymousSessionToken.set(token);
+	anonymousSessionToken.set(token);
 };
 
 export const resetAnonymousSessionToken = () => {
-  anonymousSessionToken.set(null);
+	anonymousSessionToken.set(null);
 };
 
 export const hasAnonymousSessionToken = () => {
-  return get(anonymousSessionToken) !== null;
+	return get(anonymousSessionToken) !== null;
 };
 
 export const getAnonymousSessionToken = () => {
-  return get(anonymousSessionToken);
+	return get(anonymousSessionToken);
 };
 
 export const setAnonymousShareToken = (token: string | null) => {
-  anonymousShareToken.set(token);
+	anonymousShareToken.set(token);
 };
 
 export const resetAnonymousShareToken = () => {
-  anonymousShareToken.set(null);
+	anonymousShareToken.set(null);
 };
 
 export const hasAnonymousShareToken = () => {
-  return get(anonymousShareToken) !== null;
+	return get(anonymousShareToken) !== null;
 };
 
 export const getAnonymousShareToken = () => {
-  return get(anonymousShareToken);
+	return get(anonymousShareToken);
 };
