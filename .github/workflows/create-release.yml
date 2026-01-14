@@ -53,6 +53,32 @@ jobs:
         with:
           fetch-tags: true
 
+      - name: Check branch matches version
+        run: |
+          BRANCH="${{ github.ref_name }}"
+          VERSION="${{ steps.version.outputs.VERSION }}"
+
+          # Disallow main branch
+          if [[ "$BRANCH" == "main" ]]; then
+            echo "Error: Releases cannot be created from main branch"
+            echo "Create a release branch first: git checkout -b release/vX.Y"
+            exit 1
+          fi
+
+          # Extract major.minor from version (e.g., 6.7.1 -> 6.7)
+          MAJOR_MINOR=$(echo "$VERSION" | cut -d. -f1,2)
+
+          # Expected branch name
+          EXPECTED_BRANCH="release/v${MAJOR_MINOR}"
+
+          if [[ "$BRANCH" != "$EXPECTED_BRANCH" ]]; then
+            echo "Error: Version $VERSION must be created from branch $EXPECTED_BRANCH"
+            echo "Current branch: $BRANCH"
+            exit 1
+          fi
+
+          echo "Branch check passed: $BRANCH matches version $VERSION"
+
       - name: Check if tag already exists
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
