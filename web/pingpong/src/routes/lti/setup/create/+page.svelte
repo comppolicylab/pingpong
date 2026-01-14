@@ -25,7 +25,8 @@
   let error = '';
 
   const goBack = () => {
-    goto(resolve(`/lti/setup?lti_class_id=${ltiClassId}`));
+    // eslint-disable-next-line svelte/no-navigation-without-resolve
+    goto(`/lti/setup?lti_class_id=${ltiClassId}`);
   };
 
   const handleSubmit = async () => {
@@ -82,7 +83,13 @@
           <div class="font-medium text-2xl">Create New Group</div>
         </div>
 
-        <form onsubmit|preventDefault={handleSubmit} class="flex flex-col gap-4">
+        <form
+          onsubmit={(e) => {
+            e.preventDefault();
+            handleSubmit();
+          }}
+          class="flex flex-col gap-4"
+        >
           <div>
             <Label for="name" class="mb-2">Group Name</Label>
             <Input

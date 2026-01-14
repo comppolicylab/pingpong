@@ -16,11 +16,13 @@
       : context.course_name || context.course_code || 'Your Course';
 
   const goToCreate = () => {
-    goto(resolve(`/lti/setup/create?lti_class_id=${ltiClassId}`));
+    // eslint-disable-next-line svelte/no-navigation-without-resolve
+    goto(`/lti/setup/create?lti_class_id=${ltiClassId}`);
   };
 
   const goToLink = () => {
-    goto(resolve(`/lti/setup/link?lti_class_id=${ltiClassId}`));
+    // eslint-disable-next-line svelte/no-navigation-without-resolve
+    goto(`/lti/setup/link?lti_class_id=${ltiClassId}`);
   };
 </script>
 
