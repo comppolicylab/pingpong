@@ -25,7 +25,8 @@
     goto(`/lti/setup?lti_class_id=${ltiClassId}`);
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (event: SubmitEvent) => {
+    event.preventDefault();
     if (!selectedGroupId) {
       error = 'Please select a group to link';
       return;

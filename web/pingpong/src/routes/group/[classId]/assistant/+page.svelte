@@ -313,14 +313,20 @@
                     <button
                       class="text-blue-dark-40 hover:text-blue-dark-100"
                       aria-label="Copy assistant"
-                      onclick={() => openCopyModal(assistant.id, assistant.name)}
+                      onclick={(event) => {
+                        event.preventDefault();
+                        openCopyModal(assistant.id, assistant.name);
+                      }}
                     >
                       <FileCopyOutline class="w-5 h-5" />
                     </button>
                     <button
                       class="text-red-700 hover:text-red-900"
                       aria-label="Delete assistant"
-                      onclick={() => openDeleteModal(assistant.id)}
+                      onclick={(event) => {
+                        event.preventDefault();
+                        openDeleteModal(assistant.id);
+                      }}
                     >
                       <TrashBinOutline class="w-5 h-5" />
                     </button>

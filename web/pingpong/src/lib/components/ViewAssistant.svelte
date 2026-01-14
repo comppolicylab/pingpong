@@ -248,7 +248,9 @@
               <div class="flex flex-row gap-2">
                 <button
                   class="text-xs border border-blue-dark-40 text-blue-dark-40 shrink-0 flex flex-row gap-1.5 items-center justify-center bg-white rounded-full p-1 px-3 hover:text-white hover:bg-blue-dark-40 transition-all w-fit"
-                  onclick={() => {}}
+                  onclick={(event) => {
+                    event.preventDefault();
+                  }}
                   oncopy={showCopiedLink}
                   use:copy={`${sharedAssistantLinkWithParam}${link.share_token}`}
                 >
@@ -309,7 +311,8 @@
         <button
           class="text-blue-dark-30 hover:text-blue-dark-50"
           aria-label="Copy assistant"
-          onclick={() => {
+          onclick={(event) => {
+            event.preventDefault();
             copyName = defaultCopyName(assistant.name);
             copyTargetClassId = `${currentClassId}`;
             copyPermissionAllowed = false;
@@ -322,7 +325,8 @@
         <button
           class="text-blue-dark-30 hover:text-blue-dark-50"
           aria-label="Delete assistant"
-          onclick={() => {
+          onclick={(event) => {
+            event.preventDefault();
             deleteAssistantModalOpen = true;
           }}><TrashBinOutline size="md" /></button
         >
@@ -341,7 +345,8 @@
 
       {#if editable && shareable && assistant.published}
         <button
-          onclick={() => {
+          onclick={(event) => {
+            event.preventDefault();
             sharedAssistantModalOpen = true;
           }}
           ><GlobeOutline

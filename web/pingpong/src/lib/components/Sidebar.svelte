@@ -82,8 +82,7 @@
   $: currentClassId = parseInt($page.params.classId ?? '', 10);
   $: currentAssistantIdQuery = parseInt($page.url.searchParams.get('assistant') || '0', 10);
   $: currentAssistantId = $page.data.threadData?.thread?.assistant_id || currentAssistantIdQuery;
-  $: assistants = ($page.data.assistants || []) as api.Assistant[];
-  $: assistants.sort((a, b) => {
+  $: assistants = [...(($page.data.assistants || []) as api.Assistant[])].sort((a, b) => {
     // First sort by endorsement.
     if (a.endorsed && !b.endorsed) return -1;
     if (!a.endorsed && b.endorsed) return 1;
