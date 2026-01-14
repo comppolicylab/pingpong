@@ -54,13 +54,38 @@ jobs:
           fetch-tags: true
 
       - name: Check if tag already exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if git rev-parse "v${{ steps.version.outputs.VERSION }}" >/dev/null 2>&1; then
-            echo "Error: Tag v${{ steps.version.outputs.VERSION }} already exists"
-            echo "Cannot create the same release twice"
-            exit 1
+          TAG="v${{ steps.version.outputs.VERSION }}"
+
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists"
+
+            # Check if there's a published (non-draft) release for this tag
+            RELEASE_STATUS=$(gh release view "$TAG" --json isDraft --jq '.isDraft' 2>/dev/null || echo "not_found")
+
+            if [[ "$RELEASE_STATUS" == "false" ]]; then
+              echo "Error: A published release for $TAG already exists"
+              echo "Cannot overwrite a published release"
+              exit 1
+            fi
+
+            echo "Removing existing tag and draft release to recreate..."
+
+            # Delete draft release if it exists
+            if [[ "$RELEASE_STATUS" == "true" ]]; then
+              gh release delete "$TAG" --yes || true
+            fi
+
+            # Delete remote and local tag
+            git push origin --delete "$TAG" || true
+            git tag -d "$TAG" || true
+
+            echo "Cleaned up existing tag and draft release"
           fi
-          echo "Tag v${{ steps.version.outputs.VERSION }} does not exist, proceeding..."
+
+          echo "Proceeding with tag creation..."
 
       - name: Check version is higher than latest release
         env:
