@@ -370,7 +370,7 @@
   };
 
   // Fix the height of the container when the file list changes.
-  const fixFileListHeight: Action<HTMLElement> = () => {
+  const fixFileListHeight: Action<HTMLElement, FileUploadInfo[]> = () => {
     const update = () => {
       const el = document.getElementById('message');
       if (!el) {
@@ -449,7 +449,7 @@
       {#if canSubmit && assistantVersion !== null && threadVersion !== null && assistantVersion > threadVersion}
         <div
           class="border border-gray-300 -mb-4 relative flex gap-2 flex-wrap rounded-t-2xl border-b-0 pt-2.5 pb-6 px-3.5 bg-gray-50"
-          use:fixFileListHeight
+          use:fixFileListHeight={$allFiles}
           bind:this={allFileListRef}
         >
           <div class="w-full">
@@ -479,7 +479,7 @@
       {#if $allFiles.length > 0}
         <div
           class="border border-blue-light-40 relative flex -mb-3 gap-2 flex-wrap rounded-t-2xl z-10 pb-5 pt-2.5 bg-blue-light-50"
-          use:fixFileListHeight
+          use:fixFileListHeight={$allFiles}
           bind:this={allFileListRef}
         >
           <div class="flex gap-2 flex-wrap px-2 py-0">
