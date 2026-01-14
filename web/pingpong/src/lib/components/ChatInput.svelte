@@ -483,7 +483,7 @@
           bind:this={allFileListRef}
         >
           <div class="flex gap-2 flex-wrap px-2 py-0">
-            {#each $allFiles as file (file.file.name)}
+            {#each $allFiles as file (file)}
               <FilePlaceholder
                 {mimeType}
                 info={file}
