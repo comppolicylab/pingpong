@@ -3,7 +3,6 @@
   import { goto } from '$app/navigation';
   import PingPongLogo from '$lib/components/PingPongLogo.svelte';
   import { PlusOutline, LinkOutline } from 'flowbite-svelte-icons';
-  import { resolve } from '$app/paths';
 
   export let data;
 

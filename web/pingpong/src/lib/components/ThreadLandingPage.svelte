@@ -617,7 +617,7 @@
                 : null}
               upload={handleUpload}
               remove={handleRemove}
-              onsubmit={handleSubmit}
+              on:submit={handleSubmit}
             />
           </div>
         {:else if assistant.interaction_mode === 'chat' && (assistant.assistant_should_message_first ?? false)}

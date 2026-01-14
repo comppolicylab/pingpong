@@ -5,7 +5,7 @@ const config = {
     './node_modules/flowbite-svelte/**/*.{html,js,svelte,ts}'
   ],
 
-  darkMode: 'class',
+  darkMode: 'selector',
 
   theme: {
     container: {

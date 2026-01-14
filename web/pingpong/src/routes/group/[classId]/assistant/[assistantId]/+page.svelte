@@ -1302,8 +1302,8 @@
             cancelButtonText="Cancel"
             confirmText="delete"
             confirmButtonText="Delete assistant"
-            oncancel={() => (deleteModal = false)}
-            onconfirm={deleteAssistant}
+            on:cancel={() => (deleteModal = false)}
+            on:confirm={deleteAssistant}
           />
         </Modal>
       </div>
@@ -1345,8 +1345,8 @@
       mcpServerRecordFromServer={mcpServerEditFromServer}
       mcpServerLocalDraft={mcpServerEdit}
       {mcpServerEditIndex}
-      onsave={(e) => saveMCPServerAndCloseModal(e.detail.mcpServer, e.detail.index)}
-      onclose={() => resetDraftMCPServerAndCloseModal()}
+      on:save={(e) => saveMCPServerAndCloseModal(e.detail.mcpServer, e.detail.index)}
+      on:close={() => resetDraftMCPServerAndCloseModal()}
     />
   {/if}
 
@@ -1849,9 +1849,9 @@
           maxSize={data.uploadInfo.class_file_max_size}
           maxCount={fileSearchMetadata.max_count}
           uploadType="File Search"
-          onerror={(e) => sadToast(e.detail.message)}
-          onchange={handleFSPrivateFilesChange}
-          ondelete={removePrivateFiles}
+          on:error={(e) => sadToast(e.detail.message)}
+          on:change={handleFSPrivateFilesChange}
+          on:delete={removePrivateFiles}
         />
       </div>
     {/if}
@@ -1885,9 +1885,9 @@
           maxSize={data.uploadInfo.class_file_max_size}
           maxCount={codeInterpreterMetadata.max_count}
           uploadType="Code Interpreter"
-          onerror={(e) => sadToast(e.detail.message)}
-          onchange={handleCIPrivateFilesChange}
-          ondelete={removePrivateFiles}
+          on:error={(e) => sadToast(e.detail.message)}
+          on:change={handleCIPrivateFilesChange}
+          on:delete={removePrivateFiles}
         />
       </div>
     {/if}

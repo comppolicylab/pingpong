@@ -488,7 +488,7 @@
                 {mimeType}
                 info={file}
                 purpose="fs_ci_multimodal"
-                ondelete={removeFile}
+                on:delete={removeFile}
               />
             {/each}
           </div>
@@ -543,11 +543,11 @@
         onkeydown={maybeSubmit}
         oninput={handleTextAreaInput}
         style={`max-height: ${maxHeight}px; font-size: 1rem; line-height: 1.5rem;`}
-      />
+      ></textarea>
       <textarea
         bind:this={ref}
         style="position: absolute; visibility: hidden; height: 0px; left: -1000px; top: -1000px"
-      />
+      ></textarea>
       <div class="flex flex-row gap-1">
         {#if upload && purpose}
           <FileUpload
@@ -571,8 +571,8 @@
             {threadCodeInterpreterMaxCount}
             {purpose}
             {upload}
-            onerror={(e) => sadToast(e.detail.message)}
-            onchange={handleFilesChange}
+            on:error={(e) => sadToast(e.detail.message)}
+            on:change={handleFilesChange}
           />
           {#if (codeInterpreterAcceptedFiles || fileSearchAcceptedFiles || finalVisionAcceptedFiles) && !(tooManyAttachments || tooManyVisionFiles) && !(loading || disabled || !upload) && !tooManyFileSearchFiles && !tooManyCodeInterpreterFiles}
             <Popover defaultClass="w-52" arrow={false}

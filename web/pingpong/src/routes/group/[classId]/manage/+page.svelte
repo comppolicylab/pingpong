@@ -973,8 +973,8 @@
           cancelButtonText="Cancel"
           confirmText="delete"
           confirmButtonText="Delete group"
-          onconfirm={deleteClass}
-          oncancel={() => (deleteModal = false)}
+          on:confirm={deleteClass}
+          on:cancel={() => (deleteModal = false)}
         />
       </Modal>
       <Modal bind:open={cloneModal} size="md">
@@ -988,8 +988,8 @@
           {anyCanPublishThread}
           {assistantPermissions}
           {anyCanShareAssistant}
-          onconfirm={cloneClass}
-          oncancel={() => (cloneModal = false)}
+          on:confirm={cloneClass}
+          on:cancel={() => (cloneModal = false)}
         />
       </Modal>
       <Modal bind:open={transferModal} size="md">
@@ -1130,8 +1130,8 @@
                 cancelButtonText="Cancel"
                 confirmText="confirm"
                 confirmButtonText="Make private"
-                onconfirm={handleMakePrivate}
-                oncancel={() => (aboutToSetPrivate = false)}
+                on:confirm={handleMakePrivate}
+                on:cancel={() => (aboutToSetPrivate = false)}
               />
             </Modal>
           </div>
@@ -1761,15 +1761,15 @@
                     <Modal bind:open={disconnectCanvas} size="sm" autoclose>
                       <CanvasDisconnectModal
                         canvasCourseCode={data.class.lms_class?.course_code || ''}
-                        onkeep={() => removeCanvasConnection(true)}
-                        onremove={() => removeCanvasConnection(false)}
+                        on:keep={() => removeCanvasConnection(true)}
+                        on:remove={() => removeCanvasConnection(false)}
                       />
                     </Modal>
                     <Modal bind:open={disconnectClass} size="sm" autoclose>
                       <CanvasDisconnectModal
                         canvasCourseCode={data.class.lms_class?.course_code || ''}
-                        onkeep={() => deleteClassSync(true)}
-                        onremove={() => deleteClassSync(false)}
+                        on:keep={() => deleteClassSync(true)}
+                        on:remove={() => deleteClassSync(false)}
                       />
                     </Modal>
                   </Dropdown>
@@ -1833,8 +1833,8 @@
                 <Modal bind:open={disconnectCanvas} size="sm" autoclose>
                   <CanvasDisconnectModal
                     canvasCourseCode={data.class.lms_class?.course_code || ''}
-                    onkeep={() => removeCanvasConnection(true)}
-                    onremove={() => removeCanvasConnection(false)}
+                    on:keep={() => removeCanvasConnection(true)}
+                    on:remove={() => removeCanvasConnection(false)}
                   />
                 </Modal>
               </div>
@@ -1886,8 +1886,8 @@
                 <Modal bind:open={disconnectCanvas} size="sm" autoclose>
                   <CanvasDisconnectModal
                     canvasCourseCode={data.class.lms_class?.course_code || ''}
-                    onkeep={() => removeCanvasConnection(true)}
-                    onremove={() => removeCanvasConnection(false)}
+                    on:keep={() => removeCanvasConnection(true)}
+                    on:remove={() => removeCanvasConnection(false)}
                   />
                 </Modal>
               </div>
@@ -1940,8 +1940,8 @@
                 <Modal bind:open={disconnectCanvas} size="sm" autoclose>
                   <CanvasDisconnectModal
                     canvasCourseCode={data.class.lms_class?.course_code || ''}
-                    onkeep={() => removeCanvasConnection(true)}
-                    onremove={() => removeCanvasConnection(false)}
+                    on:keep={() => removeCanvasConnection(true)}
+                    on:remove={() => removeCanvasConnection(false)}
                   />
                 </Modal>
               </div>
@@ -1987,8 +1987,8 @@
               className={data.class.name}
               classId={data.class.id}
               isPrivate={makePrivate}
-              oncancel={() => (usersModalOpen = false)}
-              onclose={resetInterface}
+              on:cancel={() => (usersModalOpen = false)}
+              on:close={resetInterface}
               role="student"
             />
           </Modal>
@@ -2030,8 +2030,8 @@
               })}
               maxSize={data.uploadInfo.class_file_max_size}
               upload={uploadFile}
-              onchange={handleNewFiles}
-              onerror={(e) => sadToast(e.detail.message)}
+              on:change={handleNewFiles}
+              on:error={(e) => sadToast(e.detail.message)}
             >
               <CloudArrowUpOutline size="lg" slot="icon" class="text-gray-500" />
               <span slot="label" class="ml-2 text-gray-500"
@@ -2044,7 +2044,7 @@
               <FilePlaceholder
                 mimeType={data.uploadInfo.mimeType}
                 info={file}
-                ondelete={removeFile}
+                on:delete={removeFile}
               />
             {/each}
           </div>

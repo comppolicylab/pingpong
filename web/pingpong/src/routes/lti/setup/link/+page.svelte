@@ -94,7 +94,7 @@
             <!-- eslint-enable svelte/no-navigation-without-resolve -->
           </div>
         {:else}
-          <form onsubmit|preventDefault={handleSubmit} class="flex flex-col gap-4">
+          <form onsubmit={handleSubmit} class="flex flex-col gap-4">
             <div class="flex flex-col gap-2 max-h-64 overflow-y-scroll">
               {#each groups as group (group.id)}
                 <label

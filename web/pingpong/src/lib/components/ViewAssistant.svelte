@@ -248,7 +248,7 @@
               <div class="flex flex-row gap-2">
                 <button
                   class="text-xs border border-blue-dark-40 text-blue-dark-40 shrink-0 flex flex-row gap-1.5 items-center justify-center bg-white rounded-full p-1 px-3 hover:text-white hover:bg-blue-dark-40 transition-all w-fit"
-                  onclick|preventDefault={() => {}}
+                  onclick={() => {}}
                   oncopy={showCopiedLink}
                   use:copy={`${sharedAssistantLinkWithParam}${link.share_token}`}
                 >
@@ -309,7 +309,7 @@
         <button
           class="text-blue-dark-30 hover:text-blue-dark-50"
           aria-label="Copy assistant"
-          onclick|preventDefault={() => {
+          onclick={() => {
             copyName = defaultCopyName(assistant.name);
             copyTargetClassId = `${currentClassId}`;
             copyPermissionAllowed = false;
@@ -322,7 +322,7 @@
         <button
           class="text-blue-dark-30 hover:text-blue-dark-50"
           aria-label="Delete assistant"
-          onclick|preventDefault={() => {
+          onclick={() => {
             deleteAssistantModalOpen = true;
           }}><TrashBinOutline size="md" /></button
         >
@@ -333,7 +333,7 @@
         >
       {/if}
 
-      <button onclick|preventDefault={() => {}} oncopy={showCopiedLink} use:copy={assistantLink}
+      <button onclick={() => {}} oncopy={showCopiedLink} use:copy={assistantLink}
         ><LinkOutline
           class="inline-block w-6 h-6 text-blue-dark-30 hover:text-blue-dark-50 active:animate-ping"
         /></button
@@ -341,7 +341,7 @@
 
       {#if editable && shareable && assistant.published}
         <button
-          onclick|preventDefault={() => {
+          onclick={() => {
             sharedAssistantModalOpen = true;
           }}
           ><GlobeOutline
@@ -443,7 +443,7 @@
     cancelButtonText="Cancel"
     confirmText="delete"
     confirmButtonText="Delete assistant"
-    oncancel={() => (deleteAssistantModalOpen = false)}
-    onconfirm={deleteAssistant}
+    on:cancel={() => (deleteAssistantModalOpen = false)}
+    on:confirm={deleteAssistant}
   />
 </Modal>

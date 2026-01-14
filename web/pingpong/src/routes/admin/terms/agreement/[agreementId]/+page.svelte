@@ -159,4 +159,9 @@
   </div>
 </div>
 
-<Modal bind:open={showCodeModal} onclose={() => (showCodeModal = false)} {preventEdits} bind:code />
+<Modal
+  bind:open={showCodeModal}
+  on:close={() => (showCodeModal = false)}
+  {preventEdits}
+  bind:code
+/>

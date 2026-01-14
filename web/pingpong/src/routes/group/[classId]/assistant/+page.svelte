@@ -298,7 +298,7 @@
                   <button
                     class="text-blue-dark-40 hover:text-blue-dark-100"
                     aria-label="Copy assistant link"
-                    onclick|preventDefault={() => {}}
+                    onclick={() => {}}
                     oncopy={showCopiedLink}
                     use:copy={assistantLink(assistant.id)}
                   >
@@ -313,14 +313,14 @@
                     <button
                       class="text-blue-dark-40 hover:text-blue-dark-100"
                       aria-label="Copy assistant"
-                      onclick|preventDefault={() => openCopyModal(assistant.id, assistant.name)}
+                      onclick={() => openCopyModal(assistant.id, assistant.name)}
                     >
                       <FileCopyOutline class="w-5 h-5" />
                     </button>
                     <button
                       class="text-red-700 hover:text-red-900"
                       aria-label="Delete assistant"
-                      onclick|preventDefault={() => openDeleteModal(assistant.id)}
+                      onclick={() => openDeleteModal(assistant.id)}
                     >
                       <TrashBinOutline class="w-5 h-5" />
                     </button>
@@ -418,8 +418,8 @@
                     cancelButtonText="Cancel"
                     confirmText="delete"
                     confirmButtonText="Delete assistant"
-                    oncancel={() => closeDeleteModal(assistant.id)}
-                    onconfirm={() => handleDeleteAssistant(assistant.id)}
+                    on:cancel={() => closeDeleteModal(assistant.id)}
+                    on:confirm={() => handleDeleteAssistant(assistant.id)}
                   />
                 </Modal>
               </TableBodyCell>

@@ -38,7 +38,7 @@
 
 {#if open}
   <!-- Backdrop -->
-  <div class="fixed inset-0 z-40 bg-gray-900/50" aria-hidden="true" />
+  <div class="fixed inset-0 z-40 bg-gray-900/50" aria-hidden="true"></div>
 
   <!-- Modal -->
   <div
@@ -52,7 +52,7 @@
       class="absolute inset-0 w-full h-full cursor-default modal-backdrop"
       aria-label="Close modal"
       onclick={handleClickOutside}
-    />
+    ></button>
 
     <!-- Modal content -->
     <div class="relative flex flex-col w-4/5 h-4/5 m-4 bg-white rounded-lg shadow">

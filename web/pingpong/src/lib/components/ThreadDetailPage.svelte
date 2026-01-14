@@ -496,7 +496,7 @@
         resetAnonymousSessionToken();
         await goto(
           resolve(
-            `/group/${classId}/shared/assistant/${$assistantId}?share_token=${api.getAnonymousShareToken()}`
+            `/group/${classId}/shared/assistant/${$assistantId}?share_token=${getAnonymousShareToken()}`
           )
         );
       } else {
@@ -1186,7 +1186,7 @@
                           purpose="vision"
                           mimeType={data.uploadInfo.mimeType}
                           preventDeletion={true}
-                          ondelete={() => {}}
+                          on:delete={() => {}}
                         />
                       {/if}
                     {/each}
@@ -1371,7 +1371,7 @@
                   <FilePlaceholder
                     info={allFiles[file_id]}
                     mimeType={data.uploadInfo.mimeType}
-                    ondelete={removeFile}
+                    on:delete={removeFile}
                   />
                 {:else}
                   <AttachmentDeletedPlaceholder {file_id} />
@@ -1614,9 +1614,9 @@
               remove={handleRemove}
               threadVersion={$version}
               assistantVersion={resolvedAssistantVersion}
-              onsubmit={handleSubmit}
-              ondismissError={handleDismissError}
-              onstartNewChat={startNewChat}
+              on:submit={handleSubmit}
+              on:dismissError={handleDismissError}
+              on:startNewChat={startNewChat}
             />
           {:else if data.threadInteractionMode === 'voice' && ($messages.length > 0 || assistantInteractionMode === 'chat')}
             {#if threadRecording && $messages.length > 0 && assistantInteractionMode === 'voice'}
@@ -1777,10 +1777,7 @@
                 >
               {/if}
             </div>
-            <button
-              onclick|preventDefault={handleCopyLinkClick}
-              title="Copy link"
-              aria-label="Copy link"
+            <button onclick={handleCopyLinkClick} title="Copy link" aria-label="Copy link"
               ><LinkOutline
                 class="dark:text-white inline-block w-5 h-6 text-blue-dark-30 hover:text-blue-dark-50 active:animate-ping font-medium"
                 size="lg"
