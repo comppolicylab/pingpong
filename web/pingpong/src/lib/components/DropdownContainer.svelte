@@ -50,7 +50,7 @@
   });
 </script>
 
-<div class="flex-grow min-w-0 relative w-full">
+<div class="grow min-w-0 relative w-full">
   <button
     id="model"
     name="model"
@@ -58,7 +58,7 @@
     type="button"
     {disabled}
   >
-    <span class="truncate flex-grow text-left mr-2">{placeholder}</span>
+    <span class="truncate grow text-left mr-2">{placeholder}</span>
     <ChevronDownOutline class="w-6 h-6 shrink-0" />
   </button>
 
@@ -72,7 +72,7 @@
       <div
         class="overflow-y-auto overscroll-contain {footer
           ? 'rounded-t-lg'
-          : 'rounded-lg'} flex-grow max-h-80 relative"
+          : 'rounded-lg'} grow max-h-80 relative"
         bind:this={dropdownContainer}
       >
         <slot />

@@ -410,7 +410,7 @@
     </div>
 
     <!-- Technical Details (Read-only) -->
-    <div class="space-y-4">
+    <div class="flex flex-col gap-4">
       <Heading tag="h3" class="text-xl font-serif font-medium text-dark-blue-40">
         Technical Information
       </Heading>

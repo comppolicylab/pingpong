@@ -882,7 +882,7 @@
 </script>
 
 <div
-  class="container p-12 space-y-12 divide-y-3 divide-blue-dark-40 dark:divide-gray-700 overflow-y-auto w-full flex flex-col justify-between h-[calc(100%-5rem)]"
+  class="container p-12 space-y-12 [&>*+*]:border-t-3 [&>*+*]:border-blue-dark-40 dark:[&>*+*]:border-gray-700 overflow-y-auto w-full flex flex-col justify-between h-[calc(100%-5rem)]"
   bind:this={manageContainer}
 >
   <div class="flex flex-row justify-between">
@@ -1625,7 +1625,7 @@
                       >
                     </div>
                   {:else}
-                    <div class="flex flex-row flex-grow gap-2 justify-between items-center">
+                    <div class="flex flex-row grow gap-2 justify-between items-center">
                       <Button
                         pill
                         size="xs"

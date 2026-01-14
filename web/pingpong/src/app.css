@@ -3,6 +3,11 @@
 @plugin 'flowbite/plugin';
 @custom-variant dark (&:where(.dark, .dark *));
 
+@theme {
+  --default-ring-width: 3px;
+  --default-ring-color: var(--color-blue-500);
+}
+
 @media print {
   body {
     background: white !important;
@@ -165,5 +170,35 @@
   /* disable chrome cancel button */
   input[type='search']::-webkit-search-cancel-button {
     display: none;
+  }
+}
+
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentColor);
+  }
+}
+
+@layer base {
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--color-gray-400);
+  }
+}
+
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+@layer base {
+  dialog {
+    margin: auto;
   }
 }

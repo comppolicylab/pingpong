@@ -21,7 +21,7 @@
   } ${!inIframe || !showCollapsedSidebarOnly ? 'lg:h-full lg:static' : ''}`}
 >
   <div
-    class="h-full flex-grow bg-white rounded-t-4xl overflow-hidden relative print:!overflow-visible print:!h-auto print:!rounded-none print:!bg-transparent"
+    class="h-full grow bg-white rounded-t-4xl overflow-hidden relative print:!overflow-visible print:!h-auto print:!rounded-none print:!bg-transparent"
   >
     {#if !!$navigating || $loading}
       <div

@@ -127,7 +127,7 @@
             <div
               class="text-sm text-gray-500 flex items-start gap-2 bg-blue-light-40 p-3 rounded-lg"
             >
-              <InfoCircleSolid class="w-4 h-4 mt-0.5 flex-shrink-0" />
+              <InfoCircleSolid class="w-4 h-4 mt-0.5 shrink-0" />
               <span>A PingPong group can be linked to multiple Canvas courses.</span>
             </div>
 

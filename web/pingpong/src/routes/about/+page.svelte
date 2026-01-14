@@ -106,7 +106,7 @@
     {#if hasNoGroups}
       <div class="w-full rounded-lg border border-gray-300 bg-gray-100 p-6">
         <div class="flex items-start gap-4">
-          <InfoCircleSolid class="w-6 h-6 text-gray-500 flex-shrink-0 mt-0.5" />
+          <InfoCircleSolid class="w-6 h-6 text-gray-500 shrink-0 mt-0.5" />
           <div class="flex-1">
             <h5 class="text-lg font-semibold text-gray-900 mb-2">
               It's a little empty around here...
