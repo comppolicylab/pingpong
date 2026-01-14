@@ -44,9 +44,18 @@ jobs:
 
           NORMALIZED="${MAJOR}.${MINOR}.${PATCH}${PRERELEASE}"
 
+          # Compute display version for release title (strip .0 patch only)
+          if [[ "$PATCH" == "0" ]]; then
+            DISPLAY_VERSION="${MAJOR}.${MINOR}${PRERELEASE}"
+          else
+            DISPLAY_VERSION="${MAJOR}.${MINOR}.${PATCH}${PRERELEASE}"
+          fi
+
           echo "Input: ${{ inputs.version }}"
           echo "Normalized: $NORMALIZED"
+          echo "Display version: $DISPLAY_VERSION"
           echo "VERSION=$NORMALIZED" >> $GITHUB_OUTPUT
+          echo "DISPLAY_VERSION=$DISPLAY_VERSION" >> $GITHUB_OUTPUT
 
       - name: Checkout code
         uses: actions/checkout@v6
@@ -216,13 +225,14 @@ jobs:
           # Remove leading indentation
           sed -i 's/^          //' /tmp/release-notes.md
 
+          # Tag uses full version, title uses display version (without .0 patch)
           gh release create "v${{ steps.version.outputs.VERSION }}" \
-            --title "v${{ steps.version.outputs.VERSION }}" \
+            --title "v${{ steps.version.outputs.DISPLAY_VERSION }}" \
             --draft \
             --prerelease \
             --notes-file /tmp/release-notes.md
 
-          echo "Created draft release v${{ steps.version.outputs.VERSION }}"
+          echo "Created draft release v${{ steps.version.outputs.DISPLAY_VERSION }} (tag: v${{ steps.version.outputs.VERSION }})"
           echo ""
           echo "Next steps:"
           echo "1. Go to GitHub Releases"

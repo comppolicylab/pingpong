@@ -21,17 +21,31 @@ jobs:
         run: |
           RELEASE_TAG="${{ github.event.release.tag_name }}"
 
-          # Validate semver format: vX.Y.Z or vX.Y.Z-prerelease
-          if [[ ! "$RELEASE_TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
-            echo "Error: Invalid tag format. Expected: vX.Y.Z or vX.Y.Z-prerelease"
+          # Validate semver format: vX, vX.Y, or vX.Y.Z (with optional prerelease)
+          if [[ ! "$RELEASE_TAG" =~ ^v([0-9]+)(\.([0-9]+))?(\.([0-9]+))?(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+            echo "Error: Invalid tag format. Expected: vX, vX.Y, or vX.Y.Z"
             echo "Got: $RELEASE_TAG"
             exit 1
           fi
 
-          # Both server and web use the same version tag
+          # Extract parts
+          VERSION="${RELEASE_TAG#v}"
+          PRERELEASE=""
+          if [[ "$VERSION" =~ -(.+)$ ]]; then
+            PRERELEASE="-${BASH_REMATCH[1]}"
+            VERSION="${VERSION%%-*}"
+          fi
+
+          # Normalize to X.Y.Z
+          IFS='.' read -ra PARTS <<< "$VERSION"
+          MAJOR="${PARTS[0]:-0}"
+          MINOR="${PARTS[1]:-0}"
+          PATCH="${PARTS[2]:-0}"
+          NORMALIZED="${MAJOR}.${MINOR}.${PATCH}${PRERELEASE}"
+
           echo "IMAGE_VERSION=$RELEASE_TAG" >> $GITHUB_ENV
-          echo "VERSION_STRIPPED=${RELEASE_TAG#v}" >> $GITHUB_ENV
-          echo "Parsed version: $RELEASE_TAG"
+          echo "VERSION_STRIPPED=$NORMALIZED" >> $GITHUB_ENV
+          echo "Parsed version: $RELEASE_TAG -> $NORMALIZED"
         shell: bash
 
       - name: Compute RELEASE_VERSION for Sentry
