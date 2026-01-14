@@ -7,6 +7,7 @@
   import { Button, Heading, Helper, Hr, Input, Label, Textarea } from 'flowbite-svelte';
   import { ArrowRightOutline, LockSolid } from 'flowbite-svelte-icons';
   import Modal from '$lib/components/CustomModal.svelte';
+  import { resolve } from '$app/paths';
 
   export let data;
 
@@ -38,7 +39,7 @@
     }
     happyToast('Agreement saved successfully!');
     await invalidateAll();
-    await goto(`/admin/terms`);
+    await goto(resolve(`/admin/terms`));
     $loading = false;
   };
 
@@ -60,7 +61,7 @@
     </div>
     <div slot="right">
       <a
-        href={`/admin/terms`}
+        href={resolve(`/admin/terms`)}
         class="text-sm text-blue-dark-50 font-medium bg-white rounded-full p-2 px-4 hover:text-white hover:bg-blue-dark-40 transition-all flex items-center gap-2"
         >All Agreements <ArrowRightOutline size="md" class="text-orange" /></a
       >
@@ -85,14 +86,14 @@
             />To make changes, create a new Agreement.
           </span>
           <a
-            href={`/admin/terms/agreement/new`}
+            href={resolve(`/admin/terms/agreement/new`)}
             class="text-sm text-blue-dark-50 font-medium bg-white rounded-full p-2 px-4 hover:text-white hover:bg-gray-800 transition-all flex items-center gap-2 shrink-0"
             >Create Agreement <ArrowRightOutline size="md" class="text-orange" /></a
           >
         </div>
       </div>
     {/if}
-    <form class="flex flex-col gap-4" on:submit={handleSubmit}>
+    <form class="flex flex-col gap-4" onsubmit={handleSubmit}>
       <div>
         <Label for="name" class="mb-1">Agreement Name</Label>
         <Helper class="mb-2"
@@ -115,7 +116,7 @@
             size="sm"
             class="text-xs border border-blue-dark-40 text-blue-dark-40 shrink-0 flex flex-row gap-1.5 items-center justify-center bg-white rounded-full py-0.5 px-3 hover:text-white hover:bg-blue-dark-40 transition-all w-fit"
             disabled={$loading}
-            on:click={() => (showCodeModal = true)}
+            onclick={() => (showCodeModal = true)}
           >
             {preventEdits ? 'Preview' : 'Edit with Preview'}
           </Button>
@@ -141,7 +142,7 @@
       <div class="flex flex-row justify-end gap-4">
         <Button
           disabled={$loading}
-          href={`/admin/terms`}
+          href={resolve(`/admin/terms`)}
           pill
           class="bg-blue-light-50 border rounded-full border-blue-dark-40 text-blue-dark-50 hover:bg-blue-light-40"
           >Cancel</Button

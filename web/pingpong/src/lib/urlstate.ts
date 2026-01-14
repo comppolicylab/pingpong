@@ -9,6 +9,7 @@ export const updateSearch = async (key: string, value: string) => {
   const $page = get(page);
   const searchParams = new URLSearchParams($page.url.searchParams.toString());
   searchParams.set(key, value);
+  // eslint-disable-next-line svelte/no-navigation-without-resolve
   await goto(`?${searchParams.toString()}`);
 };
 

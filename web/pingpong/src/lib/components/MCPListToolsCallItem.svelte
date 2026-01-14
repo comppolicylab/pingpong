@@ -116,7 +116,7 @@
   {/if}
   <div class={showServerLabel ? 'mt-1' : 'mt-0'}>
     {#if hasTools}
-      <button type="button" class="flex flex-row items-center gap-1" on:click={toggle}>
+      <button type="button" class="flex flex-row items-center gap-1" onclick={toggle}>
         <span class={statusClasses}>{statusLabel}</span>
         {#if open}
           <ChevronDownOutline class="transform rotate-180 text-gray-600" />
@@ -145,7 +145,7 @@
             <button
               type="button"
               class="rounded border border-gray-200 bg-gray-50 px-2 py-1 text-xs font-mono text-gray-700 hover:bg-gray-100"
-              on:click={() => openToolModal(tool)}
+              onclick={() => openToolModal(tool)}
               transition:slide={{ delay: i * 80, duration: 250 }}
             >
               {tool.name}

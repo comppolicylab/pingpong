@@ -49,7 +49,7 @@
 </script>
 
 <div
-  class="cursor-default hover:shadow relative rounded-lg items-center border-[1px] border-solid border-gray-300 bg-white flex px-2 -delete-button-container"
+  class="cursor-default hover:shadow-sm relative rounded-lg items-center border-[1px] border-solid border-gray-300 bg-white flex px-2 -delete-button-container"
 >
   <div>
     {#if state === 'pending'}
@@ -78,7 +78,7 @@
   {#if state !== 'pending' && state !== 'deleting'}
     {#if !preventDeletion}
       <div class="absolute top-[-6px] right-[-6px] -delete-button">
-        <Button pill color="dark" class="p-0" on:click={deleteFile}>
+        <Button pill color="dark" class="p-0" onclick={deleteFile}>
           <CloseOutline class="w-4 h-4" />
         </Button>
       </div>

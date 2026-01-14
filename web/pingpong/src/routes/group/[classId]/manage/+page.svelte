@@ -2,14 +2,10 @@
   import { getContext, onMount } from 'svelte';
   import { writable } from 'svelte/store';
   import type { Readable, Writable } from 'svelte/store';
+  import { resolve } from '$app/paths';
   import dayjs from '$lib/time';
   import * as api from '$lib/api';
-  import type {
-    FileUploadInfo,
-    ServerFile,
-    CreateClassUsersRequest,
-    LMSClass as CanvasClass
-  } from '$lib/api';
+  import type { FileUploadInfo, ServerFile, LMSClass as CanvasClass } from '$lib/api';
   import {
     Button,
     ButtonGroup,
@@ -62,7 +58,7 @@
   } from 'flowbite-svelte-icons';
   import { sadToast, happyToast } from '$lib/toast';
   import { humanSize } from '$lib/size';
-  import { afterNavigate, goto, invalidateAll, onNavigate } from '$app/navigation';
+  import { goto, invalidateAll, afterNavigate, onNavigate } from '$app/navigation';
   import { browser } from '$app/environment';
   import { submitParentForm } from '$lib/form';
   import { page } from '$app/stores';
@@ -321,7 +317,7 @@
    * Bulk add users to a class.
    */
   let timesAdded = 0;
-  const resetInterface = (e: CustomEvent<CreateClassUsersRequest>) => {
+  const resetInterface = () => {
     invalidateAll();
     usersModalOpen = false;
     timesAdded++;
@@ -392,7 +388,7 @@
     $loadingMessage = '';
     $loading = false;
     happyToast('Group deleted');
-    await goto(`/`, { invalidateAll: true });
+    await goto(resolve(`/`), { invalidateAll: true });
     return;
   };
 
@@ -821,6 +817,7 @@
     uploads.set([]);
     trashFiles.set([]);
   });
+
   afterNavigate(() => {
     invalidateAll();
   });
@@ -888,7 +885,7 @@
 </script>
 
 <div
-  class="container p-12 space-y-12 divide-y-3 divide-blue-dark-40 dark:divide-gray-700 overflow-y-auto w-full flex flex-col justify-between h-[calc(100%-5rem)]"
+  class="container p-12 space-y-12 [&>*+*]:border-t-3 [&>*+*]:border-blue-dark-40 dark:[&>*+*]:border-gray-700 overflow-y-auto w-full flex flex-col justify-between h-[calc(100%-5rem)]"
   bind:this={manageContainer}
 >
   <div class="flex flex-row justify-between">
@@ -918,8 +915,8 @@
       <Dropdown class="overflow-y-auto">
         {#if canExportThreads}
           <DropdownItem
-            on:touchstart={() => (exportThreadsModal = true)}
-            on:click={() => (exportThreadsModal = true)}
+            ontouchstart={() => (exportThreadsModal = true)}
+            onclick={() => (exportThreadsModal = true)}
             disabled={makePrivate}
             class="tracking-wide flex flex-row items-center gap-2 text-blue-dark-40 disabled:text-gray-400 disabled:cursor-not-allowed disabled:hover:bg-white"
           >
@@ -927,14 +924,14 @@
             <div>Export threads</div>
           </DropdownItem>
           {#if makePrivate}
-            <Tooltip defaultClass="text-wrap py-2 px-3 text-sm font-normal shadow-sm" arrow={false}
+            <Tooltip defaultClass="text-wrap py-2 px-3 text-sm font-normal shadow-xs" arrow={false}
               >You can't export threads because they are private in this group.</Tooltip
             >
           {/if}
         {/if}
         <DropdownItem
-          on:touchstart={() => (cloneModal = true)}
-          on:click={() => (cloneModal = true)}
+          ontouchstart={() => (cloneModal = true)}
+          onclick={() => (cloneModal = true)}
           class="tracking-wide flex flex-row items-center gap-2 text-blue-dark-40"
         >
           <FileCopyOutline />
@@ -942,8 +939,8 @@
         </DropdownItem>
 
         <DropdownItem
-          on:touchstart={() => (deleteModal = true)}
-          on:click={() => (deleteModal = true)}
+          ontouchstart={() => (deleteModal = true)}
+          onclick={() => (deleteModal = true)}
           class="tracking-wide flex flex-row items-center gap-2 text-red-700"
         >
           <TrashBinOutline />
@@ -964,10 +961,10 @@
               >{/if}
           </p>
           <div class="flex justify-center gap-4">
-            <Button pill color="alternative" on:click={() => (exportThreadsModal = false)}
+            <Button pill color="alternative" onclick={() => (exportThreadsModal = false)}
               >Cancel</Button
             >
-            <Button pill outline color="blue" on:click={exportThreads}>Export threads</Button>
+            <Button pill outline color="blue" onclick={exportThreads}>Export threads</Button>
           </div>
         </div>
       </Modal>
@@ -1023,7 +1020,7 @@
                 name="transferInstitution"
                 items={transferInstitutionOptions}
                 value={transferInstitutionId ? transferInstitutionId.toString() : ''}
-                on:change={handleTransferInstitutionChange}
+                onchange={handleTransferInstitutionChange}
                 disabled={transferring}
               />
             {:else}
@@ -1036,7 +1033,7 @@
             <Button
               pill
               color="light"
-              on:click={() => (transferModal = false)}
+              onclick={() => (transferModal = false)}
               disabled={transferring}>Cancel</Button
             >
             <Button
@@ -1045,7 +1042,7 @@
               color="blue"
               class="flex items-center gap-2"
               disabled={transferring || !transferInstitutionId || !hasCreatePermissionForCurrent}
-              on:click={transferClassInstitution}
+              onclick={transferClassInstitution}
             >
               {#if transferring}
                 <Spinner size="5" />
@@ -1062,7 +1059,7 @@
     </div>
   </div>
   {#if canEditClassInfo}
-    <form on:submit={updateClass} class="pt-4">
+    <form onsubmit={updateClass} class="pt-4">
       <div class="grid md:grid-cols-3 gap-x-6 gap-y-8">
         <div>
           <Heading customSize="text-xl" tag="h3"
@@ -1076,7 +1073,7 @@
             id="name"
             name="name"
             value={data.class.name}
-            on:change={submitParentForm}
+            onchange={submitParentForm}
             disabled={$updatingClass}
           />
         </div>
@@ -1087,7 +1084,7 @@
             id="term"
             name="term"
             value={data.class.term}
-            on:change={submitParentForm}
+            onchange={submitParentForm}
             disabled={$updatingClass}
           />
         </div>
@@ -1104,7 +1101,7 @@
               pill
               color="light"
               class="flex items-center gap-2 py-1.5 px-3 text-xs"
-              on:click={() => (transferModal = true)}
+              onclick={() => (transferModal = true)}
             >
               Transfer to another institution
               <ArrowRightOutline class="h-4 w-4" />
@@ -1123,7 +1120,7 @@
               id="make_private"
               name="make_private"
               disabled={$updatingClass || makePrivate}
-              on:click={handleClick}
+              onclick={handleClick}
               bind:checked={makePrivate}
             >
               Make threads and assistants private
@@ -1153,7 +1150,7 @@
             id="any_can_publish_thread"
             name="any_can_publish_thread"
             disabled={$updatingClass}
-            on:change={submitParentForm}
+            onchange={submitParentForm}
             bind:checked={anyCanPublishThread}>Allow members to publish threads</Checkbox
           >
         </div>
@@ -1168,7 +1165,7 @@
           items={asstPermOptions}
           value={assistantPermissions}
           name="asst_perm"
-          on:change={submitParentForm}
+          onchange={submitParentForm}
           disabled={$updatingClass}
         />
 
@@ -1182,7 +1179,7 @@
           id="any_can_share_assistant"
           name="any_can_share_assistant"
           disabled={$updatingClass || !anyCanPublishAssistant}
-          on:change={submitParentForm}
+          onchange={submitParentForm}
           bind:checked={anyCanShareAssistant}
           class={$updatingClass || !anyCanPublishAssistant
             ? 'text-gray-400'
@@ -1221,7 +1218,7 @@
         <div class="flex flex-col gap-2">
           <Info>Manage your subscription to this group's Activity Summaries.</Info>
           <a
-            href="/profile"
+            href={resolve('/profile')}
             class="text-xs text-gray-600 shrink-0 flex flex-row gap-1 items-center justify-center font-light bg-white rounded-full p-1 px-3 hover:text-blue-dark-100 hover:bg-blue-dark-40 hover:text-white transition-all max-w-max border border-gray-400 hover:border-blue-dark-40"
             >Manage All Subscriptions <ArrowRightOutline size="md" class="inline-block" /></a
           >
@@ -1255,8 +1252,8 @@
                 pill
                 size="sm"
                 class="text-xs border-blue-dark-40 text-blue-dark-40 shrink-0 flex flex-row gap-1.5 items-center justify-center bg-white rounded-full p-1 px-3 hover:text-blue-dark-100 hover:bg-blue-dark-40 hover:text-white transition-all max-w-max border"
-                on:touchstart={() => (customSummaryModal = true)}
-                on:click={() => (customSummaryModal = true)}
+                ontouchstart={() => (customSummaryModal = true)}
+                onclick={() => (customSummaryModal = true)}
               >
                 <RectangleListOutline />
                 <div>Request an Activity Summary</div>
@@ -1285,11 +1282,10 @@
                   />
                 </div>
                 <div class="flex justify-center gap-4">
-                  <Button pill color="alternative" on:click={() => (customSummaryModal = false)}
+                  <Button pill color="alternative" onclick={() => (customSummaryModal = false)}
                     >Cancel</Button
                   >
-                  <Button pill outline color="blue" on:click={requestSummary}
-                    >Request Summary</Button
+                  <Button pill outline color="blue" onclick={requestSummary}>Request Summary</Button
                   >
                 </div>
               </div>
@@ -1306,7 +1302,7 @@
             class={makePrivate ? 'text-gray-400' : ''}
             checked={data.subscription?.subscribed && !makePrivate}
             disabled={makePrivate}
-            on:change={handleSubscriptionChange}>Send me weekly Activity Summaries</Checkbox
+            onchange={handleSubscriptionChange}>Send me weekly Activity Summaries</Checkbox
           >
         </div>
       </div>
@@ -1323,7 +1319,7 @@
       {#if canViewApiKey}
         <div class="col-span-2">
           {#if !hasApiKey}
-            <form on:submit={submitUpdateApiKey}>
+            <form onsubmit={submitUpdateApiKey}>
               <Label for="provider">Choose your AI provider:</Label>
               <Helper class="mb-3"
                 >Choose the AI provider you'd like to use for your group. You'll need an API key and
@@ -1504,7 +1500,7 @@
                       >Sync your PingPong group's users with Canvas</span
                     >
                   </div>
-                  <CloseButton class="hover:bg-blue-200" on:click={dismissCanvasSync} />
+                  <CloseButton class="hover:bg-blue-200" onclick={dismissCanvasSync} />
                 </div>
                 <p class="mt-2 mb-4 text-sm">
                   If you're teaching a course at a supported institution, link your PingPong group
@@ -1519,9 +1515,9 @@
                     Pick your institution...<ChevronSortOutline class="w-4 h-4 ms-2" /></Button
                   >
                   <Dropdown placement="bottom-start">
-                    {#each canvasInstances as instance}
+                    {#each canvasInstances as instance (instance.tenant)}
                       <DropdownItem
-                        on:click={() => redirectToCanvas(instance.tenant)}
+                        onclick={() => redirectToCanvas(instance.tenant)}
                         class="tracking-wide flex flex-col gap-1"
                       >
                         <span>{instance.tenant_friendly_name}</span>
@@ -1567,7 +1563,7 @@
                       {#if canvasClassBeingVerified}
                         <Spinner color="yellow" class="w-6 h-6" />
                         <Tooltip
-                          defaultClass="text-wrap py-2 px-3 mr-5 text-sm font-light shadow-sm"
+                          defaultClass="text-wrap py-2 px-3 mr-5 text-sm font-light shadow-xs"
                           arrow={false}
                           >We're verifying your access to the class roster. This shouldn't take
                           long.</Tooltip
@@ -1575,19 +1571,19 @@
                       {:else if canvasClassVerified}
                         <CheckCircleOutline class="w-6 h-6 text-amber-800" />
                         <Tooltip
-                          defaultClass="text-wrap py-2 px-3 mr-5 text-sm font-light shadow-sm"
+                          defaultClass="text-wrap py-2 px-3 mr-5 text-sm font-light shadow-xs"
                           arrow={false}>Your access to the class roster has been verified.</Tooltip
                         >
                       {:else if canvasClassVerificationError}
                         <ExclamationCircleOutline class="w-6 h-6 text-amber-800" />
                         <Tooltip
-                          defaultClass="text-wrap py-2 px-3 mr-5 text-sm font-light shadow-sm"
+                          defaultClass="text-wrap py-2 px-3 mr-5 text-sm font-light shadow-xs"
                           arrow={false}>{canvasClassVerificationError}</Tooltip
                         >
                       {:else if !canvasClassVerified}
-                        <CheckCircleOutline class="w-6 h-6 text-amber-800 text-opacity-25" />
+                        <CheckCircleOutline class="w-6 h-6 text-amber-800/25" />
                         <Tooltip
-                          defaultClass="text-wrap py-2 px-3 mr-5 text-sm font-light shadow-sm"
+                          defaultClass="text-wrap py-2 px-3 mr-5 text-sm font-light shadow-xs"
                           arrow={false}
                           >We'll verify your permissions to access the class roster. Select a class
                           to begin.</Tooltip
@@ -1597,8 +1593,8 @@
                         pill
                         size="xs"
                         class="shrink-0 max-h-fit border border-amber-900 bg-gradient-to-t from-amber-900 to-amber-800 text-white hover:from-amber-800 hover:to-amber-700"
-                        on:click={saveSelectedClass}
-                        on:touchstart={saveSelectedClass}
+                        onclick={saveSelectedClass}
+                        ontouchstart={saveSelectedClass}
                         disabled={loadingCanvasClasses ||
                           !selectedClass ||
                           canvasClassBeingVerified ||
@@ -1611,7 +1607,7 @@
                         size="xs"
                         class="shrink-0 max-h-fit border border-gray-400 bg-gradient-to-t from-gray-100 to-gray-100 text-gray-800 hover:from-gray-200 hover:to-gray-100"
                         disabled={loadingCanvasClasses || canvasClassBeingVerified}
-                        on:click={() => {
+                        onclick={() => {
                           $loadedCanvasClasses = [];
                           selectedClass = '';
                           canvasClassVerified = false;
@@ -1619,7 +1615,7 @@
                           canvasClassVerificationError = '';
                           classSelectDropdownOpen = false;
                         }}
-                        on:touchstart={() => {
+                        ontouchstart={() => {
                           $loadedCanvasClasses = [];
                           selectedClass = '';
                           canvasClassVerified = false;
@@ -1632,13 +1628,13 @@
                       >
                     </div>
                   {:else}
-                    <div class="flex flex-row flex-grow gap-2 justify-between items-center">
+                    <div class="flex flex-row grow gap-2 justify-between items-center">
                       <Button
                         pill
                         size="xs"
                         class="border border-amber-900 bg-gradient-to-t from-amber-900 to-amber-800 text-white hover:from-amber-800 hover:to-amber-700"
-                        on:click={loadCanvasClasses}
-                        on:touchstart={loadCanvasClasses}
+                        onclick={loadCanvasClasses}
+                        ontouchstart={loadCanvasClasses}
                       >
                         {#if loadingCanvasClasses}<Spinner
                             color="white"
@@ -1650,8 +1646,8 @@
                         size="xs"
                         class="border border-amber-900 hover:bg-amber-900 text-amber-900 hover:bg-gradient-to-t hover:from-amber-800 hover:to-amber-700 hover:text-white"
                         disabled={removingCanvasConnection || syncingCanvasClass || $updatingApiKey}
-                        on:click={() => removeCanvasConnection(false)}
-                        on:touchstart={() => removeCanvasConnection(false)}
+                        onclick={() => removeCanvasConnection(false)}
+                        ontouchstart={() => removeCanvasConnection(false)}
                       >
                         {#if removingCanvasConnection}<Spinner
                             color="custom"
@@ -1687,8 +1683,8 @@
                     size="xs"
                     class="border border-amber-900 hover:bg-amber-900 text-amber-900 hover:bg-gradient-to-t hover:from-amber-800 hover:to-amber-700 hover:text-white"
                     disabled={removingCanvasConnection}
-                    on:click={() => removeCanvasConnection(false)}
-                    on:touchstart={() => removeCanvasConnection(false)}
+                    onclick={() => removeCanvasConnection(false)}
+                    ontouchstart={() => removeCanvasConnection(false)}
                   >
                     {#if removingCanvasConnection}<Spinner
                         color="custom"
@@ -1725,8 +1721,8 @@
                     pill
                     size="xs"
                     class="border border-green-900 bg-gradient-to-t from-green-800 to-green-700 text-white hover:from-green-700 hover:to-green-600"
-                    on:click={syncClass}
-                    on:touchstart={syncClass}
+                    onclick={syncClass}
+                    ontouchstart={syncClass}
                     disabled={syncingCanvasClass || $updatingApiKey}
                   >
                     {#if syncingCanvasClass}<Spinner color="white" class="w-4 h-4 me-2" />Syncing
@@ -1741,7 +1737,7 @@
                     <AdjustmentsHorizontalOutline class="w-4 h-4 me-2" />Edit Canvas Sync</Button
                   >
                   <Dropdown bind:open={editDropdownOpen}>
-                    <DropdownItem on:click={() => (disconnectClass = true)}
+                    <DropdownItem onclick={() => (disconnectClass = true)}
                       ><div class="flex flex-row gap-2 items-center">
                         <div
                           class="border bg-green-800 border-green-800 text-white rounded-full w-8 h-8 flex items-center justify-center"
@@ -1751,7 +1747,7 @@
                         Sync another class
                       </div></DropdownItem
                     >
-                    <DropdownItem on:click={() => (disconnectCanvas = true)}
+                    <DropdownItem onclick={() => (disconnectCanvas = true)}
                       ><div class="flex flex-row gap-2 items-center">
                         {#if removingCanvasConnection}<div
                             class="w-8 h-8 flex items-center justify-center"
@@ -1814,8 +1810,8 @@
                     pill
                     size="xs"
                     class="border border-green-900 bg-gradient-to-t from-green-800 to-green-700 text-white hover:from-green-700 hover:to-green-600"
-                    on:click={syncClass}
-                    on:touchstart={syncClass}
+                    onclick={syncClass}
+                    ontouchstart={syncClass}
                     disabled={syncingCanvasClass || $updatingApiKey}
                   >
                     {#if syncingCanvasClass}<Spinner color="white" class="w-4 h-4 me-2" />Syncing
@@ -1826,8 +1822,8 @@
                     size="xs"
                     class="border border-green-900 hover:bg-green-900 text-green-900 hover:bg-gradient-to-t hover:from-green-800 hover:to-green-700 hover:text-white"
                     disabled={removingCanvasConnection}
-                    on:click={() => (disconnectCanvas = true)}
-                    on:touchstart={() => (disconnectCanvas = true)}
+                    onclick={() => (disconnectCanvas = true)}
+                    ontouchstart={() => (disconnectCanvas = true)}
                   >
                     {#if removingCanvasConnection}<Spinner
                         color="custom"
@@ -1869,8 +1865,8 @@
                     size="xs"
                     class="border border-red-900 bg-gradient-to-t from-red-800 to-red-700 text-white hover:from-red-700 hover:to-red-600"
                     disabled={removingCanvasConnection}
-                    on:click={reconnectCanvasAccount}
-                    on:touchstart={reconnectCanvasAccount}
+                    onclick={reconnectCanvasAccount}
+                    ontouchstart={reconnectCanvasAccount}
                   >
                     <RefreshOutline class="w-4 h-4 me-2" />Reconnect Canvas account</Button
                   >
@@ -1879,8 +1875,8 @@
                     size="xs"
                     class="border border-red-900 hover:bg-red-900 text-red-900 hover:bg-gradient-to-t hover:from-red-800 hover:to-red-700 hover:text-white"
                     disabled={removingCanvasConnection}
-                    on:click={() => (disconnectCanvas = true)}
-                    on:touchstart={() => (disconnectCanvas = true)}
+                    onclick={() => (disconnectCanvas = true)}
+                    ontouchstart={() => (disconnectCanvas = true)}
                   >
                     {#if removingCanvasConnection}<Spinner
                         color="custom"
@@ -1933,8 +1929,8 @@
                     size="xs"
                     class="border border-green-900 hover:bg-green-900 text-green-900 hover:bg-gradient-to-t hover:from-green-800 hover:to-green-700 hover:text-white"
                     disabled={removingCanvasConnection}
-                    on:click={() => (disconnectCanvas = true)}
-                    on:touchstart={() => (disconnectCanvas = true)}
+                    onclick={() => (disconnectCanvas = true)}
+                    ontouchstart={() => (disconnectCanvas = true)}
                   >
                     {#if removingCanvasConnection}<Spinner
                         color="custom"
@@ -1967,10 +1963,10 @@
             pill
             size="md"
             class="bg-orange text-white hover:bg-orange-dark"
-            on:click={() => {
+            onclick={() => {
               usersModalOpen = true;
             }}
-            on:touchstart={() => {
+            ontouchstart={() => {
               usersModalOpen = true;
             }}>Invite new users</Button
           >
@@ -1979,8 +1975,8 @@
               pill
               size="md"
               class="bg-white border border-blue-dark-40 text-blue-dark-40 hover:bg-blue-light-50"
-              on:click={enableCanvasSync}
-              on:touchstart={enableCanvasSync}
+              onclick={enableCanvasSync}
+              ontouchstart={enableCanvasSync}
               ><div class="flex flex-row gap-2">
                 <CanvasLogo size="5" />Sync with Canvas
               </div></Button
@@ -2047,7 +2043,7 @@
             </FileUpload>
           </div>
           <div class="flex gap-2 flex-wrap">
-            {#each allFiles as file}
+            {#each allFiles as file, idx (idx)}
               <FilePlaceholder
                 mimeType={data.uploadInfo.mimeType}
                 info={file}

@@ -330,14 +330,14 @@
 </script>
 
 <div class="my-2">
-  <Input type="text" placeholder="Search users by email" bind:value={search} on:keyup={refresh}>
+  <Input type="text" placeholder="Search users by email" bind:value={search} onkeyup={refresh}>
     <SearchOutline slot="left" class="w-6 h-6 text-gray-500 dark:text-gray-400" />
   </Input>
 </div>
 <div class="relative">
   {#if loading}
     <div
-      class="absolute top-0 left-0 w-full h-full flex flex-col gap-4 items-center justify-center bg-white bg-opacity-90 dark:bg-black dark:bg-opacity-90 z-10"
+      class="absolute top-0 left-0 w-full h-full flex flex-col gap-4 items-center justify-center bg-white/90 dark:bg-black/90 z-10"
     >
       <div class="text-gray-500 animate-pulse">Loading users...</div>
     </div>
@@ -389,7 +389,7 @@
                       class="flex flex-row overflow-y-auto bg-gray-900 z-10 max-w-xs py-2 px-3 text-sm text-wrap font-light text-white"
                     >
                       <div class="whitespace-normal">
-                        <span class="font-medium">Role Change Not Allowed:</span>{' '}
+                        <span class="font-medium">Role Change Not Allowed:</span>&nbsp;&nbsp;
                         {noPermissions
                           ? `You do not have enough permissions to change ${roleInfo.label} user roles.`
                           : currentUser && !userIsAdmin
@@ -400,14 +400,14 @@
                   </div>
                 </div>
               {:else}
-                <form on:submit={submitUpdateUser}>
+                <form onsubmit={submitUpdateUser}>
                   <input type="hidden" name="user_id" value={user.id} />
                   <Select
                     name="role"
                     items={roleOptions}
                     value={roleInfo.primary}
                     placeholder="Select a user role..."
-                    on:change={submitParentForm}
+                    onchange={submitParentForm}
                   />
                 </form>
                 {#if !roleInfo.primary && roleInfo.other.length === 0}
@@ -448,9 +448,9 @@
             </TableBodyCell>
             <TableBodyCell {tdClass}>
               {#if !(user.lms_type || noPermissions || (currentUser && !userIsAdmin))}
-                <form on:submit={submitRemoveUser}>
+                <form onsubmit={submitRemoveUser}>
                   <input type="hidden" name="user_id" value={user.id} />
-                  <Button on:click={deleteUser}><TrashBinOutline color="red" /></Button>
+                  <Button onclick={deleteUser}><TrashBinOutline color="red" /></Button>
                 </form>
               {/if}
             </TableBodyCell>
@@ -469,10 +469,5 @@
     <span class="font-semibold text-gray-900 dark:text-white">{total}</span>
     {total === 1 ? 'user' : 'users'}
   </div>
-  <Pagination
-    {pages}
-    on:previous={loadPreviousPage}
-    on:next={loadNextPage}
-    on:click={handleClick}
-  />
+  <Pagination {pages} on:previous={loadPreviousPage} on:next={loadNextPage} onclick={handleClick} />
 </div>

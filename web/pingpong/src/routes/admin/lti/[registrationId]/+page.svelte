@@ -17,6 +17,7 @@
   import * as api from '$lib/api';
   import { happyToast, sadToast } from '$lib/toast';
   import { loading } from '$lib/stores/general.js';
+  import { resolve } from '$app/paths';
 
   export let data;
 
@@ -226,7 +227,7 @@
     </div>
     <div slot="right">
       <a
-        href={`/admin/lti`}
+        href={resolve('/admin/lti')}
         class="text-sm text-blue-dark-50 font-medium bg-white rounded-full p-2 px-4 hover:text-white hover:bg-blue-dark-40 transition-all flex items-center gap-2"
         >All Registrations <ArrowRightOutline size="md" class="text-orange" /></a
       >
@@ -250,7 +251,7 @@
           checked={registration.enabled}
           disabled={togglingEnabled || registration.review_status !== 'approved'}
           color="blue"
-          on:change={toggleEnabled}
+          onchange={toggleEnabled}
         />
         {#if registration.review_status !== 'approved'}
           <span class="text-xs text-gray-400">Must be approved first</span>
@@ -265,7 +266,7 @@
         <Button
           color="green"
           disabled={settingStatus || registration.review_status === 'approved'}
-          on:click={() => setStatus('approved')}
+          onclick={() => setStatus('approved')}
           class="flex items-center gap-2"
         >
           <CheckCircleSolid size="sm" />
@@ -274,7 +275,7 @@
         <Button
           color="red"
           disabled={settingStatus || registration.review_status === 'rejected'}
-          on:click={() => setStatus('rejected')}
+          onclick={() => setStatus('rejected')}
           class="flex items-center gap-2"
         >
           <CloseCircleSolid size="sm" />
@@ -283,7 +284,7 @@
         <Button
           color="light"
           disabled={settingStatus || registration.review_status === 'pending'}
-          on:click={() => setStatus('pending')}
+          onclick={() => setStatus('pending')}
         >
           Reset to Pending
         </Button>
@@ -368,7 +369,7 @@
         <Button
           class="bg-orange text-white rounded-full hover:bg-orange-dark"
           disabled={saving || !hasChanges}
-          on:click={saveChanges}
+          onclick={saveChanges}
         >
           Save Changes
         </Button>
@@ -400,7 +401,7 @@
           <Button
             class="bg-orange text-white rounded-full hover:bg-orange-dark"
             disabled={savingInstitutions || !hasInstitutionChanges}
-            on:click={saveInstitutions}
+            onclick={saveInstitutions}
           >
             Save Institutions
           </Button>
@@ -409,7 +410,7 @@
     </div>
 
     <!-- Technical Details (Read-only) -->
-    <div class="space-y-4">
+    <div class="flex flex-col gap-4">
       <Heading tag="h3" class="text-xl font-serif font-medium text-dark-blue-40">
         Technical Information
       </Heading>

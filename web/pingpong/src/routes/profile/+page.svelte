@@ -191,7 +191,7 @@
       </P>
       <div class="bg-gray-100 rounded-2xl p-6">
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div class="bg-white rounded-xl p-4 shadow-sm">
+          <div class="bg-white rounded-xl p-4 shadow-xs">
             <Label
               class="mb-2 font-medium text-md"
               for="firstName"
@@ -201,7 +201,7 @@
               name="firstName"
               color={inputState.first_name.error ? 'red' : 'base'}
               value={data.me.user?.first_name}
-              on:change={saveField('first_name')}
+              onchange={saveField('first_name')}
             >
               <div slot="right" class={inputState.first_name.loading ? '' : 'hidden'}>
                 <Spinner size="4" color="green" />
@@ -214,7 +214,7 @@
             {/if}
           </div>
 
-          <div class="bg-white rounded-xl p-4 shadow-sm">
+          <div class="bg-white rounded-xl p-4 shadow-xs">
             <Label
               class="mb-2 font-medium text-md"
               for="lastName"
@@ -224,7 +224,7 @@
               name="lastName"
               color={inputState.last_name.error ? 'red' : 'base'}
               value={data.me.user?.last_name}
-              on:change={saveField('last_name')}
+              onchange={saveField('last_name')}
             >
               <div slot="right" class={inputState.last_name.loading ? '' : 'hidden'}>
                 <Spinner size="4" color="green" />
@@ -237,7 +237,7 @@
             {/if}
           </div>
 
-          <div class="bg-white rounded-xl p-4 shadow-sm">
+          <div class="bg-white rounded-xl p-4 shadow-xs">
             <div class="flex flex-col gap-2">
               <div class="flex flex-row gap-2 items-center">
                 <span class="font-medium">Primary Email</span>
@@ -278,8 +278,8 @@
         <div class="w-full">
           <div class="bg-gray-100 rounded-2xl p-6">
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {#each sortedLogins as login}
-                <div class="flex flex-col bg-white rounded-xl p-4 shadow-sm">
+              {#each sortedLogins as login (login.id)}
+                <div class="flex flex-col bg-white rounded-xl p-4 shadow-xs">
                   <div class="flex items-center gap-3 mb-2">
                     <div class="flex items-center gap-2">
                       <span class="font-medium">
@@ -325,7 +325,7 @@
               pill
               size="sm"
               class="flex flex-row gap-2 bg-white text-blue-dark-40 border-solid border border-blue-dark-40 hover:text-white hover:bg-blue-dark-40"
-              on:click={subscribeToAllSummaries}><BellActiveAltSolid />Subscribe to all</Button
+              onclick={subscribeToAllSummaries}><BellActiveAltSolid />Subscribe to all</Button
             >
           {/if}
           {#if !noneSubscribed}
@@ -333,7 +333,7 @@
               pill
               size="sm"
               class="flex flex-row gap-2 bg-white text-blue-dark-40 border-solid border border-blue-dark-40 hover:text-white hover:bg-blue-dark-40"
-              on:click={unsubscribeFromAllSummaries}><TrashBinSolid />Unsubscribe from all</Button
+              onclick={unsubscribeFromAllSummaries}><TrashBinSolid />Unsubscribe from all</Button
             >
           {/if}
         </div>
@@ -348,8 +348,8 @@
         </P>
         <div class="bg-gray-100 rounded-2xl p-6">
           <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {#each activitySubscription as subscription}
-              <div class="bg-white rounded-xl p-4 shadow-sm flex flex-col justify-between">
+            {#each activitySubscription as subscription (subscription.class_id)}
+              <div class="bg-white rounded-xl p-4 shadow-xs flex flex-col justify-between">
                 <div class="flex flex-col gap-2 mb-4">
                   <div class="font-medium text-lg text-blue-dark-40">{subscription.class_name}</div>
                   <div class="text-sm text-gray-600">
@@ -439,7 +439,7 @@
                     <Toggle
                       color="blue"
                       checked={subscription.subscribed}
-                      on:change={(event) =>
+                      onchange={(event) =>
                         handleSubscriptionChange(
                           event,
                           subscription.class_id,
@@ -453,7 +453,7 @@
           </div>
         </div>
       </div>
-      <div class="w-8/9 my-5">
+      <div class="w-full my-5">
         <Accordion>
           <AccordionItem
             defaultClass="px-6 py-4 flex items-center justify-between w-full font-medium text-left group-first:rounded-t-none border-gray-200 dark:border-gray-700"
@@ -477,7 +477,7 @@
                     class="text-base font-normal"
                     color="blue"
                     checked={dnaAcCreate}
-                    on:change={handleDoNotAddWhenICreateChange}
+                    onchange={handleDoNotAddWhenICreateChange}
                     ><b>Do not add</b>&nbsp;an Activity Subscription for new groups I create.</Checkbox
                   >
                   <Checkbox
@@ -485,7 +485,7 @@
                     class="text-base font-normal"
                     color="blue"
                     checked={dnaAcJoin}
-                    on:change={handleDoNotAddWhenIJoinChange}
+                    onchange={handleDoNotAddWhenIJoinChange}
                     ><b>Do not add</b>&nbsp;an Activity Subscription for new groups I join.</Checkbox
                   >
                 </div>

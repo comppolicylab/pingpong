@@ -1,6 +1,7 @@
 <script lang="ts">
   import { navigating, page } from '$app/stores';
-  import { beforeNavigate, goto, invalidateAll, onNavigate } from '$app/navigation';
+  import { beforeNavigate, goto, invalidateAll, afterNavigate } from '$app/navigation';
+  import { resolve } from '$app/paths';
   import * as api from '$lib/api';
   import {
     getAnonymousShareToken,
@@ -50,7 +51,7 @@
     TerminalOutline
   } from 'flowbite-svelte-icons';
   import { parseTextContent } from '$lib/content';
-  import { ThreadManager } from '$lib/stores/thread';
+  import { ThreadManager, type Message } from '$lib/stores/thread';
   import AttachmentDeletedPlaceholder from '$lib/components/AttachmentDeletedPlaceholder.svelte';
   import FilePlaceholder from '$lib/components/FilePlaceholder.svelte';
   import { get, writable } from 'svelte/store';
@@ -102,10 +103,11 @@
   $: threadRecording = data.threadRecording;
   $: displayUserInfo = data.threadDisplayUserInfo;
   let trashThreadFiles = writable<string[]>([]);
+  let allFiles: Record<string, api.FileUploadInfo> = {};
   $: threadAttachments = threadMgr.attachments;
   $: allFiles = Object.fromEntries(
     Object.entries($threadAttachments)
-      .filter(([k, v]) => !$trashThreadFiles.includes(k))
+      .filter(([k]) => !$trashThreadFiles.includes(k))
       .map(([k, v]) => [
         k,
         {
@@ -371,7 +373,9 @@
   };
 
   // Scroll to the bottom of the chat thread.
-  const scroll = (el: HTMLDivElement, messageList: unknown[]) => {
+  const scroll = (el: HTMLDivElement, _messages: Message[]) => {
+    // Keep _messages so the action's update runs when the message list changes.
+    void _messages;
     // Scroll to the bottom of the element.
     el.scrollTo({
       top: el.scrollHeight,
@@ -493,13 +497,15 @@
       if (hasAnonymousShareToken()) {
         resetAnonymousSessionToken();
         await goto(
-          `/group/${classId}/shared/assistant/${$assistantId}?share_token=${getAnonymousShareToken()}`
+          resolve(
+            `/group/${classId}/shared/assistant/${$assistantId}?share_token=${getAnonymousShareToken()}`
+          )
         );
       } else {
         sadToast('Cannot start a new chat in this anonymous session.');
       }
     } else {
-      await goto(`/group/${classId}?assistant=${$assistantId}`);
+      await goto(resolve(`/group/${classId}?assistant=${$assistantId}`));
     }
   };
 
@@ -651,13 +657,15 @@
         if (hasAnonymousShareToken()) {
           resetAnonymousSessionToken();
           await goto(
-            `/group/${classId}/shared/assistant/${$assistantId}?share_token=${getAnonymousShareToken()}`
+            resolve(
+              `/group/${classId}/shared/assistant/${$assistantId}?share_token=${getAnonymousShareToken()}`
+            )
           );
         } else {
-          await goto(`/`, { invalidateAll: true });
+          await goto(resolve(`/`), { invalidateAll: true });
         }
       } else {
-        await goto(`/group/${classId}`, { invalidateAll: true });
+        await goto(resolve(`/group/${classId}`), { invalidateAll: true });
       }
     } catch (e) {
       sadToast(
@@ -955,12 +963,21 @@
   /*
    * Delete a file from the thread.
    */
+  const setFileState = (fileId: string, state: api.FileUploadInfo['state']) => {
+    const existing = allFiles[fileId];
+    if (!existing) return;
+    allFiles = {
+      ...allFiles,
+      [fileId]: { ...existing, state }
+    };
+  };
+
   const removeFile = async (evt: CustomEvent<api.FileUploadInfo>) => {
     const file = evt.detail;
     if (file.state === 'deleting' || !(file.response && 'file_id' in file.response)) {
       return;
     } else {
-      allFiles[(file.response as api.ServerFile).file_id].state = 'deleting';
+      setFileState((file.response as api.ServerFile).file_id, 'deleting');
       const result = await api.deleteThreadFile(
         fetch,
         data.class.id,
@@ -968,7 +985,7 @@
         (file.response as api.ServerFile).file_id
       );
       if (result.$status >= 300) {
-        allFiles[(file.response as api.ServerFile).file_id].state = 'success';
+        setFileState((file.response as api.ServerFile).file_id, 'success');
         sadToast(`Failed to delete file: ${result.detail || 'unknown error'}`);
       } else {
         trashThreadFiles.update((files) => [...files, (file.response as api.ServerFile).file_id]);
@@ -995,7 +1012,6 @@
       chunks.push(chunk as Uint8Array);
     }
 
-    // eslint-disable-next-line no-undef
     const blob = new Blob(chunks as BlobPart[], { type: 'audio/webm' });
     audioUrl = URL.createObjectURL(blob);
     showPlayer = true;
@@ -1027,7 +1043,7 @@
     }
   };
 
-  onNavigate(async () => {
+  afterNavigate(async () => {
     await resetAudioSession();
   });
 
@@ -1070,12 +1086,12 @@
     </div>
     {#if $canFetchMore}
       <div class="flex justify-center grow">
-        <Button size="sm" class="text-sky-600 hover:text-sky-800" on:click={fetchMoreMessages}>
+        <Button size="sm" class="text-sky-600 hover:text-sky-800" onclick={fetchMoreMessages}>
           <RefreshOutline class="w-3 h-3 me-2" /> Load earlier messages ...
         </Button>
       </div>
     {/if}
-    {#each $messages as message}
+    {#each $messages as message (message.data.id)}
       {@const attachment_file_ids = message.data.attachments
         ? new Set(message.data.attachments.map((attachment) => attachment.file_id))
         : new Set([])}
@@ -1155,7 +1171,7 @@
                 </div>
                 {#if quoteCitations.length > 0}
                   <div class="flex flex-wrap gap-2">
-                    {#each quoteCitations as citation}
+                    {#each quoteCitations as citation (citation.file_citation.file_id)}
                       <FileCitation
                         name={citation.file_citation.file_name}
                         quote={citation.file_citation.quote}
@@ -1165,7 +1181,7 @@
                 {/if}
                 {#if attachment_file_ids.size > 0}
                   <div class="flex flex-wrap gap-2">
-                    {#each imageInfo as image}
+                    {#each imageInfo as image (image.response && 'file_id' in image.response ? image.response.file_id : image.file.name)}
                       {#if !(image.response && 'file_id' in image.response && image.response.file_id in allFiles)}
                         <FilePlaceholder
                           info={image}
@@ -1216,8 +1232,8 @@
                       pill
                       size="xs"
                       color="alternative"
-                      on:click={() => fetchCodeInterpreterResult(content)}
-                      on:touchstart={() => fetchCodeInterpreterResult(content)}
+                      onclick={() => fetchCodeInterpreterResult(content)}
+                      ontouchstart={() => fetchCodeInterpreterResult(content)}
                     >
                       Load Code Interpreter Results
                     </Button>
@@ -1352,7 +1368,7 @@
           {/each}
           {#if attachment_file_ids.size > 0}
             <div class="flex flex-wrap gap-2 mt-4">
-              {#each attachment_file_ids as file_id}
+              {#each attachment_file_ids as file_id (file_id)}
                 {#if allFiles[file_id]}
                   <FilePlaceholder
                     info={allFiles[file_id]}
@@ -1387,7 +1403,7 @@
         value={shareLink}
       />
       <div class="flex justify-end pt-1">
-        <Button size="xs" color="alternative" on:click={() => (copyLinkModalOpen = false)}
+        <Button size="xs" color="alternative" onclick={() => (copyLinkModalOpen = false)}
           >Done</Button
         >
       </div>
@@ -1423,10 +1439,10 @@
               </p>
             </div>
             <Button
-              class="flex flex-row py-1.5 px-4 gap-1.5 bg-blue-dark-40 text-white rounded rounded-lg text-xs hover:bg-blue-dark-50 hover:text-blue-light-50 transition-all text-sm font-normal text-center"
+              class="flex flex-row py-1.5 px-4 gap-1.5 bg-blue-dark-40 text-white rounded-sm text-xs hover:bg-blue-dark-50 hover:text-blue-light-50 transition-all text-sm font-normal text-center"
               type="button"
-              on:click={handleSessionSetup}
-              on:touchstart={handleSessionSetup}
+              onclick={handleSessionSetup}
+              ontouchstart={handleSessionSetup}
             >
               Enable access
             </Button>
@@ -1473,8 +1489,8 @@
                 <span class="text-gray-700 text-sm font-normal"
                   ><Button
                     class="p-0 text-gray-700 text-sm underline font-normal"
-                    on:click={showModeratorsModal}
-                    on:touchstart={showModeratorsModal}>Moderators</Button
+                    onclick={showModeratorsModal}
+                    ontouchstart={showModeratorsModal}>Moderators</Button
                   > have enabled a setting for this thread only that allows them to see the thread,
                   <span class="font-semibold"
                     >your full name, and listen to a recording of your conversation</span
@@ -1488,10 +1504,10 @@
               >
                 {#if !audioSessionStarted}
                   <Button
-                    class="flex flex-row gap-1 bg-blue-dark-40 text-white rounded rounded-lg text-xs hover:bg-blue-dark-50 transition-all text-sm font-normal text-center px-3 py-2"
+                    class="flex flex-row gap-1 bg-blue-dark-40 text-white rounded-lg hover:bg-blue-dark-50 transition-all text-sm font-normal text-center px-3 py-2"
                     type="button"
-                    on:click={handleSessionStart}
-                    on:touchstart={handleSessionStart}
+                    onclick={handleSessionStart}
+                    ontouchstart={handleSessionStart}
                     disabled={!microphoneAccess}
                   >
                     {#if startingAudioSession}
@@ -1503,10 +1519,10 @@
                   </Button>
                 {:else}
                   <Button
-                    class="flex flex-row gap-1 bg-amber-700 text-white rounded rounded-lg text-xs hover:bg-amber-800 transition-all text-sm font-normal text-center px-3 py-2"
+                    class="flex flex-row gap-1 bg-amber-700 text-white rounded-lg hover:bg-amber-800 transition-all text-sm font-normal text-center px-3 py-2"
                     type="button"
-                    on:click={handleSessionEnd}
-                    on:touchstart={handleSessionEnd}
+                    onclick={handleSessionEnd}
+                    ontouchstart={handleSessionEnd}
                     disabled={!microphoneAccess}
                   >
                     {#if endingAudioSession}
@@ -1541,10 +1557,10 @@
                   </Dropdown>
                 {:else}
                   <Dropdown placement="top" triggeredBy="#top-dd" bind:open={openMicrophoneModal}>
-                    {#each audioDevices as audioDevice}
+                    {#each audioDevices as audioDevice (audioDevice.deviceId)}
                       <DropdownItem
                         class="flex flex-row gap-2 items-center"
-                        on:click={() => {
+                        onclick={() => {
                           selectAudioDevice(audioDevice.deviceId);
                           openMicrophoneModal = false;
                         }}
@@ -1624,7 +1640,7 @@
                       </div>
                       <Button
                         class="text-white bg-gradient-to-b from-blue-dark-30 to-blue-dark-40 py-1 px-2 rounded-lg w-fit shrink-0 hover:from-blue-dark-40 hover:to-blue-dark-50 transition-all text-xs font-normal"
-                        on:click={fetchRecording}
+                        onclick={fetchRecording}
                       >
                         Load Recording
                       </Button>
@@ -1670,11 +1686,11 @@
                 <Span class="text-gray-600 text-xs font-normal"
                   ><Button
                     class="p-0 text-gray-600 text-xs underline font-normal"
-                    on:click={showModeratorsModal}
-                    on:touchstart={showModeratorsModal}>Moderators</Button
+                    onclick={showModeratorsModal}
+                    ontouchstart={showModeratorsModal}>Moderators</Button
                   > <span class="font-semibold">cannot</span> see this thread or your name. {#if isCurrentUser}For
                     more information, please review <a
-                      href="/privacy-policy"
+                      href={resolve('/privacy-policy')}
                       rel="noopener noreferrer"
                       class="underline">PingPong's privacy statement</a
                     >.
@@ -1688,15 +1704,17 @@
                       <Span class="text-gray-600 text-xs font-normal"
                         ><Button
                           class="p-0 text-gray-600 text-xs underline font-normal"
-                          on:click={showModeratorsModal}
-                          on:touchstart={showModeratorsModal}>Moderators</Button
+                          onclick={showModeratorsModal}
+                          ontouchstart={showModeratorsModal}>Moderators</Button
                         > can see this thread,
                         <span class="font-semibold"
                           >{isCurrentUser ? 'your' : "the user's"} full name, and listen to a recording
                           of {isCurrentUser ? 'your' : 'the'} conversation</span
                         >. For more information, please review
-                        <a href="/privacy-policy" rel="noopener noreferrer" class="underline"
-                          >PingPong's privacy statement</a
+                        <a
+                          href={resolve('/privacy-policy')}
+                          rel="noopener noreferrer"
+                          class="underline">PingPong's privacy statement</a
                         >. Assistants can make mistakes. Check important info.</Span
                       >
                     </div>
@@ -1706,14 +1724,16 @@
                       <Span class="text-gray-600 text-xs font-normal"
                         ><Button
                           class="p-0 text-gray-600 text-xs underline font-normal"
-                          on:click={showModeratorsModal}
-                          on:touchstart={showModeratorsModal}>Moderators</Button
+                          onclick={showModeratorsModal}
+                          ontouchstart={showModeratorsModal}>Moderators</Button
                         > can see this thread and
                         <span class="font-semibold"
                           >{isCurrentUser ? 'your' : "the user's"} full name</span
                         >. For more information, please review
-                        <a href="/privacy-policy" rel="noopener noreferrer" class="underline"
-                          >PingPong's privacy statement</a
+                        <a
+                          href={resolve('/privacy-policy')}
+                          rel="noopener noreferrer"
+                          class="underline">PingPong's privacy statement</a
                         >. Assistants can make mistakes. Check important info.</Span
                       >
                     </div>
@@ -1723,11 +1743,11 @@
                   <Span class="text-gray-600 text-xs font-normal"
                     ><Button
                       class="p-0 text-gray-600 text-xs underline font-normal"
-                      on:click={showModeratorsModal}
-                      on:touchstart={showModeratorsModal}>Moderators</Button
+                      onclick={showModeratorsModal}
+                      ontouchstart={showModeratorsModal}>Moderators</Button
                     > can see this thread but not {isCurrentUser ? 'your' : "the user's"} name.
                     {#if isCurrentUser}For more information, please review <a
-                        href="/privacy-policy"
+                        href={resolve('/privacy-policy')}
                         rel="noopener noreferrer"
                         class="underline">PingPong's privacy statement</a
                       >.
@@ -1741,8 +1761,8 @@
                     ? 'your'
                     : "the user's"} name. {#if displayUserInfo}{#if data.threadInteractionMode === 'voice'}<Button
                         class="p-0 text-gray-600 text-xs underline font-normal"
-                        on:click={showModeratorsModal}
-                        on:touchstart={showModeratorsModal}>Moderators</Button
+                        onclick={showModeratorsModal}
+                        ontouchstart={showModeratorsModal}>Moderators</Button
                       > can see this thread,
                       <span class="font-semibold"
                         >{isCurrentUser ? 'your' : "the user's"} full name, and listen to a recording
@@ -1750,8 +1770,8 @@
                         {isCurrentUser ? 'your' : 'the'} conversation</span
                       >.{:else}<Button
                         class="p-0 text-gray-600 text-xs underline font-normal"
-                        on:click={showModeratorsModal}
-                        on:touchstart={showModeratorsModal}>Moderators</Button
+                        onclick={showModeratorsModal}
+                        ontouchstart={showModeratorsModal}>Moderators</Button
                       > can see this thread and
                       <span class="font-semibold"
                         >{isCurrentUser ? 'your' : "the user's"} full name</span
@@ -1759,10 +1779,7 @@
                 >
               {/if}
             </div>
-            <button
-              on:click|preventDefault={handleCopyLinkClick}
-              title="Copy link"
-              aria-label="Copy link"
+            <button onclick={handleCopyLinkClick} title="Copy link" aria-label="Copy link"
               ><LinkOutline
                 class="dark:text-white inline-block w-5 h-6 text-blue-dark-30 hover:text-blue-dark-50 active:animate-ping font-medium"
                 size="lg"
@@ -1774,22 +1791,22 @@
                 <Dropdown bind:open={settingsOpen}>
                   {#if $threadInstructions}
                     <DropdownItem
-                      on:click={() => ((showAssistantPrompt = true), (settingsOpen = false))}
+                      onclick={() => ((showAssistantPrompt = true), (settingsOpen = false))}
                     >
                       <span>Prompt</span>
                     </DropdownItem>
                     <DropdownDivider />
                   {/if}
-                  <DropdownItem on:click={handlePrintThread} disabled={printingThread}>
+                  <DropdownItem onclick={handlePrintThread} disabled={printingThread}>
                     <span class:text-gray-300={printingThread}>Print</span>
                   </DropdownItem>
                   {#if threadRecording}
-                    <DropdownItem on:click={transcribeRecording} disabled={transcribingRecording}>
+                    <DropdownItem onclick={transcribeRecording} disabled={transcribingRecording}>
                       <span class:text-gray-300={transcribingRecording}>Transcribe</span>
                     </DropdownItem>
                   {/if}
                   <DropdownDivider />
-                  <DropdownItem on:click={togglePublish} disabled={!canPublishThread}>
+                  <DropdownItem onclick={togglePublish} disabled={!canPublishThread}>
                     <span class:text-gray-300={!canPublishThread}>
                       {#if $published}
                         Unpublish
@@ -1798,7 +1815,7 @@
                       {/if}
                     </span>
                   </DropdownItem>
-                  <DropdownItem on:click={deleteThread} disabled={!canDeleteThread}>
+                  <DropdownItem onclick={deleteThread} disabled={!canDeleteThread}>
                     <span class:text-gray-300={!canDeleteThread}>Delete</span>
                   </DropdownItem>
                 </Dropdown>

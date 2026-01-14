@@ -17,6 +17,7 @@
   import type { Institution } from '$lib/api';
   import * as api from '$lib/api';
   import { happyToast, sadToast } from '$lib/toast';
+  import { resolve } from '$app/paths';
 
   export let data;
 
@@ -88,7 +89,7 @@
     </div>
     <div slot="right">
       <a
-        href={`/admin`}
+        href={resolve(`/admin`)}
         class="text-sm text-blue-dark-50 font-medium bg-white rounded-full p-2 px-4 hover:text-white hover:bg-blue-dark-40 transition-all flex items-center gap-2"
         >Admin page <ArrowRightOutline size="md" class="text-orange" /></a
       >
@@ -106,7 +107,7 @@
         pill
         size="sm"
         class="flex flex-row gap-2 bg-white text-blue-dark-40 border-solid border border-blue-dark-40 hover:text-white hover:bg-blue-dark-40"
-        on:click={() => (createModalOpen = true)}><PlusOutline />New Institution</Button
+        onclick={() => (createModalOpen = true)}><PlusOutline />New Institution</Button
       >
     </div>
 
@@ -125,7 +126,7 @@
             </TableBodyRow>
           {/if}
 
-          {#each institutions as institution}
+          {#each institutions as institution (institution.id)}
             <TableBodyRow>
               <TableBodyCell class="py-2 font-medium whitespace-normal">
                 {institution.name}
@@ -145,7 +146,7 @@
                     pill
                     size="sm"
                     class="text-xs border border-blue-dark-40 text-blue-dark-40 shrink-0 flex flex-row gap-1.5 items-center justify-center bg-white rounded-full p-1 px-3 hover:text-white hover:bg-blue-dark-40 transition-all w-fit"
-                    on:click={() => openCopyModal(institution)}
+                    onclick={() => openCopyModal(institution)}
                   >
                     <FileCopyOutline size="sm" class="mr-1" />
                     Copy
@@ -160,7 +161,7 @@
   </div>
 </div>
 
-<Modal bind:open={createModalOpen} size="md" on:close={() => (newInstitutionName = '')}>
+<Modal bind:open={createModalOpen} size="md" onclose={() => (newInstitutionName = '')}>
   <div class="space-y-6 p-4">
     <Heading tag="h3" class="text-xl font-semibold text-gray-900">New Institution</Heading>
     <div class="flex flex-col gap-2">
@@ -175,11 +176,11 @@
       />
     </div>
     <div class="flex justify-end gap-3">
-      <Button color="light" on:click={() => (createModalOpen = false)}>Cancel</Button>
+      <Button color="light" onclick={() => (createModalOpen = false)}>Cancel</Button>
       <Button
         class="bg-orange text-white rounded-full hover:bg-orange-dark"
         disabled={creating || !newInstitutionName.trim()}
-        on:click={handleCreate}
+        onclick={handleCreate}
       >
         Create
       </Button>
@@ -187,7 +188,7 @@
   </div>
 </Modal>
 
-<Modal bind:open={copyModalOpen} size="md" on:close={() => (copyInstitutionName = '')}>
+<Modal bind:open={copyModalOpen} size="md" onclose={() => (copyInstitutionName = '')}>
   <div class="space-y-6 p-4">
     <Heading tag="h3" class="text-xl font-semibold text-gray-900">Copy Institution</Heading>
     <div class="flex flex-col gap-2">
@@ -202,11 +203,11 @@
       />
     </div>
     <div class="flex justify-end gap-3">
-      <Button color="light" on:click={() => (copyModalOpen = false)}>Cancel</Button>
+      <Button color="light" onclick={() => (copyModalOpen = false)}>Cancel</Button>
       <Button
         class="bg-orange text-white rounded-full hover:bg-orange-dark"
         disabled={copying || !copyInstitutionName.trim()}
-        on:click={handleCopy}
+        onclick={handleCopy}
       >
         Copy
       </Button>

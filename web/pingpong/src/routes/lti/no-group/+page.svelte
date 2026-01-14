@@ -3,10 +3,11 @@
   import { goto } from '$app/navigation';
   import PingPongLogo from '$lib/components/PingPongLogo.svelte';
   import { loading } from '$lib/stores/general.js';
+  import { resolve } from '$app/paths';
 
   const continueToPingPong = async () => {
     $loading = true;
-    await goto('/');
+    await goto(resolve('/'));
     $loading = false;
   };
 </script>
@@ -33,7 +34,7 @@
           <Button
             type="button"
             class="text-white bg-orange rounded-full hover:bg-orange-dark"
-            on:click={continueToPingPong}
+            onclick={continueToPingPong}
             disabled={$loading}>Continue</Button
           >
         </div>

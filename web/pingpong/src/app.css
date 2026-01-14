@@ -1,7 +1,12 @@
-/* Write your global styles here, in PostCSS syntax */
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
+@config '../tailwind.config.js';
+@plugin 'flowbite/plugin';
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --default-ring-width: 3px;
+  --default-ring-color: var(--color-blue-500);
+}
 
 @media print {
   body {
@@ -155,5 +160,45 @@
     letter-spacing: 0.25px;
     line-height: 1.65;
     max-width: 52rem;
+  }
+}
+
+@source '../node_modules/flowbite-svelte/dist';
+@source '../node_modules/flowbite-svelte-icons/dist';
+
+@layer base {
+  /* disable chrome cancel button */
+  input[type='search']::-webkit-search-cancel-button {
+    display: none;
+  }
+}
+
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentColor);
+  }
+}
+
+@layer base {
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--color-gray-400);
+  }
+}
+
+@layer base {
+  button:not(:disabled),
+  [role='button']:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+@layer base {
+  dialog {
+    margin: auto;
   }
 }

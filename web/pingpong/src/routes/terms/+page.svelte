@@ -2,6 +2,7 @@
   import { Button, Heading } from 'flowbite-svelte';
   import * as api from '$lib/api';
   import { happyToast, sadToast } from '$lib/toast';
+  import { resolve } from '$app/paths';
   import { goto } from '$app/navigation';
   import PingPongLogo from '$lib/components/PingPongLogo.svelte';
   import { page } from '$app/stores';
@@ -14,12 +15,13 @@
   $: policyId = data.policyId;
 
   const logout = async () => {
-    await goto('/logout');
+    await goto(resolve('/logout'));
   };
 
   const goToDestination = async () => {
     $loading = true;
     const destination = $page.url.searchParams.get('forward') || '/';
+    // eslint-disable-next-line svelte/no-navigation-without-resolve
     await goto(destination);
     $loading = false;
   };
@@ -53,13 +55,13 @@
             <Button
               class="text-blue-dark-40 bg-white border border-blue-dark-40 rounded-full hover:bg-blue-dark-40 hover:text-white"
               type="button"
-              on:click={logout}
+              onclick={logout}
               disabled={$loading}>Exit PingPong</Button
             >
             <Button
               type="submit"
               class="text-white bg-orange rounded-full hover:bg-orange-dark"
-              on:click={acceptAgreement}
+              onclick={acceptAgreement}
               disabled={$loading}>Accept</Button
             >
           </div>
@@ -69,7 +71,7 @@
             <Button
               class="text-blue-dark-40 bg-white border border-blue-dark-40 rounded-full hover:bg-blue-dark-40 hover:text-white w-fit items"
               type="button"
-              on:click={goToDestination}
+              onclick={goToDestination}
               disabled={$loading}>Continue to PingPong</Button
             >
           </div>

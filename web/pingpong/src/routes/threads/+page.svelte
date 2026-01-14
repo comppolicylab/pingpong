@@ -5,8 +5,10 @@
   import { Select, Button } from 'flowbite-svelte';
   import AssistantVersionBadge from '$lib/components/AssistantVersionBadge.svelte';
   import { page } from '$app/stores';
+  import { resolve } from '$app/paths';
   import { getValue, updateSearch } from '$lib/urlstate';
   import { loading } from '$lib/stores/general';
+  import { afterUpdate } from 'svelte';
 
   export let data;
 
@@ -17,9 +19,19 @@
       .sort((a, b) => a.name.localeCompare(b.name))
   ];
   $: currentClass = $page.url.searchParams.get('class_id') || '0';
-  $: threads = data.threadArchive.threads || [];
-  $: hasMore = !data.threadArchive.lastPage;
-  $: error = data.threadArchive.error;
+  let threads = data.threadArchive.threads || [];
+  let hasMore = !data.threadArchive.lastPage;
+  let error = data.threadArchive.error;
+
+  let lastData = data;
+  afterUpdate(() => {
+    if (data !== lastData) {
+      threads = data.threadArchive.threads || [];
+      hasMore = !data.threadArchive.lastPage;
+      error = data.threadArchive.error;
+      lastData = data;
+    }
+  });
 
   const classNamesLookup = data.classes.reduce(
     (acc, cls) => {
@@ -70,7 +82,7 @@
       >
       <Select
         items={classOptions}
-        on:change={(e) => updateSearch('class_id', getValue(e.target))}
+        onchange={(e) => updateSearch('class_id', getValue(e.target))}
         value={currentClass}
         name="class"
       />
@@ -79,7 +91,7 @@
     <div class="sm:col-start-1 sm:col-end-2 sm:row-start-1 h-full overflow-y-auto">
       <h3 class="font-normal text-2xl border-b border-gray-200 pb-1">Threads</h3>
       <div class="flex flex-wrap flex-col">
-        {#each threads as thread}
+        {#each threads as thread (thread.id)}
           {@const allUsers = thread.user_names || []}
           {@const allUsersLen = allUsers.length}
           {@const isCurrentUserParticipant =
@@ -88,9 +100,11 @@
           {@const otherUsers = thread.user_names?.filter((user_name) => user_name != 'Me') || []}
           {@const otherUsersLen = otherUsers.length}
           <a
-            href={thread.anonymous_session && isCurrentUserParticipant
-              ? `/group/${thread.class_id}/shared/thread/${thread.id}`
-              : `/group/${thread.class_id}/thread/${thread.id}`}
+            href={resolve(
+              thread.anonymous_session && isCurrentUserParticipant
+                ? `/group/${thread.class_id}/shared/thread/${thread.id}`
+                : `/group/${thread.class_id}/thread/${thread.id}`
+            )}
             class="border-b border-gray-200 pb-4 pt-4 transition-all duration-300 hover:bg-gray-100 hover:pl-4"
           >
             <div>
@@ -142,7 +156,7 @@
           </a>
         {/each}
 
-        {#if data.threadArchive.threads.length === 0}
+        {#if threads.length === 0}
           <div class="text-center py-8 text-gray-400 text-sm tracking-wide uppercase">
             No threads found
           </div>
@@ -158,7 +172,7 @@
           <div class="text-center py-8 tracking-wide uppercase">
             <Button
               class="text-blue-dark-40 uppercase tracking-wide hover:bg-gray-100"
-              on:click={fetchNextPage}>Load more ...</Button
+              onclick={fetchNextPage}>Load more ...</Button
             >
           </div>
         {/if}

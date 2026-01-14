@@ -50,16 +50,16 @@
   });
 </script>
 
-<div class="flex-grow min-w-0 relative w-full">
+<div class="grow min-w-0 relative w-full">
   <button
     id="model"
     name="model"
-    class="flex w-full items-center text-gray-900 bg-gray-50 border border-gray-300 rounded-lg focus:ring-primary-500 focus:border-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-primary-500 dark:focus:border-primary-500 text-sm p-2.5 h-10 overflow-hidden"
+    class="flex w-full items-center text-gray-900 bg-gray-50 border border-gray-300 rounded-lg focus:ring-3 focus:ring-primary-500 focus:border-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-primary-500 dark:focus:border-primary-500 text-sm p-2.5 h-10 overflow-hidden"
     type="button"
     {disabled}
   >
-    <span class="truncate flex-grow text-left mr-2">{placeholder}</span>
-    <ChevronDownOutline class="w-6 h-6 flex-shrink-0" />
+    <span class="truncate grow text-left mr-2">{placeholder}</span>
+    <ChevronDownOutline class="w-6 h-6 shrink-0" />
   </button>
 
   <Dropdown
@@ -72,7 +72,7 @@
       <div
         class="overflow-y-auto overscroll-contain {footer
           ? 'rounded-t-lg'
-          : 'rounded-lg'} flex-grow max-h-80 relative"
+          : 'rounded-lg'} grow max-h-80 relative"
         bind:this={dropdownContainer}
       >
         <slot />

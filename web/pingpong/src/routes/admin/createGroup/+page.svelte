@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Select, Button, Label, Input, Heading, Helper, Radio } from 'flowbite-svelte';
   import * as api from '$lib/api';
+  import { resolve } from '$app/paths';
   import { writable } from 'svelte/store';
   import { happyToast, sadToast } from '$lib/toast';
   import { goto } from '$app/navigation';
@@ -76,13 +77,13 @@
     $loading = false;
     form.reset();
     happyToast('Group created successfully!');
-    await goto(`/group/${classResponse.data.id}/manage`);
+    await goto(resolve(`/group/${classResponse.data.id}/manage`));
   };
 </script>
 
 <div class="h-full w-full flex flex-col p-8 gap-8 items-center overflow-auto">
   <Heading tag="h2" class="serif">Create a new group</Heading>
-  <form on:submit={submitCreateClass} class="flex flex-col gap-4 max-w-lg sm:min-w-[32rem]">
+  <form onsubmit={submitCreateClass} class="flex flex-col gap-4 max-w-lg sm:min-w-[32rem]">
     <div>
       <Label for="name" class="mb-1">Name</Label>
       <Input type="text" name="name" id="name" disabled={$loading} />
@@ -98,7 +99,7 @@
     <div>
       <Label for="institution" class="mb-1">Institution</Label>
       <Select name="institution" id="institution" bind:value={selectedInst} disabled={$loading}>
-        {#each institutions as inst}
+        {#each institutions as inst (inst.id)}
           <option value={inst.id}>{inst.name}</option>
         {/each}
         {#if data.admin.canCreateInstitution}
@@ -129,7 +130,7 @@
             <div class="w-full text-base">Set up access later from the Manage Group page.</div>
           </div>
         </Radio>
-        {#each defaultKeys as key}
+        {#each defaultKeys as key (key.id)}
           <Radio name="provider" value={key.id} bind:group={selectedBilling} custom>
             <div
               class="inline-flex gap-4 items-center px-5 py-3 w-full text-gray-900 bg-white rounded-lg border border-gray-200 cursor-pointer peer-checked:border-red-600 peer-checked:text-red-600 hover:text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:bg-gray-800 dark:hover:bg-gray-700 font-normal peer-checked:font-medium"

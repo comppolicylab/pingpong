@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import type { Assistant } from '$lib/api';
   import ViewAssistant from '$lib/components/ViewAssistant.svelte';
   import {
@@ -219,7 +220,7 @@
           personality, and parameters to serve as a digital assistant for this group.
         </p>
         <a
-          href="/group/{data.class.id}/assistant/new"
+          href={resolve(`/group/${data.class.id}/assistant/new`)}
           class="text-sm text-blue-dark-50 shrink-0 flex items-center justify-center font-medium bg-white rounded-full p-2 px-4 hover:text-blue-dark-100 hover:bg-blue-dark-40 hover:text-white transition-all"
           >Create new assistant <ArrowRightOutline size="md" class="orange inline-block" /></a
         >
@@ -230,7 +231,7 @@
       >Your assistants</Heading
     >
     <div class="grid md:grid-cols-2 gap-4 mb-12">
-      {#each myAssistants as assistant}
+      {#each myAssistants as assistant (assistant.id)}
         <ViewAssistant
           {assistant}
           creator={creators[assistant.creator_id]}
@@ -247,7 +248,7 @@
       >Group assistants</Heading
     >
     <div class="grid md:grid-cols-2 gap-4 mb-12">
-      {#each courseAssistants as assistant}
+      {#each courseAssistants as assistant (assistant.id)}
         <ViewAssistant
           {assistant}
           creator={creators[assistant.creator_id]}
@@ -276,7 +277,7 @@
           <TableHeadCell class="text-right">Actions</TableHeadCell>
         </TableHead>
         <TableBody>
-          {#each otherAssistants as assistant}
+          {#each otherAssistants as assistant (assistant.id)}
             <TableBodyRow>
               <TableBodyCell class="font-light">{assistant.name}</TableBodyCell>
               <TableBodyCell class="font-light"
@@ -287,7 +288,7 @@
               >
               <TableBodyCell
                 ><a
-                  href="/group/{data.class.id}?assistant={assistant.id}"
+                  href={resolve(`/group/${data.class.id}?assistant=${assistant.id}`)}
                   class="flex items-center w-32 gap-2 text-sm text-white font-medium bg-orange rounded-full p-1 px-3 hover:text-blue-dark-100 hover:bg-blue-dark-40 hover:text-white transition-all"
                   >Start a chat <CirclePlusSolid size="sm" class="inline" /></a
                 ></TableBodyCell
@@ -297,29 +298,35 @@
                   <button
                     class="text-blue-dark-40 hover:text-blue-dark-100"
                     aria-label="Copy assistant link"
-                    on:click|preventDefault={() => {}}
-                    on:svelte-copy={showCopiedLink}
+                    onclick={() => {}}
+                    oncopy={showCopiedLink}
                     use:copy={assistantLink(assistant.id)}
                   >
                     <LinkOutline class="w-5 h-5" />
                   </button>
                   {#if data.editableAssistants.has(assistant.id)}
                     <a
-                      href="/group/{data.class.id}/assistant/{assistant.id}"
+                      href={resolve(`/group/${data.class.id}/assistant/${assistant.id}`)}
                       class="text-blue-dark-40 hover:text-blue-dark-100"
                       aria-label="Edit assistant"><PenSolid class="w-5 h-5" /></a
                     >
                     <button
                       class="text-blue-dark-40 hover:text-blue-dark-100"
                       aria-label="Copy assistant"
-                      on:click|preventDefault={() => openCopyModal(assistant.id, assistant.name)}
+                      onclick={(event) => {
+                        event.preventDefault();
+                        openCopyModal(assistant.id, assistant.name);
+                      }}
                     >
                       <FileCopyOutline class="w-5 h-5" />
                     </button>
                     <button
                       class="text-red-700 hover:text-red-900"
                       aria-label="Delete assistant"
-                      on:click|preventDefault={() => openDeleteModal(assistant.id)}
+                      onclick={(event) => {
+                        event.preventDefault();
+                        openDeleteModal(assistant.id);
+                      }}
                     >
                       <TrashBinOutline class="w-5 h-5" />
                     </button>
@@ -329,7 +336,7 @@
                 <Modal
                   open={!!copyModalState[assistant.id]}
                   size="md"
-                  on:close={() => closeCopyModal(assistant.id)}
+                  onclose={() => closeCopyModal(assistant.id)}
                 >
                   <div class="text-left whitespace-normal break-words">
                     <Heading tag="h3" class="text-2xl font-serif font-medium text-blue-dark-40"
@@ -349,7 +356,7 @@
                         id={`copy-name-${assistant.id}`}
                         name={`copy-name-${assistant.id}`}
                         value={copyNames[assistant.id] || ''}
-                        on:input={(event) => handleCopyNameInput(assistant.id, event)}
+                        oninput={(event) => handleCopyNameInput(assistant.id, event)}
                         placeholder={defaultCopyName(assistant.name)}
                       />
                     </div>
@@ -381,9 +388,9 @@
                         id={`copy-target-${assistant.id}`}
                         name={`copy-target-${assistant.id}`}
                         value={copyTargets[assistant.id] || ''}
-                        on:change={(event) => handleCopyTargetSelect(assistant.id, event)}
+                        onchange={(event) => handleCopyTargetSelect(assistant.id, event)}
                       >
-                        {#each classOptions as option}
+                        {#each classOptions as option (option.id)}
                           <option value={`${option.id}`}>
                             {option.term ? `${option.name} (${option.term})` : option.name}
                           </option>
@@ -391,14 +398,14 @@
                       </Select>
                     </div>
                     <div class="flex gap-3 justify-end">
-                      <Button color="light" on:click={() => closeCopyModal(assistant.id)}
+                      <Button color="light" onclick={() => closeCopyModal(assistant.id)}
                         >Cancel</Button
                       >
                       <Button
                         color="blue"
                         disabled={copyPermissionLoading[assistant.id] ||
                           copyPermissionAllowed[assistant.id] !== true}
-                        on:click={() => handleCopyAssistant(assistant.id)}>Copy</Button
+                        onclick={() => handleCopyAssistant(assistant.id)}>Copy</Button
                       >
                     </div>
                   </div>
@@ -408,7 +415,7 @@
                   open={!!deleteModalState[assistant.id]}
                   size="xs"
                   autoclose
-                  on:close={() => closeDeleteModal(assistant.id)}
+                  onclose={() => closeDeleteModal(assistant.id)}
                 >
                   <ConfirmationModal
                     warningTitle={`Delete ${assistant?.name || 'this assistant'}?`}
@@ -440,7 +447,7 @@
         <TableHeadCell>Email</TableHeadCell>
       </TableHead>
       <TableBody>
-        {#each moderators as moderator}
+        {#each moderators as moderator (moderator.email)}
           <TableBodyRow>
             {#if moderator.name}
               <TableBodyCell class="font-light">{moderator.name}</TableBodyCell>

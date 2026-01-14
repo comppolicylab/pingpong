@@ -1,5 +1,6 @@
 <script lang="ts">
   import { invalidateAll } from '$app/navigation';
+  import { resolve } from '$app/paths';
   import * as api from '$lib/api';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import { happyToast, sadToast } from '$lib/toast';
@@ -51,7 +52,7 @@
     </div>
     <div slot="right">
       <a
-        href={`/admin`}
+        href={resolve(`/admin`)}
         class="text-sm text-blue-dark-50 font-medium bg-white rounded-full p-2 px-4 hover:text-white hover:bg-blue-dark-40 transition-all flex items-center gap-2"
         >Admin page <ArrowRightOutline size="md" class="text-orange" /></a
       >
@@ -73,8 +74,8 @@
       </P>
       <div class="bg-gray-100 rounded-2xl p-6">
         <div class="grid grid-cols-1 gap-4">
-          {#each externalProviders as provider}
-            <div class="bg-white rounded-xl p-4 shadow-sm">
+          {#each externalProviders as provider (provider.id)}
+            <div class="bg-white rounded-xl p-4 shadow-xs">
               <div class="flex items-center justify-between flex-wrap gap-4">
                 <div class="flex items-center gap-4 flex-1">
                   <div class="flex items-center gap-4 w-1/4 shrink-0">
@@ -95,7 +96,7 @@
                   pill
                   size="sm"
                   class="text-xs border border-blue-dark-40 text-blue-dark-40 shrink-0 flex flex-row gap-1.5 items-center justify-center bg-white rounded-full p-1 px-3 hover:text-white hover:bg-blue-dark-40 transition-all"
-                  on:click={() => openEditModal(provider.id)}
+                  onclick={() => openEditModal(provider.id)}
                 >
                   Edit
                 </Button>
@@ -108,8 +109,8 @@
   </div>
 </div>
 
-<Modal bind:open={editModalOpen} size="sm" on:close={() => (providerToEdit = null)}>
-  <form class="flex flex-col space-y-6 pb-4" action="#" on:submit={handleSubmit}>
+<Modal bind:open={editModalOpen} size="sm" onclose={() => (providerToEdit = null)}>
+  <form class="flex flex-col space-y-6 pb-4" action="#" onsubmit={handleSubmit}>
     <h3 class="mb-2 text-xl font-medium text-gray-900 dark:text-white">
       Editing properties for <span class="font-mono">{providerToEdit?.name}</span>
     </h3>

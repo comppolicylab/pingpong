@@ -19,6 +19,7 @@
   import * as api from '$lib/api';
   import { happyToast, sadToast } from '$lib/toast';
   import { loading } from '$lib/stores/general.js';
+  import { resolve } from '$app/paths';
 
   export let data;
 
@@ -183,7 +184,7 @@
     </div>
     <div slot="right">
       <a
-        href={`/admin/institutions`}
+        href={resolve(`/admin/institutions`)}
         class="text-sm text-blue-dark-50 font-medium bg-white rounded-full p-2 px-4 hover:text-white hover:bg-blue-dark-40 transition-all flex items-center gap-2"
         >All Institutions <ArrowRightOutline size="md" class="text-orange" /></a
       >
@@ -209,7 +210,7 @@
         placeholder="Institution name"
         bind:value={draftName}
         disabled={$loading || savingName}
-        on:change={saveName}
+        onchange={saveName}
       />
     </div>
     <div>
@@ -221,7 +222,7 @@
         items={defaultKeyOptions}
         bind:value={selectedDefaultKeyId}
         disabled={$loading || savingDefaultKey}
-        on:change={saveDefaultApiKey}
+        onchange={saveDefaultApiKey}
       />
     </div>
     <div class="space-y-4">
@@ -242,7 +243,7 @@
               </TableBodyCell>
             </TableBodyRow>
           {/if}
-          {#each institution.admins as admin}
+          {#each institution.admins as admin (admin.id)}
             <TableBodyRow>
               <TableBodyCell class="py-2 font-medium whitespace-normal">
                 {admin.name || 'Unknown'}
@@ -256,7 +257,7 @@
                   size="sm"
                   class="text-xs border border-red-200 text-red-700 shrink-0 flex flex-row gap-1.5 items-center justify-center bg-white rounded-full p-1 px-3 hover:text-white hover:bg-red-600 transition-all w-fit"
                   disabled={!!managingAdmins[admin.id]}
-                  on:click={() => removeAdmin(admin.id)}
+                  onclick={() => removeAdmin(admin.id)}
                 >
                   <TrashBinOutline size="sm" class="mr-1" />
                   Remove
@@ -278,7 +279,7 @@
             name="admin-email"
           />
           <Button
-            on:click={addAdmin}
+            onclick={addAdmin}
             disabled={!!managingAdmins[-1] || !newAdminEmail.trim()}
             class="px-3 bg-blue-dark-40 text-white rounded-full hover:bg-blue-dark-50"
           >
@@ -306,7 +307,7 @@
               </TableBodyCell>
             </TableBodyRow>
           {/if}
-          {#each institution.root_admins as admin}
+          {#each institution.root_admins as admin (admin.id)}
             <TableBodyRow>
               <TableBodyCell class="py-2 font-medium whitespace-normal">
                 {admin.name || 'Unknown'}

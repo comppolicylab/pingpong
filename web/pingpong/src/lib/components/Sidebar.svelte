@@ -43,6 +43,7 @@
   import { appMenuOpen } from '$lib/stores/general';
   import { afterNavigate, goto } from '$app/navigation';
   import { onMount } from 'svelte';
+  import { resolve } from '$app/paths';
 
   export let data: LayoutData;
 
@@ -81,8 +82,7 @@
   $: currentClassId = parseInt($page.params.classId ?? '', 10);
   $: currentAssistantIdQuery = parseInt($page.url.searchParams.get('assistant') || '0', 10);
   $: currentAssistantId = $page.data.threadData?.thread?.assistant_id || currentAssistantIdQuery;
-  $: assistants = ($page.data.assistants || []) as api.Assistant[];
-  $: assistants.sort((a, b) => {
+  $: assistants = [...(($page.data.assistants || []) as api.Assistant[])].sort((a, b) => {
     // First sort by endorsement.
     if (a.endorsed && !b.endorsed) return -1;
     if (!a.endorsed && b.endorsed) return 1;
@@ -144,9 +144,11 @@
   });
 
   let dropdownOpen = false;
-  const goToPage = async (destination: string) => {
+  const goToPage = async (
+    destination: '/about' | '/privacy-policy' | '/admin' | '/logout' | '/profile'
+  ) => {
     dropdownOpen = false;
-    await goto(destination);
+    await goto(resolve(destination));
   };
 
   let inIframe = false;
@@ -168,7 +170,7 @@
         {#if !(inIframe && sharedPage) && !showCollapsedSidebarOnly}
           <button
             class="menu-button bg-transparent border-none mr-3 mt-1 lg:hidden"
-            on:click={() => togglePanel()}
+            onclick={() => togglePanel()}
           >
             {#if $appMenuOpen}
               <CloseOutline size="xl" class="text-white menu-close" />
@@ -263,10 +265,10 @@
             </SidebarGroup>
             <SidebarGroup
               border
-              class={'border-blue-dark-40 border-t-3 pt-1 mt-1'}
+              class="border-blue-dark-40 border-t-3 pt-1 mt-1"
               ulClass="space-y-0"
             >
-              {#each assistantsToShow as assistant}
+              {#each assistantsToShow as assistant (assistant.id)}
                 <SidebarItem
                   class={'text-sm text-white p-2 rounded-lg flex flex-wrap gap-2 truncate ' +
                     (currentAssistantIdQuery === assistant.id
@@ -304,7 +306,7 @@
           <SidebarGroup ulClass="flex flex-wrap justify-between gap-2 items-center mt-4">
             <span class="flex-1 truncate text-white">Recent Threads</span>
             <Button
-              href={`/threads`}
+              href={resolve(`/threads`)}
               class="text-white hover:bg-blue-dark-40 p-2 rounded flex flex-wrap justify-between gap-2 items-center"
             >
               <span class="text-xs">View All</span><ArrowRightOutline
@@ -318,13 +320,13 @@
             class="flex flex-col flex-1 border-blue-dark-40 border-t-3 pt-1 mt-1"
             ulClass="space-y-0 flex-1"
           >
-            {#each threads as thread}
+            {#each threads as thread (thread.id)}
               <SidebarItem
                 class="text-sm text-white hover:bg-blue-dark-30 p-2 rounded flex flex-wrap gap-2 rounded-lg"
                 spanClass="flex-1 truncate"
                 href={thread.anonymous_session
-                  ? `/group/${thread.class_id}/shared/thread/${thread.id}`
-                  : `/group/${thread.class_id}/thread/${thread.id}`}
+                  ? resolve(`/group/${thread.class_id}/shared/thread/${thread.id}`)
+                  : resolve(`/group/${thread.class_id}/thread/${thread.id}`)}
                 label={thread.name || 'New Conversation'}
                 activeClass="bg-blue-dark-40"
               >
@@ -394,26 +396,26 @@
   triggeredBy=".user"
 >
   {#if $page.data.admin.showAdminPage}
-    <DropdownItem on:click={() => goToPage('/admin')} class="flex space-x-4 items-center">
+    <DropdownItem onclick={() => goToPage('/admin')} class="flex space-x-4 items-center">
       <CogOutline size="sm" />
       <span>Admin</span>
     </DropdownItem>
     <DropdownDivider />
   {/if}
-  <DropdownItem on:click={() => goToPage('/profile')} class="flex space-x-4 items-center">
+  <DropdownItem onclick={() => goToPage('/profile')} class="flex space-x-4 items-center">
     <UserSettingsOutline size="sm" />
     <span>Profile</span>
   </DropdownItem>
-  <DropdownItem on:click={() => goToPage('/about')} class="flex space-x-4 items-center">
+  <DropdownItem onclick={() => goToPage('/about')} class="flex space-x-4 items-center">
     <QuestionCircleOutline size="sm" />
     <span>About</span>
   </DropdownItem>
-  <DropdownItem on:click={() => goToPage('/privacy-policy')} class="flex space-x-4 items-center">
+  <DropdownItem onclick={() => goToPage('/privacy-policy')} class="flex space-x-4 items-center">
     <FileLinesOutline size="sm" />
     <span>Privacy Policy</span>
   </DropdownItem>
   <DropdownDivider />
-  <DropdownItem on:click={() => goToPage('/logout')} class="flex space-x-4 items-center">
+  <DropdownItem onclick={() => goToPage('/logout')} class="flex space-x-4 items-center">
     <ArrowRightToBracketOutline size="sm" />
     <span>Logout</span>
   </DropdownItem>

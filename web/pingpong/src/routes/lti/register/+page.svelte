@@ -107,7 +107,7 @@
 
 <div class="h-full w-full flex flex-col p-8 gap-8 items-center overflow-y-auto">
   <Heading tag="h2" class="serif">Set up your LTI instance with PingPong</Heading>
-  <form class="flex flex-col gap-4 max-w-lg sm:min-w-[32rem]" on:submit={handleSubmit}>
+  <form class="flex flex-col gap-4 max-w-lg sm:min-w-[32rem]" onsubmit={handleSubmit}>
     <div>
       <Label for="name" class="mb-1">Instance name</Label>
       <Helper class="mb-2"
@@ -134,7 +134,7 @@
         back to email addresses to identify users.</Helper
       >
       <Select name="sso_id" id="sso_id" disabled={$loading} bind:value={ssoProviderId}>
-        {#each externalLoginProviders as provider}
+        {#each externalLoginProviders as provider (provider.id)}
           <option value={provider.id}>{provider.display_name || provider.name}</option>
         {/each}
         <option disabled>──────────</option>
@@ -166,7 +166,7 @@
       {#if institutions.length > 0}
         <div class="max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-gray-50 p-3">
           <div class="flex flex-col gap-2">
-            {#each institutions as inst}
+            {#each institutions as inst (inst.id)}
               <label class="flex items-start gap-3">
                 <input
                   type="checkbox"
@@ -223,7 +223,7 @@
     </p>
     {#if !missing_params}
       <div class="flex justify-center gap-4">
-        <Button color="light" on:click={() => (showModal = false)}>Close</Button>
+        <Button color="light" onclick={() => (showModal = false)}>Close</Button>
       </div>
     {/if}
   </div>

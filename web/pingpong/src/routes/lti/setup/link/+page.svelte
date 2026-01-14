@@ -5,6 +5,7 @@
   import { ArrowLeftOutline, InfoCircleSolid } from 'flowbite-svelte-icons';
   import * as api from '$lib/api';
   import { loading } from '$lib/stores/general.js';
+  import { resolve } from '$app/paths';
 
   export let data;
 
@@ -20,10 +21,12 @@
   let error = '';
 
   const goBack = () => {
+    // eslint-disable-next-line svelte/no-navigation-without-resolve
     goto(`/lti/setup?lti_class_id=${ltiClassId}`);
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (event: SubmitEvent) => {
+    event.preventDefault();
     if (!selectedGroupId) {
       error = 'Please select a group to link';
       return;
@@ -40,7 +43,7 @@
         .then(api.explodeResponse);
 
       // Redirect to the group's assistant page
-      await goto(`/group/${result.class_id}/assistant`);
+      await goto(resolve(`/group/${result.class_id}/assistant`));
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to link group';
     } finally {
@@ -60,7 +63,7 @@
           <button
             type="button"
             class="p-2 rounded-full hover:bg-gray-100 transition-colors"
-            on:click={goBack}
+            onclick={goBack}
           >
             <ArrowLeftOutline class="w-5 h-5" />
           </button>
@@ -81,18 +84,20 @@
                 group instead.
               </p>
             </div>
+            <!-- eslint-disable svelte/no-navigation-without-resolve -->
             <Button
               type="button"
               class="text-white bg-orange rounded-full hover:bg-orange-dark mt-4"
-              on:click={() => goto(`/lti/setup/create?lti_class_id=${ltiClassId}`)}
+              onclick={() => goto(`/lti/setup/create?lti_class_id=${ltiClassId}`)}
             >
               Create New Group
             </Button>
+            <!-- eslint-enable svelte/no-navigation-without-resolve -->
           </div>
         {:else}
-          <form on:submit|preventDefault={handleSubmit} class="flex flex-col gap-4">
+          <form onsubmit={handleSubmit} class="flex flex-col gap-4">
             <div class="flex flex-col gap-2 max-h-64 overflow-y-scroll">
-              {#each groups as group}
+              {#each groups as group (group.id)}
                 <label
                   for="group-{group.id}"
                   class="flex items-center p-4 border rounded-xl cursor-pointer hover:bg-gray-50 transition-colors {selectedGroupId ===
@@ -123,7 +128,7 @@
             <div
               class="text-sm text-gray-500 flex items-start gap-2 bg-blue-light-40 p-3 rounded-lg"
             >
-              <InfoCircleSolid class="w-4 h-4 mt-0.5 flex-shrink-0" />
+              <InfoCircleSolid class="w-4 h-4 mt-0.5 shrink-0" />
               <span>A PingPong group can be linked to multiple Canvas courses.</span>
             </div>
 
@@ -136,7 +141,7 @@
                 type="button"
                 color="alternative"
                 class="rounded-full"
-                on:click={goBack}
+                onclick={goBack}
                 disabled={$loading}
               >
                 Cancel

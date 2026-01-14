@@ -106,7 +106,7 @@
     {#if hasNoGroups}
       <div class="w-full rounded-lg border border-gray-300 bg-gray-100 p-6">
         <div class="flex items-start gap-4">
-          <InfoCircleSolid class="w-6 h-6 text-gray-500 flex-shrink-0 mt-0.5" />
+          <InfoCircleSolid class="w-6 h-6 text-gray-500 shrink-0 mt-0.5" />
           <div class="flex-1">
             <h5 class="text-lg font-semibold text-gray-900 mb-2">
               It's a little empty around here...
@@ -159,7 +159,7 @@
               </span>
             </div>
             <div class="mt-6">
-              <form on:submit={handleSubmit}>
+              <form onsubmit={handleSubmit}>
                 <div class="flex flex-col gap-4">
                   <div class="flex flex-col gap-2">
                     <Label for="name">Name (optional)</Label>
@@ -208,10 +208,9 @@
                         >
                       </p>
                       <div class="flex justify-center gap-4">
-                        <Button pill color="alternative" on:click={handleModalCancel}
-                          >Go back</Button
+                        <Button pill color="alternative" onclick={handleModalCancel}>Go back</Button
                         >
-                        <Button pill outline color="red" on:click={handleModalConfirm}
+                        <Button pill outline color="red" onclick={handleModalConfirm}
                           >Send without contact information</Button
                         >
                       </div>

@@ -82,16 +82,16 @@
       <Button
         pill
         class="p-2 bg-blue-light-50 opacity-90 hover:opacity-100 text-blue-dark-40 absolute top-1/2 -translate-y-1/2 start-4 font-bold"
-        on:click={() => changeSlide(false)}><AngleLeftOutline /></Button
+        onclick={() => changeSlide(false)}><AngleLeftOutline /></Button
       >
       <Button
         pill
         class="p-2 bg-blue-light-50 opacity-90 hover:opacity-100 text-blue-dark-40 absolute top-1/2 -translate-y-1/2 end-4 font-bold"
-        on:click={() => changeSlide(true)}><AngleRightOutline /></Button
+        onclick={() => changeSlide(true)}><AngleRightOutline /></Button
       >
     </Controls>
   </Carousel>
-  <div class="rounded border-2 border-blue-light-40 bg-blue-light-50 p-2 my-2 mb-4 text-center">
+  <div class="rounded-sm border-2 border-blue-light-40 bg-blue-light-50 p-2 my-2 mb-4 text-center">
     {images[index].description}
   </div>
   <Thumbnails class="bg-transparent gap-3" let:Thumbnail let:image let:selected {images} bind:index>
@@ -103,7 +103,7 @@
       activeClass="outline outline-orange"
     />
     <Tooltip
-      defaultClass="text-wrap py-2 px-3 text-sm font-normal shadow-sm"
+      defaultClass="text-wrap py-2 px-3 text-sm font-normal shadow-xs"
       placement="bottom"
       arrow={false}>{image.title}</Tooltip
     >

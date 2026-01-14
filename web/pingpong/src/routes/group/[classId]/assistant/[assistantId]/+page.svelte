@@ -18,6 +18,7 @@
   } from 'flowbite-svelte';
   import type { Tool, ServerFile, FileUploadInfo, MCPServerToolInput, MCPAuthType } from '$lib/api';
   import { beforeNavigate, goto, invalidate } from '$app/navigation';
+  import { resolve } from '$app/paths';
   import * as api from '$lib/api';
   import { setsEqual } from '$lib/set';
   import { happyToast, sadToast } from '$lib/toast';
@@ -440,7 +441,7 @@
     (model) => model.id === selectedModel
   )?.vision_support_override;
   $: finalVisionSupport = visionSupportOverride ?? supportsVision;
-  $: allowVisionUpload = true;
+  let allowVisionUpload = true;
   $: asstFSFiles = [...data.files, ...allFSPrivateFiles];
   $: asstCIFiles = [...data.files, ...allCIPrivateFiles];
 
@@ -1152,7 +1153,7 @@
     checkForChanges = false;
     happyToast('Assistant deleted');
     await invalidate(`/group/${$page.params.classId}`);
-    await goto(`/group/${data.class.id}/assistant`);
+    await goto(resolve(`/group/${data.class.id}/assistant`));
     return;
   };
 
@@ -1184,7 +1185,7 @@
         $loadingMessage = '';
         happyToast('Assistant saved.');
         checkForChanges = false;
-        await goto(`/group/${data.class.id}/assistant`, { invalidateAll: true });
+        await goto(resolve(`/group/${data.class.id}/assistant`), { invalidateAll: true });
         return;
       }
     }
@@ -1220,7 +1221,7 @@
       happyToast('Assistant saved');
       checkForChanges = false;
       await invalidate(`/group/${$page.params.classId}`);
-      await goto(`/group/${data.class.id}/assistant`);
+      await goto(resolve(`/group/${data.class.id}/assistant`));
     }
   };
 
@@ -1289,7 +1290,7 @@
           size="sm"
           class="bg-white border border-red-700 text-red-700 hover:text-white hover:bg-red-700"
           type="button"
-          on:click={() => (deleteModal = true)}
+          onclick={() => (deleteModal = true)}
           disabled={$loading || uploadingFSPrivate || uploadingCIPrivate}>Delete assistant</Button
         >
 
@@ -1349,7 +1350,7 @@
     />
   {/if}
 
-  <form on:submit={submitForm} bind:this={assistantForm}>
+  <form onsubmit={submitForm} bind:this={assistantForm}>
     <div class="mb-4">
       <Label class="pb-1" for="name">Name</Label>
       <Input id="name" name="name" bind:value={assistantName} disabled={preventEdits} />
@@ -1363,7 +1364,7 @@
             value="chat"
             bind:group={interactionMode}
             disabled={preventEdits}
-            on:change={changeInteractionMode}
+            onchange={changeInteractionMode}
             class={`${preventEdits ? 'hover:bg-transparent' : ''} select-none`}
             ><div class="flex flex-row gap-2 items-center">
               {#if interactionMode === 'chat'}<MessageDotsSolid
@@ -1377,7 +1378,7 @@
             value="voice"
             bind:group={interactionMode}
             disabled={preventEdits}
-            on:change={changeInteractionMode}
+            onchange={changeInteractionMode}
             class={`${preventEdits ? 'hover:bg-transparent' : ''} select-none`}
             ><div class="flex flex-row gap-2 items-center">
               {#if interactionMode === 'voice'}<MicrophoneSolid
@@ -1531,7 +1532,7 @@
         </div>
         <Button
           class="flex flex-row items-center gap-x-2 py-0.5 px-2 mb-1 border rounded-lg text-xs normal-case bg-gradient-to-b border-gray-400 from-gray-100 to-gray-200 text-gray-800 shrink-0 max-w-fit max-h-fit"
-          on:click={previewInstructions}
+          onclick={previewInstructions}
           type="button"
           disabled={$loading || uploadingFSPrivate || uploadingCIPrivate}
         >
@@ -1599,7 +1600,7 @@
             color="light"
             class="shrink-0 py-0.5 px-3 bg-white/60 border-amber-400 text-amber-900 hover:bg-white"
             disabled={preventEdits}
-            on:click={async () => {
+            onclick={async () => {
               if (!advancedOptionsOpen) {
                 advancedOptionsOpen = true;
                 await tick();
@@ -1649,7 +1650,7 @@
           name={fileSearchMetadata.value}
           checked={supportsFileSearch && (fileSearchToolSelect || false)}
           disabled={!supportsFileSearch || preventEdits}
-          on:change={() => {
+          onchange={() => {
             fileSearchToolSelect = !fileSearchToolSelect;
           }}>{fileSearchMetadata.name}</Checkbox
         >
@@ -1689,7 +1690,7 @@
           name={codeInterpreterMetadata.value}
           disabled={preventEdits || !supportsCodeInterpreter}
           checked={supportsCodeInterpreter && (codeInterpreterToolSelect || false)}
-          on:change={() => {
+          onchange={() => {
             codeInterpreterToolSelect = !codeInterpreterToolSelect;
           }}>{codeInterpreterMetadata.name}</Checkbox
         >
@@ -1744,7 +1745,7 @@
             name={webSearchMetadata.value}
             disabled={preventEdits || !supportsWebSearch}
             checked={supportsWebSearch && (webSearchToolSelect || false)}
-            on:change={() => {
+            onchange={() => {
               webSearchToolSelect = !webSearchToolSelect;
             }}
             ><div class="flex flex-wrap gap-1.5">
@@ -1803,7 +1804,7 @@
             name={mcpServerMetadata.value}
             disabled={preventEdits || !supportsMCPServer}
             checked={supportsMCPServer && (mcpServerToolSelect || false)}
-            on:change={() => {
+            onchange={() => {
               mcpServerToolSelect = !mcpServerToolSelect;
             }}
             ><div class="flex flex-wrap gap-1.5">
@@ -1910,7 +1911,7 @@
               size="xs"
               color="light"
               class="w-fit"
-              on:click={() => (showMCPServerModal = true)}
+              onclick={() => (showMCPServerModal = true)}
               disabled={preventEdits}>Add MCP Server</Button
             >
           </div>
@@ -1957,7 +1958,7 @@
                       size="xs"
                       color="light"
                       class="w-fit"
-                      on:click={() => {
+                      onclick={() => {
                         mcpServerEditIndex = index;
                         showMCPServerModal = true;
                       }}
@@ -1968,7 +1969,7 @@
                       size="xs"
                       color="light"
                       class="w-fit text-red-600"
-                      on:click={() => removeServer(index)}
+                      onclick={() => removeServer(index)}
                       disabled={preventEdits}>Remove</Button
                     >
                   </div>
@@ -2029,12 +2030,12 @@
       </div>
     {/if}
 
-    <div class="w-8/9 my-5">
+    <div class="w-full my-5">
       <Accordion>
         <AccordionItem
           bind:open={advancedOptionsOpen}
           paddingDefault="px-5 py-3"
-          defaultClass="px-6 py-4 flex items-center justify-between w-full font-medium text-left rounded border-gray-200 dark:border-gray-700"
+          defaultClass="px-6 py-4 flex items-center justify-between w-full font-medium text-left rounded-sm border-gray-200 dark:border-gray-700"
           activeClass="rounded-b-none"
           borderOpenClass="rounded-b-lg border-s border-e"
         >
@@ -2371,17 +2372,18 @@
                   bind:value={temperatureValue}
                   step="0.1"
                   disabled={preventEdits}
-                  on:change={checkForLargeTemperatureChat}
+                  onchange={checkForLargeTemperatureChat}
+                  class="appearance-auto"
                 />
                 <div class="grid grid-cols-20 gap-0 mx-2">
                   <button
                     type="button"
                     class="ml-1 col-span-4 flex flex-col items-center justify-start bg-transparent border-0"
-                    on:click={() => {
+                    onclick={() => {
                       temperatureValue = defaultChatTemperature;
                       _temperatureValue = defaultChatTemperature;
                     }}
-                    on:keydown={(e) => {
+                    onkeydown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         temperatureValue = defaultChatTemperature;
                         _temperatureValue = defaultChatTemperature;
@@ -2396,11 +2398,11 @@
                   <button
                     type="button"
                     class="col-start-6 col-span-4 flex flex-col items-center justify-start bg-transparent border-0"
-                    on:click={() => {
+                    onclick={() => {
                       temperatureValue = 0.7;
                       _temperatureValue = 0.7;
                     }}
-                    on:keydown={(e) => {
+                    onkeydown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         temperatureValue = 0.7;
                         _temperatureValue = 0.7;
@@ -2427,17 +2429,18 @@
                   bind:value={temperatureValue}
                   step="0.1"
                   disabled={preventEdits}
-                  on:change={checkForLargeTemperatureAudio}
+                  onchange={checkForLargeTemperatureAudio}
+                  class="appearance-auto"
                 />
                 <div class="grid grid-cols-6 gap-0 mx-2">
                   <button
                     type="button"
                     class="ml-1 col-span-4 flex flex-col items-center justify-start bg-transparent border-0"
-                    on:click={() => {
+                    onclick={() => {
                       temperatureValue = defaultAudioTemperature;
                       _temperatureValue = defaultAudioTemperature;
                     }}
-                    on:keydown={(e) => {
+                    onkeydown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         temperatureValue = defaultAudioTemperature;
                         _temperatureValue = defaultAudioTemperature;
@@ -2459,7 +2462,7 @@
                   >Select your desired reasoning effort, which gives the model guidance on how much
                   time it should spend "reasoning" before creating a response to the prompt. {#if reasoningEffortLabels.length !== 1}You
                     can specify one of
-                    {#each reasoningEffortLabels as label, idx}
+                    {#each reasoningEffortLabels as label, idx (label)}
                       <span class="font-mono">{label}</span>{idx < reasoningEffortLabels.length - 1
                         ? ','
                         : ''}
@@ -2499,10 +2502,11 @@
                   bind:value={reasoningEffortValue}
                   step="1"
                   disabled={preventEdits}
+                  class="appearance-auto"
                 />
                 <div class="mt-2 flex flex-row justify-between">
                   {#if reasoningEffortLabels.length < 4}
-                    {#each reasoningEffortLabels as label}
+                    {#each reasoningEffortLabels as label (label)}
                       <p class="text-sm">{label}</p>
                     {/each}
                   {:else if supportsNoneReasoningEffort}
@@ -2558,6 +2562,7 @@
                 bind:value={verbosityValue}
                 step="1"
                 disabled={preventEdits}
+                class="appearance-auto"
               />
               <div class="mt-2 flex flex-row justify-between">
                 <p class="text-sm">low</p>
@@ -2594,7 +2599,7 @@
                   class={isClassicRequired ? 'text-gray-400 grayscale contrast-50' : ''}
                   disabled={preventEdits || isClassicRequired}
                   checked={createClassicAssistant}
-                  on:change={() => {
+                  onchange={() => {
                     createClassicAssistantByProviderOrUser =
                       !createClassicAssistantByProviderOrUser;
                   }}

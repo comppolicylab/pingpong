@@ -26,7 +26,7 @@
   {#if content.queries && content.queries.length > 0}
     <div class="flex items-center gap-2">
       <FileSearchOutline class="h-4 w-4 text-gray-600" />
-      <button class="flex flex-row items-bottom" on:click={handleClick}>
+      <button class="flex flex-row items-bottom" onclick={handleClick}>
         {#if content.status === 'completed'}
           <span class="text-sm font-medium text-gray-600"
             >Searched files {#if open}<span>for...</span>{/if}</span

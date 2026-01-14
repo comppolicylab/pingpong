@@ -16,6 +16,7 @@
   import type { LTIRegistration } from '$lib/api';
   import * as api from '$lib/api';
   import { happyToast, sadToast } from '$lib/toast';
+  import { resolve } from '$app/paths';
 
   export let data;
 
@@ -77,7 +78,7 @@
     </div>
     <div slot="right">
       <a
-        href={`/admin`}
+        href={resolve('/admin')}
         class="text-sm text-blue-dark-50 font-medium bg-white rounded-full p-2 px-4 hover:text-white hover:bg-blue-dark-40 transition-all flex items-center gap-2"
         >Admin page <ArrowRightOutline size="md" class="text-orange" /></a
       >
@@ -112,7 +113,7 @@
             </TableBodyRow>
           {/if}
 
-          {#each registrations as registration}
+          {#each registrations as registration (registration.id)}
             {@const statusBadge = getStatusBadge(registration.review_status)}
             <TableBodyRow>
               <TableBodyCell class="py-2 font-medium whitespace-normal max-w-xs">
@@ -148,7 +149,7 @@
                   disabled={!!togglingEnabled[registration.id] ||
                     registration.review_status !== 'approved'}
                   color="blue"
-                  on:change={() => toggleEnabled(registration)}
+                  onchange={() => toggleEnabled(registration)}
                 />
               </TableBodyCell>
               <TableBodyCell class="py-2 text-right">
@@ -156,7 +157,7 @@
                   pill
                   size="sm"
                   class="text-xs border border-blue-dark-40 text-blue-dark-40 shrink-0 flex flex-row gap-1.5 items-center justify-center bg-white rounded-full p-1 px-3 hover:text-white hover:bg-blue-dark-40 transition-all w-fit"
-                  href={`/admin/lti/${registration.id}`}
+                  href={resolve(`/admin/lti/${registration.id}`)}
                 >
                   <PenSolid size="sm" class="mr-1" />
                   Details

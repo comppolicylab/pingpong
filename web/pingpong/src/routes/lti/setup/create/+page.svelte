@@ -5,6 +5,7 @@
   import { ArrowLeftOutline } from 'flowbite-svelte-icons';
   import * as api from '$lib/api';
   import { loading } from '$lib/stores/general.js';
+  import { resolve } from '$app/paths';
 
   export let data;
 
@@ -24,6 +25,7 @@
   let error = '';
 
   const goBack = () => {
+    // eslint-disable-next-line svelte/no-navigation-without-resolve
     goto(`/lti/setup?lti_class_id=${ltiClassId}`);
   };
 
@@ -54,7 +56,7 @@
         .then(api.explodeResponse);
 
       // Redirect to the new group's assistant page
-      await goto(`/group/${result.class_id}/assistant`);
+      await goto(resolve(`/group/${result.class_id}/assistant`));
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to create group';
     } finally {
@@ -74,14 +76,20 @@
           <button
             type="button"
             class="p-2 rounded-full hover:bg-gray-100 transition-colors"
-            on:click={goBack}
+            onclick={goBack}
           >
             <ArrowLeftOutline class="w-5 h-5" />
           </button>
           <div class="font-medium text-2xl">Create New Group</div>
         </div>
 
-        <form on:submit|preventDefault={handleSubmit} class="flex flex-col gap-4">
+        <form
+          onsubmit={(e) => {
+            e.preventDefault();
+            handleSubmit();
+          }}
+          class="flex flex-col gap-4"
+        >
           <div>
             <Label for="name" class="mb-2">Group Name</Label>
             <Input
@@ -108,7 +116,7 @@
             {:else}
               <Select id="institution" bind:value={institutionId} required>
                 <option value={null}>Select an institution</option>
-                {#each context.institutions as inst}
+                {#each context.institutions as inst (inst.id)}
                   <option value={inst.id}>{inst.name}</option>
                 {/each}
               </Select>
@@ -124,7 +132,7 @@
               type="button"
               color="alternative"
               class="rounded-full"
-              on:click={goBack}
+              onclick={goBack}
               disabled={$loading}
             >
               Cancel

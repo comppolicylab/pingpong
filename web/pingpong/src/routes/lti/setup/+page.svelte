@@ -15,10 +15,12 @@
       : context.course_name || context.course_code || 'Your Course';
 
   const goToCreate = () => {
+    // eslint-disable-next-line svelte/no-navigation-without-resolve
     goto(`/lti/setup/create?lti_class_id=${ltiClassId}`);
   };
 
   const goToLink = () => {
+    // eslint-disable-next-line svelte/no-navigation-without-resolve
     goto(`/lti/setup/link?lti_class_id=${ltiClassId}`);
   };
 </script>
@@ -50,7 +52,7 @@
             <button
               type="button"
               class="flex flex-col p-6 border-2 border-gray-200 rounded-2xl hover:border-orange hover:bg-orange-light transition-colors text-left cursor-pointer"
-              on:click={goToCreate}
+              onclick={goToCreate}
             >
               <div class="flex items-center gap-3 mb-3">
                 <div class="w-10 h-10 bg-orange rounded-full flex items-center justify-center">
@@ -67,7 +69,7 @@
             <button
               type="button"
               class="flex flex-col p-6 border-2 border-gray-200 rounded-2xl hover:border-orange hover:bg-orange-light transition-colors text-left cursor-pointer"
-              on:click={goToLink}
+              onclick={goToLink}
             >
               <div class="flex items-center gap-3 mb-3">
                 <div

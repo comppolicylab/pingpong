@@ -3,6 +3,7 @@
   import { ChevronDownOutline, GlobeOutline } from 'flowbite-svelte-icons';
   import type { WebSearchActionSearchSource, WebSearchCallItem } from '$lib/api';
   import WebSourceChip from './WebSourceChip.svelte';
+  import { SvelteSet } from 'svelte/reactivity';
 
   export let content: WebSearchCallItem;
   export let forceOpen = false;
@@ -26,7 +27,7 @@
   const deduplicateSources = (sources?: WebSearchActionSearchSource[]) => {
     if (!sources) return [];
 
-    const seen = new Set<string>();
+    const seen = new SvelteSet<string>();
     return sources.filter(({ url }) => {
       if (seen.has(url)) return false;
       seen.add(url);
@@ -42,7 +43,7 @@
   {#if content.action && content.action.type === 'search' && uniqueSources.length > 0}
     <div class="flex items-center gap-2">
       <GlobeOutline class="h-4 w-4 text-gray-600" />
-      <button class="flex flex-row items-bottom" on:click={handleClick}>
+      <button class="flex flex-row items-bottom" onclick={handleClick}>
         {#if content.status === 'completed'}
           <span class="text-sm text-left font-medium text-gray-600"
             >Searched{content.action.query

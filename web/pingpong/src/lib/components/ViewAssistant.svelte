@@ -34,6 +34,7 @@
   import dayjs from 'dayjs';
   import { happyToast, sadToast } from '$lib/toast';
   import * as api from '$lib/api';
+  import { resolve } from '$app/paths';
   import {
     checkCopyPermission as sharedCheckCopyPermission,
     defaultCopyName,
@@ -204,7 +205,7 @@
       pill
       size="sm"
       class="flex flex-row gap-2 bg-white text-blue-dark-40 border-solid border border-blue-dark-40 hover:text-white hover:bg-blue-dark-40"
-      on:click={createLink}><PlusOutline />New Shared Link</Button
+      onclick={createLink}><PlusOutline />New Shared Link</Button
     >
   </div>
 
@@ -217,7 +218,7 @@
         <TableHeadCell></TableHeadCell>
       </TableHead>
       <TableBody>
-        {#each shareLinks as link}
+        {#each shareLinks as link (link.id)}
           <TableBodyRow>
             <TableBodyCell class="py-2 font-medium whitespace-normal"
               ><Input
@@ -225,7 +226,7 @@
                 name="name"
                 value={link.name}
                 placeholder="Shared Link"
-                on:change={(e) => submitInputForm(e, link.id)}
+                onchange={(e) => submitInputForm(e, link.id)}
               /></TableBodyCell
             >
             <TableBodyCell
@@ -247,8 +248,10 @@
               <div class="flex flex-row gap-2">
                 <button
                   class="text-xs border border-blue-dark-40 text-blue-dark-40 shrink-0 flex flex-row gap-1.5 items-center justify-center bg-white rounded-full p-1 px-3 hover:text-white hover:bg-blue-dark-40 transition-all w-fit"
-                  on:click|preventDefault={() => {}}
-                  on:svelte-copy={showCopiedLink}
+                  onclick={(event) => {
+                    event.preventDefault();
+                  }}
+                  oncopy={showCopiedLink}
                   use:copy={`${sharedAssistantLinkWithParam}${link.share_token}`}
                 >
                   <LinkOutline class="inline-block w-4 h-4" />
@@ -260,7 +263,7 @@
                     size="sm"
                     class="text-xs border border-gray-800 text-green-800 shrink-0 flex flex-row gap-1.5 items-center justify-center bg-white rounded-full p-1 px-3 hover:text-white hover:bg-gray-800 transition-all w-fit"
                     disabled={!link.active}
-                    on:click={() => deleteLink(link.id)}
+                    onclick={() => deleteLink(link.id)}
                   >
                     Disable Link
                   </Button>
@@ -308,7 +311,8 @@
         <button
           class="text-blue-dark-30 hover:text-blue-dark-50"
           aria-label="Copy assistant"
-          on:click|preventDefault={() => {
+          onclick={(event) => {
+            event.preventDefault();
             copyName = defaultCopyName(assistant.name);
             copyTargetClassId = `${currentClassId}`;
             copyPermissionAllowed = false;
@@ -321,20 +325,19 @@
         <button
           class="text-blue-dark-30 hover:text-blue-dark-50"
           aria-label="Delete assistant"
-          on:click|preventDefault={() => {
+          onclick={(event) => {
+            event.preventDefault();
             deleteAssistantModalOpen = true;
           }}><TrashBinOutline size="md" /></button
         >
         <a
           class="text-blue-dark-30 hover:text-blue-dark-50"
-          href="/group/{assistant.class_id}/assistant/{assistant.id}"><PenSolid size="md" /></a
+          href={resolve(`/group/${assistant.class_id}/assistant/${assistant.id}`)}
+          ><PenSolid size="md" /></a
         >
       {/if}
 
-      <button
-        on:click|preventDefault={() => {}}
-        on:svelte-copy={showCopiedLink}
-        use:copy={assistantLink}
+      <button onclick={() => {}} oncopy={showCopiedLink} use:copy={assistantLink}
         ><LinkOutline
           class="inline-block w-6 h-6 text-blue-dark-30 hover:text-blue-dark-50 active:animate-ping"
         /></button
@@ -342,7 +345,8 @@
 
       {#if editable && shareable && assistant.published}
         <button
-          on:click|preventDefault={() => {
+          onclick={(event) => {
+            event.preventDefault();
             sharedAssistantModalOpen = true;
           }}
           ><GlobeOutline
@@ -357,18 +361,20 @@
     {assistant.description || '(No description provided)'}
   </div>
   <div>
+    <!-- eslint-disable svelte/no-navigation-without-resolve -->
     <a
       href={assistantLink}
       class="flex items-center w-36 gap-2 text-sm text-white font-medium bg-orange rounded-full p-2 px-4 hover:text-blue-dark-100 hover:bg-blue-dark-40 hover:text-white transition-all"
       >Start a chat <CirclePlusSolid size="sm" class="inline" /></a
     >
+    <!-- eslint-enable svelte/no-navigation-without-resolve -->
   </div>
 </div>
 
 <Modal
   size="md"
   bind:open={copyAssistantModalOpen}
-  on:close={() => (copyAssistantModalOpen = false)}
+  onclose={() => (copyAssistantModalOpen = false)}
 >
   <slot name="header">
     <Heading tag="h3" class="text-2xl font-serif font-medium text-blue-dark-40"
@@ -415,9 +421,9 @@
       bind:value={copyTargetClassId}
       size="md"
       class="w-full"
-      on:change={() => checkCopyPermission(copyTargetClassId)}
+      onchange={() => checkCopyPermission(copyTargetClassId)}
     >
-      {#each classOptions as option}
+      {#each classOptions as option (option.id)}
         <option value={`${option.id}`}>
           {option.term ? `${option.name} (${option.term})` : option.name}
         </option>
@@ -425,11 +431,11 @@
     </Select>
   </div>
   <div class="flex gap-3 justify-end">
-    <Button color="light" on:click={() => (copyAssistantModalOpen = false)}>Cancel</Button>
+    <Button color="light" onclick={() => (copyAssistantModalOpen = false)}>Cancel</Button>
     <Button
       color="blue"
       disabled={copyPermissionLoading || copyPermissionAllowed !== true}
-      on:click={copyAssistant}>Copy</Button
+      onclick={copyAssistant}>Copy</Button
     >
   </div>
 </Modal>

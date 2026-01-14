@@ -1,5 +1,6 @@
 <script lang="ts">
   import { goto, invalidateAll } from '$app/navigation';
+  import { resolve } from '$app/paths';
   import * as api from '$lib/api';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import { loading } from '$lib/stores/general';
@@ -74,7 +75,7 @@
     }
     happyToast('Agreement policy saved successfully!');
     await invalidateAll();
-    await goto(`/admin/terms`);
+    await goto(resolve(`/admin/terms`));
     $loading = false;
   };
 
@@ -100,7 +101,7 @@
     </div>
     <div slot="right">
       <a
-        href={`/admin/terms`}
+        href={resolve(`/admin/terms`)}
         class="text-sm text-blue-dark-50 font-medium bg-white rounded-full p-2 px-4 hover:text-white hover:bg-blue-dark-40 transition-all flex items-center gap-2"
         >All Agreements <ArrowRightOutline size="md" class="text-orange" /></a
       >
@@ -125,14 +126,14 @@
             changes, create a new Policy.
           </span>
           <a
-            href={`/admin/terms/policy/new`}
+            href={resolve(`/admin/terms/policy/new`)}
             class="text-sm text-blue-dark-50 font-medium bg-white rounded-full p-2 px-4 hover:text-white hover:bg-gray-800 transition-all flex items-center gap-2 shrink-0"
             >Create Policy <ArrowRightOutline size="md" class="text-orange" /></a
           >
         </div>
       </div>
     {/if}
-    <form class="flex flex-col gap-4" on:submit={handleSubmit}>
+    <form class="flex flex-col gap-4" onsubmit={handleSubmit}>
       <div>
         <Label for="name" class="mb-1">Agreement Policy Name</Label>
         <Helper class="mb-2"
@@ -198,7 +199,7 @@
       <div class="flex flex-row justify-end gap-4">
         <Button
           disabled={$loading}
-          href={`/admin/terms`}
+          href={resolve(`/admin/terms`)}
           pill
           class="bg-blue-light-50 border rounded-full border-blue-dark-40 text-blue-dark-50 hover:bg-blue-light-40"
           >Cancel</Button

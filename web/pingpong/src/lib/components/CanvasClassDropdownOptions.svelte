@@ -44,7 +44,7 @@
 </script>
 
 <div class="relative z-0">
-  {#each canvasClasses as { lms_id, name, course_code, term }}
+  {#each canvasClasses as { lms_id, name, course_code, term } (lms_id)}
     <div bind:this={classNodes[lms_id.toString()]}>
       <DropdownOption
         value={lms_id.toString()}
