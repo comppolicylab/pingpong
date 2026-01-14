@@ -2030,7 +2030,7 @@
       </div>
     {/if}
 
-    <div class="w-8/9 my-5">
+    <div class="w-full my-5">
       <Accordion>
         <AccordionItem
           bind:open={advancedOptionsOpen}
@@ -2373,6 +2373,7 @@
                   step="0.1"
                   disabled={preventEdits}
                   onchange={checkForLargeTemperatureChat}
+                  class="appearance-auto"
                 />
                 <div class="grid grid-cols-20 gap-0 mx-2">
                   <button
@@ -2429,6 +2430,7 @@
                   step="0.1"
                   disabled={preventEdits}
                   onchange={checkForLargeTemperatureAudio}
+                  class="appearance-auto"
                 />
                 <div class="grid grid-cols-6 gap-0 mx-2">
                   <button
@@ -2500,6 +2502,7 @@
                   bind:value={reasoningEffortValue}
                   step="1"
                   disabled={preventEdits}
+                  class="appearance-auto"
                 />
                 <div class="mt-2 flex flex-row justify-between">
                   {#if reasoningEffortLabels.length < 4}
@@ -2559,6 +2562,7 @@
                 bind:value={verbosityValue}
                 step="1"
                 disabled={preventEdits}
+                class="appearance-auto"
               />
               <div class="mt-2 flex flex-row justify-between">
                 <p class="text-sm">low</p>
