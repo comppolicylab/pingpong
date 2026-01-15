@@ -5,13 +5,17 @@
 	import WebSourceChip from './WebSourceChip.svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 
-	export let content: WebSearchCallItem;
-	export let forceOpen = false;
-	export let forceEagerImages = false;
+	interface Props {
+		content: WebSearchCallItem;
+		forceOpen?: boolean;
+		forceEagerImages?: boolean;
+	}
 
-	let open = false;
-	let previousOpen: boolean | null = null;
-	$: {
+	let { content, forceOpen = false, forceEagerImages = false }: Props = $props();
+
+	let open = $state(false);
+	let previousOpen: boolean | null = $state(null);
+	$effect(() => {
 		if (forceOpen) {
 			if (previousOpen === null) {
 				previousOpen = open;
@@ -21,7 +25,7 @@
 			open = previousOpen;
 			previousOpen = null;
 		}
-	}
+	});
 	const handleClick = () => (open = !open);
 
 	const deduplicateSources = (sources?: WebSearchActionSearchSource[]) => {
@@ -35,8 +39,8 @@
 		});
 	};
 
-	$: uniqueSources =
-		content?.action?.type === 'search' ? deduplicateSources(content.action.sources) : [];
+	let uniqueSources =
+		$derived(content?.action?.type === 'search' ? deduplicateSources(content.action.sources) : []);
 </script>
 
 <div class="my-3">
