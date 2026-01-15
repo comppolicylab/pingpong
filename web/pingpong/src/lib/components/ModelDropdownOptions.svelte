@@ -7,6 +7,8 @@
 	interface Props {
 		modelOptions: AssistantModelOptions[];
 		modelNodes: { [key: string]: HTMLElement };
+		optionHeaders?: { [key: string]: string };
+		headerClass?: string;
 		selectedModel: string;
 		updateSelectedModel: (model: string) => void;
 		allowVisionUpload: boolean;
@@ -16,11 +18,22 @@
 	let {
 		modelOptions,
 		modelNodes = $bindable(),
+		optionHeaders = $bindable(),
+		headerClass,
 		selectedModel,
 		updateSelectedModel,
 		allowVisionUpload,
 		smallNameText = false
 	}: Props = $props();
+
+	$effect(() => {
+		if (!headerClass || !optionHeaders) {
+			return;
+		}
+		for (const { value } of modelOptions) {
+			optionHeaders[value] = headerClass;
+		}
+	});
 </script>
 
 <div class="relative">
