@@ -1545,60 +1545,62 @@
 				</div>
 			{/if}
 			<div class="flex flex-row gap-2">
-				<DropdownContainer
-					footer
-					placeholder={selectedModelName || 'Select a model...'}
-					optionNodes={modelNodes}
-					optionHeaders={modelHeaders}
-					disabled={preventEdits}
-					bind:selectedOption={selectedModel}
-					bind:dropdownOpen
-				>
-					<DropdownHeader
-						order={1}
-						name="latest-models"
-						colorClasses="from-orange-dark to-orange"
-						topHeader>Latest Models</DropdownHeader
+				{#key selectedModelName}
+					<DropdownContainer
+						footer
+						placeholder={selectedModelName || 'Select a model...'}
+						optionNodes={modelNodes}
+						optionHeaders={modelHeaders}
+						disabled={preventEdits}
+						bind:selectedOption={selectedModel}
+						bind:dropdownOpen
 					>
-					<ModelDropdownOptions
-						modelOptions={latestModelOptions}
-						headerClass="latest-models"
-						{selectedModel}
-						{updateSelectedModel}
-						{allowVisionUpload}
-						bind:modelNodes
-						bind:optionHeaders={modelHeaders}
-					/>
-					<DropdownHeader
-						order={2}
-						name="versioned-models"
-						colorClasses="from-blue-dark-40 to-blue-dark-30">Pinned Models</DropdownHeader
-					>
-					<ModelDropdownOptions
-						modelOptions={versionedModelOptions}
-						headerClass="versioned-models"
-						{selectedModel}
-						{updateSelectedModel}
-						{allowVisionUpload}
-						bind:modelNodes
-						bind:optionHeaders={modelHeaders}
-						smallNameText
-					/>
-					<div slot="footer">
-						<DropdownFooter
-							colorClasses="from-gray-800 to-gray-600"
-							hoverable
-							hoverColorClasses="hover:from-gray-900 hover:to-gray-700"
-							link="https://platform.openai.com/docs/models"
-							><div class="flex flex-row justify-between">
-								<div class="flex flex-row gap-2">
-									<QuestionCircleSolid /> Unsure which model to choose? Check out OpenAI's documentation
-								</div>
-								<ArrowUpRightFromSquareOutline />
-							</div></DropdownFooter
+						<DropdownHeader
+							order={1}
+							name="latest-models"
+							colorClasses="from-orange-dark to-orange"
+							topHeader>Latest Models</DropdownHeader
 						>
-					</div>
-				</DropdownContainer>
+						<ModelDropdownOptions
+							modelOptions={latestModelOptions}
+							headerClass="latest-models"
+							{selectedModel}
+							{updateSelectedModel}
+							{allowVisionUpload}
+							bind:modelNodes
+							bind:optionHeaders={modelHeaders}
+						/>
+						<DropdownHeader
+							order={2}
+							name="versioned-models"
+							colorClasses="from-blue-dark-40 to-blue-dark-30">Pinned Models</DropdownHeader
+						>
+						<ModelDropdownOptions
+							modelOptions={versionedModelOptions}
+							headerClass="versioned-models"
+							{selectedModel}
+							{updateSelectedModel}
+							{allowVisionUpload}
+							bind:modelNodes
+							bind:optionHeaders={modelHeaders}
+							smallNameText
+						/>
+						<div slot="footer">
+							<DropdownFooter
+								colorClasses="from-gray-800 to-gray-600"
+								hoverable
+								hoverColorClasses="hover:from-gray-900 hover:to-gray-700"
+								link="https://platform.openai.com/docs/models"
+								><div class="flex flex-row justify-between">
+									<div class="flex flex-row gap-2">
+										<QuestionCircleSolid /> Unsure which model to choose? Check out OpenAI's documentation
+									</div>
+									<ArrowUpRightFromSquareOutline />
+								</div></DropdownFooter
+							>
+						</div>
+					</DropdownContainer>
+				{/key}
 				{#if allowVisionUpload}
 					<Badge
 						class="flex flex-row items-center gap-x-2 rounded-lg border px-2 py-0.5 text-xs normal-case {finalVisionSupport
