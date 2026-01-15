@@ -8,23 +8,22 @@
 	import { resolve } from '$app/paths';
 	import { getValue, updateSearch } from '$lib/urlstate';
 	import { loading } from '$lib/stores/general';
-	import { afterUpdate } from 'svelte';
 
-	export let data;
+	let { data } = $props();
 
-	const classOptions = [
+	let classOptions = $derived([
 		{ value: '0', name: 'All' },
 		...data.classes
 			.map((cls) => ({ value: `${cls.id}`, name: cls.name }))
 			.sort((a, b) => a.name.localeCompare(b.name))
-	];
-	$: currentClass = $page.url.searchParams.get('class_id') || '0';
-	let threads = data.threadArchive.threads || [];
-	let hasMore = !data.threadArchive.lastPage;
-	let error = data.threadArchive.error;
+	]);
+	let currentClass = $derived($page.url.searchParams.get('class_id') || '0');
+	let threads = $derived(data.threadArchive.threads || []);
+	let hasMore = $derived(!data.threadArchive.lastPage);
+	let error = $derived(data.threadArchive.error || null);
 
-	let lastData = data;
-	afterUpdate(() => {
+	let lastData = $derived(data);
+	$effect(() => {
 		if (data !== lastData) {
 			threads = data.threadArchive.threads || [];
 			hasMore = !data.threadArchive.lastPage;
@@ -33,12 +32,14 @@
 		}
 	});
 
-	const classNamesLookup = data.classes.reduce(
-		(acc, cls) => {
-			acc[cls.id] = cls;
-			return acc;
-		},
-		{} as Record<number, api.Class>
+	let classNamesLookup = $derived(
+		data.classes.reduce(
+			(acc, cls) => {
+				acc[cls.id] = cls;
+				return acc;
+			},
+			{} as Record<number, api.Class>
+		)
 	);
 
 	const fetchNextPage = async () => {
@@ -68,9 +69,13 @@
 
 <div class="flex h-full w-full flex-col">
 	<PageHeader>
-		<h2 class="text-color-blue-dark-50 px-4 py-3 font-serif text-3xl font-bold" slot="left">
-			Threads Archive
-		</h2>
+		{#snippet left()}
+			<div>
+				<h2 class="text-color-blue-dark-50 px-4 py-3 font-serif text-3xl font-bold">
+					Threads Archive
+				</h2>
+			</div>
+		{/snippet}
 	</PageHeader>
 
 	<!-- TODO: search is not yet fully supported. -->
