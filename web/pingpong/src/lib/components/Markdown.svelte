@@ -1,21 +1,25 @@
 <script lang="ts">
-	import { afterUpdate, onDestroy, tick } from 'svelte';
+	import { onDestroy, tick, mount, unmount } from 'svelte';
 	import { markdown } from '$lib/markdown';
 	import type { InlineWebSource } from '$lib/content';
 	import Sanitize from './Sanitize.svelte';
 	import WebSourceChip from './WebSourceChip.svelte';
 	import 'katex/dist/katex.min.css';
 
-	export let content = '';
-	export let syntax = true;
-	export let latex = false;
-	export let inlineWebSources: InlineWebSource[] = [];
+	interface Props {
+		content: string;
+		syntax?: boolean;
+		latex?: boolean;
+		inlineWebSources?: InlineWebSource[];
+	}
+
+	let { content, syntax = true, latex = false, inlineWebSources = [] }: Props = $props();
 
 	let container: HTMLDivElement;
 	let mountedChips: WebSourceChip[] = [];
 
 	const destroyInlineWebSources = () => {
-		mountedChips.forEach((chip) => chip.$destroy());
+		mountedChips.forEach((chip) => unmount(chip));
 		mountedChips = [];
 	};
 
@@ -47,7 +51,7 @@
 			}
 
 			mountedChips.push(
-				new WebSourceChip({
+				mount(WebSourceChip, {
 					target: placeholder as HTMLElement,
 					props: { source: source.source, type: 'chip' }
 				})
@@ -55,7 +59,7 @@
 		});
 	};
 
-	afterUpdate(() => {
+	$effect(() => {
 		mountInlineWebSources();
 	});
 

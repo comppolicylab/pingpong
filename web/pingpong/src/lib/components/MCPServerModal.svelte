@@ -17,17 +17,28 @@
 		Textarea,
 		type SelectOptionType
 	} from 'flowbite-svelte';
-	import { createEventDispatcher } from 'svelte';
+	import { createEventDispatcher, untrack } from 'svelte';
 	import { sadToast } from '$lib/toast';
 
-	export let mcpServerLocalDraft: MCPServerToolInput | null = null;
-	export let mcpServerEditIndex: number | null = null;
-	export let mcpServerRecordFromServer: MCPServerToolInput | null = null;
+	interface Props {
+		mcpServerLocalDraft?: MCPServerToolInput | null;
+		mcpServerEditIndex?: number | null;
+		mcpServerRecordFromServer?: MCPServerToolInput | null;
+	}
+
+	let {
+		mcpServerLocalDraft = null,
+		mcpServerEditIndex = null,
+		mcpServerRecordFromServer = null
+	}: Props = $props();
 	const dispatcher = createEventDispatcher();
 
-	let mcpServerDraft: MCPServerToolInput = mcpServerLocalDraft
-		? structuredClone(mcpServerLocalDraft)
-		: {
+	let mcpServerDraft: MCPServerToolInput = $derived.by(() => {
+		let mcpServerLocalDraft_ = untrack(() => mcpServerLocalDraft);
+		if (mcpServerLocalDraft_) {
+			return structuredClone(mcpServerLocalDraft_);
+		} else {
+			return {
 				server_label: undefined,
 				server_url: '',
 				display_name: '',
@@ -37,11 +48,14 @@
 				headers: {},
 				enabled: true
 			};
+		}
+	});
+	let isCreating = $derived(untrack(() => mcpServerRecordFromServer) === null);
+	let showToken = $state(false);
 
-	let isCreating = mcpServerRecordFromServer === null;
-	let showToken = false;
-
-	let serverRecordUsesTokenAuth = mcpServerRecordFromServer?.auth_type === 'token';
+	let serverRecordUsesTokenAuth = $derived(
+		untrack(() => mcpServerRecordFromServer)?.auth_type === 'token'
+	);
 
 	type MCPHeaderEntry = { key: string; value: string };
 
@@ -55,11 +69,12 @@
 		return Object.entries(headers).map(([key, value]) => ({ key, value }));
 	};
 
-	let mcpServerHeaderRows: MCPHeaderEntry[] =
-		mcpServerDraft.headers && Object.keys(mcpServerDraft.headers).length > 0
-			? headersToRows(mcpServerDraft.headers)
+	let mcpServerHeaderRows: MCPHeaderEntry[] = $derived.by(() => {
+		let mcpServerDraft_ = untrack(() => mcpServerDraft);
+		return mcpServerDraft_.headers && Object.keys(mcpServerDraft_.headers).length > 0
+			? headersToRows(mcpServerDraft_.headers)
 			: [{ key: '', value: '' }];
-
+	});
 	const addMcpServerHeaderRow = () => {
 		mcpServerHeaderRows = [...mcpServerHeaderRows, { key: '', value: '' }];
 	};

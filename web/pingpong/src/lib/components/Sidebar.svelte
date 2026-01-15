@@ -45,7 +45,11 @@
 	import { onMount } from 'svelte';
 	import { resolve } from '$app/paths';
 
-	export let data: LayoutData;
+	interface Props {
+		data: LayoutData;
+	}
+
+	let { data }: Props = $props();
 
 	// Get info about assistant provenance
 	const getAssistantMetadata = (assistant: api.Assistant) => {
@@ -58,64 +62,69 @@
 		};
 	};
 
-	$: sharedPage = data.isSharedAssistantPage || data.isSharedThreadPage;
-	$: showCollapsedSidebarOnly = data.showCollapsedSidebarOnly;
-	$: openAllLinksInNewTab = data.openAllLinksInNewTab;
-	$: logoIsClickable = data.logoIsClickable;
-	$: showSidebarItems = data.showSidebarItems;
-	$: isSharedAssistantPage = data.isSharedAssistantPage;
-	$: isSharedThreadPage = data.isSharedThreadPage;
-	$: shareToken = data.shareToken;
-	$: pathName = $page.url.pathname;
-	$: nonAuthed = (data.isPublicPage && !data?.me?.user) || data?.me?.status === 'anonymous';
-	$: avatar = data?.me?.profile?.image_url;
-	$: name = data?.me?.user?.name || data?.me?.user?.email;
+	let sharedPage = $derived(data.isSharedAssistantPage || data.isSharedThreadPage);
+	let showCollapsedSidebarOnly = $derived(data.showCollapsedSidebarOnly);
+	let openAllLinksInNewTab = $derived(data.openAllLinksInNewTab);
+	let logoIsClickable = $derived(data.logoIsClickable);
+	let showSidebarItems = $derived(data.showSidebarItems);
+	let isSharedAssistantPage = $derived(data.isSharedAssistantPage);
+	let isSharedThreadPage = $derived(data.isSharedThreadPage);
+	let shareToken = $derived(data.shareToken);
+	let pathName = $derived($page.url.pathname);
+	let nonAuthed = $derived(
+		(data.isPublicPage && !data?.me?.user) || data?.me?.status === 'anonymous'
+	);
+	let avatar = $derived(data?.me?.profile?.image_url);
+	let name = $derived(data?.me?.user?.name || data?.me?.user?.email);
 	// Index classes by ID so we can look them up easier.
-	$: classesById = ($page.data.classes || []).reduce(
-		(acc: Record<number, api.Class>, cls: api.Class) => {
+	let classesById = $derived(
+		($page.data.classes || []).reduce((acc: Record<number, api.Class>, cls: api.Class) => {
 			acc[cls.id] = cls;
 			return acc;
-		},
-		{}
+		}, {})
 	);
-	$: threads = ($page.data.threads || []) as api.Thread[];
-	$: currentClassId = parseInt($page.params.classId ?? '', 10);
-	$: currentAssistantIdQuery = parseInt($page.url.searchParams.get('assistant') || '0', 10);
-	$: currentAssistantId = $page.data.threadData?.thread?.assistant_id || currentAssistantIdQuery;
-	$: assistants = [...(($page.data.assistants || []) as api.Assistant[])].sort((a, b) => {
-		// First sort by endorsement.
-		if (a.endorsed && !b.endorsed) return -1;
-		if (!a.endorsed && b.endorsed) return 1;
-		// Then sort by whether the assistant was created by the current user.
-		if (a.creator_id === data.me.user!.id && b.creator_id !== data.me.user!.id) return -1;
-		if (a.creator_id !== data.me.user!.id && b.creator_id === data.me.user!.id) return 1;
-		// Finally, sort alphabetically by name.
-		return a.name.localeCompare(b.name);
-	});
-	let assistantsToShow: api.Assistant[] = [];
-	// Offer the top 4 assistants. If the current assistant is not in the top 4, add it to the top and remove the 4th one.
-	$: if (assistants.length > 4) {
-		assistantsToShow = assistants.slice(0, 4);
-		if (currentAssistantId && !assistantsToShow.some((a) => a.id === currentAssistantId)) {
+	let threads = $derived(($page.data.threads || []) as api.Thread[]);
+	let currentClassId = $derived(parseInt($page.params.classId ?? '', 10));
+	let currentAssistantIdQuery = $derived(
+		parseInt($page.url.searchParams.get('assistant') || '0', 10)
+	);
+	let currentAssistantId = $derived(
+		$page.data.threadData?.thread?.assistant_id || currentAssistantIdQuery
+	);
+	let assistants = $derived(
+		[...(($page.data.assistants || []) as api.Assistant[])].sort((a, b) => {
+			// First sort by endorsement.
+			if (a.endorsed && !b.endorsed) return -1;
+			if (!a.endorsed && b.endorsed) return 1;
+			// Then sort by whether the assistant was created by the current user.
+			if (a.creator_id === data.me.user!.id && b.creator_id !== data.me.user!.id) return -1;
+			if (a.creator_id !== data.me.user!.id && b.creator_id === data.me.user!.id) return 1;
+			// Finally, sort alphabetically by name.
+			return a.name.localeCompare(b.name);
+		})
+	);
+	let assistantsToShow: api.Assistant[] = $derived.by(() => {
+		// Offer the top 4 assistants. If the current assistant is not in the top 4, add it to the top and remove the 4th one.
+		if (assistants.length <= 4) return assistants;
+		let assistantsToShow_ = assistants.slice(0, 4);
+		if (currentAssistantId && !assistantsToShow_.some((a) => a.id === currentAssistantId)) {
 			const foundAssistant = assistants.find((a) => a.id === currentAssistantIdQuery);
 			if (foundAssistant) {
-				assistantsToShow.unshift(foundAssistant);
-				assistantsToShow.pop();
+				assistantsToShow_.unshift(foundAssistant);
+				assistantsToShow_.pop();
 			}
 		}
-	} else {
-		assistantsToShow = assistants;
-	}
-	$: assistantMetadata = assistants.reduce(
-		(acc: Record<number, ReturnType<typeof getAssistantMetadata>>, assistant) => {
+		return assistantsToShow_;
+	});
+	let assistantMetadata = $derived(
+		assistants.reduce((acc: Record<number, ReturnType<typeof getAssistantMetadata>>, assistant) => {
 			acc[assistant.id] = getAssistantMetadata(assistant);
 			return acc;
-		},
-		{}
+		}, {})
 	);
-	$: onNewChatPage = $page.url.pathname === `/group/${currentClassId}`;
-	$: canViewSpecificClass = data.classes.some((cls) => cls.id === currentClassId);
-	$: hasNoClasses = !nonAuthed && data.classes?.length === 0;
+	let onNewChatPage = $derived($page.url.pathname === `/group/${currentClassId}`);
+	let canViewSpecificClass = $derived(data.classes.some((cls) => cls.id === currentClassId));
+	let hasNoClasses = $derived(!nonAuthed && data.classes?.length === 0);
 
 	// Toggle whether menu is open.
 	const togglePanel = (state?: boolean) => {
@@ -127,7 +136,7 @@
 	};
 
 	type Placement = 'top-end' | 'right-start';
-	let placement: Placement = 'top-end';
+	let placement: Placement = $state('top-end');
 	function updatePlacement() {
 		if (window.innerWidth >= 1024) {
 			// lg breakpoint
@@ -143,7 +152,7 @@
 		dropdownOpen = false;
 	});
 
-	let dropdownOpen = false;
+	let dropdownOpen = $state(false);
 	const goToPage = async (
 		destination: '/about' | '/privacy-policy' | '/admin' | '/logout' | '/profile'
 	) => {
@@ -151,7 +160,7 @@
 		await goto(resolve(destination));
 	};
 
-	let inIframe = false;
+	let inIframe = $state(false);
 	onMount(() => {
 		inIframe = window.self !== window.top;
 		updatePlacement();

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { Label, type SelectOptionType, Popover, Spinner, Tooltip } from 'flowbite-svelte';
 	import { autoupload, bindToForm } from './FileUpload.svelte';
-	import { writable, type Writable } from 'svelte/store';
+	import { writable } from 'svelte/store';
 	import type { FileUploader, FileUploadInfo, ServerFile } from '$lib/api';
 	import { createEventDispatcher, onMount } from 'svelte';
 	import {
@@ -13,52 +13,60 @@
 		UsersGroupSolid
 	} from 'flowbite-svelte-icons';
 
-	/**
-	 * Name of field.
-	 */
-	export let name: string;
+	interface Props {
+		/**
+		 * Name of field.
+		 */
+		name: string;
+		/**
+		 * Items available to select.
+		 */
+		items: SelectOptionType<string>[];
+		privateFiles: ServerFile[];
+		/**
+		 * File ids of selected items.
+		 */
+		value: string[];
+		/**
+		 * Whether to allow uploading.
+		 */
+		disabled?: boolean;
+		uploading?: boolean;
+		/**
+		 * Function to run file upload.
+		 */
+		upload: FileUploader;
+		/**
+		 * File types to accept.
+		 */
+		accept?: string;
+		/**
+		 * Max upload size in bytes.
+		 */
+		maxSize?: number;
+		/**
+		 * Max number of files to select.
+		 */
+		maxCount?: number;
+		/**
+		 * Files that are currently being uploaded.
+		 */
+		uploadType?: 'File Search' | 'Code Interpreter';
+	}
 
-	/**
-	 * Items available to select.
-	 */
-	export let items: SelectOptionType<string>[];
-	export let privateFiles: ServerFile[];
-
-	/**
-	 * File ids of selected items.
-	 */
-	export let value: Writable<string[]>;
-
-	/**
-	 * Whether to allow uploading.
-	 */
-	export let disabled = false;
-	export let uploading = false;
-
-	/**
-	 * Function to run file upload.
-	 */
-	export let upload: FileUploader;
-
-	/**
-	 * File types to accept.
-	 */
-	export let accept = '*/*';
-
-	/**
-	 * Max upload size in bytes.
-	 */
-	export let maxSize = 0;
-
-	/**
-	 * Max number of files to select.
-	 */
-	export let maxCount = 10;
-
-	/**
-	 * Files that are currently being uploaded.
-	 */
-	export let uploadType: 'File Search' | 'Code Interpreter' = 'File Search';
+	let {
+		name,
+		items,
+		privateFiles,
+		value = $bindable(),
+		disabled = false,
+		uploading = false,
+		upload,
+		accept = '*/*',
+		maxSize = 0,
+		maxCount = 10,
+		uploadType = 'File Search'
+	}: Props = $props();
 
 	let loading = writable(false);
 
@@ -69,7 +77,7 @@
 	const dispatch = createEventDispatcher();
 
 	// Reference to the file upload HTML input element.
-	let uploadRef: HTMLInputElement;
+	let uploadRef: HTMLInputElement | undefined = $state();
 
 	/**
 	 * Handle file input change.
@@ -99,34 +107,38 @@
 			'assistants',
 			false,
 			dispatch,
-			value
+			writable(value)
 		);
 		$loading = false;
 	};
-	$: privateFileIds = privateFiles.map((file) => file.file_id);
-	$: availableFiles = items.filter(
-		(item) => !$value.includes(item.value) && !privateFileIds.includes(item.value)
+	let privateFileIds = $derived(privateFiles.map((file) => file.file_id));
+	let availableFiles = $derived(
+		items.filter((item) => !value.includes(item.value) && !privateFileIds.includes(item.value))
 	);
-	$: availableFileNames = [...availableFiles]
-		.sort((a, b) => (a.name as string).localeCompare(b.name as string))
-		.map((item) => item.name as string);
-	$: availableFileIds = availableFiles.map((item) => item.value);
-	$: selectedFiles = items.filter((item) => $value.includes(item.value));
-	$: selectedFileNames = [...selectedFiles]
-		.sort((a, b) => (a.name as string).localeCompare(b.name as string))
-		.map((item) => [item.name as string, privateFileIds.includes(item.value)]);
-	$: selectedFileIds = selectedFiles.map((item) => item.value);
-	let selectedAvailable: number[] = [];
-	let selectedSelected: number[] = [];
+	let availableFileNames = $derived(
+		[...availableFiles]
+			.sort((a, b) => (a.name as string).localeCompare(b.name as string))
+			.map((item) => item.name as string)
+	);
+	let availableFileIds = $derived(availableFiles.map((item) => item.value));
+	let selectedFiles = $derived(items.filter((item) => value.includes(item.value)));
+	let selectedFileNames = $derived(
+		[...selectedFiles]
+			.sort((a, b) => (a.name as string).localeCompare(b.name as string))
+			.map((item) => [item.name as string, privateFileIds.includes(item.value)])
+	);
+	let selectedFileIds = $derived(selectedFiles.map((item) => item.value));
+	let selectedAvailable: number[] = $state([]);
+	let selectedSelected: number[] = $state([]);
 
-	$: availableSpace = maxCount - selectedFiles.length;
+	let availableSpace = $derived(maxCount - selectedFiles.length);
 
-	let focusedListIsAvailable: boolean = true;
-	let focusedIndex = -1;
+	let focusedListIsAvailable: boolean = $state(true);
+	let focusedIndex = $state(-1);
 	let lastClickedIndex = -1;
 
-	let availableListElement: HTMLDivElement;
-	let selectedListElement: HTMLDivElement;
+	let availableListElement: HTMLDivElement | undefined = $state();
+	let selectedListElement: HTMLDivElement | undefined = $state();
 
 	onMount(() => {
 		availableListElement?.addEventListener(
@@ -146,10 +158,11 @@
 	});
 
 	function moveToSelected() {
+		if (!selectedListElement) return;
 		selectedAvailable
 			.sort((a, b) => a - b)
 			.forEach((index) => {
-				value.update((v) => [...v, availableFileIds[index]]);
+				value = [...value, availableFileIds[index]];
 			});
 		selectedAvailable = [];
 		focusedListIsAvailable = false;
@@ -158,11 +171,12 @@
 	}
 
 	function moveToAvailable() {
+		if (!availableListElement) return;
 		let privateIdsToDelete: string[] = [];
 		selectedSelected
 			.sort((a, b) => a - b)
 			.forEach((index) => {
-				value.update((v) => v.filter((item) => item !== selectedFileIds[index]));
+				value = value.filter((item) => item !== selectedFileIds[index]);
 				if (privateFileIds.includes(selectedFileIds[index])) {
 					privateIdsToDelete.push(selectedFileIds[index]);
 				}
@@ -223,7 +237,15 @@
 		lastClickedIndex = index;
 		focusedListIsAvailable = listIsAvailable;
 		focusedIndex = index;
-		scrollIntoView(listIsAvailable ? availableListElement : selectedListElement, index);
+		if (listIsAvailable) {
+			if (!availableListElement) return;
+			scrollIntoView(availableListElement, index);
+			return;
+		} else {
+			if (!selectedListElement) return;
+			scrollIntoView(selectedListElement, index);
+			return;
+		}
 	}
 
 	function handleKeydown(event: KeyboardEvent, listIsAvailable: boolean) {
@@ -239,8 +261,15 @@
 					focusedIndex = Math.max(0, focusedIndex - 1);
 					toggleSelection(listIsAvailable, focusedIndex, event);
 				}
-				scrollIntoView(listIsAvailable ? availableListElement : selectedListElement, focusedIndex);
-				break;
+				if (listIsAvailable) {
+					if (!availableListElement) return;
+					scrollIntoView(availableListElement, focusedIndex);
+					return;
+				} else {
+					if (!selectedListElement) return;
+					scrollIntoView(selectedListElement, focusedIndex);
+					return;
+				}
 			case 'ArrowDown':
 				event.preventDefault();
 				if (isCtrlPressed) {
@@ -249,8 +278,15 @@
 					focusedIndex = Math.min(currentList.length - 1, focusedIndex + 1);
 					toggleSelection(listIsAvailable, focusedIndex, event);
 				}
-				scrollIntoView(listIsAvailable ? availableListElement : selectedListElement, focusedIndex);
-				break;
+				if (listIsAvailable) {
+					if (!availableListElement) return;
+					scrollIntoView(availableListElement, focusedIndex);
+					return;
+				} else {
+					if (!selectedListElement) return;
+					scrollIntoView(selectedListElement, focusedIndex);
+					return;
+				}
 			case ' ':
 				if (isCtrlPressed) {
 					event.preventDefault();
@@ -407,7 +443,7 @@
 				id="upload"
 				class="mx-0 my-1 cursor-pointer rounded-sm border border-solid border-inherit bg-none px-2.5 py-1 enabled:hover:bg-slate-100 enabled:hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
 				onclick={() => {
-					uploadRef.click();
+					uploadRef?.click();
 				}}
 				disabled={!upload || disabled || $loading || selectedFiles.length >= maxCount}
 				aria-label="Upload files to add to your assistant"

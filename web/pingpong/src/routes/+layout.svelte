@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
 	import '../app.css';
 	import Sidebar from '../lib/components/Sidebar.svelte';
 	import Main from '$lib/components/Main.svelte';
@@ -6,13 +6,13 @@
 	import { onMount } from 'svelte';
 	import { detectBrowser } from '$lib/stores/general';
 
-	export let data;
+	let { data, children } = $props();
 
 	onMount(() => {
 		detectBrowser();
 	});
 
-	$: showSidebar =
+	let showSidebar = $derived(
 		((data.me &&
 			data.me.user &&
 			!data.needsOnboarding &&
@@ -20,9 +20,10 @@
 			(data.isPublicPage && !data.doNotShowSidebar) ||
 			data.isSharedAssistantPage ||
 			data.isSharedThreadPage) &&
-		!data.doNotShowSidebar;
-	$: showStatusPage = data.me?.user;
-	$: showBackground = data.isSharedAssistantPage || data.isSharedThreadPage;
+			!data.doNotShowSidebar
+	);
+	let showStatusPage = $derived(data.me?.user);
+	let showBackground = $derived(data.isSharedAssistantPage || data.isSharedThreadPage);
 </script>
 
 <SvelteToast />
@@ -33,7 +34,7 @@
 		</div>
 		<div class="main-content min-w-0 shrink grow">
 			<Main {data}>
-				<slot />
+				{@render children?.()}
 			</Main>
 		</div>
 	</div>
@@ -42,10 +43,10 @@
 	{/if}
 {:else if showBackground}
 	<Main {data}>
-		<slot />
+		{@render children?.()}
 	</Main>
 {:else}
-	<slot />
+	{@render children?.()}
 {/if}
 
 <style lang="css">

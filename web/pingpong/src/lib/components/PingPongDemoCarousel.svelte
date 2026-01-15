@@ -7,12 +7,12 @@
 	import { AngleLeftOutline, AngleRightOutline } from 'flowbite-svelte-icons';
 	import { Button, Carousel, Thumbnails, Tooltip } from 'flowbite-svelte';
 
-	let carouselHeight = 'auto';
-	let carouselWidth = 0;
-	let carouselElement: Element;
+	let carouselHeight = $state('auto');
+	let carouselWidth = $state(0);
+	let carouselElement: Element | undefined = $state();
 
 	// Carousel variables
-	let index = 0;
+	let index = $state(0);
 	let forward = true; // sync animation direction between Thumbnails and Carousel
 
 	const images = [
@@ -44,14 +44,16 @@
 		}
 	];
 
-	$: if (carouselElement && images && carouselWidth > 0) {
-		const img = new Image();
-		img.onload = () => {
-			const aspectRatio = img.height / img.width;
-			carouselHeight = `${carouselWidth * aspectRatio}px`;
-		};
-		img.src = images[index].src;
-	}
+	$effect(() => {
+		if (carouselElement && images && carouselWidth > 0) {
+			const img = new Image();
+			img.onload = () => {
+				const aspectRatio = img.height / img.width;
+				carouselHeight = `${carouselWidth * aspectRatio}px`;
+			};
+			img.src = images[index].src;
+		}
+	});
 
 	onMount(() => {
 		if (!carouselElement) return;

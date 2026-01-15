@@ -19,29 +19,31 @@
 	import { loading } from '$lib/stores/general.js';
 	import { resolve } from '$app/paths';
 
-	export let data;
+	let { data } = $props();
 
-	let registration: api.LTIRegistrationDetail = data.registration;
-	let availableInstitutions: api.Institution[] = data.availableInstitutions;
+	let registration: api.LTIRegistrationDetail = $derived(data.registration);
+	let availableInstitutions: api.Institution[] = $derived(data.availableInstitutions);
 
 	// Editable fields
-	let draftFriendlyName = registration.friendly_name || '';
-	let draftAdminName = registration.admin_name || '';
-	let draftAdminEmail = registration.admin_email || '';
-	let draftInternalNotes = registration.internal_notes || '';
-	let draftReviewNotes = registration.review_notes || '';
-	let selectedInstitutionIds: number[] = registration.institutions.map((i) => i.id);
+	let draftFriendlyName = $derived(registration.friendly_name || '');
+	let draftAdminName = $derived(registration.admin_name || '');
+	let draftAdminEmail = $derived(registration.admin_email || '');
+	let draftInternalNotes = $derived(registration.internal_notes || '');
+	let draftReviewNotes = $derived(registration.review_notes || '');
+	let selectedInstitutionIds: number[] = $derived(registration.institutions.map((i) => i.id));
 
 	// Loading states
-	let saving = false;
-	let settingStatus = false;
-	let togglingEnabled = false;
-	let savingInstitutions = false;
+	let saving = $state(false);
+	let settingStatus = $state(false);
+	let togglingEnabled = $state(false);
+	let savingInstitutions = $state(false);
 
-	$: institutionOptions = availableInstitutions.map((inst) => ({
-		value: inst.id,
-		name: inst.name
-	}));
+	let institutionOptions = $derived(
+		availableInstitutions.map((inst) => ({
+			value: inst.id,
+			name: inst.name
+		}))
+	);
 
 	const getStatusBadge = (status: api.LTIRegistrationReviewStatus) => {
 		switch (status) {
@@ -204,34 +206,40 @@
 		}
 	};
 
-	$: statusBadge = getStatusBadge(registration.review_status);
-	$: hasChanges =
+	let statusBadge = $derived(getStatusBadge(registration.review_status));
+	let hasChanges = $derived(
 		draftFriendlyName !== (registration.friendly_name || '') ||
-		draftAdminName !== (registration.admin_name || '') ||
-		draftAdminEmail !== (registration.admin_email || '') ||
-		draftInternalNotes !== (registration.internal_notes || '') ||
-		draftReviewNotes !== (registration.review_notes || '');
+			draftAdminName !== (registration.admin_name || '') ||
+			draftAdminEmail !== (registration.admin_email || '') ||
+			draftInternalNotes !== (registration.internal_notes || '') ||
+			draftReviewNotes !== (registration.review_notes || '')
+	);
 
-	$: currentInstitutionIds = registration.institutions.map((i) => i.id);
-	$: hasInstitutionChanges =
+	let currentInstitutionIds = $derived(registration.institutions.map((i) => i.id));
+	let hasInstitutionChanges = $derived(
 		selectedInstitutionIds.length !== currentInstitutionIds.length ||
-		selectedInstitutionIds.some((id) => !currentInstitutionIds.includes(id));
+			selectedInstitutionIds.some((id) => !currentInstitutionIds.includes(id))
+	);
 </script>
 
 <div class="relative flex h-full w-full flex-col">
 	<PageHeader>
-		<div slot="left">
-			<h2 class="text-color-blue-dark-50 px-4 py-3 font-serif text-3xl font-bold">
-				LTI Registration
-			</h2>
-		</div>
-		<div slot="right">
-			<a
-				href={resolve('/admin/lti')}
-				class="flex items-center gap-2 rounded-full bg-white p-2 px-4 text-sm font-medium text-blue-dark-50 transition-all hover:bg-blue-dark-40 hover:text-white"
-				>All Registrations <ArrowRightOutline size="md" class="text-orange" /></a
-			>
-		</div>
+		{#snippet left()}
+			<div>
+				<h2 class="text-color-blue-dark-50 px-4 py-3 font-serif text-3xl font-bold">
+					LTI Registration
+				</h2>
+			</div>
+		{/snippet}
+		{#snippet right()}
+			<div>
+				<a
+					href={resolve('/admin/lti')}
+					class="flex items-center gap-2 rounded-full bg-white p-2 px-4 text-sm font-medium text-blue-dark-50 transition-all hover:bg-blue-dark-40 hover:text-white"
+					>All Registrations <ArrowRightOutline size="md" class="text-orange" /></a
+				>
+			</div>
+		{/snippet}
 	</PageHeader>
 
 	<div class="h-full w-full space-y-8 overflow-y-auto p-12">

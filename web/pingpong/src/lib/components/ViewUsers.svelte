@@ -29,39 +29,46 @@
 	import { submitParentForm } from '$lib/form';
 	import CanvasLogo from './CanvasLogo.svelte';
 
-	/**
-	 * Number of users to view on each page.
-	 */
-	export let pageSize: number = 10;
-
-	/**
-	 * The current class id.
-	 */
-	export let classId: number;
-
-	/**
-	 * Function to fetch users from the server.
-	 */
-	export let fetchUsers: (page: number, pageSize: number, search?: string) => ClassUsersResponse;
-
-	/**
-	 * Style class for the table data cells.
-	 */
-	export let tdClass = 'px-3 py-2 whitespace-nowrap font-medium';
-
-	/**
-	 * Style class for the table header cells.
-	 */
-	export let thPad = 'px-3 py-2';
-
 	const rolePermissions: Record<Role, number> = {
 		admin: 3,
 		teacher: 2,
 		student: 1
 	};
 
-	export let currentUserRole: Role | null = null;
-	export let currentUserId: number | null = null;
+	interface Props {
+		/**
+		 * Number of users to view on each page.
+		 */
+		pageSize?: number;
+		/**
+		 * The current class id.
+		 */
+		classId: number;
+		/**
+		 * Function to fetch users from the server.
+		 */
+		fetchUsers: (page: number, pageSize: number, search?: string) => ClassUsersResponse;
+		/**
+		 * Style class for the table data cells.
+		 */
+		tdClass?: string;
+		/**
+		 * Style class for the table header cells.
+		 */
+		thPad?: string;
+		currentUserRole?: Role | null;
+		currentUserId?: number | null;
+	}
+
+	let {
+		pageSize = 10,
+		classId,
+		fetchUsers,
+		tdClass = 'px-3 py-2 whitespace-nowrap font-medium',
+		thPad = 'px-3 py-2',
+		currentUserRole = null,
+		currentUserId = null
+	}: Props = $props();
 
 	/**
 	 * Check if the current user has permission to edit the role of a user.
@@ -90,21 +97,21 @@
 	];
 
 	// Whether a request is in flight.
-	let loading = false;
+	let loading = $state(false);
 	// The current list of users.
-	let users: ClassUser[] = [];
+	let users: ClassUser[] = $state([]);
 	// The current page (1-based index).
-	let page = 1;
+	let page = $state(1);
 	// The total number of users in the full (unpaginated) resultset.
-	let total = 0;
+	let total = $state(0);
 	// The current search query.
-	let search = '';
+	let search = $state('');
 	// The list of pagination links to show.
-	let pages: Array<LinkType> = [];
+	let pages: Array<LinkType> = $state([]);
 	// The index of the first user on the current page.
-	$: startIdx = Math.min(total, Math.max(0, (page - 1) * pageSize + 1));
+	let startIdx = $derived(Math.min(total, Math.max(0, (page - 1) * pageSize + 1)));
 	// The index of the last user on the current page.
-	$: endIdx = Math.min(startIdx + pageSize - 1, total);
+	let endIdx = $derived(Math.min(startIdx + pageSize - 1, total));
 
 	/**
 	 * Fetch users from the server based on component state.

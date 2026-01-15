@@ -4,9 +4,9 @@
 	import { onMount, setContext } from 'svelte';
 	import { writable } from 'svelte/store';
 
-	export let data;
+	let { data, children } = $props();
 
-	let headerEl: HTMLDivElement;
+	let headerEl: HTMLDivElement | undefined = $state();
 	const headerHeightStore = writable(0);
 
 	onMount(() => {
@@ -18,7 +18,7 @@
 	// Figure out if we're on the assistant page.
 	// When we are, we want to show the "Manage Class" link.
 	// For every other page, we show the "View Class Page" link.
-	$: isOnClassPage = $page.url.pathname === `/group/${data.class?.id}/assistant`;
+	let isOnClassPage = $derived($page.url.pathname === `/group/${data.class?.id}/assistant`);
 </script>
 
 <div class="relative flex h-full w-full flex-col">
@@ -33,7 +33,7 @@
 			/>
 		</div>
 	{/if}
-	<slot />
+	{@render children?.()}
 </div>
 
 <style>

@@ -6,9 +6,9 @@
 	import { goto } from '$app/navigation';
 	import PingPongLogo from '$lib/components/PingPongLogo.svelte';
 
-	export let data;
+	let { data } = $props();
 
-	let loading = false;
+	let loading = $state(false);
 
 	const saveName = async (event: SubmitEvent) => {
 		event.preventDefault();

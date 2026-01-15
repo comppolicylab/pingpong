@@ -1,4 +1,4 @@
-<script context="module" lang="ts">
+<script module lang="ts">
 	// Automatically upload files when they are selected.
 	export const autoupload = (
 		toUpload: File[],
@@ -141,81 +141,98 @@
 	import { Button } from 'flowbite-svelte';
 	import type { FileUploader, FileUploadInfo, FileUploadPurpose } from '$lib/api';
 	import { humanSize } from '$lib/size';
-	/**
-	 * Whether to allow uploading.
-	 */
-	export let disabled = false;
 
-	/**
-	 * Function to run file upload.
-	 */
-	export let upload: FileUploader;
+	interface Props {
+		/**
+		 * Whether to allow uploading.
+		 */
+		disabled?: boolean;
+		/**
+		 * Function to run file upload.
+		 */
+		upload: FileUploader;
+		purpose?: FileUploadPurpose;
+		useImageDescriptions?: boolean;
+		/**
+		 * Additional classes to apply to wrapper.
+		 */
+		wrapperClass?: string;
+		/**
+		 * File types to accept.
+		 */
+		accept?: string;
+		/**
+		 * Type of icon to display.
+		 */
+		type?: 'file_search' | 'code_interpreter' | 'image' | 'multimodal';
+		/**
+		 * Max upload size in bytes.
+		 */
+		maxSize?: number;
+		/**
+		 * Whether to support dropping files.
+		 */
+		drop?: boolean;
+		/**
+		 * Types of file search files to accept.
+		 */
+		fileSearchAcceptedFiles?: string | null;
+		fileSearchAttachmentCount?: number;
+		threadFileSearchMaxCount?: number;
+		/**
+		 * Types of code interpreter files to accept.
+		 */
+		codeInterpreterAcceptedFiles?: string | null;
+		codeInterpreterAttachmentCount?: number;
+		threadCodeInterpreterMaxCount?: number;
+		/**
+		 * Types of vision files to accept.
+		 */
+		visionAcceptedFiles?: string | null;
+		/**
+		 * Max number of file search and code interpreter files to accept.
+		 */
+		documentMaxCount?: number;
+		currentDocumentCount?: number;
+		/**
+		 * Max number of vision files to accept.
+		 */
+		visionMaxCount?: number;
+		currentVisionCount?: number;
+		icon?: import('svelte').Snippet;
+		label?: import('svelte').Snippet;
+	}
 
-	export let purpose: FileUploadPurpose = 'assistants';
-
-	export let useImageDescriptions: boolean = false;
-
-	/**
-	 * Additional classes to apply to wrapper.
-	 */
-	export let wrapperClass: string = '';
-
-	/**
-	 * File types to accept.
-	 */
-	export let accept = '*/*';
-
-	/**
-	 * Type of icon to display.
-	 */
-	export let type: 'file_search' | 'code_interpreter' | 'image' | 'multimodal' = 'multimodal';
-
-	/**
-	 * Max upload size in bytes.
-	 */
-	export let maxSize = 0;
-
-	/**
-	 * Whether to support dropping files.
-	 */
-	export let drop = false;
-
-	/**
-	 * Types of file search files to accept.
-	 */
-	export let fileSearchAcceptedFiles: string | null = null;
-	export let fileSearchAttachmentCount = 0;
-	export let threadFileSearchMaxCount = 0;
-
-	/**
-	 * Types of code interpreter files to accept.
-	 */
-	export let codeInterpreterAcceptedFiles: string | null = null;
-	export let codeInterpreterAttachmentCount = 0;
-	export let threadCodeInterpreterMaxCount = 0;
-
-	/**
-	 * Types of vision files to accept.
-	 */
-	export let visionAcceptedFiles: string | null = null;
-
-	/**
-	 * Max number of file search and code interpreter files to accept.
-	 */
-	export let documentMaxCount = 0;
-	export let currentDocumentCount = 0;
-
-	/**
-	 * Max number of vision files to accept.
-	 */
-	export let visionMaxCount = 0;
-	export let currentVisionCount = 0;
+	let {
+		disabled = false,
+		upload,
+		purpose = 'assistants',
+		useImageDescriptions = false,
+		wrapperClass = '',
+		accept = '*/*',
+		type = 'multimodal',
+		maxSize = 0,
+		drop = false,
+		fileSearchAcceptedFiles = null,
+		fileSearchAttachmentCount = 0,
+		threadFileSearchMaxCount = 0,
+		codeInterpreterAcceptedFiles = null,
+		codeInterpreterAttachmentCount = 0,
+		threadCodeInterpreterMaxCount = 0,
+		visionAcceptedFiles = null,
+		documentMaxCount = 0,
+		currentDocumentCount = 0,
+		visionMaxCount = 0,
+		currentVisionCount = 0,
+		icon,
+		label
+	}: Props = $props();
 
 	// Ref to the dropzone.
-	let dropzone: HTMLDivElement;
+	let dropzone: HTMLDivElement | undefined = $state(undefined);
 
 	// Whether the dropzone is being targeted by a file.
-	let dropzoneActive = false;
+	let dropzoneActive = $state(false);
 
 	// Event dispatcher for custom events.
 	const dispatch = createEventDispatcher();
@@ -224,7 +241,7 @@
 	const files = writable<FileUploadInfo[]>([]);
 
 	// Reference to the file upload HTML input element.
-	let uploadRef: HTMLInputElement;
+	let uploadRef: HTMLInputElement | undefined = $state(undefined);
 
 	/**
 	 * Handle file drop.
@@ -368,9 +385,9 @@
 	};
 
 	// Set the drop handler according to whether drop is enabled.
-	$: dropHandler = drop ? handleDropFiles : undefined;
-	$: dropenterHandler = drop ? handleDropEnter : undefined;
-	$: dropleaveHandler = drop ? handleDropLeave : undefined;
+	let dropHandler = $derived(drop ? handleDropFiles : undefined);
+	let dropenterHandler = $derived(drop ? handleDropEnter : undefined);
+	let dropleaveHandler = $derived(drop ? handleDropLeave : undefined);
 </script>
 
 <div
@@ -402,20 +419,18 @@
 			class={`h-8 w-8 border-transparent bg-blue-light-40 p-1.5 ${
 				drop ? 'border-transparent bg-blue-light-40' : ''
 			} ${dropzoneActive ? 'animate-bounce' : ''}`}
-			onclick={() => uploadRef.click()}
+			onclick={() => uploadRef?.click()}
 		>
-			<slot name="icon">
-				{#if type === 'file_search'}
-					<FileSearchOutline size="md" />
-				{:else if type === 'image'}
-					<ImageOutline size="md" />
-				{:else if type === 'code_interpreter'}
-					<FileCodeOutline size="md" />
-				{:else}
-					<PaperClipOutline size="md" />
-				{/if}
-			</slot>
+			{#if icon}{@render icon()}{:else if type === 'file_search'}
+				<FileSearchOutline size="md" />
+			{:else if type === 'image'}
+				<ImageOutline size="md" />
+			{:else if type === 'code_interpreter'}
+				<FileCodeOutline size="md" />
+			{:else}
+				<PaperClipOutline size="md" />
+			{/if}
 		</Button>
-		<slot name="label" />
+		{@render label?.()}
 	</label>
 </div>

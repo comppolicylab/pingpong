@@ -45,28 +45,45 @@
 	import { invalidateAll } from '$app/navigation';
 	import { loading, loadingMessage } from '$lib/stores/general';
 
-	export let assistant: Assistant;
-	export let creator: AppUser;
-	export let editable = false;
-	export let shareable = false;
-	export let classOptions: { id: number; name: string; term: string }[] = [];
-	export let currentClassId: number;
+	interface Props {
+		assistant: Assistant;
+		creator: AppUser;
+		editable?: boolean;
+		shareable?: boolean;
+		classOptions?: { id: number; name: string; term: string }[];
+		currentClassId: number;
+		header?: import('svelte').Snippet;
+	}
 
-	let sharedAssistantModalOpen = false;
-	let copyAssistantModalOpen = false;
-	let deleteAssistantModalOpen = false;
-	let copyName = '';
-	let copyTargetClassId = `${currentClassId}`;
-	let copyPermissionAllowed: boolean | undefined = undefined;
-	let copyPermissionLoading = false;
-	let copyPermissionError = '';
+	let {
+		assistant,
+		creator,
+		editable = false,
+		shareable = false,
+		classOptions = [],
+		currentClassId,
+		header
+	}: Props = $props();
+
+	let sharedAssistantModalOpen = $state(false);
+	let copyAssistantModalOpen = $state(false);
+	let deleteAssistantModalOpen = $state(false);
+	let copyName = $state('');
+	let copyTargetClassId = $derived(`${currentClassId}`);
+	let copyPermissionAllowed: boolean | undefined = $state();
+	let copyPermissionLoading = $state(false);
+	let copyPermissionError = $state('');
 
 	// Get the full URL to use the assistant
-	$: assistantLink = `${$page.url.protocol}//${$page.url.host}/group/${assistant.class_id}?assistant=${assistant.id}`;
-	$: sharedAssistantLinkWithParam = `${$page.url.protocol}//${$page.url.host}/group/${assistant.class_id}/shared/assistant/${assistant.id}?share_token=`;
+	let assistantLink = $derived(
+		`${$page.url.protocol}//${$page.url.host}/group/${assistant.class_id}?assistant=${assistant.id}`
+	);
+	let sharedAssistantLinkWithParam = $derived(
+		`${$page.url.protocol}//${$page.url.host}/group/${assistant.class_id}/shared/assistant/${assistant.id}?share_token=`
+	);
 
-	$: currentlyShared = assistant.share_links?.some((link) => link.active);
-	$: shareLinks = assistant.share_links || [];
+	let currentlyShared = $derived(assistant.share_links?.some((link) => link.active));
+	let shareLinks = $derived(assistant.share_links || []);
 
 	// Show info that we copied the link to the clipboard
 	const showCopiedLink = (e: Event) => {
@@ -193,13 +210,13 @@
 </script>
 
 <Modal size="xl" bind:open={sharedAssistantModalOpen}>
-	<slot name="header">
+	{#if header}{@render header()}{:else}
 		<Heading
 			tag="h2"
 			class="mr-5 mb-4 max-w-max shrink-0 font-serif text-3xl font-medium text-blue-dark-40"
 			color="blue">Manage Shared Links</Heading
 		>
-	</slot>
+	{/if}
 	<div class="mb-4 flex flex-row flex-wrap items-center justify-between gap-y-4 text-blue-dark-50">
 		<Button
 			pill
@@ -376,11 +393,11 @@
 	bind:open={copyAssistantModalOpen}
 	onclose={() => (copyAssistantModalOpen = false)}
 >
-	<slot name="header">
+	{#if header}{@render header()}{:else}
 		<Heading tag="h3" class="font-serif text-2xl font-medium text-blue-dark-40"
 			>Copy Assistant</Heading
 		>
-	</slot>
+	{/if}
 	<p class="mb-4 text-blue-dark-40">
 		This will create a private copy of <b>{assistant.name}</b> in the group you select. You can rename
 		it below.

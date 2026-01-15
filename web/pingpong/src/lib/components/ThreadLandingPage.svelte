@@ -38,11 +38,8 @@
 	import AssistantVersionBadge from '$lib/components/AssistantVersionBadge.svelte';
 	import StatusErrors from './StatusErrors.svelte';
 
-	/**
-	 * Application data.
-	 */
-	export let data;
-	$: conversationId = $page.url.searchParams.get('conversation_id');
+	let { data } = $props();
+	let conversationId = $derived($page.url.searchParams.get('conversation_id'));
 
 	const errorMessages: Record<number, string> = {
 		1: 'We faced an issue when trying to sync with Canvas.'
@@ -89,75 +86,67 @@
 	};
 
 	let userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-	$: isPrivate = data.class.private || false;
+	let isPrivate = $derived(data.class.private || false);
 	// Currently selected assistant.
-	$: assistants = data?.assistants || [];
-	$: teachers = data?.supervisors || [];
-	$: courseAssistants = assistants.filter((asst: Assistant) => asst.endorsed);
-	$: myAssistantsAll = assistants.filter((asst: Assistant) => asst.creator_id === data.me.user?.id);
-	$: myAssistants = myAssistantsAll.filter((asst: Assistant) => !asst.endorsed);
-	$: otherAssistantsAll = assistants.filter(
-		(asst: Assistant) => asst.creator_id !== data.me.user?.id
+	let assistants = $derived(data?.assistants || []);
+	let teachers = $derived(data?.supervisors || []);
+	let courseAssistants = $derived(assistants.filter((asst: Assistant) => asst.endorsed));
+	let myAssistantsAll = $derived(
+		assistants.filter((asst: Assistant) => asst.creator_id === data.me.user?.id)
 	);
-	$: otherAssistants = otherAssistantsAll.filter((asst: Assistant) => !asst.endorsed);
-	let assistant = data?.assistants[0] || {};
-	$: assistantMeta = getAssistantMetadata(assistant);
+	let myAssistants = $derived(myAssistantsAll.filter((asst: Assistant) => !asst.endorsed));
+	let otherAssistantsAll = $derived(
+		assistants.filter((asst: Assistant) => asst.creator_id !== data.me.user?.id)
+	);
+	let otherAssistants = $derived(otherAssistantsAll.filter((asst: Assistant) => !asst.endorsed));
+	let linkedAssistant = $derived(parseInt($page.url.searchParams.get('assistant') || '0', 10));
+	let assistant: api.Assistant = $derived(
+		data.assistants.find((assistant: api.Assistant) => assistant.id === linkedAssistant) ||
+			data?.assistants[0] ||
+			{}
+	);
+	let assistantMeta = $derived(getAssistantMetadata(assistant));
 	// Whether billing is set up for the class (which controls everything).
-	$: isConfigured = data?.hasAssistants && data?.hasAPIKey;
-	$: parties = data.me.status === 'anonymous' ? '' : data.me.user?.id ? `${data.me.user.id}` : '';
+	let isConfigured = $derived(data?.hasAssistants && data?.hasAPIKey);
+	let parties = $derived(
+		data.me.status === 'anonymous' ? '' : data.me.user?.id ? `${data.me.user.id}` : ''
+	);
 	// The assistant ID from the URL.
-	$: linkedAssistant = parseInt($page.url.searchParams.get('assistant') || '0', 10);
-	let useImageDescriptions = false;
-	let allowUserFileUploads = true;
-	let allowUserImageUploads = true;
-	$: {
-		if (linkedAssistant && assistants) {
-			const selectedAssistant = (assistants || []).find(
-				(asst: Assistant) => asst.id === linkedAssistant
-			);
-			if (selectedAssistant) {
-				assistant = selectedAssistant;
-				useImageDescriptions = assistant.use_image_descriptions || false;
-				allowUserFileUploads = assistant.allow_user_file_uploads ?? true;
-				allowUserImageUploads = assistant.allow_user_image_uploads ?? true;
-			}
-		}
-	}
-	$: supportsFileSearch = assistant.tools?.includes('file_search') || false;
-	$: supportsCodeInterpreter = assistant.tools?.includes('code_interpreter') || false;
-	$: supportsWebSearch = assistant.tools?.includes('web_search') || false;
-	$: supportsMCPServer = assistant.tools?.includes('mcp_server') || false;
-	let supportsVision = false;
-	$: {
+	let useImageDescriptions = $derived(assistant.use_image_descriptions || false);
+	let allowUserFileUploads = $derived(assistant.allow_user_file_uploads ?? true);
+	let allowUserImageUploads = $derived(assistant.allow_user_image_uploads ?? true);
+	let supportsFileSearch = $derived(assistant.tools?.includes('file_search') || false);
+	let supportsCodeInterpreter = $derived(assistant.tools?.includes('code_interpreter') || false);
+	let supportsWebSearch = $derived(assistant.tools?.includes('web_search') || false);
+	let supportsMCPServer = $derived(assistant.tools?.includes('mcp_server') || false);
+	let supportsVision = $derived.by(() => {
 		const supportVisionModels = (
 			data.modelInfo.filter((model: api.AssistantModelLite) => model.supports_vision) || []
 		).map((model: api.AssistantModelLite) => model.id);
-		supportsVision = supportVisionModels.includes(assistant.model);
-	}
-	let visionSupportOverride: boolean | undefined;
-	$: {
-		visionSupportOverride =
-			data.class.ai_provider === 'azure'
-				? data.modelInfo.find((model: api.AssistantModelLite) => model.id === assistant.model)
-						?.azure_supports_vision
-				: undefined;
-	}
-	let allowVisionUpload = true;
-	let showModerators = false;
+		return supportVisionModels.includes(data.threadModel);
+	});
+	let visionSupportOverride: boolean | undefined = $derived(
+		data.class?.ai_provider === 'azure'
+			? data.modelInfo.find((model: api.AssistantModelLite) => model.id === data.threadModel)
+					?.azure_supports_vision
+			: undefined
+	);
 
-	$: statusComponents = (data.statusComponents || {}) as Partial<
-		Record<string, api.StatusComponentUpdate[]>
-	>;
-	let latestIncidentUpdateTimestamps: Record<string, number> = {};
-	$: latestIncidentUpdateTimestamps = computeLatestIncidentTimestamps(statusComponents);
-	$: assistantVersionNumber = Number(assistant?.version ?? 0);
-	$: statusComponentId =
+	let allowVisionUpload = true;
+	let showModerators = $state(false);
+
+	let statusComponents = $derived(
+		(data.statusComponents || {}) as Partial<Record<string, api.StatusComponentUpdate[]>>
+	);
+	let latestIncidentUpdateTimestamps = $derived(computeLatestIncidentTimestamps(statusComponents));
+	let assistantVersionNumber = $derived(Number(assistant?.version ?? 0));
+	let statusComponentId = $derived(
 		assistantVersionNumber >= 3
 			? api.STATUS_COMPONENT_IDS.nextGen
-			: api.STATUS_COMPONENT_IDS.classic;
-	$: assistantStatusUpdates = filterLatestIncidentUpdates(
-		statusComponents[statusComponentId],
-		latestIncidentUpdateTimestamps
+			: api.STATUS_COMPONENT_IDS.classic
+	);
+	let assistantStatusUpdates = $derived(
+		filterLatestIncidentUpdates(statusComponents[statusComponentId], latestIncidentUpdateTimestamps)
 	);
 
 	// Handle file upload
@@ -332,7 +321,7 @@
 		}
 	};
 
-	let assistantDropdownOpen = false;
+	let assistantDropdownOpen = $state(false);
 	// Set the new assistant selection.
 	const selectAi = async (asst: Assistant) => {
 		assistantDropdownOpen = false;

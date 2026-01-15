@@ -2,16 +2,23 @@
 	import { Heading, P, Modal, A } from 'flowbite-svelte';
 	import PingPongDemoCarousel from '$lib/components/PingPongDemoCarousel.svelte';
 	import { resolve } from '$app/paths';
+	import { type Snippet } from 'svelte';
 
-	export let nonAuthed: boolean;
-	export let linksOpenInNewTab: boolean = false;
+	interface Props {
+		nonAuthed: boolean;
+		linksOpenInNewTab?: boolean;
+		header?: Snippet;
+		footer?: Snippet;
+	}
+
+	let { nonAuthed, linksOpenInNewTab = false, header, footer }: Props = $props();
 
 	const year = new Date().getFullYear();
-	let acknowledgementsModal = false;
+	let acknowledgementsModal = $state(false);
 </script>
 
 <div class="about flex h-full flex-col gap-8 overflow-y-auto">
-	<slot name="header" />
+	{@render header?.()}
 	<div class="px-12 pt-12 text-center">
 		<Heading tag="h2" class="mt-4 mb-6" customSize="text-4xl font-extrabold md:text-5xl lg:text-6xl"
 			>{#if nonAuthed}Welcome to{:else}About{/if}
@@ -114,7 +121,7 @@
 		</ol>
 	</div>
 
-	<slot name="footer" />
+	{@render footer?.()}
 	<div class="flex w-full flex-col gap-8 bg-blue-dark-40 p-8">
 		<div class="flex flex-row items-center justify-evenly gap-2 px-12">
 			<div class="w-48">

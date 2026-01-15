@@ -3,16 +3,26 @@
 	import { createEventDispatcher } from 'svelte';
 	import { ExclamationCircleOutline } from 'flowbite-svelte-icons';
 
-	export let warningTitle: string;
-	export let warningDescription: string;
-	export let warningMessage: string;
-	export let cancelButtonText: string;
-	export let confirmText: string;
+	interface Props {
+		warningTitle: string;
+		warningDescription: string;
+		warningMessage: string;
+		cancelButtonText: string;
+		confirmText: string;
+		confirmButtonText: string;
+	}
 
-	export let confirmButtonText: string;
+	let {
+		warningTitle,
+		warningDescription,
+		warningMessage,
+		cancelButtonText,
+		confirmText,
+		confirmButtonText
+	}: Props = $props();
 
 	const dispatch = createEventDispatcher();
-	let confirmInput = '';
+	let confirmInput = $state('');
 </script>
 
 <div class="px-2 text-center">

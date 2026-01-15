@@ -25,17 +25,17 @@
 	import { sadToast, happyToast } from '$lib/toast';
 	import { invalidateAll } from '$app/navigation';
 
-	export let data;
+	let { data } = $props();
 
-	$: activitySubscription = data.subscriptions || [];
-	$: eligibleSubscriptions = activitySubscription.filter(
-		(sub) => !sub.class_private && sub.class_has_api_key
+	let activitySubscription = $derived(data.subscriptions || []);
+	let eligibleSubscriptions = $derived(
+		activitySubscription.filter((sub) => !sub.class_private && sub.class_has_api_key)
 	);
-	$: allSubscribed = eligibleSubscriptions.every((sub) => sub.subscribed);
-	$: noneSubscribed = eligibleSubscriptions.every((sub) => !sub.subscribed);
-	$: dnaAcCreate = !!data.subscriptionOpts.dna_as_create || false;
-	$: dnaAcJoin = !!data.subscriptionOpts.dna_as_join || false;
-	$: sortedLogins =
+	let allSubscribed = $derived(eligibleSubscriptions.every((sub) => sub.subscribed));
+	let noneSubscribed = $derived(eligibleSubscriptions.every((sub) => !sub.subscribed));
+	let dnaAcCreate = $derived(!!data.subscriptionOpts.dna_as_create || false);
+	let dnaAcJoin = $derived(!!data.subscriptionOpts.dna_as_join || false);
+	let sortedLogins = $derived(
 		data.externalLogins.sort((a: api.ExternalLogin, b: api.ExternalLogin) => {
 			const nameA = a.provider_obj.display_name ?? a.provider_obj.name;
 			const nameB = b.provider_obj.display_name ?? b.provider_obj.name;
@@ -45,8 +45,9 @@
 			}
 
 			return a.identifier.localeCompare(b.identifier);
-		}) || [];
-	const inputState = {
+		}) || []
+	);
+	const inputState = $state({
 		first_name: {
 			loading: false,
 			error: ''
@@ -55,7 +56,7 @@
 			loading: false,
 			error: ''
 		}
-	};
+	});
 
 	const saveField = (field: keyof typeof inputState) => async (event: Event) => {
 		const target = event.target as HTMLInputElement | undefined;
@@ -172,9 +173,9 @@
 
 <div class="relative flex h-full w-full flex-col">
 	<PageHeader>
-		<h2 class="text-color-blue-dark-50 px-4 py-3 font-serif text-3xl font-bold" slot="left">
-			Your Profile
-		</h2>
+		{#snippet left()}
+			<h2 class="text-color-blue-dark-50 px-4 py-3 font-serif text-3xl font-bold">Your Profile</h2>
+		{/snippet}
 	</PageHeader>
 	<div class="h-full w-full overflow-y-auto p-12">
 		<div class="mb-4 flex flex-row flex-wrap items-center justify-between gap-y-4">

@@ -1,8 +1,12 @@
 <script lang="ts">
 	import logo from './canvas-logo.svg?raw';
 
-	export let size: number | string = 8;
-	export let extraClass = '';
+	interface Props {
+		size?: number | string;
+		extraClass?: string;
+	}
+
+	let { size = 8, extraClass = '' }: Props = $props();
 </script>
 
 <div class="w-{size} {extraClass}">
