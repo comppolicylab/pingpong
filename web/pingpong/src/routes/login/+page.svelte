@@ -7,14 +7,14 @@
 	import * as api from '$lib/api';
 	import { page } from '$app/stores';
 
-	export let form;
+	let { form } = $props();
 	const forward = $page.url.searchParams.get('forward') || '/';
 	const expired = $page.url.searchParams.get('expired') === 'true' || false;
 	const new_link = $page.url.searchParams.get('new_link') === 'true' || false;
 	const loggingIn = writable(false);
 	const success = writable(false);
 
-	let email = form?.email ?? '';
+	let email = $derived(form?.email ?? '');
 
 	const loginWithMagicLink = async (evt: SubmitEvent) => {
 		evt.preventDefault();

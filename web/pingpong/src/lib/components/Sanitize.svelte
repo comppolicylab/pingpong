@@ -17,7 +17,6 @@
 		sanitizeInput(html);
 	});
 
-
 	function sanitizeInput(value: string | Promise<string>) {
 		if (typeof value === 'string') {
 			sanitized = DOMPurify.sanitize(value);

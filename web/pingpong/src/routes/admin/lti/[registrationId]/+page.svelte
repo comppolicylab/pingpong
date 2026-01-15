@@ -38,10 +38,12 @@
 	let togglingEnabled = $state(false);
 	let savingInstitutions = $state(false);
 
-	let institutionOptions = $derived(availableInstitutions.map((inst) => ({
-		value: inst.id,
-		name: inst.name
-	})));
+	let institutionOptions = $derived(
+		availableInstitutions.map((inst) => ({
+			value: inst.id,
+			name: inst.name
+		}))
+	);
 
 	const getStatusBadge = (status: api.LTIRegistrationReviewStatus) => {
 		switch (status) {
@@ -205,37 +207,39 @@
 	};
 
 	let statusBadge = $derived(getStatusBadge(registration.review_status));
-	let hasChanges =
-		$derived(draftFriendlyName !== (registration.friendly_name || '') ||
-		draftAdminName !== (registration.admin_name || '') ||
-		draftAdminEmail !== (registration.admin_email || '') ||
-		draftInternalNotes !== (registration.internal_notes || '') ||
-		draftReviewNotes !== (registration.review_notes || ''));
+	let hasChanges = $derived(
+		draftFriendlyName !== (registration.friendly_name || '') ||
+			draftAdminName !== (registration.admin_name || '') ||
+			draftAdminEmail !== (registration.admin_email || '') ||
+			draftInternalNotes !== (registration.internal_notes || '') ||
+			draftReviewNotes !== (registration.review_notes || '')
+	);
 
 	let currentInstitutionIds = $derived(registration.institutions.map((i) => i.id));
-	let hasInstitutionChanges =
-		$derived(selectedInstitutionIds.length !== currentInstitutionIds.length ||
-		selectedInstitutionIds.some((id) => !currentInstitutionIds.includes(id)));
+	let hasInstitutionChanges = $derived(
+		selectedInstitutionIds.length !== currentInstitutionIds.length ||
+			selectedInstitutionIds.some((id) => !currentInstitutionIds.includes(id))
+	);
 </script>
 
 <div class="relative flex h-full w-full flex-col">
 	<PageHeader>
 		{#snippet left()}
-				<div >
+			<div>
 				<h2 class="text-color-blue-dark-50 px-4 py-3 font-serif text-3xl font-bold">
 					LTI Registration
 				</h2>
 			</div>
-			{/snippet}
+		{/snippet}
 		{#snippet right()}
-				<div >
+			<div>
 				<a
 					href={resolve('/admin/lti')}
 					class="flex items-center gap-2 rounded-full bg-white p-2 px-4 text-sm font-medium text-blue-dark-50 transition-all hover:bg-blue-dark-40 hover:text-white"
 					>All Registrations <ArrowRightOutline size="md" class="text-orange" /></a
 				>
 			</div>
-			{/snippet}
+		{/snippet}
 	</PageHeader>
 
 	<div class="h-full w-full space-y-8 overflow-y-auto p-12">

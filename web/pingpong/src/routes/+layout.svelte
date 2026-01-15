@@ -12,15 +12,16 @@
 		detectBrowser();
 	});
 
-	let showSidebar =
-		$derived(((data.me &&
+	let showSidebar = $derived(
+		((data.me &&
 			data.me.user &&
 			!data.needsOnboarding &&
 			(!data.needsAgreements || !data.doNotShowSidebar)) ||
 			(data.isPublicPage && !data.doNotShowSidebar) ||
 			data.isSharedAssistantPage ||
 			data.isSharedThreadPage) &&
-		!data.doNotShowSidebar);
+			!data.doNotShowSidebar
+	);
 	let showStatusPage = $derived(data.me?.user);
 	let showBackground = $derived(data.isSharedAssistantPage || data.isSharedThreadPage);
 </script>

@@ -3,10 +3,6 @@
 	import DropdownBadge from './DropdownBadge.svelte';
 	import DropdownOption from './DropdownOption.svelte';
 
-	
-	
-	
-	
 	interface Props {
 		// The Canvas class options to display in the dropdown
 		canvasClasses: CanvasClass[];
@@ -44,15 +40,17 @@
 		'border-monza-red-400 from-monza-red-50 to-monza-red-100 text-monza-red-800'
 	];
 	// Extract the terms from the Canvas classes
-	const termsInList = [...new Set(canvasClasses.map((c) => c.term || 'Unknown term'))];
+	let termsInList = $derived([...new Set(canvasClasses.map((c) => c.term || 'Unknown term'))]);
 	// Map of terms to colors
-	const termToColor = termsInList.reduce(
-		(acc, term, index) => {
-			const color = colorPalettes[index % colorPalettes.length];
-			acc[term] = color;
-			return acc;
-		},
-		{} as { [key: string]: string }
+	let termToColor = $derived(
+		termsInList.reduce(
+			(acc, term, index) => {
+				const color = colorPalettes[index % colorPalettes.length];
+				acc[term] = color;
+				return acc;
+			},
+			{} as { [key: string]: string }
+		)
 	);
 </script>
 
@@ -70,8 +68,8 @@
 					extraClasses={termToColor[term || 'Unknown term'] ||
 						'border-amber-400 from-amber-50 to-amber-100 text-amber-700'}
 					>{#snippet name()}
-										<span >{term || 'Unknown term'}</span>
-									{/snippet}</DropdownBadge
+						<span>{term || 'Unknown term'}</span>
+					{/snippet}</DropdownBadge
 				>
 			</DropdownOption>
 		</div>

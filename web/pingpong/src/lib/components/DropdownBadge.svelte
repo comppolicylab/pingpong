@@ -7,7 +7,11 @@
 		name?: Snippet;
 	}
 
-	let { extraClasses = 'border-amber-400 from-amber-50 to-amber-100 text-amber-700', icon, name }: Props = $props();
+	let {
+		extraClasses = 'border-amber-400 from-amber-50 to-amber-100 text-amber-700',
+		icon,
+		name
+	}: Props = $props();
 </script>
 
 <Badge

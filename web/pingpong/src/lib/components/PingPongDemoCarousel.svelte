@@ -81,33 +81,33 @@
 		style="height: {carouselHeight}"
 	>
 		<Controls let:changeSlide>
-						<Button
-						pill
-						class="absolute start-4 top-1/2 -translate-y-1/2 bg-blue-light-50 p-2 font-bold text-blue-dark-40 opacity-90 hover:opacity-100"
-						onclick={() => changeSlide(false)}><AngleLeftOutline /></Button
-					>
-					<Button
-						pill
-						class="absolute end-4 top-1/2 -translate-y-1/2 bg-blue-light-50 p-2 font-bold text-blue-dark-40 opacity-90 hover:opacity-100"
-						onclick={() => changeSlide(true)}><AngleRightOutline /></Button
-					>
-				</Controls>
-		</Carousel>
+			<Button
+				pill
+				class="absolute start-4 top-1/2 -translate-y-1/2 bg-blue-light-50 p-2 font-bold text-blue-dark-40 opacity-90 hover:opacity-100"
+				onclick={() => changeSlide(false)}><AngleLeftOutline /></Button
+			>
+			<Button
+				pill
+				class="absolute end-4 top-1/2 -translate-y-1/2 bg-blue-light-50 p-2 font-bold text-blue-dark-40 opacity-90 hover:opacity-100"
+				onclick={() => changeSlide(true)}><AngleRightOutline /></Button
+			>
+		</Controls>
+	</Carousel>
 	<div class="my-2 mb-4 rounded-sm border-2 border-blue-light-40 bg-blue-light-50 p-2 text-center">
 		{images[index].description}
 	</div>
 	<Thumbnails class="gap-3 bg-transparent" let:Thumbnail let:image let:selected {images} bind:index>
-				{@const image_lte = { src: image.src, alt: image.alt }}
-			<Thumbnail
-				{...image_lte}
-				{selected}
-				class="h-24 rounded-md shadow-xl hover:outline hover:outline-orange-dark"
-				activeClass="outline outline-orange"
-			/>
-			<Tooltip
-				defaultClass="text-wrap py-2 px-3 text-sm font-normal shadow-xs"
-				placement="bottom"
-				arrow={false}>{image.title}</Tooltip
-			>
-		</Thumbnails>
+		{@const image_lte = { src: image.src, alt: image.alt }}
+		<Thumbnail
+			{...image_lte}
+			{selected}
+			class="h-24 rounded-md shadow-xl hover:outline hover:outline-orange-dark"
+			activeClass="outline outline-orange"
+		/>
+		<Tooltip
+			defaultClass="text-wrap py-2 px-3 text-sm font-normal shadow-xs"
+			placement="bottom"
+			arrow={false}>{image.title}</Tooltip
+		>
+	</Thumbnails>
 </div>

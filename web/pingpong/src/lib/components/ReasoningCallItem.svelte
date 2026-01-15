@@ -33,21 +33,23 @@
 		}
 	};
 
-	let statusLabel =
-		$derived(content.status === 'completed'
+	let statusLabel = $derived(
+		content.status === 'completed'
 			? 'Thought' +
-				(content.thought_for ? ' for ' + content.thought_for : ' before responding') +
-				(open ? '...' : '')
+					(content.thought_for ? ' for ' + content.thought_for : ' before responding') +
+					(open ? '...' : '')
 			: content.status === 'incomplete'
 				? 'Reasoning was interrupted'
-				: 'Thinking...');
+				: 'Thinking...'
+	);
 
-	let statusClasses =
-		$derived(content.status === 'in_progress'
+	let statusClasses = $derived(
+		content.status === 'in_progress'
 			? 'text-sm font-medium shimmer'
 			: content.status === 'incomplete'
 				? 'text-sm font-medium text-yellow-600'
-				: 'text-sm font-medium text-gray-600');
+				: 'text-sm font-medium text-gray-600'
+	);
 </script>
 
 <div class="my-3">

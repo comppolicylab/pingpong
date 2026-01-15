@@ -54,7 +54,7 @@
 	import { ThreadManager, type Message } from '$lib/stores/thread';
 	import AttachmentDeletedPlaceholder from '$lib/components/AttachmentDeletedPlaceholder.svelte';
 	import FilePlaceholder from '$lib/components/FilePlaceholder.svelte';
-	import { get, writable } from 'svelte/store';
+	import { get } from 'svelte/store';
 	import ModeratorsTable from '$lib/components/ModeratorsTable.svelte';
 	import { base64ToArrayBuffer, WavRecorder, WavStreamPlayer } from '$lib/wavtools/index';
 	import type { ExtendedMediaDeviceInfo } from '$lib/wavtools/lib/wav_recorder';
@@ -74,14 +74,16 @@
 	let userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 	let classId = $derived(parseInt($page.params.classId ?? ''));
 	let threadId = $derived(parseInt($page.params.threadId ?? ''));
-	let threadMgr = $derived(new ThreadManager(
-		fetch,
-		classId,
-		threadId,
-		data.threadData,
-		data.threadInteractionMode || 'chat',
-		userTimezone
-	));
+	let threadMgr = $derived(
+		new ThreadManager(
+			fetch,
+			classId,
+			threadId,
+			data.threadData,
+			data.threadInteractionMode || 'chat',
+			userTimezone
+		)
+	);
 	let isPrivate = $derived(data.class?.private || false);
 	let isAnonymousSession = $derived(data?.me?.status === 'anonymous');
 	let teachers = $derived(data?.supervisors || []);
@@ -104,65 +106,77 @@
 	let displayUserInfo = $derived(data.threadDisplayUserInfo);
 	let trashThreadFiles: string[] = $state([]);
 	let threadAttachments = $derived(threadMgr.attachments);
-	let allFiles: Record<string, api.FileUploadInfo> = $derived(Object.fromEntries(
-		Object.entries($threadAttachments)
-			.filter(([k]) => !trashThreadFiles.includes(k))
-			.map(([k, v]) => [
-				k,
-				{
-					state: 'success',
-					progress: 100,
-					file: { type: v.content_type, name: v.name },
-					response: v,
-					promise: Promise.resolve(v)
-				} as api.FileUploadInfo
-			])
-	)
-);
+	let allFiles: Record<string, api.FileUploadInfo> = $derived(
+		Object.fromEntries(
+			Object.entries($threadAttachments)
+				.filter(([k]) => !trashThreadFiles.includes(k))
+				.map(([k, v]) => [
+					k,
+					{
+						state: 'success',
+						progress: 100,
+						file: { type: v.content_type, name: v.name },
+						response: v,
+						promise: Promise.resolve(v)
+					} as api.FileUploadInfo
+				])
+		)
+	);
 	let supportsFileSearch = $derived(data.availableTools.includes('file_search') || false);
-	let fileSearchAcceptedFiles = $derived(supportsFileSearch
-		? data.uploadInfo.fileTypes({
-				file_search: true,
-				code_interpreter: false,
-				vision: false
-			})
-		: null);
+	let fileSearchAcceptedFiles = $derived(
+		supportsFileSearch
+			? data.uploadInfo.fileTypes({
+					file_search: true,
+					code_interpreter: false,
+					vision: false
+				})
+			: null
+	);
 	let supportsCodeInterpreter = $derived(data.availableTools.includes('code_interpreter') || false);
-	let codeInterpreterAcceptedFiles = $derived(supportsCodeInterpreter
-		? data.uploadInfo.fileTypes({
-				file_search: false,
-				code_interpreter: true,
-				vision: false
-			})
-		: null);
+	let codeInterpreterAcceptedFiles = $derived(
+		supportsCodeInterpreter
+			? data.uploadInfo.fileTypes({
+					file_search: false,
+					code_interpreter: true,
+					vision: false
+				})
+			: null
+	);
 	let supportsVision = $derived.by(() => {
 		const supportVisionModels = (
 			data.modelInfo.filter((model: api.AssistantModelLite) => model.supports_vision) || []
 		).map((model: api.AssistantModelLite) => model.id);
 		return supportVisionModels.includes(data.threadModel);
 	});
-	let visionSupportOverride = $derived(data.class?.ai_provider === 'azure'
-				? data.modelInfo.find((model: api.AssistantModelLite) => model.id === data.threadModel)
-						?.azure_supports_vision
-				: undefined
+	let visionSupportOverride = $derived(
+		data.class?.ai_provider === 'azure'
+			? data.modelInfo.find((model: api.AssistantModelLite) => model.id === data.threadModel)
+					?.azure_supports_vision
+			: undefined
 	);
-	let visionAcceptedFiles = $derived(supportsVision
-		? data.uploadInfo.fileTypes({
-				file_search: false,
-				code_interpreter: false,
-				vision: true
-			})
-		: null);
-	let fileSearchAttachmentCount = $derived(Object.entries($threadAttachments).filter(
-		([k, v]) =>
-			!trashThreadFiles.includes(k) && (fileSearchAcceptedFiles ?? '').includes(v.content_type)
-	).length);
-	let codeInterpreterAttachmentCount = $derived(Object.entries($threadAttachments).filter(
-		([k, v]) =>
-			!trashThreadFiles.includes(k) &&
-			(codeInterpreterAcceptedFiles ?? '').includes(v.content_type)
-	).length);
-	
+	let visionAcceptedFiles = $derived(
+		supportsVision
+			? data.uploadInfo.fileTypes({
+					file_search: false,
+					code_interpreter: false,
+					vision: true
+				})
+			: null
+	);
+	let fileSearchAttachmentCount = $derived(
+		Object.entries($threadAttachments).filter(
+			([k, v]) =>
+				!trashThreadFiles.includes(k) && (fileSearchAcceptedFiles ?? '').includes(v.content_type)
+		).length
+	);
+	let codeInterpreterAttachmentCount = $derived(
+		Object.entries($threadAttachments).filter(
+			([k, v]) =>
+				!trashThreadFiles.includes(k) &&
+				(codeInterpreterAcceptedFiles ?? '').includes(v.content_type)
+		).length
+	);
+
 	let submitting = $derived(threadMgr.submitting);
 	let waiting = $derived(threadMgr.waiting);
 	let loading = $derived(threadMgr.loading);
@@ -170,31 +184,33 @@
 	// TODO - should figure this out by checking grants instead of participants
 	let canSubmit = $derived(!!$participants.user && $participants.user.includes('Me'));
 	let assistantDeleted = $derived(!$assistantId && $assistantId === 0);
-	let currentAssistant: api.Assistant | undefined = $derived(data.assistants.find(
-			(assistant: api.Assistant) => assistant.id === $assistantId
-		));
+	let currentAssistant: api.Assistant | undefined = $derived(
+		data.assistants.find((assistant: api.Assistant) => assistant.id === $assistantId)
+	);
 	let useLatex = $derived(currentAssistant?.use_latex || false);
 	let useImageDescriptions = $derived(currentAssistant?.use_image_descriptions || false);
 	let assistantVersion: number | null = $derived(currentAssistant?.version ?? null);
-	let assistantInteractionMode: 'voice' | 'chat' | null = $derived(currentAssistant?.interaction_mode || null);
+	let assistantInteractionMode: 'voice' | 'chat' | null = $derived(
+		currentAssistant?.interaction_mode || null
+	);
 	let allowUserFileUploads = $derived(currentAssistant?.allow_user_file_uploads ?? true);
 	let allowUserImageUploads = $derived(currentAssistant?.allow_user_image_uploads ?? true);
 	$effect(() => {
 		if (data.threadData.anonymous_session) {
-				console.warn(`Definition for assistant ${$assistantId} not found.`);
-			}
-	})
-	let statusComponents = $derived((data.statusComponents || {}) as Partial<
-		Record<string, api.StatusComponentUpdate[]>
-	>);
+			console.warn(`Definition for assistant ${$assistantId} not found.`);
+		}
+	});
+	let statusComponents = $derived(
+		(data.statusComponents || {}) as Partial<Record<string, api.StatusComponentUpdate[]>>
+	);
 	let latestIncidentUpdateTimestamps = $derived(computeLatestIncidentTimestamps(statusComponents));
 	let resolvedAssistantVersion = $derived(Number(assistantVersion ?? $version ?? 0));
-	let statusComponentId =
-		$derived($version >= 3 ? api.STATUS_COMPONENT_IDS.nextGen : api.STATUS_COMPONENT_IDS.classic);
-	let assistantStatusUpdates = $derived(filterLatestIncidentUpdates(
-		statusComponents[statusComponentId],
-		latestIncidentUpdateTimestamps
-	));
+	let statusComponentId = $derived(
+		$version >= 3 ? api.STATUS_COMPONENT_IDS.nextGen : api.STATUS_COMPONENT_IDS.classic
+	);
+	let assistantStatusUpdates = $derived(
+		filterLatestIncidentUpdates(statusComponents[statusComponentId], latestIncidentUpdateTimestamps)
+	);
 	let showModerators = $state(false);
 	let showAssistantPrompt = $state(false);
 	let settingsOpen = $state(false);
@@ -1188,11 +1204,11 @@
 										<Accordion flush>
 											<AccordionItem>
 												<span slot="header"
-														><div class="flex flex-row items-center space-x-2">
-															<div><CodeOutline size="lg" /></div>
-															<div>Code Interpreter Code</div>
-														</div></span
-													>
+													><div class="flex flex-row items-center space-x-2">
+														<div><CodeOutline size="lg" /></div>
+														<div>Code Interpreter Code</div>
+													</div></span
+												>
 												<pre style="white-space: pre-wrap;" class="text-black">{content.code}</pre>
 											</AccordionItem>
 										</Accordion>
@@ -1254,11 +1270,11 @@
 									<Accordion flush>
 										<AccordionItem>
 											<span slot="header"
-													><div class="flex flex-row items-center space-x-2">
-														<div><ImageSolid size="lg" /></div>
-														<div>Output Image</div>
-													</div></span
-												>
+												><div class="flex flex-row items-center space-x-2">
+													<div><ImageSolid size="lg" /></div>
+													<div>Output Image</div>
+												</div></span
+											>
 											<div class="w-full leading-6">
 												<img
 													class="img-attachment m-auto"
@@ -1290,11 +1306,11 @@
 									<Accordion flush>
 										<AccordionItem>
 											<span slot="header"
-													><div class="flex flex-row items-center space-x-2">
-														<div><ImageSolid size="lg" /></div>
-														<div>Output Image</div>
-													</div></span
-												>
+												><div class="flex flex-row items-center space-x-2">
+													<div><ImageSolid size="lg" /></div>
+													<div>Output Image</div>
+												</div></span
+											>
 											<div class="w-full leading-6">
 												<img
 													class="img-attachment m-auto"
@@ -1320,11 +1336,11 @@
 									<Accordion flush>
 										<AccordionItem>
 											<span slot="header"
-													><div class="flex flex-row items-center space-x-2">
-														<div><TerminalOutline size="lg" /></div>
-														<div>Output Logs</div>
-													</div></span
-												>
+												><div class="flex flex-row items-center space-x-2">
+													<div><TerminalOutline size="lg" /></div>
+													<div>Output Logs</div>
+												</div></span
+											>
 											<div class="w-full leading-6">
 												<pre style="white-space: pre-wrap;" class="text-black">{content.logs}</pre>
 											</div>

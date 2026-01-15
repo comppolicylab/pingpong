@@ -1,6 +1,4 @@
 <script lang="ts">
-	import { run } from 'svelte/legacy';
-
 	import { slide } from 'svelte/transition';
 	import { ChevronDownOutline, ServerOutline } from 'flowbite-svelte-icons';
 	import { Modal } from 'flowbite-svelte';
@@ -13,12 +11,7 @@
 		compact?: boolean;
 	}
 
-	let {
-		content,
-		forceOpen = false,
-		showServerLabel = true,
-		compact = false
-	}: Props = $props();
+	let { content, forceOpen = false, showServerLabel = true, compact = false }: Props = $props();
 
 	let open = $state(false);
 	let previousOpen: boolean | null = $state(null);
@@ -62,23 +55,25 @@
 	let serverLabel = $derived(content.server_name || content.server_label || 'MCP server');
 	let errorPayload = $derived(formatError(content.error));
 	let hasTools = $derived(!!content.tools && content.tools.length > 0);
-	let statusLabel =
-		$derived(content.status === 'completed'
+	let statusLabel = $derived(
+		content.status === 'completed'
 			? `Listed tools${open ? '...' : ''}`
 			: content.status === 'failed'
 				? 'List tools failed'
 				: content.status === 'incomplete'
 					? 'List tools was canceled'
-					: 'Listing tools...');
+					: 'Listing tools...'
+	);
 
-	let statusClasses =
-		$derived(content.status === 'in_progress' || content.status === 'calling'
+	let statusClasses = $derived(
+		content.status === 'in_progress' || content.status === 'calling'
 			? 'text-sm font-medium shimmer'
 			: content.status === 'failed'
 				? 'text-sm font-medium text-yellow-600'
 				: content.status === 'incomplete'
 					? 'text-sm font-medium text-yellow-600'
-					: 'text-sm font-medium text-gray-600');
+					: 'text-sm font-medium text-gray-600'
+	);
 </script>
 
 <Modal

@@ -421,16 +421,14 @@
 			} ${dropzoneActive ? 'animate-bounce' : ''}`}
 			onclick={() => uploadRef?.click()}
 		>
-			{#if icon}{@render icon()}{:else}
-				{#if type === 'file_search'}
-					<FileSearchOutline size="md" />
-				{:else if type === 'image'}
-					<ImageOutline size="md" />
-				{:else if type === 'code_interpreter'}
-					<FileCodeOutline size="md" />
-				{:else}
-					<PaperClipOutline size="md" />
-				{/if}
+			{#if icon}{@render icon()}{:else if type === 'file_search'}
+				<FileSearchOutline size="md" />
+			{:else if type === 'image'}
+				<ImageOutline size="md" />
+			{:else if type === 'code_interpreter'}
+				<FileCodeOutline size="md" />
+			{:else}
+				<PaperClipOutline size="md" />
 			{/if}
 		</Button>
 		{@render label?.()}

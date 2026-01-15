@@ -9,10 +9,10 @@
 	import SanitizeFlowbite from '$lib/components/SanitizeFlowbite.svelte';
 	import { loading } from '$lib/stores/general.js';
 
-	export let data;
+	let { data } = $props();
 
-	$: agreement = data.agreement;
-	$: policyId = data.policyId;
+	let agreement = $derived(data.agreement);
+	let policyId = $derived(data.policyId);
 
 	const logout = async () => {
 		await goto(resolve('/logout'));

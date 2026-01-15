@@ -9,7 +9,11 @@
 		rightAction?: string;
 	}
 
-	let { canvasCourseCode = '', leftAction = 'Keep imported users', rightAction = 'Remove imported users' }: Props = $props();
+	let {
+		canvasCourseCode = '',
+		leftAction = 'Keep imported users',
+		rightAction = 'Remove imported users'
+	}: Props = $props();
 
 	// Custom events
 	const dispatch = createEventDispatcher();

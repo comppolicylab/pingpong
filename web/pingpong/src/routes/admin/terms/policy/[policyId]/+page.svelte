@@ -23,15 +23,19 @@
 	let isCreating = $derived(data.isCreating);
 	let agreementPolicyToEdit = $derived(data.agreementPolicy);
 	let agreements = $derived(data.agreements);
-	let availableAgreements = $derived(agreements.map((agreement) => ({
-		value: agreement.id,
-		name: agreement.name
-	})));
+	let availableAgreements = $derived(
+		agreements.map((agreement) => ({
+			value: agreement.id,
+			name: agreement.name
+		}))
+	);
 	let externalProviders = $derived(data.externalProviders);
-	let availableProviders = $derived(externalProviders.map((provider) => ({
-		value: provider.id,
-		name: provider.name
-	})));
+	let availableProviders = $derived(
+		externalProviders.map((provider) => ({
+			value: provider.id,
+			name: provider.name
+		}))
+	);
 
 	const handleSubmit = async (event: Event) => {
 		event.preventDefault();
@@ -78,7 +82,9 @@
 		$loading = false;
 	};
 
-	let selectedAgreement: number | null = $derived(agreementPolicyToEdit?.agreement_id !== undefined ? agreementPolicyToEdit.agreement_id : null);
+	let selectedAgreement: number | null = $derived(
+		agreementPolicyToEdit?.agreement_id !== undefined ? agreementPolicyToEdit.agreement_id : null
+	);
 
 	let selectedTargetGroupValue = $derived((data.agreementPolicy?.apply_to_all ?? true) ? '1' : '2');
 	let selectedProviders = $derived(
@@ -91,21 +97,21 @@
 <div class="relative flex h-full w-full flex-col">
 	<PageHeader>
 		{#snippet left()}
-				<div >
+			<div>
 				<h2 class="text-color-blue-dark-50 px-4 py-3 font-serif text-3xl font-bold">
 					Agreement Policies
 				</h2>
 			</div>
-			{/snippet}
+		{/snippet}
 		{#snippet right()}
-				<div >
+			<div>
 				<a
 					href={resolve(`/admin/terms`)}
 					class="flex items-center gap-2 rounded-full bg-white p-2 px-4 text-sm font-medium text-blue-dark-50 transition-all hover:bg-blue-dark-40 hover:text-white"
 					>All Agreements <ArrowRightOutline size="md" class="text-orange" /></a
 				>
 			</div>
-			{/snippet}
+		{/snippet}
 	</PageHeader>
 	<div class="h-full w-full overflow-y-auto p-12">
 		<div class="mb-4 flex flex-row flex-wrap items-center justify-between gap-y-4">

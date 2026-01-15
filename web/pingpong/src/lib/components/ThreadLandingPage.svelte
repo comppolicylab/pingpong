@@ -91,20 +91,26 @@
 	let assistants = $derived(data?.assistants || []);
 	let teachers = $derived(data?.supervisors || []);
 	let courseAssistants = $derived(assistants.filter((asst: Assistant) => asst.endorsed));
-	let myAssistantsAll = $derived(assistants.filter((asst: Assistant) => asst.creator_id === data.me.user?.id));
+	let myAssistantsAll = $derived(
+		assistants.filter((asst: Assistant) => asst.creator_id === data.me.user?.id)
+	);
 	let myAssistants = $derived(myAssistantsAll.filter((asst: Assistant) => !asst.endorsed));
-	let otherAssistantsAll = $derived(assistants.filter(
-		(asst: Assistant) => asst.creator_id !== data.me.user?.id
-	));
+	let otherAssistantsAll = $derived(
+		assistants.filter((asst: Assistant) => asst.creator_id !== data.me.user?.id)
+	);
 	let otherAssistants = $derived(otherAssistantsAll.filter((asst: Assistant) => !asst.endorsed));
 	let linkedAssistant = $derived(parseInt($page.url.searchParams.get('assistant') || '0', 10));
-	let assistant : api.Assistant = $derived(data.assistants.find(
-		(assistant: api.Assistant) => assistant.id === linkedAssistant
-	) || data?.assistants[0] || {});
+	let assistant: api.Assistant = $derived(
+		data.assistants.find((assistant: api.Assistant) => assistant.id === linkedAssistant) ||
+			data?.assistants[0] ||
+			{}
+	);
 	let assistantMeta = $derived(getAssistantMetadata(assistant));
 	// Whether billing is set up for the class (which controls everything).
 	let isConfigured = $derived(data?.hasAssistants && data?.hasAPIKey);
-	let parties = $derived(data.me.status === 'anonymous' ? '' : data.me.user?.id ? `${data.me.user.id}` : '');
+	let parties = $derived(
+		data.me.status === 'anonymous' ? '' : data.me.user?.id ? `${data.me.user.id}` : ''
+	);
 	// The assistant ID from the URL.
 	let useImageDescriptions = $derived(assistant.use_image_descriptions || false);
 	let allowUserFileUploads = $derived(assistant.allow_user_file_uploads ?? true);
@@ -119,28 +125,29 @@
 		).map((model: api.AssistantModelLite) => model.id);
 		return supportVisionModels.includes(data.threadModel);
 	});
-	let visionSupportOverride: boolean | undefined = $derived(data.class?.ai_provider === 'azure'
-				? data.modelInfo.find((model: api.AssistantModelLite) => model.id === data.threadModel)
-						?.azure_supports_vision
-				: undefined
+	let visionSupportOverride: boolean | undefined = $derived(
+		data.class?.ai_provider === 'azure'
+			? data.modelInfo.find((model: api.AssistantModelLite) => model.id === data.threadModel)
+					?.azure_supports_vision
+			: undefined
 	);
-	
+
 	let allowVisionUpload = true;
 	let showModerators = $state(false);
 
-	let statusComponents = $derived((data.statusComponents || {}) as Partial<
-		Record<string, api.StatusComponentUpdate[]>
-	>);
+	let statusComponents = $derived(
+		(data.statusComponents || {}) as Partial<Record<string, api.StatusComponentUpdate[]>>
+	);
 	let latestIncidentUpdateTimestamps = $derived(computeLatestIncidentTimestamps(statusComponents));
 	let assistantVersionNumber = $derived(Number(assistant?.version ?? 0));
-	let statusComponentId =
-		$derived(assistantVersionNumber >= 3
+	let statusComponentId = $derived(
+		assistantVersionNumber >= 3
 			? api.STATUS_COMPONENT_IDS.nextGen
-			: api.STATUS_COMPONENT_IDS.classic);
-	let assistantStatusUpdates = $derived(filterLatestIncidentUpdates(
-		statusComponents[statusComponentId],
-		latestIncidentUpdateTimestamps
-	));
+			: api.STATUS_COMPONENT_IDS.classic
+	);
+	let assistantStatusUpdates = $derived(
+		filterLatestIncidentUpdates(statusComponents[statusComponentId], latestIncidentUpdateTimestamps)
+	);
 
 	// Handle file upload
 	const handleUpload = (

@@ -17,8 +17,6 @@
 
 <script lang="ts">
 	import { createEventDispatcher } from 'svelte';
-	import { writable } from 'svelte/store';
-	import type { Writable } from 'svelte/store';
 	import { Button, Heading, Li, List, Modal, P, Popover } from 'flowbite-svelte';
 	import { browser } from '$app/environment';
 	import type {
@@ -49,76 +47,76 @@
 	const dispatcher = createEventDispatcher();
 
 	interface Props {
-	/**
-	 * Whether to allow sending.
-	 */
-	disabled?: boolean;
-	/**
-	 * Whether the user can reply in this thread.
-	 */
-	canSubmit?: boolean;
-	/**
-	 * Whether the assistant associated with this thread has been deleted.
-	 */
-	assistantDeleted?: boolean;
-	/**
-	 * Whether the user has permissions to interact with this assistant.
-	 */
-	canViewAssistant?: boolean;
-	/**
-	 * Whether we're waiting for an in-flight request.
-	 */
-	loading?: boolean;
-	/**
-	 * Error message provided by thread manager.
-	 */
-	threadManagerError?: string | null;
-	/**
-	 * The maximum height of the container before scrolling.
-	 */
-	maxHeight?: number;
-	/**
-	 * Function to call for uploading files, if uploading is allowed.
-	 */
-	upload?: FileUploader | null;
-	/**
-	 * Function to call for deleting files.
-	 */
-	remove?: FileRemover | null;
-	assistantVersion?: number | null;
-	threadVersion?: number | null;
-	/**
-	 * Files to accept for file search. If null, file search is disabled.
-	 */
-	fileSearchAcceptedFiles?: string | null;
-	fileSearchAttachmentCount?: number;
-	/**
-	 * Files to accept for code interpreter. If null, code interpreter is disabled.
-	 */
-	codeInterpreterAcceptedFiles?: string | null;
-	codeInterpreterAttachmentCount?: number;
-	/**
-	 * (Based on model capabilities)
-	 * Files to accept for Vision. If null, vision capabilities are disabled.
-	 */
-	visionAcceptedFiles?: string | null;
-	/**
-	 * Whether the specific AI Provider supports Vision for this model.
-	 */
-	visionSupportOverride?: boolean | undefined;
-	useImageDescriptions?: boolean;
-	/**
-	 * Max upload size.
-	 */
-	maxSize?: number;
-	/**
-	 * The list of files being uploaded.
-	 */
-	attachments?: ServerFile[];
-	/**
-	 * Mime type lookup function.
-	 */
-	mimeType: MimeTypeLookupFn;
+		/**
+		 * Whether to allow sending.
+		 */
+		disabled?: boolean;
+		/**
+		 * Whether the user can reply in this thread.
+		 */
+		canSubmit?: boolean;
+		/**
+		 * Whether the assistant associated with this thread has been deleted.
+		 */
+		assistantDeleted?: boolean;
+		/**
+		 * Whether the user has permissions to interact with this assistant.
+		 */
+		canViewAssistant?: boolean;
+		/**
+		 * Whether we're waiting for an in-flight request.
+		 */
+		loading?: boolean;
+		/**
+		 * Error message provided by thread manager.
+		 */
+		threadManagerError?: string | null;
+		/**
+		 * The maximum height of the container before scrolling.
+		 */
+		maxHeight?: number;
+		/**
+		 * Function to call for uploading files, if uploading is allowed.
+		 */
+		upload?: FileUploader | null;
+		/**
+		 * Function to call for deleting files.
+		 */
+		remove?: FileRemover | null;
+		assistantVersion?: number | null;
+		threadVersion?: number | null;
+		/**
+		 * Files to accept for file search. If null, file search is disabled.
+		 */
+		fileSearchAcceptedFiles?: string | null;
+		fileSearchAttachmentCount?: number;
+		/**
+		 * Files to accept for code interpreter. If null, code interpreter is disabled.
+		 */
+		codeInterpreterAcceptedFiles?: string | null;
+		codeInterpreterAttachmentCount?: number;
+		/**
+		 * (Based on model capabilities)
+		 * Files to accept for Vision. If null, vision capabilities are disabled.
+		 */
+		visionAcceptedFiles?: string | null;
+		/**
+		 * Whether the specific AI Provider supports Vision for this model.
+		 */
+		visionSupportOverride?: boolean | undefined;
+		useImageDescriptions?: boolean;
+		/**
+		 * Max upload size.
+		 */
+		maxSize?: number;
+		/**
+		 * The list of files being uploaded.
+		 */
+		attachments?: ServerFile[];
+		/**
+		 * Mime type lookup function.
+		 */
+		mimeType: MimeTypeLookupFn;
 	}
 
 	let {
@@ -154,7 +152,7 @@
 	);
 	let visionOverrideModalOpen = $state(false);
 	let visionUseImageDescriptionsModalOpen = $state(false);
-	
+
 	// Input container
 	let containerRef: HTMLDivElement | undefined = $state();
 	// Text area reference for fixing height.
@@ -167,7 +165,8 @@
 	// The list of files being uploaded.
 	let allFiles: FileUploadInfo[] = $state([]);
 	let uploading: boolean = $derived(allFiles.some((f) => f.state === 'pending'));
-	let purpose: FileUploadPurpose | null = $derived(codeInterpreterAcceptedFiles && fileSearchAcceptedFiles && finalVisionAcceptedFiles
+	let purpose: FileUploadPurpose | null = $derived(
+		codeInterpreterAcceptedFiles && fileSearchAcceptedFiles && finalVisionAcceptedFiles
 			? 'fs_ci_multimodal'
 			: codeInterpreterAcceptedFiles && finalVisionAcceptedFiles
 				? 'ci_multimodal'
@@ -177,44 +176,52 @@
 						? 'assistants'
 						: finalVisionAcceptedFiles
 							? 'vision'
-							: null);
-	let codeInterpreterFiles: string[] = $derived((codeInterpreterAcceptedFiles ? allFiles : [])
-		.filter((f) => f.state === 'success' && (f.response as ServerFile).code_interpreter_file_id)
-		.map((f) => (f.response as ServerFile).file_id));
+							: null
+	);
+	let codeInterpreterFiles: string[] = $derived(
+		(codeInterpreterAcceptedFiles ? allFiles : [])
+			.filter((f) => f.state === 'success' && (f.response as ServerFile).code_interpreter_file_id)
+			.map((f) => (f.response as ServerFile).file_id)
+	);
 	let codeInterpreterFileIds: string = $derived(codeInterpreterFiles.join(','));
 
-	let fileSearchFiles: string[] = $derived((fileSearchAcceptedFiles ? allFiles : [])
-		.filter((f) => f.state === 'success' && (f.response as ServerFile).file_search_file_id)
-		.map((f) => (f.response as ServerFile).file_id));
+	let fileSearchFiles: string[] = $derived(
+		(fileSearchAcceptedFiles ? allFiles : [])
+			.filter((f) => f.state === 'success' && (f.response as ServerFile).file_search_file_id)
+			.map((f) => (f.response as ServerFile).file_id)
+	);
 	let fileSearchFileIds: string = $derived(fileSearchFiles.join(','));
 
 	let threadCodeInterpreterMaxCount = 20;
 	let threadFileSearchMaxCount = 20;
 
-	let visionFiles: string[] = $derived((finalVisionAcceptedFiles ? allFiles : [])
-		.filter((f) => f.state === 'success' && (f.response as ServerFile).vision_file_id)
-		.map((f) => (f.response as ServerFile).vision_file_id as string));
+	let visionFiles: string[] = $derived(
+		(finalVisionAcceptedFiles ? allFiles : [])
+			.filter((f) => f.state === 'success' && (f.response as ServerFile).vision_file_id)
+			.map((f) => (f.response as ServerFile).vision_file_id as string)
+	);
 
 	let visionFileIds: string = $derived(visionFiles.join(','));
 	let visionFileImageDescriptions: ImageProxy[] = $derived(
 		(finalVisionAcceptedFiles ? allFiles : [])
-		.filter((f) => f.state === 'success' && (f.response as ServerFile).image_description)
-		.map((f) => ({
-			name: (f.response as ServerFile).name,
-			description: (f.response as ServerFile).image_description ?? 'No description',
-			content_type: (f.response as ServerFile).content_type,
-			complements: (f.response as ServerFile).file_id as string
-		}))
+			.filter((f) => f.state === 'success' && (f.response as ServerFile).image_description)
+			.map((f) => ({
+				name: (f.response as ServerFile).name,
+				description: (f.response as ServerFile).image_description ?? 'No description',
+				content_type: (f.response as ServerFile).content_type,
+				complements: (f.response as ServerFile).file_id as string
+			}))
 	);
 
 	let derivedAttachments: ServerFile[] = $derived(
-		allFiles.filter(
-			(f) =>
-				f.state === 'success' &&
-				((f.response as ServerFile).code_interpreter_file_id ||
-					(f.response as ServerFile).file_search_file_id)
-		)
-		.map((f) => f.response as ServerFile)
+		allFiles
+			.filter(
+				(f) =>
+					f.state === 'success' &&
+					((f.response as ServerFile).code_interpreter_file_id ||
+						(f.response as ServerFile).file_search_file_id)
+			)
+			.map((f) => f.response as ServerFile)
 	);
 
 	$effect(() => {
@@ -235,15 +242,13 @@
 	);
 	let tooManyAttachments: boolean = $derived(derivedAttachments.length >= 10);
 	let tooManyVisionFiles: boolean = $derived(visionFiles.length >= 10);
-	
+
 	// When one of the file upload types is disabled, we need to exclude it from the list of accepted files from the other types, otherwise we will still try to upload it.
 	let fileSearchStringToExclude: string = $derived(
 		!tooManyFileSearchFiles ? '' : (fileSearchAcceptedFiles ?? '')
 	);
 	let codeInterpreterStringToExclude: string = $derived(
-		!tooManyCodeInterpreterFiles
-			? ''
-			: (codeInterpreterAcceptedFiles ?? '')
+		!tooManyCodeInterpreterFiles ? '' : (codeInterpreterAcceptedFiles ?? '')
 	);
 	let visionStringToExclude: string = $derived(
 		!tooManyVisionFiles ? '' : (finalVisionAcceptedFiles ?? '')
@@ -284,20 +289,20 @@
 							!fileSearchStringToExclude.split(',').includes(file) &&
 							!codeInterpreterStringToExclude.split(',').includes(file)
 					)
-				)
+			)
 		).join(',')
 	);
 	let currentAccept: string = $derived(
 		currentFileSearchAcceptedFiles +
-		',' +
-		currentCodeInterpreterAcceptedFiles +
-		',' +
-		currentVisionAcceptedFiles
-	)
+			',' +
+			currentCodeInterpreterAcceptedFiles +
+			',' +
+			currentVisionAcceptedFiles
+	);
 
 	let tooManyFiles: boolean = $derived(
 		(tooManyAttachments || tooManyFileSearchFiles || tooManyCodeInterpreterFiles) &&
-		tooManyVisionFiles
+			tooManyVisionFiles
 	);
 
 	const focusMessage = () => {
@@ -351,9 +356,7 @@
 	};
 
 	let errorMessage: string | null = $state(null);
-	let combinedErrorMessage : string | null = $derived(
-		errorMessage || threadManagerError
-	);
+	let combinedErrorMessage: string | null = $derived(errorMessage || threadManagerError);
 
 	const dismissError = () => {
 		errorMessage = null;
@@ -404,7 +407,7 @@
 					allFiles = tempFiles;
 					if (ref) {
 						ref.value = message;
-					};
+					}
 					if (realRef) {
 						realRef.value = realMessage || message;
 						fixHeight(realRef);
@@ -757,8 +760,8 @@
 			<DropdownBadge
 				extraClasses="border-sky-400 from-sky-100 to-sky-200 text-sky-800 text-xs uppercase"
 				>{#snippet name()}
-								<span >Experimental Feature</span>
-							{/snippet}</DropdownBadge
+					<span>Experimental Feature</span>
+				{/snippet}</DropdownBadge
 			>
 			<Heading tag="h2" class="text-center text-3xl font-semibold"
 				>Vision capabilities through<br />image descriptions</Heading

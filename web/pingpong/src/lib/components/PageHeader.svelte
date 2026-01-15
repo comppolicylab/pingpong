@@ -1,3 +1,7 @@
+<script lang="ts" module>
+	export const mainTextClass = 'text-3xl text-color-blue-dark-50 font-serif font-bold px-4';
+</script>
+
 <script lang="ts">
 	interface Props {
 		left?: import('svelte').Snippet;
@@ -5,10 +9,6 @@
 	}
 
 	let { left, right }: Props = $props();
-</script>
-
-<script lang="ts" module>
-	export const mainTextClass = 'text-3xl text-color-blue-dark-50 font-serif font-bold px-4';
 </script>
 
 <header

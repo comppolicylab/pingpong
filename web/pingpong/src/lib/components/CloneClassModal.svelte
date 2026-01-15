@@ -1,6 +1,4 @@
 <script lang="ts">
-	import { run } from 'svelte/legacy';
-
 	import {
 		Accordion,
 		AccordionItem,
@@ -43,7 +41,6 @@
 
 	let displayGroupName = $derived(untrack(() => groupName) + ' (Copy)');
 
-
 	let disableAnyCanShareAssistants = $derived(assistantPermissions.includes('publish:0'));
 	$effect(() => {
 		if (disableAnyCanShareAssistants) {
@@ -55,11 +52,13 @@
 	let selectedInstitutionId = $derived.by(() => {
 		let institutionId = untrack(() => currentInstitutionId);
 		return institutionId !== null ? institutionId.toString() : '';
-	})
-	let institutionOptions = $derived(institutions.map((inst) => ({
-		value: inst.id.toString(),
-		name: inst.name
-	})));
+	});
+	let institutionOptions = $derived(
+		institutions.map((inst) => ({
+			value: inst.id.toString(),
+			name: inst.name
+		}))
+	);
 	$effect(() => {
 		const hasValidSelection = institutions.some(
 			(inst) => inst.id.toString() === selectedInstitutionId
@@ -86,7 +85,6 @@
 		assistantCopy,
 		userCopy
 	});
-	
 
 	const dispatch = createEventDispatcher();
 
@@ -107,10 +105,10 @@
 		<Accordion class="w-full text-left" flush multiple>
 			<AccordionItem paddingFlush="py-2" open>
 				<span slot="header" class="mr-3 w-full"
-						><div class="flex w-full flex-row items-center justify-between space-x-2">
-							<div>Group Details</div>
-						</div></span
-					>
+					><div class="flex w-full flex-row items-center justify-between space-x-2">
+						<div>Group Details</div>
+					</div></span
+				>
 				<div class="my-3 grid gap-x-6 gap-y-6 md:grid-cols-2">
 					<div>
 						<Label for="name" class="mb-1">Name</Label>
@@ -167,21 +165,21 @@
 			</AccordionItem>
 			<AccordionItem paddingFlush="py-2">
 				<span slot="header" class="mr-3 w-full"
-						><div class="flex w-full flex-row items-center justify-between space-x-2">
-							<div>AI Provider</div>
-							<div class="flex flex-row items-center gap-1 text-sm font-light">
-								{#if aiProvider === 'azure'}
-									<AzureLogo size="4" />
-									<div>Azure</div>
-								{:else if aiProvider === 'openai'}
-									<OpenAiLogo size="4" />
-									<div>OpenAI</div>
-								{:else}
-									<div>Same as original group</div>
-								{/if}
-							</div>
-						</div></span
-					>
+					><div class="flex w-full flex-row items-center justify-between space-x-2">
+						<div>AI Provider</div>
+						<div class="flex flex-row items-center gap-1 text-sm font-light">
+							{#if aiProvider === 'azure'}
+								<AzureLogo size="4" />
+								<div>Azure</div>
+							{:else if aiProvider === 'openai'}
+								<OpenAiLogo size="4" />
+								<div>OpenAI</div>
+							{:else}
+								<div>Same as original group</div>
+							{/if}
+						</div>
+					</div></span
+				>
 				<p class="mb-2 text-sm font-light text-gray-500">
 					Your new group will share the same files with the original group, which requires the same
 					billing details, including your AI Provider.
@@ -189,19 +187,19 @@
 			</AccordionItem>
 			<AccordionItem paddingFlush="py-2">
 				<span slot="header" class="mr-3 w-full"
-						><div class="flex w-full flex-row items-center justify-between space-x-2">
-							<div>Assistants</div>
-							<div class="text-sm font-light">
-								{#if assistantCopy === 'moderators'}
-									Copy only published Moderator Assistants
-								{:else if assistantCopy === 'all'}
-									Copy all published Assistants
-								{:else}
-									No assistants will be copied
-								{/if}
-							</div>
-						</div></span
-					>
+					><div class="flex w-full flex-row items-center justify-between space-x-2">
+						<div>Assistants</div>
+						<div class="text-sm font-light">
+							{#if assistantCopy === 'moderators'}
+								Copy only published Moderator Assistants
+							{:else if assistantCopy === 'all'}
+								Copy all published Assistants
+							{:else}
+								No assistants will be copied
+							{/if}
+						</div>
+					</div></span
+				>
 				<p class="mb-2 text-sm font-light text-gray-500">
 					Choose which assistants to copy over to the new group. You can also create new assistants
 					in the new group. If you choose to copy assistants created by members, they will be added
@@ -223,19 +221,19 @@
 			</AccordionItem>
 			<AccordionItem paddingFlush="py-2">
 				<span slot="header" class="mr-3 w-full"
-						><div class="flex w-full flex-row items-center justify-between space-x-2">
-							<div>Users</div>
-							<div class="text-sm font-light">
-								{#if userCopy === 'moderators'}
-									Copy only Moderators
-								{:else if userCopy === 'all'}
-									Copy all users
-								{:else}
-									No users will be copied
-								{/if}
-							</div>
-						</div></span
-					>
+					><div class="flex w-full flex-row items-center justify-between space-x-2">
+						<div>Users</div>
+						<div class="text-sm font-light">
+							{#if userCopy === 'moderators'}
+								Copy only Moderators
+							{:else if userCopy === 'all'}
+								Copy all users
+							{:else}
+								No users will be copied
+							{/if}
+						</div>
+					</div></span
+				>
 				<p class="mb-2 text-sm font-light text-gray-500">
 					Choose which users to copy over to the new group. You can also add new users in the new
 					group. If you choose to copy assistants created by members, all members will be added as

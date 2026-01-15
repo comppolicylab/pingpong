@@ -16,7 +16,6 @@
 	import ProgressCircle from './ProgressCircle.svelte';
 	import { Jumper } from 'svelte-loading-spinners';
 
-	
 	interface Props {
 		/**
 		 * Information about a file that is being uploaded.
@@ -27,12 +26,7 @@
 		preventDeletion?: boolean;
 	}
 
-	let {
-		info,
-		purpose = 'assistants',
-		mimeType,
-		preventDeletion = false
-	}: Props = $props();
+	let { info, purpose = 'assistants', mimeType, preventDeletion = false }: Props = $props();
 
 	// Custom events
 	const dispatch = createEventDispatcher();

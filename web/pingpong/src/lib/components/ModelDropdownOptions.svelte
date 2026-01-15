@@ -38,29 +38,26 @@
 				{#if highlight}
 					<DropdownBadge extraClasses="border-amber-400 from-amber-50 to-amber-100 text-amber-700"
 						>{#snippet icon()}
-												<span ><StarSolid size="sm" /></span>
-											{/snippet}{#snippet name()}
-											<span >Recommended</span
-							>
-											{/snippet}	</DropdownBadge
-					>
+							<span><StarSolid size="sm" /></span>
+						{/snippet}{#snippet name()}
+							<span>Recommended</span>
+						{/snippet}
+					</DropdownBadge>
 				{/if}
 				{#if is_new}
 					<DropdownBadge extraClasses="border-green-400 from-green-100 to-green-200 text-green-800"
 						>{#snippet name()}
-												<span >New</span>
-											{/snippet}</DropdownBadge
+							<span>New</span>
+						{/snippet}</DropdownBadge
 					>
 				{/if}
 				{#if supports_vision && allowVisionUpload}
 					<DropdownBadge extraClasses="border-gray-400 from-gray-100 to-gray-200 text-gray-800"
 						>{#snippet icon()}
-												<span ><ImageOutline size="sm" /></span>	
-											{/snippet}{#snippet name()}
-											<span 
-								>Vision capabilities</span
-							>
-											{/snippet}</DropdownBadge
+							<span><ImageOutline size="sm" /></span>
+						{/snippet}{#snippet name()}
+							<span>Vision capabilities</span>
+						{/snippet}</DropdownBadge
 					>
 				{/if}
 			</DropdownOption>

@@ -61,10 +61,10 @@
 		}
 	};
 	const url = $derived(stripUtmParams(source?.url));
-	const buttonClass =
-		$derived(
+	const buttonClass = $derived(
 		'inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-gray-50 text-xs font-normal text-gray-700 hover:bg-gray-100' +
-		(type === 'list' ? ' py-1 pl-2 pr-3 shadow-xs' : ' py-0.5 px-2'));
+			(type === 'list' ? ' py-1 pl-2 pr-3 shadow-xs' : ' py-0.5 px-2')
+	);
 </script>
 
 <button

@@ -47,18 +47,24 @@
 	let allAssistants = $derived(data?.assistants || []);
 	// "Course" assistants are endorsed by the class. Right now this means
 	// they are created by the teaching team and are published.
-	let courseAssistants: Assistant[] = $derived(allAssistants.filter((assistant) => assistant.endorsed));
+	let courseAssistants: Assistant[] = $derived(
+		allAssistants.filter((assistant) => assistant.endorsed)
+	);
 	// "My" assistants are assistants created by the current user, except
 	// for those that appear in "course" assistants.
-	let myAssistants: Assistant[] = $derived(allAssistants.filter(
+	let myAssistants: Assistant[] = $derived(
+		allAssistants.filter(
 			(assistant) => assistant.creator_id === data.me.user!.id && !assistant.endorsed
-		));
+		)
+	);
 	// "Other" assistants are non-endorsed assistants that are not created by the current user.
 	// For most people this means published assistants from other students. For people with
 	// elevated permissions, this could also mean private assistants.
-	let otherAssistants: Assistant[] = $derived(allAssistants.filter(
+	let otherAssistants: Assistant[] = $derived(
+		allAssistants.filter(
 			(assistant) => assistant.creator_id !== data.me.user!.id && !assistant.endorsed
-		));
+		)
+	);
 	let copyModalState: Record<number, boolean> = $state({});
 	let deleteModalState: Record<number, boolean> = $state({});
 	let copyNames: Record<number, string> = $state({});
@@ -67,11 +73,13 @@
 	let copyPermissionLoading: Record<number, boolean> = $state({});
 	let copyPermissionError: Record<number, string> = $state({});
 	const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
-	let classOptions = $derived((data.classes || []).map((c) => ({
-		id: c.id,
-		name: c.name,
-		term: c.term
-	})));
+	let classOptions = $derived(
+		(data.classes || []).map((c) => ({
+			id: c.id,
+			name: c.name,
+			term: c.term
+		}))
+	);
 	const assistantLink = (assistantId: number) =>
 		`${baseUrl}/group/${data.class.id}?assistant=${assistantId}`;
 

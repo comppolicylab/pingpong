@@ -11,12 +11,7 @@
 		compact?: boolean;
 	}
 
-	let {
-		content,
-		forceOpen = false,
-		showServerLabel = true,
-		compact = false
-	}: Props = $props();
+	let { content, forceOpen = false, showServerLabel = true, compact = false }: Props = $props();
 
 	let open = $state(false);
 	let previousOpen: boolean | null = $state(null);
@@ -56,23 +51,25 @@
 	let errorPayload = $derived(formatError(content.error));
 	let hasResult = $derived(!!requestPayload || !!responsePayload || !!errorPayload);
 
-	let statusLabel =
-		$derived(content.status === 'completed'
+	let statusLabel = $derived(
+		content.status === 'completed'
 			? `Ran ${toolLabel}${open ? '...' : ''}`
 			: content.status === 'failed'
 				? `${toolLabel} failed${open ? '...' : ''}`
 				: content.status === 'incomplete'
 					? `${toolLabel} was canceled`
-					: `Calling ${toolLabel}...`);
+					: `Calling ${toolLabel}...`
+	);
 
-	let statusClasses =
-		$derived(content.status === 'in_progress' || content.status === 'calling'
+	let statusClasses = $derived(
+		content.status === 'in_progress' || content.status === 'calling'
 			? 'text-sm font-medium shimmer'
 			: content.status === 'failed'
 				? 'text-sm font-medium text-yellow-600'
 				: content.status === 'incomplete'
 					? 'text-sm font-medium text-yellow-600'
-					: 'text-sm font-medium text-gray-600');
+					: 'text-sm font-medium text-gray-600'
+	);
 </script>
 
 <div class={compact ? 'my-2' : 'my-3'}>

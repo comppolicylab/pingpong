@@ -103,7 +103,7 @@
 
 <AboutPage {nonAuthed} linksOpenInNewTab={openAllLinksInNewTab}>
 	{#snippet header()}
-		<div class="px-12 pt-8" >
+		<div class="px-12 pt-8">
 			{#if hasNoGroups}
 				<div class="w-full rounded-lg border border-gray-300 bg-gray-100 p-6">
 					<div class="flex items-start gap-4">
@@ -124,7 +124,7 @@
 		</div>
 	{/snippet}
 	{#snippet footer()}
-		<span >
+		<span>
 			{#if !nonAuthed}
 				<div class="bg-white px-12 pb-8">
 					<Heading tag="h3" class="my-4">How can I get help?</Heading>
@@ -146,8 +146,8 @@
 									Heads up: <span class="font-semibold"
 										>This form is for app feedback and bug reports only.</span
 									> If you have a question about your group or course, or can't access your group's assistants,
-									please reach out to your teaching staff directly. We can't help with those kinds of questions
-									here.
+									please reach out to your teaching staff directly. We can't help with those kinds of
+									questions here.
 								</span>
 							</div>
 							<div
@@ -155,10 +155,10 @@
 							>
 								<LockSolid class="mr-3 h-8 w-8" />
 								<span>
-									Please note that if you choose to share your personal information (name, email) with
-									us, we will only use it if we need to contact you regarding your message. We do not
-									store this information with our other app data and will not share it with anyone
-									else.
+									Please note that if you choose to share your personal information (name, email)
+									with us, we will only use it if we need to contact you regarding your message. We
+									do not store this information with our other app data and will not share it with
+									anyone else.
 								</span>
 							</div>
 							<div class="mt-6">
@@ -203,15 +203,16 @@
 												</h3>
 												<p class="mb-5 text-sm text-gray-700 dark:text-gray-300">
 													You chose not to include your contact information with the support message
-													you are sending. We do not associate user information with support requests
-													unless you provide it to us.
+													you are sending. We do not associate user information with support
+													requests unless you provide it to us.
 													<span class="font-bold"
 														>If you would like us to contact you about your specific support issue,
 														please include your contact information with your message.</span
 													>
 												</p>
 												<div class="flex justify-center gap-4">
-													<Button pill color="alternative" onclick={handleModalCancel}>Go back</Button
+													<Button pill color="alternative" onclick={handleModalCancel}
+														>Go back</Button
 													>
 													<Button pill outline color="red" onclick={handleModalConfirm}
 														>Send without contact information</Button

@@ -16,13 +16,15 @@
 
 	let isNextGen = $derived((version ?? 0) >= 3);
 	let label = $derived(isNextGen ? 'Next-Gen' : 'Classic');
-	let classes =
-		$derived(`${baseClasses} ${isNextGen ? nextGenClasses : classicClasses} ${extraClasses}`.trim());
-	let tooltip =
-		$derived(title ??
-		(isNextGen
-			? 'This assistant is using the latest Next-Gen architecture'
-			: 'This assistant is using the previous Classic architecture'));
+	let classes = $derived(
+		`${baseClasses} ${isNextGen ? nextGenClasses : classicClasses} ${extraClasses}`.trim()
+	);
+	let tooltip = $derived(
+		title ??
+			(isNextGen
+				? 'This assistant is using the latest Next-Gen architecture'
+				: 'This assistant is using the previous Classic architecture')
+	);
 </script>
 
 <span class={classes} aria-label={`${label} assistant`}>

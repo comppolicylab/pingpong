@@ -9,24 +9,24 @@
 	let { data } = $props();
 
 	let institutionOptions: { value: string; name: string }[] = $derived([
-			{ value: '0', name: 'All' },
-			...data.institutions
-				.sort((a, b) => a.name.localeCompare(b.name))
-				.map((inst) => ({ value: `${inst.id}`, name: inst.name }))
-		]);
+		{ value: '0', name: 'All' },
+		...data.institutions
+			.sort((a, b) => a.name.localeCompare(b.name))
+			.map((inst) => ({ value: `${inst.id}`, name: inst.name }))
+	]);
 	let instSearch = $derived(parseInt($page.url.searchParams.get('institution_id') || '0', 10));
-	let classes = $derived((data.classes || [])
-		.filter((cls) => (instSearch ? cls.institution_id === instSearch : true))
-		.sort((a, b) => a.name.localeCompare(b.name)));
+	let classes = $derived(
+		(data.classes || [])
+			.filter((cls) => (instSearch ? cls.institution_id === instSearch : true))
+			.sort((a, b) => a.name.localeCompare(b.name))
+	);
 </script>
 
 <div class="flex h-full w-full flex-col">
 	<PageHeader>
 		{#snippet left()}
-				<h2 class="text-color-blue-dark-50 px-4 pt-6 pb-3 font-serif text-3xl font-bold" >
-				Admin
-			</h2>
-			{/snippet}
+			<h2 class="text-color-blue-dark-50 px-4 pt-6 pb-3 font-serif text-3xl font-bold">Admin</h2>
+		{/snippet}
 	</PageHeader>
 
 	<!-- TODO: search is not yet fully supported. -->

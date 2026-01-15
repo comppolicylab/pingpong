@@ -3,7 +3,6 @@
 	import { createEventDispatcher } from 'svelte';
 	import { ExclamationCircleOutline } from 'flowbite-svelte-icons';
 
-
 	interface Props {
 		warningTitle: string;
 		warningDescription: string;

@@ -5,7 +5,6 @@
 	import PingPongLogo from './PingPongLogo.svelte';
 	import { loading } from '$lib/stores/general';
 
-	
 	interface Props {
 		// Props
 		open?: boolean;
@@ -13,7 +12,7 @@
 		preventEdits?: boolean;
 	}
 
-	let { open = false, code = $bindable(''), preventEdits = false }: Props = $props();
+	let { open = $bindable(false), code = $bindable(''), preventEdits = false }: Props = $props();
 
 	// Event dispatcher
 	const dispatch = createEventDispatcher();

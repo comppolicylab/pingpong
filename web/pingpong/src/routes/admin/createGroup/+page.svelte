@@ -11,7 +11,9 @@
 	let { data } = $props();
 
 	const loading = writable(false);
-	let institutions = $derived((data.admin.canCreateClass || []).sort((a, b) => a.name.localeCompare(b.name)));
+	let institutions = $derived(
+		(data.admin.canCreateClass || []).sort((a, b) => a.name.localeCompare(b.name))
+	);
 	let selectedInst = $state('');
 	let selectedBilling = $state('0');
 	let defaultKeys = $derived(data.defaultKeys || []);

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { Label, type SelectOptionType, Popover, Spinner, Tooltip } from 'flowbite-svelte';
 	import { autoupload, bindToForm } from './FileUpload.svelte';
-	import { writable, type Writable } from 'svelte/store';
+	import { writable } from 'svelte/store';
 	import type { FileUploader, FileUploadInfo, ServerFile } from '$lib/api';
 	import { createEventDispatcher, onMount } from 'svelte';
 	import {
@@ -12,7 +12,7 @@
 		UsersGroupOutline,
 		UsersGroupSolid
 	} from 'flowbite-svelte-icons';
-	
+
 	interface Props {
 		/**
 		 * Name of field.
@@ -26,7 +26,7 @@
 		/**
 		 * File ids of selected items.
 		 */
-		value: Writable<string[]>;
+		value: string[];
 		/**
 		 * Whether to allow uploading.
 		 */
@@ -58,7 +58,7 @@
 		name,
 		items,
 		privateFiles,
-		value,
+		value = $bindable(),
 		disabled = false,
 		uploading = false,
 		upload,
@@ -107,22 +107,26 @@
 			'assistants',
 			false,
 			dispatch,
-			value
+			writable(value)
 		);
 		$loading = false;
 	};
 	let privateFileIds = $derived(privateFiles.map((file) => file.file_id));
-	let availableFiles = $derived(items.filter(
-		(item) => !$value.includes(item.value) && !privateFileIds.includes(item.value)
-	));
-	let availableFileNames = $derived([...availableFiles]
-		.sort((a, b) => (a.name as string).localeCompare(b.name as string))
-		.map((item) => item.name as string));
+	let availableFiles = $derived(
+		items.filter((item) => !value.includes(item.value) && !privateFileIds.includes(item.value))
+	);
+	let availableFileNames = $derived(
+		[...availableFiles]
+			.sort((a, b) => (a.name as string).localeCompare(b.name as string))
+			.map((item) => item.name as string)
+	);
 	let availableFileIds = $derived(availableFiles.map((item) => item.value));
-	let selectedFiles = $derived(items.filter((item) => $value.includes(item.value)));
-	let selectedFileNames = $derived([...selectedFiles]
-		.sort((a, b) => (a.name as string).localeCompare(b.name as string))
-		.map((item) => [item.name as string, privateFileIds.includes(item.value)]));
+	let selectedFiles = $derived(items.filter((item) => value.includes(item.value)));
+	let selectedFileNames = $derived(
+		[...selectedFiles]
+			.sort((a, b) => (a.name as string).localeCompare(b.name as string))
+			.map((item) => [item.name as string, privateFileIds.includes(item.value)])
+	);
 	let selectedFileIds = $derived(selectedFiles.map((item) => item.value));
 	let selectedAvailable: number[] = $state([]);
 	let selectedSelected: number[] = $state([]);
@@ -158,7 +162,7 @@
 		selectedAvailable
 			.sort((a, b) => a - b)
 			.forEach((index) => {
-				value.update((v) => [...v, availableFileIds[index]]);
+				value = [...value, availableFileIds[index]];
 			});
 		selectedAvailable = [];
 		focusedListIsAvailable = false;
@@ -172,7 +176,7 @@
 		selectedSelected
 			.sort((a, b) => a - b)
 			.forEach((index) => {
-				value.update((v) => v.filter((item) => item !== selectedFileIds[index]));
+				value = value.filter((item) => item !== selectedFileIds[index]);
 				if (privateFileIds.includes(selectedFileIds[index])) {
 					privateIdsToDelete.push(selectedFileIds[index]);
 				}

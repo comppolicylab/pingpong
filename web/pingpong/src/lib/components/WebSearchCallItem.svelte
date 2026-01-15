@@ -39,8 +39,9 @@
 		});
 	};
 
-	let uniqueSources =
-		$derived(content?.action?.type === 'search' ? deduplicateSources(content.action.sources) : []);
+	let uniqueSources = $derived(
+		content?.action?.type === 'search' ? deduplicateSources(content.action.sources) : []
+	);
 </script>
 
 <div class="my-3">

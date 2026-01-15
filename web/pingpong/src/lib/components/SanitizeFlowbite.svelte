@@ -2,7 +2,6 @@
 	import DOMPurify from '$lib/purify';
 	import { Heading, Li, List } from 'flowbite-svelte'; // eslint-disable-line @typescript-eslint/no-unused-vars
 
-	
 	interface Props {
 		/**
 		 * Content to render.

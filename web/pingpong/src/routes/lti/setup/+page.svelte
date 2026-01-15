@@ -4,15 +4,16 @@
 	import PingPongLogo from '$lib/components/PingPongLogo.svelte';
 	import { PlusOutline, LinkOutline } from 'flowbite-svelte-icons';
 
-	export let data;
+	let { data } = $props();
 
-	const { context, ltiClassId } = data;
+	const { context, ltiClassId } = $derived(data);
 
 	// Build display name: "Course Code: Course Name" or just the name if no code
-	const courseName =
+	let courseName = $derived(
 		context.course_code && context.course_name
 			? `${context.course_code}: ${context.course_name}`
-			: context.course_name || context.course_code || 'Your Course';
+			: context.course_name || context.course_code || 'Your Course'
+	);
 
 	const goToCreate = () => {
 		// eslint-disable-next-line svelte/no-navigation-without-resolve

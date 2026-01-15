@@ -75,8 +75,12 @@
 	let copyPermissionError = $state('');
 
 	// Get the full URL to use the assistant
-	let assistantLink = $derived(`${$page.url.protocol}//${$page.url.host}/group/${assistant.class_id}?assistant=${assistant.id}`);
-	let sharedAssistantLinkWithParam = $derived(`${$page.url.protocol}//${$page.url.host}/group/${assistant.class_id}/shared/assistant/${assistant.id}?share_token=`);
+	let assistantLink = $derived(
+		`${$page.url.protocol}//${$page.url.host}/group/${assistant.class_id}?assistant=${assistant.id}`
+	);
+	let sharedAssistantLinkWithParam = $derived(
+		`${$page.url.protocol}//${$page.url.host}/group/${assistant.class_id}/shared/assistant/${assistant.id}?share_token=`
+	);
 
 	let currentlyShared = $derived(assistant.share_links?.some((link) => link.active));
 	let shareLinks = $derived(assistant.share_links || []);

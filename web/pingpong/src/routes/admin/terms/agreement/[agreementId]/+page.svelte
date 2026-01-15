@@ -53,27 +53,29 @@
 		}
 	});
 
-	let preventEdits = $derived(userAgreementToEdit?.policies && userAgreementToEdit.policies.length > 0);
+	let preventEdits = $derived(
+		userAgreementToEdit?.policies && userAgreementToEdit.policies.length > 0
+	);
 </script>
 
 <div class="relative flex h-full w-full flex-col">
 	<PageHeader>
 		{#snippet left()}
-				<div >
+			<div>
 				<h2 class="text-color-blue-dark-50 px-4 py-3 font-serif text-3xl font-bold">
 					User Agreements
 				</h2>
 			</div>
-			{/snippet}
+		{/snippet}
 		{#snippet right()}
-				<div >
+			<div>
 				<a
 					href={resolve(`/admin/terms`)}
 					class="flex items-center gap-2 rounded-full bg-white p-2 px-4 text-sm font-medium text-blue-dark-50 transition-all hover:bg-blue-dark-40 hover:text-white"
 					>All Agreements <ArrowRightOutline size="md" class="text-orange" /></a
 				>
 			</div>
-			{/snippet}
+		{/snippet}
 	</PageHeader>
 	<div class="h-full w-full overflow-y-auto p-12">
 		<div class="mb-4 flex flex-row flex-wrap items-center justify-between gap-y-4">

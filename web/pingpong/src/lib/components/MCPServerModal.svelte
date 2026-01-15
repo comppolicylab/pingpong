@@ -26,7 +26,11 @@
 		mcpServerRecordFromServer?: MCPServerToolInput | null;
 	}
 
-	let { mcpServerLocalDraft = null, mcpServerEditIndex = null, mcpServerRecordFromServer = null }: Props = $props();
+	let {
+		mcpServerLocalDraft = null,
+		mcpServerEditIndex = null,
+		mcpServerRecordFromServer = null
+	}: Props = $props();
 	const dispatcher = createEventDispatcher();
 
 	let mcpServerDraft: MCPServerToolInput = $derived.by(() => {
@@ -49,7 +53,9 @@
 	let isCreating = $derived(untrack(() => mcpServerRecordFromServer) === null);
 	let showToken = $state(false);
 
-	let serverRecordUsesTokenAuth = $derived(untrack(() => mcpServerRecordFromServer)?.auth_type === 'token');
+	let serverRecordUsesTokenAuth = $derived(
+		untrack(() => mcpServerRecordFromServer)?.auth_type === 'token'
+	);
 
 	type MCPHeaderEntry = { key: string; value: string };
 

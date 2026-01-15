@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { Dropdown } from 'flowbite-svelte';
 	import { ChevronDownOutline } from 'flowbite-svelte-icons';
-	
+
 	interface Props {
 		// Whether to show the footer.
 		footer?: boolean;
@@ -23,9 +23,9 @@
 
 	let {
 		footer = false,
-		dropdownOpen = false,
+		dropdownOpen = $bindable(false),
 		placeholder = 'Select an option...',
-		selectedOption,
+		selectedOption = $bindable(),
 		optionNodes = {},
 		optionHeaders = {},
 		width = 'w-3/5',
@@ -35,10 +35,6 @@
 	let dropdownContainer: HTMLElement;
 
 	$effect(() => {
-		// ensure dependencies are tracked
-		selectedOption;
-		optionNodes;
-		optionHeaders;
 		if (!selectedOption) {
 			return;
 		}
@@ -94,8 +90,10 @@
 					: 'rounded-lg'} relative max-h-80 grow"
 				bind:this={dropdownContainer}
 			>
+				<!-- svelte-ignore slot_element_deprecated -->
 				<slot />
 			</div>
+			<!-- svelte-ignore slot_element_deprecated -->
 			<slot name="footer" />
 		</div>
 	</Dropdown>

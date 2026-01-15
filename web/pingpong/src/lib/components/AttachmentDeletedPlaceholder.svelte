@@ -1,11 +1,10 @@
 <script lang="ts">
 	import { FileSolid } from 'flowbite-svelte-icons';
 
-	
 	interface Props {
 		/**
-	 * Information about a file that is being uploaded.
-	 */
+		 * Information about a file that is being uploaded.
+		 */
 		file_id: string;
 	}
 

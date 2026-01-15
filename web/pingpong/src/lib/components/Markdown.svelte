@@ -12,7 +12,7 @@
 		latex?: boolean;
 		inlineWebSources?: InlineWebSource[];
 	}
-	
+
 	let { content, syntax = true, latex = false, inlineWebSources = [] }: Props = $props();
 
 	let container: HTMLDivElement;
@@ -52,9 +52,9 @@
 
 			mountedChips.push(
 				mount(WebSourceChip, {
-                					target: placeholder as HTMLElement,
-                					props: { source: source.source, type: 'chip' }
-                				})
+					target: placeholder as HTMLElement,
+					props: { source: source.source, type: 'chip' }
+				})
 			);
 		});
 	};

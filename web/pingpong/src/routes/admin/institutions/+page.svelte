@@ -85,19 +85,21 @@
 <div class="relative flex h-full w-full flex-col">
 	<PageHeader>
 		{#snippet left()}
-				<div >
-				<h2 class="text-color-blue-dark-50 px-4 py-3 font-serif text-3xl font-bold">Institutions</h2>
+			<div>
+				<h2 class="text-color-blue-dark-50 px-4 py-3 font-serif text-3xl font-bold">
+					Institutions
+				</h2>
 			</div>
-			{/snippet}
+		{/snippet}
 		{#snippet right()}
-				<div >
+			<div>
 				<a
 					href={resolve(`/admin`)}
 					class="flex items-center gap-2 rounded-full bg-white p-2 px-4 text-sm font-medium text-blue-dark-50 transition-all hover:bg-blue-dark-40 hover:text-white"
 					>Admin page <ArrowRightOutline size="md" class="text-orange" /></a
 				>
 			</div>
-			{/snippet}
+		{/snippet}
 	</PageHeader>
 
 	<div class="h-full w-full overflow-y-auto p-12">

@@ -3,7 +3,7 @@
 	import PingPongDemoCarousel from '$lib/components/PingPongDemoCarousel.svelte';
 	import { resolve } from '$app/paths';
 	import { type Snippet } from 'svelte';
-	
+
 	interface Props {
 		nonAuthed: boolean;
 		linksOpenInNewTab?: boolean;
@@ -11,12 +11,7 @@
 		footer?: Snippet;
 	}
 
-	let {
-		nonAuthed,
-		linksOpenInNewTab = false,
-		header,
-		footer
-	}: Props = $props();
+	let { nonAuthed, linksOpenInNewTab = false, header, footer }: Props = $props();
 
 	const year = new Date().getFullYear();
 	let acknowledgementsModal = $state(false);

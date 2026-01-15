@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { getContext, onMount } from 'svelte';
 	import { writable } from 'svelte/store';
-	import type { Readable, Writable } from 'svelte/store';
+	import type { Readable } from 'svelte/store';
 	import { resolve } from '$app/paths';
 	import dayjs from '$lib/time';
 	import * as api from '$lib/api';
@@ -74,20 +74,12 @@
 	import DropdownBadge from '$lib/components/DropdownBadge.svelte';
 	import CloneClassModal from '$lib/components/CloneClassModal.svelte';
 
-	/**
-	 * Application data.
-	 */
-	export let data;
-
-	/**
-	 * Form submission.
-	 */
-	export let form;
+	let { data, form } = $props();
 
 	/**
 	 * Max upload size as a nice string.
 	 */
-	$: maxUploadSize = humanSize(data.uploadInfo.class_file_max_size);
+	let maxUploadSize = $derived(humanSize(data.uploadInfo.class_file_max_size));
 
 	const errorMessages: Record<number, string> = {
 		1: 'We faced an issue when trying to sync with Canvas.',
@@ -108,8 +100,8 @@
 		);
 	}
 
-	let summaryElement: HTMLElement;
-	let manageContainer: HTMLElement;
+	let summaryElement: HTMLElement | undefined = $state();
+	let manageContainer: HTMLElement | undefined = $state();
 
 	// Get the headerHeight store from context
 	const headerHeightStore: Readable<number> = getContext('headerHeightStore');
@@ -127,7 +119,7 @@
 
 		// If URL contains the section 'summary', scroll the manageContainer to the summaryElement
 		const waitForHeaderHeight = () => {
-			if (headerHeight > 0) {
+			if (headerHeight > 0 && summaryElement && manageContainer) {
 				manageContainer.scrollTo({
 					top: summaryElement.offsetTop - headerHeight,
 					behavior: 'smooth'
@@ -189,36 +181,35 @@
 			any_can_upload_class_file: upload
 		};
 	};
-	let deleteModal = false;
-	let cloneModal = false;
-	let exportThreadsModal = false;
-	let customSummaryModal = false;
+	let deleteModal = $state(false);
+	let cloneModal = $state(false);
+	let exportThreadsModal = $state(false);
+	let customSummaryModal = $state(false);
 	let defaultDaysToSummarize = 7;
-	let daysToSummarize = defaultDaysToSummarize;
-	let usersModalOpen = false;
-	let anyCanPublishThread = data?.class.any_can_publish_thread || false;
-	let anyCanShareAssistant = data?.class.any_can_share_assistant || false;
-	let presignedUrlExpiration = data?.class.download_link_expiration || null;
-	let makePrivate = data?.class.private || false;
-	let assistantPermissions = formatAssistantPermissions(data?.class);
+	let daysToSummarize = $state(defaultDaysToSummarize);
+	let usersModalOpen = $state(false);
+	let anyCanPublishThread = $derived(data?.class.any_can_publish_thread || false);
+	let anyCanShareAssistant = $derived(data?.class.any_can_share_assistant || false);
+	let presignedUrlExpiration = $derived(data?.class.download_link_expiration || null);
+	let makePrivate = $derived(data?.class.private || false);
+	let assistantPermissions = $derived(formatAssistantPermissions(data?.class));
 	const asstPermOptions = [
 		{ value: 'create:0,publish:0,upload:0', name: 'Do not allow members to create' },
 		{ value: 'create:1,publish:0,upload:1', name: 'Members can create but not publish' },
 		{ value: 'create:1,publish:1,upload:1', name: 'Members can create and publish' }
 	];
-	let availableInstitutions: api.Institution[] = [];
-	let availableTransferInstitutions: api.Institution[] = [];
-	let currentInstitutionId: number | null = null;
-	$: availableInstitutions = (data?.admin?.canCreateClass || [])
-		.slice()
-		.sort((a, b) => a.name.localeCompare(b.name));
-	$: currentInstitutionId = data?.class?.institution_id ?? null;
-	$: availableTransferInstitutions = availableInstitutions.filter(
-		(inst) => inst.id !== currentInstitutionId
+	let availableInstitutions: api.Institution[] = $derived(
+		((data?.admin?.canCreateClass || []) as api.Institution[])
+			.slice()
+			.sort((a, b) => a.name.localeCompare(b.name))
 	);
-	let transferModal = false;
-	let transferInstitutionId: number | null = null;
-	$: {
+	let availableTransferInstitutions: api.Institution[] = $derived(
+		availableInstitutions.filter((inst) => inst.id !== currentInstitutionId)
+	);
+	let currentInstitutionId: number | null = $derived(data?.class?.institution_id ?? null);
+	let transferModal = $state(false);
+	let transferInstitutionId: number | null = $state(null);
+	$effect(() => {
 		if (availableTransferInstitutions.length === 0) {
 			transferInstitutionId = null;
 		} else if (
@@ -227,64 +218,73 @@
 		) {
 			transferInstitutionId = availableTransferInstitutions[0].id;
 		}
-	}
-	$: hasCreatePermissionForCurrent =
+	});
+	let hasCreatePermissionForCurrent = $derived(
 		currentInstitutionId !== null &&
-		availableInstitutions.some((inst) => inst.id === currentInstitutionId);
-	$: transferInstitutionOptions = availableTransferInstitutions.map((inst) => ({
-		value: inst.id.toString(),
-		name: inst.name
-	}));
-	let transferring = false;
-	let anyCanPublishAssistant =
-		parseAssistantPermissions(assistantPermissions).any_can_publish_assistant;
+			availableInstitutions.some((inst) => inst.id === currentInstitutionId)
+	);
+	let transferInstitutionOptions = $derived(
+		availableTransferInstitutions.map((inst) => ({
+			value: inst.id.toString(),
+			name: inst.name
+		}))
+	);
+	let transferring = $state(false);
+	let anyCanPublishAssistant = $derived(
+		parseAssistantPermissions(assistantPermissions).any_can_publish_assistant
+	);
 
 	// Check if the group has been rate limited by OpenAI recently
-	$: lastRateLimitedAt = data?.class.last_rate_limited_at
-		? dayjs().diff(dayjs(data.class.last_rate_limited_at), 'day') > 7
-			? null
-			: dayjs(data.class.last_rate_limited_at).format('MMMM D, YYYY [at] h:mma')
-		: null;
+	let lastRateLimitedAt = $derived(
+		data?.class.last_rate_limited_at
+			? dayjs().diff(dayjs(data.class.last_rate_limited_at), 'day') > 7
+				? null
+				: dayjs(data.class.last_rate_limited_at).format('MMMM D, YYYY [at] h:mma')
+			: null
+	);
 
-	$: apiKey = data.apiKey || null;
-	let apiProvider = 'openai';
+	let apiKey = $derived(data.apiKey || null);
+	let apiProvider = $state('openai');
 
-	$: subscriptionInfo = data.subscription || null;
+	let subscriptionInfo = $derived(data.subscription || null);
 
-	let uploads = writable<FileUploadInfo[]>([]);
-	const trashFiles = writable<number[]>([]);
-	$: files = data?.files || [];
-	$: allFiles = [
-		...$uploads,
-		...files.map((f) => ({
-			state: 'success',
-			progress: 100,
-			file: { type: f.content_type, name: f.name },
-			response: f,
-			promise: Promise.resolve(f)
-		}))
-	]
-		.filter((f) => !$trashFiles.includes((f.response as ServerFile)?.id))
-		.sort((a, b) => {
-			const aName = a.file?.name || (a.response as { name: string })?.name || '';
-			const bName = b.file?.name || (b.response as { name: string })?.name || '';
-			return aName.localeCompare(bName);
-		}) as FileUploadInfo[];
+	let uploads: FileUploadInfo[] = $state([]);
+	let trashFiles: number[] = $state([]);
+	let files: api.ServerFile[] = $derived(data?.files || []);
+	let allFiles = $derived(
+		[
+			...uploads,
+			...files.map((f) => ({
+				state: 'success',
+				progress: 100,
+				file: { type: f.content_type, name: f.name },
+				response: f,
+				promise: Promise.resolve(f)
+			}))
+		]
+			.filter((f) => !trashFiles.includes((f.response as ServerFile)?.id))
+			.sort((a, b) => {
+				const aName = a.file?.name || (a.response as { name: string })?.name || '';
+				const bName = b.file?.name || (b.response as { name: string })?.name || '';
+				return aName.localeCompare(bName);
+			}) as FileUploadInfo[]
+	);
 
-	$: hasApiKey = !!data?.hasAPIKey;
-	$: canExportThreads = !!data?.grants?.isAdmin || !!data?.grants?.isTeacher;
-	$: canEditClassInfo = !!data?.grants?.canEditInfo;
-	$: canManageClassUsers = !!data?.grants?.canManageUsers;
-	$: canUploadClassFiles = !!data?.grants?.canUploadClassFiles;
-	$: canViewApiKey = !!data?.grants?.canViewApiKey;
-	let currentUserRole: api.Role | null;
-	$: currentUserRole = data.grants?.isAdmin
-		? 'admin'
-		: data.grants?.isTeacher
-			? 'teacher'
-			: data.grants?.isStudent
-				? 'student'
-				: null;
+	let hasApiKey = $derived(!!data?.hasAPIKey);
+	let canExportThreads = $derived(!!data?.grants?.isAdmin || !!data?.grants?.isTeacher);
+	let canEditClassInfo = $derived(!!data?.grants?.canEditInfo);
+	let canManageClassUsers = $derived(!!data?.grants?.canManageUsers);
+	let canUploadClassFiles = $derived(!!data?.grants?.canUploadClassFiles);
+	let canViewApiKey = $derived(!!data?.grants?.canViewApiKey);
+	let currentUserRole: api.Role | null = $derived(
+		data.grants?.isAdmin
+			? 'admin'
+			: data.grants?.isTeacher
+				? 'teacher'
+				: data.grants?.isStudent
+					? 'student'
+					: null
+	);
 
 	// Handle file deletion.
 	const removeFile = async (evt: CustomEvent<FileUploadInfo>) => {
@@ -292,19 +292,19 @@
 		if (file.state === 'pending' || file.state === 'deleting') {
 			return;
 		} else if (file.state === 'error') {
-			uploads.update((u) => u.filter((f) => f !== file));
+			uploads = uploads.filter((f) => f !== file);
 		} else {
-			$trashFiles = [...$trashFiles, (file.response as ServerFile).id];
+			trashFiles = [...trashFiles, (file.response as ServerFile).id];
 			const result = await api.deleteFile(fetch, data.class.id, (file.response as ServerFile).id);
 			if (result.$status >= 300) {
-				$trashFiles = $trashFiles.filter((f) => f !== (file.response as ServerFile).id);
+				trashFiles = trashFiles.filter((f) => f !== (file.response as ServerFile).id);
 				sadToast(`Failed to delete file: ${result.detail || 'unknown error'}`);
 			}
 		}
 	};
 
 	// Handle adding new files
-	const handleNewFiles = (evt: CustomEvent<Writable<FileUploadInfo[]>>) => {
+	const handleNewFiles = (evt: CustomEvent<FileUploadInfo[]>) => {
 		uploads = evt.detail;
 	};
 
@@ -316,7 +316,7 @@
 	/**
 	 * Bulk add users to a class.
 	 */
-	let timesAdded = 0;
+	let timesAdded = $state(0);
 	const resetInterface = () => {
 		invalidateAll();
 		usersModalOpen = false;
@@ -515,9 +515,9 @@
 		return api.getClassUsers(fetch, data.class.id, { limit, offset, search });
 	};
 
-	$: classId = data.class.id;
-	$: canvasLinkedClass = data.class.lms_class;
-	$: canvasInstances = data.canvasInstances || [];
+	let classId = $derived(data.class.id);
+	let canvasLinkedClass = $derived(data.class.lms_class);
+	let canvasInstances = $derived(data.canvasInstances || []);
 
 	const redirectToCanvas = async (tenantId: string) => {
 		const result = await api.getCanvasLink(fetch, data.class.id, tenantId);
@@ -550,23 +550,24 @@
 		}
 	};
 
-	let disconnectCanvas = false;
-	let disconnectClass = false;
-	let loadedCanvasClasses = writable<CanvasClass[]>([]);
-	let canvasClasses: CanvasClass[] = [];
+	let disconnectCanvas = $state(false);
+	let disconnectClass = $state(false);
+	let loadedCanvasClasses: CanvasClass[] = $state([]);
 	// The formatted canvas classes loaded from the API.
-	$: canvasClasses = $loadedCanvasClasses
-		.map((c) => ({
-			lms_id: c.lms_id,
-			name: c.name || 'Unnamed class',
-			course_code: c.course_code || '',
-			term: c.term,
-			lms_tenant: c.lms_tenant
-		}))
-		.sort((a, b) => a.course_code.localeCompare(b.course_code));
+	let canvasClasses: CanvasClass[] = $derived(
+		loadedCanvasClasses
+			.map((c) => ({
+				lms_id: c.lms_id,
+				name: c.name || 'Unnamed class',
+				course_code: c.course_code || '',
+				term: c.term,
+				lms_tenant: c.lms_tenant
+			}))
+			.sort((a, b) => a.course_code.localeCompare(b.course_code))
+	);
 
 	// Whether we are currently loading canvas classes from the API.
-	let loadingCanvasClasses = false;
+	let loadingCanvasClasses = $state(false);
 	// Load canvas classes from the API.
 	const loadCanvasClasses = async () => {
 		if (!data.class.lms_tenant) {
@@ -581,21 +582,23 @@
 			invalidateAll();
 			sadToast(response.error.detail || 'An unknown error occurred');
 		} else {
-			$loadedCanvasClasses = response.data.classes;
+			loadedCanvasClasses = response.data.classes;
 			loadingCanvasClasses = false;
 		}
 	};
 
 	// State for the canvas class selection dropdown.
-	let classSelectDropdownOpen = false;
+	let classSelectDropdownOpen = $state(false);
 	// The canvas class id
-	let selectedClass = data.class.lms_class?.toString() || '';
+	let selectedClass = $derived(data.class.lms_class?.toString() || '');
 
-	$: classNameDict = canvasClasses.reduce<{ [key: string]: string }>((acc, class_) => {
-		acc[class_.lms_id] = `[${class_.term}] ${class_.course_code}: ${class_.name}`;
-		return acc;
-	}, {});
-	$: selectedClassName = classNameDict[selectedClass] || 'Select a class...';
+	let classNameDict = $derived(
+		canvasClasses.reduce<{ [key: string]: string }>((acc, class_) => {
+			acc[class_.lms_id] = `[${class_.term}] ${class_.course_code}: ${class_.name}`;
+			return acc;
+		}, {})
+	);
+	let selectedClassName = $derived(classNameDict[selectedClass] || 'Select a class...');
 
 	const updateSelectedClass = async (classValue: string) => {
 		canvasClassVerified = false;
@@ -629,9 +632,9 @@
 		}
 	};
 
-	let canvasClassVerified = false;
-	let canvasClassBeingVerified = false;
-	let canvasClassVerificationError = '';
+	let canvasClassVerified = $state(false);
+	let canvasClassBeingVerified = $state(false);
+	let canvasClassVerificationError = $state('');
 
 	const verifyCanvasClass = async () => {
 		if (!data.class.lms_tenant) {
@@ -656,7 +659,7 @@
 		canvasClassBeingVerified = false;
 	};
 
-	let syncingCanvasClass = false;
+	let syncingCanvasClass = $state(false);
 	const syncClass = async () => {
 		if (!data.class.lms_tenant) {
 			sadToast('No Canvas account linked to this group.');
@@ -678,7 +681,7 @@
 		}
 	};
 
-	let editDropdownOpen = false;
+	let editDropdownOpen = $state(false);
 	const deleteClassSync = async (keep: boolean) => {
 		if (!data.class.lms_tenant) {
 			sadToast('No Canvas account linked to this group.');
@@ -697,7 +700,7 @@
 			sadToast(response.error.detail || 'An unknown error occurred');
 		} else {
 			editDropdownOpen = false;
-			$loadedCanvasClasses = [];
+			loadedCanvasClasses = [];
 			selectedClass = '';
 			invalidateAll();
 			timesAdded++;
@@ -705,7 +708,7 @@
 		}
 	};
 
-	let removingCanvasConnection = false;
+	let removingCanvasConnection = $state(false);
 	const removeCanvasConnection = async (keep: boolean) => {
 		if (!data.class.lms_tenant) {
 			sadToast('No Canvas account linked to this group.');
@@ -809,20 +812,20 @@
 	};
 
 	// The HTMLElement refs of the canvas class options.
-	let classNodes: { [key: string]: HTMLElement } = {};
+	let classNodes: { [key: string]: HTMLElement } = $state({});
 	// Clean up state on navigation. Invalidate data so that any changes
 	// are reflected in the rest of the app. (If performance suffers here,
 	// we can be more selective about what we invalidate.)
 	onNavigate(() => {
-		uploads.set([]);
-		trashFiles.set([]);
+		uploads = [];
+		trashFiles = [];
 	});
 
 	afterNavigate(() => {
 		invalidateAll();
 	});
 
-	$: permissions = [
+	let permissions = $derived([
 		{ name: 'View personal or published assistants', member: true, moderator: true },
 		{
 			name: 'Create a thread and view personal or published threads',
@@ -856,9 +859,9 @@
 			moderator: !makePrivate
 		},
 		{ name: 'Manage group information and user list', member: false, moderator: true }
-	];
+	]);
 
-	let aboutToSetPrivate: boolean = false;
+	let aboutToSetPrivate: boolean = $state(false);
 	let originalEvent: Event;
 
 	function handleClick(event: MouseEvent): void {
@@ -1241,7 +1244,9 @@
 									? 'border-gray-400 from-gray-50 to-gray-100 text-gray-400 items-center'
 									: 'border-blue-400 from-blue-50 to-blue-100 text-blue-700 items-center'}
 							>
-								<span slot="name">New</span>
+								{#snippet name()}
+									<span>New</span>
+								{/snippet}
 							</DropdownBadge>
 							<Label for="subscribe" color={makePrivate ? 'disabled' : 'gray'}>
 								Sign up for Activity Summaries
@@ -1608,7 +1613,7 @@
 												class="max-h-fit shrink-0 border border-gray-400 bg-gradient-to-t from-gray-100 to-gray-100 text-gray-800 hover:from-gray-200 hover:to-gray-100"
 												disabled={loadingCanvasClasses || canvasClassBeingVerified}
 												onclick={() => {
-													$loadedCanvasClasses = [];
+													loadedCanvasClasses = [];
 													selectedClass = '';
 													canvasClassVerified = false;
 													canvasClassBeingVerified = false;
@@ -1616,7 +1621,7 @@
 													classSelectDropdownOpen = false;
 												}}
 												ontouchstart={() => {
-													$loadedCanvasClasses = [];
+													loadedCanvasClasses = [];
 													selectedClass = '';
 													canvasClassVerified = false;
 													canvasClassBeingVerified = false;
@@ -2036,10 +2041,12 @@
 							on:change={handleNewFiles}
 							on:error={(e) => sadToast(e.detail.message)}
 						>
-							<CloudArrowUpOutline size="lg" slot="icon" class="text-gray-500" />
-							<span slot="label" class="ml-2 text-gray-500"
-								>Click or drag & drop to upload files.</span
-							>
+							{#snippet icon()}
+								<CloudArrowUpOutline size="lg" class="text-gray-500" />
+							{/snippet}
+							{#snippet label()}
+								<span class="ml-2 text-gray-500">Click or drag & drop to upload files.</span>
+							{/snippet}
 						</FileUpload>
 					</div>
 					<div class="flex flex-wrap gap-2">
