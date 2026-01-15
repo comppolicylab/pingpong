@@ -43,6 +43,7 @@
 	import Sanitize from '$lib/components/Sanitize.svelte';
 	import DropdownBadge from './DropdownBadge.svelte';
 	import type { Action } from 'svelte/action';
+	import { get, type Writable } from 'svelte/store';
 
 	const dispatcher = createEventDispatcher();
 
@@ -443,8 +444,8 @@
 	};
 
 	// Handle updates from the file upload component.
-	const handleFilesChange = (e: CustomEvent<FileUploadInfo[]>) => {
-		allFiles = e.detail;
+	const handleFilesChange = (e: CustomEvent<Writable<FileUploadInfo[]>>) => {
+		allFiles = get(e.detail);
 	};
 
 	// Remove a file from the list / the server.
