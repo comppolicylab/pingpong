@@ -7105,12 +7105,9 @@ async def create_assistant(
                 )
                 return tool
 
-            mcp_servers = await asyncio.gather(
-                *[
-                    create_mcp_server(mcp_input, asst.id)
-                    for mcp_input in mcp_servers_input
-                ]
-            )
+            mcp_servers = []
+            for mcp_input in mcp_servers_input:
+                mcp_servers.append(await create_mcp_server(mcp_input, asst.id))
             await models.Assistant.synchronize_assistant_mcp_server_tools(
                 request.state.db, asst.id, [s.id for s in mcp_servers], skip_delete=True
             )
@@ -8113,9 +8110,9 @@ async def update_assistant(
                 )
                 return mcp_server.id
 
-        mcp_server_ids = await asyncio.gather(
-            *[upsert_mcp_server(mcp_input) for mcp_input in req.mcp_servers]
-        )
+        mcp_server_ids = []
+        for mcp_input in req.mcp_servers:
+            mcp_server_ids.append(await upsert_mcp_server(mcp_input))
         await request.state.db.flush()
         await models.Assistant.synchronize_assistant_mcp_server_tools(
             request.state.db, asst.id, list(mcp_server_ids)
