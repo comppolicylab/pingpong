@@ -5,10 +5,15 @@
 	import PingPongLogo from './PingPongLogo.svelte';
 	import { loading } from '$lib/stores/general';
 
-	// Props
-	export let open: boolean = false;
-	export let code: string = '';
-	export let preventEdits: boolean = false;
+	
+	interface Props {
+		// Props
+		open?: boolean;
+		code?: string;
+		preventEdits?: boolean;
+	}
+
+	let { open = false, code = $bindable(''), preventEdits = false }: Props = $props();
 
 	// Event dispatcher
 	const dispatch = createEventDispatcher();

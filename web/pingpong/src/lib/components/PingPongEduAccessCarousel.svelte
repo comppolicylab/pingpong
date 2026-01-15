@@ -6,12 +6,12 @@
 	import { AngleLeftOutline, AngleRightOutline } from 'flowbite-svelte-icons';
 	import { Button, Carousel, Thumbnails, Tooltip } from 'flowbite-svelte';
 
-	let carouselHeight = 'auto';
-	let carouselWidth = 0;
-	let carouselElement: Element;
+	let carouselHeight = $state('auto');
+	let carouselWidth = $state(0);
+	let carouselElement: Element | undefined = $state();
 
 	// Carousel variables
-	let index = 0;
+	let index = $state(0);
 	let forward = true; // sync animation direction between Thumbnails and Carousel
 
 	const images = [
@@ -37,14 +37,16 @@
 		}
 	];
 
-	$: if (carouselElement && images && carouselWidth > 0) {
-		const img = new Image();
-		img.onload = () => {
-			const aspectRatio = img.height / img.width;
-			carouselHeight = `${carouselWidth * aspectRatio}px`;
-		};
-		img.src = images[index].src;
-	}
+	$effect(() => {
+		if (carouselElement && images && carouselWidth > 0) {
+			const img = new Image();
+			img.onload = () => {
+				const aspectRatio = img.height / img.width;
+				carouselHeight = `${carouselWidth * aspectRatio}px`;
+			};
+			img.src = images[index].src;
+		}
+	});
 
 	onMount(() => {
 		if (!carouselElement) return;
@@ -72,33 +74,33 @@
 		style="height: {carouselHeight}"
 	>
 		<Controls let:changeSlide>
-			<Button
-				pill
-				class="absolute start-4 top-1/2 -translate-y-1/2 bg-blue-light-50 p-2 font-bold text-blue-dark-40 opacity-90 hover:opacity-100"
-				onclick={() => changeSlide(false)}><AngleLeftOutline /></Button
-			>
-			<Button
-				pill
-				class="absolute end-4 top-1/2 -translate-y-1/2 bg-blue-light-50 p-2 font-bold text-blue-dark-40 opacity-90 hover:opacity-100"
-				onclick={() => changeSlide(true)}><AngleRightOutline /></Button
-			>
-		</Controls>
-	</Carousel>
+						<Button
+						pill
+						class="absolute start-4 top-1/2 -translate-y-1/2 bg-blue-light-50 p-2 font-bold text-blue-dark-40 opacity-90 hover:opacity-100"
+						onclick={() => changeSlide(false)}><AngleLeftOutline /></Button
+					>
+					<Button
+						pill
+						class="absolute end-4 top-1/2 -translate-y-1/2 bg-blue-light-50 p-2 font-bold text-blue-dark-40 opacity-90 hover:opacity-100"
+						onclick={() => changeSlide(true)}><AngleRightOutline /></Button
+					>
+				</Controls>
+		</Carousel>
 	<div class="my-2 mb-4 rounded-sm border-2 border-blue-light-40 bg-blue-light-50 p-2 text-center">
 		{images[index].description}
 	</div>
 	<Thumbnails class="gap-3 bg-transparent" let:Thumbnail let:image let:selected {images} bind:index>
-		{@const image_lte = { src: image.src, alt: image.alt }}
-		<Thumbnail
-			{...image_lte}
-			{selected}
-			class="h-24 rounded-md shadow-xl hover:outline hover:outline-orange-dark"
-			activeClass="outline outline-orange"
-		/>
-		<Tooltip
-			defaultClass="text-wrap py-2 px-3 text-sm font-normal shadow-xs"
-			placement="bottom"
-			arrow={false}>{image.title}</Tooltip
-		>
-	</Thumbnails>
+				{@const image_lte = { src: image.src, alt: image.alt }}
+			<Thumbnail
+				{...image_lte}
+				{selected}
+				class="h-24 rounded-md shadow-xl hover:outline hover:outline-orange-dark"
+				activeClass="outline outline-orange"
+			/>
+			<Tooltip
+				defaultClass="text-wrap py-2 px-3 text-sm font-normal shadow-xs"
+				placement="bottom"
+				arrow={false}>{image.title}</Tooltip
+			>
+		</Thumbnails>
 </div>

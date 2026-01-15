@@ -6,10 +6,10 @@
 	import { loading, loadingMessage } from '$lib/stores/general';
 	import { onMount } from 'svelte';
 
-	export let data;
+	let { data, children } = $props();
 
-	let inIframe = false;
-	$: showCollapsedSidebarOnly = data.showCollapsedSidebarOnly;
+	let inIframe = $state(false);
+	let showCollapsedSidebarOnly = $derived(data.showCollapsedSidebarOnly);
 	onMount(() => {
 		inIframe = window.self !== window.top;
 	});
@@ -35,6 +35,6 @@
 				</div>
 			</div>
 		{/if}
-		<slot />
+		{@render children?.()}
 	</div>
 </div>

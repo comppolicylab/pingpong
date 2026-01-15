@@ -1,28 +1,47 @@
 <script lang="ts">
 	import { Dropdown } from 'flowbite-svelte';
 	import { ChevronDownOutline } from 'flowbite-svelte-icons';
-	import { afterUpdate } from 'svelte';
+	
+	interface Props {
+		// Whether to show the footer.
+		footer?: boolean;
+		// Whether the dropdown is open.
+		dropdownOpen?: boolean;
+		// The placeholder text shown in the dropdown button.
+		placeholder?: string;
+		// The selected option.
+		selectedOption?: string;
+		// The option nodes.
+		optionNodes?: Record<string, HTMLElement>;
+		// The class of the header for each node, if any.
+		optionHeaders?: Record<string, string>;
+		// The width of the dropdown as measured by the button width. Defaults to 3/5.
+		width?: string;
+		// Whether the dropdown is disabled.
+		disabled?: boolean;
+	}
 
-	// Whether to show the footer.
-	export let footer = false;
-	// Whether the dropdown is open.
-	export let dropdownOpen = false;
-	// The placeholder text shown in the dropdown button.
-	export let placeholder = 'Select an option...';
-	// The selected option.
-	export let selectedOption: string;
-	// The option nodes.
-	export let optionNodes: Record<string, HTMLElement> = {};
-	// The class of the header for each node, if any.
-	export let optionHeaders: Record<string, string> = {};
-	// The width of the dropdown as measured by the button width. Defaults to 3/5.
-	export let width = 'w-3/5';
-	// Whether the dropdown is disabled.
-	export let disabled = false;
+	let {
+		footer = false,
+		dropdownOpen = false,
+		placeholder = 'Select an option...',
+		selectedOption,
+		optionNodes = {},
+		optionHeaders = {},
+		width = 'w-3/5',
+		disabled = false
+	}: Props = $props();
 
 	let dropdownContainer: HTMLElement;
 
-	afterUpdate(async () => {
+	$effect(() => {
+		// ensure dependencies are tracked
+		selectedOption;
+		optionNodes;
+		optionHeaders;
+		if (!selectedOption) {
+			return;
+		}
 		const currentNode = optionNodes[selectedOption];
 		const headerClass = optionHeaders[selectedOption];
 		if (currentNode && dropdownContainer) {

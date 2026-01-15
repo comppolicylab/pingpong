@@ -1,20 +1,31 @@
 <script lang="ts">
+	import { run } from 'svelte/legacy';
+
 	import { slide } from 'svelte/transition';
 	import { ChevronDownOutline, ServerOutline } from 'flowbite-svelte-icons';
 	import { Modal } from 'flowbite-svelte';
 	import type { MCPListToolsCallItem, MCPListToolsTool, MCPToolError } from '$lib/api';
 
-	export let content: MCPListToolsCallItem;
-	export let forceOpen = false;
-	export let showServerLabel = true;
-	export let compact = false;
+	interface Props {
+		content: MCPListToolsCallItem;
+		forceOpen?: boolean;
+		showServerLabel?: boolean;
+		compact?: boolean;
+	}
 
-	let open = false;
-	let previousOpen: boolean | null = null;
-	let toolModalOpen = false;
-	let activeTool: MCPListToolsTool | null = null;
+	let {
+		content,
+		forceOpen = false,
+		showServerLabel = true,
+		compact = false
+	}: Props = $props();
 
-	$: {
+	let open = $state(false);
+	let previousOpen: boolean | null = $state(null);
+	let toolModalOpen = $state(false);
+	let activeTool: MCPListToolsTool | null = $state(null);
+
+	$effect(() => {
 		if (forceOpen) {
 			if (previousOpen === null) {
 				previousOpen = open;
@@ -24,7 +35,7 @@
 			open = previousOpen;
 			previousOpen = null;
 		}
-	}
+	});
 
 	const toggle = () => (open = !open);
 
@@ -48,26 +59,26 @@
 		return JSON.stringify(error, null, 2);
 	};
 
-	$: serverLabel = content.server_name || content.server_label || 'MCP server';
-	$: errorPayload = formatError(content.error);
-	$: hasTools = !!content.tools && content.tools.length > 0;
-	$: statusLabel =
-		content.status === 'completed'
+	let serverLabel = $derived(content.server_name || content.server_label || 'MCP server');
+	let errorPayload = $derived(formatError(content.error));
+	let hasTools = $derived(!!content.tools && content.tools.length > 0);
+	let statusLabel =
+		$derived(content.status === 'completed'
 			? `Listed tools${open ? '...' : ''}`
 			: content.status === 'failed'
 				? 'List tools failed'
 				: content.status === 'incomplete'
 					? 'List tools was canceled'
-					: 'Listing tools...';
+					: 'Listing tools...');
 
-	$: statusClasses =
-		content.status === 'in_progress' || content.status === 'calling'
+	let statusClasses =
+		$derived(content.status === 'in_progress' || content.status === 'calling'
 			? 'text-sm font-medium shimmer'
 			: content.status === 'failed'
 				? 'text-sm font-medium text-yellow-600'
 				: content.status === 'incomplete'
 					? 'text-sm font-medium text-yellow-600'
-					: 'text-sm font-medium text-gray-600';
+					: 'text-sm font-medium text-gray-600');
 </script>
 
 <Modal

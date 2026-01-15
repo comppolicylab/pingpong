@@ -1,8 +1,12 @@
 <script lang="ts">
 	import logo from './logo.svg?raw';
 
-	export let size = 8;
-	export let extraClass = 'fill-amber-600';
+	interface Props {
+		size?: number;
+		extraClass?: string;
+	}
+
+	let { size = 8, extraClass = 'fill-amber-600' }: Props = $props();
 </script>
 
 <div class="w-{size} {extraClass}">

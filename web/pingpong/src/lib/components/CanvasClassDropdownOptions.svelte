@@ -3,14 +3,27 @@
 	import DropdownBadge from './DropdownBadge.svelte';
 	import DropdownOption from './DropdownOption.svelte';
 
-	// The Canvas class options to display in the dropdown
-	export let canvasClasses: CanvasClass[];
-	// The HTMLElement refs of the Canvas class options.
-	export let classNodes: { [key: string]: HTMLElement };
-	// The currently selected Canvas class option.
-	export let selectedClass: string;
-	// The function to update the selected Canvas class option.
-	export let updateSelectedClass: (id: string) => void;
+	
+	
+	
+	
+	interface Props {
+		// The Canvas class options to display in the dropdown
+		canvasClasses: CanvasClass[];
+		// The HTMLElement refs of the Canvas class options.
+		classNodes: { [key: string]: HTMLElement };
+		// The currently selected Canvas class option.
+		selectedClass: string;
+		// The function to update the selected Canvas class option.
+		updateSelectedClass: (id: string) => void;
+	}
+
+	let {
+		canvasClasses,
+		classNodes = $bindable(),
+		selectedClass,
+		updateSelectedClass
+	}: Props = $props();
 
 	// Color palettes for the term badges
 	const colorPalettes = [
@@ -56,7 +69,9 @@
 				<DropdownBadge
 					extraClasses={termToColor[term || 'Unknown term'] ||
 						'border-amber-400 from-amber-50 to-amber-100 text-amber-700'}
-					><span slot="name">{term || 'Unknown term'}</span></DropdownBadge
+					>{#snippet name()}
+										<span >{term || 'Unknown term'}</span>
+									{/snippet}</DropdownBadge
 				>
 			</DropdownOption>
 		</div>

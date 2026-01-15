@@ -1,10 +1,15 @@
 <script lang="ts">
 	import { FileSolid } from 'flowbite-svelte-icons';
 
-	/**
+	
+	interface Props {
+		/**
 	 * Information about a file that is being uploaded.
 	 */
-	export let file_id: string;
+		file_id: string;
+	}
+
+	let { file_id }: Props = $props();
 </script>
 
 <div

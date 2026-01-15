@@ -9,7 +9,11 @@
 	} from 'flowbite-svelte';
 	import { CheckOutline, CloseOutline } from 'flowbite-svelte-icons';
 
-	export let permissions: { name: string; member: boolean; moderator: boolean }[] = [];
+	interface Props {
+		permissions?: { name: string; member: boolean; moderator: boolean }[];
+	}
+
+	let { permissions = [] }: Props = $props();
 
 	function getStatusClass(status: boolean) {
 		return status ? 'text-blue-dark-30' : 'text-orange-dark opacity-80';
