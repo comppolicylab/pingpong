@@ -959,6 +959,7 @@
 	};
 
 	let modelNodes: { [key: string]: HTMLElement } = $state({});
+	let modelHeaders: { [key: string]: string } = $state({});
 
 	/**
 	 * Determine if a specific field has changed in the form.
@@ -1548,6 +1549,7 @@
 					footer
 					placeholder={selectedModelName || 'Select a model...'}
 					optionNodes={modelNodes}
+					optionHeaders={modelHeaders}
 					disabled={preventEdits}
 					bind:selectedOption={selectedModel}
 					bind:dropdownOpen
@@ -1560,10 +1562,12 @@
 					>
 					<ModelDropdownOptions
 						modelOptions={latestModelOptions}
+						headerClass="latest-models"
 						{selectedModel}
 						{updateSelectedModel}
 						{allowVisionUpload}
 						bind:modelNodes
+						bind:optionHeaders={modelHeaders}
 					/>
 					<DropdownHeader
 						order={2}
@@ -1572,10 +1576,12 @@
 					>
 					<ModelDropdownOptions
 						modelOptions={versionedModelOptions}
+						headerClass="versioned-models"
 						{selectedModel}
 						{updateSelectedModel}
 						{allowVisionUpload}
 						bind:modelNodes
+						bind:optionHeaders={modelHeaders}
 						smallNameText
 					/>
 					<div slot="footer">
