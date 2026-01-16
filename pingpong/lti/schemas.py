@@ -37,6 +37,7 @@ class LTIRegisterRequest(BaseModel):
     openid_configuration: str
     registration_token: str
     institution_ids: list[int] = Field(min_length=1)
+    show_in_course_navigation: bool = True
 
 
 # LTI Setup schemas
