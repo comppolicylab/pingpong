@@ -403,7 +403,7 @@ async def register_lti_instance(request: Request, data: LTIRegisterRequest):
                         "canvas_term_name": "$Canvas.term.name",
                     },
                     "https://canvas.instructure.com/lti/display_type": "full_width_in_context",
-                    "https://canvas.instructure.com/lti/course_navigation/default_enabled": True,
+                    "https://canvas.instructure.com/lti/course_navigation/default_enabled": data.show_in_course_navigation,
                     "https://canvas.instructure.com/lti/visibility": "members",
                 }
             ],
