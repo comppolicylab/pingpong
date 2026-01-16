@@ -134,8 +134,11 @@
       <Label for="show_in_course_navigation" class="mb-1">Show in Course Navigation</Label>
       <Helper class="mb-2">By default, PingPong will be shown in the course navigation menu.</Helper
       >
-      <Checkbox id="show_in_course_navigation" color="blue" bind:checked={showInCourseNavigation}
-        >Show PingPong app in Course Navigation</Checkbox
+      <Checkbox
+        id="show_in_course_navigation"
+        name="show_in_course_navigation"
+        color="blue"
+        bind:checked={showInCourseNavigation}>Show PingPong app in Course Navigation</Checkbox
       >
     </div>
     <div>
