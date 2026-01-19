@@ -1,7 +1,10 @@
 <script lang="ts">
 	import ThreadDetailPage from '$lib/components/ThreadDetailPage.svelte';
 
-	let { data } = $props();
+	/**
+	 * Application data.
+	 */
+	export let data;
 </script>
 
 <ThreadDetailPage {data} />

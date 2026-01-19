@@ -1,12 +1,8 @@
 <script lang="ts">
 	import logo from './azure.svg?raw';
 
-	interface Props {
-		size?: number | string;
-		extraClass?: string;
-	}
-
-	let { size = 8, extraClass = '' }: Props = $props();
+	export let size: number | string = 8;
+	export let extraClass = '';
 </script>
 
 <div class="w-{size} {extraClass} shrink-0">

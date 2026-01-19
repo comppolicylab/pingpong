@@ -21,7 +21,31 @@
 	import { loading } from '$lib/stores/general.js';
 	import { resolve } from '$app/paths';
 
-	let { data } = $props();
+	export let data;
+
+	let institution: api.InstitutionWithAdmins = data.institution;
+	let defaultKeys: api.DefaultAPIKey[] = data.defaultKeys || [];
+	let draftName = institution.name;
+	let newAdminEmail = '';
+	let savingName = false;
+	let managingAdmins: Record<number, boolean> = {};
+	let savingDefaultKey = false;
+	let selectedDefaultKeyId = institution.default_api_key_id
+		? `${institution.default_api_key_id}`
+		: '';
+
+	$: defaultKeyOptions = [
+		{ value: '', name: 'None' },
+		...defaultKeys
+			.slice()
+			.sort((a, b) =>
+				(a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' })
+			)
+			.map((key) => ({
+				value: `${key.id}`,
+				name: `${key.name || key.provider} (${key.redacted_key})`
+			}))
+	];
 
 	const sortAdmins = (admins: api.InstitutionAdmin[]) =>
 		[...admins].sort((a, b) =>
@@ -36,29 +60,7 @@
 		root_admins: sortAdmins(inst.root_admins)
 	});
 
-	let institution: api.InstitutionWithAdmins = $derived(sortInstitutionAdmins(data.institution));
-	let defaultKeys: api.DefaultAPIKey[] = $derived(data.defaultKeys || []);
-	let draftName = $derived(institution.name);
-	let newAdminEmail = $state('');
-	let savingName = $state(false);
-	let managingAdmins: Record<number, boolean> = $state({});
-	let savingDefaultKey = $state(false);
-	let selectedDefaultKeyId = $derived(
-		institution.default_api_key_id ? `${institution.default_api_key_id}` : ''
-	);
-
-	let defaultKeyOptions = $derived([
-		{ value: '', name: 'None' },
-		...defaultKeys
-			.slice()
-			.sort((a, b) =>
-				(a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' })
-			)
-			.map((key) => ({
-				value: `${key.id}`,
-				name: `${key.name || key.provider} (${key.redacted_key})`
-			}))
-	]);
+	institution = sortInstitutionAdmins(institution);
 
 	const refresh = async () => {
 		const [institutionResponse, defaultKeysResponse] = await Promise.all([
@@ -177,22 +179,16 @@
 
 <div class="relative flex h-full w-full flex-col">
 	<PageHeader>
-		{#snippet left()}
-			<div>
-				<h2 class="text-color-blue-dark-50 px-4 py-3 font-serif text-3xl font-bold">
-					Institutions
-				</h2>
-			</div>
-		{/snippet}
-		{#snippet right()}
-			<div>
-				<a
-					href={resolve(`/admin/institutions`)}
-					class="flex items-center gap-2 rounded-full bg-white p-2 px-4 text-sm font-medium text-blue-dark-50 transition-all hover:bg-blue-dark-40 hover:text-white"
-					>All Institutions <ArrowRightOutline size="md" class="text-orange" /></a
-				>
-			</div>
-		{/snippet}
+		<div slot="left">
+			<h2 class="text-color-blue-dark-50 px-4 py-3 font-serif text-3xl font-bold">Institutions</h2>
+		</div>
+		<div slot="right">
+			<a
+				href={resolve(`/admin/institutions`)}
+				class="flex items-center gap-2 rounded-full bg-white p-2 px-4 text-sm font-medium text-blue-dark-50 transition-all hover:bg-blue-dark-40 hover:text-white"
+				>All Institutions <ArrowRightOutline size="md" class="text-orange" /></a
+			>
+		</div>
 	</PageHeader>
 	<div class="h-full w-full space-y-8 overflow-y-auto p-12">
 		<div class="mb-4 flex flex-row flex-wrap items-center justify-between gap-y-4">

@@ -3,13 +3,9 @@
 	import { FileSolid } from 'flowbite-svelte-icons';
 	import Markdown from './Markdown.svelte';
 
-	interface Props {
-		name: string;
-		quote: string;
-	}
-
-	let { name, quote }: Props = $props();
-	let isOpen = $state(false);
+	export let name: string;
+	export let quote: string;
+	let isOpen = false;
 </script>
 
 <Modal bind:open={isOpen} title={`Text used from "${name}"`} autoclose outsideclose dismissable>

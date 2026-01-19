@@ -3,13 +3,9 @@
 	import { Tooltip } from 'flowbite-svelte';
 	import { parse } from 'tldts';
 
-	interface Props {
-		source: WebSearchSource;
-		type?: 'chip' | 'list';
-		forceEagerLoad?: boolean;
-	}
-
-	let { source, type = 'chip', forceEagerLoad = false }: Props = $props();
+	export let source: WebSearchSource;
+	export let type: 'chip' | 'list' = 'chip';
+	export let forceEagerLoad = false;
 
 	const domainFromUrl = (url?: string | null) => {
 		if (!url) return '';
@@ -26,16 +22,14 @@
 		}
 	};
 
-	let domain = $derived(domainFromUrl(source?.url));
-	let faviconUrl = $derived(
-		source?.url
-			? `https://www.google.com/s2/favicons?domain_url=${encodeURIComponent(domain)}&sz=64`
-			: undefined
-	);
+	const domain = domainFromUrl(source?.url);
+	const faviconUrl = source?.url
+		? `https://www.google.com/s2/favicons?domain_url=${encodeURIComponent(domain)}&sz=64`
+		: undefined;
 
-	let label = $derived(source?.title || domain || source?.url || 'Source');
+	const label = source?.title || domain || source?.url || 'Source';
 
-	let showFavicon = $derived(Boolean(faviconUrl));
+	let showFavicon = Boolean(faviconUrl);
 
 	const handleFaviconLoad = (event: Event & { currentTarget: EventTarget & Element }) => {
 		if (!(event.currentTarget instanceof HTMLImageElement)) return;
@@ -60,11 +54,10 @@
 			return rawUrl;
 		}
 	};
-	const url = $derived(stripUtmParams(source?.url));
-	const buttonClass = $derived(
+	const url = stripUtmParams(source?.url);
+	const buttonClass =
 		'inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-gray-50 text-xs font-normal text-gray-700 hover:bg-gray-100' +
-			(type === 'list' ? ' py-1 pl-2 pr-3 shadow-xs' : ' py-0.5 px-2')
-	);
+		(type === 'list' ? ' py-1 pl-2 pr-3 shadow-xs' : ' py-0.5 px-2');
 </script>
 
 <button

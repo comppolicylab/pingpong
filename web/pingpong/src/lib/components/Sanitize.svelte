@@ -1,21 +1,15 @@
 <script lang="ts">
 	import DOMPurify from '$lib/purify';
 
-	interface Props {
-		/**
-		 * Content to render.
-		 */
-		html: string | Promise<string>;
-	}
+	/**
+	 * Content to render.
+	 */
+	export let html: string | Promise<string>;
 
-	let { html }: Props = $props();
-
-	let sanitized = $state('');
+	let sanitized = '';
 
 	// Sanitize the document.
-	$effect(() => {
-		sanitizeInput(html);
-	});
+	$: sanitizeInput(html);
 
 	function sanitizeInput(value: string | Promise<string>) {
 		if (typeof value === 'string') {

@@ -3,35 +3,31 @@
 	import { PauseSolid, PlaySolid } from 'flowbite-svelte-icons';
 	import { onMount, onDestroy } from 'svelte';
 
-	interface Props {
-		duration: number;
-		src: string;
-	}
+	export let duration: number;
+	export let src: string;
 
-	let { duration, src = $bindable() }: Props = $props();
-
-	let audioElement: HTMLAudioElement | null = $state(null);
-	let isPlaying = $state(false);
-	let currentTime = $state(0);
-	let playbackRate = $state(1);
-	let volume = $state(1);
-	let nonMutedVolume = $state(1);
-	let isMuted = $derived(volume === 0);
-	let isDragging = $state(false);
-	let seekTime = $state(0);
-	let showVolumeSlider = $state(false);
-	let showSpeedDropdown = $state(false);
-	let isHoveringProgress = $state(false);
-	let hoverTime = $state(0);
+	let audioElement: HTMLAudioElement;
+	let isPlaying = false;
+	let currentTime = 0;
+	let playbackRate = 1;
+	let volume = 1;
+	let nonMutedVolume = volume;
+	$: isMuted = volume === 0;
+	let isDragging = false;
+	let seekTime = 0;
+	let showVolumeSlider = false;
+	let showSpeedDropdown = false;
+	let isHoveringProgress = false;
+	let hoverTime = 0;
 
 	const playbackSpeeds = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
 	// Convert milliseconds to seconds for display
-	let durationInSeconds = $derived(duration / 1000);
-	let progress = $derived(durationInSeconds > 0 ? (currentTime / durationInSeconds) * 100 : 0);
-	let seekProgress = $derived(durationInSeconds > 0 ? (seekTime / durationInSeconds) * 100 : 0);
-	let hoverProgress = $derived(durationInSeconds > 0 ? (hoverTime / durationInSeconds) * 100 : 0);
-	let displayTime = $derived(isDragging ? seekTime : currentTime);
+	$: durationInSeconds = duration / 1000;
+	$: progress = durationInSeconds > 0 ? (currentTime / durationInSeconds) * 100 : 0;
+	$: seekProgress = durationInSeconds > 0 ? (seekTime / durationInSeconds) * 100 : 0;
+	$: hoverProgress = durationInSeconds > 0 ? (hoverTime / durationInSeconds) * 100 : 0;
+	$: displayTime = isDragging ? seekTime : currentTime;
 
 	const formatTime = (timeInSeconds: number): string => {
 		const minutes = Math.floor(timeInSeconds / 60);
@@ -63,7 +59,7 @@
 		currentTime = newTime;
 	};
 
-	let progressBar: HTMLElement | null = $state(null);
+	let progressBar: HTMLElement;
 	const handleProgressMouseDown = (event: MouseEvent) => {
 		if (!audioElement) return;
 		isDragging = true;
@@ -91,9 +87,7 @@
 		if (!isDragging) return;
 		updateSeekTime(event);
 		currentTime = seekTime;
-		if (audioElement) {
-			audioElement.currentTime = seekTime;
-		}
+		audioElement.currentTime = seekTime;
 		isDragging = false;
 		window.removeEventListener('mousemove', handleProgressMouseMove);
 		window.removeEventListener('mouseup', handleProgressMouseUp);
@@ -148,7 +142,7 @@
 			});
 
 			audioElement.addEventListener('timeupdate', () => {
-				if (!isDragging && audioElement) {
+				if (!isDragging) {
 					currentTime = audioElement.currentTime;
 				}
 			});

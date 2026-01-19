@@ -7,24 +7,22 @@
 	import { loading } from '$lib/stores/general.js';
 	import { resolve } from '$app/paths';
 
-	let { data } = $props();
+	export let data;
 
-	const { context, ltiClassId } = $derived(data);
+	const { context, ltiClassId } = data;
 
 	// Pre-fill form with LTI context data
 	// Name: "Course Code: Course Name"
-	let name = $derived(
+	let name =
 		context.course_code && context.course_name
 			? `${context.course_code}: ${context.course_name}`
-			: context.course_name || context.course_code || ''
-	);
+			: context.course_name || context.course_code || '';
 
-	let term = $derived(context.course_term || '');
-	let institutionId: number | null = $derived(
-		context.institutions.length === 1 ? context.institutions[0].id : null
-	);
+	let term = context.course_term || '';
+	let institutionId: number | null =
+		context.institutions.length === 1 ? context.institutions[0].id : null;
 
-	let error = $state('');
+	let error = '';
 
 	const goBack = () => {
 		// eslint-disable-next-line svelte/no-navigation-without-resolve

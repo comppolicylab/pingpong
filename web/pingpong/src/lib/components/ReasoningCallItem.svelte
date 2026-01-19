@@ -4,16 +4,12 @@
 	import type { ReasoningCallItem } from '$lib/api';
 	import Markdown from './Markdown.svelte';
 
-	interface Props {
-		content: ReasoningCallItem;
-		forceOpen?: boolean;
-	}
+	export let content: ReasoningCallItem;
+	export let forceOpen = false;
 
-	let { content, forceOpen = false }: Props = $props();
-
-	let open = $state(false);
-	let previousOpen: boolean | null = $state(null);
-	$effect(() => {
+	let open = false;
+	let previousOpen: boolean | null = null;
+	$: {
 		if (forceOpen) {
 			if (previousOpen === null) {
 				previousOpen = open;
@@ -23,9 +19,9 @@
 			open = previousOpen;
 			previousOpen = null;
 		}
-	});
+	}
 
-	let hasSummary = $derived((content.summary && content.summary.length > 0) || false);
+	$: hasSummary = (content.summary && content.summary.length > 0) || false;
 
 	const toggle = () => {
 		if (hasSummary) {
@@ -33,23 +29,21 @@
 		}
 	};
 
-	let statusLabel = $derived(
+	$: statusLabel =
 		content.status === 'completed'
 			? 'Thought' +
-					(content.thought_for ? ' for ' + content.thought_for : ' before responding') +
-					(open ? '...' : '')
+				(content.thought_for ? ' for ' + content.thought_for : ' before responding') +
+				(open ? '...' : '')
 			: content.status === 'incomplete'
 				? 'Reasoning was interrupted'
-				: 'Thinking...'
-	);
+				: 'Thinking...';
 
-	let statusClasses = $derived(
+	$: statusClasses =
 		content.status === 'in_progress'
 			? 'text-sm font-medium shimmer'
 			: content.status === 'incomplete'
 				? 'text-sm font-medium text-yellow-600'
-				: 'text-sm font-medium text-gray-600'
-	);
+				: 'text-sm font-medium text-gray-600';
 </script>
 
 <div class="my-3">

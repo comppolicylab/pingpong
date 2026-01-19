@@ -3,16 +3,12 @@
 	import { ChevronDownOutline, FileSearchOutline } from 'flowbite-svelte-icons';
 	import type { FileSearchCallItem } from '$lib/api';
 
-	interface Props {
-		content: FileSearchCallItem;
-		forceOpen?: boolean;
-	}
+	export let content: FileSearchCallItem;
+	export let forceOpen = false;
 
-	let { content, forceOpen = false }: Props = $props();
-
-	let open = $state(false);
-	let previousOpen: boolean | null = $state(null);
-	$effect(() => {
+	let open = false;
+	let previousOpen: boolean | null = null;
+	$: {
 		if (forceOpen) {
 			if (previousOpen === null) {
 				previousOpen = open;
@@ -22,7 +18,7 @@
 			open = previousOpen;
 			previousOpen = null;
 		}
-	});
+	}
 	const handleClick = () => (open = !open);
 </script>
 

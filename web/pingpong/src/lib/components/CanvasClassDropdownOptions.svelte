@@ -3,23 +3,14 @@
 	import DropdownBadge from './DropdownBadge.svelte';
 	import DropdownOption from './DropdownOption.svelte';
 
-	interface Props {
-		// The Canvas class options to display in the dropdown
-		canvasClasses: CanvasClass[];
-		// The HTMLElement refs of the Canvas class options.
-		classNodes: { [key: string]: HTMLElement };
-		// The currently selected Canvas class option.
-		selectedClass: string;
-		// The function to update the selected Canvas class option.
-		updateSelectedClass: (id: string) => void;
-	}
-
-	let {
-		canvasClasses,
-		classNodes = $bindable(),
-		selectedClass,
-		updateSelectedClass
-	}: Props = $props();
+	// The Canvas class options to display in the dropdown
+	export let canvasClasses: CanvasClass[];
+	// The HTMLElement refs of the Canvas class options.
+	export let classNodes: { [key: string]: HTMLElement };
+	// The currently selected Canvas class option.
+	export let selectedClass: string;
+	// The function to update the selected Canvas class option.
+	export let updateSelectedClass: (id: string) => void;
 
 	// Color palettes for the term badges
 	const colorPalettes = [
@@ -40,17 +31,15 @@
 		'border-monza-red-400 from-monza-red-50 to-monza-red-100 text-monza-red-800'
 	];
 	// Extract the terms from the Canvas classes
-	let termsInList = $derived([...new Set(canvasClasses.map((c) => c.term || 'Unknown term'))]);
+	const termsInList = [...new Set(canvasClasses.map((c) => c.term || 'Unknown term'))];
 	// Map of terms to colors
-	let termToColor = $derived(
-		termsInList.reduce(
-			(acc, term, index) => {
-				const color = colorPalettes[index % colorPalettes.length];
-				acc[term] = color;
-				return acc;
-			},
-			{} as { [key: string]: string }
-		)
+	const termToColor = termsInList.reduce(
+		(acc, term, index) => {
+			const color = colorPalettes[index % colorPalettes.length];
+			acc[term] = color;
+			return acc;
+		},
+		{} as { [key: string]: string }
 	);
 </script>
 
@@ -67,9 +56,7 @@
 				<DropdownBadge
 					extraClasses={termToColor[term || 'Unknown term'] ||
 						'border-amber-400 from-amber-50 to-amber-100 text-amber-700'}
-					>{#snippet name()}
-						<span>{term || 'Unknown term'}</span>
-					{/snippet}</DropdownBadge
+					><span slot="name">{term || 'Unknown term'}</span></DropdownBadge
 				>
 			</DropdownOption>
 		</div>

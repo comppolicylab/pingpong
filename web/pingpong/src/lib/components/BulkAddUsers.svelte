@@ -32,33 +32,23 @@
 	} from 'flowbite-svelte-icons';
 	import PermissionsTable from './PermissionsTable.svelte';
 
-	interface Props {
-		role: api.Role;
-		classId: number;
-		className?: string;
-		isPrivate?: boolean;
-		permissions?: { name: string; member: boolean; moderator: boolean }[];
-	}
-
-	let {
-		role,
-		classId,
-		className = 'your group',
-		isPrivate = false,
-		permissions = []
-	}: Props = $props();
-	let emailString: string = $state('');
-	let verifiedEmails: api.EmailValidationResult[] = $state([]);
-	let unverifiedEmails: api.EmailValidationResult[] = $state([]);
-	let newUsers = $derived(verifiedEmails.some((e) => !e.valid));
-	let selectedRole: api.Role | undefined = $state();
+	export let role: api.Role;
+	export let classId: number;
+	export let className: string = 'your group';
+	export let isPrivate: boolean = false;
+	export let permissions: { name: string; member: boolean; moderator: boolean }[] = [];
+	let emailString: string = '';
+	let verifiedEmails: api.EmailValidationResult[] = [];
+	let unverifiedEmails: api.EmailValidationResult[] = [];
+	$: newUsers = verifiedEmails.some((e) => !e.valid);
+	let selectedRole: api.Role | undefined = role;
 	let silentAdd = false;
-	let showEmailForm = $state(true);
-	let showNameForm = $state(false);
-	let showResults = $state(false);
-	let permissionsModalOpen = $state(false);
-	let results: api.CreateUserResult[] = $state([]);
-	let withErrors = $derived(results.some((r) => r.error));
+	let showEmailForm = true;
+	let showNameForm = false;
+	let showResults = false;
+	let permissionsModalOpen = false;
+	let results: api.CreateUserResult[] = [];
+	$: withErrors = results.some((r) => r.error);
 
 	const dispatch = createEventDispatcher();
 
@@ -221,7 +211,7 @@
 			name="role"
 			class="mt-2 mb-4 py-1.5"
 			placeholder="Select a user role..."
-			value={selectedRole ?? role}
+			value={selectedRole}
 			items={roles}
 		/>
 		<Helper helperClass="text-md font-normal rtl:text-right font-medium block">Notify people</Helper

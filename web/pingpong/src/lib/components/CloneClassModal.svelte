@@ -9,57 +9,39 @@
 		Radio,
 		Select
 	} from 'flowbite-svelte';
-	import { createEventDispatcher, untrack } from 'svelte';
+	import { createEventDispatcher } from 'svelte';
 	import { FileCopyOutline } from 'flowbite-svelte-icons';
 	import AzureLogo from './AzureLogo.svelte';
 	import OpenAiLogo from './OpenAILogo.svelte';
 	import type { CopyClassRequestInfo, Institution } from '$lib/api';
 
-	interface Props {
-		groupName: string;
-		groupSession: string;
-		institutions?: Institution[];
-		currentInstitutionId?: number | null;
-		makePrivate?: boolean;
-		anyCanPublishThread?: boolean;
-		anyCanShareAssistant?: boolean;
-		assistantPermissions?: string;
-		aiProvider?: string;
-	}
+	export let groupName: string;
+	let displayGroupName = groupName + ' (Copy)';
+	export let groupSession: string;
+	export let institutions: Institution[] = [];
+	export let currentInstitutionId: number | null = null;
+	export let makePrivate = false;
+	export let anyCanPublishThread = false;
+	export let anyCanShareAssistant = false;
+	export let assistantPermissions: string = 'create:0,publish:0,upload:0';
+	export let aiProvider = '';
 
-	let {
-		groupName,
-		groupSession = $bindable(),
-		institutions = [],
-		currentInstitutionId = null,
-		makePrivate = $bindable(false),
-		anyCanPublishThread = $bindable(false),
-		anyCanShareAssistant = $bindable(false),
-		assistantPermissions = $bindable('create:0,publish:0,upload:0'),
-		aiProvider = ''
-	}: Props = $props();
-
-	let displayGroupName = $derived(untrack(() => groupName) + ' (Copy)');
-
-	let disableAnyCanShareAssistants = $derived(assistantPermissions.includes('publish:0'));
-	$effect(() => {
+	let disableAnyCanShareAssistants = assistantPermissions.includes('publish:0');
+	$: {
+		disableAnyCanShareAssistants = assistantPermissions.includes('publish:0');
 		if (disableAnyCanShareAssistants) {
 			anyCanShareAssistant = false;
 		}
-	});
-	let assistantCopy: 'moderators' | 'all' = $state('moderators');
-	let userCopy: 'moderators' | 'all' = $state('moderators');
-	let selectedInstitutionId = $derived.by(() => {
-		let institutionId = untrack(() => currentInstitutionId);
-		return institutionId !== null ? institutionId.toString() : '';
-	});
-	let institutionOptions = $derived(
-		institutions.map((inst) => ({
-			value: inst.id.toString(),
-			name: inst.name
-		}))
-	);
-	$effect(() => {
+	}
+
+	let assistantCopy: 'moderators' | 'all' = 'moderators';
+	let userCopy: 'moderators' | 'all' = 'moderators';
+	let selectedInstitutionId = currentInstitutionId !== null ? currentInstitutionId.toString() : '';
+	$: institutionOptions = institutions.map((inst) => ({
+		value: inst.id.toString(),
+		name: inst.name
+	}));
+	$: {
 		const hasValidSelection = institutions.some(
 			(inst) => inst.id.toString() === selectedInstitutionId
 		);
@@ -70,9 +52,10 @@
 				selectedInstitutionId = preferred.id.toString();
 			}
 		}
-	});
+	}
 
-	let copyClassInfo: CopyClassRequestInfo = $derived({
+	let copyClassInfo: CopyClassRequestInfo;
+	$: copyClassInfo = {
 		groupName: displayGroupName,
 		groupSession,
 		institutionId: selectedInstitutionId
@@ -84,7 +67,7 @@
 		assistantPermissions,
 		assistantCopy,
 		userCopy
-	});
+	};
 
 	const dispatch = createEventDispatcher();
 

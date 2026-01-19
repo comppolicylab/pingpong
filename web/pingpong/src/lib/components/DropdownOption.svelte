@@ -1,27 +1,13 @@
 <script lang="ts">
 	import { DropdownItem, Tooltip } from 'flowbite-svelte';
 	import { BrainOutline } from 'flowbite-svelte-icons';
-	interface Props {
-		value: string;
-		selectedValue: string;
-		update: (value: string) => void;
-		name: string;
-		subtitle: string;
-		smallNameText?: boolean;
-		addBrainIcon?: boolean;
-		children?: import('svelte').Snippet;
-	}
-
-	let {
-		value,
-		selectedValue,
-		update,
-		name,
-		subtitle,
-		smallNameText = false,
-		addBrainIcon = false,
-		children
-	}: Props = $props();
+	export let value: string;
+	export let selectedValue: string;
+	export let update: (value: string) => void;
+	export let name: string;
+	export let subtitle: string;
+	export let smallNameText: boolean = false;
+	export let addBrainIcon: boolean = false;
 </script>
 
 <DropdownItem
@@ -41,7 +27,7 @@
 			{/if}
 		</div>
 		<div class="flex flex-row flex-wrap items-center gap-x-1 gap-y-0.5">
-			{@render children?.()}
+			<slot />
 		</div>
 	</div>
 	<span class="font-normal">{subtitle}</span>

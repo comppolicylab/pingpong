@@ -3,17 +3,9 @@
 	import { ExclamationCircleOutline } from 'flowbite-svelte-icons';
 	import { createEventDispatcher } from 'svelte';
 
-	interface Props {
-		canvasCourseCode?: string;
-		leftAction?: string;
-		rightAction?: string;
-	}
-
-	let {
-		canvasCourseCode = '',
-		leftAction = 'Keep imported users',
-		rightAction = 'Remove imported users'
-	}: Props = $props();
+	export let canvasCourseCode: string = '';
+	export let leftAction: string = 'Keep imported users';
+	export let rightAction: string = 'Remove imported users';
 
 	// Custom events
 	const dispatch = createEventDispatcher();

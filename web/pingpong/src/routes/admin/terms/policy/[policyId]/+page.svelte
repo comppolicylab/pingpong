@@ -17,25 +17,22 @@
 		Select
 	} from 'flowbite-svelte';
 	import { ArrowRightOutline, LockSolid } from 'flowbite-svelte-icons';
+	import { writable } from 'svelte/store';
 
-	let { data } = $props();
+	export let data;
 
-	let isCreating = $derived(data.isCreating);
-	let agreementPolicyToEdit = $derived(data.agreementPolicy);
-	let agreements = $derived(data.agreements);
-	let availableAgreements = $derived(
-		agreements.map((agreement) => ({
-			value: agreement.id,
-			name: agreement.name
-		}))
-	);
-	let externalProviders = $derived(data.externalProviders);
-	let availableProviders = $derived(
-		externalProviders.map((provider) => ({
-			value: provider.id,
-			name: provider.name
-		}))
-	);
+	$: isCreating = data.isCreating;
+	$: agreementPolicyToEdit = data.agreementPolicy;
+	$: agreements = data.agreements;
+	$: availableAgreements = agreements.map((agreement) => ({
+		value: agreement.id,
+		name: agreement.name
+	}));
+	$: externalProviders = data.externalProviders;
+	$: availableProviders = externalProviders.map((provider) => ({
+		value: provider.id,
+		name: provider.name
+	}));
 
 	const handleSubmit = async (event: Event) => {
 		event.preventDefault();
@@ -57,7 +54,7 @@
 			return sadToast('Please select an agreement.');
 		}
 
-		if (selectedTargetGroupValue === '2' && selectedProviders.length === 0) {
+		if (selectedTargetGroupValue === '2' && $selectedProviders.length === 0) {
 			$loading = false;
 			return sadToast('Please select at least one external login provider.');
 		}
@@ -66,7 +63,7 @@
 			name,
 			agreement_id: selectedAgreement,
 			apply_to_all: selectedTargetGroupValue === '1',
-			limit_to_providers: selectedTargetGroupValue === '2' ? selectedProviders : null
+			limit_to_providers: selectedTargetGroupValue === '2' ? $selectedProviders : null
 		};
 		const rawAgreement = !agreementPolicyToEdit?.id
 			? await api.createAgreementPolicy(fetch, params)
@@ -82,36 +79,33 @@
 		$loading = false;
 	};
 
-	let selectedAgreement: number | null = $derived(
-		agreementPolicyToEdit?.agreement_id !== undefined ? agreementPolicyToEdit.agreement_id : null
+	let selectedAgreement: number | null = null;
+	$: if (selectedAgreement === null && agreementPolicyToEdit?.agreement_id !== undefined) {
+		selectedAgreement = agreementPolicyToEdit?.agreement_id;
+	}
+
+	let selectedTargetGroupValue = (data.agreementPolicy?.apply_to_all ?? true) ? '1' : '2';
+	let selectedProviders = writable(
+		data.agreementPolicy?.limit_to_providers.slice().map((provider) => provider.id)
 	);
 
-	let selectedTargetGroupValue = $derived((data.agreementPolicy?.apply_to_all ?? true) ? '1' : '2');
-	let selectedProviders = $derived(
-		data.agreementPolicy?.limit_to_providers.slice().map((provider) => provider.id) || []
-	);
-
-	let preventEdits = $derived(!!agreementPolicyToEdit?.not_before || false);
+	$: preventEdits = !!agreementPolicyToEdit?.not_before || false;
 </script>
 
 <div class="relative flex h-full w-full flex-col">
 	<PageHeader>
-		{#snippet left()}
-			<div>
-				<h2 class="text-color-blue-dark-50 px-4 py-3 font-serif text-3xl font-bold">
-					Agreement Policies
-				</h2>
-			</div>
-		{/snippet}
-		{#snippet right()}
-			<div>
-				<a
-					href={resolve(`/admin/terms`)}
-					class="flex items-center gap-2 rounded-full bg-white p-2 px-4 text-sm font-medium text-blue-dark-50 transition-all hover:bg-blue-dark-40 hover:text-white"
-					>All Agreements <ArrowRightOutline size="md" class="text-orange" /></a
-				>
-			</div>
-		{/snippet}
+		<div slot="left">
+			<h2 class="text-color-blue-dark-50 px-4 py-3 font-serif text-3xl font-bold">
+				Agreement Policies
+			</h2>
+		</div>
+		<div slot="right">
+			<a
+				href={resolve(`/admin/terms`)}
+				class="flex items-center gap-2 rounded-full bg-white p-2 px-4 text-sm font-medium text-blue-dark-50 transition-all hover:bg-blue-dark-40 hover:text-white"
+				>All Agreements <ArrowRightOutline size="md" class="text-orange" /></a
+			>
+		</div>
 	</PageHeader>
 	<div class="h-full w-full overflow-y-auto p-12">
 		<div class="mb-4 flex flex-row flex-wrap items-center justify-between gap-y-4">
@@ -195,7 +189,7 @@
 					<MultiSelect
 						name="providers"
 						id="providers"
-						bind:value={selectedProviders}
+						bind:value={$selectedProviders}
 						items={availableProviders}
 						disabled={preventEdits || $loading}
 					/>

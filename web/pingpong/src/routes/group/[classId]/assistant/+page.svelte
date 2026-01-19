@@ -39,47 +39,34 @@
 		performDeleteAssistant
 	} from '$lib/assistantHelpers';
 
-	let { data } = $props();
+	export let data;
 
-	let hasApiKey = $derived(!!data?.hasAPIKey);
-	let creators = $derived(data?.assistantCreators || {});
-	let moderators = $derived(data?.supervisors || []);
-	let allAssistants = $derived(data?.assistants || []);
+	$: hasApiKey = !!data?.hasAPIKey;
+	$: creators = data?.assistantCreators || {};
+	$: moderators = data?.supervisors || [];
 	// "Course" assistants are endorsed by the class. Right now this means
 	// they are created by the teaching team and are published.
-	let courseAssistants: Assistant[] = $derived(
-		allAssistants.filter((assistant) => assistant.endorsed)
-	);
+	let courseAssistants: Assistant[] = [];
 	// "My" assistants are assistants created by the current user, except
 	// for those that appear in "course" assistants.
-	let myAssistants: Assistant[] = $derived(
-		allAssistants.filter(
-			(assistant) => assistant.creator_id === data.me.user!.id && !assistant.endorsed
-		)
-	);
+	let myAssistants: Assistant[] = [];
 	// "Other" assistants are non-endorsed assistants that are not created by the current user.
 	// For most people this means published assistants from other students. For people with
 	// elevated permissions, this could also mean private assistants.
-	let otherAssistants: Assistant[] = $derived(
-		allAssistants.filter(
-			(assistant) => assistant.creator_id !== data.me.user!.id && !assistant.endorsed
-		)
-	);
-	let copyModalState: Record<number, boolean> = $state({});
-	let deleteModalState: Record<number, boolean> = $state({});
-	let copyNames: Record<number, string> = $state({});
-	let copyTargets: Record<number, string> = $state({});
-	let copyPermissionAllowed: Record<number, boolean> = $state({});
-	let copyPermissionLoading: Record<number, boolean> = $state({});
-	let copyPermissionError: Record<number, string> = $state({});
+	let otherAssistants: Assistant[] = [];
+	let copyModalState: Record<number, boolean> = {};
+	let deleteModalState: Record<number, boolean> = {};
+	let copyNames: Record<number, string> = {};
+	let copyTargets: Record<number, string> = {};
+	let copyPermissionAllowed: Record<number, boolean> = {};
+	let copyPermissionLoading: Record<number, boolean> = {};
+	let copyPermissionError: Record<number, string> = {};
 	const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
-	let classOptions = $derived(
-		(data.classes || []).map((c) => ({
-			id: c.id,
-			name: c.name,
-			term: c.term
-		}))
-	);
+	const classOptions = (data.classes || []).map((c) => ({
+		id: c.id,
+		name: c.name,
+		term: c.term
+	}));
 	const assistantLink = (assistantId: number) =>
 		`${baseUrl}/group/${data.class.id}?assistant=${assistantId}`;
 
@@ -203,6 +190,17 @@
 		updateCopyTarget(assistantId, value);
 		void checkCopyPermission(assistantId, value);
 	};
+	$: {
+		const allAssistants = data?.assistants || [];
+		// Split all assistants into categories
+		courseAssistants = allAssistants.filter((assistant) => assistant.endorsed);
+		myAssistants = allAssistants.filter(
+			(assistant) => assistant.creator_id === data.me.user!.id && !assistant.endorsed
+		);
+		otherAssistants = allAssistants.filter(
+			(assistant) => assistant.creator_id !== data.me.user!.id && !assistant.endorsed
+		);
+	}
 </script>
 
 <div class="h-full w-full overflow-y-auto p-12">
