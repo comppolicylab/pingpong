@@ -186,7 +186,7 @@
 /* Override Flowbite's placeholder color */
 input::placeholder,
 textarea::placeholder {
-	color: theme('colors.gray.600');
+	color: var(--color-gray-500);
 }
 
 @layer base {
