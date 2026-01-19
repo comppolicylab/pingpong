@@ -2,7 +2,7 @@
 	import * as api from '$lib/api';
 	import { loading } from '$lib/stores/general';
 	import { happyToast, sadToast } from '$lib/toast';
-	import { Button, Heading, Helper, Input, Label, Select, Modal } from 'flowbite-svelte';
+	import { Button, Heading, Helper, Input, Label, Select, Modal, Checkbox } from 'flowbite-svelte';
 	import { onMount } from 'svelte';
 	import { ExclamationCircleOutline } from 'flowbite-svelte-icons';
 
@@ -17,6 +17,7 @@
 
 	let ssoProviderId = '0';
 	let institutionIds: number[] = [];
+	let showInCourseNavigation = true;
 
 	const isValidSsoField = (value: string): value is api.LTISSOField =>
 		value === 'canvas.sisIntegrationId' ||
@@ -78,6 +79,8 @@
 			return sadToast('Administrator email is required');
 		}
 
+		const showInCourseNav = formData.get('show_in_course_navigation') === 'on';
+
 		if (!institutionIds.length) {
 			$loading = false;
 			return sadToast('Select at least one institution');
@@ -91,7 +94,8 @@
 			sso_field: ssoField,
 			openid_configuration: openid_configuration || '',
 			registration_token: registration_token || '',
-			institution_ids: institutionIds
+			institution_ids: institutionIds,
+			show_in_course_navigation: showInCourseNav
 		};
 
 		const result = await api.registerLTIInstance(fetch, data);
@@ -125,6 +129,17 @@
 		<div>
 			<Label for="admin_email" class="mb-1">Administrator Email</Label>
 			<Input id="admin_email" name="admin_email" placeholder="john.doe@example.com" type="email" />
+		</div>
+		<div>
+			<Label for="show_in_course_navigation" class="mb-1">Show in Course Navigation</Label>
+			<Helper class="mb-2">By default, PingPong will be shown in the course navigation menu.</Helper
+			>
+			<Checkbox
+				id="show_in_course_navigation"
+				name="show_in_course_navigation"
+				color="blue"
+				bind:checked={showInCourseNavigation}>Show PingPong app in Course Navigation</Checkbox
+			>
 		</div>
 		<div>
 			<Label for="sso_id" class="mb-1">SSO Provider</Label>

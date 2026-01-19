@@ -483,6 +483,7 @@ export type LTIRegisterRequest = {
 	openid_configuration: string;
 	registration_token: string;
 	institution_ids?: number[];
+	show_in_course_navigation?: boolean;
 };
 
 export const registerLTIInstance = async (f: Fetcher, data: LTIRegisterRequest) => {
