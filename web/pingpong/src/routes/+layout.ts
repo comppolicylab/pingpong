@@ -12,6 +12,7 @@ const EDU = '/eduaccess';
 const LOGOUT = '/logout';
 const LTI_REGISTER = '/lti/register';
 const LTI_INACTIVE = '/lti/inactive';
+const LTI_NO_ROLE = '/lti/no-role';
 const NO_GROUP = '/lti/no-group';
 const SETUP = '/lti/setup';
 
@@ -88,7 +89,11 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
 			redirect(302, destination);
 		}
 	} else {
-		if (url.pathname === LTI_REGISTER || url.pathname === LTI_INACTIVE) {
+		if (
+			url.pathname === LTI_REGISTER ||
+			url.pathname === LTI_INACTIVE ||
+			url.pathname === LTI_NO_ROLE
+		) {
 			isPublicPage = true;
 			openAllLinksInNewTab = true;
 			logoIsClickable = false;
