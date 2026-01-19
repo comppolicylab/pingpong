@@ -54,7 +54,7 @@
 	import { ThreadManager, type Message } from '$lib/stores/thread';
 	import AttachmentDeletedPlaceholder from '$lib/components/AttachmentDeletedPlaceholder.svelte';
 	import FilePlaceholder from '$lib/components/FilePlaceholder.svelte';
-	import { get } from 'svelte/store';
+	import { get, writable } from 'svelte/store';
 	import ModeratorsTable from '$lib/components/ModeratorsTable.svelte';
 	import { base64ToArrayBuffer, WavRecorder, WavStreamPlayer } from '$lib/wavtools/index';
 	import type { ExtendedMediaDeviceInfo } from '$lib/wavtools/lib/wav_recorder';
@@ -69,153 +69,157 @@
 	import MCPServerCallItem from './MCPServerCallItem.svelte';
 	import ReasoningCallItem from './ReasoningCallItem.svelte';
 	import WebSearchCallItem from './WebSearchCallItem.svelte';
-	let { data } = $props();
+	export let data;
 
 	let userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-	let classId = $derived(parseInt($page.params.classId ?? ''));
-	let threadId = $derived(parseInt($page.params.threadId ?? ''));
-	let threadMgr = $derived(
-		new ThreadManager(
-			fetch,
-			classId,
-			threadId,
-			data.threadData,
-			data.threadInteractionMode || 'chat',
-			userTimezone
-		)
+	$: classId = parseInt($page.params.classId ?? '');
+	$: threadId = parseInt($page.params.threadId ?? '');
+	$: threadMgr = new ThreadManager(
+		fetch,
+		classId,
+		threadId,
+		data.threadData,
+		data.threadInteractionMode || 'chat',
+		userTimezone
 	);
-	let isPrivate = $derived(data.class?.private || false);
-	let isAnonymousSession = $derived(data?.me?.status === 'anonymous');
-	let teachers = $derived(data?.supervisors || []);
-	let canDeleteThread = $derived(data.canDeleteThread);
-	let canPublishThread = $derived(data.canPublishThread);
-	let canViewAssistant = $derived(data.canViewAssistant);
-	let messages = $derived(threadMgr.messages);
-	let participants = $derived(threadMgr.participants);
-	let published = $derived(threadMgr.published);
-	let version = $derived(threadMgr.version);
-	let threadName = $derived(threadMgr.thread?.name || 'Thread');
-	let groupName = $derived(data.class?.name || `Group ${classId}`);
-	let threadLink = $derived(`${$page.url.origin}/group/${classId}/thread/${threadId}`);
-	let error = $derived(threadMgr.error);
-	let threadManagerError = $derived($error?.detail || null);
-	let assistantId = $derived(threadMgr.assistantId);
-	let isCurrentUser = $derived($participants.user.includes('Me'));
-	let threadInstructions = $derived(threadMgr.instructions);
-	let threadRecording = $derived(data.threadRecording);
-	let displayUserInfo = $derived(data.threadDisplayUserInfo);
-	let trashThreadFiles: string[] = $state([]);
-	let threadAttachments = $derived(threadMgr.attachments);
-	let allFiles: Record<string, api.FileUploadInfo> = $derived(
-		Object.fromEntries(
-			Object.entries($threadAttachments)
-				.filter(([k]) => !trashThreadFiles.includes(k))
-				.map(([k, v]) => [
-					k,
-					{
-						state: 'success',
-						progress: 100,
-						file: { type: v.content_type, name: v.name },
-						response: v,
-						promise: Promise.resolve(v)
-					} as api.FileUploadInfo
-				])
-		)
+	$: isPrivate = data.class?.private || false;
+	$: isAnonymousSession = data?.me?.status === 'anonymous';
+	$: teachers = data?.supervisors || [];
+	$: canDeleteThread = data.canDeleteThread;
+	$: canPublishThread = data.canPublishThread;
+	$: canViewAssistant = data.canViewAssistant;
+	$: messages = threadMgr.messages;
+	$: participants = threadMgr.participants;
+	$: published = threadMgr.published;
+	$: version = threadMgr.version;
+	$: threadName = threadMgr.thread?.name || 'Thread';
+	$: groupName = data.class?.name || `Group ${classId}`;
+	$: threadLink = `${$page.url.origin}/group/${classId}/thread/${threadId}`;
+	$: error = threadMgr.error;
+	$: threadManagerError = $error?.detail || null;
+	$: assistantId = threadMgr.assistantId;
+	$: isCurrentUser = $participants.user.includes('Me');
+	$: threadInstructions = threadMgr.instructions;
+	$: threadRecording = data.threadRecording;
+	$: displayUserInfo = data.threadDisplayUserInfo;
+	let trashThreadFiles = writable<string[]>([]);
+	let allFiles: Record<string, api.FileUploadInfo> = {};
+	$: threadAttachments = threadMgr.attachments;
+	$: allFiles = Object.fromEntries(
+		Object.entries($threadAttachments)
+			.filter(([k]) => !$trashThreadFiles.includes(k))
+			.map(([k, v]) => [
+				k,
+				{
+					state: 'success',
+					progress: 100,
+					file: { type: v.content_type, name: v.name },
+					response: v,
+					promise: Promise.resolve(v)
+				} as api.FileUploadInfo
+			])
 	);
-	let supportsFileSearch = $derived(data.availableTools.includes('file_search') || false);
-	let fileSearchAcceptedFiles = $derived(
-		supportsFileSearch
-			? data.uploadInfo.fileTypes({
-					file_search: true,
-					code_interpreter: false,
-					vision: false
-				})
-			: null
-	);
-	let supportsCodeInterpreter = $derived(data.availableTools.includes('code_interpreter') || false);
-	let codeInterpreterAcceptedFiles = $derived(
-		supportsCodeInterpreter
-			? data.uploadInfo.fileTypes({
-					file_search: false,
-					code_interpreter: true,
-					vision: false
-				})
-			: null
-	);
-	let supportsVision = $derived.by(() => {
+	$: fileSearchAcceptedFiles = supportsFileSearch
+		? data.uploadInfo.fileTypes({
+				file_search: true,
+				code_interpreter: false,
+				vision: false
+			})
+		: null;
+	$: codeInterpreterAcceptedFiles = supportsCodeInterpreter
+		? data.uploadInfo.fileTypes({
+				file_search: false,
+				code_interpreter: true,
+				vision: false
+			})
+		: null;
+	$: visionAcceptedFiles = supportsVision
+		? data.uploadInfo.fileTypes({
+				file_search: false,
+				code_interpreter: false,
+				vision: true
+			})
+		: null;
+	$: fileSearchAttachmentCount = Object.entries($threadAttachments).filter(
+		([k, v]) =>
+			!$trashThreadFiles.includes(k) && (fileSearchAcceptedFiles ?? '').includes(v.content_type)
+	).length;
+	$: codeInterpreterAttachmentCount = Object.entries($threadAttachments).filter(
+		([k, v]) =>
+			!$trashThreadFiles.includes(k) &&
+			(codeInterpreterAcceptedFiles ?? '').includes(v.content_type)
+	).length;
+
+	let supportsVision = false;
+	$: {
 		const supportVisionModels = (
 			data.modelInfo.filter((model: api.AssistantModelLite) => model.supports_vision) || []
 		).map((model: api.AssistantModelLite) => model.id);
-		return supportVisionModels.includes(data.threadModel);
-	});
-	let visionSupportOverride = $derived(
-		data.class?.ai_provider === 'azure'
-			? data.modelInfo.find((model: api.AssistantModelLite) => model.id === data.threadModel)
-					?.azure_supports_vision
-			: undefined
-	);
-	let visionAcceptedFiles = $derived(
-		supportsVision
-			? data.uploadInfo.fileTypes({
-					file_search: false,
-					code_interpreter: false,
-					vision: true
-				})
-			: null
-	);
-	let fileSearchAttachmentCount = $derived(
-		Object.entries($threadAttachments).filter(
-			([k, v]) =>
-				!trashThreadFiles.includes(k) && (fileSearchAcceptedFiles ?? '').includes(v.content_type)
-		).length
-	);
-	let codeInterpreterAttachmentCount = $derived(
-		Object.entries($threadAttachments).filter(
-			([k, v]) =>
-				!trashThreadFiles.includes(k) &&
-				(codeInterpreterAcceptedFiles ?? '').includes(v.content_type)
-		).length
-	);
-
-	let submitting = $derived(threadMgr.submitting);
-	let waiting = $derived(threadMgr.waiting);
-	let loading = $derived(threadMgr.loading);
-	let canFetchMore = $derived(threadMgr.canFetchMore);
+		supportsVision = supportVisionModels.includes(data.threadModel);
+	}
+	let visionSupportOverride: boolean | undefined;
+	$: {
+		visionSupportOverride =
+			data.class?.ai_provider === 'azure'
+				? data.modelInfo.find((model: api.AssistantModelLite) => model.id === data.threadModel)
+						?.azure_supports_vision
+				: undefined;
+	}
+	$: submitting = threadMgr.submitting;
+	$: waiting = threadMgr.waiting;
+	$: loading = threadMgr.loading;
+	$: canFetchMore = threadMgr.canFetchMore;
+	$: supportsFileSearch = data.availableTools.includes('file_search') || false;
+	$: supportsCodeInterpreter = data.availableTools.includes('code_interpreter') || false;
 	// TODO - should figure this out by checking grants instead of participants
-	let canSubmit = $derived(!!$participants.user && $participants.user.includes('Me'));
-	let assistantDeleted = $derived(!$assistantId && $assistantId === 0);
-	let currentAssistant: api.Assistant | undefined = $derived(
-		data.assistants.find((assistant: api.Assistant) => assistant.id === $assistantId)
-	);
-	let useLatex = $derived(currentAssistant?.use_latex || false);
-	let useImageDescriptions = $derived(currentAssistant?.use_image_descriptions || false);
-	let assistantVersion: number | null = $derived(currentAssistant?.version ?? null);
-	let assistantInteractionMode: 'voice' | 'chat' | null = $derived(
-		currentAssistant?.interaction_mode || null
-	);
-	let allowUserFileUploads = $derived(currentAssistant?.allow_user_file_uploads ?? true);
-	let allowUserImageUploads = $derived(currentAssistant?.allow_user_image_uploads ?? true);
-	$effect(() => {
-		if (data.threadData.anonymous_session) {
-			console.warn(`Definition for assistant ${$assistantId} not found.`);
+	$: canSubmit = !!$participants.user && $participants.user.includes('Me');
+	$: assistantDeleted = !$assistantId && $assistantId === 0;
+	let useLatex = false;
+	let useImageDescriptions = false;
+	let assistantVersion: number | null = null;
+	let assistantInteractionMode: 'voice' | 'chat' | null = null;
+	let allowUserFileUploads = true;
+	let allowUserImageUploads = true;
+	$: {
+		const assistant = data.assistants.find(
+			(assistant: api.Assistant) => assistant.id === $assistantId
+		);
+		if (assistant) {
+			useLatex = assistant.use_latex || false;
+			useImageDescriptions = assistant.use_image_descriptions || false;
+			assistantInteractionMode = assistant.interaction_mode;
+			assistantVersion = assistant.version ?? null;
+			allowUserFileUploads = assistant.allow_user_file_uploads ?? true;
+			allowUserImageUploads = assistant.allow_user_image_uploads ?? true;
+		} else {
+			useLatex = false;
+			useImageDescriptions = false;
+			assistantInteractionMode = null;
+			assistantVersion = null;
+			allowUserFileUploads = true;
+			allowUserImageUploads = true;
+			if (data.threadData.anonymous_session) {
+				console.warn(`Definition for assistant ${$assistantId} not found.`);
+			}
 		}
-	});
-	let statusComponents = $derived(
-		(data.statusComponents || {}) as Partial<Record<string, api.StatusComponentUpdate[]>>
+	}
+	$: statusComponents = (data.statusComponents || {}) as Partial<
+		Record<string, api.StatusComponentUpdate[]>
+	>;
+	let latestIncidentUpdateTimestamps: Record<string, number> = {};
+	$: latestIncidentUpdateTimestamps = computeLatestIncidentTimestamps(statusComponents);
+	$: resolvedAssistantVersion = Number(assistantVersion ?? $version ?? 0);
+	$: statusComponentId =
+		$version >= 3 ? api.STATUS_COMPONENT_IDS.nextGen : api.STATUS_COMPONENT_IDS.classic;
+	$: assistantStatusUpdates = filterLatestIncidentUpdates(
+		statusComponents[statusComponentId],
+		latestIncidentUpdateTimestamps
 	);
-	let latestIncidentUpdateTimestamps = $derived(computeLatestIncidentTimestamps(statusComponents));
-	let resolvedAssistantVersion = $derived(Number(assistantVersion ?? $version ?? 0));
-	let statusComponentId = $derived(
-		$version >= 3 ? api.STATUS_COMPONENT_IDS.nextGen : api.STATUS_COMPONENT_IDS.classic
-	);
-	let assistantStatusUpdates = $derived(
-		filterLatestIncidentUpdates(statusComponents[statusComponentId], latestIncidentUpdateTimestamps)
-	);
-	let showModerators = $state(false);
-	let showAssistantPrompt = $state(false);
-	let settingsOpen = $state(false);
-	let printingThread = $state(false);
-	let messagesContainer: HTMLDivElement | null = $state(null);
+	let showModerators = false;
+	let showAssistantPrompt = false;
+	let settingsOpen = false;
+	let printingThread = false;
+	let messagesContainer: HTMLDivElement | null = null;
 
 	function isFileCitation(a: api.TextAnnotation): a is api.TextAnnotationFileCitation {
 		return a.type === 'file_citation' && a.text === 'responses_v3';
@@ -298,7 +302,7 @@
 		return blocks;
 	};
 
-	let currentMessageAttachments: api.ServerFile[] = $state([]);
+	let currentMessageAttachments: api.ServerFile[] = [];
 	// Get the name of the participant in the chat thread.
 	const getName = (message: api.OpenAIMessage) => {
 		if (message.role === 'user') {
@@ -506,9 +510,9 @@
 	};
 
 	// Fallback link copy handling for environments (e.g., iframes) where Clipboard API is blocked
-	let copyLinkModalOpen = $state(false);
-	let shareLink = $state('');
-	let shareLinkInputEl: HTMLInputElement | null = $state(null);
+	let copyLinkModalOpen = false;
+	let shareLink = '';
+	let shareLinkInputEl: HTMLInputElement | null = null;
 
 	type PermissionsPolicyLike = {
 		allows?: (feature: string, origin?: string) => boolean;
@@ -672,10 +676,10 @@
 
 	let wavRecorder: WavRecorder | null = null;
 	let wavStreamPlayer: WavStreamPlayer | null = null;
-	let microphoneAccess = $state(false);
-	let audioDevices: ExtendedMediaDeviceInfo[] = $state([]);
-	let selectedAudioDevice: ExtendedMediaDeviceInfo | null = $state(null);
-	let openMicrophoneModal = $state(false);
+	let microphoneAccess = false;
+	let audioDevices: ExtendedMediaDeviceInfo[] = [];
+	let selectedAudioDevice: ExtendedMediaDeviceInfo | null = null;
+	let openMicrophoneModal = false;
 
 	/**
 	 * Select an audio device. If no device ID is provided, the first available device will be selected.
@@ -757,8 +761,8 @@
 	};
 
 	let socket: WebSocket | null = null;
-	let startingAudioSession = $state(false);
-	let audioSessionStarted = $state(false);
+	let startingAudioSession = false;
+	let audioSessionStarted = false;
 
 	/**
 	 * Process audio chunks.
@@ -925,7 +929,7 @@
 		});
 	};
 
-	let endingAudioSession = $state(false);
+	let endingAudioSession = false;
 	/**
 	 * Handle session end.
 	 */
@@ -984,7 +988,7 @@
 				setFileState((file.response as api.ServerFile).file_id, 'success');
 				sadToast(`Failed to delete file: ${result.detail || 'unknown error'}`);
 			} else {
-				trashThreadFiles = [...trashThreadFiles, (file.response as api.ServerFile).file_id];
+				trashThreadFiles.update((files) => [...files, (file.response as api.ServerFile).file_id]);
 				happyToast('Thread file successfully deleted.');
 			}
 		}
@@ -994,8 +998,8 @@
 		showModerators = true;
 	};
 
-	let showPlayer = $state(false);
-	let audioUrl: string | null = $state(null);
+	let showPlayer = false;
+	let audioUrl: string | null = null;
 	const fetchRecording = async () => {
 		const res = await api.getThreadRecording(fetch, classId, threadId);
 		const chunks: Uint8Array[] = [];
@@ -1013,7 +1017,7 @@
 		showPlayer = true;
 	};
 
-	let transcribingRecording = $state(false);
+	let transcribingRecording = false;
 	const transcribeRecording = async () => {
 		if (transcribingRecording) {
 			return;

@@ -7,19 +7,18 @@
 	import { loading } from '$lib/stores/general.js';
 	import { resolve } from '$app/paths';
 
-	let { data } = $props();
+	export let data;
 
-	const { context, groups, ltiClassId } = $derived(data);
+	const { context, groups, ltiClassId } = data;
 
 	// Build display name for the course
-	const courseName = $derived(
+	const courseName =
 		context.course_code && context.course_name
 			? `${context.course_code}: ${context.course_name}`
-			: context.course_name || context.course_code || 'Your Course'
-	);
+			: context.course_name || context.course_code || 'Your Course';
 
-	let selectedGroupId: number | undefined = $state(undefined);
-	let error = $state('');
+	let selectedGroupId: number | undefined = undefined;
+	let error = '';
 
 	const goBack = () => {
 		// eslint-disable-next-line svelte/no-navigation-without-resolve

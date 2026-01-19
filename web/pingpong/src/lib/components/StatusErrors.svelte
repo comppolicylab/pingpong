@@ -2,11 +2,7 @@
 	import type { StatusComponentUpdate } from '$lib/api';
 	import { slide } from 'svelte/transition';
 
-	interface Props {
-		assistantStatusUpdates?: StatusComponentUpdate[];
-	}
-
-	let { assistantStatusUpdates = [] }: Props = $props();
+	export let assistantStatusUpdates: StatusComponentUpdate[] = [];
 
 	const IMPACT_STYLES: Record<
 		string,
@@ -69,19 +65,17 @@
 		);
 	};
 
-	let showAllIssues = $state(false);
+	let showAllIssues = false;
 
-	let hasMultipleIssues = $derived(assistantStatusUpdates.length > 1);
-	let activeIssueCount = $derived(assistantStatusUpdates.length);
-	let summaryImpactStyle = $derived(getImpactStyle(getMostSevereImpact(assistantStatusUpdates)));
-	let showDetails = $derived(hasMultipleIssues ? showAllIssues : activeIssueCount > 0);
-	let summaryLabel = $derived(`${activeIssueCount} active issues affecting this assistant`);
+	$: hasMultipleIssues = assistantStatusUpdates.length > 1;
+	$: activeIssueCount = assistantStatusUpdates.length;
+	$: summaryImpactStyle = getImpactStyle(getMostSevereImpact(assistantStatusUpdates));
+	$: showDetails = hasMultipleIssues ? showAllIssues : activeIssueCount > 0;
+	$: summaryLabel = `${activeIssueCount} active issues affecting this assistant`;
 
-	$effect(() => {
-		if (!hasMultipleIssues && showAllIssues) {
-			showAllIssues = false;
-		}
-	});
+	$: if (!hasMultipleIssues && showAllIssues) {
+		showAllIssues = false;
+	}
 </script>
 
 {#if assistantStatusUpdates.length > 0}

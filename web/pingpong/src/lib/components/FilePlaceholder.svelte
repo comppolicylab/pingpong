@@ -16,17 +16,16 @@
 	import ProgressCircle from './ProgressCircle.svelte';
 	import { Jumper } from 'svelte-loading-spinners';
 
-	interface Props {
-		/**
-		 * Information about a file that is being uploaded.
-		 */
-		info: FileUploadInfo;
-		purpose?: FileUploadPurpose;
-		mimeType: MimeTypeLookupFn;
-		preventDeletion?: boolean;
-	}
+	/**
+	 * Information about a file that is being uploaded.
+	 */
+	export let info: FileUploadInfo;
 
-	let { info, purpose = 'assistants', mimeType, preventDeletion = false }: Props = $props();
+	export let purpose: FileUploadPurpose = 'assistants';
+
+	export let mimeType: MimeTypeLookupFn;
+
+	export let preventDeletion = false;
 
 	// Custom events
 	const dispatch = createEventDispatcher();
@@ -37,11 +36,11 @@
 		return mime?.name || 'Unsupported!';
 	};
 
-	let progress = $derived(info.progress);
-	let type = $derived(nameForMimeType(info.file.type));
-	let name = $derived(info.file.name);
-	let state = $derived(info.state);
-	let error = $derived(info.state === 'error' ? (info.response as FileUploadFailure).error : '');
+	$: progress = info.progress;
+	$: type = nameForMimeType(info.file.type);
+	$: name = info.file.name;
+	$: state = info.state;
+	$: error = info.state === 'error' ? (info.response as FileUploadFailure).error : '';
 
 	// Delete button clicked.
 	const deleteFile = () => {

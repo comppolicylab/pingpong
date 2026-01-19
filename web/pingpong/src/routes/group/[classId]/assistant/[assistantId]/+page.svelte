@@ -43,6 +43,7 @@
 		ArchiveOutline
 	} from 'flowbite-svelte-icons';
 	import MultiSelectWithUpload from '$lib/components/MultiSelectWithUpload.svelte';
+	import { writable, type Writable } from 'svelte/store';
 	import { loading, loadingMessage } from '$lib/stores/general';
 	import ModelDropdownOptions from '$lib/components/ModelDropdownOptions.svelte';
 	import DropdownContainer from '$lib/components/DropdownContainer.svelte';
@@ -57,112 +58,89 @@
 	import { tick } from 'svelte';
 	import WebSourceChip from '$lib/components/WebSourceChip.svelte';
 	import MCPServerModal from '$lib/components/MCPServerModal.svelte';
-	let { data } = $props();
+	export let data;
 
 	// Flag indicating whether we should check for changes before navigating away.
 	let checkForChanges = true;
-	let advancedOptionsOpen = $state(false);
-	let assistantForm: HTMLFormElement | undefined = $state();
-	let deleteModal = $state(false);
-	let assistant = $derived(data.assistant);
-	let preventEdits = $derived(!!assistant?.locked);
-	let canPublish = $derived(data.grants.canPublishAssistants);
-	let isClassPrivate = $derived(data.class?.private || false);
+	let advancedOptionsOpen = false;
+	let assistantForm: HTMLFormElement;
+	let deleteModal = false;
+	$: assistant = data.assistant;
+	$: preventEdits = !!assistant?.locked;
+	$: canPublish = data.grants.canPublishAssistants;
+	$: isClassPrivate = data.class?.private || false;
 
-	let assistantName = $state('');
-	let hasSetAssistantName = $state(false);
-	$effect(() => {
-		if (assistant?.name !== undefined && assistant?.name !== null && !hasSetAssistantName) {
-			assistantName = assistant.name;
-			hasSetAssistantName = true;
-		}
-	});
-	let interactionMode = $state<'chat' | 'voice'>('chat');
-	let hasSetInteractionMode = $state(false);
-	$effect(() => {
-		if (
-			assistant?.interaction_mode !== undefined &&
-			assistant?.interaction_mode !== null &&
-			!hasSetInteractionMode
-		) {
-			interactionMode = assistant.interaction_mode;
-			hasSetInteractionMode = true;
-		}
-	});
-	$effect(() => {
-		if (
-			!hasSetInteractionMode &&
-			(data.isCreating ||
-				assistant?.interaction_mode === undefined ||
-				assistant?.interaction_mode === null)
-		) {
-			interactionMode = 'chat';
-			hasSetInteractionMode = true;
-		}
-	});
-	let description = $state('');
-	let hasSetDescription = $state(false);
-	$effect(() => {
-		if (
-			assistant?.description !== undefined &&
-			assistant?.description !== null &&
-			!hasSetDescription
-		) {
-			description = assistant.description;
-			hasSetDescription = true;
-		}
-	});
-	let instructions = $state('');
-	let hasSetInstructions = $state(false);
-	$effect(() => {
-		if (
-			assistant?.instructions !== undefined &&
-			assistant?.instructions !== null &&
-			!hasSetInstructions
-		) {
-			instructions = assistant.instructions;
-			hasSetInstructions = true;
-		}
-	});
-	let hidePrompt = $state(true);
-	let hasSetHidePrompt = $state(false);
-	$effect(() => {
-		if (
-			assistant?.hide_prompt !== undefined &&
-			assistant?.hide_prompt !== null &&
-			!hasSetHidePrompt
-		) {
-			hidePrompt = assistant?.hide_prompt;
-			hasSetHidePrompt = true;
-		}
-	});
-	let useLatex = $state(true);
-	let hasSetUseLatex = $state(false);
-	$effect(() => {
-		if (assistant?.use_latex !== undefined && assistant?.use_latex !== null && !hasSetUseLatex) {
-			useLatex = assistant?.use_latex;
-			hasSetUseLatex = true;
-		}
-	});
-	let mcpServersLocal: MCPServerToolInput[] = $state([]);
-	let hasSetMCPServers = $state(false);
-	$effect(() => {
-		if (data.mcpServers && !hasSetMCPServers) {
-			mcpServersLocal = data.mcpServers.slice();
-			hasSetMCPServers = true;
-		}
-	});
-	let showMCPServerModal = $state(false);
-	let mcpServerEditIndex: number | null = $state(null);
+	let assistantName = '';
+	let hasSetAssistantName = false;
+	$: if (assistant?.name !== undefined && assistant?.name !== null && !hasSetAssistantName) {
+		assistantName = assistant.name;
+		hasSetAssistantName = true;
+	}
+	let interactionMode: 'chat' | 'voice';
+	$: if (
+		assistant?.interaction_mode !== undefined &&
+		assistant?.interaction_mode !== null &&
+		interactionMode === undefined
+	) {
+		interactionMode = assistant.interaction_mode;
+	}
+	$: if (
+		interactionMode === undefined &&
+		(data.isCreating ||
+			assistant?.interaction_mode === undefined ||
+			assistant?.interaction_mode === null)
+	) {
+		interactionMode = 'chat';
+	}
+	let description = '';
+	let hasSetDescription = false;
+	$: if (
+		assistant?.description !== undefined &&
+		assistant?.description !== null &&
+		!hasSetDescription
+	) {
+		description = assistant.description;
+		hasSetDescription = true;
+	}
+	let instructions = '';
+	let hasSetInstructions = false;
+	$: if (
+		assistant?.instructions !== undefined &&
+		assistant?.instructions !== null &&
+		!hasSetInstructions
+	) {
+		instructions = assistant.instructions;
+		hasSetInstructions = true;
+	}
+	let hidePrompt = data.isCreating;
+	let hasSetHidePrompt = false;
+	$: if (
+		assistant?.hide_prompt !== undefined &&
+		assistant?.hide_prompt !== null &&
+		!hasSetHidePrompt
+	) {
+		hidePrompt = assistant?.hide_prompt;
+		hasSetHidePrompt = true;
+	}
+	let useLatex = data.isCreating;
+	let hasSetUseLatex = false;
+	$: if (assistant?.use_latex !== undefined && assistant?.use_latex !== null && !hasSetUseLatex) {
+		useLatex = assistant?.use_latex;
+		hasSetUseLatex = true;
+	}
+	let mcpServersLocal: MCPServerToolInput[] = [];
+	$: mcpServersFromRequest = data.mcpServers.slice();
+	let hasSetMCPServers = false;
+	$: if (data.mcpServers !== undefined && data.mcpServers !== null && !hasSetMCPServers) {
+		mcpServersLocal = data.mcpServers.slice();
+		hasSetMCPServers = true;
+	}
+	let showMCPServerModal = false;
+	let mcpServerEditIndex: number | null = null;
 
-	let mcpServerEditFromServer: MCPServerToolInput | null = $derived(
-		mcpServerEditIndex !== null && mcpServersLocal[mcpServerEditIndex]
-			? mcpServersLocal[mcpServerEditIndex]
-			: null
-	);
-	let mcpServerEdit: MCPServerToolInput | null = $derived(
-		mcpServerEditIndex !== null ? mcpServersLocal[mcpServerEditIndex] : null
-	);
+	$: mcpServerEditFromServer =
+		mcpServerEditIndex !== null ? mcpServersFromRequest[mcpServerEditIndex] : null;
+	$: mcpServerEdit = mcpServerEditIndex !== null ? mcpServersLocal[mcpServerEditIndex] : null;
 
 	const saveMCPServerAndCloseModal = (server: MCPServerToolInput, index: number | null) => {
 		if (!server) {
@@ -187,37 +165,33 @@
 		mcpServersLocal = mcpServersLocal.filter((_, i) => i !== index);
 	};
 
-	let selectedFileSearchFiles = $derived(
+	let selectedFileSearchFiles = writable(
 		data.selectedFileSearchFiles.slice().map((f) => f.file_id)
 	);
-	let selectedCodeInterpreterFiles = $derived(
+	let selectedCodeInterpreterFiles = writable(
 		data.selectedCodeInterpreterFiles.slice().map((f) => f.file_id)
 	);
 
 	// The list of adhoc files being uploaded.
-	let privateUploadFSFileInfo: FileUploadInfo[] = $state([]);
-	let privateUploadCIFileInfo: FileUploadInfo[] = $state([]);
-	let trashPrivateFileIds: number[] = $state([]);
-	let uploadingFSPrivate = $derived(privateUploadFSFileInfo.some((f) => f.state === 'pending'));
-	let uploadingCIPrivate = $derived(privateUploadCIFileInfo.some((f) => f.state === 'pending'));
-	let privateFSSessionFiles = $derived(
-		privateUploadFSFileInfo
-			.filter((f) => f.state === 'success')
-			.map((f) => f.response as ServerFile)
-	);
-	let privateCISessionFiles = $derived(
-		privateUploadCIFileInfo
-			.filter((f) => f.state === 'success')
-			.map((f) => f.response as ServerFile)
-	);
-	let allFSPrivateFiles = $derived([
+	let privateUploadFSFileInfo = writable<FileUploadInfo[]>([]);
+	let privateUploadCIFileInfo = writable<FileUploadInfo[]>([]);
+	const trashPrivateFileIds = writable<number[]>([]);
+	$: uploadingFSPrivate = $privateUploadFSFileInfo.some((f) => f.state === 'pending');
+	$: uploadingCIPrivate = $privateUploadCIFileInfo.some((f) => f.state === 'pending');
+	$: privateFSSessionFiles = $privateUploadFSFileInfo
+		.filter((f) => f.state === 'success')
+		.map((f) => f.response as ServerFile);
+	$: privateCISessionFiles = $privateUploadCIFileInfo
+		.filter((f) => f.state === 'success')
+		.map((f) => f.response as ServerFile);
+	$: allFSPrivateFiles = [
 		...data.selectedFileSearchFiles.slice().filter((f) => f.private),
 		...privateFSSessionFiles
-	]);
-	let allCIPrivateFiles = $derived([
+	];
+	$: allCIPrivateFiles = [
 		...data.selectedCodeInterpreterFiles.slice().filter((f) => f.private),
 		...privateCISessionFiles
-	]);
+	];
 
 	const fileSearchMetadata = {
 		value: 'file_search',
@@ -300,451 +274,386 @@
 		return cleaned;
 	};
 
-	let createClassicAssistantByProviderOrUser = $state(false);
-	let hasSetCreateClassicAssistant = $state(false);
-	$effect(() => {
+	let createClassicAssistantByProviderOrUser = false;
+	let hasSetCreateClassicAssistant = false;
+	$: if (
+		data?.enforceClassicAssistants !== undefined &&
+		data?.enforceClassicAssistants !== null &&
+		!hasSetCreateClassicAssistant
+	) {
+		createClassicAssistantByProviderOrUser = data?.enforceClassicAssistants;
+		hasSetCreateClassicAssistant = true;
+	}
+	$: createClassicAssistant = createClassicAssistantByProviderOrUser || interactionMode === 'voice';
+	$: isClassicRequired = data?.enforceClassicAssistants || interactionMode === 'voice';
+
+	$: chatModelCount = data.models.filter((model) => model.type === 'chat').length;
+	$: audioModelCount = data.models.filter((model) => model.type === 'voice').length;
+
+	$: initialTools = (assistant?.tools ? (JSON.parse(assistant.tools) as Tool[]) : defaultTools).map(
+		(t) => t.type
+	);
+	$: modelNameDict = data.models.reduce<{ [key: string]: string }>((acc, model) => {
+		acc[model.id] = model.name + (model.is_latest ? ' (Latest)' : ' (Pinned Version)');
+		return acc;
+	}, {});
+	let forcedAssistantVersion: number | null = null;
+	$: assistantVersion = forcedAssistantVersion || assistant?.version || null;
+	$: statusComponents = (data.statusComponents || {}) as Partial<
+		Record<string, api.StatusComponentUpdate[]>
+	>;
+	let latestIncidentUpdateTimestamps: Record<string, number> = {};
+	$: latestIncidentUpdateTimestamps = computeLatestIncidentTimestamps(statusComponents);
+	$: statusComponentId = data.isCreating
+		? createClassicAssistant
+			? api.STATUS_COMPONENT_IDS.classic
+			: api.STATUS_COMPONENT_IDS.nextGen
+		: assistantVersion === 3
+			? api.STATUS_COMPONENT_IDS.nextGen
+			: api.STATUS_COMPONENT_IDS.classic;
+	$: assistantStatusUpdates = filterLatestIncidentUpdates(
+		statusComponents[statusComponentId],
+		latestIncidentUpdateTimestamps
+	);
+	$: latestModelOptions = (
+		data.models.filter(
+			(model) =>
+				model.is_latest &&
+				!(model.hide_in_model_selector ?? false) &&
+				((data.isCreating && createClassicAssistant) || (!data.isCreating && assistantVersion !== 3)
+					? model.supports_classic_assistants
+					: model.supports_next_gen_assistants) &&
+				model.type === interactionMode
+		) || []
+	).map((model) => ({
+		value: model.id,
+		name: model.name,
+		description: model.description,
+		supports_vision:
+			model.supports_vision &&
+			(model.vision_support_override === undefined || model.vision_support_override),
+		supports_reasoning: model.supports_reasoning,
+		is_new: model.is_new,
+		highlight: model.highlight
+	}));
+	$: hiddenModelNames = (
+		data.models.filter(
+			(model) => (model.hide_in_model_selector ?? false) && model.type === interactionMode
+		) || []
+	).map((model) => model.id);
+	let selectedModel = '';
+	$: if (
+		((latestModelOptions.length > 0 || versionedModelOptions.length > 0) && !selectedModel) ||
+		(!latestModelOptions.map((m) => m.value).includes(selectedModel) &&
+			!versionedModelOptions.map((m) => m.value).includes(selectedModel))
+	) {
 		if (
-			data?.enforceClassicAssistants !== undefined &&
-			data?.enforceClassicAssistants !== null &&
-			!hasSetCreateClassicAssistant
+			latestModelOptions.map((m) => m.value).includes(assistant?.model || '') ||
+			hiddenModelNames.includes(assistant?.model || '')
 		) {
-			createClassicAssistantByProviderOrUser = data?.enforceClassicAssistants;
-			hasSetCreateClassicAssistant = true;
-		}
-	});
-	let createClassicAssistant = $derived(
-		createClassicAssistantByProviderOrUser || interactionMode === 'voice'
-	);
-	let isClassicRequired = $derived(data?.enforceClassicAssistants || interactionMode === 'voice');
-
-	let chatModelCount = $derived(data.models.filter((model) => model.type === 'chat').length);
-	let audioModelCount = $derived(data.models.filter((model) => model.type === 'voice').length);
-
-	let initialTools = $derived(
-		(assistant?.tools ? (JSON.parse(assistant.tools) as Tool[]) : defaultTools).map((t) => t.type)
-	);
-	let modelNameDict = $derived(
-		data.models.reduce<{ [key: string]: string }>((acc, model) => {
-			acc[model.id] = model.name + (model.is_latest ? ' (Latest)' : ' (Pinned Version)');
-			return acc;
-		}, {})
-	);
-
-	let forcedAssistantVersion: number | null = $state(null);
-	let assistantVersion = $derived(forcedAssistantVersion || assistant?.version || null);
-	let statusComponents = $derived(
-		(data.statusComponents || {}) as Partial<Record<string, api.StatusComponentUpdate[]>>
-	);
-	let latestIncidentUpdateTimestamps = $derived(computeLatestIncidentTimestamps(statusComponents));
-	let statusComponentId = $derived(
-		data.isCreating
-			? createClassicAssistant
-				? api.STATUS_COMPONENT_IDS.classic
-				: api.STATUS_COMPONENT_IDS.nextGen
-			: assistantVersion === 3
-				? api.STATUS_COMPONENT_IDS.nextGen
-				: api.STATUS_COMPONENT_IDS.classic
-	);
-	let assistantStatusUpdates = $derived(
-		filterLatestIncidentUpdates(statusComponents[statusComponentId], latestIncidentUpdateTimestamps)
-	);
-	let latestModelOptions = $derived(
-		(
-			data.models.filter(
-				(model) =>
-					model.is_latest &&
-					!(model.hide_in_model_selector ?? false) &&
-					((data.isCreating && createClassicAssistant) ||
-					(!data.isCreating && assistantVersion !== 3)
-						? model.supports_classic_assistants
-						: model.supports_next_gen_assistants) &&
-					model.type === interactionMode
-			) || []
-		).map((model) => ({
-			value: model.id,
-			name: model.name,
-			description: model.description,
-			supports_vision:
-				model.supports_vision &&
-				(model.vision_support_override === undefined || model.vision_support_override),
-			supports_reasoning: model.supports_reasoning,
-			is_new: model.is_new,
-			highlight: model.highlight
-		}))
-	);
-	let hiddenModelNames = $derived(
-		(
-			data.models.filter(
-				(model) => (model.hide_in_model_selector ?? false) && model.type === interactionMode
-			) || []
-		).map((model) => model.id)
-	);
-	let selectedModel = $state('');
-	$effect(() => {
-		if (
-			((latestModelOptions.length > 0 || versionedModelOptions.length > 0) && !selectedModel) ||
-			(!latestModelOptions.map((m) => m.value).includes(selectedModel) &&
-				!versionedModelOptions.map((m) => m.value).includes(selectedModel))
+			selectedModel = assistant?.model || latestModelOptions[0].value;
+		} else if (
+			versionedModelOptions.map((m) => m.value).includes(assistant?.model || '') ||
+			hiddenModelNames.includes(assistant?.model || '')
 		) {
-			if (
-				latestModelOptions.map((m) => m.value).includes(assistant?.model || '') ||
-				hiddenModelNames.includes(assistant?.model || '')
-			) {
-				selectedModel = assistant?.model || latestModelOptions[0].value;
-			} else if (
-				versionedModelOptions.map((m) => m.value).includes(assistant?.model || '') ||
-				hiddenModelNames.includes(assistant?.model || '')
-			) {
-				selectedModel = assistant?.model || versionedModelOptions[0].value;
-			} else if (latestModelOptions.length > 0) {
-				const highlighted = latestModelOptions.find((m) => m.highlight);
-				selectedModel = highlighted ? highlighted.value : latestModelOptions[0].value;
-			} else if (versionedModelOptions.length > 0) {
-				const highlighted = versionedModelOptions.find((m) => m.highlight);
-				selectedModel = highlighted ? highlighted.value : versionedModelOptions[0].value;
-			} else {
-				selectedModel = '';
-			}
+			selectedModel = assistant?.model || versionedModelOptions[0].value;
+		} else if (latestModelOptions.length > 0) {
+			const highlighted = latestModelOptions.find((m) => m.highlight);
+			selectedModel = highlighted ? highlighted.value : latestModelOptions[0].value;
+		} else if (versionedModelOptions.length > 0) {
+			const highlighted = versionedModelOptions.find((m) => m.highlight);
+			selectedModel = highlighted ? highlighted.value : versionedModelOptions[0].value;
+		} else {
+			selectedModel = '';
 		}
-	});
-	let selectedModelName = $derived(modelNameDict[selectedModel]);
-	let selectedModelRecord: api.AssistantModel | undefined = $derived(
-		data.models.find((model) => model.id === selectedModel)
+	}
+	$: selectedModelName = modelNameDict[selectedModel];
+	let selectedModelRecord: api.AssistantModel | undefined;
+	$: selectedModelRecord = data.models.find((model) => model.id === selectedModel);
+	$: versionedModelOptions = (
+		data.models.filter(
+			(model) =>
+				!model.is_latest &&
+				!(model.hide_in_model_selector ?? false) &&
+				((data.isCreating && createClassicAssistant) || (!data.isCreating && assistantVersion !== 3)
+					? model.supports_classic_assistants
+					: model.supports_next_gen_assistants) &&
+				model.type === interactionMode
+		) || []
+	).map((model) => ({
+		value: model.id,
+		name: model.name,
+		description: model.description,
+		supports_vision:
+			model.supports_vision &&
+			(model.vision_support_override === undefined || model.vision_support_override),
+		supports_reasoning: model.supports_reasoning,
+		is_new: model.is_new,
+		highlight: model.highlight
+	}));
+	let availableModelIds: string[] = [];
+	let selectedModelDeprecated = false;
+	$: availableModelIds = [...latestModelOptions, ...versionedModelOptions].map(
+		(model) => model.value
 	);
-	let versionedModelOptions = $derived(
-		(
-			data.models.filter(
-				(model) =>
-					!model.is_latest &&
-					!(model.hide_in_model_selector ?? false) &&
-					((data.isCreating && createClassicAssistant) ||
-					(!data.isCreating && assistantVersion !== 3)
-						? model.supports_classic_assistants
-						: model.supports_next_gen_assistants) &&
-					model.type === interactionMode
-			) || []
-		).map((model) => ({
-			value: model.id,
-			name: model.name,
-			description: model.description,
-			supports_vision:
-				model.supports_vision &&
-				(model.vision_support_override === undefined || model.vision_support_override),
-			supports_reasoning: model.supports_reasoning,
-			is_new: model.is_new,
-			highlight: model.highlight
-		}))
+	$: selectedModelDeprecated = !!selectedModel && !availableModelIds.includes(selectedModel);
+	$: supportVisionModels = (data.models.filter((model) => model.supports_vision) || []).map(
+		(model) => model.id
 	);
-	let availableModelIds: string[] = $derived(
-		[...latestModelOptions, ...versionedModelOptions].map((model) => model.value)
+	$: supportFileSearchModels = (
+		data.models.filter((model) => model.supports_file_search) || []
+	).map((model) => model.id);
+	$: supportsFileSearch = supportFileSearchModels.includes(selectedModel);
+	$: supportCodeInterpreterModels = (
+		data.models.filter((model) => model.supports_code_interpreter) || []
+	).map((model) => model.id);
+	$: supportsCodeInterpreter = supportCodeInterpreterModels.includes(selectedModel);
+	$: supportTemperatureModels = (
+		data.models.filter((model) => model.supports_temperature) || []
+	).map((model) => model.id);
+	$: supportsTemperature = supportTemperatureModels.includes(selectedModel);
+	$: supportReasoningModels = (data.models.filter((model) => model.supports_reasoning) || []).map(
+		(model) => model.id
 	);
-	let selectedModelDeprecated = $derived(
-		!!selectedModel && !availableModelIds.includes(selectedModel)
+	$: supportMinimalReasoningEffortModels = (
+		data.models.filter((model) => model.supports_minimal_reasoning_effort) || []
+	).map((model) => model.id);
+	$: supportNoneReasoningEffortModels = (
+		data.models.filter((model) => model.supports_none_reasoning_effort) || []
+	).map((model) => model.id);
+	$: supportsReasoning = supportReasoningModels.includes(selectedModel);
+	$: supportsMinimalReasoningEffort = supportMinimalReasoningEffortModels.includes(selectedModel);
+	$: supportsNoneReasoningEffort = supportNoneReasoningEffortModels.includes(selectedModel);
+	$: supportsVerbosityModels = (data.models.filter((model) => model.supports_verbosity) || []).map(
+		(model) => model.id
 	);
-	let supportVisionModels = $derived(
-		(data.models.filter((model) => model.supports_vision) || []).map((model) => model.id)
+	$: supportsVerbosity = supportsVerbosityModels.includes(selectedModel);
+	$: supportsWebSearchModels = (data.models.filter((model) => model.supports_web_search) || []).map(
+		(model) => model.id
 	);
-	let supportFileSearchModels = $derived(
-		(data.models.filter((model) => model.supports_file_search) || []).map((model) => model.id)
+	$: supportsWebSearch = supportsWebSearchModels.includes(selectedModel);
+	$: supportsMCPServerModels = (data.models.filter((model) => model.supports_mcp_server) || []).map(
+		(model) => model.id
 	);
-	let supportsFileSearch = $derived(supportFileSearchModels.includes(selectedModel));
-	let supportCodeInterpreterModels = $derived(
-		(data.models.filter((model) => model.supports_code_interpreter) || []).map((model) => model.id)
-	);
-	let supportsCodeInterpreter = $derived(supportCodeInterpreterModels.includes(selectedModel));
-	let supportTemperatureModels = $derived(
-		(data.models.filter((model) => model.supports_temperature) || []).map((model) => model.id)
-	);
-	let supportsTemperature = $derived(supportTemperatureModels.includes(selectedModel));
-	let supportReasoningModels = $derived(
-		(data.models.filter((model) => model.supports_reasoning) || []).map((model) => model.id)
-	);
-	let supportMinimalReasoningEffortModels = $derived(
-		(data.models.filter((model) => model.supports_minimal_reasoning_effort) || []).map(
-			(model) => model.id
-		)
-	);
-	let supportNoneReasoningEffortModels = $derived(
-		(data.models.filter((model) => model.supports_none_reasoning_effort) || []).map(
-			(model) => model.id
-		)
-	);
-	let supportsReasoning = $derived(supportReasoningModels.includes(selectedModel));
-	let supportsMinimalReasoningEffort = $derived(
-		supportMinimalReasoningEffortModels.includes(selectedModel)
-	);
-	let supportsNoneReasoningEffort = $derived(
-		supportNoneReasoningEffortModels.includes(selectedModel)
-	);
-	let supportsVerbosityModels = $derived(
-		(data.models.filter((model) => model.supports_verbosity) || []).map((model) => model.id)
-	);
-	let supportsVerbosity = $derived(supportsVerbosityModels.includes(selectedModel));
-	let supportsWebSearchModels = $derived(
-		(data.models.filter((model) => model.supports_web_search) || []).map((model) => model.id)
-	);
-	let supportsWebSearch = $derived(supportsWebSearchModels.includes(selectedModel));
-	let supportsMCPServerModels = $derived(
-		(data.models.filter((model) => model.supports_mcp_server) || []).map((model) => model.id)
-	);
-	let supportsMCPServer = $derived(supportsMCPServerModels.includes(selectedModel));
-	let supportsVision = $derived(supportVisionModels.includes(selectedModel));
-	let visionSupportOverride = $derived(
-		data.models.find((model) => model.id === selectedModel)?.vision_support_override
-	);
-	let finalVisionSupport = $derived(visionSupportOverride ?? supportsVision);
+	$: supportsMCPServer = supportsMCPServerModels.includes(selectedModel);
+	$: supportsVision = supportVisionModels.includes(selectedModel);
+	$: visionSupportOverride = data.models.find(
+		(model) => model.id === selectedModel
+	)?.vision_support_override;
+	$: finalVisionSupport = visionSupportOverride ?? supportsVision;
 	let allowVisionUpload = true;
-	let asstFSFiles = $derived([...data.files, ...allFSPrivateFiles]);
-	let asstCIFiles = $derived([...data.files, ...allCIPrivateFiles]);
+	$: asstFSFiles = [...data.files, ...allFSPrivateFiles];
+	$: asstCIFiles = [...data.files, ...allCIPrivateFiles];
 
-	let fileSearchFilter = $derived(
-		data.uploadInfo.getFileSupportFilter({
-			code_interpreter: false,
-			file_search: true,
-			vision: false
-		})
-	);
-	let fileSearchOptions: SelectOptionType<string>[] = $derived(
-		(asstFSFiles || [])
-			.filter(fileSearchFilter)
-			.map((file) => ({ value: file.file_id, name: file.name }))
-	);
-	const codeInterpreterFilter = $derived(
-		data.uploadInfo.getFileSupportFilter({
-			code_interpreter: true,
-			file_search: false,
-			vision: false
-		})
-	);
-	let codeInterpreterOptions: SelectOptionType<string>[] = $derived(
-		(asstCIFiles || [])
-			.filter(codeInterpreterFilter)
-			.map((file) => ({ value: file.file_id, name: file.name }))
-	);
+	let fileSearchOptions: SelectOptionType<string>[] = [];
+	let codeInterpreterOptions: SelectOptionType<string>[] = [];
+	const fileSearchFilter = data.uploadInfo.getFileSupportFilter({
+		code_interpreter: false,
+		file_search: true,
+		vision: false
+	});
+	const codeInterpreterFilter = data.uploadInfo.getFileSupportFilter({
+		code_interpreter: true,
+		file_search: false,
+		vision: false
+	});
+	$: fileSearchOptions = (asstFSFiles || [])
+		.filter(fileSearchFilter)
+		.map((file) => ({ value: file.file_id, name: file.name }));
+	$: codeInterpreterOptions = (asstCIFiles || [])
+		.filter(codeInterpreterFilter)
+		.map((file) => ({ value: file.file_id, name: file.name }));
 
-	let fileSearchToolSelect = $state(false);
-	let hasSetFileSearchToolSelect = $state(false);
-	$effect(() => {
-		if (initialTools !== undefined && initialTools !== null && !hasSetFileSearchToolSelect) {
-			fileSearchToolSelect = initialTools.includes('file_search');
-			hasSetFileSearchToolSelect = true;
-		}
-	});
-	let codeInterpreterToolSelect = $state(false);
-	let hasSetCodeInterpreterToolSelect = $state(false);
-	$effect(() => {
-		if (initialTools !== undefined && initialTools !== null && !hasSetCodeInterpreterToolSelect) {
-			codeInterpreterToolSelect = initialTools.includes('code_interpreter');
-			hasSetCodeInterpreterToolSelect = true;
-		}
-	});
-	let webSearchToolSelect = $state(false);
-	let hasSetWebSearchToolSelect = $state(false);
-	$effect(() => {
-		if (initialTools !== undefined && initialTools !== null && !hasSetWebSearchToolSelect) {
-			webSearchToolSelect = initialTools.includes('web_search');
-			hasSetWebSearchToolSelect = true;
-		}
-	});
-	let mcpServerToolSelect = $state(false);
-	let hasSetMCPServerToolSelect = $state(false);
-	$effect(() => {
-		if (initialTools !== undefined && initialTools !== null && !hasSetMCPServerToolSelect) {
-			mcpServerToolSelect = initialTools.includes('mcp_server');
-			hasSetMCPServerToolSelect = true;
-		}
-	});
-	let isPublished = $state(false);
-	let hasSetIsPublished = $state(false);
-	$effect(() => {
-		if (assistant?.published !== undefined && assistant?.published !== null && !hasSetIsPublished) {
-			isPublished = !!assistant?.published;
-			hasSetIsPublished = true;
-		}
-	});
-	let useImageDescriptions = $state(false);
-	let hasSetImageDescriptions = $state(false);
-	$effect(() => {
-		if (
-			assistant?.use_image_descriptions !== undefined &&
-			assistant?.use_image_descriptions !== null &&
-			!hasSetImageDescriptions
-		) {
-			useImageDescriptions = assistant?.use_image_descriptions;
-			hasSetImageDescriptions = true;
-		}
-	});
-	let assistantShouldMessageFirst = $state(false);
-	let hasSetAssistantShouldMessageFirst = $state(false);
-	$effect(() => {
-		if (
-			assistant?.assistant_should_message_first !== undefined &&
-			assistant?.assistant_should_message_first !== null &&
-			!hasSetAssistantShouldMessageFirst
-		) {
-			assistantShouldMessageFirst = assistant?.assistant_should_message_first;
-			hasSetAssistantShouldMessageFirst = true;
-		}
-	});
+	let fileSearchToolSelect = false;
+	let hasSetFileSearchToolSelect = false;
+	$: if (initialTools !== undefined && initialTools !== null && !hasSetFileSearchToolSelect) {
+		fileSearchToolSelect = initialTools.includes('file_search');
+		hasSetFileSearchToolSelect = true;
+	}
+	let codeInterpreterToolSelect = false;
+	let hasSetCodeInterpreterToolSelect = false;
+	$: if (initialTools !== undefined && initialTools !== null && !hasSetCodeInterpreterToolSelect) {
+		codeInterpreterToolSelect = initialTools.includes('code_interpreter');
+		hasSetCodeInterpreterToolSelect = true;
+	}
+	let webSearchToolSelect = false;
+	let hasSetWebSearchToolSelect = false;
+	$: if (initialTools !== undefined && initialTools !== null && !hasSetWebSearchToolSelect) {
+		webSearchToolSelect = initialTools.includes('web_search');
+		hasSetWebSearchToolSelect = true;
+	}
+	let mcpServerToolSelect = false;
+	let hasSetMCPServerToolSelect = false;
+	$: if (initialTools !== undefined && initialTools !== null && !hasSetMCPServerToolSelect) {
+		mcpServerToolSelect = initialTools.includes('mcp_server');
+		hasSetMCPServerToolSelect = true;
+	}
+	let isPublished = false;
+	let hasSetIsPublished = false;
+	$: if (
+		assistant?.published !== undefined &&
+		assistant?.published !== null &&
+		!hasSetIsPublished
+	) {
+		isPublished = !!assistant?.published;
+		hasSetIsPublished = true;
+	}
+	let useImageDescriptions = false;
+	let hasSetImageDescriptions = false;
+	$: if (
+		assistant?.use_image_descriptions !== undefined &&
+		assistant?.use_image_descriptions !== null &&
+		!hasSetImageDescriptions
+	) {
+		useImageDescriptions = assistant?.use_image_descriptions;
+		hasSetImageDescriptions = true;
+	}
+	let assistantShouldMessageFirst = false;
+	let hasSetAssistantShouldMessageFirst = false;
+	$: if (
+		assistant?.assistant_should_message_first !== undefined &&
+		assistant?.assistant_should_message_first !== null &&
+		!hasSetAssistantShouldMessageFirst
+	) {
+		assistantShouldMessageFirst = assistant?.assistant_should_message_first;
+		hasSetAssistantShouldMessageFirst = true;
+	}
 
-	let shouldRecordNameOrVoice = $state(false);
-	let hasSetShouldRecordNameOrVoice = $state(false);
-	$effect(() => {
-		if (
-			assistant?.should_record_user_information !== undefined &&
-			assistant?.should_record_user_information !== null &&
-			!hasSetShouldRecordNameOrVoice
-		) {
-			shouldRecordNameOrVoice = assistant?.should_record_user_information;
-			hasSetShouldRecordNameOrVoice = true;
-		}
-	});
+	let shouldRecordNameOrVoice = false;
+	let hasSetShouldRecordNameOrVoice = false;
+	$: if (
+		assistant?.should_record_user_information !== undefined &&
+		assistant?.should_record_user_information !== null &&
+		!hasSetShouldRecordNameOrVoice
+	) {
+		shouldRecordNameOrVoice = assistant?.should_record_user_information;
+		hasSetShouldRecordNameOrVoice = true;
+	}
 
-	let allowUserFileUploads = $state(true);
-	let hasSetAllowUserFileUploads = $state(false);
-	$effect(() => {
-		if (
-			assistant?.allow_user_file_uploads !== undefined &&
-			assistant?.allow_user_file_uploads !== null &&
-			!hasSetAllowUserFileUploads
-		) {
-			allowUserFileUploads = assistant?.allow_user_file_uploads;
-			hasSetAllowUserFileUploads = true;
-		}
-	});
+	let allowUserFileUploads = true;
+	let hasSetAllowUserFileUploads = false;
+	$: if (
+		assistant?.allow_user_file_uploads !== undefined &&
+		assistant?.allow_user_file_uploads !== null &&
+		!hasSetAllowUserFileUploads
+	) {
+		allowUserFileUploads = assistant?.allow_user_file_uploads;
+		hasSetAllowUserFileUploads = true;
+	}
 
-	let allowUserImageUploads = $state(true);
-	let hasSetAllowUserImageUploads = $state(false);
-	$effect(() => {
-		if (
-			assistant?.allow_user_image_uploads !== undefined &&
-			assistant?.allow_user_image_uploads !== null &&
-			!hasSetAllowUserImageUploads
-		) {
-			allowUserImageUploads = assistant?.allow_user_image_uploads;
-			hasSetAllowUserImageUploads = true;
-		}
-	});
+	let allowUserImageUploads = true;
+	let hasSetAllowUserImageUploads = false;
+	$: if (
+		assistant?.allow_user_image_uploads !== undefined &&
+		assistant?.allow_user_image_uploads !== null &&
+		!hasSetAllowUserImageUploads
+	) {
+		allowUserImageUploads = assistant?.allow_user_image_uploads;
+		hasSetAllowUserImageUploads = true;
+	}
 
-	let hideReasoningSummaries = $state(true);
-	let hasSetHideReasoningSummaries = $state(false);
-	$effect(() => {
-		if (
-			assistant?.hide_reasoning_summaries !== undefined &&
-			assistant?.hide_reasoning_summaries !== null &&
-			!hasSetHideReasoningSummaries
-		) {
-			hideReasoningSummaries = assistant?.hide_reasoning_summaries;
-			hasSetHideReasoningSummaries = true;
-		}
-	});
+	let hideReasoningSummaries = true;
+	let hasSetHideReasoningSummaries = false;
+	$: if (
+		assistant?.hide_reasoning_summaries !== undefined &&
+		assistant?.hide_reasoning_summaries !== null &&
+		!hasSetHideReasoningSummaries
+	) {
+		hideReasoningSummaries = assistant?.hide_reasoning_summaries;
+		hasSetHideReasoningSummaries = true;
+	}
 
-	let hideFileSearchResultQuotes = $state(true);
-	let hasSetHideFileSearchResultQuotes = $state(false);
-	$effect(() => {
-		if (
-			assistant?.hide_file_search_result_quotes !== undefined &&
-			assistant?.hide_file_search_result_quotes !== null &&
-			!hasSetHideFileSearchResultQuotes
-		) {
-			hideFileSearchResultQuotes = assistant?.hide_file_search_result_quotes;
-			if (hideFileSearchResultQuotes) {
-				hideFileSearchDocumentNames = true;
-			}
-			hasSetHideFileSearchResultQuotes = true;
+	let hideFileSearchResultQuotes = true;
+	let hasSetHideFileSearchResultQuotes = false;
+	$: if (
+		assistant?.hide_file_search_result_quotes !== undefined &&
+		assistant?.hide_file_search_result_quotes !== null &&
+		!hasSetHideFileSearchResultQuotes
+	) {
+		hideFileSearchResultQuotes = assistant?.hide_file_search_result_quotes;
+		if (hideFileSearchResultQuotes) {
+			hideFileSearchDocumentNames = true;
 		}
-	});
+		hasSetHideFileSearchResultQuotes = true;
+	}
 
-	let hideFileSearchDocumentNames = $state(false);
-	let hasSetHideFileSearchDocumentNames = $state(false);
-	$effect(() => {
-		if (
-			assistant?.hide_file_search_document_names !== undefined &&
-			assistant?.hide_file_search_document_names !== null &&
-			!hasSetHideFileSearchDocumentNames
-		) {
-			hideFileSearchDocumentNames = assistant?.hide_file_search_document_names;
-			hasSetHideFileSearchDocumentNames = true;
-		}
-	});
+	let hideFileSearchDocumentNames = false;
+	let hasSetHideFileSearchDocumentNames = false;
+	$: if (
+		assistant?.hide_file_search_document_names !== undefined &&
+		assistant?.hide_file_search_document_names !== null &&
+		!hasSetHideFileSearchDocumentNames
+	) {
+		hideFileSearchDocumentNames = assistant?.hide_file_search_document_names;
+		hasSetHideFileSearchDocumentNames = true;
+	}
 
-	let hideFileSearchQueries = $state(true);
-	let hasSetHideFileSearchQueries = $state(false);
-	$effect(() => {
-		if (
-			assistant?.hide_file_search_queries !== undefined &&
-			assistant?.hide_file_search_queries !== null &&
-			!hasSetHideFileSearchQueries
-		) {
-			hideFileSearchQueries = assistant?.hide_file_search_queries;
-			hasSetHideFileSearchQueries = true;
-		}
-	});
-	$effect(() => {
-		if (hideFileSearchDocumentNames) {
-			hideFileSearchResultQuotes = true;
-		}
-	});
+	let hideFileSearchQueries = true;
+	let hasSetHideFileSearchQueries = false;
+	$: if (
+		assistant?.hide_file_search_queries !== undefined &&
+		assistant?.hide_file_search_queries !== null &&
+		!hasSetHideFileSearchQueries
+	) {
+		hideFileSearchQueries = assistant?.hide_file_search_queries;
+		hasSetHideFileSearchQueries = true;
+	}
+	$: if (hideFileSearchDocumentNames) {
+		hideFileSearchResultQuotes = true;
+	}
 
-	let hasSetHideMCPServerCallDetails = $state(false);
-	let hideMCPServerCallDetails = $state(true);
-	$effect(() => {
-		if (
-			assistant?.hide_mcp_server_call_details !== undefined &&
-			assistant?.hide_mcp_server_call_details !== null &&
-			!hasSetHideMCPServerCallDetails
-		) {
-			hideMCPServerCallDetails = assistant?.hide_mcp_server_call_details;
-			hasSetHideMCPServerCallDetails = true;
-		}
-	});
+	let hasSetHideMCPServerCallDetails = false;
+	let hideMCPServerCallDetails = true;
+	$: if (
+		assistant?.hide_mcp_server_call_details !== undefined &&
+		assistant?.hide_mcp_server_call_details !== null &&
+		!hasSetHideMCPServerCallDetails
+	) {
+		hideMCPServerCallDetails = assistant?.hide_mcp_server_call_details;
+		hasSetHideMCPServerCallDetails = true;
+	}
 
-	let hideWebSearchSources = $state(false);
-	let hasSetHideWebSearchSources = $state(false);
-	$effect(() => {
-		if (
-			assistant?.hide_web_search_sources !== undefined &&
-			assistant?.hide_web_search_sources !== null &&
-			!hasSetHideWebSearchSources
-		) {
-			hideWebSearchSources = assistant?.hide_web_search_sources;
-			hasSetHideWebSearchSources = true;
-		}
-	});
+	let hideWebSearchSources = false;
+	let hasSetHideWebSearchSources = false;
+	$: if (
+		assistant?.hide_web_search_sources !== undefined &&
+		assistant?.hide_web_search_sources !== null &&
+		!hasSetHideWebSearchSources
+	) {
+		hideWebSearchSources = assistant?.hide_web_search_sources;
+		hasSetHideWebSearchSources = true;
+	}
 
-	let hideWebSearchActions = $state(false);
-	let hasSetHideWebSearchActions = $state(false);
-	$effect(() => {
-		if (
-			assistant?.hide_web_search_actions !== undefined &&
-			assistant?.hide_web_search_actions !== null &&
-			!hasSetHideWebSearchActions
-		) {
-			hideWebSearchActions = assistant?.hide_web_search_actions;
-			if (hideWebSearchActions) {
-				hideWebSearchSources = true;
-			}
-			hasSetHideWebSearchActions = true;
-		}
-	});
-	$effect(() => {
+	let hideWebSearchActions = false;
+	let hasSetHideWebSearchActions = false;
+	$: if (
+		assistant?.hide_web_search_actions !== undefined &&
+		assistant?.hide_web_search_actions !== null &&
+		!hasSetHideWebSearchActions
+	) {
+		hideWebSearchActions = assistant?.hide_web_search_actions;
 		if (hideWebSearchActions) {
 			hideWebSearchSources = true;
 		}
-	});
+		hasSetHideWebSearchActions = true;
+	}
+
+	$: if (hideWebSearchActions) {
+		hideWebSearchSources = true;
+	}
 
 	// Handle updates from the file upload component.
-	const handleFSPrivateFilesChange = (e: CustomEvent<FileUploadInfo[]>) => {
+	const handleFSPrivateFilesChange = (e: CustomEvent<Writable<FileUploadInfo[]>>) => {
 		privateUploadFSFileInfo = e.detail;
 	};
-	const handleCIPrivateFilesChange = (e: CustomEvent<FileUploadInfo[]>) => {
+	const handleCIPrivateFilesChange = (e: CustomEvent<Writable<FileUploadInfo[]>>) => {
 		privateUploadCIFileInfo = e.detail;
 	};
 
 	// Handle file deletion.
 	const removePrivateFiles = async (evt: CustomEvent<Array<number>>) => {
 		const files = evt.detail;
-		trashPrivateFileIds = [...trashPrivateFileIds, ...files];
+		$trashPrivateFileIds = [...$trashPrivateFileIds, ...files];
 	};
 
 	let defaultAudioTemperature = 0.8;
@@ -757,7 +666,7 @@
 	const checkForLargeTemperatureChat = (evt: Event) => {
 		const target = evt.target as HTMLInputElement;
 		const value = target.valueAsNumber;
-		if (value > 1.0 && _temperatureValue && _temperatureValue <= 1.0) {
+		if (value > 1.0 && _temperatureValue <= 1.0) {
 			if (confirm('Temperatures above 1.0 may lead to nonsensical responses. Are you sure?')) {
 				temperatureValue = value;
 				_temperatureValue = value;
@@ -792,18 +701,16 @@
 		}
 	};
 
-	let temperatureValue: number | undefined = $state();
-	let _temperatureValue: number | undefined = $state();
-	$effect(() => {
-		if (
-			assistant?.temperature !== undefined &&
-			assistant?.temperature !== null &&
-			temperatureValue === undefined
-		) {
-			temperatureValue = assistant.temperature;
-			_temperatureValue = assistant.temperature;
-		}
-	});
+	let temperatureValue: number;
+	let _temperatureValue: number;
+	$: if (
+		assistant?.temperature !== undefined &&
+		assistant?.temperature !== null &&
+		temperatureValue === undefined
+	) {
+		temperatureValue = assistant.temperature;
+		_temperatureValue = assistant.temperature;
+	}
 
 	const setDefaultModelPrompt = (model: string) => {
 		const matchingModels = data.models.filter((m) => m.id === model);
@@ -855,40 +762,39 @@
 			setDefaultModelPrompt(selectedModel);
 		}
 	};
-	let reasoningEffortValue: number | undefined = $state();
-	$effect(() => {
-		if (
-			assistant?.reasoning_effort !== undefined &&
-			assistant?.reasoning_effort !== null &&
-			reasoningEffortValue === undefined
-		) {
-			reasoningEffortValue = assistant.reasoning_effort;
+	let reasoningEffortValue: number;
+	let reasoningEffortLevels: number[] = [];
+	let reasoningEffortMin = -1;
+	let reasoningEffortMax = 2;
+	let reasoningEffortLabels: string[] = [];
+	let defaultReasoningLabel = 'low';
+	$: if (
+		assistant?.reasoning_effort !== undefined &&
+		assistant?.reasoning_effort !== null &&
+		reasoningEffortValue === undefined
+	) {
+		reasoningEffortValue = assistant.reasoning_effort;
+	}
+	$: if (
+		temperatureValue === undefined &&
+		(data.isCreating || assistant?.temperature === undefined || assistant?.temperature === null)
+	) {
+		if (interactionMode === 'voice') {
+			temperatureValue = defaultAudioTemperature;
+			_temperatureValue = defaultAudioTemperature;
+		} else if (interactionMode === 'chat') {
+			temperatureValue = defaultChatTemperature;
+			_temperatureValue = defaultChatTemperature;
 		}
-	});
-	$effect(() => {
-		if (
-			temperatureValue === undefined &&
-			(data.isCreating || assistant?.temperature === undefined || assistant?.temperature === null)
-		) {
-			if (interactionMode === 'voice') {
-				temperatureValue = defaultAudioTemperature;
-				_temperatureValue = defaultAudioTemperature;
-			} else if (interactionMode === 'chat') {
-				temperatureValue = defaultChatTemperature;
-				_temperatureValue = defaultChatTemperature;
-			}
-		}
-	});
-	$effect(() => {
-		if (
-			reasoningEffortValue === undefined &&
-			(data.isCreating ||
-				assistant?.reasoning_effort === undefined ||
-				assistant?.reasoning_effort === null)
-		) {
-			reasoningEffortValue = 0;
-		}
-	});
+	}
+	$: if (
+		reasoningEffortValue === undefined &&
+		(data.isCreating ||
+			assistant?.reasoning_effort === undefined ||
+			assistant?.reasoning_effort === null)
+	) {
+		reasoningEffortValue = 0;
+	}
 	const getReasoningEffortLabel = (level: number) => {
 		switch (level) {
 			case -1:
@@ -903,53 +809,40 @@
 				return '';
 		}
 	};
-	let reasoningEffortLevels = $derived(
+	$: reasoningEffortLevels =
 		selectedModelRecord?.reasoning_effort_levels ??
-			(supportsNoneReasoningEffort || supportsMinimalReasoningEffort ? [-1, 0, 1, 2] : [0, 1, 2])
-	);
-	let reasoningEffortMin = $derived(
-		reasoningEffortLevels.length ? Math.min(...reasoningEffortLevels) : 0
-	);
-	let reasoningEffortMax = $derived(
-		reasoningEffortLevels.length ? Math.max(...reasoningEffortLevels) : 2
-	);
-	let reasoningEffortLabels = $derived(
-		reasoningEffortLevels.map(getReasoningEffortLabel).filter((label) => label)
-	);
-	let defaultReasoningLabel = $derived(
-		reasoningEffortLevels.includes(0)
-			? getReasoningEffortLabel(0)
-			: getReasoningEffortLabel(reasoningEffortLevels[0] ?? 0)
-	);
-	$effect(() => {
-		if (
-			supportsReasoning &&
-			reasoningEffortLevels.length > 0 &&
-			!reasoningEffortLevels.includes(reasoningEffortValue!)
-		) {
-			reasoningEffortValue = reasoningEffortLevels[0];
-		}
-	});
-	let verbosityValue: number | undefined = $state();
-	$effect(() => {
-		if (
-			assistant?.verbosity !== undefined &&
-			assistant?.verbosity !== null &&
-			verbosityValue === undefined
-		) {
-			verbosityValue = assistant.verbosity;
-		}
-	});
-	$effect(() => {
-		if (
-			verbosityValue === undefined &&
-			(data.isCreating || assistant?.verbosity === undefined || assistant?.verbosity === null)
-		) {
-			verbosityValue = 1;
-		}
-	});
+		(supportsNoneReasoningEffort || supportsMinimalReasoningEffort ? [-1, 0, 1, 2] : [0, 1, 2]);
+	$: reasoningEffortMin = reasoningEffortLevels.length ? Math.min(...reasoningEffortLevels) : 0;
+	$: reasoningEffortMax = reasoningEffortLevels.length ? Math.max(...reasoningEffortLevels) : 2;
+	$: reasoningEffortLabels = reasoningEffortLevels
+		.map(getReasoningEffortLabel)
+		.filter((label) => label);
+	$: defaultReasoningLabel = reasoningEffortLevels.includes(0)
+		? getReasoningEffortLabel(0)
+		: getReasoningEffortLabel(reasoningEffortLevels[0] ?? 0);
+	$: if (
+		supportsReasoning &&
+		reasoningEffortLevels.length > 0 &&
+		!reasoningEffortLevels.includes(reasoningEffortValue)
+	) {
+		reasoningEffortValue = reasoningEffortLevels[0];
+	}
+	let verbosityValue: number;
+	$: if (
+		assistant?.verbosity !== undefined &&
+		assistant?.verbosity !== null &&
+		verbosityValue === undefined
+	) {
+		verbosityValue = assistant.verbosity;
+	}
+	$: if (
+		verbosityValue === undefined &&
+		(data.isCreating || assistant?.verbosity === undefined || assistant?.verbosity === null)
+	) {
+		verbosityValue = 1;
+	}
 
-	let dropdownOpen = $state(false);
+	let dropdownOpen = false;
 	/**
 	 * Check if the assistant model supports vision capabilities.
 	 */
@@ -958,8 +851,8 @@
 		selectedModel = modelValue;
 	};
 
-	let modelNodes: { [key: string]: HTMLElement } = $state({});
-	let modelHeaders: { [key: string]: string } = $state({});
+	let modelNodes: { [key: string]: HTMLElement } = {};
+	let modelHeaders: { [key: string]: string } = {};
 
 	/**
 	 * Determine if a specific field has changed in the form.
@@ -1066,7 +959,7 @@
 		// Check selected files separately since these are handled differently in the form.
 		if (
 			!setsEqual(
-				new Set(selectedCodeInterpreterFiles),
+				new Set($selectedCodeInterpreterFiles),
 				new Set(data.selectedCodeInterpreterFiles.map((f) => f.file_id))
 			)
 		) {
@@ -1074,7 +967,7 @@
 		}
 		if (
 			!setsEqual(
-				new Set(selectedFileSearchFiles),
+				new Set($selectedFileSearchFiles),
 				new Set(data.selectedFileSearchFiles.map((f) => f.file_id))
 			)
 		) {
@@ -1134,7 +1027,7 @@
 		}
 		const params = {
 			name: preventEdits ? assistant?.name || '' : body.name.toString(),
-			interaction_mode: interactionMode || 'chat',
+			interaction_mode: interactionMode,
 			description: preventEdits
 				? assistant?.description || ''
 				: normalizeNewlines(body.description.toString()),
@@ -1147,24 +1040,24 @@
 				supportsCodeInterpreter &&
 				!(supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort) &&
 				codeInterpreterToolSelect
-					? selectedCodeInterpreterFiles
+					? $selectedCodeInterpreterFiles
 					: [],
 			file_search_file_ids:
 				supportsFileSearch &&
 				!(supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort) &&
 				fileSearchToolSelect
-					? selectedFileSearchFiles
+					? $selectedFileSearchFiles
 					: [],
-			temperature: supportsTemperature ? temperatureValue || null : null,
-			reasoning_effort: supportsReasoning ? reasoningEffortValue || null : null,
-			verbosity: supportsVerbosity ? verbosityValue || null : null,
+			temperature: supportsTemperature ? temperatureValue : null,
+			reasoning_effort: supportsReasoning ? reasoningEffortValue : null,
+			verbosity: supportsVerbosity ? verbosityValue : null,
 			published: body.published?.toString() === 'on',
 			use_latex: body.use_latex?.toString() === 'on',
 			use_image_descriptions: body.use_image_descriptions?.toString() === 'on',
 			hide_prompt: body.hide_prompt?.toString() === 'on',
 			assistant_should_message_first: assistantShouldMessageFirst,
 			create_classic_assistant: createClassicAssistant,
-			deleted_private_files: [...trashPrivateFileIds, ...fileSearchCodeInterpreterUnusedFiles],
+			deleted_private_files: [...$trashPrivateFileIds, ...fileSearchCodeInterpreterUnusedFiles],
 			should_record_user_information: shouldRecordNameOrVoice,
 			allow_user_file_uploads: allowUserFileUploads,
 			allow_user_image_uploads: allowUserImageUploads,
@@ -1199,8 +1092,8 @@
 		}
 	};
 
-	let showAssistantInstructionsPreview = $state(false);
-	let instructionsPreview = $state('');
+	let showAssistantInstructionsPreview = false;
+	let instructionsPreview = '';
 	/**
 	 * Preview the assistant instructions.
 	 */
@@ -1232,13 +1125,13 @@
 		const private_files = [...allFSPrivateFiles, ...allCIPrivateFiles].map((f) => f.id);
 
 		// Show loading message if there are more than 10 files attached
-		if (selectedFileSearchFiles.length + private_files.length >= 10 || private_files.length >= 5) {
+		if ($selectedFileSearchFiles.length + private_files.length >= 10 || private_files.length >= 5) {
 			$loadingMessage = 'Deleting assistant. This may take a while.';
 		}
 		$loading = true;
 
 		if (!data.assistantId) {
-			await deletePrivateFiles(trashPrivateFileIds);
+			await deletePrivateFiles($trashPrivateFileIds);
 			$loadingMessage = '';
 			$loading = false;
 			sadToast(`Error: Assistant ID not found.`);
@@ -1247,7 +1140,7 @@
 
 		const result = await api.deleteAssistant(fetch, data.class.id, data.assistantId);
 		if (result.$status >= 300) {
-			await deletePrivateFiles(trashPrivateFileIds);
+			await deletePrivateFiles($trashPrivateFileIds);
 			$loadingMessage = '';
 			$loading = false;
 			sadToast(`Error deleting assistant: ${JSON.stringify(result.detail, null, '  ')}`);
@@ -1360,7 +1253,7 @@
 			}
 
 			// Delete any private files that were uploaded but not saved.
-			const filesToDelete = [...privateUploadFSFileInfo, ...privateUploadCIFileInfo]
+			const filesToDelete = [...$privateUploadFSFileInfo, ...$privateUploadCIFileInfo]
 				.filter((f) => f.state === 'success')
 				.map((f) => f.response as ServerFile);
 
@@ -1545,7 +1438,7 @@
 				</div>
 			{/if}
 			<div class="flex flex-row gap-2">
-				{#key selectedModelName}
+				{#key selectedModel}
 					<DropdownContainer
 						footer
 						placeholder={selectedModelName || 'Select a model...'}
@@ -1563,12 +1456,12 @@
 						>
 						<ModelDropdownOptions
 							modelOptions={latestModelOptions}
-							headerClass="latest-models"
 							{selectedModel}
 							{updateSelectedModel}
 							{allowVisionUpload}
+							headerClass="latest-models"
 							bind:modelNodes
-							bind:optionHeaders={modelHeaders}
+							bind:modelHeaders
 						/>
 						<DropdownHeader
 							order={2}
@@ -1577,12 +1470,12 @@
 						>
 						<ModelDropdownOptions
 							modelOptions={versionedModelOptions}
-							headerClass="versioned-models"
 							{selectedModel}
 							{updateSelectedModel}
 							{allowVisionUpload}
+							headerClass="versioned-models"
 							bind:modelNodes
-							bind:optionHeaders={modelHeaders}
+							bind:modelHeaders
 							smallNameText
 						/>
 						<div slot="footer">
@@ -1920,9 +1813,7 @@
 							<div>{mcpServerMetadata.name}</div>
 							<DropdownBadge
 								extraClasses="border-amber-400 from-amber-100 to-amber-200 text-amber-800 py-0 px-1"
-								>{#snippet name()}
-									<span>Preview</span>
-								{/snippet}</DropdownBadge
+								><span slot="name">Preview</span></DropdownBadge
 							>
 						</div></Checkbox
 					>
@@ -2123,9 +2014,7 @@
 						<div>Enable Vision capabilities through Image Descriptions</div>
 						<DropdownBadge
 							extraClasses="border-amber-400 from-amber-100 to-amber-200 text-amber-800 py-0 px-1"
-							>{#snippet name()}
-								<span>Experimental</span>
-							{/snippet}</DropdownBadge
+							><span slot="name">Experimental</span></DropdownBadge
 						>
 					</div></Checkbox
 				>
@@ -2469,12 +2358,7 @@
 								<Badge
 									class="flex shrink-0 flex-row items-center gap-x-2 rounded-md border border-sky-400 bg-gradient-to-b from-sky-100 to-sky-200 px-2 py-0.5 text-xs text-sky-800 normal-case"
 								>
-									<div>
-										Temperature: {((temperatureValue ?? interactionMode === 'chat')
-											? defaultChatTemperature
-											: defaultAudioTemperature
-										).toFixed(1)}
-									</div>
+									<div>Temperature: {temperatureValue.toFixed(1)}</div>
 								</Badge>
 								<div class="flex flex-row items-center gap-1 text-sm">
 									<div>More creative</div>

@@ -3,37 +3,18 @@
 	import { ImageOutline, StarSolid } from 'flowbite-svelte-icons';
 	import DropdownBadge from './DropdownBadge.svelte';
 	import DropdownOption from './DropdownOption.svelte';
+	export let modelOptions: AssistantModelOptions[];
+	export let modelNodes: { [key: string]: HTMLElement };
+	export let modelHeaders: { [key: string]: string };
+	export let headerClass: string;
+	export let selectedModel: string;
+	export let updateSelectedModel: (model: string) => void;
+	export let allowVisionUpload: boolean;
+	export let smallNameText: boolean = false;
 
-	interface Props {
-		modelOptions: AssistantModelOptions[];
-		modelNodes: { [key: string]: HTMLElement };
-		optionHeaders?: { [key: string]: string };
-		headerClass?: string;
-		selectedModel: string;
-		updateSelectedModel: (model: string) => void;
-		allowVisionUpload: boolean;
-		smallNameText?: boolean;
+	for (const model of modelOptions) {
+		modelHeaders[model.value] = headerClass;
 	}
-
-	let {
-		modelOptions,
-		modelNodes = $bindable(),
-		optionHeaders = $bindable(),
-		headerClass,
-		selectedModel,
-		updateSelectedModel,
-		allowVisionUpload,
-		smallNameText = false
-	}: Props = $props();
-
-	$effect(() => {
-		if (!headerClass || !optionHeaders) {
-			return;
-		}
-		for (const { value } of modelOptions) {
-			optionHeaders[value] = headerClass;
-		}
-	});
 </script>
 
 <div class="relative">
@@ -50,27 +31,20 @@
 			>
 				{#if highlight}
 					<DropdownBadge extraClasses="border-amber-400 from-amber-50 to-amber-100 text-amber-700"
-						>{#snippet icon()}
-							<span><StarSolid size="sm" /></span>
-						{/snippet}{#snippet name()}
-							<span>Recommended</span>
-						{/snippet}
-					</DropdownBadge>
+						><span slot="icon"><StarSolid size="sm" /></span><span slot="name">Recommended</span
+						></DropdownBadge
+					>
 				{/if}
 				{#if is_new}
 					<DropdownBadge extraClasses="border-green-400 from-green-100 to-green-200 text-green-800"
-						>{#snippet name()}
-							<span>New</span>
-						{/snippet}</DropdownBadge
+						><span slot="name">New</span></DropdownBadge
 					>
 				{/if}
 				{#if supports_vision && allowVisionUpload}
 					<DropdownBadge extraClasses="border-gray-400 from-gray-100 to-gray-200 text-gray-800"
-						>{#snippet icon()}
-							<span><ImageOutline size="sm" /></span>
-						{/snippet}{#snippet name()}
-							<span>Vision capabilities</span>
-						{/snippet}</DropdownBadge
+						><span slot="icon"><ImageOutline size="sm" /></span><span slot="name"
+							>Vision capabilities</span
+						></DropdownBadge
 					>
 				{/if}
 			</DropdownOption>

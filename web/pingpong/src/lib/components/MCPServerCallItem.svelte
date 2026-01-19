@@ -4,18 +4,14 @@
 	import { ChevronDownOutline, QuestionCircleOutline, ServerOutline } from 'flowbite-svelte-icons';
 	import type { MCPServerCallItem, MCPToolError } from '$lib/api';
 
-	interface Props {
-		content: MCPServerCallItem;
-		forceOpen?: boolean;
-		showServerLabel?: boolean;
-		compact?: boolean;
-	}
+	export let content: MCPServerCallItem;
+	export let forceOpen = false;
+	export let showServerLabel = true;
+	export let compact = false;
 
-	let { content, forceOpen = false, showServerLabel = true, compact = false }: Props = $props();
-
-	let open = $state(false);
-	let previousOpen: boolean | null = $state(null);
-	$effect(() => {
+	let open = false;
+	let previousOpen: boolean | null = null;
+	$: {
 		if (forceOpen) {
 			if (previousOpen === null) {
 				previousOpen = open;
@@ -25,7 +21,7 @@
 			open = previousOpen;
 			previousOpen = null;
 		}
-	});
+	}
 
 	const toggle = () => (open = !open);
 
@@ -44,32 +40,30 @@
 		return JSON.stringify(error, null, 2);
 	};
 
-	let serverLabel = $derived(content.server_name || content.server_label || 'MCP server');
-	let toolLabel = $derived(content.tool_name || 'MCP call');
-	let requestPayload = $derived(formatPayload(content.arguments));
-	let responsePayload = $derived(formatPayload(content.output));
-	let errorPayload = $derived(formatError(content.error));
-	let hasResult = $derived(!!requestPayload || !!responsePayload || !!errorPayload);
+	$: serverLabel = content.server_name || content.server_label || 'MCP server';
+	$: toolLabel = content.tool_name || 'MCP call';
+	$: requestPayload = formatPayload(content.arguments);
+	$: responsePayload = formatPayload(content.output);
+	$: errorPayload = formatError(content.error);
+	$: hasResult = !!requestPayload || !!responsePayload || !!errorPayload;
 
-	let statusLabel = $derived(
+	$: statusLabel =
 		content.status === 'completed'
 			? `Ran ${toolLabel}${open ? '...' : ''}`
 			: content.status === 'failed'
 				? `${toolLabel} failed${open ? '...' : ''}`
 				: content.status === 'incomplete'
 					? `${toolLabel} was canceled`
-					: `Calling ${toolLabel}...`
-	);
+					: `Calling ${toolLabel}...`;
 
-	let statusClasses = $derived(
+	$: statusClasses =
 		content.status === 'in_progress' || content.status === 'calling'
 			? 'text-sm font-medium shimmer'
 			: content.status === 'failed'
 				? 'text-sm font-medium text-yellow-600'
 				: content.status === 'incomplete'
 					? 'text-sm font-medium text-yellow-600'
-					: 'text-sm font-medium text-gray-600'
-	);
+					: 'text-sm font-medium text-gray-600';
 </script>
 
 <div class={compact ? 'my-2' : 'my-3'}>

@@ -1,4 +1,4 @@
-<script lang="ts" module>
+<script lang="ts" context="module">
 	export type CallbackParams = {
 		success: boolean;
 		errorMessage: string | null;
@@ -17,6 +17,8 @@
 
 <script lang="ts">
 	import { createEventDispatcher } from 'svelte';
+	import { writable } from 'svelte/store';
+	import type { Writable } from 'svelte/store';
 	import { Button, Heading, Li, List, Modal, P, Popover } from 'flowbite-svelte';
 	import { browser } from '$app/environment';
 	import type {
@@ -43,130 +45,108 @@
 	import Sanitize from '$lib/components/Sanitize.svelte';
 	import DropdownBadge from './DropdownBadge.svelte';
 	import type { Action } from 'svelte/action';
-	import { get, type Writable } from 'svelte/store';
 
 	const dispatcher = createEventDispatcher();
 
-	interface Props {
-		/**
-		 * Whether to allow sending.
-		 */
-		disabled?: boolean;
-		/**
-		 * Whether the user can reply in this thread.
-		 */
-		canSubmit?: boolean;
-		/**
-		 * Whether the assistant associated with this thread has been deleted.
-		 */
-		assistantDeleted?: boolean;
-		/**
-		 * Whether the user has permissions to interact with this assistant.
-		 */
-		canViewAssistant?: boolean;
-		/**
-		 * Whether we're waiting for an in-flight request.
-		 */
-		loading?: boolean;
-		/**
-		 * Error message provided by thread manager.
-		 */
-		threadManagerError?: string | null;
-		/**
-		 * The maximum height of the container before scrolling.
-		 */
-		maxHeight?: number;
-		/**
-		 * Function to call for uploading files, if uploading is allowed.
-		 */
-		upload?: FileUploader | null;
-		/**
-		 * Function to call for deleting files.
-		 */
-		remove?: FileRemover | null;
-		assistantVersion?: number | null;
-		threadVersion?: number | null;
-		/**
-		 * Files to accept for file search. If null, file search is disabled.
-		 */
-		fileSearchAcceptedFiles?: string | null;
-		fileSearchAttachmentCount?: number;
-		/**
-		 * Files to accept for code interpreter. If null, code interpreter is disabled.
-		 */
-		codeInterpreterAcceptedFiles?: string | null;
-		codeInterpreterAttachmentCount?: number;
-		/**
-		 * (Based on model capabilities)
-		 * Files to accept for Vision. If null, vision capabilities are disabled.
-		 */
-		visionAcceptedFiles?: string | null;
-		/**
-		 * Whether the specific AI Provider supports Vision for this model.
-		 */
-		visionSupportOverride?: boolean | undefined;
-		useImageDescriptions?: boolean;
-		/**
-		 * Max upload size.
-		 */
-		maxSize?: number;
-		/**
-		 * The list of files being uploaded.
-		 */
-		attachments?: ServerFile[];
-		/**
-		 * Mime type lookup function.
-		 */
-		mimeType: MimeTypeLookupFn;
-	}
+	/**
+	 * Whether to allow sending.
+	 */
+	export let disabled = false;
+	/**
+	 * Whether the user can reply in this thread.
+	 */
+	export let canSubmit = false;
+	/**
+	 * Whether the assistant associated with this thread has been deleted.
+	 */
+	export let assistantDeleted = false;
+	/**
+	 * Whether the user has permissions to interact with this assistant.
+	 */
+	export let canViewAssistant = true;
+	/**
+	 * Whether we're waiting for an in-flight request.
+	 */
+	export let loading = false;
+	/**
+	 * Error message provided by thread manager.
+	 */
+	export let threadManagerError: string | null = null;
+	/**
+	 * The maximum height of the container before scrolling.
+	 */
+	export let maxHeight = 200;
+	/**
+	 * Function to call for uploading files, if uploading is allowed.
+	 */
+	export let upload: FileUploader | null = null;
+	/**
+	 * Function to call for deleting files.
+	 */
+	export let remove: FileRemover | null = null;
 
-	let {
-		disabled = false,
-		canSubmit = false,
-		assistantDeleted = false,
-		canViewAssistant = true,
-		loading = false,
-		threadManagerError = null,
-		maxHeight = 200,
-		upload = null,
-		remove = null,
-		assistantVersion = null,
-		threadVersion = null,
-		fileSearchAcceptedFiles = null,
-		fileSearchAttachmentCount = 0,
-		codeInterpreterAcceptedFiles = null,
-		codeInterpreterAttachmentCount = 0,
-		visionAcceptedFiles = null,
-		visionSupportOverride = undefined,
-		useImageDescriptions = false,
-		maxSize = 0,
-		attachments = $bindable([]),
-		mimeType
-	}: Props = $props();
+	export let assistantVersion: number | null = null;
+	export let threadVersion: number | null = null;
 
+	/**
+	 * Files to accept for file search. If null, file search is disabled.
+	 */
+	export let fileSearchAcceptedFiles: string | null = null;
+	export let fileSearchAttachmentCount = 0;
+	/**
+	 * Files to accept for code interpreter. If null, code interpreter is disabled.
+	 */
+	export let codeInterpreterAcceptedFiles: string | null = null;
+	export let codeInterpreterAttachmentCount = 0;
+
+	/**
+	 * (Based on model capabilities)
+	 * Files to accept for Vision. If null, vision capabilities are disabled.
+	 */
+	export let visionAcceptedFiles: string | null = null;
+	/**
+	 * Whether the specific AI Provider supports Vision for this model.
+	 */
+	export let visionSupportOverride: boolean | undefined = undefined;
+	export let useImageDescriptions = false;
 	/**
 	 * (Based on model capabilities AND AI Provider capabilities)
 	 * Files to accept for Vision. If null, vision capabilities are disabled.
 	 */
-	let finalVisionAcceptedFiles: string | null = $derived(
-		visionSupportOverride === false && !useImageDescriptions ? null : visionAcceptedFiles
-	);
-	let visionOverrideModalOpen = $state(false);
-	let visionUseImageDescriptionsModalOpen = $state(false);
+	let finalVisionAcceptedFiles: string | null = null;
+	$: finalVisionAcceptedFiles =
+		visionSupportOverride === false && !useImageDescriptions ? null : visionAcceptedFiles;
+	let visionOverrideModalOpen = false;
+	let visionUseImageDescriptionsModalOpen = false;
+	/**
+	 * Max upload size.
+	 */
+	export let maxSize: number = 0;
+
+	/**
+	 * The list of files being uploaded.
+	 */
+	export let attachments: ServerFile[] = [];
+
+	/**
+	 * Mime type lookup function.
+	 */
+	export let mimeType: MimeTypeLookupFn;
 
 	// Input container
-	let containerRef: HTMLDivElement | undefined = $state();
+	let containerRef: HTMLDivElement;
 	// Text area reference for fixing height.
-	let ref: HTMLTextAreaElement | undefined = $state();
+	let ref: HTMLTextAreaElement;
 	// Real (visible) text area input reference.
-	let realRef: HTMLTextAreaElement | undefined = $state();
+	let realRef: HTMLTextAreaElement;
 	// Container for the list of files, for calculating height.
-	let allFileListRef: HTMLDivElement | undefined = $state();
+	let allFileListRef: HTMLDivElement;
 
 	// The list of files being uploaded.
-	let allFiles: FileUploadInfo[] = $state([]);
-	let uploading: boolean = $derived(allFiles.some((f) => f.state === 'pending'));
-	let purpose: FileUploadPurpose | null = $derived(
+	let allFiles = writable<FileUploadInfo[]>([]);
+	$: uploading = $allFiles.some((f) => f.state === 'pending');
+	let purpose: FileUploadPurpose | null = null;
+	$: purpose =
 		codeInterpreterAcceptedFiles && fileSearchAcceptedFiles && finalVisionAcceptedFiles
 			? 'fs_ci_multimodal'
 			: codeInterpreterAcceptedFiles && finalVisionAcceptedFiles
@@ -177,134 +157,100 @@
 						? 'assistants'
 						: finalVisionAcceptedFiles
 							? 'vision'
-							: null
-	);
-	let codeInterpreterFiles: string[] = $derived(
-		(codeInterpreterAcceptedFiles ? allFiles : [])
-			.filter((f) => f.state === 'success' && (f.response as ServerFile).code_interpreter_file_id)
-			.map((f) => (f.response as ServerFile).file_id)
-	);
-	let codeInterpreterFileIds: string = $derived(codeInterpreterFiles.join(','));
+							: null;
+	$: codeInterpreterFiles = (codeInterpreterAcceptedFiles ? $allFiles : [])
+		.filter((f) => f.state === 'success' && (f.response as ServerFile).code_interpreter_file_id)
+		.map((f) => (f.response as ServerFile).file_id);
+	$: codeInterpreterFileIds = codeInterpreterFiles.join(',');
 
-	let fileSearchFiles: string[] = $derived(
-		(fileSearchAcceptedFiles ? allFiles : [])
-			.filter((f) => f.state === 'success' && (f.response as ServerFile).file_search_file_id)
-			.map((f) => (f.response as ServerFile).file_id)
-	);
-	let fileSearchFileIds: string = $derived(fileSearchFiles.join(','));
+	$: fileSearchFiles = (fileSearchAcceptedFiles ? $allFiles : [])
+		.filter((f) => f.state === 'success' && (f.response as ServerFile).file_search_file_id)
+		.map((f) => (f.response as ServerFile).file_id);
+	$: fileSearchFileIds = fileSearchFiles.join(',');
 
 	let threadCodeInterpreterMaxCount = 20;
 	let threadFileSearchMaxCount = 20;
 
-	let visionFiles: string[] = $derived(
-		(finalVisionAcceptedFiles ? allFiles : [])
-			.filter((f) => f.state === 'success' && (f.response as ServerFile).vision_file_id)
-			.map((f) => (f.response as ServerFile).vision_file_id as string)
-	);
+	$: visionFiles = (finalVisionAcceptedFiles ? $allFiles : [])
+		.filter((f) => f.state === 'success' && (f.response as ServerFile).vision_file_id)
+		.map((f) => (f.response as ServerFile).vision_file_id);
 
-	let visionFileIds: string = $derived(visionFiles.join(','));
-	let visionFileImageDescriptions: ImageProxy[] = $derived(
-		(finalVisionAcceptedFiles ? allFiles : [])
-			.filter((f) => f.state === 'success' && (f.response as ServerFile).image_description)
-			.map((f) => ({
-				name: (f.response as ServerFile).name,
-				description: (f.response as ServerFile).image_description ?? 'No description',
-				content_type: (f.response as ServerFile).content_type,
-				complements: (f.response as ServerFile).file_id as string
-			}))
-	);
+	$: visionFileIds = visionFiles.join(',');
+	let visionFileImageDescriptions: ImageProxy[] = [];
+	$: visionFileImageDescriptions = (finalVisionAcceptedFiles ? $allFiles : [])
+		.filter((f) => f.state === 'success' && (f.response as ServerFile).image_description)
+		.map((f) => ({
+			name: (f.response as ServerFile).name,
+			description: (f.response as ServerFile).image_description ?? 'No description',
+			content_type: (f.response as ServerFile).content_type,
+			complements: (f.response as ServerFile).file_id
+		}));
 
-	let derivedAttachments: ServerFile[] = $derived(
-		allFiles
-			.filter(
-				(f) =>
-					f.state === 'success' &&
-					((f.response as ServerFile).code_interpreter_file_id ||
-						(f.response as ServerFile).file_search_file_id)
-			)
-			.map((f) => f.response as ServerFile)
-	);
+	$: attachments = $allFiles
+		.filter(
+			(f) =>
+				f.state === 'success' &&
+				((f.response as ServerFile).code_interpreter_file_id ||
+					(f.response as ServerFile).file_search_file_id)
+		)
+		.map((f) => f.response as ServerFile);
 
-	$effect(() => {
-		attachments = derivedAttachments;
-	});
-
-	let currentFileSearchFileCount: number = $derived(
-		fileSearchAttachmentCount + fileSearchFiles.length
-	);
-	let currentCodeInterpreterFileCount: number = $derived(
-		codeInterpreterAttachmentCount + codeInterpreterFiles.length
-	);
-	let tooManyFileSearchFiles: boolean = $derived(
-		currentFileSearchFileCount >= threadFileSearchMaxCount
-	);
-	let tooManyCodeInterpreterFiles: boolean = $derived(
-		currentCodeInterpreterFileCount >= threadCodeInterpreterMaxCount
-	);
-	let tooManyAttachments: boolean = $derived(derivedAttachments.length >= 10);
-	let tooManyVisionFiles: boolean = $derived(visionFiles.length >= 10);
+	$: currentFileSearchFileCount = fileSearchAttachmentCount + fileSearchFiles.length;
+	$: currentCodeInterpreterFileCount = codeInterpreterAttachmentCount + codeInterpreterFiles.length;
+	$: tooManyFileSearchFiles = currentFileSearchFileCount >= threadFileSearchMaxCount;
+	$: tooManyCodeInterpreterFiles = currentCodeInterpreterFileCount >= threadCodeInterpreterMaxCount;
+	$: tooManyAttachments = attachments.length >= 10;
+	$: tooManyVisionFiles = visionFiles.length >= 10;
 
 	// When one of the file upload types is disabled, we need to exclude it from the list of accepted files from the other types, otherwise we will still try to upload it.
-	let fileSearchStringToExclude: string = $derived(
-		!tooManyFileSearchFiles ? '' : (fileSearchAcceptedFiles ?? '')
-	);
-	let codeInterpreterStringToExclude: string = $derived(
-		!tooManyCodeInterpreterFiles ? '' : (codeInterpreterAcceptedFiles ?? '')
-	);
-	let visionStringToExclude: string = $derived(
-		!tooManyVisionFiles ? '' : (finalVisionAcceptedFiles ?? '')
-	);
-	let currentFileSearchAcceptedFiles: string = $derived(
-		Array.from(
-			new Set(
-				(tooManyFileSearchFiles ? '' : (fileSearchAcceptedFiles ?? ''))
-					.split(',')
-					.filter(
-						(file) =>
-							!codeInterpreterStringToExclude.split(',').includes(file) &&
-							!visionStringToExclude.split(',').includes(file)
-					)
-			)
-		).join(',')
-	);
-	let currentCodeInterpreterAcceptedFiles: string = $derived(
-		Array.from(
-			new Set(
-				(tooManyCodeInterpreterFiles ? '' : (codeInterpreterAcceptedFiles ?? ''))
-					.split(',')
-					.filter(
-						(file) =>
-							!fileSearchStringToExclude.split(',').includes(file) &&
-							!visionStringToExclude.split(',').includes(file)
-					)
-			)
-		).join(',')
-	);
-	let currentVisionAcceptedFiles: string = $derived(
-		Array.from(
-			new Set(
-				(tooManyVisionFiles ? '' : (finalVisionAcceptedFiles ?? ''))
-					.split(',')
-					.filter(
-						(file) =>
-							!fileSearchStringToExclude.split(',').includes(file) &&
-							!codeInterpreterStringToExclude.split(',').includes(file)
-					)
-			)
-		).join(',')
-	);
-	let currentAccept: string = $derived(
+	$: fileSearchStringToExclude = !tooManyFileSearchFiles ? '' : (fileSearchAcceptedFiles ?? '');
+	$: codeInterpreterStringToExclude = !tooManyCodeInterpreterFiles
+		? ''
+		: (codeInterpreterAcceptedFiles ?? '');
+	$: visionStringToExclude = !tooManyVisionFiles ? '' : (finalVisionAcceptedFiles ?? '');
+	$: currentFileSearchAcceptedFiles = Array.from(
+		new Set(
+			(tooManyFileSearchFiles ? '' : (fileSearchAcceptedFiles ?? ''))
+				.split(',')
+				.filter(
+					(file) =>
+						!codeInterpreterStringToExclude.split(',').includes(file) &&
+						!visionStringToExclude.split(',').includes(file)
+				)
+		)
+	).join(',');
+	$: currentCodeInterpreterAcceptedFiles = Array.from(
+		new Set(
+			(tooManyCodeInterpreterFiles ? '' : (codeInterpreterAcceptedFiles ?? ''))
+				.split(',')
+				.filter(
+					(file) =>
+						!fileSearchStringToExclude.split(',').includes(file) &&
+						!visionStringToExclude.split(',').includes(file)
+				)
+		)
+	).join(',');
+	$: currentVisionAcceptedFiles = Array.from(
+		new Set(
+			(tooManyVisionFiles ? '' : (finalVisionAcceptedFiles ?? ''))
+				.split(',')
+				.filter(
+					(file) =>
+						!fileSearchStringToExclude.split(',').includes(file) &&
+						!codeInterpreterStringToExclude.split(',').includes(file)
+				)
+		)
+	).join(',');
+	$: currentAccept =
 		currentFileSearchAcceptedFiles +
-			',' +
-			currentCodeInterpreterAcceptedFiles +
-			',' +
-			currentVisionAcceptedFiles
-	);
+		',' +
+		currentCodeInterpreterAcceptedFiles +
+		',' +
+		currentVisionAcceptedFiles;
 
-	let tooManyFiles: boolean = $derived(
+	$: tooManyFiles =
 		(tooManyAttachments || tooManyFileSearchFiles || tooManyCodeInterpreterFiles) &&
-			tooManyVisionFiles
-	);
+		tooManyVisionFiles;
 
 	const focusMessage = () => {
 		if (!browser) {
@@ -313,11 +259,9 @@
 		document.getElementById('message')?.focus();
 	};
 
-	$effect(() => {
-		if (!loading || !uploading) {
-			focusMessage();
-		}
-	});
+	$: if (!loading || !uploading) {
+		focusMessage();
+	}
 
 	// Fix the height of the textarea to match the content.
 	// The technique is to render an off-screen textarea with a scrollheight,
@@ -335,10 +279,10 @@
 		ref.value = el.value;
 		const scrollHeight = ref.scrollHeight;
 		el.style.height = `${scrollHeight + 8}px`;
-		if (scrollHeight > 80 && containerRef) {
+		if (scrollHeight > 80) {
 			containerRef.classList.toggle('rounded-[16px]', true);
 			containerRef.classList.toggle('rounded-full', false);
-		} else if (containerRef) {
+		} else {
 			containerRef.classList.toggle('rounded-[16px]', false);
 			containerRef.classList.toggle('rounded-full', true);
 		}
@@ -356,8 +300,8 @@
 		};
 	};
 
-	let errorMessage: string | null = $state(null);
-	let combinedErrorMessage: string | null = $derived(errorMessage || threadManagerError);
+	let errorMessage: string | null = null;
+	$: combinedErrorMessage = errorMessage || threadManagerError;
 
 	const dismissError = () => {
 		errorMessage = null;
@@ -376,20 +320,18 @@
 			? visionFileIds.split(',')
 			: [];
 
-		if (!ref?.value || disabled) {
+		if (!ref.value || disabled) {
 			return;
 		}
 		errorMessage = null;
 		const message = ref.value;
-		const realMessage = realRef?.value;
-		const tempFiles = allFiles;
-		allFiles = [];
+		const realMessage = realRef.value;
+		const tempFiles = $allFiles;
+		$allFiles = [];
 		focusMessage();
 		ref.value = '';
-		if (realRef) {
-			realRef.value = '';
-			fixHeight(realRef);
-		}
+		realRef.value = '';
+		fixHeight(realRef);
 
 		dispatcher('submit', {
 			file_search_file_ids,
@@ -405,14 +347,10 @@
 					errorMessage =
 						params.errorMessage ||
 						'We faced an error while trying to send your message. Please try again.';
-					allFiles = tempFiles;
-					if (ref) {
-						ref.value = message;
-					}
-					if (realRef) {
-						realRef.value = realMessage || message;
-						fixHeight(realRef);
-					}
+					$allFiles = tempFiles;
+					ref.value = message;
+					realRef.value = realMessage;
+					fixHeight(realRef);
 				}
 				errorMessage =
 					params.errorMessage ||
@@ -445,7 +383,7 @@
 
 	// Handle updates from the file upload component.
 	const handleFilesChange = (e: CustomEvent<Writable<FileUploadInfo[]>>) => {
-		allFiles = get(e.detail);
+		allFiles = e.detail;
 	};
 
 	// Remove a file from the list / the server.
@@ -457,18 +395,19 @@
 		if (file.state === 'pending' || file.state === 'deleting') {
 			return;
 		} else if (file.state === 'error') {
-			allFiles = allFiles.filter((x) => x !== file);
+			allFiles.update((f) => f.filter((x) => x !== file));
 		} else if (
 			file.state === 'success' &&
 			(file.response as ServerFile).image_description &&
 			(file.response as ServerFile).id === 0 &&
 			(file.response as ServerFile).file_id === ''
 		) {
-			allFiles = allFiles.filter((x) => x !== file);
+			allFiles.update((f) => f.filter((x) => x !== file));
 		} else {
-			allFiles = allFiles.map((f) => {
-				if (f === file) {
-					f.state = 'deleting';
+			allFiles.update((f) => {
+				const idx = f.indexOf(file);
+				if (idx >= 0) {
+					f[idx].state = 'deleting';
 				}
 				return f;
 			});
@@ -481,12 +420,13 @@
 			}
 			Promise.all(removePromises)
 				.then(() => {
-					allFiles = allFiles.filter((x) => x !== file);
+					allFiles.update((f) => f.filter((x) => x !== file));
 				})
 				.catch(() => {
-					allFiles = allFiles.map((f) => {
-						if (f === file) {
-							f.state = 'success';
+					allFiles.update((f) => {
+						const idx = f.indexOf(file);
+						if (idx >= 0) {
+							f[idx].state = 'success';
 						}
 						return f;
 					});
@@ -509,7 +449,7 @@
 			{#if canSubmit && assistantVersion !== null && threadVersion !== null && assistantVersion > threadVersion}
 				<div
 					class="relative -mb-4 flex flex-wrap gap-2 rounded-t-2xl border border-b-0 border-gray-300 bg-gray-50 px-3.5 pt-2.5 pb-6"
-					use:fixFileListHeight={allFiles}
+					use:fixFileListHeight={$allFiles}
 					bind:this={allFileListRef}
 				>
 					<div class="w-full">
@@ -536,14 +476,14 @@
 					</div>
 				</div>
 			{/if}
-			{#if allFiles.length > 0}
+			{#if $allFiles.length > 0}
 				<div
 					class="relative z-10 -mb-3 flex flex-wrap gap-2 rounded-t-2xl border border-blue-light-40 bg-blue-light-50 pt-2.5 pb-5"
-					use:fixFileListHeight={allFiles}
+					use:fixFileListHeight={$allFiles}
 					bind:this={allFileListRef}
 				>
 					<div class="flex flex-wrap gap-2 px-2 py-0">
-						{#each allFiles as file (file)}
+						{#each $allFiles as file (file)}
 							<FilePlaceholder
 								{mimeType}
 								info={file}
@@ -621,7 +561,7 @@
 						visionAcceptedFiles={finalVisionAcceptedFiles}
 						documentMaxCount={10}
 						visionMaxCount={10}
-						currentDocumentCount={derivedAttachments.filter(
+						currentDocumentCount={attachments.filter(
 							(f) => f.file_search_file_id || f.code_interpreter_file_id
 						).length}
 						currentVisionCount={visionFiles.length}
@@ -760,9 +700,7 @@
 		<div class="flex flex-col items-center gap-2">
 			<DropdownBadge
 				extraClasses="border-sky-400 from-sky-100 to-sky-200 text-sky-800 text-xs uppercase"
-				>{#snippet name()}
-					<span>Experimental Feature</span>
-				{/snippet}</DropdownBadge
+				><span slot="name">Experimental Feature</span></DropdownBadge
 			>
 			<Heading tag="h2" class="text-center text-3xl font-semibold"
 				>Vision capabilities through<br />image descriptions</Heading

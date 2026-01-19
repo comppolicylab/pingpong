@@ -2,16 +2,12 @@
 	import DOMPurify from '$lib/purify';
 	import { Heading, Li, List } from 'flowbite-svelte'; // eslint-disable-line @typescript-eslint/no-unused-vars
 
-	interface Props {
-		/**
-		 * Content to render.
-		 */
-		html: string | Promise<string>;
-	}
+	/**
+	 * Content to render.
+	 */
+	export let html: string | Promise<string>;
 
-	let { html }: Props = $props();
-
-	let sanitized = $state('');
+	let sanitized = '';
 
 	const flowbiteSvelteTags = ['Heading', 'List', 'Li'];
 
@@ -22,9 +18,7 @@
 	});
 
 	// Sanitize the document.
-	$effect(() => {
-		sanitizeInput(html);
-	});
+	$: sanitizeInput(html);
 
 	function sanitizeContent(content: string) {
 		return DOMPurify.sanitize(content, {

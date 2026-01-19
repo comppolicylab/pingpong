@@ -8,11 +8,7 @@
 		TableBodyCell
 	} from 'flowbite-svelte';
 
-	interface Props {
-		moderators?: { name: string | null; email: string }[];
-	}
-
-	let { moderators = [] }: Props = $props();
+	export let moderators: { name: string | null; email: string }[] = [];
 </script>
 
 <div class="overflow-x-auto">

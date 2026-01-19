@@ -6,17 +6,17 @@
 	import { onMount } from 'svelte';
 	import { ExclamationCircleOutline } from 'flowbite-svelte-icons';
 
-	let { data } = $props();
-	let externalLoginProviders = $derived(data.externalLoginProviders);
-	let institutions = $derived(data.institutions || []);
+	export let data;
+	$: externalLoginProviders = data.externalLoginProviders;
+	$: institutions = data.institutions || [];
 
-	let openid_configuration: string | null = $state(null);
-	let registration_token: string | null = $state(null);
-	let missing_params = $state(false);
-	let showModal = $state(false);
+	let openid_configuration: string | null = null;
+	let registration_token: string | null = null;
+	let missing_params = false;
+	let showModal = false;
 
-	let ssoProviderId = $state('0');
-	let institutionIds: number[] = $state([]);
+	let ssoProviderId = '0';
+	let institutionIds: number[] = [];
 
 	const isValidSsoField = (value: string): value is api.LTISSOField =>
 		value === 'canvas.sisIntegrationId' ||

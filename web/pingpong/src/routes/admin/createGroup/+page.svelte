@@ -8,15 +8,13 @@
 	import AzureLogo from '$lib/components/AzureLogo.svelte';
 	import OpenAiLogo from '$lib/components/OpenAILogo.svelte';
 
-	let { data } = $props();
+	export let data;
 
 	const loading = writable(false);
-	let institutions = $derived(
-		(data.admin.canCreateClass || []).sort((a, b) => a.name.localeCompare(b.name))
-	);
-	let selectedInst = $state('');
-	let selectedBilling = $state('0');
-	let defaultKeys = $derived(data.defaultKeys || []);
+	$: institutions = (data.admin.canCreateClass || []).sort((a, b) => a.name.localeCompare(b.name));
+	let selectedInst = '';
+	let selectedBilling = '0';
+	$: defaultKeys = data.defaultKeys || [];
 
 	/**
 	 * Create a new class.
