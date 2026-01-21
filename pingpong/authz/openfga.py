@@ -354,7 +354,7 @@ class OpenFgaAuthzDriver(AuthzDriver):
             c = ac._cli
             try:
                 latest = await c.read_latest_authorization_model()
-                if not latest:
+                if not latest.authorization_model:
                     raise IndexError()
                 self.config.authorization_model_id = latest.authorization_model.id
                 logger.info(
