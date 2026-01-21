@@ -4131,6 +4131,7 @@ async def export_threads_multiple_classes(
     nowfn: NowFn = utcnow,
 ) -> None:
     async with config.db.driver.async_session() as session:
+        requestor = None
         try:
             # Get details about the person we should send the export to
             requestor = await models.User.get_by_id(session, requestor_id)
@@ -4346,7 +4347,7 @@ async def export_threads_multiple_classes(
             logger.exception(
                 f"Error exporting threads for multiple classes ({class_ids}): {e}"
             )
-            if requestor.email:
+            if requestor and requestor.email:
                 try:
                     await send_export_failed(
                         config.email.sender,
@@ -4370,6 +4371,8 @@ async def export_class_threads(
     include_user_emails: bool = False,
 ) -> None:
     async with config.db.driver.async_session() as session:
+        class_ = None
+        user = None
         try:
             class_ = await models.Class.get_by_id(session, int(class_id))
             if not class_:
@@ -4562,7 +4565,7 @@ async def export_class_threads(
             )
         except Exception as e:
             logger.exception(f"Error exporting threads for class {class_id}: {e}")
-            if user.email:
+            if user and user.email:
                 try:
                     await send_export_failed(
                         config.email.sender,

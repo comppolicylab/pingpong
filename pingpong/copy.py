@@ -495,6 +495,8 @@ async def copy_group(
 ):
     async with config.db.driver.async_session() as session:
         async with config.authz.driver.get_client() as c:
+            class_ = None
+            user = None
             try:
                 class_ = await models.Class.get_by_id(session, int(class_id))
                 if not class_:
