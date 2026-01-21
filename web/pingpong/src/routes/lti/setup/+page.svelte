@@ -8,11 +8,10 @@
 
 	const { context, ltiClassId } = data;
 
-	// Build display name: "Course Code: Course Name" or just the name if no code
-	const courseName =
-		context.course_code && context.course_name
-			? `${context.course_code}: ${context.course_name}`
-			: context.course_name || context.course_code || 'Your Course';
+	// Build display name: prefer course_name, then course_code, else generic
+	// Previously, we used "Course Code: Course Name", but in many cases the
+	// course code is included in the course name, leading to redundancy.
+	const courseName = context.course_name || context.course_code || 'Your Course';
 
 	const goToCreate = () => {
 		// eslint-disable-next-line svelte/no-navigation-without-resolve

@@ -12,12 +12,10 @@
 	const { context, ltiClassId } = data;
 
 	// Pre-fill form with LTI context data
-	// Name: "Course Code: Course Name"
-	let name =
-		context.course_code && context.course_name
-			? `${context.course_code}: ${context.course_name}`
-			: context.course_name || context.course_code || '';
-
+	// Name: "Course Name"
+	// Previously, we used "Course Code: Course Name", but in many cases the
+	// course code is included in the course name, leading to redundancy.
+	let name = context.course_name || context.course_code || '';
 	let term = context.course_term || '';
 	let institutionId: number | null =
 		context.institutions.length === 1 ? context.institutions[0].id : null;

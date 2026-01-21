@@ -12,11 +12,9 @@
 	const { context, groups, ltiClassId } = data;
 
 	// Build display name for the course
-	const courseName =
-		context.course_code && context.course_name
-			? `${context.course_code}: ${context.course_name}`
-			: context.course_name || context.course_code || 'Your Course';
-
+	// Previously, we used "Course Code: Course Name", but in many cases the
+	// course code is included in the course name, leading to redundancy.
+	const courseName = context.course_name || context.course_code || 'Your Course';
 	let selectedGroupId: number | undefined = undefined;
 	let error = '';
 
