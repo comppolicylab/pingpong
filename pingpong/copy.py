@@ -1,4 +1,3 @@
-import asyncio
 import json
 import openai
 from openai.types.beta.assistant_create_params import ToolResources
@@ -353,23 +352,21 @@ async def copy_assistant(
         await client.write_safe(grant=ci_grants)
 
     if assistant.mcp_server_tools:
-        new_mcp_servers = await asyncio.gather(
-            *[
-                models.MCPServerTool.create(
-                    session,
-                    {
-                        "display_name": mcp_tool.display_name,
-                        "server_url": mcp_tool.server_url,
-                        "headers": mcp_tool.headers,
-                        "authorization_token": mcp_tool.authorization_token,
-                        "description": mcp_tool.description,
-                        "enabled": mcp_tool.enabled,
-                        "created_by_user_id": mcp_tool.created_by_user_id,
-                    },
-                )
-                for mcp_tool in assistant.mcp_server_tools
-            ]
-        )
+        new_mcp_servers = []
+        for mcp_tool in assistant.mcp_server_tools:
+            new_tool = await models.MCPServerTool.create(
+                session,
+                {
+                    "display_name": mcp_tool.display_name,
+                    "server_url": mcp_tool.server_url,
+                    "headers": mcp_tool.headers,
+                    "authorization_token": mcp_tool.authorization_token,
+                    "description": mcp_tool.description,
+                    "enabled": mcp_tool.enabled,
+                    "created_by_user_id": mcp_tool.created_by_user_id,
+                },
+            )
+            new_mcp_servers.append(new_tool)
         await models.Assistant.synchronize_assistant_mcp_server_tools(
             session, new_assistant.id, [s.id for s in new_mcp_servers], skip_delete=True
         )
