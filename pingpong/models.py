@@ -5984,6 +5984,10 @@ lti_registration_institution_association = Table(
 class LTIRegistration(Base):
     __tablename__ = "lti_registrations"
 
+    __table_args__ = (
+        Index("lti_canvas_account_lti_guid_idx", "canvas_account_lti_guid"),
+    )
+
     id = Column(Integer, primary_key=True)
     issuer = Column(String, nullable=False)
     client_id = Column(String)
@@ -5993,6 +5997,7 @@ class LTIRegistration(Base):
     token_algorithm = Column(SQLEnum(schemas.LTITokenAlgorithm), nullable=False)
     lms_platform = Column(SQLEnum(schemas.LMSPlatform), nullable=True)
     canvas_account_name = Column(String, nullable=True)
+    canvas_account_lti_guid = Column(String, nullable=True)
 
     openid_configuration = Column(String, nullable=True)
     registration_data = Column(String, nullable=True)
