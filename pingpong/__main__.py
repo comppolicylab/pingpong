@@ -820,7 +820,9 @@ def m04_check_voice_mode_recordings() -> None:
 def m05_populate_account_lti_guid() -> None:
     async def _m05_populate_account_lti_guid() -> None:
         async with config.db.driver.async_session() as session:
-            logger.info("Populating canvas_account_lti_guid from openid_configuration...")
+            logger.info(
+                "Populating canvas_account_lti_guid from openid_configuration..."
+            )
             await populate_account_lti_guid(session)
             await session.commit()
             logger.info("Done!")

@@ -4,11 +4,9 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import pingpong.models as models
-
+from pingpong.lti.server import CANVAS_ACCOUNT_LTI_GUID_KEY, PLATFORM_CONFIGURATION_KEY
 
 logger = logging.getLogger(__name__)
-
-ACCOUNT_LTI_GUID_KEY = "https://canvas.instructure.com/lti/account_lti_guid"
 
 
 async def populate_account_lti_guid(session: AsyncSession) -> None:
@@ -48,12 +46,14 @@ async def populate_account_lti_guid(session: AsyncSession) -> None:
             errors += 1
             continue
 
-        account_lti_guid = openid_config.get(ACCOUNT_LTI_GUID_KEY)
+        account_lti_guid = openid_config.get(PLATFORM_CONFIGURATION_KEY, {}).get(
+            CANVAS_ACCOUNT_LTI_GUID_KEY
+        )
         if not account_lti_guid:
             logger.debug(
                 "LTIRegistration id=%s openid_configuration does not contain %s",
                 registration.id,
-                ACCOUNT_LTI_GUID_KEY,
+                CANVAS_ACCOUNT_LTI_GUID_KEY,
             )
             skipped += 1
             continue

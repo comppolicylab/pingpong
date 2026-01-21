@@ -80,6 +80,7 @@ MESSAGE_TYPE = "LtiResourceLinkRequest"
 CANVAS_MESSAGE_PLACEMENT = "https://canvas.instructure.com/lti/course_navigation"
 
 CANVAS_ACCOUNT_NAME_KEY = "https://canvas.instructure.com/lti/account_name"
+CANVAS_ACCOUNT_LTI_GUID_KEY = "https://canvas.instructure.com/lti/account_lti_guid"
 
 REQUIRED_SCOPES = [
     "https://purl.imsglobal.org/spec/lti-nrps/scope/contextmembership.readonly"
