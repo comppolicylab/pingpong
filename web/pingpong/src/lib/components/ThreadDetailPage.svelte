@@ -180,6 +180,11 @@
 	let assistantInteractionMode: 'voice' | 'chat' | null = null;
 	let allowUserFileUploads = true;
 	let allowUserImageUploads = true;
+	let bypassedSettingsSections: {
+		id: string;
+		title: string;
+		items: { label: string; hidden: boolean; description: string }[];
+	}[] = [];
 	$: {
 		const assistant = data.assistants.find(
 			(assistant: api.Assistant) => assistant.id === $assistantId
@@ -201,6 +206,94 @@
 			if (data.threadData.anonymous_session) {
 				console.warn(`Definition for assistant ${$assistantId} not found.`);
 			}
+		}
+		const isSupervisor = data.isSupervisor === true;
+		if (assistant && isSupervisor) {
+			const hideFileSearchQueries = assistant.hide_file_search_queries === true;
+			const hideFileSearchResultQuotes = assistant.hide_file_search_result_quotes === true;
+			const hideFileSearchDocumentNames = assistant.hide_file_search_document_names === true;
+			const hideWebSearchSources = assistant.hide_web_search_sources === true;
+			const hideWebSearchActions = assistant.hide_web_search_actions === true;
+			const hideReasoningSummaries = assistant.hide_reasoning_summaries === true;
+			const hideMCPServerCallDetails = assistant.hide_mcp_server_call_details === true;
+
+			bypassedSettingsSections = [
+				{
+					id: 'file-search',
+					title: 'File Search',
+					items: [
+						{
+							label: 'Queries',
+							hidden: hideFileSearchQueries,
+							description: hideFileSearchQueries
+								? 'Members cannot see the queries the assistant uses to find relevant documents.'
+								: 'Members can see the queries the assistant uses to find relevant documents.'
+						},
+						{
+							label: 'Document Quotes',
+							hidden: hideFileSearchResultQuotes,
+							description: hideFileSearchResultQuotes
+								? 'Members cannot see the document quotes the assistant retrieves from each file.'
+								: 'Members can see the document quotes the assistant retrieves from each file.'
+						},
+						{
+							label: 'Document Names',
+							hidden: hideFileSearchDocumentNames,
+							description: hideFileSearchDocumentNames
+								? 'Members cannot see the names of the documents the assistant retrieves.'
+								: 'Members can see the names of the documents the assistant retrieves.'
+						}
+					]
+				},
+				{
+					id: 'web-search',
+					title: 'Web Search',
+					items: [
+						{
+							label: 'Sources Considered',
+							hidden: hideWebSearchSources,
+							description: hideWebSearchSources
+								? 'Members cannot see the full list of web sources the assistant considered.'
+								: 'Members can see the full list of web sources the assistant considered.'
+						},
+						{
+							label: 'Search Actions',
+							hidden: hideWebSearchActions,
+							description: hideWebSearchActions
+								? 'Members can see that the assistant is searching the web without revealing specific actions.'
+								: 'Members can see the specific web search actions such as queries, clicks, and extraction.'
+						}
+					]
+				},
+				{
+					id: 'reasoning',
+					title: 'Reasoning',
+					items: [
+						{
+							label: 'Reasoning Summaries',
+							hidden: hideReasoningSummaries,
+							description: hideReasoningSummaries
+								? 'Members cannot see summaries of the assistant reasoning process.'
+								: 'Members can see summaries of the assistant reasoning process.'
+						}
+					]
+				},
+				{
+					id: 'mcp-server',
+					title: 'MCP Server',
+					items: [
+						{
+							label: 'MCP Call Details',
+							hidden: hideMCPServerCallDetails,
+							description: hideMCPServerCallDetails
+								? 'Members see when the assistant makes calls to an MCP Server, but not detailed payloads or responses.'
+								: 'Members can see detailed payloads and responses from MCP Server calls.'
+						}
+					]
+				}
+			];
+		} else {
+			bypassedSettingsSections = [];
 		}
 	}
 	$: statusComponents = (data.statusComponents || {}) as Partial<
@@ -1616,6 +1709,7 @@
 							remove={handleRemove}
 							threadVersion={$version}
 							assistantVersion={resolvedAssistantVersion}
+							{bypassedSettingsSections}
 							on:submit={handleSubmit}
 							on:dismissError={handleDismissError}
 							on:startNewChat={startNewChat}
