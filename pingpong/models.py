@@ -2598,6 +2598,7 @@ class Assistant(Base):
                 )
             )
             .options(selectinload(Assistant.code_interpreter_files))
+            .options(selectinload(Assistant.mcp_server_tools))
         )
 
         result = await session.execute(stmt)
