@@ -1686,34 +1686,36 @@
 								<DoubleBounce color="#0ea5e9" size="30" />
 							</div>
 						{/if}
-						<ChatInput
-							mimeType={data.uploadInfo.mimeType}
-							maxSize={data.uploadInfo.private_file_max_size}
-							bind:attachments={currentMessageAttachments}
-							{threadManagerError}
-							visionAcceptedFiles={allowUserImageUploads ? visionAcceptedFiles : null}
-							fileSearchAcceptedFiles={allowUserFileUploads ? fileSearchAcceptedFiles : null}
-							codeInterpreterAcceptedFiles={allowUserFileUploads
-								? codeInterpreterAcceptedFiles
-								: null}
-							{visionSupportOverride}
-							{useImageDescriptions}
-							{assistantDeleted}
-							{canViewAssistant}
-							canSubmit={canSubmit && !assistantDeleted && canViewAssistant}
-							disabled={!canSubmit || assistantDeleted || !!$navigating || !canViewAssistant}
-							loading={$submitting || $waiting}
-							{fileSearchAttachmentCount}
-							{codeInterpreterAttachmentCount}
-							upload={handleUpload}
-							remove={handleRemove}
-							threadVersion={$version}
-							assistantVersion={resolvedAssistantVersion}
-							{bypassedSettingsSections}
-							on:submit={handleSubmit}
-							on:dismissError={handleDismissError}
-							on:startNewChat={startNewChat}
-						/>
+						{#key threadId}
+							<ChatInput
+								mimeType={data.uploadInfo.mimeType}
+								maxSize={data.uploadInfo.private_file_max_size}
+								bind:attachments={currentMessageAttachments}
+								{threadManagerError}
+								visionAcceptedFiles={allowUserImageUploads ? visionAcceptedFiles : null}
+								fileSearchAcceptedFiles={allowUserFileUploads ? fileSearchAcceptedFiles : null}
+								codeInterpreterAcceptedFiles={allowUserFileUploads
+									? codeInterpreterAcceptedFiles
+									: null}
+								{visionSupportOverride}
+								{useImageDescriptions}
+								{assistantDeleted}
+								{canViewAssistant}
+								canSubmit={canSubmit && !assistantDeleted && canViewAssistant}
+								disabled={!canSubmit || assistantDeleted || !!$navigating || !canViewAssistant}
+								loading={$submitting || $waiting}
+								{fileSearchAttachmentCount}
+								{codeInterpreterAttachmentCount}
+								upload={handleUpload}
+								remove={handleRemove}
+								threadVersion={$version}
+								assistantVersion={resolvedAssistantVersion}
+								{bypassedSettingsSections}
+								on:submit={handleSubmit}
+								on:dismissError={handleDismissError}
+								on:startNewChat={startNewChat}
+							/>
+						{/key}
 					{:else if data.threadInteractionMode === 'voice' && ($messages.length > 0 || assistantInteractionMode === 'chat')}
 						{#if threadRecording && $messages.length > 0 && assistantInteractionMode === 'voice'}
 							<div
