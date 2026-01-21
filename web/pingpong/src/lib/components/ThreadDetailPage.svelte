@@ -253,14 +253,14 @@
 							label: 'Sources Considered',
 							hidden: hideWebSearchSources,
 							description: hideWebSearchSources
-								? 'Members cannot see the full list of web sources the assistant considered.'
+								? 'Members can only see web sources cited in the assistant responses, not the full list of web sources the assistant considered.'
 								: 'Members can see the full list of web sources the assistant considered.'
 						},
 						{
 							label: 'Search Actions',
 							hidden: hideWebSearchActions,
 							description: hideWebSearchActions
-								? 'Members can see that the assistant is searching the web without revealing specific actions.'
+								? 'Members can see that the assistant is searching the web without revealing specific details.'
 								: 'Members can see the specific web search actions such as queries, clicks, and extraction.'
 						}
 					]
