@@ -2,6 +2,7 @@ name: Feature Request
 description: File a feature request if you'd like to suggest an idea for this project.
 title: "[Suggestion]: "
 labels: ["enhancement", "triage"]
+type: "Feature"
 body:
   - type: markdown
     attributes:
@@ -17,60 +18,45 @@ body:
     attributes:
       label: Which area are you seeing an issue with?
       options:
-        - Admin Page
-        - Assistants — Creating & Managing
-        - Assistants — Files
+        - Assistants
         - Canvas Integration
-        - Groups — Activity Summaries
-        - Groups — Creating & Managing
-        - Groups — Shared Files
-        - Groups — View All Assistants Page
-        - Logging In/Navigation
-        - Prompts
-        - Sidebar
-        - Threads — Archive
-        - Threads — Creating & Managing
-        - Threads — Files
-        - Threads — Message Rendering
-        - Threads — Unexpected Output
-        - User Permissions
+        - Data & Sharing (Activity Summaries, Anonymous Sessions, Thread Exports)
+        - Files
+        - Groups
+        - Login & Authentication
+        - Models & Tools (File Search, Web Search, Code Interpreter, MCP)
+        - Threads, Messages & Output
+        - User Interface
+        - Voice Mode
         - Something else not on this list
+    validations:
+      required: true
   - type: markdown
     attributes:
       value: |
         ## Description
         Please describe the issue and what steps we can take to reproduce it.
   - type: textarea
-    id: what-happened
-    attributes:
-      label: Is your feature request related to a problem? Please describe.
-      description: A clear and concise description of what the issue is.
-      placeholder: Ex. I'm always frustrated when [...]
-  - type: textarea
-    id: to-reproduce
-    attributes:
-      label: Steps to reproduce
-      description: A step-by-step set of instructions to reproduce the problem (if applicable).
-      placeholder: |
-        1. Go to '...'
-        2. Click on '....'
-        3. Scroll down to '....'
-        4. See error
-  - type: textarea
-    id: suggestion
+    id: description
     attributes:
       label: What's your suggestion?
-      description: A clear and concise description of the solution you'd like to see.
-  - type: textarea
-    id: alternatives
-    attributes:
-      label: What alternatives have you considered?
-      description: A clear and concise description of any alternative solutions or features you've considered.
+      description: |
+        Please include:
+
+        - A clear description of the problem
+        - A step-by-step set of instructions to reproduce the problem (if possible)
+        - The solution you'd like to see
+        - Alternative solutions or features you've considered
+
+      placeholder: |
+        Ex. It would be great if [...] because currently [...]
+    validations:
+      required: true
   - type: markdown
     attributes:
       value: "## Attachments"
   - type: textarea
     id: attachments
     attributes:
-      label: Additional context & relevant files
-      description: Please provide any relevant context, files or screenshots that might help demonstrate the problem or suggestion. Use the Attach files button to add files and screenshots here.
+      label: Relevant files
+      description: Please provide any relevant files or screenshots that might help demonstrate the problem. Use the Attach files button to add files, or paste screenshots here.

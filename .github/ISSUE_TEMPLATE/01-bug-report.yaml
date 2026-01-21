@@ -2,6 +2,7 @@ name: Bug Report
 description: File a bug report if you're seeing something that doesn't look right.
 title: "[Bug]: "
 labels: ["bug", "triage"]
+type: "Bug"
 body:
   - type: markdown
     attributes:
@@ -17,24 +18,19 @@ body:
     attributes:
       label: Which area are you seeing an issue with?
       options:
-        - Admin Page
-        - Assistants — Creating & Managing
-        - Assistants — Files
+        - Assistants
         - Canvas Integration
-        - Groups — Activity Summaries
-        - Groups — Creating & Managing
-        - Groups — Shared Files
-        - Groups — View All Assistants Page
-        - Logging In/Navigation
-        - Prompts
-        - Sidebar
-        - Threads — Archive
-        - Threads — Creating & Managing
-        - Threads — Files
-        - Threads — Message Rendering
-        - Threads — Unexpected Output
-        - User Permissions
+        - Data & Sharing (Activity Summaries, Anonymous Sessions, Thread Exports)
+        - Files
+        - Groups
+        - Login & Authentication
+        - Models & Tools (File Search, Web Search, Code Interpreter, MCP)
+        - Threads, Messages & Output
+        - User Interface
+        - Voice Mode
         - Something else not on this list
+    validations:
+      required: true
   - type: dropdown
     id: problem-type
     attributes:
@@ -43,37 +39,32 @@ body:
         - Incorrect/Unexpected Behavior
         - Application Crash
         - Application Slow/Unresponsive
+    validations:
+      required: true
   - type: markdown
     attributes:
       value: |
         ## Description
         Please describe the issue and what steps we can take to reproduce it.
   - type: textarea
-    id: what-happened
+    id: description
     attributes:
       label: Describe the bug
-      description: A clear and concise description of what the bug is.
-      placeholder: Tell us what you see!
-  - type: textarea
-    id: to-reproduce
-    attributes:
-      label: Steps to reproduce
-      description: A step-by-step set of instructions to reproduce the problem (if possible).
+      description: |
+        Please include:
+
+        - A clear description of the problem
+        - A step-by-step set of instructions to reproduce the problem (if possible)
+        - What results you expected
+        - What results you actually saw
       placeholder: |
+        Tell us what you see and how to reproduce it!
         1. Go to '...'
         2. Click on '....'
         3. Scroll down to '....'
         4. See error
-  - type: textarea
-    id: expected
-    attributes:
-      label: Expected behavior
-      description: A clear and concise description of what you expected to happen.
-  - type: textarea
-    id: actual
-    attributes:
-      label: Actual behavior
-      description: A clear and concise description of what actually happened.
+    validations:
+      required: true
   - type: markdown
     attributes:
       value: "## Attachments"
@@ -81,10 +72,4 @@ body:
     id: attachments
     attributes:
       label: Relevant files
-      description: Please provide any relevant files or screenshots that might help demonstrate the problem. Use the Attach files button to add files and screenshots here.
-  - type: textarea
-    id: logs
-    attributes:
-      label: Relevant log output
-      description: Please copy and paste any relevant log output. This will be automatically formatted into code, so no need for backticks.
-      render: shell
+      description: Please provide any relevant files or screenshots that might help demonstrate the problem. Use the Attach files button to add files, or paste screenshots here.
