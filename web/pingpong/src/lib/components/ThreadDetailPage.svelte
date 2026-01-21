@@ -217,6 +217,11 @@
 			}
 		}
 		const isSupervisor = data.isSupervisor === true;
+		const nextBypassedSettingsSections: {
+			id: string;
+			title: string;
+			items: { label: string; hidden: boolean; description: string }[];
+		}[] = [];
 		if (assistant && isSupervisor) {
 			const hideFileSearchQueries = assistant.hide_file_search_queries === true;
 			const hideFileSearchResultQuotes = assistant.hide_file_search_result_quotes === true;
@@ -227,7 +232,7 @@
 			const hideMCPServerCallDetails = assistant.hide_mcp_server_call_details === true;
 
 			if (supportsFileSearch) {
-				bypassedSettingsSections.push({
+				nextBypassedSettingsSections.push({
 					id: 'file-search',
 					title: 'File Search',
 					items: [
@@ -256,7 +261,7 @@
 				});
 			}
 			if (supportsWebSearch) {
-				bypassedSettingsSections.push({
+				nextBypassedSettingsSections.push({
 					id: 'web-search',
 					title: 'Web Search',
 					items: [
@@ -278,7 +283,7 @@
 				});
 			}
 			if (supportsReasoning) {
-				bypassedSettingsSections.push({
+				nextBypassedSettingsSections.push({
 					id: 'reasoning',
 					title: 'Reasoning',
 					items: [
@@ -293,7 +298,7 @@
 				});
 			}
 			if (supportsMCPServer) {
-				bypassedSettingsSections.push({
+				nextBypassedSettingsSections.push({
 					id: 'mcp-server',
 					title: 'MCP Server',
 					items: [
@@ -307,9 +312,8 @@
 					]
 				});
 			}
-		} else {
-			bypassedSettingsSections = [];
 		}
+		bypassedSettingsSections = nextBypassedSettingsSections;
 	}
 	$: statusComponents = (data.statusComponents || {}) as Partial<
 		Record<string, api.StatusComponentUpdate[]>
