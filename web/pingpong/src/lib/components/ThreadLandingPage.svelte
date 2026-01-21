@@ -587,38 +587,40 @@
 					{/if}
 					<div class="flex w-full flex-col items-center md:w-3/4 lg:w-3/5">
 						<StatusErrors {assistantStatusUpdates} />
-						<ChatInput
-							mimeType={data.uploadInfo.mimeType}
-							maxSize={data.uploadInfo.private_file_max_size}
-							loading={$loading || !!$navigating}
-							canSubmit={true}
-							visionAcceptedFiles={allowUserImageUploads && supportsVision && allowVisionUpload
-								? data.uploadInfo.fileTypes({
-										file_search: false,
-										code_interpreter: false,
-										vision: true
-									})
-								: null}
-							{visionSupportOverride}
-							{useImageDescriptions}
-							fileSearchAcceptedFiles={allowUserFileUploads && supportsFileSearch
-								? data.uploadInfo.fileTypes({
-										file_search: true,
-										code_interpreter: false,
-										vision: false
-									})
-								: null}
-							codeInterpreterAcceptedFiles={allowUserFileUploads && supportsCodeInterpreter
-								? data.uploadInfo.fileTypes({
-										file_search: false,
-										code_interpreter: true,
-										vision: false
-									})
-								: null}
-							upload={handleUpload}
-							remove={handleRemove}
-							on:submit={handleSubmit}
-						/>
+						{#key assistant.id}
+							<ChatInput
+								mimeType={data.uploadInfo.mimeType}
+								maxSize={data.uploadInfo.private_file_max_size}
+								loading={$loading || !!$navigating}
+								canSubmit={true}
+								visionAcceptedFiles={allowUserImageUploads && supportsVision && allowVisionUpload
+									? data.uploadInfo.fileTypes({
+											file_search: false,
+											code_interpreter: false,
+											vision: true
+										})
+									: null}
+								{visionSupportOverride}
+								{useImageDescriptions}
+								fileSearchAcceptedFiles={allowUserFileUploads && supportsFileSearch
+									? data.uploadInfo.fileTypes({
+											file_search: true,
+											code_interpreter: false,
+											vision: false
+										})
+									: null}
+								codeInterpreterAcceptedFiles={allowUserFileUploads && supportsCodeInterpreter
+									? data.uploadInfo.fileTypes({
+											file_search: false,
+											code_interpreter: true,
+											vision: false
+										})
+									: null}
+								upload={handleUpload}
+								remove={handleRemove}
+								on:submit={handleSubmit}
+							/>
+						{/key}
 					</div>
 				{:else if assistant.interaction_mode === 'chat' && (assistant.assistant_should_message_first ?? false)}
 					<div class="h-[5%] max-h-8"></div>

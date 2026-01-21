@@ -1584,6 +1584,7 @@ class AssistantModelLite(BaseModel):
     id: str
     supports_vision: bool
     azure_supports_vision: bool = False  # For future use
+    supports_reasoning: bool = False
 
 
 class AssistantModelLiteResponse(BaseModel):

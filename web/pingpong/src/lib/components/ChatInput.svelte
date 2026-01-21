@@ -37,6 +37,7 @@
 		ArrowUpOutline,
 		BanOutline,
 		CloseOutline,
+		CheckOutline,
 		ExclamationCircleOutline,
 		FileImageOutline,
 		InfoCircleOutline,
@@ -72,6 +73,14 @@
 	 * Error message provided by thread manager.
 	 */
 	export let threadManagerError: string | null = null;
+	/**
+	 * Settings that supervisors can bypass.
+	 */
+	export let bypassedSettingsSections: {
+		id: string;
+		title: string;
+		items: { label: string; hidden: boolean; description: string }[];
+	}[] = [];
 	/**
 	 * The maximum height of the container before scrolling.
 	 */
@@ -118,6 +127,11 @@
 		visionSupportOverride === false && !useImageDescriptions ? null : visionAcceptedFiles;
 	let visionOverrideModalOpen = false;
 	let visionUseImageDescriptionsModalOpen = false;
+	let bypassedSettingsModalOpen = false;
+	let bypassedSettingsBannerDismissed = false;
+	$: hasBypassedSettings = bypassedSettingsSections.some((section) =>
+		section.items.some((item) => item.hidden)
+	);
 	/**
 	 * Max upload size.
 	 */
@@ -495,6 +509,38 @@
 				</div>
 			{/if}
 
+			{#if hasBypassedSettings && !bypassedSettingsBannerDismissed}
+				<div
+					class="relative z-20 -mb-1 rounded-t-xl border border-b-0 border-blue-light-40 bg-blue-light-50 px-3.5 pt-2 pb-2.5 text-blue-dark-40"
+				>
+					<div class="w-full">
+						<div class="flex w-full flex-row items-center gap-2">
+							<div class="flex flex-row items-center gap-2 md:w-full">
+								<InfoCircleOutline />
+								<div>
+									<div class="text-sm">
+										As a moderator, content hidden from members based on the assistant configuration
+										may be visible to you.
+									</div>
+								</div>
+							</div>
+							<Button
+								class="-mt-px w-fit shrink-0 rounded-lg border border-blue-light-40 bg-white px-2 py-1 text-xs text-blue-dark-40 hover:bg-blue-light-50"
+								onclick={() => (bypassedSettingsModalOpen = true)}
+							>
+								View settings
+							</Button>
+							<Button
+								class="-mt-px rounded-lg p-1 text-blue-dark-40 hover:bg-blue-light-40"
+								onclick={() => (bypassedSettingsBannerDismissed = true)}
+							>
+								<CloseOutline class="cursor-pointer" />
+							</Button>
+						</div>
+					</div>
+				</div>
+			{/if}
+
 			{#if combinedErrorMessage}
 				<div
 					class="relative z-20 -mb-1 rounded-t-xl border border-b-0 border-red-light-30 bg-red-light-40 px-3.5 pt-2 pb-2.5 text-brown-dark"
@@ -658,6 +704,52 @@
 		</div>
 	</div>
 </div>
+
+<Modal
+	title="Content Visibility Settings"
+	classHeader="text-gray-700"
+	class="text-gray-700"
+	bind:open={bypassedSettingsModalOpen}
+	autoclose
+	outsideclose
+>
+	<div class="flex flex-col gap-5 px-4 pb-4">
+		<P class="text-md">
+			The following settings control what content members can see when interacting with this
+			assistant. As a moderator, you have access to all content, including any content hidden from
+			members based on these settings. You can make changes in Assistant Settings under Advanced
+			Options.
+		</P>
+		{#if hasBypassedSettings}
+			<div class="flex flex-col gap-4">
+				{#each bypassedSettingsSections as section (section.id)}
+					<div class="rounded-lg border border-gray-200 bg-gray-50 p-3">
+						<div class="text-xs font-semibold text-gray-500 uppercase">{section.title}</div>
+						<List class="mt-2 space-y-3">
+							{#each section.items as item (item.label)}
+								<Li class="list-none">
+									<div class="flex items-start gap-2">
+										{#if item.hidden}
+											<CloseOutline class="mt-0.5 h-4 w-4 text-gray-400" />
+										{:else}
+											<CheckOutline class="mt-0.5 h-4 w-4 text-green-600" />
+										{/if}
+										<div class="flex flex-col">
+											<div class="text-sm font-semibold text-gray-700">{item.label}</div>
+											<div class="text-xs text-gray-600">{item.description}</div>
+										</div>
+									</div>
+								</Li>
+							{/each}
+						</List>
+					</div>
+				{/each}
+			</div>
+		{:else}
+			<P>No settings have been bypassed.</P>
+		{/if}
+	</div>
+</Modal>
 
 <Modal
 	classHeader="text-gray-700"

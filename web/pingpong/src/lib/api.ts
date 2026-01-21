@@ -1506,6 +1506,7 @@ export type AssistantModelLite = {
 	id: string;
 	supports_vision: boolean;
 	azure_supports_vision: boolean;
+	supports_reasoning: boolean;
 };
 
 export type AssistantModelLiteResponse = {

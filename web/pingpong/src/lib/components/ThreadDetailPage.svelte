@@ -171,6 +171,15 @@
 	$: canFetchMore = threadMgr.canFetchMore;
 	$: supportsFileSearch = data.availableTools.includes('file_search') || false;
 	$: supportsCodeInterpreter = data.availableTools.includes('code_interpreter') || false;
+	$: supportsWebSearch = data.availableTools.includes('web_search') || false;
+	$: supportsMCPServer = data.availableTools.includes('mcp_server') || false;
+	let supportsReasoning = false;
+	$: {
+		const model = data.modelInfo.find(
+			(model: api.AssistantModelLite) => model.id === data.threadModel
+		);
+		supportsReasoning = model?.supports_reasoning || false;
+	}
 	// TODO - should figure this out by checking grants instead of participants
 	$: canSubmit = !!$participants.user && $participants.user.includes('Me');
 	$: assistantDeleted = !$assistantId && $assistantId === 0;
@@ -180,6 +189,11 @@
 	let assistantInteractionMode: 'voice' | 'chat' | null = null;
 	let allowUserFileUploads = true;
 	let allowUserImageUploads = true;
+	let bypassedSettingsSections: {
+		id: string;
+		title: string;
+		items: { label: string; hidden: boolean; description: string }[];
+	}[] = [];
 	$: {
 		const assistant = data.assistants.find(
 			(assistant: api.Assistant) => assistant.id === $assistantId
@@ -202,6 +216,104 @@
 				console.warn(`Definition for assistant ${$assistantId} not found.`);
 			}
 		}
+		const isSupervisor = data.isSupervisor === true;
+		const nextBypassedSettingsSections: {
+			id: string;
+			title: string;
+			items: { label: string; hidden: boolean; description: string }[];
+		}[] = [];
+		if (assistant && isSupervisor) {
+			const hideFileSearchQueries = assistant.hide_file_search_queries === true;
+			const hideFileSearchResultQuotes = assistant.hide_file_search_result_quotes === true;
+			const hideFileSearchDocumentNames = assistant.hide_file_search_document_names === true;
+			const hideWebSearchSources = assistant.hide_web_search_sources === true;
+			const hideWebSearchActions = assistant.hide_web_search_actions === true;
+			const hideReasoningSummaries = assistant.hide_reasoning_summaries === true;
+			const hideMCPServerCallDetails = assistant.hide_mcp_server_call_details === true;
+
+			if (supportsFileSearch) {
+				nextBypassedSettingsSections.push({
+					id: 'file-search',
+					title: 'File Search',
+					items: [
+						{
+							label: 'Queries',
+							hidden: hideFileSearchQueries,
+							description: hideFileSearchQueries
+								? 'Members cannot see the queries the assistant uses to find relevant documents.'
+								: 'Members can see the queries the assistant uses to find relevant documents.'
+						},
+						{
+							label: 'Document Quotes',
+							hidden: hideFileSearchResultQuotes,
+							description: hideFileSearchResultQuotes
+								? 'Members cannot see the document quotes the assistant retrieves from each file.'
+								: 'Members can see the document quotes the assistant retrieves from each file.'
+						},
+						{
+							label: 'Document Names',
+							hidden: hideFileSearchDocumentNames,
+							description: hideFileSearchDocumentNames
+								? 'Members cannot see the names of the documents the assistant retrieves.'
+								: 'Members can see the names of the documents the assistant retrieves.'
+						}
+					]
+				});
+			}
+			if (supportsWebSearch) {
+				nextBypassedSettingsSections.push({
+					id: 'web-search',
+					title: 'Web Search',
+					items: [
+						{
+							label: 'Sources Considered',
+							hidden: hideWebSearchSources,
+							description: hideWebSearchSources
+								? 'Members can only see web sources cited in the assistant responses, not the full list of web sources the assistant considered.'
+								: 'Members can see the full list of web sources the assistant considered.'
+						},
+						{
+							label: 'Search Actions',
+							hidden: hideWebSearchActions,
+							description: hideWebSearchActions
+								? 'Members can see that the assistant is searching the web without revealing specific details.'
+								: 'Members can see the specific web search actions such as queries, clicks, and extraction.'
+						}
+					]
+				});
+			}
+			if (supportsReasoning) {
+				nextBypassedSettingsSections.push({
+					id: 'reasoning',
+					title: 'Reasoning',
+					items: [
+						{
+							label: 'Reasoning Summaries',
+							hidden: hideReasoningSummaries,
+							description: hideReasoningSummaries
+								? 'Members cannot see summaries of the assistant reasoning process.'
+								: 'Members can see summaries of the assistant reasoning process.'
+						}
+					]
+				});
+			}
+			if (supportsMCPServer) {
+				nextBypassedSettingsSections.push({
+					id: 'mcp-server',
+					title: 'MCP Server',
+					items: [
+						{
+							label: 'MCP Call Details',
+							hidden: hideMCPServerCallDetails,
+							description: hideMCPServerCallDetails
+								? 'Members see when the assistant makes calls to an MCP Server, but not detailed payloads or responses.'
+								: 'Members can see detailed payloads and responses from MCP Server calls.'
+						}
+					]
+				});
+			}
+		}
+		bypassedSettingsSections = nextBypassedSettingsSections;
 	}
 	$: statusComponents = (data.statusComponents || {}) as Partial<
 		Record<string, api.StatusComponentUpdate[]>
@@ -1593,33 +1705,36 @@
 								<DoubleBounce color="#0ea5e9" size="30" />
 							</div>
 						{/if}
-						<ChatInput
-							mimeType={data.uploadInfo.mimeType}
-							maxSize={data.uploadInfo.private_file_max_size}
-							bind:attachments={currentMessageAttachments}
-							{threadManagerError}
-							visionAcceptedFiles={allowUserImageUploads ? visionAcceptedFiles : null}
-							fileSearchAcceptedFiles={allowUserFileUploads ? fileSearchAcceptedFiles : null}
-							codeInterpreterAcceptedFiles={allowUserFileUploads
-								? codeInterpreterAcceptedFiles
-								: null}
-							{visionSupportOverride}
-							{useImageDescriptions}
-							{assistantDeleted}
-							{canViewAssistant}
-							canSubmit={canSubmit && !assistantDeleted && canViewAssistant}
-							disabled={!canSubmit || assistantDeleted || !!$navigating || !canViewAssistant}
-							loading={$submitting || $waiting}
-							{fileSearchAttachmentCount}
-							{codeInterpreterAttachmentCount}
-							upload={handleUpload}
-							remove={handleRemove}
-							threadVersion={$version}
-							assistantVersion={resolvedAssistantVersion}
-							on:submit={handleSubmit}
-							on:dismissError={handleDismissError}
-							on:startNewChat={startNewChat}
-						/>
+						{#key threadId}
+							<ChatInput
+								mimeType={data.uploadInfo.mimeType}
+								maxSize={data.uploadInfo.private_file_max_size}
+								bind:attachments={currentMessageAttachments}
+								{threadManagerError}
+								visionAcceptedFiles={allowUserImageUploads ? visionAcceptedFiles : null}
+								fileSearchAcceptedFiles={allowUserFileUploads ? fileSearchAcceptedFiles : null}
+								codeInterpreterAcceptedFiles={allowUserFileUploads
+									? codeInterpreterAcceptedFiles
+									: null}
+								{visionSupportOverride}
+								{useImageDescriptions}
+								{assistantDeleted}
+								{canViewAssistant}
+								canSubmit={canSubmit && !assistantDeleted && canViewAssistant}
+								disabled={!canSubmit || assistantDeleted || !!$navigating || !canViewAssistant}
+								loading={$submitting || $waiting}
+								{fileSearchAttachmentCount}
+								{codeInterpreterAttachmentCount}
+								upload={handleUpload}
+								remove={handleRemove}
+								threadVersion={$version}
+								assistantVersion={resolvedAssistantVersion}
+								{bypassedSettingsSections}
+								on:submit={handleSubmit}
+								on:dismissError={handleDismissError}
+								on:startNewChat={startNewChat}
+							/>
+						{/key}
 					{:else if data.threadInteractionMode === 'voice' && ($messages.length > 0 || assistantInteractionMode === 'chat')}
 						{#if threadRecording && $messages.length > 0 && assistantInteractionMode === 'voice'}
 							<div
