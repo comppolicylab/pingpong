@@ -717,8 +717,8 @@
 		<P class="text-md">
 			The following settings control what content members can see when interacting with this
 			assistant. As a moderator, you have access to all content, including any content hidden from
-			members based on these settings. You can modify these settings in Assistant Settings under
-			Advanced Options.
+			members based on these settings. You can make changes in Assistant Settings under Advanced
+			Options.
 		</P>
 		{#if hasBypassedSettings}
 			<div class="flex flex-col gap-4">
@@ -748,10 +748,6 @@
 		{:else}
 			<P>No settings have been bypassed.</P>
 		{/if}
-		<P class="text-sm text-gray-600"
-			><span class="font-semibold">Note:</span> Some settings may not apply to your current assistant
-			configuration. For example, Reasoning Summary controls apply to Chat Mode reasoning models.</P
-		>
 	</div>
 </Modal>
 

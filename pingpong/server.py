@@ -2618,6 +2618,7 @@ async def list_model_capabilities(request: Request):
         schemas.AssistantModelLite(
             id=model_id,
             supports_vision=model_data["supports_vision"],
+            supports_reasoning=model_data["supports_reasoning"],
             azure_supports_vision=False,
         )
         for model_id, model_data in KNOWN_MODELS.items()

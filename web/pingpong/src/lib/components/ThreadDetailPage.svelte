@@ -171,6 +171,15 @@
 	$: canFetchMore = threadMgr.canFetchMore;
 	$: supportsFileSearch = data.availableTools.includes('file_search') || false;
 	$: supportsCodeInterpreter = data.availableTools.includes('code_interpreter') || false;
+	$: supportsWebSearch = data.availableTools.includes('web_search') || false;
+	$: supportsMCPServer = data.availableTools.includes('mcp_server') || false;
+	let supportsReasoning = false;
+	$: {
+		const model = data.modelInfo.find(
+			(model: api.AssistantModelLite) => model.id === data.threadModel
+		);
+		supportsReasoning = model?.supports_reasoning || false;
+	}
 	// TODO - should figure this out by checking grants instead of participants
 	$: canSubmit = !!$participants.user && $participants.user.includes('Me');
 	$: assistantDeleted = !$assistantId && $assistantId === 0;
@@ -217,8 +226,8 @@
 			const hideReasoningSummaries = assistant.hide_reasoning_summaries === true;
 			const hideMCPServerCallDetails = assistant.hide_mcp_server_call_details === true;
 
-			bypassedSettingsSections = [
-				{
+			if (supportsFileSearch) {
+				bypassedSettingsSections.push({
 					id: 'file-search',
 					title: 'File Search',
 					items: [
@@ -244,8 +253,10 @@
 								: 'Members can see the names of the documents the assistant retrieves.'
 						}
 					]
-				},
-				{
+				});
+			}
+			if (supportsWebSearch) {
+				bypassedSettingsSections.push({
 					id: 'web-search',
 					title: 'Web Search',
 					items: [
@@ -264,8 +275,10 @@
 								: 'Members can see the specific web search actions such as queries, clicks, and extraction.'
 						}
 					]
-				},
-				{
+				});
+			}
+			if (supportsReasoning) {
+				bypassedSettingsSections.push({
 					id: 'reasoning',
 					title: 'Reasoning',
 					items: [
@@ -277,8 +290,10 @@
 								: 'Members can see summaries of the assistant reasoning process.'
 						}
 					]
-				},
-				{
+				});
+			}
+			if (supportsMCPServer) {
+				bypassedSettingsSections.push({
 					id: 'mcp-server',
 					title: 'MCP Server',
 					items: [
@@ -290,8 +305,8 @@
 								: 'Members can see detailed payloads and responses from MCP Server calls.'
 						}
 					]
-				}
-			];
+				});
+			}
 		} else {
 			bypassedSettingsSections = [];
 		}
