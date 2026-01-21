@@ -139,6 +139,25 @@ async def send_export_download(
     await sender.send(invite.email, subject, message)
 
 
+async def send_export_failed(
+    sender: EmailSender,
+    invite: DownloadExport,
+):
+    subject = f"Export failed for {invite.class_name}"
+
+    message = notification_template.substitute(
+        {
+            "title": "We couldn’t create your data export.",
+            "subtitle": "We ran into an issue while creating the thread data export you requested from "
+            + invite.class_name
+            + ". </p><p>Our team has been notified and we are looking into it. Please try again later.",
+            "legal_text": "because you requested a transcription from PingPong",
+        }
+    )
+
+    await sender.send(invite.email, subject, message)
+
+
 async def send_transcription_download(
     sender: EmailSender,
     invite: DownloadTranscriptExport,
@@ -204,6 +223,25 @@ async def send_clone_group_notification(
             "legal_text": "because you requested for a new group to be created on PingPong",
         }
     )
+    await sender.send(invite.email, subject, message)
+
+
+async def send_clone_group_failed(
+    sender: EmailSender,
+    invite: ClonedGroupNotification,
+):
+    subject = f"Group cloning failed for {invite.class_name}"
+
+    message = notification_template.substitute(
+        {
+            "title": "We couldn’t create your cloned group.",
+            "subtitle": "We ran into an issue while creating the cloned group you requested from "
+            + invite.class_name
+            + f'. </p><p><b>Old group link:</b> <a href="{invite.link}" style="color:#0070c9;">{invite.link}</a></p><p>Our team has been notified and we are looking into it. Please try again later.',
+            "legal_text": "because you requested a transcription from PingPong",
+        }
+    )
+
     await sender.send(invite.email, subject, message)
 
 

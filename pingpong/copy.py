@@ -1,4 +1,5 @@
 import json
+import logging
 import openai
 from openai.types.beta.assistant_create_params import ToolResources
 from pingpong import models
@@ -12,7 +13,7 @@ from pingpong.authz.base import Relation
 from pingpong.authz.openfga import OpenFgaAuthzClient
 from pingpong.config import config
 from pingpong.files import _file_grants
-from pingpong.invite import send_clone_group_notification
+from pingpong.invite import send_clone_group_failed, send_clone_group_notification
 from pingpong.schemas import (
     ClonedGroupNotification,
     CopyClassRequest,
@@ -22,6 +23,8 @@ from pingpong.schemas import (
 )
 from pingpong.vector_stores import create_vector_store
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 
 async def create_new_class_object(
@@ -492,6 +495,8 @@ async def copy_group(
 ):
     async with config.db.driver.async_session() as session:
         async with config.authz.driver.get_client() as c:
+            class_ = None
+            user = None
             try:
                 class_ = await models.Class.get_by_id(session, int(class_id))
                 if not class_:
@@ -582,5 +587,19 @@ async def copy_group(
                 )
                 await session.commit()
             except Exception as e:
+                try:
+                    if user and user.email:
+                        await send_clone_group_failed(
+                            config.email.sender,
+                            ClonedGroupNotification(
+                                email=user.email,
+                                class_name=class_.name
+                                if class_
+                                else "your existing group",
+                                link=config.url(f"/group/{class_id}"),
+                            ),
+                        )
+                except Exception as e2:
+                    logger.exception(f"Failed to send clone group failed email: {e2}")
                 await session.rollback()
                 raise e
