@@ -1,7 +1,7 @@
 name: Feature Request
 description: File a feature request if you'd like to suggest an idea for this project.
 title: "[Suggestion]: "
-labels: ["enhancement", "triage"]
+labels: ["feature", "triage"]
 type: "Feature"
 body:
   - type: markdown
