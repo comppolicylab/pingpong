@@ -13,11 +13,18 @@ async def find_class_by_course_id(
     if lti_course is not None:
         return lti_course
 
-    lms_courses = await Class.get_all_by_lms_course_id(
-        db,
-        lms_course_id=int(course_id),
-    )
-    if not lms_courses or len(lms_courses) > 1:
-        return None
+    return None
 
-    return lms_courses[0]
+
+async def find_class_by_course_id_search_by_canvas_account_lti_guid(
+    db: AsyncSession, canvas_account_lti_guid: str, course_id: str
+) -> LTIClass | Class | None:
+    lti_course = await LTIClass.get_by_canvas_account_lti_guid_and_course_id(
+        db,
+        canvas_account_lti_guid=canvas_account_lti_guid,
+        course_id=course_id,
+    )
+    if lti_course is not None:
+        return lti_course
+
+    return None
