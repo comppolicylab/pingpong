@@ -352,15 +352,13 @@ class OpenFgaAuthzDriver(AuthzDriver):
 
         async with self.get_client() as ac:
             c = ac._cli
-            try:
-                latest = await c.read_latest_authorization_model()
-                if not latest.authorization_model:
-                    raise IndexError()
+            latest = await c.read_latest_authorization_model()
+            if latest.authorization_model:
                 self.config.authorization_model_id = latest.authorization_model.id
                 logger.info(
                     f"Using existing model with id {self.config.authorization_model_id}"
                 )
-            except IndexError:
+            else:
                 with open(self.model_config) as f:
                     model = json.load(f)
                     resp = await c.write_authorization_model(model)
