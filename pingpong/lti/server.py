@@ -80,6 +80,7 @@ MESSAGE_TYPE = "LtiResourceLinkRequest"
 CANVAS_MESSAGE_PLACEMENT = "https://canvas.instructure.com/lti/course_navigation"
 
 CANVAS_ACCOUNT_NAME_KEY = "https://canvas.instructure.com/lti/account_name"
+CANVAS_ACCOUNT_LTI_GUID_KEY = "https://canvas.instructure.com/lti/account_lti_guid"
 
 REQUIRED_SCOPES = [
     "https://purl.imsglobal.org/spec/lti-nrps/scope/contextmembership.readonly"
@@ -354,6 +355,7 @@ async def register_lti_instance(request: Request, data: LTIRegisterRequest):
         raise HTTPException(status_code=400, detail="public subject type not supported")
 
     canvas_account_name = platform_config.get(CANVAS_ACCOUNT_NAME_KEY)
+    canvas_account_lti_guid = platform_config.get(CANVAS_ACCOUNT_LTI_GUID_KEY)
 
     tool_registration_data = {
         "application_type": "web",
@@ -456,6 +458,7 @@ async def register_lti_instance(request: Request, data: LTIRegisterRequest):
         "lms_platform": platform,
         "token_algorithm": "RS256",
         "canvas_account_name": canvas_account_name,
+        "canvas_account_lti_guid": canvas_account_lti_guid,
         "admin_name": data.admin_name,
         "admin_email": data.admin_email,
         "friendly_name": data.name,

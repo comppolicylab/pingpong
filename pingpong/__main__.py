@@ -48,6 +48,9 @@ from pingpong.migrations.m03_migrate_to_next_gen import migrate_to_next_gen
 from pingpong.migrations.m04_check_voice_mode_recordings import (
     check_voice_mode_recordings,
 )
+from pingpong.migrations.m05_populate_account_lti_guid import (
+    populate_account_lti_guid,
+)
 from pingpong.now import _get_next_run_time, croner, utcnow
 from pingpong.schemas import LMSType, RunStatus
 from pingpong.summary import send_class_summary_for_class
@@ -811,6 +814,20 @@ def m04_check_voice_mode_recordings() -> None:
             logger.info("Done!")
 
     asyncio.run(_m04_check_voice_mode_recordings())
+
+
+@db.command("m05_populate_account_lti_guid")
+def m05_populate_account_lti_guid() -> None:
+    async def _m05_populate_account_lti_guid() -> None:
+        async with config.db.driver.async_session() as session:
+            logger.info(
+                "Populating canvas_account_lti_guid from openid_configuration..."
+            )
+            await populate_account_lti_guid(session)
+            await session.commit()
+            logger.info("Done!")
+
+    asyncio.run(_m05_populate_account_lti_guid())
 
 
 @db.command("m02_remove_responses_threads")
