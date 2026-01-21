@@ -336,7 +336,9 @@ class AddNewUsers(ABC):
 
         # If the request is from LMS, we need to store the newly synced users
         # so we can delete previously synced users that are no longer on the roster
-        if self.new_ucr.lms_tenant or self.new_ucr.lti_class_id:
+        if (
+            self.new_ucr.lms_tenant or self.new_ucr.lti_class_id
+        ) and not self.new_ucr.is_lti_launch:
             self.newly_synced: list[int] = []
             self.newly_synced_identifiers: dict[int, str | None] = {}
 
@@ -381,10 +383,12 @@ class AddNewUsers(ABC):
                 else None
             )
 
-            if self.new_ucr.lms_tenant or self.new_ucr.lti_class_id:
+            if (
+                self.new_ucr.lms_tenant or self.new_ucr.lti_class_id
+            ) and not self.new_ucr.is_lti_launch:
                 self.newly_synced.append(user.id)
                 self.newly_synced_identifiers[user.id] = ucr.sso_id
-            if user.id == self.user_id:
+            if user.id == self.user_id and not self.new_ucr.is_lti_launch:
                 # We don't want an LMS sync to change the roles of the user who initiated it
                 if self.new_ucr.lms_tenant or self.new_ucr.lti_class_id:
                     continue
@@ -455,7 +459,9 @@ class AddNewUsers(ABC):
         if not self.new_ucr.silent:
             self.send_invites()
 
-        if self.new_ucr.lms_tenant or self.new_ucr.lti_class_id:
+        if (
+            self.new_ucr.lms_tenant or self.new_ucr.lti_class_id
+        ) and not self.new_ucr.is_lti_launch:
             await self._remove_deleted_users()
             await self._merge_accounts()
 
