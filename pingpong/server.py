@@ -8034,6 +8034,9 @@ async def update_assistant(
     if "description" in req.model_fields_set and req.description is not None:
         asst.description = req.description
 
+    if "notes" in req.model_fields_set and req.notes is not None:
+        asst.notes = req.notes
+
     if "tools" in req.model_fields_set and req.tools is not None:
         openai_update["tools"] = req.tools
         asst.tools = json.dumps(req.tools)

@@ -2341,6 +2341,7 @@ class Assistant(Base):
         server_default=schemas.InteractionMode.CHAT.name,
     )
     description = Column(String)
+    notes = Column(String, nullable=True)
     assistant_id = Column(String)
     use_latex = Column(Boolean)
     use_image_descriptions = Column(Boolean)
