@@ -929,9 +929,7 @@ async def lti_launch(
                     ],
                     silent=True,
                     sso_tenant=sso_provider.name if sso_provider else None,
-                    lms_type=class_.lti_platform
-                    if not second_lti_class
-                    else None,
+                    lms_type=class_.lti_platform if not second_lti_class else None,
                     lti_class_id=second_lti_class.id if second_lti_class else class_.id,
                     is_lti_launch=True,
                 )
