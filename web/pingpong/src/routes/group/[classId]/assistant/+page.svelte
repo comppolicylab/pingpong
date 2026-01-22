@@ -24,11 +24,7 @@
 		FileCopyOutline,
 		TrashBinOutline,
 		CheckCircleOutline,
-		ExclamationCircleOutline,
-		InfoCircleOutline,
-
-		TailwindSolid
-
+		ExclamationCircleOutline
 	} from 'flowbite-svelte-icons';
 	import ConfirmationModal from '$lib/components/ConfirmationModal.svelte';
 	import { happyToast, sadToast } from '$lib/toast';
@@ -304,7 +300,7 @@
 										aria-label="Copy assistant link"
 										onclick={() => {}}
 										oncopy={showCopiedLink}
-										use:copy={assistantLink(assistant.id)} 
+										use:copy={assistantLink(assistant.id)}
 									>
 										<LinkOutline class="h-5 w-5" />
 									</button>
@@ -336,7 +332,7 @@
 										</button>
 									{/if}
 								</div>
-								
+
 								<Modal
 									open={!!copyModalState[assistant.id]}
 									size="md"

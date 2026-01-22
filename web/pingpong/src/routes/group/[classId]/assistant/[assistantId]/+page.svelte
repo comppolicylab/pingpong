@@ -114,11 +114,7 @@
 	}
 	let notes = '';
 	let hasSetNotes = false;
-	$: if (
-		assistant?.notes !== undefined &&
-		assistant?.notes !== null &&
-		!hasSetNotes
-	) {
+	$: if (assistant?.notes !== undefined && assistant?.notes !== null && !hasSetNotes) {
 		notes = assistant.notes;
 		hasSetNotes = true;
 	}
@@ -889,7 +885,7 @@
 			case 'notes':
 				dirty =
 					normalizeNewlines((newValue as string | undefined) || '') !==
-					((oldValue as string) || ''); 
+					((oldValue as string) || '');
 				break;
 			case 'instructions':
 				dirty =
@@ -1049,9 +1045,7 @@
 			instructions: preventEdits
 				? assistant?.instructions || ''
 				: normalizeNewlines(body.instructions.toString()),
-			notes: preventEdits
-				? assistant?.notes || '' 
-				: normalizeNewlines(body.notes.toString()),
+			notes: preventEdits ? assistant?.notes || '' : normalizeNewlines(body.notes.toString()),
 			model: selectedModel,
 			tools,
 			code_interpreter_file_ids:
@@ -2646,18 +2640,13 @@
 						<hr />
 
 						<div class="col-span-2 mb-1">
-							<Label for="notes">Notes</Label> 
+							<Label for="notes">Notes</Label>
 							<Helper class="pb-1"
-								>Add any notes here. This information is <strong>not</strong> shown to users, and intended for documentation.</Helper
+								>Add any notes here. This information is <strong>not</strong> shown to users, and intended
+								for documentation.</Helper
 							>
-							<Textarea
-								id="notes"
-								name="notes"
-								bind:value={notes}
-								disabled={preventEdits}
-							/>
+							<Textarea id="notes" name="notes" bind:value={notes} disabled={preventEdits} />
 						</div>
-						
 					</div>
 				</AccordionItem>
 			</Accordion>

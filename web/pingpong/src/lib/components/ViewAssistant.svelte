@@ -28,8 +28,7 @@
 		TrashBinOutline,
 		CheckCircleOutline,
 		ExclamationCircleOutline,
-		InfoCircleOutline,
-		InfoCircleSolid
+		InfoCircleOutline
 	} from 'flowbite-svelte-icons';
 	import ConfirmationModal from '$lib/components/ConfirmationModal.svelte';
 	import type { Assistant, AppUser } from '$lib/api';
@@ -46,7 +45,6 @@
 	} from '$lib/assistantHelpers';
 	import { invalidateAll } from '$app/navigation';
 	import { loading, loadingMessage } from '$lib/stores/general';
-
 
 	export let assistant: Assistant;
 	export let creator: AppUser;
@@ -472,12 +470,11 @@
 >
 	<slot name="header">
 		<Heading tag="h3" class="font-serif text-2xl font-medium text-blue-dark-40"
-		>Moderator Notes</Heading
+			>Moderator Notes</Heading
 		>
 	</slot>
-		
+
 	<p class="mb-5 text-sm break-words whitespace-normal text-gray-700 dark:text-gray-300">
 		{assistant?.notes || 'No notes recorded for this bot.'}
 	</p>
 </Modal>
-	

@@ -1387,6 +1387,7 @@ async def test_copy_assistant_within_class(
             name="A" * 100,
             instructions="Be helpful",
             description="original",
+            notes="added notes",
             interaction_mode=schemas.InteractionMode.CHAT,
             model="gpt-4o-mini",
             temperature=0.2,
