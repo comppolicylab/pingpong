@@ -11,9 +11,6 @@ services:
   srv:
     image: 654654251079.dkr.ecr.us-east-1.amazonaws.com/pingpong-srv:${SRV_VERSION}
 
-  scripts:
-    image: 654654251079.dkr.ecr.us-east-1.amazonaws.com/pingpong-scripts:${SRV_VERSION}
-
 
 secrets:
   app_config:
