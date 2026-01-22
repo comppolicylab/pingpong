@@ -200,6 +200,7 @@ def _make_registration(
     token_algorithm="RS256",
     review_status=LTIRegistrationReviewStatus.PENDING,
     enabled=True,
+    canvas_account_lti_guid=None,
 ):
     return SimpleNamespace(
         issuer=issuer,
@@ -210,6 +211,7 @@ def _make_registration(
         token_algorithm=token_algorithm,
         review_status=review_status,
         enabled=enabled,
+        canvas_account_lti_guid=canvas_account_lti_guid,
         lms_platform=LMSPlatform.CANVAS,
         id=1,
     )
