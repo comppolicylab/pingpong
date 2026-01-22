@@ -685,8 +685,9 @@ async def lti_launch(
     if registration.canvas_account_lti_guid:
         class_ = await find_class_by_course_id_search_by_canvas_account_lti_guid(
             request.state.db,
-            registration.canvas_account_lti_guid,
-            course_id,
+            registration_id=registration.id,
+            canvas_account_lti_guid=registration.canvas_account_lti_guid,
+            course_id=course_id,
         )
     else:
         class_ = await find_class_by_course_id(
