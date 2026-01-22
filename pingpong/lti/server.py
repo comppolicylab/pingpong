@@ -13,7 +13,10 @@ from fastapi.responses import RedirectResponse
 from pingpong.auth import encode_session_token
 from pingpong.config import config
 from pingpong.invite import send_lti_registration_submitted
-from pingpong.lti.lti_course import find_class_by_course_id
+from pingpong.lti.lti_course import (
+    find_class_by_course_id,
+    find_class_by_course_id_search_by_canvas_account_lti_guid,
+)
 from pingpong.lti.schemas import (
     LTIRegisterRequest,
     LTIPublicInstitutions,
@@ -679,11 +682,19 @@ async def lti_launch(
     ):
         raise HTTPException(status_code=400, detail="Missing or invalid course_id")
 
-    class_ = await find_class_by_course_id(
-        request.state.db,
-        registration.id,
-        course_id,
-    )
+    if registration.canvas_account_lti_guid:
+        class_ = await find_class_by_course_id_search_by_canvas_account_lti_guid(
+            request.state.db,
+            registration_id=registration.id,
+            canvas_account_lti_guid=registration.canvas_account_lti_guid,
+            course_id=course_id,
+        )
+    else:
+        class_ = await find_class_by_course_id(
+            request.state.db,
+            registration.id,
+            course_id,
+        )
 
     user_roles = claims.get("https://purl.imsglobal.org/spec/lti/claim/roles", [])
     is_instructor = _is_instructor(user_roles)
@@ -753,6 +764,8 @@ async def lti_launch(
     if class_ is None or (
         isinstance(class_, LTIClass) and class_.lti_status == LTIStatus.PENDING
     ):
+        # User is launching into a class that is not yet linked
+        # Or the class is pending setup
         if is_instructor:
             # Check for existing pending LTIClass (re-launch scenario)
             if isinstance(class_, LTIClass) and class_.lti_status == LTIStatus.PENDING:
@@ -803,12 +816,13 @@ async def lti_launch(
                 status_code=302,
             )
         else:
+            # Student launching into unlinked class
             return RedirectResponse(
                 url=config.url(f"/lti/no-group?lti_session={user_token}"),
                 status_code=302,
             )
     else:
-        if isinstance(class_, LTIClass):
+        if isinstance(class_, LTIClass) and class_.registration_id == registration.id:
             if user.id == class_.setup_user_id:
                 return RedirectResponse(
                     url=config.url(
@@ -834,6 +848,7 @@ async def lti_launch(
                     lms_type=registration.lms_platform,
                     lti_class_id=class_.id,
                     sso_tenant=sso_provider.name if sso_provider else None,
+                    is_lti_launch=True,
                 )
                 try:
                     await AddNewUsersManual(
@@ -855,6 +870,88 @@ async def lti_launch(
                     ),
                     status_code=302,
                 )
+        elif isinstance(class_, LTIClass):
+            second_lti_class = None
+            pp_class = await Class.get_by_id(request.state.db, class_.class_id)
+            if pp_class is None:
+                raise HTTPException(status_code=404, detail="Class not found")
+
+            if is_instructor:
+                course_details = claims.get(
+                    "https://purl.imsglobal.org/spec/lti/claim/context", {}
+                )
+                course_code = course_details.get("label")
+                course_name = course_details.get("title")
+                course_term = launch_custom_params.get("canvas_term_name")
+                if (
+                    not course_term
+                    or course_term
+                    in LTI_CUSTOM_PARAM_DEFAULT_VALUES["canvas_term_name"]
+                ):
+                    course_term = None
+                nrps_claim = claims.get(
+                    "https://purl.imsglobal.org/spec/lti-nrps/claim/namesroleservice",
+                    {},
+                )
+                context_memberships_url = nrps_claim.get("context_memberships_url")
+                second_lti_class = LTIClass(
+                    registration_id=registration.id,
+                    lti_status=LTIStatus.LINKED,
+                    lti_platform=registration.lms_platform,
+                    course_id=course_id,
+                    course_code=course_code,
+                    course_name=course_name,
+                    course_term=course_term,
+                    class_id=pp_class.id,
+                    setup_user_id=user.id,
+                    context_memberships_url=context_memberships_url,
+                )
+                request.state.db.add(second_lti_class)
+                await request.state.db.flush()
+                await request.state.db.refresh(second_lti_class)
+
+            if pp_class.lms_user_id == user.id:
+                return RedirectResponse(
+                    url=config.url(f"/group/{pp_class.id}?lti_session={user_token}"),
+                    status_code=302,
+                )
+            else:
+                new_ucr = CreateUserClassRoles(
+                    roles=[
+                        CreateUserClassRole(
+                            email=user.email,
+                            sso_id=sso_value,
+                            roles=ClassUserRoles(
+                                teacher=is_instructor,
+                                student=is_student,
+                                admin=False,
+                            ),
+                        )
+                    ],
+                    silent=True,
+                    sso_tenant=sso_provider.name if sso_provider else None,
+                    lms_type=class_.lti_platform if not second_lti_class else None,
+                    lti_class_id=second_lti_class.id if second_lti_class else class_.id,
+                    is_lti_launch=True,
+                )
+                try:
+                    await AddNewUsersManual(
+                        pp_class.id,
+                        new_ucr,
+                        request,
+                        tasks,
+                        user_id=pp_class.lms_user_id,
+                    ).add_new_users()
+                except AddUserException as e:
+                    logger.exception("lti_launch: AddUserException occurred")
+                    raise HTTPException(
+                        status_code=e.code or 500,
+                        detail="Failed to add user to class",
+                    )
+            return RedirectResponse(
+                url=config.url(f"/group/{pp_class.id}?lti_session={user_token}"),
+                status_code=302,
+            )
         else:
             new_lti_class = None
             if is_instructor:
@@ -916,6 +1013,7 @@ async def lti_launch(
                     else new_lti_class.lti_platform,
                     lti_class_id=new_lti_class.id if new_lti_class else None,
                     sso_tenant=sso_provider.name if sso_provider else None,
+                    is_lti_launch=True,
                 )
                 try:
                     await AddNewUsersManual(
@@ -942,6 +1040,7 @@ async def lti_launch(
                     ],
                     silent=True,
                     sso_tenant=sso_provider.name if sso_provider else None,
+                    is_lti_launch=True,
                 )
                 try:
                     await AddNewUsersManual(

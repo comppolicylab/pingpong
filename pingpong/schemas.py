@@ -1257,6 +1257,7 @@ class CreateUserClassRoles(BaseModel):
     lms_tenant: str | None = None
     lms_type: LMSType | None = None
     lti_class_id: int | None = None
+    is_lti_launch: bool = False
     sso_tenant: str | None = None
 
 

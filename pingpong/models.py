@@ -2847,6 +2847,23 @@ class LTIClass(Base):
         return await session.scalar(stmt)
 
     @classmethod
+    async def get_by_canvas_account_lti_guid_and_course_id(
+        cls, session: AsyncSession, canvas_account_lti_guid: str, course_id: str
+    ) -> "LTIClass | None":
+        stmt = (
+            select(LTIClass)
+            .join(LTIClass.registration)
+            .where(
+                and_(
+                    LTIRegistration.canvas_account_lti_guid == canvas_account_lti_guid,
+                    LTIClass.course_id == course_id,
+                )
+            )
+            .options(selectinload(LTIClass.registration))
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
     async def get_by_id_for_setup(
         cls, session: AsyncSession, lti_class_id: int
     ) -> "LTIClass | None":
