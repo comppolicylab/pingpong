@@ -66,6 +66,10 @@ from pingpong.invite import (
     send_lti_registration_approved,
     send_lti_registration_rejected,
 )
+from pingpong.lti.lti_course import (
+    find_class_by_course_id,
+    find_class_by_course_id_search_by_canvas_account_lti_guid,
+)
 from pingpong.realtime import browser_realtime_websocket
 from pingpong.session import populate_request
 from pingpong.stats import (
@@ -1334,6 +1338,34 @@ async def get_institutions_with_default_api_key(request: Request):
         request.state.db
     )
     return {"institutions": institutions}
+
+
+@v1.get(
+    "/admin/lti/client/{client_id}/course/{course_id}",
+    dependencies=[Depends(Authz("admin"))],
+)
+async def get_lti_class_link(client_id: str, course_id: str, request: Request):
+    registration = await models.LTIRegistration.get_by_client_id(
+        request.state.db, client_id
+    )
+    if registration is None:
+        raise HTTPException(status_code=404, detail="Unknown LTI client_id")
+
+    if registration.canvas_account_lti_guid:
+        class_ = await find_class_by_course_id_search_by_canvas_account_lti_guid(
+            request.state.db,
+            registration_id=registration.id,
+            canvas_account_lti_guid=registration.canvas_account_lti_guid,
+            course_id=course_id,
+        )
+    else:
+        class_ = await find_class_by_course_id(
+            request.state.db,
+            registration.id,
+            course_id,
+        )
+
+    return {"result": class_}
 
 
 @v1.get(
