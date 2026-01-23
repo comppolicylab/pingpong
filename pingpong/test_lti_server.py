@@ -545,8 +545,14 @@ def test_is_instructor_and_student():
     assert server_module._is_instructor(
         ["http://purl.imsglobal.org/vocab/lis/v2/membership#Instructor"]
     )
+    assert server_module._is_instructor(
+        ["http://purl.imsglobal.org/vocab/lis/v2/membership#ContentDeveloper"]
+    )
     assert server_module._is_student(
         ["http://purl.imsglobal.org/vocab/lis/v2/membership#Learner"]
+    )
+    assert server_module._is_student(
+        ["http://purl.imsglobal.org/vocab/lis/v2/membership#Mentor"]
     )
 
 

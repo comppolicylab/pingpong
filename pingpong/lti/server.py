@@ -580,6 +580,7 @@ def _is_instructor(roles: list[str]) -> bool:
     """Check if the user has an instructor role."""
     instructor_roles = {
         "http://purl.imsglobal.org/vocab/lis/v2/membership#Instructor",
+        "http://purl.imsglobal.org/vocab/lis/v2/membership#ContentDeveloper",
     }
     return any(role in instructor_roles for role in roles)
 
@@ -588,6 +589,7 @@ def _is_student(roles: list[str]) -> bool:
     """Check if the user has a student role."""
     student_roles = {
         "http://purl.imsglobal.org/vocab/lis/v2/membership#Learner",
+        "http://purl.imsglobal.org/vocab/lis/v2/membership#Mentor",
     }
     return any(role in student_roles for role in roles)
 
