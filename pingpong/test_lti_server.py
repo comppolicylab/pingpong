@@ -634,17 +634,25 @@ async def test_get_lti_class_for_setup_not_found(monkeypatch):
 @pytest.mark.asyncio
 async def test_get_lti_setup_context(monkeypatch):
     lti_class = _make_lti_class()
+    lti_class.registration.institutions.append(
+        SimpleNamespace(id=2, name="Other", default_api_key_id=9)
+    )
     monkeypatch.setattr(
         server_module,
         "_get_lti_class_for_setup",
         lambda request, lti_class_id: _async_return(lti_class),
     )
-    request = FakeRequest(state=SimpleNamespace())
+    authz = FakeAuthz(list_result=[1])
+    request = FakeRequest(
+        state=SimpleNamespace(
+            authz=authz, session=SimpleNamespace(user=SimpleNamespace(id=10))
+        )
+    )
 
     context = await server_module.get_lti_setup_context(request, 1)
 
     assert context.lti_class_id == lti_class.id
-    assert context.institutions[0].id == 1
+    assert [inst.id for inst in context.institutions] == [1]
 
 
 @pytest.mark.asyncio
@@ -763,6 +771,31 @@ async def test_create_lti_group_invalid_institution(monkeypatch):
         await server_module.create_lti_group(request, 1, body)
 
     assert excinfo.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_create_lti_group_unauthorized_institution(monkeypatch):
+    lti_class = _make_lti_class()
+
+    monkeypatch.setattr(
+        server_module,
+        "_get_lti_class_for_setup",
+        lambda request, lti_class_id: _async_return(lti_class),
+    )
+
+    request = FakeRequest(
+        state=SimpleNamespace(
+            db=FakeDB(),
+            authz=FakeAuthz(test_result=False),
+            session=SimpleNamespace(user=SimpleNamespace(id=10)),
+        )
+    )
+    body = LTISetupCreateRequest(institution_id=1, name="Group", term="Fall")
+
+    with pytest.raises(HTTPException) as excinfo:
+        await server_module.create_lti_group(request, 1, body)
+
+    assert excinfo.value.status_code == 403
 
 
 @pytest.mark.asyncio
@@ -1409,6 +1442,84 @@ async def test_lti_launch_instructor_pending_class_redirect(monkeypatch):
     )
 
     monkeypatch.setattr(server_module, "User", FakeUserModel)
+    monkeypatch.setattr(
+        server_module.User,
+        "get_by_email",
+        lambda db, email: _async_return(FakeUserModel(email)),
+    )
+    monkeypatch.setattr(server_module, "LTIClass", FakeLTIClass)
+    monkeypatch.setattr(
+        server_module, "encode_session_token", lambda user_id, nowfn: "token"
+    )
+    monkeypatch.setattr(
+        server_module, "get_now_fn", lambda request: lambda: datetime.now(timezone.utc)
+    )
+
+    request = FakeRequest(
+        payload={"state": "state", "id_token": "token"}, state=_make_request_state()
+    )
+
+    response = await server_module.lti_launch(request, tasks=SimpleNamespace())
+
+    assert response.status_code == 302
+    assert "/lti/setup" in response.headers["location"]
+
+
+@pytest.mark.asyncio
+async def test_lti_launch_admin_pending_class_redirect(monkeypatch):
+    oidc_session = _make_oidc_session(
+        redirect_uri=server_module.config.url("/api/v1/lti/launch")
+    )
+    registration = _make_registration(
+        review_status=LTIRegistrationReviewStatus.APPROVED, enabled=True
+    )
+    claims = {
+        "nonce": "nonce",
+        "email": "user@example.com",
+        "https://purl.imsglobal.org/spec/lti/claim/custom": {
+            "canvas_course_id": "course-1",
+            "sso_provider_id": "0",
+        },
+        "https://purl.imsglobal.org/spec/lti/claim/roles": [
+            "http://purl.imsglobal.org/vocab/lis/v2/institution/person#Administrator"
+        ],
+        "https://purl.imsglobal.org/spec/lti/claim/context": {
+            "label": "CS1",
+            "title": "Intro",
+        },
+    }
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "get_by_state",
+        lambda db, state: _async_return(oidc_session),
+    )
+    monkeypatch.setattr(
+        server_module.LTIRegistration,
+        "get_by_client_id",
+        lambda db, client_id: _async_return(registration),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "_verify_lti_id_token",
+        lambda **kwargs: _async_return(claims),
+    )
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "validate_and_consume",
+        lambda *args, **kwargs: _async_return(True),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "find_class_by_course_id",
+        lambda *args, **kwargs: _async_return(None),
+    )
+
+    monkeypatch.setattr(server_module, "User", FakeUserModel)
+    monkeypatch.setattr(
+        server_module.User,
+        "get_by_email",
+        lambda db, email: _async_return(FakeUserModel(email)),
+    )
     monkeypatch.setattr(server_module, "LTIClass", FakeLTIClass)
     monkeypatch.setattr(
         server_module, "encode_session_token", lambda user_id, nowfn: "token"
