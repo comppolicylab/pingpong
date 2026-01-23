@@ -1650,6 +1650,7 @@ export type Assistant = {
 	name: string;
 	version?: number | null;
 	description: string | null;
+	notes: string | null;
 	instructions: string;
 	interaction_mode: 'chat' | 'voice';
 	model: string;
@@ -1772,6 +1773,7 @@ export type CreateAssistantRequest = {
 	name: string;
 	description: string;
 	instructions: string;
+	notes: string;
 	model: string;
 	interaction_mode: 'chat' | 'voice';
 	create_classic_assistant?: boolean;
@@ -1812,6 +1814,7 @@ export type UpdateAssistantRequest = {
 	name?: string;
 	description?: string;
 	instructions?: string;
+	notes?: string;
 	model?: string;
 	interaction_mode?: 'chat' | 'voice';
 	create_classic_assistant?: boolean;

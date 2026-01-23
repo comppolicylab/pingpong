@@ -112,6 +112,12 @@
 		instructions = assistant.instructions;
 		hasSetInstructions = true;
 	}
+	let notes = '';
+	let hasSetNotes = false;
+	$: if (assistant?.notes !== undefined && assistant?.notes !== null && !hasSetNotes) {
+		notes = assistant.notes;
+		hasSetNotes = true;
+	}
 	let hidePrompt = data.isCreating;
 	let hasSetHidePrompt = false;
 	$: if (
@@ -876,6 +882,11 @@
 					normalizeNewlines((newValue as string | undefined) || '') !==
 					normalizeNewlines((oldValue as string) || '');
 				break;
+			case 'notes':
+				dirty =
+					normalizeNewlines((newValue as string | undefined) || '') !==
+					((oldValue as string) || '');
+				break;
 			case 'instructions':
 				dirty =
 					normalizeNewlines((newValue as string | undefined) || '') !==
@@ -937,6 +948,7 @@
 					'name',
 					'description',
 					'instructions',
+					'notes',
 					'interaction_mode',
 					'model',
 					'published',
@@ -1034,6 +1046,7 @@
 			instructions: preventEdits
 				? assistant?.instructions || ''
 				: normalizeNewlines(body.instructions.toString()),
+			notes: preventEdits ? assistant?.notes || '' : normalizeNewlines(notes),
 			model: selectedModel,
 			tools,
 			code_interpreter_file_ids:
@@ -2624,6 +2637,23 @@
 								>
 							</div>
 						{/if}
+
+						<hr />
+
+						<div class="col-span-2 mb-1">
+							<Label for="notes">Notes</Label>
+							<Helper class="pb-1"
+								>Add any notes here. This information is <strong>not</strong> shown to users, and intended
+								for documentation.</Helper
+							>
+							<Textarea
+								id="notes"
+								name="notes"
+								class="field-sizing-content min-h-32"
+								bind:value={notes}
+								disabled={preventEdits}
+							/>
+						</div>
 					</div>
 				</AccordionItem>
 			</Accordion>

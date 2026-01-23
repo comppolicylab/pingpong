@@ -6765,8 +6765,12 @@ async def list_assistants(class_id: str, request: Request):
     )
     for asst, has_elevated_permissions in zip(assts, has_elevated_perm_check):
         cur_asst = schemas.Assistant.model_validate(asst)
-        if asst.hide_prompt and not has_elevated_permissions:
-            cur_asst.instructions = ""
+
+        if not has_elevated_permissions:
+            cur_asst.notes = None
+
+            if asst.hide_prompt:
+                cur_asst.instructions = ""
 
         # For now, "endorsed" creators are published assistants that were
         # created by a teacher or admin.
@@ -8033,6 +8037,9 @@ async def update_assistant(
 
     if "description" in req.model_fields_set and req.description is not None:
         asst.description = req.description
+
+    if "notes" in req.model_fields_set and req.notes is not None:
+        asst.notes = req.notes
 
     if "tools" in req.model_fields_set and req.tools is not None:
         openai_update["tools"] = req.tools

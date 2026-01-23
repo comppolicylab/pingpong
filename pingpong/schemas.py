@@ -436,6 +436,7 @@ class Assistant(BaseModel):
     version: int | None = None
     instructions: str
     description: str | None
+    notes: str | None = None
     interaction_mode: InteractionMode
     tools: str
     model: str
@@ -546,6 +547,7 @@ class CreateAssistant(BaseModel):
     file_search_file_ids: list[str] | None = None
     instructions: str = Field(..., min_length=3)
     description: str
+    notes: str | None = None
     interaction_mode: InteractionMode = InteractionMode.CHAT
     model: str = Field(..., min_length=2)
     temperature: float | None = Field(None, ge=0.0, le=2.0)
@@ -605,6 +607,7 @@ class UpdateAssistant(BaseModel):
     file_search_file_ids: list[str] | None = None
     instructions: str | None = Field(None, min_length=3)
     description: str | None = None
+    notes: str | None = None
     interaction_mode: InteractionMode | None = None
     model: str | None = Field(None, min_length=2)
     temperature: float | None = Field(None, ge=0.0, le=2.0)

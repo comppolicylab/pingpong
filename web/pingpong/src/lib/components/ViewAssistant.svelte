@@ -27,7 +27,8 @@
 		FileCopyOutline,
 		TrashBinOutline,
 		CheckCircleOutline,
-		ExclamationCircleOutline
+		ExclamationCircleOutline,
+		InfoCircleOutline
 	} from 'flowbite-svelte-icons';
 	import ConfirmationModal from '$lib/components/ConfirmationModal.svelte';
 	import type { Assistant, AppUser } from '$lib/api';
@@ -55,6 +56,7 @@
 	let sharedAssistantModalOpen = false;
 	let copyAssistantModalOpen = false;
 	let deleteAssistantModalOpen = false;
+	let notesAssistantModalOpen = false;
 	let copyName = '';
 	let copyTargetClassId = `${currentClassId}`;
 	let copyPermissionAllowed: boolean | undefined = undefined;
@@ -308,6 +310,16 @@
 
 		<div class="ml-auto flex shrink-0 items-center gap-2">
 			{#if editable}
+				{#if assistant.notes}
+					<button
+						class="text-blue-dark-30 hover:text-blue-dark-50"
+						aria-label="Assistant notes"
+						onclick={(event) => {
+							event.preventDefault();
+							notesAssistantModalOpen = true;
+						}}><InfoCircleOutline side="md" /></button
+					>
+				{/if}
 				<button
 					class="text-blue-dark-30 hover:text-blue-dark-50"
 					aria-label="Copy assistant"
@@ -451,4 +463,23 @@
 		on:cancel={() => (deleteAssistantModalOpen = false)}
 		on:confirm={deleteAssistant}
 	/>
+</Modal>
+
+<Modal
+	outsideclose
+	size="md"
+	bind:open={notesAssistantModalOpen}
+	onclose={() => (notesAssistantModalOpen = false)}
+>
+	<slot name="header">
+		<Heading tag="h3" class="font-serif text-2xl font-medium text-blue-dark-40"
+			>Assistant Notes</Heading
+		>
+	</slot>
+
+	<p
+		class="mb-5 max-h-96 overflow-y-scroll text-sm break-words whitespace-pre-wrap text-gray-700 dark:text-gray-300"
+	>
+		{assistant?.notes || 'No notes recorded for this bot.'}
+	</p>
 </Modal>
