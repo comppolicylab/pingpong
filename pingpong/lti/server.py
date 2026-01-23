@@ -751,7 +751,7 @@ async def lti_launch(
         user = await User.get_by_email(request.state.db, user_email)
 
     if not user:
-        if is_admin:
+        if is_admin and not (is_instructor or is_student):
             logger.exception(
                 f"Admin user attempted LTI launch but no existing account: email={user_email}"
             )
