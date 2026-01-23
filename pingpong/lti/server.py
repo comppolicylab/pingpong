@@ -592,6 +592,14 @@ def _is_student(roles: list[str]) -> bool:
     return any(role in student_roles for role in roles)
 
 
+def _is_admin(roles: list[str]) -> bool:
+    """Check if the user has an admin role."""
+    admin_roles = {
+        "http://purl.imsglobal.org/vocab/lis/v2/institution/person#Administrator",
+    }
+    return any(role in admin_roles for role in roles)
+
+
 @lti_router.post("/launch")
 async def lti_launch(
     request: Request,
@@ -699,8 +707,9 @@ async def lti_launch(
     user_roles = claims.get("https://purl.imsglobal.org/spec/lti/claim/roles", [])
     is_instructor = _is_instructor(user_roles)
     is_student = _is_student(user_roles)
+    is_admin = _is_admin(user_roles)
 
-    if not is_instructor and not is_student:
+    if not is_instructor and not is_student and not is_admin:
         logger.exception(f"LTI launch with no recognized roles: roles={user_roles}")
         return RedirectResponse(url=config.url("/lti/no-role"), status_code=302)
 
@@ -742,6 +751,11 @@ async def lti_launch(
         user = await User.get_by_email(request.state.db, user_email)
 
     if not user:
+        if is_admin and not (is_instructor or is_student):
+            logger.exception(
+                f"Admin user attempted LTI launch but no existing account: email={user_email}"
+            )
+            return RedirectResponse(url=config.url("/lti/no-role"), status_code=302)
         user = User(
             email=user_email,
         )
@@ -766,7 +780,7 @@ async def lti_launch(
     ):
         # User is launching into a class that is not yet linked
         # Or the class is pending setup
-        if is_instructor:
+        if is_instructor or is_admin:
             # Check for existing pending LTIClass (re-launch scenario)
             if isinstance(class_, LTIClass) and class_.lti_status == LTIStatus.PENDING:
                 # Resume existing setup
@@ -831,6 +845,11 @@ async def lti_launch(
                     status_code=302,
                 )
             else:
+                # For now, prevent admins without instructor/student roles from accessing class
+                if is_admin and not (is_instructor or is_student):
+                    return RedirectResponse(
+                        url=config.url("/lti/no-role"), status_code=302
+                    )
                 new_ucr = CreateUserClassRoles(
                     roles=[
                         CreateUserClassRole(
@@ -916,6 +935,10 @@ async def lti_launch(
                     status_code=302,
                 )
             else:
+                if is_admin and not (is_instructor or is_student):
+                    return RedirectResponse(
+                        url=config.url("/lti/no-role"), status_code=302
+                    )
                 new_ucr = CreateUserClassRoles(
                     roles=[
                         CreateUserClassRole(
@@ -993,6 +1016,8 @@ async def lti_launch(
                     url=config.url(f"/group/{class_.id}?lti_session={user_token}"),
                     status_code=302,
                 )
+            elif is_admin and not (is_instructor or is_student):
+                return RedirectResponse(url=config.url("/lti/no-role"), status_code=302)
             elif str(class_.lms_course_id) == course_id:
                 new_ucr = CreateUserClassRoles(
                     roles=[
@@ -1083,10 +1108,17 @@ async def _get_lti_class_for_setup(request: Request, lti_class_id: int) -> LTICl
 async def get_lti_setup_context(request: Request, lti_class_id: int):
     lti_class = await _get_lti_class_for_setup(request, lti_class_id)
 
+    can_create_class_institution_ids = await request.state.authz.list(
+        f"user:{request.state.session.user.id}",
+        "can_create_class",
+        "institution",
+    )
+
     institutions = [
         LTISetupInstitution(id=inst.id, name=inst.name)
         for inst in lti_class.registration.institutions
         if inst.default_api_key_id is not None
+        and inst.id in can_create_class_institution_ids
     ]
 
     return LTISetupContext(
@@ -1149,6 +1181,17 @@ async def create_lti_group(
         raise HTTPException(
             status_code=400,
             detail="Invalid institution or institution has no default billing",
+        )
+
+    can_create_class_institution_ids = await request.state.authz.test(
+        f"user:{request.state.session.user.id}",
+        "can_create_class",
+        f"institution:{valid_institution.id}",
+    )
+    if not can_create_class_institution_ids:
+        raise HTTPException(
+            status_code=403,
+            detail="Not authorized to create classes for this institution",
         )
 
     new_class = Class(
