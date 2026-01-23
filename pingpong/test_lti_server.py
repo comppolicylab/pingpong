@@ -2262,3 +2262,708 @@ async def test_lti_launch_add_user_exception(monkeypatch):
         await server_module.lti_launch(request, tasks=SimpleNamespace())
 
     assert excinfo.value.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_is_supervisor_by_class_id():
+    """Test _is_supervisor_by_class_id helper function."""
+    authz = FakeAuthz(test_result=True)
+    result = await server_module._is_supervisor_by_class_id(
+        authz, user_id=42, class_id=99
+    )
+    assert result is True
+
+    authz_false = FakeAuthz(test_result=False)
+    result_false = await server_module._is_supervisor_by_class_id(
+        authz_false, user_id=42, class_id=99
+    )
+    assert result_false is False
+
+
+@pytest.mark.asyncio
+async def test_can_view_by_class_id():
+    """Test _can_view_by_class_id helper function."""
+    authz = FakeAuthz(test_result=True)
+    result = await server_module._can_view_by_class_id(authz, user_id=42, class_id=99)
+    assert result is True
+
+    authz_false = FakeAuthz(test_result=False)
+    result_false = await server_module._can_view_by_class_id(
+        authz_false, user_id=42, class_id=99
+    )
+    assert result_false is False
+
+
+@pytest.mark.asyncio
+async def test_lti_launch_admin_with_can_view_on_lti_class_redirects_to_group(
+    monkeypatch,
+):
+    """Admin user with can_view permission on existing LTI class redirects to group."""
+    oidc_session = _make_oidc_session(
+        redirect_uri=server_module.config.url("/api/v1/lti/launch")
+    )
+    registration = _make_registration(
+        review_status=LTIRegistrationReviewStatus.APPROVED, enabled=True
+    )
+    lti_class = FakeLTIClass(
+        lti_status=LTIStatus.LINKED,
+        setup_user_id=999,  # Different user
+        class_id=77,
+        registration_id=1,
+    )
+    claims = {
+        "nonce": "nonce",
+        "email": "admin@example.com",
+        "https://purl.imsglobal.org/spec/lti/claim/custom": {
+            "canvas_course_id": "course-1",
+            "sso_provider_id": "0",
+        },
+        "https://purl.imsglobal.org/spec/lti/claim/roles": [
+            "http://purl.imsglobal.org/vocab/lis/v2/institution/person#Administrator"
+        ],
+    }
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "get_by_state",
+        lambda db, state: _async_return(oidc_session),
+    )
+    monkeypatch.setattr(
+        server_module.LTIRegistration,
+        "get_by_client_id",
+        lambda db, client_id: _async_return(registration),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "_verify_lti_id_token",
+        lambda **kwargs: _async_return(claims),
+    )
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "validate_and_consume",
+        lambda *args, **kwargs: _async_return(True),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "find_class_by_course_id",
+        lambda *args, **kwargs: _async_return(lti_class),
+    )
+    monkeypatch.setattr(server_module, "User", FakeUserModel)
+    monkeypatch.setattr(
+        server_module.User,
+        "get_by_email",
+        lambda db, email: _async_return(FakeUserModel(email)),
+    )
+    monkeypatch.setattr(server_module, "LTIClass", FakeLTIClass)
+    monkeypatch.setattr(
+        server_module, "encode_session_token", lambda user_id, nowfn: "token"
+    )
+    monkeypatch.setattr(
+        server_module, "get_now_fn", lambda request: lambda: datetime.now(timezone.utc)
+    )
+
+    # Admin has can_view permission
+    authz = FakeAuthz(test_result=True)
+    request = FakeRequest(
+        payload={"state": "state", "id_token": "token"},
+        state=_make_request_state(authz=authz),
+    )
+
+    response = await server_module.lti_launch(request, tasks=SimpleNamespace())
+
+    assert response.status_code == 302
+    assert response.headers["location"].endswith("/group/77?lti_session=token")
+
+
+@pytest.mark.asyncio
+async def test_lti_launch_admin_without_can_view_on_lti_class_redirects_to_no_role(
+    monkeypatch,
+):
+    """Admin user without can_view permission on existing LTI class redirects to /lti/no-role."""
+    oidc_session = _make_oidc_session(
+        redirect_uri=server_module.config.url("/api/v1/lti/launch")
+    )
+    registration = _make_registration(
+        review_status=LTIRegistrationReviewStatus.APPROVED, enabled=True
+    )
+    lti_class = FakeLTIClass(
+        lti_status=LTIStatus.LINKED,
+        setup_user_id=999,  # Different user
+        class_id=77,
+        registration_id=1,
+    )
+    claims = {
+        "nonce": "nonce",
+        "email": "admin@example.com",
+        "https://purl.imsglobal.org/spec/lti/claim/custom": {
+            "canvas_course_id": "course-1",
+            "sso_provider_id": "0",
+        },
+        "https://purl.imsglobal.org/spec/lti/claim/roles": [
+            "http://purl.imsglobal.org/vocab/lis/v2/institution/person#Administrator"
+        ],
+    }
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "get_by_state",
+        lambda db, state: _async_return(oidc_session),
+    )
+    monkeypatch.setattr(
+        server_module.LTIRegistration,
+        "get_by_client_id",
+        lambda db, client_id: _async_return(registration),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "_verify_lti_id_token",
+        lambda **kwargs: _async_return(claims),
+    )
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "validate_and_consume",
+        lambda *args, **kwargs: _async_return(True),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "find_class_by_course_id",
+        lambda *args, **kwargs: _async_return(lti_class),
+    )
+    monkeypatch.setattr(server_module, "User", FakeUserModel)
+    monkeypatch.setattr(
+        server_module.User,
+        "get_by_email",
+        lambda db, email: _async_return(FakeUserModel(email)),
+    )
+    monkeypatch.setattr(server_module, "LTIClass", FakeLTIClass)
+    monkeypatch.setattr(
+        server_module, "encode_session_token", lambda user_id, nowfn: "token"
+    )
+    monkeypatch.setattr(
+        server_module, "get_now_fn", lambda request: lambda: datetime.now(timezone.utc)
+    )
+
+    # Admin does NOT have can_view permission
+    authz = FakeAuthz(test_result=False)
+    request = FakeRequest(
+        payload={"state": "state", "id_token": "token"},
+        state=_make_request_state(authz=authz),
+    )
+
+    response = await server_module.lti_launch(request, tasks=SimpleNamespace())
+
+    assert response.status_code == 302
+    assert response.headers["location"].endswith("/lti/no-role")
+
+
+@pytest.mark.asyncio
+async def test_lti_launch_admin_supervisor_creates_second_lti_class(monkeypatch):
+    """Admin supervisor on LTI class with different registration creates second LTI class."""
+    oidc_session = _make_oidc_session(
+        redirect_uri=server_module.config.url("/api/v1/lti/launch")
+    )
+    registration = _make_registration(
+        review_status=LTIRegistrationReviewStatus.APPROVED, enabled=True
+    )
+    # LTI class has different registration_id
+    lti_class = FakeLTIClass(
+        lti_status=LTIStatus.LINKED,
+        setup_user_id=999,
+        class_id=77,
+        registration_id=2,  # Different from registration.id (1)
+    )
+    pp_class = SimpleNamespace(id=77, lms_user_id=999)
+    claims = {
+        "nonce": "nonce",
+        "email": "admin@example.com",
+        "https://purl.imsglobal.org/spec/lti/claim/custom": {
+            "canvas_course_id": "course-1",
+            "sso_provider_id": "0",
+        },
+        "https://purl.imsglobal.org/spec/lti/claim/roles": [
+            "http://purl.imsglobal.org/vocab/lis/v2/institution/person#Administrator"
+        ],
+        "https://purl.imsglobal.org/spec/lti/claim/context": {
+            "label": "CS1",
+            "title": "Intro",
+        },
+    }
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "get_by_state",
+        lambda db, state: _async_return(oidc_session),
+    )
+    monkeypatch.setattr(
+        server_module.LTIRegistration,
+        "get_by_client_id",
+        lambda db, client_id: _async_return(registration),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "_verify_lti_id_token",
+        lambda **kwargs: _async_return(claims),
+    )
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "validate_and_consume",
+        lambda *args, **kwargs: _async_return(True),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "find_class_by_course_id",
+        lambda *args, **kwargs: _async_return(lti_class),
+    )
+    monkeypatch.setattr(
+        server_module.Class,
+        "get_by_id",
+        lambda db, class_id: _async_return(pp_class),
+    )
+    monkeypatch.setattr(server_module, "User", FakeUserModel)
+    monkeypatch.setattr(
+        server_module.User,
+        "get_by_email",
+        lambda db, email: _async_return(FakeUserModel(email)),
+    )
+    monkeypatch.setattr(server_module, "LTIClass", FakeLTIClass)
+    monkeypatch.setattr(
+        server_module, "encode_session_token", lambda user_id, nowfn: "token"
+    )
+    monkeypatch.setattr(
+        server_module, "get_now_fn", lambda request: lambda: datetime.now(timezone.utc)
+    )
+
+    # Admin has can_view permission (is supervisor)
+    authz = FakeAuthz(test_result=True)
+    db = FakeDB()
+    request = FakeRequest(
+        payload={"state": "state", "id_token": "token"},
+        state=_make_request_state(db=db, authz=authz),
+    )
+
+    response = await server_module.lti_launch(request, tasks=SimpleNamespace())
+
+    # Should create second LTI class and redirect to group
+    assert response.status_code == 302
+    assert response.headers["location"].endswith("/group/77?lti_session=token")
+    # Check that a new LTI class was added
+    assert any(isinstance(obj, FakeLTIClass) for obj in db.added)
+
+
+@pytest.mark.asyncio
+async def test_lti_launch_admin_with_can_view_on_second_lti_class_redirects_to_group(
+    monkeypatch,
+):
+    """Admin with can_view on LTI class with different registration (not owner) redirects to group."""
+    oidc_session = _make_oidc_session(
+        redirect_uri=server_module.config.url("/api/v1/lti/launch")
+    )
+    registration = _make_registration(
+        review_status=LTIRegistrationReviewStatus.APPROVED, enabled=True
+    )
+    lti_class = FakeLTIClass(
+        lti_status=LTIStatus.LINKED,
+        setup_user_id=999,
+        class_id=77,
+        registration_id=2,  # Different registration
+    )
+    pp_class = SimpleNamespace(id=77, lms_user_id=999)  # Different owner
+    claims = {
+        "nonce": "nonce",
+        "email": "admin@example.com",
+        "https://purl.imsglobal.org/spec/lti/claim/custom": {
+            "canvas_course_id": "course-1",
+            "sso_provider_id": "0",
+        },
+        "https://purl.imsglobal.org/spec/lti/claim/roles": [
+            "http://purl.imsglobal.org/vocab/lis/v2/institution/person#Administrator"
+        ],
+    }
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "get_by_state",
+        lambda db, state: _async_return(oidc_session),
+    )
+    monkeypatch.setattr(
+        server_module.LTIRegistration,
+        "get_by_client_id",
+        lambda db, client_id: _async_return(registration),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "_verify_lti_id_token",
+        lambda **kwargs: _async_return(claims),
+    )
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "validate_and_consume",
+        lambda *args, **kwargs: _async_return(True),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "find_class_by_course_id",
+        lambda *args, **kwargs: _async_return(lti_class),
+    )
+    monkeypatch.setattr(
+        server_module.Class,
+        "get_by_id",
+        lambda db, class_id: _async_return(pp_class),
+    )
+    monkeypatch.setattr(server_module, "User", FakeUserModel)
+    monkeypatch.setattr(
+        server_module.User,
+        "get_by_email",
+        lambda db, email: _async_return(FakeUserModel(email)),
+    )
+    monkeypatch.setattr(server_module, "LTIClass", FakeLTIClass)
+    monkeypatch.setattr(
+        server_module, "encode_session_token", lambda user_id, nowfn: "token"
+    )
+    monkeypatch.setattr(
+        server_module, "get_now_fn", lambda request: lambda: datetime.now(timezone.utc)
+    )
+
+    # Admin has can_view permission
+    authz = FakeAuthz(test_result=True)
+    request = FakeRequest(
+        payload={"state": "state", "id_token": "token"},
+        state=_make_request_state(authz=authz),
+    )
+
+    response = await server_module.lti_launch(request, tasks=SimpleNamespace())
+
+    assert response.status_code == 302
+    assert response.headers["location"].endswith("/group/77?lti_session=token")
+
+
+@pytest.mark.asyncio
+async def test_lti_launch_admin_without_can_view_on_second_lti_class_redirects_to_no_role(
+    monkeypatch,
+):
+    """Admin without can_view on LTI class with different registration redirects to /lti/no-role."""
+    oidc_session = _make_oidc_session(
+        redirect_uri=server_module.config.url("/api/v1/lti/launch")
+    )
+    registration = _make_registration(
+        review_status=LTIRegistrationReviewStatus.APPROVED, enabled=True
+    )
+    lti_class = FakeLTIClass(
+        lti_status=LTIStatus.LINKED,
+        setup_user_id=999,
+        class_id=77,
+        registration_id=2,  # Different registration
+    )
+    pp_class = SimpleNamespace(id=77, lms_user_id=999)
+    claims = {
+        "nonce": "nonce",
+        "email": "admin@example.com",
+        "https://purl.imsglobal.org/spec/lti/claim/custom": {
+            "canvas_course_id": "course-1",
+            "sso_provider_id": "0",
+        },
+        "https://purl.imsglobal.org/spec/lti/claim/roles": [
+            "http://purl.imsglobal.org/vocab/lis/v2/institution/person#Administrator"
+        ],
+    }
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "get_by_state",
+        lambda db, state: _async_return(oidc_session),
+    )
+    monkeypatch.setattr(
+        server_module.LTIRegistration,
+        "get_by_client_id",
+        lambda db, client_id: _async_return(registration),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "_verify_lti_id_token",
+        lambda **kwargs: _async_return(claims),
+    )
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "validate_and_consume",
+        lambda *args, **kwargs: _async_return(True),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "find_class_by_course_id",
+        lambda *args, **kwargs: _async_return(lti_class),
+    )
+    monkeypatch.setattr(
+        server_module.Class,
+        "get_by_id",
+        lambda db, class_id: _async_return(pp_class),
+    )
+    monkeypatch.setattr(server_module, "User", FakeUserModel)
+    monkeypatch.setattr(
+        server_module.User,
+        "get_by_email",
+        lambda db, email: _async_return(FakeUserModel(email)),
+    )
+    monkeypatch.setattr(server_module, "LTIClass", FakeLTIClass)
+    monkeypatch.setattr(
+        server_module, "encode_session_token", lambda user_id, nowfn: "token"
+    )
+    monkeypatch.setattr(
+        server_module, "get_now_fn", lambda request: lambda: datetime.now(timezone.utc)
+    )
+
+    # Admin does NOT have can_view permission
+    authz = FakeAuthz(test_result=False)
+    request = FakeRequest(
+        payload={"state": "state", "id_token": "token"},
+        state=_make_request_state(authz=authz),
+    )
+
+    response = await server_module.lti_launch(request, tasks=SimpleNamespace())
+
+    assert response.status_code == 302
+    assert response.headers["location"].endswith("/lti/no-role")
+
+
+@pytest.mark.asyncio
+async def test_lti_launch_admin_supervisor_creates_new_lti_class_for_non_lti_class(
+    monkeypatch,
+):
+    """Admin supervisor on non-LTI class creates new LTI class."""
+    oidc_session = _make_oidc_session(
+        redirect_uri=server_module.config.url("/api/v1/lti/launch")
+    )
+    registration = _make_registration(
+        review_status=LTIRegistrationReviewStatus.APPROVED, enabled=True
+    )
+    # Non-LTI class (regular class, not FakeLTIClass)
+    class_ = SimpleNamespace(
+        id=321,
+        lms_user_id=999,  # Different owner
+        lms_course_id="course-1",
+        lms_tenant="tenant",
+        lms_type=LMSPlatform.CANVAS,
+    )
+    claims = {
+        "nonce": "nonce",
+        "email": "admin@example.com",
+        "https://purl.imsglobal.org/spec/lti/claim/custom": {
+            "canvas_course_id": "course-1",
+            "sso_provider_id": "0",
+        },
+        "https://purl.imsglobal.org/spec/lti/claim/roles": [
+            "http://purl.imsglobal.org/vocab/lis/v2/institution/person#Administrator"
+        ],
+        "https://purl.imsglobal.org/spec/lti/claim/context": {
+            "label": "CS1",
+            "title": "Intro",
+        },
+    }
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "get_by_state",
+        lambda db, state: _async_return(oidc_session),
+    )
+    monkeypatch.setattr(
+        server_module.LTIRegistration,
+        "get_by_client_id",
+        lambda db, client_id: _async_return(registration),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "_verify_lti_id_token",
+        lambda **kwargs: _async_return(claims),
+    )
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "validate_and_consume",
+        lambda *args, **kwargs: _async_return(True),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "find_class_by_course_id",
+        lambda *args, **kwargs: _async_return(class_),
+    )
+    monkeypatch.setattr(server_module, "User", FakeUserModel)
+    monkeypatch.setattr(
+        server_module.User,
+        "get_by_email",
+        lambda db, email: _async_return(FakeUserModel(email)),
+    )
+    monkeypatch.setattr(server_module, "LTIClass", FakeLTIClass)
+    monkeypatch.setattr(
+        server_module, "encode_session_token", lambda user_id, nowfn: "token"
+    )
+    monkeypatch.setattr(
+        server_module, "get_now_fn", lambda request: lambda: datetime.now(timezone.utc)
+    )
+
+    # Admin has can_view permission (is supervisor)
+    authz = FakeAuthz(test_result=True)
+    db = FakeDB()
+    request = FakeRequest(
+        payload={"state": "state", "id_token": "token"},
+        state=_make_request_state(db=db, authz=authz),
+    )
+
+    response = await server_module.lti_launch(request, tasks=SimpleNamespace())
+
+    # Should create new LTI class and redirect to group
+    assert response.status_code == 302
+    assert response.headers["location"].endswith("/group/321?lti_session=token")
+    # Check that a new LTI class was added
+    assert any(isinstance(obj, FakeLTIClass) for obj in db.added)
+
+
+@pytest.mark.asyncio
+async def test_lti_launch_admin_with_can_view_on_non_lti_class_redirects_to_group(
+    monkeypatch,
+):
+    """Admin with can_view on non-LTI class (not owner) redirects to group."""
+    oidc_session = _make_oidc_session(
+        redirect_uri=server_module.config.url("/api/v1/lti/launch")
+    )
+    registration = _make_registration(
+        review_status=LTIRegistrationReviewStatus.APPROVED, enabled=True
+    )
+    class_ = SimpleNamespace(
+        id=321,
+        lms_user_id=999,  # Different owner
+        lms_course_id="other",  # Different course
+        lms_tenant="tenant",
+        lms_type=LMSPlatform.CANVAS,
+    )
+    claims = {
+        "nonce": "nonce",
+        "email": "admin@example.com",
+        "https://purl.imsglobal.org/spec/lti/claim/custom": {
+            "canvas_course_id": "course-1",
+            "sso_provider_id": "0",
+        },
+        "https://purl.imsglobal.org/spec/lti/claim/roles": [
+            "http://purl.imsglobal.org/vocab/lis/v2/institution/person#Administrator"
+        ],
+    }
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "get_by_state",
+        lambda db, state: _async_return(oidc_session),
+    )
+    monkeypatch.setattr(
+        server_module.LTIRegistration,
+        "get_by_client_id",
+        lambda db, client_id: _async_return(registration),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "_verify_lti_id_token",
+        lambda **kwargs: _async_return(claims),
+    )
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "validate_and_consume",
+        lambda *args, **kwargs: _async_return(True),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "find_class_by_course_id",
+        lambda *args, **kwargs: _async_return(class_),
+    )
+    monkeypatch.setattr(server_module, "User", FakeUserModel)
+    monkeypatch.setattr(
+        server_module.User,
+        "get_by_email",
+        lambda db, email: _async_return(FakeUserModel(email)),
+    )
+    monkeypatch.setattr(
+        server_module, "encode_session_token", lambda user_id, nowfn: "token"
+    )
+    monkeypatch.setattr(
+        server_module, "get_now_fn", lambda request: lambda: datetime.now(timezone.utc)
+    )
+
+    # Admin has can_view permission
+    authz = FakeAuthz(test_result=True)
+    request = FakeRequest(
+        payload={"state": "state", "id_token": "token"},
+        state=_make_request_state(authz=authz),
+    )
+
+    response = await server_module.lti_launch(request, tasks=SimpleNamespace())
+
+    assert response.status_code == 302
+    assert response.headers["location"].endswith("/group/321?lti_session=token")
+
+
+@pytest.mark.asyncio
+async def test_lti_launch_admin_without_can_view_on_non_lti_class_redirects_to_no_role(
+    monkeypatch,
+):
+    """Admin without can_view on non-LTI class redirects to /lti/no-role."""
+    oidc_session = _make_oidc_session(
+        redirect_uri=server_module.config.url("/api/v1/lti/launch")
+    )
+    registration = _make_registration(
+        review_status=LTIRegistrationReviewStatus.APPROVED, enabled=True
+    )
+    class_ = SimpleNamespace(
+        id=321,
+        lms_user_id=999,  # Different owner
+        lms_course_id="other",  # Different course
+        lms_tenant="tenant",
+        lms_type=LMSPlatform.CANVAS,
+    )
+    claims = {
+        "nonce": "nonce",
+        "email": "admin@example.com",
+        "https://purl.imsglobal.org/spec/lti/claim/custom": {
+            "canvas_course_id": "course-1",
+            "sso_provider_id": "0",
+        },
+        "https://purl.imsglobal.org/spec/lti/claim/roles": [
+            "http://purl.imsglobal.org/vocab/lis/v2/institution/person#Administrator"
+        ],
+    }
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "get_by_state",
+        lambda db, state: _async_return(oidc_session),
+    )
+    monkeypatch.setattr(
+        server_module.LTIRegistration,
+        "get_by_client_id",
+        lambda db, client_id: _async_return(registration),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "_verify_lti_id_token",
+        lambda **kwargs: _async_return(claims),
+    )
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "validate_and_consume",
+        lambda *args, **kwargs: _async_return(True),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "find_class_by_course_id",
+        lambda *args, **kwargs: _async_return(class_),
+    )
+    monkeypatch.setattr(server_module, "User", FakeUserModel)
+    monkeypatch.setattr(
+        server_module.User,
+        "get_by_email",
+        lambda db, email: _async_return(FakeUserModel(email)),
+    )
+    monkeypatch.setattr(
+        server_module, "encode_session_token", lambda user_id, nowfn: "token"
+    )
+    monkeypatch.setattr(
+        server_module, "get_now_fn", lambda request: lambda: datetime.now(timezone.utc)
+    )
+
+    # Admin does NOT have can_view permission
+    authz = FakeAuthz(test_result=False)
+    request = FakeRequest(
+        payload={"state": "state", "id_token": "token"},
+        state=_make_request_state(authz=authz),
+    )
+
+    response = await server_module.lti_launch(request, tasks=SimpleNamespace())
+
+    assert response.status_code == 302
+    assert response.headers["location"].endswith("/lti/no-role")
