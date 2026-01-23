@@ -1183,12 +1183,12 @@ async def create_lti_group(
             detail="Invalid institution or institution has no default billing",
         )
 
-    is_institution_admin = await request.state.authz.test(
+    can_create_class_institution_ids = await request.state.authz.test(
         f"user:{request.state.session.user.id}",
-        "admin",
+        "can_create_class",
         f"institution:{valid_institution.id}",
     )
-    if not is_institution_admin:
+    if not can_create_class_institution_ids:
         raise HTTPException(
             status_code=403,
             detail="Not authorized to create classes for this institution",
