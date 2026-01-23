@@ -11,6 +11,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends, Request
 from fastapi.responses import RedirectResponse
 
 from pingpong.auth import encode_session_token
+from pingpong.authz.openfga import OpenFgaAuthzClient
 from pingpong.config import config
 from pingpong.invite import send_lti_registration_submitted
 from pingpong.lti.lti_course import (
@@ -602,6 +603,24 @@ def _is_admin(roles: list[str]) -> bool:
     return any(role in admin_roles for role in roles)
 
 
+async def _is_supervisor_by_class_id(
+    client: OpenFgaAuthzClient,
+    user_id: int,
+    class_id: int,
+):
+    """Check if the user is a supervisor for the given class ID."""
+    return await client.test(f"user:{user_id}", "supervisor", f"class:{class_id}")
+
+
+async def _can_view_by_class_id(
+    client: OpenFgaAuthzClient,
+    user_id: int,
+    class_id: int,
+):
+    """Check if the user can view the given class ID."""
+    return await client.test(f"user:{user_id}", "can_view", f"class:{class_id}")
+
+
 @lti_router.post("/launch")
 async def lti_launch(
     request: Request,
@@ -847,10 +866,23 @@ async def lti_launch(
                     status_code=302,
                 )
             else:
-                # For now, prevent admins without instructor/student roles from accessing class
                 if is_admin and not (is_instructor or is_student):
+                    if not await _can_view_by_class_id(
+                        request.state.authz,
+                        user.id,
+                        class_.class_id,
+                    ):
+                        # We should not redirect supervisors to groups they
+                        # do not have access to
+                        return RedirectResponse(
+                            url=config.url("/lti/no-role"), status_code=302
+                        )
+                    # No role is being added, but allow access
                     return RedirectResponse(
-                        url=config.url("/lti/no-role"), status_code=302
+                        url=config.url(
+                            f"/group/{class_.class_id}?lti_session={user_token}"
+                        ),
+                        status_code=302,
                     )
                 new_ucr = CreateUserClassRoles(
                     roles=[
@@ -897,7 +929,15 @@ async def lti_launch(
             if pp_class is None:
                 raise HTTPException(status_code=404, detail="Class not found")
 
-            if is_instructor:
+            is_admin_supervisor = False
+            if is_admin:
+                is_admin_supervisor = await _is_supervisor_by_class_id(
+                    request.state.authz,
+                    user.id,
+                    pp_class.id,
+                )
+
+            if is_instructor or is_admin_supervisor:
                 course_details = claims.get(
                     "https://purl.imsglobal.org/spec/lti/claim/context", {}
                 )
@@ -938,8 +978,22 @@ async def lti_launch(
                 )
             else:
                 if is_admin and not (is_instructor or is_student):
+                    if not await _can_view_by_class_id(
+                        request.state.authz,
+                        user.id,
+                        pp_class.id,
+                    ):
+                        # We should not redirect supervisors to groups they
+                        # do not have access to
+                        return RedirectResponse(
+                            url=config.url("/lti/no-role"), status_code=302
+                        )
+                    # No role is being added, but allow access
                     return RedirectResponse(
-                        url=config.url("/lti/no-role"), status_code=302
+                        url=config.url(
+                            f"/group/{pp_class.id}?lti_session={user_token}"
+                        ),
+                        status_code=302,
                     )
                 new_ucr = CreateUserClassRoles(
                     roles=[
@@ -979,7 +1033,16 @@ async def lti_launch(
             )
         else:
             new_lti_class = None
-            if is_instructor:
+
+            is_admin_supervisor = False
+            if is_admin:
+                is_admin_supervisor = await _is_supervisor_by_class_id(
+                    request.state.authz,
+                    user.id,
+                    class_.id,
+                )
+
+            if is_instructor or is_admin_supervisor:
                 course_details = claims.get(
                     "https://purl.imsglobal.org/spec/lti/claim/context", {}
                 )
@@ -1019,7 +1082,21 @@ async def lti_launch(
                     status_code=302,
                 )
             elif is_admin and not (is_instructor or is_student):
-                return RedirectResponse(url=config.url("/lti/no-role"), status_code=302)
+                if not await _can_view_by_class_id(
+                    request.state.authz,
+                    user.id,
+                    class_.id,
+                ):
+                    # We should not redirect supervisors to groups they
+                    # do not have access to
+                    return RedirectResponse(
+                        url=config.url("/lti/no-role"), status_code=302
+                    )
+                # No role is being added, but allow access
+                return RedirectResponse(
+                    url=config.url(f"/group/{class_.id}?lti_session={user_token}"),
+                    status_code=302,
+                )
             elif str(class_.lms_course_id) == course_id:
                 new_ucr = CreateUserClassRoles(
                     roles=[
