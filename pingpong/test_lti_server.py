@@ -2655,7 +2655,9 @@ async def test_lti_launch_admin_non_supervisor_does_not_create_second_lti_class(
 
     # Admin does NOT have supervisor permission (so no LTI class created)
     # and does NOT have can_view permission (so redirects to no-role)
-    authz = FakeAuthzByRelation(relation_results={"supervisor": False, "can_view": False})
+    authz = FakeAuthzByRelation(
+        relation_results={"supervisor": False, "can_view": False}
+    )
     db = FakeDB()
     request = FakeRequest(
         payload={"state": "state", "id_token": "token"},
@@ -2750,7 +2752,9 @@ async def test_lti_launch_admin_non_supervisor_does_not_create_lti_class_for_non
 
     # Admin does NOT have supervisor permission (so no LTI class created)
     # and does NOT have can_view permission (so redirects to no-role)
-    authz = FakeAuthzByRelation(relation_results={"supervisor": False, "can_view": False})
+    authz = FakeAuthzByRelation(
+        relation_results={"supervisor": False, "can_view": False}
+    )
     db = FakeDB()
     request = FakeRequest(
         payload={"state": "state", "id_token": "token"},
