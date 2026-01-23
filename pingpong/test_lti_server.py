@@ -77,12 +77,37 @@ class FakeAuthz:
         self.list_result = list_result or []
         self.test_result = test_result
         self.writes = []
+        self.test_calls = []
 
     async def list(self, *args, **kwargs):
         return list(self.list_result)
 
     async def test(self, *args, **kwargs):
+        self.test_calls.append(args)
         return self.test_result
+
+    async def write(self, grant):
+        self.writes.append(grant)
+
+
+class FakeAuthzByRelation:
+    """FakeAuthz that returns different results based on the relation being checked."""
+
+    def __init__(self, relation_results=None):
+        """
+        relation_results: dict mapping relation names to bool results
+        e.g. {"supervisor": True, "can_view": False}
+        """
+        self.relation_results = relation_results or {}
+        self.test_calls = []
+        self.writes = []
+
+    async def list(self, *args, **kwargs):
+        return []
+
+    async def test(self, user, relation, resource):
+        self.test_calls.append((user, relation, resource))
+        return self.relation_results.get(relation, False)
 
     async def write(self, grant):
         self.writes.append(grant)
@@ -2530,8 +2555,9 @@ async def test_lti_launch_admin_supervisor_creates_second_lti_class(monkeypatch)
         server_module, "get_now_fn", lambda request: lambda: datetime.now(timezone.utc)
     )
 
-    # Admin has can_view permission (is supervisor)
-    authz = FakeAuthz(test_result=True)
+    # Admin has supervisor permission (used to determine if they can create LTI class link)
+    # and can_view permission (used to determine if they can access the group)
+    authz = FakeAuthzByRelation(relation_results={"supervisor": True, "can_view": True})
     db = FakeDB()
     request = FakeRequest(
         payload={"state": "state", "id_token": "token"},
@@ -2545,6 +2571,203 @@ async def test_lti_launch_admin_supervisor_creates_second_lti_class(monkeypatch)
     assert response.headers["location"].endswith("/group/77?lti_session=token")
     # Check that a new LTI class was added
     assert any(isinstance(obj, FakeLTIClass) for obj in db.added)
+    # Verify supervisor check was called (this determines LTI class creation)
+    assert any(call[1] == "supervisor" for call in authz.test_calls)
+
+
+@pytest.mark.asyncio
+async def test_lti_launch_admin_non_supervisor_does_not_create_second_lti_class(
+    monkeypatch,
+):
+    """Admin who is not a supervisor should NOT create a second LTI class link."""
+    oidc_session = _make_oidc_session(
+        redirect_uri=server_module.config.url("/api/v1/lti/launch")
+    )
+    registration = _make_registration(
+        review_status=LTIRegistrationReviewStatus.APPROVED, enabled=True
+    )
+    # LTI class has different registration_id
+    lti_class = FakeLTIClass(
+        lti_status=LTIStatus.LINKED,
+        setup_user_id=999,
+        class_id=77,
+        registration_id=2,  # Different from registration.id (1)
+    )
+    pp_class = SimpleNamespace(id=77, lms_user_id=999)
+    claims = {
+        "nonce": "nonce",
+        "email": "admin@example.com",
+        "https://purl.imsglobal.org/spec/lti/claim/custom": {
+            "canvas_course_id": "course-1",
+            "sso_provider_id": "0",
+        },
+        "https://purl.imsglobal.org/spec/lti/claim/roles": [
+            "http://purl.imsglobal.org/vocab/lis/v2/institution/person#Administrator"
+        ],
+        "https://purl.imsglobal.org/spec/lti/claim/context": {
+            "label": "CS1",
+            "title": "Intro",
+        },
+    }
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "get_by_state",
+        lambda db, state: _async_return(oidc_session),
+    )
+    monkeypatch.setattr(
+        server_module.LTIRegistration,
+        "get_by_client_id",
+        lambda db, client_id: _async_return(registration),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "_verify_lti_id_token",
+        lambda **kwargs: _async_return(claims),
+    )
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "validate_and_consume",
+        lambda *args, **kwargs: _async_return(True),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "find_class_by_course_id",
+        lambda *args, **kwargs: _async_return(lti_class),
+    )
+    monkeypatch.setattr(
+        server_module.Class,
+        "get_by_id",
+        lambda db, class_id: _async_return(pp_class),
+    )
+    monkeypatch.setattr(server_module, "User", FakeUserModel)
+    monkeypatch.setattr(
+        server_module.User,
+        "get_by_email",
+        lambda db, email: _async_return(FakeUserModel(email)),
+    )
+    monkeypatch.setattr(server_module, "LTIClass", FakeLTIClass)
+    monkeypatch.setattr(
+        server_module, "encode_session_token", lambda user_id, nowfn: "token"
+    )
+    monkeypatch.setattr(
+        server_module, "get_now_fn", lambda request: lambda: datetime.now(timezone.utc)
+    )
+
+    # Admin does NOT have supervisor permission (so no LTI class created)
+    # and does NOT have can_view permission (so redirects to no-role)
+    authz = FakeAuthzByRelation(relation_results={"supervisor": False, "can_view": False})
+    db = FakeDB()
+    request = FakeRequest(
+        payload={"state": "state", "id_token": "token"},
+        state=_make_request_state(db=db, authz=authz),
+    )
+
+    response = await server_module.lti_launch(request, tasks=SimpleNamespace())
+
+    # Should redirect to /lti/no-role since admin can't view class
+    assert response.status_code == 302
+    assert response.headers["location"].endswith("/lti/no-role")
+    # Verify NO new LTI class was added (only User is added)
+    assert not any(isinstance(obj, FakeLTIClass) for obj in db.added)
+    # Verify supervisor check was called
+    assert any(call[1] == "supervisor" for call in authz.test_calls)
+    # Verify can_view check was called (after supervisor check failed)
+    assert any(call[1] == "can_view" for call in authz.test_calls)
+
+
+@pytest.mark.asyncio
+async def test_lti_launch_admin_non_supervisor_does_not_create_lti_class_for_non_lti_class(
+    monkeypatch,
+):
+    """Admin who is not a supervisor should NOT create a new LTI class for non-LTI class."""
+    oidc_session = _make_oidc_session(
+        redirect_uri=server_module.config.url("/api/v1/lti/launch")
+    )
+    registration = _make_registration(
+        review_status=LTIRegistrationReviewStatus.APPROVED, enabled=True
+    )
+    # Non-LTI class (regular class)
+    class_ = SimpleNamespace(
+        id=321,
+        lms_user_id=999,  # Different owner
+        lms_course_id="course-1",
+        lms_tenant="tenant",
+        lms_type=LMSPlatform.CANVAS,
+    )
+    claims = {
+        "nonce": "nonce",
+        "email": "admin@example.com",
+        "https://purl.imsglobal.org/spec/lti/claim/custom": {
+            "canvas_course_id": "course-1",
+            "sso_provider_id": "0",
+        },
+        "https://purl.imsglobal.org/spec/lti/claim/roles": [
+            "http://purl.imsglobal.org/vocab/lis/v2/institution/person#Administrator"
+        ],
+        "https://purl.imsglobal.org/spec/lti/claim/context": {
+            "label": "CS1",
+            "title": "Intro",
+        },
+    }
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "get_by_state",
+        lambda db, state: _async_return(oidc_session),
+    )
+    monkeypatch.setattr(
+        server_module.LTIRegistration,
+        "get_by_client_id",
+        lambda db, client_id: _async_return(registration),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "_verify_lti_id_token",
+        lambda **kwargs: _async_return(claims),
+    )
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "validate_and_consume",
+        lambda *args, **kwargs: _async_return(True),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "find_class_by_course_id",
+        lambda *args, **kwargs: _async_return(class_),
+    )
+    monkeypatch.setattr(server_module, "User", FakeUserModel)
+    monkeypatch.setattr(
+        server_module.User,
+        "get_by_email",
+        lambda db, email: _async_return(FakeUserModel(email)),
+    )
+    monkeypatch.setattr(server_module, "LTIClass", FakeLTIClass)
+    monkeypatch.setattr(
+        server_module, "encode_session_token", lambda user_id, nowfn: "token"
+    )
+    monkeypatch.setattr(
+        server_module, "get_now_fn", lambda request: lambda: datetime.now(timezone.utc)
+    )
+
+    # Admin does NOT have supervisor permission (so no LTI class created)
+    # and does NOT have can_view permission (so redirects to no-role)
+    authz = FakeAuthzByRelation(relation_results={"supervisor": False, "can_view": False})
+    db = FakeDB()
+    request = FakeRequest(
+        payload={"state": "state", "id_token": "token"},
+        state=_make_request_state(db=db, authz=authz),
+    )
+
+    response = await server_module.lti_launch(request, tasks=SimpleNamespace())
+
+    # Should redirect to /lti/no-role since admin can't view class
+    assert response.status_code == 302
+    assert response.headers["location"].endswith("/lti/no-role")
+    # Verify NO new LTI class was added (only User is added)
+    assert not any(isinstance(obj, FakeLTIClass) for obj in db.added)
+    # Verify supervisor check was called
+    assert any(call[1] == "supervisor" for call in authz.test_calls)
+    # Verify can_view check was called (after supervisor check failed)
+    assert any(call[1] == "can_view" for call in authz.test_calls)
 
 
 @pytest.mark.asyncio
@@ -2792,8 +3015,9 @@ async def test_lti_launch_admin_supervisor_creates_new_lti_class_for_non_lti_cla
         server_module, "get_now_fn", lambda request: lambda: datetime.now(timezone.utc)
     )
 
-    # Admin has can_view permission (is supervisor)
-    authz = FakeAuthz(test_result=True)
+    # Admin has supervisor permission (used to determine if they can create LTI class link)
+    # and can_view permission (used to determine if they can access the group)
+    authz = FakeAuthzByRelation(relation_results={"supervisor": True, "can_view": True})
     db = FakeDB()
     request = FakeRequest(
         payload={"state": "state", "id_token": "token"},
@@ -2807,6 +3031,8 @@ async def test_lti_launch_admin_supervisor_creates_new_lti_class_for_non_lti_cla
     assert response.headers["location"].endswith("/group/321?lti_session=token")
     # Check that a new LTI class was added
     assert any(isinstance(obj, FakeLTIClass) for obj in db.added)
+    # Verify supervisor check was called (this determines LTI class creation)
+    assert any(call[1] == "supervisor" for call in authz.test_calls)
 
 
 @pytest.mark.asyncio
