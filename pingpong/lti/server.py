@@ -931,7 +931,7 @@ async def lti_launch(
 
             is_admin_supervisor = False
             if is_admin:
-                is_admin_supervisor = await _can_view_by_class_id(
+                is_admin_supervisor = await _is_supervisor_by_class_id(
                     request.state.authz,
                     user.id,
                     pp_class.id,
@@ -981,7 +981,7 @@ async def lti_launch(
                     if not await _can_view_by_class_id(
                         request.state.authz,
                         user.id,
-                        class_.class_id,
+                        pp_class.id,
                     ):
                         # We should not redirect supervisors to groups they
                         # do not have access to
@@ -991,7 +991,7 @@ async def lti_launch(
                     # No role is being added, but allow access
                     return RedirectResponse(
                         url=config.url(
-                            f"/group/{class_.class_id}?lti_session={user_token}"
+                            f"/group/{pp_class.id}?lti_session={user_token}"
                         ),
                         status_code=302,
                     )
@@ -1036,7 +1036,7 @@ async def lti_launch(
 
             is_admin_supervisor = False
             if is_admin:
-                is_admin_supervisor = await _can_view_by_class_id(
+                is_admin_supervisor = await _is_supervisor_by_class_id(
                     request.state.authz,
                     user.id,
                     class_.id,
