@@ -24,7 +24,8 @@
 		FileCopyOutline,
 		TrashBinOutline,
 		CheckCircleOutline,
-		ExclamationCircleOutline
+		ExclamationCircleOutline,
+		InfoCircleOutline
 	} from 'flowbite-svelte-icons';
 	import ConfirmationModal from '$lib/components/ConfirmationModal.svelte';
 	import { happyToast, sadToast } from '$lib/toast';
@@ -54,6 +55,7 @@
 	// For most people this means published assistants from other students. For people with
 	// elevated permissions, this could also mean private assistants.
 	let otherAssistants: Assistant[] = [];
+	let notesModalState: Record<number, boolean> = {};
 	let copyModalState: Record<number, boolean> = {};
 	let deleteModalState: Record<number, boolean> = {};
 	let copyNames: Record<number, string> = {};
@@ -84,6 +86,13 @@
 		copyModalState = { ...copyModalState, [assistantId]: false };
 	};
 
+	const openNotesModal = (assistantId: number) => {
+		notesModalState = { ...notesModalState, [assistantId]: true };
+	};
+
+	const closeNotesModal = (assistantId: number) => {
+		notesModalState = { ...notesModalState, [assistantId]: false };
+	};
 	const openDeleteModal = (assistantId: number) => {
 		deleteModalState = { ...deleteModalState, [assistantId]: true };
 	};
@@ -305,6 +314,16 @@
 										<LinkOutline class="h-5 w-5" />
 									</button>
 									{#if data.editableAssistants.has(assistant.id)}
+										{#if assistant.notes != ''}
+											<button
+												class="text-blue-dark-30 hover:text-blue-dark-50"
+												aria-label="Assistant notes"
+												onclick={(event) => {
+													event.preventDefault();
+													openNotesModal(assistant.id);
+												}}><InfoCircleOutline side="md" /></button
+											>
+										{/if}
 										<a
 											href={resolve(`/group/${data.class.id}/assistant/${assistant.id}`)}
 											class="hover:text-blue-dark-100 text-blue-dark-40"
@@ -427,6 +446,24 @@
 										on:cancel={() => closeDeleteModal(assistant.id)}
 										on:confirm={() => handleDeleteAssistant(assistant.id)}
 									/>
+								</Modal>
+								<Modal
+									outsideclose
+									size="md"
+									open={!!notesModalState[assistant.id]}
+									onclose={() => closeNotesModal(assistant.id)}
+								>
+									<slot name="header">
+										<Heading tag="h3" class="font-serif text-2xl font-medium text-blue-dark-40"
+											>Assistant Notes</Heading
+										>
+									</slot>
+
+									<p
+										class="mb-5 max-h-96 overflow-y-scroll text-sm break-words whitespace-pre-wrap text-gray-700 dark:text-gray-300"
+									>
+										{assistant?.notes || 'No notes recorded for this bot.'}
+									</p>
 								</Modal>
 							</TableBodyCell>
 						</TableBodyRow>

@@ -309,6 +309,7 @@ async def copy_assistant(
         instructions=assistant.instructions,
         interaction_mode=assistant.interaction_mode,
         description=assistant.description,
+        notes=assistant.notes,
         assistant_id="",
         use_latex=assistant.use_latex,
         use_image_descriptions=assistant.use_image_descriptions,

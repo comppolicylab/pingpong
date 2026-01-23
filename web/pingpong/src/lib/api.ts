@@ -1455,7 +1455,6 @@ export type AssistantModel = {
 	created: string;
 	owner: string;
 	name: string;
-	notes: string;
 	type: 'chat' | 'voice';
 	description: string;
 	is_latest: boolean;

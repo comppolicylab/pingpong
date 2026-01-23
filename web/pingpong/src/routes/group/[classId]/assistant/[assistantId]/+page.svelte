@@ -948,6 +948,7 @@
 					'name',
 					'description',
 					'instructions',
+					'notes',
 					'interaction_mode',
 					'model',
 					'published',
@@ -1045,7 +1046,7 @@
 			instructions: preventEdits
 				? assistant?.instructions || ''
 				: normalizeNewlines(body.instructions.toString()),
-			notes: preventEdits ? assistant?.notes || '' : normalizeNewlines(body.notes.toString()),
+			notes: preventEdits ? assistant?.notes || '' : normalizeNewlines(notes),
 			model: selectedModel,
 			tools,
 			code_interpreter_file_ids:
@@ -2645,7 +2646,13 @@
 								>Add any notes here. This information is <strong>not</strong> shown to users, and intended
 								for documentation.</Helper
 							>
-							<Textarea id="notes" name="notes" bind:value={notes} disabled={preventEdits} />
+							<Textarea
+								id="notes"
+								name="notes"
+								class="field-sizing-content min-h-32"
+								bind:value={notes}
+								disabled={preventEdits}
+							/>
 						</div>
 					</div>
 				</AccordionItem>
