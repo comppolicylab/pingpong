@@ -314,7 +314,7 @@
 										<LinkOutline class="h-5 w-5" />
 									</button>
 									{#if data.editableAssistants.has(assistant.id)}
-										{#if assistant.notes != ''}
+										{#if assistant.notes}
 											<button
 												class="text-blue-dark-30 hover:text-blue-dark-50"
 												aria-label="Assistant notes"
