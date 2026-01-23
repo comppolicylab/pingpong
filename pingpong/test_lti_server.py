@@ -1466,7 +1466,7 @@ async def test_lti_launch_instructor_pending_class_redirect(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_lti_launch_admin_pending_class_redirect(monkeypatch):
+async def test_lti_launch_admin_and_instructor_pending_class_redirect(monkeypatch):
     oidc_session = _make_oidc_session(
         redirect_uri=server_module.config.url("/api/v1/lti/launch")
     )
@@ -1481,7 +1481,8 @@ async def test_lti_launch_admin_pending_class_redirect(monkeypatch):
             "sso_provider_id": "0",
         },
         "https://purl.imsglobal.org/spec/lti/claim/roles": [
-            "http://purl.imsglobal.org/vocab/lis/v2/institution/person#Administrator"
+            "http://purl.imsglobal.org/vocab/lis/v2/institution/person#Administrator",
+            "http://purl.imsglobal.org/vocab/lis/v2/membership#Instructor",
         ],
         "https://purl.imsglobal.org/spec/lti/claim/context": {
             "label": "CS1",
@@ -1515,11 +1516,6 @@ async def test_lti_launch_admin_pending_class_redirect(monkeypatch):
     )
 
     monkeypatch.setattr(server_module, "User", FakeUserModel)
-    monkeypatch.setattr(
-        server_module.User,
-        "get_by_email",
-        lambda db, email: _async_return(FakeUserModel(email)),
-    )
     monkeypatch.setattr(server_module, "LTIClass", FakeLTIClass)
     monkeypatch.setattr(
         server_module, "encode_session_token", lambda user_id, nowfn: "token"
@@ -1536,6 +1532,66 @@ async def test_lti_launch_admin_pending_class_redirect(monkeypatch):
 
     assert response.status_code == 302
     assert "/lti/setup" in response.headers["location"]
+
+
+@pytest.mark.asyncio
+async def test_lti_launch_admin_only_no_user_redirect(monkeypatch):
+    oidc_session = _make_oidc_session(
+        redirect_uri=server_module.config.url("/api/v1/lti/launch")
+    )
+    registration = _make_registration(
+        review_status=LTIRegistrationReviewStatus.APPROVED, enabled=True
+    )
+    claims = {
+        "nonce": "nonce",
+        "email": "user@example.com",
+        "https://purl.imsglobal.org/spec/lti/claim/custom": {
+            "canvas_course_id": "course-1",
+            "sso_provider_id": "0",
+        },
+        "https://purl.imsglobal.org/spec/lti/claim/roles": [
+            "http://purl.imsglobal.org/vocab/lis/v2/institution/person#Administrator"
+        ],
+    }
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "get_by_state",
+        lambda db, state: _async_return(oidc_session),
+    )
+    monkeypatch.setattr(
+        server_module.LTIRegistration,
+        "get_by_client_id",
+        lambda db, client_id: _async_return(registration),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "_verify_lti_id_token",
+        lambda **kwargs: _async_return(claims),
+    )
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "validate_and_consume",
+        lambda *args, **kwargs: _async_return(True),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "find_class_by_course_id",
+        lambda *args, **kwargs: _async_return(None),
+    )
+
+    monkeypatch.setattr(server_module, "User", FakeUserModel)
+    monkeypatch.setattr(
+        server_module, "get_now_fn", lambda request: lambda: datetime.now(timezone.utc)
+    )
+
+    request = FakeRequest(
+        payload={"state": "state", "id_token": "token"}, state=_make_request_state()
+    )
+
+    response = await server_module.lti_launch(request, tasks=SimpleNamespace())
+
+    assert response.status_code == 302
+    assert response.headers["location"].endswith("/lti/no-role")
 
 
 @pytest.mark.asyncio
