@@ -6766,13 +6766,11 @@ async def list_assistants(class_id: str, request: Request):
     for asst, has_elevated_permissions in zip(assts, has_elevated_perm_check):
         cur_asst = schemas.Assistant.model_validate(asst)
 
-        if asst.hide_prompt:
-            if not has_elevated_permissions:
-                cur_asst.instructions = ""
-                cur_asst.notes = ""
+        if not has_elevated_permissions:
+            cur_asst.notes = None
 
-            if asst.notes is None:
-                cur_asst.notes = ""
+            if asst.hide_prompt:
+                cur_asst.instructions = ""
 
         # For now, "endorsed" creators are published assistants that were
         # created by a teacher or admin.

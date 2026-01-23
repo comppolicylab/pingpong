@@ -1,7 +1,7 @@
 """add notes field to assistant
 
 Revision ID: 867fefaae27b
-Revises: 371b3a44a211
+Revises: a9eb133baba4
 Create Date: 2026-01-21 15:47:41.207794
 
 """
@@ -14,7 +14,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "867fefaae27b"
-down_revision: Union[str, None] = "371b3a44a211"
+down_revision: Union[str, None] = "a9eb133baba4"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

@@ -310,7 +310,7 @@
 
 		<div class="ml-auto flex shrink-0 items-center gap-2">
 			{#if editable}
-				{#if assistant.notes != ''}
+				{#if assistant.notes}
 					<button
 						class="text-blue-dark-30 hover:text-blue-dark-50"
 						aria-label="Assistant notes"
