@@ -16,6 +16,8 @@ const LTI_NO_ROLE = '/lti/no-role';
 const NO_GROUP = '/lti/no-group';
 const SETUP = '/lti/setup';
 
+export const ssr = false;
+
 /**
  * Load the current user and redirect if they are not logged in.
  */
