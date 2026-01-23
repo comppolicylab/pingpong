@@ -8,40 +8,6 @@ from fastapi.testclient import TestClient
 os.environ["CONFIG_PATH"] = "test_config.toml"
 
 
-@pytest.fixture(scope="session", autouse=True)
-def aiosqlite_daemon_threads():
-    """Make aiosqlite 0.22+ worker threads daemon to avoid hang on process exit.
-
-    In aiosqlite 0.22 the worker thread moved from being the Connection itself
-    to a Connection._thread attribute. SQLAlchemy historically sets daemon=True
-    on that worker thread so processes can exit even if pooled connections are
-    not explicitly closed. Until SQLAlchemy ships its fix (commit
-    3148eb99477ce7f7a8705d52629d5a2d9d648607), we patch connect() here to set
-    daemon=True for both pre-0.22 and 0.22+ layouts.
-    """
-    try:
-        import aiosqlite
-    except Exception:
-        yield
-        return
-
-    import threading
-
-    monkeypatch = pytest.MonkeyPatch()
-    original_connect = aiosqlite.connect
-
-    def connect(*args, **kwargs):
-        connection = original_connect(*args, **kwargs)
-        thread = connection._thread if hasattr(connection, "_thread") else connection
-        if isinstance(thread, threading.Thread):
-            thread.daemon = True
-        return connection
-
-    monkeypatch.setattr(aiosqlite, "connect", connect)
-    yield
-    monkeypatch.undo()
-
-
 @pytest.fixture
 def config():
     from pingpong.config import config
