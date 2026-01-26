@@ -145,8 +145,6 @@ def generate_auth_link(
     redirect: str = "/",
     expiry: int = 600,
     nowfn: NowFn = utcnow,
-    is_study: bool = False,
-    is_study_admin: bool = False,
 ) -> str:
     """Generates the link to log in.
 
@@ -158,15 +156,7 @@ def generate_auth_link(
         str: Auth Link
     """
     tok = encode_auth_token(str(user_id), expiry=expiry, nowfn=nowfn)
-    if is_study:
-        if is_study_admin:
-            return config.study_url(
-                f"/api/study/auth/admin?token={tok}&redirect={redirect}"
-            )
-        else:
-            return config.study_url(f"/api/study/auth?token={tok}&redirect={redirect}")
-    else:
-        return config.url(f"/api/v1/auth?token={tok}&redirect={redirect}")
+    return config.url(f"/api/v1/auth?token={tok}&redirect={redirect}")
 
 
 def redirect_with_session(
@@ -180,23 +170,6 @@ def redirect_with_session(
     )
     response.set_cookie(
         key="session",
-        value=session_token,
-        max_age=expiry,
-    )
-    return response
-
-
-def redirect_with_session_study(
-    destination: str, user_id: str, expiry: int = 86_400 * 30, nowfn: NowFn = utcnow
-):
-    """Redirect to the destination with a session token."""
-    session_token = encode_auth_token(user_id, expiry=expiry, nowfn=nowfn)
-    response = RedirectResponse(
-        config.study_url(destination) if destination.startswith("/") else destination,
-        status_code=303,
-    )
-    response.set_cookie(
-        key="study_session",
         value=session_token,
         max_age=expiry,
     )

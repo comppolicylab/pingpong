@@ -8,7 +8,6 @@ PingPong is an educational AI assistant platform with:
 - Backend: FastAPI (Python 3.11+), async SQLAlchemy, Pydantic v2
 - Frontend: SvelteKit with TypeScript
   - `web/pingpong` (Svelte 4, Tailwind v3, Flowbite-Svelte)
-  - `web/study` (Svelte 5, Tailwind v4, bits-ui)
 - Authorization: OpenFGA
 - Authentication: JWT (magic links, SAML/SSO)
 - LMS: Canvas LTI 1.3
@@ -19,7 +18,6 @@ PingPong is an educational AI assistant platform with:
 - `pingpong/` FastAPI app, models, schemas, authz, integrations
 - `alembic/` database migrations
 - `web/pingpong/` main SvelteKit UI (Svelte 4)
-- `web/study/` study dashboard UI (Svelte 5)
 - `scripts/` one-off scripts and CLI helpers
 - `config.toml`, `test_config.toml` configuration defaults/tests
 
@@ -46,16 +44,6 @@ pnpm format
 pnpm test
 ```
 
-### Frontend: study dashboard (`web/study`)
-
-```bash
-pnpm install
-pnpm dev
-pnpm check
-pnpm lint
-pnpm format
-```
-
 ### Docker
 
 ```bash
@@ -78,11 +66,6 @@ pnpm format
 - State is managed with Svelte stores; conversation state uses `ThreadManager` in `src/lib/stores/thread.ts`.
 - UI uses Tailwind and Flowbite-Svelte components, plus custom components in `src/lib/components`.
 
-### `web/study` (Svelte 5)
-
-- Svelte 5 runes and `.svelte.ts` modules appear throughout; follow those patterns.
-- UI uses Tailwind v4, bits-ui, and components under `src/lib/components`/`src/lib/components/ui`.
-
 ## Code Style and Conventions
 
 ### Python
@@ -97,16 +80,12 @@ pnpm format
 - Prettier config uses 2 spaces, single quotes, no trailing commas, print width 100.
 - ESLint with `@typescript-eslint` and `eslint-plugin-svelte`.
 
-`web/study`:
-- Prettier uses tabs, single quotes, no trailing commas, print width 100.
-- ESLint flat config; keep formatting consistent with existing files.
-
 ## Adding New API Endpoints
 
 1. Add route handlers in `pingpong/server.py` alongside related endpoints.
 2. Add/extend Pydantic schemas in `pingpong/schemas.py`.
 3. Apply permission expressions via `Depends(Authz(...))`.
-4. Implement client call in `web/pingpong/src/lib/api.ts` (and update study client if needed).
+4. Implement client call in `web/pingpong/src/lib/api.ts`.
 5. Add tests under `pingpong/test_*.py` using fixtures in `conftest.py` and helpers in `pingpong/testutil.py`.
 
 ## Database Migrations

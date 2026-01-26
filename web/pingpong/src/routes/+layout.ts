@@ -8,7 +8,6 @@ const ONBOARDING = '/onboarding';
 const TERMS = '/terms';
 const ABOUT = '/about';
 const PRIVACY_POLICY = '/privacy-policy';
-const EDU = '/eduaccess';
 const LOGOUT = '/logout';
 const LTI_REGISTER = '/lti/register';
 const LTI_INACTIVE = '/lti/inactive';
@@ -106,7 +105,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
 		} else if (url.pathname === NO_GROUP || url.pathname.startsWith(SETUP)) {
 			doNotShowSidebar = true;
 			logoIsClickable = false;
-		} else if (new Set([ABOUT, PRIVACY_POLICY, EDU, HOME]).has(url.pathname) && !authed) {
+		} else if (new Set([ABOUT, PRIVACY_POLICY, HOME]).has(url.pathname) && !authed) {
 			isPublicPage = true;
 			if (url.pathname === HOME) {
 				// If the user is not logged in and tries to access the root path, go to the About page.

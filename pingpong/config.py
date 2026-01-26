@@ -199,19 +199,6 @@ class CanvasSettings(BaseSettings):
 LMSInstance = Union[CanvasSettings]
 
 
-class StudySettings(BaseSettings):
-    """Settings for the study."""
-
-    airtable_api_key: str
-    airtable_base_id: str
-    airtable_class_table_id: str
-    airtable_instructor_table_id: str
-    airtable_admin_table_id: str
-    airtable_preassessment_submission_table_id: str
-    airtable_postassessment_submission_table_id: str
-    airtable_user_class_association_table_id: str
-
-
 class LMSSettings(BaseSettings):
     """LMS connection settings."""
 
@@ -343,7 +330,6 @@ class Config(BaseSettings):
 
     reload: int = Field(0)
     public_url: str = Field("http://localhost:8000")
-    study_public_url: str | None = Field(None)
     development: bool = Field(False)
     artifact_store: ArtifactStoreSettings = LocalStoreSettings(
         save_target="local_exports/thread_exports"
@@ -359,7 +345,6 @@ class Config(BaseSettings):
     authz: AuthzSettings
     email: EmailSettings
     lms: LMSSettings
-    study: StudySettings | None = Field(None)
     lti: LTISettings | None = Field(None)
     sentry: SentrySettings = Field(SentrySettings())
     metrics: MetricsSettings = Field(MetricsSettings())
@@ -372,14 +357,6 @@ class Config(BaseSettings):
         if not path:
             return self.public_url
         return f"{self.public_url.rstrip('/')}/{path.lstrip('/')}"
-
-    def study_url(self, path: str | None) -> str:
-        """Return a URL relative to the study public URL."""
-        if not self.study_public_url:
-            raise ValueError("Study public URL is not configured")
-        if not path:
-            return self.study_public_url
-        return f"{self.study_public_url.rstrip('/')}/{path.lstrip('/')}"
 
 
 def _load_config() -> Config:
