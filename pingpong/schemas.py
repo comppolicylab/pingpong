@@ -195,12 +195,6 @@ class MagicLoginRequest(BaseModel):
     forward: str = "/"
 
 
-class LoginAsRequest(BaseModel):
-    instructor_email: str
-    admin_email: str
-    forward: str = "/"
-
-
 class Profile(BaseModel):
     name: str | None
     email: str
@@ -1375,22 +1369,6 @@ class AIProvider(StrEnum):
     AZURE = "azure"
 
 
-class StudyCourse(BaseModel):
-    id: str
-    name: str | None = None
-    status: Literal["in_review", "accepted", "rejected", "withdrawn"] | None = None
-    randomization: Literal["control", "treatment"] | None = None
-    start_date: datetime | None = None
-    end_date: datetime | None = None
-    enrollment_count: int | None = None
-    completion_rate_target: float | None = None
-    preassessment_url: str | None
-    postassessment_url: str | None = None
-    pingpong_group_url: str | None
-    preassessment_student_count: int | None = None
-    postassessment_student_count: int | None = None
-
-
 class Class(BaseModel):
     id: int
     name: str
@@ -2013,41 +1991,6 @@ class SessionState(BaseModel):
     user: User | None = None
     profile: Profile | None = None
     agreement_id: int | None = None
-
-
-class InstructorResponse(BaseModel):
-    id: str
-    first_name: str | None = None
-    last_name: str | None = None
-    academic_email: str | None = None
-    personal_email: str | None = None
-    honorarium_status: Literal["Yes", "No", "Unsure/Other"] | None = None
-    mailing_address: str | None = None
-    institution: str | None = None
-
-
-class StudyFeatureFlags(BaseModel):
-    """Feature flags and one-time notices for Study.
-
-    Keys use dotted, versioned names. Example:
-    - notice.profile_moved.v1
-    - banner.maintenance_2025_09.v1
-    - feature.some_toggle.v2
-    """
-
-    flags: dict[str, bool] = Field(default_factory=dict)
-
-
-class StudySessionState(BaseModel):
-    status: SessionStatus
-    error: str | None = None
-    instructor: InstructorResponse | None = None
-    token: SessionToken | None = None
-    feature_flags: StudyFeatureFlags | None = None
-
-
-class StudyNoticeSeenRequest(BaseModel):
-    key: str
 
 
 class Support(BaseModel):

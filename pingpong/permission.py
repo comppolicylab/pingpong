@@ -3,7 +3,6 @@ from abc import abstractmethod
 
 from fastapi import HTTPException, Request
 
-from pingpong.schemas import SessionStatus
 import pingpong.models as models
 
 
@@ -55,18 +54,6 @@ class Expression:
 
     def __str__(self):
         return f"{self.__class__.__name__}()"
-
-
-class StudyExpression(Expression):
-    async def __call__(self, request: Request):
-        if request.state.session.status != SessionStatus.VALID:
-            raise HTTPException(
-                status_code=403,
-                detail=f"Missing valid session token: {request.state.session.status.value}",
-            )
-
-        if not await self.test_with_cache(request):
-            raise HTTPException(status_code=403, detail="Missing required role")
 
 
 class Or(Expression):

@@ -49,20 +49,3 @@ updates:
         dependency-type: "production"
       development-dependencies:
         dependency-type: "development"
-  - package-ecosystem: "npm"
-    directory: "web/study/"
-    schedule:
-      interval: "daily"
-    commit-message:
-      prefix: "deps(study)"
-      prefix-development: "deps(study-dev)"
-    cooldown:
-      default-days: 2
-      semver-major-days: 7
-      semver-minor-days: 3
-      semver-patch-days: 1
-    groups:
-      production-dependencies:
-        dependency-type: "production"
-      development-dependencies:
-        dependency-type: "development"

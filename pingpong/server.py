@@ -352,8 +352,6 @@ def get_config(request: Request):
     for instance in d.get("lms", {}).get("lms_instances", []):
         if "client_secret" in instance:
             instance["client_secret"] = "******"
-    if d.get("study", {}) is not None and "airtable_api_key" in d.get("study", {}):
-        d["study"]["airtable_api_key"] = "******"
     return {"config": d, "headers": dict(request.headers)}
 
 
@@ -9322,20 +9320,6 @@ async def handle_exception(request: Request, exc: Exception):
 
 
 app.mount("/api/v1", v1)
-
-# Conditionally mount Study app when configured
-try:
-    if config.study_public_url and config.study:
-        from pingpong.study.server import study as study_app
-
-        # Attach shared logging middleware to study app
-        study_app.middleware("http")(log_request)
-
-        app.mount("/api/study", study_app)
-except Exception:
-    # If study is not configured or import fails, skip mounting
-    logger.exception("Failed to mount study app.")
-    pass
 
 try:
     if config.lti:

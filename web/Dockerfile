@@ -25,20 +25,6 @@ ENV HOST_HEADER=x-forwarded-host
 ENV BODY_SIZE_LIMIT=512000000
 RUN pnpm build -d
 
-########## Build study ##########
-FROM node:22-alpine AS build_study
-
-RUN npm install -g pnpm
-
-WORKDIR /app/study
-COPY study/package.json study/pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
-
-COPY study/src ./src
-COPY study/static ./static
-COPY study/components.json study/eslint.config.js study/svelte.config.js study/tsconfig.json study/vite.config.ts ./
-RUN pnpm build
-
 ########## Final Nginx image with both sites ##########
 FROM nginx:1.27.0
 
@@ -64,4 +50,3 @@ COPY default.conf.template /etc/nginx/templates/
 
 # Copy both build outputs into distinct roots
 COPY --from=build_pingpong /app/pingpong/build /usr/share/nginx/html/pingpong
-COPY --from=build_study   /app/study/build   /usr/share/nginx/html/study
