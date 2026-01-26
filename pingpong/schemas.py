@@ -1,16 +1,7 @@
 from datetime import date, datetime
 from enum import Enum, StrEnum, auto
-from typing import (
-    Any,
-    Generic,
-    Literal,
-    NotRequired,
-    TypeVar,
-    Union,
-    TypedDict,
-    Annotated,
-    TypeAlias,
-)
+from typing import Any, Generic, Literal, NotRequired, TypeVar, Union
+from typing_extensions import TypedDict, Annotated, TypeAlias
 
 from openai._utils import PropertyInfo
 from openai.types.beta.threads import (
