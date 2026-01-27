@@ -107,15 +107,20 @@
 	$: availableFiles = items.filter(
 		(item) => !$value.includes(item.value) && !privateFileIds.includes(item.value)
 	);
-	$: availableFileNames = [...availableFiles]
-		.sort((a, b) => (a.name as string).localeCompare(b.name as string))
-		.map((item) => item.name as string);
-	$: availableFileIds = availableFiles.map((item) => item.value);
+	$: sortedAvailableFiles = [...availableFiles].sort((a, b) =>
+		(a.name as string).localeCompare(b.name as string)
+	);
+	$: availableFileNames = sortedAvailableFiles.map((item) => item.name as string);
+	$: availableFileIds = sortedAvailableFiles.map((item) => item.value);
 	$: selectedFiles = items.filter((item) => $value.includes(item.value));
-	$: selectedFileNames = [...selectedFiles]
-		.sort((a, b) => (a.name as string).localeCompare(b.name as string))
-		.map((item) => [item.name as string, privateFileIds.includes(item.value)]);
-	$: selectedFileIds = selectedFiles.map((item) => item.value);
+	$: sortedSelectedFiles = [...selectedFiles].sort((a, b) =>
+		(a.name as string).localeCompare(b.name as string)
+	);
+	$: selectedFileNames = sortedSelectedFiles.map((item) => [
+		item.name as string,
+		privateFileIds.includes(item.value)
+	]);
+	$: selectedFileIds = sortedSelectedFiles.map((item) => item.value);
 	let selectedAvailable: number[] = [];
 	let selectedSelected: number[] = [];
 
