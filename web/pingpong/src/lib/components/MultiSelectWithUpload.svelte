@@ -110,16 +110,11 @@
 	$: sortedAvailableFiles = [...availableFiles].sort((a, b) =>
 		(a.name as string).localeCompare(b.name as string)
 	);
-	$: availableFileNames = sortedAvailableFiles.map((item) => item.name as string);
 	$: availableFileIds = sortedAvailableFiles.map((item) => item.value);
 	$: selectedFiles = items.filter((item) => $value.includes(item.value));
 	$: sortedSelectedFiles = [...selectedFiles].sort((a, b) =>
 		(a.name as string).localeCompare(b.name as string)
 	);
-	$: selectedFileNames = sortedSelectedFiles.map((item) => [
-		item.name as string,
-		privateFileIds.includes(item.value)
-	]);
 	$: selectedFileIds = sortedSelectedFiles.map((item) => item.value);
 	let selectedAvailable: number[] = [];
 	let selectedSelected: number[] = [];
@@ -158,7 +153,7 @@
 			});
 		selectedAvailable = [];
 		focusedListIsAvailable = false;
-		focusedIndex = selectedFileNames.length - 1;
+		focusedIndex = sortedSelectedFiles.length - 1;
 		scrollIntoView(selectedListElement, focusedIndex);
 	}
 
@@ -178,7 +173,7 @@
 		);
 		selectedSelected = [];
 		focusedListIsAvailable = true;
-		focusedIndex = availableFileNames.length - 1;
+		focusedIndex = sortedAvailableFiles.length - 1;
 		scrollIntoView(availableListElement, focusedIndex);
 	}
 
@@ -233,7 +228,7 @@
 
 	function handleKeydown(event: KeyboardEvent, listIsAvailable: boolean) {
 		const isCtrlPressed = event.ctrlKey || event.metaKey;
-		const currentList = listIsAvailable ? availableFileNames : selectedFileNames;
+		const currentList = listIsAvailable ? sortedAvailableFiles : sortedSelectedFiles;
 
 		switch (event.key) {
 			case 'ArrowUp':
@@ -279,9 +274,9 @@
 				if (isCtrlPressed) {
 					event.preventDefault();
 					if (listIsAvailable) {
-						selectedAvailable = Array.from({ length: availableFileNames.length }, (_, i) => i);
+						selectedAvailable = Array.from({ length: sortedAvailableFiles.length }, (_, i) => i);
 					} else {
-						selectedSelected = Array.from({ length: selectedFileNames.length }, (_, i) => i);
+						selectedSelected = Array.from({ length: sortedSelectedFiles.length }, (_, i) => i);
 					}
 				}
 				break;
@@ -325,7 +320,7 @@
 			tabindex="0"
 			onkeydown={(e) => handleKeydown(e, true)}
 		>
-			{#each availableFileNames as name, index (name)}
+			{#each sortedAvailableFiles as item, index (item.value)}
 				{@const isSelected = selectedAvailable.includes(index)}
 				<button
 					type="button"
@@ -350,10 +345,10 @@
 							any assistant</Tooltip
 						>
 					{/if}
-					{name}
+					{item.name as string}
 				</button>
 			{/each}
-			{#if availableFileNames.length === 0}
+			{#if sortedAvailableFiles.length === 0}
 				<div class="flex h-full flex-col flex-wrap justify-center gap-0">
 					<div class="flex justify-center">
 						<InboxFullOutline class="h-20 w-20 text-gray-500" strokeWidth="1.5" />
@@ -449,8 +444,9 @@
 			tabindex="0"
 			onkeydown={(e) => handleKeydown(e, false)}
 		>
-			{#each selectedFileNames as [name, isPrivate], index (name)}
+			{#each sortedSelectedFiles as item, index (item.value)}
 				{@const isSelected = selectedSelected.includes(index)}
+				{@const isPrivate = privateFileIds.includes(item.value)}
 				<button
 					type="button"
 					class="block flex w-full cursor-pointer flex-row gap-1 overflow-y-auto border-none bg-none pt-1 pr-0 pb-1 pl-2 text-left text-sm {isSelected
@@ -486,7 +482,7 @@
 							any assistant</Tooltip
 						>
 					{/if}
-					{name}
+					{item.name as string}
 				</button>
 			{/each}
 		</div>
