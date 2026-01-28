@@ -260,14 +260,14 @@ typing-extensions = {version = ">=4.2", markers = "python_version < \"3.13\""}
 
 [[package]]
 name = "aiosmtplib"
-version = "5.0.0"
+version = "5.1.0"
 description = "asyncio SMTP client"
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "aiosmtplib-5.0.0-py3-none-any.whl", hash = "sha256:95eb0f81189780845363ab0627e7f130bca2d0060d46cd3eeb459f066eb7df32"},
-    {file = "aiosmtplib-5.0.0.tar.gz", hash = "sha256:514ac11c31cb767c764077eb3c2eb2ae48df6f63f1e847aeb36119c4fc42b52d"},
+    {file = "aiosmtplib-5.1.0-py3-none-any.whl", hash = "sha256:368029440645b486b69db7029208a7a78c6691b90d24a5332ddba35d9109d55b"},
+    {file = "aiosmtplib-5.1.0.tar.gz", hash = "sha256:2504a23b2b63c9de6bc4ea719559a38996dba68f73f6af4eb97be20ee4c5e6c4"},
 ]
 
 [package.extras]
@@ -5779,4 +5779,4 @@ testing = ["coverage (>=5.0.3)", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.10"
-content-hash = "800744ce44cd458493a5562d12e8bd14c9d6ec9b0ec72d38487f75b4daa6688d"
+content-hash = "43e91d7bd3b799502ccf4de097485ae85a31310ec35fe84732a276a314cbd51d"
