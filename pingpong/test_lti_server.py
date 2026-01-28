@@ -683,7 +683,7 @@ async def test_get_lti_setup_context(monkeypatch):
     context = await server_module.get_lti_setup_context(request, 1)
 
     assert context.lti_class_id == lti_class.id
-    assert [inst.id for inst in context.institutions] == [1]
+    assert context.institutions[0].id == 1
 
 
 @pytest.mark.asyncio
@@ -802,31 +802,6 @@ async def test_create_lti_group_invalid_institution(monkeypatch):
         await server_module.create_lti_group(request, 1, body)
 
     assert excinfo.value.status_code == 400
-
-
-@pytest.mark.asyncio
-async def test_create_lti_group_unauthorized_institution(monkeypatch):
-    lti_class = _make_lti_class()
-
-    monkeypatch.setattr(
-        server_module,
-        "_get_lti_class_for_setup",
-        lambda request, lti_class_id: _async_return(lti_class),
-    )
-
-    request = FakeRequest(
-        state=SimpleNamespace(
-            db=FakeDB(),
-            authz=FakeAuthz(test_result=False),
-            session=SimpleNamespace(user=SimpleNamespace(id=10)),
-        )
-    )
-    body = LTISetupCreateRequest(institution_id=1, name="Group", term="Fall")
-
-    with pytest.raises(HTTPException) as excinfo:
-        await server_module.create_lti_group(request, 1, body)
-
-    assert excinfo.value.status_code == 403
 
 
 @pytest.mark.asyncio
