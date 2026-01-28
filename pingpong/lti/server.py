@@ -1187,17 +1187,10 @@ async def _get_lti_class_for_setup(request: Request, lti_class_id: int) -> LTICl
 async def get_lti_setup_context(request: Request, lti_class_id: int):
     lti_class = await _get_lti_class_for_setup(request, lti_class_id)
 
-    can_create_class_institution_ids = await request.state.authz.list(
-        f"user:{request.state.session.user.id}",
-        "can_create_class",
-        "institution",
-    )
-
     institutions = [
         LTISetupInstitution(id=inst.id, name=inst.name)
         for inst in lti_class.registration.institutions
         if inst.default_api_key_id is not None
-        and inst.id in can_create_class_institution_ids
     ]
 
     return LTISetupContext(
@@ -1260,17 +1253,6 @@ async def create_lti_group(
         raise HTTPException(
             status_code=400,
             detail="Invalid institution or institution has no default billing",
-        )
-
-    can_create_class_institution_ids = await request.state.authz.test(
-        f"user:{request.state.session.user.id}",
-        "can_create_class",
-        f"institution:{valid_institution.id}",
-    )
-    if not can_create_class_institution_ids:
-        raise HTTPException(
-            status_code=403,
-            detail="Not authorized to create classes for this institution",
         )
 
     new_class = Class(
