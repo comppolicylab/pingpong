@@ -357,7 +357,7 @@
 						{items.length > 0 ? 'All files selected' : 'No files available'}
 					</div>
 					<div
-						class="text-md mx-14 flex flex-wrap justify-center text-center text-wrap text-gray-500"
+						class="text-base mx-14 flex flex-wrap justify-center text-center text-wrap text-gray-500"
 					>
 						Use the Upload Files button to upload files for your assistant.
 					</div>

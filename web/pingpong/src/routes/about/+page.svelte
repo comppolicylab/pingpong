@@ -111,7 +111,7 @@
 						<h5 class="mb-2 text-lg font-semibold text-gray-900">
 							It's a little empty around here...
 						</h5>
-						<p class="text-md text-gray-600">
+						<p class="text-base text-gray-600">
 							You're not part of any PingPong groups yet. Ask your instructor or course
 							administrator to add you to a group to get started. If you believe this is an error,
 							please see the support information below for help.

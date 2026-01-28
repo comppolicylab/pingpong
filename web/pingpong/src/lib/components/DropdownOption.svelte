@@ -19,7 +19,7 @@
 >
 	<div class="flex w-full flex-row flex-wrap items-center justify-between gap-x-3">
 		<div class="flex flex-row items-center gap-2">
-			<span class={smallNameText ? 'text-md' : 'text-lg'}>{name}</span>
+			<span class={smallNameText ? 'text-base' : 'text-lg'}>{name}</span>
 			{#if addBrainIcon}<BrainOutline size={smallNameText ? 'sm' : 'md'} /><Tooltip
 					class="z-[100] font-light {smallNameText ? 'text-xs' : 'text-sm'}"
 					>Reasoning model</Tooltip

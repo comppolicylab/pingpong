@@ -1533,7 +1533,7 @@
 							<p class="text-center text-xl font-semibold text-blue-dark-40">
 								Voice mode not available on Firefox
 							</p>
-							<p class="text-md font-base text-center text-gray-600">
+							<p class="text-base font-base text-center text-gray-600">
 								We're working on bringing Voice mode to Firefox in a future update. For the best
 								experience, please use Safari, Chrome, or Edge in the meantime.
 							</p>
@@ -1546,7 +1546,7 @@
 						</div>
 						<div class="flex w-2/5 flex-col items-center">
 							<p class="text-center text-xl font-semibold text-blue-dark-40">Voice mode</p>
-							<p class="text-md font-base text-center text-gray-600">
+							<p class="text-base font-base text-center text-gray-600">
 								To get started, enable microphone access.
 							</p>
 						</div>
@@ -1570,7 +1570,7 @@
 							<p class="text-center text-xl font-semibold text-blue-dark-40">
 								Voice mode not available on Firefox
 							</p>
-							<p class="text-md font-base text-center text-gray-600">
+							<p class="text-base font-base text-center text-gray-600">
 								We're working on bringing Voice mode to Firefox in a future update. For the best
 								experience, please use Safari, Chrome, or Edge in the meantime.
 							</p>
@@ -1584,11 +1584,11 @@
 						<div class="flex w-2/5 flex-col items-center">
 							<p class="text-center text-xl font-semibold text-blue-dark-40">Voice mode</p>
 							{#if endingAudioSession}
-								<p class="text-md font-base text-center text-gray-600">
+								<p class="text-base font-base text-center text-gray-600">
 									Finishing up your session...
 								</p>
 							{:else}
-								<p class="text-md font-base text-center text-gray-600">
+								<p class="text-base font-base text-center text-gray-600">
 									When you're ready, start the session to begin recording.
 								</p>
 							{/if}
@@ -1771,8 +1771,8 @@
 							<div class="flex flex-row gap-2">
 								<MicrophoneOutline class="h-6 w-6 text-gray-700" />
 								<div class="flex flex-col">
-									<span class="text-md font-semibold text-gray-700">Voice Mode Session</span><span
-										class="text-md font-normal text-gray-700"
+									<span class="text-base font-semibold text-gray-700">Voice Mode Session</span><span
+										class="text-base font-normal text-gray-700"
 										>This conversation was completed in Voice mode and is read-only. To continue
 										chatting, start a new conversation.</span
 									>
@@ -1786,8 +1786,8 @@
 							<div class="flex flex-row gap-2">
 								<MicrophoneOutline class="h-6 w-6 text-gray-700" />
 								<div class="flex flex-col">
-									<span class="text-md font-semibold text-gray-700">Assistant in Voice mode</span
-									><span class="text-md font-normal text-gray-700"
+									<span class="text-base font-semibold text-gray-700">Assistant in Voice mode</span
+									><span class="text-base font-normal text-gray-700"
 										>This assistant uses audio. Start a new session to keep the conversation going.</span
 									>
 								</div>

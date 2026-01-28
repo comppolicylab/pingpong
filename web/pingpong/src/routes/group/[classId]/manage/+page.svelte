@@ -1454,7 +1454,7 @@
 									>Important: Your group has reached OpenAI's request limit</span
 								>
 							</div>
-							<p class="text-md mt-2 mb-4">
+							<p class="text-base mt-2 mb-4">
 								Your group has recently made more requests to OpenAI than allowed, which means
 								you've hit the maximum request limit for now. While you can continue using this
 								group, you might have trouble starting new threads or continuing existing

@@ -93,11 +93,11 @@
 							placeholder="you@school.edu"
 							name="email"
 							id="email"
-							class="text-md border-none bg-transparent"
+							class="text-base border-none bg-transparent"
 						></Input>
 						<Button
 							pill
-							class="text-md mr-2 rounded-full bg-orange-dark p-3 px-4 px-6 py-2 text-white hover:bg-orange"
+							class="text-base mr-2 rounded-full bg-orange-dark p-3 px-4 px-6 py-2 text-white hover:bg-orange"
 							type="submit"
 							disabled={$loggingIn || !email}>Login</Button
 						>

@@ -352,29 +352,21 @@
 			<Modal title="Group Moderators" bind:open={showModerators} autoclose outsideclose>
 				<ModeratorsTable moderators={teachers} />
 			</Modal>
-			<div class="flex h-full w-full flex-col items-center justify-center gap-4">
+			<div class="flex h-full w-full flex-col items-center justify-center gap-4 overflow-auto">
 				<div class="flex w-full flex-col items-center gap-2 text-center md:w-2/3 lg:w-1/2">
-					<div
-						class="mb-1 flex h-16 w-16 items-center justify-center rounded-full border border-blue-light-30 bg-blue-light-50 p-2"
-					>
-						<Logo size={8} />
-					</div>
 					<div class="flex flex-col items-center justify-center gap-1">
-						<div class="text-3xl font-medium">{assistant.name}</div>
-						{#if assistant?.id}
-							<AssistantVersionBadge version={assistantVersionNumber} />
-						{/if}
+						<div class="text-xl md:text-4xl font-medium leading-tight">{assistant.name}</div>
 					</div>
 					{#if !(data.isSharedAssistantPage || data.isSharedThreadPage)}
-						<div class="flex flex-row items-center gap-1 text-sm font-normal text-gray-400">
+						<div class="flex flex-row items-center gap-1 text-xs sm:text-sm font-normal text-gray-400">
 							{#if assistantMeta.isCourseAssistant}
-								<BadgeCheckOutline size="sm" />
+								<BadgeCheckOutline class="h-4 w-4 sm:h-5 sm:w-5" />
 								<span>Group assistant</span>
 							{:else if assistantMeta.isMyAssistant}
-								<UserOutline />
+								<UserOutline class="h-4 w-4 sm:h-5 sm:w-5"/>
 								<span>Created by you</span>
 							{:else}
-								<UsersOutline />
+								<UsersOutline class="h-4 w-4 sm:h-5 sm:w-5" />
 								<span>Created by {assistantMeta.creator}</span>
 							{/if}
 						</div>
@@ -541,7 +533,7 @@
 							<p class="text-center text-xl font-semibold text-blue-dark-40">
 								Voice mode not available on Firefox
 							</p>
-							<p class="text-md font-base text-center text-gray-600">
+							<p class="text-base font-base text-center text-gray-600">
 								We're working on bringing Voice mode to Firefox in a future update. For the best
 								experience, please use Safari, Chrome, or Edge in the meantime.
 							</p>
@@ -551,8 +543,8 @@
 							<MicrophoneOutline size="xl" class="text-blue-dark-40" />
 						</div>
 						<div class="flex min-w-2/5 flex-col items-center">
-							<p class="text-center text-xl font-semibold text-blue-dark-40">Voice mode</p>
-							<p class="text-md font-base text-center text-gray-600">
+							<p class="text-center text-sm sm:text-xl font-semibold text-blue-dark-40">Voice mode</p>
+							<p class="text-xs sm:text-base font-base text-center text-gray-600">
 								Talk to this assistant using your voice.<br />Create a new session to begin.
 							</p>
 						</div>
@@ -574,10 +566,10 @@
 						<div
 							class="flex w-full flex-row items-stretch gap-2 rounded-2xl border border-red-600 px-3 py-1 transition-all duration-200 md:w-3/4 lg:w-3/5"
 						>
-							<UsersSolid size="sm" class="pt-0 text-red-600" />
-							<Span class="text-xs font-normal text-gray-700"
+							<UsersSolid size="sm" class="pt-0 text-red-600 hidden sm:inline" />
+							<Span class="text-[0.7rem] sm:text-xs font-normal text-gray-700"
 								><Button
-									class="p-0 text-xs font-normal text-gray-700 underline"
+									class="p-0 text-[0.7rem] sm:text-xs font-normal text-gray-700 underline"
 									onclick={showModeratorsModal}
 									ontouchstart={showModeratorsModal}>Moderators</Button
 								> have enabled a setting for this thread only that allows them to see
@@ -625,7 +617,7 @@
 				{:else if assistant.interaction_mode === 'chat' && (assistant.assistant_should_message_first ?? false)}
 					<div class="h-[5%] max-h-8"></div>
 					<div class="flex min-w-2/5 flex-col items-center">
-						<p class="text-md font-base text-center text-gray-600">
+						<p class="text-base font-base text-center text-gray-600">
 							The assistant will send the first message.<br />Start a new conversation to begin.
 						</p>
 					</div>
@@ -647,11 +639,11 @@
 				<input type="hidden" name="parties" value={parties} />
 				<div class="my-3">
 					{#if isPrivate}
-						<div class="flex w-full flex-wrap items-start gap-2 text-sm lg:flex-nowrap">
-							<LockSolid size="sm" class="pt-0 text-orange" />
-							<Span class="text-xs font-normal text-gray-600"
+						<div class="flex w-full flex-wrap items-start gap-2 text-[0.7rem] sm:text-xs lg:flex-nowrap">
+							<LockSolid size="sm" class="pt-0 text-orange hidden sm:block" />
+							<Span class="font-normal text-gray-600"
 								><Button
-									class="p-0 text-xs font-normal text-gray-600 underline"
+									class="p-0 text-[0.7rem] sm:text-xs font-normal text-gray-600 underline"
 									onclick={showModeratorsModal}
 									ontouchstart={showModeratorsModal}>Moderators</Button
 								> <span class="font-semibold">cannot</span> see this thread or your name. For more
@@ -663,11 +655,11 @@
 						</div>
 					{:else if assistantMeta.willDisplayUserInfo}
 						{#if assistant.interaction_mode === 'voice'}
-							<div class="flex w-full flex-wrap items-start gap-2 text-sm lg:flex-nowrap">
-								<UsersSolid size="sm" class="pt-0 text-orange" />
-								<Span class="text-xs font-normal text-gray-600"
+							<div class="flex w-full flex-wrap items-start gap-2 text-[0.7rem] sm:text-xs lg:flex-nowrap">
+								<UsersSolid size="sm" class="pt-0 text-orange hidden sm:block" />
+								<Span class="font-normal text-gray-600"
 									><Button
-										class="p-0 text-xs font-normal text-gray-600 underline"
+										class="p-0 text-[0.7rem] sm:text-xs font-normal text-gray-600 underline"
 										onclick={showModeratorsModal}
 										ontouchstart={showModeratorsModal}>Moderators</Button
 									> can see this thread,
@@ -680,11 +672,11 @@
 								>
 							</div>
 						{:else}
-							<div class="flex w-full flex-wrap items-start gap-2 text-sm lg:flex-nowrap">
-								<UsersSolid size="sm" class="pt-0 text-orange" />
-								<Span class="text-xs font-normal text-gray-600"
+							<div class="flex w-full flex-wrap items-start gap-2 text-[0.7rem] sm:text-xs lg:flex-nowrap">
+								<UsersSolid size="sm" class="pt-0 text-orange hidden sm:block" />
+								<Span class="font-normal text-gray-600"
 									><Button
-										class="p-0 text-xs font-normal text-gray-600 underline"
+										class="p-0 text-[0.7rem] sm:text-xs font-normal text-gray-600 underline"
 										onclick={showModeratorsModal}
 										ontouchstart={showModeratorsModal}>Moderators</Button
 									> can see this thread and <span class="font-semibold">your full name</span>. For
@@ -696,11 +688,11 @@
 							</div>
 						{/if}
 					{:else}
-						<div class="flex w-full flex-wrap items-start gap-2 text-sm lg:flex-nowrap">
-							<EyeSlashOutline size="sm" class="pt-0 text-orange" />
-							<Span class="text-xs font-normal text-gray-600"
+						<div class="flex w-full flex-wrap items-start gap-2 text-[0.7rem] sm:text-xs lg:flex-nowrap">
+							<EyeSlashOutline size="sm" class="pt-0 text-orange hidden sm:block" />
+							<Span class="font-normal text-gray-600"
 								><Button
-									class="p-0 text-xs font-normal text-gray-600 underline"
+									class="p-0 text-[0.7rem] sm:text-xs font-normal text-gray-600 underline"
 									onclick={showModeratorsModal}
 									ontouchstart={showModeratorsModal}>Moderators</Button
 								> can see this thread but not your name. For more information, please review
