@@ -27,7 +27,7 @@
 
 {#if isSharedPage}
 	<PageHeader>
-		<div slot="left">
+		<div slot="left" class="min-w-0">
 			<div class="eyebrow eyebrow-dark mb-2 ml-4">Shared Access</div>
 			<Span class={mainTextClass}>{current?.name || 'no class'}</Span>
 		</div>
@@ -45,13 +45,13 @@
 	</PageHeader>
 {:else}
 	<PageHeader>
-		<div slot="left">
+		<div slot="left" class="min-w-0">
 			<div class="eyebrow eyebrow-dark ml-4">Select group</div>
-			<Button class={mainTextClass}
-				>{current?.name || 'Anonymous Session'}
+			<Button class="{mainTextClass} max-w-full"
+				><span class="truncate">{current?.name || 'Anonymous Session'}</span>
 				<ChevronDownOutline
 					size="sm"
-					class="ml-4 inline-block h-8 w-8 rounded-full bg-white text-orange"
+					class="ml-4 inline-block h-8 w-8 shrink-0 rounded-full bg-white text-orange"
 				/></Button
 			>
 			<Dropdown
