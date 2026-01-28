@@ -714,7 +714,7 @@
 	outsideclose
 >
 	<div class="flex flex-col gap-5 px-4 pb-4">
-		<P class="text-md">
+		<P class="text-base">
 			The following settings control what content members can see when interacting with this
 			assistant. As a moderator, you have access to all content, including any content hidden from
 			members based on these settings. You can make changes in Assistant Settings under Advanced
@@ -769,11 +769,11 @@
 			>
 		</div>
 		<div class="flex flex-col gap-1">
-			<div class="text-md text-wrap">
+			<div class="text-base text-wrap">
 				Your group's AI Provider does not support Vision capabilities for this AI model. Assistants
 				will not be able to "see" and process images you upload.
 			</div>
-			<div class="text-md text-wrap">
+			<div class="text-base text-wrap">
 				We are working on adding Vision support for your AI Provider. In the meantime, you can still
 				upload and use supported image files with Code Interpreter.
 			</div>

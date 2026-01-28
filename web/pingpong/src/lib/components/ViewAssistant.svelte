@@ -282,12 +282,15 @@
 <div
 	class="flex flex-col gap-2 {editable
 		? 'bg-gold-light'
-		: 'bg-orange-light'} rounded-2xl px-8 py-4 pt-6 pr-4 pb-8"
+		: 'bg-orange-light'} rounded-2xl px-8 py-4 pt-6 pb-8"
 >
-	<Heading tag="h3" class="flex items-center gap-4 text-3xl font-normal">
-		<div class="flex flex-row items-center gap-3">
-			{assistant.name}
-			<div class="flex flex-row items-center gap-1">
+	<Heading
+		tag="h3"
+		class="flex flex-wrap items-center justify-between gap-x-4 gap-y-0 text-3xl font-normal"
+	>
+		<div class="min-w-0">
+			<span class="mr-2 break-words">{assistant.name}</span>
+			<span class="inline-flex flex-wrap items-center gap-1 align-baseline">
 				{#if !assistant.published}
 					<EyeSlashOutline class="mr-1 inline-block h-5 w-5 text-gray-500" />
 					<Tooltip placement="top" class="text-xs font-light"
@@ -305,10 +308,10 @@
 						>One or more sharable links are active for this assistant.</Tooltip
 					>
 				{/if}
-			</div>
+			</span>
 		</div>
 
-		<div class="ml-auto flex shrink-0 items-center gap-2">
+		<div class="flex shrink-0 items-center gap-2">
 			{#if editable}
 				{#if assistant.notes}
 					<button

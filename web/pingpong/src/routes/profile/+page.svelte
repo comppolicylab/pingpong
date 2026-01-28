@@ -193,7 +193,7 @@
 				<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
 					<div class="rounded-xl bg-white p-4 shadow-xs">
 						<Label
-							class="text-md mb-2 font-medium"
+							class="mb-2 text-base font-medium"
 							for="firstName"
 							color={inputState.first_name.error ? 'red' : undefined}>First Name</Label
 						>
@@ -216,7 +216,7 @@
 
 					<div class="rounded-xl bg-white p-4 shadow-xs">
 						<Label
-							class="text-md mb-2 font-medium"
+							class="mb-2 text-base font-medium"
 							for="lastName"
 							color={inputState.last_name.error ? 'red' : undefined}>Last Name</Label
 						>

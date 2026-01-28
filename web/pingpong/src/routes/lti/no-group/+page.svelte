@@ -21,11 +21,11 @@
 			<div class="flex flex-col gap-4">
 				<div class="mb-2 w-full text-3xl font-medium">This course isn't on PingPong yet.</div>
 				<div class="flex w-full flex-col gap-4">
-					<p class="text-md">
+					<p class="text-base">
 						Your instructor hasn&apos;t linked this Canvas course to a PingPong group, so there
 						isn&apos;t a class space to enter.
 					</p>
-					<p class="text-md">
+					<p class="text-base">
 						Please ask your instructor to complete the setup. In the meantime, you can continue to
 						the main PingPong page.
 					</p>

@@ -223,7 +223,9 @@
 			<Heading tag="h2" class="text-dark-blue-40 mb-4 font-serif text-3xl font-medium"
 				>Make a new assistant</Heading
 			>
-			<div class="mb-12 items-start justify-between gap-12 rounded-2xl bg-gold p-8 lg:flex">
+			<div
+				class="mb-12 flex flex-col items-start justify-between gap-12 gap-y-4 rounded-2xl bg-gold p-8 text-sm sm:text-base lg:flex-row"
+			>
 				<p class="font-light">
 					Build your own AI chatbot for this group. You can customize it with specific knowledge,
 					personality, and parameters to serve as a digital assistant for this group.

@@ -453,7 +453,7 @@
 			</Card>
 
 			<Card size="none">
-				<Heading tag="h4" class="text-md mb-3 font-medium text-gray-900"
+				<Heading tag="h4" class="mb-3 text-base font-medium text-gray-900"
 					>OpenID Configuration</Heading
 				>
 				<pre
@@ -463,7 +463,9 @@
 			</Card>
 
 			<Card size="none">
-				<Heading tag="h4" class="text-md mb-3 font-medium text-gray-900">Registration Data</Heading>
+				<Heading tag="h4" class="mb-3 text-base font-medium text-gray-900"
+					>Registration Data</Heading
+				>
 				<pre
 					class="max-h-96 overflow-x-auto overflow-y-auto rounded-lg bg-gray-50 p-4 text-xs whitespace-pre-wrap text-gray-700">{formatJson(
 						registration.registration_data

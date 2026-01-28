@@ -62,7 +62,7 @@
 							<span class="text-5xl font-light text-blue-dark-40">
 								{data.statistics.institutions}
 							</span>
-							<span class="text-md font-medium text-blue-dark-50 uppercase">Institutions</span>
+							<span class="text-base font-medium text-blue-dark-50 uppercase">Institutions</span>
 						</div>
 						<div
 							class="flex flex-col gap-2 rounded-2xl bg-gold-light px-8 py-4 pt-6 pb-6 text-center"
@@ -70,7 +70,7 @@
 							<span class="text-5xl font-light text-blue-dark-40">
 								{data.statistics.classes}
 							</span>
-							<span class="text-md font-medium text-blue-dark-50 uppercase">Groups</span>
+							<span class="text-base font-medium text-blue-dark-50 uppercase">Groups</span>
 						</div>
 						<div
 							class="flex flex-col gap-2 rounded-2xl bg-gold-light px-8 py-4 pt-6 pb-6 text-center"
@@ -78,7 +78,7 @@
 							<span class="text-5xl font-light text-blue-dark-40">
 								{data.statistics.users}
 							</span>
-							<span class="text-md font-medium text-blue-dark-50 uppercase">Users</span>
+							<span class="text-base font-medium text-blue-dark-50 uppercase">Users</span>
 						</div>
 						{#if data.statistics.users}
 							<div
@@ -87,7 +87,7 @@
 								<span class="text-5xl font-light text-blue-dark-40">
 									{(data.statistics.enrollments / data.statistics.users).toFixed(1)}
 								</span>
-								<span class="text-md font-medium text-blue-dark-50 uppercase"
+								<span class="text-base font-medium text-blue-dark-50 uppercase"
 									>Average enrollments<br />per user</span
 								>
 							</div>
@@ -98,7 +98,7 @@
 							<span class="text-5xl font-light text-blue-dark-40">
 								{data.statistics.assistants}
 							</span>
-							<span class="text-md font-medium text-blue-dark-50 uppercase">Assistants</span>
+							<span class="text-base font-medium text-blue-dark-50 uppercase">Assistants</span>
 						</div>
 						<div
 							class="flex flex-col gap-2 rounded-2xl bg-gold-light px-8 py-4 pt-6 pb-6 text-center"
@@ -106,7 +106,7 @@
 							<span class="text-5xl font-light text-blue-dark-40">
 								{data.statistics.threads}
 							</span>
-							<span class="text-md font-medium text-blue-dark-50 uppercase">Threads</span>
+							<span class="text-base font-medium text-blue-dark-50 uppercase">Threads</span>
 						</div>
 						<div
 							class="flex flex-col gap-2 rounded-2xl bg-gold-light px-8 py-4 pt-6 pb-6 text-center"
@@ -114,7 +114,7 @@
 							<span class="text-5xl font-light text-blue-dark-40">
 								{data.statistics.files}
 							</span>
-							<span class="text-md font-medium text-blue-dark-50 uppercase">Files</span>
+							<span class="text-base font-medium text-blue-dark-50 uppercase">Files</span>
 						</div>
 					</div>
 				{/if}

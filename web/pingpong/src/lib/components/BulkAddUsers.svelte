@@ -150,7 +150,7 @@
 
 {#if showEmailForm}
 	<form onsubmit={submitEmailForm}>
-		<Label defaultClass="text-md font-normal rtl:text-right font-medium block" for="emails"
+		<Label defaultClass="text-base font-normal rtl:text-right font-medium block" for="emails"
 			>Emails</Label
 		>
 		<Helper helperClass="text-sm font-normal text-gray-500 dark:text-gray-300"
@@ -159,7 +159,7 @@
 		<Textarea class="mt-2 mb-4" id="emails" name="emails" rows={4} value={emailString} />
 
 		<div class="flex items-center justify-between">
-			<Label defaultClass="text-md font-normal rtl:text-right font-medium block" for="role"
+			<Label defaultClass="text-base font-normal rtl:text-right font-medium block" for="role"
 				>Role</Label
 			>
 			<Button
@@ -214,7 +214,8 @@
 			value={selectedRole}
 			items={roles}
 		/>
-		<Helper helperClass="text-md font-normal rtl:text-right font-medium block">Notify people</Helper
+		<Helper helperClass="text-base font-normal rtl:text-right font-medium block"
+			>Notify people</Helper
 		>
 		<Checkbox checked id="notify" name="notify" class="mt-1 text-sm font-normal"
 			>Let users know they have access to {className} on PingPong</Checkbox
@@ -256,7 +257,7 @@
 		</div>
 
 		<Table class="mt-2 min-w-full text-left text-sm text-gray-500">
-			<TableHead theadClass="text-md" class="bg-gray-200">
+			<TableHead theadClass="text-base" class="bg-gray-200">
 				<TableHeadCell padding="px-3 py-1" class="font-medium text-gray-900"
 					>Name <span class="font-light">(optional)</span></TableHeadCell
 				>
@@ -321,7 +322,7 @@
 		The following users are ready to be added to the group.
 	</div>
 	<Table class="mt-2 min-w-full text-left text-sm text-gray-500">
-		<TableHead theadClass="text-md" class="bg-gray-200">
+		<TableHead theadClass="text-base" class="bg-gray-200">
 			<TableHeadCell padding="px-3 py-1" class="font-medium text-gray-900"
 				>Name <span class="font-light">(optional)</span></TableHeadCell
 			>
@@ -438,7 +439,7 @@
 			</div>
 		{/if}
 		<Table class="mt-2 mb-4 text-left text-sm text-gray-500">
-			<TableHead theadClass="text-md" class="bg-gray-200">
+			<TableHead theadClass="text-base" class="bg-gray-200">
 				<TableHeadCell padding="px-3 py-1" class="font-medium text-gray-900">Name</TableHeadCell>
 				<TableHeadCell padding="px-3 py-1" class="font-medium text-gray-900">Email</TableHeadCell>
 				<TableHeadCell padding="px-3 py-1" class="font-medium text-gray-900"></TableHeadCell>
