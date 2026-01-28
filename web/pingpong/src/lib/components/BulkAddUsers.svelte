@@ -214,7 +214,8 @@
 			value={selectedRole}
 			items={roles}
 		/>
-		<Helper helperClass="text-base font-normal rtl:text-right font-medium block">Notify people</Helper
+		<Helper helperClass="text-base font-normal rtl:text-right font-medium block"
+			>Notify people</Helper
 		>
 		<Checkbox checked id="notify" name="notify" class="mt-1 text-sm font-normal"
 			>Let users know they have access to {className} on PingPong</Checkbox

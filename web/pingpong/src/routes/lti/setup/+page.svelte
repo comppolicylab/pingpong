@@ -42,7 +42,7 @@
 				</div>
 
 				<div class="w-full">
-					<p class="text-base mb-6 text-gray-700">
+					<p class="mb-6 text-base text-gray-700">
 						Choose how you'd like to connect this course to PingPong:
 					</p>
 

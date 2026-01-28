@@ -1533,7 +1533,7 @@
 							<p class="text-center text-xl font-semibold text-blue-dark-40">
 								Voice mode not available on Firefox
 							</p>
-							<p class="text-base font-base text-center text-gray-600">
+							<p class="font-base text-center text-base text-gray-600">
 								We're working on bringing Voice mode to Firefox in a future update. For the best
 								experience, please use Safari, Chrome, or Edge in the meantime.
 							</p>
@@ -1546,7 +1546,7 @@
 						</div>
 						<div class="flex w-2/5 flex-col items-center">
 							<p class="text-center text-xl font-semibold text-blue-dark-40">Voice mode</p>
-							<p class="text-base font-base text-center text-gray-600">
+							<p class="font-base text-center text-base text-gray-600">
 								To get started, enable microphone access.
 							</p>
 						</div>
@@ -1570,7 +1570,7 @@
 							<p class="text-center text-xl font-semibold text-blue-dark-40">
 								Voice mode not available on Firefox
 							</p>
-							<p class="text-base font-base text-center text-gray-600">
+							<p class="font-base text-center text-base text-gray-600">
 								We're working on bringing Voice mode to Firefox in a future update. For the best
 								experience, please use Safari, Chrome, or Edge in the meantime.
 							</p>
@@ -1584,11 +1584,11 @@
 						<div class="flex w-2/5 flex-col items-center">
 							<p class="text-center text-xl font-semibold text-blue-dark-40">Voice mode</p>
 							{#if endingAudioSession}
-								<p class="text-base font-base text-center text-gray-600">
+								<p class="font-base text-center text-base text-gray-600">
 									Finishing up your session...
 								</p>
 							{:else}
-								<p class="text-base font-base text-center text-gray-600">
+								<p class="font-base text-center text-base text-gray-600">
 									When you're ready, start the session to begin recording.
 								</p>
 							{/if}

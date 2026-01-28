@@ -49,7 +49,7 @@
 		<div class="bg-white px-8 py-8">
 			<form onsubmit={saveName}>
 				<section class="flex flex-col gap-2">
-					<div class="text-base w-full">
+					<div class="w-full text-base">
 						Welcome, {data.me.user?.email || 'Unknown'}.
 					</div>
 					<div class="mb-6 w-full text-xs">Please enter your name to continue.</div>

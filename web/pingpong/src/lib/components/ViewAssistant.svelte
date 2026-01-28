@@ -284,7 +284,10 @@
 		? 'bg-gold-light'
 		: 'bg-orange-light'} rounded-2xl px-8 py-4 pt-6 pb-8"
 >
-	<Heading tag="h3" class="flex flex-wrap items-center gap-x-4 gap-y-0 text-3xl font-normal justify-between">
+	<Heading
+		tag="h3"
+		class="flex flex-wrap items-center justify-between gap-x-4 gap-y-0 text-3xl font-normal"
+	>
 		<div class="min-w-0">
 			<span class="mr-2 break-words">{assistant.name}</span>
 			<span class="inline-flex flex-wrap items-center gap-1 align-baseline">
