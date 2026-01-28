@@ -29,7 +29,7 @@
 	<PageHeader>
 		<div slot="left" class="min-w-0">
 			<div class="eyebrow eyebrow-dark mb-2 ml-4">Shared Access</div>
-			<Span class={mainTextClass}>{current?.name || 'no class'}</Span>
+			<Span class="{mainTextClass} overflow-hidden">{current?.name || 'no class'}</Span>
 		</div>
 		<div slot="right" class="flex flex-col items-end gap-2">
 			{#if current}
@@ -47,7 +47,7 @@
 	<PageHeader>
 		<div slot="left" class="min-w-0">
 			<div class="eyebrow eyebrow-dark ml-4">Select group</div>
-			<Button class="{mainTextClass} max-w-full"
+			<Button class="{mainTextClass} max-w-full overflow-hidden"
 				><span class="truncate">{current?.name || 'Anonymous Session'}</span>
 				<ChevronDownOutline
 					size="sm"
