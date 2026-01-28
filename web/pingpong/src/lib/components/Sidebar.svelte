@@ -332,13 +332,13 @@
 							>
 								<svelte:fragment slot="icon">
 									<span class="eyebrow w-full"
-										><div class="flex flex-row gap-1">
-											<h4 class="shrink-0">
+										><div class="flex min-w-0 flex-row gap-1">
+											<h4 class="max-w-1/2 shrink truncate">
 												{classesById[thread.class_id]?.name ||
 													(thread.anonymous_session ? 'Anonymous Session' : 'Unknown Group')}
 											</h4>
 											<h4 class="shrink-0">|</h4>
-											<h4 class="shrink truncate">
+											<h4 class="min-w-0 shrink truncate">
 												{Object.values(thread.assistant_names || { 1: 'Unknown Assistant' }).join(
 													', '
 												)}
