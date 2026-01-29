@@ -1,5 +1,8 @@
 name: Push PR code to AWS Staging
 run-name: "Staging Test: Push ${{ github.event.issue.number }} on AWS"
+permissions:
+  contents: read
+  checks: write
 concurrency: release
 
 on:
