@@ -12,6 +12,7 @@ from pingpong.models import (
     Assistant,
     Class,
     ExternalLogin,
+    LTIClass,
     User,
     UserClassRole,
     UserInstitutionRole,
@@ -171,6 +172,16 @@ async def merge_lms_users(
         update(Class)
         .where(Class.lms_user_id == old_user_id)
         .values(lms_user_id=new_user_id)
+    )
+    await session.execute(stmt)
+
+async def merge_lti_users(
+    session: AsyncSession, new_user_id: int, old_user_id: int
+) -> None:
+    stmt = (
+        update(LTIClass)
+        .where(LTIClass.setup_user_id == old_user_id)
+        .values(setup_user_id=new_user_id)
     )
     await session.execute(stmt)
 
