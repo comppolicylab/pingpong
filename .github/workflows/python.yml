@@ -11,6 +11,8 @@ on:
 jobs:
   build:
     name: Test Python
+    permissions:
+      contents: read
     timeout-minutes: 10
     runs-on: ubuntu-latest
     env:
