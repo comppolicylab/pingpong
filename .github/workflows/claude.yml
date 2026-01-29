@@ -13,6 +13,7 @@ on:
 jobs:
   detect-non-claude-review:
     name: Skip Exact @claude Review Command
+    permissions: {}
     runs-on: ubuntu-latest
     outputs:
       run_claude: ${{ steps.check.outputs.run_claude }}
