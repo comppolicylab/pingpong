@@ -5,6 +5,8 @@ concurrency: release
 on:
   release:
     types: [published, released]
+permissions:
+  contents: read
 jobs:
   release:
     name: Build and Push/Tag Docker Images for Release
