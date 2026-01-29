@@ -175,6 +175,7 @@ async def merge_lms_users(
     )
     await session.execute(stmt)
 
+
 async def merge_lti_users(
     session: AsyncSession, new_user_id: int, old_user_id: int
 ) -> None:
