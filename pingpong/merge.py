@@ -9,9 +9,12 @@ from pingpong.config import config
 from pingpong.authz.base import Relation
 from pingpong.authz.openfga import OpenFgaAuthzClient, ReadRequestTupleKey
 from pingpong.models import (
+    AgreementAcceptance,
     Assistant,
     Class,
     ExternalLogin,
+    LTIClass,
+    MCPServerTool,
     User,
     UserClassRole,
     UserInstitutionRole,
@@ -45,7 +48,12 @@ async def merge_db_operations(
     await merge_institutions(session, new_user_id, old_user_id)
     await merge_assistants(session, new_user_id, old_user_id)
     await merge_threads(session, new_user_id, old_user_id)
+    await merge_agreement_acceptances(session, new_user_id, old_user_id)
+    await merge_mcp_created_by(session, new_user_id, old_user_id)
+    await merge_mcp_updated_by(session, new_user_id, old_user_id)
+    await merge_files(session, new_user_id, old_user_id)
     await merge_lms_users(session, new_user_id, old_user_id)
+    await merge_lti_users(session, new_user_id, old_user_id)
     await merge_external_logins(session, new_user_id, old_user_id)
     await merge_user_files(session, new_user_id, old_user_id)
 
@@ -171,6 +179,71 @@ async def merge_lms_users(
         update(Class)
         .where(Class.lms_user_id == old_user_id)
         .values(lms_user_id=new_user_id)
+    )
+    await session.execute(stmt)
+
+
+async def merge_lti_users(
+    session: AsyncSession, new_user_id: int, old_user_id: int
+) -> None:
+    stmt = (
+        update(LTIClass)
+        .where(LTIClass.setup_user_id == old_user_id)
+        .values(setup_user_id=new_user_id)
+    )
+    await session.execute(stmt)
+
+
+async def merge_agreement_acceptances(
+    session: AsyncSession, new_user_id: int, old_user_id: int
+) -> None:
+    upsert_stmt = text("""
+    INSERT INTO agreement_acceptances (user_id, agreement_id, policy_id, accepted_at)
+    SELECT :new_user_id, agreement_id, policy_id, accepted_at
+    FROM agreement_acceptances
+    WHERE user_id = :old_user_id
+    ON CONFLICT (user_id, agreement_id) DO NOTHING
+    """)
+
+    await session.execute(
+        upsert_stmt, {"new_user_id": new_user_id, "old_user_id": old_user_id}
+    )
+
+    stmt_delete_old_user = delete(AgreementAcceptance).where(
+        AgreementAcceptance.user_id == old_user_id
+    )
+    await session.execute(stmt_delete_old_user)
+
+
+async def merge_files(
+    session: AsyncSession, new_user_id: int, old_user_id: int
+) -> None:
+    stmt = (
+        update(File)
+        .where(File.uploader_id == old_user_id)
+        .values(uploader_id=new_user_id)
+    )
+    await session.execute(stmt)
+
+
+async def merge_mcp_created_by(
+    session: AsyncSession, new_user_id: int, old_user_id: int
+) -> None:
+    stmt = (
+        update(MCPServerTool)
+        .where(MCPServerTool.created_by_user_id == old_user_id)
+        .values(created_by_user_id=new_user_id)
+    )
+    await session.execute(stmt)
+
+
+async def merge_mcp_updated_by(
+    session: AsyncSession, new_user_id: int, old_user_id: int
+) -> None:
+    stmt = (
+        update(MCPServerTool)
+        .where(MCPServerTool.updated_by_user_id == old_user_id)
+        .values(updated_by_user_id=new_user_id)
     )
     await session.execute(stmt)
 
