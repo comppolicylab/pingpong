@@ -197,12 +197,22 @@ async def merge_lti_users(
 async def merge_agreement_acceptances(
     session: AsyncSession, new_user_id: int, old_user_id: int
 ) -> None:
-    stmt = (
-        update(AgreementAcceptance)
-        .where(AgreementAcceptance.user_id == old_user_id)
-        .values(user_id=new_user_id)
+    upsert_stmt = text("""
+    INSERT INTO agreement_acceptances (user_id, agreement_id, policy_id, accepted_at)
+    SELECT :new_user_id, agreement_id, policy_id, accepted_at
+    FROM agreement_acceptances
+    WHERE user_id = :old_user_id
+    ON CONFLICT (user_id, agreement_id) DO NOTHING
+    """)
+
+    await session.execute(
+        upsert_stmt, {"new_user_id": new_user_id, "old_user_id": old_user_id}
     )
-    await session.execute(stmt)
+
+    stmt_delete_old_user = delete(AgreementAcceptance).where(
+        AgreementAcceptance.user_id == old_user_id
+    )
+    await session.execute(stmt_delete_old_user)
 
 
 async def merge_files(
