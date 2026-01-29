@@ -18,6 +18,7 @@ jobs:
         github.event.comment.author_association
       )
     runs-on: ubuntu-latest
+    permissions: {}
     outputs:
       run_review: ${{ steps.check.outputs.run_review }}
     steps:
