@@ -47,6 +47,7 @@ async def merge_db_operations(
     await merge_assistants(session, new_user_id, old_user_id)
     await merge_threads(session, new_user_id, old_user_id)
     await merge_lms_users(session, new_user_id, old_user_id)
+    await merge_lti_users(session, new_user_id, old_user_id)
     await merge_external_logins(session, new_user_id, old_user_id)
     await merge_user_files(session, new_user_id, old_user_id)
 
