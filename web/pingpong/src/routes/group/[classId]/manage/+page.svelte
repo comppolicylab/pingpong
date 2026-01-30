@@ -1509,10 +1509,6 @@
 									this group's user list. In the meantime, students can access your PingPong group
 									by clicking the PingPong link in your course navigation menu.
 								</p>
-								<p class="mt-2">
-									You can remove a Canvas Connect link below to stop your Canvas users from
-									accessing this PingPong group.
-								</p>
 								<div class="mt-3 mb-2 w-full">
 									<div class="grid grid-cols-1 gap-2">
 										{#each ltiLinkedClasses as linkedClass (linkedClass.id)}
