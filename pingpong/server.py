@@ -1831,10 +1831,12 @@ async def get_lti_canvas_classes(class_id: str, request: Request):
     lti_classes_results: list[schemas.LTIClass] = []
 
     for lti_class in lti_classes:
-        lti_class_schema = schemas.LTIClass.model_validate(lti_class)
-        lti_class_schema.client_id = lti_class.registration.client_id
-        lti_class.canvas_account_name = lti_class.registration.canvas_account_name
-        lti_classes_results.append(lti_class_schema)
+        lti_class_from_schema = schemas.LTIClass.model_validate(lti_class)
+        lti_class_from_schema.client_id = lti_class.registration.client_id
+        lti_class_from_schema.canvas_account_name = (
+            lti_class.registration.canvas_account_name
+        )
+        lti_classes_results.append(lti_class_from_schema)
 
     return {"classes": lti_classes_results}
 

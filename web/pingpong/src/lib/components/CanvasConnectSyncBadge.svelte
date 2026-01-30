@@ -28,6 +28,6 @@
 	$: classes = `${baseClasses} ${statusClasses} ${extraClasses}`;
 </script>
 
-<span class={classes} aria-label={`${label} assistant`}>
+<span class={classes} aria-label={label}>
 	{label}
 </span>

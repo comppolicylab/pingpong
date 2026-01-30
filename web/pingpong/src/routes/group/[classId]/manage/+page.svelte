@@ -1516,9 +1516,11 @@
 												class="flex flex-row justify-between gap-1 rounded-xl border border-gray-200 bg-white p-4 shadow-xs"
 											>
 												<div class="flex flex-col gap-1">
-													<div class="font-medium">{linkedClass.course_name}</div>
+													<div class="font-medium">
+														{linkedClass.course_name ?? 'Unknown Course Name'}
+													</div>
 													<div class="text-sm text-gray-600">
-														{linkedClass.course_term}
+														{linkedClass.course_term ?? 'Unknown Term'}
 													</div>
 												</div>
 												<div class="flex shrink-0 flex-row gap-1">

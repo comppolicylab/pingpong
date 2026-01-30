@@ -2912,7 +2912,7 @@ class LTIClass(Base):
             .options(selectinload(LTIClass.registration))
         )
         result = await session.execute(stmt)
-        return [row.LTIClass for row in result]
+        return [row[0] for row in result]
 
 
 class APIKey(Base):

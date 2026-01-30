@@ -1265,9 +1265,9 @@ class LTIClass(BaseModel):
     lti_status: LTIStatus
     lti_platform: LMSPlatform
     registration_id: int
-    course_name: str
-    course_term: str
-    course_id: str
+    course_name: str | None = None
+    course_term: str | None = None
+    course_id: str | None = None
 
     model_config = ConfigDict(
         from_attributes=True,

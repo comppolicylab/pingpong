@@ -3379,14 +3379,14 @@ export type LTIStatus = 'pending' | 'linked' | 'error';
 
 export type LTIClass = {
 	id: number;
+	registration_id: number;
 	lti_status: LTIStatus;
-	lms_platform: LMSPlatform;
-	course_name: string;
-	course_term: string;
+	lti_platform: LMSPlatform;
+	course_name: string | null;
+	course_term: string | null;
 	course_id: string;
 	canvas_account_name?: string | null;
 	client_id?: string | null;
-	registration_id: number;
 };
 
 export type LTIClasses = {
