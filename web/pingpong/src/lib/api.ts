@@ -3505,6 +3505,16 @@ export const removeCanvasConnection = async (
 	return await DELETE<{ keep_users: boolean }, GenericStatus>(f, url, { keep_users: keep });
 };
 
+export const removeLTIConnection = async (
+	f: Fetcher,
+	classId: number,
+	ltiClassId: number,
+	keep: boolean
+) => {
+	const url = `class/${classId}/lti/classes/${ltiClassId}`;
+	return await DELETE<{ keep_users: boolean }, GenericStatus>(f, url, { keep_users: keep });
+};
+
 /**
  * Roles for users in a class.
  */

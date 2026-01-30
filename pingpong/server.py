@@ -1841,6 +1841,41 @@ async def get_lti_canvas_classes(class_id: str, request: Request):
     return {"classes": lti_classes_results}
 
 
+@v1.delete(
+    "/class/{class_id}/lti/classes/{lti_class_id}",
+    dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
+    response_model=schemas.GenericStatus,
+)
+async def delete_lti_class(
+    class_id: str, lti_class_id: str, request: Request, keep_users: bool = True
+):
+    lti_class = await models.LTIClass.get_by_id(request.state.db, int(lti_class_id))
+    if not lti_class:
+        raise HTTPException(status_code=404, detail="LTI class not found")
+
+    if lti_class.class_id != int(class_id):
+        raise HTTPException(
+            status_code=400, detail="LTI class does not belong to the specified class"
+        )
+
+    userIds = await models.LTIClass.remove_lti_sync(
+        request.state.db,
+        lti_class.id,
+        int(class_id),
+        schemas.LMSType(lti_class.lti_platform),
+        keep_users=keep_users,
+    )
+
+    if userIds:
+        await delete_canvas_permissions(request.state.authz, userIds, class_id)
+
+    await models.LTIClass.delete(request.state.db, lti_class.id)
+    logger.info(
+        f"Canvas LTI class {lti_class.id} unlinked from PingPong group {class_id} by user {request.state.session.user.id}."
+    )
+    return {"status": "ok"}
+
+
 @v1.get(
     "/class/{class_id}/lms/canvas/{tenant}/link",
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
