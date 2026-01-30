@@ -749,7 +749,6 @@
 		const result = await api.removeLTIConnection(fetch, data.class.id, ltiClassId, keep);
 		const response = api.expandResponse(result);
 		if (response.error) {
-			invalidateAll();
 			sadToast(response.error.detail || 'An unknown error occurred', 5000);
 			removingLTIConnection = false;
 		} else {

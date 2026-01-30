@@ -1849,29 +1849,32 @@ async def get_lti_canvas_classes(class_id: str, request: Request):
 async def delete_lti_class(
     class_id: str, lti_class_id: str, request: Request, keep_users: bool = True
 ):
+    class_id_int = int(class_id)
     lti_class = await models.LTIClass.get_by_id(request.state.db, int(lti_class_id))
     if not lti_class:
         raise HTTPException(status_code=404, detail="LTI class not found")
 
-    if lti_class.class_id != int(class_id):
+    if lti_class.class_id != class_id_int:
         raise HTTPException(
             status_code=400, detail="LTI class does not belong to the specified class"
         )
 
-    userIds = await models.LTIClass.remove_lti_sync(
+    user_ids = await models.LTIClass.remove_lti_sync(
         request.state.db,
         lti_class.id,
-        int(class_id),
+        class_id_int,
         schemas.LMSType(lti_class.lti_platform),
         keep_users=keep_users,
     )
 
-    if userIds:
-        await delete_canvas_permissions(request.state.authz, userIds, class_id)
+    if user_ids:
+        await delete_canvas_permissions(
+            request.state.authz, user_ids, str(class_id_int)
+        )
 
     await models.LTIClass.delete(request.state.db, lti_class.id)
     logger.info(
-        f"Canvas LTI class {lti_class.id} unlinked from PingPong group {class_id} by user {request.state.session.user.id}."
+        f"Canvas LTI class {lti_class.id} unlinked from PingPong group {class_id_int} by user {request.state.session.user.id}."
     )
     return {"status": "ok"}
 

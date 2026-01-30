@@ -2948,7 +2948,6 @@ class LTIClass(Base):
 
             for user in users:
                 await session.delete(user)
-            await session.flush()
         else:
             stmt_ = (
                 update(UserClassRole)
@@ -2962,6 +2961,7 @@ class LTIClass(Base):
                 .values(lti_class_id=None, lms_tenant=None, lms_type=None)
             )
             await session.execute(stmt_)
+        await session.flush()
         return user_ids
 
 
