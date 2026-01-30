@@ -3373,6 +3373,31 @@ export const loginWithMagicLink = async (f: Fetcher, email: string, forward: str
 	return response;
 };
 
+export type LMSPlatform = 'canvas';
+
+export type LTIStatus = 'pending' | 'linked' | 'error';
+
+export type LTIClass = {
+	id: number;
+	lti_status: LTIStatus;
+	lms_platform: LMSPlatform;
+	course_name: string;
+	course_term: string;
+	course_id: string;
+	canvas_account_name?: string | null;
+	client_id?: string | null;
+	registration_id: number;
+};
+
+export type LTIClasses = {
+	classes: LTIClass[];
+};
+
+export const loadLTIClasses = async (f: Fetcher, classId: number) => {
+	const url = `class/${classId}/lti/classes`;
+	return await GET<never, LTIClasses>(f, url);
+};
+
 export type LMSType = 'canvas';
 
 export type LMSInstance = {

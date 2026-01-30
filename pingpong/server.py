@@ -1821,6 +1821,25 @@ async def delete_class(class_id: str, request: Request):
 
 
 @v1.get(
+    "/class/{class_id}/lti/classes",
+    dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
+    response_model=schemas.LTIClasses,
+)
+async def get_lti_canvas_classes(class_id: str, request: Request):
+    lti_classes = await models.LTIClass.get_by_class_id(request.state.db, int(class_id))
+
+    lti_classes_results: list[schemas.LTIClass] = []
+
+    for lti_class in lti_classes:
+        lti_class_schema = schemas.LTIClass.model_validate(lti_class)
+        lti_class_schema.client_id = lti_class.registration.client_id
+        lti_class.canvas_account_name = lti_class.registration.canvas_account_name
+        lti_classes_results.append(lti_class_schema)
+
+    return {"classes": lti_classes_results}
+
+
+@v1.get(
     "/class/{class_id}/lms/canvas/{tenant}/link",
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
     response_model=schemas.CanvasRedirect,

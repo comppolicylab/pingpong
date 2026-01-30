@@ -2894,6 +2894,26 @@ class LTIClass(Base):
         result = await session.scalar(stmt)
         return result is not None
 
+    @classmethod
+    async def get_by_class_id(
+        cls, session: AsyncSession, class_id: int
+    ) -> List["LTIClass"]:
+        stmt = (
+            select(LTIClass)
+            .where(
+                and_(
+                    LTIClass.class_id == class_id,
+                    or_(
+                        LTIClass.lti_status == schemas.LTIStatus.LINKED,
+                        LTIClass.lti_status == schemas.LTIStatus.ERROR,
+                    ),
+                )
+            )
+            .options(selectinload(LTIClass.registration))
+        )
+        result = await session.execute(stmt)
+        return [row.LTIClass for row in result]
+
 
 class APIKey(Base):
     __tablename__ = "api_keys"

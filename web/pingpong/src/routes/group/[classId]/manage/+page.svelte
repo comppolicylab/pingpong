@@ -21,10 +21,11 @@
 		InputAddon,
 		Alert,
 		Spinner,
-		CloseButton,
 		Dropdown,
 		DropdownItem,
-		Radio
+		Radio,
+		Accordion,
+		AccordionItem
 	} from 'flowbite-svelte';
 	import BulkAddUsers from '$lib/components/BulkAddUsers.svelte';
 	import CanvasLogo from '$lib/components/CanvasLogo.svelte';
@@ -54,7 +55,8 @@
 		RectangleListOutline,
 		EnvelopeOpenSolid,
 		FileCopyOutline,
-		ChevronSortOutline
+		ChevronSortOutline,
+		QuestionCircleOutline
 	} from 'flowbite-svelte-icons';
 	import { sadToast, happyToast } from '$lib/toast';
 	import { humanSize } from '$lib/size';
@@ -73,6 +75,7 @@
 	import OpenAiLogo from '$lib/components/OpenAILogo.svelte';
 	import DropdownBadge from '$lib/components/DropdownBadge.svelte';
 	import CloneClassModal from '$lib/components/CloneClassModal.svelte';
+	import CanvasConnectSyncBadge from '$lib/components/CanvasConnectSyncBadge.svelte';
 
 	/**
 	 * Application data.
@@ -518,6 +521,7 @@
 	$: classId = data.class.id;
 	$: canvasLinkedClass = data.class.lms_class;
 	$: canvasInstances = data.canvasInstances || [];
+	$: ltiLinkedClasses = data.ltiClasses || [];
 
 	const redirectToCanvas = async (tenantId: string) => {
 		const result = await api.getCanvasLink(fetch, data.class.id, tenantId);
@@ -1485,28 +1489,97 @@
 				<Info>Manage users who have access to this group.</Info>
 			</div>
 			<div class="col-span-2">
+				{#if ltiLinkedClasses.length > 0}
+					<Accordion flush class="mb-2 rounded-lg border-2 border-gray-300 bg-gray-50">
+						<AccordionItem paddingFlush="px-5.5 py-3.5" class="text-gray-800" borderBottomClass="">
+							<div slot="header" class="mr-3 flex grow items-center justify-between gap-3">
+								<div class="flex flex-row items-center gap-3">
+									<CanvasLogo size="5" />
+									<span class="text-lg font-medium">Canvas Connect is active</span>
+								</div>
+								<CanvasConnectSyncBadge
+									type="default"
+									label={`${ltiLinkedClasses.length} linked ${ltiLinkedClasses.length === 1 ? 'class' : 'classes'}`}
+								/>
+							</div>
+							<div class="-mt-4 text-sm text-gray-800">
+								<p>
+									This PingPong group is linked to the following courses through our Canvas Connect
+									LTI 1.3 integration. Soon, PingPong will automatically sync your class roster with
+									this group's user list. In the meantime, students can access your PingPong group
+									by clicking the PingPong link in your course navigation menu.
+								</p>
+								<p class="mt-2">
+									You can remove a Canvas Connect link below to stop your Canvas users from
+									accessing this PingPong group.
+								</p>
+								<div class="mt-3 mb-2 w-full">
+									<div class="grid grid-cols-1 gap-2">
+										{#each ltiLinkedClasses as linkedClass (linkedClass.id)}
+											<div
+												class="flex flex-row justify-between gap-1 rounded-xl border border-gray-200 bg-white p-4 shadow-xs"
+											>
+												<div class="flex flex-col gap-1">
+													<div class="font-medium">{linkedClass.course_name}</div>
+													<div class="text-sm text-gray-600">
+														{linkedClass.course_term}
+													</div>
+												</div>
+												<div class="flex shrink-0 flex-row gap-1">
+													<div
+														class="flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white shadow-xs hover:bg-gray-50"
+													>
+														<QuestionCircleOutline class=" text-gray-600" />
+													</div>
+													<Tooltip
+														defaultClass="flex flex-col text-wrap py-2 px-3 text-xs font-light shadow-xs"
+														arrow={false}
+														><span>Course ID: {linkedClass.course_id}</span>
+														{#if linkedClass.canvas_account_name}<span
+																>Canvas Account: {linkedClass.canvas_account_name}</span
+															>
+														{/if}
+														<span>Client ID: {linkedClass.client_id}</span><span
+															>LTI Registration ID: {linkedClass.registration_id}</span
+														>
+													</Tooltip>
+												</div>
+											</div>
+										{/each}
+									</div>
+								</div>
+							</div>
+						</AccordionItem>
+					</Accordion>
+				{/if}
 				{#if canvasInstances.length > 0}
 					{#if !data.class.lms_status || data.class.lms_status === 'none'}
-						<Alert
-							color="none"
-							class="bg-blue-50 text-blue-900"
-							defaultClass="p-4 gap-3 text-sm border-2 border-blue-200"
-						>
-							<div class="p-1.5">
-								<div class="flex flex-row items-center justify-between">
-									<div class="flex items-center gap-3">
+						<Accordion flush class="mb-2 rounded-lg border-2 border-blue-200 bg-blue-50">
+							<AccordionItem
+								paddingFlush="px-5.5 py-3.5"
+								class="text-blue-900"
+								borderBottomClass=""
+							>
+								<div slot="header" class="mr-3 flex grow items-center justify-between gap-3">
+									<div class="flex flex-row items-center gap-3">
 										<CanvasLogo size="5" />
 										<span class="text-lg font-medium"
 											>Sync your PingPong group's users with Canvas</span
 										>
 									</div>
-									<CloseButton class="hover:bg-blue-200" onclick={dismissCanvasSync} />
 								</div>
-								<p class="mt-2 mb-4 text-sm">
-									If you're teaching a course at a supported institution, link your PingPong group
-									with your Canvas course to automatically sync your course roster with PingPong.
-								</p>
-								<div class="flex gap-1">
+								<div class="-mt-4 mb-4 flex flex-col gap-2 text-sm text-blue-900">
+									<p>
+										If you're teaching a course at a supported institution, link your PingPong group
+										with your Canvas course to automatically sync your course roster with PingPong.
+									</p>
+									<p class="italic">
+										Canvas Sync is being phased out in favor of our new Canvas Connect LTI 1.3
+										integration. If your institution supports Canvas Connect, we recommend using
+										that instead. We will stop supporting Canvas Sync later this year.
+									</p>
+								</div>
+								<div class="flex grow-0 justify-between gap-1">
 									<Button
 										pill
 										size="xs"
@@ -1527,9 +1600,19 @@
 											</DropdownItem>
 										{/each}
 									</Dropdown>
+									<Button
+										pill
+										size="xs"
+										class="border border-blue-dark-40 bg-white px-3 text-blue-dark-40 hover:bg-blue-light-50"
+										onclick={dismissCanvasSync}
+										ontouchstart={dismissCanvasSync}
+										><div class="flex flex-row gap-2">
+											<EyeSlashOutline class="h-4 w-4" />Hide this option
+										</div></Button
+									>
 								</div>
-							</div>
-						</Alert>
+							</AccordionItem>
+						</Accordion>
 					{:else if data.class.lms_status === 'authorized' && data.class.lms_user?.id && data.me.user?.id === data.class.lms_user?.id}
 						<Alert color="yellow" defaultClass="p-4 gap-3 text-sm border-2">
 							<div class="p-1.5">
@@ -1662,21 +1745,29 @@
 							</div>
 						</Alert>
 					{:else if data.class.lms_status === 'authorized'}
-						<Alert color="yellow" defaultClass="p-4 gap-3 text-sm border-2">
-							<div class="p-1.5">
-								<div class="flex items-center gap-3">
-									<CanvasLogo size="5" />
-									<span class="text-lg font-medium">Canvas Sync setup in process</span>
+						<Accordion flush class="mb-2 rounded-lg border-2 border-yellow-300 bg-yellow-50">
+							<AccordionItem
+								paddingFlush="px-5.5 py-3.5"
+								class="text-yellow-800"
+								borderBottomClass=""
+							>
+								<div slot="header" class="mr-3 flex grow items-center justify-between gap-3">
+									<div class="flex flex-row items-center gap-3">
+										<CanvasLogo size="5" />
+										<span class="text-lg font-medium">Canvas Sync setup in process</span>
+									</div>
 								</div>
-								<p class="mt-2 text-sm">
-									{data.class.lms_user?.name || 'Someone in your course'} has linked their Canvas account
-									with this group. Once they have selected a course to sync with this group, PingPong
-									will automatically sync the course's roster.
-								</p>
-								<p class="mt-2 mb-4 text-sm">
-									Need to link your own account? You can disconnect their Canvas account from this
-									PingPong group.
-								</p>
+								<div class="-mt-4 mb-4 text-sm text-yellow-800">
+									<p>
+										{data.class.lms_user?.name || 'Someone in your course'} has linked their Canvas account
+										with this group. Once they have selected a course to sync with this group, PingPong
+										will automatically sync the course's roster.
+									</p>
+									<p class="mt-2 text-sm">
+										Need to link your own account? You can disconnect their Canvas account from this
+										PingPong group.
+									</p>
+								</div>
 								<div class="flex gap-2">
 									<Button
 										pill
@@ -1694,28 +1785,44 @@
 										account</Button
 									>
 								</div>
-							</div>
-						</Alert>
+							</AccordionItem>
+						</Accordion>
 					{:else if data.class.lms_status === 'linked' && data.class.lms_user?.id && data.me.user?.id === data.class.lms_user?.id}
-						<Alert color="green" defaultClass="p-4 gap-3 text-sm border-2">
-							<div class="p-1.5">
-								<div class="flex items-center gap-3">
-									<div class="animate-pulse"><CanvasLogo size="5" /></div>
-									<span class="text-lg font-medium">Canvas Sync is active</span>
+						<Accordion flush class="mb-2 rounded-lg border-2 border-green-300 bg-green-50">
+							<AccordionItem
+								paddingFlush="px-5.5 py-3.5"
+								class="text-green-800"
+								borderBottomClass=""
+							>
+								<div slot="header" class="mr-3 flex grow items-center justify-between gap-3">
+									<div class="flex flex-row items-center gap-3">
+										<CanvasLogo size="5" />
+										<span class="text-lg font-medium">Canvas Sync is active</span>
+									</div>
+									<CanvasConnectSyncBadge
+										type="success"
+										label={`Last sync: ${
+											data.class.lms_last_synced
+												? dayjs.utc(data.class.lms_last_synced).fromNow()
+												: 'never'
+										}`}
+									/>
 								</div>
-								<p class="mt-2 text-sm">
-									This PingPong group is linked to <span class="font-semibold"
-										>{canvasLinkedClass?.course_code}: {canvasLinkedClass?.name}</span
-									>
-									on Canvas. The class roster is automatically synced with this group's user list about
-									once every hour. Use the Sync button below to request an immediate sync. Users are not
-									notified when they get added to this group though Canvas Sync.
-								</p>
-								<p class="mt-2 mb-4 text-sm">
-									Last sync: {data.class.lms_last_synced
-										? dayjs.utc(data.class.lms_last_synced).fromNow()
-										: 'never'}
-								</p>
+								<div class="-mt-4 mb-4 text-sm text-green-800">
+									<p>
+										This PingPong group is linked to <span class="font-semibold"
+											>{canvasLinkedClass?.name}</span
+										>
+										on Canvas through the Canvas API. The class roster is automatically synced with this
+										group's user list about once every hour. Use the Sync button below to request an immediate
+										sync. Users are not notified when they get added to this group though Canvas Sync.
+									</p>
+									<p class="mt-2">
+										Last sync: {data.class.lms_last_synced
+											? dayjs.utc(data.class.lms_last_synced).fromNow()
+											: 'never'}
+									</p>
+								</div>
 								<div class="flex flex-row items-center justify-between">
 									<Button
 										pill
@@ -1777,34 +1884,48 @@
 										</Modal>
 									</Dropdown>
 								</div>
-							</div>
-						</Alert>
+							</AccordionItem>
+						</Accordion>
 					{:else if data.class.lms_status === 'linked'}
-						<Alert color="green" defaultClass="p-4 gap-3 text-sm border-2">
-							<div class="p-1.5">
-								<div class="flex items-center gap-3">
-									<div class="animate-pulse"><CanvasLogo size="5" /></div>
-									<span class="text-lg font-medium">Canvas Sync is active</span>
+						<Accordion flush class="mb-2 rounded-lg border-2 border-green-300 bg-green-50">
+							<AccordionItem
+								paddingFlush="px-5.5 py-3.5"
+								class="text-green-800"
+								borderBottomClass=""
+							>
+								<div slot="header" class="mr-3 flex grow items-center justify-between gap-3">
+									<div class="flex flex-row items-center gap-3">
+										<CanvasLogo size="5" />
+										<span class="text-lg font-medium">Canvas Sync is active</span>
+									</div>
+									<CanvasConnectSyncBadge
+										type="success"
+										label={`Last sync: ${
+											data.class.lms_last_synced
+												? dayjs.utc(data.class.lms_last_synced).fromNow()
+												: 'never'
+										}`}
+									/>
 								</div>
-								<p class="mt-2 text-sm">
-									This PingPong group is linked to <span class="font-semibold"
-										>{canvasLinkedClass?.course_code}: {canvasLinkedClass?.name}</span
-									> on Canvas. The class roster is automatically synced with this group's user list about
-									once every hour.
-								</p>
-								<p class="mt-2 mb-2 text-sm">
-									Last sync: {data.class.lms_last_synced
-										? dayjs.utc(data.class.lms_last_synced).fromNow()
-										: 'never'}
-								</p>
-								<p class="mt-2 mb-4 text-sm">
-									{data.class.lms_user?.name || 'Someone in your course'} has linked their Canvas account
-									with this group. Need to link your own account? You can disconnect their Canvas account
-									from this PingPong group.
-									<span class="font-bold"
-										>This action is irreversible and will delete all imported users from Canvas.</span
-									>
-								</p>
+								<div class="-mt-4 mb-4 text-sm text-green-800">
+									<p>
+										This PingPong group is linked to <span class="font-semibold"
+											>{canvasLinkedClass?.name}</span
+										>
+										on Canvas through the Canvas API. The class roster is automatically synced with this
+										group's user list about once every hour.
+									</p>
+									<p class="mt-2">
+										Last sync: {data.class.lms_last_synced
+											? dayjs.utc(data.class.lms_last_synced).fromNow()
+											: 'never'}
+									</p>
+									<p class="mt-2 text-sm">
+										{data.class.lms_user?.name || 'Someone in your course'} has linked their Canvas account
+										with this group. Need to link your own account? You can disconnect their Canvas account
+										from this PingPong group.
+									</p>
+								</div>
 								<div class="flex gap-2">
 									<Button
 										pill
@@ -1840,8 +1961,8 @@
 										on:remove={() => removeCanvasConnection(false)}
 									/>
 								</Modal>
-							</div>
-						</Alert>
+							</AccordionItem>
+						</Accordion>
 					{:else if data.class.lms_status === 'error' && data.class.lms_user?.id && data.me.user?.id === data.class.lms_user?.id}
 						<Alert color="red" defaultClass="p-4 gap-3 text-sm border-2">
 							<div class="p-1.5">
@@ -1901,7 +2022,7 @@
 								<div class="flex items-center gap-3">
 									<CanvasLogo size="5" />
 									<span class="text-lg font-medium"
-										>Important: Error connecting to Canvas account</span
+										>Important: Error connecting to linked Canvas account</span
 									>
 								</div>
 								<p class="mt-2 text-sm">
@@ -1919,15 +2040,12 @@
 									{data.class.lms_user?.name || 'Someone in your course'} has linked their Canvas account
 									with this group. Need to link your own account? You can disconnect their Canvas account
 									from this PingPong group.
-									<span class="font-bold"
-										>This action is irreversible and will delete all imported users from Canvas.</span
-									>
 								</p>
 								<div class="flex gap-2">
 									<Button
 										pill
 										size="xs"
-										class="border border-green-900 text-green-900 hover:bg-green-900 hover:bg-gradient-to-t hover:from-green-800 hover:to-green-700 hover:text-white"
+										class="border border-red-900 text-red-900 hover:bg-red-900 hover:bg-gradient-to-t hover:from-red-800 hover:to-red-700 hover:text-white"
 										disabled={removingCanvasConnection}
 										onclick={() => (disconnectCanvas = true)}
 										ontouchstart={() => (disconnectCanvas = true)}
@@ -1978,7 +2096,7 @@
 							onclick={enableCanvasSync}
 							ontouchstart={enableCanvasSync}
 							><div class="flex flex-row gap-2">
-								<CanvasLogo size="5" />Sync with Canvas
+								<CanvasLogo size="5" />Set up Canvas Sync
 							</div></Button
 						>
 					{/if}
