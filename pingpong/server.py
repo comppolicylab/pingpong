@@ -2086,10 +2086,14 @@ async def update_canvas_class(
 async def sync_canvas_class(
     class_id: str, tenant: str, request: Request, tasks: BackgroundTasks
 ):
+    class_ = await models.Class.get_by_id(request.state.db, int(class_id))
+    if not class_ or not class_.lms_user_id:
+        raise HTTPException(status_code=404, detail="Canvas class not linked")
     canvas_settings = get_canvas_config(tenant)
     async with ManualCanvasClient(
         canvas_settings,
         int(class_id),
+        class_.lms_user_id,
         request,
         tasks,
     ) as client:
