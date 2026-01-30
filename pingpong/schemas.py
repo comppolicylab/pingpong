@@ -1258,6 +1258,30 @@ class CreateUserClassRoles(BaseModel):
     sso_tenant: str | None = None
 
 
+class LTIClass(BaseModel):
+    id: int
+    canvas_account_name: str | None = None
+    client_id: str | None = None
+    lti_status: LTIStatus
+    lti_platform: LMSPlatform
+    registration_id: int
+    course_name: str | None = None
+    course_term: str | None = None
+    course_id: str | None = None
+
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+
+class LTIClasses(BaseModel):
+    classes: list[LTIClass]
+
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+
 class LMSClass(BaseModel):
     lms_id: int
     lms_type: LMSType

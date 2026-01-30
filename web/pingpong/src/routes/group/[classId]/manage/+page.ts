@@ -7,7 +7,7 @@ import type { PageLoad } from './$types';
  */
 export const load = async ({ fetch, params }: Parameters<PageLoad>[0]) => {
 	const classId = parseInt(params.classId, 10);
-	const [classDataResponse, grants, canvasInstances] = await Promise.all([
+	const [classDataResponse, grants, canvasInstances, ltiClasses] = await Promise.all([
 		// Even though we `getClass` at the parent layout, we need to do it again here since we might have an updated lastRateLimitedAt value.
 		api.getClass(fetch, classId).then(api.expandResponse),
 		api.grants(fetch, {
@@ -47,7 +47,8 @@ export const load = async ({ fetch, params }: Parameters<PageLoad>[0]) => {
 				relation: 'can_receive_summaries'
 			}
 		}),
-		api.loadLMSInstances(fetch, classId, 'canvas').then(api.expandResponse)
+		api.loadLMSInstances(fetch, classId, 'canvas').then(api.expandResponse),
+		api.loadLTIClasses(fetch, classId).then(api.expandResponse)
 	]);
 
 	if (classDataResponse.error) {
@@ -57,7 +58,9 @@ export const load = async ({ fetch, params }: Parameters<PageLoad>[0]) => {
 	if (canvasInstances.error) {
 		error(canvasInstances.$status, canvasInstances.error.detail || 'Error loading LMS instances');
 	}
-
+	if (ltiClasses.error) {
+		error(ltiClasses.$status, ltiClasses.error.detail || 'Error loading LTI classes');
+	}
 	let api_key: api.ApiKey | undefined;
 	if (grants.canViewApiKey) {
 		const apiKeyResponse = api.expandResponse(await api.getApiKey(fetch, classId));
@@ -86,6 +89,7 @@ export const load = async ({ fetch, params }: Parameters<PageLoad>[0]) => {
 		grants,
 		class: classDataResponse.data,
 		subscription: subscription,
-		canvasInstances: canvasInstances.data.instances
+		canvasInstances: canvasInstances.data.instances,
+		ltiClasses: ltiClasses.data.classes
 	};
 };
