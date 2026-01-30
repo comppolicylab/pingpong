@@ -792,6 +792,7 @@ class ManualCanvasClient(CanvasCourseClient):
         self,
         canvas_backend_config: CanvasSettings,
         class_id: int,
+        user_id: int,
         request: Request,
         tasks: BackgroundTasks,
         nowfn: NowFn = utcnow,
@@ -800,7 +801,7 @@ class ManualCanvasClient(CanvasCourseClient):
             canvas_backend_config,
             request.state.db,
             class_id,
-            request.state.session.user.id,
+            user_id,
             nowfn=nowfn,
         )
         self.request = request
@@ -823,7 +824,7 @@ class ManualCanvasClient(CanvasCourseClient):
     async def _update_user_roles(self):
         """Update the user roles for the class."""
         await AddNewUsersManual(
-            str(self.class_id), self.new_ucr, self.request, self.tasks
+            str(self.class_id), self.new_ucr, self.request, self.tasks, self.user_id
         ).add_new_users()
 
     def _raise_sync_error_if_manual(self):
