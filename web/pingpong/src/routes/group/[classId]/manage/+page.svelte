@@ -56,7 +56,8 @@
 		EnvelopeOpenSolid,
 		FileCopyOutline,
 		ChevronSortOutline,
-		QuestionCircleOutline
+		QuestionCircleOutline,
+		LinkBreakOutline
 	} from 'flowbite-svelte-icons';
 	import { sadToast, happyToast } from '$lib/toast';
 	import { humanSize } from '$lib/size';
@@ -734,6 +735,27 @@
 			invalidateAll();
 			timesAdded++;
 			happyToast('Canvas class connection removed successfully!');
+		}
+	};
+
+	let disconnectLTIModalState: Record<number, boolean> = {};
+	const openDisconnectLTIModal = (ltiClassId: number) => {
+		disconnectLTIModalState = { ...disconnectLTIModalState, [ltiClassId]: true };
+	};
+
+	let removingLTIConnection = false;
+	const removeLTIClassLink = async (ltiClassId: number, keep: boolean) => {
+		removingLTIConnection = true;
+		const result = await api.removeLTIConnection(fetch, data.class.id, ltiClassId, keep);
+		const response = api.expandResponse(result);
+		if (response.error) {
+			sadToast(response.error.detail || 'An unknown error occurred', 5000);
+			removingLTIConnection = false;
+		} else {
+			invalidateAll();
+			timesAdded++;
+			happyToast('LTI class connection removed successfully!');
+			removingLTIConnection = false;
 		}
 	};
 
@@ -1530,7 +1552,7 @@
 														<QuestionCircleOutline class=" text-gray-600" />
 													</div>
 													<Tooltip
-														defaultClass="flex flex-col text-wrap py-2 px-3 text-xs font-light shadow-xs"
+														defaultClass="flex flex-col text-wrap py-2 px-3 text-xs font-light"
 														arrow={false}
 														><span>Course ID: {linkedClass.course_id}</span>
 														{#if linkedClass.canvas_account_name}<span
@@ -1541,6 +1563,30 @@
 															>LTI Registration ID: {linkedClass.registration_id}</span
 														>
 													</Tooltip>
+													<button
+														onclick={() => openDisconnectLTIModal(linkedClass.id)}
+														ontouchstart={() => openDisconnectLTIModal(linkedClass.id)}
+														disabled={removingLTIConnection}
+														class="flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white shadow-xs hover:bg-gray-50"
+													>
+														<LinkBreakOutline class=" text-red-600" />
+													</button>
+													<Tooltip
+														defaultClass="text-wrap py-2 px-3 text-xs font-light "
+														arrow={false}>Remove connection</Tooltip
+													>
+													<Modal
+														bind:open={disconnectLTIModalState[linkedClass.id]}
+														size="sm"
+														autoclose
+													>
+														<CanvasDisconnectModal
+															canvasCourseCode={linkedClass.course_name || ''}
+															introPhrase="While Canvas Connect was active, your Canvas users were imported when they launched PingPong from your Canvas course."
+															on:keep={() => removeLTIClassLink(linkedClass.id, true)}
+															on:remove={() => removeLTIClassLink(linkedClass.id, false)}
+														/>
+													</Modal>
 												</div>
 											</div>
 										{/each}

@@ -6,6 +6,8 @@
 	export let canvasCourseCode: string = '';
 	export let leftAction: string = 'Keep imported users';
 	export let rightAction: string = 'Remove imported users';
+	export let introPhrase: string =
+		'While Canvas Sync was active, PingPong imported all users in your Canvas roster.';
 
 	// Custom events
 	const dispatch = createEventDispatcher();
@@ -17,8 +19,8 @@
 		Remove imported users from {canvasCourseCode || 'Canvas'}?
 	</h3>
 	<h4 class="mb-5 text-sm font-normal text-black">
-		While Canvas Sync was active, PingPong imported all users in your Canvas roster. If you keep
-		imported users, you can edit their roles or remove their access to this group at any time.
+		{introPhrase} If you keep imported users, you can edit their roles or remove their access to this
+		group at any time.
 	</h4>
 	<div class="flex flex-row justify-center gap-2">
 		<Button pill color="alternative" onclick={() => dispatch('keep')}>{leftAction}</Button>

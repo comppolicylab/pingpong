@@ -2914,6 +2914,56 @@ class LTIClass(Base):
         result = await session.execute(stmt)
         return [row[0] for row in result]
 
+    @classmethod
+    async def get_by_id(cls, session: AsyncSession, id_: int) -> "LTIClass | None":
+        stmt = select(LTIClass).where(LTIClass.id == int(id_))
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def delete(cls, session: AsyncSession, id_: int) -> None:
+        stmt = delete(LTIClass).where(LTIClass.id == int(id_))
+        await session.execute(stmt)
+
+    @classmethod
+    async def remove_lti_sync(
+        cls,
+        session: AsyncSession,
+        lti_class_id: int,
+        class_id: int,
+        lms_type: schemas.LMSType,
+        keep_users: bool = True,
+    ) -> list[int]:
+        user_ids = []
+        if not keep_users:
+            stmt_ = select(UserClassRole).where(
+                and_(
+                    UserClassRole.lti_class_id == lti_class_id,
+                    UserClassRole.class_id == class_id,
+                    UserClassRole.lms_type == lms_type,
+                )
+            )
+            result = await session.execute(stmt_)
+            users = result.scalars().all()
+            user_ids = [user.user_id for user in users]
+
+            for user in users:
+                await session.delete(user)
+        else:
+            stmt_ = (
+                update(UserClassRole)
+                .where(
+                    and_(
+                        UserClassRole.lti_class_id == lti_class_id,
+                        UserClassRole.class_id == class_id,
+                        UserClassRole.lms_type == lms_type,
+                    )
+                )
+                .values(lti_class_id=None, lms_tenant=None, lms_type=None)
+            )
+            await session.execute(stmt_)
+        await session.flush()
+        return user_ids
+
 
 class APIKey(Base):
     __tablename__ = "api_keys"
