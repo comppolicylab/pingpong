@@ -40,6 +40,7 @@ BRANCH_NAME="$1"
 WORKTREE_NAME="$1"
 WORKTREE_ROOT="../pingpong-worktrees"
 WORKTREE_PATH="${WORKTREE_ROOT}/${WORKTREE_NAME}"
+PORTS_FILE="${WORKTREE_ROOT}/.worktree-ports.json"
 
 sanitize_db_suffix() {
   local raw="$1"
@@ -120,6 +121,7 @@ CREATED_AUTHZ_STORE=false
 CREATED_AUTHZ_STORE_ID=""
 CREATED_WORKTREE=false
 CREATED_BRANCH=false
+CREATED_PORTS=false
 
 cleanup_on_failure() {
   local exit_code=$?
@@ -150,6 +152,19 @@ cleanup_on_failure() {
   if [[ "${CREATED_DB}" == "true" ]]; then
     echo "Removing database ${DB_NAME}..." >&2
     docker exec pingpong-db psql -Upingpong -c "DROP DATABASE IF EXISTS ${DB_NAME};" 2>/dev/null || true
+  fi
+
+  if [[ "${CREATED_PORTS}" == "true" ]]; then
+    if [[ -f "${PORTS_FILE}" ]]; then
+      if acquire_ports_lock; then
+        tmp_ports="$(mktemp)"
+        jq --arg name "${WORKTREE_NAME}" 'del(.[$name])' "${PORTS_FILE}" > "${tmp_ports}" \
+          && mv "${tmp_ports}" "${PORTS_FILE}" || rm -f "${tmp_ports}"
+        release_ports_lock
+      else
+        echo "WARNING: Could not acquire port lock during cleanup; skipping port reservation cleanup." >&2
+      fi
+    fi
   fi
 
   echo "Cleanup complete." >&2
@@ -470,6 +485,118 @@ copy_if_exists ".claude/"
 copy_if_exists "config.dev.toml"
 copy_if_exists "config.local.toml"
 
+ensure_ports_file() {
+  mkdir -p "${WORKTREE_ROOT}"
+  if [[ ! -f "${PORTS_FILE}" ]]; then
+    echo '{}' > "${PORTS_FILE}"
+  fi
+}
+
+# Lockfile for port reservation to prevent race conditions
+PORTS_LOCKFILE="${WORKTREE_ROOT}/.worktree-ports.lock"
+
+acquire_ports_lock() {
+  mkdir -p "${WORKTREE_ROOT}"
+  # Use flock if available, otherwise fall back to mkdir-based locking
+  if command -v flock >/dev/null 2>&1; then
+    exec 9>"${PORTS_LOCKFILE}"
+    if ! flock -w 30 9; then
+      echo "ERROR: Could not acquire port reservation lock after 30 seconds." >&2
+      echo "Another create-worktree.sh may be running. If not, remove ${PORTS_LOCKFILE}" >&2
+      return 1
+    fi
+  else
+    # Fallback: mkdir-based locking (atomic on POSIX)
+    local max_attempts=60
+    local attempt=0
+    while ! mkdir "${PORTS_LOCKFILE}.d" 2>/dev/null; do
+      attempt=$((attempt + 1))
+      if (( attempt >= max_attempts )); then
+        echo "ERROR: Could not acquire port reservation lock after 30 seconds." >&2
+        echo "Another create-worktree.sh may be running. If not, remove ${PORTS_LOCKFILE}.d" >&2
+        return 1
+      fi
+      sleep 0.5
+    done
+    # Store PID for debugging
+    echo $$ > "${PORTS_LOCKFILE}.d/pid"
+  fi
+}
+
+release_ports_lock() {
+  if command -v flock >/dev/null 2>&1; then
+    # flock is released automatically when fd 9 is closed
+    exec 9>&-
+  else
+    rm -rf "${PORTS_LOCKFILE}.d" 2>/dev/null || true
+  fi
+}
+
+# Clean up stale port reservations for non-existent worktrees
+cleanup_stale_reservations() {
+  ensure_ports_file
+  if [[ ! -f "${PORTS_FILE}" ]]; then
+    return 0
+  fi
+
+  local tmp_ports stale_count=0
+  local worktrees
+  worktrees=$(jq -r 'keys[]' "${PORTS_FILE}" 2>/dev/null) || return 0
+
+  for worktree in ${worktrees}; do
+    local worktree_path="${WORKTREE_ROOT}/${worktree}"
+    if [[ ! -d "${worktree_path}" ]]; then
+      # Verify it's not a valid git worktree elsewhere
+      if ! git worktree list --porcelain 2>/dev/null | grep -q "worktree.*/${worktree}\$"; then
+        echo "Removing stale port reservation for non-existent worktree: ${worktree}" >&2
+        tmp_ports="$(mktemp)"
+        if jq --arg name "${worktree}" 'del(.[$name])' "${PORTS_FILE}" > "${tmp_ports}"; then
+          mv "${tmp_ports}" "${PORTS_FILE}"
+          stale_count=$((stale_count + 1))
+        else
+          rm -f "${tmp_ports}"
+        fi
+      fi
+    fi
+  done
+
+  if (( stale_count > 0 )); then
+    echo "Cleaned up ${stale_count} stale port reservation(s)." >&2
+  fi
+}
+
+is_port_reserved() {
+  local port="$1"
+  if [[ ! -f "${PORTS_FILE}" ]]; then
+    return 1
+  fi
+
+  jq -e --argjson port "${port}" \
+    'to_entries[] | .value | select(.server == $port or .frontend == $port)' \
+    "${PORTS_FILE}" >/dev/null 2>&1
+}
+
+reserve_ports() {
+  local worktree="$1"
+  local server="$2"
+  local frontend="$3"
+  local tmp_ports
+
+  ensure_ports_file
+  tmp_ports="$(mktemp)"
+  if jq --arg name "${worktree}" \
+       --argjson server "${server}" \
+       --argjson frontend "${frontend}" \
+       '. + {($name): {server: $server, frontend: $frontend, updated_at: (now | todateiso8601)}}' \
+       "${PORTS_FILE}" > "${tmp_ports}"; then
+    if mv "${tmp_ports}" "${PORTS_FILE}"; then
+      return 0
+    fi
+  fi
+  rm -f "${tmp_ports}"
+  return 1
+}
+
 is_port_in_use() {
   local port="$1"
 
@@ -497,7 +624,7 @@ find_next_available_port() {
   local port=$((start_port + 1))
 
   while true; do
-    if ! is_port_in_use "${port}"; then
+    if ! is_port_in_use "${port}" && ! is_port_reserved "${port}"; then
       echo "${port}"
       return 0
     fi
@@ -505,11 +632,42 @@ find_next_available_port() {
   done
 }
 
+# Acquire lock before port operations to prevent race conditions
+echo "Acquiring port reservation lock..."
+if ! acquire_ports_lock; then
+  exit 1
+fi
+
+# Ensure lock is released on exit (add to existing trap)
+release_lock_on_exit() {
+  release_ports_lock
+}
+trap 'release_lock_on_exit; cleanup_on_failure' EXIT
+
+# Clean up stale reservations from crashed/killed runs
+cleanup_stale_reservations
+
+ensure_ports_file
+if jq -e --arg name "${WORKTREE_NAME}" 'has($name)' "${PORTS_FILE}" >/dev/null 2>&1; then
+  echo "ERROR: Port reservation for ${WORKTREE_NAME} already exists in ${PORTS_FILE}." >&2
+  echo "Run ./remove-worktree.sh ${WORKTREE_NAME} or remove the entry manually." >&2
+  exit 1
+fi
+
 SERVER_PORT="$(find_next_available_port 8001)"
 FRONTEND_PORT="$(find_next_available_port 5174)"
 
 export SERVER_PORT
 export FRONTEND_PORT
+
+if ! reserve_ports "${WORKTREE_NAME}" "${SERVER_PORT}" "${FRONTEND_PORT}"; then
+  echo "ERROR: Failed to reserve ports for ${WORKTREE_NAME}." >&2
+  exit 1
+fi
+CREATED_PORTS=true
+
+# Release lock now that ports are reserved
+release_ports_lock
 
 # Portable sed in-place: macOS requires -i '', GNU sed requires -i without argument
 sed_inplace() {
