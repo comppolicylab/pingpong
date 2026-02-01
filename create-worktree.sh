@@ -374,8 +374,8 @@ find_next_available_port() {
   done
 }
 
-SERVER_PORT="$(find_next_available_port 8000)"
-FRONTEND_PORT="$(find_next_available_port 5173)"
+SERVER_PORT="$(find_next_available_port 8001)"
+FRONTEND_PORT="$(find_next_available_port 5174)"
 
 export SERVER_PORT
 export FRONTEND_PORT
