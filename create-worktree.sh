@@ -71,8 +71,48 @@ sanitize_db_suffix() {
 DB_SUFFIX="$(sanitize_db_suffix "${BRANCH_NAME}")"
 DB_NAME="pingpong_${DB_SUFFIX}"
 AUTHZ_STORE_NAME="pingpong_${DB_SUFFIX}"
-AUTHZ_API="https://localhost:8080"
-AUTHZ_TOKEN="devkey"
+
+# Parse authz settings from config file
+CONFIG_FILE="${CONFIG_FILE:-config.local.toml}"
+if [[ ! -f "${CONFIG_FILE}" ]]; then
+  echo "ERROR: Config file not found: ${CONFIG_FILE}" >&2
+  exit 1
+fi
+
+# Extract values from [authz] section of TOML config
+get_toml_value() {
+  local file="$1"
+  local section="$2"
+  local key="$3"
+  local default="$4"
+  # Find section, then extract key value (handles quotes)
+  awk -v section="[$section]" -v key="$key" '
+    $0 == section { in_section=1; next }
+    /^\[/ { in_section=0 }
+    in_section && $1 == key && $2 == "=" {
+      val=$3
+      for(i=4;i<=NF;i++) val=val" "$i
+      gsub(/^["'\'']|["'\'']$/, "", val)
+      print val
+      exit
+    }
+  ' "$file" || echo "$default"
+}
+
+AUTHZ_SCHEME="$(get_toml_value "${CONFIG_FILE}" "authz" "scheme" "https")"
+AUTHZ_HOST="$(get_toml_value "${CONFIG_FILE}" "authz" "host" "localhost")"
+AUTHZ_TOKEN="$(get_toml_value "${CONFIG_FILE}" "authz" "key" "devkey")"
+
+# Get authz port from docker-compose.yml (first port in authz service ports mapping)
+DOCKER_COMPOSE_FILE="${DOCKER_COMPOSE_FILE:-docker-compose.yml}"
+if [[ -f "${DOCKER_COMPOSE_FILE}" ]]; then
+  AUTHZ_PORT="$(awk '/^  authz:/,/^  [a-z]/' "${DOCKER_COMPOSE_FILE}" | grep -E '^\s+ports:' | grep -oE '"[0-9]+:' | head -1 | tr -d '":' || echo "8080")"
+  [[ -z "${AUTHZ_PORT}" ]] && AUTHZ_PORT="8080"
+else
+  echo "WARNING: Docker compose file not found: ${DOCKER_COMPOSE_FILE}. Using default authz port 8080." >&2
+  AUTHZ_PORT="8080"
+fi
+AUTHZ_API="${AUTHZ_SCHEME}://${AUTHZ_HOST}:${AUTHZ_PORT}"
 
 # Track created resources for cleanup on failure
 CREATED_DB=false
