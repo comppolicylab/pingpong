@@ -23,6 +23,7 @@ fi
 WORKTREE_NAME="$1"
 WORKTREE_ROOT="../pingpong-worktrees"
 WORKTREE_PATH="${WORKTREE_ROOT}/${WORKTREE_NAME}"
+PORTS_FILE="${WORKTREE_ROOT}/.worktree-ports.json"
 
 sanitize_db_suffix() {
   local raw="$1"
@@ -179,3 +180,14 @@ fi
 
 echo ""
 echo "Cleanup complete for ${WORKTREE_NAME}"
+
+if [[ -f "${PORTS_FILE}" ]]; then
+  tmp_ports="$(mktemp)"
+  if jq --arg name "${WORKTREE_NAME}" 'del(.[$name])' "${PORTS_FILE}" > "${tmp_ports}"; then
+    mv "${tmp_ports}" "${PORTS_FILE}"
+    echo "Released reserved ports for ${WORKTREE_NAME}."
+  else
+    rm -f "${tmp_ports}"
+    echo "Warning: Failed to update ${PORTS_FILE} when releasing ports." >&2
+  fi
+fi

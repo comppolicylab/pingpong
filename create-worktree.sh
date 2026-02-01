@@ -40,6 +40,7 @@ BRANCH_NAME="$1"
 WORKTREE_NAME="$1"
 WORKTREE_ROOT="../pingpong-worktrees"
 WORKTREE_PATH="${WORKTREE_ROOT}/${WORKTREE_NAME}"
+PORTS_FILE="${WORKTREE_ROOT}/.worktree-ports.json"
 
 sanitize_db_suffix() {
   local raw="$1"
@@ -120,6 +121,7 @@ CREATED_AUTHZ_STORE=false
 CREATED_AUTHZ_STORE_ID=""
 CREATED_WORKTREE=false
 CREATED_BRANCH=false
+CREATED_PORTS=false
 
 cleanup_on_failure() {
   local exit_code=$?
@@ -150,6 +152,14 @@ cleanup_on_failure() {
   if [[ "${CREATED_DB}" == "true" ]]; then
     echo "Removing database ${DB_NAME}..." >&2
     docker exec pingpong-db psql -Upingpong -c "DROP DATABASE IF EXISTS ${DB_NAME};" 2>/dev/null || true
+  fi
+
+  if [[ "${CREATED_PORTS}" == "true" ]]; then
+    if [[ -f "${PORTS_FILE}" ]]; then
+      tmp_ports="$(mktemp)"
+      jq --arg name "${WORKTREE_NAME}" 'del(.[$name])' "${PORTS_FILE}" > "${tmp_ports}" \
+        && mv "${tmp_ports}" "${PORTS_FILE}" || rm -f "${tmp_ports}"
+    fi
   fi
 
   echo "Cleanup complete." >&2
@@ -470,6 +480,47 @@ copy_if_exists ".claude/"
 copy_if_exists "config.dev.toml"
 copy_if_exists "config.local.toml"
 
+ensure_ports_file() {
+  mkdir -p "${WORKTREE_ROOT}"
+  if [[ ! -f "${PORTS_FILE}" ]]; then
+    echo '{}' > "${PORTS_FILE}"
+  fi
+}
+
+is_port_reserved() {
+  local port="$1"
+  if [[ ! -f "${PORTS_FILE}" ]]; then
+    return 1
+  fi
+
+  jq -e --argjson port "${port}" \
+    'to_entries[] | .value | select(.server == $port or .frontend == $port)' \
+    "${PORTS_FILE}" >/dev/null 2>&1
+}
+
+reserve_ports() {
+  local worktree="$1"
+  local server="$2"
+  local frontend="$3"
+  local tmp_ports
+
+  ensure_ports_file
+  tmp_ports="$(mktemp)"
+  jq --arg name "${worktree}" \
+     --argjson server "${server}" \
+     --argjson frontend "${frontend}" \
+     '. + {($name): {server: $server, frontend: $frontend, updated_at: (now | todateiso8601)}}' \
+     "${PORTS_FILE}" > "${tmp_ports}" \
+    && mv "${tmp_ports}" "${PORTS_FILE}" || rm -f "${tmp_ports}"
+}
+
+ensure_ports_file
+if jq -e --arg name "${WORKTREE_NAME}" 'has($name)' "${PORTS_FILE}" >/dev/null 2>&1; then
+  echo "ERROR: Port reservation for ${WORKTREE_NAME} already exists in ${PORTS_FILE}." >&2
+  echo "Run ./remove-worktree.sh ${WORKTREE_NAME} or remove the entry manually." >&2
+  exit 1
+fi
+
 is_port_in_use() {
   local port="$1"
 
@@ -497,7 +548,7 @@ find_next_available_port() {
   local port=$((start_port + 1))
 
   while true; do
-    if ! is_port_in_use "${port}"; then
+    if ! is_port_in_use "${port}" && ! is_port_reserved "${port}"; then
       echo "${port}"
       return 0
     fi
@@ -510,6 +561,9 @@ FRONTEND_PORT="$(find_next_available_port 5174)"
 
 export SERVER_PORT
 export FRONTEND_PORT
+
+reserve_ports "${WORKTREE_NAME}" "${SERVER_PORT}" "${FRONTEND_PORT}"
+CREATED_PORTS=true
 
 # Portable sed in-place: macOS requires -i '', GNU sed requires -i without argument
 sed_inplace() {
