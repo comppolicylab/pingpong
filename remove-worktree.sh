@@ -7,6 +7,19 @@ if [[ -z "${1:-}" ]]; then
   exit 1
 fi
 
+# Validate worktree name: allow alphanumeric, hyphens, underscores, and slashes for nested branches
+if [[ ! "$1" =~ ^[a-zA-Z0-9][a-zA-Z0-9_/-]*$ ]]; then
+  echo "ERROR: Invalid worktree name '$1'" >&2
+  echo "Names must start with alphanumeric and contain only letters, numbers, hyphens, underscores, or slashes." >&2
+  exit 1
+fi
+
+# Reject path traversal attempts and consecutive slashes
+if [[ "$1" == *".."* ]] || [[ "$1" == *"//"* ]] || [[ "$1" == */ ]]; then
+  echo "ERROR: Invalid worktree name '$1' (contains '..' or invalid slashes)" >&2
+  exit 1
+fi
+
 WORKTREE_NAME="$1"
 WORKTREE_ROOT="../pingpong-worktrees"
 WORKTREE_PATH="${WORKTREE_ROOT}/${WORKTREE_NAME}"
@@ -50,7 +63,7 @@ authz_api() {
 
 get_store_id_by_name() {
   local name="$1"
-  authz_api "${AUTHZ_API}/stores" | sed 's/ //g' | grep -o '"id":"[^"]*","name":"'"${name}"'"' | sed 's/.*"id":"\([^"]*\)".*/\1/'
+  authz_api "${AUTHZ_API}/stores" | jq -r --arg name "${name}" '.stores[] | select(.name == $name) | .id'
 }
 
 echo "Removing worktree: ${WORKTREE_NAME}"

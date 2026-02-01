@@ -2,8 +2,37 @@
 
 set -e
 
+# Preflight checks for required tools
+REQUIRED_TOOLS=(curl docker git jq pnpm poetry python)
+MISSING_TOOLS=()
+
+for tool in "${REQUIRED_TOOLS[@]}"; do
+  if ! command -v "${tool}" >/dev/null 2>&1; then
+    MISSING_TOOLS+=("${tool}")
+  fi
+done
+
+if [[ ${#MISSING_TOOLS[@]} -gt 0 ]]; then
+  echo "ERROR: Required tools not found: ${MISSING_TOOLS[*]}" >&2
+  echo "Please install the missing tools and try again." >&2
+  exit 1
+fi
+
 if [[ -z "${1:-}" ]]; then
   echo "Usage: $0 <branch-and-worktree-name>" >&2
+  exit 1
+fi
+
+# Validate worktree name: allow alphanumeric, hyphens, underscores, and slashes for nested branches
+if [[ ! "$1" =~ ^[a-zA-Z0-9][a-zA-Z0-9_/-]*$ ]]; then
+  echo "ERROR: Invalid worktree name '$1'" >&2
+  echo "Names must start with alphanumeric and contain only letters, numbers, hyphens, underscores, or slashes." >&2
+  exit 1
+fi
+
+# Reject path traversal attempts and consecutive slashes
+if [[ "$1" == *".."* ]] || [[ "$1" == *"//"* ]] || [[ "$1" == */ ]]; then
+  echo "ERROR: Invalid worktree name '$1' (contains '..' or invalid slashes)" >&2
   exit 1
 fi
 
@@ -45,13 +74,57 @@ AUTHZ_STORE_NAME="pingpong_${DB_SUFFIX}"
 AUTHZ_API="https://localhost:8080"
 AUTHZ_TOKEN="devkey"
 
+# Track created resources for cleanup on failure
+CREATED_DB=false
+CREATED_AUTHZ_STORE=false
+CREATED_AUTHZ_STORE_ID=""
+CREATED_WORKTREE=false
+CREATED_BRANCH=false
+
+cleanup_on_failure() {
+  local exit_code=$?
+  if [[ ${exit_code} -eq 0 ]]; then
+    return 0
+  fi
+
+  echo "" >&2
+  echo "ERROR: Script failed. Cleaning up partially created resources..." >&2
+
+  # Clean up in reverse order of creation
+  if [[ "${CREATED_WORKTREE}" == "true" ]]; then
+    echo "Removing worktree ${WORKTREE_PATH}..." >&2
+    git worktree remove --force "${WORKTREE_PATH}" 2>/dev/null || rm -rf "${WORKTREE_PATH}"
+    git worktree prune 2>/dev/null || true
+  fi
+
+  if [[ "${CREATED_BRANCH}" == "true" ]]; then
+    echo "Removing branch ${BRANCH_NAME}..." >&2
+    git branch -D "${BRANCH_NAME}" 2>/dev/null || true
+  fi
+
+  if [[ "${CREATED_AUTHZ_STORE}" == "true" && -n "${CREATED_AUTHZ_STORE_ID}" ]]; then
+    echo "Removing authz store ${AUTHZ_STORE_NAME}..." >&2
+    curl -sk -X DELETE -H "Authorization: Bearer ${AUTHZ_TOKEN}" "${AUTHZ_API}/stores/${CREATED_AUTHZ_STORE_ID}" 2>/dev/null || true
+  fi
+
+  if [[ "${CREATED_DB}" == "true" ]]; then
+    echo "Removing database ${DB_NAME}..." >&2
+    docker exec pingpong-db psql -Upingpong -c "DROP DATABASE IF EXISTS ${DB_NAME};" 2>/dev/null || true
+  fi
+
+  echo "Cleanup complete." >&2
+  exit ${exit_code}
+}
+
+trap cleanup_on_failure EXIT
+
 authz_api() {
   curl -sk -H "Authorization: Bearer ${AUTHZ_TOKEN}" "$@"
 }
 
 get_store_id_by_name() {
   local name="$1"
-  authz_api "${AUTHZ_API}/stores" | sed 's/ //g' | grep -o '"id":"[^"]*","name":"'"${name}"'"' | sed 's/.*"id":"\([^"]*\)".*/\1/'
+  authz_api "${AUTHZ_API}/stores" | jq -r --arg name "${name}" '.stores[] | select(.name == $name) | .id'
 }
 
 ensure_container_running() {
@@ -127,7 +200,20 @@ fi
 
 echo "Cloning database pingpong -> ${DB_NAME}..."
 docker exec pingpong-db psql -Upingpong -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'pingpong' AND pid <> pg_backend_pid();"
-docker exec pingpong-db psql -Upingpong -c "CREATE DATABASE ${DB_NAME} WITH TEMPLATE pingpong;"
+
+# Wait for connections to fully terminate before cloning
+clone_attempt=0
+max_clone_attempts=10
+while ! docker exec pingpong-db psql -Upingpong -c "CREATE DATABASE ${DB_NAME} WITH TEMPLATE pingpong;" 2>/dev/null; do
+  clone_attempt=$((clone_attempt + 1))
+  if (( clone_attempt >= max_clone_attempts )); then
+    echo "ERROR: Failed to clone database after ${max_clone_attempts} attempts." >&2
+    exit 1
+  fi
+  echo "Waiting for connections to close (attempt ${clone_attempt}/${max_clone_attempts})..."
+  sleep 0.5
+done
+CREATED_DB=true
 
 ensure_container_running "pingpong-authz"
 wait_for_authz_ready
@@ -154,6 +240,8 @@ if [[ -z "${NEW_STORE_ID}" ]]; then
   echo "ERROR: Failed to create authz store ${AUTHZ_STORE_NAME}." >&2
   exit 1
 fi
+CREATED_AUTHZ_STORE=true
+CREATED_AUTHZ_STORE_ID="${NEW_STORE_ID}"
 
 echo "Cloning authz store pingpong -> ${AUTHZ_STORE_NAME}..."
 
@@ -314,8 +402,11 @@ mkdir -p "${WORKTREE_ROOT}"
 
 if git show-ref --verify --quiet "refs/heads/${BRANCH_NAME}"; then
   git worktree add "${WORKTREE_PATH}" "${BRANCH_NAME}"
+  CREATED_WORKTREE=true
 else
   git worktree add -b "${BRANCH_NAME}" "${WORKTREE_PATH}" main
+  CREATED_WORKTREE=true
+  CREATED_BRANCH=true
 fi
 
 copy_if_exists() {
@@ -380,30 +471,42 @@ FRONTEND_PORT="$(find_next_available_port 5174)"
 export SERVER_PORT
 export FRONTEND_PORT
 
+# Portable sed in-place: macOS requires -i '', GNU sed requires -i without argument
+sed_inplace() {
+  local pattern="$1"
+  local file="$2"
+  if [[ "$(uname)" == "Darwin" ]]; then
+    sed -i '' -E "${pattern}" "${file}"
+  else
+    sed -i -E "${pattern}" "${file}"
+  fi
+}
+
+# Escape sed replacement special characters (& and \)
+sed_escape() {
+  printf '%s' "$1" | sed 's/[&\\/]/\\&/g'
+}
+
 if [[ -f "${WORKTREE_PATH}/config.local.toml" ]]; then
-  sed -i '' -E "s|^public_url = \".*\"|public_url = \"http://localhost:${FRONTEND_PORT}\"|" "${WORKTREE_PATH}/config.local.toml" 2>/dev/null || \
-    sed -i -E "s|^public_url = \".*\"|public_url = \"http://localhost:${FRONTEND_PORT}\"|" "${WORKTREE_PATH}/config.local.toml"
-  sed -i '' -E "s|^database = \".*\"|database = \"${DB_NAME}\"|" "${WORKTREE_PATH}/config.local.toml" 2>/dev/null || \
-    sed -i -E "s|^database = \".*\"|database = \"${DB_NAME}\"|" "${WORKTREE_PATH}/config.local.toml"
-  sed -i '' -E "s|^store = \".*\"|store = \"${AUTHZ_STORE_NAME}\"|" "${WORKTREE_PATH}/config.local.toml" 2>/dev/null || \
-    sed -i -E "s|^store = \".*\"|store = \"${AUTHZ_STORE_NAME}\"|" "${WORKTREE_PATH}/config.local.toml"
+  ESCAPED_DB_NAME="$(sed_escape "${DB_NAME}")"
+  ESCAPED_AUTHZ_STORE_NAME="$(sed_escape "${AUTHZ_STORE_NAME}")"
+
+  sed_inplace "s|^public_url = \".*\"|public_url = \"http://localhost:${FRONTEND_PORT}\"|" "${WORKTREE_PATH}/config.local.toml"
+  sed_inplace "s|^database = \".*\"|database = \"${ESCAPED_DB_NAME}\"|" "${WORKTREE_PATH}/config.local.toml"
+  sed_inplace "s|^store = \".*\"|store = \"${ESCAPED_AUTHZ_STORE_NAME}\"|" "${WORKTREE_PATH}/config.local.toml"
 fi
 
-if [[ -f "${WORKTREE_PATH}/.vscode/tasks.json" ]]; then
-  python - <<PY
-from pathlib import Path
-import re
+# Create .env.worktree at root for VSCode tasks (sources both ports)
+cat > "${WORKTREE_PATH}/.env.dev" <<EOF
+BACKEND_PORT=${SERVER_PORT}
+FRONTEND_PORT=${FRONTEND_PORT}
+EOF
 
-path = Path("${WORKTREE_PATH}") / ".vscode" / "tasks.json"
-text = path.read_text()
-text = re.sub(r"\\$\\{BACKEND_PORT:-\\d+\\}", lambda _: "${BACKEND_PORT:-${SERVER_PORT}}", text)
-text = re.sub(r"\\$\\{FRONTEND_PORT:-\\d+\\}", lambda _: "${FRONTEND_PORT:-${FRONTEND_PORT}}", text)
-path.write_text(text)
-PY
-fi
-
-# Create .env.local for frontend with backend port
-echo "BACKEND_PORT=${SERVER_PORT}" > "${WORKTREE_PATH}/web/pingpong/.env.local"
+# Create .env.dev for Vite's loadEnv (proxy configuration)
+cat > "${WORKTREE_PATH}/web/pingpong/.env.dev" <<EOF
+VITE_BACKEND_PORT=${SERVER_PORT}
+VITE_FRONTEND_PORT=${FRONTEND_PORT}
+EOF
 
 echo "Installing backend deps (poetry)..."
 (cd "${WORKTREE_PATH}" && poetry install --with dev)
