@@ -24,6 +24,41 @@ WORKTREE_NAME="$1"
 WORKTREE_ROOT="../pingpong-worktrees"
 WORKTREE_PATH="${WORKTREE_ROOT}/${WORKTREE_NAME}"
 PORTS_FILE="${WORKTREE_ROOT}/.worktree-ports.json"
+PORTS_LOCKFILE="${WORKTREE_ROOT}/.worktree-ports.lock"
+
+# Lockfile functions shared with create-worktree.sh
+acquire_ports_lock() {
+  mkdir -p "${WORKTREE_ROOT}"
+  if command -v flock >/dev/null 2>&1; then
+    exec 9>"${PORTS_LOCKFILE}"
+    if ! flock -w 30 9; then
+      echo "ERROR: Could not acquire port reservation lock after 30 seconds." >&2
+      echo "Another worktree script may be running. If not, remove ${PORTS_LOCKFILE}" >&2
+      return 1
+    fi
+  else
+    local max_attempts=60
+    local attempt=0
+    while ! mkdir "${PORTS_LOCKFILE}.d" 2>/dev/null; do
+      attempt=$((attempt + 1))
+      if (( attempt >= max_attempts )); then
+        echo "ERROR: Could not acquire port reservation lock after 30 seconds." >&2
+        echo "Another worktree script may be running. If not, remove ${PORTS_LOCKFILE}.d" >&2
+        return 1
+      fi
+      sleep 0.5
+    done
+    echo $$ > "${PORTS_LOCKFILE}.d/pid"
+  fi
+}
+
+release_ports_lock() {
+  if command -v flock >/dev/null 2>&1; then
+    exec 9>&- 2>/dev/null || true
+  else
+    rm -rf "${PORTS_LOCKFILE}.d" 2>/dev/null || true
+  fi
+}
 
 sanitize_db_suffix() {
   local raw="$1"
@@ -181,13 +216,19 @@ fi
 echo ""
 echo "Cleanup complete for ${WORKTREE_NAME}"
 
+# Release port reservation (with lock to prevent race conditions)
 if [[ -f "${PORTS_FILE}" ]]; then
-  tmp_ports="$(mktemp)"
-  if jq --arg name "${WORKTREE_NAME}" 'del(.[$name])' "${PORTS_FILE}" > "${tmp_ports}"; then
-    mv "${tmp_ports}" "${PORTS_FILE}"
-    echo "Released reserved ports for ${WORKTREE_NAME}."
+  if acquire_ports_lock; then
+    tmp_ports="$(mktemp)"
+    if jq --arg name "${WORKTREE_NAME}" 'del(.[$name])' "${PORTS_FILE}" > "${tmp_ports}"; then
+      mv "${tmp_ports}" "${PORTS_FILE}"
+      echo "Released reserved ports for ${WORKTREE_NAME}."
+    else
+      rm -f "${tmp_ports}"
+      echo "Warning: Failed to update ${PORTS_FILE} when releasing ports." >&2
+    fi
+    release_ports_lock
   else
-    rm -f "${tmp_ports}"
-    echo "Warning: Failed to update ${PORTS_FILE} when releasing ports." >&2
+    echo "Warning: Could not acquire lock to release ports. Manual cleanup may be needed." >&2
   fi
 fi
