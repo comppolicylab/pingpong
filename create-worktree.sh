@@ -156,9 +156,14 @@ cleanup_on_failure() {
 
   if [[ "${CREATED_PORTS}" == "true" ]]; then
     if [[ -f "${PORTS_FILE}" ]]; then
-      tmp_ports="$(mktemp)"
-      jq --arg name "${WORKTREE_NAME}" 'del(.[$name])' "${PORTS_FILE}" > "${tmp_ports}" \
-        && mv "${tmp_ports}" "${PORTS_FILE}" || rm -f "${tmp_ports}"
+      if acquire_ports_lock; then
+        tmp_ports="$(mktemp)"
+        jq --arg name "${WORKTREE_NAME}" 'del(.[$name])' "${PORTS_FILE}" > "${tmp_ports}" \
+          && mv "${tmp_ports}" "${PORTS_FILE}" || rm -f "${tmp_ports}"
+        release_ports_lock
+      else
+        echo "WARNING: Could not acquire port lock during cleanup; skipping port reservation cleanup." >&2
+      fi
     fi
   fi
 
