@@ -1,0 +1,418 @@
+#!/bin/bash
+
+set -e
+
+if [[ -z "${1:-}" ]]; then
+  echo "Usage: $0 <branch-and-worktree-name>" >&2
+  exit 1
+fi
+
+BRANCH_NAME="$1"
+WORKTREE_NAME="$1"
+WORKTREE_ROOT="../pingpong-worktrees"
+WORKTREE_PATH="${WORKTREE_ROOT}/${WORKTREE_NAME}"
+
+sanitize_db_suffix() {
+  local raw="$1"
+  local lower
+  local cleaned
+  local max_len=40
+
+  lower="$(printf '%s' "${raw}" | tr '[:upper:]' '[:lower:]')"
+  cleaned="$(printf '%s' "${lower}" | sed -E 's/[^a-z0-9_]+/_/g; s/^_+//; s/_+$//')"
+
+  if [[ -z "${cleaned}" ]]; then
+    cleaned="branch"
+  fi
+
+  if [[ "${cleaned}" =~ ^[0-9] ]]; then
+    cleaned="b_${cleaned}"
+  fi
+
+  cleaned="${cleaned:0:${max_len}}"
+  cleaned="$(printf '%s' "${cleaned}" | sed -E 's/_+$//')"
+
+  if [[ -z "${cleaned}" ]]; then
+    cleaned="branch"
+  fi
+
+  echo "${cleaned}"
+}
+
+DB_SUFFIX="$(sanitize_db_suffix "${BRANCH_NAME}")"
+DB_NAME="pingpong_${DB_SUFFIX}"
+AUTHZ_STORE_NAME="pingpong_${DB_SUFFIX}"
+AUTHZ_API="https://localhost:8080"
+AUTHZ_TOKEN="devkey"
+
+authz_api() {
+  curl -sk -H "Authorization: Bearer ${AUTHZ_TOKEN}" "$@"
+}
+
+get_store_id_by_name() {
+  local name="$1"
+  authz_api "${AUTHZ_API}/stores" | sed 's/ //g' | grep -o '"id":"[^"]*","name":"'"${name}"'"' | sed 's/.*"id":"\([^"]*\)".*/\1/'
+}
+
+ensure_container_running() {
+  local container_name="$1"
+  local max_attempts=30
+  local attempt=1
+
+  if ! docker ps -a --format '{{.Names}}' | grep -Fxq "${container_name}"; then
+    echo "${container_name} container not found. Please run ./start-dev-docker.sh first." >&2
+    exit 1
+  fi
+
+  if ! docker ps --format '{{.Names}}' | grep -Fxq "${container_name}"; then
+    echo "Starting ${container_name}..."
+    docker start "${container_name}" >/dev/null
+  fi
+
+  while true; do
+    if [[ "$(docker inspect -f '{{.State.Running}}' "${container_name}" 2>/dev/null)" == "true" ]]; then
+      break
+    fi
+    if (( attempt >= max_attempts )); then
+      echo "${container_name} failed to start. Please run ./start-dev-docker.sh first." >&2
+      exit 1
+    fi
+    attempt=$((attempt + 1))
+    sleep 1
+  done
+}
+
+wait_for_db_ready() {
+  local max_attempts=30
+  local attempt=1
+
+  until docker exec pingpong-db pg_isready >/dev/null 2>&1; do
+    if (( attempt >= max_attempts )); then
+      echo "Database is not ready. Please run ./start-dev-docker.sh first." >&2
+      exit 1
+    fi
+    attempt=$((attempt + 1))
+    sleep 1
+  done
+}
+
+wait_for_authz_ready() {
+  local max_attempts=30
+  local attempt=1
+
+  until docker exec pingpong-authz /usr/local/bin/grpc_health_probe -addr=authz:8081 >/dev/null 2>&1; do
+    if (( attempt >= max_attempts )); then
+      echo "Authz server is not ready. Please run ./start-dev-docker.sh first." >&2
+      exit 1
+    fi
+    attempt=$((attempt + 1))
+    sleep 1
+  done
+}
+
+ensure_container_running "pingpong-db"
+wait_for_db_ready
+
+if docker exec pingpong-db psql -Upingpong -tAc "SELECT 1 FROM pg_database WHERE datname = '${DB_NAME}'" | grep -q 1; then
+  echo "ERROR: Database ${DB_NAME} already exists." >&2
+  exit 1
+fi
+
+if docker ps -a --format '{{.Names}}' | grep -Fxq "pingpong-authz"; then
+  if docker ps --format '{{.Names}}' | grep -Fxq "pingpong-authz"; then
+    echo "Stopping pingpong-authz..."
+    docker stop pingpong-authz >/dev/null
+  fi
+fi
+
+echo "Cloning database pingpong -> ${DB_NAME}..."
+docker exec pingpong-db psql -Upingpong -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'pingpong' AND pid <> pg_backend_pid();"
+docker exec pingpong-db psql -Upingpong -c "CREATE DATABASE ${DB_NAME} WITH TEMPLATE pingpong;"
+
+ensure_container_running "pingpong-authz"
+wait_for_authz_ready
+
+# Check if authz store already exists
+if authz_api "${AUTHZ_API}/stores" | grep -q "\"name\":\"${AUTHZ_STORE_NAME}\""; then
+  echo "ERROR: Authz store ${AUTHZ_STORE_NAME} already exists." >&2
+  exit 1
+fi
+
+# Get source store ID
+SOURCE_STORE_ID="$(get_store_id_by_name "pingpong")"
+if [[ -z "${SOURCE_STORE_ID}" ]]; then
+  echo "ERROR: Source authz store 'pingpong' not found." >&2
+  exit 1
+fi
+
+# Create new store
+NEW_STORE_ID="$(authz_api -X POST "${AUTHZ_API}/stores" \
+  -H "Content-Type: application/json" \
+  -d "{\"name\":\"${AUTHZ_STORE_NAME}\"}" | grep -o '"id":"[^"]*"' | head -1 | sed 's/"id":"\([^"]*\)"/\1/')"
+
+if [[ -z "${NEW_STORE_ID}" ]]; then
+  echo "ERROR: Failed to create authz store ${AUTHZ_STORE_NAME}." >&2
+  exit 1
+fi
+
+echo "Cloning authz store pingpong -> ${AUTHZ_STORE_NAME}..."
+
+WORKDIR="$(mktemp -d)"
+MODEL_FILE="${WORKDIR}/model.json"
+TUPLES_FILE="${WORKDIR}/tuples.json"
+
+SOURCE_READ_URL="${AUTHZ_API}/stores/${SOURCE_STORE_ID}/read"
+DEST_WRITE_URL="${AUTHZ_API}/stores/${NEW_STORE_ID}/write"
+SOURCE_MODELS_URL="${AUTHZ_API}/stores/${SOURCE_STORE_ID}/authorization-models"
+DEST_MODELS_URL="${AUTHZ_API}/stores/${NEW_STORE_ID}/authorization-models"
+
+AUTH_HEADER="Authorization: Bearer ${AUTHZ_TOKEN}"
+JSON_HEADER="Content-Type: application/json"
+
+# ====== 1. Copy latest authorization model ======
+echo "Fetching latest authorization model from source store..."
+
+curl -sk \
+  -H "${AUTH_HEADER}" \
+  "${SOURCE_MODELS_URL}" \
+| jq '.authorization_models | sort_by(.created_at) | last' \
+> "${MODEL_FILE}"
+
+echo "Writing authorization model to destination store..."
+
+DEST_MODEL_ID=$(
+  curl -sk -X POST \
+    -H "${AUTH_HEADER}" \
+    -H "${JSON_HEADER}" \
+    -d @"${MODEL_FILE}" \
+    "${DEST_MODELS_URL}" \
+  | jq -r '.authorization_model_id'
+)
+
+# ====== 2. Read all tuples from source store ======
+echo "Reading tuples from source store..."
+
+PAGE_SIZE=100
+WRITE_BATCH_SIZE=100
+PAGE_TOKEN=""
+> "${TUPLES_FILE}"
+
+while true; do
+  if [[ -z "${PAGE_TOKEN}" ]]; then
+    BODY="{\"page_size\": ${PAGE_SIZE}}"
+  else
+    BODY="{\"page_size\": ${PAGE_SIZE}, \"continuation_token\": \"${PAGE_TOKEN}\"}"
+  fi
+
+  RESPONSE=$(curl -sk -X POST \
+    -H "${AUTH_HEADER}" \
+    -H "${JSON_HEADER}" \
+    -d "${BODY}" \
+    "${SOURCE_READ_URL}")
+
+  echo "${RESPONSE}" | jq -c '.tuples[]' >> "${TUPLES_FILE}"
+
+  PAGE_TOKEN=$(echo "${RESPONSE}" | jq -r '.continuation_token')
+
+  if [[ "${PAGE_TOKEN}" == "null" || -z "${PAGE_TOKEN}" ]]; then
+    break
+  fi
+done
+
+TUPLE_COUNT=$(wc -l < "${TUPLES_FILE}" | tr -d ' ')
+echo "Fetched ${TUPLE_COUNT} tuples."
+
+# ====== 3. Write tuples to destination store (batched) ======
+echo "Writing tuples to destination store..."
+
+# Transform tuples: extract .key from each tuple, remove null conditions, batch them, format for write API
+# Input: [{key: {user, relation, object, condition}, timestamp}, ...]
+# Output: {writes: {tuple_keys: [{user, relation, object}, ...]}}
+JQ_BATCH_FILTER="[.[].key | {user, relation, object} + (if .condition then {condition} else {} end)] | . as \$keys | range(0; length; $WRITE_BATCH_SIZE) | {writes: {tuple_keys: \$keys[. : . + $WRITE_BATCH_SIZE]}}"
+
+# Save batches to temp file to avoid subshell variable scope issues
+BATCHES_FILE="${WORKDIR}/batches.json"
+jq -s '.' "${TUPLES_FILE}" | jq -c "$JQ_BATCH_FILTER" > "${BATCHES_FILE}"
+
+EXPECTED_BATCHES=$(( (TUPLE_COUNT + WRITE_BATCH_SIZE - 1) / WRITE_BATCH_SIZE ))
+ACTUAL_BATCHES=$(wc -l < "${BATCHES_FILE}" | tr -d ' ')
+
+BATCH_NUM=0
+while read -r BATCH; do
+    BATCH_NUM=$((BATCH_NUM + 1))
+    RESULT=$(curl -sk -X POST \
+      -H "Authorization: Bearer ${AUTHZ_TOKEN}" \
+      -H "Content-Type: application/json" \
+      -d "${BATCH}" \
+      "${DEST_WRITE_URL}")
+
+    # Check for errors
+    if echo "${RESULT}" | jq -e '.code' > /dev/null 2>&1; then
+      echo "ERROR writing batch ${BATCH_NUM}: ${RESULT}" >&2
+      exit 1
+    fi
+done < "${BATCHES_FILE}"
+
+echo "Tuple copy complete."
+
+# ====== 4. Verify tuple count in destination store ======
+echo "Verifying tuple count in destination store..."
+
+DEST_READ_URL="${AUTHZ_API}/stores/${NEW_STORE_ID}/read"
+DEST_TUPLES_FILE="${WORKDIR}/dest_tuples.json"
+DEST_PAGE_TOKEN=""
+> "${DEST_TUPLES_FILE}"
+
+while true; do
+  if [[ -z "${DEST_PAGE_TOKEN}" ]]; then
+    BODY="{\"page_size\": ${PAGE_SIZE}}"
+  else
+    BODY="{\"page_size\": ${PAGE_SIZE}, \"continuation_token\": \"${DEST_PAGE_TOKEN}\"}"
+  fi
+
+  RESPONSE=$(curl -sk -X POST \
+    -H "${AUTH_HEADER}" \
+    -H "${JSON_HEADER}" \
+    -d "${BODY}" \
+    "${DEST_READ_URL}")
+
+  echo "${RESPONSE}" | jq -c '.tuples[]' >> "${DEST_TUPLES_FILE}"
+
+  DEST_PAGE_TOKEN=$(echo "${RESPONSE}" | jq -r '.continuation_token')
+
+  if [[ "${DEST_PAGE_TOKEN}" == "null" || -z "${DEST_PAGE_TOKEN}" ]]; then
+    break
+  fi
+done
+
+DEST_TUPLE_COUNT=$(wc -l < "${DEST_TUPLES_FILE}" | tr -d ' ')
+
+echo "Source tuples: ${TUPLE_COUNT}, Destination tuples: ${DEST_TUPLE_COUNT}"
+
+if [[ "${TUPLE_COUNT}" -ne "${DEST_TUPLE_COUNT}" ]]; then
+  echo "ERROR: Tuple count mismatch! Expected ${TUPLE_COUNT}, got ${DEST_TUPLE_COUNT}" >&2
+  echo "Source tuples saved to: ${TUPLES_FILE}"
+  echo "Destination tuples saved to: ${DEST_TUPLES_FILE}"
+  echo "Batches file saved to: ${BATCHES_FILE}"
+  echo "To compare: diff <(jq -c '.key' ${TUPLES_FILE} | sort) <(jq -c '.key' ${DEST_TUPLES_FILE} | sort)"
+  exit 1
+fi
+
+echo "Tuple verification passed."
+
+# ====== Cleanup ======
+rm -rf "${WORKDIR}"
+
+echo "Created authz store ${AUTHZ_STORE_NAME} (${NEW_STORE_ID})"
+
+if [[ -e "${WORKTREE_PATH}" ]]; then
+  echo "ERROR: Worktree path already exists: ${WORKTREE_PATH}" >&2
+  exit 1
+fi
+
+mkdir -p "${WORKTREE_ROOT}"
+
+if git show-ref --verify --quiet "refs/heads/${BRANCH_NAME}"; then
+  git worktree add "${WORKTREE_PATH}" "${BRANCH_NAME}"
+else
+  git worktree add -b "${BRANCH_NAME}" "${WORKTREE_PATH}" main
+fi
+
+copy_if_exists() {
+  local source="$1"
+  local normalized="${source%/}"
+
+  if [[ ! -e "${normalized}" ]]; then
+    return 0
+  fi
+
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -a "${normalized}" "${WORKTREE_PATH}/"
+  else
+    cp -R "${normalized}" "${WORKTREE_PATH}/"
+  fi
+}
+
+copy_if_exists ".vscode/"
+copy_if_exists "local_exports/"
+copy_if_exists ".claude/"
+copy_if_exists "config.dev.toml"
+copy_if_exists "config.local.toml"
+
+is_port_in_use() {
+  local port="$1"
+
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -iTCP:"${port}" -sTCP:LISTEN -P -n >/dev/null 2>&1
+    return $?
+  fi
+
+  if command -v nc >/dev/null 2>&1; then
+    nc -z localhost "${port}" >/dev/null 2>&1
+    return $?
+  fi
+
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltn "sport = :${port}" | grep -q "LISTEN"
+    return $?
+  fi
+
+  echo "No port-checking tool found (need lsof, nc, or ss)." >&2
+  return 2
+}
+
+find_next_available_port() {
+  local start_port="$1"
+  local port=$((start_port + 1))
+
+  while true; do
+    if ! is_port_in_use "${port}"; then
+      echo "${port}"
+      return 0
+    fi
+    port=$((port + 1))
+  done
+}
+
+SERVER_PORT="$(find_next_available_port 8000)"
+FRONTEND_PORT="$(find_next_available_port 5173)"
+
+export SERVER_PORT
+export FRONTEND_PORT
+
+if [[ -f "${WORKTREE_PATH}/config.local.toml" ]]; then
+  sed -i '' -E "s|^public_url = \".*\"|public_url = \"http://localhost:${FRONTEND_PORT}\"|" "${WORKTREE_PATH}/config.local.toml" 2>/dev/null || \
+    sed -i -E "s|^public_url = \".*\"|public_url = \"http://localhost:${FRONTEND_PORT}\"|" "${WORKTREE_PATH}/config.local.toml"
+  sed -i '' -E "s|^database = \".*\"|database = \"${DB_NAME}\"|" "${WORKTREE_PATH}/config.local.toml" 2>/dev/null || \
+    sed -i -E "s|^database = \".*\"|database = \"${DB_NAME}\"|" "${WORKTREE_PATH}/config.local.toml"
+  sed -i '' -E "s|^store = \".*\"|store = \"${AUTHZ_STORE_NAME}\"|" "${WORKTREE_PATH}/config.local.toml" 2>/dev/null || \
+    sed -i -E "s|^store = \".*\"|store = \"${AUTHZ_STORE_NAME}\"|" "${WORKTREE_PATH}/config.local.toml"
+fi
+
+if [[ -f "${WORKTREE_PATH}/.vscode/tasks.json" ]]; then
+  python - <<PY
+from pathlib import Path
+import re
+
+path = Path("${WORKTREE_PATH}") / ".vscode" / "tasks.json"
+text = path.read_text()
+text = re.sub(r"\\$\\{BACKEND_PORT:-\\d+\\}", lambda _: "${BACKEND_PORT:-${SERVER_PORT}}", text)
+text = re.sub(r"\\$\\{FRONTEND_PORT:-\\d+\\}", lambda _: "${FRONTEND_PORT:-${FRONTEND_PORT}}", text)
+path.write_text(text)
+PY
+fi
+
+# Create .env.local for frontend with backend port
+echo "BACKEND_PORT=${SERVER_PORT}" > "${WORKTREE_PATH}/web/pingpong/.env.local"
+
+echo "Installing backend deps (poetry)..."
+(cd "${WORKTREE_PATH}" && poetry install --with dev)
+
+echo "Installing frontend deps (pnpm)..."
+(cd "${WORKTREE_PATH}/web/pingpong" && pnpm install --frozen-lockfile)
+
+# Open in VSCode if available
+if command -v code >/dev/null 2>&1; then
+  echo "Opening worktree in VSCode..."
+  code --new-window "${WORKTREE_PATH}"
+fi
