@@ -536,14 +536,14 @@ if [[ -f "${WORKTREE_PATH}/config.local.toml" ]]; then
   sed_inplace "s|^store = \".*\"|store = \"${ESCAPED_AUTHZ_STORE_NAME}\"|" "${WORKTREE_PATH}/config.local.toml"
 fi
 
-# Create .env.worktree at root for VSCode tasks (sources both ports)
+# Create .env.dev at root for VSCode tasks (sources both ports)
 cat > "${WORKTREE_PATH}/.env.dev" <<EOF
 BACKEND_PORT=${SERVER_PORT}
 FRONTEND_PORT=${FRONTEND_PORT}
 EOF
 
-# Create .env.dev for Vite's loadEnv (proxy configuration)
-cat > "${WORKTREE_PATH}/web/pingpong/.env.dev" <<EOF
+# Create .env.local for Vite's loadEnv (proxy configuration)
+cat > "${WORKTREE_PATH}/web/pingpong/.env.local" <<EOF
 VITE_BACKEND_PORT=${SERVER_PORT}
 VITE_FRONTEND_PORT=${FRONTEND_PORT}
 EOF
