@@ -59,7 +59,8 @@
 	};
 
 	$: sharedPage = data.isSharedAssistantPage || data.isSharedThreadPage;
-	$: showCollapsedSidebarOnly = data.showCollapsedSidebarOnly;
+	$: forceShowSidebarButton = data.forceShowSidebarButton;
+	$: forceCollapsedLayout = data.forceCollapsedLayout;
 	$: openAllLinksInNewTab = data.openAllLinksInNewTab;
 	$: logoIsClickable = data.logoIsClickable;
 	$: showSidebarItems = data.showSidebarItems;
@@ -161,15 +162,18 @@
 </script>
 
 <Sidebar
-	asideClass={`absolute top-0 left-0 z-0 w-[90%] px-2 h-full ${!inIframe || !showCollapsedSidebarOnly ? 'lg:static lg:h-full lg:w-full' : ''}`}
+	asideClass={`absolute top-0 left-0 z-0 w-[90%] md:w-80 px-2 h-full ${!inIframe || !forceCollapsedLayout ? 'lg:static lg:h-full lg:w-full' : ''}`}
 	activeUrl={$page.url.pathname}
 >
 	<SidebarWrapper class="flex h-full flex-col bg-transparent">
 		<SidebarGroup class="mb-6">
 			<div class="flex items-center" data-sveltekit-preload-data="off">
-				{#if !(inIframe && sharedPage) && !showCollapsedSidebarOnly}
+				{#if !(inIframe && sharedPage) || forceShowSidebarButton}
 					<button
-						class="menu-button mt-1 mr-3 border-none bg-transparent lg:hidden"
+						class="menu-button mt-1 mr-3 border-none bg-transparent {inIframe &&
+						forceCollapsedLayout
+							? ''
+							: 'lg:hidden'}"
 						onclick={() => togglePanel()}
 					>
 						{#if $appMenuOpen}

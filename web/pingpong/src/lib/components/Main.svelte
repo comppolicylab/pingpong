@@ -9,7 +9,7 @@
 	export let data;
 
 	let inIframe = false;
-	$: showCollapsedSidebarOnly = data.showCollapsedSidebarOnly;
+	$: forceCollapsedLayout = data.forceCollapsedLayout;
 	onMount(() => {
 		inIframe = window.self !== window.top;
 	});
@@ -17,8 +17,8 @@
 
 <div
 	class={`main-panel absolute top-24 left-0 z-10 mr-4 ml-4 h-[calc(100%-6rem)] w-[calc(100%-2rem)] overflow-hidden transition-all print:!static print:!top-0 print:!left-0 print:!z-auto print:!m-0 print:!h-auto print:!w-full print:!overflow-visible print:!p-0  ${
-		$appMenuOpen ? 'left-[90%]' : ''
-	} ${!inIframe || !showCollapsedSidebarOnly ? 'lg:static lg:h-full' : ''}`}
+		$appMenuOpen ? 'left-[90%] md:left-80' : ''
+	} ${!inIframe || !forceCollapsedLayout ? 'lg:static lg:h-full' : ''}`}
 >
 	<div
 		class="relative h-full grow overflow-hidden rounded-t-4xl bg-white print:!h-auto print:!overflow-visible print:!rounded-none print:!bg-transparent"

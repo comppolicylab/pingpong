@@ -38,6 +38,9 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
 		api.setLTISessionToken(ltiSession);
 	}
 
+	// Check if we're in an LTI context (either from URL param or stored token)
+	const isLTIContext = !!ltiSession || api.hasLTISessionToken();
+
 	// Helper to append lti_session to redirect URLs during SSR.
 	// This ensures the token is preserved across redirects before client hydration.
 	const buildRedirect = (path: string) => {
@@ -69,7 +72,8 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
 	const needsOnboarding = !!me.data?.user && (!me.data.user.first_name || !me.data.user.last_name);
 	const needsAgreements = me.data?.agreement_id !== null;
 	let doNotShowSidebar = false;
-	let showCollapsedSidebarOnly = false;
+	let forceShowSidebarButton = isLTIContext;
+	let forceCollapsedLayout = isLTIContext;
 	let openAllLinksInNewTab = false;
 	let logoIsClickable = true;
 	let showSidebarItems = true;
@@ -99,7 +103,8 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
 			openAllLinksInNewTab = true;
 			logoIsClickable = false;
 			if (url.pathname === LTI_REGISTER) {
-				showCollapsedSidebarOnly = true;
+				forceShowSidebarButton = false;
+				forceCollapsedLayout = true;
 				showSidebarItems = false;
 			}
 		} else if (url.pathname === NO_GROUP || url.pathname.startsWith(SETUP)) {
@@ -305,7 +310,8 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
 		needsOnboarding,
 		needsAgreements,
 		doNotShowSidebar,
-		showCollapsedSidebarOnly,
+		forceShowSidebarButton,
+		forceCollapsedLayout,
 		openAllLinksInNewTab,
 		logoIsClickable,
 		showSidebarItems,
