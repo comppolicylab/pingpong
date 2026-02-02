@@ -14,6 +14,8 @@ from typing import (
     Callable,
     Coroutine,
     Any,
+    TypeVar,
+    cast,
 )
 
 from sqlalchemy import (
@@ -61,6 +63,19 @@ import pingpong.schemas as schemas
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+T = TypeVar("T")
+
+
+def _strip_nulls(value: T) -> T:
+    if isinstance(value, str):
+        return cast(T, value.replace("\x00", ""))
+    return value
+
+
+def _sanitize_str_fields(data: dict) -> dict:
+    return {key: _strip_nulls(value) for key, value in data.items()}
 
 
 def _get_upsert_stmt(session: AsyncSession):
@@ -3972,7 +3987,7 @@ class MCPListToolsTool(Base):
 
     @classmethod
     async def create(cls, session: AsyncSession, data: dict) -> None:
-        tool = MCPListToolsTool(**data)
+        tool = MCPListToolsTool(**_sanitize_str_fields(data))
         session.add(tool)
         await session.flush()
 
@@ -4021,7 +4036,7 @@ class Annotation(Base):
 
     @classmethod
     async def create(cls, session: AsyncSession, data: dict) -> None:
-        annotation = Annotation(**data)
+        annotation = Annotation(**_sanitize_str_fields(data))
         session.add(annotation)
         await session.flush()
 
@@ -4055,7 +4070,7 @@ class WebSearchCallSearchSource(Base):
 
     @classmethod
     async def create(cls, session: AsyncSession, data: dict) -> None:
-        source = cls(**data)
+        source = cls(**_sanitize_str_fields(data))
         session.add(source)
         await session.flush()
 
@@ -4092,7 +4107,7 @@ class WebSearchCallAction(Base):
 
     @classmethod
     async def create(cls, session: AsyncSession, data: dict) -> "WebSearchCallAction":
-        result = cls(**data)
+        result = cls(**_sanitize_str_fields(data))
         session.add(result)
         await session.flush()
         return result
@@ -4127,7 +4142,7 @@ class FileSearchCallResult(Base):
 
     @classmethod
     async def create(cls, session: AsyncSession, data: dict) -> None:
-        result = cls(**data)
+        result = cls(**_sanitize_str_fields(data))
         session.add(result)
         await session.flush()
 
@@ -4154,7 +4169,7 @@ class CodeInterpreterCallOutput(Base):
 
     @classmethod
     async def create(cls, session: AsyncSession, data: dict) -> None:
-        output = cls(**data)
+        output = cls(**_sanitize_str_fields(data))
         session.add(output)
         await session.flush()
 
@@ -4246,7 +4261,7 @@ class ToolCall(Base):
     @classmethod
     async def create(cls, session: AsyncSession, data: dict) -> "ToolCall":
         """Create a new tool call."""
-        tool_call = cls(**data)
+        tool_call = cls(**_sanitize_str_fields(data))
         session.add(tool_call)
         await session.flush()
         return tool_call
@@ -4272,6 +4287,7 @@ class ToolCall(Base):
         cls, session: AsyncSession, id: int, code_delta: str
     ) -> None:
         """Append a code delta to a tool call."""
+        code_delta = _strip_nulls(code_delta)
         stmt = (
             update(ToolCall)
             .where(ToolCall.id == id)
@@ -4284,6 +4300,7 @@ class ToolCall(Base):
         cls, session: AsyncSession, id: int, arguments_delta: str
     ) -> None:
         """Append an arguments delta to a tool call."""
+        arguments_delta = _strip_nulls(arguments_delta)
         stmt = (
             update(ToolCall)
             .where(ToolCall.id == id)
@@ -4303,6 +4320,7 @@ class ToolCall(Base):
         queries: str,
     ) -> None:
         """Append status queries to a tool call."""
+        queries = _strip_nulls(queries)
         stmt = (
             update(ToolCall)
             .where(ToolCall.id == id)
@@ -4327,10 +4345,10 @@ class ToolCall(Base):
             .where(ToolCall.id == id)
             .values(
                 status=status if status else ToolCall.status,
-                mcp_tool_name=mcp_tool_name,
-                mcp_arguments=mcp_arguments,
-                mcp_output=mcp_output,
-                error=error,
+                mcp_tool_name=_strip_nulls(mcp_tool_name),
+                mcp_arguments=_strip_nulls(mcp_arguments),
+                mcp_output=_strip_nulls(mcp_output),
+                error=_strip_nulls(error),
             )
         )
         await session.execute(stmt)
@@ -4361,7 +4379,7 @@ class ReasoningSummaryPart(Base):
 
     @classmethod
     async def create(cls, session: AsyncSession, data: dict) -> "ReasoningSummaryPart":
-        summary_part = cls(**data)
+        summary_part = cls(**_sanitize_str_fields(data))
         session.add(summary_part)
         await session.flush()
         return summary_part
@@ -4371,6 +4389,7 @@ class ReasoningSummaryPart(Base):
         cls, session: AsyncSession, id: int, delta: str
     ) -> None:
         """Append a summary text delta to a reasoning summary part."""
+        delta = _strip_nulls(delta)
         stmt = (
             update(ReasoningSummaryPart)
             .where(ReasoningSummaryPart.id == id)
@@ -4404,7 +4423,7 @@ class ReasoningContentPart(Base):
 
     @classmethod
     async def create(cls, session: AsyncSession, data: dict) -> None:
-        content_part = cls(**data)
+        content_part = cls(**_sanitize_str_fields(data))
         session.add(content_part)
         await session.flush()
 
@@ -4447,7 +4466,7 @@ class ReasoningStep(Base):
 
     @classmethod
     async def create(cls, session: AsyncSession, data: dict) -> "ReasoningStep":
-        reasoning_step = cls(**data)
+        reasoning_step = cls(**_sanitize_str_fields(data))
         session.add(reasoning_step)
         await session.flush()
         return reasoning_step
@@ -4476,7 +4495,7 @@ class ReasoningStep(Base):
             .where(ReasoningStep.id == id)
             .values(
                 status=status,
-                encrypted_content=encrypted_content
+                encrypted_content=_strip_nulls(encrypted_content)
                 if encrypted_content is not None
                 else ReasoningStep.encrypted_content,
             )
@@ -4494,7 +4513,7 @@ class ReasoningStep(Base):
         stmt = (
             update(ReasoningStep)
             .where(ReasoningStep.reasoning_id == reasoning_id)
-            .values(encrypted_content=encrypted_content)
+            .values(encrypted_content=_strip_nulls(encrypted_content))
         )
         await session.execute(stmt)
 
@@ -4582,7 +4601,7 @@ class MessagePart(Base):
     @classmethod
     async def create(cls, session: AsyncSession, data: dict) -> "MessagePart":
         """Create a new message part."""
-        message_part = cls(**data)
+        message_part = cls(**_sanitize_str_fields(data))
         session.add(message_part)
         await session.flush()
         return message_part
@@ -4592,6 +4611,7 @@ class MessagePart(Base):
         cls, session: AsyncSession, id_: int, text_delta: str
     ) -> None:
         """Append a text delta to a message part."""
+        text_delta = _strip_nulls(text_delta)
         stmt = (
             update(MessagePart)
             .where(MessagePart.id == id_)
