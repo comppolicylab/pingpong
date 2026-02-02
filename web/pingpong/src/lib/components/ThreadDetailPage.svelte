@@ -485,12 +485,12 @@
 	};
 
 	// Scroll to the bottom of the chat thread.
-	const scroll = (el: HTMLDivElement, messages: Message[]) => {
+	const scroll = (el: HTMLDivElement, params: { messages: Message[]; threadId: number }) => {
 		let lastScrollTop = el.scrollTop;
 		let userPausedAutoScroll = false;
 		let isProgrammaticScroll = false;
-		let lastMessageId = messages[messages.length - 1]?.data.id ?? null;
-		const isNearBottom = () => el.scrollTop + el.clientHeight >= el.scrollHeight - 600;
+		let lastMessageId: string | null = params.messages[params.messages.length - 1]?.data.id ?? null;
+		let currentThreadId = params.threadId;
 
 		const scrollToBottom = () => {
 			isProgrammaticScroll = true;
@@ -506,9 +506,6 @@
 
 		const maybeAutoScroll = () => {
 			if (userPausedAutoScroll) {
-				return;
-			}
-			if (!isNearBottom()) {
 				return;
 			}
 			scrollToBottom();
@@ -529,7 +526,18 @@
 		scrollToBottom();
 
 		return {
-			update: (nextMessages: Message[]) => {
+			update: (nextParams: { messages: Message[]; threadId: number }) => {
+				// Reset scroll state when navigating to a different thread
+				if (nextParams.threadId !== currentThreadId) {
+					currentThreadId = nextParams.threadId;
+					userPausedAutoScroll = false;
+					lastMessageId = null;
+					lastScrollTop = 0;
+					scrollToBottom();
+					return;
+				}
+
+				const nextMessages = nextParams.messages;
 				const nextLastMessage = nextMessages[nextMessages.length - 1];
 				const nextLastMessageId = nextLastMessage?.data.id ?? null;
 				const hasNewTailMessage = nextLastMessageId && nextLastMessageId !== lastMessageId;
@@ -1223,7 +1231,7 @@
 			data.isSharedAssistantPage || data.isSharedThreadPage ? 'pt-10' : ''
 		}`}
 		bind:this={messagesContainer}
-		use:scroll={$messages}
+		use:scroll={{ messages: $messages, threadId }}
 	>
 		<div class="print-only print-header">
 			<div class="print-header__brand">
