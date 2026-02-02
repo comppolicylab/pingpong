@@ -804,8 +804,8 @@
 				audioDevices.find((device) => device.deviceId === lookupDeviceId) || null;
 		}
 
-		// Check if any device is default based on ExtendedMediaDeviceInfo
-		if (audioDevices.length > 0) {
+		// Only fall back to default device if no device was explicitly selected
+		if (!selectedAudioDevice && audioDevices.length > 0) {
 			const defaultDevice = audioDevices.find((device) => device.default);
 			if (defaultDevice) {
 				selectedAudioDevice = defaultDevice;
