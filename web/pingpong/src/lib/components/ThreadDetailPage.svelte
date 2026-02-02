@@ -504,20 +504,22 @@
 			});
 		};
 
-		const maybeAutoScroll = () => {
-			if (userPausedAutoScroll) {
-				return;
-			}
-			scrollToBottom();
-		};
-
 		const onScroll = () => {
 			if (isProgrammaticScroll) {
 				lastScrollTop = el.scrollTop;
 				return;
 			}
-			if (el.scrollTop < lastScrollTop - 5) {
+			const isScrollingDown = el.scrollTop > lastScrollTop;
+			const isScrollingUp = el.scrollTop < lastScrollTop - 5;
+			const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+
+			// Pause auto-scroll on upward scroll
+			if (isScrollingUp) {
 				userPausedAutoScroll = true;
+			}
+			// Resume auto-scroll only when scrolling down and near the bottom
+			if (userPausedAutoScroll && isScrollingDown && distanceFromBottom < 50) {
+				userPausedAutoScroll = false;
 			}
 			lastScrollTop = el.scrollTop;
 		};
@@ -546,12 +548,13 @@
 					nextLastMessage?.data.metadata?.is_current_user === true;
 				lastMessageId = nextLastMessageId;
 				requestAnimationFrame(() => {
+					// Force scroll when user sends a new message
 					if (hasNewTailMessage && isCurrentUserTail) {
 						userPausedAutoScroll = false;
-						scrollToBottom();
-						return;
 					}
-					maybeAutoScroll();
+					if (!userPausedAutoScroll) {
+						scrollToBottom();
+					}
 				});
 			},
 			destroy: () => {
