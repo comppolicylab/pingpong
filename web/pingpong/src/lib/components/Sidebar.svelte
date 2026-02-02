@@ -170,7 +170,10 @@
 			<div class="flex items-center" data-sveltekit-preload-data="off">
 				{#if !(inIframe && sharedPage) || forceShowSidebarButton}
 					<button
-						class="menu-button mt-1 mr-3 border-none bg-transparent {inIframe && forceCollapsedLayout ? '' : 'lg:hidden'}"
+						class="menu-button mt-1 mr-3 border-none bg-transparent {inIframe &&
+						forceCollapsedLayout
+							? ''
+							: 'lg:hidden'}"
 						onclick={() => togglePanel()}
 					>
 						{#if $appMenuOpen}
