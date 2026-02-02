@@ -50,7 +50,7 @@
 	},
 	"type": "module",
 	"dependencies": {
-		"@sentry/sveltekit": "^10.36.0",
+		"@sentry/sveltekit": "^10.38.0",
 		"@zerodevx/svelte-toast": "^0.9.6",
 		"dayjs": "^1.11.19",
 		"dotenv": "^17.2.3",
@@ -61,7 +61,7 @@
 		"marked": "^17.0.1",
 		"marked-highlight": "^2.2.3",
 		"svelte-copy": "^2.0.0",
-		"tldts": "^7.0.19"
+		"tldts": "^7.0.21"
 	},
 	"pnpm": {
 		"overrides": {
