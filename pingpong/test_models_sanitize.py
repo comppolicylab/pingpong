@@ -192,9 +192,7 @@ async def test_tool_call_mcp_arguments_delta_strips_nulls(db):
         session.add(tool_call)
         await session.commit()
 
-        await models.ToolCall.add_mcp_arguments_delta(
-            session, tool_call.id, "x\x00y"
-        )
+        await models.ToolCall.add_mcp_arguments_delta(session, tool_call.id, "x\x00y")
         await session.commit()
 
         stmt = select(models.ToolCall.mcp_arguments).where(
