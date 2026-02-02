@@ -485,29 +485,80 @@
 	};
 
 	// Scroll to the bottom of the chat thread.
-	const scroll = (el: HTMLDivElement, _messages: Message[]) => {
-		// Keep _messages so the action's update runs when the message list changes.
-		void _messages;
-		// Scroll to the bottom of the element.
-		el.scrollTo({
-			top: el.scrollHeight,
-			behavior: 'smooth'
-		});
-		return {
-			// TODO - would be good to figure out how to do this without a timeout.
-			update: () => {
-				setTimeout(() => {
-					// Don't auto-scroll if the user is not near the bottom of the chat.
-					// TODO - we can show an indicator if there are new messages that we'd want to scroll to.
-					if (el.scrollTop + el.clientHeight < el.scrollHeight - 600) {
-						return;
-					}
+	const scroll = (el: HTMLDivElement, params: { messages: Message[]; threadId: number }) => {
+		let lastScrollTop = el.scrollTop;
+		let userPausedAutoScroll = false;
+		let isProgrammaticScroll = false;
+		let lastMessageId: string | null = params.messages[params.messages.length - 1]?.data.id ?? null;
+		let currentThreadId = params.threadId;
 
-					el.scrollTo({
-						top: el.scrollHeight,
-						behavior: 'smooth'
-					});
-				}, 250);
+		const scrollToBottom = () => {
+			isProgrammaticScroll = true;
+			el.scrollTo({
+				top: el.scrollHeight,
+				behavior: 'smooth'
+			});
+			requestAnimationFrame(() => {
+				lastScrollTop = el.scrollTop;
+				isProgrammaticScroll = false;
+			});
+		};
+
+		const onScroll = () => {
+			if (isProgrammaticScroll) {
+				lastScrollTop = el.scrollTop;
+				return;
+			}
+			const isScrollingDown = el.scrollTop > lastScrollTop;
+			const isScrollingUp = el.scrollTop < lastScrollTop - 5;
+			const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+
+			// Pause auto-scroll on upward scroll
+			if (isScrollingUp) {
+				userPausedAutoScroll = true;
+			}
+			// Resume auto-scroll only when scrolling down and near the bottom
+			if (userPausedAutoScroll && isScrollingDown && distanceFromBottom < 50) {
+				userPausedAutoScroll = false;
+			}
+			lastScrollTop = el.scrollTop;
+		};
+
+		el.addEventListener('scroll', onScroll, { passive: true });
+		scrollToBottom();
+
+		return {
+			update: (nextParams: { messages: Message[]; threadId: number }) => {
+				// Reset scroll state when navigating to a different thread
+				if (nextParams.threadId !== currentThreadId) {
+					currentThreadId = nextParams.threadId;
+					userPausedAutoScroll = false;
+					lastMessageId = null;
+					lastScrollTop = 0;
+					scrollToBottom();
+					return;
+				}
+
+				const nextMessages = nextParams.messages;
+				const nextLastMessage = nextMessages[nextMessages.length - 1];
+				const nextLastMessageId = nextLastMessage?.data.id ?? null;
+				const hasNewTailMessage = nextLastMessageId && nextLastMessageId !== lastMessageId;
+				const isCurrentUserTail =
+					nextLastMessage?.data.role === 'user' &&
+					nextLastMessage?.data.metadata?.is_current_user === true;
+				lastMessageId = nextLastMessageId;
+				requestAnimationFrame(() => {
+					// Force scroll when user sends a new message
+					if (hasNewTailMessage && isCurrentUserTail) {
+						userPausedAutoScroll = false;
+					}
+					if (!userPausedAutoScroll) {
+						scrollToBottom();
+					}
+				});
+			},
+			destroy: () => {
+				el.removeEventListener('scroll', onScroll);
 			}
 		};
 	};
@@ -1183,7 +1234,7 @@
 			data.isSharedAssistantPage || data.isSharedThreadPage ? 'pt-10' : ''
 		}`}
 		bind:this={messagesContainer}
-		use:scroll={$messages}
+		use:scroll={{ messages: $messages, threadId }}
 	>
 		<div class="print-only print-header">
 			<div class="print-header__brand">
