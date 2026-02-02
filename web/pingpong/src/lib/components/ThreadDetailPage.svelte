@@ -485,15 +485,11 @@
 	};
 
 	// Scroll to the bottom of the chat thread.
-	const scroll = (el: HTMLDivElement, params: { messages: Message[]; waiting: boolean }) => {
-		// Keep messages so the action's update runs when the message list changes.
-		let current = params;
+	const scroll = (el: HTMLDivElement, messages: Message[]) => {
 		let lastScrollTop = el.scrollTop;
 		let userPausedAutoScroll = false;
 		let isProgrammaticScroll = false;
-		let previousWaiting = params.waiting;
-		let lastMessageId = params.messages[params.messages.length - 1]?.data.id ?? null;
-
+		let lastMessageId = messages[messages.length - 1]?.data.id ?? null;
 		const isNearBottom = () => el.scrollTop + el.clientHeight >= el.scrollHeight - 600;
 
 		const scrollToBottom = () => {
@@ -533,19 +529,14 @@
 		scrollToBottom();
 
 		return {
-			update: (nextParams: { messages: Message[]; waiting: boolean }) => {
-				current = nextParams;
-				const nextLastMessage = nextParams.messages[nextParams.messages.length - 1];
+			update: (nextMessages: Message[]) => {
+				const nextLastMessage = nextMessages[nextMessages.length - 1];
 				const nextLastMessageId = nextLastMessage?.data.id ?? null;
 				const hasNewTailMessage = nextLastMessageId && nextLastMessageId !== lastMessageId;
 				const isCurrentUserTail =
 					nextLastMessage?.data.role === 'user' &&
 					nextLastMessage?.data.metadata?.is_current_user === true;
 				lastMessageId = nextLastMessageId;
-				if (!previousWaiting && current.waiting) {
-					userPausedAutoScroll = false;
-				}
-				previousWaiting = current.waiting;
 				requestAnimationFrame(() => {
 					if (hasNewTailMessage && isCurrentUserTail) {
 						userPausedAutoScroll = false;
@@ -1232,7 +1223,7 @@
 			data.isSharedAssistantPage || data.isSharedThreadPage ? 'pt-10' : ''
 		}`}
 		bind:this={messagesContainer}
-		use:scroll={{ messages: $messages, waiting: $waiting }}
+		use:scroll={$messages}
 	>
 		<div class="print-only print-header">
 			<div class="print-header__brand">
