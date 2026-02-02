@@ -492,6 +492,7 @@
 		let userPausedAutoScroll = false;
 		let isProgrammaticScroll = false;
 		let previousWaiting = params.waiting;
+		let lastMessageId = params.messages[params.messages.length - 1]?.data.id ?? null;
 
 		const isNearBottom = () => el.scrollTop + el.clientHeight >= el.scrollHeight - 600;
 
@@ -508,7 +509,7 @@
 		};
 
 		const maybeAutoScroll = () => {
-			if (current.waiting && userPausedAutoScroll) {
+			if (userPausedAutoScroll) {
 				return;
 			}
 			if (!isNearBottom()) {
@@ -522,7 +523,7 @@
 				lastScrollTop = el.scrollTop;
 				return;
 			}
-			if (current.waiting && el.scrollTop < lastScrollTop - 5) {
+			if (el.scrollTop < lastScrollTop - 5) {
 				userPausedAutoScroll = true;
 			}
 			lastScrollTop = el.scrollTop;
@@ -532,16 +533,27 @@
 		scrollToBottom();
 
 		return {
-			// TODO - would be good to figure out how to do this without a timeout.
 			update: (nextParams: { messages: Message[]; waiting: boolean }) => {
 				current = nextParams;
+				const nextLastMessage = nextParams.messages[nextParams.messages.length - 1];
+				const nextLastMessageId = nextLastMessage?.data.id ?? null;
+				const hasNewTailMessage = nextLastMessageId && nextLastMessageId !== lastMessageId;
+				const isCurrentUserTail =
+					nextLastMessage?.data.role === 'user' &&
+					nextLastMessage?.data.metadata?.is_current_user === true;
+				lastMessageId = nextLastMessageId;
 				if (!previousWaiting && current.waiting) {
 					userPausedAutoScroll = false;
 				}
 				previousWaiting = current.waiting;
-				setTimeout(() => {
+				requestAnimationFrame(() => {
+					if (hasNewTailMessage && isCurrentUserTail) {
+						userPausedAutoScroll = false;
+						scrollToBottom();
+						return;
+					}
 					maybeAutoScroll();
-				}, 250);
+				});
 			},
 			destroy: () => {
 				el.removeEventListener('scroll', onScroll);
