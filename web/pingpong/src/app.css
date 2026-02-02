@@ -201,3 +201,35 @@ textarea::placeholder {
 		margin: auto;
 	}
 }
+
+/* Firefox range input styling - Flowbite only has WebKit styles */
+input[type='range']::-moz-range-track {
+	background: var(--color-gray-200);
+	border-radius: 0.5rem;
+	height: 0.5rem;
+}
+
+input[type='range']::-moz-range-thumb {
+	appearance: none;
+	background: var(--color-blue-500);
+	border: none;
+	border-radius: 50%;
+	height: 1.25rem;
+	width: 1.25rem;
+	cursor: pointer;
+}
+
+input[type='range']::-moz-range-progress {
+	background: var(--color-blue-500);
+	border-radius: 0.5rem;
+	height: 0.5rem;
+}
+
+input[type='range']:disabled::-moz-range-thumb {
+	background: var(--color-gray-400);
+	cursor: not-allowed;
+}
+
+input[type='range']:disabled::-moz-range-progress {
+	background: var(--color-gray-400);
+}
