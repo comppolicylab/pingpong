@@ -485,29 +485,66 @@
 	};
 
 	// Scroll to the bottom of the chat thread.
-	const scroll = (el: HTMLDivElement, _messages: Message[]) => {
-		// Keep _messages so the action's update runs when the message list changes.
-		void _messages;
-		// Scroll to the bottom of the element.
-		el.scrollTo({
-			top: el.scrollHeight,
-			behavior: 'smooth'
-		});
+	const scroll = (el: HTMLDivElement, params: { messages: Message[]; waiting: boolean }) => {
+		// Keep messages so the action's update runs when the message list changes.
+		let current = params;
+		let lastScrollTop = el.scrollTop;
+		let userPausedAutoScroll = false;
+		let isProgrammaticScroll = false;
+		let previousWaiting = params.waiting;
+
+		const isNearBottom = () => el.scrollTop + el.clientHeight >= el.scrollHeight - 600;
+
+		const scrollToBottom = () => {
+			isProgrammaticScroll = true;
+			el.scrollTo({
+				top: el.scrollHeight,
+				behavior: 'smooth'
+			});
+			requestAnimationFrame(() => {
+				lastScrollTop = el.scrollTop;
+				isProgrammaticScroll = false;
+			});
+		};
+
+		const maybeAutoScroll = () => {
+			if (current.waiting && userPausedAutoScroll) {
+				return;
+			}
+			if (!isNearBottom()) {
+				return;
+			}
+			scrollToBottom();
+		};
+
+		const onScroll = () => {
+			if (isProgrammaticScroll) {
+				lastScrollTop = el.scrollTop;
+				return;
+			}
+			if (current.waiting && el.scrollTop < lastScrollTop - 5) {
+				userPausedAutoScroll = true;
+			}
+			lastScrollTop = el.scrollTop;
+		};
+
+		el.addEventListener('scroll', onScroll, { passive: true });
+		scrollToBottom();
+
 		return {
 			// TODO - would be good to figure out how to do this without a timeout.
-			update: () => {
+			update: (nextParams: { messages: Message[]; waiting: boolean }) => {
+				current = nextParams;
+				if (!previousWaiting && current.waiting) {
+					userPausedAutoScroll = false;
+				}
+				previousWaiting = current.waiting;
 				setTimeout(() => {
-					// Don't auto-scroll if the user is not near the bottom of the chat.
-					// TODO - we can show an indicator if there are new messages that we'd want to scroll to.
-					if (el.scrollTop + el.clientHeight < el.scrollHeight - 600) {
-						return;
-					}
-
-					el.scrollTo({
-						top: el.scrollHeight,
-						behavior: 'smooth'
-					});
+					maybeAutoScroll();
 				}, 250);
+			},
+			destroy: () => {
+				el.removeEventListener('scroll', onScroll);
 			}
 		};
 	};
@@ -1183,7 +1220,7 @@
 			data.isSharedAssistantPage || data.isSharedThreadPage ? 'pt-10' : ''
 		}`}
 		bind:this={messagesContainer}
-		use:scroll={$messages}
+		use:scroll={{ messages: $messages, waiting: $waiting }}
 	>
 		<div class="print-only print-header">
 			<div class="print-header__brand">
