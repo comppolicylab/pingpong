@@ -942,7 +942,7 @@ async def build_response_input_item_list(
             or (
                 utcnow() - container_by_last_active_time[item["container_id"]]
             ).total_seconds()
-            > 30 * 60
+            > 19 * 60
         ):
             expired_ci_output_indices.add(output_index)
 
