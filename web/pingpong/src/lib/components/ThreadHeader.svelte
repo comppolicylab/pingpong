@@ -50,9 +50,9 @@
 			? 'p-2 pt-3 pr-4 flex flex-row shrink rounded-t-4xl'
 			: undefined}
 	>
-		<div slot="left" class="min-w-0">
+		<div slot="left" class="min-w-0 pt-2">
 			<div class="eyebrow eyebrow-dark ml-4">Select group</div>
-			<Button class="{mainTextClass} max-w-full overflow-hidden"
+			<Button class="{mainTextClass} max-w-full overflow-hidden pt-0.5"
 				><span class="truncate">{current?.name || 'Anonymous Session'}</span>
 				<ChevronDownOutline
 					size="sm"

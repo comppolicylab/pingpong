@@ -5,6 +5,7 @@
 	import { blur } from 'svelte/transition';
 	import { loading, loadingMessage } from '$lib/stores/general';
 	import { onMount } from 'svelte';
+	import { ltiHeaderComponent } from '$lib/stores/ltiHeader';
 
 	export let data;
 	export let isLtiHeaderLayout: boolean = false;
@@ -14,6 +15,7 @@
 	$: isLtiHeaderLayout = isLtiHeaderLayout;
 	$: isCollapsedSidebarOpen = $appMenuOpen && isLtiHeaderLayout;
 	$: isMenuOpen = $appMenuOpen && !isCollapsedSidebarOpen;
+	$: hasLtiHeaderComponent = !!$ltiHeaderComponent;
 	onMount(() => {
 		inIframe = window.self !== window.top;
 	});
@@ -33,8 +35,8 @@
 	<div
 		class="relative h-full grow overflow-hidden bg-white transition-all print:!h-auto print:!overflow-visible print:!rounded-none print:!bg-transparent"
 		class:rounded-tl-4xl={isLtiHeaderLayout}
-		class:rounded-t-4xl={!isLtiHeaderLayout}
-		class:md:rounded-tl-none={$appMenuOpen && isLtiHeaderLayout}
+		class:rounded-t-4xl={!isLtiHeaderLayout || !hasLtiHeaderComponent}
+		class:md:rounded-tl-none={$appMenuOpen && isLtiHeaderLayout && hasLtiHeaderComponent}
 		class:rounded-b-4xl={isLtiHeaderLayout}
 	>
 		{#if !!$navigating || $loading}
