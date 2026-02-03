@@ -1,14 +1,14 @@
-import type { ComponentProps, ComponentType } from 'svelte';
+import type { ComponentProps } from 'svelte';
 import { writable } from 'svelte/store';
 import type ThreadHeader from '$lib/components/ThreadHeader.svelte';
 import type NonGroupHeader from '$lib/components/NonGroupHeader.svelte';
 
-type ThreadHeaderProps = ComponentProps<ThreadHeader>;
-type NonGroupHeaderProps = ComponentProps<NonGroupHeader>;
+export type ThreadHeaderProps = ComponentProps<ThreadHeader>;
+export type NonGroupHeaderProps = ComponentProps<NonGroupHeader>;
 
-export type LtiHeaderProps = ThreadHeaderProps | NonGroupHeaderProps | Record<string, never>;
+export type LtiHeaderState =
+	| { kind: 'thread'; props: ThreadHeaderProps }
+	| { kind: 'nongroup'; props: NonGroupHeaderProps }
+	| { kind: 'none' };
 
-export type LtiHeaderComponent = ComponentType<ThreadHeader> | ComponentType<NonGroupHeader> | null;
-
-export const ltiHeaderComponent = writable<LtiHeaderComponent>(null);
-export const ltiHeaderProps = writable<LtiHeaderProps>({});
+export const ltiHeaderState = writable<LtiHeaderState>({ kind: 'none' });

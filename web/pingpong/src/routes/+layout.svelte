@@ -5,15 +5,11 @@
 	import { SvelteToast } from '@zerodevx/svelte-toast';
 	import { onMount } from 'svelte';
 	import { detectBrowser } from '$lib/stores/general';
-	import { ltiHeaderComponent, ltiHeaderProps } from '$lib/stores/ltiHeader';
+	import { ltiHeaderState } from '$lib/stores/ltiHeader';
 	import ThreadHeader from '$lib/components/ThreadHeader.svelte';
 	import NonGroupHeader from '$lib/components/NonGroupHeader.svelte';
-	import type { ComponentProps } from 'svelte';
 
 	export let data;
-
-	type ThreadHeaderProps = ComponentProps<ThreadHeader>;
-	type NonGroupHeaderProps = ComponentProps<NonGroupHeader>;
 
 	onMount(() => {
 		detectBrowser();
@@ -48,12 +44,12 @@
 			<Sidebar {data} />
 		</div>
 		<div class="main-content flex min-w-0 shrink grow flex-col">
-			{#if isLtiHeaderLayout && $ltiHeaderComponent}
+			{#if isLtiHeaderLayout && $ltiHeaderState.kind !== 'none'}
 				<div class="-mt-8 mr-4 shrink-0">
-					{#if $ltiHeaderComponent === ThreadHeader}
-						<ThreadHeader {...$ltiHeaderProps as ThreadHeaderProps} />
-					{:else if $ltiHeaderComponent === NonGroupHeader}
-						<NonGroupHeader {...$ltiHeaderProps as NonGroupHeaderProps} />
+					{#if $ltiHeaderState.kind === 'thread'}
+						<ThreadHeader {...$ltiHeaderState.props} />
+					{:else if $ltiHeaderState.kind === 'nongroup'}
+						<NonGroupHeader {...$ltiHeaderState.props} />
 					{/if}
 				</div>
 			{/if}

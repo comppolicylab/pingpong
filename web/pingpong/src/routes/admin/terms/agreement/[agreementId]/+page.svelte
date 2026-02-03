@@ -8,8 +8,7 @@
 	import { ArrowRightOutline, LockSolid } from 'flowbite-svelte-icons';
 	import Modal from '$lib/components/CustomModal.svelte';
 	import { resolve } from '$app/paths';
-	import { ltiHeaderComponent, ltiHeaderProps } from '$lib/stores/ltiHeader';
-	import NonGroupHeader from '$lib/components/NonGroupHeader.svelte';
+	import { ltiHeaderState } from '$lib/stores/ltiHeader';
 
 	export let data;
 
@@ -20,11 +19,13 @@
 
 	// Update props reactively when data changes
 	$: if (isLtiHeaderLayout) {
-		ltiHeaderComponent.set(NonGroupHeader);
-		ltiHeaderProps.set({
-			title: 'User Agreements',
-			redirectUrl: '/admin/terms',
-			redirectName: 'All Agreements'
+		ltiHeaderState.set({
+			kind: 'nongroup',
+			props: {
+				title: 'User Agreements',
+				redirectUrl: '/admin/terms',
+				redirectName: 'All Agreements'
+			}
 		});
 	}
 

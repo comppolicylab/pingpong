@@ -3,7 +3,7 @@
 	import { page } from '$app/stores';
 	import { onMount, setContext } from 'svelte';
 	import { writable } from 'svelte/store';
-	import { ltiHeaderComponent, ltiHeaderProps } from '$lib/stores/ltiHeader';
+	import { ltiHeaderState } from '$lib/stores/ltiHeader';
 
 	export let data;
 
@@ -15,14 +15,16 @@
 
 	// Update props reactively when data changes
 	$: if (isLtiHeaderLayout) {
-		ltiHeaderComponent.set(ThreadHeader);
-		ltiHeaderProps.set({
-			current: data.class,
-			classes: data.classes,
-			canManage: data.canManage,
-			isOnClassPage,
-			isSharedPage: data.isSharedAssistantPage || data.isSharedThreadPage,
-			isLtiHeaderLayout: true
+		ltiHeaderState.set({
+			kind: 'thread',
+			props: {
+				current: data.class,
+				classes: data.classes,
+				canManage: data.canManage,
+				isOnClassPage,
+				isSharedPage: data.isSharedAssistantPage || data.isSharedThreadPage,
+				isLtiHeaderLayout: true
+			}
 		});
 	}
 

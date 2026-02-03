@@ -2,11 +2,10 @@
 	import PingPongLogo from '$lib/components/PingPongLogo.svelte';
 	import { Heading } from 'flowbite-svelte';
 	import { onMount } from 'svelte';
-	import { ltiHeaderComponent, ltiHeaderProps } from '$lib/stores/ltiHeader';
+	import { ltiHeaderState } from '$lib/stores/ltiHeader';
 
 	onMount(() => {
-		ltiHeaderComponent.set(null);
-		ltiHeaderProps.set({});
+		ltiHeaderState.set({ kind: 'none' });
 	});
 </script>
 
