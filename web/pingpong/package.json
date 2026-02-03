@@ -68,7 +68,8 @@
 			"cookie": ">=0.7.0",
 			"esbuild": ">=0.25.0",
 			"glob": ">=10.5.0",
-			"devalue": ">=5.6.2"
+			"devalue": ">=5.6.2",
+			"@isaacs/brace-expansion": ">=5.0.1"
 		}
 	}
 }
