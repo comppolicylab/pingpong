@@ -925,7 +925,7 @@ async def build_response_input_item_list(
 
         return EasyInputMessageParam(
             role="developer" if uses_reasoning else "system",
-            content=f"The assistant made use of the code interpreter tool.\n CODE RUN: {item['code']} \n OUTPUTS: {tool_call_outputs}",
+            content=f"The assistant made use of the code interpreter tool.\n CODE RUN: {item.get('code', '')} \n OUTPUTS: {tool_call_outputs}",
         )
 
     # Use output_index ordering to walk back through contiguous reasoning items.
@@ -938,11 +938,13 @@ async def build_response_input_item_list(
     for _, output_index, item_type, item in items_by_output:
         if item_type != "code_interpreter_call":
             continue
+        container_id = item.get("container_id")
+        if not container_id:
+            expired_ci_output_indices.add(output_index)
+            continue
         if (
-            item["container_id"] not in container_by_last_active_time
-            or (
-                utcnow() - container_by_last_active_time[item["container_id"]]
-            ).total_seconds()
+            container_id not in container_by_last_active_time
+            or (utcnow() - container_by_last_active_time[container_id]).total_seconds()
             > 19 * 60
         ):
             expired_ci_output_indices.add(output_index)
