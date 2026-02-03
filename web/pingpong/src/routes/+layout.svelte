@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
 	import '../app.css';
 	import Sidebar from '../lib/components/Sidebar.svelte';
 	import Main from '$lib/components/Main.svelte';
@@ -6,8 +6,14 @@
 	import { onMount } from 'svelte';
 	import { detectBrowser } from '$lib/stores/general';
 	import { ltiHeaderComponent, ltiHeaderProps } from '$lib/stores/ltiHeader';
+	import ThreadHeader from '$lib/components/ThreadHeader.svelte';
+	import NonGroupHeader from '$lib/components/NonGroupHeader.svelte';
+	import type { ComponentProps } from 'svelte';
 
 	export let data;
+
+	type ThreadHeaderProps = ComponentProps<ThreadHeader>;
+	type NonGroupHeaderProps = ComponentProps<NonGroupHeader>;
 
 	onMount(() => {
 		detectBrowser();
@@ -44,7 +50,11 @@
 		<div class="main-content flex min-w-0 shrink grow flex-col">
 			{#if isLtiHeaderLayout && $ltiHeaderComponent}
 				<div class="-mt-8 mr-4 shrink-0">
-					<svelte:component this={$ltiHeaderComponent} {...$ltiHeaderProps} />
+					{#if $ltiHeaderComponent === ThreadHeader}
+						<ThreadHeader {...$ltiHeaderProps as ThreadHeaderProps} />
+					{:else if $ltiHeaderComponent === NonGroupHeader}
+						<NonGroupHeader {...$ltiHeaderProps as NonGroupHeaderProps} />
+					{/if}
 				</div>
 			{/if}
 			<Main {isLtiHeaderLayout} {data}>

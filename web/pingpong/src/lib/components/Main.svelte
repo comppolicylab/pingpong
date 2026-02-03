@@ -12,7 +12,6 @@
 
 	let inIframe = false;
 	$: forceCollapsedLayout = data.forceCollapsedLayout;
-	$: isLtiHeaderLayout = isLtiHeaderLayout;
 	$: isCollapsedSidebarOpen = $appMenuOpen && isLtiHeaderLayout;
 	$: isMenuOpen = $appMenuOpen && !isCollapsedSidebarOpen;
 	$: hasLtiHeaderComponent = !!$ltiHeaderComponent;
