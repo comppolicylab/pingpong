@@ -55,6 +55,7 @@ from pingpong.ai_models import (
 )
 from pingpong.artifacts import ArtifactStoreError
 from pingpong.audio_store import AudioStoreError
+from pingpong.video_stream import VideoStreamError
 from pingpong.bg_tasks import safe_task
 from pingpong.copy import copy_group, copy_assistant as copy_assistant_to_class
 from pingpong.emails import (
@@ -3862,6 +3863,109 @@ async def redirect_to_transcription_download(
         return RedirectResponse(
             config.url(f"/group/{class_id}/manage?error_code=6"),
             status_code=303,
+        )
+
+
+@v1.get(
+    "/class/{class_id}/videos/{video_key:path}",
+    dependencies=[
+        Depends(Authz("viewer", "class:{class_id}")),
+    ],
+    response_class=StreamingResponse,
+)
+async def stream_video(
+    class_id: str,
+    video_key: str,
+    request: Request,
+):
+    """
+    Stream a video file with support for HTTP range requests (for video seeking).
+    Requires viewer permission on the class.
+    """
+    try:
+        # Get video metadata
+        metadata = await config.video_stream.stream.get_metadata(video_key)
+
+        # Parse Range header if present
+        range_header = request.headers.get("Range")
+        start = None
+        end = None
+        status_code = 200
+
+        if range_header:
+            # Parse range header (format: "bytes=start-end")
+            import re
+            match = re.match(r"bytes=(\d*)-(\d*)", range_header)
+            if match:
+                start_str, end_str = match.groups()
+                start = int(start_str) if start_str else 0
+                end = int(end_str) if end_str else metadata.content_length - 1
+                status_code = 206  # Partial Content
+            else:
+                # Invalid range format, serve full content
+                start = 0
+                end = metadata.content_length - 1
+        else:
+            # No range requested, serve full content
+            start = 0
+            end = metadata.content_length - 1
+
+        # Validate range
+        if start < 0 or start >= metadata.content_length:
+            raise HTTPException(status_code=416, detail="Invalid range start")
+        if end >= metadata.content_length:
+            end = metadata.content_length - 1
+        if end < start:
+            raise HTTPException(status_code=416, detail="Invalid range end")
+
+        # Stream the video range
+        stream = config.video_stream.stream.stream_video_range(
+            video_key,
+            start=start,
+            end=end,
+        )
+
+        # Build response headers
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Content-Type": metadata.content_type,
+        }
+
+        if status_code == 206:
+            content_length = end - start + 1
+            headers["Content-Range"] = f"bytes {start}-{end}/{metadata.content_length}"
+            headers["Content-Length"] = str(content_length)
+        else:
+            headers["Content-Length"] = str(metadata.content_length)
+
+        if metadata.etag:
+            headers["ETag"] = metadata.etag
+        if metadata.last_modified:
+            headers["Last-Modified"] = str(metadata.last_modified)
+
+        return StreamingResponse(
+            stream,
+            status_code=status_code,
+            media_type=metadata.content_type,
+            headers=headers,
+        )
+
+    except VideoStreamError as e:
+        if e.code == 404:
+            raise HTTPException(status_code=404, detail="Video not found")
+        elif e.code == 416:
+            raise HTTPException(status_code=416, detail=e.detail or "Invalid range")
+        else:
+            logger.exception(f"VideoStreamError while streaming video {video_key}")
+            raise HTTPException(
+                status_code=500,
+                detail=e.detail or "An error occurred while streaming the video",
+            )
+    except Exception:
+        logger.exception(f"Unexpected error while streaming video {video_key}")
+        raise HTTPException(
+            status_code=500,
+            detail="An internal error occurred while streaming the video.",
         )
 
 
