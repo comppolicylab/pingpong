@@ -11,6 +11,7 @@
 	export let current: api.Class | null = null;
 	export let canManage: boolean = false;
 	export let isSharedPage: boolean = false;
+	export let isLtiHeaderLayout: boolean = false;
 
 	$: sortedClasses = classes.sort((a: api.Class, b: api.Class) => a.name.localeCompare(b.name));
 	let searchTerm = '';
@@ -44,7 +45,7 @@
 		</div>
 	</PageHeader>
 {:else}
-	<PageHeader>
+	<PageHeader paddingClass={isLtiHeaderLayout ? 'p-2 pt-3 pr-4 flex flex-row shrink rounded-t-4xl' : undefined}>
 		<div slot="left" class="min-w-0">
 			<div class="eyebrow eyebrow-dark ml-4">Select group</div>
 			<Button class="{mainTextClass} max-w-full overflow-hidden"

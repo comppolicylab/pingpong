@@ -3,8 +3,12 @@
 		'text-3xl text-color-blue-dark-50 font-serif font-bold px-4 truncate text-left';
 </script>
 
+<script lang="ts">
+	export let paddingClass: string = 'p-2 pt-6 pb-6 sm:flex sm:pb-2 lg:p-8 lg:pt-10 lg:pb-4';
+</script>
+
 <header
-	class="items-center justify-between bg-blue-light-50 p-2 pt-6 pb-6 sm:flex sm:pb-2 lg:p-8 lg:pt-10 lg:pb-4"
+	class="items-center justify-between bg-blue-light-50 {paddingClass}"
 >
 	<div class="w-full min-w-0 sm:max-w-2/3">
 		<slot name="left" />
