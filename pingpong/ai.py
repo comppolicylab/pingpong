@@ -575,8 +575,14 @@ async def build_response_input_item_list(
     """Build a list of ResponseInputItem from a thread run step."""
     response_input_items: list[ResponseInputItemParam] = []
     # Store ResponseInputItemParam and time created to sort later
-    response_input_items_with_time: list[tuple[datetime, ResponseInputItemParam]] = []
+    response_input_items_with_time: list[
+        tuple[datetime, int, str, ResponseInputItemParam]
+    ] = []
     container_by_last_active_time: dict[int, datetime] = {}
+
+    def coerce_utc(value: datetime) -> datetime:
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
     async for message in models.Thread.list_all_messages_gen(session, thread_id):
         content_list: list[ResponseInputMessageContentListParam] = []
         for content in message.content:
@@ -656,6 +662,8 @@ async def build_response_input_item_list(
         response_input_items_with_time.append(
             (
                 message.created,
+                message.output_index,
+                "message",
                 ResponseOutputMessageParam(
                     role=message.role,
                     content=content_list,
@@ -684,6 +692,8 @@ async def build_response_input_item_list(
                 response_input_items_with_time.append(
                     (
                         tool_call.created,
+                        tool_call.output_index,
+                        "code_interpreter_call",
                         ResponseCodeInterpreterToolCallParam(
                             id=tool_call.tool_call_id,
                             code=tool_call.code,
@@ -700,11 +710,11 @@ async def build_response_input_item_list(
                 )
                 candidates: list[datetime] = []
                 if existing_time is not None:
-                    candidates.append(existing_time)
+                    candidates.append(coerce_utc(existing_time))
                 if tool_call.created is not None:
-                    candidates.append(tool_call.created)
+                    candidates.append(coerce_utc(tool_call.created))
                 if getattr(tool_call, "completed", None) is not None:
-                    candidates.append(tool_call.completed)
+                    candidates.append(coerce_utc(tool_call.completed))
                 if candidates:
                     container_by_last_active_time[tool_call.container_id] = max(
                         candidates
@@ -727,6 +737,8 @@ async def build_response_input_item_list(
                 response_input_items_with_time.append(
                     (
                         tool_call.created,
+                        tool_call.output_index,
+                        "file_search_call",
                         ResponseFileSearchToolCallParam(
                             id=tool_call.tool_call_id,
                             queries=json.loads(tool_call.queries)
@@ -771,6 +783,8 @@ async def build_response_input_item_list(
                 response_input_items_with_time.append(
                     (
                         tool_call.created,
+                        tool_call.output_index,
+                        "web_search_call",
                         ResponseFunctionWebSearchParam(
                             id=tool_call.tool_call_id,
                             action=action,
@@ -799,6 +813,8 @@ async def build_response_input_item_list(
                 response_input_items_with_time.append(
                     (
                         tool_call.created,
+                        tool_call.output_index,
+                        "mcp_call",
                         McpCallParam(
                             id=tool_call.tool_call_id,
                             arguments=tool_call.mcp_arguments,
@@ -846,6 +862,8 @@ async def build_response_input_item_list(
                 response_input_items_with_time.append(
                     (
                         tool_call.created,
+                        tool_call.output_index,
+                        "mcp_list_tools",
                         McpListToolsParam(
                             id=tool_call.tool_call_id,
                             server_label=server_label,
@@ -880,6 +898,8 @@ async def build_response_input_item_list(
         response_input_items_with_time.append(
             (
                 reasoning.created,
+                reasoning.output_index,
+                "reasoning",
                 ResponseReasoningItemParam(
                     id=reasoning.reasoning_id,
                     content=content_array if content_array else None,
@@ -889,10 +909,8 @@ async def build_response_input_item_list(
                 ),
             )
         )
-    # Sort by created time
-    response_input_items_with_time.sort(key=lambda x: x[0])
-    # Extract the ResponseInputItemParam from the sorted list
-    response_input_items.extend(item for _, item in response_input_items_with_time)
+    # Sort by output index, falling back to created time for ties.
+    response_input_items_with_time.sort(key=lambda x: (x[1], x[0]))
 
     def convert_to_message(
         item: ResponseCodeInterpreterToolCallParam, uses_reasoning: bool
@@ -907,21 +925,68 @@ async def build_response_input_item_list(
 
         return EasyInputMessageParam(
             role="developer" if uses_reasoning else "system",
-            content=f"The assistant made use of the code interpreter tool.\n CODE RUN: {item['code']} \n OUTPUTS: {tool_call_outputs}",
+            content=f"The assistant made use of the code interpreter tool.\n CODE RUN: {item.get('code', '')} \n OUTPUTS: {tool_call_outputs}",
         )
 
-    for item in response_input_items:
-        if item["type"] == "code_interpreter_call":
-            if (
-                item["container_id"] not in container_by_last_active_time
-                or (
-                    utcnow() - container_by_last_active_time[item["container_id"]]
-                ).total_seconds()
-                > 19 * 60
-            ):
-                response_input_items[response_input_items.index(item)] = (
-                    convert_to_message(item, uses_reasoning)
+    # Use output_index ordering to walk back through contiguous reasoning items.
+    items_by_output = response_input_items_with_time
+    output_index_positions = {
+        output_index: idx for idx, (_, output_index, _, _) in enumerate(items_by_output)
+    }
+
+    expired_ci_output_indices: set[int] = set()
+    for _, output_index, item_type, item in items_by_output:
+        if item_type != "code_interpreter_call":
+            continue
+        container_id = item.get("container_id")
+        if not container_id:
+            expired_ci_output_indices.add(output_index)
+            continue
+        if (
+            container_id not in container_by_last_active_time
+            or (utcnow() - container_by_last_active_time[container_id]).total_seconds()
+            > 19 * 60
+        ):
+            expired_ci_output_indices.add(output_index)
+
+    reasoning_output_indices_to_remove: set[int] = set()
+    for ci_output_index in expired_ci_output_indices:
+        position = output_index_positions.get(ci_output_index)
+        if position is None:
+            continue
+        scan_index = position - 1
+        while scan_index >= 0:
+            _, prior_output_index, prior_type, _ = items_by_output[scan_index]
+            if prior_type == "reasoning":
+                reasoning_output_indices_to_remove.add(prior_output_index)
+                scan_index -= 1
+                continue
+            break
+
+    filtered_items: list[tuple[datetime, int, str, ResponseInputItemParam]] = []
+    for created, output_index, item_type, item in response_input_items_with_time:
+        if (
+            item_type == "reasoning"
+            and output_index in reasoning_output_indices_to_remove
+        ):
+            continue
+        if (
+            item_type == "code_interpreter_call"
+            and output_index in expired_ci_output_indices
+        ):
+            filtered_items.append(
+                (
+                    created,
+                    output_index,
+                    "message",
+                    convert_to_message(item, uses_reasoning),
                 )
+            )
+            continue
+        filtered_items.append((created, output_index, item_type, item))
+
+    # Extract the ResponseInputItemParam from the sorted list
+    response_input_items.extend(item for _, _, _, item in filtered_items)
     return response_input_items
 
 
