@@ -5,6 +5,8 @@
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import { updateSearch, getValue } from '$lib/urlstate';
 	import { resolve } from '$app/paths';
+	import { ltiHeaderComponent, ltiHeaderProps } from '$lib/stores/ltiHeader';
+	import NonGroupHeader from '$lib/components/NonGroupHeader.svelte';
 
 	export let data;
 
@@ -21,14 +23,26 @@
 	$: classes = (data.classes || [])
 		.filter((cls) => (instSearch ? cls.institution_id === instSearch : true))
 		.sort((a, b) => a.name.localeCompare(b.name));
+
+	$: isLtiHeaderLayout = data.forceCollapsedLayout && data.forceShowSidebarButton;
+
+	// Update props reactively when data changes
+	$: if (isLtiHeaderLayout) {
+		ltiHeaderComponent.set(NonGroupHeader);
+		ltiHeaderProps.set({
+			title: 'Admin'
+		});
+	}
 </script>
 
 <div class="flex h-full w-full flex-col">
-	<PageHeader>
-		<h2 class="text-color-blue-dark-50 px-4 pt-6 pb-3 font-serif text-3xl font-bold" slot="left">
-			Admin
-		</h2>
-	</PageHeader>
+	{#if !isLtiHeaderLayout}
+		<PageHeader>
+			<h2 class="text-color-blue-dark-50 px-4 pt-6 pb-3 font-serif text-3xl font-bold" slot="left">
+				Admin
+			</h2>
+		</PageHeader>
+	{/if}
 
 	<!-- TODO: search is not yet fully supported. -->
 

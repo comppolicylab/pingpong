@@ -129,18 +129,24 @@
 
 	type Placement = 'top-end' | 'right-start';
 	let placement: Placement = 'top-end';
+	let isLgOrWider = false;
 	function updatePlacement() {
 		if (window.innerWidth >= 1024) {
 			// lg breakpoint
 			placement = 'right-start';
+			isLgOrWider = true;
 		} else {
 			placement = 'top-end';
+			isLgOrWider = false;
 		}
 	}
 
 	// Close the menu when navigating.
 	afterNavigate(() => {
-		togglePanel(false);
+		// Don't close the sidebar in LTI context on lg or larger screens
+		if (!(forceCollapsedLayout && forceShowSidebarButton && isLgOrWider)) {
+			togglePanel(false);
+		}
 		dropdownOpen = false;
 	});
 
@@ -163,9 +169,7 @@
 
 <Sidebar
 	asideClass={`absolute top-0 left-0 z-0 px-2 h-full ${
-		forceCollapsedLayout && forceShowSidebarButton
-			? 'w-80'
-			: 'w-[90%] md:w-80'
+		forceCollapsedLayout && forceShowSidebarButton ? 'w-80' : 'w-[90%] md:w-80'
 	} ${!inIframe || !forceCollapsedLayout ? 'lg:static lg:h-full lg:w-full' : ''}`}
 	activeUrl={$page.url.pathname}
 >
@@ -197,7 +201,9 @@
 			</div>
 		</SidebarGroup>
 		{#if showSidebarItems}
-			<SidebarGroup class="mt-6 {forceCollapsedLayout && forceShowSidebarButton ? 'pt-6 md:pt-0' : ''}">
+			<SidebarGroup
+				class="mt-6 {forceCollapsedLayout && forceShowSidebarButton ? 'pt-6 md:pt-0' : ''}"
+			>
 				<SidebarItem
 					target={openAllLinksInNewTab ? '_blank' : undefined}
 					href={nonAuthed
@@ -256,7 +262,12 @@
 					/>
 				</SidebarGroup>
 			{:else}
-				<SidebarGroup class="{forceCollapsedLayout && forceShowSidebarButton ? '' : 'mt-6'} flex flex-col overflow-y-auto pr-3" ulClass="flex-1">
+				<SidebarGroup
+					class="{forceCollapsedLayout && forceShowSidebarButton
+						? ''
+						: 'mt-6'} flex flex-col overflow-y-auto pr-3"
+					ulClass="flex-1"
+				>
 					{#if !sharedPage || canViewSpecificClass}
 						<SidebarGroup ulClass="flex flex-wrap justify-between gap-2 items-center mt-4">
 							<span class="flex-1 truncate text-white">Group Assistants</span>

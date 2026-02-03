@@ -24,6 +24,8 @@
 	} from 'flowbite-svelte-icons';
 	import { sadToast, happyToast } from '$lib/toast';
 	import { invalidateAll } from '$app/navigation';
+	import { ltiHeaderComponent, ltiHeaderProps } from '$lib/stores/ltiHeader';
+	import NonGroupHeader from '$lib/components/NonGroupHeader.svelte';
 
 	export let data;
 
@@ -46,6 +48,17 @@
 
 			return a.identifier.localeCompare(b.identifier);
 		}) || [];
+
+	$: isLtiHeaderLayout = data.forceCollapsedLayout && data.forceShowSidebarButton;
+
+	// Update props reactively when data changes
+	$: if (isLtiHeaderLayout) {
+		ltiHeaderComponent.set(NonGroupHeader);
+		ltiHeaderProps.set({
+			title: 'Your Profile'
+		});
+	}
+
 	const inputState = {
 		first_name: {
 			loading: false,
@@ -171,11 +184,13 @@
 </script>
 
 <div class="relative flex h-full w-full flex-col">
-	<PageHeader>
-		<h2 class="text-color-blue-dark-50 px-4 py-3 font-serif text-3xl font-bold" slot="left">
-			Your Profile
-		</h2>
-	</PageHeader>
+	{#if !isLtiHeaderLayout}
+		<PageHeader>
+			<h2 class="text-color-blue-dark-50 px-4 py-3 font-serif text-3xl font-bold" slot="left">
+				Your Profile
+			</h2>
+		</PageHeader>
+	{/if}
 	<div class="h-full w-full overflow-y-auto p-12">
 		<div class="mb-4 flex flex-row flex-wrap items-center justify-between gap-y-4">
 			<Heading

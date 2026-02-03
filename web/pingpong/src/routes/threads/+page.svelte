@@ -9,6 +9,8 @@
 	import { getValue, updateSearch } from '$lib/urlstate';
 	import { loading } from '$lib/stores/general';
 	import { afterUpdate } from 'svelte';
+	import { ltiHeaderComponent, ltiHeaderProps } from '$lib/stores/ltiHeader';
+	import NonGroupHeader from '$lib/components/NonGroupHeader.svelte';
 
 	export let data;
 
@@ -32,6 +34,16 @@
 			lastData = data;
 		}
 	});
+
+	$: isLtiHeaderLayout = data.forceCollapsedLayout && data.forceShowSidebarButton;
+
+	// Update props reactively when data changes
+	$: if (isLtiHeaderLayout) {
+		ltiHeaderComponent.set(NonGroupHeader);
+		ltiHeaderProps.set({
+			title: 'Threads Archive'
+		});
+	}
 
 	const classNamesLookup = data.classes.reduce(
 		(acc, cls) => {
@@ -67,11 +79,13 @@
 </script>
 
 <div class="flex h-full w-full flex-col">
-	<PageHeader>
-		<h2 class="text-color-blue-dark-50 px-4 py-3 font-serif text-3xl font-bold" slot="left">
-			Threads Archive
-		</h2>
-	</PageHeader>
+	{#if !isLtiHeaderLayout}
+		<PageHeader>
+			<h2 class="text-color-blue-dark-50 px-4 py-3 font-serif text-3xl font-bold" slot="left">
+				Threads Archive
+			</h2>
+		</PageHeader>
+	{/if}
 
 	<!-- TODO: search is not yet fully supported. -->
 

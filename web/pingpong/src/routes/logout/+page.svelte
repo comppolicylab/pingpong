@@ -1,6 +1,13 @@
 <script lang="ts">
 	import PingPongLogo from '$lib/components/PingPongLogo.svelte';
 	import { Heading } from 'flowbite-svelte';
+	import { onMount } from 'svelte';
+	import { ltiHeaderComponent, ltiHeaderProps } from '$lib/stores/ltiHeader';
+
+	onMount(() => {
+		ltiHeaderComponent.set(null);
+		ltiHeaderProps.set({});
+	});
 </script>
 
 <div class="v-screen flex h-[calc(100dvh-3rem)] items-center justify-center">

@@ -45,7 +45,11 @@
 		</div>
 	</PageHeader>
 {:else}
-	<PageHeader paddingClass={isLtiHeaderLayout ? 'p-2 pt-3 pr-4 flex flex-row shrink rounded-t-4xl' : undefined}>
+	<PageHeader
+		paddingClass={isLtiHeaderLayout
+			? 'p-2 pt-3 pr-4 flex flex-row shrink rounded-t-4xl'
+			: undefined}
+	>
 		<div slot="left" class="min-w-0">
 			<div class="eyebrow eyebrow-dark ml-4">Select group</div>
 			<Button class="{mainTextClass} max-w-full overflow-hidden"

@@ -31,9 +31,11 @@
 
 <SvelteToast />
 {#if showSidebar}
-	<div class="flex h-full w-full md:h-[calc(100vh-3rem)] {isLtiHeaderLayout ? 'md:gap-4' : 'lg:gap-4'}">
+	<div
+		class="flex h-full w-full md:h-[calc(100vh-3rem)] {isLtiHeaderLayout ? 'md:gap-4' : 'lg:gap-4'}"
+	>
 		<div
-			class="sidebar min-w-0 shrink-0 grow-0 {isLtiHeaderLayout 
+			class="sidebar min-w-0 shrink-0 grow-0 {isLtiHeaderLayout
 				? 'basis-16 md:basis-[320px]'
 				: 'basis-[320px]'}"
 		>
@@ -41,7 +43,7 @@
 		</div>
 		<div class="main-content flex min-w-0 shrink grow flex-col">
 			{#if isLtiHeaderLayout && $ltiHeaderComponent}
-				<div class="shrink-0 -mt-8 mr-4">
+				<div class="-mt-8 mr-4 shrink-0">
 					<svelte:component this={$ltiHeaderComponent} {...$ltiHeaderProps} />
 				</div>
 			{/if}

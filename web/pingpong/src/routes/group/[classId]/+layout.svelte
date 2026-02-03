@@ -1,7 +1,7 @@
 <script lang="ts">
 	import ThreadHeader from '$lib/components/ThreadHeader.svelte';
 	import { page } from '$app/stores';
-	import { onMount, onDestroy, setContext } from 'svelte';
+	import { onMount, setContext } from 'svelte';
 	import { writable } from 'svelte/store';
 	import { ltiHeaderComponent, ltiHeaderProps } from '$lib/stores/ltiHeader';
 
@@ -28,11 +28,6 @@
 
 	onMount(() => {
 		headerHeightStore.set(headerEl?.offsetHeight ?? 0);
-	});
-
-	onDestroy(() => {
-		ltiHeaderComponent.set(null);
-		ltiHeaderProps.set({});
 	});
 
 	setContext('headerHeightStore', headerHeightStore);
