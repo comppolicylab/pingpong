@@ -44,6 +44,7 @@
 	import { afterNavigate, goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import { resolve } from '$app/paths';
+	import { ltiHeaderComponent } from '$lib/stores/ltiHeader';
 
 	export let data: LayoutData;
 
@@ -57,7 +58,7 @@
 			isMyAssistant
 		};
 	};
-
+	$: hasLtiHeaderComponent = !!$ltiHeaderComponent;
 	$: sharedPage = data.isSharedAssistantPage || data.isSharedThreadPage;
 	$: forceShowSidebarButton = data.forceShowSidebarButton;
 	$: forceCollapsedLayout = data.forceCollapsedLayout;
@@ -168,7 +169,7 @@
 </script>
 
 <Sidebar
-	asideClass={`absolute top-0 left-0 z-0 px-2 h-full ${
+	asideClass={`absolute top-0 left-0 ${forceCollapsedLayout && forceShowSidebarButton && hasLtiHeaderComponent ? '-z-1 md:z-0' : 'z-0'} px-2 h-full ${
 		forceCollapsedLayout && forceShowSidebarButton ? 'w-80' : 'w-[90%] md:w-80'
 	} ${!inIframe || !forceCollapsedLayout ? 'lg:static lg:h-full lg:w-full' : ''}`}
 	activeUrl={$page.url.pathname}
@@ -193,7 +194,9 @@
 				{/if}
 				<NavBrand
 					href={(inIframe && sharedPage) || !logoIsClickable ? undefined : '/'}
-					class={forceCollapsedLayout && forceShowSidebarButton ? 'hidden md:block' : ''}
+					class={forceCollapsedLayout && forceShowSidebarButton && hasLtiHeaderComponent
+						? 'hidden md:block'
+						: ''}
 					target={openAllLinksInNewTab ? '_blank' : undefined}
 				>
 					<PingPongLogo size={10} extraClass="fill-amber-600" />
