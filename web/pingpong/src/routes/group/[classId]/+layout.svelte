@@ -3,11 +3,28 @@
 	import { page } from '$app/stores';
 	import { onMount, setContext } from 'svelte';
 	import { writable } from 'svelte/store';
+	import { ltiHeaderComponent, ltiHeaderProps } from '$lib/stores/ltiHeader';
 
 	export let data;
 
 	let headerEl: HTMLDivElement;
 	const headerHeightStore = writable(0);
+
+	// Register the LTI header component when this layout mounts
+	$: isLtiHeaderLayout = data.forceCollapsedLayout && data.forceShowSidebarButton;
+
+	// Update props reactively when data changes
+	$: if (isLtiHeaderLayout) {
+		ltiHeaderComponent.set(ThreadHeader);
+		ltiHeaderProps.set({
+			current: data.class,
+			classes: data.classes,
+			canManage: data.canManage,
+			isOnClassPage,
+			isSharedPage: data.isSharedAssistantPage || data.isSharedThreadPage,
+			isLtiHeaderLayout: true
+		});
+	}
 
 	onMount(() => {
 		headerHeightStore.set(headerEl?.offsetHeight ?? 0);
@@ -22,7 +39,7 @@
 </script>
 
 <div class="relative flex h-full w-full flex-col">
-	{#if !(data.isSharedAssistantPage || data.isSharedThreadPage)}
+	{#if !(data.isSharedAssistantPage || data.isSharedThreadPage) && !isLtiHeaderLayout}
 		<div bind:this={headerEl} class="print-hidden">
 			<ThreadHeader
 				current={data.class}

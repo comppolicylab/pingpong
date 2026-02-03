@@ -911,7 +911,7 @@
 </script>
 
 <div
-	class="container flex h-[calc(100%-5rem)] w-full flex-col justify-between space-y-12 overflow-y-auto p-12 [&>*+*]:border-t-3 [&>*+*]:border-blue-dark-40 dark:[&>*+*]:border-gray-700"
+	class="container flex w-full flex-col justify-between space-y-12 overflow-y-auto p-12 [&>*+*]:border-t-3 [&>*+*]:border-blue-dark-40 dark:[&>*+*]:border-gray-700"
 	bind:this={manageContainer}
 >
 	<div class="flex flex-row justify-between">

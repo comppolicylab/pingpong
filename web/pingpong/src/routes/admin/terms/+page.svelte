@@ -17,11 +17,25 @@
 		TableHeadCell
 	} from 'flowbite-svelte';
 	import { ArrowRightOutline, PlusOutline } from 'flowbite-svelte-icons';
+	import { ltiHeaderComponent, ltiHeaderProps } from '$lib/stores/ltiHeader';
+	import NonGroupHeader from '$lib/components/NonGroupHeader.svelte';
 
 	export let data;
 
 	$: agreements = data.agreements;
 	$: policies = data.policies;
+
+	$: isLtiHeaderLayout = data.forceCollapsedLayout && data.forceShowSidebarButton;
+
+	// Update props reactively when data changes
+	$: if (isLtiHeaderLayout) {
+		ltiHeaderComponent.set(NonGroupHeader);
+		ltiHeaderProps.set({
+			title: 'User Agreements',
+			redirectUrl: '/admin',
+			redirectName: 'Admin page'
+		});
+	}
 
 	const handleEnablePolicy = async (policy: api.AgreementPolicy) => {
 		if (
@@ -59,20 +73,22 @@
 </script>
 
 <div class="relative flex h-full w-full flex-col">
-	<PageHeader>
-		<div slot="left">
-			<h2 class="text-color-blue-dark-50 px-4 py-3 font-serif text-3xl font-bold">
-				User Agreements
-			</h2>
-		</div>
-		<div slot="right">
-			<a
-				href={resolve(`/admin`)}
-				class="flex items-center gap-2 rounded-full bg-white p-2 px-4 text-sm font-medium text-blue-dark-50 transition-all hover:bg-blue-dark-40 hover:text-white"
-				>Admin page <ArrowRightOutline size="md" class="text-orange" /></a
-			>
-		</div>
-	</PageHeader>
+	{#if !isLtiHeaderLayout}
+		<PageHeader>
+			<div slot="left">
+				<h2 class="text-color-blue-dark-50 px-4 py-3 font-serif text-3xl font-bold">
+					User Agreements
+				</h2>
+			</div>
+			<div slot="right">
+				<a
+					href={resolve(`/admin`)}
+					class="flex items-center gap-2 rounded-full bg-white p-2 px-4 text-sm font-medium text-blue-dark-50 transition-all hover:bg-blue-dark-40 hover:text-white"
+					>Admin page <ArrowRightOutline size="md" class="text-orange" /></a
+				>
+			</div>
+		</PageHeader>
+	{/if}
 	<div class="h-full w-full overflow-y-auto p-12">
 		<div class="mb-4 flex flex-row flex-wrap items-center justify-between gap-y-4">
 			<Heading

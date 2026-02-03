@@ -5,6 +5,7 @@
 	import { SvelteToast } from '@zerodevx/svelte-toast';
 	import { onMount } from 'svelte';
 	import { detectBrowser } from '$lib/stores/general';
+	import { ltiHeaderComponent, ltiHeaderProps } from '$lib/stores/ltiHeader';
 
 	export let data;
 
@@ -23,16 +24,30 @@
 		!data.doNotShowSidebar;
 	$: showStatusPage = data.me?.user;
 	$: showBackground = data.isSharedAssistantPage || data.isSharedThreadPage;
+	$: forceCollapsedLayout = data.forceCollapsedLayout;
+	$: forceShowSidebarButton = data.forceShowSidebarButton;
+	$: isLtiHeaderLayout = forceCollapsedLayout && forceShowSidebarButton;
 </script>
 
 <SvelteToast />
 {#if showSidebar}
-	<div class=" flex h-full w-full md:h-[calc(100vh-3rem)] lg:gap-4">
-		<div class="sidebar min-w-0 shrink-0 grow-0 basis-[320px]">
+	<div
+		class="flex h-full w-full md:h-[calc(100vh-3rem)] {isLtiHeaderLayout ? 'md:gap-4' : 'lg:gap-4'}"
+	>
+		<div
+			class="sidebar min-w-0 shrink-0 grow-0 {isLtiHeaderLayout
+				? 'basis-16 md:basis-[320px]'
+				: 'basis-[320px]'}"
+		>
 			<Sidebar {data} />
 		</div>
-		<div class="main-content min-w-0 shrink grow">
-			<Main {data}>
+		<div class="main-content flex min-w-0 shrink grow flex-col">
+			{#if isLtiHeaderLayout && $ltiHeaderComponent}
+				<div class="-mt-8 mr-4 shrink-0">
+					<svelte:component this={$ltiHeaderComponent} {...$ltiHeaderProps} />
+				</div>
+			{/if}
+			<Main {isLtiHeaderLayout} {data}>
 				<slot />
 			</Main>
 		</div>
