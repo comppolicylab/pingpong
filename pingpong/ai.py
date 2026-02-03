@@ -909,8 +909,8 @@ async def build_response_input_item_list(
                 ),
             )
         )
-    # Sort by created time
-    response_input_items_with_time.sort(key=lambda x: (x[0], x[1]))
+    # Sort by output index, falling back to created time for ties.
+    response_input_items_with_time.sort(key=lambda x: (x[1], x[0]))
 
     def convert_to_message(
         item: ResponseCodeInterpreterToolCallParam, uses_reasoning: bool
@@ -928,7 +928,8 @@ async def build_response_input_item_list(
             content=f"The assistant made use of the code interpreter tool.\n CODE RUN: {item['code']} \n OUTPUTS: {tool_call_outputs}",
         )
 
-    items_by_output = sorted(response_input_items_with_time, key=lambda x: x[1])
+    # Use output_index ordering to walk back through contiguous reasoning items.
+    items_by_output = response_input_items_with_time
     output_index_positions = {
         output_index: idx for idx, (_, output_index, _, _) in enumerate(items_by_output)
     }
