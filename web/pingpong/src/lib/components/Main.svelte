@@ -5,17 +5,16 @@
 	import { blur } from 'svelte/transition';
 	import { loading, loadingMessage } from '$lib/stores/general';
 	import { onMount } from 'svelte';
-	import { ltiHeaderComponent } from '$lib/stores/ltiHeader';
+	import { ltiHeaderState } from '$lib/stores/ltiHeader';
 
 	export let data;
 	export let isLtiHeaderLayout: boolean = false;
 
 	let inIframe = false;
 	$: forceCollapsedLayout = data.forceCollapsedLayout;
-	$: isLtiHeaderLayout = isLtiHeaderLayout;
 	$: isCollapsedSidebarOpen = $appMenuOpen && isLtiHeaderLayout;
 	$: isMenuOpen = $appMenuOpen && !isCollapsedSidebarOpen;
-	$: hasLtiHeaderComponent = !!$ltiHeaderComponent;
+	$: hasLtiHeaderComponent = $ltiHeaderState.kind !== 'none';
 	onMount(() => {
 		inIframe = window.self !== window.top;
 	});

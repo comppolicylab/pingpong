@@ -44,7 +44,7 @@
 	import { afterNavigate, goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import { resolve } from '$app/paths';
-	import { ltiHeaderComponent } from '$lib/stores/ltiHeader';
+	import { ltiHeaderState } from '$lib/stores/ltiHeader';
 
 	export let data: LayoutData;
 
@@ -58,7 +58,7 @@
 			isMyAssistant
 		};
 	};
-	$: hasLtiHeaderComponent = !!$ltiHeaderComponent;
+	$: hasLtiHeaderComponent = $ltiHeaderState.kind !== 'none';
 	$: sharedPage = data.isSharedAssistantPage || data.isSharedThreadPage;
 	$: forceShowSidebarButton = data.forceShowSidebarButton;
 	$: forceCollapsedLayout = data.forceCollapsedLayout;

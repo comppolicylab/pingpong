@@ -6,8 +6,7 @@
 	import { happyToast, sadToast } from '$lib/toast';
 	import { Button, Heading, Input, Label, Modal, P, Textarea } from 'flowbite-svelte';
 	import { ArrowRightOutline } from 'flowbite-svelte-icons';
-	import { ltiHeaderComponent, ltiHeaderProps } from '$lib/stores/ltiHeader';
-	import NonGroupHeader from '$lib/components/NonGroupHeader.svelte';
+	import { ltiHeaderState } from '$lib/stores/ltiHeader';
 
 	export let data;
 	$: externalProviders = data.externalProviders;
@@ -16,11 +15,13 @@
 
 	// Update props reactively when data changes
 	$: if (isLtiHeaderLayout) {
-		ltiHeaderComponent.set(NonGroupHeader);
-		ltiHeaderProps.set({
-			title: 'External Login Providers',
-			redirectUrl: '/admin',
-			redirectName: 'Admin page'
+		ltiHeaderState.set({
+			kind: 'nongroup',
+			props: {
+				title: 'External Login Providers',
+				redirectUrl: '/admin',
+				redirectName: 'Admin page'
+			}
 		});
 	}
 

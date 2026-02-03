@@ -1,11 +1,10 @@
 <script lang="ts">
 	import { Heading, P } from 'flowbite-svelte';
 	import { onMount } from 'svelte';
-	import { ltiHeaderComponent, ltiHeaderProps } from '$lib/stores/ltiHeader';
+	import { ltiHeaderState } from '$lib/stores/ltiHeader';
 
 	onMount(() => {
-		ltiHeaderComponent.set(null);
-		ltiHeaderProps.set({});
+		ltiHeaderState.set({ kind: 'none' });
 	});
 </script>
 

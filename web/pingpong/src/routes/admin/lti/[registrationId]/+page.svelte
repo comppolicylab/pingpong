@@ -18,8 +18,7 @@
 	import { happyToast, sadToast } from '$lib/toast';
 	import { loading } from '$lib/stores/general.js';
 	import { resolve } from '$app/paths';
-	import { ltiHeaderComponent, ltiHeaderProps } from '$lib/stores/ltiHeader';
-	import NonGroupHeader from '$lib/components/NonGroupHeader.svelte';
+	import { ltiHeaderState } from '$lib/stores/ltiHeader';
 
 	export let data;
 
@@ -49,11 +48,13 @@
 
 	// Update props reactively when data changes
 	$: if (isLtiHeaderLayout) {
-		ltiHeaderComponent.set(NonGroupHeader);
-		ltiHeaderProps.set({
-			title: 'LTI Registration',
-			redirectUrl: '/admin/lti',
-			redirectName: 'All Registrations'
+		ltiHeaderState.set({
+			kind: 'nongroup',
+			props: {
+				title: 'LTI Registration',
+				redirectUrl: '/admin/lti',
+				redirectName: 'All Registrations'
+			}
 		});
 	}
 

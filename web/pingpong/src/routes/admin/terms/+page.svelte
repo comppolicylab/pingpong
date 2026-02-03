@@ -17,8 +17,7 @@
 		TableHeadCell
 	} from 'flowbite-svelte';
 	import { ArrowRightOutline, PlusOutline } from 'flowbite-svelte-icons';
-	import { ltiHeaderComponent, ltiHeaderProps } from '$lib/stores/ltiHeader';
-	import NonGroupHeader from '$lib/components/NonGroupHeader.svelte';
+	import { ltiHeaderState } from '$lib/stores/ltiHeader';
 
 	export let data;
 
@@ -29,11 +28,13 @@
 
 	// Update props reactively when data changes
 	$: if (isLtiHeaderLayout) {
-		ltiHeaderComponent.set(NonGroupHeader);
-		ltiHeaderProps.set({
-			title: 'User Agreements',
-			redirectUrl: '/admin',
-			redirectName: 'Admin page'
+		ltiHeaderState.set({
+			kind: 'nongroup',
+			props: {
+				title: 'User Agreements',
+				redirectUrl: '/admin',
+				redirectName: 'Admin page'
+			}
 		});
 	}
 

@@ -9,8 +9,7 @@
 	import { getValue, updateSearch } from '$lib/urlstate';
 	import { loading } from '$lib/stores/general';
 	import { afterUpdate } from 'svelte';
-	import { ltiHeaderComponent, ltiHeaderProps } from '$lib/stores/ltiHeader';
-	import NonGroupHeader from '$lib/components/NonGroupHeader.svelte';
+	import { ltiHeaderState } from '$lib/stores/ltiHeader';
 
 	export let data;
 
@@ -39,9 +38,11 @@
 
 	// Update props reactively when data changes
 	$: if (isLtiHeaderLayout) {
-		ltiHeaderComponent.set(NonGroupHeader);
-		ltiHeaderProps.set({
-			title: 'Threads Archive'
+		ltiHeaderState.set({
+			kind: 'nongroup',
+			props: {
+				title: 'Threads Archive'
+			}
 		});
 	}
 
