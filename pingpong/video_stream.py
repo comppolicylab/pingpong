@@ -83,7 +83,7 @@ class S3VideoStream(BaseVideoStream):
 
                 # Determine content type
                 content_type = response.get(
-                    "Content-Type", "video/mp4"
+                    "ContentType", "video/mp4"
                 )  # default is mp4
                 if not content_type or content_type == "binary/octet-stream":
                     raise VideoStreamError(
