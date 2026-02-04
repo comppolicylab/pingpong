@@ -74,7 +74,7 @@ class S3VideoStream(BaseVideoStream):
     async def get_metadata(self, key: str) -> VideoMetadata:
         """Get metadata about a video file from S3."""
         config = None
-        if self._authenticated == False:
+        if not self._authenticated:
             config = Config(signature_version=UNSIGNED)
 
         async with aioboto3.Session().client("s3", config=config) as s3_client:
@@ -109,7 +109,7 @@ class S3VideoStream(BaseVideoStream):
     ) -> AsyncGenerator[bytes, None]:
         "Stream a video from S3, as it exists - no specifying range"
         config = None
-        if self._authenticated == False:
+        if not self._authenticated:
             config = Config(signature_version=UNSIGNED)
 
         async with aioboto3.Session().client("s3", config=config) as s3_client:
@@ -135,7 +135,7 @@ class S3VideoStream(BaseVideoStream):
         Stream a video file or byte range from S3; Supports HTTP range requests for video seeking.
         """
         config = None
-        if self._authenticated == False:
+        if not self._authenticated:
             config = Config(signature_version=UNSIGNED)
 
         async with aioboto3.Session().client("s3", config=config) as s3_client:
