@@ -7,6 +7,7 @@ import logging
 import mimetypes
 from pathlib import Path
 from abc import ABC, abstractmethod
+from datetime import datetime
 from typing import AsyncGenerator
 from aiohttp import ClientError
 from botocore import UNSIGNED
@@ -30,7 +31,7 @@ class VideoMetadata:
         content_length: int,
         content_type: str,
         etag: str | None = None,
-        last_modified: str | None = None,
+        last_modified: datetime | None = None,
     ):
         self.content_length = content_length
         self.content_type = content_type
