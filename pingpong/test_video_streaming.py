@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from pathlib import Path
 import re
 
-from pingpong.video_stream import LocalVideoStream, VideoStreamError
+from pingpong.video_stream import VideoStreamError
 
 app = FastAPI(title="video stream test")
 
@@ -21,15 +21,17 @@ app = FastAPI(title="video stream test")
 VIDEO_DIR = "s3"
 
 # Uncomment the line below if running locally
-#video_stream = LocalVideoStream(VIDEO_DIR)
+# video_stream = LocalVideoStream(VIDEO_DIR)
 
 # For S3 testing (uncomment and configure):
 from pingpong.video_stream import S3VideoStream
+
 S3_BUCKET = "pp.testing.soundbyte-jan2026-public"
 video_stream = S3VideoStream(S3_BUCKET, authenticated=False)
 
 TEST_VIDEO_KEY = "bigbuck_bunny_8bit_15000kbps_1080p_60.0fps_hevc.mp4"
 # ======================================
+
 
 def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
     """Parse HTTP Range header and return (start, end) byte positions."""
@@ -42,6 +44,7 @@ def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
     end = int(end_str) if end_str else file_size - 1
 
     return start, min(end, file_size - 1)
+
 
 @app.get("/video/{video_key:path}")
 async def stream_video(video_key: str, request: Request):
@@ -94,9 +97,11 @@ async def stream_video(video_key: str, request: Request):
 
     except VideoStreamError as e:
         from fastapi import HTTPException
+
         raise HTTPException(status_code=e.code or 500, detail=e.detail)
     except Exception as e:
         from fastapi import HTTPException
+
         raise HTTPException(status_code=500, detail=f"Error streaming video: {str(e)}")
 
 
@@ -170,7 +175,7 @@ async def test_page():
                 <h3>Test Information</h3>
                 <p><strong>Video URL:</strong> <code>/video/{TEST_VIDEO_KEY}</code></p>
                 <p><strong>Storage:</strong> {video_stream.__class__.__name__}</p>
-                <p><strong>Location:</strong> <code>{getattr(video_stream, '_directory', 'N/A')}</code></p>
+                <p><strong>Location:</strong> <code>{getattr(video_stream, "_directory", "N/A")}</code></p>
             </div>
 
             <div id="status" class="status">
@@ -255,6 +260,7 @@ async def get_video_info(video_key: str):
         }
     except VideoStreamError as e:
         from fastapi import HTTPException
+
         raise HTTPException(status_code=e.code or 500, detail=e.detail)
 
 

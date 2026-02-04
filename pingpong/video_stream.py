@@ -7,33 +7,37 @@ import logging
 import mimetypes
 from pathlib import Path
 from abc import ABC, abstractmethod
-from typing import IO, AsyncGenerator, Optional
+from typing import AsyncGenerator
 from aiohttp import ClientError
 
 logger = logging.getLogger(__name__)
 
-#Workaround for needing credentials for public s3 buckets
+# Workaround for needing credentials for public s3 buckets
 from botocore import UNSIGNED
 from botocore.client import Config
+
 
 class VideoStreamError(Exception):
     def __init__(self, detail: str = "", code: int | None = None):
         self.code = code
         self.detail = detail
 
+
 class VideoMetadata:
     """Content details about the requested video file"""
+
     def __init__(
-            self,
-            content_length: int,
-            content_type: str,
-            etag: str | None = None,
-            last_modified: str | None = None
+        self,
+        content_length: int,
+        content_type: str,
+        etag: str | None = None,
+        last_modified: str | None = None,
     ):
         self.content_length = content_length
         self.content_type = content_type
         self.etag = etag
         self.last_modified = last_modified
+
 
 class BaseVideoStream(ABC):
     @abstractmethod
@@ -42,15 +46,23 @@ class BaseVideoStream(ABC):
         ...
 
     @abstractmethod
-    async def stream_video(self, key: str, chunk_size: int = 1024 * 1024) -> AsyncGenerator[bytes, None]:
+    async def stream_video(
+        self, key: str, chunk_size: int = 1024 * 1024
+    ) -> AsyncGenerator[bytes, None]:
         """Stream a video file from start to finish"""
         ...
 
     @abstractmethod
-    async def stream_video_range(self, key: str, start: int | None = None,
-                                  end: int | None = None, chunk_size: int = 1024 * 1024) -> AsyncGenerator[bytes, None]:
+    async def stream_video_range(
+        self,
+        key: str,
+        start: int | None = None,
+        end: int | None = None,
+        chunk_size: int = 1024 * 1024,
+    ) -> AsyncGenerator[bytes, None]:
         """Stream a video file with byte range support for seeking"""
         ...
+
 
 class S3VideoStream(BaseVideoStream):
     "s3-based video streaming with HTTP range support"
@@ -59,26 +71,26 @@ class S3VideoStream(BaseVideoStream):
         self._bucket = bucket
         self._authenticated = authenticated
 
-
-    async def get_metadata(
-            self,
-            key: str
-    ) -> VideoMetadata:
-        
+    async def get_metadata(self, key: str) -> VideoMetadata:
         """Get metadata about a video file from S3."""
         config = None
         if self._authenticated == False:
             config = Config(signature_version=UNSIGNED)
 
-        async with aioboto3.Session().client('s3', config=config) as s3_client:  
+        async with aioboto3.Session().client("s3", config=config) as s3_client:
             try:
                 response = await s3_client.head_object(Bucket=self._bucket, Key=key)
 
-                #Determine content type
-                content_type = response.get("Content-Type", "video/mp4") #default is mp4
+                # Determine content type
+                content_type = response.get(
+                    "Content-Type", "video/mp4"
+                )  # default is mp4
                 if not content_type or content_type == "binary/octet-stream":
-                    raise VideoStreamError(code="422", detail="Binary data received is unable to be processed")
-                
+                    raise VideoStreamError(
+                        code="422",
+                        detail="Binary data received is unable to be processed",
+                    )
+
                 return VideoMetadata(
                     content_length=response["ContentLength"],
                     content_type=content_type,
@@ -89,21 +101,18 @@ class S3VideoStream(BaseVideoStream):
             except ClientError as e:
                 logger.exception(f"Error getting video metadata from S3: {e}")
                 raise VideoStreamError(
-                    code=500,
-                    detail=f"Failed to get video metadata from S3: {str(e)}"
+                    code=500, detail=f"Failed to get video metadata from S3: {str(e)}"
                 )
-            
+
     async def stream_video(
-        self,
-        key: str,
-        chunk_size: int = 1024 * 1024
+        self, key: str, chunk_size: int = 1024 * 1024
     ) -> AsyncGenerator[bytes, None]:
         "Stream a video from S3, as it exists - no specifying range"
         config = None
         if self._authenticated == False:
             config = Config(signature_version=UNSIGNED)
 
-        async with aioboto3.Session().client('s3', config=config) as s3_client:  
+        async with aioboto3.Session().client("s3", config=config) as s3_client:
             try:
                 s3_object = await s3_client.get_object(Bucket=self._bucket, Key=key)
                 async for chunk in s3_object["Body"].iter_chunks(chunk_size=chunk_size):
@@ -111,47 +120,49 @@ class S3VideoStream(BaseVideoStream):
             except ClientError as e:
                 logger.exception(f"Error streaming video {key}: {e}")
                 raise VideoStreamError(
-                    code=500, detail=f"Error streaming Video: {str(e)}" #find a more descriptive error message
+                    code=500,
+                    detail=f"Error streaming Video: {str(e)}",  # find a more descriptive error message
                 )
-            
+
     async def stream_video_range(
-        self, 
+        self,
         key: str,
         start: int | None = None,
         end: int | None = None,
         chunk_size: int = 1024 * 1024,
     ) -> AsyncGenerator[bytes, None]:
-            """
-            Stream a video file or byte range from S3; Supports HTTP range requests for video seeking.
-            """
-            config = None
-            if self._authenticated == False:
-                config = Config(signature_version=UNSIGNED)
+        """
+        Stream a video file or byte range from S3; Supports HTTP range requests for video seeking.
+        """
+        config = None
+        if self._authenticated == False:
+            config = Config(signature_version=UNSIGNED)
 
-            async with aioboto3.Session().client('s3', config=config) as s3_client:  
-                try:
-                    #Build the range header if start/end specified
-                    range_header = None
-                    if start is not None or end is not None:
-                        start_byte = start if start is not None else 0
-                        end_byte = end if end is not None else ""
-                        range_header = f"bytes={start_byte}-{end_byte}"
+        async with aioboto3.Session().client("s3", config=config) as s3_client:
+            try:
+                # Build the range header if start/end specified
+                range_header = None
+                if start is not None or end is not None:
+                    start_byte = start if start is not None else 0
+                    end_byte = end if end is not None else ""
+                    range_header = f"bytes={start_byte}-{end_byte}"
 
-                    
-                    #Get the object with optional range
-                    get_params = {"Bucket": self._bucket, "Key":key}
-                    if range_header:
-                        get_params["Range"] = range_header
-                    
-                    s3_object = await s3_client.get_object(**get_params)
-                    async for chunk in s3_object["Body"].iter_chunks(chunk_size=chunk_size):
-                        yield chunk
+                # Get the object with optional range
+                get_params = {"Bucket": self._bucket, "Key": key}
+                if range_header:
+                    get_params["Range"] = range_header
 
-                except Exception as e:
-                    logger.exception(f"Error streaming video {key}: {e}")
-                    raise VideoStreamError(
-                        code=500, detail=f"Error streaming Video: {str(e)}" #find a more descriptive error message
-                    )                    
+                s3_object = await s3_client.get_object(**get_params)
+                async for chunk in s3_object["Body"].iter_chunks(chunk_size=chunk_size):
+                    yield chunk
+
+            except Exception as e:
+                logger.exception(f"Error streaming video {key}: {e}")
+                raise VideoStreamError(
+                    code=500,
+                    detail=f"Error streaming Video: {str(e)}",  # find a more descriptive error message
+                )
+
 
 class LocalVideoStream(BaseVideoStream):
     """local filesystem video streaming for development and testing."""
@@ -171,13 +182,13 @@ class LocalVideoStream(BaseVideoStream):
         file_path = self._directory / key
         if not file_path.exists():
             raise VideoStreamError(code=404, detail="File not found")
-        
+
         try:
             # get file stats
             stat = file_path.stat()
 
             # determine content type
-            content_type, _ = mimetypes.guess_type(str(file_path)) #check this
+            content_type, _ = mimetypes.guess_type(str(file_path))  # check this
             if not content_type:
                 content_type = "video/mp4"
 
@@ -188,12 +199,12 @@ class LocalVideoStream(BaseVideoStream):
             )
         except Exception as e:
             logger.exception(f"Error getting video metadata from local storage: {e}")
-            raise VideoStreamError(code=500, detail=f"Error accessing video metadata: {str(e)}")
+            raise VideoStreamError(
+                code=500, detail=f"Error accessing video metadata: {str(e)}"
+            )
 
     async def stream_video(
-        self,
-        key: str,
-        chunk_size: int = 1024 * 1024
+        self, key: str, chunk_size: int = 1024 * 1024
     ) -> AsyncGenerator[bytes, None]:
         "Stream a video from local filesystem, as it exists - no specifying range"
         file_path = self._directory / key
@@ -204,7 +215,7 @@ class LocalVideoStream(BaseVideoStream):
         except Exception as e:
             logger.exception(f"Error reading file {key}: {e}")
             raise VideoStreamError(code=404, detail="File not found")
-            
+
     async def stream_video_range(
         self,
         key: str,
@@ -245,4 +256,3 @@ class LocalVideoStream(BaseVideoStream):
         except Exception as e:
             logger.exception(f"Error streaming video from local storage: {e}")
             raise VideoStreamError(code=500, detail=f"Error streaming video: {str(e)}")
-
