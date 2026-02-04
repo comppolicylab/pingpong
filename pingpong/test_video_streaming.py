@@ -11,25 +11,20 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pathlib import Path
 import re
-
 from pingpong.video_stream import VideoStreamError
-
-app = FastAPI(title="video stream test")
 
 # Config (s3 or local)
 # Set to "s3" if attempting to stream a video from s3! otherwise should be set to the Local Video folder
 VIDEO_DIR = "s3"
-
 # Uncomment the line below if running locally
 # video_stream = LocalVideoStream(VIDEO_DIR)
-
 # For S3 testing (uncomment and configure):
 from pingpong.video_stream import S3VideoStream
 
 S3_BUCKET = "--insert-bucket-here--"
 video_stream = S3VideoStream(S3_BUCKET, authenticated=False)
-
 TEST_VIDEO_KEY = "--insert-key-here--"
+app = FastAPI(title="video stream test")
 # ======================================
 
 

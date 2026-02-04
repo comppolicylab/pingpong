@@ -9,12 +9,11 @@ from pathlib import Path
 from abc import ABC, abstractmethod
 from typing import AsyncGenerator
 from aiohttp import ClientError
-
-logger = logging.getLogger(__name__)
-
-# Workaround for needing credentials for public s3 buckets
 from botocore import UNSIGNED
 from botocore.client import Config
+# Workaround for needing credentials for public s3 buckets
+
+logger = logging.getLogger(__name__)
 
 
 class VideoStreamError(Exception):
@@ -50,7 +49,7 @@ class BaseVideoStream(ABC):
         self, key: str, chunk_size: int = 1024 * 1024
     ) -> AsyncGenerator[bytes, None]:
         """Stream a video file from start to finish"""
-        ...
+        yield b""
 
     @abstractmethod
     async def stream_video_range(
@@ -61,7 +60,7 @@ class BaseVideoStream(ABC):
         chunk_size: int = 1024 * 1024,
     ) -> AsyncGenerator[bytes, None]:
         """Stream a video file with byte range support for seeking"""
-        ...
+        yield b""
 
 
 class S3VideoStream(BaseVideoStream):
@@ -87,7 +86,7 @@ class S3VideoStream(BaseVideoStream):
                 )  # default is mp4
                 if not content_type or content_type == "binary/octet-stream":
                     raise VideoStreamError(
-                        code="422",
+                        code=422,
                         detail="Binary data received is unable to be processed",
                     )
 
