@@ -7,7 +7,7 @@ import logging
 import mimetypes
 from pathlib import Path
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import AsyncGenerator
 from aiohttp import ClientError
 from botocore import UNSIGNED
@@ -43,7 +43,7 @@ class BaseVideoStream(ABC):
     @abstractmethod
     async def get_metadata(self, key: str) -> VideoMetadata:
         """Get content details about a video file"""
-        ...
+        pass
 
     @abstractmethod
     async def stream_video(
@@ -118,6 +118,7 @@ class S3VideoStream(BaseVideoStream):
                 async for chunk in s3_object["Body"].iter_chunks(chunk_size=chunk_size):
                     yield chunk
             except ClientError as e:
+                key = key.replace('\r\n','').replace('\n','')
                 logger.exception(f"Error streaming video {key}: {e}")
                 raise VideoStreamError(
                     code=500,
@@ -157,6 +158,7 @@ class S3VideoStream(BaseVideoStream):
                     yield chunk
 
             except Exception as e:
+                key = key.replace('\r\n','').replace('\n','')
                 logger.exception(f"Error streaming video {key}: {e}")
                 raise VideoStreamError(
                     code=500,
@@ -191,11 +193,14 @@ class LocalVideoStream(BaseVideoStream):
             content_type, _ = mimetypes.guess_type(str(file_path))  # check this
             if not content_type:
                 content_type = "video/mp4"
+            
+            local_timestamp = stat.st_mtime  
+            local_last_modified = datetime.fromtimestamp(local_timestamp, tz=timezone.utc)
 
             return VideoMetadata(
                 content_length=stat.st_size,
                 content_type=content_type,
-                last_modified=stat.st_mtime,
+                last_modified=local_last_modified,
             )
         except Exception as e:
             logger.exception(f"Error getting video metadata from local storage: {e}")
@@ -213,6 +218,7 @@ class LocalVideoStream(BaseVideoStream):
                 while chunk := f.read(chunk_size):
                     yield chunk
         except Exception as e:
+            key = key.replace('\r\n','').replace('\n','')
             logger.exception(f"Error reading file {key}: {e}")
             raise VideoStreamError(code=404, detail="File not found")
 
