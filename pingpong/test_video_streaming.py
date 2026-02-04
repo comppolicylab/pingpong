@@ -26,10 +26,10 @@ VIDEO_DIR = "s3"
 # For S3 testing (uncomment and configure):
 from pingpong.video_stream import S3VideoStream
 
-S3_BUCKET = "pp.testing.soundbyte-jan2026-public"
+S3_BUCKET = "--insert-bucket-here--"
 video_stream = S3VideoStream(S3_BUCKET, authenticated=False)
 
-TEST_VIDEO_KEY = "bigbuck_bunny_8bit_15000kbps_1080p_60.0fps_hevc.mp4"
+TEST_VIDEO_KEY = "--insert-key-here--"
 # ======================================
 
 
