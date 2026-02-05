@@ -83,13 +83,15 @@ class ConversationItemOrderingBuffer:
 
         for item_id, previous_item_id in self.relevant_item_previous.items():
             if previous_item_id and previous_item_id in self.relevant_item_previous:
-                child_item_ids_by_parent_item_id.setdefault(previous_item_id, []).append(
-                    item_id
-                )
+                child_item_ids_by_parent_item_id.setdefault(
+                    previous_item_id, []
+                ).append(item_id)
                 continue
             root_item_ids.append(item_id)
 
-        root_item_ids.sort(key=lambda item_id: self.relevant_item_registration_order[item_id])
+        root_item_ids.sort(
+            key=lambda item_id: self.relevant_item_registration_order[item_id]
+        )
         for child_item_ids in child_item_ids_by_parent_item_id.values():
             child_item_ids.sort(
                 key=lambda item_id: self.relevant_item_registration_order[item_id]
@@ -318,10 +320,12 @@ async def handle_browser_messages(
                                 f"Received response.audio.delta.started message without item_id, event_id, or started_playing_at {data}"
                             )
                             continue
-                        await realtime_recorder.started_playing_assistant_response_delta(
-                            item_id=item_id,
-                            event_id=event_id,
-                            started_playing_at_ms=started_playing_at_ms,
+                        await (
+                            realtime_recorder.started_playing_assistant_response_delta(
+                                item_id=item_id,
+                                event_id=event_id,
+                                started_playing_at_ms=started_playing_at_ms,
+                            )
                         )
 
                 except json.JSONDecodeError as e:
