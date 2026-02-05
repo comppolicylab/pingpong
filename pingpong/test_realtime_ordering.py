@@ -200,3 +200,26 @@ def test_late_non_relevant_predecessor_unblocks_dispatch():
     assert _drain_ready_messages(buffer) == [
         ("assistant-1", "assistant-1", "assistant", "1")
     ]
+
+
+def test_pruned_saved_predecessor_still_allows_late_descendant_dispatch():
+    buffer = ConversationItemOrderingBuffer(logging.getLogger("ordering-test"))
+
+    buffer.register_conversation_item("user-1", None, "user")
+    buffer.register_transcription("user-1", "user-1", "user")
+    assert _drain_ready_messages(buffer) == [("user-1", "user-1", "user", "0")]
+
+    buffer.register_conversation_item("assistant-1", "user-1", "assistant")
+    buffer.register_transcription("assistant-1", "assistant-1", "assistant")
+    assert _drain_ready_messages(buffer) == [
+        ("assistant-1", "assistant-1", "assistant", "1")
+    ]
+    assert "user-1" not in buffer.items_by_id
+    assert "assistant-1" not in buffer.items_by_id
+
+    buffer.register_conversation_item("system-1", "user-1", None)
+    buffer.register_conversation_item("assistant-2", "system-1", "assistant")
+    buffer.register_transcription("assistant-2", "assistant-2", "assistant")
+    assert _drain_ready_messages(buffer) == [
+        ("assistant-2", "assistant-2", "assistant", "2")
+    ]

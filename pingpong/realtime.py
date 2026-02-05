@@ -61,6 +61,7 @@ class ConversationItemOrderingBuffer:
         self.children_by_previous_item_id: dict[str, set[str]] = {}
         self.ready_item_heap: list[tuple[int, str]] = []
         self.queued_ready_item_ids: set[str] = set()
+        self.pruned_saved_item_ids: set[str] = set()
         self.next_conversation_order = 0
         self.next_output_index = 0
 
@@ -77,6 +78,12 @@ class ConversationItemOrderingBuffer:
         role: ConversationRole | None,
     ):
         if not item_id:
+            return
+        if item_id in self.pruned_saved_item_ids:
+            self._logger.warning(
+                "Received conversation.item.added for already-saved item_id %s. Ignoring duplicate.",
+                item_id,
+            )
             return
 
         item = self._get_item(item_id=item_id)
@@ -108,6 +115,12 @@ class ConversationItemOrderingBuffer:
         if not item_id:
             self._logger.warning(
                 "Received transcript event without an item_id. Skipping message ordering."
+            )
+            return
+        if item_id in self.pruned_saved_item_ids:
+            self._logger.warning(
+                "Received transcript for already-saved item_id %s. Ignoring duplicate.",
+                item_id,
             )
             return
 
@@ -152,6 +165,12 @@ class ConversationItemOrderingBuffer:
         self, item_id: str | None, delta_text: str | None, role: ConversationRole
     ):
         if not item_id or not delta_text:
+            return
+        if item_id in self.pruned_saved_item_ids:
+            self._logger.warning(
+                "Received transcription delta for already-saved item_id %s. Ignoring.",
+                item_id,
+            )
             return
 
         item = self._get_item(item_id=item_id)
@@ -200,6 +219,7 @@ class ConversationItemOrderingBuffer:
             self.next_output_index += 1
             item.is_message_saved = True
             self._mark_item_and_descendants_for_readiness(item.item_id)
+            self._prune_saved_items()
             return item.item_id, item.transcription_text, item.role, output_index
 
         return None
@@ -237,6 +257,9 @@ class ConversationItemOrderingBuffer:
         self.queued_ready_item_ids.add(item.item_id)
 
     def _mark_item_and_descendants_for_readiness(self, item_id: str):
+        # This is an O(size_of_subtree) walk by design. The conversation chain is
+        # expected to stay small in practice, and this keeps readiness updates simple
+        # when late predecessor links or completion events arrive out of order.
         pending_item_ids = deque([item_id])
         visited_item_ids: set[str] = set()
 
@@ -261,6 +284,8 @@ class ConversationItemOrderingBuffer:
         if item.previous_item_id == self._UNSET_PREVIOUS_ITEM_ID:
             return False, None
 
+        # Defensive cycle guard: realtime events can be out-of-order or malformed,
+        # so a bad previous_item_id chain must fail closed instead of looping forever.
         seen_item_ids = {item.item_id}
         previous_item_id = item.previous_item_id
 
@@ -270,6 +295,8 @@ class ConversationItemOrderingBuffer:
 
             previous_item = self._get_item(previous_item_id)
             if previous_item is None:
+                if previous_item_id in self.pruned_saved_item_ids:
+                    return True, None
                 return False, None
             if previous_item.has_transcription:
                 return True, previous_item
@@ -280,6 +307,16 @@ class ConversationItemOrderingBuffer:
             previous_item_id = previous_item.previous_item_id
 
         return True, None
+
+    def _prune_saved_items(self) -> None:
+        stale_saved_item_ids = [
+            item_id
+            for item_id, item in self.items_by_id.items()
+            if item.is_message_saved
+        ]
+        for stale_item_id in stale_saved_item_ids:
+            self.items_by_id.pop(stale_item_id, None)
+            self.pruned_saved_item_ids.add(stale_item_id)
 
     def _is_item_ready_to_dispatch(self, item: ConversationChainItem) -> bool:
         if item.role not in {"user", "assistant"}:
