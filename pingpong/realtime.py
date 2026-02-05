@@ -46,7 +46,11 @@ class ConversationItemOrderingBuffer:
         self._logger = logger
         self.relevant_item_order: list[str] = []
         self.relevant_item_positions: dict[str, int] = {}
+        self.relevant_item_previous: dict[str, str | None] = {}
+        self.relevant_item_registration_order: dict[str, int] = {}
+        self.relevant_item_registration_counter = 0
         self.pending_message_tasks: dict[str, TaskFactory] = {}
+        self.dispatched_item_ids: set[str] = set()
         self.next_relevant_index_to_dispatch = 0
         self.next_output_index = 0
 
@@ -57,22 +61,100 @@ class ConversationItemOrderingBuffer:
         return item_type == "message" and item_role in {"user", "assistant"}
 
     def register_relevant_item(self, item_id: str | None, previous_item_id: str | None):
-        if not item_id or item_id in self.relevant_item_positions:
+        if not item_id:
             return
 
-        insert_idx = len(self.relevant_item_order)
-        if previous_item_id and previous_item_id in self.relevant_item_positions:
-            insert_idx = self.relevant_item_positions[previous_item_id] + 1
+        if item_id not in self.relevant_item_previous:
+            self.relevant_item_registration_order[item_id] = (
+                self.relevant_item_registration_counter
+            )
+            self.relevant_item_registration_counter += 1
+            self.relevant_item_previous[item_id] = previous_item_id
+            self._rebuild_relevant_item_order()
+            return
 
-        self.relevant_item_order.insert(insert_idx, item_id)
-        for idx in range(insert_idx, len(self.relevant_item_order)):
-            self.relevant_item_positions[self.relevant_item_order[idx]] = idx
+        current_previous_item_id = self.relevant_item_previous[item_id]
+        if current_previous_item_id is None and previous_item_id is not None:
+            self.relevant_item_previous[item_id] = previous_item_id
+            self._rebuild_relevant_item_order()
+
+    def _rebuild_relevant_item_order(self):
+        child_item_ids_by_parent_item_id: dict[str, list[str]] = {}
+        root_item_ids: list[str] = []
+
+        for item_id, previous_item_id in self.relevant_item_previous.items():
+            if previous_item_id and previous_item_id in self.relevant_item_previous:
+                child_item_ids_by_parent_item_id.setdefault(previous_item_id, []).append(
+                    item_id
+                )
+                continue
+            root_item_ids.append(item_id)
+
+        root_item_ids.sort(key=lambda item_id: self.relevant_item_registration_order[item_id])
+        for child_item_ids in child_item_ids_by_parent_item_id.values():
+            child_item_ids.sort(
+                key=lambda item_id: self.relevant_item_registration_order[item_id]
+            )
+
+        ordered_item_ids: list[str] = []
+        visited_item_ids: set[str] = set()
+
+        def visit(item_id: str):
+            if item_id in visited_item_ids:
+                return
+            visited_item_ids.add(item_id)
+            ordered_item_ids.append(item_id)
+            for child_item_id in child_item_ids_by_parent_item_id.get(item_id, []):
+                visit(child_item_id)
+
+        for root_item_id in root_item_ids:
+            visit(root_item_id)
+
+        for item_id in sorted(
+            self.relevant_item_previous.keys(),
+            key=lambda current_item_id: self.relevant_item_registration_order[
+                current_item_id
+            ],
+        ):
+            visit(item_id)
+
+        self.relevant_item_order = ordered_item_ids
+        self.relevant_item_positions = {
+            current_item_id: idx
+            for idx, current_item_id in enumerate(self.relevant_item_order)
+        }
+
+        for idx, current_item_id in enumerate(self.relevant_item_order):
+            if current_item_id not in self.dispatched_item_ids:
+                self.next_relevant_index_to_dispatch = idx
+                return
+        self.next_relevant_index_to_dispatch = len(self.relevant_item_order)
+
+    def _is_item_anchored(self, item_id: str, visited_item_ids: set[str] | None = None):
+        previous_item_id = self.relevant_item_previous.get(item_id)
+        if previous_item_id is None:
+            return True
+        if previous_item_id not in self.relevant_item_previous:
+            return False
+
+        if visited_item_ids is None:
+            visited_item_ids = set()
+        if item_id in visited_item_ids:
+            return False
+        visited_item_ids.add(item_id)
+        return self._is_item_anchored(previous_item_id, visited_item_ids)
 
     async def dispatch_ready_messages(self):
         while self.next_relevant_index_to_dispatch < len(self.relevant_item_order):
             current_item_id = self.relevant_item_order[
                 self.next_relevant_index_to_dispatch
             ]
+            if current_item_id in self.dispatched_item_ids:
+                self.next_relevant_index_to_dispatch += 1
+                continue
+            if not self._is_item_anchored(current_item_id):
+                break
+
             task_factory = self.pending_message_tasks.get(current_item_id)
             if not task_factory:
                 break
@@ -80,6 +162,7 @@ class ConversationItemOrderingBuffer:
             output_index_str = str(self.next_output_index)
             task = task_factory(output_index_str)
             self.pending_message_tasks.pop(current_item_id, None)
+            self.dispatched_item_ids.add(current_item_id)
             self.next_relevant_index_to_dispatch += 1
             self.next_output_index += 1
             await self._task_queue.put(task)

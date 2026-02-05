@@ -105,3 +105,46 @@ async def test_interleaving_transcripts_follow_conversation_order():
 
     buffer.register_relevant_item("user-3", "assistant-2")
     assert queue.empty()
+
+
+async def test_late_predecessor_registration_reorders_before_dispatch():
+    queue: asyncio.Queue = asyncio.Queue()
+    buffer = ConversationItemOrderingBuffer(queue, logging.getLogger("ordering-test"))
+
+    buffer.register_relevant_item("assistant-1", "user-1")
+    buffer.register_relevant_item("assistant-2", "assistant-1")
+
+    await buffer.enqueue_message_task("assistant-2", _task_factory("assistant-2"))
+    await buffer.enqueue_message_task("assistant-1", _task_factory("assistant-1"))
+    assert queue.empty()
+
+    buffer.register_relevant_item("user-1", None)
+    await buffer.enqueue_message_task("user-1", _task_factory("user-1"))
+
+    first_task = await queue.get()
+    second_task = await queue.get()
+    third_task = await queue.get()
+
+    assert await first_task() == ("user-1", "0")
+    assert await second_task() == ("assistant-1", "1")
+    assert await third_task() == ("assistant-2", "2")
+
+
+async def test_existing_item_can_adopt_late_previous_item_id():
+    queue: asyncio.Queue = asyncio.Queue()
+    buffer = ConversationItemOrderingBuffer(queue, logging.getLogger("ordering-test"))
+
+    buffer.register_relevant_item("assistant-1", None)
+    buffer.register_relevant_item("user-1", None)
+    buffer.register_relevant_item("assistant-1", "user-1")
+
+    await buffer.enqueue_message_task("assistant-1", _task_factory("assistant-1"))
+    assert queue.empty()
+
+    await buffer.enqueue_message_task("user-1", _task_factory("user-1"))
+
+    first_task = await queue.get()
+    second_task = await queue.get()
+
+    assert await first_task() == ("user-1", "0")
+    assert await second_task() == ("assistant-1", "1")
