@@ -42,45 +42,66 @@ export type Message = {
 	persisted: boolean;
 };
 
-function getOrderValue(a: api.OpenAIMessage, b: api.OpenAIMessage): [number, number] {
+function getOutputIndexValue(message: api.OpenAIMessage): number | null {
+	if (typeof message.output_index === 'number' && Number.isFinite(message.output_index)) {
+		return message.output_index;
+	}
+	const metadataIndex = message.metadata?.output_index;
+	if (typeof metadataIndex === 'number' && Number.isFinite(metadataIndex)) {
+		return metadataIndex;
+	}
+	if (typeof metadataIndex === 'string') {
+		const parsed = Number(metadataIndex);
+		if (!isNaN(parsed)) {
+			return parsed;
+		}
+	}
+	return null;
+}
+
+function compareMessageOrderAsc(a: api.OpenAIMessage, b: api.OpenAIMessage): number {
 	const aRunId = a.run_id ?? null;
 	const bRunId = b.run_id ?? null;
+	const aOutputIndex = getOutputIndexValue(a);
+	const bOutputIndex = getOutputIndexValue(b);
 
 	// If both messages are from the same run, compare by output_index
 	if (aRunId !== null && bRunId !== null && aRunId === bRunId) {
-		const aHasOutputIndex = typeof a.output_index === 'number';
-		const bHasOutputIndex = typeof b.output_index === 'number';
-		if (aHasOutputIndex && bHasOutputIndex) {
-			return [a.output_index as number, b.output_index as number];
-		}
-		const aHasMetadataIndex = a.metadata && !isNaN(Number(a.metadata.output_index));
-		const bHasMetadataIndex = b.metadata && !isNaN(Number(b.metadata.output_index));
-		if (aHasMetadataIndex && bHasMetadataIndex) {
-			return [Number(a.metadata?.output_index), Number(b.metadata?.output_index)];
+		if (aOutputIndex !== null && bOutputIndex !== null && aOutputIndex !== bOutputIndex) {
+			return aOutputIndex - bOutputIndex;
 		}
 	}
 
-	// Different runs or missing run_id: compare by created_at to maintain chronological order
+	// Voice transcript messages are persisted without a run_id, but they still carry
+	// monotonic output_index metadata from realtime ordering.
+	if (aRunId === null && bRunId === null) {
+		if (aOutputIndex !== null && bOutputIndex !== null && aOutputIndex !== bOutputIndex) {
+			return aOutputIndex - bOutputIndex;
+		}
+	}
+
+	// Different runs or missing output indexes: compare by created_at to maintain chronological order.
 	const aCreated = typeof a.created_at === 'number' ? a.created_at : 0;
 	const bCreated = typeof b.created_at === 'number' ? b.created_at : 0;
-	return [aCreated, bCreated];
+	if (aCreated !== bCreated) {
+		return aCreated - bCreated;
+	}
+
+	// Deterministic fallback for same-second created_at collisions.
+	return a.id.localeCompare(b.id);
 }
 
 const compareMessageDataAsc = (a: Message, b: Message) => {
-	const [aVal, bVal] = getOrderValue(a.data, b.data);
-	return aVal - bVal;
+	return compareMessageOrderAsc(a.data, b.data);
 };
 const compareMessageDataDesc = (a: Message, b: Message) => {
-	const [aVal, bVal] = getOrderValue(a.data, b.data);
-	return bVal - aVal;
+	return compareMessageOrderAsc(b.data, a.data);
 };
 const compareApiMessagesAsc = (a: api.OpenAIMessage, b: api.OpenAIMessage) => {
-	const [aVal, bVal] = getOrderValue(a, b);
-	return aVal - bVal;
+	return compareMessageOrderAsc(a, b);
 };
 const compareApiMessagesDesc = (a: api.OpenAIMessage, b: api.OpenAIMessage) => {
-	const [aVal, bVal] = getOrderValue(a, b);
-	return bVal - aVal;
+	return compareMessageOrderAsc(b, a);
 };
 
 /**
