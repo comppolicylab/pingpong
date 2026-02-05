@@ -1,9 +1,11 @@
 import asyncio
 import base64
+from collections import deque
 import json
 import logging
 import struct
 from dataclasses import dataclass
+from heapq import heappop, heappush
 from typing import Awaitable, Callable, Literal, cast
 from fastapi import WebSocket, WebSocketDisconnect
 from openai import OpenAIError
@@ -39,6 +41,7 @@ UNSET_PREVIOUS_ITEM_ID = "__UNSET_PREVIOUS_ITEM_ID__"
 @dataclass
 class ConversationChainItem:
     item_id: str
+    conversation_order: int = -1
     has_transcription: bool = False
     is_transcription_complete: bool = False
     is_message_saved: bool = False
@@ -54,7 +57,11 @@ class ConversationItemOrderingBuffer:
 
     def __init__(self, logger: logging.Logger):
         self._logger = logger
-        self.conversation_items: list[ConversationChainItem] = []
+        self.items_by_id: dict[str, ConversationChainItem] = {}
+        self.children_by_previous_item_id: dict[str, set[str]] = {}
+        self.ready_item_heap: list[tuple[int, str]] = []
+        self.queued_ready_item_ids: set[str] = set()
+        self.next_conversation_order = 0
         self.next_output_index = 0
 
     @staticmethod
@@ -72,11 +79,25 @@ class ConversationItemOrderingBuffer:
         if not item_id:
             return
 
-        item = self._get_or_create_item(item_id=item_id)
+        item = self._get_item(item_id=item_id)
+        if item is None:
+            item = ConversationChainItem(
+                item_id=item_id,
+                conversation_order=self.next_conversation_order,
+            )
+            self.next_conversation_order += 1
+            self.items_by_id[item_id] = item
+        else:
+            self._logger.warning(
+                "Received duplicate conversation.item.added for item_id %s.",
+                item_id,
+            )
+
         self._set_item_previous_item_id(item=item, previous_item_id=previous_item_id)
         if role is not None:
             item.role = role
             item.has_transcription = True
+        self._mark_item_and_descendants_for_readiness(item.item_id)
 
     def register_transcription(
         self,
@@ -125,6 +146,7 @@ class ConversationItemOrderingBuffer:
         item.has_transcription = True
         if item.role is None:
             item.role = role
+        self._mark_item_and_descendants_for_readiness(item.item_id)
 
     def register_transcription_delta(
         self, item_id: str | None, delta_text: str | None, role: ConversationRole
@@ -159,51 +181,79 @@ class ConversationItemOrderingBuffer:
         item.has_transcription = True
         if item.role is None:
             item.role = role
+        self._mark_item_and_descendants_for_readiness(item.item_id)
 
     def pop_next_ready_message(
         self,
     ) -> tuple[str, str, ConversationRole, str] | None:
-        for item in self.conversation_items:
+        while self.ready_item_heap:
+            _, item_id = heappop(self.ready_item_heap)
+            self.queued_ready_item_ids.discard(item_id)
+            item = self._get_item(item_id=item_id)
+            if item is None:
+                continue
             if not self._is_item_ready_to_dispatch(item):
                 continue
-
             if item.transcription_text is None or item.role is None:
                 continue
-
             output_index = str(self.next_output_index)
             self.next_output_index += 1
             item.is_message_saved = True
+            self._mark_item_and_descendants_for_readiness(item.item_id)
             return item.item_id, item.transcription_text, item.role, output_index
 
         return None
 
     def _get_item(self, item_id: str) -> ConversationChainItem | None:
-        for item in self.conversation_items:
-            if item.item_id == item_id:
-                return item
-        return None
-
-    def _get_or_create_item(self, item_id: str) -> ConversationChainItem:
-        existing_item = self._get_item(item_id)
-        if existing_item:
-            return existing_item
-
-        item = ConversationChainItem(item_id=item_id)
-        self.conversation_items.append(item)
-        return item
+        return self.items_by_id.get(item_id)
 
     def _set_item_previous_item_id(
         self, *, item: ConversationChainItem, previous_item_id: str | None
     ):
         if item.previous_item_id == self._UNSET_PREVIOUS_ITEM_ID:
             item.previous_item_id = previous_item_id
+            if previous_item_id is not None:
+                self.children_by_previous_item_id.setdefault(
+                    previous_item_id, set()
+                ).add(item.item_id)
             return
 
         if item.previous_item_id is None and previous_item_id is not None:
             item.previous_item_id = previous_item_id
+            self.children_by_previous_item_id.setdefault(previous_item_id, set()).add(
+                item.item_id
+            )
 
     def _is_message_saved(self, item: ConversationChainItem) -> bool:
         return item.is_message_saved
+
+    def _queue_if_item_ready(self, item: ConversationChainItem):
+        if item.item_id in self.queued_ready_item_ids:
+            return
+        if not self._is_item_ready_to_dispatch(item):
+            return
+
+        heappush(self.ready_item_heap, (item.conversation_order, item.item_id))
+        self.queued_ready_item_ids.add(item.item_id)
+
+    def _mark_item_and_descendants_for_readiness(self, item_id: str):
+        pending_item_ids = deque([item_id])
+        visited_item_ids: set[str] = set()
+
+        while pending_item_ids:
+            current_item_id = pending_item_ids.popleft()
+            if current_item_id in visited_item_ids:
+                continue
+            visited_item_ids.add(current_item_id)
+
+            current_item = self._get_item(current_item_id)
+            if current_item is not None:
+                self._queue_if_item_ready(current_item)
+
+            for child_item_id in self.children_by_previous_item_id.get(
+                current_item_id, set()
+            ):
+                pending_item_ids.append(child_item_id)
 
     def _resolve_previous_relevant_item(
         self, item: ConversationChainItem

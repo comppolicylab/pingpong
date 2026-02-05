@@ -30,7 +30,7 @@ def test_transcript_before_item_added_is_ignored(caplog: pytest.LogCaptureFixtur
 
     buffer.register_transcription("item-1", "hello", "user")
     buffer.register_transcription_delta("item-1", "hi", "user")
-    assert buffer.conversation_items == []
+    assert buffer.items_by_id == {}
 
     buffer.register_conversation_item("item-1", None, "user")
     assert _drain_ready_messages(buffer) == []
@@ -44,8 +44,8 @@ def test_relevant_registration_sets_has_transcription_flag():
     buffer.register_conversation_item("user-1", None, "user")
     buffer.register_conversation_item("system-1", "user-1", None)
 
-    user_item = buffer.conversation_items[0]
-    system_item = buffer.conversation_items[1]
+    user_item = buffer.items_by_id["user-1"]
+    system_item = buffer.items_by_id["system-1"]
     assert user_item.has_transcription
     assert not system_item.has_transcription
 
@@ -58,12 +58,13 @@ def test_transcription_deltas_wait_for_completion():
     buffer.register_transcription_delta("item-1", "lo", "user")
 
     assert _drain_ready_messages(buffer) == []
-    assert buffer.conversation_items[0].has_transcription
-    assert not buffer.conversation_items[0].is_transcription_complete
-    assert buffer.conversation_items[0].transcription_text == "hello"
+    item = buffer.items_by_id["item-1"]
+    assert item.has_transcription
+    assert not item.is_transcription_complete
+    assert item.transcription_text == "hello"
 
     buffer.register_transcription("item-1", None, "user")
-    assert buffer.conversation_items[0].is_transcription_complete
+    assert buffer.items_by_id["item-1"].is_transcription_complete
     assert _drain_ready_messages(buffer) == [("item-1", "hello", "user", "0")]
 
 
@@ -101,7 +102,7 @@ def test_transcript_without_item_id_logs_warning(caplog: pytest.LogCaptureFixtur
     buffer.register_transcription(None, "missing", "user")
 
     assert "without an item_id" in caplog.text
-    assert buffer.conversation_items == []
+    assert buffer.items_by_id == {}
 
 
 def test_interleaving_transcripts_follow_conversation_order():
