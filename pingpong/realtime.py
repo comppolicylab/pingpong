@@ -45,7 +45,6 @@ class ConversationItemOrderingBuffer:
         self._task_queue = task_queue
         self._logger = logger
         self.relevant_item_order: list[str] = []
-        self.relevant_item_positions: dict[str, int] = {}
         self.relevant_item_previous: dict[str, str | None] = {}
         self.relevant_item_registration_order: dict[str, int] = {}
         self.relevant_item_registration_counter = 0
@@ -119,10 +118,6 @@ class ConversationItemOrderingBuffer:
             visit(item_id)
 
         self.relevant_item_order = ordered_item_ids
-        self.relevant_item_positions = {
-            current_item_id: idx
-            for idx, current_item_id in enumerate(self.relevant_item_order)
-        }
 
         for idx, current_item_id in enumerate(self.relevant_item_order):
             if current_item_id not in self.dispatched_item_ids:
@@ -323,12 +318,11 @@ async def handle_browser_messages(
                                 f"Received response.audio.delta.started message without item_id, event_id, or started_playing_at {data}"
                             )
                             continue
-                        else:
-                            await realtime_recorder.started_playing_assistant_response_delta(
-                                item_id=item_id,
-                                event_id=event_id,
-                                started_playing_at_ms=started_playing_at_ms,
-                            )
+                        await realtime_recorder.started_playing_assistant_response_delta(
+                            item_id=item_id,
+                            event_id=event_id,
+                            started_playing_at_ms=started_playing_at_ms,
+                        )
 
                 except json.JSONDecodeError as e:
                     browser_connection_logger.exception(
