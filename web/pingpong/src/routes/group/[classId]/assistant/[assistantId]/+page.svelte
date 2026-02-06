@@ -1260,12 +1260,17 @@
 		if (
 			!confirm(
 				switchingToNextGen
-					? 'Convert this assistant to Next-Gen when you save? Existing threads will keep their current version.'
-					: 'Switch this assistant back to Classic when you save? Existing threads will keep their current version.'
+					? 'Convert this assistant to Next-Gen when you save?\n\nDo not use for important assistants where transcription accuracy is critical.'
+					: 'Switch this assistant back to Classic when you save?'
 			)
 		) {
 			return;
 		}
+		alert(
+			switchingToNextGen
+				? 'After saving, this assistant will be converted to Next-Gen. You can always switch back to Classic later if needed.'
+				: 'After saving, this assistant will be switched back to Classic.'
+		);
 		convertToNextGen = switchingToNextGen;
 		forcedAssistantVersion = switchingToNextGen ? 3 : 2;
 	};
@@ -2638,6 +2643,24 @@
 									take advantage of the latest improvements.</Helper
 								>
 								{#if canSwitchAssistantVersion}
+									<div class="mt-4 flex flex-row gap-1.5">
+										<DropdownBadge
+											extraClasses="border-amber-400 from-amber-100 to-amber-200 text-amber-800 py-0 px-1"
+											><span slot="name">Preview</span></DropdownBadge
+										>
+										<div class="text-sm font-medium text-gray-900">
+											{#if (assistantVersion === 3 && convertToNextGen === null) || (assistantVersion === 2 && convertToNextGen === false)}Revert
+												back to the previous generation of Voice Mode assistants{:else}Switch to the
+												new generation of Voice Mode assistants{/if}
+										</div>
+									</div>
+									<Helper class="mt-1"
+										>Help us test the next generation of Voice Mode assistants, designed to enable
+										additional capabilities and improve reliability. During the preview period,
+										Next-Gen voice assistants may be unstable and result in missing or incomplete
+										transcripts. You can switch back to the previous assistant generation at any
+										time.</Helper
+									>
 									<div class="mt-2 flex flex-row items-center gap-2">
 										<Button
 											type="button"
