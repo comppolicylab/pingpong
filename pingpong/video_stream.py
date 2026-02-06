@@ -2,6 +2,7 @@
 Note (2/2/2026): Currently utitlizing a static library of lecture videos; Eventually, will allow ability for instructors to upload videos.
 """
 
+import re
 import aioboto3
 import logging
 import mimetypes
@@ -12,6 +13,7 @@ from typing import AsyncGenerator
 from aiohttp import ClientError
 from botocore import UNSIGNED
 from botocore.client import Config
+from schemas import VideoMetadata
 # Workaround for needing credentials for public s3 buckets
 
 logger = logging.getLogger(__name__)
@@ -21,22 +23,6 @@ class VideoStreamError(Exception):
     def __init__(self, detail: str = "", code: int | None = None):
         self.code = code
         self.detail = detail
-
-
-class VideoMetadata:
-    """Content details about the requested video file"""
-
-    def __init__(
-        self,
-        content_length: int,
-        content_type: str,
-        etag: str | None = None,
-        last_modified: datetime | None = None,
-    ):
-        self.content_length = content_length
-        self.content_type = content_type
-        self.etag = etag
-        self.last_modified = last_modified
 
 
 class BaseVideoStream(ABC):
@@ -67,29 +53,21 @@ class BaseVideoStream(ABC):
 class S3VideoStream(BaseVideoStream):
     "s3-based video streaming with HTTP range support"
 
-    def __init__(self, bucket: str, authenticated: bool):
+    def __init__(self, bucket: str, allow_unsigned: bool):
         self._bucket = bucket
-        self._authenticated = authenticated
+        self._allow_unsigned = allow_unsigned
 
     async def get_metadata(self, key: str) -> VideoMetadata:
         """Get metadata about a video file from S3."""
-        config = None
-        if not self._authenticated:
-            config = Config(signature_version=UNSIGNED)
-
+        config = Config(signature_version=UNSIGNED) if self._allow_unsigned else None
         async with aioboto3.Session().client("s3", config=config) as s3_client:
             try:
                 response = await s3_client.head_object(Bucket=self._bucket, Key=key)
 
                 # Determine content type
-                content_type = response.get(
-                    "ContentType", "video/mp4"
-                )  # default is mp4
-                if not content_type or content_type == "binary/octet-stream":
-                    raise VideoStreamError(
-                        code=422,
-                        detail="Binary data received is unable to be processed",
-                    )
+                content_type = response.get("ContentType")
+                if content_type.lower() not in {"video/mp4", "video/webm"}:
+                    raise TypeError(f"Unsupported video format: {content_type}")
 
                 return VideoMetadata(
                     content_length=response["ContentLength"],
@@ -102,28 +80,25 @@ class S3VideoStream(BaseVideoStream):
                 logger.exception(f"Error getting video metadata from S3: {e}")
                 raise VideoStreamError(
                     code=500, detail=f"Failed to get video metadata from S3: {str(e)}"
-                )
+                ) from e
 
     async def stream_video(
         self, key: str, chunk_size: int = 1024 * 1024
     ) -> AsyncGenerator[bytes, None]:
         "Stream a video from S3, as it exists - no specifying range"
-        config = None
-        if not self._authenticated:
-            config = Config(signature_version=UNSIGNED)
-
+        config = Config(signature_version=UNSIGNED) if self._allow_unsigned else None
         async with aioboto3.Session().client("s3", config=config) as s3_client:
             try:
                 s3_object = await s3_client.get_object(Bucket=self._bucket, Key=key)
                 async for chunk in s3_object["Body"].iter_chunks(chunk_size=chunk_size):
                     yield chunk
             except ClientError as e:
-                key = key.replace("\r\n", "").replace("\n", "")
-                logger.exception(f"Error streaming video {key}: {e}")
+                safe_key = re.sub(r"[^\w\-\./]", "", key)
+                logger.exception(f"Error streaming video {safe_key}: {e}")
                 raise VideoStreamError(
-                    code=500,
-                    detail=f"Error streaming Video: {str(e)}",  # find a more descriptive error message
-                )
+                    code=502,
+                    detail=f"Error streaming Video: {str(e)}",
+                ) from e
 
     async def stream_video_range(
         self,
@@ -135,10 +110,7 @@ class S3VideoStream(BaseVideoStream):
         """
         Stream a video file or byte range from S3; Supports HTTP range requests for video seeking.
         """
-        config = None
-        if not self._authenticated:
-            config = Config(signature_version=UNSIGNED)
-
+        config = Config(signature_version=UNSIGNED) if self._allow_unsigned else None
         async with aioboto3.Session().client("s3", config=config) as s3_client:
             try:
                 # Build the range header if start/end specified
@@ -157,13 +129,13 @@ class S3VideoStream(BaseVideoStream):
                 async for chunk in s3_object["Body"].iter_chunks(chunk_size=chunk_size):
                     yield chunk
 
-            except Exception as e:
-                key = key.replace("\r\n", "").replace("\n", "")
-                logger.exception(f"Error streaming video {key}: {e}")
+            except ClientError as e:
+                safe_key = re.sub(r"[^\w\-\./]", "", key)
+                logger.exception(f"Error streaming video {safe_key}: {e}")
                 raise VideoStreamError(
-                    code=500,
-                    detail=f"Error streaming Video: {str(e)}",  # find a more descriptive error message
-                )
+                    code=502,
+                    detail=f"Error streaming Video: {str(e)}",
+                ) from e
 
 
 class LocalVideoStream(BaseVideoStream):
@@ -205,10 +177,10 @@ class LocalVideoStream(BaseVideoStream):
                 last_modified=local_last_modified,
             )
         except Exception as e:
-            logger.exception(f"Error getting video metadata from local storage: {e}")
+            logger.exception(f"Error getting video metadata from file: {e}")
             raise VideoStreamError(
                 code=500, detail=f"Error accessing video metadata: {str(e)}"
-            )
+            ) from e
 
     async def stream_video(
         self, key: str, chunk_size: int = 1024 * 1024
@@ -219,10 +191,20 @@ class LocalVideoStream(BaseVideoStream):
             with open(file_path, "rb") as f:
                 while chunk := f.read(chunk_size):
                     yield chunk
+        except VideoStreamError:
+            raise
+        except FileNotFoundError as e:
+            safe_key = re.sub(r"[^\w\-\./]", "", key)
+            logger.exception(f"File not found {safe_key}")
+            raise VideoStreamError(
+                code=404, detail=f"Video file not found: {safe_key}"
+            ) from e
         except Exception as e:
-            key = key.replace("\r\n", "").replace("\n", "")
-            logger.exception(f"Error reading file {key}: {e}")
-            raise VideoStreamError(code=404, detail="File not found")
+            safe_key = re.sub(r"[^\w\-\./]", "", key)
+            logger.exception(f"Unexpected error streaming video file {safe_key}")
+            raise VideoStreamError(
+                code=404, detail=f"Error streaming video: {str(e)}"
+            ) from e
 
     async def stream_video_range(
         self,
@@ -261,6 +243,15 @@ class LocalVideoStream(BaseVideoStream):
                     yield chunk
         except VideoStreamError:
             raise
+        except FileNotFoundError as e:
+            safe_key = re.sub(r"[^\w\-\./]", "", key)
+            logger.exception(f"File not found {safe_key}")
+            raise VideoStreamError(
+                code=404, detail=f"Video file not found: {safe_key}"
+            ) from e
         except Exception as e:
-            logger.exception(f"Error streaming video from local storage: {e}")
-            raise VideoStreamError(code=500, detail=f"Error streaming video: {str(e)}")
+            safe_key = re.sub(r"[^\w\-\./]", "", key)
+            logger.exception(f"Unexpected error streaming video file {safe_key}")
+            raise VideoStreamError(
+                code=404, detail=f"Error streaming video: {str(e)}"
+            ) from e
