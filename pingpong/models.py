@@ -1586,6 +1586,32 @@ assistant_link_association = Table(
 )
 
 
+class LectureVideo(Base):
+    __tablename__ = "lecture_videos"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    assistants = relationship("Assistant", back_populates="lecture_video")
+    key = Column(String, nullable=False, unique=True)
+    name = Column(String)
+    uploader_id = Column(
+        Integer, ForeignKey("users.id"), nullable=True, default=None
+    )
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
+
+    @classmethod
+    async def create(cls, session: AsyncSession, data: dict) -> "LectureVideo":
+        lecture_video = LectureVideo(**data)
+        session.add(lecture_video)
+        await session.flush()
+        await session.refresh(lecture_video)
+        return lecture_video
+
+    @classmethod
+    async def delete(cls, session: AsyncSession, id_: int) -> None:
+        stmt = delete(LectureVideo).where(LectureVideo.id == id_)
+        await session.execute(stmt)
+
 class S3File(Base):
     __tablename__ = "s3_files"
 
@@ -2351,7 +2377,7 @@ class Assistant(Base):
     name = Column(String)
     version = Column(Integer, default=1)
     instructions = Column(String)
-    interaction_mode = Column(
+    interaction_mode = Column(  
         SQLEnum(schemas.InteractionMode),
         server_default=schemas.InteractionMode.CHAT.name,
     )
@@ -2388,6 +2414,15 @@ class Assistant(Base):
         "File",
         secondary=code_interpreter_file_assistant_association,
         back_populates="assistants_v2",
+    )
+    lecture_video_id = Column(
+        Integer,
+        ForeignKey(
+            "lecture_videos.id", name="fk_assistants_lecture_video_id_lecture_video"
+        ),
+    )
+    lecture_video = relationship(
+        "LectureVideo", back_populates="assistants", uselist=False
     )
     vector_store_id = Column(
         Integer,
@@ -2493,6 +2528,7 @@ class Assistant(Base):
         user_id: int,
         assistant_id: str | None = None,
         vector_store_id: int | None = None,
+        lecture_video_id: int | None = None,
         version: int = 1,
     ) -> "Assistant":
         params = data.dict()
@@ -2505,6 +2541,7 @@ class Assistant(Base):
         params["use_latex"] = data.use_latex
         params["use_image_descriptions"] = data.use_image_descriptions
         params["vector_store_id"] = vector_store_id
+        params["lecture_video_id"] = lecture_video_id
         params["version"] = version
 
         assistant = Assistant(**params)
