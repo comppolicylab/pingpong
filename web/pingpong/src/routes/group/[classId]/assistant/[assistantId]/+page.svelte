@@ -305,6 +305,13 @@
 	}, {});
 	let forcedAssistantVersion: number | null = null;
 	$: assistantVersion = forcedAssistantVersion || assistant?.version || null;
+	let convertToNextGen: boolean | null = null;
+	$: canSwitchAssistantVersion =
+		!data.isCreating && interactionMode === 'voice' && !data?.enforceClassicAssistants;
+	$: if (convertToNextGen !== null && !canSwitchAssistantVersion) {
+		convertToNextGen = null;
+		forcedAssistantVersion = null;
+	}
 	$: statusComponents = (data.statusComponents || {}) as Partial<
 		Record<string, api.StatusComponentUpdate[]>
 	>;
@@ -988,6 +995,9 @@
 		if (!areMcpServersEqual(mcpServersLocal, data.mcpServers || [])) {
 			modifiedFields.push('mcp servers');
 		}
+		if (convertToNextGen !== null) {
+			modifiedFields.push('assistant version');
+		}
 
 		return modifiedFields;
 	};
@@ -995,7 +1005,9 @@
 	/**
 	 * Parse data from the assistants form into API request params.
 	 */
-	const parseFormData = (form: HTMLFormElement): api.CreateAssistantRequest => {
+	const parseFormData = (
+		form: HTMLFormElement
+	): api.CreateAssistantRequest & { convert_to_next_gen?: boolean } => {
 		const formData = new FormData(form);
 		const body = Object.fromEntries(formData.entries());
 
@@ -1083,7 +1095,9 @@
 			hide_web_search_sources: hideWebSearchActions ? true : hideWebSearchSources,
 			hide_web_search_actions: hideWebSearchActions,
 			mcp_servers: mcpServersForRequest,
-			hide_mcp_server_call_details: hideMCPServerCallDetails
+			hide_mcp_server_call_details: hideMCPServerCallDetails,
+			convert_to_next_gen:
+				!data.isCreating && convertToNextGen !== null ? convertToNextGen : undefined
 		};
 		return params;
 	};
@@ -1236,6 +1250,24 @@
 			await invalidate(`/group/${$page.params.classId}`);
 			await goto(resolve(`/group/${data.class.id}/assistant`));
 		}
+	};
+
+	const switchAssistantVersion = () => {
+		if (!canSwitchAssistantVersion || preventEdits || assistantVersion === null) {
+			return;
+		}
+		const switchingToNextGen = assistantVersion !== 3;
+		if (
+			!confirm(
+				switchingToNextGen
+					? 'Convert this assistant to Next-Gen when you save? Existing threads will keep their current version.'
+					: 'Switch this assistant back to Classic when you save? Existing threads will keep their current version.'
+			)
+		) {
+			return;
+		}
+		convertToNextGen = switchingToNextGen;
+		forcedAssistantVersion = switchingToNextGen ? 3 : 2;
 	};
 
 	// Handle file upload
@@ -2605,6 +2637,25 @@
 									to work just as expected and will be upgraded to Next-Gen in the future so you can
 									take advantage of the latest improvements.</Helper
 								>
+								{#if canSwitchAssistantVersion}
+									<div class="mt-2 flex flex-row items-center gap-2">
+										<Button
+											type="button"
+											size="xs"
+											color="light"
+											class="w-fit"
+											disabled={preventEdits || convertToNextGen !== null}
+											onclick={switchAssistantVersion}
+											>{convertToNextGen === true
+												? 'Converts to Next-Gen on Save'
+												: convertToNextGen === false
+													? 'Switches to Classic on Save'
+													: assistantVersion === 3
+														? 'Switch Back to Classic'
+														: 'Convert to Next-Gen'}</Button
+										>
+									</div>
+								{/if}
 							</div>
 						{:else}
 							<div class="col-span-2 mb-1">

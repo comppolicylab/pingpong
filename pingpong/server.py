@@ -5157,6 +5157,13 @@ async def create_audio_thread(
             parties_ids.append(request.state.session.user.id)
 
     assistant = await models.Assistant.get_by_id(request.state.db, req.assistant_id)
+    if not assistant:
+        raise HTTPException(
+            status_code=404,
+            detail="Could not find the assistant you specified. Please try again.",
+        )
+
+    class_ = None
     if assistant.version <= 2:
         try:
             thread, class_, parties = await asyncio.gather(
@@ -5184,36 +5191,35 @@ async def create_audio_thread(
                 status_code=400,
                 detail="Something went wrong while creating your conversation. Please try again later. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
             )
-        if not assistant:
-            if thread:
-                await openai_client.beta.threads.delete(thread.id)
-            raise HTTPException(
-                status_code=404,
-                detail="Could not find the assistant you specified. Please try again.",
-            )
-
-        if not class_:
-            if thread:
-                await openai_client.beta.threads.delete(thread.id)
-            raise HTTPException(
-                status_code=404,
-                detail="Class not found",
-            )
-
         if not thread:
             raise HTTPException(
                 status_code=500,
                 detail="We faced an error while creating your conversation. Please try again later. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
             )
     elif assistant.version == 3:
-        raise HTTPException(
-            status_code=400,
-            detail="Audio conversations are not supported with the assistant version you selected. Please select an assistant with version 2.",
-        )
+        try:
+            class_, parties = await asyncio.gather(
+                models.Class.get_by_id(request.state.db, int(class_id)),
+                models.User.get_all_by_id(request.state.db, parties_ids),
+            )
+        except (openai.APIError, Exception):
+            logger.exception("Error creating thread")
+            raise HTTPException(
+                status_code=400,
+                detail="Something went wrong while creating your conversation. Please try again later. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+            )
     else:
         raise HTTPException(
             status_code=400,
             detail="Invalid assistant version",
+        )
+
+    if not class_:
+        if thread:
+            await openai_client.beta.threads.delete(thread.id)
+        raise HTTPException(
+            status_code=404,
+            detail="Class not found",
         )
 
     all_parties = parties or []
@@ -5233,7 +5239,7 @@ async def create_audio_thread(
         "code_interpreter_file_ids": [],
         "image_file_ids": [],
         "tools_available": json.dumps([]),
-        "version": 2,
+        "version": assistant.version,
         "last_activity": func.now(),
         "instructions": format_instructions(
             assistant.instructions,
@@ -5250,6 +5256,17 @@ async def create_audio_thread(
     result: None | models.Thread = None
     try:
         result = await models.Thread.create(request.state.db, new_thread)
+        if assistant.version == 3:
+            result.instructions = format_instructions(
+                assistant.instructions,
+                assistant.use_latex,
+                assistant.use_image_descriptions,
+                thread_id=result.id,
+                user_id=request.state.session.user.id,
+            )
+            request.state.db.add(result)
+            await request.state.db.flush()
+            await request.state.db.refresh(result)
 
         grants = [
             (f"class:{class_id}", "parent", f"thread:{result.id}"),
@@ -7679,18 +7696,41 @@ async def update_assistant(
         else schemas.InteractionMode(asst.interaction_mode)
     )
     uses_voice = interaction_mode == schemas.InteractionMode.VOICE
+    convert_to_next_gen_requested = (
+        "convert_to_next_gen" in req.model_fields_set
+        and req.convert_to_next_gen is not None
+    )
+    convert_to_next_gen = (
+        "convert_to_next_gen" in req.model_fields_set
+        and req.convert_to_next_gen is True
+    )
 
-    # Reinforce model version:
-    # 1. If Azure OpenAI client, only support version 2 assistants
-    # 2. If Voice mode, only support version 2 assistants
-    # 3. Otherwise, force version 3 assistants if class has OAI key
-    if isinstance(openai_client, openai.AsyncAzureOpenAI) or uses_voice:
+    # Reinforce assistant version defaults:
+    # 1. Azure OpenAI only supports classic assistants (v2).
+    # 2. Existing classic assistants remain classic by default.
+    # 3. Assistant version changes only happen when explicitly requested.
+    if isinstance(openai_client, openai.AsyncAzureOpenAI):
+        if convert_to_next_gen:
+            raise HTTPException(
+                status_code=400,
+                detail="Next-Gen assistants are not available for your AI Provider.",
+            )
         asst.version = 2
     else:
-        if class_.api_key_obj or class_.api_key:
+        has_openai_key = bool(
+            class_.api_key_obj and class_.api_key_obj.provider == "openai"
+        ) or bool(not class_.api_key_obj and class_.api_key)
+        if convert_to_next_gen:
+            if not has_openai_key:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Next-Gen assistants are not available for your AI Provider.",
+                )
             asst.version = 3
-        else:
+        elif convert_to_next_gen_requested:
             asst.version = 2
+        else:
+            asst.version = 3 if asst.version == 3 else 2
 
     # If the interaction mode is changing, and the user did not specify a
     # temperature, set a default temperature based on the interaction mode
