@@ -18,9 +18,8 @@ from openai.resources.realtime.realtime import AsyncRealtimeConnection
 from pingpong.ai import (
     OpenAIClientType,
 )
-import pingpong.models as models
 import pingpong.schemas as schemas
-from pingpong.models import Thread
+from pingpong.models import Thread, MessagePart, Message, Run
 from pingpong.realtime_recorder import RealtimeRecorder
 from pingpong.websocket import (
     ws_auth_middleware,
@@ -363,7 +362,7 @@ async def add_message_to_thread(
             )
             run = None
             if existing_run_id is not None:
-                run = await models.Run.get_by_id(
+                run = await Run.get_by_id(
                     browser_connection.state.db, int(existing_run_id)
                 )
                 if run and run.thread_id != thread.id:
@@ -374,7 +373,7 @@ async def add_message_to_thread(
                 conversation_instructions = getattr(
                     browser_connection.state, "conversation_instructions", None
                 )
-                run = models.Run(
+                run = Run(
                     status=schemas.RunStatus.COMPLETED,
                     thread_id=thread.id,
                     assistant_id=thread.assistant_id,
@@ -407,7 +406,7 @@ async def add_message_to_thread(
                     + 1
                 )
 
-            message = await models.Message.create(
+            message = await Message.create(
                 browser_connection.state.db,
                 {
                     "message_id": item_id,
@@ -431,7 +430,7 @@ async def add_message_to_thread(
                     "completed": func.now(),
                 },
             )
-            await models.MessagePart.create(
+            await MessagePart.create(
                 browser_connection.state.db,
                 {
                     "message_id": message.id,
