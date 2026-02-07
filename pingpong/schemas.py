@@ -623,6 +623,7 @@ class UpdateAssistant(BaseModel):
     hide_web_search_actions: bool | None = None
     hide_mcp_server_call_details: bool | None = None
     use_image_descriptions: bool | None = None
+    convert_to_next_gen: bool | None = None
     deleted_private_files: list[int] = []
     mcp_servers: list[MCPServerToolInput] | None = None
 

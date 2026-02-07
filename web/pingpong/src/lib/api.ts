@@ -1841,6 +1841,7 @@ export type UpdateAssistantRequest = {
 	hide_web_search_actions?: boolean;
 	hide_mcp_server_call_details?: boolean;
 	mcp_servers?: MCPServerToolInput[];
+	convert_to_next_gen?: boolean;
 };
 
 /**

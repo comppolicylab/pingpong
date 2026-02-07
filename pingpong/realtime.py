@@ -18,7 +18,8 @@ from openai.resources.realtime.realtime import AsyncRealtimeConnection
 from pingpong.ai import (
     OpenAIClientType,
 )
-from pingpong.models import Thread
+import pingpong.schemas as schemas
+from pingpong.models import Thread, MessagePart, Message, Run
 from pingpong.realtime_recorder import RealtimeRecorder
 from pingpong.websocket import (
     ws_auth_middleware,
@@ -55,7 +56,7 @@ class ConversationItemOrderingBuffer:
 
     _UNSET_PREVIOUS_ITEM_ID = UNSET_PREVIOUS_ITEM_ID
 
-    def __init__(self, logger: logging.Logger):
+    def __init__(self, logger: logging.Logger, initial_output_index: int = 0):
         self._logger = logger
         self.items_by_id: dict[str, ConversationChainItem] = {}
         self.children_by_previous_item_id: dict[str, set[str]] = {}
@@ -63,7 +64,7 @@ class ConversationItemOrderingBuffer:
         self.queued_ready_item_ids: set[str] = set()
         self.pruned_saved_item_ids: set[str] = set()
         self.next_conversation_order = 0
-        self.next_output_index = 0
+        self.next_output_index = max(0, initial_output_index)
 
     @staticmethod
     def is_relevant_conversation_item(item) -> bool:
@@ -352,43 +353,150 @@ async def add_message_to_thread(
     output_index: str | None = None,
 ):
     is_user_message = role == "user"
-    try:
-        metadata = {
-            "item_id": item_id,
-        }
-        if output_index is not None:
-            metadata["output_index"] = str(output_index)
-        if is_user_message:
-            metadata["user_id"] = str(browser_connection.state.session.user.id)
+    message_saved = False
 
-        if (
-            hasattr(browser_connection.state, "anonymous_share_token")
-            and browser_connection.state.anonymous_share_token is not None
-        ):
-            metadata["share_token"] = str(
-                browser_connection.state.anonymous_share_token
+    if thread.version == 3:
+        try:
+            existing_run_id = getattr(
+                browser_connection.state, "voice_mode_run_id", None
             )
-        if (
-            hasattr(browser_connection.state, "anonymous_session_token")
-            and browser_connection.state.anonymous_session_token is not None
-        ):
-            metadata["anonymous_session_token"] = str(
-                browser_connection.state.anonymous_session_token
+            run = None
+            if existing_run_id is not None:
+                run = await Run.get_by_id(
+                    browser_connection.state.db, int(existing_run_id)
+                )
+                if run and run.thread_id != thread.id:
+                    run = None
+
+            if run is None:
+                assistant = getattr(browser_connection.state, "assistant", None)
+                conversation_instructions = getattr(
+                    browser_connection.state, "conversation_instructions", None
+                )
+                run = Run(
+                    status=schemas.RunStatus.COMPLETED,
+                    thread_id=thread.id,
+                    assistant_id=thread.assistant_id,
+                    model=getattr(assistant, "model", None),
+                    reasoning_effort=getattr(assistant, "reasoning_effort", None),
+                    verbosity=getattr(assistant, "verbosity", None),
+                    temperature=getattr(assistant, "temperature", None),
+                    tools_available=thread.tools_available,
+                    creator_id=browser_connection.state.session.user.id,
+                    instructions=conversation_instructions or thread.instructions,
+                    completed=func.now(),
+                )
+                browser_connection.state.db.add(run)
+                await browser_connection.state.db.flush()
+                await browser_connection.state.db.refresh(run)
+                browser_connection.state.voice_mode_run_id = run.id
+
+            try:
+                output_index_int = (
+                    int(output_index) if output_index is not None else None
+                )
+            except (TypeError, ValueError):
+                output_index_int = None
+
+            if output_index_int is None:
+                output_index_int = (
+                    await Thread.get_max_output_sequence(
+                        browser_connection.state.db, thread.id
+                    )
+                    + 1
+                )
+
+            message = await Message.create(
+                browser_connection.state.db,
+                {
+                    "message_id": item_id,
+                    "message_status": schemas.MessageStatus.COMPLETED,
+                    "run_id": run.id,
+                    "thread_id": thread.id,
+                    "assistant_id": thread.assistant_id
+                    if not is_user_message
+                    else None,
+                    "output_index": output_index_int,
+                    "role": (
+                        schemas.MessageRole.USER
+                        if is_user_message
+                        else schemas.MessageRole.ASSISTANT
+                    ),
+                    "user_id": (
+                        browser_connection.state.session.user.id
+                        if is_user_message
+                        else None
+                    ),
+                    "completed": func.now(),
+                },
             )
+            await MessagePart.create(
+                browser_connection.state.db,
+                {
+                    "message_id": message.id,
+                    "part_index": 0,
+                    "type": (
+                        schemas.MessagePartType.INPUT_TEXT
+                        if is_user_message
+                        else schemas.MessagePartType.OUTPUT_TEXT
+                    ),
+                    "text": transcript_text,
+                },
+            )
+            message_saved = True
+        except Exception as e:
+            openai_connection_logger.exception(
+                f"Failed to save Version 3 realtime transcript: {e}, item_id={item_id}, role={role}"
+            )
+            return
+    elif thread.version <= 2:
+        try:
+            metadata = {
+                "item_id": item_id,
+            }
+            if output_index is not None:
+                metadata["output_index"] = str(output_index)
+            if is_user_message:
+                metadata["user_id"] = str(browser_connection.state.session.user.id)
 
-        await openai_client.beta.threads.messages.create(
-            thread_id=thread.thread_id,
-            role=role,
-            content=transcript_text,
-            metadata=metadata,
-        )
+            if (
+                hasattr(browser_connection.state, "anonymous_share_token")
+                and browser_connection.state.anonymous_share_token is not None
+            ):
+                metadata["share_token"] = str(
+                    browser_connection.state.anonymous_share_token
+                )
+            if (
+                hasattr(browser_connection.state, "anonymous_session_token")
+                and browser_connection.state.anonymous_session_token is not None
+            ):
+                metadata["anonymous_session_token"] = str(
+                    browser_connection.state.anonymous_session_token
+                )
 
-        if realtime_recorder and not realtime_recorder.should_save_audio:
-            realtime_recorder.should_save_audio = True
-    except OpenAIError as e:
-        openai_connection_logger.exception(
-            f"Failed to send message to OpenAI: {e}, item_id={item_id}, role={role}"
+            await openai_client.beta.threads.messages.create(
+                thread_id=thread.thread_id,
+                role=role,
+                content=transcript_text,
+                metadata=metadata,
+            )
+            message_saved = True
+        except OpenAIError as e:
+            openai_connection_logger.exception(
+                f"Failed to send message to OpenAI: {e}, item_id={item_id}, role={role}"
+            )
+            return
+    else:
+        openai_connection_logger.error(
+            "Unsupported thread version %s for realtime transcript persistence.",
+            thread.version,
         )
+        return
+
+    if message_saved and realtime_recorder and not realtime_recorder.should_save_audio:
+        realtime_recorder.should_save_audio = True
+
+    if not message_saved:
         return
 
     if is_user_message:
@@ -547,7 +655,24 @@ async def handle_openai_events(
     openai_task_queue: asyncio.Queue,
     realtime_recorder: RealtimeRecorder | None = None,
 ):
-    ordering_buffer = ConversationItemOrderingBuffer(openai_connection_logger)
+    initial_output_index = 0
+    if thread.version == 3:
+        try:
+            initial_output_index = (
+                await Thread.get_max_output_sequence(
+                    browser_connection.state.db, thread.id
+                )
+            ) + 1
+        except Exception as e:
+            openai_connection_logger.exception(
+                "Failed to initialize Version 3 realtime output index for thread %s: %s",
+                thread.id,
+                e,
+            )
+
+    ordering_buffer = ConversationItemOrderingBuffer(
+        openai_connection_logger, initial_output_index=initial_output_index
+    )
 
     try:
         async for event in realtime_connection:
@@ -747,7 +872,7 @@ async def browser_realtime_websocket(
     if thread.display_user_info:
         realtime_recorder = await RealtimeRecorder.create(
             thread_id=thread.id,
-            thread_obj_id=thread.thread_id,
+            thread_obj_id=thread.thread_id if thread.thread_id else str(thread.id),
             session=browser_connection.state.db,
         )
 
