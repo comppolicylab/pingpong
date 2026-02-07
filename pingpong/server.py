@@ -6949,6 +6949,18 @@ async def create_assistant(
                 detail=f"Model {req.model} is not available for use.",
             )
 
+    # Only admins can create an assistant in Lecture mode
+    if req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
+        if not await request.state.authz.test(
+            f"user:{creator_id}",
+            "admin",
+            f"class:{class_id}",
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="Only class administrators can create assistants in Lecture mode.",
+            )
+
     if req.published:
         if not await request.state.authz.test(
             f"user:{creator_id}", "can_publish_assistants", f"class:{class_id}"
@@ -7049,12 +7061,17 @@ async def create_assistant(
     tool_resources: ToolResources = {}
     vector_store_object_id = None
     uses_voice = req.interaction_mode == schemas.InteractionMode.VOICE
+    is_video = req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
 
     if req.file_search_file_ids:
         if uses_voice:
             raise HTTPException(
                 status_code=400,
                 detail="File search is not supported in Voice mode.",
+            )
+        if is_video:
+            raise HTTPException(
+                status_code=400, detail="File search is not supported in Lecture mode."
             )
         vector_store_id, vector_store_object_id = await create_vector_store(
             request.state.db,
@@ -7072,6 +7089,11 @@ async def create_assistant(
             raise HTTPException(
                 status_code=400,
                 detail="Code interpreter is not supported in Voice mode.",
+            )
+        if is_video:
+            raise HTTPException(
+                status_code=400,
+                detail="Code interpreter is not supported in Lecture mode.",
             )
         tool_resources["code_interpreter"] = {"file_ids": req.code_interpreter_file_ids}
 
@@ -7679,6 +7701,14 @@ async def update_assistant(
         else schemas.InteractionMode(asst.interaction_mode)
     )
     uses_voice = interaction_mode == schemas.InteractionMode.VOICE
+    is_video = interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
+
+    # Prevent updating existing assistants to lecture video mode
+    if is_video and asst.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot convert existing assistants to lecture video mode. Please create a new assistant.",
+        )
 
     # Reinforce model version:
     # 1. If Azure OpenAI client, only support version 2 assistants

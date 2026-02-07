@@ -405,6 +405,7 @@ class VectorStoreType(Enum):
 class InteractionMode(StrEnum):
     CHAT = "chat"
     VOICE = "voice"
+    LECTURE_VIDEO = "lecture_video"
 
 
 class AnonymousLink(BaseModel):
@@ -736,6 +737,13 @@ class CreateAudioThread(BaseModel):
     assistant_id: int
     timezone: str | None = None
     conversation_id: str | None = None
+
+
+class VideoMetadata:
+    content_length: int
+    content_type: str
+    etag: str | None = (None,)
+    last_modified: datetime | None = None
 
 
 class CreateThreadRunRequest(BaseModel):

@@ -1593,9 +1593,7 @@ class LectureVideo(Base):
     assistants = relationship("Assistant", back_populates="lecture_video")
     key = Column(String, nullable=False, unique=True)
     name = Column(String)
-    uploader_id = Column(
-        Integer, ForeignKey("users.id"), nullable=True, default=None
-    )
+    uploader_id = Column(Integer, ForeignKey("users.id"), nullable=True, default=None)
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
 
@@ -1611,6 +1609,7 @@ class LectureVideo(Base):
     async def delete(cls, session: AsyncSession, id_: int) -> None:
         stmt = delete(LectureVideo).where(LectureVideo.id == id_)
         await session.execute(stmt)
+
 
 class S3File(Base):
     __tablename__ = "s3_files"
@@ -2377,7 +2376,7 @@ class Assistant(Base):
     name = Column(String)
     version = Column(Integer, default=1)
     instructions = Column(String)
-    interaction_mode = Column(  
+    interaction_mode = Column(
         SQLEnum(schemas.InteractionMode),
         server_default=schemas.InteractionMode.CHAT.name,
     )
