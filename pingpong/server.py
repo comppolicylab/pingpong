@@ -6979,6 +6979,9 @@ async def create_assistant(
     if req.interaction_mode == schemas.InteractionMode.VOICE:
         # Voice mode assistants are only supported in version 2
         assistant_version = 2
+    elif req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
+        # Lecture video assistants require Version 3
+        assistant_version = 3
     else:
         if (
             class_.api_key_obj
@@ -7023,12 +7026,22 @@ async def create_assistant(
             status_code=400,
             detail="The selected model does not support Web Search. Please select a different model or remove the Web Search tool.",
         )
-
+    if uses_web_search and req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
+        raise HTTPException(
+            status_code=400,
+            detail="Lecture video assistants do not support Web Search. Please select a different interaction mode or remove the Web Search tool."
+        )
+    
     uses_mcp_server = {"type": "mcp_server"} in req.tools
     if uses_mcp_server and not model_record.supports_mcp_server:
         raise HTTPException(
             status_code=400,
             detail="The selected model does not support MCP Servers. Please select a different model or remove the MCP Server tool.",
+        )
+    if uses_mcp_server and not req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
+        raise HTTPException(
+            status_code=400,
+            detail="Lecture video assistants do not support MCP Server. Please select a different interaction mode or remove the MCP Server tool."
         )
     if uses_mcp_server and assistant_version <= 2:
         raise HTTPException(
@@ -7670,6 +7683,18 @@ async def update_assistant(
                 403,
                 "This assistant is locked and cannot be edited. Please create a new assistant if you need to make changes.",
             )
+    
+    # Only Administrators can edit lecture video assistants
+    if asst.locked and req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
+        if not await request.state.authz.test(
+            f"user:{request.state.session.user.id}",
+            "admin",
+            f"class:{class_id}",
+        ):
+            raise HTTPException(
+                403,
+                "This lecture video assistant is locked and cannot be edited. Please create a new assistant if you need to make changes."
+            )
 
     class_ = await models.Class.get_by_id(request.state.db, int(class_id))
     if not class_:
@@ -7708,6 +7733,13 @@ async def update_assistant(
         raise HTTPException(
             status_code=400,
             detail="Cannot convert existing assistants to lecture video mode. Please create a new assistant.",
+        )
+    
+    #Prevent changing lecture video assistants to other interaction modes
+    if not is_video and asst.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
+        raise HTTPException(
+            status_code=400,
+            detail="Assistants in Lecture video mode cannot be switched to another interaction mode. Please create a new assistant.",
         )
 
     # Reinforce model version:

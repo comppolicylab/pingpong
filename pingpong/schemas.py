@@ -475,6 +475,17 @@ def temperature_validator(self):
         raise ValueError("Temperature must be between 0.6 and 1.2 for Voice mode.")
     return self
 
+def lecture_video_validator(self):
+    if (
+        self.interaction_mode == InteractionMode.LECTURE_VIDEO
+        and self.tools
+        and len(self.tools) > 0
+    ):
+        raise ValueError(
+            "Lecture video assistants cannot be created with tools. "
+            "Please remove all tools or select a different interaction mode."
+        )
+    return self
 
 class ToolOption(TypedDict):
     type: (
@@ -569,6 +580,7 @@ class CreateAssistant(BaseModel):
     mcp_servers: list[MCPServerToolInput] = []
 
     _temperature_check = model_validator(mode="after")(temperature_validator)
+    _lecture_video_check = model_validator(mode="after")(lecture_video_validator)
 
 
 class AssistantInstructionsPreviewRequest(BaseModel):
@@ -628,6 +640,7 @@ class UpdateAssistant(BaseModel):
     mcp_servers: list[MCPServerToolInput] | None = None
 
     _temperature_check = model_validator(mode="after")(temperature_validator)
+    _lecture_video_check = model_validator(mode="after")(lecture_video_validator)
 
 
 class DeleteAssistant(BaseModel):
@@ -742,7 +755,7 @@ class CreateAudioThread(BaseModel):
 class VideoMetadata:
     content_length: int
     content_type: str
-    etag: str | None = (None,)
+    etag: str | None = None
     last_modified: datetime | None = None
 
 
