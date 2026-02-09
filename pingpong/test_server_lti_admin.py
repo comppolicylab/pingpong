@@ -4,6 +4,7 @@ import importlib
 
 import pytest
 from fastapi import HTTPException
+from starlette.datastructures import State
 
 schemas = importlib.import_module("pingpong.schemas")
 server_module = importlib.import_module("pingpong.server")
@@ -15,8 +16,8 @@ async def _async_return(value):
 
 def _make_request(db="db", user_id=1):
     return SimpleNamespace(
-        state=SimpleNamespace(
-            db=db, session=SimpleNamespace(user=SimpleNamespace(id=user_id))
+        state=State(
+            {"db": db, "session": SimpleNamespace(user=SimpleNamespace(id=user_id))}
         )
     )
 

@@ -7,7 +7,7 @@ import struct
 from dataclasses import dataclass
 from heapq import heappop, heappush
 from typing import Awaitable, Callable, Literal, cast
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import WebSocketDisconnect
 from openai import OpenAIError
 from sqlalchemy import func
 from starlette.requests import ClientDisconnect
@@ -30,6 +30,7 @@ from pingpong.websocket import (
     ws_with_realtime_connection,
     ws_with_thread_assistant_prompt,
 )
+from pingpong.state_types import StateWebSocket
 
 browser_connection_logger = logging.getLogger("realtime_browser")
 openai_connection_logger = logging.getLogger("realtime_openai")
@@ -344,7 +345,7 @@ class ConversationItemOrderingBuffer:
 
 async def add_message_to_thread(
     openai_client: OpenAIClientType,
-    browser_connection: WebSocket,
+    browser_connection: StateWebSocket,
     thread: Thread,
     item_id: str,
     transcript_text: str,
@@ -357,21 +358,29 @@ async def add_message_to_thread(
 
     if thread.version == 3:
         try:
-            existing_run_id = getattr(
-                browser_connection.state, "voice_mode_run_id", None
+            existing_run_id = (
+                browser_connection.state["voice_mode_run_id"]
+                if "voice_mode_run_id" in browser_connection.state
+                else None
             )
             run = None
             if existing_run_id is not None:
                 run = await Run.get_by_id(
-                    browser_connection.state.db, int(existing_run_id)
+                    browser_connection.state["db"], int(existing_run_id)
                 )
                 if run and run.thread_id != thread.id:
                     run = None
 
             if run is None:
-                assistant = getattr(browser_connection.state, "assistant", None)
-                conversation_instructions = getattr(
-                    browser_connection.state, "conversation_instructions", None
+                assistant = (
+                    browser_connection.state["assistant"]
+                    if "assistant" in browser_connection.state
+                    else None
+                )
+                conversation_instructions = (
+                    browser_connection.state["conversation_instructions"]
+                    if "conversation_instructions" in browser_connection.state
+                    else None
                 )
                 run = Run(
                     status=schemas.RunStatus.COMPLETED,
@@ -382,14 +391,14 @@ async def add_message_to_thread(
                     verbosity=getattr(assistant, "verbosity", None),
                     temperature=getattr(assistant, "temperature", None),
                     tools_available=thread.tools_available,
-                    creator_id=browser_connection.state.session.user.id,
+                    creator_id=browser_connection.state["session"].user.id,
                     instructions=conversation_instructions or thread.instructions,
                     completed=func.now(),
                 )
-                browser_connection.state.db.add(run)
-                await browser_connection.state.db.flush()
-                await browser_connection.state.db.refresh(run)
-                browser_connection.state.voice_mode_run_id = run.id
+                browser_connection.state["db"].add(run)
+                await browser_connection.state["db"].flush()
+                await browser_connection.state["db"].refresh(run)
+                browser_connection.state["voice_mode_run_id"] = run.id
 
             try:
                 output_index_int = (
@@ -401,13 +410,13 @@ async def add_message_to_thread(
             if output_index_int is None:
                 output_index_int = (
                     await Thread.get_max_output_sequence(
-                        browser_connection.state.db, thread.id
+                        browser_connection.state["db"], thread.id
                     )
                     + 1
                 )
 
             message = await Message.create(
-                browser_connection.state.db,
+                browser_connection.state["db"],
                 {
                     "message_id": item_id,
                     "message_status": schemas.MessageStatus.COMPLETED,
@@ -423,7 +432,7 @@ async def add_message_to_thread(
                         else schemas.MessageRole.ASSISTANT
                     ),
                     "user_id": (
-                        browser_connection.state.session.user.id
+                        browser_connection.state["session"].user.id
                         if is_user_message
                         else None
                     ),
@@ -431,7 +440,7 @@ async def add_message_to_thread(
                 },
             )
             await MessagePart.create(
-                browser_connection.state.db,
+                browser_connection.state["db"],
                 {
                     "message_id": message.id,
                     "part_index": 0,
@@ -457,21 +466,15 @@ async def add_message_to_thread(
             if output_index is not None:
                 metadata["output_index"] = str(output_index)
             if is_user_message:
-                metadata["user_id"] = str(browser_connection.state.session.user.id)
+                metadata["user_id"] = str(browser_connection.state["session"].user.id)
 
-            if (
-                hasattr(browser_connection.state, "anonymous_share_token")
-                and browser_connection.state.anonymous_share_token is not None
-            ):
+            if browser_connection.state["anonymous_share_token"] is not None:
                 metadata["share_token"] = str(
-                    browser_connection.state.anonymous_share_token
+                    browser_connection.state["anonymous_share_token"]
                 )
-            if (
-                hasattr(browser_connection.state, "anonymous_session_token")
-                and browser_connection.state.anonymous_session_token is not None
-            ):
+            if browser_connection.state["anonymous_session_token"] is not None:
                 metadata["anonymous_session_token"] = str(
-                    browser_connection.state.anonymous_session_token
+                    browser_connection.state["anonymous_session_token"]
                 )
 
             await openai_client.beta.threads.messages.create(
@@ -504,9 +507,9 @@ async def add_message_to_thread(
             thread.user_message_ct += 1
             thread.last_activity = func.now()
 
-            browser_connection.state.db.add(thread)
-            await browser_connection.state.db.flush()
-            await browser_connection.state.db.refresh(thread)
+            browser_connection.state["db"].add(thread)
+            await browser_connection.state["db"].flush()
+            await browser_connection.state["db"].refresh(thread)
         except Exception as e:
             openai_connection_logger.exception(
                 f"Failed to update thread in database: {e}"
@@ -517,7 +520,7 @@ async def enqueue_ready_thread_message_tasks(
     ordering_buffer: ConversationItemOrderingBuffer,
     openai_task_queue: asyncio.Queue,
     openai_client: OpenAIClientType,
-    browser_connection: WebSocket,
+    browser_connection: StateWebSocket,
     thread: Thread,
     realtime_recorder: RealtimeRecorder | None,
 ) -> None:
@@ -549,7 +552,7 @@ async def enqueue_ready_thread_message_tasks(
 
 
 async def handle_browser_messages(
-    browser_connection: WebSocket,
+    browser_connection: StateWebSocket,
     realtime_connection: AsyncRealtimeConnection,
     realtime_recorder: RealtimeRecorder | None = None,
 ):
@@ -648,7 +651,7 @@ async def handle_browser_messages(
 
 
 async def handle_openai_events(
-    browser_connection: WebSocket,
+    browser_connection: StateWebSocket,
     realtime_connection: AsyncRealtimeConnection,
     openai_client: OpenAIClientType,
     thread: Thread,
@@ -660,7 +663,7 @@ async def handle_openai_events(
         try:
             initial_output_index = (
                 await Thread.get_max_output_sequence(
-                    browser_connection.state.db, thread.id
+                    browser_connection.state["db"], thread.id
                 )
             ) + 1
         except Exception as e:
@@ -856,15 +859,15 @@ async def process_queue_tasks(
 @ws_with_thread_assistant_prompt
 @ws_with_realtime_connection
 async def browser_realtime_websocket(
-    browser_connection: WebSocket,
+    browser_connection: StateWebSocket,
     class_id: str,
     thread_id: str,
 ):
-    realtime_connection: AsyncRealtimeConnection = (
-        browser_connection.state.realtime_connection
-    )
-    openai_client: OpenAIClientType = browser_connection.state.openai_client
-    thread: Thread = browser_connection.state.thread
+    realtime_connection: AsyncRealtimeConnection = browser_connection.state[
+        "realtime_connection"
+    ]
+    openai_client: OpenAIClientType = browser_connection.state["openai_client"]
+    thread: Thread = browser_connection.state["thread"]
 
     openai_task_queue: NamedQueue = NamedQueue("openai_task_queue")
 
@@ -873,7 +876,7 @@ async def browser_realtime_websocket(
         realtime_recorder = await RealtimeRecorder.create(
             thread_id=thread.id,
             thread_obj_id=thread.thread_id if thread.thread_id else str(thread.id),
-            session=browser_connection.state.db,
+            session=browser_connection.state["db"],
         )
 
     realtime_tasks: list[asyncio.Task] = []

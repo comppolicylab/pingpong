@@ -52,7 +52,7 @@ pnpm test
 
 ## Backend Architecture and Patterns
 
-- Request middleware order: session parsing -> authz session -> DB session -> logging. Access `request.state.db`, `request.state.authz`, `request.state.session`.
+- Request middleware order: session parsing -> authz session -> DB session -> logging. Access `request.state["db"]`, `request.state["authz"]`, `request.state["session"]`.
 - Authorization uses composable expressions in `pingpong/permission.py` (`Authz`, `LoggedIn`, `InstitutionAdmin`) and OpenFGA model in `pingpong/authz/authz.fga.json`.
 - Database is async SQLAlchemy; use `config.db.driver.async_session()` or `@db_session_handler` for non-request tasks.
 - Schemas live in `pingpong/schemas.py` (Pydantic v2). Return schemas directly from endpoints.

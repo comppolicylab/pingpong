@@ -91,7 +91,7 @@ pnpm build
    - `begin_authz_session` - Create OpenFGA client connection
    - `begin_db_session` - Create async DB session with auto-commit
    - `log_request` - Log metrics and performance data
-3. Route handler executes with access to `request.state.db`, `request.state.authz`, `request.state.session`
+3. Route handler executes with access to `request.state["db"]`, `request.state["authz"]`, `request.state["session"]`
 4. Middleware auto-commits DB transaction on success (status < 400) or rolls back on error
 
 **Authorization System:**
@@ -203,7 +203,7 @@ async def api(api, valid_user_token):
 1. Add route handler to `pingpong/server.py` (grouped with related endpoints)
 2. Add Pydantic schemas to `pingpong/schemas.py` for request/response models
 3. Use permission expressions as dependencies: `Depends(Authz("viewer", "class:{class_id}"))`
-4. Access DB via `request.state.db`, authz via `request.state.authz`
+4. Access DB via `request.state["db"]`, authz via `request.state["authz"]`
 5. Return Pydantic models directly (FastAPI handles serialization)
 6. Add corresponding client method to `web/pingpong/src/lib/api.ts`
 
@@ -212,12 +212,12 @@ async def api(api, valid_user_token):
 **Check permissions:**
 ```python
 # In route handler
-has_access = await request.state.authz.check("viewer", f"class:{class_id}", request.state.auth_user)
+has_access = await request.state["authz"].check("viewer", f"class:{class_id}", request.state.auth_user)
 ```
 
 **Grant permissions:**
 ```python
-await request.state.authz.write_safe(
+await request.state["authz"].write_safe(
     grants=[("viewer", f"class:{class_id}", f"user:{user_id}")],
     revokes=[]
 )
@@ -225,7 +225,7 @@ await request.state.authz.write_safe(
 
 **List accessible resources:**
 ```python
-class_ids = await request.state.authz.list("viewer", "class", request.state.auth_user)
+class_ids = await request.state["authz"].list("viewer", "class", request.state.auth_user)
 ```
 
 ### Canvas LTI Integration
