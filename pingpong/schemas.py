@@ -283,6 +283,20 @@ class ExternalLoginProviders(BaseModel):
     )
 
 
+class ExternalLoginLookupItem(BaseModel):
+    identifier: str = Field(..., min_length=1)
+    provider: str | None = None
+    provider_id: int | None = None
+
+    @model_validator(mode="after")
+    def _validate_provider_fields(self) -> "ExternalLoginLookupItem":
+        has_provider = bool(self.provider and self.provider.strip())
+        has_provider_id = self.provider_id is not None
+        if not has_provider and not has_provider_id:
+            raise ValueError("provider or provider_id is required")
+        return self
+
+
 class UpdateExternalLoginProvider(BaseModel):
     display_name: str | None
     description: str | None
