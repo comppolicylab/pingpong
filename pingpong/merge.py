@@ -1,7 +1,7 @@
 import asyncio
 import json
 from typing import AsyncGenerator
-from sqlalchemy import Select, and_, delete, select, text, update
+from sqlalchemy import Select, and_, delete, exists, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 import logging
 
@@ -251,39 +251,43 @@ async def merge_mcp_updated_by(
 async def merge_external_logins(
     session: AsyncSession, new_user_id: int, old_user_id: int
 ) -> None:
-    delete_stmt = (
-        delete(ExternalLogin)
-        .where(ExternalLogin.user_id == old_user_id)
-        .returning(ExternalLogin.provider, ExternalLogin.identifier)
-    )
-    result = await session.execute(delete_stmt)
-    old_logins = result.fetchall()
+    existing_login = ExternalLogin.__table__.alias("existing_login")
 
-    logger.info(
-        f"ELDEBUG: (merge_external_logins) ExternalLogin RID before migration: {await ExternalLogin.get_last_row_id(session)}"
-    )
-
-    for provider, identifier in old_logins:
-        logger.info(
-            f"ELDEBUG: (merge_external_logins) ExternalLogin RID before {provider}, {identifier} migration: {await ExternalLogin.get_last_row_id(session)}"
+    conflicting_login_exists = exists(
+        select(1)
+        .select_from(existing_login)
+        .where(
+            and_(
+                existing_login.c.user_id == new_user_id,
+                ExternalLogin.provider != "email",
+                or_(
+                    existing_login.c.provider == ExternalLogin.provider,
+                    and_(
+                        ExternalLogin.provider_id.is_not(None),
+                        existing_login.c.provider_id == ExternalLogin.provider_id,
+                    ),
+                ),
+            )
         )
-
-        # Use the create_or_update method to migrate each login to the new user
-        await ExternalLogin.create_or_update(
-            session,
-            user_id=new_user_id,
-            provider=provider,
-            identifier=identifier,
-            called_by="merge_external_logins",
-        )
-
-        logger.info(
-            f"ELDEBUG: (merge_external_logins) ExternalLogin RID after {provider}, {identifier} migration: {await ExternalLogin.get_last_row_id(session)}"
-        )
-
-    logger.info(
-        f"ELDEBUG: (merge_external_logins) ExternalLogin RID after migration: {await ExternalLogin.get_last_row_id(session)}"
     )
+
+    move_stmt = (
+        update(ExternalLogin)
+        .where(
+            and_(
+                ExternalLogin.user_id == old_user_id,
+                ~conflicting_login_exists,
+            )
+        )
+        .values(user_id=new_user_id)
+    )
+    await session.execute(move_stmt)
+
+    # Remove old-user logins that conflict with already-present new-user logins.
+    delete_conflicting_stmt = delete(ExternalLogin).where(
+        ExternalLogin.user_id == old_user_id
+    )
+    await session.execute(delete_conflicting_stmt)
 
 
 async def merge_user_files(
