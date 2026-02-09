@@ -1,13 +1,14 @@
 from abc import ABC, abstractmethod
 import logging
-from typing import Optional
+from typing import Optional, cast
 from pingpong.authz.openfga import OpenFgaAuthzClient
 from email_validator import validate_email, EmailSyntaxError
 from pingpong.bg_tasks import safe_task
 import pingpong.models as models
 import pingpong.schemas as schemas
 
-from fastapi import BackgroundTasks, Request
+from fastapi import BackgroundTasks
+from pingpong.state_types import AppState, StateRequest
 from sqlalchemy.ext.asyncio import AsyncSession
 from .auth import generate_auth_link
 from .authz import Relation
@@ -49,22 +50,24 @@ class CheckUserPermissionException(Exception):
         self.detail = detail
 
 
-async def check_permissions(request: Request, uid: int, cid: int):
-    supervisor_permission_ids = await request.state.authz.list_entities(
+async def check_permissions(request: StateRequest, uid: int, cid: int):
+    supervisor_permission_ids = await request.state["authz"].list_entities(
         f"class:{cid}",
         "supervisor",
         "user",
     )
     supervisors = await models.User.get_all_by_id_if_in_class(
-        request.state.db, supervisor_permission_ids, cid
+        request.state["db"], supervisor_permission_ids, cid
     )
     supervisor_ids = [s.id for s in supervisors]
 
     # CHECK 1: Is the requesting user trying to edit themselves?
     # Check that the user is an admin.
     # Check that there is at least one more moderator in the group
-    if uid == request.state.session.user.id:
-        if not await request.state.authz.test(f"user:{uid}", "admin", f"class:{cid}"):
+    if uid == request.state["session"].user.id:
+        if not await request.state["authz"].test(
+            f"user:{uid}", "admin", f"class:{cid}"
+        ):
             raise CheckUserPermissionException(
                 code=403, detail="You cannot change your role in the Group."
             )
@@ -85,10 +88,10 @@ async def check_permissions(request: Request, uid: int, cid: int):
 
     # CHECK 3: Does requesting user have enough permissions to edit this type of user?
     # Query to find the current permissions for the requester and the user being modified.
-    me_ent = f"user:{request.state.session.user.id}"
+    me_ent = f"user:{request.state['session'].user.id}"
     them_ent = f"user:{uid}"
     class_obj = f"class:{cid}"
-    perms = await request.state.authz.check(
+    perms = await request.state["authz"].check(
         [
             (me_ent, "admin", class_obj),
             (me_ent, "teacher", class_obj),
@@ -123,7 +126,7 @@ async def check_permissions(request: Request, uid: int, cid: int):
             code=403, detail="Lacking permission to manage this user."
         )
 
-    existing = await models.UserClassRole.get(request.state.db, uid, cid)
+    existing = await models.UserClassRole.get(request.state["db"], uid, cid)
 
     # CHECK 4: Is the user being edited a member of this group?
     if not existing:
@@ -479,23 +482,24 @@ class AddNewUsersManual(AddNewUsers):
         self,
         class_id: str,
         new_ucr: schemas.CreateUserClassRoles,
-        request: Request,
+        request: StateRequest,
         tasks: BackgroundTasks,
         user_id: Optional[int] = None,
     ):
         super().__init__(
             class_id,
             new_ucr,
-            user_id or request.state.session.user.id,
-            request.state.db,
-            request.state.authz,
+            user_id or request.state["session"].user.id,
+            request.state["db"],
+            request.state["authz"],
         )
         self.request = request
         self.tasks = tasks
 
     def get_now_fn(self) -> NowFn:
         """Get the current time function for the request."""
-        return getattr(self.request.app.state, "now", utcnow)
+        app_state = cast(AppState, self.request.app.state)
+        return app_state["now"] if "now" in app_state else utcnow
 
     def send_invites(self):
         nowfn = self.get_now_fn()

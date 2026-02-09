@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from starlette.datastructures import State
 
 from pingpong.lti import server as server_module
 from pingpong.lti.schemas import (
@@ -50,7 +51,7 @@ class FakeRequest:
         self.method = method
         self.query_params = payload or {}
         self._form = payload or {}
-        self.state = state or SimpleNamespace()
+        self.state = _to_state(state)
 
     async def form(self):
         return self._form
@@ -117,11 +118,23 @@ async def _async_return(value):
     return value
 
 
+def _to_state(value) -> State:
+    if value is None:
+        return State({})
+    if isinstance(value, State):
+        return value
+    if isinstance(value, dict):
+        return State(value)
+    return State(vars(value))
+
+
 def _make_request_state(db=None, session_user=None, authz=None):
-    return SimpleNamespace(
-        db=db or FakeDB(),
-        session=SimpleNamespace(user=session_user),
-        authz=authz or FakeAuthz(),
+    return State(
+        {
+            "db": db or FakeDB(),
+            "session": SimpleNamespace(user=session_user),
+            "authz": authz or FakeAuthz(),
+        }
     )
 
 

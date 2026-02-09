@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
+from starlette.datastructures import State
 
 from pingpong.ai_models import KNOWN_MODELS
 from pingpong import models
@@ -113,11 +114,13 @@ async def test_add_message_to_thread_persists_version_3_voice_messages(db, user)
         await session.flush()
 
         browser_connection = SimpleNamespace(
-            state=SimpleNamespace(
-                db=session,
-                session=SimpleNamespace(user=SimpleNamespace(id=123)),
-                assistant=assistant,
-                conversation_instructions="voice instructions with timestamp",
+            state=State(
+                {
+                    "db": session,
+                    "session": SimpleNamespace(user=SimpleNamespace(id=123)),
+                    "assistant": assistant,
+                    "conversation_instructions": "voice instructions with timestamp",
+                }
             )
         )
 
@@ -151,9 +154,7 @@ async def test_add_message_to_thread_persists_version_3_voice_messages(db, user)
         )
         assert len(runs) == 1
         assert runs[0].status == schemas.RunStatus.COMPLETED
-        assert (
-            getattr(browser_connection.state, "voice_mode_run_id", None) == runs[0].id
-        )
+        assert browser_connection.state["voice_mode_run_id"] == runs[0].id
 
         messages = (
             (

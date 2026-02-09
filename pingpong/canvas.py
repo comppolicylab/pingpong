@@ -5,7 +5,8 @@ import logging
 from typing import Callable, Generator, Literal, TypeVar, Union
 import aiohttp
 
-from fastapi import BackgroundTasks, Request
+from fastapi import BackgroundTasks
+from pingpong.state_types import StateRequest
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -793,13 +794,13 @@ class ManualCanvasClient(CanvasCourseClient):
         canvas_backend_config: CanvasSettings,
         class_id: int,
         user_id: int,
-        request: Request,
+        request: StateRequest,
         tasks: BackgroundTasks,
         nowfn: NowFn = utcnow,
     ):
         super().__init__(
             canvas_backend_config,
-            request.state.db,
+            request.state["db"],
             class_id,
             user_id,
             nowfn=nowfn,
@@ -841,14 +842,14 @@ class LightweightCanvasClient(CanvasCourseClient):
         self,
         canvas_backend_config: CanvasSettings,
         class_id: int,
-        request: Request,
+        request: StateRequest,
         nowfn: NowFn = utcnow,
     ):
         super().__init__(
             canvas_backend_config,
-            request.state.db,
+            request.state["db"],
             class_id,
-            request.state.session.user.id,
+            request.state["session"].user.id,
             nowfn=nowfn,
         )
         self.request = request

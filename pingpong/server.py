@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from collections import defaultdict
 from datetime import datetime, timedelta
 from math import ceil
-from typing import Annotated, Any, Literal, Optional, Union
+from typing import Annotated, Any, Literal, Optional, Union, cast
 import uuid_utils as uuid
 from aiohttp import ClientResponseError
 import jwt
@@ -21,10 +21,8 @@ from fastapi import (
     FastAPI,
     Form,
     HTTPException,
-    Request,
     Response,
     UploadFile,
-    WebSocket,
 )
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import PositiveInt
@@ -139,6 +137,7 @@ from .files import (
 from .now import NowFn, utcnow
 from .permission import Authz, InstitutionAdmin, LoggedIn, ClassInstitutionAdmin
 from .runs import get_placeholder_ci_calls
+from .state_types import AppState, StateRequest, StateWebSocket
 from .vector_stores import (
     add_vector_store_files_to_db,
     create_vector_store,
@@ -244,22 +243,23 @@ else:
     )
 
 
-def get_now_fn(req: Request) -> NowFn:
+def get_now_fn(req: StateRequest) -> NowFn:
     """Get the current time function for the request."""
-    return getattr(req.app.state, "now", utcnow)
+    app_state = cast(AppState, req.app.state)
+    return app_state["now"] if "now" in app_state else utcnow
 
 
 OpenAIClientType = Union[openai.AsyncClient, openai.AsyncAzureOpenAI]
 
 
-async def get_openai_client_for_class(request: Request) -> OpenAIClientType:
+async def get_openai_client_for_class(request: StateRequest) -> OpenAIClientType:
     """Get an OpenAI client for the class.
 
     Requires the class_id to be in the path parameters.
     """
     class_id = request.path_params["class_id"]
     try:
-        return await get_openai_client_by_class_id(request.state.db, int(class_id))
+        return await get_openai_client_by_class_id(request.state["db"], int(class_id))
     except GetOpenAIClientException as e:
         raise HTTPException(status_code=e.code, detail=e.detail)
 
@@ -269,27 +269,27 @@ OpenAIClient = Annotated[OpenAIClientType, OpenAIClientDependency]
 
 
 @v1.middleware("http")
-async def parse_session_token(request: Request, call_next):
+async def parse_session_token(request: StateRequest, call_next):
     """Parse the session token from the cookie and add it to the request state."""
     request = await populate_request(request)
     return await call_next(request)
 
 
 @v1.middleware("http")
-async def begin_authz_session(request: Request, call_next):
+async def begin_authz_session(request: StateRequest, call_next):
     """Connect to authorization server."""
     async with config.authz.driver.get_client() as c:
-        request.state.authz = c
+        request.state["authz"] = c
         response = await call_next(request)
         await c.close()
         return response
 
 
 @v1.middleware("http")
-async def begin_db_session(request: Request, call_next):
+async def begin_db_session(request: StateRequest, call_next):
     """Create a database session for the request."""
     async with config.db.driver.async_session_with_args(pool_pre_ping=True)() as db:
-        request.state.db = db
+        request.state["db"] = db
         try:
             result = await call_next(request)
             status_code = getattr(result, "status_code", 0)
@@ -303,7 +303,7 @@ async def begin_db_session(request: Request, call_next):
 
 
 @v1.middleware("http")
-async def log_request(request: Request, call_next):
+async def log_request(request: StateRequest, call_next):
     """Log the request."""
     metrics.in_flight.inc(app=config.public_url)
     start_time = time.monotonic()
@@ -339,7 +339,7 @@ async def log_request(request: Request, call_next):
 
 
 @v1.get("/config", dependencies=[Depends(Authz("admin"))])
-def get_config(request: Request):
+def get_config(request: StateRequest):
     d = config.model_dump()
     for k in d.get("auth", {}).get("secret_keys", []):
         k["key"] = "******"
@@ -360,31 +360,31 @@ def get_config(request: Request):
     dependencies=[Depends(Authz("admin"))],
     response_model=schemas.InspectAuthz,
 )
-async def inspect_authz(request: Request, subj: str, obj: str, rel: str):
+async def inspect_authz(request: StateRequest, subj: str, obj: str, rel: str):
     subj_type_, _, subj_id_ = subj.partition(":")
     obj_type_, _, obj_id_ = obj.partition(":")
     try:
         result: schemas.InspectAuthzResult | None = None
         if obj_id_ and subj_id_:
             logger.info(f"Inspecting authz for {subj} {rel} {obj}")
-            verdict = await request.state.authz.test(subj, rel, obj)
+            verdict = await request.state["authz"].test(subj, rel, obj)
             result = schemas.InspectAuthzTestResult(
                 verdict=verdict,
             )
         elif subj_id_:
-            ids = await request.state.authz.list(subj, rel, obj)
+            ids = await request.state["authz"].list(subj, rel, obj)
             result = schemas.InspectAuthzListResult(
                 list=ids,
             )
         elif obj_id_ and (subj_type_ == "user"):
-            ids = await request.state.authz.list_entities(obj, rel, subj_type_)
+            ids = await request.state["authz"].list_entities(obj, rel, subj_type_)
             result = schemas.InspectAuthzListResult(
                 list=ids,
             )
         elif obj_id_ and (
             subj_type_ == "anonymous_user" or subj_type_ == "anonymous_link"
         ):
-            ids = await request.state.authz.list_entities_permissive(
+            ids = await request.state["authz"].list_entities_permissive(
                 obj, rel, subj_type_
             )
             result = schemas.InspectAuthzListResultPermissive(
@@ -412,8 +412,8 @@ async def inspect_authz(request: Request, subj: str, obj: str, rel: str):
     dependencies=[Depends(Authz("admin"))],
     response_model=schemas.InspectAuthzAllResult,
 )
-async def list_all_user_permissions(request: Request, user_id: str):
-    return {"result": await list_all_permissions(request.state.authz, int(user_id))}
+async def list_all_user_permissions(request: StateRequest, user_id: str):
+    return {"result": await list_all_permissions(request.state["authz"], int(user_id))}
 
 
 @v1.post(
@@ -421,13 +421,13 @@ async def list_all_user_permissions(request: Request, user_id: str):
     dependencies=[Depends(Authz("admin"))],
     response_model=schemas.GenericStatus,
 )
-async def manage_authz(data: schemas.ManageAuthzRequest, request: Request):
-    await request.state.authz.write(grant=data.grant, revoke=data.revoke)
+async def manage_authz(data: schemas.ManageAuthzRequest, request: StateRequest):
+    await request.state["authz"].write(grant=data.grant, revoke=data.revoke)
     return {"status": "ok"}
 
 
 @v1.post("/login/sso/saml/acs", response_model=schemas.GenericStatus)
-async def login_sso_saml_acs(provider: str, request: Request):
+async def login_sso_saml_acs(provider: str, request: StateRequest):
     """SAML login assertion consumer service."""
     try:
         sso_config = get_saml2_settings(provider)
@@ -452,7 +452,7 @@ async def login_sso_saml_acs(provider: str, request: Request):
 
     # Create user if missing. Update if already exists.
     user = await models.User.get_by_email_sso(
-        request.state.db,
+        request.state["db"],
         attrs.email,
         provider,
         attrs.identifier if attrs.identifier else None,
@@ -473,26 +473,26 @@ async def login_sso_saml_acs(provider: str, request: Request):
     user.state = schemas.UserState.VERIFIED
 
     # Save user to DB
-    request.state.db.add(user)
-    await request.state.db.flush()
-    await request.state.db.refresh(user)
+    request.state["db"].add(user)
+    await request.state["db"].flush()
+    await request.state["db"].refresh(user)
 
     if attrs.identifier:
         # Add external login and get accounts to merge
         await models.ExternalLogin.create_or_update(
-            request.state.db,
+            request.state["db"],
             user.id,
             provider=provider,
             identifier=attrs.identifier,
             called_by="login_sso_saml_acs",
         )
         user_ids = await models.ExternalLogin.accounts_to_merge(
-            request.state.db, user.id, provider=provider, identifier=attrs.identifier
+            request.state["db"], user.id, provider=provider, identifier=attrs.identifier
         )
 
         # Merge accounts
         for uid in user_ids:
-            await merge(request.state.db, request.state.authz, user.id, uid)
+            await merge(request.state["db"], request.state["authz"], user.id, uid)
 
     url = "/"
     if "RelayState" in saml_client._request_data["get_data"]:
@@ -504,7 +504,7 @@ async def login_sso_saml_acs(provider: str, request: Request):
 
 
 @v1.get("/login/sso")
-async def login_sso(provider: str, request: Request):
+async def login_sso(provider: str, request: StateRequest):
     # Find the SSO method
     try:
         sso_config = get_saml2_settings(provider)
@@ -526,9 +526,11 @@ async def login_sso(provider: str, request: Request):
     dependencies=[Depends(Authz("admin"))],
     response_model=schemas.User,
 )
-async def get_user_by_email(email: str, request: Request):
+async def get_user_by_email(email: str, request: StateRequest):
     _email = email.lower().strip()
-    user = await models.User.get_by_email_sso(request.state.db, _email, "email", _email)
+    user = await models.User.get_by_email_sso(
+        request.state["db"], _email, "email", _email
+    )
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user
@@ -539,8 +541,8 @@ async def get_user_by_email(email: str, request: Request):
     dependencies=[Depends(Authz("admin"))],
     response_model=schemas.User,
 )
-async def get_user(user_id: str, request: Request):
-    user = await models.User.get_by_id(request.state.db, int(user_id))
+async def get_user(user_id: str, request: StateRequest):
+    user = await models.User.get_by_id(request.state["db"], int(user_id))
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user
@@ -551,12 +553,12 @@ async def get_user(user_id: str, request: Request):
     dependencies=[Depends(Authz("admin"))],
     response_model=schemas.ExternalLogins,
 )
-async def get_secondary_emails(user_id: str, request: Request):
-    user = await models.User.get_by_id(request.state.db, int(user_id))
+async def get_secondary_emails(user_id: str, request: StateRequest):
+    user = await models.User.get_by_id(request.state["db"], int(user_id))
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     external_logins = await models.ExternalLogin.get_secondary_emails_by_user_id(
-        request.state.db, user.id
+        request.state["db"], user.id
     )
     return schemas.ExternalLogins(
         external_logins=external_logins,
@@ -569,20 +571,20 @@ async def get_secondary_emails(user_id: str, request: Request):
     dependencies=[Depends(Authz("admin"))],
     response_model=schemas.GenericStatus,
 )
-async def add_email_to_user(user_id: str, email: str, request: Request):
+async def add_email_to_user(user_id: str, email: str, request: StateRequest):
     _new_email = email.lower().strip()
     email_verification = parse_addresses(_new_email)
 
     if not email_verification[0].valid:
         raise HTTPException(status_code=400, detail="Invalid new email address.")
 
-    user = await models.User.get_by_id(request.state.db, int(user_id))
+    user = await models.User.get_by_id(request.state["db"], int(user_id))
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
     try:
         is_new_or_updated = await models.ExternalLogin.create_or_update(
-            request.state.db,
+            request.state["db"],
             user.id,
             provider="email",
             identifier=_new_email,
@@ -646,14 +648,14 @@ async def add_email_to_user(user_id: str, email: str, request: Request):
     dependencies=[Depends(Authz("admin"))],
     response_model=schemas.GenericStatus,
 )
-async def delete_email_from_user(user_id: str, email: str, request: Request):
-    user = await models.User.get_by_id(request.state.db, int(user_id))
+async def delete_email_from_user(user_id: str, email: str, request: StateRequest):
+    user = await models.User.get_by_id(request.state["db"], int(user_id))
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
     try:
         await models.ExternalLogin.delete_secondary_email(
-            request.state.db, user.id, email=email
+            request.state["db"], user.id, email=email
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -667,14 +669,14 @@ async def delete_email_from_user(user_id: str, email: str, request: Request):
     response_model=schemas.GenericStatus,
 )
 async def merge_users(
-    old_user_id: PositiveInt, new_user_id: PositiveInt, request: Request
+    old_user_id: PositiveInt, new_user_id: PositiveInt, request: StateRequest
 ):
-    await merge(request.state.db, request.state.authz, new_user_id, old_user_id)
+    await merge(request.state["db"], request.state["authz"], new_user_id, old_user_id)
     return {"status": "ok"}
 
 
 @v1.post("/login/magic", response_model=schemas.GenericStatus)
-async def login_magic(body: schemas.MagicLoginRequest, request: Request):
+async def login_magic(body: schemas.MagicLoginRequest, request: StateRequest):
     """Provide a magic link to the auth endpoint."""
     # First figure out if this email domain is even allowed to use magic auth.
     # If not, we deny the request and point to another place they can log in.
@@ -701,17 +703,19 @@ async def login_magic(body: schemas.MagicLoginRequest, request: Request):
     # Get the email from the request.
     email = body.email
     # Look up the user by email
-    user = await models.User.get_by_email_sso(request.state.db, email, "email", email)
+    user = await models.User.get_by_email_sso(
+        request.state["db"], email, "email", email
+    )
     # Throw an error if the user does not exist.
     if not user:
         # In dev we can auto-create the user as a super-admin
         if config.auth.autopromote_on_login:
             if not config.development:
                 raise RuntimeError("Cannot autopromote in non-dev mode")
-            user = await models.User.get_or_create_by_email(request.state.db, email)
+            user = await models.User.get_or_create_by_email(request.state["db"], email)
             user.super_admin = True
-            request.state.db.add(user)
-            await request.state.authz.create_root_user(user.id)
+            request.state["db"].add(user)
+            await request.state["authz"].create_root_user(user.id)
         else:
             raise HTTPException(status_code=401, detail="User does not exist")
 
@@ -744,7 +748,7 @@ async def login_magic(body: schemas.MagicLoginRequest, request: Request):
 
 
 @v1.get("/auth/canvas")
-async def auth_canvas(request: Request):
+async def auth_canvas(request: StateRequest):
     """Canvas OAuth2 callback. For now, this defaults to using the Harvard instance.
 
     This endpoint is called by Canvas after the user has authenticated.
@@ -799,7 +803,7 @@ async def auth_canvas(request: Request):
     except ValueError:
         canvas_settings = None
 
-    if not code or not canvas_settings or user_id != request.state.session.user.id:
+    if not code or not canvas_settings or user_id != request.state["session"].user.id:
         return RedirectResponse(
             config.url(f"/group/{class_id}/manage?error_code=4"),
             status_code=303,
@@ -814,7 +818,7 @@ async def auth_canvas(request: Request):
 
 
 @v1.get("/auth")
-async def auth(request: Request):
+async def auth(request: StateRequest):
     """Continue the auth flow based on a JWT in the query params.
 
     If the token is valid, determine the correct authn method based on the user.
@@ -839,7 +843,7 @@ async def auth(request: Request):
     except jwt.exceptions.PyJWTError as e:
         raise HTTPException(status_code=401, detail=str(e))
     except TimeException as e:
-        user = await models.User.get_by_id(request.state.db, int(e.user_id))
+        user = await models.User.get_by_id(request.state["db"], int(e.user_id))
         forward = request.query_params.get("redirect", "/")
         if user and user.email:
             try:
@@ -864,7 +868,7 @@ async def auth(request: Request):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    user = await models.User.get_by_id(request.state.db, int(auth_token.sub))
+    user = await models.User.get_by_id(request.state["db"], int(auth_token.sub))
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -893,8 +897,8 @@ async def auth(request: Request):
     dependencies=[Depends(Authz("admin") | InstitutionAdmin())],
     response_model=schemas.DefaultAPIKeys,
 )
-async def list_default_api_keys(request: Request):
-    default_api_keys = await models.APIKey.get_all_default_keys(request.state.db)
+async def list_default_api_keys(request: StateRequest):
+    default_api_keys = await models.APIKey.get_all_default_keys(request.state["db"])
     return schemas.DefaultAPIKeys(
         default_keys=[
             schemas.DefaultAPIKey(
@@ -914,11 +918,11 @@ async def list_default_api_keys(request: Request):
     dependencies=[Depends(LoggedIn())],
     response_model=schemas.Institutions,
 )
-async def list_institutions(request: Request, role: str = "can_view"):
-    ids = await request.state.authz.list(
-        f"user:{request.state.session.user.id}", role, "institution"
+async def list_institutions(request: StateRequest, role: str = "can_view"):
+    ids = await request.state["authz"].list(
+        f"user:{request.state['session'].user.id}", role, "institution"
     )
-    inst = await models.Institution.get_all_by_id(request.state.db, ids)
+    inst = await models.Institution.get_all_by_id(request.state["db"], ids)
     return {"institutions": inst}
 
 
@@ -927,10 +931,10 @@ async def list_institutions(request: Request, role: str = "can_view"):
     dependencies=[Depends(Authz("can_create_institution"))],
     response_model=schemas.Institution,
 )
-async def create_institution(create: schemas.CreateInstitution, request: Request):
-    inst = await models.Institution.create(request.state.db, create)
-    await request.state.authz.grant(
-        request.state.authz.root,
+async def create_institution(create: schemas.CreateInstitution, request: StateRequest):
+    inst = await models.Institution.create(request.state["db"], create)
+    await request.state["authz"].grant(
+        request.state["authz"].root,
         "parent",
         f"institution:{inst.id}",
     )
@@ -942,8 +946,8 @@ async def create_institution(create: schemas.CreateInstitution, request: Request
     dependencies=[Depends(Authz("admin"))],
     response_model=schemas.Institutions,
 )
-async def list_institutions_with_admins(request: Request):
-    institutions = await models.Institution.get_all(request.state.db)
+async def list_institutions_with_admins(request: StateRequest):
+    institutions = await models.Institution.get_all(request.state["db"])
 
     return {"institutions": institutions}
 
@@ -953,22 +957,24 @@ async def list_institutions_with_admins(request: Request):
     dependencies=[Depends(Authz("admin"))],
     response_model=schemas.InstitutionWithAdmins,
 )
-async def get_institution_with_admins(institution_id: int, request: Request):
-    institution = await models.Institution.get_by_id(request.state.db, institution_id)
+async def get_institution_with_admins(institution_id: int, request: StateRequest):
+    institution = await models.Institution.get_by_id(
+        request.state["db"], institution_id
+    )
     if not institution:
         raise HTTPException(status_code=404, detail="Institution not found")
 
-    root_admin_ids = await request.state.authz.list_entities(
-        request.state.authz.root, "admin", "user"
+    root_admin_ids = await request.state["authz"].list_entities(
+        request.state["authz"].root, "admin", "user"
     )
 
     inst_admin_ids = await _direct_institution_admin_ids(
-        request.state.authz, institution_id
+        request.state["authz"], institution_id
     )
     all_ids = set(root_admin_ids) | set(inst_admin_ids)
     users_by_id: dict[int, models.User] = {}
     if all_ids:
-        users = await models.User.get_all_by_id(request.state.db, list(all_ids))
+        users = await models.User.get_all_by_id(request.state["db"], list(all_ids))
         users_by_id = {user.id: user for user in users}
 
     admins = [
@@ -1002,16 +1008,18 @@ async def get_institution_with_admins(institution_id: int, request: Request):
 async def set_institution_default_api_key(
     institution_id: int,
     body: schemas.SetInstitutionDefaultAPIKeyRequest,
-    request: Request,
+    request: StateRequest,
 ):
-    institution = await models.Institution.get_by_id(request.state.db, institution_id)
+    institution = await models.Institution.get_by_id(
+        request.state["db"], institution_id
+    )
     if not institution:
         raise HTTPException(status_code=404, detail="Institution not found")
 
     default_api_key_id = None
     if body.default_api_key_id is not None:
         api_key = await models.APIKey.get_by_id(
-            request.state.db, body.default_api_key_id
+            request.state["db"], body.default_api_key_id
         )
         if not api_key:
             raise HTTPException(status_code=404, detail="API key not found")
@@ -1025,8 +1033,8 @@ async def set_institution_default_api_key(
         .where(models.Institution.id == int(institution_id))
         .values(default_api_key_id=default_api_key_id)
     )
-    await request.state.db.execute(stmt)
-    return await models.Institution.get_by_id(request.state.db, institution_id)
+    await request.state["db"].execute(stmt)
+    return await models.Institution.get_by_id(request.state["db"], institution_id)
 
 
 @v1.post(
@@ -1035,28 +1043,30 @@ async def set_institution_default_api_key(
     response_model=schemas.Institution,
 )
 async def copy_institution(
-    institution_id: int, body: schemas.CopyInstitution, request: Request
+    institution_id: int, body: schemas.CopyInstitution, request: StateRequest
 ):
-    source = await models.Institution.get_by_id(request.state.db, institution_id)
+    source = await models.Institution.get_by_id(request.state["db"], institution_id)
     if not source:
         raise HTTPException(status_code=404, detail="Institution not found")
 
     # Gather direct admins (exclude inherited root) from source.
-    admin_ids = await _direct_institution_admin_ids(request.state.authz, institution_id)
+    admin_ids = await _direct_institution_admin_ids(
+        request.state["authz"], institution_id
+    )
 
     # Create the new institution.
     new_inst = await models.Institution.create(
-        request.state.db, schemas.CreateInstitution(name=body.name)
+        request.state["db"], schemas.CreateInstitution(name=body.name)
     )
-    await request.state.authz.grant(
-        request.state.authz.root,
+    await request.state["authz"].grant(
+        request.state["authz"].root,
         "parent",
         f"institution:{new_inst.id}",
     )
 
     # Copy admin grants.
     if admin_ids:
-        await request.state.authz.write_safe(
+        await request.state["authz"].write_safe(
             grant=[
                 (f"user:{uid}", "admin", f"institution:{new_inst.id}")
                 for uid in admin_ids
@@ -1071,8 +1081,8 @@ async def copy_institution(
     dependencies=[Depends(Authz("can_view", "institution:{institution_id}"))],
     response_model=schemas.Institution,
 )
-async def get_institution(institution_id: str, request: Request):
-    return await models.Institution.get_by_id(request.state.db, int(institution_id))
+async def get_institution(institution_id: str, request: StateRequest):
+    return await models.Institution.get_by_id(request.state["db"], int(institution_id))
 
 
 @v1.patch(
@@ -1081,10 +1091,10 @@ async def get_institution(institution_id: str, request: Request):
     response_model=schemas.Institution,
 )
 async def update_institution(
-    institution_id: int, data: schemas.UpdateInstitution, request: Request
+    institution_id: int, data: schemas.UpdateInstitution, request: StateRequest
 ):
     institution = await models.Institution.update(
-        request.state.db, institution_id, data
+        request.state["db"], institution_id, data
     )
     if not institution:
         raise HTTPException(status_code=404, detail="Institution not found")
@@ -1097,7 +1107,7 @@ async def update_institution(
     response_model=schemas.InstitutionAdminResponse,
 )
 async def add_institution_admin(
-    institution_id: str, data: schemas.AddInstitutionAdminRequest, request: Request
+    institution_id: str, data: schemas.AddInstitutionAdminRequest, request: StateRequest
 ):
     """Add an admin to an institution.
 
@@ -1106,7 +1116,7 @@ async def add_institution_admin(
     Returns information about whether a user was created and whether admin rights were added.
     """
     inst_id = int(institution_id)
-    institution = await models.Institution.get_by_id(request.state.db, inst_id)
+    institution = await models.Institution.get_by_id(request.state["db"], inst_id)
     if not institution:
         raise HTTPException(status_code=404, detail="Institution not found")
 
@@ -1118,12 +1128,12 @@ async def add_institution_admin(
         raise HTTPException(status_code=400, detail=f"Invalid email: {str(e)}")
 
     user = await models.User.get_or_create_by_email(
-        request.state.db,
+        request.state["db"],
         normalized_email,
         initial_state=schemas.UserState.UNVERIFIED,
     )
 
-    tuples = await request.state.authz.read_tuples(
+    tuples = await request.state["authz"].read_tuples(
         "admin",
         f"institution:{inst_id}",
         user=f"user:{user.id}",
@@ -1131,7 +1141,7 @@ async def add_institution_admin(
     already_admin = bool(tuples)
     added_admin = False
     if not already_admin:
-        await request.state.authz.write_safe(
+        await request.state["authz"].write_safe(
             grant=[(f"user:{user.id}", "admin", f"institution:{inst_id}")]
         )
         added_admin = True
@@ -1149,12 +1159,16 @@ async def add_institution_admin(
     dependencies=[Depends(Authz("admin"))],
     response_model=schemas.GenericStatus,
 )
-async def remove_institution_admin(institution_id: int, user_id: int, request: Request):
-    institution = await models.Institution.get_by_id(request.state.db, institution_id)
+async def remove_institution_admin(
+    institution_id: int, user_id: int, request: StateRequest
+):
+    institution = await models.Institution.get_by_id(
+        request.state["db"], institution_id
+    )
     if not institution:
         raise HTTPException(status_code=404, detail="Institution not found")
 
-    await request.state.authz.write_safe(
+    await request.state["authz"].write_safe(
         revoke=[(f"user:{user_id}", "admin", f"institution:{institution_id}")]
     )
     return {"status": "ok"}
@@ -1165,8 +1179,8 @@ async def remove_institution_admin(institution_id: int, user_id: int, request: R
     dependencies=[Depends(Authz("admin"))],
     response_model=schemas.LTIRegistrations,
 )
-async def list_lti_registrations(request: Request):
-    registrations = await models.LTIRegistration.get_all(request.state.db)
+async def list_lti_registrations(request: StateRequest):
+    registrations = await models.LTIRegistration.get_all(request.state["db"])
     return {"registrations": registrations}
 
 
@@ -1175,9 +1189,9 @@ async def list_lti_registrations(request: Request):
     dependencies=[Depends(Authz("admin"))],
     response_model=schemas.LTIRegistrationDetail,
 )
-async def get_lti_registration(registration_id: int, request: Request):
+async def get_lti_registration(registration_id: int, request: StateRequest):
     registration = await models.LTIRegistration.get_by_id(
-        request.state.db, registration_id
+        request.state["db"], registration_id
     )
     if not registration:
         raise HTTPException(status_code=404, detail="LTI registration not found")
@@ -1196,14 +1210,14 @@ async def get_lti_registration(registration_id: int, request: Request):
 async def update_lti_registration(
     registration_id: int,
     body: schemas.UpdateLTIRegistration,
-    request: Request,
+    request: StateRequest,
 ):
     data = body.model_dump(exclude_unset=True)
     registration = await models.LTIRegistration.update(
-        request.state.db,
+        request.state["db"],
         registration_id,
         data,
-        reviewer_id=request.state.session.user.id,
+        reviewer_id=request.state["session"].user.id,
     )
     if not registration:
         raise HTTPException(status_code=404, detail="LTI registration not found")
@@ -1218,11 +1232,11 @@ async def update_lti_registration(
 async def set_lti_registration_status(
     registration_id: int,
     body: schemas.SetLTIRegistrationStatus,
-    request: Request,
+    request: StateRequest,
 ):
     # Get current registration to check previous status and get admin email
     current_registration = await models.LTIRegistration.get_by_id(
-        request.state.db, registration_id
+        request.state["db"], registration_id
     )
     if not current_registration:
         raise HTTPException(status_code=404, detail="LTI registration not found")
@@ -1235,10 +1249,10 @@ async def set_lti_registration_status(
     else:
         data["enabled"] = False
     registration = await models.LTIRegistration.update(
-        request.state.db,
+        request.state["db"],
         registration_id,
         data,
-        reviewer_id=request.state.session.user.id,
+        reviewer_id=request.state["session"].user.id,
     )
 
     if not registration:
@@ -1285,11 +1299,11 @@ async def set_lti_registration_status(
 async def set_lti_registration_enabled(
     registration_id: int,
     body: schemas.SetLTIRegistrationEnabled,
-    request: Request,
+    request: StateRequest,
 ):
     # First get the registration to check its status
     registration = await models.LTIRegistration.get_by_id(
-        request.state.db, registration_id
+        request.state["db"], registration_id
     )
     if not registration:
         raise HTTPException(status_code=404, detail="LTI registration not found")
@@ -1303,7 +1317,7 @@ async def set_lti_registration_enabled(
             detail="Cannot enable registration that is not approved",
         )
     registration = await models.LTIRegistration.set_enabled(
-        request.state.db, registration_id, body.enabled
+        request.state["db"], registration_id, body.enabled
     )
     return registration
 
@@ -1316,10 +1330,10 @@ async def set_lti_registration_enabled(
 async def set_lti_registration_institutions(
     registration_id: int,
     body: schemas.SetLTIRegistrationInstitutions,
-    request: Request,
+    request: StateRequest,
 ):
     registration = await models.LTIRegistration.set_institutions(
-        request.state.db, registration_id, body.institution_ids
+        request.state["db"], registration_id, body.institution_ids
     )
     if not registration:
         raise HTTPException(status_code=404, detail="LTI registration not found")
@@ -1331,9 +1345,9 @@ async def set_lti_registration_institutions(
     dependencies=[Depends(Authz("admin"))],
     response_model=schemas.InstitutionsWithDefaultAPIKey,
 )
-async def get_institutions_with_default_api_key(request: Request):
+async def get_institutions_with_default_api_key(request: StateRequest):
     institutions = await models.Institution.get_all_with_default_api_key(
-        request.state.db
+        request.state["db"]
     )
     return {"institutions": institutions}
 
@@ -1342,23 +1356,23 @@ async def get_institutions_with_default_api_key(request: Request):
     "/admin/lti/client/{client_id}/course/{course_id}",
     dependencies=[Depends(Authz("admin"))],
 )
-async def get_lti_class_link(client_id: str, course_id: str, request: Request):
+async def get_lti_class_link(client_id: str, course_id: str, request: StateRequest):
     registration = await models.LTIRegistration.get_by_client_id(
-        request.state.db, client_id
+        request.state["db"], client_id
     )
     if registration is None:
         raise HTTPException(status_code=404, detail="Unknown LTI client_id")
 
     if registration.canvas_account_lti_guid:
         class_ = await find_class_by_course_id_search_by_canvas_account_lti_guid(
-            request.state.db,
+            request.state["db"],
             registration_id=registration.id,
             canvas_account_lti_guid=registration.canvas_account_lti_guid,
             course_id=course_id,
         )
     else:
         class_ = await find_class_by_course_id(
-            request.state.db,
+            request.state["db"],
             registration.id,
             course_id,
         )
@@ -1371,9 +1385,9 @@ async def get_lti_class_link(client_id: str, course_id: str, request: Request):
     dependencies=[Depends(Authz("can_view", "institution:{institution_id}"))],
     response_model=schemas.Classes,
 )
-async def get_institution_classes(institution_id: str, request: Request):
+async def get_institution_classes(institution_id: str, request: StateRequest):
     classes = await models.Class.get_by_institution(
-        request.state.db, int(institution_id)
+        request.state["db"], int(institution_id)
     )
     return {"classes": classes}
 
@@ -1384,25 +1398,33 @@ async def get_institution_classes(institution_id: str, request: Request):
     response_model=schemas.Class,
 )
 async def create_class(
-    institution_id: str, create: schemas.CreateClass, request: Request
+    institution_id: str, create: schemas.CreateClass, request: StateRequest
 ):
     if not create.any_can_publish_assistant:
         create.any_can_share_assistant = False
-    new_class = await models.Class.create(request.state.db, int(institution_id), create)
+    new_class = await models.Class.create(
+        request.state["db"], int(institution_id), create
+    )
 
-    user = await models.User.get_by_id(request.state.db, request.state.session.user.id)
+    user = await models.User.get_by_id(
+        request.state["db"], request.state["session"].user.id
+    )
 
     # Create an entry for the creator as the owner
     ucr = models.UserClassRole(
-        user_id=request.state.session.user.id,
+        user_id=request.state["session"].user.id,
         class_id=new_class.id,
         subscribed_to_summaries=not user.dna_as_create,
     )
-    request.state.db.add(ucr)
+    request.state["db"].add(ucr)
 
     grants = [
         (f"institution:{institution_id}", "parent", f"class:{new_class.id}"),
-        (f"user:{request.state.session.user.id}", "teacher", f"class:{new_class.id}"),
+        (
+            f"user:{request.state['session'].user.id}",
+            "teacher",
+            f"class:{new_class.id}",
+        ),
     ]
 
     if not new_class.private:
@@ -1466,7 +1488,7 @@ async def create_class(
             )
         )
 
-    await request.state.authz.write(grant=grants)
+    await request.state["authz"].write(grant=grants)
 
     return new_class
 
@@ -1476,8 +1498,8 @@ async def create_class(
     dependencies=[Depends(Authz("admin"))],
     response_model=schemas.StatisticsResponse,
 )
-async def get_stats(request: Request):
-    statistics = await get_statistics(request.state.db)
+async def get_stats(request: StateRequest):
+    statistics = await get_statistics(request.state["db"])
     return schemas.StatisticsResponse(statistics=statistics)
 
 
@@ -1486,8 +1508,8 @@ async def get_stats(request: Request):
     dependencies=[Depends(Authz("admin"))],
     response_model=schemas.ModelStatisticsResponse,
 )
-async def get_models_stats(request: Request):
-    counts = await models.Assistant.get_count_by_model(request.state.db)
+async def get_models_stats(request: StateRequest):
+    counts = await models.Assistant.get_count_by_model(request.state["db"])
     stats = [{"model": k, "assistant_count": v} for (k, v) in counts]
     return schemas.ModelStatisticsResponse(statistics=stats)
 
@@ -1498,7 +1520,7 @@ async def get_models_stats(request: Request):
     response_model=schemas.RunDailyAssistantMessageStatsResponse,
 )
 async def get_runs_multi_assistant_stats(
-    request: Request,
+    request: StateRequest,
     days: int = 14,
     group_by: Literal["model", "assistant"] = "model",
     top_n: int = 10,
@@ -1506,7 +1528,7 @@ async def get_runs_multi_assistant_stats(
     sort_priority: Literal["count", "percentage"] = "percentage",
 ):
     statistics, summary = await get_runs_with_multiple_assistant_messages_stats(
-        request.state.db,
+        request.state["db"],
         days=days,
         group_by=group_by,
         limit=top_n,
@@ -1523,8 +1545,8 @@ async def get_runs_multi_assistant_stats(
     dependencies=[Depends(Authz("admin"))],
     response_model=schemas.StatisticsResponse,
 )
-async def get_stats_by_institution(institution_id: int, request: Request):
-    statistics = await get_institution_statistics(request.state.db, institution_id)
+async def get_stats_by_institution(institution_id: int, request: StateRequest):
+    statistics = await get_institution_statistics(request.state["db"], institution_id)
     return schemas.StatisticsResponse(statistics=statistics)
 
 
@@ -1533,8 +1555,10 @@ async def get_stats_by_institution(institution_id: int, request: Request):
     dependencies=[Depends(Authz("admin"))],
     response_model=schemas.InstitutionClassThreadCountsResponse,
 )
-async def get_thread_counts_for_institution(institution_id: int, request: Request):
-    thread_counts = await get_thread_counts_by_class(request.state.db, institution_id)
+async def get_thread_counts_for_institution(institution_id: int, request: StateRequest):
+    thread_counts = await get_thread_counts_by_class(
+        request.state["db"], institution_id
+    )
     return schemas.InstitutionClassThreadCountsResponse(
         institution_id=institution_id, classes=thread_counts
     )
@@ -1545,9 +1569,9 @@ async def get_thread_counts_for_institution(institution_id: int, request: Reques
     dependencies=[Depends(Authz("admin"))],
     response_model=schemas.AssistantModelInfoResponse,
 )
-async def get_model_assistants(model_name: str, request: Request):
+async def get_model_assistants(model_name: str, request: StateRequest):
     assistants = await models.Assistant.get_by_model_with_stats(
-        request.state.db, model_name
+        request.state["db"], model_name
     )
     stats = [
         {
@@ -1568,13 +1592,13 @@ async def get_model_assistants(model_name: str, request: Request):
     dependencies=[Depends(LoggedIn())],
     response_model=schemas.Classes,
 )
-async def get_my_classes(request: Request):
-    ids = await request.state.authz.list(
-        f"user:{request.state.session.user.id}",
+async def get_my_classes(request: StateRequest):
+    ids = await request.state["authz"].list(
+        f"user:{request.state['session'].user.id}",
         "can_view",
         "class",
     )
-    classes = await models.Class.get_all_by_id(request.state.db, ids)
+    classes = await models.Class.get_all_by_id(request.state["db"], ids)
     return {"classes": classes}
 
 
@@ -1583,8 +1607,8 @@ async def get_my_classes(request: Request):
     dependencies=[Depends(Authz("can_view", "class:{class_id}"))],
     response_model=schemas.Class,
 )
-async def get_class(class_id: str, request: Request):
-    class_ = await models.Class.get_by_id(request.state.db, int(class_id))
+async def get_class(class_id: str, request: StateRequest):
+    class_ = await models.Class.get_by_id(request.state["db"], int(class_id))
     class_.download_link_expiration = convert_seconds(
         config.artifact_store.download_link_expiration
     )
@@ -1601,7 +1625,7 @@ async def get_class(class_id: str, request: Request):
     dependencies=[Depends(Authz("can_view", "class:{class_id}"))],
     response_model=schemas.FileUploadSupport,
 )
-async def get_class_upload_info(class_id: str, request: Request):
+async def get_class_upload_info(class_id: str, request: StateRequest):
     return {
         "types": FILE_TYPES,
         "allow_private": True,
@@ -1615,14 +1639,16 @@ async def get_class_upload_info(class_id: str, request: Request):
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
     response_model=schemas.Class,
 )
-async def update_class(class_id: str, update: schemas.UpdateClass, request: Request):
+async def update_class(
+    class_id: str, update: schemas.UpdateClass, request: StateRequest
+):
     try:
         if (
             update.any_can_publish_assistant is not None
             and not update.any_can_publish_assistant
         ):
             update.any_can_share_assistant = False
-        cls = await models.Class.update(request.state.db, int(class_id), update)
+        cls = await models.Class.update(request.state["db"], int(class_id), update)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -1697,7 +1723,7 @@ async def update_class(class_id: str, update: schemas.UpdateClass, request: Requ
         grants.append(supervisor_as_can_manage_threads)
         grants.append(supervisor_as_can_manage_assistants)
 
-    await request.state.authz.write_safe(grant=grants, revoke=revokes)
+    await request.state["authz"].write_safe(grant=grants, revoke=revokes)
 
     return cls
 
@@ -1708,9 +1734,9 @@ async def update_class(class_id: str, update: schemas.UpdateClass, request: Requ
     response_model=schemas.Class,
 )
 async def transfer_class(
-    class_id: str, transfer: schemas.TransferClassRequest, request: Request
+    class_id: str, transfer: schemas.TransferClassRequest, request: StateRequest
 ):
-    class_ = await models.Class.get_by_id(request.state.db, int(class_id))
+    class_ = await models.Class.get_by_id(request.state["db"], int(class_id))
     if not class_:
         raise HTTPException(status_code=404, detail="Class not found")
 
@@ -1718,7 +1744,7 @@ async def transfer_class(
         return class_
 
     target_institution = await models.Institution.get_by_id(
-        request.state.db, transfer.institution_id
+        request.state["db"], transfer.institution_id
     )
     if not target_institution:
         raise HTTPException(status_code=404, detail="Institution not found")
@@ -1739,8 +1765,8 @@ async def transfer_class(
         ),
     ]
     for inst_id, error_detail in checks:
-        can_create = await request.state.authz.test(
-            request.state.auth_user,
+        can_create = await request.state["authz"].test(
+            request.state["auth_user"],
             "can_create_class",
             f"institution:{inst_id}",
         )
@@ -1748,7 +1774,7 @@ async def transfer_class(
             raise HTTPException(status_code=403, detail=error_detail)
 
     updated_class, previous_institution_id = await models.Class.transfer_institution(
-        request.state.db, int(class_id), transfer.institution_id
+        request.state["db"], int(class_id), transfer.institution_id
     )
 
     grants = [
@@ -1768,7 +1794,7 @@ async def transfer_class(
             )
         )
 
-    await request.state.authz.write_safe(grant=grants, revoke=revokes)
+    await request.state["authz"].write_safe(grant=grants, revoke=revokes)
 
     return updated_class
 
@@ -1778,8 +1804,8 @@ async def transfer_class(
     dependencies=[Depends(Authz("can_delete", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
-async def delete_class(class_id: str, request: Request):
-    class_ = await models.Class.get_by_id(request.state.db, int(class_id))
+async def delete_class(class_id: str, request: StateRequest):
+    class_ = await models.Class.get_by_id(request.state["db"], int(class_id))
     if not class_:
         raise HTTPException(status_code=404, detail="Group not found")
 
@@ -1787,21 +1813,23 @@ async def delete_class(class_id: str, request: Request):
         openai_client = await get_openai_client_for_class(request)
         # Delete all threads
         async for thread in models.Thread.get_ids_by_class_id(
-            request.state.db, class_.id
+            request.state["db"], class_.id
         ):
             await delete_thread(class_id, str(thread.id), request, openai_client)
 
         # Delete all class assistants
         async for assistant_id in models.Assistant.async_get_by_class_id(
-            request.state.db, class_.id
+            request.state["db"], class_.id
         ):
             await delete_assistant(class_id, str(assistant_id), request, openai_client)
 
         # Double check that we deleted all vector stores
         async for vector_store_id in models.VectorStore.get_id_by_class_id(
-            request.state.db, class_.id
+            request.state["db"], class_.id
         ):
-            await delete_vector_store(request.state.db, openai_client, vector_store_id)
+            await delete_vector_store(
+                request.state["db"], openai_client, vector_store_id
+            )
 
     # All private and class files associated with the class_id
     # are deleted by the database cascade
@@ -1809,14 +1837,14 @@ async def delete_class(class_id: str, request: Request):
         schemas.LMSStatus.DISMISSED,
         schemas.LMSStatus.NONE,
     }:
-        await remove_canvas_connection(request.state.db, class_.id, request=request)
+        await remove_canvas_connection(request.state["db"], class_.id, request=request)
 
     stmt = delete(models.UserClassRole).where(
         models.UserClassRole.class_id == class_.id
     )
-    await request.state.db.execute(stmt)
+    await request.state["db"].execute(stmt)
 
-    await class_.delete(request.state.db)
+    await class_.delete(request.state["db"])
     return {"status": "ok"}
 
 
@@ -1825,8 +1853,10 @@ async def delete_class(class_id: str, request: Request):
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
     response_model=schemas.LTIClasses,
 )
-async def get_lti_canvas_classes(class_id: str, request: Request):
-    lti_classes = await models.LTIClass.get_by_class_id(request.state.db, int(class_id))
+async def get_lti_canvas_classes(class_id: str, request: StateRequest):
+    lti_classes = await models.LTIClass.get_by_class_id(
+        request.state["db"], int(class_id)
+    )
 
     lti_classes_results: list[schemas.LTIClass] = []
 
@@ -1847,10 +1877,10 @@ async def get_lti_canvas_classes(class_id: str, request: Request):
     response_model=schemas.GenericStatus,
 )
 async def delete_lti_class(
-    class_id: str, lti_class_id: str, request: Request, keep_users: bool = True
+    class_id: str, lti_class_id: str, request: StateRequest, keep_users: bool = True
 ):
     class_id_int = int(class_id)
-    lti_class = await models.LTIClass.get_by_id(request.state.db, int(lti_class_id))
+    lti_class = await models.LTIClass.get_by_id(request.state["db"], int(lti_class_id))
     if not lti_class:
         raise HTTPException(status_code=404, detail="LTI class not found")
 
@@ -1860,7 +1890,7 @@ async def delete_lti_class(
         )
 
     user_ids = await models.LTIClass.remove_lti_sync(
-        request.state.db,
+        request.state["db"],
         lti_class.id,
         class_id_int,
         schemas.LMSType(lti_class.lti_platform),
@@ -1869,12 +1899,12 @@ async def delete_lti_class(
 
     if user_ids:
         await delete_canvas_permissions(
-            request.state.authz, user_ids, str(class_id_int)
+            request.state["authz"], user_ids, str(class_id_int)
         )
 
-    await models.LTIClass.delete(request.state.db, lti_class.id)
+    await models.LTIClass.delete(request.state["db"], lti_class.id)
     logger.info(
-        f"Canvas LTI class {lti_class.id} unlinked from PingPong group {class_id_int} by user {request.state.session.user.id}."
+        f"Canvas LTI class {lti_class.id} unlinked from PingPong group {class_id_int} by user {request.state['session'].user.id}."
     )
     return {"status": "ok"}
 
@@ -1884,7 +1914,7 @@ async def delete_lti_class(
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
     response_model=schemas.CanvasRedirect,
 )
-async def get_canvas_link(class_id: str, tenant: str, request: Request):
+async def get_canvas_link(class_id: str, tenant: str, request: StateRequest):
     canvas_settings = get_canvas_config(tenant)
     async with LightweightCanvasClient(
         canvas_settings,
@@ -1899,8 +1929,8 @@ async def get_canvas_link(class_id: str, tenant: str, request: Request):
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
-async def dismiss_canvas_sync(class_id: str, request: Request):
-    await models.Class.dismiss_lms_sync(request.state.db, int(class_id))
+async def dismiss_canvas_sync(class_id: str, request: StateRequest):
+    await models.Class.dismiss_lms_sync(request.state["db"], int(class_id))
     return {"status": "ok"}
 
 
@@ -1909,8 +1939,8 @@ async def dismiss_canvas_sync(class_id: str, request: Request):
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
-async def enable_canvas_sync(class_id: str, request: Request):
-    await models.Class.enable_lms_sync(request.state.db, int(class_id))
+async def enable_canvas_sync(class_id: str, request: StateRequest):
+    await models.Class.enable_lms_sync(request.state["db"], int(class_id))
     return {"status": "ok"}
 
 
@@ -1919,7 +1949,9 @@ async def enable_canvas_sync(class_id: str, request: Request):
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
     response_model=schemas.LMSInstances,
 )
-async def get_available_lms_instances(class_id: str, lms_type: str, request: Request):
+async def get_available_lms_instances(
+    class_id: str, lms_type: str, request: StateRequest
+):
     return {
         "instances": [
             tenant for tenant in config.lms.lms_instances if tenant.type == lms_type
@@ -1932,7 +1964,7 @@ async def get_available_lms_instances(class_id: str, lms_type: str, request: Req
     dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
     response_model=schemas.LMSClasses,
 )
-async def get_canvas_classes(class_id: str, tenant: str, request: Request):
+async def get_canvas_classes(class_id: str, tenant: str, request: StateRequest):
     canvas_settings = get_canvas_config(tenant)
     async with LightweightCanvasClient(
         canvas_settings,
@@ -1947,13 +1979,15 @@ async def get_canvas_classes(class_id: str, tenant: str, request: Request):
             # This will prompt the user to re-connect to Canvas before we sync again.
             # Otherwise, just display an error message.
             if e.code == 401:
-                await models.Class.mark_lms_sync_error(request.state.db, int(class_id))
+                await models.Class.mark_lms_sync_error(
+                    request.state["db"], int(class_id)
+                )
             logger.exception("get_canvas_classes: ClientResponseError occurred")
             raise HTTPException(
                 status_code=e.code, detail="Canvas returned an error: " + e.message
             ) from e
         except CanvasInvalidTokenException:
-            await models.Class.mark_lms_sync_error(request.state.db, int(class_id))
+            await models.Class.mark_lms_sync_error(request.state["db"], int(class_id))
             logger.exception("get_canvas_classes: CanvasInvalidTokenException occurred")
             raise HTTPException(
                 status_code=401,
@@ -1987,7 +2021,7 @@ async def get_canvas_classes(class_id: str, tenant: str, request: Request):
     response_model=schemas.GenericStatus,
 )
 async def verify_canvas_class_permissions(
-    class_id: str, tenant: str, canvas_class_id: str, request: Request
+    class_id: str, tenant: str, canvas_class_id: str, request: StateRequest
 ):
     canvas_settings = get_canvas_config(tenant)
     async with LightweightCanvasClient(
@@ -2030,7 +2064,9 @@ async def verify_canvas_class_permissions(
             # If we get a 401 error, mark the class as having a sync error.
             # Otherwise, just display an error message.
             if e.code == 401:
-                await models.Class.mark_lms_sync_error(request.state.db, int(class_id))
+                await models.Class.mark_lms_sync_error(
+                    request.state["db"], int(class_id)
+                )
             logger.exception(
                 "verify_canvas_class_permissions: ClientResponseError occurred"
             )
@@ -2038,7 +2074,7 @@ async def verify_canvas_class_permissions(
                 status_code=e.code, detail="Canvas returned an error: " + e.message
             )
         except CanvasInvalidTokenException:
-            await models.Class.mark_lms_sync_error(request.state.db, int(class_id))
+            await models.Class.mark_lms_sync_error(request.state["db"], int(class_id))
             logger.exception(
                 "verify_canvas_class_permissions: CanvasInvalidTokenException occurred"
             )
@@ -2060,7 +2096,7 @@ async def verify_canvas_class_permissions(
     response_model=schemas.GenericStatus,
 )
 async def update_canvas_class(
-    class_id: str, tenant: str, canvas_class_id: str, request: Request
+    class_id: str, tenant: str, canvas_class_id: str, request: StateRequest
 ):
     canvas_settings = get_canvas_config(tenant)
     async with LightweightCanvasClient(
@@ -2096,13 +2132,15 @@ async def update_canvas_class(
             # If we get a 401 error, mark the class as having a sync error.
             # Otherwise, just display an error message.
             if e.code == 401:
-                await models.Class.mark_lms_sync_error(request.state.db, int(class_id))
+                await models.Class.mark_lms_sync_error(
+                    request.state["db"], int(class_id)
+                )
             logger.exception("update_canvas_class: ClientResponseError occurred")
             raise HTTPException(
                 status_code=e.code, detail="Canvas returned an error: " + e.message
             )
         except CanvasInvalidTokenException:
-            await models.Class.mark_lms_sync_error(request.state.db, int(class_id))
+            await models.Class.mark_lms_sync_error(request.state["db"], int(class_id))
             logger.exception("sync_canvas_class: CanvasInvalidTokenException occurred")
             raise HTTPException(
                 status_code=401,
@@ -2122,9 +2160,9 @@ async def update_canvas_class(
     response_model=schemas.GenericStatus,
 )
 async def sync_canvas_class(
-    class_id: str, tenant: str, request: Request, tasks: BackgroundTasks
+    class_id: str, tenant: str, request: StateRequest, tasks: BackgroundTasks
 ):
-    class_ = await models.Class.get_by_id(request.state.db, int(class_id))
+    class_ = await models.Class.get_by_id(request.state["db"], int(class_id))
     if not class_ or not class_.lms_user_id:
         raise HTTPException(status_code=404, detail="Canvas class not linked")
     canvas_settings = get_canvas_config(tenant)
@@ -2142,14 +2180,18 @@ async def sync_canvas_class(
             # If we get a 401 error, mark the class as having a sync error.
             # Otherwise, just display an error message.
             if e.code == 401:
-                await models.Class.mark_lms_sync_error(request.state.db, int(class_id))
+                await models.Class.mark_lms_sync_error(
+                    request.state["db"], int(class_id)
+                )
             logger.exception("sync_canvas_class: ClientResponseError occurred")
             raise HTTPException(
                 status_code=e.code, detail="Canvas returned an error: " + e.message
             )
         except (CanvasException, AddUserException) as e:
             if e.code == 403:
-                await models.Class.mark_lms_sync_error(request.state.db, int(class_id))
+                await models.Class.mark_lms_sync_error(
+                    request.state["db"], int(class_id)
+                )
             logger.exception(
                 "sync_canvas_class: CanvasException or AddUserException occurred"
             )
@@ -2164,7 +2206,7 @@ async def sync_canvas_class(
                 detail=e.detail or "We faced an error while syncing with Canvas.",
             )
         except CanvasInvalidTokenException:
-            await models.Class.mark_lms_sync_error(request.state.db, int(class_id))
+            await models.Class.mark_lms_sync_error(request.state["db"], int(class_id))
             logger.exception("sync_canvas_class: CanvasInvalidTokenException occurred")
             raise HTTPException(
                 status_code=401,
@@ -2184,19 +2226,19 @@ async def sync_canvas_class(
     response_model=schemas.GenericStatus,
 )
 async def unlink_canvas_class(
-    class_id: str, tenant: str, request: Request, keep_users: bool = True
+    class_id: str, tenant: str, request: StateRequest, keep_users: bool = True
 ):
     canvas_settings = get_canvas_config(tenant)
     userIds = await models.Class.remove_lms_sync(
-        request.state.db,
+        request.state["db"],
         int(class_id),
         canvas_settings.tenant,
         schemas.LMSType(canvas_settings.type),
         keep_users=keep_users,
     )
-    await delete_canvas_permissions(request.state.authz, userIds, class_id)
+    await delete_canvas_permissions(request.state["authz"], userIds, class_id)
     logger.info(
-        f"Canvas class unlinked from PingPong class {class_id} by user {request.state.session.user.id}."
+        f"Canvas class unlinked from PingPong class {class_id} by user {request.state['session'].user.id}."
     )
     return {"status": "ok"}
 
@@ -2209,7 +2251,7 @@ async def unlink_canvas_class(
 async def remove_canvas_connection(
     class_id: str,
     tenant: str,
-    request: Request,
+    request: StateRequest,
     keep_users: bool = True,
 ):
     canvas_settings = get_canvas_config(tenant)
@@ -2245,16 +2287,16 @@ async def remove_canvas_connection(
 
         try:
             userIds = await models.Class.remove_lms_sync(
-                request.state.db,
+                request.state["db"],
                 int(class_id),
                 canvas_settings.tenant,
                 schemas.LMSType(canvas_settings.type),
                 kill_connection=True,
                 keep_users=keep_users,
             )
-            await delete_canvas_permissions(request.state.authz, userIds, class_id)
+            await delete_canvas_permissions(request.state["authz"], userIds, class_id)
             logger.info(
-                f"Canvas account removed from PingPong class {class_id} by user {request.state.session.user.id}."
+                f"Canvas account removed from PingPong class {class_id} by user {request.state['session'].user.id}."
             )
         except Exception:
             logger.exception("remove_canvas_connection: Exception occurred")
@@ -2273,12 +2315,12 @@ async def remove_canvas_connection(
 )
 async def request_class_summary(
     class_id: str,
-    request: Request,
+    request: StateRequest,
     tasks: BackgroundTasks,
     openai_client: OpenAIClient,
     opts: schemas.ActivitySummaryOpts,
 ):
-    class_ = await models.Class.get_by_id(request.state.db, int(class_id))
+    class_ = await models.Class.get_by_id(request.state["db"], int(class_id))
     if not class_:
         raise HTTPException(status_code=404, detail="Group not found")
     if class_.private:
@@ -2286,7 +2328,9 @@ async def request_class_summary(
             status_code=403,
             detail="Cannot create assistant summaries for a private class",
         )
-    user = await models.User.get_by_id(request.state.db, request.state.session.user.id)
+    user = await models.User.get_by_id(
+        request.state["db"], request.state["session"].user.id
+    )
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -2310,9 +2354,9 @@ async def request_class_summary(
     dependencies=[Depends(Authz("can_receive_summaries", "class:{class_id}"))],
     response_model=schemas.SummarySubscriptionResult,
 )
-async def get_class_summary_subscription(class_id: str, request: Request):
+async def get_class_summary_subscription(class_id: str, request: StateRequest):
     subscribed = await models.UserClassRole.is_subscribed_to_summaries(
-        request.state.db, request.state.session.user.id, int(class_id)
+        request.state["db"], request.state["session"].user.id, int(class_id)
     )
     return {"subscribed": subscribed}
 
@@ -2322,8 +2366,8 @@ async def get_class_summary_subscription(class_id: str, request: Request):
     dependencies=[Depends(Authz("can_receive_summaries", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
-async def subscribe_to_class_summary(class_id: str, request: Request):
-    class_ = await models.Class.get_by_id(request.state.db, int(class_id))
+async def subscribe_to_class_summary(class_id: str, request: StateRequest):
+    class_ = await models.Class.get_by_id(request.state["db"], int(class_id))
     if not class_:
         raise HTTPException(status_code=404, detail="Group not found")
     if class_.private:
@@ -2337,7 +2381,7 @@ async def subscribe_to_class_summary(class_id: str, request: Request):
             detail="Cannot subscribe to Activity Summaries for a group with no billing information.",
         )
     await models.UserClassRole.subscribe_to_summaries(
-        request.state.db, request.state.session.user.id, int(class_id)
+        request.state["db"], request.state["session"].user.id, int(class_id)
     )
     return {"status": "ok"}
 
@@ -2347,8 +2391,8 @@ async def subscribe_to_class_summary(class_id: str, request: Request):
     dependencies=[Depends(Authz("can_receive_summaries", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
-async def unsubscribe_from_class_summary(class_id: str, request: Request):
-    class_ = await models.Class.get_by_id(request.state.db, int(class_id))
+async def unsubscribe_from_class_summary(class_id: str, request: StateRequest):
+    class_ = await models.Class.get_by_id(request.state["db"], int(class_id))
     if not class_:
         raise HTTPException(status_code=404, detail="Group not found")
     if class_.private:
@@ -2362,7 +2406,7 @@ async def unsubscribe_from_class_summary(class_id: str, request: Request):
             detail="Cannot subscribe to Activity Summaries for a group with no billing information.",
         )
     await models.UserClassRole.unsubscribe_from_summaries(
-        request.state.db, request.state.session.user.id, int(class_id)
+        request.state["db"], request.state["session"].user.id, int(class_id)
     )
     return {"status": "ok"}
 
@@ -2372,14 +2416,14 @@ async def unsubscribe_from_class_summary(class_id: str, request: Request):
     dependencies=[Depends(Authz("can_view", "class:{class_id}"))],
     response_model=schemas.ClassSupervisors,
 )
-async def list_class_supervisors(class_id: str, request: Request):
-    supervisor_ids = await request.state.authz.list_entities(
+async def list_class_supervisors(class_id: str, request: StateRequest):
+    supervisor_ids = await request.state["authz"].list_entities(
         f"class:{class_id}",
         "supervisor",
         "user",
     )
     supervisors = await models.User.get_all_by_id_if_in_class(
-        request.state.db, supervisor_ids, int(class_id)
+        request.state["db"], supervisor_ids, int(class_id)
     )
     supervisors_users = []
     for supervisor in supervisors:
@@ -2405,7 +2449,11 @@ async def list_class_supervisors(class_id: str, request: Request):
     response_model=schemas.ClassUsers,
 )
 async def list_class_users(
-    class_id: str, request: Request, limit: int = 20, offset: int = 0, search: str = ""
+    class_id: str,
+    request: StateRequest,
+    limit: int = 20,
+    offset: int = 0,
+    search: str = "",
 ):
     if offset < 0:
         raise HTTPException(status_code=400, detail="Offset must be non-negative")
@@ -2419,15 +2467,17 @@ async def list_class_users(
 
     batch = list[Relation]()
     async for u in models.Class.get_members(
-        request.state.db, int(class_id), limit=limit, offset=offset, search=search
+        request.state["db"], int(class_id), limit=limit, offset=offset, search=search
     ):
         users.append(u)
         for role in ["admin", "teacher", "student"]:
             batch.append((f"user:{u.user_id}", role, f"class:{class_id}"))
 
     total, results = await asyncio.gather(
-        models.Class.get_member_count(request.state.db, int(class_id), search=search),
-        request.state.authz.check(batch),
+        models.Class.get_member_count(
+            request.state["db"], int(class_id), search=search
+        ),
+        request.state["authz"].check(batch),
     )
 
     class_users = list[schemas.ClassUser]()
@@ -2460,9 +2510,9 @@ async def list_class_users(
     response_model=schemas.EmailValidationResults,
 )
 async def validate_user_emails(
-    class_id: str, data: schemas.EmailValidationRequest, request: Request
+    class_id: str, data: schemas.EmailValidationRequest, request: StateRequest
 ):
-    return await validate_email_addresses(request.state.db, data.emails)
+    return await validate_email_addresses(request.state["db"], data.emails)
 
 
 @v1.post(
@@ -2471,9 +2521,9 @@ async def validate_user_emails(
     response_model=schemas.EmailValidationResults,
 )
 async def revalidate_user_emails(
-    class_id: str, data: schemas.EmailValidationResults, request: Request
+    class_id: str, data: schemas.EmailValidationResults, request: StateRequest
 ):
-    return await revalidate_email_addresses(request.state.db, data.results)
+    return await revalidate_email_addresses(request.state["db"], data.results)
 
 
 @v1.post(
@@ -2484,7 +2534,7 @@ async def revalidate_user_emails(
 async def add_users_to_class(
     class_id: str,
     new_ucr: schemas.CreateUserClassRoles,
-    request: Request,
+    request: StateRequest,
     tasks: BackgroundTasks,
 ):
     try:
@@ -2505,7 +2555,10 @@ async def add_users_to_class(
     response_model=schemas.UserClassRole,
 )
 async def update_user_class_role(
-    class_id: str, user_id: str, update: schemas.UpdateUserClassRole, request: Request
+    class_id: str,
+    user_id: str,
+    update: schemas.UpdateUserClassRole,
+    request: StateRequest,
 ):
     cid = int(class_id)
     uid = int(user_id)
@@ -2527,7 +2580,7 @@ async def update_user_class_role(
             detail="We faced an internal error while verifying your permissions.",
         )
 
-    existing = await models.UserClassRole.get(request.state.db, uid, cid)
+    existing = await models.UserClassRole.get(request.state["db"], uid, cid)
     if not existing:
         raise HTTPException(status_code=404, detail="User not found in class")
 
@@ -2542,7 +2595,7 @@ async def update_user_class_role(
             revokes.append((f"user:{uid}", role, f"class:{cid}"))
 
     # Save new role info to the database.
-    await request.state.authz.write_safe(grant=grants, revoke=revokes)
+    await request.state["authz"].write_safe(grant=grants, revoke=revokes)
 
     return schemas.UserClassRole(
         user_id=existing.user_id,
@@ -2563,7 +2616,7 @@ async def update_user_class_role(
     dependencies=[Depends(Authz("supervisor", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
-async def remove_user_from_class(class_id: str, user_id: str, request: Request):
+async def remove_user_from_class(class_id: str, user_id: str, request: StateRequest):
     cid = int(class_id)
     uid = int(user_id)
 
@@ -2587,13 +2640,13 @@ async def remove_user_from_class(class_id: str, user_id: str, request: Request):
             status_code=500,
             detail="We faced an internal error while verifying your permissions.",
         )
-    await models.UserClassRole.delete(request.state.db, uid, cid)
+    await models.UserClassRole.delete(request.state["db"], uid, cid)
 
     revokes = list[Relation]()
     for role in ["admin", "teacher", "student"]:
         revokes.append((f"user:{uid}", role, f"class:{cid}"))
 
-    await request.state.authz.write_safe(revoke=revokes)
+    await request.state["authz"].write_safe(revoke=revokes)
     return {"status": "ok"}
 
 
@@ -2602,8 +2655,8 @@ async def remove_user_from_class(class_id: str, user_id: str, request: Request):
     dependencies=[Depends(Authz("can_view", "class:{class_id}"))],
     response_model=schemas.APIKeyCheck,
 )
-async def check_class_api_key(class_id: str, request: Request):
-    result = await models.Class.get_api_key(request.state.db, int(class_id))
+async def check_class_api_key(class_id: str, request: StateRequest):
+    result = await models.Class.get_api_key(request.state["db"], int(class_id))
     if result.api_key_obj:
         return {"has_api_key": True}
     elif result.api_key:
@@ -2617,14 +2670,14 @@ async def check_class_api_key(class_id: str, request: Request):
     response_model=schemas.APIKeyResponse,
 )
 async def update_class_api_key(
-    class_id: str, update: schemas.UpdateApiKey, request: Request
+    class_id: str, update: schemas.UpdateApiKey, request: StateRequest
 ):
     if not update.api_key:
         raise HTTPException(
             status_code=400,
             detail="API key must be provided to update the class API key.",
         )
-    existing_key = await models.Class.get_api_key(request.state.db, int(class_id))
+    existing_key = await models.Class.get_api_key(request.state["db"], int(class_id))
     if (
         existing_key.api_key_obj
         and existing_key.api_key_obj.api_key == update.api_key
@@ -2650,7 +2703,7 @@ async def update_class_api_key(
                 detail="Invalid API connection information provided. Please try again.",
             )
         api_key_obj = await models.Class.update_api_key(
-            request.state.db,
+            request.state["db"],
             int(class_id),
             update.api_key,
             provider=update.provider,
@@ -2659,10 +2712,10 @@ async def update_class_api_key(
             region=response.region if update.provider == "azure" else None,
             available_as_default=False,
         )
-        await request.state.authz.write_safe(
+        await request.state["authz"].write_safe(
             grant=[
                 (
-                    f"user:{request.state.session.user.id}",
+                    f"user:{request.state['session'].user.id}",
                     "can_view_api_key",
                     f"class:{class_id}",
                 )
@@ -2681,9 +2734,9 @@ async def update_class_api_key(
     dependencies=[Depends(Authz("can_view_api_key", "class:{class_id}"))],
     response_model=schemas.APIKeyResponse,
 )
-async def get_class_api_key(class_id: str, request: Request):
+async def get_class_api_key(class_id: str, request: StateRequest):
     response = None
-    result = await models.Class.get_api_key(request.state.db, int(class_id))
+    result = await models.Class.get_api_key(request.state["db"], int(class_id))
     if result.api_key_obj:
         api_key_obj = result.api_key_obj
         response = schemas.ApiKey(
@@ -2706,7 +2759,7 @@ async def get_class_api_key(class_id: str, request: Request):
     dependencies=[Depends(LoggedIn())],
     response_model=schemas.AssistantModelLiteResponse,
 )
-async def list_model_capabilities(request: Request):
+async def list_model_capabilities(request: StateRequest):
     lite_models = [
         schemas.AssistantModelLite(
             id=model_id,
@@ -2725,7 +2778,7 @@ async def list_model_capabilities(request: Request):
     response_model=schemas.AssistantModels,
 )
 async def list_class_models(
-    class_id: str, request: Request, openai_client: OpenAIClient
+    class_id: str, request: StateRequest, openai_client: OpenAIClient
 ):
     """List available models for the class assistants."""
     try:
@@ -2849,10 +2902,10 @@ async def list_class_models(
         )
 
     if not (
-        await request.state.authz.check(
+        await request.state["authz"].check(
             [
                 (
-                    f"user:{request.state.session.user.id}",
+                    f"user:{request.state['session'].user.id}",
                     "admin",
                     f"class:{class_id}",
                 ),
@@ -2905,14 +2958,14 @@ async def list_class_models(
     "/class/{class_id}/thread/{thread_id}/audio",
 )
 async def audio_stream(
-    websocket: WebSocket,
+    websocket: StateWebSocket,
     class_id: str,
     thread_id: str,
     share_token: str | None = None,
     session_token: str | None = None,
 ):
-    websocket.state.anonymous_share_token = share_token
-    websocket.state.anonymous_session_token = session_token
+    websocket.state["anonymous_share_token"] = share_token
+    websocket.state["anonymous_session_token"] = session_token
     await browser_realtime_websocket(websocket, class_id, thread_id)
 
 
@@ -2926,10 +2979,10 @@ async def audio_stream(
     response_model=schemas.ThreadWithMeta,
 )
 async def get_thread(
-    class_id: str, thread_id: str, request: Request, openai_client: OpenAIClient
+    class_id: str, thread_id: str, request: StateRequest, openai_client: OpenAIClient
 ):
     thread = await models.Thread.get_by_id_with_users_voice_mode(
-        request.state.db, int(thread_id)
+        request.state["db"], int(thread_id)
     )
     if thread.version <= 2:
         (
@@ -2941,11 +2994,11 @@ async def get_thread(
             openai_client.beta.threads.messages.list(
                 thread.thread_id, limit=20, order="desc"
             ),
-            models.Thread.get_thread_components(request.state.db, thread.id),
-            request.state.authz.check(
+            models.Thread.get_thread_components(request.state["db"], thread.id),
+            request.state["authz"].check(
                 [
                     (
-                        f"user:{request.state.session.user.id}",
+                        f"user:{request.state['session'].user.id}",
                         "supervisor",
                         f"class:{class_id}",
                     ),
@@ -2961,9 +3014,9 @@ async def get_thread(
         ]
         last_run = [r async for r in runs_result]
         current_user_ids = [
-            request.state.session.user.id
+            request.state["session"].user.id
         ] + await models.User.get_previous_ids_by_id(
-            request.state.db, request.state.session.user.id
+            request.state["db"], request.state["session"].user.id
         )
         if messages.data:
             users = {str(u.id): u for u in thread.users}
@@ -3005,7 +3058,7 @@ async def get_thread(
         placeholder_ci_calls = []
         if "code_interpreter" in thread.tools_available and messages.data:
             placeholder_ci_calls = await get_placeholder_ci_calls(
-                request.state.db,
+                request.state["db"],
                 messages.data[0].assistant_id
                 if messages.data[0].assistant_id
                 else "None",
@@ -3019,7 +3072,7 @@ async def get_thread(
         else:
             thread.assistant_names = {0: "Deleted Assistant"}
         thread.user_names = user_names(
-            thread, request.state.session.user.id, is_supervisor
+            thread, request.state["session"].user.id, is_supervisor
         )
 
         can_view_prompt = False
@@ -3027,8 +3080,8 @@ async def get_thread(
             if not assistant.hide_prompt:
                 can_view_prompt = True
             else:
-                can_view_prompt = await request.state.authz.test(
-                    f"user:{request.state.session.user.id}",
+                can_view_prompt = await request.state["authz"].test(
+                    f"user:{request.state['session'].user.id}",
                     "can_edit",
                     f"assistant:{assistant.id}",
                 )
@@ -3056,7 +3109,7 @@ async def get_thread(
         limit = 20
         run_limit = max(1, ceil(limit / 2))
         run_ids, has_more_runs = await models.Run.get_run_window(
-            request.state.db,
+            request.state["db"],
             thread.id,
             run_limit,
             order="desc",
@@ -3069,17 +3122,17 @@ async def get_thread(
             is_supervisor_check,
         ) = await asyncio.gather(
             models.Thread.list_messages_tool_calls(
-                request.state.db,
+                request.state["db"],
                 thread.id,
                 run_ids=run_ids,
                 order="desc",
             ),
-            models.Thread.get_latest_run_by_thread_id(request.state.db, thread.id),
-            models.Thread.get_thread_components(request.state.db, thread.id),
-            request.state.authz.check(
+            models.Thread.get_latest_run_by_thread_id(request.state["db"], thread.id),
+            models.Thread.get_thread_components(request.state["db"], thread.id),
+            request.state["authz"].check(
                 [
                     (
-                        f"user:{request.state.session.user.id}",
+                        f"user:{request.state['session'].user.id}",
                         "supervisor",
                         f"class:{class_id}",
                     ),
@@ -3087,9 +3140,9 @@ async def get_thread(
             ),
         )
         current_user_ids = [
-            request.state.session.user.id
+            request.state["session"].user.id
         ] + await models.User.get_previous_ids_by_id(
-            request.state.db, request.state.session.user.id
+            request.state["db"], request.state["session"].user.id
         )
         users = {str(u.id): u for u in thread.users}
 
@@ -3603,7 +3656,7 @@ async def get_thread(
         else:
             thread.assistant_names = {0: "Deleted Assistant"}
         thread.user_names = user_names(
-            thread, request.state.session.user.id, is_supervisor
+            thread, request.state["session"].user.id, is_supervisor
         )
 
         can_view_prompt = False
@@ -3611,8 +3664,8 @@ async def get_thread(
             if not assistant.hide_prompt:
                 can_view_prompt = True
             else:
-                can_view_prompt = await request.state.authz.test(
-                    f"user:{request.state.session.user.id}",
+                can_view_prompt = await request.state["authz"].test(
+                    f"user:{request.state['session'].user.id}",
                     "can_edit",
                     f"assistant:{assistant.id}",
                 )
@@ -3679,12 +3732,14 @@ async def get_thread(
 async def get_thread_recording(
     class_id: str,
     thread_id: str,
-    request: Request,
+    request: StateRequest,
 ):
-    user_id = request.state.session.user.id
+    user_id = request.state["session"].user.id
     thread, is_supervisor_check = await asyncio.gather(
-        models.Thread.get_by_id_with_users_voice_mode(request.state.db, int(thread_id)),
-        request.state.authz.check(
+        models.Thread.get_by_id_with_users_voice_mode(
+            request.state["db"], int(thread_id)
+        ),
+        request.state["authz"].check(
             [
                 (
                     f"user:{user_id}",
@@ -3775,14 +3830,16 @@ async def get_thread_recording(
 async def transcribe_thread_recording(
     class_id: str,
     thread_id: str,
-    request: Request,
+    request: StateRequest,
     tasks: BackgroundTasks,
     openai_client: OpenAIClient,
 ):
-    user_id = request.state.session.user.id
+    user_id = request.state["session"].user.id
     thread, is_supervisor_check = await asyncio.gather(
-        models.Thread.get_by_id_with_users_voice_mode(request.state.db, int(thread_id)),
-        request.state.authz.check(
+        models.Thread.get_by_id_with_users_voice_mode(
+            request.state["db"], int(thread_id)
+        ),
+        request.state["authz"].check(
             [
                 (
                     f"user:{user_id}",
@@ -3829,7 +3886,7 @@ async def transcribe_thread_recording(
 async def redirect_to_transcription_download(
     class_id: str,
     thread_id: str,
-    request: Request,
+    request: StateRequest,
 ):
     token = request.query_params.get("token")
     nowfn = get_now_fn(request)
@@ -3838,7 +3895,7 @@ async def redirect_to_transcription_download(
         sub_data = json.loads(auth_token.sub)
         requestor_user_id = sub_data["user_id"]
         download_name = sub_data["download_name"]
-        if requestor_user_id != request.state.session.user.id:
+        if requestor_user_id != request.state["session"].user.id:
             return RedirectResponse(
                 config.url(f"/group/{class_id}/manage?error_code=8"),
                 status_code=303,
@@ -3877,12 +3934,12 @@ async def redirect_to_transcription_download(
 async def get_ci_messages(
     class_id: str,
     thread_id: str,
-    request: Request,
+    request: StateRequest,
     openai_client: OpenAIClient,
     run_id: str,
     step_id: str,
 ):
-    thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
+    thread = await models.Thread.get_by_id(request.state["db"], int(thread_id))
     if thread.version <= 2:
         messages = await get_ci_messages_from_step(
             openai_client, thread.thread_id, run_id, step_id
@@ -3900,9 +3957,12 @@ async def get_ci_messages(
     response_model=schemas.GenericStatus,
 )
 async def export_class_threads(
-    class_id: str, request: Request, tasks: BackgroundTasks, openai_client: OpenAIClient
+    class_id: str,
+    request: StateRequest,
+    tasks: BackgroundTasks,
+    openai_client: OpenAIClient,
 ):
-    class_ = await models.Class.get_by_id(request.state.db, int(class_id))
+    class_ = await models.Class.get_by_id(request.state["db"], int(class_id))
     if not class_:
         raise HTTPException(status_code=404, detail="Class not found")
     if class_.private:
@@ -3915,7 +3975,7 @@ async def export_class_threads(
         export_class_threads_anonymized,
         openai_client,
         class_id,
-        request.state.session.user.id,
+        request.state["session"].user.id,
     )
     return {"status": "ok"}
 
@@ -3928,17 +3988,17 @@ async def export_class_threads(
 async def copy_class(
     class_id: str,
     copy_options: schemas.CopyClassRequest,
-    request: Request,
+    request: StateRequest,
     tasks: BackgroundTasks,
     openai_client: OpenAIClient,
 ):
-    class_ = await models.Class.get_by_id(request.state.db, int(class_id))
+    class_ = await models.Class.get_by_id(request.state["db"], int(class_id))
     if not class_:
         raise HTTPException(status_code=404, detail="Class not found")
 
     target_institution_id = copy_options.institution_id or class_.institution_id
-    can_create_class = await request.state.authz.test(
-        request.state.auth_user,
+    can_create_class = await request.state["authz"].test(
+        request.state["auth_user"],
         "can_create_class",
         f"institution:{target_institution_id}",
     )
@@ -3963,7 +4023,7 @@ async def copy_class(
         copy_options,
         openai_client,
         class_id,
-        request.state.session.user.id,
+        request.state["session"].user.id,
     )
     return {"status": "ok"}
 
@@ -3974,7 +4034,9 @@ async def copy_class(
     response_model=schemas.GenericStatus,
 )
 async def migrate_models(
-    req: schemas.AssistantModelUpgradeRequest, request: Request, tasks: BackgroundTasks
+    req: schemas.AssistantModelUpgradeRequest,
+    request: StateRequest,
+    tasks: BackgroundTasks,
 ):
     tasks.add_task(
         safe_task, upgrade_assistants_model, req.deprecated_model, req.replacement_model
@@ -3989,14 +4051,14 @@ async def migrate_models(
 )
 async def export_class_threads_multiple_classes(
     data: schemas.MultipleClassThreadExportRequest,
-    request: Request,
+    request: StateRequest,
     tasks: BackgroundTasks,
 ):
     tasks.add_task(
         safe_task,
         export_threads_multiple_classes,
         data.class_ids,
-        request.state.session.user.id,
+        request.state["session"].user.id,
         data.include_user_emails,
         data.user_ids,
         data.user_emails,
@@ -4009,8 +4071,8 @@ async def export_class_threads_multiple_classes(
     dependencies=[Depends(Authz("admin"))],
     response_model=schemas.ClassLMSInfo,
 )
-async def get_class_lms_data(class_id: str, request: Request):
-    class_ = await models.Class.get_by_id(request.state.db, int(class_id))
+async def get_class_lms_data(class_id: str, request: StateRequest):
+    class_ = await models.Class.get_by_id(request.state["db"], int(class_id))
     if not class_:
         raise HTTPException(status_code=404, detail="Class not found")
 
@@ -4021,7 +4083,7 @@ async def get_class_lms_data(class_id: str, request: Request):
     "/class/{class_id}/export/download",
     dependencies=[Depends(Authz("supervisor", "class:{class_id}"))],
 )
-async def redirect_to_export(class_id: str, request: Request):
+async def redirect_to_export(class_id: str, request: StateRequest):
     token = request.query_params.get("token")
     nowfn = get_now_fn(request)
     try:
@@ -4029,7 +4091,7 @@ async def redirect_to_export(class_id: str, request: Request):
         sub_data = json.loads(auth_token.sub)
         requestor_user_id = sub_data["user_id"]
         download_name = sub_data["download_name"]
-        if requestor_user_id != request.state.session.user.id:
+        if requestor_user_id != request.state["session"].user.id:
             return RedirectResponse(
                 config.url(f"/group/{class_id}/manage?error_code=8"),
                 status_code=303,
@@ -4068,7 +4130,7 @@ async def redirect_to_export(class_id: str, request: Request):
 async def list_thread_messages(
     class_id: str,
     thread_id: str,
-    request: Request,
+    request: StateRequest,
     openai_client: OpenAIClient,
     limit: int = 20,
     before: str | None = None,
@@ -4081,18 +4143,20 @@ async def list_thread_messages(
 
     limit = min(limit, 100)
 
-    thread = await models.Thread.get_by_id_with_users(request.state.db, int(thread_id))
+    thread = await models.Thread.get_by_id_with_users(
+        request.state["db"], int(thread_id)
+    )
     if thread.version <= 2:
         messages_task = openai_client.beta.threads.messages.list(
             thread.thread_id, limit=limit, order="asc", before=before
         )
         file_names_task = models.Thread.get_file_search_files(
-            request.state.db, thread.id
+            request.state["db"], thread.id
         )
-        is_supervisor_check_task = request.state.authz.check(
+        is_supervisor_check_task = request.state["authz"].check(
             [
                 (
-                    f"user:{request.state.session.user.id}",
+                    f"user:{request.state['session'].user.id}",
                     "supervisor",
                     f"class:{class_id}",
                 ),
@@ -4111,9 +4175,9 @@ async def list_thread_messages(
         ]
 
         current_user_ids = [
-            request.state.session.user.id
+            request.state["session"].user.id
         ] + await models.User.get_previous_ids_by_id(
-            request.state.db, request.state.session.user.id
+            request.state["db"], request.state["session"].user.id
         )
         if messages.data:
             users = {u.id: u.created for u in thread.users}
@@ -4157,7 +4221,7 @@ async def list_thread_messages(
         # Only run the extra steps if code_interpreter is available
         if "code_interpreter" in thread.tools_available and messages.data:
             placeholder_ci_calls = await get_placeholder_ci_calls(
-                request.state.db,
+                request.state["db"],
                 messages.data[0].assistant_id
                 if messages.data[0].assistant_id
                 else "None",
@@ -4189,7 +4253,7 @@ async def list_thread_messages(
                 )
 
         run_ids, has_more_runs = await models.Run.get_run_window(
-            request.state.db,
+            request.state["db"],
             thread.id,
             run_limit,
             before_run_pk=before_run_id,
@@ -4222,17 +4286,17 @@ async def list_thread_messages(
             is_supervisor_check,
         ) = await asyncio.gather(
             models.Thread.list_messages_tool_calls(
-                request.state.db,
+                request.state["db"],
                 thread.id,
                 run_ids=run_ids,
                 order="asc",
             ),
-            get_assistant(request.state.db, thread.assistant_id),
-            models.Thread.get_file_search_files(request.state.db, thread.id),
-            request.state.authz.check(
+            get_assistant(request.state["db"], thread.assistant_id),
+            models.Thread.get_file_search_files(request.state["db"], thread.id),
+            request.state["authz"].check(
                 [
                     (
-                        f"user:{request.state.session.user.id}",
+                        f"user:{request.state['session'].user.id}",
                         "supervisor",
                         f"class:{class_id}",
                     ),
@@ -4241,9 +4305,9 @@ async def list_thread_messages(
         )
 
         current_user_ids = [
-            request.state.session.user.id
+            request.state["session"].user.id
         ] + await models.User.get_previous_ids_by_id(
-            request.state.db, request.state.session.user.id
+            request.state["db"], request.state["session"].user.id
         )
         users = {str(u.id): u for u in thread.users}
 
@@ -4784,10 +4848,10 @@ async def list_thread_messages(
 async def get_thread_details(
     class_id: str,
     thread_id: str,
-    request: Request,
+    request: StateRequest,
 ):
     thread = await models.Thread.get_by_id_extended_details(
-        request.state.db, int(thread_id)
+        request.state["db"], int(thread_id)
     )
 
     if thread is None or thread.class_id != int(class_id):
@@ -4824,12 +4888,12 @@ async def get_thread_details(
 async def get_last_run(
     class_id: str,
     thread_id: str,
-    request: Request,
+    request: StateRequest,
     openai_client: OpenAIClient,
     block: bool = True,
 ):
     TIMEOUT = 60  # seconds
-    thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
+    thread = await models.Thread.get_by_id(request.state["db"], int(thread_id))
 
     if thread.version <= 2:
         # Streaming is not supported right now, so we need to poll to get the last run.
@@ -4874,7 +4938,7 @@ async def get_last_run(
         return {"thread": thread, "run": last_run}
     elif thread.version == 3:
         last_run = await models.Thread.get_latest_run_by_thread_id(
-            request.state.db, thread.id
+            request.state["db"], thread.id
         )
 
         if not last_run:
@@ -4896,7 +4960,7 @@ async def get_last_run(
             # Poll until the run is complete.
             await asyncio.sleep(1)
             try:
-                await request.state.db.refresh(last_run)
+                await request.state["db"].refresh(last_run)
             except Exception as e:
                 logger.exception("Error refreshing run status: %s", e)
                 # Continue polling
@@ -4912,7 +4976,7 @@ async def get_last_run(
     response_model=schemas.Threads,
 )
 async def list_recent_threads(
-    request: Request, limit: int = 5, before: str | None = None
+    request: StateRequest, limit: int = 5, before: str | None = None
 ):
     if limit < 1:
         raise HTTPException(
@@ -4924,13 +4988,13 @@ async def list_recent_threads(
     current_latest_time: datetime | None = (
         datetime.fromisoformat(before) if before else None
     )
-    thread_ids = await request.state.authz.list(
-        f"user:{request.state.session.user.id}",
+    thread_ids = await request.state["authz"].list(
+        f"user:{request.state['session'].user.id}",
         "can_participate",
         "thread",
     )
     threads = await models.Thread.get_n_by_id(
-        request.state.db,
+        request.state["db"],
         thread_ids,
         limit,
         before=current_latest_time,
@@ -4940,9 +5004,13 @@ async def list_recent_threads(
 
     class_ids = set(t.class_id for t in threads if t.class_id is not None)
 
-    is_supervisor_in_class_check = await request.state.authz.check(
+    is_supervisor_in_class_check = await request.state["authz"].check(
         [
-            (f"user:{request.state.session.user.id}", "supervisor", f"class:{class_id}")
+            (
+                f"user:{request.state['session'].user.id}",
+                "supervisor",
+                f"class:{class_id}",
+            )
             for class_id in class_ids
         ]
     )
@@ -4953,7 +5021,7 @@ async def list_recent_threads(
 
     return {
         "threads": process_threads(
-            threads, request.state.session.user.id, is_supervisor_dict
+            threads, request.state["session"].user.id, is_supervisor_dict
         )
     }
 
@@ -4964,7 +5032,7 @@ async def list_recent_threads(
     response_model=schemas.Threads,
 )
 async def list_all_threads(
-    request: Request,
+    request: StateRequest,
     limit: int = 20,
     before: str | None = None,
     private: bool | None = None,
@@ -4990,10 +5058,10 @@ async def list_all_threads(
     #
     # For high cardinality users, it's much faster to pull all threads from the database
     # and filter out the relative few they can't see.
-    expect_high_cardinality = await request.state.authz.test(
-        f"user:{request.state.session.user.id}",
+    expect_high_cardinality = await request.state["authz"].test(
+        f"user:{request.state['session'].user.id}",
         "admin",
-        request.state.authz.root,
+        request.state["authz"].root,
     )
 
     if expect_high_cardinality:
@@ -5002,10 +5070,10 @@ async def list_all_threads(
         async def _batch_check_can_view(
             threads: list[models.Thread],
         ) -> list[models.Thread]:
-            allows = await request.state.authz.check(
+            allows = await request.state["authz"].check(
                 [
                     (
-                        f"user:{request.state.session.user.id}",
+                        f"user:{request.state['session'].user.id}",
                         "can_view",
                         f"thread:{t.id}",
                     )
@@ -5015,7 +5083,7 @@ async def list_all_threads(
             return [t for t, allow in zip(threads, allows) if allow]
 
         threads = await models.Thread.get_n(
-            request.state.db,
+            request.state["db"],
             n=limit,
             before=current_latest_time,
             class_id=class_id,
@@ -5024,14 +5092,14 @@ async def list_all_threads(
         )
     else:
         logger.info("Using low-cardinality strategy for all_threads query")
-        thread_ids = await request.state.authz.list(
-            f"user:{request.state.session.user.id}",
+        thread_ids = await request.state["authz"].list(
+            f"user:{request.state['session'].user.id}",
             "can_view",
             "thread",
         )
         logger.info("/threads: FGA Returned %s thread_ids", len(thread_ids))
         threads = await models.Thread.get_n_by_id(
-            request.state.db,
+            request.state["db"],
             thread_ids,
             limit,
             before=current_latest_time,
@@ -5044,9 +5112,13 @@ async def list_all_threads(
 
     class_ids = set(t.class_id for t in threads if t.class_id is not None)
 
-    is_supervisor_in_class_check = await request.state.authz.check(
+    is_supervisor_in_class_check = await request.state["authz"].check(
         [
-            (f"user:{request.state.session.user.id}", "supervisor", f"class:{class_id}")
+            (
+                f"user:{request.state['session'].user.id}",
+                "supervisor",
+                f"class:{class_id}",
+            )
             for class_id in class_ids
         ]
     )
@@ -5057,7 +5129,7 @@ async def list_all_threads(
 
     return {
         "threads": process_threads(
-            threads, request.state.session.user.id, is_supervisor_dict
+            threads, request.state["session"].user.id, is_supervisor_dict
         )
     }
 
@@ -5068,7 +5140,7 @@ async def list_all_threads(
     response_model=schemas.Threads,
 )
 async def list_threads(
-    class_id: str, request: Request, limit: int = 20, before: str | None = None
+    class_id: str, request: StateRequest, limit: int = 20, before: str | None = None
 ):
     if limit < 1:
         raise HTTPException(
@@ -5080,12 +5152,12 @@ async def list_threads(
     current_latest_time: datetime | None = (
         datetime.fromisoformat(before) if before else None
     )
-    can_view_coro = request.state.authz.list(
-        f"user:{request.state.session.user.id}",
+    can_view_coro = request.state["authz"].list(
+        f"user:{request.state['session'].user.id}",
         "can_view",
         "thread",
     )
-    in_class_coro = request.state.authz.list(
+    in_class_coro = request.state["authz"].list(
         f"class:{class_id}",
         "parent",
         "thread",
@@ -5093,7 +5165,7 @@ async def list_threads(
     can_view, in_class = await asyncio.gather(can_view_coro, in_class_coro)
     thread_ids = list(set(can_view) & set(in_class))
     threads = await models.Thread.get_n_by_id(
-        request.state.db,
+        request.state["db"],
         thread_ids,
         limit,
         before=current_latest_time,
@@ -5104,9 +5176,13 @@ async def list_threads(
 
     class_ids = set(t.class_id for t in threads if t.class_id is not None)
 
-    is_supervisor_in_class_check = await request.state.authz.check(
+    is_supervisor_in_class_check = await request.state["authz"].check(
         [
-            (f"user:{request.state.session.user.id}", "supervisor", f"class:{class_id}")
+            (
+                f"user:{request.state['session'].user.id}",
+                "supervisor",
+                f"class:{class_id}",
+            )
             for class_id in class_ids
         ]
     )
@@ -5117,7 +5193,7 @@ async def list_threads(
 
     return {
         "threads": process_threads(
-            threads, request.state.session.user.id, is_supervisor_dict
+            threads, request.state["session"].user.id, is_supervisor_dict
         )
     }
 
@@ -5130,7 +5206,7 @@ async def list_threads(
 async def create_audio_thread(
     class_id: str,
     req: schemas.CreateAudioThread,
-    request: Request,
+    request: StateRequest,
     openai_client: OpenAIClient,
 ):
     parties = list[models.User]()
@@ -5138,25 +5214,25 @@ async def create_audio_thread(
 
     anonymous_session: models.AnonymousSession | None = None
     anonymous_user: models.User | None = None
-    if request.state.is_anonymous:
+    if request.state["is_anonymous"]:
         anonymous_session = await models.AnonymousSession.create(
-            request.state.db,
+            request.state["db"],
             str(uuid.uuid7()),
-            user_id=request.state.anonymous_session.user.id,
+            user_id=request.state["anonymous_session"].user.id,
         )
         anonymous_user = anonymous_session.user
 
     anonymous_session_with_logged_in_user = False
     parties_ids = req.parties or []
     if (
-        hasattr(request.state.session, "user")
-        and request.state.session.status != "anonymous"
+        request.state["session"].user is not None
+        and request.state["session"].status != schemas.SessionStatus.ANONYMOUS
     ):
         anonymous_session_with_logged_in_user = True
-        if request.state.session.user.id not in parties_ids:
-            parties_ids.append(request.state.session.user.id)
+        if request.state["session"].user.id not in parties_ids:
+            parties_ids.append(request.state["session"].user.id)
 
-    assistant = await models.Assistant.get_by_id(request.state.db, req.assistant_id)
+    assistant = await models.Assistant.get_by_id(request.state["db"], req.assistant_id)
     if not assistant:
         raise HTTPException(
             status_code=404,
@@ -5169,11 +5245,11 @@ async def create_audio_thread(
             thread, class_, parties = await asyncio.gather(
                 openai_client.beta.threads.create(
                     metadata={
-                        "user_id": str(request.state.session.user.id),
+                        "user_id": str(request.state["session"].user.id),
                     },
                 ),
-                models.Class.get_by_id(request.state.db, int(class_id)),
-                models.User.get_all_by_id(request.state.db, parties_ids),
+                models.Class.get_by_id(request.state["db"], int(class_id)),
+                models.User.get_all_by_id(request.state["db"], parties_ids),
             )
         except openai.InternalServerError:
             logger.exception("Error creating thread")
@@ -5199,8 +5275,8 @@ async def create_audio_thread(
     elif assistant.version == 3:
         try:
             class_, parties = await asyncio.gather(
-                models.Class.get_by_id(request.state.db, int(class_id)),
-                models.User.get_all_by_id(request.state.db, parties_ids),
+                models.Class.get_by_id(request.state["db"], int(class_id)),
+                models.User.get_all_by_id(request.state["db"], parties_ids),
             )
         except (openai.APIError, Exception):
             logger.exception("Error creating thread")
@@ -5246,7 +5322,7 @@ async def create_audio_thread(
             assistant.use_latex,
             assistant.use_image_descriptions,
             thread_id=thread.id if thread else None,
-            user_id=request.state.session.user.id,
+            user_id=request.state["session"].user.id,
         ),
         "timezone": req.timezone,
         "display_user_info": assistant.should_record_user_information
@@ -5255,18 +5331,18 @@ async def create_audio_thread(
 
     result: None | models.Thread = None
     try:
-        result = await models.Thread.create(request.state.db, new_thread)
+        result = await models.Thread.create(request.state["db"], new_thread)
         if assistant.version == 3:
             result.instructions = format_instructions(
                 assistant.instructions,
                 assistant.use_latex,
                 assistant.use_image_descriptions,
                 thread_id=result.id,
-                user_id=request.state.session.user.id,
+                user_id=request.state["session"].user.id,
             )
-            request.state.db.add(result)
-            await request.state.db.flush()
-            await request.state.db.refresh(result)
+            request.state["db"].add(result)
+            await request.state["db"].flush()
+            await request.state["db"].refresh(result)
 
         grants = [
             (f"class:{class_id}", "parent", f"thread:{result.id}"),
@@ -5289,12 +5365,12 @@ async def create_audio_thread(
             if anonymous_session_with_logged_in_user:
                 grants.append(
                     (
-                        f"user:{request.state.session.user.id}",
+                        f"user:{request.state['session'].user.id}",
                         "anonymous_party",
                         f"thread:{result.id}",
                     )
                 )
-        await request.state.authz.write(grant=grants)
+        await request.state["authz"].write(grant=grants)
 
         return {
             "thread": result,
@@ -5311,7 +5387,7 @@ async def create_audio_thread(
             # Delete users-threads mapping
             for user in result.users:
                 result.users.remove(user)
-            await result.delete(request.state.db)
+            await result.delete(request.state["db"])
         raise e
 
 
@@ -5323,7 +5399,7 @@ async def create_audio_thread(
 async def create_thread(
     class_id: str,
     req: schemas.CreateThread,
-    request: Request,
+    request: StateRequest,
     openai_client: OpenAIClient,
 ):
     parties = list[models.User]()
@@ -5331,7 +5407,7 @@ async def create_thread(
     vector_store_object_id = None
     tool_resources: ToolResources = {}
 
-    assistant = await models.Assistant.get_by_id(request.state.db, req.assistant_id)
+    assistant = await models.Assistant.get_by_id(request.state["db"], req.assistant_id)
 
     if not assistant:
         raise HTTPException(
@@ -5374,7 +5450,7 @@ async def create_thread(
             detail="You can't upload photos with this assistant. Remove the photos and try again.",
         )
 
-    class_ = await models.Class.get_by_id(request.state.db, int(class_id))
+    class_ = await models.Class.get_by_id(request.state["db"], int(class_id))
     if not class_:
         raise HTTPException(
             status_code=404,
@@ -5383,7 +5459,7 @@ async def create_thread(
 
     if req.file_search_file_ids:
         vector_store_id, vector_store_object_id = await create_vector_store(
-            request.state.db,
+            request.state["db"],
             openai_client,
             class_id,
             req.file_search_file_ids,
@@ -5430,33 +5506,30 @@ async def create_thread(
 
     anonymous_session: models.AnonymousSession | None = None
     anonymous_user: models.User | None = None
-    if request.state.is_anonymous:
+    if request.state["is_anonymous"]:
         anonymous_session = await models.AnonymousSession.create(
-            request.state.db,
+            request.state["db"],
             str(uuid.uuid7()),
-            user_id=request.state.anonymous_session.user.id,
+            user_id=request.state["anonymous_session"].user.id,
         )
         anonymous_user = anonymous_session.user
 
     anonymous_session_with_logged_in_user = False
     parties_ids = req.parties or []
     if (
-        hasattr(request.state.session, "user")
-        and request.state.session.status != "anonymous"
+        request.state["session"].user is not None
+        and request.state["session"].status != schemas.SessionStatus.ANONYMOUS
     ):
         anonymous_session_with_logged_in_user = True
-        if request.state.session.user.id not in parties_ids:
-            parties_ids.append(request.state.session.user.id)
+        if request.state["session"].user.id not in parties_ids:
+            parties_ids.append(request.state["session"].user.id)
 
     metadata: dict[str, str | int] = {
-        "user_id": str(request.state.session.user.id),
+        "user_id": str(request.state["session"].user.id),
     }
 
-    if (
-        hasattr(request.state, "anonymous_share_token")
-        and request.state.anonymous_share_token is not None
-    ):
-        metadata["share_token"] = str(request.state.anonymous_share_token)
+    if request.state["anonymous_share_token"] is not None:
+        metadata["share_token"] = str(request.state["anonymous_share_token"])
     if anonymous_session is not None:
         metadata["anonymous_session_token"] = str(anonymous_session.session_token)
 
@@ -5478,10 +5551,10 @@ async def create_thread(
                     else [],
                     tool_resources=tool_resources,
                 ),
-                models.User.get_all_by_id(request.state.db, parties_ids),
+                models.User.get_all_by_id(request.state["db"], parties_ids),
                 get_initial_thread_conversation_name(
                     openai_client,
-                    request.state.db,
+                    request.state["db"],
                     req.message,
                     req.vision_file_ids,
                     class_id,
@@ -5518,10 +5591,10 @@ async def create_thread(
     elif assistant.version == 3:
         try:
             parties, thread_name = await asyncio.gather(
-                models.User.get_all_by_id(request.state.db, parties_ids),
+                models.User.get_all_by_id(request.state["db"], parties_ids),
                 get_initial_thread_conversation_name(
                     openai_client,
-                    request.state.db,
+                    request.state["db"],
                     req.message,
                     req.vision_file_ids,
                     class_id,
@@ -5573,7 +5646,7 @@ async def create_thread(
             assistant.use_latex,
             assistant.use_image_descriptions,
             thread_id=thread.id if thread and thread.id else None,
-            user_id=request.state.session.user.id,
+            user_id=request.state["session"].user.id,
         )
         if thread and thread.id
         else None,
@@ -5584,14 +5657,14 @@ async def create_thread(
 
     thread_db_record: None | models.Thread = None
     try:
-        thread_db_record = await models.Thread.create(request.state.db, new_thread)
+        thread_db_record = await models.Thread.create(request.state["db"], new_thread)
 
         mcp_tool_ids = await models.Assistant.get_mcp_tool_ids_by_assistant_id(
-            request.state.db, assistant.id
+            request.state["db"], assistant.id
         )
         if mcp_tool_ids:
             await models.Thread.add_mcp_server_tools(
-                request.state.db, thread_db_record.id, mcp_tool_ids
+                request.state["db"], thread_db_record.id, mcp_tool_ids
             )
 
         if assistant.version == 3:
@@ -5600,7 +5673,7 @@ async def create_thread(
                 assistant.use_latex,
                 assistant.use_image_descriptions,
                 thread_id=thread_db_record.id,
-                user_id=request.state.session.user.id,
+                user_id=request.state["session"].user.id,
             )
             tasks_to_run = []
 
@@ -5610,7 +5683,7 @@ async def create_thread(
             if req.code_interpreter_file_ids:
                 tasks_to_run.append(
                     models.File.get_all_by_file_id(
-                        request.state.db, req.code_interpreter_file_ids
+                        request.state["db"], req.code_interpreter_file_ids
                     )
                 )
             else:
@@ -5619,7 +5692,7 @@ async def create_thread(
             if req.file_search_file_ids:
                 tasks_to_run.append(
                     models.File.get_all_by_file_id(
-                        request.state.db, req.file_search_file_ids
+                        request.state["db"], req.file_search_file_ids
                     )
                 )
             else:
@@ -5653,7 +5726,7 @@ async def create_thread(
             run = models.Run(
                 status=schemas.RunStatus.PENDING,
                 thread_id=thread_db_record.id,
-                creator_id=request.state.session.user.id,
+                creator_id=request.state["session"].user.id,
                 assistant_id=assistant.id,
                 model=assistant.model,
                 verbosity=assistant.verbosity,
@@ -5669,7 +5742,7 @@ async def create_thread(
                         output_index=0,
                         message_status=schemas.MessageStatus.COMPLETED,
                         role=schemas.MessageRole.USER,
-                        user_id=request.state.session.user.id,
+                        user_id=request.state["session"].user.id,
                         content=messageContentParts,
                         file_search_attachments=file_search_files,
                         code_interpreter_attachments=code_interpreter_files,
@@ -5679,12 +5752,12 @@ async def create_thread(
                 else [],
             )
 
-            request.state.db.add(run)
-            await request.state.db.flush()
+            request.state["db"].add(run)
+            await request.state["db"].flush()
 
             if mcp_tool_ids:
                 await models.Run.add_mcp_server_tools(
-                    request.state.db, run.id, mcp_tool_ids
+                    request.state["db"], run.id, mcp_tool_ids
                 )
 
         grants = [
@@ -5711,7 +5784,7 @@ async def create_thread(
             if anonymous_session_with_logged_in_user:
                 grants.append(
                     (
-                        f"user:{request.state.session.user.id}",
+                        f"user:{request.state['session'].user.id}",
                         "anonymous_party",
                         f"thread:{thread_db_record.id}",
                     )
@@ -5727,7 +5800,7 @@ async def create_thread(
                     + (req.vision_file_ids or [])
                 )
                 files = await models.File.get_all_by_file_id(
-                    request.state.db, all_file_ids
+                    request.state["db"], all_file_ids
                 )
                 for file in files:
                     grants.append(
@@ -5740,23 +5813,23 @@ async def create_thread(
                     # Revoke can_delete permission from the anonymous link
                     # now that the file is associated with an anonymous session
                     if (
-                        request.state.anonymous_share_token
-                        and file.anonymous_link_id == request.state.anonymous_link_id
+                        request.state["anonymous_share_token"]
+                        and file.anonymous_link_id == request.state["anonymous_link_id"]
                     ):
                         revokes.append(
                             (
-                                f"anonymous_link:{request.state.anonymous_share_token}",
+                                f"anonymous_link:{request.state['anonymous_share_token']}",
                                 "can_delete",
                                 f"user_file:{file.id}",
                             )
                         )
 
                     file.anonymous_session_id = anonymous_session.id
-                    request.state.db.add(file)
+                    request.state["db"].add(file)
                 if files:
-                    await request.state.db.flush()
+                    await request.state["db"].flush()
 
-        await request.state.authz.write_safe(grant=grants, revoke=revokes)
+        await request.state["authz"].write_safe(grant=grants, revoke=revokes)
 
         return {
             "thread": thread_db_record,
@@ -5771,7 +5844,7 @@ async def create_thread(
         if thread:
             await openai_client.beta.threads.delete(thread.id)
         if thread_db_record:
-            await thread_db_record.delete(request.state.db)
+            await thread_db_record.delete(request.state["db"])
         raise e
 
 
@@ -5784,16 +5857,16 @@ async def create_thread(
 async def create_run(
     class_id: str,
     thread_id: str,
-    request: Request,
+    request: StateRequest,
     openai_client: OpenAIClient,
     req: schemas.CreateThreadRunRequest = Body(default=None),
 ):
     thread = await models.Thread.get_by_id_with_ci_file_ids(
-        request.state.db, int(thread_id)
+        request.state["db"], int(thread_id)
     )
-    asst = await models.Assistant.get_by_id(request.state.db, thread.assistant_id)
+    asst = await models.Assistant.get_by_id(request.state["db"], thread.assistant_id)
     mcp_tool_ids = await models.Thread.get_mcp_tool_ids_by_thread_id(
-        request.state.db, thread.id
+        request.state["db"], thread.id
     )
 
     if not thread or not asst:
@@ -5805,7 +5878,7 @@ async def create_run(
     if thread.version == 3:
         try:
             last_run = await models.Thread.get_latest_run_by_thread_id(
-                request.state.db, thread.id
+                request.state["db"], thread.id
             )
             file_search_file_ids: list[str] = []
 
@@ -5813,7 +5886,7 @@ async def create_run(
                 run_to_complete = last_run
                 file_search_file_ids = (
                     await models.Run.get_file_search_files_from_messages(
-                        request.state.db, last_run.id
+                        request.state["db"], last_run.id
                     )
                 )
             elif last_run is None or (
@@ -5831,16 +5904,16 @@ async def create_run(
                         asst.use_latex,
                         asst.use_image_descriptions,
                         thread_id=str(thread.id),
-                        user_id=request.state.session.user.id,
+                        user_id=request.state["session"].user.id,
                     )
-                    request.state.db.add(thread)
-                    await request.state.db.flush()
-                    await request.state.db.refresh(thread)
+                    request.state["db"].add(thread)
+                    await request.state["db"].flush()
+                    await request.state["db"].refresh(thread)
 
                 run_to_complete = models.Run(
                     status=schemas.RunStatus.PENDING,
                     thread_id=thread.id,
-                    creator_id=request.state.session.user.id,
+                    creator_id=request.state["session"].user.id,
                     assistant_id=asst.id,
                     model=asst.model,
                     reasoning_effort=asst.reasoning_effort,
@@ -5851,9 +5924,9 @@ async def create_run(
                     ),
                     verbosity=asst.verbosity,
                 )
-                request.state.db.add(run_to_complete)
-                await request.state.db.flush()
-                await request.state.db.refresh(run_to_complete)
+                request.state["db"].add(run_to_complete)
+                await request.state["db"].flush()
+                await request.state["db"].refresh(run_to_complete)
                 file_search_file_ids = []
             else:
                 raise HTTPException(
@@ -5876,17 +5949,17 @@ async def create_run(
                 assistant_vector_store_id,
                 is_supervisor_check,
             ] = await asyncio.gather(
-                models.Thread.get_file_search_files(request.state.db, thread.id),
+                models.Thread.get_file_search_files(request.state["db"], thread.id),
                 get_vector_store_id_by_id_or_none(
-                    request.state.db, thread.vector_store_id
+                    request.state["db"], thread.vector_store_id
                 ),
                 get_vector_store_id_by_id_or_none(
-                    request.state.db, asst.vector_store_id
+                    request.state["db"], asst.vector_store_id
                 ),
-                request.state.authz.check(
+                request.state["authz"].check(
                     [
                         (
-                            f"user:{request.state.session.user.id}",
+                            f"user:{request.state['session'].user.id}",
                             "supervisor",
                             f"class:{class_id}",
                         )
@@ -5899,16 +5972,16 @@ async def create_run(
 
             if mcp_tool_ids:
                 mcp_server_tools = await models.Run.add_mcp_server_tools_return_tools(
-                    request.state.db, run_to_complete.id, mcp_tool_ids
+                    request.state["db"], run_to_complete.id, mcp_tool_ids
                 )
                 for tool in mcp_server_tools:
                     if tool.enabled:
                         mcp_server_tools_by_server_label[tool.server_label] = tool
 
             run_to_complete.status = schemas.RunStatus.QUEUED
-            request.state.db.add(run_to_complete)
-            await request.state.db.flush()
-            await request.state.db.refresh(run_to_complete)
+            request.state["db"].add(run_to_complete)
+            await request.state["db"].flush()
+            await request.state["db"].refresh(run_to_complete)
 
             stream = run_response(
                 openai_client,
@@ -5922,21 +5995,11 @@ async def create_run(
                     file.file_id for file in thread.code_interpreter_files
                 ],
                 mcp_server_tools_by_server_label=mcp_server_tools_by_server_label,
-                user_auth=request.state.auth_user
-                if hasattr(request.state, "auth_user")
-                else None,
-                anonymous_user_auth=request.state.anonymous_session_token_auth
-                if hasattr(request.state, "anonymous_session_token_auth")
-                else None,
-                anonymous_link_auth=request.state.anonymous_share_token_auth
-                if hasattr(request.state, "anonymous_share_token_auth")
-                else None,
-                anonymous_session_id=request.state.anonymous_session_id
-                if hasattr(request.state, "anonymous_session_id")
-                else None,
-                anonymous_link_id=request.state.anonymous_link_id
-                if hasattr(request.state, "anonymous_link_id")
-                else None,
+                user_auth=request.state["auth_user"],
+                anonymous_user_auth=request.state["anonymous_session_token_auth"],
+                anonymous_link_auth=request.state["anonymous_share_token_auth"],
+                anonymous_session_id=request.state["anonymous_session_id"],
+                anonymous_link_id=request.state["anonymous_link_id"],
                 show_file_search_document_names=is_supervisor
                 or not asst.hide_file_search_document_names,
                 show_file_search_queries=is_supervisor
@@ -5961,11 +6024,11 @@ async def create_run(
     elif thread.version <= 2:
         try:
             file_names = await models.Thread.get_file_search_files(
-                request.state.db, thread.id
+                request.state["db"], thread.id
             )
             vector_store_id = (
                 await models.VectorStore.get_vector_store_id_by_id(
-                    request.state.db, thread.vector_store_id
+                    request.state["db"], thread.vector_store_id
                 )
                 if thread.vector_store_id
                 else None
@@ -5982,11 +6045,11 @@ async def create_run(
                     asst.use_latex,
                     asst.use_image_descriptions,
                     thread_id=thread.thread_id,
-                    user_id=request.state.session.user.id,
+                    user_id=request.state["session"].user.id,
                 )
-                request.state.db.add(thread)
-                await request.state.db.flush()
-                await request.state.db.refresh(thread)
+                request.state["db"].add(thread)
+                await request.state["db"].flush()
+                await request.state["db"].refresh(thread)
 
             stream = run_thread(
                 openai_client,
@@ -6025,15 +6088,15 @@ async def send_message(
     class_id: str,
     thread_id: str,
     data: schemas.NewThreadMessage,
-    request: Request,
+    request: StateRequest,
     openai_client: OpenAIClient,
 ):
     mcp_tool_ids: list[int] = []
     try:
-        thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
+        thread = await models.Thread.get_by_id(request.state["db"], int(thread_id))
         if thread.tools_available and "mcp_server" in thread.tools_available:
             mcp_tool_ids = await models.Thread.get_mcp_tool_ids_by_thread_id(
-                request.state.db, thread.id
+                request.state["db"], thread.id
             )
 
         tool_resources: ToolResources = {}
@@ -6047,12 +6110,12 @@ async def send_message(
 
         # Check user has permission to view this assistant
         if not (
-            await request.state.authz.check(
+            await request.state["authz"].check(
                 [
                     (
-                        request.state.auth_user
-                        if not request.state.is_anonymous
-                        else request.state.anonymous_share_token_auth,
+                        request.state["auth_user"]
+                        if not request.state["is_anonymous"]
+                        else request.state["anonymous_share_token_auth"],
                         "can_view",
                         f"assistant:{thread.assistant_id}",
                     ),
@@ -6089,7 +6152,7 @@ async def send_message(
                 )
         elif thread.version == 3:
             last_run = await models.Thread.get_latest_run_by_thread_id(
-                request.state.db, thread.id
+                request.state["db"], thread.id
             )
 
             if not last_run:
@@ -6122,7 +6185,9 @@ async def send_message(
         )
 
     try:
-        asst = await models.Assistant.get_by_id(request.state.db, thread.assistant_id)
+        asst = await models.Assistant.get_by_id(
+            request.state["db"], thread.assistant_id
+        )
 
         # Check if user file uploads are allowed for this assistant
         if not asst.allow_user_file_uploads and (
@@ -6143,7 +6208,7 @@ async def send_message(
         if thread.user_message_ct == 3 or thread.name is None:
             thread.name = await get_thread_conversation_name(
                 openai_client,
-                request.state.db,
+                request.state["db"],
                 data,
                 str(thread.id) if thread.version == 3 else thread.thread_id,
                 class_id,
@@ -6154,7 +6219,7 @@ async def send_message(
             if thread.vector_store_id:
                 # Vector store already exists, update
                 await add_vector_store_files_to_db(
-                    request.state.db,
+                    request.state["db"],
                     thread.vector_store_id,
                     data.file_search_file_ids,
                 )
@@ -6163,7 +6228,7 @@ async def send_message(
                 # (empty, since we're adding files as attachments)
                 # and relate files with new vector store
                 vector_store_id, vector_store_object_id = await create_vector_store(
-                    request.state.db,
+                    request.state["db"],
                     openai_client,
                     class_id,
                     data.file_search_file_ids,
@@ -6176,7 +6241,7 @@ async def send_message(
                 existing_file_ids = [
                     file_id
                     async for file_id in models.Thread.get_file_ids_by_id(
-                        request.state.db, thread.id
+                        request.state["db"], thread.id
                     )
                 ]
                 tool_resources["code_interpreter"] = {"file_ids": existing_file_ids}
@@ -6198,7 +6263,7 @@ async def send_message(
 
         if data.code_interpreter_file_ids:
             await models.Thread.add_code_interpreter_files(
-                request.state.db, thread.id, data.code_interpreter_file_ids
+                request.state["db"], thread.id, data.code_interpreter_file_ids
             )
 
         vision_image_descriptions = None
@@ -6216,7 +6281,7 @@ async def send_message(
 
         if data.vision_file_ids:
             await models.Thread.add_image_files(
-                request.state.db, thread.id, data.vision_file_ids
+                request.state["db"], thread.id, data.vision_file_ids
             )
             [
                 messageContent.append(
@@ -6239,27 +6304,27 @@ async def send_message(
                 asst.use_latex,
                 asst.use_image_descriptions,
                 thread_id=thread.thread_id,
-                user_id=request.state.session.user.id,
+                user_id=request.state["session"].user.id,
             )
-            request.state.db.add(thread)
-            await request.state.db.flush()
-            await request.state.db.refresh(thread)
+            request.state["db"].add(thread)
+            await request.state["db"].flush()
+            await request.state["db"].refresh(thread)
         else:
-            request.state.db.add(thread)
+            request.state["db"].add(thread)
 
         metrics.inbound_messages.inc(
             app=config.public_url,
             class_=int(class_id),
-            user=request.state.session.user.id,
+            user=request.state["session"].user.id,
             thread=thread.thread_id,
         )
 
         file_names = await models.Thread.get_file_search_files(
-            request.state.db, thread.id
+            request.state["db"], thread.id
         )
         thread_vector_store_id = (
             await models.VectorStore.get_vector_store_id_by_id(
-                request.state.db, thread.vector_store_id
+                request.state["db"], thread.vector_store_id
             )
             if thread.vector_store_id
             else None
@@ -6267,19 +6332,13 @@ async def send_message(
 
         if thread.version <= 2:
             metadata: dict[str, str | int] = {
-                "user_id": str(request.state.session.user.id),
+                "user_id": str(request.state["session"].user.id),
             }
-            if (
-                hasattr(request.state, "anonymous_share_token")
-                and request.state.anonymous_share_token is not None
-            ):
-                metadata["share_token"] = str(request.state.anonymous_share_token)
-            if (
-                hasattr(request.state, "anonymous_session_token")
-                and request.state.anonymous_session_token is not None
-            ):
+            if request.state["anonymous_share_token"] is not None:
+                metadata["share_token"] = str(request.state["anonymous_share_token"])
+            if request.state["anonymous_session_token"] is not None:
                 metadata["anonymous_session_token"] = str(
-                    request.state.anonymous_session_token
+                    request.state["anonymous_session_token"]
                 )
             # Create a generator that will stream chunks to the client.
             stream = run_thread(
@@ -6307,7 +6366,7 @@ async def send_message(
             if data.code_interpreter_file_ids:
                 tasks_to_run.append(
                     models.File.get_all_by_file_id(
-                        request.state.db, data.code_interpreter_file_ids
+                        request.state["db"], data.code_interpreter_file_ids
                     )
                 )
             else:
@@ -6316,7 +6375,7 @@ async def send_message(
             if data.file_search_file_ids:
                 tasks_to_run.append(
                     models.File.get_all_by_file_id(
-                        request.state.db, data.file_search_file_ids
+                        request.state["db"], data.file_search_file_ids
                     )
                 )
             else:
@@ -6332,19 +6391,19 @@ async def send_message(
                 ci_all_files,
                 prev_output_sequence,
             ] = await asyncio.gather(
-                request.state.authz.check(
+                request.state["authz"].check(
                     [
                         (
-                            f"user:{request.state.session.user.id}",
+                            f"user:{request.state['session'].user.id}",
                             "supervisor",
                             f"class:{class_id}",
                         ),
                     ]
                 ),
                 models.Thread.get_code_interpreter_file_obj_ids_including_assistant(
-                    request.state.db, thread.id, asst.id
+                    request.state["db"], thread.id, asst.id
                 ),
-                models.Thread.get_max_output_sequence(request.state.db, thread.id),
+                models.Thread.get_max_output_sequence(request.state["db"], thread.id),
             )
 
             is_supervisor = is_supervisor_check[0]
@@ -6394,7 +6453,7 @@ async def send_message(
             run_to_complete = models.Run(
                 status=schemas.RunStatus.PENDING,
                 thread_id=thread.id,
-                creator_id=request.state.session.user.id,
+                creator_id=request.state["session"].user.id,
                 assistant_id=asst.id,
                 model=asst.model,
                 reasoning_effort=asst.reasoning_effort,
@@ -6411,7 +6470,7 @@ async def send_message(
                         output_index=prev_output_sequence + 1,
                         message_status=schemas.MessageStatus.COMPLETED,
                         role=schemas.MessageRole.USER,
-                        user_id=request.state.session.user.id,
+                        user_id=request.state["session"].user.id,
                         content=messageContentParts,
                         file_search_attachments=file_search_files,
                         code_interpreter_attachments=code_interpreter_files,
@@ -6423,19 +6482,19 @@ async def send_message(
 
             if mcp_tool_ids:
                 mcp_server_tools = await models.Run.add_mcp_server_tools_return_tools(
-                    request.state.db, run_to_complete.id, mcp_tool_ids
+                    request.state["db"], run_to_complete.id, mcp_tool_ids
                 )
                 for tool in mcp_server_tools:
                     if tool.enabled:
                         mcp_server_tools_by_server_label[tool.server_label] = tool
 
-            request.state.db.add(run_to_complete)
-            await request.state.db.flush()
-            await request.state.db.refresh(run_to_complete)
+            request.state["db"].add(run_to_complete)
+            await request.state["db"].flush()
+            await request.state["db"].refresh(run_to_complete)
 
             assistant_vector_store_id = (
                 await models.VectorStore.get_vector_store_id_by_id(
-                    request.state.db, asst.vector_store_id
+                    request.state["db"], asst.vector_store_id
                 )
                 if asst.vector_store_id
                 else None
@@ -6458,21 +6517,11 @@ async def send_message(
                 show_web_search_sources=show_web_search_sources,
                 show_web_search_actions=show_web_search_actions,
                 show_mcp_server_call_details=show_mcp_server_call_details,
-                user_auth=request.state.auth_user
-                if hasattr(request.state, "auth_user")
-                else None,
-                anonymous_user_auth=request.state.anonymous_session_token_auth
-                if hasattr(request.state, "anonymous_session_token_auth")
-                else None,
-                anonymous_link_auth=request.state.anonymous_share_token_auth
-                if hasattr(request.state, "anonymous_share_token_auth")
-                else None,
-                anonymous_session_id=request.state.anonymous_session_id
-                if hasattr(request.state, "anonymous_session_id")
-                else None,
-                anonymous_link_id=request.state.anonymous_link_id
-                if hasattr(request.state, "anonymous_link_id")
-                else None,
+                user_auth=request.state["auth_user"],
+                anonymous_user_auth=request.state["anonymous_session_token_auth"],
+                anonymous_link_auth=request.state["anonymous_share_token_auth"],
+                anonymous_session_id=request.state["anonymous_session_id"],
+                anonymous_link_id=request.state["anonymous_link_id"],
             )
         else:
             raise HTTPException(
@@ -6497,11 +6546,11 @@ async def send_message(
     ],
     response_model=schemas.GenericStatus,
 )
-async def publish_thread(class_id: str, thread_id: str, request: Request):
-    thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
+async def publish_thread(class_id: str, thread_id: str, request: StateRequest):
+    thread = await models.Thread.get_by_id(request.state["db"], int(thread_id))
     thread.private = False
-    request.state.db.add(thread)
-    await request.state.authz.write_safe(
+    request.state["db"].add(thread)
+    await request.state["authz"].write_safe(
         grant=[(f"class:{class_id}#member", "can_view", f"thread:{thread_id}")]
     )
     return {"status": "ok"}
@@ -6514,11 +6563,11 @@ async def publish_thread(class_id: str, thread_id: str, request: Request):
     ],
     response_model=schemas.GenericStatus,
 )
-async def unpublish_thread(class_id: str, thread_id: str, request: Request):
-    thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
+async def unpublish_thread(class_id: str, thread_id: str, request: StateRequest):
+    thread = await models.Thread.get_by_id(request.state["db"], int(thread_id))
     thread.private = True
-    request.state.db.add(thread)
-    await request.state.authz.write_safe(
+    request.state["db"].add(thread)
+    await request.state["authz"].write_safe(
         revoke=[(f"class:{class_id}#member", "can_view", f"thread:{thread_id}")]
     )
     return {"status": "ok"}
@@ -6535,11 +6584,11 @@ async def remove_file_from_thread(
     class_id: str,
     thread_id: str,
     file_id: str,
-    request: Request,
+    request: StateRequest,
     openai_client: OpenAIClient,
 ):
     try:
-        await models.File.delete_by_file_id(request.state.db, file_id)
+        await models.File.delete_by_file_id(request.state["db"], file_id)
         await openai_client.files.delete(file_id)
     except openai.NotFoundError:
         pass
@@ -6557,10 +6606,10 @@ async def remove_file_from_thread(
     response_model=schemas.GenericStatus,
 )
 async def delete_thread(
-    class_id: str, thread_id: str, request: Request, openai_client: OpenAIClient
+    class_id: str, thread_id: str, request: StateRequest, openai_client: OpenAIClient
 ):
     thread = await models.Thread.get_by_id_with_users_voice_mode(
-        request.state.db, int(thread_id)
+        request.state["db"], int(thread_id)
     )
     # Detach the vector store from the thread and delete it
     vector_store_obj_id = None
@@ -6570,7 +6619,7 @@ async def delete_thread(
         thread.vector_store_id = None
         # Keep the OAI vector store ID for deletion
         result_vector = await delete_vector_store_db_returning_file_ids(
-            request.state.db, vector_store_id
+            request.state["db"], vector_store_id
         )
         vector_store_obj_id = result_vector.vector_store_id
         file_ids_to_delete.extend(result_vector.deleted_file_ids)
@@ -6584,7 +6633,7 @@ async def delete_thread(
         )
         .returning(models.code_interpreter_file_thread_association.c.file_id)
     )
-    result_ci = await request.state.db.execute(stmt)
+    result_ci = await request.state["db"].execute(stmt)
     file_ids_to_delete.extend([row[0] for row in result_ci.fetchall()])
 
     # Remove any image files associations with the thread
@@ -6593,7 +6642,7 @@ async def delete_thread(
         .where(models.image_file_thread_association.c.thread_id == int(thread.id))
         .returning(models.image_file_thread_association.c.file_id)
     )
-    result_image = await request.state.db.execute(stmt)
+    result_image = await request.state["db"].execute(stmt)
     file_ids_to_delete.extend([row[0] for row in result_image.fetchall()])
 
     revokes = [(f"class:{class_id}", "parent", f"thread:{thread_id}")] + [
@@ -6611,7 +6660,7 @@ async def delete_thread(
                 key=thread.voice_mode_recording.recording_id
             )
             await models.VoiceModeRecording.delete(
-                request.state.db, thread.voice_mode_recording.id
+                request.state["db"], thread.voice_mode_recording.id
             )
         except Exception as e:
             logger.exception(
@@ -6623,7 +6672,7 @@ async def delete_thread(
     # Keep the OAI thread ID for deletion
     thread_obj_id = thread.thread_id
     thread_version = thread.version
-    await thread.delete(request.state.db)
+    await thread.delete(request.state["db"])
 
     # Delete vector store as late as possible to avoid orphaned thread
     if vector_store_obj_id:
@@ -6640,7 +6689,7 @@ async def delete_thread(
             )
 
     # clean up grants
-    await request.state.authz.write_safe(revoke=revokes)
+    await request.state["authz"].write_safe(revoke=revokes)
     return {"status": "ok"}
 
 
@@ -6650,7 +6699,10 @@ async def delete_thread(
     response_model=schemas.File,
 )
 async def create_file(
-    class_id: str, request: Request, upload: UploadFile, openai_client: OpenAIClient
+    class_id: str,
+    request: StateRequest,
+    upload: UploadFile,
+    openai_client: OpenAIClient,
 ):
     if upload.size > config.upload.class_file_max_size:
         raise HTTPException(
@@ -6659,12 +6711,12 @@ async def create_file(
         )
 
     return await handle_create_file(
-        request.state.db,
-        request.state.authz,
+        request.state["db"],
+        request.state["authz"],
         openai_client,
         upload=upload,
         class_id=int(class_id),
-        uploader_id=request.state.session.user.id,
+        uploader_id=request.state["session"].user.id,
         private=False,
     )
 
@@ -6677,7 +6729,7 @@ async def create_file(
 async def create_user_file(
     class_id: str,
     user_id: str,
-    request: Request,
+    request: StateRequest,
     upload: UploadFile,
     openai_client: OpenAIClient,
     purpose: schemas.FileUploadPurpose = Form("assistants"),
@@ -6690,30 +6742,20 @@ async def create_user_file(
         )
 
     return await handle_create_file(
-        request.state.db,
-        request.state.authz,
+        request.state["db"],
+        request.state["authz"],
         openai_client,
         upload=upload,
         class_id=int(class_id),
-        uploader_id=request.state.session.user.id,
+        uploader_id=request.state["session"].user.id,
         private=True,
         purpose=purpose,
         use_image_descriptions=use_image_descriptions,
-        user_auth=request.state.auth_user
-        if hasattr(request.state, "auth_user")
-        else None,
-        anonymous_user_auth=request.state.anonymous_session_token_auth
-        if hasattr(request.state, "anonymous_session_token_auth")
-        else None,
-        anonymous_link_auth=request.state.anonymous_share_token_auth
-        if hasattr(request.state, "anonymous_share_token_auth")
-        else None,
-        anonymous_session_id=request.state.anonymous_session_id
-        if hasattr(request.state, "anonymous_session_id")
-        else None,
-        anonymous_link_id=request.state.anonymous_link_id
-        if hasattr(request.state, "anonymous_link_id")
-        else None,
+        user_auth=request.state["auth_user"],
+        anonymous_user_auth=request.state["anonymous_session_token_auth"],
+        anonymous_link_auth=request.state["anonymous_share_token_auth"],
+        anonymous_session_id=request.state["anonymous_session_id"],
+        anonymous_link_id=request.state["anonymous_link_id"],
     )
 
 
@@ -6723,12 +6765,12 @@ async def create_user_file(
     response_model=schemas.GenericStatus,
 )
 async def delete_file(
-    class_id: str, file_id: str, request: Request, openai_client: OpenAIClient
+    class_id: str, file_id: str, request: StateRequest, openai_client: OpenAIClient
 ):
     try:
         await handle_delete_file(
-            request.state.db,
-            request.state.authz,
+            request.state["db"],
+            request.state["authz"],
             openai_client,
             int(file_id),
             int(class_id),
@@ -6749,13 +6791,13 @@ async def delete_user_file(
     class_id: str,
     user_id: str,
     file_id: str,
-    request: Request,
+    request: StateRequest,
     openai_client: OpenAIClient,
 ):
     try:
         await handle_delete_file(
-            request.state.db,
-            request.state.authz,
+            request.state["db"],
+            request.state["authz"],
             openai_client,
             int(file_id),
             int(class_id),
@@ -6770,18 +6812,18 @@ async def delete_user_file(
     dependencies=[Depends(Authz("member", "class:{class_id}"))],
     response_model=schemas.Files,
 )
-async def list_files(class_id: str, request: Request):
-    ids = await request.state.authz.list(
-        f"user:{request.state.session.user.id}", "can_view", "class_file"
+async def list_files(class_id: str, request: StateRequest):
+    ids = await request.state["authz"].list(
+        f"user:{request.state['session'].user.id}", "can_view", "class_file"
     )
-    class_ids = await request.state.authz.list(
+    class_ids = await request.state["authz"].list(
         f"class:{class_id}",
         "parent",
         "class_file",
     )
 
     file_ids = list(set(ids) & set(class_ids))
-    files = await models.File.get_all_by_id(request.state.db, file_ids)
+    files = await models.File.get_all_by_id(request.state["db"], file_ids)
     return {"files": files}
 
 
@@ -6790,17 +6832,17 @@ async def list_files(class_id: str, request: Request):
     dependencies=[Depends(Authz("can_view_assistants", "class:{class_id}"))],
     response_model=schemas.Assistants,
 )
-async def list_assistants(class_id: str, request: Request):
+async def list_assistants(class_id: str, request: StateRequest):
     # Only return assistants that are in the class and are visible to the current user.
     all_for_class = await models.Assistant.get_by_class_id(
-        request.state.db, int(class_id)
+        request.state["db"], int(class_id)
     )
-    filters = await request.state.authz.check(
+    filters = await request.state["authz"].check(
         [
             (
-                request.state.auth_user
-                if not request.state.is_anonymous
-                else request.state.anonymous_share_token_auth,
+                request.state["auth_user"]
+                if not request.state["is_anonymous"]
+                else request.state["anonymous_share_token_auth"],
                 "can_view",
                 f"assistant:{a.id}",
             )
@@ -6810,8 +6852,8 @@ async def list_assistants(class_id: str, request: Request):
     assts = [a for a, f in zip(all_for_class, filters) if f]
 
     creator_ids = {a.creator_id for a in assts}
-    creators = await models.User.get_all_by_id(request.state.db, list(creator_ids))
-    creator_perms = await request.state.authz.check(
+    creators = await models.User.get_all_by_id(request.state["db"], list(creator_ids))
+    creator_perms = await request.state["authz"].check(
         [
             (
                 f"user:{id_}",
@@ -6824,20 +6866,20 @@ async def list_assistants(class_id: str, request: Request):
     endorsed_creators = {id_ for id_, perm in zip(creator_ids, creator_perms) if perm}
 
     ret_assistants = list[schemas.Assistant]()
-    has_elevated_perm_check = await request.state.authz.check(
+    has_elevated_perm_check = await request.state["authz"].check(
         [
             (
-                request.state.auth_user
-                if not request.state.is_anonymous
-                else request.state.anonymous_share_token_auth,
+                request.state["auth_user"]
+                if not request.state["is_anonymous"]
+                else request.state["anonymous_share_token_auth"],
                 "can_edit",
                 f"assistant:{asst.id}",
             )
             for asst in assts
         ]
     )
-    is_class_supervisor = await request.state.authz.test(
-        f"user:{request.state.session.user.id}",
+    is_class_supervisor = await request.state["authz"].test(
+        f"user:{request.state['session'].user.id}",
         "supervisor",
         f"class:{class_id}",
     )
@@ -6861,7 +6903,7 @@ async def list_assistants(class_id: str, request: Request):
 
         if is_class_supervisor:
             cur_asst.share_links = await models.AnonymousLink.get_by_assistant_id(
-                request.state.db, asst.id
+                request.state["db"], asst.id
             )
 
         ret_assistants.append(cur_asst)
@@ -6880,11 +6922,11 @@ async def list_assistants(class_id: str, request: Request):
 async def create_assistant(
     class_id: str,
     req: schemas.CreateAssistant,
-    request: Request,
+    request: StateRequest,
     openai_client: OpenAIClient,
 ):
     class_id_int = int(class_id)
-    creator_id = request.state.session.user.id
+    creator_id = request.state["session"].user.id
 
     class_models_response = schemas.AssistantModels.model_validate(
         await list_class_models(
@@ -6955,7 +6997,7 @@ async def create_assistant(
         )
 
     # Check that the model is not admin-only
-    if not await request.state.authz.test(
+    if not await request.state["authz"].test(
         f"user:{creator_id}",
         "admin",
         f"class:{class_id}",
@@ -6967,14 +7009,14 @@ async def create_assistant(
             )
 
     if req.published:
-        if not await request.state.authz.test(
+        if not await request.state["authz"].test(
             f"user:{creator_id}", "can_publish_assistants", f"class:{class_id}"
         ):
             raise HTTPException(403, "You lack permission to publish an assistant.")
 
-        class_ = await models.Class.get_by_id(request.state.db, int(class_id))
+        class_ = await models.Class.get_by_id(request.state["db"], int(class_id))
 
-    class_ = await models.Class.get_by_id(request.state.db, class_id_int)
+    class_ = await models.Class.get_by_id(request.state["db"], class_id_int)
     if not class_:
         raise HTTPException(
             status_code=404,
@@ -7074,7 +7116,7 @@ async def create_assistant(
                 detail="File search is not supported in Voice mode.",
             )
         vector_store_id, vector_store_object_id = await create_vector_store(
-            request.state.db,
+            request.state["db"],
             openai_client,
             class_id,
             req.file_search_file_ids,
@@ -7165,7 +7207,7 @@ async def create_assistant(
         del req.mcp_servers
 
         asst = await models.Assistant.create(
-            request.state.db,
+            request.state["db"],
             req,
             class_id=class_id_int,
             user_id=creator_id,
@@ -7176,11 +7218,11 @@ async def create_assistant(
 
         # Delete private files uploaded but not attached to the assistant
         files_to_delete = await models.File.get_files_not_used_by_assistant(
-            request.state.db, asst.id, deleted_private_files
+            request.state["db"], asst.id, deleted_private_files
         )
         await handle_delete_files(
-            request.state.db,
-            request.state.authz,
+            request.state["db"],
+            request.state["authz"],
             openai_client,
             files_to_delete,
             class_id=int(class_id),
@@ -7202,7 +7244,7 @@ async def create_assistant(
                     authorization_token = mcp_input.authorization_token
 
                 tool = await models.MCPServerTool.create(
-                    request.state.db,
+                    request.state["db"],
                     {
                         "display_name": mcp_input.display_name,
                         "server_url": mcp_input.server_url_str,
@@ -7210,13 +7252,13 @@ async def create_assistant(
                         "authorization_token": authorization_token,
                         "description": mcp_input.description,
                         "enabled": mcp_input.enabled,
-                        "created_by_user_id": request.state.session.user.id,
+                        "created_by_user_id": request.state["session"].user.id,
                     },
                 )
 
                 # Log which user created the MCP server tool and some basic info
                 logger.info(
-                    f"User {request.state.session.user.id} created MCP server tool {tool.server_label} for assistant {assistant_id} with URL {tool.server_url} and display name '{tool.display_name}'"
+                    f"User {request.state['session'].user.id} created MCP server tool {tool.server_label} for assistant {assistant_id} with URL {tool.server_url} and display name '{tool.display_name}'"
                 )
                 return tool
 
@@ -7224,7 +7266,10 @@ async def create_assistant(
             for mcp_input in mcp_servers_input:
                 mcp_servers.append(await create_mcp_server(mcp_input, asst.id))
             await models.Assistant.synchronize_assistant_mcp_server_tools(
-                request.state.db, asst.id, [s.id for s in mcp_servers], skip_delete=True
+                request.state["db"],
+                asst.id,
+                [s.id for s in mcp_servers],
+                skip_delete=True,
             )
 
         grants = [
@@ -7237,7 +7282,7 @@ async def create_assistant(
                 (f"class:{class_id}#member", "can_view", f"assistant:{asst.id}"),
             )
 
-        await request.state.authz.write(grant=grants)
+        await request.state["authz"].write(grant=grants)
 
         return asst
     except Exception as e:
@@ -7256,14 +7301,14 @@ async def create_assistant(
 async def preview_assistant_instructions(
     class_id: str,
     req: schemas.AssistantInstructionsPreviewRequest,
-    request: Request,
+    request: StateRequest,
 ):
     return {
         "instructions_preview": format_instructions(
             req.instructions,
             use_latex=False,
             use_image_descriptions=False,
-            user_id=request.state.session.user.id,
+            user_id=request.state["session"].user.id,
             thread_id=f"preview_{uuid.uuid4()}",
         )
     }
@@ -7292,12 +7337,12 @@ def _classes_share_api_key(src: models.Class | None, tgt: models.Class | None) -
 async def copy_assistant(
     class_id: str,
     assistant_id: str,
-    request: Request,
+    request: StateRequest,
     openai_client: OpenAIClient,
     copy_options: schemas.CopyAssistantRequest | None = Body(default=None),
 ):
     assistant = await models.Assistant.get_by_id_with_ci_files_mcp(
-        request.state.db, int(assistant_id)
+        request.state["db"], int(assistant_id)
     )
     class_id_int = int(class_id)
     if not assistant or assistant.class_id != class_id_int:
@@ -7305,7 +7350,7 @@ async def copy_assistant(
             status_code=404,
             detail="Assistant not found",
         )
-    source_class = await models.Class.get_by_id(request.state.db, class_id_int)
+    source_class = await models.Class.get_by_id(request.state["db"], class_id_int)
     if not source_class:
         raise HTTPException(status_code=404, detail="Class not found")
 
@@ -7322,7 +7367,7 @@ async def copy_assistant(
         else class_id_int
     )
 
-    target_class = await models.Class.get_by_id(request.state.db, target_class_id)
+    target_class = await models.Class.get_by_id(request.state["db"], target_class_id)
     if not target_class:
         raise HTTPException(
             status_code=404,
@@ -7347,8 +7392,8 @@ async def copy_assistant(
             detail="Source and target classes must share the same API key to copy assistants.",
         )
 
-    can_create_in_target = await request.state.authz.test(
-        request.state.auth_user,
+    can_create_in_target = await request.state["authz"].test(
+        request.state["auth_user"],
         "can_create_assistants",
         f"class:{target_class_id}",
     )
@@ -7363,7 +7408,7 @@ async def copy_assistant(
     else:
         try:
             target_openai_client = await get_openai_client_by_class_id(
-                request.state.db, target_class_id
+                request.state["db"], target_class_id
             )
         except GetOpenAIClientException as e:
             raise HTTPException(status_code=e.code or 400, detail=e.detail)
@@ -7373,8 +7418,8 @@ async def copy_assistant(
     )
 
     new_assistant = await copy_assistant_to_class(
-        request.state.db,
-        request.state.authz,
+        request.state["db"],
+        request.state["authz"],
         target_openai_client,
         target_class_id,
         assistant,
@@ -7397,22 +7442,22 @@ async def copy_assistant(
 async def copy_assistant_check(
     class_id: str,
     assistant_id: str,
-    request: Request,
+    request: StateRequest,
     copy_options: schemas.CopyAssistantRequest,
 ):
-    assistant = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
+    assistant = await models.Assistant.get_by_id(request.state["db"], int(assistant_id))
     class_id_int = int(class_id)
     if not assistant or assistant.class_id != class_id_int:
         raise HTTPException(
             status_code=404,
             detail="Assistant not found",
         )
-    source_class = await models.Class.get_by_id(request.state.db, class_id_int)
+    source_class = await models.Class.get_by_id(request.state["db"], class_id_int)
     if not source_class:
         raise HTTPException(status_code=404, detail="Class not found")
 
     target_class_id = copy_options.target_class_id or class_id_int
-    target_class = await models.Class.get_by_id(request.state.db, target_class_id)
+    target_class = await models.Class.get_by_id(request.state["db"], target_class_id)
     if not target_class:
         raise HTTPException(
             status_code=404,
@@ -7437,8 +7482,8 @@ async def copy_assistant_check(
             detail="Source and target classes must share the same API key to copy assistants.",
         )
 
-    can_create_in_target = await request.state.authz.test(
-        request.state.auth_user,
+    can_create_in_target = await request.state["authz"].test(
+        request.state["auth_user"],
         "can_create_assistants",
         f"class:{target_class_id}",
     )
@@ -7464,12 +7509,12 @@ async def copy_assistant_check(
 async def share_assistant(
     class_id: str,
     assistant_id: str,
-    request: Request,
+    request: StateRequest,
 ):
     """
     Create an anonymous share of an assistant with the class.
     """
-    asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
+    asst = await models.Assistant.get_by_id(request.state["db"], int(assistant_id))
     if not asst:
         raise HTTPException(
             status_code=404,
@@ -7484,18 +7529,18 @@ async def share_assistant(
 
     # Create a new anonymous link for the assistant
     share_link = await models.AnonymousLink.create(
-        request.state.db,
+        request.state["db"],
         share_token=str(uuid.uuid7()),
         assistant_id=asst.id,
     )
 
     await models.User.create_anonymous_user(
-        request.state.db,
+        request.state["db"],
         anonymous_link_id=share_link.id,
     )
 
     auth_user = f"anonymous_link:{share_link.share_token}"
-    await request.state.authz.write_safe(
+    await request.state["authz"].write_safe(
         grant=[
             (auth_user, "can_view", f"class:{class_id}"),
             (
@@ -7523,14 +7568,14 @@ async def unshare_assistant(
     class_id: str,
     assistant_id: str,
     share_id: str,
-    request: Request,
+    request: StateRequest,
 ):
     """
     Remove an anonymous share of an assistant with the class.
     """
     asst, share_link = await asyncio.gather(
-        models.Assistant.get_by_id(request.state.db, int(assistant_id)),
-        models.AnonymousLink.get_by_id(request.state.db, int(share_id)),
+        models.Assistant.get_by_id(request.state["db"], int(assistant_id)),
+        models.AnonymousLink.get_by_id(request.state["db"], int(share_id)),
     )
     if not asst:
         raise HTTPException(
@@ -7559,10 +7604,10 @@ async def unshare_assistant(
     auth_user = f"anonymous_link:{share_link.share_token}"
 
     await models.AnonymousLink.revoke(
-        request.state.db,
+        request.state["db"],
         share_link.id,
     )
-    await request.state.authz.write_safe(
+    await request.state["authz"].write_safe(
         revoke=[
             (auth_user, "can_view", f"class:{class_id}"),
             (
@@ -7591,12 +7636,14 @@ async def update_assistant_share_name(
     assistant_id: str,
     share_id: str,
     req: schemas.UpdateAssistantShareNameRequest,
-    request: Request,
+    request: StateRequest,
 ):
     """
     Update the name of an anonymous share of an assistant with the class.
     """
-    share_link = await models.AnonymousLink.get_by_id(request.state.db, int(share_id))
+    share_link = await models.AnonymousLink.get_by_id(
+        request.state["db"], int(share_id)
+    )
 
     if not share_link:
         raise HTTPException(
@@ -7605,8 +7652,8 @@ async def update_assistant_share_name(
         )
 
     share_link.name = req.name
-    request.state.db.add(share_link)
-    await request.state.db.flush()
+    request.state["db"].add(share_link)
+    await request.state["db"].flush()
 
     return {"status": "ok"}
 
@@ -7620,12 +7667,12 @@ async def update_assistant(
     class_id: str,
     assistant_id: str,
     req: schemas.UpdateAssistant,
-    request: Request,
+    request: StateRequest,
     openai_client: OpenAIClient,
 ):
     # Get the existing assistant.
     asst = await models.Assistant.get_by_id_with_ci_files_mcp(
-        request.state.db, int(assistant_id)
+        request.state["db"], int(assistant_id)
     )
     grants = list[Relation]()
     revokes = list[Relation]()
@@ -7641,8 +7688,8 @@ async def update_assistant(
     )
 
     if is_toggling_publish_status:
-        if not await request.state.authz.test(
-            f"user:{request.state.session.user.id}",
+        if not await request.state["authz"].test(
+            f"user:{request.state['session'].user.id}",
             "can_publish",
             f"assistant:{assistant_id}",
         ):
@@ -7656,8 +7703,8 @@ async def update_assistant(
 
     # Only Administrators can edit locked assistants
     if asst.locked and req.model_fields_set != {"published", "use_image_descriptions"}:
-        if not await request.state.authz.test(
-            f"user:{request.state.session.user.id}",
+        if not await request.state["authz"].test(
+            f"user:{request.state['session'].user.id}",
             "admin",
             f"class:{class_id}",
         ):
@@ -7666,7 +7713,7 @@ async def update_assistant(
                 "This assistant is locked and cannot be edited. Please create a new assistant if you need to make changes.",
             )
 
-    class_ = await models.Class.get_by_id(request.state.db, int(class_id))
+    class_ = await models.Class.get_by_id(request.state["db"], int(class_id))
     if not class_:
         raise HTTPException(
             status_code=404,
@@ -7781,8 +7828,8 @@ async def update_assistant(
                 )
 
             # Check that the model is not admin-only
-            if not await request.state.authz.test(
-                f"user:{request.state.session.user.id}",
+            if not await request.state["authz"].test(
+                f"user:{request.state['session'].user.id}",
                 "admin",
                 f"class:{class_id}",
             ):
@@ -8044,7 +8091,7 @@ async def update_assistant(
                     "file_ids": req.code_interpreter_file_ids
                 }
                 asst.code_interpreter_files = await models.File.get_all_by_file_id(
-                    request.state.db, req.code_interpreter_file_ids
+                    request.state["db"], req.code_interpreter_file_ids
                 )
             else:
                 asst.code_interpreter_files = []
@@ -8062,7 +8109,7 @@ async def update_assistant(
                 if asst.vector_store_id:
                     # Vector store already exists, update
                     vector_store_id = await sync_vector_store_files(
-                        request.state.db,
+                        request.state["db"],
                         openai_client,
                         asst.vector_store_id,
                         req.file_search_file_ids,
@@ -8073,7 +8120,7 @@ async def update_assistant(
                 else:
                     # Store doesn't exist, create a new one
                     vector_store_id, vector_store_object_id = await create_vector_store(
-                        request.state.db,
+                        request.state["db"],
                         openai_client,
                         class_id,
                         req.file_search_file_ids,
@@ -8089,7 +8136,7 @@ async def update_assistant(
                     id_to_delete = asst.vector_store_id
                     asst.vector_store_id = None
                     vector_store_id_to_delete = await delete_vector_store_db(
-                        request.state.db, id_to_delete
+                        request.state["db"], id_to_delete
                     )
                     tool_resources["file_search"] = {}
     except ValueError as e:
@@ -8167,7 +8214,7 @@ async def update_assistant(
                 has_changes = False
                 if existing_server.server_url != mcp_input.server_url_str:
                     logger.info(
-                        f"User {request.state.session.user.id} updated MCP server tool URL for tool {existing_server.server_label} for assistant {assistant_id} from {existing_server.server_url} to {mcp_input.server_url_str}"
+                        f"User {request.state['session'].user.id} updated MCP server tool URL for tool {existing_server.server_label} for assistant {assistant_id} from {existing_server.server_url} to {mcp_input.server_url_str}"
                     )
                     existing_server.server_url = mcp_input.server_url_str
                     has_changes = True
@@ -8176,13 +8223,13 @@ async def update_assistant(
                     has_changes = True
                 if existing_server.enabled != mcp_input.enabled:
                     logger.info(
-                        f"User {request.state.session.user.id} updated MCP server tool enabled status for tool {existing_server.server_label} for assistant {assistant_id} from {existing_server.enabled} to {mcp_input.enabled}"
+                        f"User {request.state['session'].user.id} updated MCP server tool enabled status for tool {existing_server.server_label} for assistant {assistant_id} from {existing_server.enabled} to {mcp_input.enabled}"
                     )
                     existing_server.enabled = mcp_input.enabled
                     has_changes = True
                 if existing_server.display_name != mcp_input.display_name:
                     logger.info(
-                        f"User {request.state.session.user.id} updated MCP server tool display name for tool {existing_server.server_label} for assistant {assistant_id} from '{existing_server.display_name}' to '{mcp_input.display_name}'"
+                        f"User {request.state['session'].user.id} updated MCP server tool display name for tool {existing_server.server_label} for assistant {assistant_id} from '{existing_server.display_name}' to '{mcp_input.display_name}'"
                     )
                     existing_server.display_name = mcp_input.display_name
                     has_changes = True
@@ -8193,7 +8240,7 @@ async def update_assistant(
                         or existing_server.authorization_token is not None
                     ):
                         logger.info(
-                            f"User {request.state.session.user.id} removed authentication for MCP server tool {existing_server.server_label} for assistant {assistant_id}"
+                            f"User {request.state['session'].user.id} removed authentication for MCP server tool {existing_server.server_label} for assistant {assistant_id}"
                         )
                     if existing_server.headers is not None:
                         existing_server.headers = None
@@ -8204,38 +8251,40 @@ async def update_assistant(
                 elif mcp_input.auth_type == schemas.MCPAuthType.HEADER:
                     if existing_server.headers != headers_json:
                         logger.info(
-                            f"User {request.state.session.user.id} updated MCP server tool headers for tool {existing_server.server_label} for assistant {assistant_id}"
+                            f"User {request.state['session'].user.id} updated MCP server tool headers for tool {existing_server.server_label} for assistant {assistant_id}"
                         )
                         existing_server.headers = headers_json
                         has_changes = True
                     if existing_server.authorization_token is not None:
                         logger.info(
-                            f"User {request.state.session.user.id} switched MCP server tool {existing_server.server_label} for assistant {assistant_id} to header-based authentication, removing existing authorization token"
+                            f"User {request.state['session'].user.id} switched MCP server tool {existing_server.server_label} for assistant {assistant_id} to header-based authentication, removing existing authorization token"
                         )
                         existing_server.authorization_token = None
                         has_changes = True
                 elif mcp_input.auth_type == schemas.MCPAuthType.TOKEN:
                     if existing_server.headers is not None:
                         logger.info(
-                            f"User {request.state.session.user.id} switched MCP server tool {existing_server.server_label} for assistant {assistant_id} to token-based authentication, removing existing headers"
+                            f"User {request.state['session'].user.id} switched MCP server tool {existing_server.server_label} for assistant {assistant_id} to token-based authentication, removing existing headers"
                         )
                         existing_server.headers = None
                         has_changes = True
                     if authorization_token:
                         if existing_server.authorization_token != authorization_token:
                             logger.info(
-                                f"User {request.state.session.user.id} updated MCP server tool authorization token for tool {existing_server.server_label} for assistant {assistant_id}"
+                                f"User {request.state['session'].user.id} updated MCP server tool authorization token for tool {existing_server.server_label} for assistant {assistant_id}"
                             )
                             existing_server.authorization_token = authorization_token
                             has_changes = True
 
                 if has_changes:
-                    existing_server.updated_by_user_id = request.state.session.user.id
-                    request.state.db.add(existing_server)
+                    existing_server.updated_by_user_id = request.state[
+                        "session"
+                    ].user.id
+                    request.state["db"].add(existing_server)
                 return existing_server.id
             else:
                 mcp_server = await models.MCPServerTool.create(
-                    request.state.db,
+                    request.state["db"],
                     {
                         "display_name": mcp_input.display_name,
                         "server_url": mcp_input.server_url_str,
@@ -8243,23 +8292,23 @@ async def update_assistant(
                         "authorization_token": authorization_token,
                         "description": mcp_input.description,
                         "enabled": mcp_input.enabled,
-                        "created_by_user_id": request.state.session.user.id,
+                        "created_by_user_id": request.state["session"].user.id,
                     },
                 )
                 logger.info(
-                    f"User {request.state.session.user.id} created MCP server tool {mcp_server.server_label} for assistant {assistant_id} with URL {mcp_server.server_url} and display name '{mcp_server.display_name}'"
+                    f"User {request.state['session'].user.id} created MCP server tool {mcp_server.server_label} for assistant {assistant_id} with URL {mcp_server.server_url} and display name '{mcp_server.display_name}'"
                 )
                 return mcp_server.id
 
         mcp_server_ids = []
         for mcp_input in req.mcp_servers:
             mcp_server_ids.append(await upsert_mcp_server(mcp_input))
-        await request.state.db.flush()
+        await request.state["db"].flush()
         await models.Assistant.synchronize_assistant_mcp_server_tools(
-            request.state.db, asst.id, list(mcp_server_ids)
+            request.state["db"], asst.id, list(mcp_server_ids)
         )
         await models.Thread.update_mcp_server_tools_available(
-            request.state.db,
+            request.state["db"],
             asst.id,
             list(mcp_server_ids),
             asst.version,
@@ -8269,10 +8318,10 @@ async def update_assistant(
         req.tools is None or {"type": "mcp_server"} not in req.tools
     ):
         await models.Assistant.synchronize_assistant_mcp_server_tools(
-            request.state.db, asst.id, []
+            request.state["db"], asst.id, []
         )
         await models.Thread.update_mcp_server_tools_available(
-            request.state.db,
+            request.state["db"],
             asst.id,
             [],
             asst.version,
@@ -8385,11 +8434,11 @@ async def update_assistant(
         asst.name = req.name
 
     await models.Thread.update_tools_available(
-        request.state.db, asst.id, asst.tools, asst.version, asst.interaction_mode
+        request.state["db"], asst.id, asst.tools, asst.version, asst.interaction_mode
     )
-    request.state.db.add(asst)
-    await request.state.db.flush()
-    await request.state.db.refresh(asst)
+    request.state["db"].add(asst)
+    await request.state["db"].flush()
+    await request.state["db"].refresh(asst)
 
     if not asst.instructions:
         raise HTTPException(400, "Instructions cannot be empty.")
@@ -8435,15 +8484,15 @@ async def update_assistant(
                         temperature=asst.temperature,
                         metadata={
                             "class_id": class_id,
-                            "creator_id": str(request.state.session.user.id),
+                            "creator_id": str(request.state["session"].user.id),
                         },
                         tool_resources=new_tool_resources,
                         extra_body=new_reasoning_effort_body,
                     )
                     asst.assistant_id = new_asst.id
-                    request.state.db.add(asst)
-                    await request.state.db.flush()
-                    await request.state.db.refresh(asst)
+                    request.state["db"].add(asst)
+                    await request.state["db"].flush()
+                    await request.state["db"].refresh(asst)
                 else:
                     await openai_client.beta.assistants.update(
                         assistant_id=asst.assistant_id, **openai_update
@@ -8473,14 +8522,14 @@ async def update_assistant(
     ):
         try:
             files_to_delete = await models.File.get_files_not_used_by_assistant(
-                request.state.db,
+                request.state["db"],
                 asst.id,
                 req.deleted_private_files,
             )
             # Delete any private files that were removed
             await handle_delete_files(
-                request.state.db,
-                request.state.authz,
+                request.state["db"],
+                request.state["authz"],
                 openai_client,
                 files_to_delete,
                 class_id=int(class_id),
@@ -8490,7 +8539,7 @@ async def update_assistant(
                 "Error deleting private files while updating assistant: %s", e
             )
 
-    await request.state.authz.write_safe(grant=grants, revoke=revokes)
+    await request.state["authz"].write_safe(grant=grants, revoke=revokes)
     return asst
 
 
@@ -8527,14 +8576,16 @@ def mcp_server_to_response(
     dependencies=[Depends(Authz("can_edit", "assistant:{assistant_id}"))],
     response_model=schemas.MCPServerToolsResponse,
 )
-async def get_assistant_mcp_servers(class_id: str, assistant_id: str, request: Request):
+async def get_assistant_mcp_servers(
+    class_id: str, assistant_id: str, request: StateRequest
+):
     """Get MCP servers configured for an assistant"""
-    asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
+    asst = await models.Assistant.get_by_id(request.state["db"], int(assistant_id))
     if not asst:
         raise HTTPException(404, "Assistant not found.")
 
     mcp_servers = await models.MCPServerTool.get_for_assistant(
-        request.state.db, asst.id
+        request.state["db"], asst.id
     )
 
     return {"mcp_servers": [mcp_server_to_response(server) for server in mcp_servers]}
@@ -8545,11 +8596,11 @@ async def get_assistant_mcp_servers(class_id: str, assistant_id: str, request: R
     dependencies=[Depends(Authz("can_publish", "assistant:{assistant_id}"))],
     response_model=schemas.GenericStatus,
 )
-async def publish_assistant(class_id: str, assistant_id: str, request: Request):
-    asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
+async def publish_assistant(class_id: str, assistant_id: str, request: StateRequest):
+    asst = await models.Assistant.get_by_id(request.state["db"], int(assistant_id))
     asst.published = func.now()
-    request.state.db.add(asst)
-    await request.state.authz.write_safe(
+    request.state["db"].add(asst)
+    await request.state["authz"].write_safe(
         grant=[(f"class:{class_id}#member", "can_view", f"assistant:{assistant_id}")]
     )
     return {"status": "ok"}
@@ -8560,11 +8611,11 @@ async def publish_assistant(class_id: str, assistant_id: str, request: Request):
     dependencies=[Depends(Authz("can_publish", "assistant:{assistant_id}"))],
     response_model=schemas.GenericStatus,
 )
-async def unpublish_assistant(class_id: str, assistant_id: str, request: Request):
-    asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
+async def unpublish_assistant(class_id: str, assistant_id: str, request: StateRequest):
+    asst = await models.Assistant.get_by_id(request.state["db"], int(assistant_id))
     asst.published = None
-    request.state.db.add(asst)
-    await request.state.authz.write_safe(
+    request.state["db"].add(asst)
+    await request.state["authz"].write_safe(
         revoke=[(f"class:{class_id}#member", "can_view", f"assistant:{assistant_id}")]
     )
     return {"status": "ok"}
@@ -8575,12 +8626,12 @@ async def unpublish_assistant(class_id: str, assistant_id: str, request: Request
     dependencies=[Depends(Authz("admin", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
-async def lock_assistant(class_id: str, assistant_id: str, request: Request):
-    asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
+async def lock_assistant(class_id: str, assistant_id: str, request: StateRequest):
+    asst = await models.Assistant.get_by_id(request.state["db"], int(assistant_id))
     if not asst:
         raise HTTPException(404, "Assistant not found.")
     asst.locked = True
-    request.state.db.add(asst)
+    request.state["db"].add(asst)
     return {"status": "ok"}
 
 
@@ -8589,12 +8640,12 @@ async def lock_assistant(class_id: str, assistant_id: str, request: Request):
     dependencies=[Depends(Authz("admin", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
-async def unlock_assistant(class_id: str, assistant_id: str, request: Request):
-    asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
+async def unlock_assistant(class_id: str, assistant_id: str, request: StateRequest):
+    asst = await models.Assistant.get_by_id(request.state["db"], int(assistant_id))
     if not asst:
         raise HTTPException(404, "Assistant not found.")
     asst.locked = False
-    request.state.db.add(asst)
+    request.state["db"].add(asst)
     return {"status": "ok"}
 
 
@@ -8606,10 +8657,10 @@ async def unlock_assistant(class_id: str, assistant_id: str, request: Request):
 async def delete_assistant(
     class_id: str,
     assistant_id: str,
-    request: Request,
+    request: StateRequest,
     openai_client: OpenAIClient,
 ):
-    asst = await models.Assistant.get_by_id(request.state.db, int(assistant_id))
+    asst = await models.Assistant.get_by_id(request.state["db"], int(assistant_id))
 
     # Detach the vector store from the assistant and delete it
     vector_store_obj_id = None
@@ -8618,7 +8669,7 @@ async def delete_assistant(
         asst.vector_store_id = None
         # Keep the OAI vector store ID for deletion
         vector_store_obj_id = await delete_vector_store_db(
-            request.state.db, vector_store_id
+            request.state["db"], vector_store_id
         )
 
     # Remove any CI files associations with the assistant
@@ -8626,7 +8677,7 @@ async def delete_assistant(
         models.code_interpreter_file_assistant_association.c.assistant_id
         == int(asst.id)
     )
-    await request.state.db.execute(stmt)
+    await request.state["db"].execute(stmt)
 
     revokes = [
         (f"class:{class_id}", "parent", f"assistant:{asst.id}"),
@@ -8643,11 +8694,11 @@ async def delete_assistant(
         .where(models.Thread.assistant_id == int(asst.id))
         .values(assistant_id=None)
     )
-    await request.state.db.execute(_stmt)
+    await request.state["db"].execute(_stmt)
 
     # Keep the OAI assistant ID for deletion
     assistant_id = asst.assistant_id
-    await models.Assistant.delete(request.state.db, asst.id)
+    await models.Assistant.delete(request.state["db"], asst.id)
 
     # Delete vector store as late as possible to avoid orphaned assistant
     if vector_store_obj_id:
@@ -8664,7 +8715,7 @@ async def delete_assistant(
             )
 
     # clean up grants
-    await request.state.authz.write_safe(revoke=revokes)
+    await request.state["authz"].write_safe(revoke=revokes)
     return {"status": "ok"}
 
 
@@ -8676,15 +8727,15 @@ async def delete_assistant(
 async def get_assistant_files(
     class_id: str,
     assistant_id: str,
-    request: Request,
+    request: StateRequest,
 ):
     asst = await models.Assistant.get_by_id_with_ci_files(
-        request.state.db, int(assistant_id)
+        request.state["db"], int(assistant_id)
     )
     file_search_files = []
     if asst.vector_store_id:
         file_search_files = await models.VectorStore.get_files_by_id(
-            request.state.db, asst.vector_store_id
+            request.state["db"], asst.vector_store_id
         )
     code_interpreter_files = asst.code_interpreter_files
     return {
@@ -8699,7 +8750,7 @@ async def get_assistant_files(
     "/class/{class_id}/thread/{thread_id}/image/{file_id}",
     dependencies=[Depends(Authz("can_view", "thread:{thread_id}"))],
 )
-async def get_image(file_id: str, request: Request, openai_client: OpenAIClient):
+async def get_image(file_id: str, request: StateRequest, openai_client: OpenAIClient):
     response = await openai_client.files.with_raw_response.retrieve_content(file_id)
     if response.status_code != 200:
         raise HTTPException(
@@ -8717,10 +8768,10 @@ async def download_file(
     class_id: str,
     thread_id: str,
     file_id: str,
-    request: Request,
+    request: StateRequest,
     openai_client: OpenAIClient,
 ):
-    thread = await models.Thread.get_by_id(request.state.db, int(thread_id))
+    thread = await models.Thread.get_by_id(request.state["db"], int(thread_id))
 
     if not thread:
         raise HTTPException(
@@ -8747,7 +8798,9 @@ async def download_file(
         }
         return Response(content=response.content, headers=headers)
     elif thread.version == 3:
-        file = await models.File.get_by_id_with_download(request.state.db, int(file_id))
+        file = await models.File.get_by_id_with_download(
+            request.state["db"], int(file_id)
+        )
         if not file or not file.s3_file:
             raise HTTPException(
                 status_code=404,
@@ -8769,9 +8822,9 @@ async def download_file(
 @v1.get(
     "/me",
 )
-async def get_me(request: Request):
+async def get_me(request: StateRequest):
     """Get the session information."""
-    return request.state.session
+    return request.state["session"]
 
 
 @v1.put(
@@ -8779,10 +8832,10 @@ async def get_me(request: Request):
     dependencies=[Depends(LoggedIn())],
     response_model=schemas.User,
 )
-async def update_me(request: Request, update: schemas.UpdateUserInfo):
+async def update_me(request: StateRequest, update: schemas.UpdateUserInfo):
     """Update the user profile."""
     return await models.User.update_info(
-        request.state.db, request.state.session.user.id, update
+        request.state["db"], request.state["session"].user.id, update
     )
 
 
@@ -8791,11 +8844,11 @@ async def update_me(request: Request, update: schemas.UpdateUserInfo):
     dependencies=[Depends(LoggedIn())],
     response_model=schemas.ExternalLoginsResponse,
 )
-async def get_external_logins(request: Request):
+async def get_external_logins(request: StateRequest):
     """Get the user's external logins."""
     return {
         "external_logins": await models.User.get_external_logins_by_id(
-            request.state.db, request.state.session.user.id
+            request.state["db"], request.state["session"].user.id
         )
     }
 
@@ -8805,18 +8858,18 @@ async def get_external_logins(request: Request):
     dependencies=[Depends(LoggedIn())],
     response_model=schemas.ActivitySummarySubscriptions,
 )
-async def get_activity_summaries(request: Request):
+async def get_activity_summaries(request: StateRequest):
     """Get the user's activity summaries."""
 
     # Get all groups the user is a moderator of
-    moderator_class_ids = await request.state.authz.list(
-        f"user:{request.state.session.user.id}",
+    moderator_class_ids = await request.state["authz"].list(
+        f"user:{request.state['session'].user.id}",
         "teacher",
         "class",
     )
 
     return await models.UserClassRole.get_activity_summary_subscriptions(
-        request.state.db, request.state.session.user.id, moderator_class_ids
+        request.state["db"], request.state["session"].user.id, moderator_class_ids
     )
 
 
@@ -8826,11 +8879,11 @@ async def get_activity_summaries(request: Request):
     response_model=schemas.GenericStatus,
 )
 async def subscribe_to_all_summaries(
-    request: Request,
+    request: StateRequest,
 ):
     """Subscribe to all activity summaries."""
-    moderator_classes = await request.state.authz.list(
-        f"user:{request.state.session.user.id}",
+    moderator_classes = await request.state["authz"].list(
+        f"user:{request.state['session'].user.id}",
         "teacher",
         "class",
     )
@@ -8842,7 +8895,7 @@ async def subscribe_to_all_summaries(
         )
 
     await models.UserClassRole.subscribe_to_all_summaries(
-        request.state.db, request.state.session.user.id
+        request.state["db"], request.state["session"].user.id
     )
     return {"status": "ok"}
 
@@ -8853,11 +8906,11 @@ async def subscribe_to_all_summaries(
     response_model=schemas.GenericStatus,
 )
 async def unsubscribe_from_all_summaries(
-    request: Request,
+    request: StateRequest,
 ):
     """Unsubscribe from all activity summaries."""
-    moderator_classes = await request.state.authz.list(
-        f"user:{request.state.session.user.id}",
+    moderator_classes = await request.state["authz"].list(
+        f"user:{request.state['session'].user.id}",
         "teacher",
         "class",
     )
@@ -8869,7 +8922,7 @@ async def unsubscribe_from_all_summaries(
         )
 
     await models.UserClassRole.unsubscribe_from_all_summaries(
-        request.state.db, request.state.session.user.id
+        request.state["db"], request.state["session"].user.id
     )
     return {"status": "ok"}
 
@@ -8880,11 +8933,11 @@ async def unsubscribe_from_all_summaries(
     response_model=schemas.GenericStatus,
 )
 async def enable_dna_as_create(
-    request: Request,
+    request: StateRequest,
 ):
     """Enable DNA as create."""
     await models.User.update_dna_as_create(
-        request.state.db, request.state.session.user.id, True
+        request.state["db"], request.state["session"].user.id, True
     )
     return {"status": "ok"}
 
@@ -8895,11 +8948,11 @@ async def enable_dna_as_create(
     response_model=schemas.GenericStatus,
 )
 async def disable_dna_as_create(
-    request: Request,
+    request: StateRequest,
 ):
     """Disable DNA as create."""
     await models.User.update_dna_as_create(
-        request.state.db, request.state.session.user.id, False
+        request.state["db"], request.state["session"].user.id, False
     )
     return {"status": "ok"}
 
@@ -8910,11 +8963,11 @@ async def disable_dna_as_create(
     response_model=schemas.GenericStatus,
 )
 async def enable_dna_as_join(
-    request: Request,
+    request: StateRequest,
 ):
     """Enable DNA as join."""
     await models.User.update_dna_as_join(
-        request.state.db, request.state.session.user.id, True
+        request.state["db"], request.state["session"].user.id, True
     )
     return {"status": "ok"}
 
@@ -8925,11 +8978,11 @@ async def enable_dna_as_join(
     response_model=schemas.GenericStatus,
 )
 async def disable_dna_as_join(
-    request: Request,
+    request: StateRequest,
 ):
     """Disable DNA as join."""
     await models.User.update_dna_as_join(
-        request.state.db, request.state.session.user.id, False
+        request.state["db"], request.state["session"].user.id, False
     )
     return {"status": "ok"}
 
@@ -8939,17 +8992,17 @@ async def disable_dna_as_join(
     dependencies=[Depends(LoggedIn())],
     response_model=schemas.GrantsList,
 )
-async def get_grants_list(rel: str, obj: str, request: Request):
+async def get_grants_list(rel: str, obj: str, request: StateRequest):
     """List objects for which user has a specific relation."""
-    sub = f"user:{request.state.session.user.id}"
-    results = await request.state.authz.list(
+    sub = f"user:{request.state['session'].user.id}"
+    results = await request.state["authz"].list(
         sub,
         rel,
         obj,
     )
     return {
         "subject_type": "user",
-        "subject_id": request.state.session.user.id,
+        "subject_id": request.state["session"].user.id,
         "relation": rel,
         "target_type": obj,
         "target_ids": results,
@@ -8961,21 +9014,21 @@ async def get_grants_list(rel: str, obj: str, request: Request):
     dependencies=[Depends(LoggedIn())],
     response_model=schemas.Grants,
 )
-async def get_grants(query: schemas.GrantsQuery, request: Request):
+async def get_grants(query: schemas.GrantsQuery, request: StateRequest):
     checks = list[Relation]()
     user_names = list[str]()
 
-    if request.state.is_anonymous:
-        if request.state.anonymous_share_token_auth is not None:
+    if request.state["is_anonymous"]:
+        if request.state["anonymous_share_token_auth"] is not None:
             user_names.append(
-                request.state.anonymous_share_token_auth,
+                request.state["anonymous_share_token_auth"],
             )
-        if request.state.anonymous_session_token_auth is not None:
+        if request.state["anonymous_session_token_auth"] is not None:
             user_names.append(
-                request.state.anonymous_session_token_auth,
+                request.state["anonymous_session_token_auth"],
             )
     else:
-        user_names.append(request.state.auth_user)
+        user_names.append(request.state["auth_user"])
 
     check_both_anonymous_tokens = len(user_names) == 2
     for grant in query.grants:
@@ -8991,7 +9044,7 @@ async def get_grants(query: schemas.GrantsQuery, request: Request):
             ]
         )
 
-    results = await request.state.authz.check(checks)
+    results = await request.state["authz"].check(checks)
     return {
         "grants": [
             schemas.GrantDetail(
@@ -9012,11 +9065,11 @@ async def get_grants(query: schemas.GrantsQuery, request: Request):
 )
 async def get_user_agreement(
     policy_id: str,
-    request: Request,
+    request: StateRequest,
 ):
     """Get the user agreement."""
     agreement = await models.Agreement.get_by_policy_id(
-        request.state.db, int(policy_id)
+        request.state["db"], int(policy_id)
     )
     if not agreement:
         raise HTTPException(404, "Agreement not found.")
@@ -9028,17 +9081,17 @@ async def get_user_agreement(
     dependencies=[Depends(LoggedIn())],
     response_model=schemas.GenericStatus,
 )
-async def accept_user_agreement(policy_id: str, request: Request):
+async def accept_user_agreement(policy_id: str, request: StateRequest):
     """Accept the user agreement."""
     policy = await models.AgreementPolicy.get_by_id_if_eligible(
-        request.state.db, int(policy_id), request.state.session.user.id
+        request.state["db"], int(policy_id), request.state["session"].user.id
     )
     if not policy:
         raise HTTPException(404, "Agreement not found.")
 
     await models.AgreementAcceptance.accept_agreement(
-        request.state.db,
-        request.state.session.user.id,
+        request.state["db"],
+        request.state["session"].user.id,
         policy.agreement_id,
         policy.id,
     )
@@ -9051,9 +9104,9 @@ async def accept_user_agreement(policy_id: str, request: Request):
     dependencies=[Depends(Authz("admin"))],
     response_model=schemas.Agreements,
 )
-async def list_user_agreements(request: Request):
+async def list_user_agreements(request: StateRequest):
     """Get all user agreements."""
-    agreements = await models.Agreement.get_all(request.state.db)
+    agreements = await models.Agreement.get_all(request.state["db"])
     return {"agreements": agreements}
 
 
@@ -9064,10 +9117,10 @@ async def list_user_agreements(request: Request):
 )
 async def create_user_agreement(
     req: schemas.CreateAgreementRequest,
-    request: Request,
+    request: StateRequest,
 ):
     """Create a user agreement."""
-    await models.Agreement.create(request.state.db, req)
+    await models.Agreement.create(request.state["db"], req)
     return {"status": "ok"}
 
 
@@ -9078,11 +9131,11 @@ async def create_user_agreement(
 )
 async def get_user_agreement_detail(
     agreement_id: str,
-    request: Request,
+    request: StateRequest,
 ):
     """Get a user agreement."""
     agreement = await models.Agreement.get_by_id_with_policies(
-        request.state.db, int(agreement_id)
+        request.state["db"], int(agreement_id)
     )
     if not agreement:
         raise HTTPException(404, "Agreement not found.")
@@ -9097,11 +9150,11 @@ async def get_user_agreement_detail(
 async def update_user_agreement(
     agreement_id: str,
     req: schemas.UpdateAgreementRequest,
-    request: Request,
+    request: StateRequest,
 ):
     """Update a user agreement."""
     agreement = await models.Agreement.get_by_id_with_policies(
-        request.state.db, int(agreement_id)
+        request.state["db"], int(agreement_id)
     )
 
     if not agreement:
@@ -9119,8 +9172,8 @@ async def update_user_agreement(
     if "body" in req.model_fields_set and req.body is not None:
         agreement.body = req.body
 
-    request.state.db.add(agreement)
-    await request.state.db.flush()
+    request.state["db"].add(agreement)
+    await request.state["db"].flush()
     return {"status": "ok"}
 
 
@@ -9129,9 +9182,9 @@ async def update_user_agreement(
     dependencies=[Depends(Authz("admin"))],
     response_model=schemas.AgreementPolicies,
 )
-async def list_user_agreement_policies(request: Request):
+async def list_user_agreement_policies(request: StateRequest):
     """Get all user agreement policies."""
-    policies = await models.AgreementPolicy.get_all(request.state.db)
+    policies = await models.AgreementPolicy.get_all(request.state["db"])
     return {"policies": policies}
 
 
@@ -9142,7 +9195,7 @@ async def list_user_agreement_policies(request: Request):
 )
 async def create_user_agreement_policy(
     req: schemas.CreateAgreementPolicyRequest,
-    request: Request,
+    request: StateRequest,
 ):
     """Create a user agreement policy."""
     if req.apply_to_all and req.limit_to_providers:
@@ -9157,7 +9210,7 @@ async def create_user_agreement_policy(
         )
 
     agreement = await models.Agreement.get_by_id(
-        request.state.db, int(req.agreement_id)
+        request.state["db"], int(req.agreement_id)
     )
     if not agreement:
         raise HTTPException(404, "Agreement not found.")
@@ -9165,7 +9218,7 @@ async def create_user_agreement_policy(
     providers = []
     if req.limit_to_providers:
         providers = await models.ExternalLoginProvider.get_by_ids(
-            request.state.db, req.limit_to_providers
+            request.state["db"], req.limit_to_providers
         )
 
     policy = models.AgreementPolicy(
@@ -9174,8 +9227,8 @@ async def create_user_agreement_policy(
         apply_to_all=req.apply_to_all,
         limit_to_providers=providers,
     )
-    request.state.db.add(policy)
-    await request.state.db.flush()
+    request.state["db"].add(policy)
+    await request.state["db"].flush()
 
     return {"status": "ok"}
 
@@ -9187,11 +9240,11 @@ async def create_user_agreement_policy(
 )
 async def get_user_agreement_policy(
     policy_id: str,
-    request: Request,
+    request: StateRequest,
 ):
     """Get a user agreement policy."""
     policy = await models.AgreementPolicy.get_by_id_with_external_logins(
-        request.state.db, int(policy_id)
+        request.state["db"], int(policy_id)
     )
     if not policy:
         raise HTTPException(404, "Policy not found.")
@@ -9206,11 +9259,11 @@ async def get_user_agreement_policy(
 async def update_user_agreement_policy(
     policy_id: str,
     req: schemas.UpdateAgreementPolicyRequest,
-    request: Request,
+    request: StateRequest,
 ):
     """Update a user agreement policy."""
     policy = await models.AgreementPolicy.get_by_id_with_external_logins(
-        request.state.db, int(policy_id)
+        request.state["db"], int(policy_id)
     )
     if not policy:
         raise HTTPException(404, "Policy not found.")
@@ -9225,7 +9278,7 @@ async def update_user_agreement_policy(
                 "Cannot change the agreement of a policy that has already been enabled.",
             )
         agreement = await models.Agreement.get_by_id(
-            request.state.db, int(req.agreement_id)
+            request.state["db"], int(req.agreement_id)
         )
         if not agreement:
             raise HTTPException(404, "Agreement not found.")
@@ -9264,12 +9317,12 @@ async def update_user_agreement_policy(
         providers = []
         if req.limit_to_providers:
             providers = await models.ExternalLoginProvider.get_by_ids(
-                request.state.db, req.limit_to_providers
+                request.state["db"], req.limit_to_providers
             )
         policy.limit_to_providers = providers
 
-    request.state.db.add(policy)
-    await request.state.db.flush()
+    request.state["db"].add(policy)
+    await request.state["db"].flush()
 
     return {"status": "ok"}
 
@@ -9282,10 +9335,10 @@ async def update_user_agreement_policy(
 async def toggle_user_agreement_policy(
     policy_id: str,
     req: schemas.ToggleAgreementPolicyRequest,
-    request: Request,
+    request: StateRequest,
 ):
     """Enable a user agreement policy."""
-    policy = await models.AgreementPolicy.get_by_id(request.state.db, int(policy_id))
+    policy = await models.AgreementPolicy.get_by_id(request.state["db"], int(policy_id))
     if not policy:
         raise HTTPException(404, "Policy not found.")
 
@@ -9309,8 +9362,8 @@ async def toggle_user_agreement_policy(
         case _:
             raise HTTPException(400, "Invalid action.")
 
-    request.state.db.add(policy)
-    await request.state.db.flush()
+    request.state["db"].add(policy)
+    await request.state["db"].flush()
     return {"status": "ok"}
 
 
@@ -9319,9 +9372,9 @@ async def toggle_user_agreement_policy(
     dependencies=[Depends(Authz("admin"))],
     response_model=schemas.ExternalLoginProviders,
 )
-async def get_external_login_providers(request: Request):
+async def get_external_login_providers(request: StateRequest):
     """Get the external login providers."""
-    providers = await models.ExternalLoginProvider.get_all(request.state.db)
+    providers = await models.ExternalLoginProvider.get_all(request.state["db"])
     return {"providers": providers}
 
 
@@ -9333,18 +9386,18 @@ async def get_external_login_providers(request: Request):
 async def update_external_login_provider(
     provider_id: str,
     req: schemas.UpdateExternalLoginProvider,
-    request: Request,
+    request: StateRequest,
 ):
     """Update an external login provider."""
     provider = await models.ExternalLoginProvider.get_by_id(
-        request.state.db, int(provider_id)
+        request.state["db"], int(provider_id)
     )
     if not provider:
         raise HTTPException(404, "Provider not found.")
     provider.description = req.description
     provider.display_name = req.display_name
-    request.state.db.add(provider)
-    await request.state.db.flush()
+    request.state["db"].add(provider)
+    await request.state["db"].flush()
     return {"status": "ok"}
 
 
@@ -9352,7 +9405,7 @@ async def update_external_login_provider(
     "/support",
     response_model=schemas.Support,
 )
-async def get_support(request: Request):
+async def get_support(request: StateRequest):
     """Get the support information."""
     return {
         "blurb": config.support.blurb(),
@@ -9367,7 +9420,7 @@ async def get_support(request: Request):
 )
 async def post_support(
     req: schemas.SupportRequest,
-    request: Request,
+    request: StateRequest,
 ):
     """Post a support request."""
     if not config.support.driver:
@@ -9408,7 +9461,7 @@ app = FastAPI(
 
 
 @app.exception_handler(Exception)
-async def handle_exception(request: Request, exc: Exception):
+async def handle_exception(request: StateRequest, exc: Exception):
     """Handle exceptions."""
     if isinstance(exc, HTTPException):
         return JSONResponse(

@@ -7,7 +7,7 @@ from typing import Any, cast
 from urllib.parse import urlencode
 import aiohttp
 import jwt
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends
 from fastapi.responses import RedirectResponse
 
 from pingpong.auth import encode_session_token
@@ -45,6 +45,7 @@ from pingpong.models import (
 from pingpong.server import get_now_fn
 from pingpong.users import AddNewUsersManual, AddUserException
 from pingpong.permission import LoggedIn
+from pingpong.state_types import StateRequest
 from .key_manager import LTIKeyManager
 from pingpong.schemas import (
     ClassUserRoles,
@@ -206,11 +207,11 @@ async def get_jwks(key_manager: LTIKeyManager = Depends(get_lti_key_manager)):
 
 
 @lti_router.get("/sso/providers", response_model=ExternalLoginProviders)
-async def get_sso_ids(request: Request):
+async def get_sso_ids(request: StateRequest):
     """
     Get the SSO identifiers for the LTI instance.
     """
-    external_login_providers = await ExternalLoginProvider.get_all(request.state.db)
+    external_login_providers = await ExternalLoginProvider.get_all(request.state["db"])
     no_email_providers = [
         provider for provider in external_login_providers if provider.name != "email"
     ]
@@ -218,8 +219,8 @@ async def get_sso_ids(request: Request):
 
 
 @lti_router.get("/public/sso/providers", response_model=LTIPublicSSOProviders)
-async def get_public_sso_providers(request: Request):
-    providers = await ExternalLoginProvider.get_all(request.state.db)
+async def get_public_sso_providers(request: StateRequest):
+    providers = await ExternalLoginProvider.get_all(request.state["db"])
     return {
         "providers": [
             {"id": p.id, "name": p.name, "display_name": p.display_name}
@@ -230,15 +231,15 @@ async def get_public_sso_providers(request: Request):
 
 
 @lti_router.get("/public/institutions", response_model=LTIPublicInstitutions)
-async def get_public_institutions(request: Request):
-    institutions = await Institution.get_all_with_default_api_key(request.state.db)
+async def get_public_institutions(request: StateRequest):
+    institutions = await Institution.get_all_with_default_api_key(request.state["db"])
     return {
         "institutions": [{"id": inst.id, "name": inst.name} for inst in institutions]
     }
 
 
 @lti_router.post("/register")
-async def register_lti_instance(request: Request, data: LTIRegisterRequest):
+async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest):
     """
     Register a new LTI instance.
     """
@@ -264,7 +265,7 @@ async def register_lti_instance(request: Request, data: LTIRegisterRequest):
 
     # Validate that all selected institutions have a default API key
     if not await Institution.all_have_default_api_key(
-        request.state.db, data.institution_ids
+        request.state["db"], data.institution_ids
     ):
         raise HTTPException(
             status_code=400,
@@ -469,7 +470,7 @@ async def register_lti_instance(request: Request, data: LTIRegisterRequest):
     }
 
     await LTIRegistration.create(
-        request.state.db, new_registration, data.institution_ids
+        request.state["db"], new_registration, data.institution_ids
     )
 
     try:
@@ -488,7 +489,7 @@ async def register_lti_instance(request: Request, data: LTIRegisterRequest):
 
 
 @lti_router.api_route("/login", methods=["GET", "POST"])
-async def lti_login(request: Request):
+async def lti_login(request: StateRequest):
     """Handle LTI login requests.
 
     Receives an OIDC initiation request from the platform and responds with a browser redirect
@@ -507,7 +508,9 @@ async def lti_login(request: Request):
     if not isinstance(iss, str) or not iss:
         raise HTTPException(status_code=400, detail="Missing or invalid iss")
 
-    registration = await LTIRegistration.get_by_client_id(request.state.db, client_id)
+    registration = await LTIRegistration.get_by_client_id(
+        request.state["db"], client_id
+    )
     if registration is None:
         raise HTTPException(status_code=404, detail="Unknown LTI client_id")
 
@@ -546,7 +549,7 @@ async def lti_login(request: Request):
     now = get_now_fn(request)()
     redirect_uri = config.url("/api/v1/lti/launch")
     _, state, nonce = await LTIOIDCSession.create_pending(
-        request.state.db,
+        request.state["db"],
         issuer=iss,
         client_id=client_id,
         deployment_id=request_deployment_id,
@@ -623,7 +626,7 @@ async def _can_view_by_class_id(
 
 @lti_router.post("/launch")
 async def lti_launch(
-    request: Request,
+    request: StateRequest,
     tasks: BackgroundTasks,
 ):
     form = await request.form()
@@ -638,7 +641,7 @@ async def lti_launch(
 
     now: datetime = get_now_fn(request)()
 
-    oidc_session = await LTIOIDCSession.get_by_state(request.state.db, state)
+    oidc_session = await LTIOIDCSession.get_by_state(request.state["db"], state)
     if oidc_session is None:
         raise HTTPException(status_code=400, detail="Unknown state")
     if oidc_session.is_consumed():
@@ -651,7 +654,7 @@ async def lti_launch(
         raise HTTPException(status_code=400, detail="OIDC redirect_uri mismatch")
 
     registration = await LTIRegistration.get_by_client_id(
-        request.state.db, oidc_session.client_id
+        request.state["db"], oidc_session.client_id
     )
     if registration is None:
         raise HTTPException(status_code=404, detail="Unknown LTI client_id")
@@ -683,7 +686,7 @@ async def lti_launch(
         deployment_id_to_check = deployment_id_claim
 
     consumed = await LTIOIDCSession.validate_and_consume(
-        request.state.db,
+        request.state["db"],
         state=state,
         nonce=nonce,
         now=now,
@@ -713,14 +716,14 @@ async def lti_launch(
 
     if registration.canvas_account_lti_guid:
         class_ = await find_class_by_course_id_search_by_canvas_account_lti_guid(
-            request.state.db,
+            request.state["db"],
             registration_id=registration.id,
             canvas_account_lti_guid=registration.canvas_account_lti_guid,
             course_id=course_id,
         )
     else:
         class_ = await find_class_by_course_id(
-            request.state.db,
+            request.state["db"],
             registration.id,
             course_id,
         )
@@ -745,7 +748,7 @@ async def lti_launch(
 
     if int(sso_provider_id_str) != 0:
         sso_provider = await ExternalLoginProvider.get_by_id(
-            request.state.db, int(sso_provider_id_str)
+            request.state["db"], int(sso_provider_id_str)
         )
         if sso_provider is None:
             raise HTTPException(status_code=400, detail="Unknown SSO provider id")
@@ -753,7 +756,7 @@ async def lti_launch(
         if not sso_value or sso_value in LTI_CUSTOM_PARAM_DEFAULT_VALUES["sso_value"]:
             sso_value = None
         user = await User.get_by_email_sso(
-            request.state.db,
+            request.state["db"],
             user_email,
             provider=sso_provider.name,
             identifier=sso_value,
@@ -762,14 +765,14 @@ async def lti_launch(
             user.email = user_email
             if sso_value:
                 await ExternalLogin.create_or_update(
-                    request.state.db,
+                    request.state["db"],
                     user.id,
                     provider=sso_provider.name,
                     identifier=sso_value,
                     called_by="lti_launch",
                 )
     else:
-        user = await User.get_by_email(request.state.db, user_email)
+        user = await User.get_by_email(request.state["db"], user_email)
 
     if not user:
         if is_admin and not (is_instructor or is_student):
@@ -790,10 +793,10 @@ async def lti_launch(
 
     user.state = UserState.VERIFIED
 
-    request.state.db.add(user)
-    await request.state.db.flush()
-    await request.state.db.refresh(user)
-    request.state.session.user = user
+    request.state["db"].add(user)
+    await request.state["db"].flush()
+    await request.state["db"].refresh(user)
+    request.state["session"].user = user
     user_token = encode_session_token(user.id, nowfn=get_now_fn(request))
 
     if class_ is None or (
@@ -807,8 +810,8 @@ async def lti_launch(
                 # Resume existing setup
                 pending_lti_class = class_
                 pending_lti_class.setup_user_id = user.id
-                request.state.db.add(pending_lti_class)
-                await request.state.db.flush()
+                request.state["db"].add(pending_lti_class)
+                await request.state["db"].flush()
             else:
                 # Create new pending LTIClass to store context
                 course_details = claims.get(
@@ -841,8 +844,8 @@ async def lti_launch(
                     setup_user_id=user.id,
                     context_memberships_url=context_memberships_url,
                 )
-                request.state.db.add(pending_lti_class)
-                await request.state.db.flush()
+                request.state["db"].add(pending_lti_class)
+                await request.state["db"].flush()
 
             return RedirectResponse(
                 url=config.url(
@@ -868,7 +871,7 @@ async def lti_launch(
             else:
                 if is_admin and not (is_instructor or is_student):
                     if not await _can_view_by_class_id(
-                        request.state.authz,
+                        request.state["authz"],
                         user.id,
                         class_.class_id,
                     ):
@@ -925,14 +928,14 @@ async def lti_launch(
                 )
         elif isinstance(class_, LTIClass):
             second_lti_class = None
-            pp_class = await Class.get_by_id(request.state.db, class_.class_id)
+            pp_class = await Class.get_by_id(request.state["db"], class_.class_id)
             if pp_class is None:
                 raise HTTPException(status_code=404, detail="Class not found")
 
             is_admin_supervisor = False
             if is_admin:
                 is_admin_supervisor = await _is_supervisor_by_class_id(
-                    request.state.authz,
+                    request.state["authz"],
                     user.id,
                     pp_class.id,
                 )
@@ -967,9 +970,9 @@ async def lti_launch(
                     setup_user_id=user.id,
                     context_memberships_url=context_memberships_url,
                 )
-                request.state.db.add(second_lti_class)
-                await request.state.db.flush()
-                await request.state.db.refresh(second_lti_class)
+                request.state["db"].add(second_lti_class)
+                await request.state["db"].flush()
+                await request.state["db"].refresh(second_lti_class)
 
             if pp_class.lms_user_id == user.id:
                 return RedirectResponse(
@@ -979,7 +982,7 @@ async def lti_launch(
             else:
                 if is_admin and not (is_instructor or is_student):
                     if not await _can_view_by_class_id(
-                        request.state.authz,
+                        request.state["authz"],
                         user.id,
                         pp_class.id,
                     ):
@@ -1037,7 +1040,7 @@ async def lti_launch(
             is_admin_supervisor = False
             if is_admin:
                 is_admin_supervisor = await _is_supervisor_by_class_id(
-                    request.state.authz,
+                    request.state["authz"],
                     user.id,
                     class_.id,
                 )
@@ -1072,9 +1075,9 @@ async def lti_launch(
                     setup_user_id=user.id,
                     context_memberships_url=context_memberships_url,
                 )
-                request.state.db.add(new_lti_class)
-                await request.state.db.flush()
-                await request.state.db.refresh(new_lti_class)
+                request.state["db"].add(new_lti_class)
+                await request.state["db"].flush()
+                await request.state["db"].refresh(new_lti_class)
 
             if class_.lms_user_id == user.id:
                 return RedirectResponse(
@@ -1083,7 +1086,7 @@ async def lti_launch(
                 )
             elif is_admin and not (is_instructor or is_student):
                 if not await _can_view_by_class_id(
-                    request.state.authz,
+                    request.state["authz"],
                     user.id,
                     class_.id,
                 ):
@@ -1162,13 +1165,15 @@ async def lti_launch(
             )
 
 
-async def _get_lti_class_for_setup(request: Request, lti_class_id: int) -> LTIClass:
-    lti_class = await LTIClass.get_by_id_for_setup(request.state.db, lti_class_id)
+async def _get_lti_class_for_setup(
+    request: StateRequest, lti_class_id: int
+) -> LTIClass:
+    lti_class = await LTIClass.get_by_id_for_setup(request.state["db"], lti_class_id)
 
     if not lti_class:
         raise HTTPException(status_code=404, detail="LTI class not found")
 
-    if lti_class.setup_user_id != request.state.session.user.id:
+    if lti_class.setup_user_id != request.state["session"].user.id:
         raise HTTPException(
             status_code=403, detail="Not authorized to setup this class"
         )
@@ -1184,7 +1189,7 @@ async def _get_lti_class_for_setup(request: Request, lti_class_id: int) -> LTICl
     dependencies=[Depends(LoggedIn())],
     response_model=LTISetupContext,
 )
-async def get_lti_setup_context(request: Request, lti_class_id: int):
+async def get_lti_setup_context(request: StateRequest, lti_class_id: int):
     lti_class = await _get_lti_class_for_setup(request, lti_class_id)
 
     institutions = [
@@ -1207,9 +1212,9 @@ async def get_lti_setup_context(request: Request, lti_class_id: int):
     dependencies=[Depends(LoggedIn())],
     response_model=LTILinkableGroupsResponse,
 )
-async def get_lti_linkable_groups(request: Request, lti_class_id: int):
-    teacher_class_ids = await request.state.authz.list(
-        f"user:{request.state.session.user.id}",
+async def get_lti_linkable_groups(request: StateRequest, lti_class_id: int):
+    teacher_class_ids = await request.state["authz"].list(
+        f"user:{request.state['session'].user.id}",
         "supervisor",
         "class",
     )
@@ -1217,7 +1222,7 @@ async def get_lti_linkable_groups(request: Request, lti_class_id: int):
     if not teacher_class_ids:
         return LTILinkableGroupsResponse(groups=[])
 
-    classes = await Class.get_all_by_id_simple(request.state.db, teacher_class_ids)
+    classes = await Class.get_all_by_id_simple(request.state["db"], teacher_class_ids)
 
     linkable_groups = [
         LTILinkableGroup(
@@ -1238,7 +1243,7 @@ async def get_lti_linkable_groups(request: Request, lti_class_id: int):
     response_model=LTISetupCreateResponse,
 )
 async def create_lti_group(
-    request: Request, lti_class_id: int, body: LTISetupCreateRequest
+    request: StateRequest, lti_class_id: int, body: LTISetupCreateRequest
 ):
     """Create a new group and link it to the pending LTIClass."""
     lti_class = await _get_lti_class_for_setup(request, lti_class_id)
@@ -1261,25 +1266,29 @@ async def create_lti_group(
         institution_id=valid_institution.id,
         api_key_id=valid_institution.default_api_key_id,
     )
-    request.state.db.add(new_class)
-    await request.state.db.flush()
-    await request.state.db.refresh(new_class)
+    request.state["db"].add(new_class)
+    await request.state["db"].flush()
+    await request.state["db"].refresh(new_class)
 
     lti_class.class_id = new_class.id
     lti_class.lti_status = LTIStatus.LINKED
-    request.state.db.add(lti_class)
+    request.state["db"].add(lti_class)
 
-    user = await User.get_by_id(request.state.db, request.state.session.user.id)
+    user = await User.get_by_id(request.state["db"], request.state["session"].user.id)
     user_class_role = UserClassRole(
-        user_id=request.state.session.user.id,
+        user_id=request.state["session"].user.id,
         class_id=new_class.id,
         subscribed_to_summaries=not user.dna_as_create,
     )
-    request.state.db.add(user_class_role)
+    request.state["db"].add(user_class_role)
 
     grants = [
         (f"institution:{valid_institution.id}", "parent", f"class:{new_class.id}"),
-        (f"user:{request.state.session.user.id}", "teacher", f"class:{new_class.id}"),
+        (
+            f"user:{request.state['session'].user.id}",
+            "teacher",
+            f"class:{new_class.id}",
+        ),
     ]
 
     if not new_class.private:
@@ -1343,7 +1352,7 @@ async def create_lti_group(
             )
         )
 
-    await request.state.authz.write(grant=grants)
+    await request.state["authz"].write(grant=grants)
 
     return LTISetupCreateResponse(class_id=new_class.id)
 
@@ -1354,14 +1363,14 @@ async def create_lti_group(
     response_model=LTISetupLinkResponse,
 )
 async def link_lti_group(
-    request: Request, lti_class_id: int, body: LTISetupLinkRequest
+    request: StateRequest, lti_class_id: int, body: LTISetupLinkRequest
 ):
     """Link an existing group to the pending LTIClass."""
     lti_class = await _get_lti_class_for_setup(request, lti_class_id)
-    user = request.state.session.user
+    user = request.state["session"].user
 
     # Verify user has teacher role on the target class using authz
-    has_teacher_role = await request.state.authz.test(
+    has_teacher_role = await request.state["authz"].test(
         f"user:{user.id}", "teacher", f"class:{body.class_id}"
     )
     if not has_teacher_role:
@@ -1369,7 +1378,7 @@ async def link_lti_group(
 
     # Verify class doesn't already have an LTI link for this registration
     has_link = await LTIClass.has_link_for_registration_and_class(
-        request.state.db, lti_class.registration_id, body.class_id
+        request.state["db"], lti_class.registration_id, body.class_id
     )
     if has_link:
         raise HTTPException(
@@ -1380,6 +1389,6 @@ async def link_lti_group(
     # Update the LTIClass to link it
     lti_class.class_id = body.class_id
     lti_class.lti_status = LTIStatus.LINKED
-    request.state.db.add(lti_class)
+    request.state["db"].add(lti_class)
 
     return LTISetupLinkResponse(class_id=body.class_id)
