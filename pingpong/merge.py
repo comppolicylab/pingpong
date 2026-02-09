@@ -259,15 +259,12 @@ async def merge_external_logins(
         .where(
             and_(
                 existing_login.c.user_id == new_user_id,
+                ExternalLogin.provider != "email",
                 or_(
-                    and_(
-                        existing_login.c.provider == ExternalLogin.provider,
-                        existing_login.c.identifier == ExternalLogin.identifier,
-                    ),
+                    existing_login.c.provider == ExternalLogin.provider,
                     and_(
                         ExternalLogin.provider_id.is_not(None),
                         existing_login.c.provider_id == ExternalLogin.provider_id,
-                        existing_login.c.identifier == ExternalLogin.identifier,
                     ),
                 ),
             )
