@@ -12,6 +12,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from pingpong.artifacts import LocalArtifactStore, S3ArtifactStore
 from pingpong.audio_store import LocalAudioStore, S3AudioStore
+from pingpong.video_stream import LocalVideoStream, S3VideoStream
 from pingpong.log_filters import IgnoreHealthEndpoint
 from .authz import OpenFgaAuthzDriver
 from .email import AzureEmailSender, GmailEmailSender, MockEmailSender, SmtpEmailSender
@@ -245,6 +246,32 @@ class LocalStoreSettings(BaseSettings):
 ArtifactStoreSettings = Union[S3StoreSettings, LocalStoreSettings]
 
 
+class S3VideoStreamSettings(BaseSettings):
+    """Settings for S3 Video Streaming"""
+
+    type: Literal["s3"] = "s3"
+    save_target: str
+    allow_unsigned: bool = Field(False)
+
+    @cached_property
+    def store(self):
+        return S3VideoStream(self.save_target, self.allow_unsigned)
+
+
+class LocalVideoStreamSettings(BaseSettings):
+    """Settings for Local Video Streaming"""
+
+    type: Literal["local"] = "local"
+    save_target: str
+
+    @cached_property
+    def store(self):
+        return LocalVideoStream(self.save_target)
+
+
+VideoStreamSettings = Union[S3VideoStreamSettings, LocalVideoStreamSettings]
+
+
 class S3AudioStoreSettings(BaseSettings):
     """Settings for S3 storage."""
 
@@ -339,6 +366,9 @@ class Config(BaseSettings):
     )
     audio_store: AudioStoreSettings = LocalAudioStoreSettings(
         save_target="local_exports/voice_mode_recordings"
+    )
+    video_stream: VideoStreamSettings = LocalVideoStreamSettings(
+        save_target="local_exports/video_stream_exports"
     )
     db: DbSettings
     auth: AuthSettings

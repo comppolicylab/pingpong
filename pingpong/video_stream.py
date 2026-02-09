@@ -13,8 +13,7 @@ from typing import AsyncGenerator
 from aiohttp import ClientError
 from botocore import UNSIGNED
 from botocore.client import Config
-from schemas import VideoMetadata
-# Workaround for needing credentials for public s3 buckets
+from .schemas import VideoMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -82,24 +81,6 @@ class S3VideoStream(BaseVideoStream):
                     code=500, detail=f"Failed to get video metadata from S3: {str(e)}"
                 ) from e
 
-    async def stream_video(
-        self, key: str, chunk_size: int = 1024 * 1024
-    ) -> AsyncGenerator[bytes, None]:
-        "Stream a video from S3, as it exists - no specifying range"
-        config = Config(signature_version=UNSIGNED) if self._allow_unsigned else None
-        async with aioboto3.Session().client("s3", config=config) as s3_client:
-            try:
-                s3_object = await s3_client.get_object(Bucket=self._bucket, Key=key)
-                async for chunk in s3_object["Body"].iter_chunks(chunk_size=chunk_size):
-                    yield chunk
-            except ClientError as e:
-                safe_key = re.sub(r"[^\w\-\./]", "", key)
-                logger.exception(f"Error streaming video {safe_key}: {e}")
-                raise VideoStreamError(
-                    code=502,
-                    detail=f"Error streaming Video: {str(e)}",
-                ) from e
-
     async def stream_video_range(
         self,
         key: str,
@@ -108,34 +89,64 @@ class S3VideoStream(BaseVideoStream):
         chunk_size: int = 1024 * 1024,
     ) -> AsyncGenerator[bytes, None]:
         """
-        Stream a video file or byte range from S3; Supports HTTP range requests for video seeking.
+        Stream a video file or byte range from S3.
+        Supports HTTP range requests for video seeking.
         """
         config = Config(signature_version=UNSIGNED) if self._allow_unsigned else None
+
         async with aioboto3.Session().client("s3", config=config) as s3_client:
             try:
-                # Build the range header if start/end specified
-                range_header = None
+                params = {
+                    "Bucket": self._bucket,
+                    "Key": key,
+                }
+
                 if start is not None or end is not None:
-                    start_byte = start if start is not None else 0
-                    end_byte = end if end is not None else ""
-                    range_header = f"bytes={start_byte}-{end_byte}"
+                    params["Range"] = f"bytes={start or 0}-{'' if end is None else end}"
 
-                # Get the object with optional range
-                get_params = {"Bucket": self._bucket, "Key": key}
-                if range_header:
-                    get_params["Range"] = range_header
+                s3_object = await s3_client.get_object(**params)
 
-                s3_object = await s3_client.get_object(**get_params)
                 async for chunk in s3_object["Body"].iter_chunks(chunk_size=chunk_size):
                     yield chunk
 
             except ClientError as e:
+                error_code = e.response.get("Error", {}).get("Code", "")
+                if error_code == "InvalidRange":
+                    raise VideoStreamError(code=416, detail="Range entered is invalid")
+
+                if error_code == "AccessDenied":
+                    raise VideoStreamError(
+                        code=403,
+                        detail="You don't have the permissions to view the resource",
+                    )
+
+                if error_code == "NoSuchKey":
+                    raise VideoStreamError(
+                        code=404, detail="The specified key does not exist"
+                    )
+
                 safe_key = re.sub(r"[^\w\-\./]", "", key)
-                logger.exception(f"Error streaming video {safe_key}: {e}")
+                logger.exception("Error streaming video %s", safe_key)
                 raise VideoStreamError(
                     code=502,
-                    detail=f"Error streaming Video: {str(e)}",
+                    detail=f"Error streaming Video: {e}",
                 ) from e
+
+    async def stream_video(
+        self,
+        key: str,
+        chunk_size: int = 1024 * 1024,
+    ) -> AsyncGenerator[bytes, None]:
+        """
+        Stream a full video from S3 (no byte range).
+        """
+        async for chunk in self.stream_video_range(
+            key=key,
+            start=None,
+            end=None,
+            chunk_size=chunk_size,
+        ):
+            yield chunk
 
 
 class LocalVideoStream(BaseVideoStream):
@@ -162,9 +173,9 @@ class LocalVideoStream(BaseVideoStream):
             stat = file_path.stat()
 
             # determine content type
-            content_type, _ = mimetypes.guess_type(str(file_path))  # check this
-            if not content_type:
-                content_type = "video/mp4"
+            content_type, _ = mimetypes.guess_type(str(file_path))
+            if content_type.lower() not in {"video/mp4", "video/webm"}:
+                raise TypeError(f"Unsupported video format: {content_type}")
 
             local_timestamp = stat.st_mtime
             local_last_modified = datetime.fromtimestamp(
@@ -182,30 +193,6 @@ class LocalVideoStream(BaseVideoStream):
                 code=500, detail=f"Error accessing video metadata: {str(e)}"
             ) from e
 
-    async def stream_video(
-        self, key: str, chunk_size: int = 1024 * 1024
-    ) -> AsyncGenerator[bytes, None]:
-        "Stream a video from local filesystem, as it exists - no specifying range"
-        file_path = self._directory / key
-        try:
-            with open(file_path, "rb") as f:
-                while chunk := f.read(chunk_size):
-                    yield chunk
-        except VideoStreamError:
-            raise
-        except FileNotFoundError as e:
-            safe_key = re.sub(r"[^\w\-\./]", "", key)
-            logger.exception(f"File not found {safe_key}")
-            raise VideoStreamError(
-                code=404, detail=f"Video file not found: {safe_key}"
-            ) from e
-        except Exception as e:
-            safe_key = re.sub(r"[^\w\-\./]", "", key)
-            logger.exception(f"Unexpected error streaming video file {safe_key}")
-            raise VideoStreamError(
-                code=404, detail=f"Error streaming video: {str(e)}"
-            ) from e
-
     async def stream_video_range(
         self,
         key: str,
@@ -214,20 +201,30 @@ class LocalVideoStream(BaseVideoStream):
         chunk_size: int = 1024 * 1024,
     ) -> AsyncGenerator[bytes, None]:
         """
-        stream a video file or byte range from local filesystem; supports range requests for video seeking.
+        Stream a video file or byte range from local filesystem
+        Supports HTTP range requests for video seeking.
         """
         file_path = self._directory / key
         try:
             file_size = file_path.stat().st_size
 
-            # Calculate actual start and end positions
+            if start is not None and (start < 0 or start >= file_size):
+                raise VideoStreamError(
+                    code=416, detail="Start range entered is invalid"
+                )
+
+            if end is not None:
+                if end < 0 or end >= file_size:
+                    raise VideoStreamError(
+                        code=416, detail="End range entered is invalid"
+                    )
+                if start is not None and end < start:
+                    raise VideoStreamError(
+                        code=416, detail="Start range entered is after end range"
+                    )
+
             start_pos = start if start is not None else 0
             end_pos = end if end is not None else file_size - 1
-
-            if start_pos < 0 or start_pos >= file_size:
-                raise VideoStreamError(code=416, detail="Invalid start position")
-            if end_pos < start_pos or end_pos >= file_size:
-                raise VideoStreamError(code=416, detail="Invalid end position")
 
             # Stream the file
             with open(file_path, "rb") as f:
@@ -241,17 +238,32 @@ class LocalVideoStream(BaseVideoStream):
                         break
                     bytes_read += len(chunk)
                     yield chunk
+
         except VideoStreamError:
             raise
-        except FileNotFoundError as e:
+        except FileNotFoundError:
+            raise VideoStreamError(code=404, detail="File not found")
+        except PermissionError:
+            raise VideoStreamError(code=403, detail="Permission denied")
+        except OSError as e:
             safe_key = re.sub(r"[^\w\-\./]", "", key)
-            logger.exception(f"File not found {safe_key}")
+            logger.exception("Error streaming video %s", safe_key)
             raise VideoStreamError(
-                code=404, detail=f"Video file not found: {safe_key}"
+                code=500, detail=f"Error streaming video: {e}"
             ) from e
-        except Exception as e:
-            safe_key = re.sub(r"[^\w\-\./]", "", key)
-            logger.exception(f"Unexpected error streaming video file {safe_key}")
-            raise VideoStreamError(
-                code=404, detail=f"Error streaming video: {str(e)}"
-            ) from e
+
+    async def stream_video(
+        self,
+        key: str,
+        chunk_size: int = 1024 * 1024,
+    ) -> AsyncGenerator[bytes, None]:
+        """
+        Stream a full video from S3 (no byte range).
+        """
+        async for chunk in self.stream_video_range(
+            key=key,
+            start=None,
+            end=None,
+            chunk_size=chunk_size,
+        ):
+            yield chunk
