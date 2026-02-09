@@ -32,7 +32,8 @@ class Expression:
         return request.state["permissions"][key]
 
     @abstractmethod
-    async def test(self, request: StateRequest) -> bool: ...
+    async def test(self, request: StateRequest) -> bool:
+        raise NotImplementedError()
 
     def __or__(self, other):
         return Or(self, other)
