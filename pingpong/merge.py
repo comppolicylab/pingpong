@@ -251,39 +251,12 @@ async def merge_mcp_updated_by(
 async def merge_external_logins(
     session: AsyncSession, new_user_id: int, old_user_id: int
 ) -> None:
-    delete_stmt = (
-        delete(ExternalLogin)
+    stmt = (
+        update(ExternalLogin)
         .where(ExternalLogin.user_id == old_user_id)
-        .returning(ExternalLogin.provider, ExternalLogin.identifier)
+        .values(user_id=new_user_id)
     )
-    result = await session.execute(delete_stmt)
-    old_logins = result.fetchall()
-
-    logger.info(
-        f"ELDEBUG: (merge_external_logins) ExternalLogin RID before migration: {await ExternalLogin.get_last_row_id(session)}"
-    )
-
-    for provider, identifier in old_logins:
-        logger.info(
-            f"ELDEBUG: (merge_external_logins) ExternalLogin RID before {provider}, {identifier} migration: {await ExternalLogin.get_last_row_id(session)}"
-        )
-
-        # Use the create_or_update method to migrate each login to the new user
-        await ExternalLogin.create_or_update(
-            session,
-            user_id=new_user_id,
-            provider=provider,
-            identifier=identifier,
-            called_by="merge_external_logins",
-        )
-
-        logger.info(
-            f"ELDEBUG: (merge_external_logins) ExternalLogin RID after {provider}, {identifier} migration: {await ExternalLogin.get_last_row_id(session)}"
-        )
-
-    logger.info(
-        f"ELDEBUG: (merge_external_logins) ExternalLogin RID after migration: {await ExternalLogin.get_last_row_id(session)}"
-    )
+    await session.execute(stmt)
 
 
 async def merge_user_files(
