@@ -53,7 +53,7 @@
 		"@sentry/sveltekit": "^10.38.0",
 		"@zerodevx/svelte-toast": "^0.9.6",
 		"dayjs": "^1.11.19",
-		"dotenv": "^17.2.3",
+		"dotenv": "^17.2.4",
 		"flowbite-svelte-icons": "^1.6.2",
 		"highlight.js": "^11.11.1",
 		"isomorphic-dompurify": "^2.35.0",
