@@ -10,7 +10,7 @@ from pathlib import Path
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from typing import AsyncGenerator
-from aiohttp import ClientError
+from botocore.exceptions import ClientError
 from botocore import UNSIGNED
 from botocore.client import Config
 from .schemas import VideoMetadata
@@ -174,7 +174,10 @@ class LocalVideoStream(BaseVideoStream):
 
             # determine content type
             content_type, _ = mimetypes.guess_type(str(file_path))
-            if content_type.lower() not in {"video/mp4", "video/webm"}:
+            if content_type is None or content_type.lower() not in {
+                "video/mp4",
+                "video/webm",
+            }:
                 raise TypeError(f"Unsupported video format: {content_type}")
 
             local_timestamp = stat.st_mtime
