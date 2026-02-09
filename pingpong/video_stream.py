@@ -261,7 +261,7 @@ class LocalVideoStream(BaseVideoStream):
         chunk_size: int = 1024 * 1024,
     ) -> AsyncGenerator[bytes, None]:
         """
-        Stream a full video from S3 (no byte range).
+        Stream a full video from the local filesystem (no byte range).
         """
         async for chunk in self.stream_video_range(
             key=key,
