@@ -64,7 +64,7 @@ class S3VideoStore(BaseVideoStore):
                     "video/mp4",
                     "video/webm",
                 }:
-                    raise VideoStoreError(f"Unsupported video format: {content_type}")
+                    raise TypeError(f"Unsupported video format: {content_type}")
 
                 return VideoMetadata(
                     content_length=response["ContentLength"],
@@ -155,12 +155,20 @@ class LocalVideoStore(BaseVideoStore):
 
         # Create the directory if it doesn't exist
         target.mkdir(parents=True, exist_ok=True)
-        self._directory = target
+        self._directory = target.resolve()
+
+    def _resolve_key_path(self, key: str) -> Path:
+        file_path = (self._directory / key).resolve(strict=False)
+        try:
+            file_path.relative_to(self._directory)
+        except ValueError as e:
+            raise VideoStoreError("Invalid key path") from e
+        return file_path
 
     async def get_video_metadata(self, key: str) -> VideoMetadata:
         """get metadata about a video file from local filesystem."""
 
-        file_path = self._directory / key
+        file_path = self._resolve_key_path(key)
         if not file_path.exists():
             raise VideoStoreError("File not found")
 
@@ -186,6 +194,8 @@ class LocalVideoStore(BaseVideoStore):
                 content_type=content_type,
                 last_modified=local_last_modified,
             )
+        except VideoStoreError:
+            raise
         except TypeError:
             raise
         except Exception as e:
@@ -203,7 +213,7 @@ class LocalVideoStore(BaseVideoStore):
         Stream a video file or byte range from local filesystem
         Supports HTTP range requests for video seeking.
         """
-        file_path = self._directory / key
+        file_path = self._resolve_key_path(key)
         try:
             file_size = file_path.stat().st_size
 

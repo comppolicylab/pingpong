@@ -139,7 +139,7 @@ async def test_s3_authenticated_key_maps_error(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_s3_authenticated_invalid_content_type(monkeypatch):
-    """Raises TypeError when S3 object has invalid content type"""
+    """Raises TypeError when S3 object has invalid content type."""
 
     mock_client = AsyncMock()
     mock_session = AsyncMock()
@@ -154,7 +154,7 @@ async def test_s3_authenticated_invalid_content_type(monkeypatch):
 
     store = S3VideoStore(bucket="test-bucket", allow_unsigned=False)
 
-    # Test: get_metadata raises VideoStoreError for unplayable data
+    # Test: get_metadata raises TypeError for unplayable data
     mock_client.head_object = AsyncMock(
         return_value={
             "ContentLength": 1000,
@@ -164,13 +164,13 @@ async def test_s3_authenticated_invalid_content_type(monkeypatch):
         }
     )
 
-    with pytest.raises(VideoStoreError) as excinfo:
+    with pytest.raises(TypeError) as excinfo:
         await store.get_video_metadata("file.bin")
 
-    assert "Unsupported video format" in excinfo.value.detail
-    assert "application/octet-stream" in excinfo.value.detail
+    assert "Unsupported video format" in str(excinfo.value)
+    assert "application/octet-stream" in str(excinfo.value)
 
-    # Test: get_metadata raises VideoStoreError for non-video content types
+    # Test: get_metadata raises TypeError for non-video content types
     mock_client.head_object = AsyncMock(
         return_value={
             "ContentLength": 1000,
@@ -180,11 +180,11 @@ async def test_s3_authenticated_invalid_content_type(monkeypatch):
         }
     )
 
-    with pytest.raises(VideoStoreError) as excinfo:
+    with pytest.raises(TypeError) as excinfo:
         await store.get_video_metadata("document.pdf")
 
-    assert "Unsupported video format" in excinfo.value.detail
-    assert "application/pdf" in excinfo.value.detail
+    assert "Unsupported video format" in str(excinfo.value)
+    assert "application/pdf" in str(excinfo.value)
 
 
 @pytest.mark.asyncio
@@ -279,3 +279,28 @@ async def test_local_stream_range_invalid(monkeypatch, tmp_path):
         ):
             pass
     assert "end range entered is invalid" in excinfo.value.detail.lower()
+
+
+@pytest.mark.asyncio
+async def test_local_rejects_path_traversal_for_metadata(tmp_path):
+    store = LocalVideoStore(str(tmp_path))
+    escape_target = tmp_path.parent / "outside.mp4"
+    escape_target.write_bytes(b"hidden")
+
+    with pytest.raises(VideoStoreError) as excinfo:
+        await store.get_video_metadata("../outside.mp4")
+
+    assert "invalid key path" in excinfo.value.detail.lower()
+
+
+@pytest.mark.asyncio
+async def test_local_rejects_absolute_path_for_streaming(tmp_path):
+    store = LocalVideoStore(str(tmp_path))
+    escape_target = tmp_path.parent / "outside.mp4"
+    escape_target.write_bytes(b"hidden")
+
+    with pytest.raises(VideoStoreError) as excinfo:
+        async for _ in store.stream_video_range(str(escape_target), start=0, end=1):
+            pass
+
+    assert "invalid key path" in excinfo.value.detail.lower()
