@@ -280,3 +280,30 @@ async def test_get_by_email_external_logins_priority_returns_none_when_all_miss(
 
         assert result_user is None
         assert matched_user_ids == []
+
+
+async def test_external_login_create_or_update_non_email_keeps_multiple_identifiers(db):
+    async with db.async_session() as session:
+        user = await _create_user(session, 1501, "issuer-user@example.com")
+        provider = "https://canvas.instructure.com"
+
+        await models.ExternalLogin.create_or_update(
+            session,
+            user_id=user.id,
+            provider=provider,
+            identifier="sub-1",
+        )
+        await models.ExternalLogin.create_or_update(
+            session,
+            user_id=user.id,
+            provider=provider,
+            identifier="sub-2",
+        )
+
+        logins = await models.User.get_external_logins_by_id(session, user.id)
+        provider_logins = [login for login in logins if login.provider == provider]
+
+        assert sorted(login.identifier for login in provider_logins) == [
+            "sub-1",
+            "sub-2",
+        ]

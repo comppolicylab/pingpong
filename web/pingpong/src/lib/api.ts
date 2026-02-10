@@ -446,13 +446,6 @@ export type ExternalLoginProviders = {
 	providers: ExternalLoginProvider[];
 };
 
-/**
- * Get all external login providers.
- */
-export const getExternalLoginProvidersForLTI = async (f: Fetcher) => {
-	return await GET<never, ExternalLoginProviders>(f, 'lti/sso/providers');
-};
-
 export type LTIPublicSSOProvider = {
 	id: number;
 	name: string;

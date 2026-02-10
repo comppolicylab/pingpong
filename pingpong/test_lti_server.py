@@ -229,6 +229,33 @@ class FakeUserModel:
     async def get_by_email_sso(db, email, provider, identifier):
         return None
 
+    @staticmethod
+    async def get_by_email_external_logins_priority(db, email, lookup_items):
+        user = await FakeUserModel.get_by_email(db, email)
+        if user:
+            return user, [user.id]
+        return None, []
+
+
+@pytest.fixture(autouse=True)
+def _patch_lti_external_login_io(monkeypatch):
+    async def _get_or_create_by_name(db, name, **kwargs):
+        return SimpleNamespace(id=999, name=name, internal_only=False)
+
+    async def _create_or_update(*args, **kwargs):
+        return True
+
+    monkeypatch.setattr(
+        server_module.ExternalLoginProvider,
+        "get_or_create_by_name",
+        _get_or_create_by_name,
+    )
+    monkeypatch.setattr(
+        server_module.ExternalLogin,
+        "create_or_update",
+        _create_or_update,
+    )
+
 
 def _make_registration(
     issuer="issuer",
@@ -1898,6 +1925,8 @@ async def test_lti_launch_sso_user_update(monkeypatch):
     )
     claims = {
         "nonce": "nonce",
+        "sub": "canvas-user-123",
+        "iss": "issuer",
         "email": "user@example.com",
         "https://purl.imsglobal.org/spec/lti/claim/custom": {
             "canvas_course_id": "course-1",
@@ -1937,25 +1966,43 @@ async def test_lti_launch_sso_user_update(monkeypatch):
 
     user = FakeUserModel("user@example.com")
     sso_provider = SimpleNamespace(id=5, name="saml")
-    called = {}
+    called = {"lookups": None, "create_or_update": [], "merge": []}
 
-    async def _get_by_email_sso(db, email, provider, identifier):
-        return user
+    async def _get_by_email_external_logins_priority(db, email, lookup_items):
+        called["lookups"] = lookup_items
+        return user, [user.id, 9999]
 
     monkeypatch.setattr(server_module, "User", FakeUserModel)
-    monkeypatch.setattr(server_module.User, "get_by_email_sso", _get_by_email_sso)
+    monkeypatch.setattr(
+        server_module.User,
+        "get_by_email_external_logins_priority",
+        _get_by_email_external_logins_priority,
+    )
     monkeypatch.setattr(
         server_module.ExternalLoginProvider,
         "get_by_id",
         lambda db, provider_id: _async_return(sso_provider),
     )
 
-    async def _create_or_update(*args, **kwargs):
-        called["called"] = True
+    async def _create_or_update(db, user_id, provider, identifier, called_by=None):
+        called["create_or_update"].append(
+            {
+                "provider": provider,
+                "identifier": identifier,
+                "user_id": user_id,
+                "called_by": called_by,
+            }
+        )
+        return True
 
     monkeypatch.setattr(
         server_module.ExternalLogin, "create_or_update", _create_or_update
     )
+
+    async def _merge(db, authz, new_user_id, old_user_id):
+        called["merge"].append((new_user_id, old_user_id))
+
+    monkeypatch.setattr(server_module, "merge", _merge)
     monkeypatch.setattr(
         server_module, "encode_session_token", lambda user_id, nowfn: "token"
     )
@@ -1971,7 +2018,15 @@ async def test_lti_launch_sso_user_update(monkeypatch):
 
     assert response.status_code == 302
     assert "/lti/setup" in response.headers["location"]
-    assert called["called"] is True
+    assert called["lookups"] is not None
+    assert len(called["lookups"]) == 3
+    assert called["lookups"][0].provider_id == 5
+    assert called["lookups"][1].provider_id == 999
+    assert called["lookups"][2].provider == "email"
+    assert called["lookups"][2].identifier == "user@example.com"
+    assert called["create_or_update"][0]["provider"] == "issuer"
+    assert called["create_or_update"][1]["provider"] == "saml"
+    assert called["merge"] == [(user.id, 9999)]
 
 
 @pytest.mark.asyncio
