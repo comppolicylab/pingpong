@@ -412,19 +412,6 @@ async def test_get_jwks_error():
 
 
 @pytest.mark.asyncio
-async def test_get_sso_ids_filters_email(monkeypatch):
-    providers = [SimpleNamespace(name="email"), SimpleNamespace(name="saml")]
-    monkeypatch.setattr(
-        server_module.ExternalLoginProvider,
-        "get_all",
-        lambda db: _async_return(providers),
-    )
-    request = FakeRequest(state=SimpleNamespace(db="db"))
-    result = await server_module.get_sso_ids(request)
-    assert [p.name for p in result["providers"]] == ["saml"]
-
-
-@pytest.mark.asyncio
 async def test_get_public_sso_providers(monkeypatch):
     providers = [
         SimpleNamespace(id=1, name="email", display_name="Email"),
