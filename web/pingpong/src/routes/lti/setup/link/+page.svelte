@@ -51,7 +51,7 @@
 	};
 </script>
 
-<div class="v-screen flex h-[calc(100dvh-3rem)] items-center justify-center">
+<div class="v-screen flex h-[calc(100dvh-3rem)] items-center justify-center pb-10">
 	<div class="flex w-11/12 max-w-2xl flex-col overflow-hidden rounded-4xl lg:w-7/12">
 		<header class="bg-blue-dark-40 px-12 py-8">
 			<Heading tag="h1" class="logo w-full text-center"><PingPongLogo size="full" /></Heading>
