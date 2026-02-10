@@ -61,7 +61,7 @@
 		"marked": "^17.0.1",
 		"marked-highlight": "^2.2.3",
 		"svelte-copy": "^2.0.0",
-		"tldts": "^7.0.22"
+		"tldts": "^7.0.23"
 	},
 	"pnpm": {
 		"overrides": {
