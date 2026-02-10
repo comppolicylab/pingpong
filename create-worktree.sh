@@ -39,7 +39,6 @@ fi
 BRANCH_NAME="$1"
 WORKTREE_NAME="$1"
 WORKTREE_ROOT="../pingpong-worktrees"
-WORKTREE_PATH="${WORKTREE_ROOT}/${WORKTREE_NAME}"
 PORTS_FILE="${WORKTREE_ROOT}/.worktree-ports.json"
 
 sanitize_db_suffix() {
@@ -70,6 +69,7 @@ sanitize_db_suffix() {
 }
 
 DB_SUFFIX="$(sanitize_db_suffix "${BRANCH_NAME}")"
+WORKTREE_PATH="${WORKTREE_ROOT}/${DB_SUFFIX}"
 DB_NAME="pingpong_${DB_SUFFIX}"
 AUTHZ_STORE_NAME="pingpong_${DB_SUFFIX}"
 
