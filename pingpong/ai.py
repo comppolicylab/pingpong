@@ -4284,9 +4284,13 @@ async def export_threads_multiple_classes(
                             thread.created.astimezone(ZoneInfo("America/New_York"))
                             .replace(microsecond=0)
                             .isoformat(),
-                            assistant.instructions
-                            if assistant
-                            else "Unknown Prompt (Deleted Assistant)",
+                            thread.instructions
+                            if thread.instructions
+                            else (
+                                f"Thread-specific prompt unavailable, current assistant prompt:\n\n{assistant.instructions}"
+                                if assistant
+                                else "Unknown Prompt (Deleted Assistant)"
+                            ),
                         ]
                     )
                     csvwriter.writerow(prompt_row)
@@ -4505,9 +4509,13 @@ async def export_class_threads(
                         thread.created.astimezone(ZoneInfo("America/New_York"))
                         .replace(microsecond=0)
                         .isoformat(),
-                        assistant.instructions
-                        if assistant
-                        else "Unknown Prompt (Deleted Assistant)",
+                        thread.instructions
+                        if thread.instructions
+                        else (
+                            f"Thread-specific prompt unavailable, current assistant prompt:\n\n{assistant.instructions}"
+                            if assistant
+                            else "Unknown Prompt (Deleted Assistant)"
+                        ),
                     ]
                 )
                 csvwriter.writerow(prompt_row)
