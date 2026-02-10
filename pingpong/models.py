@@ -961,35 +961,68 @@ class ExternalLogin(Base):
         provider: str,
         identifier: str,
         called_by: str | None = None,
+        replace_existing: bool = True,
     ) -> bool:
         provider_ = await ExternalLoginProvider.get_or_create_by_name(session, provider)
         if provider not in {"email"}:
-            # For non-email providers, keep one row per unique identifier. This
-            # allows multiple identities for the same provider (e.g. same issuer,
-            # different LTI sub values across instances).
-            stmt = (
-                _get_upsert_stmt(session)(ExternalLogin)
-                .values(
-                    user_id=user_id,
-                    provider=provider,
-                    provider_id=provider_.id,
-                    identifier=identifier,
+            if replace_existing:
+                # For other providers, first check if a record exists
+                stmt = select(ExternalLogin).where(
+                    and_(
+                        ExternalLogin.user_id == user_id,
+                        or_(
+                            ExternalLogin.provider == provider,
+                            ExternalLogin.provider_id == provider_.id,
+                        ),
+                    )
                 )
-                .on_conflict_do_update(
-                    index_elements=["user_id", "provider", "identifier"],
-                    set_=dict(provider_id=provider_.id, provider=provider),
+                existing = await session.scalar(stmt)
+
+                if existing:
+                    existing.identifier = identifier
+                    session.add(existing)
+                    await session.flush()
+                    return True
+                else:
+                    new_login = ExternalLogin(
+                        user_id=user_id,
+                        provider=provider,
+                        identifier=identifier,
+                        provider_id=provider_.id,
+                    )
+                    session.add(new_login)
+                    await session.flush()
+                    if called_by:
+                        logger.info(
+                            f"ELDEBUG: ({called_by}) Creating new external login for user {user_id} with provider {provider} and identifier {identifier}"
+                        )
+                    return True
+            else:
+                # For non-email providers, when replace_existing=False keep one row
+                # per unique identifier. This supports LTI issuer/sub history.
+                stmt = (
+                    _get_upsert_stmt(session)(ExternalLogin)
+                    .values(
+                        user_id=user_id,
+                        provider=provider,
+                        provider_id=provider_.id,
+                        identifier=identifier,
+                    )
+                    .on_conflict_do_update(
+                        index_elements=["user_id", "provider", "identifier"],
+                        set_=dict(provider_id=provider_.id, provider=provider),
+                    )
                 )
-            )
-            result = await session.execute(stmt)
-            if called_by:
-                logger.info(
-                    "ELDEBUG: (%s) Upserting external login for user %s provider=%s identifier=%s",
-                    sanitize_for_log(called_by),
-                    user_id,
-                    sanitize_for_log(provider),
-                    sanitize_for_log(identifier),
-                )
-            return result.rowcount > 0
+                result = await session.execute(stmt)
+                if called_by:
+                    logger.info(
+                        "ELDEBUG: (%s) Upserting external login for user %s provider=%s identifier=%s",
+                        sanitize_for_log(called_by),
+                        user_id,
+                        sanitize_for_log(provider),
+                        sanitize_for_log(identifier),
+                    )
+                return result.rowcount > 0
         else:
             # For email provider, always create a new record if it doesn't exist
             # and it's not being used by another user. This allows multiple

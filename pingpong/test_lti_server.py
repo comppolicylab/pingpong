@@ -1984,13 +1984,21 @@ async def test_lti_launch_sso_user_update(monkeypatch):
         lambda db, provider_id: _async_return(sso_provider),
     )
 
-    async def _create_or_update(db, user_id, provider, identifier, called_by=None):
+    async def _create_or_update(
+        db,
+        user_id,
+        provider,
+        identifier,
+        called_by=None,
+        replace_existing=True,
+    ):
         called["create_or_update"].append(
             {
                 "provider": provider,
                 "identifier": identifier,
                 "user_id": user_id,
                 "called_by": called_by,
+                "replace_existing": replace_existing,
             }
         )
         return True
@@ -2025,8 +2033,106 @@ async def test_lti_launch_sso_user_update(monkeypatch):
     assert called["lookups"][2].provider == "email"
     assert called["lookups"][2].identifier == "user@example.com"
     assert called["create_or_update"][0]["provider"] == "issuer"
+    assert called["create_or_update"][0]["replace_existing"] is False
     assert called["create_or_update"][1]["provider"] == "saml"
+    assert called["create_or_update"][1]["replace_existing"] is True
     assert called["merge"] == [(user.id, 9999)]
+
+
+@pytest.mark.asyncio
+async def test_lti_launch_ambiguous_lookup_falls_back_to_email_only(monkeypatch):
+    oidc_session = _make_oidc_session(
+        redirect_uri=server_module.config.url("/api/v1/lti/launch")
+    )
+    registration = _make_registration(
+        review_status=LTIRegistrationReviewStatus.APPROVED, enabled=True
+    )
+    claims = {
+        "nonce": "nonce",
+        "sub": "canvas-user-123",
+        "iss": "issuer",
+        "email": "user@example.com",
+        "https://purl.imsglobal.org/spec/lti/claim/custom": {
+            "canvas_course_id": "course-1",
+            "sso_provider_id": "5",
+            "sso_value": "abc123",
+        },
+        "https://purl.imsglobal.org/spec/lti/claim/roles": [
+            "http://purl.imsglobal.org/vocab/lis/v2/membership#Instructor"
+        ],
+    }
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "get_by_state",
+        lambda db, state: _async_return(oidc_session),
+    )
+    monkeypatch.setattr(
+        server_module.LTIRegistration,
+        "get_by_client_id",
+        lambda db, client_id: _async_return(registration),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "_verify_lti_id_token",
+        lambda **kwargs: _async_return(claims),
+    )
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "validate_and_consume",
+        lambda *args, **kwargs: _async_return(True),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "find_class_by_course_id",
+        lambda *args, **kwargs: _async_return(None),
+    )
+    monkeypatch.setattr(server_module, "LTIClass", FakeLTIClass)
+
+    user = FakeUserModel("user@example.com")
+    sso_provider = SimpleNamespace(id=5, name="saml")
+    calls = {"lookups": []}
+
+    async def _get_by_email_external_logins_priority(db, email, lookup_items):
+        calls["lookups"].append(lookup_items)
+        if len(calls["lookups"]) == 1:
+            raise server_module.AmbiguousExternalLoginLookupError(
+                lookup_index=0,
+                lookup_item=lookup_items[0],
+                user_ids=[123, 456],
+            )
+        return user, [user.id]
+
+    monkeypatch.setattr(server_module, "User", FakeUserModel)
+    monkeypatch.setattr(
+        server_module.User,
+        "get_by_email_external_logins_priority",
+        _get_by_email_external_logins_priority,
+    )
+    monkeypatch.setattr(
+        server_module.ExternalLoginProvider,
+        "get_by_id",
+        lambda db, provider_id: _async_return(sso_provider),
+    )
+    monkeypatch.setattr(
+        server_module, "encode_session_token", lambda user_id, nowfn: "token"
+    )
+    monkeypatch.setattr(
+        server_module, "get_now_fn", lambda request: lambda: datetime.now(timezone.utc)
+    )
+
+    request = FakeRequest(
+        payload={"state": "state", "id_token": "token"}, state=_make_request_state()
+    )
+
+    response = await server_module.lti_launch(request, tasks=SimpleNamespace())
+
+    assert response.status_code == 302
+    assert "/lti/setup" in response.headers["location"]
+    assert len(calls["lookups"]) == 2
+    assert len(calls["lookups"][0]) == 3
+    assert len(calls["lookups"][1]) == 1
+    assert calls["lookups"][1][0].provider == "email"
+    assert calls["lookups"][1][0].identifier == "user@example.com"
 
 
 @pytest.mark.asyncio

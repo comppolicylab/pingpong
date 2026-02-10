@@ -292,12 +292,14 @@ async def test_external_login_create_or_update_non_email_keeps_multiple_identifi
             user_id=user.id,
             provider=provider,
             identifier="sub-1",
+            replace_existing=False,
         )
         await models.ExternalLogin.create_or_update(
             session,
             user_id=user.id,
             provider=provider,
             identifier="sub-2",
+            replace_existing=False,
         )
 
         logins = await models.User.get_external_logins_by_id(session, user.id)
@@ -307,3 +309,28 @@ async def test_external_login_create_or_update_non_email_keeps_multiple_identifi
             "sub-1",
             "sub-2",
         ]
+
+
+async def test_external_login_create_or_update_non_email_replaces_by_default(db):
+    async with db.async_session() as session:
+        user = await _create_user(session, 1502, "replace-user@example.com")
+        provider = "saml"
+
+        await models.ExternalLogin.create_or_update(
+            session,
+            user_id=user.id,
+            provider=provider,
+            identifier="old-id",
+        )
+        await models.ExternalLogin.create_or_update(
+            session,
+            user_id=user.id,
+            provider=provider,
+            identifier="new-id",
+        )
+
+        logins = await models.User.get_external_logins_by_id(session, user.id)
+        provider_logins = [login for login in logins if login.provider == provider]
+
+        assert len(provider_logins) == 1
+        assert provider_logins[0].identifier == "new-id"

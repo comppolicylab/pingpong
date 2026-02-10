@@ -33,6 +33,7 @@ from pingpong.lti.schemas import (
 )
 from pingpong.merge import merge
 from pingpong.models import (
+    AmbiguousExternalLoginLookupError,
     Class,
     ExternalLogin,
     ExternalLoginProvider,
@@ -811,9 +812,27 @@ async def lti_launch(
         )
     )
 
-    user, matched_user_ids = await User.get_by_email_external_logins_priority(
-        request.state["db"], user_email, lookup_items
-    )
+    try:
+        user, matched_user_ids = await User.get_by_email_external_logins_priority(
+            request.state["db"], user_email, lookup_items
+        )
+    except AmbiguousExternalLoginLookupError as e:
+        logger.warning(
+            "Ambiguous external-login lookup during LTI launch; falling back to email-only. "
+            "lookup_index=%s user_ids=%s",
+            e.lookup_index,
+            e.user_ids,
+        )
+        user, matched_user_ids = await User.get_by_email_external_logins_priority(
+            request.state["db"],
+            user_email,
+            [
+                ExternalLoginLookupItem(
+                    provider="email",
+                    identifier=user_email.lower(),
+                )
+            ],
+        )
     if user:
         user.email = user_email
 
@@ -856,6 +875,7 @@ async def lti_launch(
             provider=lti_provider_name,
             identifier=lti_identifier,
             called_by="lti_launch",
+            replace_existing=False,
         )
     if sso_provider and sso_value:
         await ExternalLogin.create_or_update(
