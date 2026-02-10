@@ -4284,8 +4284,8 @@ async def export_threads_multiple_classes(
                             thread.created.astimezone(ZoneInfo("America/New_York"))
                             .replace(microsecond=0)
                             .isoformat(),
-                            thread.assistant.instructions
-                            if thread.assistant
+                            assistant.instructions
+                            if assistant
                             else "Unknown Prompt (Deleted Assistant)",
                         ]
                     )
@@ -4505,8 +4505,8 @@ async def export_class_threads(
                         thread.created.astimezone(ZoneInfo("America/New_York"))
                         .replace(microsecond=0)
                         .isoformat(),
-                        thread.assistant.instructions
-                        if thread.assistant
+                        assistant.instructions
+                        if assistant
                         else "Unknown Prompt (Deleted Assistant)",
                     ]
                 )
