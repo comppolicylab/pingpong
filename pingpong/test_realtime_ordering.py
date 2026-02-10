@@ -23,6 +23,21 @@ def test_transcript_dispatches_once_item_is_registered():
     assert _drain_ready_messages(buffer) == []
 
 
+def test_empty_transcript_is_skipped_and_descendant_still_dispatches():
+    buffer = ConversationItemOrderingBuffer(logging.getLogger("ordering-test"))
+
+    buffer.register_conversation_item("item-1", None, "user")
+    buffer.register_conversation_item("item-2", "item-1", "assistant")
+
+    buffer.register_transcription("item-1", "   ", "user")
+    buffer.register_transcription("item-2", "assistant text", "assistant")
+
+    assert _drain_ready_messages(buffer) == [
+        ("item-2", "assistant text", "assistant", "0")
+    ]
+    assert _drain_ready_messages(buffer) == []
+
+
 def test_transcript_before_item_added_is_ignored(caplog: pytest.LogCaptureFixture):
     logger_name = "ordering-test-before-item-added"
     buffer = ConversationItemOrderingBuffer(logging.getLogger(logger_name))

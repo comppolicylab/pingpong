@@ -192,6 +192,178 @@ async def test_add_message_to_thread_persists_version_3_voice_messages(db, user)
     mock_threads_messages_create.assert_not_awaited()
 
 
+@with_user(123)
+async def test_add_message_to_thread_skips_empty_transcript_for_version_3(db, user):
+    mock_threads_messages_create = AsyncMock()
+    openai_client = SimpleNamespace(
+        beta=SimpleNamespace(
+            threads=SimpleNamespace(
+                messages=SimpleNamespace(create=mock_threads_messages_create)
+            )
+        )
+    )
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Voice Class",
+            term="Spring 2026",
+            api_key="sk-test",
+            private=False,
+        )
+        assistant = models.Assistant(
+            id=11,
+            name="Voice V3 Assistant",
+            version=3,
+            instructions="You are a voice assistant.",
+            interaction_mode=schemas.InteractionMode.VOICE,
+            description="Voice assistant",
+            tools="[]",
+            model="gpt-4o-mini",
+            class_id=class_.id,
+            creator_id=123,
+            use_latex=False,
+            use_image_descriptions=False,
+        )
+        thread = models.Thread(
+            id=21,
+            class_id=class_.id,
+            assistant_id=assistant.id,
+            version=3,
+            interaction_mode=schemas.InteractionMode.VOICE,
+            tools_available="[]",
+            private=False,
+            user_message_ct=0,
+            instructions="voice instructions",
+        )
+
+        session.add_all([class_, assistant, thread])
+        await session.flush()
+
+        browser_connection = SimpleNamespace(
+            state=State(
+                {
+                    "db": session,
+                    "session": SimpleNamespace(user=SimpleNamespace(id=123)),
+                    "assistant": assistant,
+                    "conversation_instructions": "voice instructions with timestamp",
+                }
+            )
+        )
+
+        await add_message_to_thread(
+            openai_client,  # type: ignore[arg-type]
+            browser_connection,  # type: ignore[arg-type]
+            thread,
+            item_id="item-user-1",
+            transcript_text="   ",
+            role="user",
+            output_index="0",
+        )
+
+        runs = (
+            (
+                await session.execute(
+                    select(models.Run).where(models.Run.thread_id == thread.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        messages = (
+            (
+                await session.execute(
+                    select(models.Message).where(models.Message.thread_id == thread.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        assert runs == []
+        assert messages == []
+        assert thread.user_message_ct == 0
+
+    mock_threads_messages_create.assert_not_awaited()
+
+
+@with_user(123)
+async def test_add_message_to_thread_skips_empty_transcript_for_classic_thread(
+    db, user
+):
+    mock_threads_messages_create = AsyncMock()
+    openai_client = SimpleNamespace(
+        beta=SimpleNamespace(
+            threads=SimpleNamespace(
+                messages=SimpleNamespace(create=mock_threads_messages_create)
+            )
+        )
+    )
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Voice Class",
+            term="Spring 2026",
+            api_key="sk-test",
+            private=False,
+        )
+        assistant = models.Assistant(
+            id=11,
+            name="Voice V2 Assistant",
+            version=2,
+            instructions="You are a voice assistant.",
+            interaction_mode=schemas.InteractionMode.VOICE,
+            description="Voice assistant",
+            tools="[]",
+            model="gpt-4o-mini",
+            class_id=class_.id,
+            creator_id=123,
+            use_latex=False,
+            use_image_descriptions=False,
+        )
+        thread = models.Thread(
+            id=21,
+            class_id=class_.id,
+            assistant_id=assistant.id,
+            version=2,
+            thread_id="thread-legacy-voice",
+            interaction_mode=schemas.InteractionMode.VOICE,
+            tools_available="[]",
+            private=False,
+            user_message_ct=0,
+            instructions="voice instructions",
+        )
+
+        session.add_all([class_, assistant, thread])
+        await session.flush()
+
+        browser_connection = SimpleNamespace(
+            state=State(
+                {
+                    "db": session,
+                    "session": SimpleNamespace(user=SimpleNamespace(id=123)),
+                    "anonymous_share_token": None,
+                    "anonymous_session_token": None,
+                }
+            )
+        )
+
+        await add_message_to_thread(
+            openai_client,  # type: ignore[arg-type]
+            browser_connection,  # type: ignore[arg-type]
+            thread,
+            item_id="item-user-1",
+            transcript_text="",
+            role="user",
+            output_index="0",
+        )
+
+        assert thread.user_message_ct == 0
+
+    mock_threads_messages_create.assert_not_awaited()
+
+
 def _fake_class_models_response(
     model_id: str = "gpt-4o-mini", model_type: str = "chat"
 ) -> dict:
