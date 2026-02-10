@@ -994,7 +994,11 @@ class ExternalLogin(Base):
                     await session.flush()
                     if called_by:
                         logger.info(
-                            f"ELDEBUG: ({called_by}) Creating new external login for user {user_id} with provider {provider} and identifier {identifier}"
+                            "ELDEBUG: (%s) Creating new external login for user %s with provider %s and identifier %s",
+                            sanitize_for_log(called_by),
+                            user_id,
+                            sanitize_for_log(provider),
+                            sanitize_for_log(identifier),
                         )
                     return True
             else:
