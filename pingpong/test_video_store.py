@@ -1,16 +1,14 @@
 from datetime import datetime, timezone
+from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 import pytest
 from botocore import UNSIGNED
 from botocore.exceptions import ClientError
-from pingpong.video_stream import (
-    LocalVideoStream,
-    VideoStreamError,
-    S3VideoStream,
-    S3VideoStore,
+from pingpong.video_store import (
     LocalVideoStore,
+    S3VideoStore,
+    VideoStoreError,
 )
-from pathlib import Path
 
 
 @pytest.mark.asyncio
@@ -18,12 +16,10 @@ async def test_local_missing_file(monkeypatch, tmp_path):
     """File requested for viewing does not exist"""
 
     store = LocalVideoStore(str(tmp_path))
-    stream = LocalVideoStream(store=store)
 
     mock_video_path = tmp_path / "mock_video.mp4"
 
     original_stat = Path.stat
-    original_exists = Path.exists
 
     def mock_stat(self):
         # Only mock stat for the specific missing file
@@ -32,22 +28,15 @@ async def test_local_missing_file(monkeypatch, tmp_path):
         # For everything else, use the real stat
         return original_stat(self)
 
-    def mock_exists(self):
-        if self == mock_video_path:
-            return False
-        return original_exists(self)
-
     monkeypatch.setattr(Path, "stat", mock_stat)
-    monkeypatch.setattr(Path, "exists", mock_exists)
 
     # Test: Attempting to stream non-existent file
-    with pytest.raises(VideoStreamError) as excinfo:
-        async for _ in stream.stream_video_range(
+    with pytest.raises(VideoStoreError) as excinfo:
+        async for _ in store.stream_video_range(
             key="mock_video.mp4", start=None, end=None
         ):
             pass
 
-    assert excinfo.value.code == 404
     assert "not found" in excinfo.value.detail.lower()
 
 
@@ -68,7 +57,7 @@ async def test_s3_public_metadata(monkeypatch):
     mock_session.client = mock_client_context
 
     mock_session_class = Mock(return_value=mock_session)
-    monkeypatch.setattr("pingpong.video_stream.aioboto3.Session", mock_session_class)
+    monkeypatch.setattr("pingpong.video_store.aioboto3.Session", mock_session_class)
 
     mock_client.head_object = AsyncMock(
         return_value={
@@ -119,35 +108,32 @@ async def test_s3_authenticated_key_maps_error(monkeypatch):
     mock_session.client = mock_client_context
 
     mock_session_class = Mock(return_value=mock_session)
-    monkeypatch.setattr("pingpong.video_stream.aioboto3.Session", mock_session_class)
+    monkeypatch.setattr("pingpong.video_store.aioboto3.Session", mock_session_class)
 
     store = S3VideoStore(bucket="test-bucket", allow_unsigned=False)
-    stream = S3VideoStream(store=store)
 
-    # Test: NoSuchKey → 404
+    # Test: NoSuchKey maps to a missing-key error
     error_response = {"Error": {"Code": "NoSuchKey"}}
     mock_client.get_object = AsyncMock(
         side_effect=ClientError(error_response, "GetObject")
     )
 
-    with pytest.raises(VideoStreamError) as excinfo:
-        async for _ in stream.stream_video_range(key="missing.mp4", start=0, end=100):
+    with pytest.raises(VideoStoreError) as excinfo:
+        async for _ in store.stream_video_range(key="missing.mp4", start=0, end=100):
             pass
 
-    assert excinfo.value.code == 404
     assert "does not exist" in excinfo.value.detail
 
-    # Test: AccessDenied → 403
+    # Test: AccessDenied maps to a permission error
     error_response = {"Error": {"Code": "AccessDenied"}}
     mock_client.get_object = AsyncMock(
         side_effect=ClientError(error_response, "GetObject")
     )
 
-    with pytest.raises(VideoStreamError) as excinfo:
-        async for _ in stream.stream_video_range(key="forbidden.mp4", start=0, end=100):
+    with pytest.raises(VideoStoreError) as excinfo:
+        async for _ in store.stream_video_range(key="forbidden.mp4", start=0, end=100):
             pass
 
-    assert excinfo.value.code == 403
     assert "permissions" in excinfo.value.detail.lower()
 
 
@@ -164,11 +150,11 @@ async def test_s3_authenticated_invalid_content_type(monkeypatch):
     mock_session.client = mock_client_context
 
     mock_session_class = Mock(return_value=mock_session)
-    monkeypatch.setattr("pingpong.video_stream.aioboto3.Session", mock_session_class)
+    monkeypatch.setattr("pingpong.video_store.aioboto3.Session", mock_session_class)
 
     store = S3VideoStore(bucket="test-bucket", allow_unsigned=False)
 
-    # Test: get_metadata raises TypeError for unplayable data
+    # Test: get_metadata raises VideoStoreError for unplayable data
     mock_client.head_object = AsyncMock(
         return_value={
             "ContentLength": 1000,
@@ -178,13 +164,13 @@ async def test_s3_authenticated_invalid_content_type(monkeypatch):
         }
     )
 
-    with pytest.raises(TypeError) as excinfo:
+    with pytest.raises(VideoStoreError) as excinfo:
         await store.get_video_metadata("file.bin")
 
-    assert "Unsupported video format" in str(excinfo.value)
-    assert "application/octet-stream" in str(excinfo.value)
+    assert "Unsupported video format" in excinfo.value.detail
+    assert "application/octet-stream" in excinfo.value.detail
 
-    # Test: get_metadata raises TypeError for non-video content types
+    # Test: get_metadata raises VideoStoreError for non-video content types
     mock_client.head_object = AsyncMock(
         return_value={
             "ContentLength": 1000,
@@ -194,11 +180,11 @@ async def test_s3_authenticated_invalid_content_type(monkeypatch):
         }
     )
 
-    with pytest.raises(TypeError) as excinfo:
+    with pytest.raises(VideoStoreError) as excinfo:
         await store.get_video_metadata("document.pdf")
 
-    assert "Unsupported video format" in str(excinfo.value)
-    assert "application/pdf" in str(excinfo.value)
+    assert "Unsupported video format" in excinfo.value.detail
+    assert "application/pdf" in excinfo.value.detail
 
 
 @pytest.mark.asyncio
@@ -214,7 +200,7 @@ async def test_s3_authenticated_stream_full(monkeypatch):
     mock_session.client = mock_client_context
 
     mock_session_class = Mock(return_value=mock_session)
-    monkeypatch.setattr("pingpong.video_stream.aioboto3.Session", mock_session_class)
+    monkeypatch.setattr("pingpong.video_store.aioboto3.Session", mock_session_class)
 
     # Create test data
     test_data = b"x" * 1000
@@ -238,11 +224,10 @@ async def test_s3_authenticated_stream_full(monkeypatch):
     )
 
     store = S3VideoStore(bucket="test-bucket", allow_unsigned=False)
-    stream = S3VideoStream(store=store)
 
     # Test: stream_video() returns all bytes
     collected_bytes = b""
-    async for chunk in stream.stream_video(key="test.mp4"):
+    async for chunk in store.stream_video(key="test.mp4"):
         collected_bytes += chunk
 
     assert collected_bytes == test_data
@@ -250,7 +235,7 @@ async def test_s3_authenticated_stream_full(monkeypatch):
 
     # Test: stream_video_range() with no range returns all bytes
     collected_bytes = b""
-    async for chunk in stream.stream_video_range(key="test.mp4", start=None, end=None):
+    async for chunk in store.stream_video_range(key="test.mp4", start=None, end=None):
         collected_bytes += chunk
 
     assert collected_bytes == test_data
@@ -259,10 +244,9 @@ async def test_s3_authenticated_stream_full(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_local_stream_range_invalid(monkeypatch, tmp_path):
-    """Out of bounds or inverted ranges return VideoStreamError with 416"""
+    """Out of bounds or inverted ranges return VideoStoreError"""
 
     store = LocalVideoStore(str(tmp_path))
-    stream = LocalVideoStream(store=store)
 
     test_file_size = 1000
     mock_stat_result = Mock()
@@ -275,23 +259,23 @@ async def test_local_stream_range_invalid(monkeypatch, tmp_path):
     monkeypatch.setattr(Path, "exists", mock_exists)
 
     # Test: start byte beyond file size
-    with pytest.raises(VideoStreamError) as excinfo:
-        async for _ in stream.stream_video_range(
+    with pytest.raises(VideoStoreError) as excinfo:
+        async for _ in store.stream_video_range(
             key="test_video.mp4", start=test_file_size + 1, end=None
         ):
             pass
-    assert excinfo.value.code == 416
+    assert "start range entered is invalid" in excinfo.value.detail.lower()
 
     # Test: inverted range (end < start)
-    with pytest.raises(VideoStreamError) as excinfo:
-        async for _ in stream.stream_video_range(key="test_video.mp4", start=10, end=5):
+    with pytest.raises(VideoStoreError) as excinfo:
+        async for _ in store.stream_video_range(key="test_video.mp4", start=10, end=5):
             pass
-    assert excinfo.value.code == 416
+    assert "after end range" in excinfo.value.detail.lower()
 
     # Test: End byte beyond file size with valid start
-    with pytest.raises(VideoStreamError) as excinfo:
-        async for _ in stream.stream_video_range(
+    with pytest.raises(VideoStoreError) as excinfo:
+        async for _ in store.stream_video_range(
             key="test_video.mp4", start=0, end=test_file_size + 100
         ):
             pass
-    assert excinfo.value.code == 416
+    assert "end range entered is invalid" in excinfo.value.detail.lower()

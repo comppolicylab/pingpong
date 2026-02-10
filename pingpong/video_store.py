@@ -1,7 +1,3 @@
-"""
-Note (2/2/2026): Currently utilizing a static library of lecture videos; Eventually, will allow ability for instructors to upload videos.
-"""
-
 import re
 import aioboto3
 import logging
@@ -18,9 +14,8 @@ from .schemas import VideoMetadata
 logger = logging.getLogger(__name__)
 
 
-class VideoStreamError(Exception):
-    def __init__(self, detail: str = "", code: int | None = None):
-        self.code = code
+class VideoStoreError(Exception):
+    def __init__(self, detail: str = ""):
         self.detail = detail
 
 
@@ -28,28 +23,8 @@ class BaseVideoStore(ABC):
     @abstractmethod
     async def get_video_metadata(self, key: str) -> VideoMetadata:
         """Get metdata about a video file from the store"""
-        pass
+        raise NotImplementedError()
 
-    @abstractmethod
-    async def stream_video(
-        self, key: str, chunk_size: int = 1024 * 1024
-    ) -> AsyncGenerator[bytes, None]:
-        """Stream a video file from start to finish"""
-        yield b""
-
-    @abstractmethod
-    async def stream_video_range(
-        self,
-        key: str,
-        start: int | None = None,
-        end: int | None = None,
-        chunk_size: int = 1024 * 1024,
-    ) -> AsyncGenerator[bytes, None]:
-        """Stream a video file with byte range support for seeking"""
-        yield b""
-
-
-class BaseVideoStream(ABC):
     @abstractmethod
     async def stream_video(
         self, key: str, chunk_size: int = 1024 * 1024
@@ -89,7 +64,7 @@ class S3VideoStore(BaseVideoStore):
                     "video/mp4",
                     "video/webm",
                 }:
-                    raise TypeError(f"Unsupported video format: {content_type}")
+                    raise VideoStoreError(f"Unsupported video format: {content_type}")
 
                 return VideoMetadata(
                     content_length=response["ContentLength"],
@@ -101,19 +76,16 @@ class S3VideoStore(BaseVideoStore):
             except ClientError as e:
                 error_code = e.response.get("Error", {}).get("Code", "")
                 if error_code == "AccessDenied":
-                    raise VideoStreamError(
-                        code=403,
-                        detail="You don't have the permissions to view the resource",
+                    raise VideoStoreError(
+                        "You don't have the permissions to view the resource",
                     )
 
                 if error_code == "NoSuchKey":
-                    raise VideoStreamError(
-                        code=404, detail="The specified key does not exist"
-                    )
+                    raise VideoStoreError("The specified key does not exist")
 
                 logger.exception(f"Error getting video metadata from S3: {e}")
-                raise VideoStreamError(
-                    code=500, detail=f"Failed to get video metadata from S3: {str(e)}"
+                raise VideoStoreError(
+                    f"Failed to get video metadata from S3: {str(e)}"
                 ) from e
 
     async def stream_video_range(
@@ -143,24 +115,20 @@ class S3VideoStore(BaseVideoStore):
             except ClientError as e:
                 error_code = e.response.get("Error", {}).get("Code", "")
                 if error_code == "InvalidRange":
-                    raise VideoStreamError(code=416, detail="Range entered is invalid")
+                    raise VideoStoreError("Range entered is invalid")
 
                 if error_code == "AccessDenied":
-                    raise VideoStreamError(
-                        code=403,
-                        detail="You don't have the permissions to view the resource",
+                    raise VideoStoreError(
+                        "You don't have the permissions to view the resource",
                     )
 
                 if error_code == "NoSuchKey":
-                    raise VideoStreamError(
-                        code=404, detail="The specified key does not exist"
-                    )
+                    raise VideoStoreError("The specified key does not exist")
 
                 safe_key = re.sub(r"[^\w\-\./]", "", key)
                 logger.exception("Error streaming video %s", safe_key)
-                raise VideoStreamError(
-                    code=502,
-                    detail=f"Error streaming Video: {e}",
+                raise VideoStoreError(
+                    f"Error streaming Video: {e}",
                 ) from e
 
     async def stream_video(
@@ -174,40 +142,6 @@ class S3VideoStore(BaseVideoStore):
             end=None,
             chunk_size=chunk_size,
         ):
-            yield chunk
-
-
-class S3VideoStream(BaseVideoStream):
-    "s3-based video streaming with HTTP range support"
-
-    def __init__(self, store: "S3VideoStore"):
-        self._store = store
-
-    async def stream_video_range(
-        self,
-        key: str,
-        start: int | None = None,
-        end: int | None = None,
-        chunk_size: int = 1024 * 1024,
-    ) -> AsyncGenerator[bytes, None]:
-        """
-        Stream a video file or byte range from S3.
-        Supports HTTP range requests for video seeking.
-        """
-        async for chunk in self._store.stream_video_range(
-            key=key, start=start, end=end, chunk_size=chunk_size
-        ):
-            yield chunk
-
-    async def stream_video(
-        self,
-        key: str,
-        chunk_size: int = 1024 * 1024,
-    ) -> AsyncGenerator[bytes, None]:
-        """
-        Stream a full video from S3 (no byte range).
-        """
-        async for chunk in self._store.stream_video(key=key, chunk_size=chunk_size):
             yield chunk
 
 
@@ -228,7 +162,7 @@ class LocalVideoStore(BaseVideoStore):
 
         file_path = self._directory / key
         if not file_path.exists():
-            raise VideoStreamError(code=404, detail="File not found")
+            raise VideoStoreError("File not found")
 
         try:
             # get file stats
@@ -256,9 +190,7 @@ class LocalVideoStore(BaseVideoStore):
             raise
         except Exception as e:
             logger.exception(f"Error getting video metadata from file: {e}")
-            raise VideoStreamError(
-                code=500, detail=f"Error accessing video metadata: {str(e)}"
-            ) from e
+            raise VideoStoreError(f"Error accessing video metadata: {str(e)}") from e
 
     async def stream_video_range(
         self,
@@ -276,19 +208,13 @@ class LocalVideoStore(BaseVideoStore):
             file_size = file_path.stat().st_size
 
             if start is not None and (start < 0 or start >= file_size):
-                raise VideoStreamError(
-                    code=416, detail="Start range entered is invalid"
-                )
+                raise VideoStoreError("Start range entered is invalid")
 
             if end is not None:
                 if end < 0 or end >= file_size:
-                    raise VideoStreamError(
-                        code=416, detail="End range entered is invalid"
-                    )
+                    raise VideoStoreError("End range entered is invalid")
                 if start is not None and end < start:
-                    raise VideoStreamError(
-                        code=416, detail="Start range entered is after end range"
-                    )
+                    raise VideoStoreError("Start range entered is after end range")
 
             start_pos = start if start is not None else 0
             end_pos = end if end is not None else file_size - 1
@@ -306,18 +232,16 @@ class LocalVideoStore(BaseVideoStore):
                     bytes_read += len(chunk)
                     yield chunk
 
-        except VideoStreamError:
+        except VideoStoreError:
             raise
         except FileNotFoundError:
-            raise VideoStreamError(code=404, detail="File not found")
+            raise VideoStoreError("File not found")
         except PermissionError:
-            raise VideoStreamError(code=403, detail="Permission denied")
+            raise VideoStoreError("Permission denied")
         except OSError as e:
             safe_key = re.sub(r"[^\w\-\./]", "", key)
             logger.exception("Error streaming video %s", safe_key)
-            raise VideoStreamError(
-                code=500, detail=f"Error streaming video: {e}"
-            ) from e
+            raise VideoStoreError(f"Error streaming video: {e}") from e
 
     async def stream_video(
         self,
@@ -333,38 +257,4 @@ class LocalVideoStore(BaseVideoStore):
             end=None,
             chunk_size=chunk_size,
         ):
-            yield chunk
-
-
-class LocalVideoStream(BaseVideoStream):
-    """local filesystem video streaming for development and testing."""
-
-    def __init__(self, store: "LocalVideoStore"):
-        self._store = store
-
-    async def stream_video_range(
-        self,
-        key: str,
-        start: int | None = None,
-        end: int | None = None,
-        chunk_size: int = 1024 * 1024,
-    ) -> AsyncGenerator[bytes, None]:
-        """
-        Stream a video file or byte range from Local.
-        Supports HTTP range requests for video seeking.
-        """
-        async for chunk in self._store.stream_video_range(
-            key=key, start=start, end=end, chunk_size=chunk_size
-        ):
-            yield chunk
-
-    async def stream_video(
-        self,
-        key: str,
-        chunk_size: int = 1024 * 1024,
-    ) -> AsyncGenerator[bytes, None]:
-        """
-        Stream a full video from Local (no byte range).
-        """
-        async for chunk in self._store.stream_video(key=key, chunk_size=chunk_size):
             yield chunk
