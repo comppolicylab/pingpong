@@ -14,6 +14,7 @@ from pingpong.auth import encode_session_token
 from pingpong.authz.openfga import OpenFgaAuthzClient
 from pingpong.config import config
 from pingpong.invite import send_lti_registration_submitted
+from pingpong.log_utils import sanitize_for_log
 from pingpong.lti.lti_course import (
     find_class_by_course_id,
     find_class_by_course_id_search_by_canvas_account_lti_guid,
@@ -31,7 +32,9 @@ from pingpong.lti.schemas import (
     LTISetupLinkRequest,
     LTISetupLinkResponse,
 )
+from pingpong.merge import merge
 from pingpong.models import (
+    AmbiguousExternalLoginLookupError,
     Class,
     ExternalLogin,
     ExternalLoginProvider,
@@ -51,7 +54,7 @@ from pingpong.schemas import (
     ClassUserRoles,
     CreateUserClassRole,
     CreateUserClassRoles,
-    ExternalLoginProviders,
+    ExternalLoginLookupItem,
     LMSPlatform,
     LTIRegistrationReviewStatus,
     LTIStatus,
@@ -99,6 +102,10 @@ LTI_CUSTOM_PARAM_DEFAULT_VALUES = {
     "canvas_course_id": ["$Canvas.course.id"],
     "canvas_term_name": ["$Canvas.term.name"],
 }
+
+
+def _is_public_sso_provider(provider: ExternalLoginProvider) -> bool:
+    return provider.name != "email" and not getattr(provider, "internal_only", False)
 
 
 async def _fetch_jwks(jwks_url: str) -> dict[str, Any]:
@@ -206,18 +213,6 @@ async def get_jwks(key_manager: LTIKeyManager = Depends(get_lti_key_manager)):
         raise HTTPException(status_code=500, detail="Error retrieving public keys")
 
 
-@lti_router.get("/sso/providers", response_model=ExternalLoginProviders)
-async def get_sso_ids(request: StateRequest):
-    """
-    Get the SSO identifiers for the LTI instance.
-    """
-    external_login_providers = await ExternalLoginProvider.get_all(request.state["db"])
-    no_email_providers = [
-        provider for provider in external_login_providers if provider.name != "email"
-    ]
-    return {"providers": no_email_providers}
-
-
 @lti_router.get("/public/sso/providers", response_model=LTIPublicSSOProviders)
 async def get_public_sso_providers(request: StateRequest):
     providers = await ExternalLoginProvider.get_all(request.state["db"])
@@ -225,7 +220,7 @@ async def get_public_sso_providers(request: StateRequest):
         "providers": [
             {"id": p.id, "name": p.name, "display_name": p.display_name}
             for p in providers
-            if p.name != "email"
+            if _is_public_sso_provider(p)
         ]
     }
 
@@ -741,10 +736,43 @@ async def lti_launch(
     if user_email is None or not isinstance(user_email, str):
         raise HTTPException(status_code=400, detail="Invalid email in id_token")
 
+    user_subject_claim = claims.get("sub")
+    issuer_from_claim = claims.get("iss")
+    lti_provider: ExternalLoginProvider | None = None
+    lti_provider_name: str | None = None
+    lti_identifier: str | None = None
+    if (
+        isinstance(user_subject_claim, str)
+        and user_subject_claim
+        and isinstance(issuer_from_claim, str)
+        and issuer_from_claim
+    ):
+        lti_provider_name = issuer_from_claim
+        lti_identifier = user_subject_claim
+        lti_provider = await ExternalLoginProvider.get_or_create_by_name(
+            request.state["db"], lti_provider_name, internal_only=True
+        )
+        if not lti_provider.internal_only:
+            lti_provider.internal_only = True
+            request.state["db"].add(lti_provider)
+    else:
+        logger.warning(
+            "LTI launch missing iss/sub for email=%s; skipping issuer/sub external-login key",
+            sanitize_for_log(user_email),
+        )
+
     sso_provider_id_str = launch_custom_params.get("sso_provider_id", "0")
     user: User | None = None
     sso_provider: ExternalLoginProvider | None = None
     sso_value: str | None = None
+    lookup_items: list[ExternalLoginLookupItem] = []
+    if lti_provider and lti_identifier:
+        lookup_items.append(
+            ExternalLoginLookupItem(
+                provider_id=lti_provider.id,
+                identifier=lti_identifier,
+            )
+        )
 
     if int(sso_provider_id_str) != 0:
         sso_provider = await ExternalLoginProvider.get_by_id(
@@ -755,24 +783,43 @@ async def lti_launch(
         sso_value = launch_custom_params.get("sso_value", None)
         if not sso_value or sso_value in LTI_CUSTOM_PARAM_DEFAULT_VALUES["sso_value"]:
             sso_value = None
-        user = await User.get_by_email_sso(
+        if sso_value:
+            lookup_items.insert(
+                0,
+                ExternalLoginLookupItem(
+                    provider_id=sso_provider.id,
+                    identifier=sso_value,
+                ),
+            )
+    lookup_items.append(
+        ExternalLoginLookupItem(
+            provider="email",
+            identifier=user_email.lower(),
+        )
+    )
+
+    try:
+        user, matched_user_ids = await User.get_by_email_external_logins_priority(
+            request.state["db"], user_email, lookup_items
+        )
+    except AmbiguousExternalLoginLookupError as e:
+        logger.warning(
+            "Ambiguous external-login lookup during LTI launch; falling back to email-only. "
+            "lookup_index=%s user_ids=%s",
+            e.lookup_index,
+            e.user_ids,
+        )
+        user, matched_user_ids = await User.get_by_email_external_logins_priority(
             request.state["db"],
             user_email,
-            provider=sso_provider.name,
-            identifier=sso_value,
-        )
-        if user:
-            user.email = user_email
-            if sso_value:
-                await ExternalLogin.create_or_update(
-                    request.state["db"],
-                    user.id,
-                    provider=sso_provider.name,
-                    identifier=sso_value,
-                    called_by="lti_launch",
+            [
+                ExternalLoginLookupItem(
+                    provider="email",
+                    identifier=user_email.lower(),
                 )
-    else:
-        user = await User.get_by_email(request.state["db"], user_email)
+            ],
+        )
+    user_needs_email_update = user is not None and user.email != user_email
 
     if not user:
         if is_admin and not (is_instructor or is_student):
@@ -796,6 +843,38 @@ async def lti_launch(
     request.state["db"].add(user)
     await request.state["db"].flush()
     await request.state["db"].refresh(user)
+
+    for matched_user_id in sorted(set(matched_user_ids)):
+        if matched_user_id != user.id:
+            await merge(
+                request.state["db"],
+                request.state["authz"],
+                user.id,
+                matched_user_id,
+            )
+    if user_needs_email_update:
+        user.email = user_email
+        request.state["db"].add(user)
+        await request.state["db"].flush()
+
+    if lti_provider_name and lti_identifier:
+        await ExternalLogin.create_or_update(
+            request.state["db"],
+            user.id,
+            provider=lti_provider_name,
+            identifier=lti_identifier,
+            called_by="lti_launch",
+            replace_existing=False,
+        )
+    if sso_provider and sso_value:
+        await ExternalLogin.create_or_update(
+            request.state["db"],
+            user.id,
+            provider=sso_provider.name,
+            identifier=sso_value,
+            called_by="lti_launch",
+        )
+
     request.state["session"].user = user
     user_token = encode_session_token(user.id, nowfn=get_now_fn(request))
 

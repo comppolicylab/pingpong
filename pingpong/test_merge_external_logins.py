@@ -202,3 +202,49 @@ async def test_merge_external_logins_allows_multiple_email_identifiers(db):
             old_email_login.id,
             new_email_login.id,
         }
+
+
+async def test_merge_external_logins_allows_multiple_internal_only_identifiers(db):
+    async with db.async_session() as session:
+        old_user = await _create_user(session, 2031, "old-internal@example.com")
+        new_user = await _create_user(session, 2032, "new-internal@example.com")
+
+        internal_provider = await models.ExternalLoginProvider.get_or_create_by_name(
+            session, "canvas-issuer-internal", internal_only=True
+        )
+
+        old_internal_login = await _create_external_login(
+            session,
+            user_id=old_user.id,
+            provider="canvas-issuer-internal",
+            provider_id=internal_provider.id,
+            identifier="sub-old",
+        )
+        new_internal_login = await _create_external_login(
+            session,
+            user_id=new_user.id,
+            provider="canvas-issuer-internal",
+            provider_id=internal_provider.id,
+            identifier="sub-new",
+        )
+
+        await merge_external_logins(session, new_user.id, old_user.id)
+        await session.flush()
+
+        old_user_login_count = await session.scalar(
+            select(func.count(models.ExternalLogin.id)).where(
+                models.ExternalLogin.user_id == old_user.id
+            )
+        )
+        assert old_user_login_count == 0
+
+        new_user_rows_result = await session.execute(
+            select(models.ExternalLogin).where(
+                models.ExternalLogin.user_id == new_user.id
+            )
+        )
+        new_user_rows = new_user_rows_result.scalars().all()
+        assert {login.id for login in new_user_rows} == {
+            old_internal_login.id,
+            new_internal_login.id,
+        }
