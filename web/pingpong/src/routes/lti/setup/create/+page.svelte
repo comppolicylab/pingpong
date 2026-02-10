@@ -2,6 +2,7 @@
 	import { Button, Heading, Label, Input, Select } from 'flowbite-svelte';
 	import { goto } from '$app/navigation';
 	import PingPongLogo from '$lib/components/PingPongLogo.svelte';
+	import Sanitize from '$lib/components/Sanitize.svelte';
 	import { ArrowLeftOutline } from 'flowbite-svelte-icons';
 	import * as api from '$lib/api';
 	import { loading } from '$lib/stores/general.js';
@@ -9,7 +10,7 @@
 
 	export let data;
 
-	const { context, ltiClassId } = data;
+	const { context, ltiClassId, supportInfo } = data;
 
 	// Pre-fill form with LTI context data
 	// Name: "Course Name"
@@ -144,6 +145,15 @@
 						</Button>
 					</div>
 				</form>
+
+				<div class="rounded-xl border border-gray-200 bg-gray-50 p-4">
+					<p class="text-sm font-semibold text-gray-800">Need help with setup?</p>
+					<div
+						class="mt-1 text-sm text-gray-700 [&_a]:font-medium [&_a]:text-blue-dark-50 [&_a]:underline"
+					>
+						<Sanitize html={supportInfo.blurb} />
+					</div>
+				</div>
 			</div>
 		</div>
 	</div>

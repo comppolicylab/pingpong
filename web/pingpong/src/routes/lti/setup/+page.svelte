@@ -2,11 +2,12 @@
 	import { Heading } from 'flowbite-svelte';
 	import { goto } from '$app/navigation';
 	import PingPongLogo from '$lib/components/PingPongLogo.svelte';
+	import Sanitize from '$lib/components/Sanitize.svelte';
 	import { PlusOutline, LinkOutline } from 'flowbite-svelte-icons';
 
 	export let data;
 
-	const { context, ltiClassId } = data;
+	const { context, ltiClassId, supportInfo } = data;
 
 	// Build display name: prefer course_name, then course_code, else generic
 	// Previously, we used "Course Code: Course Name", but in many cases the
@@ -82,6 +83,15 @@
 								Connect this course to a PingPong group you already manage.
 							</p>
 						</button>
+					</div>
+				</div>
+
+				<div class="rounded-xl border border-gray-200 bg-gray-50 p-4">
+					<p class="text-sm font-semibold text-gray-800">Need help with setup?</p>
+					<div
+						class="mt-1 text-sm text-gray-700 [&_a]:font-medium [&_a]:text-blue-dark-50 [&_a]:underline"
+					>
+						<Sanitize html={supportInfo.blurb} />
 					</div>
 				</div>
 			</div>
