@@ -87,7 +87,8 @@ sanitize_db_suffix() {
 }
 
 DB_SUFFIX="$(sanitize_db_suffix "${WORKTREE_NAME}")"
-WORKTREE_PATH="${WORKTREE_ROOT}/${DB_SUFFIX}"
+SANITIZED_WORKTREE_PATH="${WORKTREE_ROOT}/${DB_SUFFIX}"
+LEGACY_WORKTREE_PATH="${WORKTREE_ROOT}/${WORKTREE_NAME}"
 DB_NAME="pingpong_${DB_SUFFIX}"
 AUTHZ_STORE_NAME="pingpong_${DB_SUFFIX}"
 
@@ -142,6 +143,31 @@ get_store_id_by_name() {
   authz_api "${AUTHZ_API}/stores" | jq -r --arg name "${name}" '.stores[] | select(.name == $name) | .id'
 }
 
+get_worktree_path_for_branch() {
+  local branch_name="$1"
+  git worktree list --porcelain | awk -v branch="refs/heads/${branch_name}" '
+    $1 == "worktree" {
+      path = $0
+      sub(/^worktree /, "", path)
+    }
+    $1 == "branch" && $2 == branch {
+      print path
+      exit
+    }
+  '
+}
+
+REGISTERED_WORKTREE_PATH="$(get_worktree_path_for_branch "${WORKTREE_NAME}")"
+if [[ -n "${REGISTERED_WORKTREE_PATH}" ]]; then
+  WORKTREE_PATH="${REGISTERED_WORKTREE_PATH}"
+elif [[ -e "${SANITIZED_WORKTREE_PATH}" ]]; then
+  WORKTREE_PATH="${SANITIZED_WORKTREE_PATH}"
+elif [[ -e "${LEGACY_WORKTREE_PATH}" ]]; then
+  WORKTREE_PATH="${LEGACY_WORKTREE_PATH}"
+else
+  WORKTREE_PATH="${SANITIZED_WORKTREE_PATH}"
+fi
+
 echo "Removing worktree: ${WORKTREE_NAME}"
 echo "  Database: ${DB_NAME}"
 echo "  Authz store: ${AUTHZ_STORE_NAME}"
@@ -157,17 +183,22 @@ if [[ ! $REPLY =~ ^[Yy]$ ]]; then
 fi
 
 # ====== 1. Remove git worktree ======
-if [[ -e "${WORKTREE_PATH}" ]]; then
+TARGET_WORKTREE_PATH="${REGISTERED_WORKTREE_PATH:-${WORKTREE_PATH}}"
+if [[ -n "${REGISTERED_WORKTREE_PATH}" ]] || [[ -e "${TARGET_WORKTREE_PATH}" ]]; then
   echo "Removing git worktree..."
-  GIT_ERROR=$(git worktree remove --force "${WORKTREE_PATH}" 2>&1) || {
+  GIT_ERROR=$(git worktree remove --force "${TARGET_WORKTREE_PATH}" 2>&1) || {
     echo "Warning: Failed to remove worktree via git: ${GIT_ERROR}"
-    echo "Removing directory manually..."
-    rm -rf "${WORKTREE_PATH}"
+    if [[ -e "${TARGET_WORKTREE_PATH}" ]]; then
+      echo "Removing directory manually..."
+      rm -rf "${TARGET_WORKTREE_PATH}"
+    else
+      echo "Worktree path not found on disk; pruning stale worktree metadata..."
+    fi
     git worktree prune
   }
   echo "Worktree removed."
 else
-  echo "Worktree path does not exist, skipping..."
+  echo "Worktree path does not exist and branch is not in git worktree list, skipping..."
 fi
 
 # ====== 2. Remove database ======
@@ -206,9 +237,14 @@ fi
 # ====== 4. Remove git branch ======
 BRANCH_NAME="${WORKTREE_NAME}"
 if git show-ref --verify --quiet "refs/heads/${BRANCH_NAME}"; then
-  echo "Removing git branch ${BRANCH_NAME}..."
-  git branch -D "${BRANCH_NAME}"
-  echo "Branch removed."
+  REMAINING_WORKTREE_PATH="$(get_worktree_path_for_branch "${BRANCH_NAME}")"
+  if [[ -n "${REMAINING_WORKTREE_PATH}" ]]; then
+    echo "Warning: Branch ${BRANCH_NAME} is still checked out at ${REMAINING_WORKTREE_PATH}; skipping branch deletion."
+  else
+    echo "Removing git branch ${BRANCH_NAME}..."
+    git branch -D "${BRANCH_NAME}"
+    echo "Branch removed."
+  fi
 else
   echo "Branch ${BRANCH_NAME} does not exist, skipping..."
 fi

@@ -532,6 +532,20 @@ release_ports_lock() {
   fi
 }
 
+get_worktree_path_for_branch() {
+  local branch_name="$1"
+  git worktree list --porcelain 2>/dev/null | awk -v branch="refs/heads/${branch_name}" '
+    $1 == "worktree" {
+      path = $0
+      sub(/^worktree /, "", path)
+    }
+    $1 == "branch" && $2 == branch {
+      print path
+      exit
+    }
+  '
+}
+
 # Clean up stale port reservations for non-existent worktrees
 cleanup_stale_reservations() {
   ensure_ports_file
@@ -544,19 +558,22 @@ cleanup_stale_reservations() {
   worktrees=$(jq -r 'keys[]' "${PORTS_FILE}" 2>/dev/null) || return 0
 
   for worktree in ${worktrees}; do
-    local worktree_path="${WORKTREE_ROOT}/${worktree}"
-    if [[ ! -d "${worktree_path}" ]]; then
-      # Verify it's not a valid git worktree elsewhere
-      if ! git worktree list --porcelain 2>/dev/null | grep -q "worktree.*/${worktree}\$"; then
-        echo "Removing stale port reservation for non-existent worktree: ${worktree}" >&2
-        tmp_ports="$(mktemp)"
-        if jq --arg name "${worktree}" 'del(.[$name])' "${PORTS_FILE}" > "${tmp_ports}"; then
-          mv "${tmp_ports}" "${PORTS_FILE}"
-          stale_count=$((stale_count + 1))
-        else
-          rm -f "${tmp_ports}"
-        fi
-      fi
+    local legacy_worktree_path="${WORKTREE_ROOT}/${worktree}"
+    local sanitized_worktree_path="${WORKTREE_ROOT}/$(sanitize_db_suffix "${worktree}")"
+    local registered_worktree_path
+
+    registered_worktree_path="$(get_worktree_path_for_branch "${worktree}")"
+    if [[ -d "${legacy_worktree_path}" ]] || [[ -d "${sanitized_worktree_path}" ]] || [[ -n "${registered_worktree_path}" ]]; then
+      continue
+    fi
+
+    echo "Removing stale port reservation for non-existent worktree: ${worktree}" >&2
+    tmp_ports="$(mktemp)"
+    if jq --arg name "${worktree}" 'del(.[$name])' "${PORTS_FILE}" > "${tmp_ports}"; then
+      mv "${tmp_ports}" "${PORTS_FILE}"
+      stale_count=$((stale_count + 1))
+    else
+      rm -f "${tmp_ports}"
     fi
   done
 
