@@ -62,6 +62,7 @@ from sqlalchemy.orm import (
 from sqlalchemy.sql import func
 import pingpong.schemas as schemas
 import logging
+from pingpong.log_utils import sanitize_for_log
 
 logger = logging.getLogger(__name__)
 
@@ -982,7 +983,11 @@ class ExternalLogin(Base):
             result = await session.execute(stmt)
             if called_by:
                 logger.info(
-                    f"ELDEBUG: ({called_by}) Upserting external login for user {user_id} with provider {provider} and identifier {identifier}"
+                    "ELDEBUG: (%s) Upserting external login for user %s provider=%s identifier=%s",
+                    sanitize_for_log(called_by),
+                    user_id,
+                    sanitize_for_log(provider),
+                    sanitize_for_log(identifier),
                 )
             return result.rowcount > 0
         else:
