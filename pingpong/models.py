@@ -5704,7 +5704,14 @@ class Thread(Base):
             select(Thread)
             .outerjoin(Thread.users)
             .options(
-                selectinload(Thread.users).load_only(User.id, User.created),
+                selectinload(Thread.users).load_only(
+                    User.id,
+                    User.created,
+                    User.display_name,
+                    User.first_name,
+                    User.last_name,
+                    User.email,
+                ),
             )
             .order_by(Thread.updated.desc() if desc else Thread.updated.asc())
             .where(condition)
