@@ -40,6 +40,12 @@ ConversationRole = Literal["user", "assistant"]
 UNSET_PREVIOUS_ITEM_ID = "__UNSET_PREVIOUS_ITEM_ID__"
 
 
+def _has_non_empty_transcript(transcript_text: str | None) -> bool:
+    if transcript_text is None:
+        return False
+    return bool(transcript_text.strip())
+
+
 @dataclass
 class ConversationChainItem:
     item_id: str
@@ -217,6 +223,15 @@ class ConversationItemOrderingBuffer:
                 continue
             if item.transcription_text is None or item.role is None:
                 continue
+            if not _has_non_empty_transcript(item.transcription_text):
+                self._logger.warning(
+                    "Skipping realtime transcript with empty content for item_id %s.",
+                    item.item_id,
+                )
+                item.is_message_saved = True
+                self._mark_item_and_descendants_for_readiness(item.item_id)
+                self._prune_saved_items()
+                continue
             output_index = str(self.next_output_index)
             self.next_output_index += 1
             item.is_message_saved = True
@@ -355,6 +370,15 @@ async def add_message_to_thread(
 ):
     is_user_message = role == "user"
     message_saved = False
+
+    if not _has_non_empty_transcript(transcript_text):
+        openai_connection_logger.warning(
+            "Skipping realtime message with empty transcript content: item_id=%s, role=%s, output_index=%s",
+            item_id,
+            role,
+            output_index,
+        )
+        return
 
     if thread.version == 3:
         try:
