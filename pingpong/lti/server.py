@@ -14,6 +14,7 @@ from pingpong.auth import encode_session_token
 from pingpong.authz.openfga import OpenFgaAuthzClient
 from pingpong.config import config
 from pingpong.invite import send_lti_registration_submitted
+from pingpong.log_utils import sanitize_for_log
 from pingpong.lti.lti_course import (
     find_class_by_course_id,
     find_class_by_course_id_search_by_canvas_account_lti_guid,
@@ -772,7 +773,7 @@ async def lti_launch(
     else:
         logger.warning(
             "LTI launch missing iss/sub for email=%s; skipping issuer/sub external-login key",
-            user_email,
+            sanitize_for_log(user_email),
         )
 
     sso_provider_id_str = launch_custom_params.get("sso_provider_id", "0")
