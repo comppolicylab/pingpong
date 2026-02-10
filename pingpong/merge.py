@@ -13,6 +13,7 @@ from pingpong.models import (
     Assistant,
     Class,
     ExternalLogin,
+    ExternalLoginProvider,
     LTIClass,
     MCPServerTool,
     User,
@@ -252,6 +253,19 @@ async def merge_external_logins(
     session: AsyncSession, new_user_id: int, old_user_id: int
 ) -> None:
     existing_login = ExternalLogin.__table__.alias("existing_login")
+    old_login_is_internal_only = exists(
+        select(1)
+        .select_from(ExternalLoginProvider)
+        .where(
+            and_(
+                ExternalLoginProvider.internal_only.is_(True),
+                or_(
+                    ExternalLoginProvider.id == ExternalLogin.provider_id,
+                    ExternalLoginProvider.name == ExternalLogin.provider,
+                ),
+            )
+        )
+    )
 
     conflicting_login_exists = exists(
         select(1)
@@ -260,6 +274,7 @@ async def merge_external_logins(
             and_(
                 existing_login.c.user_id == new_user_id,
                 ExternalLogin.provider != "email",
+                ~old_login_is_internal_only,
                 or_(
                     existing_login.c.provider == ExternalLogin.provider,
                     and_(

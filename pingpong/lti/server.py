@@ -55,7 +55,6 @@ from pingpong.schemas import (
     CreateUserClassRole,
     CreateUserClassRoles,
     ExternalLoginLookupItem,
-    ExternalLoginProviders,
     LMSPlatform,
     LTIRegistrationReviewStatus,
     LTIStatus,
@@ -212,20 +211,6 @@ async def get_jwks(key_manager: LTIKeyManager = Depends(get_lti_key_manager)):
     except Exception as e:
         logger.error(f"Error serving JWKS: {e}")
         raise HTTPException(status_code=500, detail="Error retrieving public keys")
-
-
-@lti_router.get("/sso/providers", response_model=ExternalLoginProviders)
-async def get_sso_ids(request: StateRequest):
-    """
-    Get the SSO identifiers for the LTI instance.
-    """
-    external_login_providers = await ExternalLoginProvider.get_all(request.state["db"])
-    no_email_providers = [
-        provider
-        for provider in external_login_providers
-        if _is_public_sso_provider(provider)
-    ]
-    return {"providers": no_email_providers}
 
 
 @lti_router.get("/public/sso/providers", response_model=LTIPublicSSOProviders)
@@ -834,8 +819,7 @@ async def lti_launch(
                 )
             ],
         )
-    if user:
-        user.email = user_email
+    user_needs_email_update = user is not None and user.email != user_email
 
     if not user:
         if is_admin and not (is_instructor or is_student):
@@ -868,6 +852,10 @@ async def lti_launch(
                 user.id,
                 matched_user_id,
             )
+    if user_needs_email_update:
+        user.email = user_email
+        request.state["db"].add(user)
+        await request.state["db"].flush()
 
     if lti_provider_name and lti_identifier:
         await ExternalLogin.create_or_update(

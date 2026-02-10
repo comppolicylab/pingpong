@@ -2136,6 +2136,98 @@ async def test_lti_launch_ambiguous_lookup_falls_back_to_email_only(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_lti_launch_updates_email_after_merge(monkeypatch):
+    oidc_session = _make_oidc_session(
+        redirect_uri=server_module.config.url("/api/v1/lti/launch")
+    )
+    registration = _make_registration(
+        review_status=LTIRegistrationReviewStatus.APPROVED, enabled=True
+    )
+    claims = {
+        "nonce": "nonce",
+        "sub": "canvas-user-123",
+        "iss": "issuer",
+        "email": "new@example.com",
+        "https://purl.imsglobal.org/spec/lti/claim/custom": {
+            "canvas_course_id": "course-1",
+            "sso_provider_id": "0",
+        },
+        "https://purl.imsglobal.org/spec/lti/claim/roles": [
+            "http://purl.imsglobal.org/vocab/lis/v2/membership#Instructor"
+        ],
+    }
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "get_by_state",
+        lambda db, state: _async_return(oidc_session),
+    )
+    monkeypatch.setattr(
+        server_module.LTIRegistration,
+        "get_by_client_id",
+        lambda db, client_id: _async_return(registration),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "_verify_lti_id_token",
+        lambda **kwargs: _async_return(claims),
+    )
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "validate_and_consume",
+        lambda *args, **kwargs: _async_return(True),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "find_class_by_course_id",
+        lambda *args, **kwargs: _async_return(None),
+    )
+    monkeypatch.setattr(server_module, "LTIClass", FakeLTIClass)
+
+    user = FakeUserModel("old@example.com")
+    merge_state = {"called": False}
+
+    class MergeAwareDB(FakeDB):
+        async def flush(self):
+            # Simulate uniqueness conflict when the new email is flushed
+            # before account merge resolves ownership.
+            if user.email == "new@example.com" and not merge_state["called"]:
+                raise AssertionError("email updated before merge")
+            await super().flush()
+
+    async def _get_by_email_external_logins_priority(db, email, lookup_items):
+        return user, [user.id, 9999]
+
+    async def _merge(db, authz, new_user_id, old_user_id):
+        merge_state["called"] = True
+
+    monkeypatch.setattr(server_module, "User", FakeUserModel)
+    monkeypatch.setattr(
+        server_module.User,
+        "get_by_email_external_logins_priority",
+        _get_by_email_external_logins_priority,
+    )
+    monkeypatch.setattr(server_module, "merge", _merge)
+    monkeypatch.setattr(
+        server_module, "encode_session_token", lambda user_id, nowfn: "token"
+    )
+    monkeypatch.setattr(
+        server_module, "get_now_fn", lambda request: lambda: datetime.now(timezone.utc)
+    )
+
+    request = FakeRequest(
+        payload={"state": "state", "id_token": "token"},
+        state=_make_request_state(db=MergeAwareDB()),
+    )
+
+    response = await server_module.lti_launch(request, tasks=SimpleNamespace())
+
+    assert response.status_code == 302
+    assert "/lti/setup" in response.headers["location"]
+    assert merge_state["called"] is True
+    assert user.email == "new@example.com"
+
+
+@pytest.mark.asyncio
 async def test_lti_launch_non_lti_class_redirect_when_owner(monkeypatch):
     oidc_session = _make_oidc_session(
         redirect_uri=server_module.config.url("/api/v1/lti/launch")
