@@ -22,7 +22,7 @@ class VideoStoreError(Exception):
 class BaseVideoStore(ABC):
     @abstractmethod
     async def get_video_metadata(self, key: str) -> VideoMetadata:
-        """Get metdata about a video file from the store"""
+        """Get metadata about a video file from the store"""
         raise NotImplementedError()
 
     @abstractmethod
