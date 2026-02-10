@@ -3,7 +3,13 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from botocore import UNSIGNED
 from botocore.exceptions import ClientError
-from pingpong.video_stream import LocalVideoStream, VideoStreamError, S3VideoStream
+from pingpong.video_stream import (
+    LocalVideoStream,
+    VideoStreamError,
+    S3VideoStream,
+    S3VideoStore,
+    LocalVideoStore,
+)
 from pathlib import Path
 
 
@@ -11,7 +17,8 @@ from pathlib import Path
 async def test_local_missing_file(monkeypatch, tmp_path):
     """File requested for viewing does not exist"""
 
-    stream = LocalVideoStream(str(tmp_path))
+    store = LocalVideoStore(str(tmp_path))
+    stream = LocalVideoStream(store=store)
 
     mock_video_path = tmp_path / "mock_video.mp4"
 
@@ -45,7 +52,7 @@ async def test_local_missing_file(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_s3_public_metdata(monkeypatch):
+async def test_s3_public_metadata(monkeypatch):
     """Correctly sets the s3_client config and returns the metadata"""
     mock_client = AsyncMock()
     mock_session = AsyncMock()
@@ -73,16 +80,16 @@ async def test_s3_public_metdata(monkeypatch):
     )
 
     # Test: with allow_unsigned=True, should use UNSIGNED config
-    stream = S3VideoStream(bucket="test-bucket", allow_unsigned=True)
-    await stream.get_metadata("test.mp4")
+    store = S3VideoStore(bucket="test-bucket", allow_unsigned=True)
+    await store.get_video_metadata("test.mp4")  # Metadata from store, not stream
 
     assert captured_config is not None
     assert captured_config.signature_version == UNSIGNED
 
     # Test: with allow_unsigned=False, should NOT use UNSIGNED config
     captured_config = None
-    stream = S3VideoStream(bucket="test-bucket", allow_unsigned=False)
-    await stream.get_metadata("test.mp4")
+    store = S3VideoStore(bucket="test-bucket", allow_unsigned=False)
+    await store.get_video_metadata("test.mp4")  # Metadata from store, not stream
 
     assert captured_config is None
 
@@ -114,7 +121,8 @@ async def test_s3_authenticated_key_maps_error(monkeypatch):
     mock_session_class = Mock(return_value=mock_session)
     monkeypatch.setattr("pingpong.video_stream.aioboto3.Session", mock_session_class)
 
-    stream = S3VideoStream(bucket="test-bucket", allow_unsigned=False)
+    store = S3VideoStore(bucket="test-bucket", allow_unsigned=False)
+    stream = S3VideoStream(store=store)
 
     # Test: NoSuchKey → 404
     error_response = {"Error": {"Code": "NoSuchKey"}}
@@ -158,7 +166,7 @@ async def test_s3_authenticated_invalid_content_type(monkeypatch):
     mock_session_class = Mock(return_value=mock_session)
     monkeypatch.setattr("pingpong.video_stream.aioboto3.Session", mock_session_class)
 
-    stream = S3VideoStream(bucket="test-bucket", allow_unsigned=False)
+    store = S3VideoStore(bucket="test-bucket", allow_unsigned=False)
 
     # Test: get_metadata raises TypeError for unplayable data
     mock_client.head_object = AsyncMock(
@@ -171,7 +179,7 @@ async def test_s3_authenticated_invalid_content_type(monkeypatch):
     )
 
     with pytest.raises(TypeError) as excinfo:
-        await stream.get_metadata("file.bin")
+        await store.get_video_metadata("file.bin")
 
     assert "Unsupported video format" in str(excinfo.value)
     assert "application/octet-stream" in str(excinfo.value)
@@ -187,7 +195,7 @@ async def test_s3_authenticated_invalid_content_type(monkeypatch):
     )
 
     with pytest.raises(TypeError) as excinfo:
-        await stream.get_metadata("document.pdf")
+        await store.get_video_metadata("document.pdf")
 
     assert "Unsupported video format" in str(excinfo.value)
     assert "application/pdf" in str(excinfo.value)
@@ -220,7 +228,7 @@ async def test_s3_authenticated_stream_full(monkeypatch):
 
     mock_body.iter_chunks = mock_iter_chunks
 
-    # "Last_modified" nor "E-tag" is not used in this function
+    # LastModified and Etag are not used in this test
     mock_client.get_object = AsyncMock(
         return_value={
             "Body": mock_body,
@@ -229,7 +237,8 @@ async def test_s3_authenticated_stream_full(monkeypatch):
         }
     )
 
-    stream = S3VideoStream(bucket="test-bucket", allow_unsigned=False)
+    store = S3VideoStore(bucket="test-bucket", allow_unsigned=False)
+    stream = S3VideoStream(store=store)
 
     # Test: stream_video() returns all bytes
     collected_bytes = b""
@@ -252,7 +261,8 @@ async def test_s3_authenticated_stream_full(monkeypatch):
 async def test_local_stream_range_invalid(monkeypatch, tmp_path):
     """Out of bounds or inverted ranges return VideoStreamError with 416"""
 
-    stream = LocalVideoStream(str(tmp_path))
+    store = LocalVideoStore(str(tmp_path))
+    stream = LocalVideoStream(store=store)
 
     test_file_size = 1000
     mock_stat_result = Mock()

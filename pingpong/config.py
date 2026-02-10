@@ -12,7 +12,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from pingpong.artifacts import LocalArtifactStore, S3ArtifactStore
 from pingpong.audio_store import LocalAudioStore, S3AudioStore
-from pingpong.video_stream import LocalVideoStream, S3VideoStream
+from pingpong.video_stream import LocalVideoStore, S3VideoStore
 from pingpong.log_filters import IgnoreHealthEndpoint
 from .authz import OpenFgaAuthzDriver
 from .email import AzureEmailSender, GmailEmailSender, MockEmailSender, SmtpEmailSender
@@ -246,8 +246,8 @@ class LocalStoreSettings(BaseSettings):
 ArtifactStoreSettings = Union[S3StoreSettings, LocalStoreSettings]
 
 
-class S3VideoStreamSettings(BaseSettings):
-    """Settings for S3 Video Streaming"""
+class S3VideoStoreSettings(BaseSettings):
+    """Settings for S3 Video Store"""
 
     type: Literal["s3"] = "s3"
     save_target: str
@@ -255,21 +255,21 @@ class S3VideoStreamSettings(BaseSettings):
 
     @cached_property
     def store(self):
-        return S3VideoStream(self.save_target, self.allow_unsigned)
+        return S3VideoStore(bucket=self.save_target, allow_unsigned=self.allow_unsigned)
 
 
-class LocalVideoStreamSettings(BaseSettings):
-    """Settings for Local Video Streaming"""
+class LocalVideoStoreSettings(BaseSettings):
+    """Settings for Local Video Store"""
 
     type: Literal["local"] = "local"
     save_target: str
 
     @cached_property
     def store(self):
-        return LocalVideoStream(self.save_target)
+        return LocalVideoStore(directory=self.save_target)
 
 
-VideoStreamSettings = Union[S3VideoStreamSettings, LocalVideoStreamSettings]
+VideoStreamSettings = Union[S3VideoStoreSettings, LocalVideoStoreSettings]
 
 
 class S3AudioStoreSettings(BaseSettings):
@@ -367,7 +367,7 @@ class Config(BaseSettings):
     audio_store: AudioStoreSettings = LocalAudioStoreSettings(
         save_target="local_exports/voice_mode_recordings"
     )
-    video_stream: VideoStreamSettings = LocalVideoStreamSettings(
+    video_stream: VideoStreamSettings = LocalVideoStoreSettings(
         save_target="local_exports/video_stream_exports"
     )
     db: DbSettings
