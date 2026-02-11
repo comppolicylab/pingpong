@@ -881,12 +881,17 @@ async def lti_launch(
     class_needs_setup = isinstance(class_, LTIClass) and (
         class_.lti_status == LTIStatus.PENDING or class_.class_id is None
     )
+    can_reuse_setup_class = (
+        class_needs_setup and class_.registration_id == registration.id
+        if isinstance(class_, LTIClass)
+        else False
+    )
     if class_ is None or class_needs_setup:
         # User is launching into a class that is not yet linked
         # Or the class is pending setup
         if is_instructor or is_admin:
             # Reuse existing unlinked/pending LTIClass for setup (re-launch scenario)
-            if class_needs_setup:
+            if can_reuse_setup_class:
                 assert isinstance(class_, LTIClass)
                 # Resume existing setup
                 pending_lti_class = class_
