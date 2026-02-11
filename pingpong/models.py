@@ -3059,6 +3059,7 @@ class LTIClass(Base):
     setup_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     lti_platform = Column(SQLEnum(schemas.LMSPlatform), nullable=False)
     course_id = Column(String, nullable=False)
+    resource_link_id = Column(String, nullable=True)
     course_name = Column(String, nullable=True)
     course_code = Column(String, nullable=True)
     course_term = Column(String, nullable=True)
@@ -3083,7 +3084,7 @@ class LTIClass(Base):
         return await session.scalar(stmt)
 
     @classmethod
-    async def get_by_canvas_account_lti_guid_and_course_id(
+    async def get_linked_by_canvas_account_lti_guid_and_course_id(
         cls, session: AsyncSession, canvas_account_lti_guid: str, course_id: str
     ) -> "LTIClass | None":
         stmt = (
@@ -3093,6 +3094,12 @@ class LTIClass(Base):
                 and_(
                     LTIRegistration.canvas_account_lti_guid == canvas_account_lti_guid,
                     LTIClass.course_id == course_id,
+                    LTIClass.lti_status.in_(
+                        [
+                            schemas.LTIStatus.LINKED,
+                            schemas.LTIStatus.ERROR,
+                        ]
+                    ),
                 )
             )
             .options(selectinload(LTIClass.registration))
@@ -3150,8 +3157,45 @@ class LTIClass(Base):
         return [row[0] for row in result]
 
     @classmethod
+    async def get_all_to_sync(
+        cls,
+        session: AsyncSession,
+        sync_classes_with_error_status: bool = False,
+    ) -> AsyncGenerator["LTIClass", None]:
+        lti_status_condition = (
+            or_(
+                LTIClass.lti_status == schemas.LTIStatus.LINKED,
+                LTIClass.lti_status == schemas.LTIStatus.ERROR,
+            )
+            if sync_classes_with_error_status
+            else LTIClass.lti_status == schemas.LTIStatus.LINKED
+        )
+
+        stmt = select(LTIClass).where(
+            and_(
+                LTIClass.class_id.is_not(None),
+                LTIClass.setup_user_id.is_not(None),
+                lti_status_condition,
+            )
+        )
+        result = await session.execute(stmt)
+        for row in result.scalars():
+            yield row
+
+    @classmethod
     async def get_by_id(cls, session: AsyncSession, id_: int) -> "LTIClass | None":
         stmt = select(LTIClass).where(LTIClass.id == int(id_))
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_id_with_registration(
+        cls, session: AsyncSession, id_: int
+    ) -> "LTIClass | None":
+        stmt = (
+            select(LTIClass)
+            .where(LTIClass.id == int(id_))
+            .options(selectinload(LTIClass.registration))
+        )
         return await session.scalar(stmt)
 
     @classmethod

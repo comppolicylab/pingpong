@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { getContext, onMount } from 'svelte';
+	import { fade } from 'svelte/transition';
 	import { writable } from 'svelte/store';
 	import type { Readable, Writable } from 'svelte/store';
 	import { resolve } from '$app/paths';
@@ -523,6 +524,58 @@
 	$: canvasLinkedClass = data.class.lms_class;
 	$: canvasInstances = data.canvasInstances || [];
 	$: ltiLinkedClasses = data.ltiClasses || [];
+	let syncingCanvasConnectRoster = false;
+	let canvasConnectAccordionOpen = false;
+	let canvasSyncOwnAccordionOpen = false;
+	let canvasSyncOtherAccordionOpen = false;
+
+	const syncCanvasConnectRosterFromHeader = (event: MouseEvent | TouchEvent) => {
+		event.stopPropagation();
+		void syncCanvasConnectRoster();
+	};
+
+	const syncCanvasConnectRoster = async () => {
+		if (!ltiLinkedClasses.length) {
+			sadToast('No Canvas Connect classes linked to this group.');
+			return;
+		}
+		syncingCanvasConnectRoster = true;
+		const failedCourses: string[] = [];
+		let syncedClasses = 0;
+
+		for (const linkedClass of ltiLinkedClasses) {
+			const result = await api.syncLTIClassRoster(fetch, data.class.id, linkedClass.id);
+			const response = api.expandResponse(result);
+			if (response.error) {
+				const courseName = linkedClass.course_name || linkedClass.course_id || 'Unknown course';
+				failedCourses.push(
+					`${courseName}: ${response.error.detail || 'An unknown error occurred'}`
+				);
+				continue;
+			}
+			syncedClasses++;
+		}
+
+		syncingCanvasConnectRoster = false;
+		invalidateAll();
+		if (syncedClasses > 0) {
+			timesAdded++; // Trigger a refresh of the users list in the UI
+		}
+
+		if (failedCourses.length) {
+			sadToast(failedCourses[0], 6000);
+			if (syncedClasses > 0) {
+				happyToast(
+					`Synced ${syncedClasses} Canvas Connect ${syncedClasses === 1 ? 'class' : 'classes'}.`
+				);
+			}
+			return;
+		}
+
+		happyToast(
+			`Synced roster for ${syncedClasses} Canvas Connect ${syncedClasses === 1 ? 'class' : 'classes'}!`
+		);
+	};
 
 	const redirectToCanvas = async (tenantId: string) => {
 		const result = await api.getCanvasLink(fetch, data.class.id, tenantId);
@@ -662,6 +715,11 @@
 	};
 
 	let syncingCanvasClass = false;
+	const syncClassFromHeader = (event: MouseEvent | TouchEvent) => {
+		event.stopPropagation();
+		void syncClass();
+	};
+
 	const syncClass = async () => {
 		if (!data.class.lms_tenant) {
 			sadToast('No Canvas account linked to this group.');
@@ -1513,24 +1571,70 @@
 			<div class="col-span-2">
 				{#if ltiLinkedClasses.length > 0}
 					<Accordion flush class="mb-2 rounded-lg border-2 border-gray-300 bg-gray-50">
-						<AccordionItem paddingFlush="px-5.5 py-3.5" class="text-gray-800" borderBottomClass="">
+						<AccordionItem
+							bind:open={canvasConnectAccordionOpen}
+							paddingFlush="px-5.5 py-3.5"
+							class="text-gray-800"
+							borderBottomClass=""
+						>
 							<div slot="header" class="mr-3 flex grow items-center justify-between gap-3">
 								<div class="flex flex-row items-center gap-3">
 									<CanvasLogo size="5" />
 									<span class="text-lg font-medium">Canvas Connect is active</span>
 								</div>
-								<CanvasConnectSyncBadge
-									type="default"
-									label={`${ltiLinkedClasses.length} linked ${ltiLinkedClasses.length === 1 ? 'class' : 'classes'}`}
-								/>
+								<div class="flex flex-row items-center gap-2">
+									{#if !canvasConnectAccordionOpen}
+										<div transition:fade={{ duration: 100 }}>
+											<Button
+												pill
+												size="xs"
+												class="border border-gray-700 bg-gradient-to-t from-gray-700 to-gray-600 !px-2.5 !py-1 text-white hover:from-gray-600 hover:to-gray-500"
+												onclick={syncCanvasConnectRosterFromHeader}
+												disabled={syncingCanvasConnectRoster ||
+													removingLTIConnection ||
+													$updatingApiKey}
+											>
+												{#if syncingCanvasConnectRoster}<Spinner
+														class="me-1 h-4 w-4"
+													/>{:else}<RefreshOutline class="me-1 h-4 w-4" />{/if}<span
+													class="hidden sm:inline">Sync</span
+												></Button
+											>
+										</div>
+									{/if}
+									<CanvasConnectSyncBadge
+										type="default"
+										label={`${ltiLinkedClasses.length} linked ${ltiLinkedClasses.length === 1 ? 'class' : 'classes'}`}
+									/>
+								</div>
 							</div>
 							<div class="-mt-4 text-sm text-gray-800">
 								<p>
 									This PingPong group is linked to the following courses through our Canvas Connect
-									LTI 1.3 integration. Soon, PingPong will automatically sync your class roster with
-									this group's user list. In the meantime, students can access your PingPong group
-									by clicking the PingPong link in your course navigation menu.
+									LTI 1.3 integration. Course rosters are automatically synced with this group's
+									user list about once every hour. Use the Sync button below to request an immediate
+									sync. Users are not notified when they get added to this group through Canvas
+									Connect.
 								</p>
+								<p class="mt-2">
+									Course members can also access your PingPong group by clicking the PingPong link
+									in your course navigation menu.
+								</p>
+								<div class="mt-3 flex flex-row items-center justify-start">
+									<Button
+										pill
+										size="xs"
+										class="border border-gray-700 bg-gradient-to-t from-gray-700 to-gray-600 text-white hover:from-gray-600 hover:to-gray-500"
+										onclick={syncCanvasConnectRoster}
+										disabled={syncingCanvasConnectRoster ||
+											removingLTIConnection ||
+											$updatingApiKey}
+									>
+										{#if syncingCanvasConnectRoster}<Spinner
+												class="me-2 h-4 w-4"
+											/>{:else}<RefreshOutline class="me-2 h-4 w-4" />{/if}Sync roster</Button
+									>
+								</div>
 								<div class="mt-3 mb-2 w-full">
 									<div class="grid grid-cols-1 gap-2">
 										{#each ltiLinkedClasses as linkedClass (linkedClass.id)}
@@ -1543,6 +1647,11 @@
 													</div>
 													<div class="text-sm text-gray-600">
 														{linkedClass.course_term ?? 'Unknown Term'}
+													</div>
+													<div class="text-xs text-gray-500">
+														Last sync: {linkedClass.last_synced
+															? dayjs.utc(linkedClass.last_synced).fromNow()
+															: 'never'}
 													</div>
 												</div>
 												<div class="flex shrink-0 flex-row gap-1">
@@ -1834,6 +1943,7 @@
 					{:else if data.class.lms_status === 'linked' && data.class.lms_user?.id && data.me.user?.id === data.class.lms_user?.id}
 						<Accordion flush class="mb-2 rounded-lg border-2 border-green-300 bg-green-50">
 							<AccordionItem
+								bind:open={canvasSyncOwnAccordionOpen}
 								paddingFlush="px-5.5 py-3.5"
 								class="text-green-800"
 								borderBottomClass=""
@@ -1843,14 +1953,35 @@
 										<CanvasLogo size="5" />
 										<span class="text-lg font-medium">Canvas Sync is active</span>
 									</div>
-									<CanvasConnectSyncBadge
-										type="success"
-										label={`Last sync: ${
-											data.class.lms_last_synced
-												? dayjs.utc(data.class.lms_last_synced).fromNow()
-												: 'never'
-										}`}
-									/>
+									{#if !canvasSyncOwnAccordionOpen}
+										<div
+											class="flex flex-row items-center gap-2"
+											transition:fade={{ duration: 100 }}
+										>
+											<Button
+												pill
+												size="xs"
+												class="border border-green-900 bg-gradient-to-t from-green-800 to-green-700 !px-2.5 !py-1 text-white hover:from-green-700 hover:to-green-600"
+												onclick={syncClassFromHeader}
+												disabled={syncingCanvasClass || $updatingApiKey}
+											>
+												{#if syncingCanvasClass}<Spinner
+														color="white"
+														class="me-1 h-4 w-4"
+													/>{:else}<RefreshOutline class="me-1 h-4 w-4" />{/if}<span
+													class="hidden sm:inline">Sync</span
+												></Button
+											>
+											<CanvasConnectSyncBadge
+												type="success"
+												label={`Last sync: ${
+													data.class.lms_last_synced
+														? dayjs.utc(data.class.lms_last_synced).fromNow()
+														: 'never'
+												}`}
+											/>
+										</div>
+									{/if}
 								</div>
 								<div class="-mt-4 mb-4 text-sm text-green-800">
 									<p>
@@ -1859,7 +1990,7 @@
 										>
 										on Canvas through the Canvas API. The class roster is automatically synced with this
 										group's user list about once every hour. Use the Sync button below to request an immediate
-										sync. Users are not notified when they get added to this group though Canvas Sync.
+										sync. Users are not notified when they get added to this group through Canvas Sync.
 									</p>
 									<p class="mt-2">
 										Last sync: {data.class.lms_last_synced
@@ -1873,7 +2004,6 @@
 										size="xs"
 										class="border border-green-900 bg-gradient-to-t from-green-800 to-green-700 text-white hover:from-green-700 hover:to-green-600"
 										onclick={syncClass}
-										ontouchstart={syncClass}
 										disabled={syncingCanvasClass || $updatingApiKey}
 									>
 										{#if syncingCanvasClass}<Spinner color="white" class="me-2 h-4 w-4" />Syncing
@@ -1933,6 +2063,7 @@
 					{:else if data.class.lms_status === 'linked'}
 						<Accordion flush class="mb-2 rounded-lg border-2 border-green-300 bg-green-50">
 							<AccordionItem
+								bind:open={canvasSyncOtherAccordionOpen}
 								paddingFlush="px-5.5 py-3.5"
 								class="text-green-800"
 								borderBottomClass=""
@@ -1942,14 +2073,35 @@
 										<CanvasLogo size="5" />
 										<span class="text-lg font-medium">Canvas Sync is active</span>
 									</div>
-									<CanvasConnectSyncBadge
-										type="success"
-										label={`Last sync: ${
-											data.class.lms_last_synced
-												? dayjs.utc(data.class.lms_last_synced).fromNow()
-												: 'never'
-										}`}
-									/>
+									{#if !canvasSyncOtherAccordionOpen}
+										<div
+											class="flex flex-row items-center gap-2"
+											transition:fade={{ duration: 100 }}
+										>
+											<Button
+												pill
+												size="xs"
+												class="border border-green-900 bg-gradient-to-t from-green-800 to-green-700 !px-2.5 !py-1 text-white hover:from-green-700 hover:to-green-600"
+												onclick={syncClassFromHeader}
+												disabled={syncingCanvasClass || $updatingApiKey}
+											>
+												{#if syncingCanvasClass}<Spinner
+														color="white"
+														class="me-1 h-4 w-4"
+													/>{:else}<RefreshOutline class="me-1 h-4 w-4" />{/if}<span
+													class="hidden sm:inline">Sync</span
+												></Button
+											>
+											<CanvasConnectSyncBadge
+												type="success"
+												label={`Last sync: ${
+													data.class.lms_last_synced
+														? dayjs.utc(data.class.lms_last_synced).fromNow()
+														: 'never'
+												}`}
+											/>
+										</div>
+									{/if}
 								</div>
 								<div class="-mt-4 mb-4 text-sm text-green-800">
 									<p>
@@ -1976,7 +2128,6 @@
 										size="xs"
 										class="border border-green-900 bg-gradient-to-t from-green-800 to-green-700 text-white hover:from-green-700 hover:to-green-600"
 										onclick={syncClass}
-										ontouchstart={syncClass}
 										disabled={syncingCanvasClass || $updatingApiKey}
 									>
 										{#if syncingCanvasClass}<Spinner color="white" class="me-2 h-4 w-4" />Syncing

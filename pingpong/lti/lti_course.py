@@ -28,7 +28,7 @@ async def find_class_by_course_id_search_by_canvas_account_lti_guid(
     if lti_course is not None:
         return lti_course
 
-    lti_course = await LTIClass.get_by_canvas_account_lti_guid_and_course_id(
+    lti_course = await LTIClass.get_linked_by_canvas_account_lti_guid_and_course_id(
         db,
         canvas_account_lti_guid=canvas_account_lti_guid,
         course_id=course_id,

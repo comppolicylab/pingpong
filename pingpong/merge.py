@@ -400,7 +400,10 @@ async def merge_users(
         logging.warning(
             f"Old user {old_user_id} not found, continuing with adding the merge tuple only."
         )
+
     if old_user:
+        old_user_email = old_user.email.strip() if old_user.email else None
+        new_user_email = new_user.email.strip() if new_user.email else None
         match old_user.state:
             case "verified":
                 new_user.state = (
@@ -420,6 +423,23 @@ async def merge_users(
         await session.execute(update_merged_account_tuple_stmt)
         delete_old_user_stmt = delete(User).where(User.id == old_user_id)
         await session.execute(delete_old_user_stmt)
+        if old_user_email and old_user_email.lower() != (new_user_email or "").lower():
+            try:
+                await ExternalLogin.create_or_update(
+                    session,
+                    new_user_id,
+                    provider="email",
+                    identifier=old_user_email,
+                    called_by="merge_users",
+                )
+            except ValueError:
+                logger.exception(
+                    "Failed to preserve old primary email during user merge "
+                    "(new_user_id=%s old_user_id=%s email=%s)",
+                    new_user_id,
+                    old_user_id,
+                    old_user_email,
+                )
     add_new_merge_tuple_stmt = (
         _get_upsert_stmt(session)(user_merge_association)
         .values(user_id=new_user_id, merged_user_id=old_user_id)

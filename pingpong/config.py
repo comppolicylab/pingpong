@@ -328,6 +328,7 @@ class LTISettings(BaseSettings):
     """LTI Advantage Service settings."""
 
     key_store: LTIKeyStoreSettings
+    sync_wait: int = Field(60 * 10, gt=0)  # 10 mins
 
     # Key rotation settings
     rotation_schedule: str = Field("0 0 1 * *")  # First day of every month at midnight

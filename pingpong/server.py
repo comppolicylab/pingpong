@@ -115,6 +115,11 @@ from .auth import (
 )
 from .authz import Relation
 from .config import config
+from .lti.canvas_connect import (
+    CanvasConnectException,
+    CanvasConnectWarning,
+    ManualCanvasConnectClient,
+)
 from .canvas import (
     CanvasAccessException,
     CanvasException,
@@ -1869,6 +1874,50 @@ async def get_lti_canvas_classes(class_id: str, request: StateRequest):
         lti_classes_results.append(lti_class_from_schema)
 
     return {"classes": lti_classes_results}
+
+
+@v1.post(
+    "/class/{class_id}/lti/classes/{lti_class_id}/sync",
+    dependencies=[Depends(Authz("can_edit_info", "class:{class_id}"))],
+    response_model=schemas.GenericStatus,
+)
+async def sync_lti_class_roster(
+    class_id: str, lti_class_id: str, request: StateRequest, tasks: BackgroundTasks
+):
+    class_id_int = int(class_id)
+    lti_class = await models.LTIClass.get_by_id(request.state["db"], int(lti_class_id))
+    if not lti_class:
+        raise HTTPException(status_code=404, detail="LTI class not found")
+    if lti_class.class_id != class_id_int:
+        raise HTTPException(
+            status_code=400, detail="LTI class does not belong to the specified class"
+        )
+
+    async with ManualCanvasConnectClient(
+        lti_class_id=lti_class.id, request=request, tasks=tasks
+    ) as client:
+        try:
+            await client.sync_roster()
+        except CanvasConnectWarning as e:
+            raise HTTPException(
+                status_code=400,
+                detail=e.detail
+                or "A roster sync through Canvas Connect was recently completed.",
+            ) from e
+        except CanvasConnectException as e:
+            raise HTTPException(
+                status_code=500,
+                detail=e.detail
+                or "Syncing your roster through Canvas Connect failed. Please try again later.",
+            ) from e
+        except Exception as e:
+            logger.exception("sync_lti_class_roster: Exception occurred")
+            raise HTTPException(
+                status_code=500,
+                detail="We faced an internal error while syncing with Canvas Connect.",
+            ) from e
+
+    return {"status": "ok"}
 
 
 @v1.delete(

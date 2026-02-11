@@ -53,6 +53,7 @@ from pingpong.migrations.m05_populate_account_lti_guid import (
 )
 from pingpong.now import _get_next_run_time, croner, utcnow
 from pingpong.schemas import LMSType, RunStatus
+from pingpong.lti.canvas_connect import canvas_connect_sync_all
 from pingpong.summary import send_class_summary_for_class
 
 from .auth import encode_auth_token
@@ -91,6 +92,12 @@ def auth() -> None:
 
 @cli.group("lms")
 def lms() -> None:
+    pass
+
+
+@cli.group("lti")
+def lti() -> None:
+    """LTI Advantage Service commands."""
     pass
 
 
@@ -917,6 +924,23 @@ async def _lms_sync_all(
             logger.info("Done!")
 
 
+async def _lti_sync_all(sync_classes_with_error_status: bool = False) -> None:
+    lti_settings = config.lti
+    if lti_settings is None:
+        logger.error("LTI service is not enabled in configuration")
+        return
+
+    await config.authz.driver.init()
+    async with config.db.driver.async_session() as session:
+        async with config.authz.driver.get_client() as c:
+            await canvas_connect_sync_all(
+                session=session,
+                authz_client=c,
+                sync_classes_with_error_status=sync_classes_with_error_status,
+            )
+            logger.info("Done!")
+
+
 @lms.command("sync-all")
 @click.option("--sync-with-error", default=False, is_flag=True)
 @click.option("--sync-without-sso", default=False, is_flag=True)
@@ -953,6 +977,42 @@ def sync_pingpong_with_lms(crontime: str, host: str, port: int) -> None:
     # Run the Uvicorn server in the background
     with server.run_in_thread():
         asyncio.run(_sync_pingpong_with_lms())
+
+
+@lti.command("sync-all")
+@click.option("--sync-with-error", default=False, is_flag=True)
+def sync_lti_all(sync_with_error: bool) -> None:
+    """
+    Sync all classes linked through Canvas Connect.
+    """
+    asyncio.run(
+        _lti_sync_all(
+            sync_classes_with_error_status=sync_with_error,
+        )
+    )
+
+
+@lti.command("sync_pingpong_with_lti")
+@click.option("--crontime", default="0 * * * *")
+@click.option("--host", default="localhost")
+@click.option("--port", default=8001)
+def sync_pingpong_with_lti(crontime: str, host: str, port: int) -> None:
+    """
+    Run the LTI sync-all command in a background server.
+    """
+    server = get_server(host=host, port=port)
+
+    async def _sync_pingpong_with_lti():
+        async for _ in croner(crontime, logger=logger):
+            try:
+                await _lti_sync_all()
+                logger.info(f"LTI sync completed successfully at {datetime.now()}")
+            except Exception as e:
+                logger.exception(f"Error during LTI sync: {e}")
+
+    # Run the Uvicorn server in the background
+    with server.run_in_thread():
+        asyncio.run(_sync_pingpong_with_lti())
 
 
 @export.command("export_threads_with_emails")
@@ -1062,12 +1122,6 @@ async def _send_activity_summaries(
                 logger.info("All summaries sent successfully.")
                 job.completed_at = utcnow()
             await session.commit()
-
-
-@cli.group("lti")
-def lti() -> None:
-    """LTI Advantage Service commands."""
-    pass
 
 
 @lti.command("rotate-keys")
@@ -1204,6 +1258,7 @@ def lti_test_jwks() -> None:
 FUNCTIONS_MAP: Dict[str, Callable] = {
     "batch_send_activity_summaries": _send_activity_summaries,
     "sync_pingpong_with_lms": lambda _, **kwargs: _lms_sync_all(**kwargs),
+    "sync_pingpong_with_lti": lambda _, **kwargs: _lti_sync_all(**kwargs),
 }
 
 
