@@ -46,7 +46,7 @@ jobs:
           fetch-tags: true
           token: ${{ steps.app-token.outputs.token }}
 
-      - name: Wait for build tag on current main HEAD
+      - name: Find newest taggable main commit and wait for build tag
         id: preflight-tag
         shell: bash
         run: |
@@ -97,13 +97,61 @@ jobs:
             return 1
           }
 
+          is_taggable_path() {
+            local path="$1"
+            case "$path" in
+              web/*|pingpong/*|alembic/*|saml/*|poetry.lock|pyproject.toml)
+                return 0
+                ;;
+              *)
+                return 1
+                ;;
+            esac
+          }
+
+          find_newest_taggable_commit() {
+            local max_commits=2000
+            local checked=0
+            while IFS= read -r sha; do
+              ((checked++))
+              if (( checked > max_commits )); then
+                break
+              fi
+
+              local first_parent
+              first_parent="$(git rev-list --parents -n 1 "$sha" | awk '{print $2}')"
+              local files
+              if [[ -n "$first_parent" ]]; then
+                # Compare against first parent only to avoid per-parent merge diffs.
+                files="$(git diff --name-only "$first_parent" "$sha" || true)"
+              else
+                # Root commit fallback.
+                files="$(git diff-tree --no-commit-id --name-only -r --root "$sha" || true)"
+              fi
+              while IFS= read -r file; do
+                [[ -z "$file" ]] && continue
+                if is_taggable_path "$file"; then
+                  echo "$sha"
+                  return 0
+                fi
+              done <<< "$files"
+            done < <(git rev-list --first-parent origin/main)
+
+            return 1
+          }
+
           git fetch origin main --tags --prune --quiet
-          MAIN_SHA="$(git rev-parse origin/main)"
-          MAIN_TAG="$(wait_for_tag "$MAIN_SHA")"
-          echo "PRE_COMMIT_MAIN_SHA=$MAIN_SHA" >> "$GITHUB_ENV"
-          echo "PRE_COMMIT_TAG=$MAIN_TAG" >> "$GITHUB_ENV"
-          echo "main_sha=$MAIN_SHA" >> "$GITHUB_OUTPUT"
-          echo "main_tag=$MAIN_TAG" >> "$GITHUB_OUTPUT"
+          TAGGABLE_SHA="$(find_newest_taggable_commit || true)"
+          if [[ -z "$TAGGABLE_SHA" ]]; then
+            echo "Error: Could not find a recent taggable commit on origin/main (checked up to 2000 commits)."
+            exit 1
+          fi
+
+          TAGGABLE_TAG="$(wait_for_tag "$TAGGABLE_SHA")"
+          echo "PRE_COMMIT_TAGGABLE_SHA=$TAGGABLE_SHA" >> "$GITHUB_ENV"
+          echo "PRE_COMMIT_TAG=$TAGGABLE_TAG" >> "$GITHUB_ENV"
+          echo "taggable_sha=$TAGGABLE_SHA" >> "$GITHUB_OUTPUT"
+          echo "taggable_tag=$TAGGABLE_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Compute release version and same-version behavior
         id: version
@@ -294,8 +342,8 @@ jobs:
             TARGET_SHA="$(git rev-parse HEAD)"
             echo "Using newly created release commit as target: $TARGET_SHA"
           else
-            TARGET_SHA="${PRE_COMMIT_MAIN_SHA}"
-            echo "No version commit created; reusing preflight main commit as target: $TARGET_SHA"
+            TARGET_SHA="${PRE_COMMIT_TAGGABLE_SHA}"
+            echo "No version commit created; reusing preflight taggable commit as target: $TARGET_SHA"
           fi
 
           echo "TARGET_SHA=$TARGET_SHA" >> "$GITHUB_ENV"
