@@ -475,6 +475,7 @@ def temperature_validator(self):
         raise ValueError("Temperature must be between 0.6 and 1.2 for Voice mode.")
     return self
 
+
 def lecture_video_validator(self):
     if (
         self.interaction_mode == InteractionMode.LECTURE_VIDEO
@@ -486,6 +487,7 @@ def lecture_video_validator(self):
             "Please remove all tools or select a different interaction mode."
         )
     return self
+
 
 class ToolOption(TypedDict):
     type: (

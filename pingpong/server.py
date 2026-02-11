@@ -7026,22 +7026,28 @@ async def create_assistant(
             status_code=400,
             detail="The selected model does not support Web Search. Please select a different model or remove the Web Search tool.",
         )
-    if uses_web_search and req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
+    if (
+        uses_web_search
+        and req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
+    ):
         raise HTTPException(
             status_code=400,
-            detail="Lecture video assistants do not support Web Search. Please select a different interaction mode or remove the Web Search tool."
+            detail="Lecture video assistants do not support Web Search. Please select a different interaction mode or remove the Web Search tool.",
         )
-    
+
     uses_mcp_server = {"type": "mcp_server"} in req.tools
     if uses_mcp_server and not model_record.supports_mcp_server:
         raise HTTPException(
             status_code=400,
             detail="The selected model does not support MCP Servers. Please select a different model or remove the MCP Server tool.",
         )
-    if uses_mcp_server and not req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
+    if (
+        uses_mcp_server
+        and not req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
+    ):
         raise HTTPException(
             status_code=400,
-            detail="Lecture video assistants do not support MCP Server. Please select a different interaction mode or remove the MCP Server tool."
+            detail="Lecture video assistants do not support MCP Server. Please select a different interaction mode or remove the MCP Server tool.",
         )
     if uses_mcp_server and assistant_version <= 2:
         raise HTTPException(
@@ -7108,23 +7114,20 @@ async def create_assistant(
                 status_code=400,
                 detail="Code interpreter is not supported in Lecture mode.",
             )
-        tool_resources["code_interpreter"] = {"file_ids": req.code_interpreter_file_ids} 
+        tool_resources["code_interpreter"] = {"file_ids": req.code_interpreter_file_ids}
 
     lecture_video_object_id = None
     if is_video:
         if not req.lecture_video_id:
             raise HTTPException(
                 status_code=400,
-                detail="lecture_video_id is required for lecture video assistants."
+                detail="lecture_video_id is required for lecture video assistants.",
             )
         lecture_video = await models.LectureVideo.get_by_id(
             request.state.db, req.lecture_video_id
         )
         if not lecture_video:
-            raise HTTPException(
-                status_code=404,
-                detail="Lecture video not found."
-            )
+            raise HTTPException(status_code=404, detail="Lecture video not found.")
         lecture_video_object_id = req.lecture_video_id
 
     if assistant_version <= 2:
@@ -7701,7 +7704,7 @@ async def update_assistant(
                 403,
                 "This assistant is locked and cannot be edited. Please create a new assistant if you need to make changes.",
             )
-    
+
     # Only Administrators can edit lecture video assistants
     if asst.locked and req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
         if not await request.state.authz.test(
@@ -7711,7 +7714,7 @@ async def update_assistant(
         ):
             raise HTTPException(
                 403,
-                "This lecture video assistant is locked and cannot be edited. Please create a new assistant if you need to make changes."
+                "This lecture video assistant is locked and cannot be edited. Please create a new assistant if you need to make changes.",
             )
 
     class_ = await models.Class.get_by_id(request.state.db, int(class_id))
@@ -7752,8 +7755,8 @@ async def update_assistant(
             status_code=400,
             detail="Cannot convert existing assistants to lecture video mode. Please create a new assistant.",
         )
-    
-    #Prevent changing lecture video assistants to other interaction modes
+
+    # Prevent changing lecture video assistants to other interaction modes
     if not is_video and asst.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
         raise HTTPException(
             status_code=400,

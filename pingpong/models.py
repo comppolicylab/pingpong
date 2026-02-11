@@ -1615,6 +1615,7 @@ class LectureVideo(Base):
         stmt = select(LectureVideo).where(LectureVideo.id == id_)
         return await session.scalar(stmt)
 
+
 class S3File(Base):
     __tablename__ = "s3_files"
 
