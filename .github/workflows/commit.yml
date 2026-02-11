@@ -46,8 +46,8 @@ jobs:
           import subprocess
           import sys
 
-          LEGACY_TAG_PATTERN = re.compile(r'^(\\d+)-srv(\\d+)-web(\\d+)$')
-          NEW_TAG_PATTERN = re.compile(r'^v(\\d+)\\+srv(\\d+)\\.web(\\d+)$')
+          LEGACY_TAG_PATTERN = re.compile(r'^(\d+)-srv(\d+)-web(\d+)$')
+          NEW_TAG_PATTERN = re.compile(r'^v(\d+)\+srv(\d+)\.web(\d+)$')
 
           def is_versioning_tag(tag):
               return bool(LEGACY_TAG_PATTERN.match(tag) or NEW_TAG_PATTERN.match(tag))
