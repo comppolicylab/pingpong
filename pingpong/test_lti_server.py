@@ -173,6 +173,7 @@ def _make_lti_class(
         registration=registration,
         registration_id=registration.id,
         lti_status=status,
+        resource_link_id=None,
         setup_user_id=setup_user_id,
         course_name="Course",
         course_code="CODE",
@@ -199,12 +200,14 @@ class FakeLTIClass:
         class_id=None,
         setup_user_id=10,
         context_memberships_url=None,
+        resource_link_id=None,
     ):
         self.id = 555
         self.registration_id = registration_id
         self.lti_status = lti_status
         self.lti_platform = lti_platform
         self.course_id = course_id
+        self.resource_link_id = resource_link_id
         self.course_code = course_code
         self.course_name = course_name
         self.course_term = course_term
