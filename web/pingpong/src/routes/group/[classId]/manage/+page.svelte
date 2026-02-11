@@ -542,39 +542,42 @@
 		syncingCanvasConnectRoster = true;
 		const failedCourses: string[] = [];
 		let syncedClasses = 0;
-
-		for (const linkedClass of ltiLinkedClasses) {
-			const result = await api.syncLTIClassRoster(fetch, data.class.id, linkedClass.id);
-			const response = api.expandResponse(result);
-			if (response.error) {
-				const courseName = linkedClass.course_name || linkedClass.course_id || 'Unknown course';
-				failedCourses.push(
-					`${courseName}: ${response.error.detail || 'An unknown error occurred'}`
-				);
-				continue;
+		try {
+			for (const linkedClass of ltiLinkedClasses) {
+				const result = await api.syncLTIClassRoster(fetch, data.class.id, linkedClass.id);
+				const response = api.expandResponse(result);
+				if (response.error) {
+					const courseName = linkedClass.course_name || linkedClass.course_id || 'Unknown course';
+					failedCourses.push(
+						`${courseName}: ${response.error.detail || 'An unknown error occurred'}`
+					);
+					continue;
+				}
+				syncedClasses++;
 			}
-			syncedClasses++;
-		}
-
-		syncingCanvasConnectRoster = false;
-		invalidateAll();
-		if (syncedClasses > 0) {
-			timesAdded++; // Trigger a refresh of the users list in the UI
-		}
-
-		if (failedCourses.length) {
-			sadToast(failedCourses[0], 6000);
+			invalidateAll();
 			if (syncedClasses > 0) {
-				happyToast(
-					`Synced ${syncedClasses} Canvas Connect ${syncedClasses === 1 ? 'class' : 'classes'}.`
-				);
+				timesAdded++; // Trigger a refresh of the users list in the UI
 			}
-			return;
-		}
 
-		happyToast(
-			`Synced roster for ${syncedClasses} Canvas Connect ${syncedClasses === 1 ? 'class' : 'classes'}!`
-		);
+			if (failedCourses.length) {
+				sadToast(failedCourses[0], 6000);
+				if (syncedClasses > 0) {
+					happyToast(
+						`Synced ${syncedClasses} Canvas Connect ${syncedClasses === 1 ? 'class' : 'classes'}.`
+					);
+				}
+				return;
+			}
+
+			happyToast(
+				`Synced roster for ${syncedClasses} Canvas Connect ${syncedClasses === 1 ? 'class' : 'classes'}!`
+			);
+		} catch {
+			sadToast('Failed to sync Canvas Connect roster. Please try again.');
+		} finally {
+			syncingCanvasConnectRoster = false;
+		}
 	};
 
 	const redirectToCanvas = async (tenantId: string) => {
