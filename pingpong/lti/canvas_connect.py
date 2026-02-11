@@ -220,7 +220,7 @@ class CanvasConnectClient:
             (now + timedelta(seconds=CLIENT_ASSERTION_EXPIRY_SECONDS)).timestamp()
         )
         payload = {
-            "iss": config.public_url,
+            "iss": client_id,
             "sub": client_id,
             "aud": token_endpoint,
             "iat": issued_at,

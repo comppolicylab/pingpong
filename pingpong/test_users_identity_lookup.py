@@ -5,7 +5,6 @@ import pytest
 import pingpong.models as models
 import pingpong.schemas as schemas
 import pingpong.users as users_module
-from pingpong.users import AddNewUsersScript
 
 
 class _FakeAuthzClient:
@@ -22,7 +21,7 @@ async def test_lookup_user_prefers_external_logins_over_legacy_sso(monkeypatch):
         roles=[],
         sso_tenant="legacy-tenant",
     )
-    add_users = AddNewUsersScript(
+    add_users = users_module.AddNewUsersScript(
         class_id="1",
         user_id=1,
         session=SimpleNamespace(),
@@ -69,7 +68,7 @@ async def test_lookup_user_falls_back_to_legacy_sso_when_external_logins_empty(
         roles=[],
         sso_tenant="legacy-tenant",
     )
-    add_users = AddNewUsersScript(
+    add_users = users_module.AddNewUsersScript(
         class_id="1",
         user_id=1,
         session=SimpleNamespace(),
@@ -111,7 +110,7 @@ async def test_lookup_user_ambiguous_external_login_falls_back_to_email_only(
         roles=[],
         sso_tenant="legacy-tenant",
     )
-    add_users = AddNewUsersScript(
+    add_users = users_module.AddNewUsersScript(
         class_id="1",
         user_id=1,
         session=SimpleNamespace(),
@@ -162,7 +161,7 @@ async def test_merge_matched_user_ids_deduplicates_old_user_merges(
         roles=[],
         lms_tenant="canvas-tenant",
     )
-    add_users = AddNewUsersScript(
+    add_users = users_module.AddNewUsersScript(
         class_id="1",
         user_id=1,
         session=SimpleNamespace(),
@@ -206,7 +205,7 @@ async def test_add_new_users_skips_identity_upsert_for_rejected_manual_lms_edit(
         ],
         silent=True,
     )
-    add_users = AddNewUsersScript(
+    add_users = users_module.AddNewUsersScript(
         class_id="1",
         user_id=1,
         session=SimpleNamespace(),
@@ -242,14 +241,14 @@ async def test_add_new_users_skips_identity_upsert_for_rejected_manual_lms_edit(
         upsert_calls["count"] += 1
 
     monkeypatch.setattr(
-        AddNewUsersScript,
+        users_module.AddNewUsersScript,
         "_lookup_user_for_ucr",
         _lookup_user_for_ucr,
     )
     monkeypatch.setattr(models.Class, "get_by_id", _class_get_by_id)
     monkeypatch.setattr(models.UserClassRole, "get", _user_class_role_get)
     monkeypatch.setattr(
-        AddNewUsersScript,
+        users_module.AddNewUsersScript,
         "_upsert_identity_external_logins",
         _upsert_identity_external_logins,
     )
@@ -296,7 +295,7 @@ async def test_add_new_users_allows_switching_between_lms_sync_sources(
         lms_tenant=new_lms_tenant,
         lti_class_id=new_lti_class_id,
     )
-    add_users = AddNewUsersScript(
+    add_users = users_module.AddNewUsersScript(
         class_id="1",
         user_id=1,
         session=SimpleNamespace(),
@@ -339,24 +338,24 @@ async def test_add_new_users_allows_switching_between_lms_sync_sources(
         return None
 
     monkeypatch.setattr(
-        AddNewUsersScript,
+        users_module.AddNewUsersScript,
         "_lookup_user_for_ucr",
         _lookup_user_for_ucr,
     )
     monkeypatch.setattr(models.Class, "get_by_id", _class_get_by_id)
     monkeypatch.setattr(models.UserClassRole, "get", _user_class_role_get)
     monkeypatch.setattr(
-        AddNewUsersScript,
+        users_module.AddNewUsersScript,
         "_upsert_identity_external_logins",
         _upsert_identity_external_logins,
     )
     monkeypatch.setattr(
-        AddNewUsersScript,
+        users_module.AddNewUsersScript,
         "_update_user_enrollment",
         _update_user_enrollment,
     )
     monkeypatch.setattr(
-        AddNewUsersScript,
+        users_module.AddNewUsersScript,
         "_remove_deleted_users",
         _remove_deleted_users,
     )
@@ -384,7 +383,7 @@ async def test_add_new_users_creates_external_login_when_enrollment_create_recei
         sso_tenant="legacy-tenant",
         silent=True,
     )
-    add_users = AddNewUsersScript(
+    add_users = users_module.AddNewUsersScript(
         class_id="1",
         user_id=1,
         session=SimpleNamespace(),
@@ -441,7 +440,7 @@ async def test_add_new_users_creates_external_login_when_enrollment_create_recei
         return True
 
     monkeypatch.setattr(
-        AddNewUsersScript,
+        users_module.AddNewUsersScript,
         "_lookup_user_for_ucr",
         _lookup_user_for_ucr,
     )
