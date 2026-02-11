@@ -989,6 +989,7 @@ async def lti_launch(
                     is_lti_launch=True,
                 )
                 try:
+                    assert class_.class_id is not None
                     await AddNewUsersManual(
                         str(class_.class_id),
                         new_ucr,
@@ -1099,6 +1100,7 @@ async def lti_launch(
                     is_lti_launch=True,
                 )
                 try:
+                    assert pp_class.id is not None
                     await AddNewUsersManual(
                         pp_class.id,
                         new_ucr,
@@ -1205,6 +1207,7 @@ async def lti_launch(
                     is_lti_launch=True,
                 )
                 try:
+                    assert class_.id is not None
                     await AddNewUsersManual(
                         class_.id, new_ucr, request, tasks, user_id=class_.lms_user_id
                     ).add_new_users()
@@ -1232,6 +1235,7 @@ async def lti_launch(
                     is_lti_launch=True,
                 )
                 try:
+                    assert class_.id is not None
                     await AddNewUsersManual(
                         class_.id, new_ucr, request, tasks, user_id=class_.lms_user_id
                     ).add_new_users()
