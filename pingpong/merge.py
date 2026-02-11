@@ -8,6 +8,7 @@ import logging
 from pingpong.config import config
 from pingpong.authz.base import Relation
 from pingpong.authz.openfga import OpenFgaAuthzClient, ReadRequestTupleKey
+from pingpong.log_utils import sanitize_for_log
 from pingpong.models import (
     AgreementAcceptance,
     Assistant,
@@ -395,10 +396,10 @@ async def merge_users(
     old_user = await User.get_by_id(session, old_user_id)
     new_user = await User.get_by_id(session, new_user_id)
     if not new_user:
-        raise ValueError(f"New user {new_user_id} not found.")
+        raise ValueError(f"New user {sanitize_for_log(new_user_id)} not found.")
     if not old_user:
         logging.warning(
-            f"Old user {old_user_id} not found, continuing with adding the merge tuple only."
+            f"Old user {sanitize_for_log(old_user_id)} not found, continuing with adding the merge tuple only."
         )
 
     if old_user:
@@ -436,9 +437,9 @@ async def merge_users(
                 logger.exception(
                     "Failed to preserve old primary email during user merge "
                     "(new_user_id=%s old_user_id=%s email=%s)",
-                    new_user_id,
-                    old_user_id,
-                    old_user_email,
+                    sanitize_for_log(new_user_id),
+                    sanitize_for_log(old_user_id),
+                    sanitize_for_log(old_user_email),
                 )
     add_new_merge_tuple_stmt = (
         _get_upsert_stmt(session)(user_merge_association)

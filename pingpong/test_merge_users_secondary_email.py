@@ -3,7 +3,6 @@ from sqlalchemy import select
 
 from pingpong import models, schemas
 import pingpong.merge as merge_module
-from pingpong.merge import merge_users
 
 pytestmark = pytest.mark.asyncio
 
@@ -20,7 +19,7 @@ async def test_merge_users_preserves_old_primary_email_as_secondary(db):
         old_user = await _create_user(session, 2101, "old-primary@example.com")
         new_user = await _create_user(session, 2102, "new-primary@example.com")
 
-        await merge_users(session, new_user.id, old_user.id)
+        await merge_module.merge_users(session, new_user.id, old_user.id)
         await session.flush()
 
         merged_user = await models.User.get_by_id(session, new_user.id)
@@ -58,7 +57,7 @@ async def test_merge_users_does_not_duplicate_existing_secondary_email(db):
         session.add(existing_secondary)
         await session.flush()
 
-        await merge_users(session, new_user.id, old_user.id)
+        await merge_module.merge_users(session, new_user.id, old_user.id)
         await session.flush()
 
         secondary_email_rows = await session.execute(
@@ -91,7 +90,7 @@ async def test_merge_users_continues_when_secondary_email_upsert_raises_value_er
             _raise_value_error,
         )
 
-        merged_user = await merge_users(session, new_user.id, old_user.id)
+        merged_user = await merge_module.merge_users(session, new_user.id, old_user.id)
         await session.flush()
 
         assert merged_user.id == new_user.id
