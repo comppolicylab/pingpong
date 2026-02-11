@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pingpong"
-version = "7.12.1"
+version = "7.13.0"
 description = "A software platform carefully designed for AI-driven learning."
 authors = ["Joe Nudell <jnudell@hks.harvard.edu>", "Evangelos Kassos <github@evangeloskassos.com>"]
 readme = "README.md"
