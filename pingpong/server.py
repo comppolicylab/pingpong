@@ -7108,7 +7108,24 @@ async def create_assistant(
                 status_code=400,
                 detail="Code interpreter is not supported in Lecture mode.",
             )
-        tool_resources["code_interpreter"] = {"file_ids": req.code_interpreter_file_ids}
+        tool_resources["code_interpreter"] = {"file_ids": req.code_interpreter_file_ids} 
+
+    lecture_video_object_id = None
+    if is_video:
+        if not req.lecture_video_id:
+            raise HTTPException(
+                status_code=400,
+                detail="lecture_video_id is required for lecture video assistants."
+            )
+        lecture_video = await models.LectureVideo.get_by_id(
+            request.state.db, req.lecture_video_id
+        )
+        if not lecture_video:
+            raise HTTPException(
+                status_code=404,
+                detail="Lecture video not found."
+            )
+        lecture_video_object_id = req.lecture_video_id
 
     if assistant_version <= 2:
         try:
@@ -7189,6 +7206,7 @@ async def create_assistant(
             user_id=creator_id,
             assistant_id=new_asst.id if new_asst else None,
             vector_store_id=vector_store_object_id,
+            lecture_video_id=lecture_video_object_id,
             version=assistant_version,
         )
 
@@ -7748,6 +7766,8 @@ async def update_assistant(
     # 3. Otherwise, force version 3 assistants if class has OAI key
     if isinstance(openai_client, openai.AsyncAzureOpenAI) or uses_voice:
         asst.version = 2
+    elif is_video:
+        asst.version = 3
     else:
         if class_.api_key_obj or class_.api_key:
             asst.version = 3

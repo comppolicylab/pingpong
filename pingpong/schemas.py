@@ -560,6 +560,7 @@ class CreateAssistant(BaseModel):
     reasoning_effort: int | None = Field(None, ge=-1, le=2)
     verbosity: int | None = Field(None, ge=0, le=2)
     tools: list[ToolOption] = Field(default_factory=list)
+    lecture_video_id: int | None = None
     published: bool = False
     use_latex: bool = False
     use_image_descriptions: bool = False

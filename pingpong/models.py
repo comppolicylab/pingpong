@@ -1610,6 +1610,10 @@ class LectureVideo(Base):
         stmt = delete(LectureVideo).where(LectureVideo.id == id_)
         await session.execute(stmt)
 
+    @classmethod
+    async def get_by_id(cls, session: AsyncSession, id_: int) -> "LectureVideo | None":
+        stmt = select(LectureVideo).where(LectureVideo.id == id_)
+        return await session.scalar(stmt)
 
 class S3File(Base):
     __tablename__ = "s3_files"
