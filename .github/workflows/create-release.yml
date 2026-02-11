@@ -219,15 +219,6 @@ jobs:
               out.write(f"EXISTING_DRAFT_TAG={existing_draft_tag}\n")
           PY
 
-      - name: Delete existing draft release with same version
-        if: ${{ steps.version.outputs.EXISTING_DRAFT_TAG != '' }}
-        shell: bash
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: |
-          set -euo pipefail
-          gh release delete "${{ steps.version.outputs.EXISTING_DRAFT_TAG }}" --yes
-
       - name: Update version files directly
         shell: bash
         env:
@@ -441,14 +432,31 @@ jobs:
             out.write(f"notes_path={notes_path}\n")
           PY
 
-      - name: Create draft prerelease
+      - name: Create or update draft prerelease
         shell: bash
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          EXISTING_DRAFT_TAG: ${{ steps.version.outputs.EXISTING_DRAFT_TAG }}
+          RELEASE_NAME: ${{ steps.version.outputs.RELEASE_NAME }}
+          RESOLVED_TAG: ${{ steps.target-tag.outputs.resolved_tag }}
+          TARGET_SHA: ${{ steps.target-sha.outputs.target_sha }}
+          NOTES_PATH: ${{ steps.notes.outputs.notes_path }}
         run: |
           set -euo pipefail
-          gh release create "${{ steps.target-tag.outputs.resolved_tag }}" \
-            --title "${{ steps.version.outputs.RELEASE_NAME }}" \
-            --draft \
-            --prerelease \
-            --notes-file "${{ steps.notes.outputs.notes_path }}"
+          if [[ -n "${EXISTING_DRAFT_TAG}" ]]; then
+            echo "Updating existing draft release ${EXISTING_DRAFT_TAG} to tag ${RESOLVED_TAG}"
+            gh release edit "${EXISTING_DRAFT_TAG}" \
+              --title "${RELEASE_NAME}" \
+              --draft \
+              --prerelease \
+              --notes-file "${NOTES_PATH}" \
+              --tag "${RESOLVED_TAG}" \
+              --target "${TARGET_SHA}"
+          else
+            echo "Creating new draft prerelease ${RELEASE_NAME} on tag ${RESOLVED_TAG}"
+            gh release create "${RESOLVED_TAG}" \
+              --title "${RELEASE_NAME}" \
+              --draft \
+              --prerelease \
+              --notes-file "${NOTES_PATH}"
+          fi
