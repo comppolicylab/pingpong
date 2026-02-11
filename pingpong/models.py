@@ -3064,7 +3064,7 @@ class LTIClass(Base):
     course_code = Column(String, nullable=True)
     course_term = Column(String, nullable=True)
     class_id = Column(
-        Integer, ForeignKey("classes.id", ondelete="SET NULL"), nullable=True
+        Integer, ForeignKey("classes.id", ondelete="CASCADE"), nullable=True
     )
 
     setup_user = relationship("User", foreign_keys=[setup_user_id])

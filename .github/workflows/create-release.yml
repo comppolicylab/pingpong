@@ -1,0 +1,510 @@
+name: Create Release
+run-name: "Create Release (${{ inputs.release_type }})"
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: 'Release bump type'
+        required: true
+        type: choice
+        options:
+          - major
+          - minor
+          - patch
+
+concurrency: create-release
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    name: Bump version and create draft prerelease
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ vars.CPL_BOT_GITHUB_APP_ID }}
+          private-key: ${{ secrets.CPL_BOT_GITHUB_APP_PRIVATE_KEY }}
+
+      - name: Ensure workflow runs on main
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_NAME}" != "main" ]]; then
+            echo "Error: This workflow must run on main. Current ref: ${GITHUB_REF_NAME}"
+            exit 1
+          fi
+
+      - name: Checkout main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+          fetch-tags: true
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Find newest taggable main commit and wait for build tag
+        id: preflight-tag
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          find_best_tag() {
+            local tags_text="$1"
+            local best_tag=""
+            local best_build=-1
+            while IFS= read -r tag; do
+              [[ -z "$tag" ]] && continue
+              local build=""
+              if [[ "$tag" =~ ^([0-9]+)-srv([0-9]+)-web([0-9]+)$ ]]; then
+                build="${BASH_REMATCH[1]}"
+              elif [[ "$tag" =~ ^v([0-9]+)\+srv([0-9]+)\.web([0-9]+)$ ]]; then
+                build="${BASH_REMATCH[1]}"
+              else
+                continue
+              fi
+              if (( build > best_build )); then
+                best_build=$build
+                best_tag="$tag"
+              fi
+            done <<< "$tags_text"
+            echo "$best_tag"
+          }
+
+          wait_for_tag() {
+            local target_sha="$1"
+            local max_attempts=90
+            local sleep_seconds=10
+            local attempt=1
+            while (( attempt <= max_attempts )); do
+              git fetch origin --tags --quiet
+              local tags
+              tags="$(git tag --points-at "$target_sha" || true)"
+              local best_tag
+              best_tag="$(find_best_tag "$tags")"
+              if [[ -n "$best_tag" ]]; then
+                echo "$best_tag"
+                return 0
+              fi
+              echo "Waiting for build tag on $target_sha (${attempt}/${max_attempts})..." >&2
+              sleep "$sleep_seconds"
+              ((attempt++))
+            done
+            echo "Error: Timed out waiting for build tag on $target_sha" >&2
+            return 1
+          }
+
+          is_taggable_path() {
+            local path="$1"
+            case "$path" in
+              web/*|pingpong/*|alembic/*|saml/*|poetry.lock|pyproject.toml)
+                return 0
+                ;;
+              *)
+                return 1
+                ;;
+            esac
+          }
+
+          find_newest_taggable_commit() {
+            local max_commits=2000
+            local checked=0
+            while IFS= read -r sha; do
+              ((checked++))
+              if (( checked > max_commits )); then
+                break
+              fi
+
+              local first_parent
+              first_parent="$(git rev-list --parents -n 1 "$sha" | awk '{print $2}')"
+              local files
+              if [[ -n "$first_parent" ]]; then
+                # Compare against first parent only to avoid per-parent merge diffs.
+                files="$(git diff --name-only "$first_parent" "$sha" || true)"
+              else
+                # Root commit fallback.
+                files="$(git diff-tree --no-commit-id --name-only -r --root "$sha" || true)"
+              fi
+              while IFS= read -r file; do
+                [[ -z "$file" ]] && continue
+                if is_taggable_path "$file"; then
+                  echo "$sha"
+                  return 0
+                fi
+              done <<< "$files"
+            done < <(git rev-list --first-parent origin/main)
+
+            return 1
+          }
+
+          git fetch origin main --tags --prune --quiet
+          TAGGABLE_SHA="$(find_newest_taggable_commit || true)"
+          if [[ -z "$TAGGABLE_SHA" ]]; then
+            echo "Error: Could not find a recent taggable commit on origin/main (checked up to 2000 commits)."
+            exit 1
+          fi
+
+          TAGGABLE_TAG="$(wait_for_tag "$TAGGABLE_SHA")"
+          echo "PRE_COMMIT_TAGGABLE_SHA=$TAGGABLE_SHA" >> "$GITHUB_ENV"
+          echo "PRE_COMMIT_TAG=$TAGGABLE_TAG" >> "$GITHUB_ENV"
+          echo "taggable_sha=$TAGGABLE_SHA" >> "$GITHUB_OUTPUT"
+          echo "taggable_tag=$TAGGABLE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Compute release version and same-version behavior
+        id: version
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          RELEASE_TYPE: ${{ inputs.release_type }}
+        run: |
+          set -euo pipefail
+          python << 'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+
+          release_type = os.environ["RELEASE_TYPE"]
+          if release_type not in {"major", "minor", "patch"}:
+              print(f"Invalid release_type: {release_type}", file=sys.stderr)
+              sys.exit(1)
+
+          pattern = re.compile(r"^v(\d+)\.(\d+)(?:\.(\d+))?(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$")
+          latest_raw = subprocess.check_output(
+              [
+                  "gh",
+                  "release",
+                  "list",
+                  "--exclude-drafts",
+                  "--exclude-pre-releases",
+                  "--limit",
+                  "1",
+                  "--json",
+                  "name",
+              ],
+              text=True,
+          )
+          latest_releases = json.loads(latest_raw)
+          if not latest_releases:
+              print(
+                  "Expected at least one published release to exist, but none were found.",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+
+          baseline_name = (latest_releases[0].get("name") or "").strip()
+          match = pattern.match(baseline_name)
+          if not match:
+              print(
+                  f"Latest published release name does not match expected semver format: {baseline_name}",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+
+          major = int(match.group(1))
+          minor = int(match.group(2))
+          patch = int(match.group(3) or "0")
+          if release_type == "major":
+              major += 1
+              minor = 0
+              patch = 0
+          elif release_type == "minor":
+              minor += 1
+              patch = 0
+          else:
+              patch += 1
+
+          version_normalized = f"{major}.{minor}.{patch}"
+          release_name = f"v{major}.{minor}" if patch == 0 else f"v{major}.{minor}.{patch}"
+
+          all_releases_raw = subprocess.check_output(
+              [
+                  "gh",
+                  "release",
+                  "list",
+                  "--limit",
+                  "200",
+                  "--json",
+                  "name,tagName,isDraft",
+              ],
+              text=True,
+          )
+          all_releases = json.loads(all_releases_raw)
+
+          same_name_releases = [rel for rel in all_releases if (rel.get("name") or "") == release_name]
+          if len(same_name_releases) > 1:
+              print(
+                  f"Found multiple releases with the same name ({release_name}); refusing ambiguous recreation.",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+
+          existing_draft_tag = ""
+          if len(same_name_releases) == 1:
+              rel = same_name_releases[0]
+              if rel.get("isDraft"):
+                  existing_draft_tag = rel.get("tagName") or ""
+              else:
+                  print(
+                      f"Published release {release_name} already exists; refusing to overwrite published releases.",
+                      file=sys.stderr,
+                  )
+                  sys.exit(1)
+
+          print(f"Baseline release: {baseline_name}")
+          print(f"Computed version: {version_normalized}")
+          print(f"Computed release name: {release_name}")
+          if existing_draft_tag:
+              print(f"Will recreate existing draft release with tag: {existing_draft_tag}")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"VERSION_NORMALIZED={version_normalized}\n")
+              out.write(f"RELEASE_NAME={release_name}\n")
+              out.write(f"EXISTING_DRAFT_TAG={existing_draft_tag}\n")
+          PY
+
+      - name: Update version files directly
+        shell: bash
+        env:
+          VERSION_NORMALIZED: ${{ steps.version.outputs.VERSION_NORMALIZED }}
+        run: |
+          set -euo pipefail
+          python << 'PY'
+          import os
+          import re
+          import sys
+          from pathlib import Path
+
+          version = os.environ["VERSION_NORMALIZED"]
+
+          pyproject = Path("pyproject.toml")
+          py_content = pyproject.read_text(encoding="utf-8")
+          py_updated, py_count = re.subn(
+              r'^version = ".*"$',
+              f'version = "{version}"',
+              py_content,
+              count=1,
+              flags=re.MULTILINE,
+          )
+          if py_count != 1:
+              print("Failed to update version in pyproject.toml", file=sys.stderr)
+              sys.exit(1)
+          pyproject.write_text(py_updated, encoding="utf-8")
+
+          package_json = Path("web/pingpong/package.json")
+          pkg_content = package_json.read_text(encoding="utf-8")
+          pkg_updated, pkg_count = re.subn(
+              r'("version"\s*:\s*")[^"]+(")',
+              rf'\g<1>{version}\2',
+              pkg_content,
+              count=1,
+          )
+          if pkg_count != 1:
+              print("Failed to update version in web/pingpong/package.json", file=sys.stderr)
+              sys.exit(1)
+          package_json.write_text(pkg_updated, encoding="utf-8")
+          PY
+
+      - name: Detect version file changes
+        id: version-files
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- pyproject.toml web/pingpong/package.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No version file changes detected."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Version files changed and will be committed."
+          fi
+
+      - name: Commit version bump
+        if: ${{ steps.version-files.outputs.changed == 'true' }}
+        uses: iarekylew00t/verified-bot-commit@1ef83397a1859232022109719403ad9ad1ea7b09
+        with:
+          message: 'release: ${{ steps.version.outputs.RELEASE_NAME }}'
+          token: ${{ steps.app-token.outputs.token }}
+          files: |
+            pyproject.toml
+            web/pingpong/package.json
+
+      - name: Resolve target commit SHA
+        id: target-sha
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ steps.version-files.outputs.changed }}" == "true" ]]; then
+            TARGET_SHA="$(git rev-parse HEAD)"
+            echo "Using newly created release commit as target: $TARGET_SHA"
+          else
+            TARGET_SHA="${PRE_COMMIT_TAGGABLE_SHA}"
+            echo "No version commit created; reusing preflight taggable commit as target: $TARGET_SHA"
+          fi
+
+          echo "TARGET_SHA=$TARGET_SHA" >> "$GITHUB_ENV"
+          echo "target_sha=$TARGET_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for build tag on target commit
+        id: target-tag
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ steps.version-files.outputs.changed }}" != "true" ]]; then
+            RESOLVED_TAG="${PRE_COMMIT_TAG}"
+            if [[ -z "$RESOLVED_TAG" ]]; then
+              echo "Error: PRE_COMMIT_TAG is empty in no-change path."
+              exit 1
+            fi
+            echo "No version commit created; reusing preflight tag: $RESOLVED_TAG"
+            echo "RESOLVED_TAG=$RESOLVED_TAG" >> "$GITHUB_ENV"
+            echo "resolved_tag=$RESOLVED_TAG" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          find_best_tag() {
+            local tags_text="$1"
+            local best_tag=""
+            local best_build=-1
+            while IFS= read -r tag; do
+              [[ -z "$tag" ]] && continue
+              local build=""
+              if [[ "$tag" =~ ^([0-9]+)-srv([0-9]+)-web([0-9]+)$ ]]; then
+                build="${BASH_REMATCH[1]}"
+              elif [[ "$tag" =~ ^v([0-9]+)\+srv([0-9]+)\.web([0-9]+)$ ]]; then
+                build="${BASH_REMATCH[1]}"
+              else
+                continue
+              fi
+              if (( build > best_build )); then
+                best_build=$build
+                best_tag="$tag"
+              fi
+            done <<< "$tags_text"
+            echo "$best_tag"
+          }
+
+          wait_for_tag() {
+            local target_sha="$1"
+            local max_attempts=90
+            local sleep_seconds=10
+            local attempt=1
+            while (( attempt <= max_attempts )); do
+              git fetch origin --tags --quiet
+              local tags
+              tags="$(git tag --points-at "$target_sha" || true)"
+              local best_tag
+              best_tag="$(find_best_tag "$tags")"
+              if [[ -n "$best_tag" ]]; then
+                echo "$best_tag"
+                return 0
+              fi
+              echo "Waiting for build tag on $target_sha (${attempt}/${max_attempts})..." >&2
+              sleep "$sleep_seconds"
+              ((attempt++))
+            done
+            echo "Error: Timed out waiting for build tag on $target_sha" >&2
+            return 1
+          }
+
+          RESOLVED_TAG="$(wait_for_tag "${TARGET_SHA}")"
+          echo "RESOLVED_TAG=$RESOLVED_TAG" >> "$GITHUB_ENV"
+          echo "resolved_tag=$RESOLVED_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes file
+        id: notes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          RELEASE_NAME: ${{ steps.version.outputs.RELEASE_NAME }}
+          RESOLVED_TAG: ${{ steps.target-tag.outputs.resolved_tag }}
+          TARGET_SHA: ${{ steps.target-sha.outputs.target_sha }}
+        run: |
+          set -euo pipefail
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            -f "tag_name=${RESOLVED_TAG}" \
+            -f "target_commitish=${TARGET_SHA}" \
+            -f "name=${RELEASE_NAME}" > /tmp/generated-notes.json
+
+          python << 'PY'
+          import json
+          import os
+          import textwrap
+          from pathlib import Path
+
+          generated = json.loads(Path("/tmp/generated-notes.json").read_text(encoding="utf-8"))
+          body = (generated.get("body") or "").strip()
+
+          start_index = body.find("## What's Changed")
+          if start_index != -1:
+            related_prs_section = body[start_index:].strip()
+          else:
+            related_prs_section = body if body else "- None"
+
+          template = textwrap.dedent("""\
+          # Release Notes
+
+          This update provides important bug fixes and improvements.
+
+          ## General
+          ### New Features
+          - Note
+          ### Updates & Improvements
+          - Note
+          ### Resolved Issues
+          - Note
+          ### Known Issues
+          - Note
+          ### Deprecations
+          - Note
+
+          ## Deployment Information
+          | Schema Upgrade | Migration Script | Permissions Update | Task Definition Update | Configuration Update |
+          | --- | --- | --- | --- | --- |
+          | No | No | No | No | No |
+          ### Deployment Details
+          - N/A
+
+          ## Related PRs
+          """)
+          notes = f"{template}{related_prs_section}\n"
+          notes_path = "/tmp/release-notes.md"
+          Path(notes_path).write_text(notes, encoding="utf-8")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+            out.write(f"notes_path={notes_path}\n")
+          PY
+
+      - name: Create or update draft prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          EXISTING_DRAFT_TAG: ${{ steps.version.outputs.EXISTING_DRAFT_TAG }}
+          RELEASE_NAME: ${{ steps.version.outputs.RELEASE_NAME }}
+          RESOLVED_TAG: ${{ steps.target-tag.outputs.resolved_tag }}
+          TARGET_SHA: ${{ steps.target-sha.outputs.target_sha }}
+          NOTES_PATH: ${{ steps.notes.outputs.notes_path }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${EXISTING_DRAFT_TAG}" ]]; then
+            echo "Updating existing draft release ${EXISTING_DRAFT_TAG} to tag ${RESOLVED_TAG}"
+            gh release edit "${EXISTING_DRAFT_TAG}" \
+              --title "${RELEASE_NAME}" \
+              --draft \
+              --prerelease \
+              --notes-file "${NOTES_PATH}" \
+              --tag "${RESOLVED_TAG}" \
+              --target "${TARGET_SHA}"
+          else
+            echo "Creating new draft prerelease ${RELEASE_NAME} on tag ${RESOLVED_TAG}"
+            gh release create "${RESOLVED_TAG}" \
+              --title "${RELEASE_NAME}" \
+              --draft \
+              --prerelease \
+              --notes-file "${NOTES_PATH}"
+          fi
