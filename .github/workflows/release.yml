@@ -21,20 +21,27 @@ jobs:
       - name: Parse version tag
         run: |
           # Get the release tag
-          RELEASE_TAG=${{ github.event.release.tag_name }}
+          RELEASE_TAG="${{ github.event.release.tag_name }}"
 
-          # Parse the tag
+          # Parse legacy tag format: NNNN-srvNNN-webNNN
           if [[ $RELEASE_TAG =~ ^([0-9]+)-srv([0-9]+)-web([0-9]+)$ ]]; then
+            BUILD_NUMBER="${BASH_REMATCH[1]}"
             SRV_VERSION="${BASH_REMATCH[2]}"
             WEB_VERSION="${BASH_REMATCH[3]}"
-
-            # Set GitHub environment variables
-            echo "SRV_VERSION=v${SRV_VERSION}" >> $GITHUB_ENV
-            echo "WEB_VERSION=v${WEB_VERSION}" >> $GITHUB_ENV
+          # Parse new tag format: vNNNN+srvNNN.webNNN
+          elif [[ $RELEASE_TAG =~ ^v([0-9]+)\+srv([0-9]+)\.web([0-9]+)$ ]]; then
+            BUILD_NUMBER="${BASH_REMATCH[1]}"
+            SRV_VERSION="${BASH_REMATCH[2]}"
+            WEB_VERSION="${BASH_REMATCH[3]}"
           else
-            echo "Error: Invalid tag format"
+            echo "Error: Invalid tag format. Expected NNNN-srvNNN-webNNN or vNNNN+srvNNN.webNNN"
             exit 1
           fi
+
+          # Set GitHub environment variables
+          echo "BUILD_NUMBER=${BUILD_NUMBER}" >> $GITHUB_ENV
+          echo "SRV_VERSION=v${SRV_VERSION}" >> $GITHUB_ENV
+          echo "WEB_VERSION=v${WEB_VERSION}" >> $GITHUB_ENV
         shell: bash
 
       - name: Extract release version
@@ -64,20 +71,24 @@ jobs:
         run: |
           RELEASE_TAG="${{ github.event.release.tag_name }}"
           VERSION_STRIPPED="${VERSION_STRIPPED:-}"
+          BUILD_NUMBER="${BUILD_NUMBER:-}"
 
           if [[ -z "$RELEASE_TAG" ]]; then
             echo "Error: release.tag_name is empty"
             exit 1
           fi
 
-          BUILD="${RELEASE_TAG%%-*}"
-
-          if [[ ! "$BUILD" =~ ^[0-9]+$ ]]; then
-            echo "Error: Invalid build number. Expected numeric prefix before '-'. Found: $BUILD"
+          if [[ -z "$BUILD_NUMBER" ]]; then
+            echo "Error: BUILD_NUMBER is empty; release tag parsing failed"
             exit 1
           fi
 
-          RELEASE_VERSION="pingpong@${VERSION_STRIPPED}+${BUILD}"
+          if [[ ! "$BUILD_NUMBER" =~ ^[0-9]+$ ]]; then
+            echo "Error: Invalid build number. Expected numeric build number. Found: $BUILD_NUMBER"
+            exit 1
+          fi
+
+          RELEASE_VERSION="pingpong@${VERSION_STRIPPED}+${BUILD_NUMBER}"
           echo "RELEASE_VERSION=$RELEASE_VERSION" >> $GITHUB_ENV
           echo "Computed RELEASE_VERSION=$RELEASE_VERSION"
 

@@ -46,6 +46,12 @@ jobs:
           import subprocess
           import sys
 
+          LEGACY_TAG_PATTERN = re.compile(r'^(\d+)-srv(\d+)-web(\d+)$')
+          NEW_TAG_PATTERN = re.compile(r'^v(\d+)\+srv(\d+)\.web(\d+)$')
+
+          def is_versioning_tag(tag):
+              return bool(LEGACY_TAG_PATTERN.match(tag) or NEW_TAG_PATTERN.match(tag))
+
           def get_last_tag(n=1):
               if n > 10:
                   raise ValueError('No versioning tags found on the last 10 commits')
@@ -72,8 +78,7 @@ jobs:
                       print(f"Error occurred: {e}")
 
                   # Filter tags that match our versioning format
-                  pattern = r'\d+\-srv\d+-web\d+'
-                  matching_tags = [tag for tag in tags if re.match(pattern, tag)]
+                  matching_tags = [tag for tag in tags if is_versioning_tag(tag)]
                   print(f'Matching versioning tags on commit HEAD~{n}: {matching_tags}')
                   if not matching_tags:
                       print(f'No versioning tags found on commit HEAD~{n}')
@@ -81,16 +86,17 @@ jobs:
 
                   print(f'Found versioning tags on commit HEAD~{n}: {matching_tags}')
                   # If multiple matching tags, return the one with the highest build number
-                  return max(matching_tags, key=lambda t: int(t.split('-')[0]))
+                  return max(matching_tags, key=lambda t: parse_tag(t)['build'])
               except subprocess.CalledProcessError as e:
                   raise ValueError("Failed to retrieve versioning tags from the previous commits", e)
 
           def parse_tag(tag):
               print(f'Parsing tag: {tag}')
-              pattern = r'(\d+)-srv(\d+)-web(\d+)'
-              match = re.match(pattern, tag)
+              match = LEGACY_TAG_PATTERN.match(tag)
               if not match:
-                  raise ValueError(f"Invalid versioning tag format: {tag}")
+                  match = NEW_TAG_PATTERN.match(tag)
+              if not match:
+                  raise ValueError(f"Invalid versioning tag format: {tag}. Expected NNNN-srvNNN-webNNN or vNNNN+srvNNN.webNNN")
               try:
                   return {
                     'build': int(match.group(1)),
@@ -114,7 +120,7 @@ jobs:
               srv_status = 'b' if server_update else 'r'
               web_status = 'b' if web_update else 'r'
 
-              return f"{new_build}-srv{new_srv}-web{new_web}", new_srv, new_web
+              return f"v{new_build}+srv{new_srv}.web{new_web}", new_srv, new_web
 
           try:
               subprocess.run(['git', 'fetch', 'origin', '--tags', '--depth=11', 'HEAD'], check=True)
