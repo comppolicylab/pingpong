@@ -753,6 +753,13 @@ class CreateAudioThread(BaseModel):
     conversation_id: str | None = None
 
 
+class VideoMetadata(BaseModel):
+    content_length: int
+    content_type: str
+    etag: str | None = None
+    last_modified: datetime | None = None
+
+
 class CreateThreadRunRequest(BaseModel):
     timezone: str | None = None
 
