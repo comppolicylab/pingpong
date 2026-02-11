@@ -55,7 +55,7 @@ pydub = "^0.25.1"
 pybase64 = "^1.4.3"
 uuid-utils = "^0.14.0"
 pyairtable = "^3.3.0"
-cryptography = "^46.0.4"
+cryptography = "^46.0.5"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^9.0.2"
