@@ -1,25 +1,25 @@
 import asyncio
 import base64
+from collections import deque
 import json
 import logging
 import struct
-from typing import Awaitable, Callable, cast
-from fastapi import WebSocket, WebSocketDisconnect
+from dataclasses import dataclass
+from heapq import heappop, heappush
+from typing import Awaitable, Callable, Literal, cast
+from fastapi import WebSocketDisconnect
 from openai import OpenAIError
 from sqlalchemy import func
 from starlette.requests import ClientDisconnect
 
 from openai.resources.realtime.realtime import AsyncRealtimeConnection
-from openai.types.realtime import (
-    ConversationItemInputAudioTranscriptionCompletedEvent,
-    ResponseAudioTranscriptDoneEvent,
-)
 
 
 from pingpong.ai import (
     OpenAIClientType,
 )
-from pingpong.models import Thread
+import pingpong.schemas as schemas
+from pingpong.models import Thread, MessagePart, Message, Run
 from pingpong.realtime_recorder import RealtimeRecorder
 from pingpong.websocket import (
     ws_auth_middleware,
@@ -30,25 +30,48 @@ from pingpong.websocket import (
     ws_with_realtime_connection,
     ws_with_thread_assistant_prompt,
 )
+from pingpong.state_types import StateWebSocket
 
 browser_connection_logger = logging.getLogger("realtime_browser")
 openai_connection_logger = logging.getLogger("realtime_openai")
 
 TaskFunc = Callable[[], Awaitable[object]]
-TaskFactory = Callable[[str], TaskFunc]
+ConversationRole = Literal["user", "assistant"]
+UNSET_PREVIOUS_ITEM_ID = "__UNSET_PREVIOUS_ITEM_ID__"
+
+
+def _has_non_empty_transcript(transcript_text: str | None) -> bool:
+    if transcript_text is None:
+        return False
+    return bool(transcript_text.strip())
+
+
+@dataclass
+class ConversationChainItem:
+    item_id: str
+    conversation_order: int = -1
+    has_transcription: bool = False
+    is_transcription_complete: bool = False
+    is_message_saved: bool = False
+    previous_item_id: str | None = UNSET_PREVIOUS_ITEM_ID
+    transcription_text: str | None = None
+    role: ConversationRole | None = None
 
 
 class ConversationItemOrderingBuffer:
-    """Ensures thread messages are enqueued in the order items appear in the conversation."""
+    """Tracks conversation chain items and returns ready transcripts in order."""
 
-    def __init__(self, task_queue: asyncio.Queue, logger: logging.Logger):
-        self._task_queue = task_queue
+    _UNSET_PREVIOUS_ITEM_ID = UNSET_PREVIOUS_ITEM_ID
+
+    def __init__(self, logger: logging.Logger, initial_output_index: int = 0):
         self._logger = logger
-        self.relevant_item_order: list[str] = []
-        self.relevant_item_positions: dict[str, int] = {}
-        self.pending_message_tasks: dict[str, TaskFactory] = {}
-        self.next_relevant_index_to_dispatch = 0
-        self.next_output_index = 0
+        self.items_by_id: dict[str, ConversationChainItem] = {}
+        self.children_by_previous_item_id: dict[str, set[str]] = {}
+        self.ready_item_heap: list[tuple[int, str]] = []
+        self.queued_ready_item_ids: set[str] = set()
+        self.pruned_saved_item_ids: set[str] = set()
+        self.next_conversation_order = 0
+        self.next_output_index = max(0, initial_output_index)
 
     @staticmethod
     def is_relevant_conversation_item(item) -> bool:
@@ -56,94 +79,451 @@ class ConversationItemOrderingBuffer:
         item_type = getattr(item, "type", None)
         return item_type == "message" and item_role in {"user", "assistant"}
 
-    def register_relevant_item(self, item_id: str | None, previous_item_id: str | None):
-        if not item_id or item_id in self.relevant_item_positions:
+    def register_conversation_item(
+        self,
+        item_id: str | None,
+        previous_item_id: str | None,
+        role: ConversationRole | None,
+    ):
+        if not item_id:
+            return
+        if item_id in self.pruned_saved_item_ids:
+            self._logger.warning(
+                "Received conversation.item.added for already-saved item_id %s. Ignoring duplicate.",
+                item_id,
+            )
             return
 
-        insert_idx = len(self.relevant_item_order)
-        if previous_item_id and previous_item_id in self.relevant_item_positions:
-            insert_idx = self.relevant_item_positions[previous_item_id] + 1
+        item = self._get_item(item_id=item_id)
+        if item is None:
+            item = ConversationChainItem(
+                item_id=item_id,
+                conversation_order=self.next_conversation_order,
+            )
+            self.next_conversation_order += 1
+            self.items_by_id[item_id] = item
+        else:
+            self._logger.warning(
+                "Received duplicate conversation.item.added for item_id %s.",
+                item_id,
+            )
 
-        self.relevant_item_order.insert(insert_idx, item_id)
-        for idx in range(insert_idx, len(self.relevant_item_order)):
-            self.relevant_item_positions[self.relevant_item_order[idx]] = idx
+        self._set_item_previous_item_id(item=item, previous_item_id=previous_item_id)
+        if role is not None:
+            item.role = role
+            item.has_transcription = True
+        self._mark_item_and_descendants_for_readiness(item.item_id)
 
-    async def dispatch_ready_messages(self):
-        while self.next_relevant_index_to_dispatch < len(self.relevant_item_order):
-            current_item_id = self.relevant_item_order[
-                self.next_relevant_index_to_dispatch
-            ]
-            task_factory = self.pending_message_tasks.get(current_item_id)
-            if not task_factory:
-                break
-
-            output_index_str = str(self.next_output_index)
-            task = task_factory(output_index_str)
-            self.pending_message_tasks.pop(current_item_id, None)
-            self.next_relevant_index_to_dispatch += 1
-            self.next_output_index += 1
-            await self._task_queue.put(task)
-
-    async def enqueue_message_task(
-        self, item_id: str | None, task_factory: TaskFactory
+    def register_transcription(
+        self,
+        item_id: str | None,
+        transcription_text: str | None,
+        role: ConversationRole,
     ):
         if not item_id:
             self._logger.warning(
                 "Received transcript event without an item_id. Skipping message ordering."
             )
             return
+        if item_id in self.pruned_saved_item_ids:
+            self._logger.warning(
+                "Received transcript for already-saved item_id %s. Ignoring duplicate.",
+                item_id,
+            )
+            return
 
-        self.pending_message_tasks[item_id] = task_factory
-        await self.dispatch_ready_messages()
+        item = self._get_item(item_id=item_id)
+        if item is None:
+            self._logger.warning(
+                "Received completed transcript for unknown item_id %s before conversation.item.added.",
+                item_id,
+            )
+            return
+
+        if self._is_message_saved(item):
+            self._logger.warning(
+                "Received transcript for already-saved item_id %s. Ignoring duplicate.",
+                item_id,
+            )
+            return
+
+        if item.is_transcription_complete:
+            self._logger.warning(
+                "Received transcription completion for already-complete item_id %s.",
+                item_id,
+            )
+            return
+
+        if transcription_text is not None:
+            item.transcription_text = transcription_text
+        if item.transcription_text is None:
+            self._logger.warning(
+                "Received completed transcript without text for item_id %s.",
+                item_id,
+            )
+            return
+
+        item.is_transcription_complete = True
+        item.has_transcription = True
+        if item.role is None:
+            item.role = role
+        self._mark_item_and_descendants_for_readiness(item.item_id)
+
+    def register_transcription_delta(
+        self, item_id: str | None, delta_text: str | None, role: ConversationRole
+    ):
+        if not item_id or not delta_text:
+            return
+        if item_id in self.pruned_saved_item_ids:
+            self._logger.warning(
+                "Received transcription delta for already-saved item_id %s. Ignoring.",
+                item_id,
+            )
+            return
+
+        item = self._get_item(item_id=item_id)
+        if item is None:
+            self._logger.warning(
+                "Received transcript delta for unknown item_id %s before conversation.item.added.",
+                item_id,
+            )
+            return
+
+        if self._is_message_saved(item):
+            self._logger.warning(
+                "Received transcription delta for already-saved item_id %s. Ignoring.",
+                item_id,
+            )
+            return
+        if item.is_transcription_complete:
+            self._logger.warning(
+                "Received transcription delta after completion for item_id %s. Ignoring.",
+                item_id,
+            )
+            return
+
+        if item.transcription_text is None:
+            item.transcription_text = ""
+        item.transcription_text += delta_text
+        item.has_transcription = True
+        if item.role is None:
+            item.role = role
+        self._mark_item_and_descendants_for_readiness(item.item_id)
+
+    def pop_next_ready_message(
+        self,
+    ) -> tuple[str, str, ConversationRole, str] | None:
+        while self.ready_item_heap:
+            _, item_id = heappop(self.ready_item_heap)
+            self.queued_ready_item_ids.discard(item_id)
+            item = self._get_item(item_id=item_id)
+            if item is None:
+                continue
+            if not self._is_item_ready_to_dispatch(item):
+                continue
+            if item.transcription_text is None or item.role is None:
+                continue
+            if not _has_non_empty_transcript(item.transcription_text):
+                self._logger.warning(
+                    "Skipping realtime transcript with empty content for item_id %s.",
+                    item.item_id,
+                )
+                item.is_message_saved = True
+                self._mark_item_and_descendants_for_readiness(item.item_id)
+                self._prune_saved_items()
+                continue
+            output_index = str(self.next_output_index)
+            self.next_output_index += 1
+            item.is_message_saved = True
+            self._mark_item_and_descendants_for_readiness(item.item_id)
+            self._prune_saved_items()
+            return item.item_id, item.transcription_text, item.role, output_index
+
+        return None
+
+    def _get_item(self, item_id: str) -> ConversationChainItem | None:
+        return self.items_by_id.get(item_id)
+
+    def _set_item_previous_item_id(
+        self, *, item: ConversationChainItem, previous_item_id: str | None
+    ):
+        if item.previous_item_id == self._UNSET_PREVIOUS_ITEM_ID:
+            item.previous_item_id = previous_item_id
+            if previous_item_id is not None:
+                self.children_by_previous_item_id.setdefault(
+                    previous_item_id, set()
+                ).add(item.item_id)
+            return
+
+        if item.previous_item_id is None and previous_item_id is not None:
+            item.previous_item_id = previous_item_id
+            self.children_by_previous_item_id.setdefault(previous_item_id, set()).add(
+                item.item_id
+            )
+
+    def _is_message_saved(self, item: ConversationChainItem) -> bool:
+        return item.is_message_saved
+
+    def _queue_if_item_ready(self, item: ConversationChainItem):
+        if item.item_id in self.queued_ready_item_ids:
+            return
+        if not self._is_item_ready_to_dispatch(item):
+            return
+
+        heappush(self.ready_item_heap, (item.conversation_order, item.item_id))
+        self.queued_ready_item_ids.add(item.item_id)
+
+    def _mark_item_and_descendants_for_readiness(self, item_id: str):
+        # This is an O(size_of_subtree) walk by design. The conversation chain is
+        # expected to stay small in practice, and this keeps readiness updates simple
+        # when late predecessor links or completion events arrive out of order.
+        pending_item_ids = deque([item_id])
+        visited_item_ids: set[str] = set()
+
+        while pending_item_ids:
+            current_item_id = pending_item_ids.popleft()
+            if current_item_id in visited_item_ids:
+                continue
+            visited_item_ids.add(current_item_id)
+
+            current_item = self._get_item(current_item_id)
+            if current_item is not None:
+                self._queue_if_item_ready(current_item)
+
+            for child_item_id in self.children_by_previous_item_id.get(
+                current_item_id, set()
+            ):
+                pending_item_ids.append(child_item_id)
+
+    def _resolve_previous_relevant_item(
+        self, item: ConversationChainItem
+    ) -> tuple[bool, ConversationChainItem | None]:
+        if item.previous_item_id == self._UNSET_PREVIOUS_ITEM_ID:
+            return False, None
+
+        # Defensive cycle guard: realtime events can be out-of-order or malformed,
+        # so a bad previous_item_id chain must fail closed instead of looping forever.
+        seen_item_ids = {item.item_id}
+        previous_item_id = item.previous_item_id
+
+        while previous_item_id is not None:
+            if previous_item_id in seen_item_ids:
+                return False, None
+
+            previous_item = self._get_item(previous_item_id)
+            if previous_item is None:
+                if previous_item_id in self.pruned_saved_item_ids:
+                    return True, None
+                return False, None
+            if previous_item.has_transcription:
+                return True, previous_item
+
+            if previous_item.previous_item_id == self._UNSET_PREVIOUS_ITEM_ID:
+                return False, None
+            seen_item_ids.add(previous_item_id)
+            previous_item_id = previous_item.previous_item_id
+
+        return True, None
+
+    def _prune_saved_items(self) -> None:
+        stale_saved_item_ids = [
+            item_id
+            for item_id, item in self.items_by_id.items()
+            if item.is_message_saved
+        ]
+        for stale_item_id in stale_saved_item_ids:
+            self.items_by_id.pop(stale_item_id, None)
+            self.pruned_saved_item_ids.add(stale_item_id)
+
+    def _is_item_ready_to_dispatch(self, item: ConversationChainItem) -> bool:
+        if item.role not in {"user", "assistant"}:
+            return False
+        if not item.has_transcription:
+            return False
+        if item.is_message_saved:
+            return False
+        if not item.is_transcription_complete:
+            return False
+        if item.transcription_text is None:
+            return False
+
+        is_resolved, previous_relevant_item = self._resolve_previous_relevant_item(item)
+        if not is_resolved:
+            return False
+        if previous_relevant_item is not None and not self._is_message_saved(
+            previous_relevant_item
+        ):
+            return False
+
+        return True
 
 
 async def add_message_to_thread(
     openai_client: OpenAIClientType,
-    browser_connection: WebSocket,
+    browser_connection: StateWebSocket,
     thread: Thread,
-    event: ConversationItemInputAudioTranscriptionCompletedEvent
-    | ResponseAudioTranscriptDoneEvent,
+    item_id: str,
+    transcript_text: str,
+    role: ConversationRole,
     realtime_recorder: RealtimeRecorder | None = None,
-    is_user_message: bool = False,
     output_index: str | None = None,
 ):
-    try:
-        metadata = {
-            "item_id": event.item_id,
-        }
-        if output_index is not None:
-            metadata["output_index"] = str(output_index)
-        if is_user_message:
-            metadata["user_id"] = str(browser_connection.state.session.user.id)
+    is_user_message = role == "user"
+    message_saved = False
 
-        if (
-            hasattr(browser_connection.state, "anonymous_share_token")
-            and browser_connection.state.anonymous_share_token is not None
-        ):
-            metadata["share_token"] = str(
-                browser_connection.state.anonymous_share_token
-            )
-        if (
-            hasattr(browser_connection.state, "anonymous_session_token")
-            and browser_connection.state.anonymous_session_token is not None
-        ):
-            metadata["anonymous_session_token"] = str(
-                browser_connection.state.anonymous_session_token
-            )
-
-        await openai_client.beta.threads.messages.create(
-            thread_id=thread.thread_id,
-            role="user" if is_user_message else "assistant",
-            content=event.transcript,
-            metadata=metadata,
+    if not _has_non_empty_transcript(transcript_text):
+        openai_connection_logger.warning(
+            "Skipping realtime message with empty transcript content: item_id=%s, role=%s, output_index=%s",
+            item_id,
+            role,
+            output_index,
         )
+        return
 
-        if realtime_recorder and not realtime_recorder.should_save_audio:
-            realtime_recorder.should_save_audio = True
-    except OpenAIError as e:
-        openai_connection_logger.exception(
-            f"Failed to send message to OpenAI: {e}, {event}"
+    if thread.version == 3:
+        try:
+            existing_run_id = (
+                browser_connection.state["voice_mode_run_id"]
+                if "voice_mode_run_id" in browser_connection.state
+                else None
+            )
+            run = None
+            if existing_run_id is not None:
+                run = await Run.get_by_id(
+                    browser_connection.state["db"], int(existing_run_id)
+                )
+                if run and run.thread_id != thread.id:
+                    run = None
+
+            if run is None:
+                assistant = (
+                    browser_connection.state["assistant"]
+                    if "assistant" in browser_connection.state
+                    else None
+                )
+                conversation_instructions = (
+                    browser_connection.state["conversation_instructions"]
+                    if "conversation_instructions" in browser_connection.state
+                    else None
+                )
+                run = Run(
+                    status=schemas.RunStatus.COMPLETED,
+                    thread_id=thread.id,
+                    assistant_id=thread.assistant_id,
+                    model=getattr(assistant, "model", None),
+                    reasoning_effort=getattr(assistant, "reasoning_effort", None),
+                    verbosity=getattr(assistant, "verbosity", None),
+                    temperature=getattr(assistant, "temperature", None),
+                    tools_available=thread.tools_available,
+                    creator_id=browser_connection.state["session"].user.id,
+                    instructions=conversation_instructions or thread.instructions,
+                    completed=func.now(),
+                )
+                browser_connection.state["db"].add(run)
+                await browser_connection.state["db"].flush()
+                await browser_connection.state["db"].refresh(run)
+                browser_connection.state["voice_mode_run_id"] = run.id
+
+            try:
+                output_index_int = (
+                    int(output_index) if output_index is not None else None
+                )
+            except (TypeError, ValueError):
+                output_index_int = None
+
+            if output_index_int is None:
+                output_index_int = (
+                    await Thread.get_max_output_sequence(
+                        browser_connection.state["db"], thread.id
+                    )
+                    + 1
+                )
+
+            message = await Message.create(
+                browser_connection.state["db"],
+                {
+                    "message_id": item_id,
+                    "message_status": schemas.MessageStatus.COMPLETED,
+                    "run_id": run.id,
+                    "thread_id": thread.id,
+                    "assistant_id": thread.assistant_id
+                    if not is_user_message
+                    else None,
+                    "output_index": output_index_int,
+                    "role": (
+                        schemas.MessageRole.USER
+                        if is_user_message
+                        else schemas.MessageRole.ASSISTANT
+                    ),
+                    "user_id": (
+                        browser_connection.state["session"].user.id
+                        if is_user_message
+                        else None
+                    ),
+                    "completed": func.now(),
+                },
+            )
+            await MessagePart.create(
+                browser_connection.state["db"],
+                {
+                    "message_id": message.id,
+                    "part_index": 0,
+                    "type": (
+                        schemas.MessagePartType.INPUT_TEXT
+                        if is_user_message
+                        else schemas.MessagePartType.OUTPUT_TEXT
+                    ),
+                    "text": transcript_text,
+                },
+            )
+            message_saved = True
+        except Exception as e:
+            openai_connection_logger.exception(
+                f"Failed to save Version 3 realtime transcript: {e}, item_id={item_id}, role={role}"
+            )
+            return
+    elif thread.version <= 2:
+        try:
+            metadata = {
+                "item_id": item_id,
+            }
+            if output_index is not None:
+                metadata["output_index"] = str(output_index)
+            if is_user_message:
+                metadata["user_id"] = str(browser_connection.state["session"].user.id)
+
+            if browser_connection.state["anonymous_share_token"] is not None:
+                metadata["share_token"] = str(
+                    browser_connection.state["anonymous_share_token"]
+                )
+            if browser_connection.state["anonymous_session_token"] is not None:
+                metadata["anonymous_session_token"] = str(
+                    browser_connection.state["anonymous_session_token"]
+                )
+
+            await openai_client.beta.threads.messages.create(
+                thread_id=thread.thread_id,
+                role=role,
+                content=transcript_text,
+                metadata=metadata,
+            )
+            message_saved = True
+        except OpenAIError as e:
+            openai_connection_logger.exception(
+                f"Failed to send message to OpenAI: {e}, item_id={item_id}, role={role}"
+            )
+            return
+    else:
+        openai_connection_logger.error(
+            "Unsupported thread version %s for realtime transcript persistence.",
+            thread.version,
         )
+        return
+
+    if message_saved and realtime_recorder and not realtime_recorder.should_save_audio:
+        realtime_recorder.should_save_audio = True
+
+    if not message_saved:
         return
 
     if is_user_message:
@@ -151,44 +531,52 @@ async def add_message_to_thread(
             thread.user_message_ct += 1
             thread.last_activity = func.now()
 
-            browser_connection.state.db.add(thread)
-            await browser_connection.state.db.flush()
-            await browser_connection.state.db.refresh(thread)
+            browser_connection.state["db"].add(thread)
+            await browser_connection.state["db"].flush()
+            await browser_connection.state["db"].refresh(thread)
         except Exception as e:
             openai_connection_logger.exception(
                 f"Failed to update thread in database: {e}"
             )
 
 
-def _build_thread_message_task_factory(
-    *,
-    event: ConversationItemInputAudioTranscriptionCompletedEvent
-    | ResponseAudioTranscriptDoneEvent,
-    is_user_message: bool,
+async def enqueue_ready_thread_message_tasks(
+    ordering_buffer: ConversationItemOrderingBuffer,
+    openai_task_queue: asyncio.Queue,
     openai_client: OpenAIClientType,
-    browser_connection: WebSocket,
+    browser_connection: StateWebSocket,
     thread: Thread,
     realtime_recorder: RealtimeRecorder | None,
-) -> TaskFactory:
-    def factory(output_index: str) -> TaskFunc:
-        async def task():
+) -> None:
+    while True:
+        next_ready_message = ordering_buffer.pop_next_ready_message()
+        if next_ready_message is None:
+            return
+
+        item_id, transcript_text, role, output_index = next_ready_message
+
+        async def task(
+            item_id: str = item_id,
+            transcript_text: str = transcript_text,
+            role: ConversationRole = role,
+            output_index: str = output_index,
+        ):
             await add_message_to_thread(
                 openai_client,
                 browser_connection,
                 thread,
-                event,
+                item_id,
+                transcript_text,
+                role,
                 realtime_recorder=realtime_recorder,
-                is_user_message=is_user_message,
                 output_index=output_index,
             )
 
-        return task
-
-    return factory
+        await openai_task_queue.put(task)
 
 
 async def handle_browser_messages(
-    browser_connection: WebSocket,
+    browser_connection: StateWebSocket,
     realtime_connection: AsyncRealtimeConnection,
     realtime_recorder: RealtimeRecorder | None = None,
 ):
@@ -240,12 +628,13 @@ async def handle_browser_messages(
                                 f"Received response.audio.delta.started message without item_id, event_id, or started_playing_at {data}"
                             )
                             continue
-                        else:
-                            await realtime_recorder.started_playing_assistant_response_delta(
+                        await (
+                            realtime_recorder.started_playing_assistant_response_delta(
                                 item_id=item_id,
                                 event_id=event_id,
                                 started_playing_at_ms=started_playing_at_ms,
                             )
+                        )
 
                 except json.JSONDecodeError as e:
                     browser_connection_logger.exception(
@@ -286,15 +675,30 @@ async def handle_browser_messages(
 
 
 async def handle_openai_events(
-    browser_connection: WebSocket,
+    browser_connection: StateWebSocket,
     realtime_connection: AsyncRealtimeConnection,
     openai_client: OpenAIClientType,
     thread: Thread,
     openai_task_queue: asyncio.Queue,
     realtime_recorder: RealtimeRecorder | None = None,
 ):
+    initial_output_index = 0
+    if thread.version == 3:
+        try:
+            initial_output_index = (
+                await Thread.get_max_output_sequence(
+                    browser_connection.state["db"], thread.id
+                )
+            ) + 1
+        except Exception as e:
+            openai_connection_logger.exception(
+                "Failed to initialize Version 3 realtime output index for thread %s: %s",
+                thread.id,
+                e,
+            )
+
     ordering_buffer = ConversationItemOrderingBuffer(
-        openai_task_queue, openai_connection_logger
+        openai_connection_logger, initial_output_index=initial_output_index
     )
 
     try:
@@ -302,28 +706,44 @@ async def handle_openai_events(
             match event.type:
                 case "conversation.item.added":
                     item = getattr(event, "item", None)
+                    item_role = getattr(item, "role", None) if item else None
+                    role: ConversationRole | None = None
                     if (
                         item
                         and ConversationItemOrderingBuffer.is_relevant_conversation_item(
                             item
                         )
                     ):
-                        ordering_buffer.register_relevant_item(
-                            getattr(item, "id", None),
-                            getattr(event, "previous_item_id", None),
-                        )
-                        await ordering_buffer.dispatch_ready_messages()
+                        role = cast(ConversationRole, item_role)
+
+                    ordering_buffer.register_conversation_item(
+                        getattr(item, "id", None) if item else None,
+                        getattr(event, "previous_item_id", None),
+                        role,
+                    )
+                    await enqueue_ready_thread_message_tasks(
+                        ordering_buffer=ordering_buffer,
+                        openai_task_queue=openai_task_queue,
+                        openai_client=openai_client,
+                        browser_connection=browser_connection,
+                        thread=thread,
+                        realtime_recorder=realtime_recorder,
+                    )
                 case "response.output_audio_transcript.done":
-                    await ordering_buffer.enqueue_message_task(
-                        event.item_id,
-                        _build_thread_message_task_factory(
-                            event=event,
-                            is_user_message=False,
-                            openai_client=openai_client,
-                            browser_connection=browser_connection,
-                            thread=thread,
-                            realtime_recorder=realtime_recorder,
-                        ),
+                    ordering_buffer.register_transcription(
+                        event.item_id, event.transcript, "assistant"
+                    )
+                    await enqueue_ready_thread_message_tasks(
+                        ordering_buffer=ordering_buffer,
+                        openai_task_queue=openai_task_queue,
+                        openai_client=openai_client,
+                        browser_connection=browser_connection,
+                        thread=thread,
+                        realtime_recorder=realtime_recorder,
+                    )
+                case "response.output_audio_transcript.delta":
+                    ordering_buffer.register_transcription_delta(
+                        event.item_id, event.delta, "assistant"
                     )
                 case "session.created":
                     openai_connection_logger.debug(
@@ -350,16 +770,20 @@ async def handle_openai_events(
                         }
                     )
                 case "conversation.item.input_audio_transcription.completed":
-                    await ordering_buffer.enqueue_message_task(
-                        event.item_id,
-                        _build_thread_message_task_factory(
-                            event=event,
-                            is_user_message=True,
-                            openai_client=openai_client,
-                            browser_connection=browser_connection,
-                            thread=thread,
-                            realtime_recorder=realtime_recorder,
-                        ),
+                    ordering_buffer.register_transcription(
+                        event.item_id, event.transcript, "user"
+                    )
+                    await enqueue_ready_thread_message_tasks(
+                        ordering_buffer=ordering_buffer,
+                        openai_task_queue=openai_task_queue,
+                        openai_client=openai_client,
+                        browser_connection=browser_connection,
+                        thread=thread,
+                        realtime_recorder=realtime_recorder,
+                    )
+                case "conversation.item.input_audio_transcription.delta":
+                    ordering_buffer.register_transcription_delta(
+                        event.item_id, event.delta, "user"
                     )
                 case "response.output_audio.delta":
                     delta_audio_b64 = event.delta
@@ -387,7 +811,6 @@ async def handle_openai_events(
                 case (
                     "conversation.created"
                     | "conversation.item.created"
-                    | "conversation.item.input_audio_transcription.delta"
                     | "conversation.item.input_audio_transcription.failed"
                     | "conversation.item.retrieved"
                     | "conversation.item.truncated"
@@ -404,7 +827,6 @@ async def handle_openai_events(
                     | "response.content_part.done"
                     | "response.text.delta"
                     | "response.text.done"
-                    | "response.output_audio_transcript.delta"
                     | "response.output_audio.done"
                     | "response.output_text.delta"
                     | "response.output_text.done"
@@ -461,15 +883,15 @@ async def process_queue_tasks(
 @ws_with_thread_assistant_prompt
 @ws_with_realtime_connection
 async def browser_realtime_websocket(
-    browser_connection: WebSocket,
+    browser_connection: StateWebSocket,
     class_id: str,
     thread_id: str,
 ):
-    realtime_connection: AsyncRealtimeConnection = (
-        browser_connection.state.realtime_connection
-    )
-    openai_client: OpenAIClientType = browser_connection.state.openai_client
-    thread: Thread = browser_connection.state.thread
+    realtime_connection: AsyncRealtimeConnection = browser_connection.state[
+        "realtime_connection"
+    ]
+    openai_client: OpenAIClientType = browser_connection.state["openai_client"]
+    thread: Thread = browser_connection.state["thread"]
 
     openai_task_queue: NamedQueue = NamedQueue("openai_task_queue")
 
@@ -477,8 +899,8 @@ async def browser_realtime_websocket(
     if thread.display_user_info:
         realtime_recorder = await RealtimeRecorder.create(
             thread_id=thread.id,
-            thread_obj_id=thread.thread_id,
-            session=browser_connection.state.db,
+            thread_obj_id=thread.thread_id if thread.thread_id else str(thread.id),
+            session=browser_connection.state["db"],
         )
 
     realtime_tasks: list[asyncio.Task] = []

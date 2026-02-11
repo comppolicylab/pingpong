@@ -1,107 +1,240 @@
-from __future__ import annotations
-
-import asyncio
 import logging
 
 import pytest
 
 from pingpong.realtime import ConversationItemOrderingBuffer
 
-pytestmark = pytest.mark.asyncio
+
+def _drain_ready_messages(buffer: ConversationItemOrderingBuffer):
+    ready_messages: list[tuple[str, str, str, str]] = []
+    while True:
+        next_message = buffer.pop_next_ready_message()
+        if next_message is None:
+            return ready_messages
+        ready_messages.append(next_message)
 
 
-def _task_factory(label: str):
-    def factory(output_index: str):
-        async def task():
-            return label, output_index
+def test_transcript_dispatches_once_item_is_registered():
+    buffer = ConversationItemOrderingBuffer(logging.getLogger("ordering-test"))
 
-        return task
-
-    return factory
-
-
-async def test_enqueue_dispatches_once_item_is_registered():
-    queue: asyncio.Queue = asyncio.Queue()
-    buffer = ConversationItemOrderingBuffer(queue, logging.getLogger("ordering-test"))
-
-    task = _task_factory("item-1")
-
-    await buffer.enqueue_message_task("item-1", task)
-    assert queue.empty()
-
-    buffer.register_relevant_item("item-1", None)
-    await buffer.dispatch_ready_messages()
-
-    dequeued = await queue.get()
-    assert await dequeued() == ("item-1", "0")
+    buffer.register_conversation_item("item-1", None, "user")
+    buffer.register_transcription("item-1", "hello", "user")
+    assert _drain_ready_messages(buffer) == [("item-1", "hello", "user", "0")]
+    assert _drain_ready_messages(buffer) == []
 
 
-async def test_dispatch_respects_previous_item_relationships():
-    queue: asyncio.Queue = asyncio.Queue()
-    buffer = ConversationItemOrderingBuffer(queue, logging.getLogger("ordering-test"))
+def test_empty_transcript_is_skipped_and_descendant_still_dispatches():
+    buffer = ConversationItemOrderingBuffer(logging.getLogger("ordering-test"))
 
-    buffer.register_relevant_item("item-1", None)
-    buffer.register_relevant_item("item-2", "item-1")
+    buffer.register_conversation_item("item-1", None, "user")
+    buffer.register_conversation_item("item-2", "item-1", "assistant")
 
-    task_two = _task_factory("item-2")
-    task_one = _task_factory("item-1")
+    buffer.register_transcription("item-1", "   ", "user")
+    buffer.register_transcription("item-2", "assistant text", "assistant")
 
-    await buffer.enqueue_message_task("item-2", task_two)
-    await buffer.enqueue_message_task("item-1", task_one)
-
-    first_task = await queue.get()
-    second_task = await queue.get()
-
-    assert await first_task() == ("item-1", "0")
-    assert await second_task() == ("item-2", "1")
+    assert _drain_ready_messages(buffer) == [
+        ("item-2", "assistant text", "assistant", "0")
+    ]
+    assert _drain_ready_messages(buffer) == []
 
 
-async def test_enqueue_without_item_id_logs_warning(caplog: pytest.LogCaptureFixture):
-    queue: asyncio.Queue = asyncio.Queue()
-    logger_name = "ordering-test-missing-id"
-    buffer = ConversationItemOrderingBuffer(queue, logging.getLogger(logger_name))
+def test_transcript_before_item_added_is_ignored(caplog: pytest.LogCaptureFixture):
+    logger_name = "ordering-test-before-item-added"
+    buffer = ConversationItemOrderingBuffer(logging.getLogger(logger_name))
     caplog.set_level(logging.WARNING, logger=logger_name)
 
-    await buffer.enqueue_message_task(None, _task_factory("missing"))
+    buffer.register_transcription("item-1", "hello", "user")
+    buffer.register_transcription_delta("item-1", "hi", "user")
+    assert buffer.items_by_id == {}
 
-    assert "Skipping message ordering" in caplog.text
-    assert queue.empty()
-    assert buffer.pending_message_tasks == {}
+    buffer.register_conversation_item("item-1", None, "user")
+    assert _drain_ready_messages(buffer) == []
+
+    assert "before conversation.item.added" in caplog.text
 
 
-async def test_interleaving_transcripts_follow_conversation_order():
-    queue: asyncio.Queue = asyncio.Queue()
-    buffer = ConversationItemOrderingBuffer(queue, logging.getLogger("ordering-test"))
+def test_relevant_registration_sets_has_transcription_flag():
+    buffer = ConversationItemOrderingBuffer(logging.getLogger("ordering-test"))
 
-    buffer.register_relevant_item("user-1", None)
-    buffer.register_relevant_item("assistant-1", "user-1")
+    buffer.register_conversation_item("user-1", None, "user")
+    buffer.register_conversation_item("system-1", "user-1", None)
 
-    task_assistant_1 = _task_factory("assistant-1")
-    await buffer.enqueue_message_task("assistant-1", task_assistant_1)
-    assert queue.empty()
+    user_item = buffer.items_by_id["user-1"]
+    system_item = buffer.items_by_id["system-1"]
+    assert user_item.has_transcription
+    assert not system_item.has_transcription
 
-    buffer.register_relevant_item("user-2", "assistant-1")
 
-    task_user_1 = _task_factory("user-1")
-    await buffer.enqueue_message_task("user-1", task_user_1)
+def test_transcription_deltas_wait_for_completion():
+    buffer = ConversationItemOrderingBuffer(logging.getLogger("ordering-test"))
 
-    dequeued_user_1 = await queue.get()
-    dequeued_assistant_1 = await queue.get()
-    assert await dequeued_user_1() == ("user-1", "0")
-    assert await dequeued_assistant_1() == ("assistant-1", "1")
+    buffer.register_conversation_item("item-1", None, "user")
+    buffer.register_transcription_delta("item-1", "hel", "user")
+    buffer.register_transcription_delta("item-1", "lo", "user")
 
-    buffer.register_relevant_item("assistant-2", "user-2")
-    task_assistant_2 = _task_factory("assistant-2")
-    await buffer.enqueue_message_task("assistant-2", task_assistant_2)
-    assert queue.empty()
+    assert _drain_ready_messages(buffer) == []
+    item = buffer.items_by_id["item-1"]
+    assert item.has_transcription
+    assert not item.is_transcription_complete
+    assert item.transcription_text == "hello"
 
-    task_user_2 = _task_factory("user-2")
-    await buffer.enqueue_message_task("user-2", task_user_2)
+    buffer.register_transcription("item-1", None, "user")
+    assert buffer.items_by_id["item-1"].is_transcription_complete
+    assert _drain_ready_messages(buffer) == [("item-1", "hello", "user", "0")]
 
-    dequeued_user_2 = await queue.get()
-    assert await dequeued_user_2() == ("user-2", "2")
-    dequeued_assistant_2 = await queue.get()
-    assert await dequeued_assistant_2() == ("assistant-2", "3")
 
-    buffer.register_relevant_item("user-3", "assistant-2")
-    assert queue.empty()
+def test_completed_transcription_overrides_deltas():
+    buffer = ConversationItemOrderingBuffer(logging.getLogger("ordering-test"))
+
+    buffer.register_conversation_item("item-1", None, "assistant")
+    buffer.register_transcription_delta("item-1", "part", "assistant")
+    buffer.register_transcription_delta("item-1", "ial", "assistant")
+
+    buffer.register_transcription("item-1", "final", "assistant")
+    assert _drain_ready_messages(buffer) == [("item-1", "final", "assistant", "0")]
+
+
+def test_dispatch_respects_previous_item_relationships():
+    buffer = ConversationItemOrderingBuffer(logging.getLogger("ordering-test"))
+
+    buffer.register_conversation_item("item-1", None, "user")
+    buffer.register_conversation_item("item-2", "item-1", "assistant")
+
+    buffer.register_transcription("item-2", "assistant text", "assistant")
+    buffer.register_transcription("item-1", "user text", "user")
+
+    assert _drain_ready_messages(buffer) == [
+        ("item-1", "user text", "user", "0"),
+        ("item-2", "assistant text", "assistant", "1"),
+    ]
+
+
+def test_transcript_without_item_id_logs_warning(caplog: pytest.LogCaptureFixture):
+    logger_name = "ordering-test-missing-id"
+    buffer = ConversationItemOrderingBuffer(logging.getLogger(logger_name))
+    caplog.set_level(logging.WARNING, logger=logger_name)
+
+    buffer.register_transcription(None, "missing", "user")
+
+    assert "without an item_id" in caplog.text
+    assert buffer.items_by_id == {}
+
+
+def test_interleaving_transcripts_follow_conversation_order():
+    buffer = ConversationItemOrderingBuffer(logging.getLogger("ordering-test"))
+
+    buffer.register_conversation_item("user-1", None, "user")
+    buffer.register_conversation_item("assistant-1", "user-1", "assistant")
+
+    buffer.register_transcription("assistant-1", "assistant-1", "assistant")
+    assert _drain_ready_messages(buffer) == []
+
+    buffer.register_conversation_item("user-2", "assistant-1", "user")
+    buffer.register_transcription("user-1", "user-1", "user")
+    assert _drain_ready_messages(buffer) == [
+        ("user-1", "user-1", "user", "0"),
+        ("assistant-1", "assistant-1", "assistant", "1"),
+    ]
+
+    buffer.register_conversation_item("assistant-2", "user-2", "assistant")
+    buffer.register_transcription("assistant-2", "assistant-2", "assistant")
+    assert _drain_ready_messages(buffer) == []
+
+    buffer.register_transcription("user-2", "user-2", "user")
+    assert _drain_ready_messages(buffer) == [
+        ("user-2", "user-2", "user", "2"),
+        ("assistant-2", "assistant-2", "assistant", "3"),
+    ]
+
+
+def test_late_predecessor_registration_reorders_before_dispatch():
+    buffer = ConversationItemOrderingBuffer(logging.getLogger("ordering-test"))
+
+    buffer.register_conversation_item("assistant-1", "user-1", "assistant")
+    buffer.register_conversation_item("assistant-2", "assistant-1", "assistant")
+
+    buffer.register_transcription("assistant-2", "assistant-2", "assistant")
+    buffer.register_transcription("assistant-1", "assistant-1", "assistant")
+    assert _drain_ready_messages(buffer) == []
+
+    buffer.register_conversation_item("user-1", None, "user")
+    buffer.register_transcription("user-1", "user-1", "user")
+    assert _drain_ready_messages(buffer) == [
+        ("user-1", "user-1", "user", "0"),
+        ("assistant-1", "assistant-1", "assistant", "1"),
+        ("assistant-2", "assistant-2", "assistant", "2"),
+    ]
+
+
+def test_existing_item_can_adopt_late_previous_item_id():
+    buffer = ConversationItemOrderingBuffer(logging.getLogger("ordering-test"))
+
+    buffer.register_conversation_item("assistant-1", None, "assistant")
+    buffer.register_conversation_item("user-1", None, "user")
+    buffer.register_conversation_item("assistant-1", "user-1", "assistant")
+
+    buffer.register_transcription("assistant-1", "assistant-1", "assistant")
+    assert _drain_ready_messages(buffer) == []
+
+    buffer.register_transcription("user-1", "user-1", "user")
+    assert _drain_ready_messages(buffer) == [
+        ("user-1", "user-1", "user", "0"),
+        ("assistant-1", "assistant-1", "assistant", "1"),
+    ]
+
+
+def test_item_after_non_relevant_predecessor_dispatches():
+    buffer = ConversationItemOrderingBuffer(logging.getLogger("ordering-test"))
+
+    buffer.register_conversation_item("user-1", None, "user")
+    buffer.register_conversation_item("system-1", "user-1", None)
+    buffer.register_conversation_item("assistant-1", "system-1", "assistant")
+
+    buffer.register_transcription("assistant-1", "assistant-1", "assistant")
+    buffer.register_transcription("user-1", "user-1", "user")
+
+    assert _drain_ready_messages(buffer) == [
+        ("user-1", "user-1", "user", "0"),
+        ("assistant-1", "assistant-1", "assistant", "1"),
+    ]
+
+
+def test_late_non_relevant_predecessor_unblocks_dispatch():
+    buffer = ConversationItemOrderingBuffer(logging.getLogger("ordering-test"))
+
+    buffer.register_conversation_item("user-1", None, "user")
+    buffer.register_conversation_item("assistant-1", "system-1", "assistant")
+
+    buffer.register_transcription("user-1", "user-1", "user")
+    assert _drain_ready_messages(buffer) == [("user-1", "user-1", "user", "0")]
+
+    buffer.register_transcription("assistant-1", "assistant-1", "assistant")
+    assert _drain_ready_messages(buffer) == []
+
+    buffer.register_conversation_item("system-1", "user-1", None)
+    assert _drain_ready_messages(buffer) == [
+        ("assistant-1", "assistant-1", "assistant", "1")
+    ]
+
+
+def test_pruned_saved_predecessor_still_allows_late_descendant_dispatch():
+    buffer = ConversationItemOrderingBuffer(logging.getLogger("ordering-test"))
+
+    buffer.register_conversation_item("user-1", None, "user")
+    buffer.register_transcription("user-1", "user-1", "user")
+    assert _drain_ready_messages(buffer) == [("user-1", "user-1", "user", "0")]
+
+    buffer.register_conversation_item("assistant-1", "user-1", "assistant")
+    buffer.register_transcription("assistant-1", "assistant-1", "assistant")
+    assert _drain_ready_messages(buffer) == [
+        ("assistant-1", "assistant-1", "assistant", "1")
+    ]
+    assert "user-1" not in buffer.items_by_id
+    assert "assistant-1" not in buffer.items_by_id
+
+    buffer.register_conversation_item("system-1", "user-1", None)
+    buffer.register_conversation_item("assistant-2", "system-1", "assistant")
+    buffer.register_transcription("assistant-2", "assistant-2", "assistant")
+    assert _drain_ready_messages(buffer) == [
+        ("assistant-2", "assistant-2", "assistant", "2")
+    ]

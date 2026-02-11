@@ -42,6 +42,7 @@ from sqlalchemy import (
     and_,
     delete,
     select,
+    tuple_,
     update,
 )
 from sqlalchemy.sql.elements import BinaryExpression
@@ -61,8 +62,32 @@ from sqlalchemy.orm import (
 from sqlalchemy.sql import func
 import pingpong.schemas as schemas
 import logging
+from pingpong.log_utils import sanitize_for_log
 
 logger = logging.getLogger(__name__)
+
+
+class AmbiguousExternalLoginLookupError(ValueError):
+    def __init__(
+        self,
+        lookup_index: int,
+        lookup_item: schemas.ExternalLoginLookupItem,
+        user_ids: list[int],
+    ):
+        self.lookup_index = lookup_index
+        self.lookup_item = lookup_item
+        self.user_ids = user_ids
+        provider = lookup_item.provider if lookup_item.provider else "<none>"
+        provider_id = (
+            str(lookup_item.provider_id)
+            if lookup_item.provider_id is not None
+            else "<none>"
+        )
+        super().__init__(
+            "Ambiguous external login lookup at index "
+            f"{lookup_index} (provider={provider}, provider_id={provider_id}, "
+            f"identifier={lookup_item.identifier}). Matched user ids: {user_ids}"
+        )
 
 
 T = TypeVar("T")
@@ -819,13 +844,14 @@ class AgreementAcceptance(Base):
 
 class ExternalLoginProvider(Base):
     __tablename__ = "external_login_providers"
-    __table_args__ = (Index("ix_external_login_providers_name", "name"),)
+    __table_args__ = (Index("ix_external_login_providers_name", "name", unique=True),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name = Column(String, nullable=False)
     display_name = Column(String, nullable=True)
     description = Column(String, nullable=True)
     icon = Column(String, nullable=True)
+    internal_only = Column(Boolean, nullable=False, server_default="false")
     external_logins: Mapped[List["ExternalLogin"]] = relationship(
         "ExternalLogin", back_populates="provider_obj"
     )
@@ -865,12 +891,17 @@ class ExternalLoginProvider(Base):
         display_name: str | None = None,
         description: str | None = None,
         icon: str | None = None,
+        internal_only: bool = False,
     ) -> "ExternalLoginProvider":
         existing = await cls.get_by_name(session, name)
         if existing:
             return existing
         provider = ExternalLoginProvider(
-            name=name, description=description, display_name=display_name, icon=icon
+            name=name,
+            description=description,
+            display_name=display_name,
+            icon=icon,
+            internal_only=internal_only,
         )
         session.add(provider)
         await session.flush()
@@ -903,6 +934,8 @@ class ExternalLogin(Base):
     __table_args__ = (
         Index("idx_user_provider", "user_id", "provider"),
         Index("idx_user_provider_id", "user_id", "provider_id"),
+        Index("idx_provider_identifier", "provider", "identifier"),
+        Index("idx_provider_id_identifier", "provider_id", "identifier"),
         UniqueConstraint(
             "user_id", "provider", "identifier", name="uq_user_provider_identifier"
         ),
@@ -928,40 +961,72 @@ class ExternalLogin(Base):
         provider: str,
         identifier: str,
         called_by: str | None = None,
+        replace_existing: bool = True,
     ) -> bool:
         provider_ = await ExternalLoginProvider.get_or_create_by_name(session, provider)
         if provider not in {"email"}:
-            # For other providers, first check if a record exists
-            stmt = select(ExternalLogin).where(
-                and_(
-                    ExternalLogin.user_id == user_id,
-                    or_(
-                        ExternalLogin.provider == provider,
-                        ExternalLogin.provider_id == provider_.id,
-                    ),
+            if replace_existing:
+                # For other providers, first check if a record exists
+                stmt = select(ExternalLogin).where(
+                    and_(
+                        ExternalLogin.user_id == user_id,
+                        or_(
+                            ExternalLogin.provider == provider,
+                            ExternalLogin.provider_id == provider_.id,
+                        ),
+                    )
                 )
-            )
-            existing = await session.scalar(stmt)
+                existing = await session.scalar(stmt)
 
-            if existing:
-                existing.identifier = identifier
-                session.add(existing)
-                await session.flush()
-                return True
+                if existing:
+                    existing.identifier = identifier
+                    session.add(existing)
+                    await session.flush()
+                    return True
+                else:
+                    new_login = ExternalLogin(
+                        user_id=user_id,
+                        provider=provider,
+                        identifier=identifier,
+                        provider_id=provider_.id,
+                    )
+                    session.add(new_login)
+                    await session.flush()
+                    if called_by:
+                        logger.info(
+                            "ELDEBUG: (%s) Creating new external login for user %s with provider %s and identifier %s",
+                            sanitize_for_log(called_by),
+                            user_id,
+                            sanitize_for_log(provider),
+                            sanitize_for_log(identifier),
+                        )
+                    return True
             else:
-                new_login = ExternalLogin(
-                    user_id=user_id,
-                    provider=provider,
-                    identifier=identifier,
-                    provider_id=provider_.id,
+                # For non-email providers, when replace_existing=False keep one row
+                # per unique identifier. This supports LTI issuer/sub history.
+                stmt = (
+                    _get_upsert_stmt(session)(ExternalLogin)
+                    .values(
+                        user_id=user_id,
+                        provider=provider,
+                        provider_id=provider_.id,
+                        identifier=identifier,
+                    )
+                    .on_conflict_do_update(
+                        index_elements=["user_id", "provider", "identifier"],
+                        set_=dict(provider_id=provider_.id, provider=provider),
+                    )
                 )
-                session.add(new_login)
-                await session.flush()
+                result = await session.execute(stmt)
                 if called_by:
                     logger.info(
-                        f"ELDEBUG: ({called_by}) Creating new external login for user {user_id} with provider {provider} and identifier {identifier}"
+                        "ELDEBUG: (%s) Upserting external login for user %s provider=%s identifier=%s",
+                        sanitize_for_log(called_by),
+                        user_id,
+                        sanitize_for_log(provider),
+                        sanitize_for_log(identifier),
                     )
-                return True
+                return result.rowcount > 0
         else:
             # For email provider, always create a new record if it doesn't exist
             # and it's not being used by another user. This allows multiple
@@ -1175,6 +1240,161 @@ class User(Base):
     async def get_by_email(cls, session: AsyncSession, email: str) -> "User":
         stmt = select(User).where(func.lower(User.email) == func.lower(email))
         return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_email_external_logins_priority(
+        cls,
+        session: AsyncSession,
+        email: str,
+        lookup_items: list[schemas.ExternalLoginLookupItem],
+    ) -> tuple["User | None", list[int]]:
+        normalized_email = email.strip()
+        if not normalized_email:
+            raise ValueError("Email is required")
+
+        email_match = await cls.get_by_email(session, normalized_email)
+
+        if not lookup_items:
+            email_matched_user_ids = [email_match.id] if email_match else []
+            return email_match, email_matched_user_ids
+
+        provider_ids_requested = {
+            item.provider_id for item in lookup_items if item.provider_id is not None
+        }
+        provider_names_requested = {
+            item.provider.lower().strip()
+            for item in lookup_items
+            if item.provider is not None and item.provider.strip()
+        }
+
+        provider_names_by_id: dict[int, str] = {}
+        provider_ids_by_name: dict[str, int] = {}
+        provider_filters: list[BinaryExpression] = []
+        if provider_ids_requested:
+            provider_filters.append(
+                ExternalLoginProvider.id.in_(provider_ids_requested)
+            )
+        if provider_names_requested:
+            provider_filters.append(
+                func.lower(ExternalLoginProvider.name).in_(provider_names_requested)
+            )
+
+        if provider_filters:
+            provider_rows = await session.execute(
+                select(ExternalLoginProvider.id, ExternalLoginProvider.name).where(
+                    or_(*provider_filters)
+                )
+            )
+            for provider_id, provider_name in provider_rows:
+                normalized_provider_name = provider_name.lower().strip()
+                provider_names_by_id[provider_id] = normalized_provider_name
+                provider_ids_by_name[normalized_provider_name] = provider_id
+
+        normalized_lookup_items: list[
+            tuple[int, schemas.ExternalLoginLookupItem, str, int]
+        ] = []
+        for lookup_index, lookup_item in enumerate(lookup_items):
+            identifier = lookup_item.identifier.strip()
+            if not identifier:
+                raise ValueError(
+                    f"Lookup item at index {lookup_index} requires an identifier"
+                )
+
+            provider_name = (
+                lookup_item.provider.lower().strip()
+                if lookup_item.provider is not None
+                else None
+            )
+            if provider_name == "":
+                provider_name = None
+
+            provider_id = lookup_item.provider_id
+
+            if provider_name is None and provider_id is None:
+                raise ValueError(
+                    f"Lookup item at index {lookup_index} requires provider or provider_id"
+                )
+
+            if provider_id is not None:
+                provider_name_from_id = provider_names_by_id.get(provider_id)
+                if provider_name_from_id is None:
+                    if provider_name is not None:
+                        raise ValueError(
+                            f"Lookup item at index {lookup_index} has unknown provider_id "
+                            f"{provider_id}"
+                        )
+                    continue
+
+                if provider_name and provider_name != provider_name_from_id:
+                    raise ValueError(
+                        f"Lookup item at index {lookup_index} has provider "
+                        f"{provider_name!r} which does not match provider_id {provider_id}"
+                    )
+
+                resolved_provider_id = provider_id
+            else:
+                resolved_provider_id = (
+                    provider_ids_by_name.get(provider_name) if provider_name else None
+                )
+                if resolved_provider_id is None:
+                    continue
+
+            normalized_lookup_items.append(
+                (lookup_index, lookup_item, identifier, resolved_provider_id)
+            )
+
+        if not normalized_lookup_items:
+            email_matched_user_ids = [email_match.id] if email_match else []
+            return email_match, email_matched_user_ids
+
+        lookup_indexes_by_pair: dict[tuple[int, str], list[int]] = {}
+        lookup_pairs: set[tuple[int, str]] = set()
+        for lookup_index, _, identifier, provider_id in normalized_lookup_items:
+            key = (provider_id, identifier)
+            lookup_pairs.add(key)
+            lookup_indexes_by_pair.setdefault(key, []).append(lookup_index)
+
+        matched_rows = await session.execute(
+            select(
+                ExternalLogin.provider_id,
+                ExternalLogin.identifier,
+                ExternalLogin.user_id,
+            ).where(
+                tuple_(ExternalLogin.provider_id, ExternalLogin.identifier).in_(
+                    lookup_pairs
+                )
+            )
+        )
+        all_matched_user_ids: set[int] = set()
+        matched_user_ids_by_lookup_index: dict[int, set[int]] = {}
+        for provider_id, identifier, user_id in matched_rows:
+            all_matched_user_ids.add(user_id)
+            key = (provider_id, identifier)
+            for lookup_index in lookup_indexes_by_pair.get(key, []):
+                matched_user_ids_by_lookup_index.setdefault(lookup_index, set()).add(
+                    user_id
+                )
+
+        if email_match:
+            all_matched_user_ids.add(email_match.id)
+
+        for lookup_index, lookup_item, *_ in normalized_lookup_items:
+            matched_user_ids_for_lookup = matched_user_ids_by_lookup_index.get(
+                lookup_index, set()
+            )
+            if len(matched_user_ids_for_lookup) == 1:
+                return (
+                    await session.get(User, next(iter(matched_user_ids_for_lookup))),
+                    sorted(all_matched_user_ids),
+                )
+            if len(matched_user_ids_for_lookup) > 1:
+                raise AmbiguousExternalLoginLookupError(
+                    lookup_index=lookup_index,
+                    lookup_item=lookup_item,
+                    user_ids=sorted(matched_user_ids_for_lookup),
+                )
+
+        return email_match, sorted(all_matched_user_ids)
 
     @classmethod
     async def get_by_email_sso(
@@ -5564,7 +5784,14 @@ class Thread(Base):
             select(Thread)
             .outerjoin(Thread.users)
             .options(
-                selectinload(Thread.users).load_only(User.id, User.created),
+                selectinload(Thread.users).load_only(
+                    User.id,
+                    User.created,
+                    User.display_name,
+                    User.first_name,
+                    User.last_name,
+                    User.email,
+                ),
             )
             .order_by(Thread.updated.desc() if desc else Thread.updated.asc())
             .where(condition)

@@ -5,6 +5,12 @@
 	import { happyToast, sadToast } from '$lib/toast';
 	import { goto } from '$app/navigation';
 	import PingPongLogo from '$lib/components/PingPongLogo.svelte';
+	import { onMount } from 'svelte';
+	import { ltiHeaderState } from '$lib/stores/ltiHeader';
+
+	onMount(() => {
+		ltiHeaderState.set({ kind: 'none' });
+	});
 
 	export let data;
 

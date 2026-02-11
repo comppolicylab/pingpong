@@ -1,5 +1,11 @@
 <script lang="ts">
 	import { Heading, P } from 'flowbite-svelte';
+	import { onMount } from 'svelte';
+	import { ltiHeaderState } from '$lib/stores/ltiHeader';
+
+	onMount(() => {
+		ltiHeaderState.set({ kind: 'none' });
+	});
 </script>
 
 <div class="about flex h-full flex-col gap-4 overflow-y-auto px-12 py-12">

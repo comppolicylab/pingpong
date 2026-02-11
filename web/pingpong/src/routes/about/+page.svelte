@@ -6,6 +6,12 @@
 	import * as api from '$lib/api';
 	import { ExclamationCircleOutline, InfoCircleSolid, LockSolid } from 'flowbite-svelte-icons';
 	import AboutPage from '$lib/components/AboutPage.svelte';
+	import { onMount } from 'svelte';
+	import { ltiHeaderState } from '$lib/stores/ltiHeader';
+
+	onMount(() => {
+		ltiHeaderState.set({ kind: 'none' });
+	});
 
 	export let data;
 

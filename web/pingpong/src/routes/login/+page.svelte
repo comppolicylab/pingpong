@@ -6,6 +6,12 @@
 	import { sadToast } from '$lib/toast';
 	import * as api from '$lib/api';
 	import { page } from '$app/stores';
+	import { onMount } from 'svelte';
+	import { ltiHeaderState } from '$lib/stores/ltiHeader';
+
+	onMount(() => {
+		ltiHeaderState.set({ kind: 'none' });
+	});
 
 	export let form;
 	const forward = $page.url.searchParams.get('forward') || '/';

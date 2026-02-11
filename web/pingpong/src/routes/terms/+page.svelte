@@ -8,6 +8,12 @@
 	import { page } from '$app/stores';
 	import SanitizeFlowbite from '$lib/components/SanitizeFlowbite.svelte';
 	import { loading } from '$lib/stores/general.js';
+	import { onMount } from 'svelte';
+	import { ltiHeaderState } from '$lib/stores/ltiHeader';
+
+	onMount(() => {
+		ltiHeaderState.set({ kind: 'none' });
+	});
 
 	export let data;
 

@@ -18,7 +18,7 @@
 		"@sveltejs/adapter-auto": "^7.0.0",
 		"@sveltejs/adapter-node": "^5.5.2",
 		"@sveltejs/adapter-static": "^3.0.10",
-		"@sveltejs/kit": "^2.50.1",
+		"@sveltejs/kit": "^2.50.2",
 		"@sveltejs/vite-plugin-svelte": "^6.2.4",
 		"@tailwindcss/vite": "^4.1.18",
 		"@types/katex": "^0.16.8",
@@ -30,15 +30,15 @@
 		"eslint-plugin-svelte": "^3.14.0",
 		"flowbite": "^4.0.1",
 		"flowbite-svelte": "^0.48.5",
-		"globals": "^17.2.0",
+		"globals": "^17.3.0",
 		"postcss": "^8.5.6",
 		"postcss-import": "^16.1.1",
 		"postcss-load-config": "^6.0.1",
 		"prettier": "^3.8.1",
 		"prettier-plugin-svelte": "^3.4.1",
 		"prettier-plugin-tailwindcss": "^0.7.2",
-		"rollup": "^4.57.0",
-		"svelte": "^5.49.1",
+		"rollup": "^4.57.1",
+		"svelte": "^5.50.0",
 		"svelte-check": "^4.3.6",
 		"svelte-loading-spinners": "^0.3.6",
 		"tailwindcss": "^4.1.17",
@@ -53,7 +53,7 @@
 		"@sentry/sveltekit": "^10.38.0",
 		"@zerodevx/svelte-toast": "^0.9.6",
 		"dayjs": "^1.11.19",
-		"dotenv": "^17.2.3",
+		"dotenv": "^17.2.4",
 		"flowbite-svelte-icons": "^1.6.2",
 		"highlight.js": "^11.11.1",
 		"isomorphic-dompurify": "^2.35.0",
@@ -61,14 +61,15 @@
 		"marked": "^17.0.1",
 		"marked-highlight": "^2.2.3",
 		"svelte-copy": "^2.0.0",
-		"tldts": "^7.0.21"
+		"tldts": "^7.0.23"
 	},
 	"pnpm": {
 		"overrides": {
 			"cookie": ">=0.7.0",
 			"esbuild": ">=0.25.0",
 			"glob": ">=10.5.0",
-			"devalue": ">=5.6.2"
+			"devalue": ">=5.6.2",
+			"@isaacs/brace-expansion": ">=5.0.1"
 		}
 	}
 }

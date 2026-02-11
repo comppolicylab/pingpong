@@ -1,5 +1,7 @@
-import pytest
 from datetime import datetime, timedelta, timezone
+
+import pytest
+from sqlalchemy import inspect
 
 from pingpong import models, schemas
 
@@ -293,3 +295,45 @@ async def test_list_messages_tool_calls_filters_and_orders(db):
     assert [message.id for message in messages_desc] == message_ids[::-1]
     assert [tool_call.id for tool_call in tool_calls_desc] == tool_call_ids[::-1]
     assert [reasoning.id for reasoning in reasoning_steps_desc] == reasoning_ids[::-1]
+
+
+@pytest.mark.asyncio
+async def test_get_thread_by_class_id_preloads_export_user_fields(db):
+    async with db.async_session() as session:
+        class_ = models.Class(name="Export Thread Class")
+        user = models.User(
+            email="export-user@example.com",
+            display_name="Export User",
+            first_name="Export",
+            last_name="User",
+        )
+        thread = models.Thread(
+            thread_id="thread_export_user_fields",
+            class_=class_,
+            users=[user],
+            display_user_info=True,
+        )
+        session.add(thread)
+        await session.commit()
+        class_id = class_.id
+
+    async with db.async_session() as session:
+        threads = [
+            t
+            async for t in models.Thread.get_thread_by_class_id(
+                session, class_id=class_id, desc=False
+            )
+        ]
+
+    assert len(threads) == 1
+    loaded_user = threads[0].users[0]
+    unloaded = inspect(loaded_user).unloaded
+
+    assert "id" not in unloaded
+    assert "created" not in unloaded
+    assert "display_name" not in unloaded
+    assert "first_name" not in unloaded
+    assert "last_name" not in unloaded
+    assert "email" not in unloaded
+    assert loaded_user.display_name == "Export User"
+    assert loaded_user.email == "export-user@example.com"

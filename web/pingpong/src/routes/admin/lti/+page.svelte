@@ -17,11 +17,26 @@
 	import * as api from '$lib/api';
 	import { happyToast, sadToast } from '$lib/toast';
 	import { resolve } from '$app/paths';
+	import { ltiHeaderState } from '$lib/stores/ltiHeader';
 
 	export let data;
 
 	let registrations: LTIRegistration[] = data.registrations;
 	let togglingEnabled: Record<number, boolean> = {};
+
+	$: isLtiHeaderLayout = data.forceCollapsedLayout && data.forceShowSidebarButton;
+
+	// Update props reactively when data changes
+	$: if (isLtiHeaderLayout) {
+		ltiHeaderState.set({
+			kind: 'nongroup',
+			props: {
+				title: 'LTI Registrations',
+				redirectUrl: '/admin',
+				redirectName: 'Admin page'
+			}
+		});
+	}
 
 	const getStatusBadge = (status: api.LTIRegistrationReviewStatus) => {
 		switch (status) {
@@ -70,20 +85,22 @@
 </script>
 
 <div class="relative flex h-full w-full flex-col">
-	<PageHeader>
-		<div slot="left">
-			<h2 class="text-color-blue-dark-50 px-4 py-3 font-serif text-3xl font-bold">
-				LTI Registrations
-			</h2>
-		</div>
-		<div slot="right">
-			<a
-				href={resolve('/admin')}
-				class="flex items-center gap-2 rounded-full bg-white p-2 px-4 text-sm font-medium text-blue-dark-50 transition-all hover:bg-blue-dark-40 hover:text-white"
-				>Admin page <ArrowRightOutline size="md" class="text-orange" /></a
-			>
-		</div>
-	</PageHeader>
+	{#if !isLtiHeaderLayout}
+		<PageHeader>
+			<div slot="left">
+				<h2 class="text-color-blue-dark-50 px-4 py-3 font-serif text-3xl font-bold">
+					LTI Registrations
+				</h2>
+			</div>
+			<div slot="right">
+				<a
+					href={resolve('/admin')}
+					class="flex items-center gap-2 rounded-full bg-white p-2 px-4 text-sm font-medium text-blue-dark-50 transition-all hover:bg-blue-dark-40 hover:text-white"
+					>Admin page <ArrowRightOutline size="md" class="text-orange" /></a
+				>
+			</div>
+		</PageHeader>
+	{/if}
 
 	<div class="h-full w-full overflow-y-auto p-12">
 		<div class="mb-6 flex flex-row flex-wrap items-center justify-between gap-y-4">

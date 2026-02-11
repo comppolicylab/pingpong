@@ -18,6 +18,7 @@
 	} from 'flowbite-svelte';
 	import { ArrowRightOutline, LockSolid } from 'flowbite-svelte-icons';
 	import { writable } from 'svelte/store';
+	import { ltiHeaderState } from '$lib/stores/ltiHeader';
 
 	export let data;
 
@@ -33,6 +34,20 @@
 		value: provider.id,
 		name: provider.name
 	}));
+
+	$: isLtiHeaderLayout = data.forceCollapsedLayout && data.forceShowSidebarButton;
+
+	// Update props reactively when data changes
+	$: if (isLtiHeaderLayout) {
+		ltiHeaderState.set({
+			kind: 'nongroup',
+			props: {
+				title: 'Agreement Policies',
+				redirectUrl: '/admin/terms',
+				redirectName: 'All Agreements'
+			}
+		});
+	}
 
 	const handleSubmit = async (event: Event) => {
 		event.preventDefault();
@@ -93,20 +108,22 @@
 </script>
 
 <div class="relative flex h-full w-full flex-col">
-	<PageHeader>
-		<div slot="left">
-			<h2 class="text-color-blue-dark-50 px-4 py-3 font-serif text-3xl font-bold">
-				Agreement Policies
-			</h2>
-		</div>
-		<div slot="right">
-			<a
-				href={resolve(`/admin/terms`)}
-				class="flex items-center gap-2 rounded-full bg-white p-2 px-4 text-sm font-medium text-blue-dark-50 transition-all hover:bg-blue-dark-40 hover:text-white"
-				>All Agreements <ArrowRightOutline size="md" class="text-orange" /></a
-			>
-		</div>
-	</PageHeader>
+	{#if !isLtiHeaderLayout}
+		<PageHeader>
+			<div slot="left">
+				<h2 class="text-color-blue-dark-50 px-4 py-3 font-serif text-3xl font-bold">
+					Agreement Policies
+				</h2>
+			</div>
+			<div slot="right">
+				<a
+					href={resolve(`/admin/terms`)}
+					class="flex items-center gap-2 rounded-full bg-white p-2 px-4 text-sm font-medium text-blue-dark-50 transition-all hover:bg-blue-dark-40 hover:text-white"
+					>All Agreements <ArrowRightOutline size="md" class="text-orange" /></a
+				>
+			</div>
+		</PageHeader>
+	{/if}
 	<div class="h-full w-full overflow-y-auto p-12">
 		<div class="mb-4 flex flex-row flex-wrap items-center justify-between gap-y-4">
 			<Heading

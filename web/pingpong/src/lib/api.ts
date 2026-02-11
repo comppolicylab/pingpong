@@ -446,13 +446,6 @@ export type ExternalLoginProviders = {
 	providers: ExternalLoginProvider[];
 };
 
-/**
- * Get all external login providers.
- */
-export const getExternalLoginProvidersForLTI = async (f: Fetcher) => {
-	return await GET<never, ExternalLoginProviders>(f, 'lti/sso/providers');
-};
-
 export type LTIPublicSSOProvider = {
 	id: number;
 	name: string;
@@ -1841,6 +1834,7 @@ export type UpdateAssistantRequest = {
 	hide_web_search_actions?: boolean;
 	hide_mcp_server_call_details?: boolean;
 	mcp_servers?: MCPServerToolInput[];
+	convert_to_next_gen?: boolean;
 };
 
 /**

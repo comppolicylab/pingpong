@@ -48,8 +48,8 @@ async def api(config, db, user, now, authz):
     from pingpong.server import app, v1
 
     api = TestClient(app)
-    api.app.state.now = now
-    v1.state.now = now
+    api.app.state["now"] = now
+    v1.state["now"] = now
 
     await config.authz.driver.init()
     yield api
