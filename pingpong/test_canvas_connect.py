@@ -180,7 +180,7 @@ async def test_get_nrps_access_token_uses_oidc_token_endpoint_and_signed_asserti
         ).timestamp()
     )
     assert jwt_calls["payload"] == {
-        "iss": canvas_connect_module.config.public_url,
+        "iss": "client-123",
         "sub": "client-123",
         "aud": token_endpoint,
         "iat": expected_iat,
