@@ -7780,7 +7780,7 @@ async def update_assistant(
                 403,
                 "This lecture video assistant is locked and cannot be edited. Please create a new assistant if you need to make changes.",
             )
-            
+
     class_ = await models.Class.get_by_id(request.state["db"], int(class_id))
     if not class_:
         raise HTTPException(
