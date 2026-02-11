@@ -878,16 +878,24 @@ async def lti_launch(
     request.state["session"].user = user
     user_token = encode_session_token(user.id, nowfn=get_now_fn(request))
 
-    if class_ is None or (
-        isinstance(class_, LTIClass) and class_.lti_status == LTIStatus.PENDING
-    ):
+    class_needs_setup = isinstance(class_, LTIClass) and (
+        class_.lti_status == LTIStatus.PENDING or class_.class_id is None
+    )
+    can_reuse_setup_class = (
+        class_needs_setup and class_.registration_id == registration.id
+        if isinstance(class_, LTIClass)
+        else False
+    )
+    if class_ is None or class_needs_setup:
         # User is launching into a class that is not yet linked
         # Or the class is pending setup
         if is_instructor or is_admin:
-            # Check for existing pending LTIClass (re-launch scenario)
-            if isinstance(class_, LTIClass) and class_.lti_status == LTIStatus.PENDING:
+            # Reuse existing unlinked/pending LTIClass for setup (re-launch scenario)
+            if can_reuse_setup_class:
+                assert isinstance(class_, LTIClass)
                 # Resume existing setup
                 pending_lti_class = class_
+                pending_lti_class.lti_status = LTIStatus.PENDING
                 pending_lti_class.setup_user_id = user.id
                 request.state["db"].add(pending_lti_class)
                 await request.state["db"].flush()
@@ -986,6 +994,7 @@ async def lti_launch(
                     is_lti_launch=True,
                 )
                 try:
+                    assert class_.class_id is not None
                     await AddNewUsersManual(
                         str(class_.class_id),
                         new_ucr,
@@ -1096,6 +1105,7 @@ async def lti_launch(
                     is_lti_launch=True,
                 )
                 try:
+                    assert pp_class.id is not None
                     await AddNewUsersManual(
                         pp_class.id,
                         new_ucr,
@@ -1202,6 +1212,7 @@ async def lti_launch(
                     is_lti_launch=True,
                 )
                 try:
+                    assert class_.id is not None
                     await AddNewUsersManual(
                         class_.id, new_ucr, request, tasks, user_id=class_.lms_user_id
                     ).add_new_users()
@@ -1229,6 +1240,7 @@ async def lti_launch(
                     is_lti_launch=True,
                 )
                 try:
+                    assert class_.id is not None
                     await AddNewUsersManual(
                         class_.id, new_ucr, request, tasks, user_id=class_.lms_user_id
                     ).add_new_users()
