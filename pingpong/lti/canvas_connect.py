@@ -61,6 +61,7 @@ from pingpong.time import convert_seconds
 from pingpong.users import AddNewUsersManual, AddNewUsersScript
 
 logger = logging.getLogger(__name__)
+SYNC_ROW_ERROR_DETAIL_LIMIT = 3
 
 
 def exception_detail(e: Exception) -> str:
@@ -100,6 +101,15 @@ def _extract_error_detail(payload: object) -> str | None:
     if isinstance(error, str) and error:
         return error
     return None
+
+
+def _extract_sync_row_errors(results: CreateUserResults) -> list[str]:
+    row_errors: list[str] = []
+    for row_result in results.results:
+        if not row_result.error:
+            continue
+        row_errors.append(f"{row_result.email}: {row_result.error}")
+    return row_errors
 
 
 class CanvasConnectException(Exception):
@@ -607,6 +617,23 @@ class CanvasConnectClient:
         try:
             new_ucr = await self.get_nrps_create_user_class_roles()
             results = await self._update_user_roles(class_id, setup_user_id, new_ucr)
+            row_errors = _extract_sync_row_errors(results)
+            if row_errors:
+                displayed_row_errors = "; ".join(
+                    row_errors[:SYNC_ROW_ERROR_DETAIL_LIMIT]
+                )
+                overflow_count = len(row_errors) - SYNC_ROW_ERROR_DETAIL_LIMIT
+                overflow_suffix = (
+                    f"; and {overflow_count} more row errors"
+                    if overflow_count > 0
+                    else ""
+                )
+                raise CanvasConnectException(
+                    detail=(
+                        f"Canvas Connect sync had {len(row_errors)} failed roster updates: "
+                        f"{displayed_row_errors}{overflow_suffix}"
+                    )
+                )
         except CanvasConnectWarning:
             raise
         except Exception as e:

@@ -1244,7 +1244,9 @@ async def test_sync_calls_add_new_users_script_with_lti_class_context(monkeypatc
             captured["new_ucr"] = new_ucr
 
         async def add_new_users(self):
-            return "synced-result"
+            return canvas_connect_module.CreateUserResults(
+                results=[{"email": "synced@example.com"}]
+            )
 
     monkeypatch.setattr(
         canvas_connect_module,
@@ -1264,7 +1266,9 @@ async def test_sync_calls_add_new_users_script_with_lti_class_context(monkeypatc
     )
     result = await client.sync_roster()
 
-    assert result == "synced-result"
+    assert result == canvas_connect_module.CreateUserResults(
+        results=[{"email": "synced@example.com"}]
+    )
     assert captured["class_id"] == "321"
     assert captured["user_id"] == 42
     assert captured["session"] is db
@@ -1493,7 +1497,9 @@ async def test_manual_canvas_connect_sync_roster_calls_add_new_users_manual(
             captured["user_id"] = user_id
 
         async def add_new_users(self):
-            return "manual-synced"
+            return canvas_connect_module.CreateUserResults(
+                results=[{"email": "synced@example.com"}]
+            )
 
     monkeypatch.setattr(
         canvas_connect_module,
@@ -1513,7 +1519,9 @@ async def test_manual_canvas_connect_sync_roster_calls_add_new_users_manual(
     )
     result = await client.sync_roster()
 
-    assert result == "manual-synced"
+    assert result == canvas_connect_module.CreateUserResults(
+        results=[{"email": "synced@example.com"}]
+    )
     assert captured["class_id"] == "321"
     assert captured["new_ucr"] is expected_ucr
     assert captured["request"] is request
@@ -1638,7 +1646,9 @@ async def test_script_canvas_connect_sync_roster_uses_script_client(monkeypatch)
             captured["new_ucr"] = new_ucr
 
         async def add_new_users(self):
-            return "script-sync"
+            return canvas_connect_module.CreateUserResults(
+                results=[{"email": "synced@example.com"}]
+            )
 
     monkeypatch.setattr(
         canvas_connect_module.CanvasConnectClient,
@@ -1667,8 +1677,173 @@ async def test_script_canvas_connect_sync_roster_uses_script_client(monkeypatch)
     )
     result = await client.sync_roster()
 
-    assert result == "script-sync"
+    assert result == canvas_connect_module.CreateUserResults(
+        results=[{"email": "synced@example.com"}]
+    )
     assert captured["class_id"] == "321"
     assert captured["user_id"] == 42
     assert captured["session"] is db
     assert captured["client"] is authz_client
+
+
+@pytest.mark.asyncio
+async def test_script_canvas_connect_sync_roster_marks_error_on_row_failures(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc)
+    previous_sync = fixed_now - timedelta(hours=3)
+    fake_lti_class = SimpleNamespace(
+        id=290,
+        class_id=321,
+        setup_user_id=42,
+        lti_status=canvas_connect_module.LTIStatus.LINKED,
+        last_sync_error=None,
+        last_synced=previous_sync,
+    )
+
+    async def _get_sync_context(self):
+        return fake_lti_class, 321, 42
+
+    async def _get_nrps_create_user_class_roles(self):
+        return canvas_connect_module.CreateUserClassRoles(
+            roles=[],
+            silent=True,
+            lms_type=canvas_connect_module.LMSType.CANVAS,
+            lti_class_id=290,
+        )
+
+    class FakeAddNewUsersScript:
+        def __init__(self, class_id, user_id, session, client, new_ucr):
+            pass
+
+        async def add_new_users(self):
+            return canvas_connect_module.CreateUserResults(
+                results=[
+                    {"email": "ok@example.com", "display_name": "OK User"},
+                    {
+                        "email": "bad@example.com",
+                        "display_name": "Broken User",
+                        "error": "role update rejected",
+                    },
+                ]
+            )
+
+    monkeypatch.setattr(
+        canvas_connect_module.CanvasConnectClient,
+        "_get_sync_context",
+        _get_sync_context,
+    )
+    monkeypatch.setattr(
+        canvas_connect_module.CanvasConnectClient,
+        "get_nrps_create_user_class_roles",
+        _get_nrps_create_user_class_roles,
+    )
+    monkeypatch.setattr(
+        canvas_connect_module,
+        "AddNewUsersScript",
+        FakeAddNewUsersScript,
+    )
+
+    db = FakeWriteDB()
+    authz_client = SimpleNamespace()
+    client = canvas_connect_module.ScriptCanvasConnectClient(
+        db=db,
+        client=authz_client,
+        lti_class_id=290,
+        key_manager=FakeKeyManager(),
+        nowfn=lambda: fixed_now,
+    )
+
+    with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+        await client.sync_roster()
+
+    assert "failed roster updates" in excinfo.value.detail
+    assert "bad@example.com: role update rejected" in excinfo.value.detail
+    assert fake_lti_class.lti_status == canvas_connect_module.LTIStatus.ERROR
+    assert fake_lti_class.last_sync_error == excinfo.value.detail
+    assert fake_lti_class.last_synced == previous_sync
+    assert db.added == [fake_lti_class]
+    assert db.flush_count == 1
+
+
+@pytest.mark.asyncio
+async def test_manual_canvas_connect_sync_roster_marks_error_on_row_failures(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc)
+    previous_sync = fixed_now - timedelta(hours=3)
+    fake_lti_class = SimpleNamespace(
+        id=291,
+        class_id=321,
+        setup_user_id=42,
+        lti_status=canvas_connect_module.LTIStatus.LINKED,
+        last_sync_error=None,
+        last_synced=previous_sync,
+    )
+
+    async def _get_sync_context(self):
+        return fake_lti_class, 321, 42
+
+    async def _get_nrps_create_user_class_roles(self):
+        return canvas_connect_module.CreateUserClassRoles(
+            roles=[],
+            silent=True,
+            lms_type=canvas_connect_module.LMSType.CANVAS,
+            lti_class_id=291,
+        )
+
+    class FakeAddNewUsersManual:
+        def __init__(self, class_id, new_ucr, request, tasks, user_id=None):
+            pass
+
+        async def add_new_users(self):
+            return canvas_connect_module.CreateUserResults(
+                results=[
+                    {
+                        "email": "broken@example.com",
+                        "display_name": "Broken User",
+                        "error": "role update rejected",
+                    }
+                ]
+            )
+
+    monkeypatch.setattr(
+        canvas_connect_module.CanvasConnectClient,
+        "_get_sync_context",
+        _get_sync_context,
+    )
+    monkeypatch.setattr(
+        canvas_connect_module.CanvasConnectClient,
+        "get_nrps_create_user_class_roles",
+        _get_nrps_create_user_class_roles,
+    )
+    monkeypatch.setattr(
+        canvas_connect_module,
+        "AddNewUsersManual",
+        FakeAddNewUsersManual,
+    )
+
+    db = FakeWriteDB()
+    request = SimpleNamespace(state={"db": db})
+    tasks = SimpleNamespace()
+    client = canvas_connect_module.ManualCanvasConnectClient(
+        lti_class_id=291,
+        request=request,
+        tasks=tasks,
+        key_manager=FakeKeyManager(),
+        nowfn=lambda: fixed_now,
+    )
+
+    with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+        await client.sync_roster()
+
+    assert "Syncing your roster through Canvas Connect failed" in excinfo.value.detail
+    assert fake_lti_class.lti_status == canvas_connect_module.LTIStatus.ERROR
+    assert (
+        fake_lti_class.last_sync_error
+        == "Canvas Connect sync had 1 failed roster updates: "
+        "broken@example.com: role update rejected"
+    )
+    assert fake_lti_class.last_synced == previous_sync
+    assert db.added == [fake_lti_class]
+    assert db.flush_count == 1
