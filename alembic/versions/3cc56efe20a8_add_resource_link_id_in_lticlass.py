@@ -1,7 +1,7 @@
 """Add resource_link_id in LTIClass
 
 Revision ID: 3cc56efe20a8
-Revises: f9f8097f7ce1
+Revises: a384f2bfddf4
 Create Date: 2026-02-10 18:00:43.449645
 
 """
@@ -14,7 +14,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "3cc56efe20a8"
-down_revision: Union[str, None] = "f9f8097f7ce1"
+down_revision: Union[str, None] = "a384f2bfddf4"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
