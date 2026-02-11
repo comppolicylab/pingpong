@@ -118,8 +118,16 @@ jobs:
                 break
               fi
 
+              local first_parent
+              first_parent="$(git rev-list --parents -n 1 "$sha" | awk '{print $2}')"
               local files
-              files="$(git diff-tree --no-commit-id --name-only -r -m --root "$sha" || true)"
+              if [[ -n "$first_parent" ]]; then
+                # Compare against first parent only to avoid per-parent merge diffs.
+                files="$(git diff --name-only "$first_parent" "$sha" || true)"
+              else
+                # Root commit fallback.
+                files="$(git diff-tree --no-commit-id --name-only -r --root "$sha" || true)"
+              fi
               while IFS= read -r file; do
                 [[ -z "$file" ]] && continue
                 if is_taggable_path "$file"; then
