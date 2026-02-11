@@ -51,6 +51,9 @@ from pingpong.migrations.m04_check_voice_mode_recordings import (
 from pingpong.migrations.m05_populate_account_lti_guid import (
     populate_account_lti_guid,
 )
+from pingpong.migrations.m06_cleanup_orphaned_lti_classes import (
+    cleanup_orphaned_lti_classes,
+)
 from pingpong.now import _get_next_run_time, croner, utcnow
 from pingpong.schemas import LMSType, RunStatus
 from pingpong.summary import send_class_summary_for_class
@@ -828,6 +831,32 @@ def m05_populate_account_lti_guid() -> None:
             logger.info("Done!")
 
     asyncio.run(_m05_populate_account_lti_guid())
+
+
+@db.command("m06_cleanup_orphaned_lti_classes")
+@click.option(
+    "--dry-run",
+    default=False,
+    is_flag=True,
+    help="Report orphaned LTI classes without deleting them.",
+)
+def m06_cleanup_orphaned_lti_classes(dry_run: bool) -> None:
+    async def _m06_cleanup_orphaned_lti_classes() -> None:
+        async with config.db.driver.async_session() as session:
+            logger.info(
+                "Cleaning up orphaned LTI classes%s...",
+                " (dry run)" if dry_run else "",
+            )
+            count = await cleanup_orphaned_lti_classes(session, dry_run=dry_run)
+            if not dry_run:
+                await session.commit()
+            logger.info(
+                "Done! %s orphaned LTI classes %s.",
+                count,
+                "would be deleted" if dry_run else "deleted",
+            )
+
+    asyncio.run(_m06_cleanup_orphaned_lti_classes())
 
 
 @db.command("m02_remove_responses_threads")

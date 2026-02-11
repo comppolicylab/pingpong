@@ -878,16 +878,19 @@ async def lti_launch(
     request.state["session"].user = user
     user_token = encode_session_token(user.id, nowfn=get_now_fn(request))
 
-    if class_ is None or (
-        isinstance(class_, LTIClass) and class_.lti_status == LTIStatus.PENDING
-    ):
+    class_needs_setup = isinstance(class_, LTIClass) and (
+        class_.lti_status == LTIStatus.PENDING or class_.class_id is None
+    )
+    if class_ is None or class_needs_setup:
         # User is launching into a class that is not yet linked
         # Or the class is pending setup
         if is_instructor or is_admin:
-            # Check for existing pending LTIClass (re-launch scenario)
-            if isinstance(class_, LTIClass) and class_.lti_status == LTIStatus.PENDING:
+            # Reuse existing unlinked/pending LTIClass for setup (re-launch scenario)
+            if class_needs_setup:
+                assert isinstance(class_, LTIClass)
                 # Resume existing setup
                 pending_lti_class = class_
+                pending_lti_class.lti_status = LTIStatus.PENDING
                 pending_lti_class.setup_user_id = user.id
                 request.state["db"].add(pending_lti_class)
                 await request.state["db"].flush()

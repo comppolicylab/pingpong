@@ -1903,6 +1903,84 @@ async def test_lti_launch_resume_pending_lti_class(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_lti_launch_resume_unlinked_linked_lti_class(monkeypatch):
+    oidc_session = _make_oidc_session(
+        redirect_uri=server_module.config.url("/api/v1/lti/launch")
+    )
+    registration = _make_registration(
+        review_status=LTIRegistrationReviewStatus.APPROVED, enabled=True
+    )
+    unlinked_class = FakeLTIClass(
+        lti_status=LTIStatus.LINKED,
+        class_id=None,
+        setup_user_id=12,
+    )
+    claims = {
+        "nonce": "nonce",
+        "email": "user@example.com",
+        "https://purl.imsglobal.org/spec/lti/claim/custom": {
+            "canvas_course_id": "course-1",
+            "sso_provider_id": "0",
+        },
+        "https://purl.imsglobal.org/spec/lti/claim/roles": [
+            "http://purl.imsglobal.org/vocab/lis/v2/membership#Instructor"
+        ],
+    }
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "get_by_state",
+        lambda db, state: _async_return(oidc_session),
+    )
+    monkeypatch.setattr(
+        server_module.LTIRegistration,
+        "get_by_client_id",
+        lambda db, client_id: _async_return(registration),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "_verify_lti_id_token",
+        lambda **kwargs: _async_return(claims),
+    )
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "validate_and_consume",
+        lambda *args, **kwargs: _async_return(True),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "find_class_by_course_id",
+        lambda *args, **kwargs: _async_return(unlinked_class),
+    )
+    monkeypatch.setattr(server_module, "LTIClass", FakeLTIClass)
+
+    class FakeAddUsers:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError(
+                "AddNewUsersManual should not be called for unlinked LTI classes"
+            )
+
+    monkeypatch.setattr(server_module, "User", FakeUserModel)
+    monkeypatch.setattr(server_module, "AddNewUsersManual", FakeAddUsers)
+    monkeypatch.setattr(
+        server_module, "encode_session_token", lambda user_id, nowfn: "token"
+    )
+    monkeypatch.setattr(
+        server_module, "get_now_fn", lambda request: lambda: datetime.now(timezone.utc)
+    )
+
+    request = FakeRequest(
+        payload={"state": "state", "id_token": "token"}, state=_make_request_state()
+    )
+
+    response = await server_module.lti_launch(request, tasks=SimpleNamespace())
+
+    assert response.status_code == 302
+    assert "/lti/setup" in response.headers["location"]
+    assert unlinked_class.lti_status == LTIStatus.PENDING
+    assert unlinked_class.setup_user_id == 42
+
+
+@pytest.mark.asyncio
 async def test_lti_launch_sso_user_update(monkeypatch):
     oidc_session = _make_oidc_session(
         redirect_uri=server_module.config.url("/api/v1/lti/launch")
