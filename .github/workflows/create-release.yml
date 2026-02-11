@@ -285,7 +285,7 @@ jobs:
 
       - name: Commit version bump
         if: ${{ steps.version-files.outputs.changed == 'true' }}
-        uses: iarekylew00t/verified-bot-commit@v2
+        uses: iarekylew00t/verified-bot-commit@1ef83397a1859232022109719403ad9ad1ea7b09
         with:
           message: 'release: ${{ steps.version.outputs.RELEASE_NAME }}'
           token: ${{ steps.app-token.outputs.token }}
@@ -303,9 +303,8 @@ jobs:
             TARGET_SHA="$(git rev-parse HEAD)"
             echo "Using newly created release commit as target: $TARGET_SHA"
           else
-            git fetch origin main --quiet
-            TARGET_SHA="$(git rev-parse origin/main)"
-            echo "No version commit created; using latest main commit as target: $TARGET_SHA"
+            TARGET_SHA="${PRE_COMMIT_MAIN_SHA}"
+            echo "No version commit created; reusing preflight main commit as target: $TARGET_SHA"
           fi
 
           echo "TARGET_SHA=$TARGET_SHA" >> "$GITHUB_ENV"
@@ -316,6 +315,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          if [[ "${{ steps.version-files.outputs.changed }}" != "true" ]]; then
+            RESOLVED_TAG="${PRE_COMMIT_TAG}"
+            if [[ -z "$RESOLVED_TAG" ]]; then
+              echo "Error: PRE_COMMIT_TAG is empty in no-change path."
+              exit 1
+            fi
+            echo "No version commit created; reusing preflight tag: $RESOLVED_TAG"
+            echo "RESOLVED_TAG=$RESOLVED_TAG" >> "$GITHUB_ENV"
+            echo "resolved_tag=$RESOLVED_TAG" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           find_best_tag() {
             local tags_text="$1"
