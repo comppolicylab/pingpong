@@ -103,7 +103,7 @@ async def test_lookup_user_falls_back_to_legacy_sso_when_external_logins_empty(
 
 
 @pytest.mark.asyncio
-async def test_lookup_user_ambiguous_external_login_falls_back_to_email_only(
+async def test_lookup_user_ambiguous_external_login_raises_conflict(
     monkeypatch,
 ):
     new_ucr = schemas.CreateUserClassRoles(
@@ -146,11 +146,15 @@ async def test_lookup_user_ambiguous_external_login_falls_back_to_email_only(
         _get_by_email_external_logins_priority,
     )
 
-    await add_users._lookup_user_for_ucr(ucr)
+    with pytest.raises(users_module.AddUserException) as exc_info:
+        await add_users._lookup_user_for_ucr(ucr)
 
-    assert len(captured_calls) == 2
+    assert exc_info.value.code == 409
+    assert "Ambiguous external identity lookup matched multiple users" in (
+        exc_info.value.detail
+    )
+    assert len(captured_calls) == 1
     assert [i.provider for i in captured_calls[0]] == ["issuer.example.com", "email"]
-    assert [i.provider for i in captured_calls[1]] == ["email"]
 
 
 @pytest.mark.asyncio
