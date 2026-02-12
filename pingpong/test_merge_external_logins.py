@@ -19,7 +19,7 @@ async def _create_external_login(
     user_id: int,
     provider: str,
     identifier: str,
-    provider_id: int,
+    provider_id: int | None,
 ) -> models.ExternalLogin:
     login = models.ExternalLogin(
         user_id=user_id,
@@ -230,6 +230,68 @@ async def test_merge_external_logins_keeps_conflict_filter_when_internal_only_ex
         assert old_conflicting_harvardkey.id not in {
             login.id for login in new_user_rows
         }
+
+
+async def test_merge_external_logins_handles_null_provider_id_as_non_internal(
+    db,
+):
+    async with db.async_session() as session:
+        old_user = await _create_user(session, 2018, "old-legacy-null@example.com")
+        new_user = await _create_user(session, 2019, "new-legacy-null@example.com")
+
+        harvardkey_provider = await models.ExternalLoginProvider.get_or_create_by_name(
+            session, "harvardkey"
+        )
+        canvas_provider = await models.ExternalLoginProvider.get_or_create_by_name(
+            session, "canvas"
+        )
+        await models.ExternalLoginProvider.get_or_create_by_name(
+            session, "canvas-issuer-internal", internal_only=True
+        )
+
+        old_legacy_harvardkey = await _create_external_login(
+            session,
+            user_id=old_user.id,
+            provider="harvardkey",
+            provider_id=None,
+            identifier="maf9695",
+        )
+        old_canvas_login = await _create_external_login(
+            session,
+            user_id=old_user.id,
+            provider="canvas",
+            provider_id=canvas_provider.id,
+            identifier="canvas-only-old-user-null-provider-id-test",
+        )
+        existing_new_harvardkey = await _create_external_login(
+            session,
+            user_id=new_user.id,
+            provider="harvardkey",
+            provider_id=harvardkey_provider.id,
+            identifier="maf9695",
+        )
+
+        await merge_external_logins(session, new_user.id, old_user.id)
+        await session.flush()
+
+        old_user_login_count = await session.scalar(
+            select(func.count(models.ExternalLogin.id)).where(
+                models.ExternalLogin.user_id == old_user.id
+            )
+        )
+        assert old_user_login_count == 0
+
+        new_user_rows_result = await session.execute(
+            select(models.ExternalLogin).where(
+                models.ExternalLogin.user_id == new_user.id
+            )
+        )
+        new_user_rows = new_user_rows_result.scalars().all()
+        assert {login.id for login in new_user_rows} == {
+            existing_new_harvardkey.id,
+            old_canvas_login.id,
+        }
+        assert old_legacy_harvardkey.id not in {login.id for login in new_user_rows}
 
 
 async def test_merge_external_logins_allows_multiple_email_identifiers(db):

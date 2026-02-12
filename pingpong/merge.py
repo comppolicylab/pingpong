@@ -262,7 +262,10 @@ async def merge_external_logins(
         ExternalLoginProvider.internal_only.is_(True)
     )
     old_login_is_internal_only = or_(
-        old_login.c.provider_id.in_(internal_only_provider_ids),
+        and_(
+            old_login.c.provider_id.is_not(None),
+            old_login.c.provider_id.in_(internal_only_provider_ids),
+        ),
         old_login.c.provider.in_(internal_only_provider_names),
     )
 
