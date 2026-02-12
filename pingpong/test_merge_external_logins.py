@@ -181,7 +181,7 @@ async def test_merge_external_logins_keeps_conflict_filter_when_internal_only_ex
             user_id=old_user.id,
             provider="harvardkey",
             provider_id=harvardkey_provider.id,
-            identifier="maf9695",
+            identifier="maf9695-old",
         )
         old_canvas_login = await _create_external_login(
             session,
@@ -195,7 +195,7 @@ async def test_merge_external_logins_keeps_conflict_filter_when_internal_only_ex
             user_id=new_user.id,
             provider="harvardkey",
             provider_id=harvardkey_provider.id,
-            identifier="maf9695",
+            identifier="maf9695-new",
         )
 
         # Ensure the merge logic doesn't globally treat all logins as internal-only.
@@ -254,7 +254,7 @@ async def test_merge_external_logins_handles_null_provider_id_as_non_internal(
             user_id=old_user.id,
             provider="harvardkey",
             provider_id=None,
-            identifier="maf9695",
+            identifier="maf9695-old",
         )
         old_canvas_login = await _create_external_login(
             session,
@@ -268,7 +268,7 @@ async def test_merge_external_logins_handles_null_provider_id_as_non_internal(
             user_id=new_user.id,
             provider="harvardkey",
             provider_id=harvardkey_provider.id,
-            identifier="maf9695",
+            identifier="maf9695-new",
         )
 
         await merge_external_logins(session, new_user.id, old_user.id)
@@ -340,7 +340,7 @@ async def test_merge_external_logins_allows_multiple_email_identifiers(db):
         }
 
 
-async def test_merge_external_logins_skips_duplicate_email_identifier(db):
+async def test_merge_external_logins_moves_multiple_old_email_identifiers(db):
     async with db.async_session() as session:
         old_user = await _create_user(session, 2025, "old-email-dup@example.com")
         new_user = await _create_user(session, 2026, "new-email-dup@example.com")
@@ -368,7 +368,7 @@ async def test_merge_external_logins_skips_duplicate_email_identifier(db):
             user_id=new_user.id,
             provider="email",
             provider_id=email_provider.id,
-            identifier="shared-secondary@example.com",
+            identifier="new-user-secondary@example.com",
         )
 
         await merge_external_logins(session, new_user.id, old_user.id)
@@ -388,10 +388,10 @@ async def test_merge_external_logins_skips_duplicate_email_identifier(db):
         )
         new_user_rows = new_user_rows_result.scalars().all()
         assert {login.id for login in new_user_rows} == {
+            old_shared_email_login.id,
             old_unique_email_login.id,
             new_shared_email_login.id,
         }
-        assert old_shared_email_login.id not in {login.id for login in new_user_rows}
 
 
 async def test_merge_external_logins_allows_multiple_internal_only_identifiers(db):

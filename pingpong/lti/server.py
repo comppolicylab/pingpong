@@ -849,7 +849,7 @@ async def lti_launch(
         await request.state["db"].flush()
 
     if lti_provider_name and lti_identifier:
-        await ExternalLogin.create_or_update(
+        lti_login_added = await ExternalLogin.create_or_update(
             request.state["db"],
             user.id,
             provider=lti_provider_name,
@@ -857,14 +857,32 @@ async def lti_launch(
             called_by="lti_launch",
             replace_existing=False,
         )
+        if not lti_login_added:
+            logger.warning(
+                "LTI launch external login was not added due to identity ownership conflict "
+                "(user_id=%s provider=%s identifier=%s). "
+                "This may indicate an unmerged account.",
+                sanitize_for_log(user.id),
+                sanitize_for_log(lti_provider_name),
+                sanitize_for_log(lti_identifier),
+            )
     if sso_provider and sso_value:
-        await ExternalLogin.create_or_update(
+        sso_login_added = await ExternalLogin.create_or_update(
             request.state["db"],
             user.id,
             provider=sso_provider.name,
             identifier=sso_value,
             called_by="lti_launch",
         )
+        if not sso_login_added:
+            logger.warning(
+                "LTI launch SSO external login was not added due to identity ownership conflict "
+                "(user_id=%s provider=%s identifier=%s). "
+                "This may indicate an unmerged account.",
+                sanitize_for_log(user.id),
+                sanitize_for_log(sso_provider.name),
+                sanitize_for_log(sso_value),
+            )
 
     request.state["session"].user = user
     user_token = encode_session_token(user.id, nowfn=get_now_fn(request))

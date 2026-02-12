@@ -937,6 +937,14 @@ class ExternalLogin(Base):
         Index("idx_provider_identifier", "provider", "identifier"),
         Index("idx_provider_id_identifier", "provider_id", "identifier"),
         UniqueConstraint(
+            "provider", "identifier", name="uq_external_logins_provider_identifier"
+        ),
+        UniqueConstraint(
+            "provider_id",
+            "identifier",
+            name="uq_external_logins_provider_id_identifier_global",
+        ),
+        UniqueConstraint(
             "user_id", "provider", "identifier", name="uq_user_provider_identifier"
         ),
         UniqueConstraint(
@@ -966,6 +974,20 @@ class ExternalLogin(Base):
         provider_ = await ExternalLoginProvider.get_or_create_by_name(session, provider)
         if provider not in {"email"}:
             if replace_existing:
+                conflicting_user_id = await session.scalar(
+                    select(ExternalLogin.user_id).where(
+                        and_(
+                            ExternalLogin.identifier == identifier,
+                            or_(
+                                ExternalLogin.provider_id == provider_.id,
+                                ExternalLogin.provider == provider,
+                            ),
+                            ExternalLogin.user_id != user_id,
+                        )
+                    )
+                )
+                if conflicting_user_id is not None:
+                    return False
                 # For other providers, first check if a record exists
                 stmt = select(ExternalLogin).where(
                     and_(
@@ -980,19 +1002,24 @@ class ExternalLogin(Base):
 
                 if existing:
                     existing.identifier = identifier
+                    existing.provider = provider
+                    existing.provider_id = provider_.id
                     session.add(existing)
                     await session.flush()
                     return True
                 else:
-                    new_login = ExternalLogin(
-                        user_id=user_id,
-                        provider=provider,
-                        identifier=identifier,
-                        provider_id=provider_.id,
+                    stmt = (
+                        _get_upsert_stmt(session)(ExternalLogin)
+                        .values(
+                            user_id=user_id,
+                            provider=provider,
+                            identifier=identifier,
+                            provider_id=provider_.id,
+                        )
+                        .on_conflict_do_nothing()
                     )
-                    session.add(new_login)
-                    await session.flush()
-                    if called_by:
+                    result = await session.execute(stmt)
+                    if called_by and result.rowcount > 0:
                         logger.info(
                             "ELDEBUG: (%s) Creating new external login for user %s with provider %s and identifier %s",
                             sanitize_for_log(called_by),
@@ -1000,7 +1027,7 @@ class ExternalLogin(Base):
                             sanitize_for_log(provider),
                             sanitize_for_log(identifier),
                         )
-                    return True
+                    return result.rowcount > 0
             else:
                 # For non-email providers, when replace_existing=False keep one row
                 # per unique identifier. This supports LTI issuer/sub history.
@@ -1012,13 +1039,29 @@ class ExternalLogin(Base):
                         provider_id=provider_.id,
                         identifier=identifier,
                     )
-                    .on_conflict_do_update(
-                        index_elements=["user_id", "provider", "identifier"],
-                        set_=dict(provider_id=provider_.id, provider=provider),
-                    )
+                    .on_conflict_do_nothing()
                 )
                 result = await session.execute(stmt)
-                if called_by:
+                if result.rowcount == 0:
+                    existing_for_identifier = await session.scalar(
+                        select(ExternalLogin).where(
+                            and_(
+                                or_(
+                                    ExternalLogin.provider_id == provider_.id,
+                                    ExternalLogin.provider == provider,
+                                ),
+                                ExternalLogin.identifier == identifier,
+                                ExternalLogin.user_id == user_id,
+                            )
+                        )
+                    )
+                    if existing_for_identifier:
+                        existing_for_identifier.provider_id = provider_.id
+                        existing_for_identifier.provider = provider
+                        session.add(existing_for_identifier)
+                        await session.flush()
+                        return True
+                if called_by and result.rowcount > 0:
                     logger.info(
                         "ELDEBUG: (%s) Upserting external login for user %s provider=%s identifier=%s",
                         sanitize_for_log(called_by),
@@ -1047,12 +1090,20 @@ class ExternalLogin(Base):
                     provider_id=provider_.id,
                     identifier=email_to_add,
                 )
-                .on_conflict_do_update(
-                    index_elements=["user_id", "provider", "identifier"],
-                    set_=dict(provider_id=provider_.id, provider=provider),
-                )
+                .on_conflict_do_nothing()
             )
             result = await session.execute(stmt)
+            if result.rowcount == 0:
+                existing_email_login = await session.scalar(
+                    select(ExternalLogin).where(
+                        and_(
+                            ExternalLogin.provider_id == provider_.id,
+                            ExternalLogin.identifier == email_to_add,
+                        )
+                    )
+                )
+                if existing_email_login and existing_email_login.user_id != user_id:
+                    raise ValueError(f"Email {email_to_add} is already in use.")
             return result.rowcount > 0
 
     @classmethod
