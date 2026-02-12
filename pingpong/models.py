@@ -1046,7 +1046,10 @@ class ExternalLogin(Base):
                     existing_for_identifier = await session.scalar(
                         select(ExternalLogin).where(
                             and_(
-                                ExternalLogin.provider_id == provider_.id,
+                                or_(
+                                    ExternalLogin.provider_id == provider_.id,
+                                    ExternalLogin.provider == provider,
+                                ),
                                 ExternalLogin.identifier == identifier,
                                 ExternalLogin.user_id == user_id,
                             )

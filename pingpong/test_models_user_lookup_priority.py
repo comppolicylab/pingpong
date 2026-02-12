@@ -314,6 +314,44 @@ async def test_external_login_create_or_update_non_email_keeps_multiple_identifi
         ]
 
 
+async def test_external_login_create_or_update_non_email_repairs_legacy_null_provider_id(
+    db,
+):
+    async with db.async_session() as session:
+        user = await _create_user(session, 1505, "legacy-provider-null@example.com")
+        provider = "https://canvas.instructure.com"
+        provider_obj = await models.ExternalLoginProvider.get_or_create_by_name(
+            session, provider
+        )
+
+        legacy_login = await _create_external_login(
+            session,
+            user.id,
+            provider=provider,
+            identifier="legacy-sub",
+            provider_id=None,
+        )
+
+        result = await models.ExternalLogin.create_or_update(
+            session,
+            user_id=user.id,
+            provider=provider,
+            identifier="legacy-sub",
+            replace_existing=False,
+        )
+
+        assert result is True
+        refreshed_legacy_login = await session.get(
+            models.ExternalLogin, legacy_login.id
+        )
+        assert refreshed_legacy_login is not None
+        assert refreshed_legacy_login.provider_id == provider_obj.id
+
+        user_logins = await models.User.get_external_logins_by_id(session, user.id)
+        provider_logins = [login for login in user_logins if login.provider == provider]
+        assert len(provider_logins) == 1
+
+
 async def test_external_login_create_or_update_non_email_replaces_by_default(db):
     async with db.async_session() as session:
         user = await _create_user(session, 1502, "replace-user@example.com")
