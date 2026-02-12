@@ -3356,6 +3356,39 @@ class BufferedResponseStreamHandler:
         )
 
 
+async def poll_vector_store_files(
+    cli: openai.AsyncClient,
+    *,
+    vector_store_id: str,
+    file_ids: list[str],
+) -> None:
+    async def poll_single_file(file_id: str) -> bool:
+        try:
+            await cli.vector_stores.files.poll(
+                file_id=file_id,
+                vector_store_id=vector_store_id,
+            )
+            return True
+        except openai.NotFoundError:
+            return False
+
+    poll_results = await asyncio.gather(
+        *[poll_single_file(file_id) for file_id in file_ids]
+    )
+    missing_file_ids = [
+        file_id
+        for file_id, was_found in zip(file_ids, poll_results, strict=False)
+        if not was_found
+    ]
+    if missing_file_ids:
+        logger.warning(
+            "Skipping %s missing file(s) during vector store poll for vector store %s: %s",
+            len(missing_file_ids),
+            vector_store_id,
+            ", ".join(missing_file_ids),
+        )
+
+
 async def run_response(
     cli: openai.AsyncClient,
     *,
@@ -3463,14 +3496,10 @@ async def run_response(
                 if attached_file_search_file_ids:
                     if not thread_vector_store_id:
                         raise ValueError("Vector store ID is required for file search")
-                    await asyncio.gather(
-                        *[
-                            cli.vector_stores.files.poll(
-                                file_id=file_id,
-                                vector_store_id=thread_vector_store_id,
-                            )
-                            for file_id in attached_file_search_file_ids
-                        ]
+                    await poll_vector_store_files(
+                        cli,
+                        vector_store_id=thread_vector_store_id,
+                        file_ids=attached_file_search_file_ids,
                     )
                 if vector_store_ids:
                     tools.append(
