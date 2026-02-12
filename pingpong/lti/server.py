@@ -974,7 +974,6 @@ async def lti_launch(
                     roles=[
                         CreateUserClassRole(
                             email=user.email,
-                            sso_id=sso_value,
                             roles=ClassUserRoles(
                                 teacher=is_instructor,
                                 student=is_student,
@@ -986,7 +985,6 @@ async def lti_launch(
                     lms_tenant=None,
                     lms_type=registration.lms_platform,
                     lti_class_id=class_.id,
-                    sso_tenant=sso_provider.name if sso_provider else None,
                     is_lti_launch=True,
                 )
                 try:
@@ -1082,7 +1080,6 @@ async def lti_launch(
                     roles=[
                         CreateUserClassRole(
                             email=user.email,
-                            sso_id=sso_value,
                             roles=ClassUserRoles(
                                 teacher=is_instructor,
                                 student=is_student,
@@ -1091,7 +1088,6 @@ async def lti_launch(
                         )
                     ],
                     silent=True,
-                    sso_tenant=sso_provider.name if sso_provider else None,
                     lms_type=class_.lti_platform if not second_lti_class else None,
                     lti_class_id=second_lti_class.id if second_lti_class else class_.id,
                     is_lti_launch=True,
@@ -1182,7 +1178,6 @@ async def lti_launch(
                     roles=[
                         CreateUserClassRole(
                             email=user.email,
-                            sso_id=sso_value,
                             roles=ClassUserRoles(
                                 teacher=is_instructor,
                                 student=is_student,
@@ -1196,7 +1191,6 @@ async def lti_launch(
                     if not new_lti_class
                     else new_lti_class.lti_platform,
                     lti_class_id=new_lti_class.id if new_lti_class else None,
-                    sso_tenant=sso_provider.name if sso_provider else None,
                     is_lti_launch=True,
                 )
                 try:
@@ -1215,7 +1209,6 @@ async def lti_launch(
                     roles=[
                         CreateUserClassRole(
                             email=user.email,
-                            sso_id=sso_value,
                             roles=ClassUserRoles(
                                 teacher=is_instructor,
                                 student=is_student,
@@ -1224,7 +1217,6 @@ async def lti_launch(
                         )
                     ],
                     silent=True,
-                    sso_tenant=sso_provider.name if sso_provider else None,
                     is_lti_launch=True,
                 )
                 try:
