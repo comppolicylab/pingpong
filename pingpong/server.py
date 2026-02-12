@@ -145,6 +145,7 @@ from .runs import get_placeholder_ci_calls
 from .state_types import AppState, StateRequest, StateWebSocket
 from .vector_stores import (
     add_vector_store_files_to_db,
+    append_vector_store_files,
     create_vector_store,
     delete_vector_store,
     delete_vector_store_db_returning_file_ids,
@@ -6267,11 +6268,19 @@ async def send_message(
         if data.file_search_file_ids:
             if thread.vector_store_id:
                 # Vector store already exists, update
-                await add_vector_store_files_to_db(
-                    request.state["db"],
-                    thread.vector_store_id,
-                    data.file_search_file_ids,
-                )
+                if thread.version == 3:
+                    await append_vector_store_files(
+                        request.state["db"],
+                        openai_client,
+                        thread.vector_store_id,
+                        data.file_search_file_ids,
+                    )
+                else:
+                    await add_vector_store_files_to_db(
+                        request.state["db"],
+                        thread.vector_store_id,
+                        data.file_search_file_ids,
+                    )
             else:
                 # Store doesn't exist, create a new one
                 # (empty, since we're adding files as attachments)
