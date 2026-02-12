@@ -253,19 +253,17 @@ async def merge_mcp_updated_by(
 async def merge_external_logins(
     session: AsyncSession, new_user_id: int, old_user_id: int
 ) -> None:
+    old_login = ExternalLogin.__table__.alias("old_login")
     existing_login = ExternalLogin.__table__.alias("existing_login")
-    old_login_is_internal_only = exists(
-        select(1)
-        .select_from(ExternalLoginProvider)
-        .where(
-            and_(
-                ExternalLoginProvider.internal_only.is_(True),
-                or_(
-                    ExternalLoginProvider.id == ExternalLogin.provider_id,
-                    ExternalLoginProvider.name == ExternalLogin.provider,
-                ),
-            )
-        )
+    internal_only_provider_ids = select(ExternalLoginProvider.id).where(
+        ExternalLoginProvider.internal_only.is_(True)
+    )
+    internal_only_provider_names = select(ExternalLoginProvider.name).where(
+        ExternalLoginProvider.internal_only.is_(True)
+    )
+    old_login_is_internal_only = or_(
+        old_login.c.provider_id.in_(internal_only_provider_ids),
+        old_login.c.provider.in_(internal_only_provider_names),
     )
 
     conflicting_login_exists = exists(
@@ -274,27 +272,29 @@ async def merge_external_logins(
         .where(
             and_(
                 existing_login.c.user_id == new_user_id,
-                ExternalLogin.provider != "email",
+                old_login.c.provider != "email",
                 ~old_login_is_internal_only,
                 or_(
-                    existing_login.c.provider == ExternalLogin.provider,
+                    existing_login.c.provider == old_login.c.provider,
                     and_(
-                        ExternalLogin.provider_id.is_not(None),
-                        existing_login.c.provider_id == ExternalLogin.provider_id,
+                        old_login.c.provider_id.is_not(None),
+                        existing_login.c.provider_id == old_login.c.provider_id,
                     ),
                 ),
             )
         )
     )
 
+    move_old_logins_stmt = select(old_login.c.id).where(
+        and_(
+            old_login.c.user_id == old_user_id,
+            ~conflicting_login_exists,
+        )
+    )
+
     move_stmt = (
         update(ExternalLogin)
-        .where(
-            and_(
-                ExternalLogin.user_id == old_user_id,
-                ~conflicting_login_exists,
-            )
-        )
+        .where(ExternalLogin.id.in_(move_old_logins_stmt))
         .values(user_id=new_user_id)
     )
     await session.execute(move_stmt)
