@@ -1150,6 +1150,69 @@ class ExternalLogin(Base):
         for row in await session.execute(stmt):
             yield row.ExternalLogin
 
+    @classmethod
+    async def get_cross_user_identifier_conflicts(
+        cls, session: AsyncSession, include_email: bool = False
+    ) -> list[dict[str, Any]]:
+        duplicate_keys_stmt = (
+            select(
+                ExternalLogin.provider_id,
+                ExternalLoginProvider.name,
+                ExternalLogin.identifier,
+            )
+            .join(
+                ExternalLoginProvider,
+                ExternalLogin.provider_id == ExternalLoginProvider.id,
+            )
+            .where(ExternalLogin.provider_id.is_not(None))
+            .group_by(
+                ExternalLogin.provider_id,
+                ExternalLoginProvider.name,
+                ExternalLogin.identifier,
+            )
+            .having(func.count(distinct(ExternalLogin.user_id)) > 1)
+            .order_by(
+                ExternalLoginProvider.name.asc(),
+                ExternalLogin.identifier.asc(),
+            )
+        )
+        if not include_email:
+            duplicate_keys_stmt = duplicate_keys_stmt.where(
+                ExternalLoginProvider.name != "email"
+            )
+
+        duplicate_rows = (await session.execute(duplicate_keys_stmt)).all()
+        conflicts: list[dict[str, Any]] = []
+        for provider_id, provider_name, identifier in duplicate_rows:
+            users_stmt = (
+                select(
+                    User.id,
+                    User.email,
+                )
+                .join(ExternalLogin, ExternalLogin.user_id == User.id)
+                .where(
+                    ExternalLogin.provider_id == provider_id,
+                    ExternalLogin.identifier == identifier,
+                )
+                .distinct()
+                .order_by(User.id.asc())
+            )
+            users = [
+                {"id": user_id, "email": email}
+                for user_id, email in await session.execute(users_stmt)
+            ]
+            conflicts.append(
+                {
+                    "provider_id": provider_id,
+                    "provider": provider_name,
+                    "identifier": identifier,
+                    "user_ids": [user["id"] for user in users],
+                    "users": users,
+                }
+            )
+
+        return conflicts
+
 
 user_merge_association = Table(
     "users_merged_users",

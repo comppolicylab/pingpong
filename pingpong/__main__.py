@@ -777,6 +777,47 @@ def check_for_missing_providers() -> None:
     asyncio.run(_check_for_missing_providers())
 
 
+@db.command("find_external_login_conflicts")
+@click.option(
+    "--include-email/--exclude-email",
+    default=False,
+    show_default=True,
+    help="Include email-provider conflicts in the report.",
+)
+@click.option(
+    "--json-output/--text-output",
+    default=False,
+    show_default=True,
+    help="Print conflicts as JSON.",
+)
+def find_external_login_conflicts(include_email: bool, json_output: bool) -> None:
+    async def _find_external_login_conflicts() -> None:
+        async with config.db.driver.async_session() as session:
+            conflicts = await ExternalLogin.get_cross_user_identifier_conflicts(
+                session, include_email=include_email
+            )
+            if json_output:
+                click.echo(json.dumps(conflicts, indent=2, sort_keys=True))
+                return
+
+            if not conflicts:
+                logger.info("No external-login conflicts found.")
+                return
+
+            logger.info("Found %s external-login conflicts.", len(conflicts))
+            for i, conflict in enumerate(conflicts, start=1):
+                click.echo(
+                    f"{i}. provider={conflict['provider']} "
+                    f"(provider_id={conflict['provider_id']}) "
+                    f"identifier={conflict['identifier']}"
+                )
+                click.echo(f"   user_ids={conflict['user_ids']}")
+                for user in conflict["users"]:
+                    click.echo(f"   - user_id={user['id']} email={user['email']}")
+
+    asyncio.run(_find_external_login_conflicts())
+
+
 @db.command("m01_file_class_id_to_assoc_table")
 def m01_file_class_id_to_assoc_table() -> None:
     async def _m01_file_class_id_to_assoc_table() -> None:

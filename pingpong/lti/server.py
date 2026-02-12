@@ -797,21 +797,18 @@ async def lti_launch(
             request.state["db"], user_email, lookup_items
         )
     except AmbiguousExternalLoginLookupError as e:
-        logger.warning(
-            "Ambiguous external-login lookup during LTI launch; falling back to email-only. "
+        logger.exception(
+            "Ambiguous external-login lookup during LTI launch; rejecting request. "
             "lookup_index=%s user_ids=%s",
             e.lookup_index,
             e.user_ids,
         )
-        user, matched_user_ids = await User.get_by_email_external_logins_priority(
-            request.state["db"],
-            user_email,
-            [
-                ExternalLoginLookupItem(
-                    provider="email",
-                    identifier=user_email.lower(),
-                )
-            ],
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Ambiguous external identity lookup matched multiple users. "
+                "Resolve account conflicts and retry."
+            ),
         )
     user_needs_email_update = user is not None and user.email != user_email
 

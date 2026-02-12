@@ -254,16 +254,19 @@ class AddNewUsers(ABC):
                 lookup_items,
             )
         except models.AmbiguousExternalLoginLookupError as e:
-            logger.warning(
-                "Ambiguous external-login lookup during add users; falling back to email-only. "
+            logger.exception(
+                "Ambiguous external-login lookup during add users; rejecting request. "
                 "lookup_index=%s user_ids=%s",
                 e.lookup_index,
                 e.user_ids,
             )
-            return await models.User.get_by_email_external_logins_priority(
-                self.session,
-                ucr.email,
-                [email_lookup],
+            raise AddUserException(
+                code=409,
+                detail=(
+                    "Ambiguous external identity lookup matched multiple users "
+                    f"for {ucr.email}. Matched user ids: {e.user_ids}. "
+                    "Resolve account conflicts and retry."
+                ),
             )
 
     async def _merge_matched_user_ids(

@@ -334,3 +334,87 @@ async def test_external_login_create_or_update_non_email_replaces_by_default(db)
 
         assert len(provider_logins) == 1
         assert provider_logins[0].identifier == "new-id"
+
+
+async def test_external_login_conflicts_detect_cross_user_duplicates(db):
+    async with db.async_session() as session:
+        saml_provider = await models.ExternalLoginProvider.get_or_create_by_name(
+            session, "saml"
+        )
+        user_a = await _create_user(session, 1601, "conflict-a@example.com")
+        user_b = await _create_user(session, 1602, "conflict-b@example.com")
+        user_c = await _create_user(session, 1603, "conflict-c@example.com")
+
+        await _create_external_login(
+            session,
+            user_a.id,
+            provider="saml",
+            identifier="shared-identifier",
+            provider_id=saml_provider.id,
+        )
+        await _create_external_login(
+            session,
+            user_b.id,
+            provider="saml",
+            identifier="shared-identifier",
+            provider_id=saml_provider.id,
+        )
+        await _create_external_login(
+            session,
+            user_c.id,
+            provider="saml",
+            identifier="unique-identifier",
+            provider_id=saml_provider.id,
+        )
+
+        conflicts = await models.ExternalLogin.get_cross_user_identifier_conflicts(
+            session
+        )
+
+        assert len(conflicts) == 1
+        assert conflicts[0]["provider"] == "saml"
+        assert conflicts[0]["provider_id"] == saml_provider.id
+        assert conflicts[0]["identifier"] == "shared-identifier"
+        assert conflicts[0]["user_ids"] == [user_a.id, user_b.id]
+        assert conflicts[0]["users"] == [
+            {"id": user_a.id, "email": user_a.email},
+            {"id": user_b.id, "email": user_b.email},
+        ]
+
+
+async def test_external_login_conflicts_excludes_email_by_default(db):
+    async with db.async_session() as session:
+        email_provider = await models.ExternalLoginProvider.get_or_create_by_name(
+            session, "email"
+        )
+        user_a = await _create_user(session, 1701, "email-a@example.com")
+        user_b = await _create_user(session, 1702, "email-b@example.com")
+
+        await _create_external_login(
+            session,
+            user_a.id,
+            provider="email",
+            identifier="secondary@example.com",
+            provider_id=email_provider.id,
+        )
+        await _create_external_login(
+            session,
+            user_b.id,
+            provider="email",
+            identifier="secondary@example.com",
+            provider_id=email_provider.id,
+        )
+
+        conflicts_default = (
+            await models.ExternalLogin.get_cross_user_identifier_conflicts(session)
+        )
+        conflicts_with_email = (
+            await models.ExternalLogin.get_cross_user_identifier_conflicts(
+                session, include_email=True
+            )
+        )
+
+        assert conflicts_default == []
+        assert len(conflicts_with_email) == 1
+        assert conflicts_with_email[0]["provider"] == "email"
+        assert conflicts_with_email[0]["user_ids"] == [user_a.id, user_b.id]

@@ -2199,7 +2199,7 @@ async def test_lti_launch_sso_user_update(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_lti_launch_ambiguous_lookup_falls_back_to_email_only(monkeypatch):
+async def test_lti_launch_ambiguous_lookup_returns_conflict(monkeypatch):
     oidc_session = _make_oidc_session(
         redirect_uri=server_module.config.url("/api/v1/lti/launch")
     )
@@ -2283,15 +2283,13 @@ async def test_lti_launch_ambiguous_lookup_falls_back_to_email_only(monkeypatch)
         payload={"state": "state", "id_token": "token"}, state=_make_request_state()
     )
 
-    response = await server_module.lti_launch(request, tasks=SimpleNamespace())
+    with pytest.raises(HTTPException) as exc_info:
+        await server_module.lti_launch(request, tasks=SimpleNamespace())
 
-    assert response.status_code == 302
-    assert "/lti/setup" in response.headers["location"]
-    assert len(calls["lookups"]) == 2
+    assert exc_info.value.status_code == 409
+    assert "Ambiguous external identity lookup" in exc_info.value.detail
+    assert len(calls["lookups"]) == 1
     assert len(calls["lookups"][0]) == 3
-    assert len(calls["lookups"][1]) == 1
-    assert calls["lookups"][1][0].provider == "email"
-    assert calls["lookups"][1][0].identifier == "user@example.com"
 
 
 @pytest.mark.asyncio
