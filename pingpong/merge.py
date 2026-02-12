@@ -269,7 +269,7 @@ async def merge_external_logins(
         old_login.c.provider.in_(internal_only_provider_names),
     )
 
-    conflicting_login_exists = exists(
+    conflicting_provider_login_exists = exists(
         select(1)
         .select_from(existing_login)
         .where(
@@ -287,11 +287,32 @@ async def merge_external_logins(
             )
         )
     )
+    conflicting_identifier_login_exists = exists(
+        select(1)
+        .select_from(existing_login)
+        .where(
+            and_(
+                existing_login.c.user_id == new_user_id,
+                or_(
+                    and_(
+                        existing_login.c.provider == old_login.c.provider,
+                        existing_login.c.identifier == old_login.c.identifier,
+                    ),
+                    and_(
+                        old_login.c.provider_id.is_not(None),
+                        existing_login.c.provider_id == old_login.c.provider_id,
+                        existing_login.c.identifier == old_login.c.identifier,
+                    ),
+                ),
+            )
+        )
+    )
 
     move_old_logins_stmt = select(old_login.c.id).where(
         and_(
             old_login.c.user_id == old_user_id,
-            ~conflicting_login_exists,
+            ~conflicting_provider_login_exists,
+            ~conflicting_identifier_login_exists,
         )
     )
 

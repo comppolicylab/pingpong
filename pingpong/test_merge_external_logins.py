@@ -340,6 +340,60 @@ async def test_merge_external_logins_allows_multiple_email_identifiers(db):
         }
 
 
+async def test_merge_external_logins_skips_duplicate_email_identifier(db):
+    async with db.async_session() as session:
+        old_user = await _create_user(session, 2025, "old-email-dup@example.com")
+        new_user = await _create_user(session, 2026, "new-email-dup@example.com")
+
+        email_provider = await models.ExternalLoginProvider.get_or_create_by_name(
+            session, "email"
+        )
+
+        old_shared_email_login = await _create_external_login(
+            session,
+            user_id=old_user.id,
+            provider="email",
+            provider_id=email_provider.id,
+            identifier="shared-secondary@example.com",
+        )
+        old_unique_email_login = await _create_external_login(
+            session,
+            user_id=old_user.id,
+            provider="email",
+            provider_id=email_provider.id,
+            identifier="old-only-secondary@example.com",
+        )
+        new_shared_email_login = await _create_external_login(
+            session,
+            user_id=new_user.id,
+            provider="email",
+            provider_id=email_provider.id,
+            identifier="shared-secondary@example.com",
+        )
+
+        await merge_external_logins(session, new_user.id, old_user.id)
+        await session.flush()
+
+        old_user_login_count = await session.scalar(
+            select(func.count(models.ExternalLogin.id)).where(
+                models.ExternalLogin.user_id == old_user.id
+            )
+        )
+        assert old_user_login_count == 0
+
+        new_user_rows_result = await session.execute(
+            select(models.ExternalLogin).where(
+                models.ExternalLogin.user_id == new_user.id
+            )
+        )
+        new_user_rows = new_user_rows_result.scalars().all()
+        assert {login.id for login in new_user_rows} == {
+            old_unique_email_login.id,
+            new_shared_email_login.id,
+        }
+        assert old_shared_email_login.id not in {login.id for login in new_user_rows}
+
+
 async def test_merge_external_logins_allows_multiple_internal_only_identifiers(db):
     async with db.async_session() as session:
         old_user = await _create_user(session, 2031, "old-internal@example.com")
