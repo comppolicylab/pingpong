@@ -7077,7 +7077,7 @@ async def create_assistant(
 
     # Only admins can create an assistant in Lecture mode
     if req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
-        if not await request.state.authz.test(
+        if not await request.state["authz"].test(
             f"user:{creator_id}",
             "admin",
             f"class:{class_id}",
@@ -7329,6 +7329,7 @@ async def create_assistant(
         del req.deleted_private_files
         mcp_servers_input = req.mcp_servers or []
         del req.mcp_servers
+        del req.lecture_video_key
 
         asst = await models.Assistant.create(
             request.state["db"],
@@ -7838,10 +7839,19 @@ async def update_assistant(
                 "This assistant is locked and cannot be edited. Please create a new assistant if you need to make changes.",
             )
 
+    interaction_mode = (
+        req.interaction_mode
+        if (
+            "interaction_mode" in req.model_fields_set
+            and req.interaction_mode is not None
+        )
+        else schemas.InteractionMode(asst.interaction_mode)
+    )
+
     # Only Administrators can edit lecture video assistants
-    if asst.locked and req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
-        if not await request.state.authz.test(
-            f"user:{request.state.session.user.id}",
+    if asst.locked and interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
+        if not await request.state["authz"].test(
+            f"user:{request.state['session'].user.id}",
             "admin",
             f"class:{class_id}",
         ):
@@ -7871,14 +7881,6 @@ async def update_assistant(
     tool_resources: ToolResources = {}
     update_tool_resources = False
     update_instructions = False
-    interaction_mode = (
-        req.interaction_mode
-        if (
-            "interaction_mode" in req.model_fields_set
-            and req.interaction_mode is not None
-        )
-        else schemas.InteractionMode(asst.interaction_mode)
-    )
     uses_voice = interaction_mode == schemas.InteractionMode.VOICE
     is_video = interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
 

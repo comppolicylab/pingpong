@@ -490,7 +490,28 @@ def temperature_validator(self):
     return self
 
 
-def lecture_video_validator(self):
+def lecture_video_validator_create_assistant(self):
+    if self.interaction_mode == InteractionMode.LECTURE_VIDEO and (
+        (self.code_interpreter_file_ids and len(self.code_interpreter_file_ids) > 0)
+        or (self.file_search_file_ids and len(self.file_search_file_ids) > 0)
+        or (self.tools and len(self.tools) > 0)
+        or (len(self.mcp_servers) > 0)
+    ):
+        raise ValueError(
+            "Lecture video assistants cannot be created with tools. "
+            "Please remove all tools or select a different interaction mode."
+        )
+    if (
+        self.interaction_mode == InteractionMode.LECTURE_VIDEO
+        and self.create_classic_assistant
+    ):
+        raise ValueError("Lecture Video assistants should be next-gen")
+    return self
+
+
+def lecture_video_validator_update_assistant(self):
+    if not self.interaction_mode:
+        return self
     if self.interaction_mode == InteractionMode.LECTURE_VIDEO and (
         (self.code_interpreter_file_ids and len(self.code_interpreter_file_ids) > 0)
         or (self.file_search_file_ids and len(self.file_search_file_ids) > 0)
@@ -503,9 +524,11 @@ def lecture_video_validator(self):
         )
     if (
         self.interaction_mode == InteractionMode.LECTURE_VIDEO
-        and self.create_classic_assistant
+        and self.convert_to_next_gen is not None
     ):
-        raise ValueError("Lecture Video assistants should be next-gen")
+        raise ValueError(
+            "Cannot switch to or from next-gen for lecture video assistants."
+        )
     return self
 
 
@@ -603,7 +626,9 @@ class CreateAssistant(BaseModel):
     mcp_servers: list[MCPServerToolInput] = []
 
     _temperature_check = model_validator(mode="after")(temperature_validator)
-    _lecture_video_check = model_validator(mode="after")(lecture_video_validator)
+    _lecture_video_check = model_validator(mode="after")(
+        lecture_video_validator_create_assistant
+    )
 
 
 class AssistantInstructionsPreviewRequest(BaseModel):
@@ -665,7 +690,9 @@ class UpdateAssistant(BaseModel):
     mcp_servers: list[MCPServerToolInput] | None = None
 
     _temperature_check = model_validator(mode="after")(temperature_validator)
-    _lecture_video_check = model_validator(mode="after")(lecture_video_validator)
+    _lecture_video_check = model_validator(mode="after")(
+        lecture_video_validator_update_assistant
+    )
 
 
 class DeleteAssistant(BaseModel):
