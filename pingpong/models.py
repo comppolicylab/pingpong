@@ -1941,7 +1941,7 @@ class LectureVideo(Base):
                 key=key,
                 uploader_id=user_id,
             )
-            .on_conflict_do_nothing(index_elements=["key"])
+            .on_conflict_do_update(index_elements=["key"], set_=dict(key=key))
             .returning(LectureVideo)
         )
         result = await session.scalar(stmt)
