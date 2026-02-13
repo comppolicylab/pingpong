@@ -495,7 +495,7 @@ def lecture_video_validator(self):
         (self.code_interpreter_file_ids and len(self.code_interpreter_file_ids) > 0)
         or (self.file_search_file_ids and len(self.file_search_file_ids) > 0)
         or (self.tools and len(self.tools) > 0)
-        or (len(self.mcp_servers) > 0)
+        or (self.mcp_servers and len(self.mcp_servers) > 0)
     ):
         raise ValueError(
             "Lecture video assistants cannot be created with tools. "
@@ -639,6 +639,7 @@ class UpdateAssistant(BaseModel):
     description: str | None = None
     notes: str | None = None
     interaction_mode: InteractionMode | None = None
+    lecture_video_key: str | None = None
     model: str | None = Field(None, min_length=2)
     temperature: float | None = Field(None, ge=0.0, le=2.0)
     reasoning_effort: int | None = Field(None, ge=-1, le=2)
