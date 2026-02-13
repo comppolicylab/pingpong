@@ -9,6 +9,9 @@ from typing import AsyncGenerator
 from botocore.exceptions import ClientError
 from botocore import UNSIGNED
 from botocore.client import Config
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from pingpong.models import LectureVideo
 from .schemas import VideoMetadata
 
 logger = logging.getLogger(__name__)
@@ -24,6 +27,19 @@ class BaseVideoStore(ABC):
     async def get_video_metadata(self, key: str) -> VideoMetadata:
         """Get metadata about a video file from the store"""
         raise NotImplementedError()
+
+    async def get_or_create(
+        self, session: AsyncSession, key: str, user_id: int
+    ) -> LectureVideo:
+        """Get or create a LectureVideo record for a given video key and user ID"""
+        lecture_video = await LectureVideo.get_by_key(session, key)
+
+        if lecture_video:
+            return lecture_video
+
+        await self.get_video_metadata(key)
+
+        return await LectureVideo.create(session, key, user_id)
 
     @abstractmethod
     async def stream_video(

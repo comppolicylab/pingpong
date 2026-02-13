@@ -77,6 +77,7 @@ from pingpong.stats import (
     get_thread_counts_by_class,
 )
 from pingpong.summary import send_class_summary_to_user_task
+from pingpong.video_store import VideoStoreError
 from .animal_hash import name, process_threads, pseudonym, user_names
 from openai.types.beta.assistant_create_params import ToolResources
 from openai.types.beta.threads import MessageContentPartParam
@@ -7004,8 +7005,16 @@ async def create_assistant(
             detail=f"Model {req.model} is not available for use.",
         )
 
+    # For now, allow chat mode models to be used in lecture video assistants
+    # TODO: Introduce lecture_video type in AssistantModelDict.type
+    _interaction_mode = (
+        schemas.InteractionMode.CHAT
+        if req.interaction_mode is schemas.InteractionMode.LECTURE_VIDEO
+        else req.interaction_mode
+    )
+
     # Check that the model supports the interaction mode
-    if model_record.type != req.interaction_mode:
+    if model_record.type != _interaction_mode:
         raise HTTPException(
             status_code=400,
             detail=f"Model {req.model} is not available for use in {req.interaction_mode} mode.",
@@ -7066,6 +7075,17 @@ async def create_assistant(
                 detail=f"Model {req.model} is not available for use.",
             )
 
+    # Only admins can create an assistant in Lecture video mode
+    if req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
+        if not await request.state["authz"].test(
+            f"user:{creator_id}",
+            "admin",
+            f"class:{class_id}",
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="Only class administrators can create assistants in Lecture video mode.",
+            )
     if req.published:
         if not await request.state["authz"].test(
             f"user:{creator_id}", "can_publish_assistants", f"class:{class_id}"
@@ -7080,10 +7100,23 @@ async def create_assistant(
             status_code=404,
             detail=f"Associated class {class_id} not found.",
         )
+
+    # Check Azure compatibility for lecture video mode
+    if req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO and (
+        class_.api_key_obj and class_.api_key_obj.provider == "azure"
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Assistants in Lecture video mode do not support Azure OpenAI. Please select a different interaction mode or use another group.",
+        )
+
     assistant_version = 2
     if req.interaction_mode == schemas.InteractionMode.VOICE:
         # Voice mode assistants are only supported in version 2
         assistant_version = 2
+    elif req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
+        # Lecture video assistants require Version 3
+        assistant_version = 3
     else:
         if (
             class_.api_key_obj
@@ -7166,6 +7199,7 @@ async def create_assistant(
     tool_resources: ToolResources = {}
     vector_store_object_id = None
     uses_voice = req.interaction_mode == schemas.InteractionMode.VOICE
+    is_video = req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
 
     if req.file_search_file_ids:
         if uses_voice:
@@ -7191,6 +7225,39 @@ async def create_assistant(
                 detail="Code interpreter is not supported in Voice mode.",
             )
         tool_resources["code_interpreter"] = {"file_ids": req.code_interpreter_file_ids}
+
+    lecture_video_object_id = None
+    if is_video:
+        if not req.lecture_video_key:
+            raise HTTPException(
+                status_code=400,
+                detail="Specifying a lecture video is required for lecture video assistants.",
+            )
+        if not config.video_store:
+            raise HTTPException(status_code=404, detail="No Video Store exists.")
+
+        try:
+            lecture_video = await config.video_store.store.get_or_create(
+                request.state["db"],
+                req.lecture_video_key,
+                request.state["session"].user.id,
+            )
+        except VideoStoreError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Error saving lecture video: {e.detail or str(e)}",
+            ) from e
+        except TypeError as e:
+            raise HTTPException(
+                status_code=400, detail=f"Invalid lecture video: {e}"
+            ) from e
+        except Exception as e:
+            logger.exception("Unexpected error saving lecture video")
+            raise HTTPException(
+                status_code=500,
+                detail="An unexpected error occurred while saving the lecture video. Please try again later.",
+            ) from e
+        lecture_video_object_id = lecture_video.id
 
     if assistant_version <= 2:
         try:
@@ -7263,6 +7330,7 @@ async def create_assistant(
         del req.deleted_private_files
         mcp_servers_input = req.mcp_servers or []
         del req.mcp_servers
+        del req.lecture_video_key
 
         asst = await models.Assistant.create(
             request.state["db"],
@@ -7271,6 +7339,7 @@ async def create_assistant(
             user_id=creator_id,
             assistant_id=new_asst.id if new_asst else None,
             vector_store_id=vector_store_object_id,
+            lecture_video_id=lecture_video_object_id,
             version=assistant_version,
         )
 
@@ -7759,8 +7828,19 @@ async def update_assistant(
     if not req.model_dump():
         return asst
 
-    # Only Administrators can edit locked assistants
-    if asst.locked and req.model_fields_set != {"published", "use_image_descriptions"}:
+    interaction_mode = (
+        req.interaction_mode
+        if (
+            "interaction_mode" in req.model_fields_set
+            and req.interaction_mode is not None
+        )
+        else schemas.InteractionMode(asst.interaction_mode)
+    )
+
+    # Only Administrators can edit locked assistants or Lecture Video asssistants
+    if (
+        asst.locked and req.model_fields_set != {"published", "use_image_descriptions"}
+    ) or interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
         if not await request.state["authz"].test(
             f"user:{request.state['session'].user.id}",
             "admin",
@@ -7768,7 +7848,12 @@ async def update_assistant(
         ):
             raise HTTPException(
                 403,
-                "This assistant is locked and cannot be edited. Please create a new assistant if you need to make changes.",
+                "This assistant is locked and cannot be edited. Please create a new assistant if you need to make changes."
+                if (
+                    asst.locked
+                    and req.model_fields_set != {"published", "use_image_descriptions"}
+                )
+                else "Only class administrators can create assistants in Lecture Video mode.",
             )
 
     class_ = await models.Class.get_by_id(request.state["db"], int(class_id))
@@ -7792,15 +7877,22 @@ async def update_assistant(
     tool_resources: ToolResources = {}
     update_tool_resources = False
     update_instructions = False
-    interaction_mode = (
-        req.interaction_mode
-        if (
-            "interaction_mode" in req.model_fields_set
-            and req.interaction_mode is not None
-        )
-        else schemas.InteractionMode(asst.interaction_mode)
-    )
     uses_voice = interaction_mode == schemas.InteractionMode.VOICE
+    is_video = interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
+
+    # Prevent updating existing assistants to lecture video mode
+    if is_video and asst.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot convert existing assistants to Lecture Video mode. Please create a new assistant.",
+        )
+
+    # Prevent changing lecture video assistants to other interaction modes
+    if not is_video and asst.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
+        raise HTTPException(
+            status_code=400,
+            detail="Assistants in Lecture Video mode cannot be switched to another interaction mode. Please create a new assistant.",
+        )
     convert_to_next_gen_requested = (
         "convert_to_next_gen" in req.model_fields_set
         and req.convert_to_next_gen is not None
@@ -7809,6 +7901,14 @@ async def update_assistant(
         "convert_to_next_gen" in req.model_fields_set
         and req.convert_to_next_gen is True
     )
+    if (
+        convert_to_next_gen_requested
+        and interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Assistant version conversions are not supported in Lecture Video mode.",
+        )
 
     # Reinforce assistant version defaults:
     # 1. Azure OpenAI only supports classic assistants (v2).
@@ -7821,6 +7921,8 @@ async def update_assistant(
                 detail="Next-Gen assistants are not available for your AI Provider.",
             )
         asst.version = 2
+    elif is_video:
+        asst.version = 3
     else:
         has_openai_key = bool(
             class_.api_key_obj and class_.api_key_obj.provider == "openai"
@@ -7851,6 +7953,14 @@ async def update_assistant(
             asst.temperature = 0.2
 
     model_record = None
+    # For now, allow chat mode models to be used in lecture video assistants
+    # TODO: Introduce lecture_video type in AssistantModelDict.type
+    _interaction_mode = (
+        schemas.InteractionMode.CHAT
+        if interaction_mode is schemas.InteractionMode.LECTURE_VIDEO
+        else interaction_mode
+    )
+
     # Check that the model is available
     if "model" in req.model_fields_set and req.model is not None:
         _model = None
@@ -7879,7 +7989,7 @@ async def update_assistant(
                 )
 
             # Check that the model supports the interaction mode
-            if model_record.type != interaction_mode:
+            if model_record.type != _interaction_mode:
                 raise HTTPException(
                     status_code=400,
                     detail=f"Model {req.model} is not available for use in {interaction_mode} mode.",
@@ -7933,11 +8043,47 @@ async def update_assistant(
         )
 
         # Check that the model supports the interaction mode
-        if not model_record or model_record.type != interaction_mode:
+        if not model_record or model_record.type != _interaction_mode:
             raise HTTPException(
                 status_code=400,
-                detail=f"Model {req.model} is not available for use in {interaction_mode.capitalize()} mode.",
+                detail=f"Model {_model} is not available for use in {interaction_mode.capitalize()} mode.",
             )
+
+    if (
+        "lecture_video_key" in req.model_fields_set
+        and req.lecture_video_key is not None
+    ):
+        if interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
+            raise HTTPException(
+                status_code=400,
+                detail="Lecture video key can only be set for assistants in Lecture Video mode.",
+            )
+
+        if not config.video_store:
+            raise HTTPException(status_code=404, detail="No Video Store exists.")
+
+        try:
+            lecture_video = await config.video_store.store.get_or_create(
+                request.state["db"],
+                req.lecture_video_key,
+                request.state["session"].user.id,
+            )
+        except VideoStoreError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Error saving lecture video: {e.detail or str(e)}",
+            ) from e
+        except TypeError as e:
+            raise HTTPException(
+                status_code=400, detail=f"Invalid lecture video: {e}"
+            ) from e
+        except Exception as e:
+            logger.exception("Unexpected error saving lecture video")
+            raise HTTPException(
+                status_code=500,
+                detail="An unexpected error occurred while saving the lecture video. Please try again later.",
+            ) from e
+        asst.lecture_video_id = lecture_video.id
 
     reasoning_effort_map = (
         get_reasoning_effort_map(model_record.id) if model_record else {}
@@ -8041,6 +8187,12 @@ async def update_assistant(
             "The selected model does not support Web Search. Please select a different model or remove the Web Search tool.",
         )
 
+    if uses_web_search and is_video:
+        raise HTTPException(
+            400,
+            detail="Assistants in Lecture Video mode do not support Web Search capabilities. Please remove the Web Search tool or create a new assistant without Lecture Video mode.",
+        )
+
     uses_mcp_server = False
     if "tools" in req.model_fields_set:
         if req.tools is not None and len(req.tools) > 0:
@@ -8060,6 +8212,12 @@ async def update_assistant(
         raise HTTPException(
             400,
             "The selected model does not support MCP Servers. Please select a different model or remove the MCP Server tool.",
+        )
+
+    if uses_mcp_server and is_video:
+        raise HTTPException(
+            400,
+            detail="Assistants in Lecture Video mode do not support MCP Server tools. Please remove the MCP Server tool or create a new assistant without Lecture Video mode.",
         )
 
     existing_mcp_by_label = {}
@@ -8145,6 +8303,11 @@ async def update_assistant(
                         status_code=400,
                         detail="Code interpreter is not supported in Voice mode.",
                     )
+                if is_video:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Code interpreter is not supported in Lecture Video mode.",
+                    )
                 tool_resources["code_interpreter"] = {
                     "file_ids": req.code_interpreter_file_ids
                 }
@@ -8162,6 +8325,11 @@ async def update_assistant(
                     raise HTTPException(
                         status_code=400,
                         detail="File search is not supported in Voice mode.",
+                    )
+                if is_video:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="File search is not supported in Lecture Video mode.",
                     )
                 # Files will need to be stored in a vector store
                 if asst.vector_store_id:
