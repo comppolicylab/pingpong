@@ -28,12 +28,19 @@ class BaseVideoStore(ABC):
         """Get metadata about a video file from the store"""
         raise NotImplementedError()
 
-    @abstractmethod
     async def get_or_create(
         self, session: AsyncSession, key: str, user_id: int
     ) -> LectureVideo:
         """Get or create a LectureVideo record for a given video key and user ID"""
-        raise NotImplementedError()
+        lecture_video = await LectureVideo.get_by_key(session, key)
+
+        if lecture_video:
+            return lecture_video
+
+        await self.get_video_metadata(key)
+
+        lecture_video_data = {"key": key, "uploader_id": user_id}
+        return await LectureVideo.create(session, lecture_video_data)
 
     @abstractmethod
     async def stream_video(
@@ -97,19 +104,6 @@ class S3VideoStore(BaseVideoStore):
                 raise VideoStoreError(
                     f"Failed to get video metadata from S3: {str(e)}"
                 ) from e
-
-    async def get_or_create(
-        self, session: AsyncSession, key: str, user_id: int
-    ) -> LectureVideo:
-        lecture_video = await LectureVideo.get_by_key(session, key)
-
-        if lecture_video:
-            return lecture_video
-
-        await self.get_video_metadata(key)
-
-        lecture_video_data = {"key": key, "uploader_id": user_id}
-        return await LectureVideo.create(session, lecture_video_data)
 
     async def stream_video_range(
         self,
