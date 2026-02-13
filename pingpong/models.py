@@ -1945,8 +1945,8 @@ class LectureVideo(Base):
         await session.execute(stmt)
 
     @classmethod
-    async def get_by_id(cls, session: AsyncSession, id_: int) -> "LectureVideo | None":
-        stmt = select(LectureVideo).where(LectureVideo.id == id_)
+    async def get_by_key(cls, session: AsyncSession, key: str) -> "LectureVideo | None":
+        stmt = select(LectureVideo).where(LectureVideo.key == key)
         return await session.scalar(stmt)
 
 

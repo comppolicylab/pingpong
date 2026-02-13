@@ -491,15 +491,21 @@ def temperature_validator(self):
 
 
 def lecture_video_validator(self):
-    if (
-        self.interaction_mode == InteractionMode.LECTURE_VIDEO
-        and self.tools
-        and len(self.tools) > 0
+    if self.interaction_mode == InteractionMode.LECTURE_VIDEO and (
+        (self.code_interpreter_file_ids and len(self.code_interpreter_file_ids) > 0)
+        or (self.file_search_file_ids and len(self.file_search_file_ids) > 0)
+        or (self.tools and len(self.tools) > 0)
+        or (len(self.mcp_servers) > 0)
     ):
         raise ValueError(
             "Lecture video assistants cannot be created with tools. "
             "Please remove all tools or select a different interaction mode."
         )
+    if (
+        self.interaction_mode == InteractionMode.LECTURE_VIDEO
+        and self.create_classic_assistant
+    ):
+        raise ValueError("Lecture Video assistants should be next-gen")
     return self
 
 
@@ -576,7 +582,7 @@ class CreateAssistant(BaseModel):
     reasoning_effort: int | None = Field(None, ge=-1, le=2)
     verbosity: int | None = Field(None, ge=0, le=2)
     tools: list[ToolOption] = Field(default_factory=list)
-    lecture_video_id: int | None = None
+    lecture_video_key: str | None = None
     published: bool = False
     use_latex: bool = False
     use_image_descriptions: bool = False
