@@ -733,7 +733,7 @@ async def test_magic_link_login_no_user(api, config, monkeypatch):
 
 
 @with_user(123)
-async def test_magic_link_login(api, config, monkeypatch):
+async def test_magic_link_login(api, config, monkeypatch, now):
     # Patch the email driver in config.email
     send_mock = AsyncMock()
     monkeypatch.setattr(config.email.sender, "send", send_mock)
@@ -743,10 +743,13 @@ async def test_magic_link_login(api, config, monkeypatch):
     )
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
-    send_mock.assert_called_once_with(
-        "user_123@domain.org",
-        "Log back in to PingPong",
-        """
+    expected_token = encode_session_token(123, nowfn=now)
+    old_expected_token = (
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+        "eyJzdWIiOiIxMjMiLCJleHAiOjE3MDQxNTM2MDAsImlhdCI6MTcwNDA2NzIwMH0."
+        "Z6PEytos_I5QVHJp0kIzmoTjI_PyZIT5P8YVwo2SVCU"
+    )
+    expected_body = """
 <!doctype html>
 <html>
    <head>
@@ -1182,7 +1185,12 @@ async def test_magic_link_login(api, config, monkeypatch):
       <!-- end desktop footer include -->
    </body>
 </html>
-""",
+"""
+    expected_body = expected_body.replace(old_expected_token, expected_token)
+    send_mock.assert_called_once_with(
+        "user_123@domain.org",
+        "Log back in to PingPong",
+        expected_body,
     )
 
 

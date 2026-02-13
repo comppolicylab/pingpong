@@ -30,7 +30,7 @@ name = "Email"
 expiry = 86400
 
 [[auth.secret_keys]]
-key = "test env"
+key = "test env secret key for hs256 tests"
 
 [email]
 type = "mock"
