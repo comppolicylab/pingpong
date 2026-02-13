@@ -7075,7 +7075,7 @@ async def create_assistant(
                 detail=f"Model {req.model} is not available for use.",
             )
 
-    # Only admins can create an assistant in Lecture mode
+    # Only admins can create an assistant in Lecture video mode
     if req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
         if not await request.state["authz"].test(
             f"user:{creator_id}",
@@ -7084,7 +7084,7 @@ async def create_assistant(
         ):
             raise HTTPException(
                 status_code=403,
-                detail="Only class administrators can create assistants in Lecture mode.",
+                detail="Only class administrators can create assistants in Lecture video mode.",
             )
     if req.published:
         if not await request.state["authz"].test(
@@ -7107,7 +7107,7 @@ async def create_assistant(
     ):
         raise HTTPException(
             status_code=400,
-            detail="Assistants in Lecture mode do not support Azure OpenAI. Please select a different interaction mode or use another group.",
+            detail="Assistants in Lecture video mode do not support Azure OpenAI. Please select a different interaction mode or use another group.",
         )
 
     assistant_version = 2
@@ -7888,14 +7888,14 @@ async def update_assistant(
     if is_video and asst.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
         raise HTTPException(
             status_code=400,
-            detail="Cannot convert existing assistants to lecture video mode. Please create a new assistant.",
+            detail="Cannot convert existing assistants to Lecture Video mode. Please create a new assistant.",
         )
 
     # Prevent changing lecture video assistants to other interaction modes
     if not is_video and asst.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
         raise HTTPException(
             status_code=400,
-            detail="Assistants in Lecture video mode cannot be switched to another interaction mode. Please create a new assistant.",
+            detail="Assistants in Lecture Video mode cannot be switched to another interaction mode. Please create a new assistant.",
         )
     convert_to_next_gen_requested = (
         "convert_to_next_gen" in req.model_fields_set
@@ -8050,7 +8050,7 @@ async def update_assistant(
         if not model_record or model_record.type != _interaction_mode:
             raise HTTPException(
                 status_code=400,
-                detail=f"Model {req.model} is not available for use in {interaction_mode.capitalize()} mode.",
+                detail=f"Model {_model} is not available for use in {interaction_mode.capitalize()} mode.",
             )
 
     if (

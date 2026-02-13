@@ -527,7 +527,7 @@ def lecture_video_validator_update_assistant(self):
         and self.convert_to_next_gen is not None
     ):
         raise ValueError(
-            "Cannot switch to or from next-gen for lecture video assistants."
+            "Cannot switch to or from next-gen for Lecture video assistants."
         )
     return self
 
