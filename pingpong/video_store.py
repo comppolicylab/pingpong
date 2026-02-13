@@ -39,8 +39,7 @@ class BaseVideoStore(ABC):
 
         await self.get_video_metadata(key)
 
-        lecture_video_data = {"key": key, "uploader_id": user_id}
-        return await LectureVideo.create(session, lecture_video_data)
+        return await LectureVideo.create(session, key, user_id)
 
     @abstractmethod
     async def stream_video(

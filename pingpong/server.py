@@ -7248,9 +7248,9 @@ async def create_assistant(
                 detail=f"Error saving lecture video: {e.detail or str(e)}",
             ) from e
         except TypeError as e:
-                raise HTTPException(
-                    status_code=400, detail=f"Invalid lecture video: {e}"
-                ) from e
+            raise HTTPException(
+                status_code=400, detail=f"Invalid lecture video: {e}"
+            ) from e
         except Exception as e:
             logger.exception("Unexpected error saving lecture video")
             raise HTTPException(
@@ -7828,6 +7828,15 @@ async def update_assistant(
     if not req.model_dump():
         return asst
 
+    interaction_mode = (
+        req.interaction_mode
+        if (
+            "interaction_mode" in req.model_fields_set
+            and req.interaction_mode is not None
+        )
+        else schemas.InteractionMode(asst.interaction_mode)
+    )
+
     # Only Administrators can edit locked assistants or Lecture Video asssistants
     if (
         asst.locked and req.model_fields_set != {"published", "use_image_descriptions"}
@@ -7846,15 +7855,6 @@ async def update_assistant(
                 )
                 else "Only class administrators can create assistants in Lecture Video mode.",
             )
-
-    interaction_mode = (
-        req.interaction_mode
-        if (
-            "interaction_mode" in req.model_fields_set
-            and req.interaction_mode is not None
-        )
-        else schemas.InteractionMode(asst.interaction_mode)
-    )
 
     class_ = await models.Class.get_by_id(request.state["db"], int(class_id))
     if not class_:
