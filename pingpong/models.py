@@ -1932,12 +1932,20 @@ class LectureVideo(Base):
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
 
     @classmethod
-    async def create(cls, session: AsyncSession, data: dict) -> "LectureVideo":
-        lecture_video = LectureVideo(**data)
-        session.add(lecture_video)
-        await session.flush()
-        await session.refresh(lecture_video)
-        return lecture_video
+    async def create(
+        cls, session: AsyncSession, key: str, user_id: int
+    ) -> "LectureVideo":
+        stmt = (
+            _get_upsert_stmt(session)(LectureVideo)
+            .values(
+                key=key,
+                uploader_id=user_id,
+            )
+            .on_conflict_do_nothing(index_elements=["key"])
+            .returning(LectureVideo)
+        )
+        result = await session.scalar(stmt)
+        return result
 
     @classmethod
     async def delete(cls, session: AsyncSession, id_: int) -> None:

@@ -7244,18 +7244,19 @@ async def create_assistant(
             )
         except VideoStoreError as e:
             raise HTTPException(
-                status_code=400, detail=f"Error saving lecture video: {str(e)}"
-            )
+                status_code=400,
+                detail=f"Error saving lecture video: {e.detail or str(e)}",
+            ) from e
         except TypeError as e:
-            raise HTTPException(
-                status_code=400, detail=f"Invalid lecture video: {str(e)}"
-            )
+                raise HTTPException(
+                    status_code=400, detail=f"Invalid lecture video: {e}"
+                ) from e
         except Exception as e:
-            logger.exception("Unexpected error saving lecture video: %s", e)
+            logger.exception("Unexpected error saving lecture video")
             raise HTTPException(
                 status_code=500,
                 detail="An unexpected error occurred while saving the lecture video. Please try again later.",
-            )
+            ) from e
         lecture_video_object_id = lecture_video.id
 
     if assistant_version <= 2:
@@ -7827,8 +7828,10 @@ async def update_assistant(
     if not req.model_dump():
         return asst
 
-    # Only Administrators can edit locked assistants
-    if asst.locked and req.model_fields_set != {"published", "use_image_descriptions"}:
+    # Only Administrators can edit locked assistants or Lecture Video asssistants
+    if (
+        asst.locked and req.model_fields_set != {"published", "use_image_descriptions"}
+    ) or interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
         if not await request.state["authz"].test(
             f"user:{request.state['session'].user.id}",
             "admin",
@@ -7836,7 +7839,12 @@ async def update_assistant(
         ):
             raise HTTPException(
                 403,
-                "This assistant is locked and cannot be edited. Please create a new assistant if you need to make changes.",
+                "This assistant is locked and cannot be edited. Please create a new assistant if you need to make changes."
+                if (
+                    asst.locked
+                    and req.model_fields_set != {"published", "use_image_descriptions"}
+                )
+                else "Only class administrators can create assistants in Lecture Video mode.",
             )
 
     interaction_mode = (
@@ -7847,18 +7855,6 @@ async def update_assistant(
         )
         else schemas.InteractionMode(asst.interaction_mode)
     )
-
-    # Only Administrators can edit lecture video assistants
-    if asst.locked and interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
-        if not await request.state["authz"].test(
-            f"user:{request.state['session'].user.id}",
-            "admin",
-            f"class:{class_id}",
-        ):
-            raise HTTPException(
-                403,
-                "This lecture video assistant is locked and cannot be edited. Please create a new assistant if you need to make changes.",
-            )
 
     class_ = await models.Class.get_by_id(request.state["db"], int(class_id))
     if not class_:
@@ -8074,18 +8070,19 @@ async def update_assistant(
             )
         except VideoStoreError as e:
             raise HTTPException(
-                status_code=400, detail=f"Error saving lecture video: {str(e)}"
-            )
+                status_code=400,
+                detail=f"Error saving lecture video: {e.detail or str(e)}",
+            ) from e
         except TypeError as e:
             raise HTTPException(
-                status_code=400, detail=f"Invalid lecture video: {str(e)}"
-            )
+                status_code=400, detail=f"Invalid lecture video: {e}"
+            ) from e
         except Exception as e:
-            logger.exception("Unexpected error saving lecture video: %s", e)
+            logger.exception("Unexpected error saving lecture video")
             raise HTTPException(
                 status_code=500,
                 detail="An unexpected error occurred while saving the lecture video. Please try again later.",
-            )
+            ) from e
         asst.lecture_video_id = lecture_video.id
 
     reasoning_effort_map = (

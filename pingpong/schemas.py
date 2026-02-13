@@ -519,7 +519,7 @@ def lecture_video_validator_update_assistant(self):
         or (self.mcp_servers and len(self.mcp_servers) > 0)
     ):
         raise ValueError(
-            "Lecture video assistants cannot be created with tools. "
+            "Lecture video assistants cannot be updated with tools. "
             "Please remove all tools or select a different interaction mode."
         )
     if (
