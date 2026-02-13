@@ -1,7 +1,7 @@
 """Added Lecture Video case in the Interaction Mode Enum
 
 Revision ID: d4843142e8de
-Revises: 85b3ffaf5cfc
+Revises: 700e871f0775
 Create Date: 2026-02-06 15:05:33.549155
 
 """
@@ -14,7 +14,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "d4843142e8de"
-down_revision: Union[str, None] = "85b3ffaf5cfc"
+down_revision: Union[str, None] = "700e871f0775"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
