@@ -937,6 +937,14 @@ class ExternalLogin(Base):
         Index("idx_provider_identifier", "provider", "identifier"),
         Index("idx_provider_id_identifier", "provider_id", "identifier"),
         UniqueConstraint(
+            "provider", "identifier", name="uq_external_logins_provider_identifier"
+        ),
+        UniqueConstraint(
+            "provider_id",
+            "identifier",
+            name="uq_external_logins_provider_id_identifier_global",
+        ),
+        UniqueConstraint(
             "user_id", "provider", "identifier", name="uq_user_provider_identifier"
         ),
         UniqueConstraint(
@@ -966,6 +974,20 @@ class ExternalLogin(Base):
         provider_ = await ExternalLoginProvider.get_or_create_by_name(session, provider)
         if provider not in {"email"}:
             if replace_existing:
+                conflicting_user_id = await session.scalar(
+                    select(ExternalLogin.user_id).where(
+                        and_(
+                            ExternalLogin.identifier == identifier,
+                            or_(
+                                ExternalLogin.provider_id == provider_.id,
+                                ExternalLogin.provider == provider,
+                            ),
+                            ExternalLogin.user_id != user_id,
+                        )
+                    )
+                )
+                if conflicting_user_id is not None:
+                    return False
                 # For other providers, first check if a record exists
                 stmt = select(ExternalLogin).where(
                     and_(
@@ -980,19 +1002,24 @@ class ExternalLogin(Base):
 
                 if existing:
                     existing.identifier = identifier
+                    existing.provider = provider
+                    existing.provider_id = provider_.id
                     session.add(existing)
                     await session.flush()
                     return True
                 else:
-                    new_login = ExternalLogin(
-                        user_id=user_id,
-                        provider=provider,
-                        identifier=identifier,
-                        provider_id=provider_.id,
+                    stmt = (
+                        _get_upsert_stmt(session)(ExternalLogin)
+                        .values(
+                            user_id=user_id,
+                            provider=provider,
+                            identifier=identifier,
+                            provider_id=provider_.id,
+                        )
+                        .on_conflict_do_nothing()
                     )
-                    session.add(new_login)
-                    await session.flush()
-                    if called_by:
+                    result = await session.execute(stmt)
+                    if called_by and result.rowcount > 0:
                         logger.info(
                             "ELDEBUG: (%s) Creating new external login for user %s with provider %s and identifier %s",
                             sanitize_for_log(called_by),
@@ -1000,7 +1027,7 @@ class ExternalLogin(Base):
                             sanitize_for_log(provider),
                             sanitize_for_log(identifier),
                         )
-                    return True
+                    return result.rowcount > 0
             else:
                 # For non-email providers, when replace_existing=False keep one row
                 # per unique identifier. This supports LTI issuer/sub history.
@@ -1012,13 +1039,29 @@ class ExternalLogin(Base):
                         provider_id=provider_.id,
                         identifier=identifier,
                     )
-                    .on_conflict_do_update(
-                        index_elements=["user_id", "provider", "identifier"],
-                        set_=dict(provider_id=provider_.id, provider=provider),
-                    )
+                    .on_conflict_do_nothing()
                 )
                 result = await session.execute(stmt)
-                if called_by:
+                if result.rowcount == 0:
+                    existing_for_identifier = await session.scalar(
+                        select(ExternalLogin).where(
+                            and_(
+                                or_(
+                                    ExternalLogin.provider_id == provider_.id,
+                                    ExternalLogin.provider == provider,
+                                ),
+                                ExternalLogin.identifier == identifier,
+                                ExternalLogin.user_id == user_id,
+                            )
+                        )
+                    )
+                    if existing_for_identifier:
+                        existing_for_identifier.provider_id = provider_.id
+                        existing_for_identifier.provider = provider
+                        session.add(existing_for_identifier)
+                        await session.flush()
+                        return True
+                if called_by and result.rowcount > 0:
                     logger.info(
                         "ELDEBUG: (%s) Upserting external login for user %s provider=%s identifier=%s",
                         sanitize_for_log(called_by),
@@ -1047,12 +1090,20 @@ class ExternalLogin(Base):
                     provider_id=provider_.id,
                     identifier=email_to_add,
                 )
-                .on_conflict_do_update(
-                    index_elements=["user_id", "provider", "identifier"],
-                    set_=dict(provider_id=provider_.id, provider=provider),
-                )
+                .on_conflict_do_nothing()
             )
             result = await session.execute(stmt)
+            if result.rowcount == 0:
+                existing_email_login = await session.scalar(
+                    select(ExternalLogin).where(
+                        and_(
+                            ExternalLogin.provider_id == provider_.id,
+                            ExternalLogin.identifier == email_to_add,
+                        )
+                    )
+                )
+                if existing_email_login and existing_email_login.user_id != user_id:
+                    raise ValueError(f"Email {email_to_add} is already in use.")
             return result.rowcount > 0
 
     @classmethod
@@ -1149,6 +1200,69 @@ class ExternalLogin(Base):
         stmt = select(ExternalLogin).where(ExternalLogin.provider_id.is_(None))
         for row in await session.execute(stmt):
             yield row.ExternalLogin
+
+    @classmethod
+    async def get_cross_user_identifier_conflicts(
+        cls, session: AsyncSession, include_email: bool = False
+    ) -> list[dict[str, Any]]:
+        duplicate_keys_stmt = (
+            select(
+                ExternalLogin.provider_id,
+                ExternalLoginProvider.name,
+                ExternalLogin.identifier,
+            )
+            .join(
+                ExternalLoginProvider,
+                ExternalLogin.provider_id == ExternalLoginProvider.id,
+            )
+            .where(ExternalLogin.provider_id.is_not(None))
+            .group_by(
+                ExternalLogin.provider_id,
+                ExternalLoginProvider.name,
+                ExternalLogin.identifier,
+            )
+            .having(func.count(distinct(ExternalLogin.user_id)) > 1)
+            .order_by(
+                ExternalLoginProvider.name.asc(),
+                ExternalLogin.identifier.asc(),
+            )
+        )
+        if not include_email:
+            duplicate_keys_stmt = duplicate_keys_stmt.where(
+                ExternalLoginProvider.name != "email"
+            )
+
+        duplicate_rows = (await session.execute(duplicate_keys_stmt)).all()
+        conflicts: list[dict[str, Any]] = []
+        for provider_id, provider_name, identifier in duplicate_rows:
+            users_stmt = (
+                select(
+                    User.id,
+                    User.email,
+                )
+                .join(ExternalLogin, ExternalLogin.user_id == User.id)
+                .where(
+                    ExternalLogin.provider_id == provider_id,
+                    ExternalLogin.identifier == identifier,
+                )
+                .distinct()
+                .order_by(User.id.asc())
+            )
+            users = [
+                {"id": user_id, "email": email}
+                for user_id, email in await session.execute(users_stmt)
+            ]
+            conflicts.append(
+                {
+                    "provider_id": provider_id,
+                    "provider": provider_name,
+                    "identifier": identifier,
+                    "user_ids": [user["id"] for user in users],
+                    "users": users,
+                }
+            )
+
+        return conflicts
 
 
 user_merge_association = Table(
@@ -3100,11 +3214,12 @@ class LTIClass(Base):
     setup_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     lti_platform = Column(SQLEnum(schemas.LMSPlatform), nullable=False)
     course_id = Column(String, nullable=False)
+    resource_link_id = Column(String, nullable=True)
     course_name = Column(String, nullable=True)
     course_code = Column(String, nullable=True)
     course_term = Column(String, nullable=True)
     class_id = Column(
-        Integer, ForeignKey("classes.id", ondelete="SET NULL"), nullable=True
+        Integer, ForeignKey("classes.id", ondelete="CASCADE"), nullable=True
     )
 
     setup_user = relationship("User", foreign_keys=[setup_user_id])
@@ -3124,7 +3239,7 @@ class LTIClass(Base):
         return await session.scalar(stmt)
 
     @classmethod
-    async def get_by_canvas_account_lti_guid_and_course_id(
+    async def get_linked_by_canvas_account_lti_guid_and_course_id(
         cls, session: AsyncSession, canvas_account_lti_guid: str, course_id: str
     ) -> "LTIClass | None":
         stmt = (
@@ -3134,6 +3249,12 @@ class LTIClass(Base):
                 and_(
                     LTIRegistration.canvas_account_lti_guid == canvas_account_lti_guid,
                     LTIClass.course_id == course_id,
+                    LTIClass.lti_status.in_(
+                        [
+                            schemas.LTIStatus.LINKED,
+                            schemas.LTIStatus.ERROR,
+                        ]
+                    ),
                 )
             )
             .options(selectinload(LTIClass.registration))
@@ -3191,8 +3312,45 @@ class LTIClass(Base):
         return [row[0] for row in result]
 
     @classmethod
+    async def get_all_to_sync(
+        cls,
+        session: AsyncSession,
+        sync_classes_with_error_status: bool = False,
+    ) -> AsyncGenerator["LTIClass", None]:
+        lti_status_condition = (
+            or_(
+                LTIClass.lti_status == schemas.LTIStatus.LINKED,
+                LTIClass.lti_status == schemas.LTIStatus.ERROR,
+            )
+            if sync_classes_with_error_status
+            else LTIClass.lti_status == schemas.LTIStatus.LINKED
+        )
+
+        stmt = select(LTIClass).where(
+            and_(
+                LTIClass.class_id.is_not(None),
+                LTIClass.setup_user_id.is_not(None),
+                lti_status_condition,
+            )
+        )
+        result = await session.execute(stmt)
+        for row in result.scalars():
+            yield row
+
+    @classmethod
     async def get_by_id(cls, session: AsyncSession, id_: int) -> "LTIClass | None":
         stmt = select(LTIClass).where(LTIClass.id == int(id_))
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_id_with_registration(
+        cls, session: AsyncSession, id_: int
+    ) -> "LTIClass | None":
+        stmt = (
+            select(LTIClass)
+            .where(LTIClass.id == int(id_))
+            .options(selectinload(LTIClass.registration))
+        )
         return await session.scalar(stmt)
 
     @classmethod

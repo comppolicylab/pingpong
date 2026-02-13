@@ -3375,6 +3375,7 @@ export type LTIClass = {
 	id: number;
 	registration_id: number;
 	lti_status: LTIStatus;
+	last_synced?: string | null;
 	lti_platform: LMSPlatform;
 	course_name: string | null;
 	course_term: string | null;
@@ -3507,6 +3508,11 @@ export const removeLTIConnection = async (
 ) => {
 	const url = `class/${classId}/lti/classes/${ltiClassId}`;
 	return await DELETE<{ keep_users: boolean }, GenericStatus>(f, url, { keep_users: keep });
+};
+
+export const syncLTIClassRoster = async (f: Fetcher, classId: number, ltiClassId: number) => {
+	const url = `class/${classId}/lti/classes/${ltiClassId}/sync`;
+	return await POST<never, GenericStatus>(f, url);
 };
 
 /**

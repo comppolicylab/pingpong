@@ -51,8 +51,12 @@ from pingpong.migrations.m04_check_voice_mode_recordings import (
 from pingpong.migrations.m05_populate_account_lti_guid import (
     populate_account_lti_guid,
 )
+from pingpong.migrations.m06_cleanup_orphaned_lti_classes import (
+    cleanup_orphaned_lti_classes,
+)
 from pingpong.now import _get_next_run_time, croner, utcnow
 from pingpong.schemas import LMSType, RunStatus
+from pingpong.lti.canvas_connect import canvas_connect_sync_all
 from pingpong.summary import send_class_summary_for_class
 
 from .auth import encode_auth_token
@@ -91,6 +95,12 @@ def auth() -> None:
 
 @cli.group("lms")
 def lms() -> None:
+    pass
+
+
+@cli.group("lti")
+def lti() -> None:
+    """LTI Advantage Service commands."""
     pass
 
 
@@ -767,6 +777,47 @@ def check_for_missing_providers() -> None:
     asyncio.run(_check_for_missing_providers())
 
 
+@db.command("find_external_login_conflicts")
+@click.option(
+    "--include-email/--exclude-email",
+    default=False,
+    show_default=True,
+    help="Include email-provider conflicts in the report.",
+)
+@click.option(
+    "--json-output/--text-output",
+    default=False,
+    show_default=True,
+    help="Print conflicts as JSON.",
+)
+def find_external_login_conflicts(include_email: bool, json_output: bool) -> None:
+    async def _find_external_login_conflicts() -> None:
+        async with config.db.driver.async_session() as session:
+            conflicts = await ExternalLogin.get_cross_user_identifier_conflicts(
+                session, include_email=include_email
+            )
+            if json_output:
+                click.echo(json.dumps(conflicts, indent=2, sort_keys=True))
+                return
+
+            if not conflicts:
+                logger.info("No external-login conflicts found.")
+                return
+
+            logger.info("Found %s external-login conflicts.", len(conflicts))
+            for i, conflict in enumerate(conflicts, start=1):
+                click.echo(
+                    f"{i}. provider={conflict['provider']} "
+                    f"(provider_id={conflict['provider_id']}) "
+                    f"identifier={conflict['identifier']}"
+                )
+                click.echo(f"   user_ids={conflict['user_ids']}")
+                for user in conflict["users"]:
+                    click.echo(f"   - user_id={user['id']} email={user['email']}")
+
+    asyncio.run(_find_external_login_conflicts())
+
+
 @db.command("m01_file_class_id_to_assoc_table")
 def m01_file_class_id_to_assoc_table() -> None:
     async def _m01_file_class_id_to_assoc_table() -> None:
@@ -828,6 +879,32 @@ def m05_populate_account_lti_guid() -> None:
             logger.info("Done!")
 
     asyncio.run(_m05_populate_account_lti_guid())
+
+
+@db.command("m06_cleanup_orphaned_lti_classes")
+@click.option(
+    "--dry-run",
+    default=False,
+    is_flag=True,
+    help="Report orphaned LTI classes without deleting them.",
+)
+def m06_cleanup_orphaned_lti_classes(dry_run: bool) -> None:
+    async def _m06_cleanup_orphaned_lti_classes() -> None:
+        async with config.db.driver.async_session() as session:
+            logger.info(
+                "Cleaning up orphaned LTI classes%s...",
+                " (dry run)" if dry_run else "",
+            )
+            count = await cleanup_orphaned_lti_classes(session, dry_run=dry_run)
+            if not dry_run:
+                await session.commit()
+            logger.info(
+                "Done! %s orphaned LTI classes %s.",
+                count,
+                "would be deleted" if dry_run else "deleted",
+            )
+
+    asyncio.run(_m06_cleanup_orphaned_lti_classes())
 
 
 @db.command("m02_remove_responses_threads")
@@ -917,6 +994,23 @@ async def _lms_sync_all(
             logger.info("Done!")
 
 
+async def _lti_sync_all(sync_classes_with_error_status: bool = False) -> None:
+    lti_settings = config.lti
+    if lti_settings is None:
+        logger.error("LTI service is not enabled in configuration")
+        return
+
+    await config.authz.driver.init()
+    async with config.db.driver.async_session() as session:
+        async with config.authz.driver.get_client() as c:
+            await canvas_connect_sync_all(
+                session=session,
+                authz_client=c,
+                sync_classes_with_error_status=sync_classes_with_error_status,
+            )
+            logger.info("Done!")
+
+
 @lms.command("sync-all")
 @click.option("--sync-with-error", default=False, is_flag=True)
 @click.option("--sync-without-sso", default=False, is_flag=True)
@@ -953,6 +1047,42 @@ def sync_pingpong_with_lms(crontime: str, host: str, port: int) -> None:
     # Run the Uvicorn server in the background
     with server.run_in_thread():
         asyncio.run(_sync_pingpong_with_lms())
+
+
+@lti.command("sync-all")
+@click.option("--sync-with-error", default=False, is_flag=True)
+def sync_lti_all(sync_with_error: bool) -> None:
+    """
+    Sync all classes linked through Canvas Connect.
+    """
+    asyncio.run(
+        _lti_sync_all(
+            sync_classes_with_error_status=sync_with_error,
+        )
+    )
+
+
+@lti.command("sync_pingpong_with_lti")
+@click.option("--crontime", default="0 * * * *")
+@click.option("--host", default="localhost")
+@click.option("--port", default=8001)
+def sync_pingpong_with_lti(crontime: str, host: str, port: int) -> None:
+    """
+    Run the LTI sync-all command in a background server.
+    """
+    server = get_server(host=host, port=port)
+
+    async def _sync_pingpong_with_lti():
+        async for _ in croner(crontime, logger=logger):
+            try:
+                await _lti_sync_all()
+                logger.info(f"LTI sync completed successfully at {datetime.now()}")
+            except Exception as e:
+                logger.exception(f"Error during LTI sync: {e}")
+
+    # Run the Uvicorn server in the background
+    with server.run_in_thread():
+        asyncio.run(_sync_pingpong_with_lti())
 
 
 @export.command("export_threads_with_emails")
@@ -1062,12 +1192,6 @@ async def _send_activity_summaries(
                 logger.info("All summaries sent successfully.")
                 job.completed_at = utcnow()
             await session.commit()
-
-
-@cli.group("lti")
-def lti() -> None:
-    """LTI Advantage Service commands."""
-    pass
 
 
 @lti.command("rotate-keys")
@@ -1204,6 +1328,7 @@ def lti_test_jwks() -> None:
 FUNCTIONS_MAP: Dict[str, Callable] = {
     "batch_send_activity_summaries": _send_activity_summaries,
     "sync_pingpong_with_lms": lambda _, **kwargs: _lms_sync_all(**kwargs),
+    "sync_pingpong_with_lti": lambda _, **kwargs: _lti_sync_all(**kwargs),
 }
 
 

@@ -8,6 +8,7 @@ import logging
 from pingpong.config import config
 from pingpong.authz.base import Relation
 from pingpong.authz.openfga import OpenFgaAuthzClient, ReadRequestTupleKey
+from pingpong.log_utils import sanitize_for_log
 from pingpong.models import (
     AgreementAcceptance,
     Assistant,
@@ -252,48 +253,72 @@ async def merge_mcp_updated_by(
 async def merge_external_logins(
     session: AsyncSession, new_user_id: int, old_user_id: int
 ) -> None:
+    old_login = ExternalLogin.__table__.alias("old_login")
     existing_login = ExternalLogin.__table__.alias("existing_login")
-    old_login_is_internal_only = exists(
-        select(1)
-        .select_from(ExternalLoginProvider)
-        .where(
-            and_(
-                ExternalLoginProvider.internal_only.is_(True),
-                or_(
-                    ExternalLoginProvider.id == ExternalLogin.provider_id,
-                    ExternalLoginProvider.name == ExternalLogin.provider,
-                ),
-            )
-        )
+    internal_only_provider_ids = select(ExternalLoginProvider.id).where(
+        ExternalLoginProvider.internal_only.is_(True)
+    )
+    internal_only_provider_names = select(ExternalLoginProvider.name).where(
+        ExternalLoginProvider.internal_only.is_(True)
+    )
+    old_login_is_internal_only = or_(
+        and_(
+            old_login.c.provider_id.is_not(None),
+            old_login.c.provider_id.in_(internal_only_provider_ids),
+        ),
+        old_login.c.provider.in_(internal_only_provider_names),
     )
 
-    conflicting_login_exists = exists(
+    conflicting_provider_login_exists = exists(
         select(1)
         .select_from(existing_login)
         .where(
             and_(
                 existing_login.c.user_id == new_user_id,
-                ExternalLogin.provider != "email",
+                old_login.c.provider != "email",
                 ~old_login_is_internal_only,
                 or_(
-                    existing_login.c.provider == ExternalLogin.provider,
+                    existing_login.c.provider == old_login.c.provider,
                     and_(
-                        ExternalLogin.provider_id.is_not(None),
-                        existing_login.c.provider_id == ExternalLogin.provider_id,
+                        old_login.c.provider_id.is_not(None),
+                        existing_login.c.provider_id == old_login.c.provider_id,
+                    ),
+                ),
+            )
+        )
+    )
+    conflicting_identifier_login_exists = exists(
+        select(1)
+        .select_from(existing_login)
+        .where(
+            and_(
+                existing_login.c.user_id == new_user_id,
+                or_(
+                    and_(
+                        existing_login.c.provider == old_login.c.provider,
+                        existing_login.c.identifier == old_login.c.identifier,
+                    ),
+                    and_(
+                        old_login.c.provider_id.is_not(None),
+                        existing_login.c.provider_id == old_login.c.provider_id,
+                        existing_login.c.identifier == old_login.c.identifier,
                     ),
                 ),
             )
         )
     )
 
+    move_old_logins_stmt = select(old_login.c.id).where(
+        and_(
+            old_login.c.user_id == old_user_id,
+            ~conflicting_provider_login_exists,
+            ~conflicting_identifier_login_exists,
+        )
+    )
+
     move_stmt = (
         update(ExternalLogin)
-        .where(
-            and_(
-                ExternalLogin.user_id == old_user_id,
-                ~conflicting_login_exists,
-            )
-        )
+        .where(ExternalLogin.id.in_(move_old_logins_stmt))
         .values(user_id=new_user_id)
     )
     await session.execute(move_stmt)
@@ -395,12 +420,15 @@ async def merge_users(
     old_user = await User.get_by_id(session, old_user_id)
     new_user = await User.get_by_id(session, new_user_id)
     if not new_user:
-        raise ValueError(f"New user {new_user_id} not found.")
+        raise ValueError(f"New user {sanitize_for_log(new_user_id)} not found.")
     if not old_user:
         logging.warning(
-            f"Old user {old_user_id} not found, continuing with adding the merge tuple only."
+            f"Old user {sanitize_for_log(old_user_id)} not found, continuing with adding the merge tuple only."
         )
+
     if old_user:
+        old_user_email = old_user.email.strip() if old_user.email else None
+        new_user_email = new_user.email.strip() if new_user.email else None
         match old_user.state:
             case "verified":
                 new_user.state = (
@@ -420,6 +448,23 @@ async def merge_users(
         await session.execute(update_merged_account_tuple_stmt)
         delete_old_user_stmt = delete(User).where(User.id == old_user_id)
         await session.execute(delete_old_user_stmt)
+        if old_user_email and old_user_email.lower() != (new_user_email or "").lower():
+            try:
+                await ExternalLogin.create_or_update(
+                    session,
+                    new_user_id,
+                    provider="email",
+                    identifier=old_user_email,
+                    called_by="merge_users",
+                )
+            except ValueError:
+                logger.exception(
+                    "Failed to preserve old primary email during user merge "
+                    "(new_user_id=%s old_user_id=%s email=%s)",
+                    sanitize_for_log(new_user_id),
+                    sanitize_for_log(old_user_id),
+                    sanitize_for_log(old_user_email),
+                )
     add_new_merge_tuple_stmt = (
         _get_upsert_stmt(session)(user_merge_association)
         .values(user_id=new_user_id, merged_user_id=old_user_id)

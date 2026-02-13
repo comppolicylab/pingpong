@@ -15,9 +15,43 @@ from pingpong.authz.openfga import OpenFgaAuthzClient
 from pingpong.config import config
 from pingpong.invite import send_lti_registration_submitted
 from pingpong.log_utils import sanitize_for_log
+from pingpong.lti.constants import (
+    AUTHORIZATION_ENDPOINT_KEY,
+    CANVAS_ACCOUNT_LTI_GUID_KEY,
+    CANVAS_ACCOUNT_NAME_KEY,
+    CANVAS_MESSAGE_PLACEMENT,
+    ISSUER_KEY,
+    KEYS_ENDPOINT_KEY,
+    LTI_CLAIM_CONTEXT_KEY,
+    LTI_CLAIM_CUSTOM_KEY,
+    LTI_CLAIM_NRPS_KEY,
+    LTI_CLAIM_RESOURCE_LINK_KEY,
+    LTI_CLAIM_ROLES_KEY,
+    LTI_CLAIM_TOOL_PLATFORM_KEY,
+    LTI_CUSTOM_PARAM_DEFAULT_VALUES,
+    LTI_CUSTOM_SSO_PROVIDER_ID_KEY,
+    LTI_CUSTOM_SSO_VALUE_KEY,
+    LTI_DEPLOYMENT_ID_CLAIM,
+    LTI_TOOL_CONFIGURATION_KEY,
+    MESSAGE_TYPES_KEY,
+    MESSAGE_TYPE,
+    PLATFORM_CONFIGURATION_KEY,
+    REGISTRATION_ENDPOINT_KEY,
+    REQUIRED_SCOPES,
+    SCOPES_SUPPORTED_KEY,
+    SSO_FIELD_FULL_NAME,
+    SUBJECT_TYPES_KEY,
+    TOKEN_ALG_KEY,
+    TOKEN_ENDPOINT_KEY,
+)
 from pingpong.lti.lti_course import (
     find_class_by_course_id,
     find_class_by_course_id_search_by_canvas_account_lti_guid,
+)
+from pingpong.lti.roles import (
+    is_admin as is_lti_admin,
+    is_instructor as is_lti_instructor,
+    is_student as is_lti_student,
 )
 from pingpong.lti.schemas import (
     LTIRegisterRequest,
@@ -64,44 +98,6 @@ from pingpong.schemas import (
 logger = logging.getLogger(__name__)
 
 lti_router: APIRouter = APIRouter()
-
-SSO_FIELD_FULL_NAME: dict[str, str] = {
-    "canvas.sisIntegrationId": "Canvas.user.sisIntegrationId",
-    "canvas.sisSourceId": "Canvas.user.sisSourceId",
-    "person.sourcedId": "Person.sourcedId",
-}
-
-ISSUER_KEY = "issuer"
-AUTHORIZATION_ENDPOINT_KEY = "authorization_endpoint"
-REGISTRATION_ENDPOINT_KEY = "registration_endpoint"
-KEYS_ENDPOINT_KEY = "jwks_uri"
-TOKEN_ENDPOINT_KEY = "token_endpoint"
-SCOPES_SUPPORTED_KEY = "scopes_supported"
-TOKEN_ALG_KEY = "id_token_signing_alg_values_supported"
-SUBJECT_TYPES_KEY = "subject_types_supported"
-
-PLATFORM_CONFIGURATION_KEY = (
-    "https://purl.imsglobal.org/spec/lti-platform-configuration"
-)
-MESSAGE_TYPES_KEY = "messages_supported"
-MESSAGE_TYPE = "LtiResourceLinkRequest"
-CANVAS_MESSAGE_PLACEMENT = "https://canvas.instructure.com/lti/course_navigation"
-
-CANVAS_ACCOUNT_NAME_KEY = "https://canvas.instructure.com/lti/account_name"
-CANVAS_ACCOUNT_LTI_GUID_KEY = "https://canvas.instructure.com/lti/account_lti_guid"
-
-REQUIRED_SCOPES = [
-    "https://purl.imsglobal.org/spec/lti-nrps/scope/contextmembership.readonly"
-]
-
-LTI_DEPLOYMENT_ID_CLAIM = "https://purl.imsglobal.org/spec/lti/claim/deployment_id"
-
-LTI_CUSTOM_PARAM_DEFAULT_VALUES = {
-    "sso_provider_id": ["0"],
-    "sso_value": [""] + [f"${field}" for field in SSO_FIELD_FULL_NAME.values()],
-    "canvas_course_id": ["$Canvas.course.id"],
-    "canvas_term_name": ["$Canvas.term.name"],
-}
 
 
 def _is_public_sso_provider(provider: ExternalLoginProvider) -> bool:
@@ -368,7 +364,7 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
         "token_endpoint_auth_method": "private_key_jwt",
         "logo_uri": config.url("/pingpong_icon_2x.png"),
         "scope": " ".join(REQUIRED_SCOPES + ["openid"]),
-        "https://purl.imsglobal.org/spec/lti-tool-configuration": {
+        LTI_TOOL_CONFIGURATION_KEY: {
             "domain": config.public_url.replace("https://", "")
             .replace("http://", "")
             .replace("/", ""),
@@ -377,8 +373,10 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
             "custom_parameters": {
                 "platform": platform.value,
                 "pingpong_lti_tool_version": "1.0",
-                "sso_provider_id": str(data.provider_id),
-                "sso_value": f"${sso_field_full_name}" if sso_field_full_name else "",
+                LTI_CUSTOM_SSO_PROVIDER_ID_KEY: str(data.provider_id),
+                LTI_CUSTOM_SSO_VALUE_KEY: (
+                    f"${sso_field_full_name}" if sso_field_full_name else ""
+                ),
             },
             "claims": [
                 "sub",
@@ -386,11 +384,11 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
                 "given_name",
                 "family_name",
                 "email",
-                "https://purl.imsglobal.org/spec/lti/claim/context",
-                "https://purl.imsglobal.org/spec/lti/claim/roles",
-                "https://purl.imsglobal.org/spec/lti/claim/resource_link",
-                "https://purl.imsglobal.org/spec/lti/claim/tool_platform",
-                "https://purl.imsglobal.org/spec/lti-nrps/claim/namesroleservice",
+                LTI_CLAIM_CONTEXT_KEY,
+                LTI_CLAIM_ROLES_KEY,
+                LTI_CLAIM_RESOURCE_LINK_KEY,
+                LTI_CLAIM_TOOL_PLATFORM_KEY,
+                LTI_CLAIM_NRPS_KEY,
             ],
             "https://canvas.instructure.com/lti/vendor": "Computational Policy Lab",
             "messages": [
@@ -577,28 +575,17 @@ async def lti_login(request: StateRequest):
 
 def _is_instructor(roles: list[str]) -> bool:
     """Check if the user has an instructor role."""
-    instructor_roles = {
-        "http://purl.imsglobal.org/vocab/lis/v2/membership#Instructor",
-        "http://purl.imsglobal.org/vocab/lis/v2/membership#ContentDeveloper",
-    }
-    return any(role in instructor_roles for role in roles)
+    return is_lti_instructor(roles)
 
 
 def _is_student(roles: list[str]) -> bool:
     """Check if the user has a student role."""
-    student_roles = {
-        "http://purl.imsglobal.org/vocab/lis/v2/membership#Learner",
-        "http://purl.imsglobal.org/vocab/lis/v2/membership#Mentor",
-    }
-    return any(role in student_roles for role in roles)
+    return is_lti_student(roles)
 
 
 def _is_admin(roles: list[str]) -> bool:
     """Check if the user has an admin role."""
-    admin_roles = {
-        "http://purl.imsglobal.org/vocab/lis/v2/institution/person#Administrator",
-    }
-    return any(role in admin_roles for role in roles)
+    return is_lti_admin(roles)
 
 
 async def _is_supervisor_by_class_id(
@@ -691,9 +678,13 @@ async def lti_launch(
     )
     if consumed is None:
         raise HTTPException(status_code=400, detail="Invalid or expired state/nonce")
-    launch_custom_params = claims.get(
-        "https://purl.imsglobal.org/spec/lti/claim/custom", {}
-    )
+    launch_custom_params = claims.get(LTI_CLAIM_CUSTOM_KEY, {})
+    resource_link_claim = claims.get(LTI_CLAIM_RESOURCE_LINK_KEY, {})
+    resource_link_id = None
+    if isinstance(resource_link_claim, dict):
+        resource_link_id = resource_link_claim.get("id")
+        if not isinstance(resource_link_id, str) or not resource_link_id:
+            resource_link_id = None
 
     if (
         registration.review_status != LTIRegistrationReviewStatus.APPROVED
@@ -723,7 +714,7 @@ async def lti_launch(
             course_id,
         )
 
-    user_roles = claims.get("https://purl.imsglobal.org/spec/lti/claim/roles", [])
+    user_roles = claims.get(LTI_CLAIM_ROLES_KEY, [])
     is_instructor = _is_instructor(user_roles)
     is_student = _is_student(user_roles)
     is_admin = _is_admin(user_roles)
@@ -761,7 +752,7 @@ async def lti_launch(
             sanitize_for_log(user_email),
         )
 
-    sso_provider_id_str = launch_custom_params.get("sso_provider_id", "0")
+    sso_provider_id_str = launch_custom_params.get(LTI_CUSTOM_SSO_PROVIDER_ID_KEY, "0")
     user: User | None = None
     sso_provider: ExternalLoginProvider | None = None
     sso_value: str | None = None
@@ -780,8 +771,11 @@ async def lti_launch(
         )
         if sso_provider is None:
             raise HTTPException(status_code=400, detail="Unknown SSO provider id")
-        sso_value = launch_custom_params.get("sso_value", None)
-        if not sso_value or sso_value in LTI_CUSTOM_PARAM_DEFAULT_VALUES["sso_value"]:
+        sso_value = launch_custom_params.get(LTI_CUSTOM_SSO_VALUE_KEY, None)
+        if (
+            not sso_value
+            or sso_value in LTI_CUSTOM_PARAM_DEFAULT_VALUES[LTI_CUSTOM_SSO_VALUE_KEY]
+        ):
             sso_value = None
         if sso_value:
             lookup_items.insert(
@@ -803,21 +797,18 @@ async def lti_launch(
             request.state["db"], user_email, lookup_items
         )
     except AmbiguousExternalLoginLookupError as e:
-        logger.warning(
-            "Ambiguous external-login lookup during LTI launch; falling back to email-only. "
+        logger.exception(
+            "Ambiguous external-login lookup during LTI launch; rejecting request. "
             "lookup_index=%s user_ids=%s",
             e.lookup_index,
             e.user_ids,
         )
-        user, matched_user_ids = await User.get_by_email_external_logins_priority(
-            request.state["db"],
-            user_email,
-            [
-                ExternalLoginLookupItem(
-                    provider="email",
-                    identifier=user_email.lower(),
-                )
-            ],
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Ambiguous external identity lookup matched multiple users. "
+                "Resolve account conflicts and retry."
+            ),
         )
     user_needs_email_update = user is not None and user.email != user_email
 
@@ -858,7 +849,7 @@ async def lti_launch(
         await request.state["db"].flush()
 
     if lti_provider_name and lti_identifier:
-        await ExternalLogin.create_or_update(
+        lti_login_added = await ExternalLogin.create_or_update(
             request.state["db"],
             user.id,
             provider=lti_provider_name,
@@ -866,36 +857,65 @@ async def lti_launch(
             called_by="lti_launch",
             replace_existing=False,
         )
+        if not lti_login_added:
+            logger.warning(
+                "LTI launch external login was not added due to identity ownership conflict "
+                "(user_id=%s provider=%s identifier=%s). "
+                "This may indicate an unmerged account.",
+                sanitize_for_log(user.id),
+                sanitize_for_log(lti_provider_name),
+                sanitize_for_log(lti_identifier),
+            )
     if sso_provider and sso_value:
-        await ExternalLogin.create_or_update(
+        sso_login_added = await ExternalLogin.create_or_update(
             request.state["db"],
             user.id,
             provider=sso_provider.name,
             identifier=sso_value,
             called_by="lti_launch",
         )
+        if not sso_login_added:
+            logger.warning(
+                "LTI launch SSO external login was not added due to identity ownership conflict "
+                "(user_id=%s provider=%s identifier=%s). "
+                "This may indicate an unmerged account.",
+                sanitize_for_log(user.id),
+                sanitize_for_log(sso_provider.name),
+                sanitize_for_log(sso_value),
+            )
 
     request.state["session"].user = user
     user_token = encode_session_token(user.id, nowfn=get_now_fn(request))
 
-    if class_ is None or (
-        isinstance(class_, LTIClass) and class_.lti_status == LTIStatus.PENDING
-    ):
+    class_needs_setup = isinstance(class_, LTIClass) and (
+        class_.lti_status == LTIStatus.PENDING or class_.class_id is None
+    )
+    can_reuse_setup_class = (
+        class_needs_setup and class_.registration_id == registration.id
+        if isinstance(class_, LTIClass)
+        else False
+    )
+    if class_ is None or class_needs_setup:
         # User is launching into a class that is not yet linked
         # Or the class is pending setup
         if is_instructor or is_admin:
-            # Check for existing pending LTIClass (re-launch scenario)
-            if isinstance(class_, LTIClass) and class_.lti_status == LTIStatus.PENDING:
+            # Reuse existing unlinked/pending LTIClass for setup (re-launch scenario)
+            if can_reuse_setup_class:
+                assert isinstance(class_, LTIClass)
                 # Resume existing setup
                 pending_lti_class = class_
+                pending_lti_class.lti_status = LTIStatus.PENDING
                 pending_lti_class.setup_user_id = user.id
+                if (
+                    resource_link_id
+                    and pending_lti_class.resource_link_id != resource_link_id
+                ):
+                    pending_lti_class.resource_link_id = resource_link_id
                 request.state["db"].add(pending_lti_class)
                 await request.state["db"].flush()
             else:
                 # Create new pending LTIClass to store context
-                course_details = claims.get(
-                    "https://purl.imsglobal.org/spec/lti/claim/context", {}
-                )
+                course_details = claims.get(LTI_CLAIM_CONTEXT_KEY, {})
                 course_code = course_details.get("label")
                 course_name = course_details.get("title")
                 course_term = launch_custom_params.get("canvas_term_name")
@@ -905,10 +925,7 @@ async def lti_launch(
                     in LTI_CUSTOM_PARAM_DEFAULT_VALUES["canvas_term_name"]
                 ):
                     course_term = None
-                nrps_claim = claims.get(
-                    "https://purl.imsglobal.org/spec/lti-nrps/claim/namesroleservice",
-                    {},
-                )
+                nrps_claim = claims.get(LTI_CLAIM_NRPS_KEY, {})
                 context_memberships_url = nrps_claim.get("context_memberships_url")
 
                 pending_lti_class = LTIClass(
@@ -916,6 +933,7 @@ async def lti_launch(
                     lti_status=LTIStatus.PENDING,
                     lti_platform=registration.lms_platform,
                     course_id=course_id,
+                    resource_link_id=resource_link_id,
                     course_code=course_code,
                     course_name=course_name,
                     course_term=course_term,
@@ -940,6 +958,10 @@ async def lti_launch(
             )
     else:
         if isinstance(class_, LTIClass) and class_.registration_id == registration.id:
+            if resource_link_id and class_.resource_link_id != resource_link_id:
+                class_.resource_link_id = resource_link_id
+                request.state["db"].add(class_)
+                await request.state["db"].flush()
             if user.id == class_.setup_user_id:
                 return RedirectResponse(
                     url=config.url(
@@ -970,7 +992,6 @@ async def lti_launch(
                     roles=[
                         CreateUserClassRole(
                             email=user.email,
-                            sso_id=sso_value,
                             roles=ClassUserRoles(
                                 teacher=is_instructor,
                                 student=is_student,
@@ -982,10 +1003,10 @@ async def lti_launch(
                     lms_tenant=None,
                     lms_type=registration.lms_platform,
                     lti_class_id=class_.id,
-                    sso_tenant=sso_provider.name if sso_provider else None,
                     is_lti_launch=True,
                 )
                 try:
+                    assert class_.class_id is not None
                     await AddNewUsersManual(
                         str(class_.class_id),
                         new_ucr,
@@ -1020,9 +1041,7 @@ async def lti_launch(
                 )
 
             if is_instructor or is_admin_supervisor:
-                course_details = claims.get(
-                    "https://purl.imsglobal.org/spec/lti/claim/context", {}
-                )
+                course_details = claims.get(LTI_CLAIM_CONTEXT_KEY, {})
                 course_code = course_details.get("label")
                 course_name = course_details.get("title")
                 course_term = launch_custom_params.get("canvas_term_name")
@@ -1032,16 +1051,14 @@ async def lti_launch(
                     in LTI_CUSTOM_PARAM_DEFAULT_VALUES["canvas_term_name"]
                 ):
                     course_term = None
-                nrps_claim = claims.get(
-                    "https://purl.imsglobal.org/spec/lti-nrps/claim/namesroleservice",
-                    {},
-                )
+                nrps_claim = claims.get(LTI_CLAIM_NRPS_KEY, {})
                 context_memberships_url = nrps_claim.get("context_memberships_url")
                 second_lti_class = LTIClass(
                     registration_id=registration.id,
                     lti_status=LTIStatus.LINKED,
                     lti_platform=registration.lms_platform,
                     course_id=course_id,
+                    resource_link_id=resource_link_id,
                     course_code=course_code,
                     course_name=course_name,
                     course_term=course_term,
@@ -1081,7 +1098,6 @@ async def lti_launch(
                     roles=[
                         CreateUserClassRole(
                             email=user.email,
-                            sso_id=sso_value,
                             roles=ClassUserRoles(
                                 teacher=is_instructor,
                                 student=is_student,
@@ -1090,12 +1106,12 @@ async def lti_launch(
                         )
                     ],
                     silent=True,
-                    sso_tenant=sso_provider.name if sso_provider else None,
                     lms_type=class_.lti_platform if not second_lti_class else None,
                     lti_class_id=second_lti_class.id if second_lti_class else class_.id,
                     is_lti_launch=True,
                 )
                 try:
+                    assert pp_class.id is not None
                     await AddNewUsersManual(
                         pp_class.id,
                         new_ucr,
@@ -1125,9 +1141,7 @@ async def lti_launch(
                 )
 
             if is_instructor or is_admin_supervisor:
-                course_details = claims.get(
-                    "https://purl.imsglobal.org/spec/lti/claim/context", {}
-                )
+                course_details = claims.get(LTI_CLAIM_CONTEXT_KEY, {})
                 course_code = course_details.get("label")
                 course_name = course_details.get("title")
                 course_term = launch_custom_params.get("canvas_term_name")
@@ -1137,16 +1151,14 @@ async def lti_launch(
                     in LTI_CUSTOM_PARAM_DEFAULT_VALUES["canvas_term_name"]
                 ):
                     course_term = None
-                nrps_claim = claims.get(
-                    "https://purl.imsglobal.org/spec/lti-nrps/claim/namesroleservice",
-                    {},
-                )
+                nrps_claim = claims.get(LTI_CLAIM_NRPS_KEY, {})
                 context_memberships_url = nrps_claim.get("context_memberships_url")
                 new_lti_class = LTIClass(
                     registration_id=registration.id,
                     lti_status=LTIStatus.LINKED,
                     lti_platform=registration.lms_platform,
                     course_id=course_id,
+                    resource_link_id=resource_link_id,
                     course_code=course_code,
                     course_name=course_name,
                     course_term=course_term,
@@ -1184,7 +1196,6 @@ async def lti_launch(
                     roles=[
                         CreateUserClassRole(
                             email=user.email,
-                            sso_id=sso_value,
                             roles=ClassUserRoles(
                                 teacher=is_instructor,
                                 student=is_student,
@@ -1198,10 +1209,10 @@ async def lti_launch(
                     if not new_lti_class
                     else new_lti_class.lti_platform,
                     lti_class_id=new_lti_class.id if new_lti_class else None,
-                    sso_tenant=sso_provider.name if sso_provider else None,
                     is_lti_launch=True,
                 )
                 try:
+                    assert class_.id is not None
                     await AddNewUsersManual(
                         class_.id, new_ucr, request, tasks, user_id=class_.lms_user_id
                     ).add_new_users()
@@ -1216,7 +1227,6 @@ async def lti_launch(
                     roles=[
                         CreateUserClassRole(
                             email=user.email,
-                            sso_id=sso_value,
                             roles=ClassUserRoles(
                                 teacher=is_instructor,
                                 student=is_student,
@@ -1225,10 +1235,10 @@ async def lti_launch(
                         )
                     ],
                     silent=True,
-                    sso_tenant=sso_provider.name if sso_provider else None,
                     is_lti_launch=True,
                 )
                 try:
+                    assert class_.id is not None
                     await AddNewUsersManual(
                         class_.id, new_ucr, request, tasks, user_id=class_.lms_user_id
                     ).add_new_users()

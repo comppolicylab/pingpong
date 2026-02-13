@@ -1,4 +1,5 @@
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from pingpong import models, schemas
 
@@ -213,41 +214,43 @@ async def test_get_by_email_external_logins_priority_provider_id_name_mismatch(d
             )
 
 
-async def test_get_by_email_external_logins_priority_ambiguous_match_raises(db):
+async def test_get_by_email_external_logins_priority_duplicate_identity_is_rejected(db):
     async with db.async_session() as session:
-        saml_provider = await models.ExternalLoginProvider.get_or_create_by_name(
-            session, "saml"
-        )
         user_a = await _create_user(session, 1301, "a@example.com")
         user_b = await _create_user(session, 1302, "b@example.com")
 
-        await _create_external_login(
+        created_for_a = await models.ExternalLogin.create_or_update(
             session,
-            user_a.id,
+            user_id=user_a.id,
             provider="saml",
             identifier="duplicate-id",
-            provider_id=saml_provider.id,
         )
-        await _create_external_login(
+        created_for_b = await models.ExternalLogin.create_or_update(
             session,
-            user_b.id,
+            user_id=user_b.id,
             provider="saml",
             identifier="duplicate-id",
-            provider_id=saml_provider.id,
         )
 
-        with pytest.raises(models.AmbiguousExternalLoginLookupError) as exc_info:
-            await models.User.get_by_email_external_logins_priority(
-                session,
-                email="missing@example.com",
-                lookup_items=[
-                    schemas.ExternalLoginLookupItem(
-                        provider="saml", identifier="duplicate-id"
-                    )
-                ],
-            )
+        assert created_for_a is True
+        assert created_for_b is False
 
-        assert sorted(exc_info.value.user_ids) == [user_a.id, user_b.id]
+        (
+            result_user,
+            matched_user_ids,
+        ) = await models.User.get_by_email_external_logins_priority(
+            session,
+            email="missing@example.com",
+            lookup_items=[
+                schemas.ExternalLoginLookupItem(
+                    provider="saml", identifier="duplicate-id"
+                )
+            ],
+        )
+
+        assert result_user is not None
+        assert result_user.id == user_a.id
+        assert matched_user_ids == [user_a.id]
 
 
 async def test_get_by_email_external_logins_priority_returns_none_when_all_miss(db):
@@ -311,6 +314,44 @@ async def test_external_login_create_or_update_non_email_keeps_multiple_identifi
         ]
 
 
+async def test_external_login_create_or_update_non_email_repairs_legacy_null_provider_id(
+    db,
+):
+    async with db.async_session() as session:
+        user = await _create_user(session, 1505, "legacy-provider-null@example.com")
+        provider = "https://canvas.instructure.com"
+        provider_obj = await models.ExternalLoginProvider.get_or_create_by_name(
+            session, provider
+        )
+
+        legacy_login = await _create_external_login(
+            session,
+            user.id,
+            provider=provider,
+            identifier="legacy-sub",
+            provider_id=None,
+        )
+
+        result = await models.ExternalLogin.create_or_update(
+            session,
+            user_id=user.id,
+            provider=provider,
+            identifier="legacy-sub",
+            replace_existing=False,
+        )
+
+        assert result is True
+        refreshed_legacy_login = await session.get(
+            models.ExternalLogin, legacy_login.id
+        )
+        assert refreshed_legacy_login is not None
+        assert refreshed_legacy_login.provider_id == provider_obj.id
+
+        user_logins = await models.User.get_external_logins_by_id(session, user.id)
+        provider_logins = [login for login in user_logins if login.provider == provider]
+        assert len(provider_logins) == 1
+
+
 async def test_external_login_create_or_update_non_email_replaces_by_default(db):
     async with db.async_session() as session:
         user = await _create_user(session, 1502, "replace-user@example.com")
@@ -334,3 +375,81 @@ async def test_external_login_create_or_update_non_email_replaces_by_default(db)
 
         assert len(provider_logins) == 1
         assert provider_logins[0].identifier == "new-id"
+
+
+async def test_external_login_create_or_update_non_email_returns_false_on_conflicting_user(
+    db,
+):
+    async with db.async_session() as session:
+        user_a = await _create_user(session, 1503, "owner@example.com")
+        user_b = await _create_user(session, 1504, "other@example.com")
+        provider = "saml"
+
+        await models.ExternalLogin.create_or_update(
+            session,
+            user_id=user_a.id,
+            provider=provider,
+            identifier="shared-id",
+        )
+        result = await models.ExternalLogin.create_or_update(
+            session,
+            user_id=user_b.id,
+            provider=provider,
+            identifier="shared-id",
+        )
+
+        assert result is False
+        user_b_logins = await models.User.get_external_logins_by_id(session, user_b.id)
+        assert [login for login in user_b_logins if login.provider == provider] == []
+
+
+async def test_external_login_uniqueness_prevents_cross_user_duplicates(db):
+    async with db.async_session() as session:
+        saml_provider = await models.ExternalLoginProvider.get_or_create_by_name(
+            session, "saml"
+        )
+        user_a = await _create_user(session, 1601, "conflict-a@example.com")
+        user_b = await _create_user(session, 1602, "conflict-b@example.com")
+
+        await _create_external_login(
+            session,
+            user_a.id,
+            provider="saml",
+            identifier="shared-identifier",
+            provider_id=saml_provider.id,
+        )
+        with pytest.raises(IntegrityError):
+            await _create_external_login(
+                session,
+                user_b.id,
+                provider="saml",
+                identifier="shared-identifier",
+                provider_id=saml_provider.id,
+            )
+        await session.rollback()
+
+
+async def test_external_login_uniqueness_prevents_cross_user_email_duplicates(db):
+    async with db.async_session() as session:
+        email_provider = await models.ExternalLoginProvider.get_or_create_by_name(
+            session, "email"
+        )
+        user_a = await _create_user(session, 1701, "email-a@example.com")
+        user_b = await _create_user(session, 1702, "email-b@example.com")
+
+        await _create_external_login(
+            session,
+            user_a.id,
+            provider="email",
+            identifier="secondary@example.com",
+            provider_id=email_provider.id,
+        )
+        with pytest.raises(IntegrityError):
+            await _create_external_login(
+                session,
+                user_b.id,
+                provider="email",
+                identifier="secondary@example.com",
+                provider_id=email_provider.id,
+            )
+        await session.rollback()

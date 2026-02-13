@@ -923,6 +923,7 @@ class CreateUserClassRole(BaseModel):
     email: str = Field(..., min_length=3, max_length=100)
     display_name: str | None = None
     sso_id: str | None = None
+    external_logins: list[ExternalLoginLookupItem] = Field(default_factory=list)
     last_active: datetime | None = None
     roles: ClassUserRoles
 
@@ -1302,6 +1303,7 @@ class LTIClass(BaseModel):
     canvas_account_name: str | None = None
     client_id: str | None = None
     lti_status: LTIStatus
+    last_synced: datetime | None = None
     lti_platform: LMSPlatform
     registration_id: int
     course_name: str | None = None
@@ -2029,6 +2031,13 @@ class CanvasToken(BaseModel):
 
 class CanvasRedirect(BaseModel):
     url: str
+
+
+class CanvasConnectAccessToken(BaseModel):
+    access_token: str
+    expires_in: int | None = None
+    token_type: str | None = None
+    scope: str | None = None
 
 
 class SessionToken(BaseModel):

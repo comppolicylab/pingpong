@@ -154,27 +154,141 @@ class AddNewUsers(ABC):
         self.user_id = user_id
         self.session = session
         self.client = client
+        self._external_login_provider_name_cache: dict[int, str | None] = {}
 
     @abstractmethod
     def send_invites(self):
         pass
 
-    async def _merge_accounts(self):
-        if not self.new_ucr.sso_tenant:
-            return
-        for user_id, sso_id in self.newly_synced_identifiers.items():
-            if not sso_id:
+    def _get_legacy_external_login_lookup_item(
+        self, ucr: schemas.CreateUserClassRole
+    ) -> schemas.ExternalLoginLookupItem | None:
+        if not self.new_ucr.sso_tenant or not ucr.sso_id:
+            return None
+
+        return schemas.ExternalLoginLookupItem(
+            provider=self.new_ucr.sso_tenant,
+            identifier=ucr.sso_id,
+        )
+
+    def _get_identity_lookup_items(
+        self, ucr: schemas.CreateUserClassRole
+    ) -> list[schemas.ExternalLoginLookupItem]:
+        if ucr.external_logins:
+            return list(ucr.external_logins)
+
+        legacy_item = self._get_legacy_external_login_lookup_item(ucr)
+        if legacy_item is None:
+            return []
+        return [legacy_item]
+
+    async def _resolve_lookup_provider_name(
+        self, lookup_item: schemas.ExternalLoginLookupItem
+    ) -> str | None:
+        provider_name = lookup_item.provider.strip() if lookup_item.provider else None
+        if provider_name:
+            return provider_name
+
+        provider_id = lookup_item.provider_id
+        if provider_id is None:
+            return None
+
+        if provider_id in self._external_login_provider_name_cache:
+            return self._external_login_provider_name_cache[provider_id]
+
+        provider = await models.ExternalLoginProvider.get_by_id(
+            self.session, provider_id
+        )
+        resolved_provider_name = provider.name if provider else None
+        self._external_login_provider_name_cache[provider_id] = resolved_provider_name
+        return resolved_provider_name
+
+    async def _upsert_identity_external_logins(
+        self, user_id: int, ucr: schemas.CreateUserClassRole
+    ) -> None:
+        identity_lookup_items = self._get_identity_lookup_items(ucr)
+        seen: set[tuple[str, str]] = set()
+
+        for lookup_item in identity_lookup_items:
+            identifier = lookup_item.identifier.strip()
+            if not identifier:
                 continue
-            user_ids = await models.ExternalLogin.accounts_to_merge(
+
+            provider_name = await self._resolve_lookup_provider_name(lookup_item)
+            if not provider_name:
+                logger.warning(
+                    "Skipping external login upsert for user %s due to unresolved provider (provider_id=%s)",
+                    user_id,
+                    lookup_item.provider_id,
+                )
+                continue
+
+            provider_key = provider_name.strip().lower()
+            key = (provider_key, identifier)
+            if key in seen:
+                continue
+            seen.add(key)
+
+            await models.ExternalLogin.create_or_update(
                 self.session,
                 user_id,
-                provider=self.new_ucr.sso_tenant,
-                identifier=sso_id,
+                provider_name,
+                identifier,
+                called_by="AddNewUsers.add_new_users",
             )
 
-            # Merge accounts
-            for uid in user_ids:
-                await merge(self.session, self.client, user_id, uid)
+    async def _lookup_user_for_ucr(
+        self, ucr: schemas.CreateUserClassRole
+    ) -> tuple[models.User | None, list[int]]:
+        email_lookup = schemas.ExternalLoginLookupItem(
+            provider="email",
+            identifier=ucr.email.lower(),
+        )
+        lookup_items = self._get_identity_lookup_items(ucr)
+        lookup_items.append(email_lookup)
+
+        try:
+            return await models.User.get_by_email_external_logins_priority(
+                self.session,
+                ucr.email,
+                lookup_items,
+            )
+        except models.AmbiguousExternalLoginLookupError as e:
+            logger.exception(
+                "Ambiguous external-login lookup during add users; rejecting request. "
+                "lookup_index=%s user_ids=%s",
+                e.lookup_index,
+                e.user_ids,
+            )
+            raise AddUserException(
+                code=409,
+                detail=(
+                    "Ambiguous external identity lookup matched multiple users "
+                    f"for {ucr.email}. Matched user ids: {e.user_ids}. "
+                    "Resolve account conflicts and retry."
+                ),
+            )
+
+    async def _merge_matched_user_ids(
+        self,
+        user: models.User,
+        matched_user_ids: list[int],
+        merged_old_user_ids: set[int],
+    ) -> models.User:
+        canonical_user = user
+        for matched_user_id in sorted(set(matched_user_ids)):
+            if matched_user_id == canonical_user.id:
+                continue
+            if matched_user_id in merged_old_user_ids:
+                continue
+            canonical_user = await merge(
+                self.session,
+                self.client,
+                canonical_user.id,
+                matched_user_id,
+            )
+            merged_old_user_ids.add(matched_user_id)
+        return canonical_user
 
     def _permissions_to_revoke(self, user_ids: list[int]) -> list[Relation]:
         """Generate permissions to revoke after deleting enrollment for a list of users."""
@@ -218,7 +332,6 @@ class AddNewUsers(ABC):
         self,
         enrollment: schemas.UserClassRole,
         roles: schemas.ClassUserRoles,
-        sso_id: str | None = None,
     ):
         self.new_roles.append(
             schemas.UserClassRole(
@@ -243,23 +356,14 @@ class AddNewUsers(ABC):
             enrollment.lti_class_id = self.new_ucr.lti_class_id
             self.session.add(enrollment)
 
-        # Update the external login identifier if it's provided
-        if sso_id and self.new_ucr.sso_tenant:
-            await models.ExternalLogin.create_or_update(
-                self.session,
-                enrollment.user_id,
-                self.new_ucr.sso_tenant,
-                sso_id,
-                called_by="UserClassRole.update_user_enrollment",
-            )
-
     async def _create_user_enrollment(
         self,
         user: models.User,
         ucr: schemas.UserClassRole,
         invite_roles: list[str] = [],
-        sso_id: str | None = None,
     ):
+        # External-login identity mapping is handled centrally via
+        # _upsert_identity_external_logins before enrollment create/update.
         # Create the user enrollment
         enrollment = await models.UserClassRole.create(
             self.session,
@@ -267,8 +371,8 @@ class AddNewUsers(ABC):
             self.class_id,
             self.new_ucr.lms_tenant,
             self.new_ucr.lms_type,
-            self.new_ucr.sso_tenant,
-            sso_id,
+            None,
+            None,
             subscribed_to_summaries=not user.dna_as_join,
             lti_class_id=self.new_ucr.lti_class_id,
         )
@@ -337,13 +441,16 @@ class AddNewUsers(ABC):
         if not self.new_ucr.silent:
             self.invite_config = await self._init_invites()
 
+        is_sync_import = (
+            bool(self.new_ucr.lms_tenant or self.new_ucr.lti_class_id)
+            and not self.new_ucr.is_lti_launch
+        )
+
         # If the request is from LMS, we need to store the newly synced users
         # so we can delete previously synced users that are no longer on the roster
-        if (
-            self.new_ucr.lms_tenant or self.new_ucr.lti_class_id
-        ) and not self.new_ucr.is_lti_launch:
+        if is_sync_import:
             self.newly_synced: list[int] = []
-            self.newly_synced_identifiers: dict[int, str | None] = {}
+            merged_old_user_ids: set[int] = set()
 
         results: list[schemas.CreateUserResult] = []
         for ucr in self.new_ucr.roles:
@@ -370,13 +477,21 @@ class AddNewUsers(ABC):
                     )
                 )
                 continue
-            user = await models.User.get_or_create_by_email_sso(
-                self.session,
-                ucr.email,
-                self.new_ucr.sso_tenant,
-                ucr.sso_id,
-                display_name=ucr.display_name,
-            )
+            user, matched_user_ids = await self._lookup_user_for_ucr(ucr)
+            if user is None:
+                user = models.User(
+                    email=ucr.email,
+                    display_name=ucr.display_name,
+                    state=schemas.UserState.UNVERIFIED,
+                )
+                self.session.add(user)
+                await self.session.flush()
+                await self.session.refresh(user)
+
+            if is_sync_import:
+                user = await self._merge_matched_user_ids(
+                    user, matched_user_ids, merged_old_user_ids
+                )
 
             display_name = (
                 user.first_name + " " + user.last_name
@@ -386,14 +501,11 @@ class AddNewUsers(ABC):
                 else None
             )
 
-            if (
-                self.new_ucr.lms_tenant or self.new_ucr.lti_class_id
-            ) and not self.new_ucr.is_lti_launch:
+            if is_sync_import:
                 self.newly_synced.append(user.id)
-                self.newly_synced_identifiers[user.id] = ucr.sso_id
             if user.id == self.user_id and not self.new_ucr.is_lti_launch:
                 # We don't want an LMS sync to change the roles of the user who initiated it
-                if self.new_ucr.lms_tenant or self.new_ucr.lti_class_id:
+                if is_sync_import:
                     continue
                 # An admin cannot add themselves as a student
                 if self.is_admin and ucr.roles.student:
@@ -423,10 +535,13 @@ class AddNewUsers(ABC):
                 self.session, user.id, self.class_id
             )
 
-            if enrollment and (
-                (enrollment.lms_tenant and not self.new_ucr.lms_tenant)
-                or (enrollment.lti_class_id and not self.new_ucr.lti_class_id)
-            ):
+            is_import_request = bool(
+                self.new_ucr.lms_tenant or self.new_ucr.lti_class_id
+            )
+            is_imported_enrollment = bool(
+                enrollment and (enrollment.lms_tenant or enrollment.lti_class_id)
+            )
+            if is_imported_enrollment and not is_import_request:
                 logger.info("add_users_to_class: AddUserException occurred")
                 results.append(
                     schemas.CreateUserResult(
@@ -436,6 +551,8 @@ class AddNewUsers(ABC):
                     )
                 )
                 continue
+
+            await self._upsert_identity_external_logins(user.id, ucr)
 
             invite_roles = []
             for role in ["admin", "teacher", "student"]:
@@ -448,12 +565,12 @@ class AddNewUsers(ABC):
                     self.revokes.append(new_role)
 
             if enrollment:
-                await self._update_user_enrollment(enrollment, ucr.roles, ucr.sso_id)
+                await self._update_user_enrollment(enrollment, ucr.roles)
                 results.append(
                     schemas.CreateUserResult(email=ucr.email, display_name=display_name)
                 )
             else:
-                await self._create_user_enrollment(user, ucr, invite_roles, ucr.sso_id)
+                await self._create_user_enrollment(user, ucr, invite_roles)
                 results.append(
                     schemas.CreateUserResult(email=ucr.email, display_name=display_name)
                 )
@@ -462,11 +579,8 @@ class AddNewUsers(ABC):
         if not self.new_ucr.silent:
             self.send_invites()
 
-        if (
-            self.new_ucr.lms_tenant or self.new_ucr.lti_class_id
-        ) and not self.new_ucr.is_lti_launch:
+        if is_sync_import:
             await self._remove_deleted_users()
-            await self._merge_accounts()
 
         if len(grants) > len(list(set(grants))):
             logger.exception("Duplicate grants detected.")

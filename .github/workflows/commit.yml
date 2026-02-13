@@ -41,10 +41,17 @@ jobs:
         run: |
           set -e
           python << EOF
+          import json
           import os
           import re
           import subprocess
           import sys
+
+          LEGACY_TAG_PATTERN = re.compile(r'^(\d+)-srv(\d+)-web(\d+)$')
+          NEW_TAG_PATTERN = re.compile(r'^v(\d+)\+srv(\d+)\.web(\d+)$')
+
+          def is_versioning_tag(tag):
+              return bool(LEGACY_TAG_PATTERN.match(tag) or NEW_TAG_PATTERN.match(tag))
 
           def get_last_tag(n=1):
               if n > 10:
@@ -72,8 +79,7 @@ jobs:
                       print(f"Error occurred: {e}")
 
                   # Filter tags that match our versioning format
-                  pattern = r'\d+\-srv\d+-web\d+'
-                  matching_tags = [tag for tag in tags if re.match(pattern, tag)]
+                  matching_tags = [tag for tag in tags if is_versioning_tag(tag)]
                   print(f'Matching versioning tags on commit HEAD~{n}: {matching_tags}')
                   if not matching_tags:
                       print(f'No versioning tags found on commit HEAD~{n}')
@@ -81,16 +87,17 @@ jobs:
 
                   print(f'Found versioning tags on commit HEAD~{n}: {matching_tags}')
                   # If multiple matching tags, return the one with the highest build number
-                  return max(matching_tags, key=lambda t: int(t.split('-')[0]))
+                  return max(matching_tags, key=lambda t: parse_tag(t)['build'])
               except subprocess.CalledProcessError as e:
                   raise ValueError("Failed to retrieve versioning tags from the previous commits", e)
 
           def parse_tag(tag):
               print(f'Parsing tag: {tag}')
-              pattern = r'(\d+)-srv(\d+)-web(\d+)'
-              match = re.match(pattern, tag)
+              match = LEGACY_TAG_PATTERN.match(tag)
               if not match:
-                  raise ValueError(f"Invalid versioning tag format: {tag}")
+                  match = NEW_TAG_PATTERN.match(tag)
+              if not match:
+                  raise ValueError(f"Invalid versioning tag format: {tag}. Expected NNNN-srvNNN-webNNN or vNNNN+srvNNN.webNNN")
               try:
                   return {
                     'build': int(match.group(1)),
@@ -111,16 +118,85 @@ jobs:
                   new_srv = 1
                   new_web = 1
 
-              srv_status = 'b' if server_update else 'r'
-              web_status = 'b' if web_update else 'r'
+              return f"v{new_build}+srv{new_srv}.web{new_web}", new_srv, new_web
 
-              return f"{new_build}-srv{new_srv}-web{new_web}", new_srv, new_web
+          def get_compare_range():
+              default_range = 'HEAD~1..HEAD'
+              event_path = os.environ.get('GITHUB_EVENT_PATH')
+              if not event_path:
+                  return default_range
+
+              try:
+                  with open(event_path, encoding='utf-8') as f:
+                      event = json.load(f)
+              except Exception as e:
+                  print(f'Failed to parse GitHub event payload ({event_path}): {e}. Falling back to {default_range}')
+                  return default_range
+
+              before = event.get('before')
+              after = event.get('after') or os.environ.get('GITHUB_SHA')
+              if not before or not after or before == '0' * 40:
+                  return default_range
+              return f'{before}..{after}'
+
+          def get_changed_diff_lines(file_path, compare_range):
+              try:
+                  patch = subprocess.check_output(
+                      ['git', 'diff', '--unified=0', compare_range, '--', file_path],
+                      stderr=subprocess.DEVNULL,
+                  ).decode()
+              except subprocess.CalledProcessError:
+                  return []
+
+              changed_lines = []
+              for line in patch.splitlines():
+                  if line.startswith(('diff --git ', 'index ', '@@', '--- ', '+++ ')):
+                      continue
+                  if line.startswith(('+', '-')):
+                      changed_lines.append(line[1:].strip())
+              return changed_lines
+
+          def is_version_only_change(file_path, compare_range):
+              patterns = {
+                  'pyproject.toml': re.compile(r'^version\s*=\s*".*"$'),
+                  'web/pingpong/package.json': re.compile(r'^"version"\s*:\s*".*"\s*,?$'),
+              }
+              pattern = patterns.get(file_path)
+              if not pattern:
+                  return False
+
+              changed_lines = get_changed_diff_lines(file_path, compare_range)
+              if not changed_lines:
+                  return False
+
+              only_version = all(pattern.match(line) for line in changed_lines)
+              print(f'Checking version-only change for {file_path} in {compare_range}: {only_version}')
+              return only_version
+
+          def detect_component_updates(changed_files, compare_range):
+              web_files = [file for file in changed_files if file.startswith('web/')]
+              server_files = [
+                  file for file in changed_files
+                  if file.startswith(('pingpong/', 'saml/', 'alembic/')) or file in ['poetry.lock', 'pyproject.toml']
+              ]
+
+              web_update = any(file != 'web/pingpong/package.json' for file in web_files)
+              if not web_update and 'web/pingpong/package.json' in web_files:
+                  web_update = not is_version_only_change('web/pingpong/package.json', compare_range)
+
+              server_update = any(file != 'pyproject.toml' for file in server_files)
+              if not server_update and 'pyproject.toml' in server_files:
+                  server_update = not is_version_only_change('pyproject.toml', compare_range)
+
+              return web_update, server_update
 
           try:
               subprocess.run(['git', 'fetch', 'origin', '--tags', '--depth=11', 'HEAD'], check=True)
-              changed_files = os.environ['CHANGED_FILES_STRING'].split(" ")
-              web_update = any('web/' in file for file in changed_files)
-              server_update = any(file.startswith(('pingpong/', 'saml/', 'alembic/')) or file in ['poetry.lock', 'pyproject.toml'] for file in changed_files)
+              changed_files = [file for file in os.environ['CHANGED_FILES_STRING'].split() if file]
+              compare_range = get_compare_range()
+              web_update, server_update = detect_component_updates(changed_files, compare_range)
+              print(f'Changed files: {changed_files}')
+              print(f'Component updates -> server: {server_update}, web: {web_update}')
 
               last_tag = get_last_tag()
               new_tag, new_srv, new_web = create_new_tag(last_tag, web_update, server_update)
