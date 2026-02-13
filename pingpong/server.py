@@ -7101,7 +7101,7 @@ async def create_assistant(
             detail=f"Associated class {class_id} not found.",
         )
 
-    # Only admins can create an assistant in Lecture mode
+    # Check Azure compatibility for lecture video mode
     if req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO and (
         class_.api_key_obj and class_.api_key_obj.provider == "azure"
     ):
