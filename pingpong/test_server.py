@@ -743,7 +743,10 @@ async def test_magic_link_login(api, config, monkeypatch, now):
     )
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
-    expected_body = """
+    send_mock.assert_called_once_with(
+        "user_123@domain.org",
+        "Log back in to PingPong",
+        """
 <!doctype html>
 <html>
    <head>
@@ -1179,11 +1182,7 @@ async def test_magic_link_login(api, config, monkeypatch, now):
       <!-- end desktop footer include -->
    </body>
 </html>
-"""
-    send_mock.assert_called_once_with(
-        "user_123@domain.org",
-        "Log back in to PingPong",
-        expected_body,
+""",
     )
 
 
