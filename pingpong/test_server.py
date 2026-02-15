@@ -733,7 +733,7 @@ async def test_magic_link_login_no_user(api, config, monkeypatch):
 
 
 @with_user(123)
-async def test_magic_link_login(api, config, monkeypatch, now):
+async def test_magic_link_login(api, config, monkeypatch):
     # Patch the email driver in config.email
     send_mock = AsyncMock()
     monkeypatch.setattr(config.email.sender, "send", send_mock)
