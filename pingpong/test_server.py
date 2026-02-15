@@ -743,12 +743,6 @@ async def test_magic_link_login(api, config, monkeypatch, now):
     )
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
-    expected_token = encode_session_token(123, nowfn=now)
-    old_expected_token = (
-        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
-        "eyJzdWIiOiIxMjMiLCJleHAiOjE3MDQxNTM2MDAsImlhdCI6MTcwNDA2NzIwMH0."
-        "Z6PEytos_I5QVHJp0kIzmoTjI_PyZIT5P8YVwo2SVCU"
-    )
     expected_body = """
 <!doctype html>
 <html>
@@ -1008,7 +1002,7 @@ async def test_magic_link_login(api, config, monkeypatch, now):
             <p>This login link will expire in a day.</p>
             <p>
                <span style="white-space: nowrap;">
-            <div><a href="http://localhost:5173/api/v1/auth?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMiLCJleHAiOjE3MDQxNTM2MDAsImlhdCI6MTcwNDA2NzIwMH0.Z6PEytos_I5QVHJp0kIzmoTjI_PyZIT5P8YVwo2SVCU&redirect=/" class="mobile-button-bg" style="display: flex; align-items: center; width: fit-content; row-gap: 8px; column-gap: 8px; font-size: 17px; line-height: 20px;font-weight: 500; border-radius: 9999px; padding: 8px 16px; color: white !important; flex-shrink: 0;">Login to PingPong<source srcset="https://pingpong.hks.harvard.edu/circle_plus_solid_2x.png"><img src="https://pingpong.hks.harvard.edu/circle_plus_solid_2x.png" width="17" height="17" class="hero-image" style="display: block;" border="0" alt="right pointing arrow"></a></div></span></p>
+            <div><a href="http://localhost:5173/api/v1/auth?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMiLCJleHAiOjE3MDQxNTM2MDAsImlhdCI6MTcwNDA2NzIwMH0.oe6SBCxjKwfLlX6_oRIsowlGSykqilCYKRvEzmxMYBk&redirect=/" class="mobile-button-bg" style="display: flex; align-items: center; width: fit-content; row-gap: 8px; column-gap: 8px; font-size: 17px; line-height: 20px;font-weight: 500; border-radius: 9999px; padding: 8px 16px; color: white !important; flex-shrink: 0;">Login to PingPong<source srcset="https://pingpong.hks.harvard.edu/circle_plus_solid_2x.png"><img src="https://pingpong.hks.harvard.edu/circle_plus_solid_2x.png" width="17" height="17" class="hero-image" style="display: block;" border="0" alt="right pointing arrow"></a></div></span></p>
             <p></p>
             </p>
             <p><b>Note:</b> This login link was intended for <span style="white-space: nowrap;"><a href="mailto:user_123@domain.org" style="color:#0070c9;">user_123@domain.org</a></span>. If you weren&#8217;t expecting this login link, there&#8217;s nothing to worry about — you can safely ignore it.</p>
@@ -1025,7 +1019,7 @@ async def test_magic_link_login(api, config, monkeypatch, now):
       <!-- BEGIN MOBILE -->
       <div class="mobile get-in-touch-m mobile-bg" style="width: 0; max-height: 0; overflow: hidden; display: none;">
          <div class="m-gutter">
-            <p class="m3 type-body-m"><b>Button not working?</b> Paste the following link into your browser:<br><span style="overflow-wrap: break-word; word-wrap: break-word; -ms-word-break: break-all; word-break: break-all;"><a href="http://localhost:5173/api/v1/auth?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMiLCJleHAiOjE3MDQxNTM2MDAsImlhdCI6MTcwNDA2NzIwMH0.Z6PEytos_I5QVHJp0kIzmoTjI_PyZIT5P8YVwo2SVCU&redirect=/" style="color:#0070c9;">http://localhost:5173/api/v1/auth?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMiLCJleHAiOjE3MDQxNTM2MDAsImlhdCI6MTcwNDA2NzIwMH0.Z6PEytos_I5QVHJp0kIzmoTjI_PyZIT5P8YVwo2SVCU&redirect=/</a></p>
+            <p class="m3 type-body-m"><b>Button not working?</b> Paste the following link into your browser:<br><span style="overflow-wrap: break-word; word-wrap: break-word; -ms-word-break: break-all; word-break: break-all;"><a href="http://localhost:5173/api/v1/auth?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMiLCJleHAiOjE3MDQxNTM2MDAsImlhdCI6MTcwNDA2NzIwMH0.oe6SBCxjKwfLlX6_oRIsowlGSykqilCYKRvEzmxMYBk&redirect=/" style="color:#0070c9;">http://localhost:5173/api/v1/auth?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMiLCJleHAiOjE3MDQxNTM2MDAsImlhdCI6MTcwNDA2NzIwMH0.oe6SBCxjKwfLlX6_oRIsowlGSykqilCYKRvEzmxMYBk&redirect=/</a></p>
          </div>
       </div>
       <!-- END MOBILE -->
@@ -1093,7 +1087,7 @@ async def test_magic_link_login(api, config, monkeypatch, now):
                               <p>This login link will expire in a day.</p>
                               <p>
                                  <span style="white-space: nowrap;">
-                              <div><a href="http://localhost:5173/api/v1/auth?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMiLCJleHAiOjE3MDQxNTM2MDAsImlhdCI6MTcwNDA2NzIwMH0.Z6PEytos_I5QVHJp0kIzmoTjI_PyZIT5P8YVwo2SVCU&redirect=/" class="desktop-button-bg" style="display: flex; align-items: center; width: fit-content; row-gap: 8px; column-gap: 8px; font-size: 17px; line-height: 20px;font-weight: 500; border-radius: 9999px; padding: 8px 16px; color: white !important; background-color: rgb(252, 98, 77); flex-shrink: 0;">
+                              <div><a href="http://localhost:5173/api/v1/auth?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMiLCJleHAiOjE3MDQxNTM2MDAsImlhdCI6MTcwNDA2NzIwMH0.oe6SBCxjKwfLlX6_oRIsowlGSykqilCYKRvEzmxMYBk&redirect=/" class="desktop-button-bg" style="display: flex; align-items: center; width: fit-content; row-gap: 8px; column-gap: 8px; font-size: 17px; line-height: 20px;font-weight: 500; border-radius: 9999px; padding: 8px 16px; color: white !important; background-color: rgb(252, 98, 77); flex-shrink: 0;">
                               Login to PingPong
                               <source srcset="https://pingpong.hks.harvard.edu/circle_plus_solid_2x.png">
                               <img src="https://pingpong.hks.harvard.edu/circle_plus_solid_2x.png" width="17" height="17" class="hero-image" style="display: block;" border="0" alt="right pointing arrow">
@@ -1140,7 +1134,7 @@ async def test_magic_link_login(api, config, monkeypatch, now):
                   <table role="presentation" width="550" cellspacing="0" cellpadding="0" border="0" align="center">
                      <tbody>
                         <tr>
-                           <td class="type-body-d" align="left" valign="top" style="padding: 3px 0 0 0;"> <b>Button not working?</b> Paste the following link into your browser:<br><span style="overflow-wrap: break-word; word-wrap: break-word; -ms-word-break: break-all; word-break: break-all;"><a href="http://localhost:5173/api/v1/auth?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMiLCJleHAiOjE3MDQxNTM2MDAsImlhdCI6MTcwNDA2NzIwMH0.Z6PEytos_I5QVHJp0kIzmoTjI_PyZIT5P8YVwo2SVCU&redirect=/" style="color:#0070c9;">http://localhost:5173/api/v1/auth?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMiLCJleHAiOjE3MDQxNTM2MDAsImlhdCI6MTcwNDA2NzIwMH0.Z6PEytos_I5QVHJp0kIzmoTjI_PyZIT5P8YVwo2SVCU&redirect=/</a></td>
+                           <td class="type-body-d" align="left" valign="top" style="padding: 3px 0 0 0;"> <b>Button not working?</b> Paste the following link into your browser:<br><span style="overflow-wrap: break-word; word-wrap: break-word; -ms-word-break: break-all; word-break: break-all;"><a href="http://localhost:5173/api/v1/auth?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMiLCJleHAiOjE3MDQxNTM2MDAsImlhdCI6MTcwNDA2NzIwMH0.oe6SBCxjKwfLlX6_oRIsowlGSykqilCYKRvEzmxMYBk&redirect=/" style="color:#0070c9;">http://localhost:5173/api/v1/auth?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMiLCJleHAiOjE3MDQxNTM2MDAsImlhdCI6MTcwNDA2NzIwMH0.oe6SBCxjKwfLlX6_oRIsowlGSykqilCYKRvEzmxMYBk&redirect=/</a></td>
                         </tr>
                         <tr height="4"></tr>
                      </tbody>
@@ -1186,7 +1180,6 @@ async def test_magic_link_login(api, config, monkeypatch, now):
    </body>
 </html>
 """
-    expected_body = expected_body.replace(old_expected_token, expected_token)
     send_mock.assert_called_once_with(
         "user_123@domain.org",
         "Log back in to PingPong",
