@@ -411,7 +411,7 @@ export class WavRecorder {
 			await context.audioWorklet.addModule(this.scriptSrc);
 		} catch (e) {
 			console.error(e);
-			throw new Error(`Could not add audioWorklet module: ${this.scriptSrc}`);
+			throw new Error(`Could not add audioWorklet module: ${this.scriptSrc}`, { cause: e });
 		}
 		const processor = new AudioWorkletNode(context, 'audio_processor');
 		processor.port.onmessage = (e: MessageEvent) => {
