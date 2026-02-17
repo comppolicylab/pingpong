@@ -93,7 +93,7 @@ jobs:
           echo "Computed RELEASE_VERSION=$RELEASE_VERSION"
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@4ce2bbcf5d401e557e0537d863a6aced08605794
+        uses: aws-actions/configure-aws-credentials@f487a3d99423b03b33cbe8a0944867cb0f4223f9
         with:
           aws-access-key-id: ${{ secrets.PINGPONG_AWS_ACCESS_KEY }}
           aws-secret-access-key: ${{ secrets.PINGPONG_AWS_SECRET_ACCESS_KEY }}
@@ -101,7 +101,7 @@ jobs:
 
       - name: Login to Amazon ECR
         id: login-ecr
-        uses: aws-actions/amazon-ecr-login@d63b14614fe5d7fc5e5e52c523dea4e876816cc4
+        uses: aws-actions/amazon-ecr-login@bb3fdaaaf1aae5e6758d24b073b79052f3cda0a2
 
       - name: Check if Server image exists
         env:
