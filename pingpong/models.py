@@ -2702,15 +2702,6 @@ class AnonymousLink(Base):
         return await session.scalar(stmt)
 
     @classmethod
-    async def get_assistant_id_by_link_id(
-        cls, session: AsyncSession, id_: int
-    ) -> int | None:
-        stmt = select(assistant_link_association.c.assistant_id).where(
-            assistant_link_association.c.link_id == int(id_)
-        )
-        return await session.scalar(stmt)
-
-    @classmethod
     async def revoke(cls, session: AsyncSession, id_: int) -> "AnonymousLink":
         stmt = (
             update(AnonymousLink)
