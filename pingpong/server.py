@@ -7700,9 +7700,11 @@ async def unshare_assistant(
     """
     Remove an anonymous share of an assistant with the class.
     """
-    asst = await models.Assistant.get_by_id(request.state["db"], int(assistant_id))
-    share_link = await models.AnonymousLink.get_by_id(
-        request.state["db"], int(share_id)
+    asst, share_link = await asyncio.gather(
+        models.Assistant.get_by_id(request.state["db"], int(assistant_id)),
+        models.AnonymousLink.get_by_id_with_assistant(
+            request.state["db"], int(share_id)
+        ),
     )
     if not asst:
         raise HTTPException(
@@ -7716,11 +7718,7 @@ async def unshare_assistant(
             detail="Share link not found.",
         )
 
-    share_assistant_id = await models.AnonymousLink.get_assistant_id_by_link_id(
-        request.state["db"],
-        share_link.id,
-    )
-    if share_assistant_id != asst.id:
+    if share_link.assistant.id != asst.id:
         raise HTTPException(
             status_code=400,
             detail="This share link does not belong to the specified assistant.",
