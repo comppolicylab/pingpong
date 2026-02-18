@@ -1925,6 +1925,7 @@ class LectureVideo(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     assistants = relationship("Assistant", back_populates="lecture_video")
+    threads = relationship("Thread", back_populates="lecture_video")
     key = Column(String, nullable=False, unique=True)
     name = Column(String)
     uploader_id = Column(Integer, ForeignKey("users.id"), nullable=True, default=None)
@@ -2795,6 +2796,19 @@ class Assistant(Base):
         if not id_:
             return Assistant()
         stmt = select(Assistant).where(Assistant.id == int(id_))
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_id_with_lecture_video(
+        cls, session: AsyncSession, id_: int | None
+    ) -> "Assistant":
+        if not id_:
+            return Assistant()
+        stmt = (
+            select(Assistant)
+            .where(Assistant.id == int(id_))
+            .options(selectinload(Assistant.lecture_video))
+        )
         return await session.scalar(stmt)
 
     @classmethod
@@ -5496,6 +5510,18 @@ class Thread(Base):
         "VoiceModeRecording",
         back_populates="thread",
         uselist=False,
+    )
+    lecture_video_id = Column(
+        Integer,
+        ForeignKey(
+            "lecture_videos.id",
+            name="fk_threads_lecture_video_id_lecture_video",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    )
+    lecture_video = relationship(
+        "LectureVideo", back_populates="threads", uselist=False
     )
     instructions = Column(String, nullable=True)
     timezone = Column(String, nullable=True)

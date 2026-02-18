@@ -804,6 +804,12 @@ class CreateAudioThread(BaseModel):
     conversation_id: str | None = None
 
 
+class CreateLectureThread(BaseModel):
+    parties: list[int] = []
+    assistant_id: int
+    timezone: str | None = None
+
+
 class VideoMetadata(BaseModel):
     content_length: int
     content_type: str

@@ -3198,6 +3198,7 @@ async def get_thread(
         users = {str(u.id): u for u in thread.users}
 
         is_supervisor = is_supervisor_check[0]
+
         is_current_user = False
         show_reasoning_summaries = is_supervisor or (
             assistant and not assistant.hide_reasoning_summaries
@@ -3762,6 +3763,7 @@ async def get_thread(
             "reasoning_messages": reasoning_messages,
             "attachments": all_files,
             "instructions": thread.instructions if can_view_prompt else None,
+            "lecture_video_id": thread.lecture_video_id,
             "recording": thread.voice_mode_recording
             if is_supervisor or is_current_user
             else None,
@@ -3900,7 +3902,6 @@ async def transcribe_thread_recording(
             ]
         ),
     )
-
     if not thread:
         raise HTTPException(status_code=404, detail="Thread not found")
     if not thread.voice_mode_recording:
@@ -5443,6 +5444,128 @@ async def create_audio_thread(
 
 
 @v1.post(
+    "/class/{class_id}/thread/lecture",
+    dependencies=[Depends(Authz("can_create_thread", "class:{class_id}"))],
+    response_model=schemas.ThreadWithOptionalToken,
+)
+async def create_lecture_thread(
+    class_id: str,
+    req: schemas.CreateLectureThread,
+    request: StateRequest,
+):
+    if request.state["is_anonymous"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Can't create a Lecture presentation with an anonymous session. Please sign in!",
+        )
+
+    parties = list[models.User]()
+
+    parties_ids = req.parties or []
+    if (
+        request.state["session"].user is not None
+        and request.state["session"].status != schemas.SessionStatus.ANONYMOUS
+    ):
+        if request.state["session"].user.id not in parties_ids:
+            parties_ids.append(request.state["session"].user.id)
+
+    assistant = await models.Assistant.get_by_id_with_lecture_video(
+        request.state["db"], int(req.assistant_id)
+    )
+    if not assistant:
+        raise HTTPException(
+            status_code=404,
+            detail="Could not find the assistant you specified. Please try again.",
+        )
+
+    if not assistant.lecture_video:
+        raise HTTPException(
+            status_code=400,
+            detail="This assistant does not have a lecture video attached. Unable to create Lecture Presentation",
+        )
+
+    lecture_video_id = assistant.lecture_video_id
+
+    if assistant.version != 3:
+        raise HTTPException(
+            status_code=400,
+            detail="Lecture presentation can only be created using v3 assistants.",
+        )
+
+    try:
+        class_, parties = await asyncio.gather(
+            models.Class.get_by_id(request.state["db"], int(class_id)),
+            models.User.get_all_by_id(request.state["db"], parties_ids),
+        )
+    except Exception:
+        logger.exception("Error creating thread")
+        raise HTTPException(
+            status_code=400,
+            detail="Something went wrong while creating your Lecture presentation. Please try again later. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+        )
+
+    if not class_:
+        raise HTTPException(
+            status_code=404,
+            detail="Class not found",
+        )
+    all_parties = parties or []
+    new_thread = {
+        "name": "Lecture Presentation",
+        "class_id": int(class_id),
+        "private": True if all_parties else False,
+        "interaction_mode": "lecture_video",
+        "users": all_parties,
+        "thread_id": None,
+        "anonymous_sessions": [],
+        "conversation_id": None,
+        "assistant_id": req.assistant_id,
+        "vector_store_id": None,
+        "code_interpreter_file_ids": [],
+        "image_file_ids": [],
+        "tools_available": json.dumps([]),
+        "version": assistant.version,
+        "last_activity": func.now(),
+        "instructions": None,
+        "timezone": req.timezone,
+        "lecture_video_id": lecture_video_id,
+        "display_user_info": assistant.should_record_user_information
+        and not class_.private,
+    }
+
+    result: None | models.Thread = None
+    try:
+        result = await models.Thread.create(request.state["db"], new_thread)
+        result.instructions = format_instructions(
+            assistant.instructions,
+            assistant.use_latex,
+            assistant.use_image_descriptions,
+            thread_id=result.id,
+            user_id=request.state["session"].user.id,
+        )
+        request.state["db"].add(result)
+        await request.state["db"].flush()
+        await request.state["db"].refresh(result)
+
+        grants = [
+            (f"class:{class_id}", "parent", f"thread:{result.id}"),
+        ] + [(f"user:{p.id}", "party", f"thread:{result.id}") for p in parties]
+        await request.state["authz"].write(grant=grants)
+
+        return {
+            "thread": result,
+        }
+    except Exception as e:
+        logger.exception("Error creating thread: %s", e)
+        if result:
+            # Delete users-threads mapping
+            for user in result.users:
+                result.users.remove(user)
+            await result.delete(request.state["db"])
+        raise e
+
+
+@v1.post(
     "/class/{class_id}/thread",
     dependencies=[Depends(Authz("can_create_thread", "class:{class_id}"))],
     response_model=schemas.ThreadWithOptionalToken,
@@ -5464,6 +5587,15 @@ async def create_thread(
         raise HTTPException(
             status_code=404,
             detail="Could not find the assistant you specified. Please try again.",
+        )
+
+    if assistant.interaction_mode in (
+        schemas.InteractionMode.LECTURE_VIDEO,
+        schemas.InteractionMode.VOICE,
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="This assistant requires a dedicated thread creation endpoint.",
         )
 
     if assistant.assistant_should_message_first and req.message:
@@ -7652,6 +7784,11 @@ async def share_assistant(
         raise HTTPException(
             status_code=400,
             detail="This assistant is not published and cannot be shared.",
+        )
+
+    if asst.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
+        raise HTTPException(
+            status_code=403, detail="Lecture Video assistants cannot be shared."
         )
 
     # Create a new anonymous link for the assistant
