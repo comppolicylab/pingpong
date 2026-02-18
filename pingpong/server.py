@@ -5459,8 +5459,6 @@ async def create_lecture_thread(
             detail="Can't create a Lecture presentation with an anonymous session. Please sign in!",
         )
 
-    parties = list[models.User]()
-
     parties_ids = req.parties or []
     if (
         request.state["session"].user is not None
@@ -5476,6 +5474,12 @@ async def create_lecture_thread(
         raise HTTPException(
             status_code=404,
             detail="Could not find the assistant you specified. Please try again.",
+        )
+
+    if assistant.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
+        raise HTTPException(
+            status_code=400,
+            detail="This assistant is not compatible with this thread creation endpoint. Provide a lecture_video assistant.",
         )
 
     if not assistant.lecture_video:
@@ -5562,7 +5566,10 @@ async def create_lecture_thread(
             for user in result.users:
                 result.users.remove(user)
             await result.delete(request.state["db"])
-        raise e
+        raise HTTPException(
+            status_code=400,
+            detail="Something went wrong while creating your Lecture presentation. Please try again later. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+        ) from e
 
 
 @v1.post(

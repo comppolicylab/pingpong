@@ -2037,6 +2037,7 @@ class ThreadWithMeta(BaseModel):
     reasoning_messages: list["ReasoningMessage"] | None = None
     attachments: dict[str, File] | None
     instructions: str | None
+    lecture_video_id: int | None = None
     recording: VoiceModeRecording | None = None
     has_more: bool
 
