@@ -7702,7 +7702,9 @@ async def unshare_assistant(
     """
     asst, share_link = await asyncio.gather(
         models.Assistant.get_by_id(request.state["db"], int(assistant_id)),
-        models.AnonymousLink.get_by_id(request.state["db"], int(share_id)),
+        models.AnonymousLink.get_by_id_with_assistant(
+            request.state["db"], int(share_id)
+        ),
     )
     if not asst:
         raise HTTPException(
