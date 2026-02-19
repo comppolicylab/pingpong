@@ -1,6 +1,6 @@
 {
 	"name": "pingpong",
-	"version": "7.16.1",
+	"version": "7.16.2",
 	"private": true,
 	"scripts": {
 		"dev": "vite dev",
