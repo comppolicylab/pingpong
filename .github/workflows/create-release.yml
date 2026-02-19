@@ -100,7 +100,7 @@ jobs:
           is_taggable_path() {
             local path="$1"
             case "$path" in
-              web/*|pingpong/*|alembic/*|saml/*|poetry.lock|pyproject.toml)
+              web/*|pingpong/*|alembic/*|saml/*|uv.lock|pyproject.toml)
                 return 0
                 ;;
               *)

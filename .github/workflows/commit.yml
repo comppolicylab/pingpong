@@ -10,7 +10,7 @@ on:
       - pingpong/**
       - alembic/**
       - saml/**
-      - poetry.lock
+      - uv.lock
       - pyproject.toml
 
 jobs:
@@ -177,7 +177,7 @@ jobs:
               web_files = [file for file in changed_files if file.startswith('web/')]
               server_files = [
                   file for file in changed_files
-                  if file.startswith(('pingpong/', 'saml/', 'alembic/')) or file in ['poetry.lock', 'pyproject.toml']
+                  if file.startswith(('pingpong/', 'saml/', 'alembic/')) or file in ['uv.lock', 'pyproject.toml']
               ]
 
               web_update = any(file != 'web/pingpong/package.json' for file in web_files)

@@ -3,7 +3,7 @@ name: Claude Code Review
 on:
   pull_request:
     types: [opened]
-    paths: [web/**, pingpong/**, .github/workflows/**, conftest.py, poetry.lock, pyproject.toml]
+    paths: [web/**, pingpong/**, .github/workflows/**, conftest.py, uv.lock, pyproject.toml]
   issue_comment:
     types: [created]
 
@@ -73,5 +73,5 @@ jobs:
           prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ env.PR_NUMBER }}'
 
           # Tools based on CLAUDE.md development commands
-          # Includes: poetry (pytest, alembic, python), pnpm (check, lint, test), and gh CLI
-          claude_args: '--allowed-tools "Bash(poetry run pytest:*),Bash(poetry run alembic:*),Bash(poetry run python:*),Bash(poetry install:*),Bash(pnpm install:*),Bash(pnpm check:*),Bash(pnpm lint:*),Bash(pnpm format:*),Bash(pnpm test:*),Bash(pnpm build:*),Bash(gh issue:*),Bash(gh pr:*),Bash(gh search:*)"'
+          # Includes: uv (pytest, alembic, python), pnpm (check, lint, test), and gh CLI
+          claude_args: '--allowed-tools "Bash(uv run pytest:*),Bash(uv run alembic:*),Bash(uv run python:*),Bash(uv sync:*),Bash(pnpm install:*),Bash(pnpm check:*),Bash(pnpm lint:*),Bash(pnpm format:*),Bash(pnpm test:*),Bash(pnpm build:*),Bash(gh issue:*),Bash(gh pr:*),Bash(gh search:*)"'
