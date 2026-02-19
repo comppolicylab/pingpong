@@ -1,6 +1,7 @@
 # Set up image based on uv / Python3.11
 
-FROM python:3.11.6-bookworm
+FROM ghcr.io/astral-sh/uv:python3.11-trixie
+COPY --from=ghcr.io/astral-sh/uv:0.10.4 /uv /uvx /bin/
 
 RUN apt-get update \
     && apt-get install -y ca-certificates ffmpeg \
@@ -15,12 +16,9 @@ ENV PYTHONFAULTHANDLER=1 \
       PIP_NO_CACHE_DIR=off \
       PIP_DISABLE_PIP_VERSION_CHECK=on \
       PIP_DEFAULT_TIMEOUT=100 \
-      UV_SYSTEM_PYTHON=true \
+      UV_NO_DEV=1 \
       PATH="/code/.venv/bin:$PATH" \
       SENTRY_RELEASE=$SENTRY_RELEASE
-
-# Set up uv
-RUN pip install uv==0.10.4
 
 WORKDIR /code
 
@@ -28,7 +26,7 @@ WORKDIR /code
 COPY uv.lock pyproject.toml /code/
 
 # Install dependencies
-RUN uv sync --no-dev --locked --color never
+RUN uv sync --locked --color never --compile-bytecode
 
 COPY . /code
 
