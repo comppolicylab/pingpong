@@ -30,7 +30,7 @@ COPY uv.lock pyproject.toml /code/
 # Install dependencies
 RUN uv sync --locked --color never
 
-# Disable uv's sync lockfile checking, 
+# Disable uv's sync lockfile checking,
 # since we won't be modifying dependencies in the container.
 ENV UV_NO_SYNC=1
 
