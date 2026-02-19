@@ -6,6 +6,7 @@ RUN npm install -g pnpm@10
 WORKDIR /app/pingpong
 COPY pingpong/package.json pingpong/pnpm-lock.yaml ./
 COPY pingpong/patches ./patches
+
 RUN pnpm install --frozen-lockfile
 
 ARG node_env=production
