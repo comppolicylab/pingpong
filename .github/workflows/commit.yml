@@ -40,7 +40,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -e
-          python << EOF
+          python << 'EOF'
           import json
           import os
           import re
