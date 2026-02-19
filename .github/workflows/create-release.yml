@@ -307,6 +307,19 @@ jobs:
               print("Failed to update version in web/pingpong/package.json", file=sys.stderr)
               sys.exit(1)
           package_json.write_text(pkg_updated, encoding="utf-8")
+
+          uv_lock = Path("uv.lock")
+          lock_content = uv_lock.read_text(encoding="utf-8")
+          lock_updated, lock_count = re.subn(
+              r'(\[\[package\]\]\s+name = "pingpong"\s+version = ")[^"]+(")',
+              rf'\g<1>{version}\2',
+              lock_content,
+              count=1,
+          )
+          if lock_count != 1:
+              print("Failed to update version in uv.lock", file=sys.stderr)
+              sys.exit(1)
+          uv_lock.write_text(lock_updated, encoding="utf-8")
           PY
 
       - name: Detect version file changes
@@ -314,7 +327,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if git diff --quiet -- pyproject.toml web/pingpong/package.json; then
+          if git diff --quiet -- pyproject.toml web/pingpong/package.json uv.lock; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "No version file changes detected."
           else
@@ -331,6 +344,7 @@ jobs:
           files: |
             pyproject.toml
             web/pingpong/package.json
+            uv.lock
 
       - name: Resolve target commit SHA
         id: target-sha
