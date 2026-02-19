@@ -166,13 +166,49 @@ jobs:
               if not pattern:
                   return False
 
+              def uv_lock_has_pingpong_context():
+                  package_name_pattern = re.compile(r'^name\s*=\s*"pingpong"\s*$')
+                  try:
+                      patch = subprocess.check_output(
+                          ['git', 'diff', '--unified=1', compare_range, '--', 'uv.lock'],
+                          stderr=subprocess.DEVNULL,
+                      ).decode()
+                  except subprocess.CalledProcessError:
+                      return False
+
+                  hunk_has_pingpong_name = False
+                  hunk_has_version_change = False
+                  for line in patch.splitlines():
+                      if line.startswith(('diff --git ', 'index ', '--- ', '+++ ')):
+                          continue
+                      if line.startswith('@@'):
+                          if hunk_has_pingpong_name and hunk_has_version_change:
+                              return True
+                          hunk_has_pingpong_name = False
+                          hunk_has_version_change = False
+                          continue
+                      if not line or line.startswith('\\'):
+                          continue
+                      if line[0] not in {' ', '+', '-'}:
+                          continue
+
+                      content = line[1:].strip()
+                      if package_name_pattern.match(content):
+                          hunk_has_pingpong_name = True
+                      if line[0] in {'+', '-'} and pattern.match(content):
+                          hunk_has_version_change = True
+
+                  return hunk_has_pingpong_name and hunk_has_version_change
+
               changed_lines = get_changed_diff_lines(file_path, compare_range)
               if not changed_lines:
                   return False
 
               if file_path == 'uv.lock':
-                  only_version = len(changed_lines) == 2 and all(
-                      pattern.match(line) for line in changed_lines
+                  only_version = (
+                      len(changed_lines) == 2
+                      and all(pattern.match(line) for line in changed_lines)
+                      and uv_lock_has_pingpong_context()
                   )
               else:
                   only_version = all(pattern.match(line) for line in changed_lines)
