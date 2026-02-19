@@ -32,4 +32,9 @@ RUN uv sync --no-dev --locked --color never
 
 COPY . /code
 
+RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser \
+    && chown -R appuser:appgroup /code
+
+USER appuser
+
 CMD ["fastapi", "run", "pingpong", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
