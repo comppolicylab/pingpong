@@ -18,28 +18,28 @@ PingPong is an educational AI assistant platform built with:
 
 ```bash
 # Install dependencies
-poetry install --with dev
+uv sync
 
 # Run development server with auto-reload
-CONFIG_PATH=config.local.toml poetry run fastapi dev pingpong --port 8000 --host 0.0.0.0 --reload
+CONFIG_PATH=config.local.toml uv run fastapi dev pingpong --port 8000 --host 0.0.0.0 --reload
 
 # Alternative: run with uvicorn directly
-poetry run uvicorn pingpong:server --port 8000 --workers 1 --reload
+uv run uvicorn pingpong:server --port 8000 --workers 1 --reload
 
 # Run tests
-poetry run pytest
+uv run pytest
 
 # Run specific test file
-poetry run pytest path/to/test_file.py
+uv run pytest path/to/test_file.py
 
 # Run specific test
-poetry run pytest path/to/test_file.py::test_function_name
+uv run pytest path/to/test_file.py::test_function_name
 
 # Database migrations - create new migration
-poetry run alembic revision --autogenerate -m "description of change"
+uv run alembic revision --autogenerate -m "description of change"
 
 # Database migrations - apply migrations
-poetry run python -m pingpong db migrate
+uv run python -m pingpong db migrate
 ```
 
 ### Frontend (SvelteKit)
@@ -127,7 +127,7 @@ Institution ─── User (admins)
 **Configuration:**
 - Single `config` object from `pingpong/config.py`
 - Uses Pydantic `BaseSettings` with TOML file support
-- Load custom config: `CONFIG_PATH=config.local.toml poetry run ...`
+- Load custom config: `CONFIG_PATH=config.local.toml uv run ...`
 - Test config: `test_config.toml` (automatically loaded by pytest via `conftest.py`)
 
 ### Frontend Architecture
@@ -176,9 +176,9 @@ Institution ─── User (admins)
 ### Database Migrations
 
 1. Make changes to SQLAlchemy models in `pingpong/models.py`
-2. Generate migration: `poetry run alembic revision --autogenerate -m "description"`
+2. Generate migration: `uv run alembic revision --autogenerate -m "description"`
 3. Review generated migration file in `alembic/versions/`
-4. Apply migration: `poetry run python -m pingpong db migrate`
+4. Apply migration: `uv run python -m pingpong db migrate`
 
 ### Testing
 

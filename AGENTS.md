@@ -26,11 +26,11 @@ PingPong is an educational AI assistant platform with:
 ### Backend (repo root)
 
 ```bash
-poetry install --with dev
-CONFIG_PATH=config.local.toml poetry run fastapi dev pingpong --port 8000 --host 0.0.0.0 --reload
-poetry run pytest
-poetry run alembic revision --autogenerate -m "description of change"
-poetry run python -m pingpong db migrate
+uv sync
+CONFIG_PATH=config.local.toml uv run fastapi dev pingpong --port 8000 --host 0.0.0.0 --reload
+uv run pytest
+uv run alembic revision --autogenerate -m "description of change"
+uv run python -m pingpong db migrate
 ```
 
 ### Frontend: main app (`web/pingpong`)
@@ -91,9 +91,9 @@ pnpm test
 ## Database Migrations
 
 1. Update models in `pingpong/models.py`.
-2. Generate migration: `poetry run alembic revision --autogenerate -m "description"`.
+2. Generate migration: `uv run alembic revision --autogenerate -m "description"`.
 3. Review migration in `alembic/versions/`.
-4. Apply: `poetry run python -m pingpong db migrate`.
+4. Apply: `uv run python -m pingpong db migrate`.
 
 ## Development Notes
 
