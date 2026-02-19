@@ -1,10 +1,10 @@
 # Set up image based on uv / Python3.11
 
-FROM ghcr.io/astral-sh/uv:python3.11-trixie
+FROM ghcr.io/astral-sh/uv:0.10.4-python3.11-trixie
 COPY --from=ghcr.io/astral-sh/uv:0.10.4 /uv /uvx /bin/
 
 RUN apt-get update \
-    && apt-get install -y ca-certificates ffmpeg \
+    && apt-get install -y ca-certificates ffmpeg --no-install-recommends \
     && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
@@ -13,27 +13,28 @@ ARG SENTRY_RELEASE=""
 ENV PYTHONFAULTHANDLER=1 \
       PYTHONUNBUFFERED=1 \
       PYTHONHASHSEED=random \
-      PIP_NO_CACHE_DIR=off \
-      PIP_DISABLE_PIP_VERSION_CHECK=on \
-      PIP_DEFAULT_TIMEOUT=100 \
-      UV_SYSTEM_PYTHON=1 \
-      UV_FROZEN=1 \
+      NO_COLOR=1 \
+      UV_COMPILE_BYTECODE=1 \
       UV_NO_DEV=1 \
       PATH="/code/.venv/bin:$PATH" \
       SENTRY_RELEASE=$SENTRY_RELEASE
 
 WORKDIR /code
 
+# Create runtime user early so COPY --chown can resolve app:app.
+RUN useradd --create-home --uid 10001 app
+
 # Copy dependency manifests
 COPY uv.lock pyproject.toml /code/
 
 # Install dependencies
-RUN uv sync --color never --compile-bytecode
+RUN uv sync --locked --color never
 
-COPY . /code
+# Disable uv's sync lockfile checking, 
+# since we won't be modifying dependencies in the container.
+ENV UV_NO_SYNC=1
 
-RUN useradd --create-home --uid 10001 app \
-        && chown -R app:app /code
+COPY --chown=app:app . /code
 USER app
 
 CMD ["fastapi", "run", "pingpong", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]

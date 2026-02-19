@@ -197,4 +197,7 @@ saml/**/*.key
 saml/**/*.crt
 
 # Local artifact store
-/local_exports/
+local_exports/
+
+# Web
+web/
