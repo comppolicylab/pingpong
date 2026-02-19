@@ -9,9 +9,9 @@ on:
         required: true
         type: choice
         options:
-          - major
-          - minor
           - patch
+          - minor
+          - major
 
 concurrency: create-release
 
@@ -454,11 +454,12 @@ jobs:
           generated = json.loads(Path("/tmp/generated-notes.json").read_text(encoding="utf-8"))
           body = (generated.get("body") or "").strip()
 
-          start_index = body.find("## What's Changed")
-          if start_index != -1:
-            related_prs_section = body[start_index:].strip()
-          else:
-            related_prs_section = body if body else "- None"
+          related_prs_section = body if body else "- None"
+          what_changed_heading = "## What's Changed"
+          heading_index = body.find(what_changed_heading)
+          if heading_index != -1:
+            after_heading = body[heading_index + len(what_changed_heading):].lstrip()
+            related_prs_section = after_heading if after_heading else "- None"
 
           template = textwrap.dedent("""\
           # Release Notes
