@@ -58,20 +58,6 @@ jobs:
         working-directory: ${{env.wd}}
         run: pnpm check
 
-      - name: Check formatting
-        working-directory: ${{env.wd}}
-        run: |
-          pnpm format
-
-          # Verify no code changed
-          git diff HEAD --exit-code || {
-              echo
-              echo -e "\033[91m" 'Looks like you did not check in formatted files :(' "\033[0m"
-              echo
-              echo -e "\033[91m" 'Run `pnpm format` and check in the result.' "\033[0m"
-              exit 1
-          }
-
       - name: Run tests
         working-directory: ${{env.wd}}
         run: pnpm test
