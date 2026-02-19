@@ -159,17 +159,59 @@ jobs:
           def is_version_only_change(file_path, compare_range):
               patterns = {
                   'pyproject.toml': re.compile(r'^version\s*=\s*".*"$'),
+                  'uv.lock': re.compile(r'^version\s*=\s*".*"$'),
                   'web/pingpong/package.json': re.compile(r'^"version"\s*:\s*".*"\s*,?$'),
               }
               pattern = patterns.get(file_path)
               if not pattern:
                   return False
 
+              def uv_lock_has_pingpong_context():
+                  package_name_pattern = re.compile(r'^name\s*=\s*"pingpong"\s*$')
+                  try:
+                      patch = subprocess.check_output(
+                          ['git', 'diff', '--unified=1', compare_range, '--', 'uv.lock'],
+                          stderr=subprocess.DEVNULL,
+                      ).decode()
+                  except subprocess.CalledProcessError:
+                      return False
+
+                  hunk_has_pingpong_name = False
+                  hunk_has_version_change = False
+                  for line in patch.splitlines():
+                      if line.startswith(('diff --git ', 'index ', '--- ', '+++ ')):
+                          continue
+                      if line.startswith('@@'):
+                          if hunk_has_pingpong_name and hunk_has_version_change:
+                              return True
+                          hunk_has_pingpong_name = False
+                          hunk_has_version_change = False
+                          continue
+                      if not line or line.startswith('\\'):
+                          continue
+                      if line[0] not in {' ', '+', '-'}:
+                          continue
+
+                      content = line[1:].strip()
+                      if package_name_pattern.match(content):
+                          hunk_has_pingpong_name = True
+                      if line[0] in {'+', '-'} and pattern.match(content):
+                          hunk_has_version_change = True
+
+                  return hunk_has_pingpong_name and hunk_has_version_change
+
               changed_lines = get_changed_diff_lines(file_path, compare_range)
               if not changed_lines:
                   return False
 
-              only_version = all(pattern.match(line) for line in changed_lines)
+              if file_path == 'uv.lock':
+                  only_version = (
+                      len(changed_lines) == 2
+                      and all(pattern.match(line) for line in changed_lines)
+                      and uv_lock_has_pingpong_context()
+                  )
+              else:
+                  only_version = all(pattern.match(line) for line in changed_lines)
               print(f'Checking version-only change for {file_path} in {compare_range}: {only_version}')
               return only_version
 
@@ -184,9 +226,11 @@ jobs:
               if not web_update and 'web/pingpong/package.json' in web_files:
                   web_update = not is_version_only_change('web/pingpong/package.json', compare_range)
 
-              server_update = any(file != 'pyproject.toml' for file in server_files)
+              server_update = any(file not in {'pyproject.toml', 'uv.lock'} for file in server_files)
               if not server_update and 'pyproject.toml' in server_files:
                   server_update = not is_version_only_change('pyproject.toml', compare_range)
+              if not server_update and 'uv.lock' in server_files:
+                  server_update = not is_version_only_change('uv.lock', compare_range)
 
               return web_update, server_update
 
