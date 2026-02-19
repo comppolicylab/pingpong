@@ -18,10 +18,11 @@ repos:
       - id: mypy
         args: [--ignore-missing-imports, --install-types, --non-interactive]
         exclude: alembic/
-  - repo: https://github.com/python-poetry/poetry
-    rev: 2.1.3
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    # uv version.
+    rev: 0.10.4
     hooks:
-      - id: poetry-check
+      - id: uv-lock
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:

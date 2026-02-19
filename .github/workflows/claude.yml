@@ -96,4 +96,4 @@ jobs:
 
           # Tools based on CLAUDE.md development commands
           claude_args: |
-            --allowed-tools "Bash(poetry run pytest:*),Bash(poetry run alembic:*),Bash(poetry run python:*),Bash(poetry install:*),Bash(pnpm install:*),Bash(pnpm check:*),Bash(pnpm lint:*),Bash(pnpm format:*),Bash(pnpm test:*),Bash(pnpm build:*),Bash(gh issue:*),Bash(gh pr:*),Bash(gh search:*)"
+            --allowed-tools "Bash(uv run pytest:*),Bash(uv run alembic:*),Bash(uv run python:*),Bash(uv sync:*),Bash(pnpm install:*),Bash(pnpm check:*),Bash(pnpm lint:*),Bash(pnpm format:*),Bash(pnpm test:*),Bash(pnpm build:*),Bash(gh issue:*),Bash(gh pr:*),Bash(gh search:*)"
