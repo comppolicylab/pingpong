@@ -2801,9 +2801,9 @@ class Assistant(Base):
     @classmethod
     async def get_by_id_with_lecture_video(
         cls, session: AsyncSession, id_: int | None
-    ) -> "Assistant":
+    ) -> Optional["Assistant"]:
         if not id_:
-            return Assistant()
+            return None
         stmt = (
             select(Assistant)
             .where(Assistant.id == int(id_))

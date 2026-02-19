@@ -3198,7 +3198,6 @@ async def get_thread(
         users = {str(u.id): u for u in thread.users}
 
         is_supervisor = is_supervisor_check[0]
-
         is_current_user = False
         show_reasoning_summaries = is_supervisor or (
             assistant and not assistant.hide_reasoning_summaries
@@ -3902,6 +3901,7 @@ async def transcribe_thread_recording(
             ]
         ),
     )
+
     if not thread:
         raise HTTPException(status_code=404, detail="Thread not found")
     if not thread.voice_mode_recording:
@@ -5496,17 +5496,10 @@ async def create_lecture_thread(
             detail="Lecture presentation can only be created using v3 assistants.",
         )
 
-    try:
-        class_, parties = await asyncio.gather(
-            models.Class.get_by_id(request.state["db"], int(class_id)),
-            models.User.get_all_by_id(request.state["db"], parties_ids),
-        )
-    except Exception:
-        logger.exception("Error creating thread")
-        raise HTTPException(
-            status_code=400,
-            detail="Something went wrong while creating your Lecture presentation. Please try again later. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
-        )
+    class_, parties = await asyncio.gather(
+        models.Class.get_by_id(request.state["db"], int(class_id)),
+        models.User.get_all_by_id(request.state["db"], parties_ids),
+    )
 
     if not class_:
         raise HTTPException(

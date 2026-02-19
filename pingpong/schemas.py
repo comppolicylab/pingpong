@@ -724,6 +724,7 @@ class Thread(BaseModel):
     last_activity: datetime
     display_user_info: bool
     anonymous_session: bool = False
+    lecture_video_id: int | None = None
     is_current_user_participant: bool = False
 
     model_config = ConfigDict(
