@@ -1,0 +1,36 @@
+diff --git a/lib/shared/ajv.js b/lib/shared/ajv.js
+index 7e53d12a6a078aaac1b14aa34467625afceb27e0..452fb3251a16283b17f77dd606e0ac19050077a1 100644
+--- a/lib/shared/ajv.js
++++ b/lib/shared/ajv.js
+@@ -7,7 +7,7 @@
+ // Requirements
+ //------------------------------------------------------------------------------
+ 
+-import Ajv from "ajv";
++import Ajv from "ajv-draft-04";
+ 
+ //-----------------------------------------------------------------------------
+ // Helpers
+@@ -177,15 +177,18 @@ export default (additionalOptions = {}) => {
+         meta: false,
+         useDefaults: true,
+         validateSchema: false,
+-        missingRefs: "ignore",
++        strict: false,
+         verbose: true,
+-        schemaId: "auto",
+         ...additionalOptions
+     });
+ 
+     ajv.addMetaSchema(metaSchema);
+-    // eslint-disable-next-line no-underscore-dangle -- part of the API
+-    ajv._opts.defaultMeta = metaSchema.id;
++    if (ajv.opts) {
++        ajv.opts.defaultMeta = metaSchema.id;
++    } else {
++        // eslint-disable-next-line no-underscore-dangle -- part of the API in v6
++        ajv._opts.defaultMeta = metaSchema.id;
++    }
+ 
+     return ajv;
+ };
