@@ -5,10 +5,10 @@ index ce0be2f43d81ac0dd0abae69caadcdc68f4726ca..dfcbebd0ea5c24dc8453d7a8b088f314
 @@ -28,7 +28,7 @@ const {
  	defaultRuleTesterConfig,
  } = require("../config/default-config");
- 
+
 -const ajv = require("../shared/ajv")({ strictDefaults: true });
 +const ajv = require("../shared/ajv")({ strict: true });
- 
+
  const parserSymbol = Symbol.for("eslint.RuleTester.parser");
  const { ConfigArraySymbol } = require("@eslint/config-array");
 diff --git a/lib/shared/ajv.js b/lib/shared/ajv.js
@@ -18,12 +18,12 @@ index 5c5c41bd7470bd190bd4efb5caab88c73ae01f56..79ddd762a4f403ac6ebbf510ccbae31c
 @@ -8,8 +8,8 @@
  // Requirements
  //------------------------------------------------------------------------------
- 
+
 -const Ajv = require("ajv"),
 -	metaSchema = require("ajv/lib/refs/json-schema-draft-04.json");
 +const Ajv = require("ajv-draft-04"),
 +	metaSchema = require("ajv-draft-04/dist/refs/json-schema-draft-04.json");
- 
+
  //------------------------------------------------------------------------------
  // Public Interface
 @@ -20,15 +20,18 @@ module.exports = (additionalOptions = {}) => {
@@ -36,7 +36,7 @@ index 5c5c41bd7470bd190bd4efb5caab88c73ae01f56..79ddd762a4f403ac6ebbf510ccbae31c
 -		schemaId: "auto",
  		...additionalOptions,
  	});
- 
+
  	ajv.addMetaSchema(metaSchema);
 -	// eslint-disable-next-line no-underscore-dangle -- Ajv's API
 -	ajv._opts.defaultMeta = metaSchema.id;
@@ -46,6 +46,6 @@ index 5c5c41bd7470bd190bd4efb5caab88c73ae01f56..79ddd762a4f403ac6ebbf510ccbae31c
 +		// eslint-disable-next-line no-underscore-dangle -- Ajv's API in v6
 +		ajv._opts.defaultMeta = metaSchema.id;
 +	}
- 
+
  	return ajv;
  };

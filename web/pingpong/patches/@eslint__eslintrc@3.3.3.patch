@@ -5,10 +5,10 @@ index 7e53d12a6a078aaac1b14aa34467625afceb27e0..452fb3251a16283b17f77dd606e0ac19
 @@ -7,7 +7,7 @@
  // Requirements
  //------------------------------------------------------------------------------
- 
+
 -import Ajv from "ajv";
 +import Ajv from "ajv-draft-04";
- 
+
  //-----------------------------------------------------------------------------
  // Helpers
 @@ -177,15 +177,18 @@ export default (additionalOptions = {}) => {
@@ -21,7 +21,7 @@ index 7e53d12a6a078aaac1b14aa34467625afceb27e0..452fb3251a16283b17f77dd606e0ac19
 -        schemaId: "auto",
          ...additionalOptions
      });
- 
+
      ajv.addMetaSchema(metaSchema);
 -    // eslint-disable-next-line no-underscore-dangle -- part of the API
 -    ajv._opts.defaultMeta = metaSchema.id;
@@ -31,6 +31,6 @@ index 7e53d12a6a078aaac1b14aa34467625afceb27e0..452fb3251a16283b17f77dd606e0ac19
 +        // eslint-disable-next-line no-underscore-dangle -- part of the API in v6
 +        ajv._opts.defaultMeta = metaSchema.id;
 +    }
- 
+
      return ajv;
  };
