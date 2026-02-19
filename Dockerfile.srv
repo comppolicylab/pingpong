@@ -17,6 +17,7 @@ ENV PYTHONFAULTHANDLER=1 \
       PIP_DISABLE_PIP_VERSION_CHECK=on \
       PIP_DEFAULT_TIMEOUT=100 \
       UV_SYSTEM_PYTHON=1 \
+      UV_FROZEN=1 \
       UV_NO_DEV=1 \
       PATH="/code/.venv/bin:$PATH" \
       SENTRY_RELEASE=$SENTRY_RELEASE
@@ -27,7 +28,7 @@ WORKDIR /code
 COPY uv.lock pyproject.toml /code/
 
 # Install dependencies
-RUN uv sync --locked --color never --compile-bytecode
+RUN uv sync --color never --compile-bytecode
 
 COPY . /code
 
