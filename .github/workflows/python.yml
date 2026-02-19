@@ -36,7 +36,7 @@ jobs:
       - name: Get requirements
         working-directory: ${{env.wd}}
         run: |
-          uv sync --color never
+          uv sync --locked --color never
 
       - name: Linting, formatting, and type checking
         working-directory: ${{env.wd}}
