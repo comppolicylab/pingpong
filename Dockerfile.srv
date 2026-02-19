@@ -32,9 +32,8 @@ RUN uv sync --no-dev --locked --color never
 
 COPY . /code
 
-RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser \
-    && chown -R appuser:appgroup /code
-
-USER appuser
+RUN useradd --create-home --uid 10001 app \
+        && chown -R app:app /code
+USER app
 
 CMD ["fastapi", "run", "pingpong", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
