@@ -13,9 +13,7 @@ from .testutil import with_authz, with_user, with_institution
         ("user:123", "can_create_thread", "class:1"),
     ]
 )
-async def test_create_lecture_thread_success(
-    api, db, institution, valid_user_token
-):
+async def test_create_lecture_thread_success(api, db, institution, valid_user_token):
     async with db.async_session() as session:
         class_ = models.Class(
             name="Test Class",
@@ -135,7 +133,10 @@ async def test_create_thread_rejects_lecture_video_assistant(
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 400
-    assert response.json()["detail"] == "This assistant requires a dedicated thread creation endpoint."
+    assert (
+        response.json()["detail"]
+        == "This assistant requires a dedicated thread creation endpoint."
+    )
 
 
 @with_user(123)
@@ -145,9 +146,7 @@ async def test_create_thread_rejects_lecture_video_assistant(
         ("anonymous_link:anon-share-token", "can_create_thread", "class:1"),
     ]
 )
-async def test_anonymous_cannot_create_lecture_thread(
-    api, db, institution
-):
+async def test_anonymous_cannot_create_lecture_thread(api, db, institution):
     async with db.async_session() as session:
         class_ = models.Class(
             name="Test Class",
@@ -199,9 +198,7 @@ async def test_anonymous_cannot_create_lecture_thread(
         ("user:123", "can_create_thread", "class:1"),
     ]
 )
-async def test_non_v3_assistants_rejected(
-    api, db, institution, valid_user_token
-):
+async def test_non_v3_assistants_rejected(api, db, institution, valid_user_token):
     async with db.async_session() as session:
         class_ = models.Class(
             name="Test Class",
@@ -235,7 +232,11 @@ async def test_non_v3_assistants_rejected(
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 400
-    assert response.json()["detail"] == "Lecture presentation can only be created using v3 assistants."
+    assert (
+        response.json()["detail"]
+        == "Lecture presentation can only be created using v3 assistants."
+    )
+
 
 @with_user(123)
 @with_institution(11, "Test Institution")
@@ -273,7 +274,10 @@ async def test_lecture_thread_rejected_without_attached_video(
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 400
-    assert response.json()["detail"] == "This assistant does not have a lecture video attached. Unable to create Lecture Presentation"
+    assert (
+        response.json()["detail"]
+        == "This assistant does not have a lecture video attached. Unable to create Lecture Presentation"
+    )
 
 
 @with_user(123)
@@ -311,4 +315,7 @@ async def test_lecture_endpoint_rejects_non_lecture_video_assistant(
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 400
-    assert response.json()["detail"] == "This assistant is not compatible with this thread creation endpoint. Provide a lecture_video assistant."
+    assert (
+        response.json()["detail"]
+        == "This assistant is not compatible with this thread creation endpoint. Provide a lecture_video assistant."
+    )
