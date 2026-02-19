@@ -1677,6 +1677,7 @@ async def test_create_thread_rejects_voice_assistant(
 ):
     async with db.async_session() as session:
         class_ = models.Class(
+            id=1,
             name="Test Class",
             institution_id=institution.id,
             api_key="test-key",

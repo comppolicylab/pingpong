@@ -16,6 +16,7 @@ from .testutil import with_authz, with_user, with_institution
 async def test_create_lecture_thread_success(api, db, institution, valid_user_token):
     async with db.async_session() as session:
         class_ = models.Class(
+            id=1,
             name="Test Class",
             institution_id=institution.id,
         )
@@ -71,6 +72,7 @@ async def test_share_lecture_video_assistant_blocked(
 ):
     async with db.async_session() as session:
         class_ = models.Class(
+            id=1,
             name="Test Class",
             institution_id=institution.id,
         )
@@ -109,6 +111,7 @@ async def test_create_thread_rejects_lecture_video_assistant(
 ):
     async with db.async_session() as session:
         class_ = models.Class(
+            id=1,
             name="Test Class",
             institution_id=institution.id,
             api_key="test-key",
@@ -149,6 +152,7 @@ async def test_create_thread_rejects_lecture_video_assistant(
 async def test_anonymous_cannot_create_lecture_thread(api, db, institution):
     async with db.async_session() as session:
         class_ = models.Class(
+            id=1,
             name="Test Class",
             institution_id=institution.id,
         )
@@ -201,6 +205,7 @@ async def test_anonymous_cannot_create_lecture_thread(api, db, institution):
 async def test_non_v3_assistants_rejected(api, db, institution, valid_user_token):
     async with db.async_session() as session:
         class_ = models.Class(
+            id=1,
             name="Test Class",
             institution_id=institution.id,
         )
@@ -250,6 +255,7 @@ async def test_lecture_thread_rejected_without_attached_video(
 ):
     async with db.async_session() as session:
         class_ = models.Class(
+            id=1,
             name="Test Class",
             institution_id=institution.id,
         )
@@ -292,6 +298,7 @@ async def test_lecture_endpoint_rejects_non_lecture_video_assistant(
 ):
     async with db.async_session() as session:
         class_ = models.Class(
+            id=1,
             name="Test Class",
             institution_id=institution.id,
         )
