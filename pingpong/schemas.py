@@ -724,6 +724,7 @@ class Thread(BaseModel):
     last_activity: datetime
     display_user_info: bool
     anonymous_session: bool = False
+    lecture_video_id: int | None = None
     is_current_user_participant: bool = False
 
     model_config = ConfigDict(
@@ -802,6 +803,12 @@ class CreateAudioThread(BaseModel):
     assistant_id: int
     timezone: str | None = None
     conversation_id: str | None = None
+
+
+class CreateLectureThread(BaseModel):
+    parties: list[int] = []
+    assistant_id: int
+    timezone: str | None = None
 
 
 class VideoMetadata(BaseModel):
@@ -2031,6 +2038,7 @@ class ThreadWithMeta(BaseModel):
     reasoning_messages: list["ReasoningMessage"] | None = None
     attachments: dict[str, File] | None
     instructions: str | None
+    lecture_video_id: int | None = None
     recording: VoiceModeRecording | None = None
     has_more: bool
 
