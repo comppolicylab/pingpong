@@ -33,7 +33,7 @@ jobs:
         shell: bash
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@f487a3d99423b03b33cbe8a0944867cb0f4223f9
+        uses: aws-actions/configure-aws-credentials@6e631f05b2a5f53c9f1e27150d5e8af2f907b03b
         with:
           aws-access-key-id: ${{ secrets.PINGPONG_AWS_ACCESS_KEY }}
           aws-secret-access-key: ${{ secrets.PINGPONG_AWS_SECRET_ACCESS_KEY }}
@@ -41,7 +41,7 @@ jobs:
 
       - name: Login to Amazon ECR
         id: login-ecr
-        uses: aws-actions/amazon-ecr-login@bb3fdaaaf1aae5e6758d24b073b79052f3cda0a2
+        uses: aws-actions/amazon-ecr-login@fe725d47d3009d901b44f3df285a6dc9d438e63a
 
       - name: Create Server Check Run
         if: contains(github.event.comment.body, 'server') || contains(github.event.comment.body, 'srv') || contains(github.event.comment.body, 'all')
