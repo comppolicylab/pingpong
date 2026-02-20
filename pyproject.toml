@@ -3,7 +3,7 @@ name = "pingpong"
 version = "7.16.5"
 description = "A software platform carefully designed for AI-driven learning."
 readme = "README.md"
-requires-python = ">= 3.10, <4.0.0"
+requires-python = ">= 3.11, <4.0.0"
 authors = [
     { name = "Joe Nudell", email = "jnudell@hks.harvard.edu" },
     { name = "Evangelos Kassos", email = "github@evangeloskassos.com" }
