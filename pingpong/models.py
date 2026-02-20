@@ -5577,11 +5577,17 @@ class Thread(Base):
         stmt_ = delete(user_thread_association).where(
             user_thread_association.c.thread_id == self.id
         )
+        run_mcp_stmt = delete(mcp_server_tool_run_association).where(
+            mcp_server_tool_run_association.c.run_id.in_(
+                select(Run.id).where(Run.thread_id == self.id)
+            )
+        )
         mcp_stmt = delete(mcp_server_tool_thread_association).where(
             mcp_server_tool_thread_association.c.thread_id == self.id
         )
         stmt = delete(Thread).where(Thread.id == self.id)
         await session.execute(stmt_)
+        await session.execute(run_mcp_stmt)
         await session.execute(mcp_stmt)
         await session.execute(stmt)
 
