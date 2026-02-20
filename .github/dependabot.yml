@@ -3,7 +3,7 @@ updates:
   - package-ecosystem: "pip"
     directory: "/"
     schedule:
-      interval: "daily"
+      interval: "weekly"
     commit-message:
       prefix: "deps(py)"
       prefix-development: "deps(py-dev)"
@@ -30,7 +30,7 @@ updates:
   - package-ecosystem: "npm"
     directory: "web/pingpong/"
     schedule:
-      interval: "daily"
+      interval: "weekly"
     commit-message:
       prefix: "deps(web)"
       prefix-development: "deps(web-dev)"
