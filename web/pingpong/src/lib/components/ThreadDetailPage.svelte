@@ -1039,7 +1039,21 @@
 						sadToast('No audio device selected. Please select a microphone.');
 						return;
 					}
-					await wavRecorder.begin(selectedAudioDevice.deviceId);
+					try {
+						await wavRecorder.begin(selectedAudioDevice.deviceId);
+					} catch (error) {
+						if (error instanceof Error && error.message === AUDIO_WORKLET_UNSUPPORTED_MESSAGE) {
+							sadToast(
+								'Voice mode is unavailable in this browser or LMS iframe. Please use the latest Chrome, Edge, or Safari.'
+							);
+						} else {
+							sadToast(
+								`Failed to start recording. Error: ${errorMessage(error, "We're facing an unknown error. Check PingPong's status page for updates if this persists.")}`
+							);
+						}
+						await resetAudioSession();
+						return;
+					}
 					await wavRecorder.record(chunkProcessor);
 					startingAudioSession = false;
 					audioSessionStarted = true;
