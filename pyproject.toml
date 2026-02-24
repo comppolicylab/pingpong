@@ -1,6 +1,6 @@
 [project]
 name = "pingpong"
-version = "7.19.0"
+version = "7.19.1"
 description = "A software platform carefully designed for AI-driven learning."
 readme = "README.md"
 requires-python = ">= 3.11, <4.0.0"
