@@ -31,6 +31,14 @@ import { WavPacker } from './lib/wav_packer';
 import { AudioAnalysis } from './lib/analysis/audio_analysis';
 import { WavStreamPlayer } from './lib/wav_stream_player';
 import { WavRecorder } from './lib/wav_recorder';
+import { AUDIO_WORKLET_UNSUPPORTED_MESSAGE } from './lib/audio_support';
 import { base64ToArrayBuffer } from './utils';
 
-export { AudioAnalysis, WavPacker, WavStreamPlayer, WavRecorder, base64ToArrayBuffer };
+export {
+	AudioAnalysis,
+	WavPacker,
+	WavStreamPlayer,
+	WavRecorder,
+	AUDIO_WORKLET_UNSUPPORTED_MESSAGE,
+	base64ToArrayBuffer
+};
