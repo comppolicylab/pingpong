@@ -451,8 +451,8 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     #
     # ----------------- Realtime Models -----------------
     #
-    "gpt-realtime": {
-        "name": "GPT Realtime",
+    "gpt-realtime-1.5": {
+        "name": "GPT Realtime 1.5",
         "default_prompt_id": "voice_mode_v1",
         "sort_order": 0.1,
         "type": "voice",
@@ -471,14 +471,36 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_verbosity": False,
         "supports_web_search": False,
         "supports_mcp_server": False,
+        "description": "The best voice model for audio in, audio out.",
+    },
+    "gpt-realtime": {
+        "name": "GPT Realtime",
+        "default_prompt_id": "voice_mode_v1",
+        "sort_order": 0.2,
+        "type": "voice",
+        "is_new": False,
+        "highlight": False,
+        "is_latest": True,
+        "supports_vision": False,
+        "supports_file_search": False,
+        "supports_code_interpreter": False,
+        "supports_temperature": False,
+        "supports_reasoning": False,
+        "supports_classic_assistants": True,
+        "supports_next_gen_assistants": True,
+        "supports_minimal_reasoning_effort": False,
+        "supports_none_reasoning_effort": False,
+        "supports_verbosity": False,
+        "supports_web_search": False,
+        "supports_mcp_server": False,
         "description": "Flagship model capable of responding to audio inputs in real-time.",
     },
     "gpt-realtime-mini": {
         "name": "GPT Realtime mini",
         "default_prompt_id": "voice_mode_v1",
-        "sort_order": 0.2,
+        "sort_order": 0.3,
         "type": "voice",
-        "is_new": True,
+        "is_new": False,
         "highlight": False,
         "is_latest": True,
         "supports_vision": False,
@@ -498,7 +520,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     "gpt-4o-realtime-preview": {
         "name": "GPT-4o Realtime",
         "default_prompt_id": "voice_mode_v1",
-        "sort_order": 0.3,
+        "sort_order": 0.4,
         "type": "voice",
         "is_new": False,
         "highlight": False,
@@ -520,7 +542,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     "gpt-4o-mini-realtime-preview": {
         "name": "GPT-4o mini Realtime",
         "default_prompt_id": "voice_mode_v1",
-        "sort_order": 0.4,
+        "sort_order": 0.5,
         "type": "voice",
         "is_new": False,
         "highlight": False,
