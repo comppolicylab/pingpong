@@ -3348,10 +3348,16 @@ class BufferedResponseStreamHandler:
             }
         )
 
-    async def on_response_canceled(self) -> None:
+    async def on_response_canceled(self, cancellation_cause: str | None = None) -> None:
+        incomplete_reason = "Response stream disconnected before completion."
+        if cancellation_cause:
+            incomplete_reason = (
+                "Response stream disconnected before completion "
+                f"({cancellation_cause})."
+            )
         await self.cleanup(
             run_status=RunStatus.INCOMPLETE,
-            response_incomplete_reason="User canceled the request.",
+            response_incomplete_reason=incomplete_reason,
             send_error_message_only_if_active=False,
         )
 
@@ -3717,11 +3723,22 @@ async def run_response(
                 ConnectionAbortedError,
                 asyncio.CancelledError,
                 ClientDisconnect,
-            ):
+            ) as stream_cancel_error:
                 is_canceled = True
-                print("Response stream was canceled by the client.")
+                cancellation_cause = type(stream_cancel_error).__name__
+                logger.warning(
+                    "Response stream interrupted before completion "
+                    "(run_id=%s, thread_id=%s, class_id=%s, cause=%s)",
+                    run.id,
+                    run.thread_id,
+                    class_id,
+                    cancellation_cause,
+                    exc_info=stream_cancel_error,
+                )
                 if handler:
-                    await asyncio.shield(handler.on_response_canceled())
+                    await asyncio.shield(
+                        handler.on_response_canceled(cancellation_cause)
+                    )
                 return
             except openai.APIError as openai_error:
                 if openai_error.type == "server_error":
@@ -3838,8 +3855,16 @@ async def run_response(
                     if handler:
                         yield handler.flush()
                     yield b'{"type":"done"}\n'
-        except (asyncio.CancelledError, ClientDisconnect):
-            logger.info("Response stream was cancelled")
+        except (asyncio.CancelledError, ClientDisconnect) as stream_cancel_error:
+            logger.warning(
+                "Response stream setup cancelled "
+                "(run_id=%s, thread_id=%s, class_id=%s, cause=%s)",
+                run.id,
+                run.thread_id,
+                class_id,
+                type(stream_cancel_error).__name__,
+                exc_info=stream_cancel_error,
+            )
             return
         except Exception as e:
             logger.exception(f"Error in response creating responses handler: {e}")
