@@ -30,6 +30,7 @@
 import { AudioProcessorSrc } from './worklets/audio_processor';
 import { AudioAnalysis, type AudioAnalysisOutputType } from './analysis/audio_analysis';
 import { WavPacker, type WavPackerAudioType } from './wav_packer';
+import { AUDIO_WORKLET_UNSUPPORTED_MESSAGE, isAudioWorkletSupported } from './audio_support';
 
 /**
  * Decodes audio into a wav file
@@ -390,6 +391,9 @@ export class WavRecorder {
 		if (this.processor) {
 			throw new Error(`Already connected: please call .end() to start a new session`);
 		}
+		if (!isAudioWorkletSupported()) {
+			throw new Error(AUDIO_WORKLET_UNSUPPORTED_MESSAGE);
+		}
 
 		if (!navigator.mediaDevices || !('getUserMedia' in navigator.mediaDevices)) {
 			throw new Error('Could not request user media');
@@ -410,7 +414,6 @@ export class WavRecorder {
 		try {
 			await context.audioWorklet.addModule(this.scriptSrc);
 		} catch (e) {
-			console.error(e);
 			throw new Error(`Could not add audioWorklet module: ${this.scriptSrc}`, { cause: e });
 		}
 		const processor = new AudioWorkletNode(context, 'audio_processor');

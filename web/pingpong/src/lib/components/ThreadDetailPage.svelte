@@ -56,7 +56,12 @@
 	import FilePlaceholder from '$lib/components/FilePlaceholder.svelte';
 	import { get, writable } from 'svelte/store';
 	import ModeratorsTable from '$lib/components/ModeratorsTable.svelte';
-	import { base64ToArrayBuffer, WavRecorder, WavStreamPlayer } from '$lib/wavtools/index';
+	import {
+		AUDIO_WORKLET_UNSUPPORTED_MESSAGE,
+		base64ToArrayBuffer,
+		WavRecorder,
+		WavStreamPlayer
+	} from '$lib/wavtools/index';
 	import type { ExtendedMediaDeviceInfo } from '$lib/wavtools/lib/wav_recorder';
 	import { isFirefox } from '$lib/stores/general';
 	import Sanitize from '$lib/components/Sanitize.svelte';
@@ -893,9 +898,15 @@
 		try {
 			await wavStreamPlayer.connect();
 		} catch (error) {
-			sadToast(
-				`Failed to set up audio output to your speakers. Error: ${errorMessage(error, "We're facing an unknown error. Check PingPong's status page for updates if this persists.")}`
-			);
+			if (error instanceof Error && error.message === AUDIO_WORKLET_UNSUPPORTED_MESSAGE) {
+				sadToast(
+					'Voice mode is unavailable in this browser or LMS iframe. Please use the latest Chrome, Edge, or Safari.'
+				);
+			} else {
+				sadToast(
+					`Failed to set up audio output to your speakers. Error: ${errorMessage(error, "We're facing an unknown error. Check PingPong's status page for updates if this persists.")}`
+				);
+			}
 			wavRecorder.quit();
 			wavRecorder = null;
 			wavStreamPlayer = null;

@@ -29,6 +29,7 @@
 
 import { StreamProcessorSrc } from './worklets/stream_processor';
 import { AudioAnalysis, type AudioAnalysisOutputType } from './analysis/audio_analysis';
+import { AUDIO_WORKLET_UNSUPPORTED_MESSAGE, isAudioWorkletSupported } from './audio_support';
 
 export type OnAudioPartStartedProcessor = (data: {
 	trackId: string;
@@ -81,6 +82,10 @@ export class WavStreamPlayer {
 	 * @returns {Promise<true>}
 	 */
 	async connect(): Promise<true> {
+		if (!isAudioWorkletSupported()) {
+			throw new Error(AUDIO_WORKLET_UNSUPPORTED_MESSAGE);
+		}
+
 		this.context = new AudioContext({ sampleRate: this.sampleRate });
 		if (this.context.state === 'suspended') {
 			await this.context.resume();
@@ -88,7 +93,6 @@ export class WavStreamPlayer {
 		try {
 			await this.context.audioWorklet.addModule(this.scriptSrc);
 		} catch (e) {
-			console.error(e);
 			throw new Error(`Could not add audioWorklet module: ${this.scriptSrc}`, { cause: e });
 		}
 		const analyser = this.context.createAnalyser();
