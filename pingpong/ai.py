@@ -19,6 +19,7 @@ from pingpong.files import (
     handle_create_file,
 )
 from pingpong.invite import send_export_download, send_export_failed
+from pingpong.log_utils import sanitize_for_log
 import pingpong.models as models
 from pingpong.prompt import replace_random_blocks
 from pingpong.schemas import (
@@ -3731,7 +3732,7 @@ async def run_response(
                     "(run_id=%s, thread_id=%s, class_id=%s, cause=%s)",
                     run.id,
                     run.thread_id,
-                    class_id,
+                    sanitize_for_log(class_id),
                     cancellation_cause,
                     exc_info=stream_cancel_error,
                 )
@@ -3861,7 +3862,7 @@ async def run_response(
                 "(run_id=%s, thread_id=%s, class_id=%s, cause=%s)",
                 run.id,
                 run.thread_id,
-                class_id,
+                sanitize_for_log(class_id),
                 type(stream_cancel_error).__name__,
                 exc_info=stream_cancel_error,
             )
