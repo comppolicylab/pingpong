@@ -12,7 +12,9 @@ class DummyWebSocket:
 
 async def test_audio_stream_uses_lti_session_when_cookie_missing(monkeypatch):
     browser_realtime_websocket = AsyncMock()
-    monkeypatch.setattr(server, "browser_realtime_websocket", browser_realtime_websocket)
+    monkeypatch.setattr(
+        server, "browser_realtime_websocket", browser_realtime_websocket
+    )
 
     websocket = DummyWebSocket()
 
