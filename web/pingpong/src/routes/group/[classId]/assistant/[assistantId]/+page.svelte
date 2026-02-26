@@ -15,7 +15,8 @@
 		Range,
 		ButtonGroup,
 		RadioButton,
-		InputAddon
+		InputAddon,
+		Tooltip
 	} from 'flowbite-svelte';
 	import type { Tool, ServerFile, FileUploadInfo, MCPServerToolInput, MCPAuthType } from '$lib/api';
 	import { beforeNavigate, goto, invalidate } from '$app/navigation';
@@ -1548,11 +1549,21 @@
 						disabled={preventEdits || !data.isCreating}
 						onchange={changeInteractionMode}
 						class={`${preventEdits || !data.isCreating ? 'hover:bg-transparent' : ''} select-none`}
-						><div class="flex flex-row items-center gap-2">
+						><div id="lecture-video-admin-tooltip" class="flex flex-row items-center gap-2">
 							{#if interactionMode === 'lecture_video'}<ClapperboardPlaySolid
 									class="h-5 w-5"
-								/>{:else}<ClapperboardPlayOutline class="h-5 w-5" />{/if}Lecture Video mode
+								/>{:else}<PersonChalkboardOutline class="h-5 w-5" />{/if}Lecture Video mode
+							<DropdownBadge
+								extraClasses="border-red-400 from-red-100 to-red-200 text-red-800 py-0 px-1"
+								><span slot="name">In Development</span></DropdownBadge
+							>
 						</div></RadioButton
+					>
+					<Tooltip
+						triggeredBy="#lecture-video-admin-tooltip"
+						class="z-100 text-sm font-light"
+						hidden={!data.isCreating}
+						arrow={false}>Only admins can see and select this option</Tooltip
 					>
 				{/if}
 			</ButtonGroup>
@@ -1712,6 +1723,7 @@
 							id="lecture_video_key"
 							name="lecture_video_key"
 							autocomplete="off"
+							placeholder="video_name.mp4"
 							bind:value={lectureVideoKey}
 							disabled={preventEdits}
 							defaultClass="block w-full disabled:cursor-not-allowed disabled:opacity-50 rtl:text-right font-mono"
