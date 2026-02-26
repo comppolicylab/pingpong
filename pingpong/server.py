@@ -5443,7 +5443,7 @@ async def create_audio_thread(
             else None,
         }
     except Exception as e:
-        logger.exception("Error creating thread: %s", e)
+        logger.exception("Error creating thread")
         if thread:
             # If the thread was created, delete it
             await openai_client.beta.threads.delete(thread.id)
@@ -5465,7 +5465,6 @@ async def create_lecture_thread(
     req: schemas.CreateLectureThread,
     request: StateRequest,
 ):
-    parties = list[models.User]()
     anonymous_session: models.AnonymousSession | None = None
     anonymous_user: models.User | None = None
     if request.state["is_anonymous"]:
@@ -5600,7 +5599,7 @@ async def create_lecture_thread(
             else None,
         }
     except Exception as e:
-        logger.exception("Error creating thread: %s", e)
+        logger.exception("Error creating thread")
         if result:
             # Delete users-threads mapping
             for user in result.users:
@@ -6068,7 +6067,7 @@ async def create_thread(
             else None,
         }
     except Exception as e:
-        logger.exception("Error creating thread: %s", e)
+        logger.exception("Error creating thread")
         if vector_store_id:
             await openai_client.vector_stores.delete(vector_store_id)
         if thread:

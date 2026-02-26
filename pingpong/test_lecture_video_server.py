@@ -1,5 +1,3 @@
-from datetime import datetime
-
 from pingpong import models
 import pingpong.schemas as schemas
 
@@ -68,7 +66,7 @@ async def test_create_lecture_thread_success(api, db, institution, valid_user_to
     ]
 )
 async def test_share_lecture_video_assistant_blocked(
-    api, db, institution, valid_user_token
+    api, db, institution, valid_user_token, now
 ):
     async with db.async_session() as session:
         class_ = models.Class(
@@ -86,7 +84,7 @@ async def test_share_lecture_video_assistant_blocked(
             class_id=class_.id,
             interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
             version=3,
-            published=datetime.now(),
+            published=now,
         )
         session.add(assistant)
         await session.commit()
