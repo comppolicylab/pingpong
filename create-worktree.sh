@@ -3,7 +3,7 @@
 set -e
 
 # Preflight checks for required tools
-REQUIRED_TOOLS=(curl docker git jq pnpm poetry python)
+REQUIRED_TOOLS=(curl docker git jq pnpm uv python)
 MISSING_TOOLS=()
 
 for tool in "${REQUIRED_TOOLS[@]}"; do
@@ -723,8 +723,8 @@ VITE_BACKEND_PORT=${SERVER_PORT}
 VITE_FRONTEND_PORT=${FRONTEND_PORT}
 EOF
 
-echo "Installing backend deps (poetry)..."
-(cd "${WORKTREE_PATH}" && poetry install --with dev)
+echo "Installing backend deps (uv)..."
+(cd "${WORKTREE_PATH}" && uv sync)
 
 echo "Installing frontend deps (pnpm)..."
 (cd "${WORKTREE_PATH}/web/pingpong" && pnpm install --frozen-lockfile)

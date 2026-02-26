@@ -3014,9 +3014,14 @@ async def audio_stream(
     thread_id: str,
     share_token: str | None = None,
     session_token: str | None = None,
+    lti_session: str | None = None,
 ):
     websocket.state["anonymous_share_token"] = share_token
     websocket.state["anonymous_session_token"] = session_token
+    # WebSocket requests from LTI iframes can lose first-party cookies.
+    # Treat lti_session like a session cookie for websocket auth.
+    if lti_session and websocket.cookies.get("session") is None:
+        websocket.cookies["session"] = lti_session
     await browser_realtime_websocket(websocket, class_id, thread_id)
 
 
@@ -7841,7 +7846,9 @@ async def unshare_assistant(
     """
     asst, share_link = await asyncio.gather(
         models.Assistant.get_by_id(request.state["db"], int(assistant_id)),
-        models.AnonymousLink.get_by_id(request.state["db"], int(share_id)),
+        models.AnonymousLink.get_by_id_with_assistant(
+            request.state["db"], int(share_id)
+        ),
     )
     if not asst or asst.class_id != int(class_id):
         raise HTTPException(

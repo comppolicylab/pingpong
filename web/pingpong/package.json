@@ -1,6 +1,6 @@
 {
 	"name": "pingpong",
-	"version": "7.16.0",
+	"version": "7.19.1",
 	"private": true,
 	"scripts": {
 		"dev": "vite dev",
@@ -13,19 +13,18 @@
 		"format": "prettier --write ."
 	},
 	"devDependencies": {
-		"@eslint/eslintrc": "^3.3.3",
 		"@eslint/js": "^10.0.1",
 		"@sveltejs/adapter-auto": "^7.0.1",
 		"@sveltejs/adapter-node": "^5.5.3",
 		"@sveltejs/adapter-static": "^3.0.10",
-		"@sveltejs/kit": "^2.51.0",
+		"@sveltejs/kit": "^2.52.2",
 		"@sveltejs/vite-plugin-svelte": "^6.2.4",
-		"@tailwindcss/vite": "^4.1.18",
+		"@tailwindcss/vite": "^4.2.0",
 		"@types/katex": "^0.16.8",
 		"@typescript-eslint/eslint-plugin": "^8.56.0",
 		"@typescript-eslint/parser": "^8.56.0",
 		"autoprefixer": "^10.4.24",
-		"eslint": "^10.0.0",
+		"eslint": "^10.0.1",
 		"eslint-config-prettier": "^10.1.8",
 		"eslint-plugin-svelte": "^3.15.0",
 		"flowbite": "^4.0.1",
@@ -35,13 +34,13 @@
 		"postcss-import": "^16.1.1",
 		"postcss-load-config": "^6.0.1",
 		"prettier": "^3.8.1",
-		"prettier-plugin-svelte": "^3.4.1",
+		"prettier-plugin-svelte": "^3.5.0",
 		"prettier-plugin-tailwindcss": "^0.7.2",
-		"rollup": "^4.57.1",
-		"svelte": "^5.51.0",
-		"svelte-check": "^4.4.0",
+		"rollup": "^4.58.0",
+		"svelte": "^5.53.2",
+		"svelte-check": "^4.4.3",
 		"svelte-loading-spinners": "^0.3.6",
-		"tailwindcss": "^4.1.17",
+		"tailwindcss": "^4.2.0",
 		"tslib": "^2.8.1",
 		"typescript": "^5.9.3",
 		"typescript-eslint": "^8.56.0",
@@ -50,7 +49,7 @@
 	},
 	"type": "module",
 	"dependencies": {
-		"@sentry/sveltekit": "^10.38.0",
+		"@sentry/sveltekit": "^10.39.0",
 		"@zerodevx/svelte-toast": "^0.9.6",
 		"dayjs": "^1.11.19",
 		"dotenv": "^17.3.1",
@@ -58,7 +57,7 @@
 		"highlight.js": "^11.11.1",
 		"isomorphic-dompurify": "^2.36.0",
 		"katex": "^0.16.28",
-		"marked": "^17.0.2",
+		"marked": "^17.0.3",
 		"marked-highlight": "^2.2.3",
 		"svelte-copy": "^2.0.0",
 		"tldts": "^7.0.23"
@@ -69,7 +68,9 @@
 			"esbuild": ">=0.25.0",
 			"glob": ">=10.5.0",
 			"devalue": ">=5.6.2",
-			"@isaacs/brace-expansion": ">=5.0.1"
+			"@isaacs/brace-expansion": ">=5.0.1",
+			"minimatch": ">=10.2.1",
+			"ajv": ">=6.14.0, <7.0.0"
 		}
 	}
 }

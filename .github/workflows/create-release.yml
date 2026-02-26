@@ -9,9 +9,9 @@ on:
         required: true
         type: choice
         options:
-          - major
-          - minor
           - patch
+          - minor
+          - major
 
 concurrency: create-release
 
@@ -100,7 +100,7 @@ jobs:
           is_taggable_path() {
             local path="$1"
             case "$path" in
-              web/*|pingpong/*|alembic/*|saml/*|poetry.lock|pyproject.toml)
+              web/*|pingpong/*|alembic/*|saml/*|uv.lock|pyproject.toml)
                 return 0
                 ;;
               *)
@@ -307,6 +307,19 @@ jobs:
               print("Failed to update version in web/pingpong/package.json", file=sys.stderr)
               sys.exit(1)
           package_json.write_text(pkg_updated, encoding="utf-8")
+
+          uv_lock = Path("uv.lock")
+          lock_content = uv_lock.read_text(encoding="utf-8")
+          lock_updated, lock_count = re.subn(
+              r'(\[\[package\]\]\s+name = "pingpong"\s+version = ")[^"]+(")',
+              rf'\g<1>{version}\2',
+              lock_content,
+              count=1,
+          )
+          if lock_count != 1:
+              print("Failed to update version in uv.lock", file=sys.stderr)
+              sys.exit(1)
+          uv_lock.write_text(lock_updated, encoding="utf-8")
           PY
 
       - name: Detect version file changes
@@ -314,7 +327,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if git diff --quiet -- pyproject.toml web/pingpong/package.json; then
+          if git diff --quiet -- pyproject.toml web/pingpong/package.json uv.lock; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "No version file changes detected."
           else
@@ -324,13 +337,14 @@ jobs:
 
       - name: Commit version bump
         if: ${{ steps.version-files.outputs.changed == 'true' }}
-        uses: iarekylew00t/verified-bot-commit@1ef83397a1859232022109719403ad9ad1ea7b09
+        uses: iarekylew00t/verified-bot-commit@a2269b7d866d37071d47dc066e2b2bbd9e5a7eae
         with:
           message: 'release: ${{ steps.version.outputs.RELEASE_NAME }}'
           token: ${{ steps.app-token.outputs.token }}
           files: |
             pyproject.toml
             web/pingpong/package.json
+            uv.lock
 
       - name: Resolve target commit SHA
         id: target-sha
@@ -440,11 +454,12 @@ jobs:
           generated = json.loads(Path("/tmp/generated-notes.json").read_text(encoding="utf-8"))
           body = (generated.get("body") or "").strip()
 
-          start_index = body.find("## What's Changed")
-          if start_index != -1:
-            related_prs_section = body[start_index:].strip()
-          else:
-            related_prs_section = body if body else "- None"
+          related_prs_section = body if body else "- None"
+          what_changed_heading = "## What's Changed"
+          heading_index = body.find(what_changed_heading)
+          if heading_index != -1:
+            after_heading = body[heading_index + len(what_changed_heading):].lstrip()
+            related_prs_section = after_heading if after_heading else "- None"
 
           template = textwrap.dedent("""\
           # Release Notes

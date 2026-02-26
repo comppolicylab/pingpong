@@ -28,7 +28,7 @@ done
 docker exec pingpong-db psql -Upingpong -c "CREATE SCHEMA IF NOT EXISTS authz;"
 
 # Run the OpenFGA migrate command to init the database
-docker compose -f docker-compose.yml -f docker-compose.dev.yml run authz migrate
+docker compose -f docker-compose.yml -f docker-compose.dev.yml run --rm authz migrate
 
 # Update the PingPong srv image
 docker compose -f docker-compose.yml -f docker-compose.dev.yml build srv
@@ -36,8 +36,8 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml build srv
 # Init/update the PingPong DB. It's ok if the DB already exists - in that
 # case the init command does not do anything. We will apply migrations to
 # put the DB in the correct state.
-docker compose -f docker-compose.yml -f docker-compose.dev.yml run srv poetry run python -m pingpong db init
-docker compose -f docker-compose.yml -f docker-compose.dev.yml run srv poetry run python -m pingpong db migrate
+docker compose -f docker-compose.yml -f docker-compose.dev.yml run --rm srv uv run --no-dev python -m pingpong db init
+docker compose -f docker-compose.yml -f docker-compose.dev.yml run --rm srv uv run --no-dev python -m pingpong db migrate
 
 # Run the app
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up authz srv -d

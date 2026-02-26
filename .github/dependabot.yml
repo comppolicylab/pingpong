@@ -3,7 +3,9 @@ updates:
   - package-ecosystem: "pip"
     directory: "/"
     schedule:
-      interval: "daily"
+      interval: "cron"
+      cronjob: "0 7 * * 1"
+      timezone: "America/New_York"
     commit-message:
       prefix: "deps(py)"
       prefix-development: "deps(py-dev)"
@@ -20,9 +22,11 @@ updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "cron"
+      cronjob: "0 7 * * 1"
+      timezone: "America/New_York"
     commit-message:
-      prefix: "deps(gha)/"
+      prefix: "deps(gha)"
     groups:
       github-actions:
         patterns:
@@ -30,7 +34,9 @@ updates:
   - package-ecosystem: "npm"
     directory: "web/pingpong/"
     schedule:
-      interval: "daily"
+      interval: "cron"
+      cronjob: "0 7 * * 1"
+      timezone: "America/New_York"
     commit-message:
       prefix: "deps(web)"
       prefix-development: "deps(web-dev)"
