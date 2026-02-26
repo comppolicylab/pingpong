@@ -2860,6 +2860,18 @@ class Assistant(Base):
         return [row.Assistant for row in result]
 
     @classmethod
+    async def get_by_class_id_with_lecture_video(
+        cls, session: AsyncSession, class_id: int
+    ) -> List["Assistant"]:
+        stmt = (
+            select(Assistant)
+            .where(Assistant.class_id == int(class_id))
+            .options(selectinload(Assistant.lecture_video))
+        )
+        result = await session.execute(stmt)
+        return [row.Assistant for row in result]
+
+    @classmethod
     async def async_get_by_class_id(
         cls, session: AsyncSession, class_id: int
     ) -> AsyncGenerator[int, None]:

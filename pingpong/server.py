@@ -7077,7 +7077,7 @@ async def list_files(class_id: str, request: StateRequest):
 )
 async def list_assistants(class_id: str, request: StateRequest):
     # Only return assistants that are in the class and are visible to the current user.
-    all_for_class = await models.Assistant.get_by_class_id(
+    all_for_class = await models.Assistant.get_by_class_id_with_lecture_video(
         request.state["db"], int(class_id)
     )
     filters = await request.state["authz"].check(
@@ -7134,6 +7134,11 @@ async def list_assistants(class_id: str, request: StateRequest):
 
             if asst.hide_prompt:
                 cur_asst.instructions = ""
+        elif (
+            asst.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
+            and asst.lecture_video is not None
+        ):
+            cur_asst.lecture_video_key = asst.lecture_video.key
 
         # For now, "endorsed" creators are published assistants that were
         # created by a teacher or admin.
@@ -8034,10 +8039,8 @@ async def update_assistant(
         else schemas.InteractionMode(asst.interaction_mode)
     )
 
-    # Only Administrators can edit locked assistants or Lecture Video asssistants
-    if (
-        asst.locked and req.model_fields_set != {"published", "use_image_descriptions"}
-    ) or interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
+    # Only Administrators can edit locked assistants
+    if asst.locked and req.model_fields_set != {"published", "use_image_descriptions"}:
         if not await request.state["authz"].test(
             f"user:{request.state['session'].user.id}",
             "admin",
@@ -8045,12 +8048,7 @@ async def update_assistant(
         ):
             raise HTTPException(
                 403,
-                "This assistant is locked and cannot be edited. Please create a new assistant if you need to make changes."
-                if (
-                    asst.locked
-                    and req.model_fields_set != {"published", "use_image_descriptions"}
-                )
-                else "Only class administrators can create assistants in Lecture Video mode.",
+                "This assistant is locked and cannot be edited. Please create a new assistant if you need to make changes.",
             )
 
     class_ = await models.Class.get_by_id(request.state["db"], int(class_id))

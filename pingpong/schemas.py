@@ -473,6 +473,7 @@ class Assistant(BaseModel):
     endorsed: bool | None = None
     created: datetime
     updated: datetime | None
+    lecture_video_key: str | None = None
     share_links: list[AnonymousLink] | None = None
 
     model_config = ConfigDict(

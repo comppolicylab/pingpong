@@ -1645,7 +1645,7 @@ export type Assistant = {
 	description: string | null;
 	notes: string | null;
 	instructions: string;
-	interaction_mode: 'chat' | 'voice';
+	interaction_mode: 'chat' | 'voice' | 'lecture_video';
 	model: string;
 	temperature: number | null;
 	reasoning_effort: number | null;
@@ -1670,6 +1670,7 @@ export type Assistant = {
 	hide_web_search_actions: boolean | null;
 	hide_mcp_server_call_details: boolean | null;
 	endorsed: boolean | null;
+	lecture_video_key: string | null;
 	created: string;
 	updated: string | null;
 	share_links: AnonymousLink[] | null;
@@ -1768,7 +1769,8 @@ export type CreateAssistantRequest = {
 	instructions: string;
 	notes: string;
 	model: string;
-	interaction_mode: 'chat' | 'voice';
+	interaction_mode: 'chat' | 'voice' | 'lecture_video';
+	lecture_video_key?: string;
 	create_classic_assistant?: boolean;
 	temperature: number | null;
 	reasoning_effort: number | null;
@@ -1809,7 +1811,8 @@ export type UpdateAssistantRequest = {
 	instructions?: string;
 	notes?: string;
 	model?: string;
-	interaction_mode?: 'chat' | 'voice';
+	interaction_mode?: 'chat' | 'voice' | 'lecture_video';
+	lecture_video_key?: string;
 	create_classic_assistant?: boolean;
 	temperature?: number | null;
 	reasoning_effort?: number | null;
@@ -2465,7 +2468,7 @@ export type Thread = {
 	id: number;
 	name: string | null;
 	version: number;
-	interaction_mode: 'chat' | 'voice';
+	interaction_mode: 'chat' | 'voice' | 'lecture_video';
 	class_id: number;
 	assistant_names?: Record<number, string> | null;
 	assistant_id: number;
