@@ -12,7 +12,7 @@ export const load: LayoutLoad = async ({ fetch, params, parent }) => {
 	}
 
 	const classId = parseInt(params.classId, 10);
-	const [grants, editable] = await Promise.all([
+	const [grants, editable, institutionGrants] = await Promise.all([
 		api.grants(fetch, {
 			canCreateAssistants: {
 				target_type: 'class',
@@ -40,12 +40,22 @@ export const load: LayoutLoad = async ({ fetch, params, parent }) => {
 				relation: 'supervisor'
 			}
 		}),
-		api.grantsList(fetch, 'can_edit', 'assistant')
+		api.grantsList(fetch, 'can_edit', 'assistant'),
+		classData.institution_id
+			? api.grants(fetch, {
+					isInstitutionAdmin: {
+						target_type: 'institution',
+						target_id: classData.institution_id,
+						relation: 'admin'
+					}
+				})
+			: Promise.resolve({ isInstitutionAdmin: false })
 	]);
 
 	return {
 		grants,
 		class: classData,
-		editableAssistants: new Set(editable)
+		editableAssistants: new Set(editable),
+		isInstitutionAdmin: institutionGrants.isInstitutionAdmin
 	};
 };

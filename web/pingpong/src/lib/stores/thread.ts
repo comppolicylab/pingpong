@@ -191,7 +191,7 @@ export class ThreadManager {
 		classId: number,
 		threadId: number,
 		threadData: BaseResponse & (ThreadWithMeta | Error | api.ValidationError),
-		interactionMode: 'chat' | 'voice' = 'chat',
+		interactionMode: 'chat' | 'voice' | 'lecture_video' = 'chat',
 		timezone?: string
 	) {
 		const expanded = api.expandResponse(threadData);

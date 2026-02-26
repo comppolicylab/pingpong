@@ -14,7 +14,9 @@
 		AccordionItem,
 		Range,
 		ButtonGroup,
-		RadioButton
+		RadioButton,
+		InputAddon,
+		Tooltip
 	} from 'flowbite-svelte';
 	import type { Tool, ServerFile, FileUploadInfo, MCPServerToolInput, MCPAuthType } from '$lib/api';
 	import { beforeNavigate, goto, invalidate } from '$app/navigation';
@@ -40,7 +42,10 @@
 		MessageDotsOutline,
 		MicrophoneOutline,
 		MicrophoneSolid,
-		ArchiveOutline
+		ArchiveOutline,
+		FileVideoOutline,
+		ClapperboardPlaySolid,
+		ClapperboardPlayOutline
 	} from 'flowbite-svelte-icons';
 	import MultiSelectWithUpload from '$lib/components/MultiSelectWithUpload.svelte';
 	import { writable, type Writable } from 'svelte/store';
@@ -59,6 +64,7 @@
 	import WebSourceChip from '$lib/components/WebSourceChip.svelte';
 	import MCPServerModal from '$lib/components/MCPServerModal.svelte';
 	export let data;
+	const LECTURE_VIDEO_DEFAULT_INSTRUCTIONS = 'You are a lecture video assistant.';
 
 	// Flag indicating whether we should check for changes before navigating away.
 	let checkForChanges = true;
@@ -76,7 +82,7 @@
 		assistantName = assistant.name;
 		hasSetAssistantName = true;
 	}
-	let interactionMode: 'chat' | 'voice';
+	let interactionMode: 'chat' | 'voice' | 'lecture_video';
 	$: if (
 		assistant?.interaction_mode !== undefined &&
 		assistant?.interaction_mode !== null &&
@@ -92,6 +98,12 @@
 	) {
 		interactionMode = 'chat';
 	}
+	$: isLectureMode = interactionMode === 'lecture_video';
+	$: isEditingLectureAssistant =
+		!data.isCreating && (assistant?.interaction_mode || null) === 'lecture_video';
+	$: showLectureModeOption =
+		(data.isCreating && data.isInstitutionAdmin) || isEditingLectureAssistant;
+	$: modelInteractionMode = isLectureMode ? 'chat' : interactionMode;
 	let description = '';
 	let hasSetDescription = false;
 	$: if (
@@ -117,6 +129,18 @@
 	$: if (assistant?.notes !== undefined && assistant?.notes !== null && !hasSetNotes) {
 		notes = assistant.notes;
 		hasSetNotes = true;
+	}
+	let currentLectureVideoKey = '';
+	$: currentLectureVideoKey = assistant?.lecture_video_key || '';
+	let lectureVideoKey = '';
+	let hasSetLectureVideoKey = false;
+	$: if (!hasSetLectureVideoKey) {
+		if (!data.isCreating && assistant?.lecture_video_key) {
+			lectureVideoKey = assistant.lecture_video_key;
+		} else {
+			lectureVideoKey = $page.url.searchParams.get('lecture_video_key') || '';
+		}
+		hasSetLectureVideoKey = true;
 	}
 	let hidePrompt = data.isCreating;
 	let hasSetHidePrompt = false;
@@ -290,8 +314,12 @@
 		createClassicAssistantByProviderOrUser = data?.enforceClassicAssistants;
 		hasSetCreateClassicAssistant = true;
 	}
-	$: createClassicAssistant = createClassicAssistantByProviderOrUser || interactionMode === 'voice';
-	$: isClassicRequired = data?.enforceClassicAssistants || interactionMode === 'voice';
+	$: createClassicAssistant = isLectureMode
+		? false
+		: createClassicAssistantByProviderOrUser || interactionMode === 'voice';
+	$: isClassicRequired = isLectureMode
+		? false
+		: data?.enforceClassicAssistants || interactionMode === 'voice';
 
 	$: chatModelCount = data.models.filter((model) => model.type === 'chat').length;
 	$: audioModelCount = data.models.filter((model) => model.type === 'voice').length;
@@ -307,10 +335,17 @@
 	$: assistantVersion = forcedAssistantVersion || assistant?.version || null;
 	let convertToNextGen: boolean | null = null;
 	$: canSwitchAssistantVersion =
-		!data.isCreating && interactionMode === 'voice' && !data?.enforceClassicAssistants;
+		!data.isCreating &&
+		interactionMode === 'voice' &&
+		!data?.enforceClassicAssistants &&
+		!isLectureMode;
 	$: if (convertToNextGen !== null && !canSwitchAssistantVersion) {
 		convertToNextGen = null;
 		forcedAssistantVersion = null;
+	}
+	$: if (data.isCreating && isLectureMode) {
+		forcedAssistantVersion = 3;
+		convertToNextGen = null;
 	}
 	$: statusComponents = (data.statusComponents || {}) as Partial<
 		Record<string, api.StatusComponentUpdate[]>
@@ -336,7 +371,7 @@
 				((data.isCreating && createClassicAssistant) || (!data.isCreating && assistantVersion !== 3)
 					? model.supports_classic_assistants
 					: model.supports_next_gen_assistants) &&
-				model.type === interactionMode
+				model.type === modelInteractionMode
 		) || []
 	).map((model) => ({
 		value: model.id,
@@ -351,7 +386,7 @@
 	}));
 	$: hiddenModelNames = (
 		data.models.filter(
-			(model) => (model.hide_in_model_selector ?? false) && model.type === interactionMode
+			(model) => (model.hide_in_model_selector ?? false) && model.type === modelInteractionMode
 		) || []
 	).map((model) => model.id);
 	let selectedModel = '';
@@ -380,6 +415,12 @@
 			selectedModel = '';
 		}
 	}
+	$: if (isLectureMode && data.isCreating && latestModelOptions.length > 0) {
+		selectedModel = latestModelOptions[0].value;
+	}
+	$: if (isLectureMode && !data.isCreating && assistant?.model) {
+		selectedModel = assistant.model;
+	}
 	$: selectedModelName = modelNameDict[selectedModel];
 	let selectedModelRecord: api.AssistantModel | undefined;
 	$: selectedModelRecord = data.models.find((model) => model.id === selectedModel);
@@ -391,7 +432,7 @@
 				((data.isCreating && createClassicAssistant) || (!data.isCreating && assistantVersion !== 3)
 					? model.supports_classic_assistants
 					: model.supports_next_gen_assistants) &&
-				model.type === interactionMode
+				model.type === modelInteractionMode
 		) || []
 	).map((model) => ({
 		value: model.id,
@@ -743,11 +784,14 @@
 
 	const changeInteractionMode = async (evt: Event) => {
 		const target = evt.target as HTMLInputElement;
-		const mode = target.value as 'chat' | 'voice';
-		if (mode === 'chat') {
-			forcedAssistantVersion = null;
-		} else {
+		const mode = target.value as 'chat' | 'voice' | 'lecture_video';
+		if (mode === 'voice') {
 			forcedAssistantVersion = 2;
+		} else if (mode === 'lecture_video') {
+			forcedAssistantVersion = 3;
+			convertToNextGen = null;
+		} else {
+			forcedAssistantVersion = null;
 		}
 		if (
 			assistant?.interaction_mode === mode &&
@@ -759,7 +803,7 @@
 		} else if (mode === 'voice') {
 			temperatureValue = defaultAudioTemperature;
 			_temperatureValue = defaultAudioTemperature;
-		} else if (mode === 'chat') {
+		} else if (mode === 'chat' || mode === 'lecture_video') {
 			temperatureValue = defaultChatTemperature;
 			_temperatureValue = defaultChatTemperature;
 		}
@@ -795,7 +839,7 @@
 		if (interactionMode === 'voice') {
 			temperatureValue = defaultAudioTemperature;
 			_temperatureValue = defaultAudioTemperature;
-		} else if (interactionMode === 'chat') {
+		} else if (interactionMode === 'chat' || interactionMode === 'lecture_video') {
 			temperatureValue = defaultChatTemperature;
 			_temperatureValue = defaultChatTemperature;
 		}
@@ -966,7 +1010,9 @@
 					'temperature',
 					'reasoning_effort'
 				]
-			: ['name', 'description', 'instructions'];
+			: isLectureMode
+				? ['name', 'description']
+				: ['name', 'description', 'instructions'];
 
 		const modifiedFields: string[] = [];
 		for (const field of fields) {
@@ -998,6 +1044,10 @@
 		if (convertToNextGen !== null) {
 			modifiedFields.push('assistant version');
 		}
+		const newLectureVideoKey = lectureVideoKey.trim();
+		if (newLectureVideoKey !== currentLectureVideoKey.trim()) {
+			modifiedFields.push('lecture video key');
+		}
 
 		return modifiedFields;
 	};
@@ -1010,10 +1060,16 @@
 	): api.CreateAssistantRequest & { convert_to_next_gen?: boolean } => {
 		const formData = new FormData(form);
 		const body = Object.fromEntries(formData.entries());
+		const includeTooling = !isLectureMode;
+		const lectureVideoKeyValue = lectureVideoKey.trim();
+		const lectureModeInstructions = normalizeNewlines(
+			(assistant?.instructions || LECTURE_VIDEO_DEFAULT_INSTRUCTIONS).trim()
+		);
 
 		const tools: api.Tool[] = [];
 		const fileSearchCodeInterpreterUnusedFiles: number[] = [];
 		if (
+			includeTooling &&
 			fileSearchToolSelect &&
 			supportsFileSearch &&
 			!(supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort)
@@ -1023,6 +1079,7 @@
 			fileSearchCodeInterpreterUnusedFiles.push(...allFSPrivateFiles.map((f) => f.id));
 		}
 		if (
+			includeTooling &&
 			codeInterpreterToolSelect &&
 			supportsCodeInterpreter &&
 			!(supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort)
@@ -1032,6 +1089,7 @@
 			fileSearchCodeInterpreterUnusedFiles.push(...allCIPrivateFiles.map((f) => f.id));
 		}
 		if (
+			includeTooling &&
 			webSearchToolSelect &&
 			supportsWebSearch &&
 			!(supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort) &&
@@ -1041,6 +1099,7 @@
 		}
 		let mcpServersForRequest: MCPServerToolInput[] = [];
 		if (
+			includeTooling &&
 			mcpServerToolSelect &&
 			supportsMCPServer &&
 			!(supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort) &&
@@ -1057,29 +1116,61 @@
 				: normalizeNewlines(body.description.toString()),
 			instructions: preventEdits
 				? assistant?.instructions || ''
-				: normalizeNewlines(body.instructions.toString()),
+				: isLectureMode
+					? lectureModeInstructions || LECTURE_VIDEO_DEFAULT_INSTRUCTIONS
+					: normalizeNewlines(body.instructions?.toString() || ''),
 			notes: preventEdits ? assistant?.notes || '' : normalizeNewlines(notes),
-			model: selectedModel,
-			tools,
+			model: isLectureMode
+				? data.isCreating
+					? latestModelOptions[0]?.value || selectedModel
+					: assistant?.model || selectedModel
+				: selectedModel,
+			tools: includeTooling ? tools : [],
 			code_interpreter_file_ids:
+				includeTooling &&
 				supportsCodeInterpreter &&
 				!(supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort) &&
 				codeInterpreterToolSelect
 					? $selectedCodeInterpreterFiles
 					: [],
 			file_search_file_ids:
+				includeTooling &&
 				supportsFileSearch &&
 				!(supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort) &&
 				fileSearchToolSelect
 					? $selectedFileSearchFiles
 					: [],
-			temperature: supportsTemperature ? temperatureValue : null,
-			reasoning_effort: supportsReasoning ? reasoningEffortValue : null,
-			verbosity: supportsVerbosity ? verbosityValue : null,
+			temperature: isLectureMode
+				? (assistant?.temperature ?? null)
+				: supportsTemperature
+					? temperatureValue
+					: null,
+			reasoning_effort: isLectureMode
+				? (assistant?.reasoning_effort ?? null)
+				: supportsReasoning
+					? reasoningEffortValue
+					: null,
+			verbosity: isLectureMode
+				? (assistant?.verbosity ?? null)
+				: supportsVerbosity
+					? verbosityValue
+					: null,
+			lecture_video_key:
+				isLectureMode &&
+				(data.isCreating ||
+					(lectureVideoKeyValue.length > 0 && lectureVideoKeyValue !== currentLectureVideoKey))
+					? lectureVideoKeyValue
+					: undefined,
 			published: body.published?.toString() === 'on',
-			use_latex: body.use_latex?.toString() === 'on',
-			use_image_descriptions: body.use_image_descriptions?.toString() === 'on',
-			hide_prompt: body.hide_prompt?.toString() === 'on',
+			use_latex: isLectureMode
+				? (assistant?.use_latex ?? false)
+				: body.use_latex?.toString() === 'on',
+			use_image_descriptions: isLectureMode
+				? (assistant?.use_image_descriptions ?? false)
+				: body.use_image_descriptions?.toString() === 'on',
+			hide_prompt: isLectureMode
+				? (assistant?.hide_prompt ?? false)
+				: body.hide_prompt?.toString() === 'on',
 			assistant_should_message_first: assistantShouldMessageFirst,
 			create_classic_assistant: createClassicAssistant,
 			deleted_private_files: [...$trashPrivateFileIds, ...fileSearchCodeInterpreterUnusedFiles],
@@ -1215,6 +1306,13 @@
 				await goto(resolve(`/group/${data.class.id}/assistant`), { invalidateAll: true });
 				return;
 			}
+		}
+
+		if (params.interaction_mode === 'lecture_video' && lectureVideoKey.trim().length === 0) {
+			sadToast('Please provide a lecture video key for Lecture video mode assistants.');
+			$loading = false;
+			$loadingMessage = '';
+			return;
 		}
 
 		if (params.file_search_file_ids.length > fileSearchMetadata.max_count) {
@@ -1407,9 +1505,12 @@
 		</div>
 		<div class="mb-4">
 			<Label for="interactionMode">Interaction Mode</Label>
-			<Helper class="pb-1">Choose how users will primarily interact with this assistant.</Helper>
+			<Helper class="pb-1"
+				>Choose how users will primarily interact with this assistant.{#if showLectureModeOption && !data.isCreating}
+					&nbsp;Lecture video mode cannot be changed after assistant creation.{/if}</Helper
+			>
 			<ButtonGroup>
-				{#if chatModelCount !== 0}
+				{#if !isEditingLectureAssistant && chatModelCount !== 0}
 					<RadioButton
 						value="chat"
 						bind:group={interactionMode}
@@ -1423,7 +1524,7 @@
 						</div></RadioButton
 					>
 				{/if}
-				{#if audioModelCount !== 0}
+				{#if !isEditingLectureAssistant && audioModelCount !== 0}
 					<RadioButton
 						value="voice"
 						bind:group={interactionMode}
@@ -1437,129 +1538,157 @@
 						</div></RadioButton
 					>
 				{/if}
-			</ButtonGroup>
-		</div>
-		<div class="mb-4">
-			<Label for="model">Model</Label>
-			<Helper class="pb-1"
-				>Select the model to use for this assistant. You can update your model selection at any
-				time. Latest Models will always point to the latest version of the model available. Select a
-				Pinned Model Version to continue using a specific model version regardless of future model
-				updates. See <a
-					href="https://platform.openai.com/docs/models"
-					rel="noopener noreferrer"
-					target="_blank"
-					class="underline">OpenAI's Documentation</a
-				> for detailed descriptions of model capabilities.</Helper
-			>
-			{#if selectedModelDeprecated}
-				<div
-					class="mb-2 flex flex-row items-center gap-4 rounded-lg border border-amber-400 bg-gradient-to-b from-amber-50 to-amber-100 p-4 py-2 text-amber-800"
-				>
-					<ArchiveOutline class="h-8 w-8 text-amber-800" strokeWidth="1.5" />
-					<div class="flex flex-col">
-						<span class="text-sm font-semibold">Legacy Model</span>
-						<span class="text-xs"
-							>This model is no longer available for new assistants on PingPong. You can continue
-							using it with this assistant, but you won't be able to switch back after selecting a
-							new model. <span class="font-semibold"
-								>We recommend upgrading to one of the latest models for the best experience.</span
-							></span
-						>
-					</div>
-				</div>
-			{/if}
-			{#if supportsVision && visionSupportOverride === false}
-				<div
-					class="mb-2 flex flex-row items-center gap-4 rounded-lg border border-amber-400 bg-gradient-to-b from-amber-50 to-amber-100 p-4 py-2 text-amber-800"
-				>
-					<div class="relative flex h-8 w-12 items-center justify-center">
-						<BanOutline class="absolute z-10 h-12 w-12 text-amber-600" strokeWidth="1.5" />
-						<FileImageOutline class="h-8 w-8 text-stone-400" strokeWidth="1" />
-					</div>
-					<div class="flex flex-col">
-						<span class="text-sm font-semibold">Vision capabilities are currently unavailable</span>
-						<span class="text-xs"
-							>Your AI Provider doesn't support Vision capabilities for this model. We are working
-							on adding Vision support. You can still use supported image files with Code
-							Interpreter.</span
-						>
-					</div>
-				</div>
-			{/if}
-			<div class="flex flex-row gap-2">
-				{#key selectedModel}
-					<DropdownContainer
-						footer
-						placeholder={selectedModelName || 'Select a model...'}
-						optionNodes={modelNodes}
-						optionHeaders={modelHeaders}
-						disabled={preventEdits}
-						bind:selectedOption={selectedModel}
-						bind:dropdownOpen
-					>
-						<DropdownHeader
-							order={1}
-							name="latest-models"
-							colorClasses="from-orange-dark to-orange"
-							topHeader>Latest Models</DropdownHeader
-						>
-						<ModelDropdownOptions
-							modelOptions={latestModelOptions}
-							{selectedModel}
-							{updateSelectedModel}
-							{allowVisionUpload}
-							headerClass="latest-models"
-							bind:modelNodes
-							bind:modelHeaders
-						/>
-						<DropdownHeader
-							order={2}
-							name="versioned-models"
-							colorClasses="from-blue-dark-40 to-blue-dark-30">Pinned Models</DropdownHeader
-						>
-						<ModelDropdownOptions
-							modelOptions={versionedModelOptions}
-							{selectedModel}
-							{updateSelectedModel}
-							{allowVisionUpload}
-							headerClass="versioned-models"
-							bind:modelNodes
-							bind:modelHeaders
-							smallNameText
-						/>
-						<div slot="footer">
-							<DropdownFooter
-								colorClasses="from-gray-800 to-gray-600"
-								hoverable
-								hoverColorClasses="hover:from-gray-900 hover:to-gray-700"
-								link="https://platform.openai.com/docs/models"
-								><div class="flex flex-row justify-between">
-									<div class="flex flex-row gap-2">
-										<QuestionCircleSolid /> Unsure which model to choose? Check out OpenAI's documentation
-									</div>
-									<ArrowUpRightFromSquareOutline />
-								</div></DropdownFooter
+				{#if showLectureModeOption && chatModelCount !== 0}
+					<RadioButton
+						value="lecture_video"
+						bind:group={interactionMode}
+						disabled={preventEdits || !data.isCreating}
+						onchange={changeInteractionMode}
+						class={`${preventEdits || !data.isCreating ? 'hover:bg-transparent' : ''} select-none`}
+						><div id="lecture-video-admin-tooltip" class="flex flex-row items-center gap-2">
+							{#if interactionMode === 'lecture_video'}<ClapperboardPlaySolid
+									class="h-5 w-5"
+								/>{:else}<ClapperboardPlayOutline class="h-5 w-5" />{/if}Lecture Video mode
+							<DropdownBadge
+								extraClasses="border-red-400 from-red-100 to-red-200 text-red-800 py-0 px-1"
+								><span slot="name">In Development</span></DropdownBadge
 							>
-						</div>
-					</DropdownContainer>
-				{/key}
-				{#if allowVisionUpload}
-					<Badge
-						class="flex flex-row items-center gap-x-2 rounded-lg border px-2 py-0.5 text-xs normal-case {finalVisionSupport
-							? 'border-green-400 bg-gradient-to-b from-emerald-100 to-emerald-200 text-green-800'
-							: 'border-gray-100 bg-gray-50 text-gray-600'}"
-						>{#if finalVisionSupport}<ImageOutline size="sm" />{:else}<CloseOutline
-								size="sm"
-							/>{/if}
-						<div class="flex flex-col">
-							<div>{finalVisionSupport ? 'Vision' : 'No Vision'}</div>
-							<div>capabilities</div>
-						</div></Badge
+						</div></RadioButton
+					>
+					<Tooltip
+						triggeredBy="#lecture-video-admin-tooltip"
+						class="z-100 text-sm font-light"
+						hidden={!data.isCreating}
+						arrow={false}>Only admins can see and select this option</Tooltip
 					>
 				{/if}
-			</div>
+			</ButtonGroup>
 		</div>
+		{#if !isLectureMode}
+			<div class="mb-4">
+				<Label for="model">Model</Label>
+				<Helper class="pb-1"
+					>Select the model to use for this assistant. You can update your model selection at any
+					time. Latest Models will always point to the latest version of the model available. Select
+					a Pinned Model Version to continue using a specific model version regardless of future
+					model updates. See <a
+						href="https://platform.openai.com/docs/models"
+						rel="noopener noreferrer"
+						target="_blank"
+						class="underline">OpenAI's Documentation</a
+					> for detailed descriptions of model capabilities.</Helper
+				>
+				{#if selectedModelDeprecated}
+					<div
+						class="mb-2 flex flex-row items-center gap-4 rounded-lg border border-amber-400 bg-gradient-to-b from-amber-50 to-amber-100 p-4 py-2 text-amber-800"
+					>
+						<ArchiveOutline class="h-8 w-8 text-amber-800" strokeWidth="1.5" />
+						<div class="flex flex-col">
+							<span class="text-sm font-semibold">Legacy Model</span>
+							<span class="text-xs"
+								>This model is no longer available for new assistants on PingPong. You can continue
+								using it with this assistant, but you won't be able to switch back after selecting a
+								new model. <span class="font-semibold"
+									>We recommend upgrading to one of the latest models for the best experience.</span
+								></span
+							>
+						</div>
+					</div>
+				{/if}
+				{#if supportsVision && visionSupportOverride === false}
+					<div
+						class="mb-2 flex flex-row items-center gap-4 rounded-lg border border-amber-400 bg-gradient-to-b from-amber-50 to-amber-100 p-4 py-2 text-amber-800"
+					>
+						<div class="relative flex h-8 w-12 items-center justify-center">
+							<BanOutline class="absolute z-10 h-12 w-12 text-amber-600" strokeWidth="1.5" />
+							<FileImageOutline class="h-8 w-8 text-stone-400" strokeWidth="1" />
+						</div>
+						<div class="flex flex-col">
+							<span class="text-sm font-semibold"
+								>Vision capabilities are currently unavailable</span
+							>
+							<span class="text-xs"
+								>Your AI Provider doesn't support Vision capabilities for this model. We are working
+								on adding Vision support. You can still use supported image files with Code
+								Interpreter.</span
+							>
+						</div>
+					</div>
+				{/if}
+				<div class="flex flex-row gap-2">
+					{#key selectedModel}
+						<DropdownContainer
+							footer
+							placeholder={selectedModelName || 'Select a model...'}
+							optionNodes={modelNodes}
+							optionHeaders={modelHeaders}
+							disabled={preventEdits}
+							bind:selectedOption={selectedModel}
+							bind:dropdownOpen
+						>
+							<DropdownHeader
+								order={1}
+								name="latest-models"
+								colorClasses="from-orange-dark to-orange"
+								topHeader>Latest Models</DropdownHeader
+							>
+							<ModelDropdownOptions
+								modelOptions={latestModelOptions}
+								{selectedModel}
+								{updateSelectedModel}
+								{allowVisionUpload}
+								headerClass="latest-models"
+								bind:modelNodes
+								bind:modelHeaders
+							/>
+							<DropdownHeader
+								order={2}
+								name="versioned-models"
+								colorClasses="from-blue-dark-40 to-blue-dark-30">Pinned Models</DropdownHeader
+							>
+							<ModelDropdownOptions
+								modelOptions={versionedModelOptions}
+								{selectedModel}
+								{updateSelectedModel}
+								{allowVisionUpload}
+								headerClass="versioned-models"
+								bind:modelNodes
+								bind:modelHeaders
+								smallNameText
+							/>
+							<div slot="footer">
+								<DropdownFooter
+									colorClasses="from-gray-800 to-gray-600"
+									hoverable
+									hoverColorClasses="hover:from-gray-900 hover:to-gray-700"
+									link="https://platform.openai.com/docs/models"
+									><div class="flex flex-row justify-between">
+										<div class="flex flex-row gap-2">
+											<QuestionCircleSolid /> Unsure which model to choose? Check out OpenAI's documentation
+										</div>
+										<ArrowUpRightFromSquareOutline />
+									</div></DropdownFooter
+								>
+							</div>
+						</DropdownContainer>
+					{/key}
+					{#if allowVisionUpload}
+						<Badge
+							class="flex flex-row items-center gap-x-2 rounded-lg border px-2 py-0.5 text-xs normal-case {finalVisionSupport
+								? 'border-green-400 bg-gradient-to-b from-emerald-100 to-emerald-200 text-green-800'
+								: 'border-gray-100 bg-gray-50 text-gray-600'}"
+							>{#if finalVisionSupport}<ImageOutline size="sm" />{:else}<CloseOutline
+									size="sm"
+								/>{/if}
+							<div class="flex flex-col">
+								<div>{finalVisionSupport ? 'Vision' : 'No Vision'}</div>
+								<div>capabilities</div>
+							</div></Badge
+						>
+					{/if}
+				</div>
+			</div>
+		{/if}
 
 		<div class="col-span-2 mb-4">
 			<Label for="description">Description</Label>
@@ -1574,463 +1703,491 @@
 				disabled={preventEdits}
 			/>
 		</div>
-		<div class="col-span-2 mb-4">
-			<div class="flex flex-row items-end justify-between">
-				<div>
-					<Label for="instructions">Instructions</Label>
-					<Helper class="pb-1"
-						>This is the prompt the language model will use to generate responses.</Helper
-					>
-				</div>
-				<Button
-					class="mb-1 flex max-h-fit max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
-					onclick={previewInstructions}
-					type="button"
-					disabled={$loading || uploadingFSPrivate || uploadingCIPrivate}
+		{#if isLectureMode}
+			<div class="col-span-2 mb-4">
+				<Label for="lecture_video_key">Lecture Video Key</Label>
+				<Helper class="pb-1"
+					>{#if data.isCreating}Provide the key for the lecture video this assistant should use.{:else}Edit
+						this key to replace the current lecture video.{/if}</Helper
 				>
-					Preview
-				</Button>
+				<div class="relative w-full pt-2 pb-2">
+					<ButtonGroup class="w-full">
+						<InputAddon>
+							<FileVideoOutline class="h-6 w-6" />
+						</InputAddon>
+						<Input
+							id="lecture_video_key"
+							name="lecture_video_key"
+							autocomplete="off"
+							placeholder="video_name.mp4"
+							bind:value={lectureVideoKey}
+							disabled={preventEdits}
+							defaultClass="block w-full disabled:cursor-not-allowed disabled:opacity-50 rtl:text-right font-mono"
+						/>
+					</ButtonGroup>
+				</div>
 			</div>
-			<Textarea
-				id="instructions"
-				name="instructions"
-				rows={6}
-				bind:value={instructions}
-				disabled={preventEdits}
-			/>
-		</div>
-		<div class="col-span-2 mb-4">
-			<Checkbox id="hide_prompt" name="hide_prompt" disabled={preventEdits} checked={hidePrompt}
-				>Hide Prompt</Checkbox
-			>
-			<Helper
-				>Hide the prompt from other users. When checked, only the moderation team and the
-				assistant's creator will be able to see this prompt.</Helper
-			>
-		</div>
-		<div class="col-span-2 mb-4">
-			{#if interactionMode === 'chat'}
-				<Checkbox id="use_latex" name="use_latex" disabled={preventEdits} checked={useLatex}
-					>Use LaTeX</Checkbox
-				>
-				<Helper>Enable LaTeX formatting for assistant responses.</Helper>
-			{:else}
-				<div class="flex flex-col gap-y-1">
-					<Badge
-						class="flex max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
-						><CloseOutline size="sm" />
-						<div>No LaTeX formatting for assistant responses</div>
-					</Badge>
-					<Helper
-						>This interaction mode does not support LaTeX formatting for assistant responses. To use
-						LaTeX formatting, switch to Chat mode.</Helper
-					>
-				</div>
-			{/if}
-		</div>
-		<div class="col-span-2 mb-4">
-			<Label for="tools">Tools</Label>
-			<Helper>Select tools available to the assistant when generating a response.</Helper>
-		</div>
-		{#if supportsReasoning && reasoningEffortValue === -1 && supportsNoneReasoningEffort}
-			<div class="col-span-2 mb-3">
-				<div
-					class="flex flex-row items-center justify-between gap-x-4 rounded-lg border border-amber-400 bg-gradient-to-b from-amber-50 to-amber-100 p-3 text-amber-800"
-				>
-					<div class="flex flex-row items-center gap-x-3">
-						<LightbulbSolid size="md" class="shrink-0" />
-						<div class="flex flex-col text-xs">
-							<span class="font-bold">Tool reliability may be reduced</span>
-							<span
-								>The current <span class="font-mono">none</span> reasoning effort prioritizes speed, which
-								can impact the reliability of tool calls. You can adjust this setting in Advanced Options.</span
-							>
-						</div>
+		{/if}
+		{#if !isLectureMode}
+			<div class="col-span-2 mb-4">
+				<div class="flex flex-row items-end justify-between">
+					<div>
+						<Label for="instructions">Instructions</Label>
+						<Helper class="pb-1"
+							>This is the prompt the language model will use to generate responses.</Helper
+						>
 					</div>
 					<Button
-						size="xs"
-						color="light"
-						class="shrink-0 border-amber-400 bg-white/60 px-3 py-0.5 text-amber-900 hover:bg-white"
-						disabled={preventEdits}
-						onclick={async () => {
-							if (!advancedOptionsOpen) {
-								advancedOptionsOpen = true;
-								await tick();
-								await new Promise((resolve) => setTimeout(resolve, 150));
-							}
-							const el = document.getElementById('reasoning-effort');
-							if (el) {
-								el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-							}
-						}}>Adjust in Advanced Options</Button
+						class="mb-1 flex max-h-fit max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
+						onclick={previewInstructions}
+						type="button"
+						disabled={$loading || uploadingFSPrivate || uploadingCIPrivate}
 					>
+						Preview
+					</Button>
 				</div>
+				<Textarea
+					id="instructions"
+					name="instructions"
+					rows={6}
+					bind:value={instructions}
+					disabled={preventEdits}
+				/>
 			</div>
-		{/if}
-		{#if !supportsFileSearch}
-			<div class="col-span-2 mb-3">
-				<div class="flex flex-col gap-y-1">
-					<Badge
-						class="flex max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
-						><CloseOutline size="sm" />
-						<div>No File Search capabilities</div>
-					</Badge>
-					<Helper
-						>This model does not support File Search capabilities. To use File Search, select a
-						different model.</Helper
-					>
-				</div>
-			</div>
-		{:else if supportsFileSearch && supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort}
-			<div class="col-span-2 mb-3">
-				<div class="flex flex-col gap-y-1">
-					<Badge
-						class="flex max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
-						><CloseOutline size="sm" />
-						<div>No File Search capabilities in Minimal reasoning effort</div>
-					</Badge>
-					<Helper
-						>Minimal reasoning effort does not support File Search capabilities. To use File Search,
-						select a higher reasoning effort level.</Helper
-					>
-				</div>
-			</div>
-		{:else}
 			<div class="col-span-2 mb-4">
-				<Checkbox
-					id={fileSearchMetadata.value}
-					name={fileSearchMetadata.value}
-					checked={supportsFileSearch && (fileSearchToolSelect || false)}
-					disabled={!supportsFileSearch || preventEdits}
-					onchange={() => {
-						fileSearchToolSelect = !fileSearchToolSelect;
-					}}>{fileSearchMetadata.name}</Checkbox
+				<Checkbox id="hide_prompt" name="hide_prompt" disabled={preventEdits} checked={hidePrompt}
+					>Hide Prompt</Checkbox
 				>
-				<Helper>{fileSearchMetadata.description}</Helper>
+				<Helper
+					>Hide the prompt from other users. When checked, only the moderation team and the
+					assistant's creator will be able to see this prompt.</Helper
+				>
 			</div>
-		{/if}
-		<div class="col-span-2 mb-4">
-			{#if !supportsCodeInterpreter}
-				<div class="flex flex-col gap-y-1">
-					<Badge
-						class="flex max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
-						><CloseOutline size="sm" />
-						<div>No Code Interpreter capabilities</div>
-					</Badge>
-					<Helper
-						>This model does not support Code Interpreter capabilities. To use Code Interpreter,
-						select a different model.</Helper
+			<div class="col-span-2 mb-4">
+				{#if interactionMode === 'chat'}
+					<Checkbox id="use_latex" name="use_latex" disabled={preventEdits} checked={useLatex}
+						>Use LaTeX</Checkbox
 					>
+					<Helper>Enable LaTeX formatting for assistant responses.</Helper>
+				{:else}
+					<div class="flex flex-col gap-y-1">
+						<Badge
+							class="flex max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
+							><CloseOutline size="sm" />
+							<div>No LaTeX formatting for assistant responses</div>
+						</Badge>
+						<Helper
+							>This interaction mode does not support LaTeX formatting for assistant responses. To
+							use LaTeX formatting, switch to Chat mode.</Helper
+						>
+					</div>
+				{/if}
+			</div>
+			<div class="col-span-2 mb-4">
+				<Label for="tools">Tools</Label>
+				<Helper>Select tools available to the assistant when generating a response.</Helper>
+			</div>
+			{#if supportsReasoning && reasoningEffortValue === -1 && supportsNoneReasoningEffort}
+				<div class="col-span-2 mb-3">
+					<div
+						class="flex flex-row items-center justify-between gap-x-4 rounded-lg border border-amber-400 bg-gradient-to-b from-amber-50 to-amber-100 p-3 text-amber-800"
+					>
+						<div class="flex flex-row items-center gap-x-3">
+							<LightbulbSolid size="md" class="shrink-0" />
+							<div class="flex flex-col text-xs">
+								<span class="font-bold">Tool reliability may be reduced</span>
+								<span
+									>The current <span class="font-mono">none</span> reasoning effort prioritizes speed,
+									which can impact the reliability of tool calls. You can adjust this setting in Advanced
+									Options.</span
+								>
+							</div>
+						</div>
+						<Button
+							size="xs"
+							color="light"
+							class="shrink-0 border-amber-400 bg-white/60 px-3 py-0.5 text-amber-900 hover:bg-white"
+							disabled={preventEdits}
+							onclick={async () => {
+								if (!advancedOptionsOpen) {
+									advancedOptionsOpen = true;
+									await tick();
+									await new Promise((resolve) => setTimeout(resolve, 150));
+								}
+								const el = document.getElementById('reasoning-effort');
+								if (el) {
+									el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+								}
+							}}>Adjust in Advanced Options</Button
+						>
+					</div>
 				</div>
-			{:else if supportsCodeInterpreter && supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort}
+			{/if}
+			{#if !supportsFileSearch}
 				<div class="col-span-2 mb-3">
 					<div class="flex flex-col gap-y-1">
 						<Badge
 							class="flex max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
 							><CloseOutline size="sm" />
-							<div>No Code Interpreter capabilities in Minimal reasoning effort</div>
+							<div>No File Search capabilities</div>
 						</Badge>
 						<Helper
-							>Minimal reasoning effort does not support Code Interpreter capabilities. To use Code
-							Interpreter, select a higher reasoning effort level.</Helper
+							>This model does not support File Search capabilities. To use File Search, select a
+							different model.</Helper
+						>
+					</div>
+				</div>
+			{:else if supportsFileSearch && supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort}
+				<div class="col-span-2 mb-3">
+					<div class="flex flex-col gap-y-1">
+						<Badge
+							class="flex max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
+							><CloseOutline size="sm" />
+							<div>No File Search capabilities in Minimal reasoning effort</div>
+						</Badge>
+						<Helper
+							>Minimal reasoning effort does not support File Search capabilities. To use File
+							Search, select a higher reasoning effort level.</Helper
 						>
 					</div>
 				</div>
 			{:else}
-				<Checkbox
-					id={codeInterpreterMetadata.value}
-					name={codeInterpreterMetadata.value}
-					disabled={preventEdits || !supportsCodeInterpreter}
-					checked={supportsCodeInterpreter && (codeInterpreterToolSelect || false)}
-					onchange={() => {
-						codeInterpreterToolSelect = !codeInterpreterToolSelect;
-					}}>{codeInterpreterMetadata.name}</Checkbox
-				>
-				<Helper>{codeInterpreterMetadata.description}</Helper>
+				<div class="col-span-2 mb-4">
+					<Checkbox
+						id={fileSearchMetadata.value}
+						name={fileSearchMetadata.value}
+						checked={supportsFileSearch && (fileSearchToolSelect || false)}
+						disabled={!supportsFileSearch || preventEdits}
+						onchange={() => {
+							fileSearchToolSelect = !fileSearchToolSelect;
+						}}>{fileSearchMetadata.name}</Checkbox
+					>
+					<Helper>{fileSearchMetadata.description}</Helper>
+				</div>
 			{/if}
-		</div>
-		{#if !data?.enforceClassicAssistants}
 			<div class="col-span-2 mb-4">
-				{#if (data.isCreating && createClassicAssistant) || (!data.isCreating && assistantVersion !== 3)}
-					<div class="col-span-2 mb-3">
-						<div class="flex flex-col gap-y-1">
-							<Badge
-								class="flex max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
-								><CloseOutline size="sm" />
-								<div>No Web Search capabilities in Classic Assistants</div>
-							</Badge>
-							<Helper
-								>Classic Assistants do not support Web Search capabilities. To use Web Search,
-								create a Next-Gen Assistant.</Helper
-							>
-						</div>
-					</div>
-				{:else if !supportsWebSearch}
+				{#if !supportsCodeInterpreter}
 					<div class="flex flex-col gap-y-1">
 						<Badge
 							class="flex max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
 							><CloseOutline size="sm" />
-							<div>No Web Search capabilities</div>
+							<div>No Code Interpreter capabilities</div>
 						</Badge>
 						<Helper
-							>This model does not support Web Search capabilities. To use Web Search, select a
-							different model.</Helper
+							>This model does not support Code Interpreter capabilities. To use Code Interpreter,
+							select a different model.</Helper
 						>
 					</div>
-				{:else if supportsWebSearch && supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort}
+				{:else if supportsCodeInterpreter && supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort}
 					<div class="col-span-2 mb-3">
 						<div class="flex flex-col gap-y-1">
 							<Badge
 								class="flex max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
 								><CloseOutline size="sm" />
-								<div>No Web Search capabilities in Minimal reasoning effort</div>
+								<div>No Code Interpreter capabilities in Minimal reasoning effort</div>
 							</Badge>
 							<Helper
-								>Minimal reasoning effort does not support Web Search capabilities. To use Web
-								Search, select a higher reasoning effort level.</Helper
+								>Minimal reasoning effort does not support Code Interpreter capabilities. To use
+								Code Interpreter, select a higher reasoning effort level.</Helper
 							>
 						</div>
 					</div>
 				{:else}
 					<Checkbox
-						id={webSearchMetadata.value}
-						name={webSearchMetadata.value}
-						disabled={preventEdits || !supportsWebSearch}
-						checked={supportsWebSearch && (webSearchToolSelect || false)}
+						id={codeInterpreterMetadata.value}
+						name={codeInterpreterMetadata.value}
+						disabled={preventEdits || !supportsCodeInterpreter}
+						checked={supportsCodeInterpreter && (codeInterpreterToolSelect || false)}
 						onchange={() => {
-							webSearchToolSelect = !webSearchToolSelect;
-						}}
-						><div class="flex flex-wrap gap-1.5">
-							<div>{webSearchMetadata.name}</div>
-						</div></Checkbox
+							codeInterpreterToolSelect = !codeInterpreterToolSelect;
+						}}>{codeInterpreterMetadata.name}</Checkbox
 					>
-					<Helper>{webSearchMetadata.description}</Helper>
+					<Helper>{codeInterpreterMetadata.description}</Helper>
 				{/if}
 			</div>
-		{/if}
-		{#if !data?.enforceClassicAssistants}
-			<div class="col-span-2 mb-4">
-				{#if (data.isCreating && createClassicAssistant) || (!data.isCreating && assistantVersion !== 3)}
-					<div class="col-span-2 mb-3">
-						<div class="flex flex-col gap-y-1">
-							<Badge
-								class="flex max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
-								><CloseOutline size="sm" />
-								<div>No MCP Server capabilities in Classic Assistants</div>
-							</Badge>
-							<Helper
-								>Classic Assistants do not support MCP Server capabilities. To use MCP Server,
-								create a Next-Gen Assistant.</Helper
-							>
-						</div>
-					</div>
-				{:else if !supportsMCPServer}
-					<div class="flex flex-col gap-y-1">
-						<Badge
-							class="flex max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
-							><CloseOutline size="sm" />
-							<div>No MCP Server capabilities</div>
-						</Badge>
-						<Helper
-							>This model does not support MCP Server capabilities. To use MCP Server, select a
-							different model.</Helper
-						>
-					</div>
-				{:else if supportsMCPServer && supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort}
-					<div class="col-span-2 mb-3">
-						<div class="flex flex-col gap-y-1">
-							<Badge
-								class="flex max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
-								><CloseOutline size="sm" />
-								<div>No MCP Server capabilities in Minimal reasoning effort</div>
-							</Badge>
-							<Helper
-								>Minimal reasoning effort does not support MCP Server capabilities. To use MCP
-								Server, select a higher reasoning effort level.</Helper
-							>
-						</div>
-					</div>
-				{:else}
-					<Checkbox
-						id={mcpServerMetadata.value}
-						name={mcpServerMetadata.value}
-						disabled={preventEdits || !supportsMCPServer}
-						checked={supportsMCPServer && (mcpServerToolSelect || false)}
-						onchange={() => {
-							mcpServerToolSelect = !mcpServerToolSelect;
-						}}
-						><div class="flex flex-wrap gap-1.5">
-							<div>{mcpServerMetadata.name}</div>
-							<DropdownBadge
-								extraClasses="border-amber-400 from-amber-100 to-amber-200 text-amber-800 py-0 px-1"
-								><span slot="name">Preview</span></DropdownBadge
-							>
-						</div></Checkbox
-					>
-					<Helper>{mcpServerMetadata.description}</Helper>
-				{/if}
-			</div>
-		{/if}
-
-		{#if fileSearchToolSelect && supportsFileSearch && !(supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort)}
-			<div class="col-span-2 mb-4">
-				<Label for="selectedFileSearchFiles">{fileSearchMetadata.name} Files</Label>
-				<Helper class="pb-1"
-					>Select which files this assistant should use for {fileSearchMetadata.name}. You can
-					select up to {fileSearchMetadata.max_count} files. You can also upload private files specific
-					to this assistant. If you want to make files available for the entire group, upload them in
-					the Manage Group page.</Helper
-				>
-				<MultiSelectWithUpload
-					name="selectedFileSearchFiles"
-					items={fileSearchOptions}
-					bind:value={selectedFileSearchFiles}
-					disabled={$loading ||
-						!handleUpload ||
-						uploadingFSPrivate ||
-						preventEdits ||
-						!supportsFileSearch}
-					privateFiles={allFSPrivateFiles}
-					uploading={uploadingFSPrivate}
-					upload={handleUpload}
-					accept={data.uploadInfo.fileTypes({
-						file_search: true,
-						code_interpreter: false,
-						vision: false
-					})}
-					maxSize={data.uploadInfo.class_file_max_size}
-					maxCount={fileSearchMetadata.max_count}
-					uploadType="File Search"
-					on:error={(e) => sadToast(e.detail.message)}
-					on:change={handleFSPrivateFilesChange}
-					on:delete={removePrivateFiles}
-				/>
-			</div>
-		{/if}
-
-		{#if codeInterpreterToolSelect && supportsCodeInterpreter && !(supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort)}
-			<div class="col-span-2 mb-4">
-				<Label for="selectedCodeInterpreterFiles">{codeInterpreterMetadata.name} Files</Label>
-				<Helper class="pb-1"
-					>Select which files this assistant should use for {codeInterpreterMetadata.name}. You can
-					select up to {codeInterpreterMetadata.max_count} files. You can also upload private files specific
-					to this assistant. If you want to make files available for the entire group, upload them in
-					the Manage Group page.</Helper
-				>
-				<MultiSelectWithUpload
-					name="selectedCodeInterpreterFiles"
-					items={codeInterpreterOptions}
-					bind:value={selectedCodeInterpreterFiles}
-					disabled={$loading ||
-						!handleUpload ||
-						uploadingCIPrivate ||
-						preventEdits ||
-						!supportsCodeInterpreter}
-					privateFiles={allCIPrivateFiles}
-					uploading={uploadingCIPrivate}
-					upload={handleUpload}
-					accept={data.uploadInfo.fileTypes({
-						file_search: false,
-						code_interpreter: true,
-						vision: false
-					})}
-					maxSize={data.uploadInfo.class_file_max_size}
-					maxCount={codeInterpreterMetadata.max_count}
-					uploadType="Code Interpreter"
-					on:error={(e) => sadToast(e.detail.message)}
-					on:change={handleCIPrivateFilesChange}
-					on:delete={removePrivateFiles}
-				/>
-			</div>
-		{/if}
-
-		{#if mcpServerToolSelect && supportsMCPServer && !(supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort)}
-			<div class="col-span-2 mb-4">
-				<Label for="mcpServers">MCP Server Configuration</Label>
-				<Helper class="pb-1"
-					>Configure which remote MCP servers this assistant can use. In addition to built-in tools
-					you make available to the assistant, you can give assistants new capabilities using remote
-					MCP servers. These tools give the assistant the ability to connect to and control external
-					services when needed to respond to a user's prompt.
-				</Helper>
-				<div class="mt-4 rounded-2xl border border-gray-200 bg-white">
-					<div
-						class="flex flex-col gap-3 border-b border-gray-200 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
-					>
-						<div class="text-sm font-semibold text-gray-900">Configured servers</div>
-						<Button
-							type="button"
-							size="xs"
-							color="light"
-							class="w-fit"
-							onclick={() => (showMCPServerModal = true)}
-							disabled={preventEdits}>Add MCP Server</Button
-						>
-					</div>
-					<div
-						class="hidden border-b border-gray-100 px-4 py-2 text-xs tracking-[0.14em] text-gray-500 uppercase sm:grid sm:grid-cols-12 sm:gap-3"
-					>
-						<div class="sm:col-span-4">Server Name</div>
-						<div class="sm:col-span-4">URL</div>
-						<div class="sm:col-span-2">Authentication</div>
-						<div class="text-center sm:col-span-1">Enabled</div>
-						<div class="text-right sm:col-span-1">Actions</div>
-					</div>
-					{#if mcpServersLocal.length === 0}
-						<div class="px-4 py-6 text-sm text-gray-500">No MCP servers configured yet.</div>
-					{:else}
-						{#each mcpServersLocal as server, index (index)}
-							<div class="border-t border-gray-100 px-4 py-3">
-								<div class="flex flex-col gap-3 sm:grid sm:grid-cols-12 sm:items-center sm:gap-3">
-									<div class="sm:col-span-4">
-										<div class="truncate text-sm text-gray-700" title={server.display_name}>
-											{server.display_name}
-										</div>
-									</div>
-									<div class="sm:col-span-4">
-										<div class="truncate text-sm text-gray-700" title={server.server_url}>
-											{server.server_url}
-										</div>
-									</div>
-									<div class="sm:col-span-2">
-										<div class="text-sm text-gray-600">{mcpAuthTypeLabels[server.auth_type]}</div>
-									</div>
-									<div class="sm:col-span-1 sm:text-center">
-										<input
-											type="checkbox"
-											class="h-4 w-4 rounded border-gray-300 text-blue-dark-40 focus:ring-blue-dark-40 disabled:opacity-50"
-											bind:checked={server.enabled}
-											disabled={preventEdits}
-											aria-label="Enable MCP server"
-										/>
-									</div>
-									<div class="flex flex-wrap items-center gap-2 sm:col-span-1 sm:justify-end">
-										<Button
-											type="button"
-											size="xs"
-											color="light"
-											class="w-fit"
-											onclick={() => {
-												mcpServerEditIndex = index;
-												showMCPServerModal = true;
-											}}
-											disabled={preventEdits}>Edit</Button
-										>
-										<Button
-											type="button"
-											size="xs"
-											color="light"
-											class="w-fit text-red-600"
-											onclick={() => removeServer(index)}
-											disabled={preventEdits}>Remove</Button
-										>
-									</div>
-								</div>
+			{#if !data?.enforceClassicAssistants}
+				<div class="col-span-2 mb-4">
+					{#if (data.isCreating && createClassicAssistant) || (!data.isCreating && assistantVersion !== 3)}
+						<div class="col-span-2 mb-3">
+							<div class="flex flex-col gap-y-1">
+								<Badge
+									class="flex max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
+									><CloseOutline size="sm" />
+									<div>No Web Search capabilities in Classic Assistants</div>
+								</Badge>
+								<Helper
+									>Classic Assistants do not support Web Search capabilities. To use Web Search,
+									create a Next-Gen Assistant.</Helper
+								>
 							</div>
-						{/each}
+						</div>
+					{:else if !supportsWebSearch}
+						<div class="flex flex-col gap-y-1">
+							<Badge
+								class="flex max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
+								><CloseOutline size="sm" />
+								<div>No Web Search capabilities</div>
+							</Badge>
+							<Helper
+								>This model does not support Web Search capabilities. To use Web Search, select a
+								different model.</Helper
+							>
+						</div>
+					{:else if supportsWebSearch && supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort}
+						<div class="col-span-2 mb-3">
+							<div class="flex flex-col gap-y-1">
+								<Badge
+									class="flex max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
+									><CloseOutline size="sm" />
+									<div>No Web Search capabilities in Minimal reasoning effort</div>
+								</Badge>
+								<Helper
+									>Minimal reasoning effort does not support Web Search capabilities. To use Web
+									Search, select a higher reasoning effort level.</Helper
+								>
+							</div>
+						</div>
+					{:else}
+						<Checkbox
+							id={webSearchMetadata.value}
+							name={webSearchMetadata.value}
+							disabled={preventEdits || !supportsWebSearch}
+							checked={supportsWebSearch && (webSearchToolSelect || false)}
+							onchange={() => {
+								webSearchToolSelect = !webSearchToolSelect;
+							}}
+							><div class="flex flex-wrap gap-1.5">
+								<div>{webSearchMetadata.name}</div>
+							</div></Checkbox
+						>
+						<Helper>{webSearchMetadata.description}</Helper>
 					{/if}
 				</div>
-			</div>
+			{/if}
+			{#if !data?.enforceClassicAssistants}
+				<div class="col-span-2 mb-4">
+					{#if (data.isCreating && createClassicAssistant) || (!data.isCreating && assistantVersion !== 3)}
+						<div class="col-span-2 mb-3">
+							<div class="flex flex-col gap-y-1">
+								<Badge
+									class="flex max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
+									><CloseOutline size="sm" />
+									<div>No MCP Server capabilities in Classic Assistants</div>
+								</Badge>
+								<Helper
+									>Classic Assistants do not support MCP Server capabilities. To use MCP Server,
+									create a Next-Gen Assistant.</Helper
+								>
+							</div>
+						</div>
+					{:else if !supportsMCPServer}
+						<div class="flex flex-col gap-y-1">
+							<Badge
+								class="flex max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
+								><CloseOutline size="sm" />
+								<div>No MCP Server capabilities</div>
+							</Badge>
+							<Helper
+								>This model does not support MCP Server capabilities. To use MCP Server, select a
+								different model.</Helper
+							>
+						</div>
+					{:else if supportsMCPServer && supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort}
+						<div class="col-span-2 mb-3">
+							<div class="flex flex-col gap-y-1">
+								<Badge
+									class="flex max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
+									><CloseOutline size="sm" />
+									<div>No MCP Server capabilities in Minimal reasoning effort</div>
+								</Badge>
+								<Helper
+									>Minimal reasoning effort does not support MCP Server capabilities. To use MCP
+									Server, select a higher reasoning effort level.</Helper
+								>
+							</div>
+						</div>
+					{:else}
+						<Checkbox
+							id={mcpServerMetadata.value}
+							name={mcpServerMetadata.value}
+							disabled={preventEdits || !supportsMCPServer}
+							checked={supportsMCPServer && (mcpServerToolSelect || false)}
+							onchange={() => {
+								mcpServerToolSelect = !mcpServerToolSelect;
+							}}
+							><div class="flex flex-wrap gap-1.5">
+								<div>{mcpServerMetadata.name}</div>
+								<DropdownBadge
+									extraClasses="border-amber-400 from-amber-100 to-amber-200 text-amber-800 py-0 px-1"
+									><span slot="name">Preview</span></DropdownBadge
+								>
+							</div></Checkbox
+						>
+						<Helper>{mcpServerMetadata.description}</Helper>
+					{/if}
+				</div>
+			{/if}
+
+			{#if fileSearchToolSelect && supportsFileSearch && !(supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort)}
+				<div class="col-span-2 mb-4">
+					<Label for="selectedFileSearchFiles">{fileSearchMetadata.name} Files</Label>
+					<Helper class="pb-1"
+						>Select which files this assistant should use for {fileSearchMetadata.name}. You can
+						select up to {fileSearchMetadata.max_count} files. You can also upload private files specific
+						to this assistant. If you want to make files available for the entire group, upload them in
+						the Manage Group page.</Helper
+					>
+					<MultiSelectWithUpload
+						name="selectedFileSearchFiles"
+						items={fileSearchOptions}
+						bind:value={selectedFileSearchFiles}
+						disabled={$loading ||
+							!handleUpload ||
+							uploadingFSPrivate ||
+							preventEdits ||
+							!supportsFileSearch}
+						privateFiles={allFSPrivateFiles}
+						uploading={uploadingFSPrivate}
+						upload={handleUpload}
+						accept={data.uploadInfo.fileTypes({
+							file_search: true,
+							code_interpreter: false,
+							vision: false
+						})}
+						maxSize={data.uploadInfo.class_file_max_size}
+						maxCount={fileSearchMetadata.max_count}
+						uploadType="File Search"
+						on:error={(e) => sadToast(e.detail.message)}
+						on:change={handleFSPrivateFilesChange}
+						on:delete={removePrivateFiles}
+					/>
+				</div>
+			{/if}
+
+			{#if codeInterpreterToolSelect && supportsCodeInterpreter && !(supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort)}
+				<div class="col-span-2 mb-4">
+					<Label for="selectedCodeInterpreterFiles">{codeInterpreterMetadata.name} Files</Label>
+					<Helper class="pb-1"
+						>Select which files this assistant should use for {codeInterpreterMetadata.name}. You
+						can select up to {codeInterpreterMetadata.max_count} files. You can also upload private files
+						specific to this assistant. If you want to make files available for the entire group, upload
+						them in the Manage Group page.</Helper
+					>
+					<MultiSelectWithUpload
+						name="selectedCodeInterpreterFiles"
+						items={codeInterpreterOptions}
+						bind:value={selectedCodeInterpreterFiles}
+						disabled={$loading ||
+							!handleUpload ||
+							uploadingCIPrivate ||
+							preventEdits ||
+							!supportsCodeInterpreter}
+						privateFiles={allCIPrivateFiles}
+						uploading={uploadingCIPrivate}
+						upload={handleUpload}
+						accept={data.uploadInfo.fileTypes({
+							file_search: false,
+							code_interpreter: true,
+							vision: false
+						})}
+						maxSize={data.uploadInfo.class_file_max_size}
+						maxCount={codeInterpreterMetadata.max_count}
+						uploadType="Code Interpreter"
+						on:error={(e) => sadToast(e.detail.message)}
+						on:change={handleCIPrivateFilesChange}
+						on:delete={removePrivateFiles}
+					/>
+				</div>
+			{/if}
+
+			{#if mcpServerToolSelect && supportsMCPServer && !(supportsReasoning && reasoningEffortValue === -1 && !supportsNoneReasoningEffort)}
+				<div class="col-span-2 mb-4">
+					<Label for="mcpServers">MCP Server Configuration</Label>
+					<Helper class="pb-1"
+						>Configure which remote MCP servers this assistant can use. In addition to built-in
+						tools you make available to the assistant, you can give assistants new capabilities
+						using remote MCP servers. These tools give the assistant the ability to connect to and
+						control external services when needed to respond to a user's prompt.
+					</Helper>
+					<div class="mt-4 rounded-2xl border border-gray-200 bg-white">
+						<div
+							class="flex flex-col gap-3 border-b border-gray-200 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+						>
+							<div class="text-sm font-semibold text-gray-900">Configured servers</div>
+							<Button
+								type="button"
+								size="xs"
+								color="light"
+								class="w-fit"
+								onclick={() => (showMCPServerModal = true)}
+								disabled={preventEdits}>Add MCP Server</Button
+							>
+						</div>
+						<div
+							class="hidden border-b border-gray-100 px-4 py-2 text-xs tracking-[0.14em] text-gray-500 uppercase sm:grid sm:grid-cols-12 sm:gap-3"
+						>
+							<div class="sm:col-span-4">Server Name</div>
+							<div class="sm:col-span-4">URL</div>
+							<div class="sm:col-span-2">Authentication</div>
+							<div class="text-center sm:col-span-1">Enabled</div>
+							<div class="text-right sm:col-span-1">Actions</div>
+						</div>
+						{#if mcpServersLocal.length === 0}
+							<div class="px-4 py-6 text-sm text-gray-500">No MCP servers configured yet.</div>
+						{:else}
+							{#each mcpServersLocal as server, index (index)}
+								<div class="border-t border-gray-100 px-4 py-3">
+									<div class="flex flex-col gap-3 sm:grid sm:grid-cols-12 sm:items-center sm:gap-3">
+										<div class="sm:col-span-4">
+											<div class="truncate text-sm text-gray-700" title={server.display_name}>
+												{server.display_name}
+											</div>
+										</div>
+										<div class="sm:col-span-4">
+											<div class="truncate text-sm text-gray-700" title={server.server_url}>
+												{server.server_url}
+											</div>
+										</div>
+										<div class="sm:col-span-2">
+											<div class="text-sm text-gray-600">{mcpAuthTypeLabels[server.auth_type]}</div>
+										</div>
+										<div class="sm:col-span-1 sm:text-center">
+											<input
+												type="checkbox"
+												class="h-4 w-4 rounded border-gray-300 text-blue-dark-40 focus:ring-blue-dark-40 disabled:opacity-50"
+												bind:checked={server.enabled}
+												disabled={preventEdits}
+												aria-label="Enable MCP server"
+											/>
+										</div>
+										<div class="flex flex-wrap items-center gap-2 sm:col-span-1 sm:justify-end">
+											<Button
+												type="button"
+												size="xs"
+												color="light"
+												class="w-fit"
+												onclick={() => {
+													mcpServerEditIndex = index;
+													showMCPServerModal = true;
+												}}
+												disabled={preventEdits}>Edit</Button
+											>
+											<Button
+												type="button"
+												size="xs"
+												color="light"
+												class="w-fit text-red-600"
+												onclick={() => removeServer(index)}
+												disabled={preventEdits}>Remove</Button
+											>
+										</div>
+									</div>
+								</div>
+							{/each}
+						{/if}
+					</div>
+				</div>
+			{/if}
 		{/if}
 
 		<div class="col-span-2 mb-4">
@@ -2053,7 +2210,7 @@
 			{/if}
 		</div>
 
-		{#if visionSupportOverride === false}
+		{#if visionSupportOverride === false && !isLectureMode}
 			<div class="col-span-2 mb-4">
 				<Checkbox
 					id="use_image_descriptions"
@@ -2098,20 +2255,23 @@
 						</div></span
 					>
 					<div class="flex flex-col gap-4 px-1">
-						<div class="col-span-2 mb-1">
-							<Checkbox
-								id="assistant_should_message_first"
-								name="assistant_should_message_first"
-								disabled={preventEdits}
-								bind:checked={assistantShouldMessageFirst}>Assistant Should Message First</Checkbox
-							>
-							<Helper
-								>Control whether the assistant should initiate the conversation. When checked, users
-								will be able to send their first message after the assistant responds.</Helper
-							>
-						</div>
+						{#if !isLectureMode}
+							<div class="col-span-2 mb-1">
+								<Checkbox
+									id="assistant_should_message_first"
+									name="assistant_should_message_first"
+									disabled={preventEdits}
+									bind:checked={assistantShouldMessageFirst}
+									>Assistant Should Message First</Checkbox
+								>
+								<Helper
+									>Control whether the assistant should initiate the conversation. When checked,
+									users will be able to send their first message after the assistant responds.</Helper
+								>
+							</div>
 
-						<hr />
+							<hr />
+						{/if}
 
 						<div class="col-span-2 mb-1">
 							<Checkbox
@@ -2121,15 +2281,15 @@
 								bind:checked={shouldRecordNameOrVoice}
 								><div class="flex flex-row gap-1">
 									<div>
-										{#if interactionMode === 'chat'}Record User Name{:else}Record User Name and
-											Conversation{/if}
+										{#if interactionMode === 'voice'}Record User Name and Conversation{/if}
+										{#if interactionMode !== 'voice'}Record User Name{/if}
 									</div>
 									{#if isClassPrivate}<div>&middot;</div>
 										<div>Unavailable for Private Groups</div>{/if}
 								</div></Checkbox
 							>
 							<Helper
-								>{#if interactionMode === 'chat'}Control whether moderators should be able to view
+								>{#if interactionMode !== 'voice'}Control whether moderators should be able to view
 									the user's name when viewing a thread. When checked, users will be given a notice
 									that their name will be visible to moderators. Published threads will display
 									pseudonyms to members. Only threads <span class="font-extrabold"
@@ -2145,244 +2305,257 @@
 								{/if}</Helper
 							>
 						</div>
-						<hr />
+						{#if !isLectureMode}
+							<hr />
+						{/if}
 
-						<div class="col-span-2 mb-1">
-							<Checkbox
-								id="allow_user_file_uploads"
-								name="allow_user_file_uploads"
-								disabled={preventEdits}
-								bind:checked={allowUserFileUploads}
-								><div class="flex flex-row gap-1">
-									<div>Allow Users to Upload Files</div>
-								</div></Checkbox
-							>
-							<Helper
-								>Control whether users can upload their own files when interacting with this
-								assistant. When unchecked, users will not be able to attach their own files to
-								messages, even if the assistant has file search or code interpreter enabled. Files
-								that you add to the assistant will still be available for the assistant to use. <b
-									>This setting will only apply when you enable File Search or Code Interpreter in
-									Chat Mode models.</b
-								></Helper
-							>
-						</div>
+						{#if !isLectureMode}
+							<div class="col-span-2 mb-1">
+								<Checkbox
+									id="allow_user_file_uploads"
+									name="allow_user_file_uploads"
+									disabled={preventEdits}
+									bind:checked={allowUserFileUploads}
+									><div class="flex flex-row gap-1">
+										<div>Allow Users to Upload Files</div>
+									</div></Checkbox
+								>
+								<Helper
+									>Control whether users can upload their own files when interacting with this
+									assistant. When unchecked, users will not be able to attach their own files to
+									messages, even if the assistant has file search or code interpreter enabled. Files
+									that you add to the assistant will still be available for the assistant to use. <b
+										>This setting will only apply when you enable File Search or Code Interpreter in
+										Chat Mode models.</b
+									></Helper
+								>
+							</div>
 
-						<div class="col-span-2 mb-1">
-							<Checkbox
-								id="allow_user_image_uploads"
-								name="allow_user_image_uploads"
-								disabled={preventEdits}
-								bind:checked={allowUserImageUploads}
-								><div class="flex flex-row gap-1">
-									<div>Allow Users to Upload Images</div>
-								</div></Checkbox
-							>
-							<Helper
-								>Control whether users can upload their own images when interacting with this
-								assistant. When unchecked, users will not be able to attach their own images to
-								messages, even if the assistant's model has Vision capabilities. <b
-									>This setting will only apply to Chat Mode models with Vision capabilities{visionSupportOverride ===
-									false
-										? ', or when you enable Vision capabilities through Image Descriptions.'
-										: '.'}</b
-								></Helper
-							>
-						</div>
-						<hr />
-						<div class="col-span-2 mb-1">
-							<Checkbox
-								id="hide_file_search_queries"
-								name="hide_file_search_queries"
-								disabled={preventEdits}
-								bind:checked={hideFileSearchQueries}
-								><div class="flex flex-row gap-1">
-									<div>Hide File Search Queries from Members</div>
-								</div></Checkbox
-							>
-							<Helper
-								>Control whether members can see the queries the assistant uses for file searches.
-								Depending on your prompt, these queries may contain sensitive information or provide
-								information about how you have designed the assistant. When checked, members will
-								not see the queries. Moderators can always review file search queries. <b
-									>This setting will only apply to Chat Mode models with File Search enabled.</b
-								></Helper
-							>
-						</div>
+							<div class="col-span-2 mb-1">
+								<Checkbox
+									id="allow_user_image_uploads"
+									name="allow_user_image_uploads"
+									disabled={preventEdits}
+									bind:checked={allowUserImageUploads}
+									><div class="flex flex-row gap-1">
+										<div>Allow Users to Upload Images</div>
+									</div></Checkbox
+								>
+								<Helper
+									>Control whether users can upload their own images when interacting with this
+									assistant. When unchecked, users will not be able to attach their own images to
+									messages, even if the assistant's model has Vision capabilities. <b
+										>This setting will only apply to Chat Mode models with Vision capabilities{visionSupportOverride ===
+										false
+											? ', or when you enable Vision capabilities through Image Descriptions.'
+											: '.'}</b
+									></Helper
+								>
+							</div>
+							<hr />
+							<div class="col-span-2 mb-1">
+								<Checkbox
+									id="hide_file_search_queries"
+									name="hide_file_search_queries"
+									disabled={preventEdits}
+									bind:checked={hideFileSearchQueries}
+									><div class="flex flex-row gap-1">
+										<div>Hide File Search Queries from Members</div>
+									</div></Checkbox
+								>
+								<Helper
+									>Control whether members can see the queries the assistant uses for file searches.
+									Depending on your prompt, these queries may contain sensitive information or
+									provide information about how you have designed the assistant. When checked,
+									members will not see the queries. Moderators can always review file search
+									queries. <b
+										>This setting will only apply to Chat Mode models with File Search enabled.</b
+									></Helper
+								>
+							</div>
 
-						<div class="col-span-2 mb-1">
-							<Checkbox
-								id="hide_file_search_result_quotes"
-								name="hide_file_search_result_quotes"
-								class={hideFileSearchDocumentNames
-									? 'text-gray-400 contrast-50 grayscale'
-									: 'text-gray-800 contrast-100 grayscale-0'}
-								disabled={preventEdits || hideFileSearchDocumentNames}
-								bind:checked={hideFileSearchResultQuotes}
-								><div class="flex flex-row gap-1">
-									<div>Hide File Search Result Quotes from Members</div>
-									{#if hideFileSearchDocumentNames}<div>&middot;</div>
-										<div>"Completely Hide File Search Results" selected</div>{/if}
-								</div></Checkbox
-							>
-							<Helper
-								>Control whether members can see the text the assistant retrieves from each file
-								during File Search. Depending on the materials you make available to the assistant,
-								quotes may contain sensitive information like answer keys. When checked, members
-								will not see the document quotes returned during file searches. Moderators can
-								always review file search results. <b
-									>This setting will only apply to Chat Mode models with File Search enabled.</b
-								></Helper
-							>
-						</div>
-						<div class="col-span-2 mb-1">
-							<Checkbox
-								id="hide_file_search_document_names"
-								name="hide_file_search_document_names"
-								disabled={preventEdits}
-								bind:checked={hideFileSearchDocumentNames}
-								><div class="flex flex-row gap-1">
-									<div>Completely Hide File Search Results from Members</div>
-								</div></Checkbox
-							>
-							<Helper
-								>Hide the names of the documents the assistant retrieves in file searches from
-								members, on top of quotes. In some cases, document names may contain sensitive
-								information. When checked, PingPong will completely hide file search results.
-								Moderators can always review file search results. <b
-									>This setting will only apply to Chat Mode models with File Search enabled.</b
-								></Helper
-							>
-						</div>
+							<div class="col-span-2 mb-1">
+								<Checkbox
+									id="hide_file_search_result_quotes"
+									name="hide_file_search_result_quotes"
+									class={hideFileSearchDocumentNames
+										? 'text-gray-400 contrast-50 grayscale'
+										: 'text-gray-800 contrast-100 grayscale-0'}
+									disabled={preventEdits || hideFileSearchDocumentNames}
+									bind:checked={hideFileSearchResultQuotes}
+									><div class="flex flex-row gap-1">
+										<div>Hide File Search Result Quotes from Members</div>
+										{#if hideFileSearchDocumentNames}<div>&middot;</div>
+											<div>"Completely Hide File Search Results" selected</div>{/if}
+									</div></Checkbox
+								>
+								<Helper
+									>Control whether members can see the text the assistant retrieves from each file
+									during File Search. Depending on the materials you make available to the
+									assistant, quotes may contain sensitive information like answer keys. When
+									checked, members will not see the document quotes returned during file searches.
+									Moderators can always review file search results. <b
+										>This setting will only apply to Chat Mode models with File Search enabled.</b
+									></Helper
+								>
+							</div>
+							<div class="col-span-2 mb-1">
+								<Checkbox
+									id="hide_file_search_document_names"
+									name="hide_file_search_document_names"
+									disabled={preventEdits}
+									bind:checked={hideFileSearchDocumentNames}
+									><div class="flex flex-row gap-1">
+										<div>Completely Hide File Search Results from Members</div>
+									</div></Checkbox
+								>
+								<Helper
+									>Hide the names of the documents the assistant retrieves in file searches from
+									members, on top of quotes. In some cases, document names may contain sensitive
+									information. When checked, PingPong will completely hide file search results.
+									Moderators can always review file search results. <b
+										>This setting will only apply to Chat Mode models with File Search enabled.</b
+									></Helper
+								>
+							</div>
 
-						<hr />
-						<div class="col-span-2 mb-1">
-							<Checkbox
-								id="hide_web_search_sources"
-								name="hide_web_search_sources"
-								disabled={preventEdits || hideWebSearchActions}
-								class={hideWebSearchActions
-									? 'text-gray-400 contrast-50 grayscale'
-									: 'text-gray-800 contrast-100 grayscale-0'}
-								bind:checked={hideWebSearchSources}
-								><div class="flex flex-row gap-1">
-									<div>Hide Web Search Sources from Members</div>
-									{#if hideWebSearchActions}<div>&middot;</div>
-										<div>"Completely Hide Web Search Actions" selected</div>{/if}
-								</div></Checkbox
-							>
-							<Helper
-								>When the assistant uses web search, it may consider a number of sources before
-								drafting its response. Many of the sources are often not used in the final response.
-								Control whether members can see all sources. When checked, members will not see the
-								sources the assistant used during web searches. Moderators can always review web
-								search sources. <b
-									>This setting will only apply to Chat Mode models with Web Search enabled.</b
-								></Helper
-							>
-						</div>
+							<hr />
+							<div class="col-span-2 mb-1">
+								<Checkbox
+									id="hide_web_search_sources"
+									name="hide_web_search_sources"
+									disabled={preventEdits || hideWebSearchActions}
+									class={hideWebSearchActions
+										? 'text-gray-400 contrast-50 grayscale'
+										: 'text-gray-800 contrast-100 grayscale-0'}
+									bind:checked={hideWebSearchSources}
+									><div class="flex flex-row gap-1">
+										<div>Hide Web Search Sources from Members</div>
+										{#if hideWebSearchActions}<div>&middot;</div>
+											<div>"Completely Hide Web Search Actions" selected</div>{/if}
+									</div></Checkbox
+								>
+								<Helper
+									>When the assistant uses web search, it may consider a number of sources before
+									drafting its response. Many of the sources are often not used in the final
+									response. Control whether members can see all sources. When checked, members will
+									not see the sources the assistant used during web searches. Moderators can always
+									review web search sources. <b
+										>This setting will only apply to Chat Mode models with Web Search enabled.</b
+									></Helper
+								>
+							</div>
 
-						<div class="col-span-2 mb-1">
-							<Checkbox
-								id="hide_web_search_actions"
-								name="hide_web_search_actions"
-								disabled={preventEdits}
-								bind:checked={hideWebSearchActions}
-								><div class="flex flex-row gap-1">
-									<div>Completely Hide Web Search Actions from Members</div>
-								</div></Checkbox
-							>
-							<Helper
-								>When the assistant uses web search, it may perform various actions such as querying
-								search engines, clicking on links, and extracting information. This setting controls
-								whether members can see these web search actions. When checked, members will see
-								that the assistant is searching the web without revealing specific actions.
-								Moderators can always review web search actions. <b
-									>This setting will only apply to Chat Mode models with Web Search enabled.</b
-								></Helper
-							>
-						</div>
-						<div class="col-span-2 mb-1">
-							<div
-								class="flex flex-row items-center justify-between gap-x-4 rounded-lg border border-blue-400 bg-gradient-to-b from-blue-50 to-blue-100 p-3 text-blue-800"
-							>
-								<div class="flex flex-row items-center gap-x-3">
-									<LightbulbSolid size="md" class="shrink-0" />
-									<div class="flex flex-col text-xs">
-										<span class="font-bold"
-											>Assistant responses may include inline URL citations</span
-										>
-										<span
-											>When the assistant uses web search, URL citations may be included in its
-											responses. Citations show the domain inline, and the web address and title in
-											a popover. Members can click the inline citation to visit the source. You can
-											interact with the example citation on the right.</span
-										>
+							<div class="col-span-2 mb-1">
+								<Checkbox
+									id="hide_web_search_actions"
+									name="hide_web_search_actions"
+									disabled={preventEdits}
+									bind:checked={hideWebSearchActions}
+									><div class="flex flex-row gap-1">
+										<div>Completely Hide Web Search Actions from Members</div>
+									</div></Checkbox
+								>
+								<Helper
+									>When the assistant uses web search, it may perform various actions such as
+									querying search engines, clicking on links, and extracting information. This
+									setting controls whether members can see these web search actions. When checked,
+									members will see that the assistant is searching the web without revealing
+									specific actions. Moderators can always review web search actions. <b
+										>This setting will only apply to Chat Mode models with Web Search enabled.</b
+									></Helper
+								>
+							</div>
+							<div class="col-span-2 mb-1">
+								<div
+									class="flex flex-row items-center justify-between gap-x-4 rounded-lg border border-blue-400 bg-gradient-to-b from-blue-50 to-blue-100 p-3 text-blue-800"
+								>
+									<div class="flex flex-row items-center gap-x-3">
+										<LightbulbSolid size="md" class="shrink-0" />
+										<div class="flex flex-col text-xs">
+											<span class="font-bold"
+												>Assistant responses may include inline URL citations</span
+											>
+											<span
+												>When the assistant uses web search, URL citations may be included in its
+												responses. Citations show the domain inline, and the web address and title
+												in a popover. Members can click the inline citation to visit the source. You
+												can interact with the example citation on the right.</span
+											>
+										</div>
+									</div>
+									<div class="flex flex-row items-center gap-x-3">
+										<WebSourceChip
+											source={{
+												url: 'https://openai.com/index/gpt-5-1/',
+												type: 'url',
+												title: 'GPT-5.1: A smarter, more conversational ChatGPT'
+											}}
+											type="chip"
+										/>
 									</div>
 								</div>
-								<div class="flex flex-row items-center gap-x-3">
-									<WebSourceChip
-										source={{
-											url: 'https://openai.com/index/gpt-5-1/',
-											type: 'url',
-											title: 'GPT-5.1: A smarter, more conversational ChatGPT'
-										}}
-										type="chip"
-									/>
-								</div>
 							</div>
-						</div>
 
-						<hr />
+							<hr />
 
-						<div class="col-span-2 mb-1">
-							<Checkbox
-								id="hide_reasoning_summaries"
-								name="hide_reasoning_summaries"
-								disabled={preventEdits}
-								bind:checked={hideReasoningSummaries}
-								><div class="flex flex-row gap-1">
-									<div>Hide Reasoning Summaries from Members</div>
-								</div></Checkbox
-							>
-							<Helper
-								>Control whether members can see summaries of the assistant's reasoning process. In
-								some cases, this material may contain sensitive information or insights about the
-								assistant's internal logic or prompt. When checked, members will not see the
-								reasoning summaries. Moderators can always review reasoning summaries. <b
-									>This setting will only apply to Chat Mode reasoning models.</b
-								></Helper
-							>
-						</div>
-						<hr />
+							<div class="col-span-2 mb-1">
+								<Checkbox
+									id="hide_reasoning_summaries"
+									name="hide_reasoning_summaries"
+									disabled={preventEdits}
+									bind:checked={hideReasoningSummaries}
+									><div class="flex flex-row gap-1">
+										<div>Hide Reasoning Summaries from Members</div>
+									</div></Checkbox
+								>
+								<Helper
+									>Control whether members can see summaries of the assistant's reasoning process.
+									In some cases, this material may contain sensitive information or insights about
+									the assistant's internal logic or prompt. When checked, members will not see the
+									reasoning summaries. Moderators can always review reasoning summaries. <b
+										>This setting will only apply to Chat Mode reasoning models.</b
+									></Helper
+								>
+							</div>
+							<hr />
 
-						<div class="col-span-2 mb-1">
-							<Checkbox
-								id="hide_mcp_server_call_details"
-								name="hide_mcp_server_call_details"
-								disabled={preventEdits}
-								bind:checked={hideMCPServerCallDetails}
-								><div class="flex flex-row gap-1">
-									<div>Hide MCP Server call details from Members</div>
-								</div></Checkbox
-							>
-							<Helper
-								>Control whether members can see MCP Server call details. In some cases, this
-								material may contain sensitive information or insights about the assistant's
-								internal logic or prompt. When checked, members will see when the assistant makes
-								calls to an MCP Server, including which tools are called, but will not see detailed
-								payloads or responses. Moderators can always review MCP Server call details. <b
-									>This setting will only apply to Chat Mode models with the MCP Server tool
-									enabled.</b
-								></Helper
-							>
-						</div>
-						<hr />
+							<div class="col-span-2 mb-1">
+								<Checkbox
+									id="hide_mcp_server_call_details"
+									name="hide_mcp_server_call_details"
+									disabled={preventEdits}
+									bind:checked={hideMCPServerCallDetails}
+									><div class="flex flex-row gap-1">
+										<div>Hide MCP Server call details from Members</div>
+									</div></Checkbox
+								>
+								<Helper
+									>Control whether members can see MCP Server call details. In some cases, this
+									material may contain sensitive information or insights about the assistant's
+									internal logic or prompt. When checked, members will see when the assistant makes
+									calls to an MCP Server, including which tools are called, but will not see
+									detailed payloads or responses. Moderators can always review MCP Server call
+									details. <b
+										>This setting will only apply to Chat Mode models with the MCP Server tool
+										enabled.</b
+									></Helper
+								>
+							</div>
+							<hr />
+						{/if}
 
-						{#if supportsTemperature}
+						{#if supportsTemperature && !isLectureMode}
 							<div class="flex flex-col">
 								<Label for="temperature">Temperature</Label>
-								{#if interactionMode === 'chat'}
+								{#if interactionMode === 'voice'}
+									<Helper class="pb-1"
+										>Select the model's "temperature," a setting from 0.6 to 1.2 that controls how
+										creative or predictable the assistant's responses are. For audio models, a
+										temperature of 0.8 is highly recommended for best performance. You can change
+										this setting anytime.</Helper
+									>
+								{:else}
 									<Helper class="pb-1"
 										>Select the model's "temperature," a setting from 0 to 2 that controls how
 										creative or predictable the assistant's responses are. For reliable, focused
@@ -2390,13 +2563,6 @@
 										responses, try a setting closer to 1. Avoid setting the temperature much above 1
 										unless you need very experimental responses, as it may lead to less predictable
 										and more random answers.</Helper
-									>
-								{:else if interactionMode === 'voice'}
-									<Helper class="pb-1"
-										>Select the model's "temperature," a setting from 0.6 to 1.2 that controls how
-										creative or predictable the assistant's responses are. For audio models, a
-										temperature of 0.8 is highly recommended for best performance. You can change
-										this setting anytime.</Helper
 									>
 								{/if}
 							</div>
@@ -2415,7 +2581,7 @@
 									<ArrowRightOutline />
 								</div>
 							</div>
-							{#if interactionMode === 'chat'}
+							{#if interactionMode !== 'voice'}
 								<Range
 									id="temperature"
 									name="temperature"
@@ -2507,7 +2673,7 @@
 								</div>
 							{/if}
 						{/if}
-						{#if supportsReasoning}
+						{#if supportsReasoning && !isLectureMode}
 							<div class="flex flex-col">
 								<Label for="reasoning-effort">Reasoning effort</Label>
 								<Helper class="pb-1"
@@ -2575,7 +2741,7 @@
 								</div>
 							{/if}
 						{/if}
-						{#if supportsVerbosity}
+						{#if supportsVerbosity && !isLectureMode}
 							<div class="flex flex-col">
 								<Label for="verbosity">Verbosity</Label>
 								<Helper class="pb-1"
@@ -2624,7 +2790,7 @@
 						{/if}
 						<hr />
 
-						{#if !data.isCreating}
+						{#if !data.isCreating || isLectureMode}
 							<div class="col-span-2 mb-1">
 								<span
 									class="block text-sm font-medium text-gray-900 rtl:text-right dark:text-gray-300"
@@ -2634,14 +2800,20 @@
 											? 'Classic Assistants'
 											: 'No Version Information'}</span
 								>
-								<Helper class="pb-1"
-									>Shows which version of Assistants you’re using. Next-Gen Assistants are the next
-									generation of PingPong Assistants. They're designed to enable additional
-									capabilities and improve reliability. Most new Assistants you create will
-									automatically use this Next-Gen version. Existing Classic Assistants will continue
-									to work just as expected and will be upgraded to Next-Gen in the future so you can
-									take advantage of the latest improvements.</Helper
-								>
+								{#if isLectureMode}
+									<Helper class="pb-1"
+										>Lecture video mode assistants always use Next-Gen Assistants.</Helper
+									>
+								{:else}
+									<Helper class="pb-1"
+										>Shows which version of Assistants you’re using. Next-Gen Assistants are the
+										next generation of PingPong Assistants. They're designed to enable additional
+										capabilities and improve reliability. Most new Assistants you create will
+										automatically use this Next-Gen version. Existing Classic Assistants will
+										continue to work just as expected and will be upgraded to Next-Gen in the future
+										so you can take advantage of the latest improvements.</Helper
+									>
+								{/if}
 								{#if canSwitchAssistantVersion}
 									<div class="mt-4 flex flex-row gap-1.5">
 										<DropdownBadge

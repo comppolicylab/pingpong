@@ -17,7 +17,7 @@ export const load: PageLoad = async ({ fetch, params, parent }) => {
 	const expanded = api.expandResponse(threadData);
 	let threadModel = '';
 	let threadTools = '';
-	let threadInteractionMode: 'chat' | 'voice' | null = null;
+	let threadInteractionMode: 'chat' | 'voice' | 'lecture_video' | null = null;
 	let threadRecording: api.VoiceModeRecordingInfo | null = null;
 	let threadDisplayUserInfo = false;
 	let assistantGrants = { canViewAssistant: false };
