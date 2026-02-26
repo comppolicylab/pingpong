@@ -1044,8 +1044,8 @@
 		if (convertToNextGen !== null) {
 			modifiedFields.push('assistant version');
 		}
-		const newLectureVideoKey = (params.lecture_video_key || '').trim();
-		if (newLectureVideoKey.length > 0 && newLectureVideoKey !== currentLectureVideoKey) {
+		const newLectureVideoKey = lectureVideoKey.trim();
+		if (newLectureVideoKey !== currentLectureVideoKey.trim()) {
 			modifiedFields.push('lecture video key');
 		}
 
@@ -1308,11 +1308,7 @@
 			}
 		}
 
-		if (
-			data.isCreating &&
-			params.interaction_mode === 'lecture_video' &&
-			!params.lecture_video_key
-		) {
+		if (params.interaction_mode === 'lecture_video' && lectureVideoKey.trim().length === 0) {
 			sadToast('Please provide a lecture video key for Lecture video mode assistants.');
 			$loading = false;
 			$loadingMessage = '';

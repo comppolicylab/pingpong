@@ -7134,7 +7134,8 @@ async def list_assistants(class_id: str, request: StateRequest):
 
             if asst.hide_prompt:
                 cur_asst.instructions = ""
-        elif (
+
+        if (
             asst.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
             and asst.lecture_video is not None
         ):
@@ -8040,7 +8041,8 @@ async def update_assistant(
     )
 
     # Only Administrators can edit locked assistants
-    if asst.locked and req.model_fields_set != {"published", "use_image_descriptions"}:
+    allowed_locked_fields = {"published", "use_image_descriptions"}
+    if asst.locked and not req.model_fields_set.issubset(allowed_locked_fields):
         if not await request.state["authz"].test(
             f"user:{request.state['session'].user.id}",
             "admin",
