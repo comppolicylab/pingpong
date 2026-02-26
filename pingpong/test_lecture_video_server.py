@@ -84,7 +84,7 @@ async def test_share_lecture_video_assistant_blocked(
             class_id=class_.id,
             interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
             version=3,
-            published=now,
+            published=now(),
         )
         session.add(assistant)
         await session.commit()
