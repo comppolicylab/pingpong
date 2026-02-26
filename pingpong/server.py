@@ -3767,6 +3767,7 @@ async def get_thread(
             "reasoning_messages": reasoning_messages,
             "attachments": all_files,
             "instructions": thread.instructions if can_view_prompt else None,
+            "lecture_video_id": thread.lecture_video_id,
             "recording": thread.voice_mode_recording
             if is_supervisor or is_current_user
             else None,
@@ -4328,12 +4329,14 @@ async def list_thread_messages(
             }
 
         async def get_assistant(
-            session: AsyncSession, id_: int | None
+            session: AsyncSession, id_: int | None, class_id: int = int(class_id)
         ) -> list[models.Assistant]:
             if id_ is None:
                 return []
             assistant = await models.Assistant.get_by_id(session, id_)
-            return [assistant] if assistant else []
+            if not assistant or assistant.class_id != class_id:
+                return []
+            return [assistant]
 
         (
             [messages_v3, tool_calls_v3, reasoning_steps_v3],
@@ -5289,10 +5292,15 @@ async def create_audio_thread(
             parties_ids.append(request.state["session"].user.id)
 
     assistant = await models.Assistant.get_by_id(request.state["db"], req.assistant_id)
-    if not assistant:
+    if not assistant or assistant.class_id != int(class_id):
         raise HTTPException(
             status_code=404,
             detail="Could not find the assistant you specified. Please try again.",
+        )
+    if assistant.interaction_mode != schemas.InteractionMode.VOICE:
+        raise HTTPException(
+            status_code=400,
+            detail="This assistant is not compatible with this thread creation endpoint. Provide a voice assistant.",
         )
 
     class_ = None
@@ -5435,7 +5443,7 @@ async def create_audio_thread(
             else None,
         }
     except Exception as e:
-        logger.exception("Error creating thread: %s", e)
+        logger.exception("Error creating thread")
         if thread:
             # If the thread was created, delete it
             await openai_client.beta.threads.delete(thread.id)
@@ -5445,6 +5453,162 @@ async def create_audio_thread(
                 result.users.remove(user)
             await result.delete(request.state["db"])
         raise e
+
+
+@v1.post(
+    "/class/{class_id}/thread/lecture",
+    dependencies=[Depends(Authz("can_create_thread", "class:{class_id}"))],
+    response_model=schemas.ThreadWithOptionalToken,
+)
+async def create_lecture_thread(
+    class_id: str,
+    req: schemas.CreateLectureThread,
+    request: StateRequest,
+):
+    anonymous_session: models.AnonymousSession | None = None
+    anonymous_user: models.User | None = None
+    if request.state["is_anonymous"]:
+        anonymous_session = await models.AnonymousSession.create(
+            request.state["db"],
+            str(uuid.uuid7()),
+            user_id=request.state["anonymous_session"].user.id,
+        )
+        anonymous_user = anonymous_session.user
+
+    anonymous_session_with_logged_in_user = False
+    parties_ids = req.parties or []
+    if (
+        request.state["session"].user is not None
+        and request.state["session"].status != schemas.SessionStatus.ANONYMOUS
+    ):
+        anonymous_session_with_logged_in_user = True
+        if request.state["session"].user.id not in parties_ids:
+            parties_ids.append(request.state["session"].user.id)
+
+    assistant = await models.Assistant.get_by_id_with_lecture_video(
+        request.state["db"], int(req.assistant_id)
+    )
+    if not assistant or assistant.class_id != int(class_id):
+        raise HTTPException(
+            status_code=404,
+            detail="Could not find the assistant you specified. Please try again.",
+        )
+
+    if assistant.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
+        raise HTTPException(
+            status_code=400,
+            detail="This assistant is not compatible with this thread creation endpoint. Provide a lecture_video assistant.",
+        )
+
+    if not assistant.lecture_video:
+        raise HTTPException(
+            status_code=400,
+            detail="This assistant does not have a lecture video attached. Unable to create Lecture Presentation",
+        )
+
+    lecture_video_id = assistant.lecture_video_id
+
+    if assistant.version != 3:
+        raise HTTPException(
+            status_code=400,
+            detail="Lecture presentation can only be created using v3 assistants.",
+        )
+
+    class_, parties = await asyncio.gather(
+        models.Class.get_by_id(request.state["db"], int(class_id)),
+        models.User.get_all_by_id(request.state["db"], parties_ids),
+    )
+
+    if not class_:
+        raise HTTPException(
+            status_code=404,
+            detail="Class not found",
+        )
+    all_parties = parties or []
+    if anonymous_user:
+        all_parties.append(anonymous_user)
+    new_thread = {
+        "name": "Lecture Presentation",
+        "class_id": int(class_id),
+        "private": True if all_parties else False,
+        "interaction_mode": "lecture_video",
+        "users": all_parties,
+        "thread_id": None,
+        "anonymous_sessions": [anonymous_session] if anonymous_session else [],
+        "conversation_id": req.conversation_id,
+        "assistant_id": req.assistant_id,
+        "vector_store_id": None,
+        "code_interpreter_file_ids": [],
+        "image_file_ids": [],
+        "tools_available": json.dumps([]),
+        "version": assistant.version,
+        "last_activity": func.now(),
+        "instructions": None,
+        "timezone": req.timezone,
+        "lecture_video_id": lecture_video_id,
+        "display_user_info": assistant.should_record_user_information
+        and not class_.private,
+    }
+
+    result: None | models.Thread = None
+    try:
+        result = await models.Thread.create(request.state["db"], new_thread)
+        result.instructions = format_instructions(
+            assistant.instructions,
+            assistant.use_latex,
+            assistant.use_image_descriptions,
+            thread_id=result.id,
+            user_id=request.state["session"].user.id,
+        )
+        request.state["db"].add(result)
+        await request.state["db"].flush()
+        await request.state["db"].refresh(result)
+
+        grants = [
+            (f"class:{class_id}", "parent", f"thread:{result.id}"),
+        ] + [(f"user:{p.id}", "party", f"thread:{result.id}") for p in parties]
+        if anonymous_session:
+            grants.extend(
+                [
+                    (
+                        f"anonymous_user:{anonymous_session.session_token}",
+                        "anonymous_party",
+                        f"thread:{result.id}",
+                    ),
+                    (
+                        f"anonymous_user:{anonymous_session.session_token}",
+                        "can_upload_user_files",
+                        f"class:{class_id}",
+                    ),
+                ]
+            )
+            if anonymous_session_with_logged_in_user:
+                grants.append(
+                    (
+                        f"user:{request.state['session'].user.id}",
+                        "anonymous_party",
+                        f"thread:{result.id}",
+                    )
+                )
+        await request.state["authz"].write_safe(grant=grants)
+
+        return {
+            "thread": result,
+            "session_token": anonymous_session.session_token
+            if anonymous_session
+            else None,
+        }
+    except Exception as e:
+        logger.exception("Error creating thread")
+        if result:
+            # Delete users-threads mapping
+            for user in result.users:
+                result.users.remove(user)
+            await result.delete(request.state["db"])
+        raise HTTPException(
+            status_code=400,
+            detail="Something went wrong while creating your Lecture presentation. Please try again later. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+        ) from e
 
 
 @v1.post(
@@ -5465,10 +5629,19 @@ async def create_thread(
 
     assistant = await models.Assistant.get_by_id(request.state["db"], req.assistant_id)
 
-    if not assistant:
+    if not assistant or assistant.class_id != int(class_id):
         raise HTTPException(
             status_code=404,
             detail="Could not find the assistant you specified. Please try again.",
+        )
+
+    if assistant.interaction_mode in (
+        schemas.InteractionMode.LECTURE_VIDEO,
+        schemas.InteractionMode.VOICE,
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="This assistant requires a dedicated thread creation endpoint.",
         )
 
     if assistant.assistant_should_message_first and req.message:
@@ -5894,7 +6067,7 @@ async def create_thread(
             else None,
         }
     except Exception as e:
-        logger.exception("Error creating thread: %s", e)
+        logger.exception("Error creating thread")
         if vector_store_id:
             await openai_client.vector_stores.delete(vector_store_id)
         if thread:
@@ -5925,7 +6098,7 @@ async def create_run(
         request.state["db"], thread.id
     )
 
-    if not thread or not asst:
+    if not thread or not asst or asst.class_id != int(class_id):
         raise HTTPException(
             status_code=404,
             detail="We could not find the thread or assistant you specified. Please try again.",
@@ -6244,6 +6417,12 @@ async def send_message(
         asst = await models.Assistant.get_by_id(
             request.state["db"], thread.assistant_id
         )
+
+        if not asst or asst.class_id != int(class_id):
+            raise HTTPException(
+                status_code=404,
+                detail="The assistant for this thread no longer exists.",
+            )
 
         # Check if user file uploads are allowed for this assistant
         if not asst.allow_user_file_uploads and (
@@ -7647,7 +7826,7 @@ async def share_assistant(
     Create an anonymous share of an assistant with the class.
     """
     asst = await models.Assistant.get_by_id(request.state["db"], int(assistant_id))
-    if not asst:
+    if not asst or asst.class_id != int(class_id):
         raise HTTPException(
             status_code=404,
             detail=f"Assistant {assistant_id} not found.",
@@ -7657,6 +7836,11 @@ async def share_assistant(
         raise HTTPException(
             status_code=400,
             detail="This assistant is not published and cannot be shared.",
+        )
+
+    if asst.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
+        raise HTTPException(
+            status_code=403, detail="Lecture Video assistants cannot be shared."
         )
 
     # Create a new anonymous link for the assistant
@@ -7711,7 +7895,7 @@ async def unshare_assistant(
             request.state["db"], int(share_id)
         ),
     )
-    if not asst:
+    if not asst or asst.class_id != int(class_id):
         raise HTTPException(
             status_code=404,
             detail=f"Assistant {assistant_id} not found.",
@@ -7810,6 +7994,12 @@ async def update_assistant(
     )
     grants = list[Relation]()
     revokes = list[Relation]()
+
+    if not asst or asst.class_id != int(class_id):
+        raise HTTPException(
+            status_code=404,
+            detail="Assistant not found.",
+        )
 
     # Users without publish permission can't toggle the published status of assistants.
     is_toggling_publish_status = (
@@ -8814,7 +9004,7 @@ async def get_assistant_mcp_servers(
 ):
     """Get MCP servers configured for an assistant"""
     asst = await models.Assistant.get_by_id(request.state["db"], int(assistant_id))
-    if not asst:
+    if not asst or asst.class_id != int(class_id):
         raise HTTPException(404, "Assistant not found.")
 
     mcp_servers = await models.MCPServerTool.get_for_assistant(
@@ -8831,6 +9021,8 @@ async def get_assistant_mcp_servers(
 )
 async def publish_assistant(class_id: str, assistant_id: str, request: StateRequest):
     asst = await models.Assistant.get_by_id(request.state["db"], int(assistant_id))
+    if not asst or asst.class_id != int(class_id):
+        raise HTTPException(404, "Assistant not found.")
     asst.published = func.now()
     request.state["db"].add(asst)
     await request.state["authz"].write_safe(
@@ -8846,6 +9038,8 @@ async def publish_assistant(class_id: str, assistant_id: str, request: StateRequ
 )
 async def unpublish_assistant(class_id: str, assistant_id: str, request: StateRequest):
     asst = await models.Assistant.get_by_id(request.state["db"], int(assistant_id))
+    if not asst or asst.class_id != int(class_id):
+        raise HTTPException(404, "Assistant not found.")
     asst.published = None
     request.state["db"].add(asst)
     await request.state["authz"].write_safe(
@@ -8861,7 +9055,7 @@ async def unpublish_assistant(class_id: str, assistant_id: str, request: StateRe
 )
 async def lock_assistant(class_id: str, assistant_id: str, request: StateRequest):
     asst = await models.Assistant.get_by_id(request.state["db"], int(assistant_id))
-    if not asst:
+    if not asst or asst.class_id != int(class_id):
         raise HTTPException(404, "Assistant not found.")
     asst.locked = True
     request.state["db"].add(asst)
@@ -8875,7 +9069,7 @@ async def lock_assistant(class_id: str, assistant_id: str, request: StateRequest
 )
 async def unlock_assistant(class_id: str, assistant_id: str, request: StateRequest):
     asst = await models.Assistant.get_by_id(request.state["db"], int(assistant_id))
-    if not asst:
+    if not asst or asst.class_id != int(class_id):
         raise HTTPException(404, "Assistant not found.")
     asst.locked = False
     request.state["db"].add(asst)
@@ -8894,6 +9088,8 @@ async def delete_assistant(
     openai_client: OpenAIClient,
 ):
     asst = await models.Assistant.get_by_id(request.state["db"], int(assistant_id))
+    if not asst or asst.class_id != int(class_id):
+        raise HTTPException(404, "Assistant not found.")
 
     # Detach the vector store from the assistant and delete it
     vector_store_obj_id = None
@@ -8965,6 +9161,8 @@ async def get_assistant_files(
     asst = await models.Assistant.get_by_id_with_ci_files(
         request.state["db"], int(assistant_id)
     )
+    if not asst or asst.class_id != int(class_id):
+        raise HTTPException(404, "Assistant not found.")
     file_search_files = []
     if asst.vector_store_id:
         file_search_files = await models.VectorStore.get_files_by_id(

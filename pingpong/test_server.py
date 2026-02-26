@@ -1663,3 +1663,46 @@ async def test_copy_assistant_check_endpoint(api, db, institution, valid_user_to
     )
     assert response.status_code == 200
     assert response.json() == {"allowed": True}
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+    ]
+)
+async def test_create_thread_rejects_voice_assistant(
+    api, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        session.add(class_)
+        await session.commit()
+        await session.refresh(class_)
+
+        assistant = models.Assistant(
+            id=1,
+            name="Voice Assistant",
+            class_id=class_.id,
+            interaction_mode=schemas.InteractionMode.VOICE,
+            version=2,
+        )
+        session.add(assistant)
+        await session.commit()
+
+    response = api.post(
+        f"/api/v1/class/{class_.id}/thread",
+        json={"assistant_id": 1, "message": "hello"},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert response.status_code == 400
+    assert (
+        response.json()["detail"]
+        == "This assistant requires a dedicated thread creation endpoint."
+    )
