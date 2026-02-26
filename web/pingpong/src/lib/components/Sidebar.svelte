@@ -18,7 +18,8 @@
 		UserOutline,
 		BadgeCheckOutline,
 		UsersOutline,
-		InboxOutline
+		InboxOutline,
+		ClapperboardPlayOutline
 	} from 'flowbite-svelte-icons';
 
 	import {
@@ -314,6 +315,9 @@
 										{#if assistant.interaction_mode === 'voice'}
 											<MicrophoneOutline size="sm" class="text-white" />
 											<Tooltip>Voice mode assistant</Tooltip>
+										{:else if assistant.interaction_mode === 'lecture_video'}
+											<ClapperboardPlayOutline size="sm" class="text-white" />
+											<Tooltip>Lecture Video mode assistant</Tooltip>
 										{/if}
 									</svelte:fragment>
 								</SidebarItem>
@@ -374,6 +378,8 @@
 									{/if}
 									{#if thread.interaction_mode === 'voice'}
 										<MicrophoneOutline size="sm" class="text-white" />
+									{:else if thread.interaction_mode === 'lecture_video'}
+										<ClapperboardPlayOutline size="sm" class="text-white" />
 									{/if}
 								</svelte:fragment>
 
