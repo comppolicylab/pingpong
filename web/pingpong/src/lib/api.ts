@@ -2395,6 +2395,13 @@ export type CreateAudioThreadRequest = {
 	conversation_id?: string | null;
 };
 
+export type CreateLectureThreadRequest = {
+	assistant_id: number;
+	parties?: number[];
+	timezone?: string | null;
+	conversation_id?: string | null;
+};
+
 export type VoiceModeRecordingInfo = {
 	recording_id: string;
 	duration: number;
@@ -2505,6 +2512,18 @@ export const createAudioThread = async (
 ) => {
 	const url = `class/${classId}/thread/audio`;
 	return await POST<CreateAudioThreadRequest, ThreadWithOptionalToken>(f, url, data);
+};
+
+/**
+ * Create lecture video mode thread.
+ */
+export const createLectureThread = async (
+	f: Fetcher,
+	classId: number,
+	data: CreateLectureThreadRequest
+) => {
+	const url = `class/${classId}/thread/lecture`;
+	return await POST<CreateLectureThreadRequest, ThreadWithOptionalToken>(f, url, data);
 };
 
 /**
