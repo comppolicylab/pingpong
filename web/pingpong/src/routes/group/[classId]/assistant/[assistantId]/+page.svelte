@@ -1552,7 +1552,7 @@
 						><div id="lecture-video-admin-tooltip" class="flex flex-row items-center gap-2">
 							{#if interactionMode === 'lecture_video'}<ClapperboardPlaySolid
 									class="h-5 w-5"
-								/>{:else}<PersonChalkboardOutline class="h-5 w-5" />{/if}Lecture Video mode
+								/>{:else}<ClapperboardPlayOutline class="h-5 w-5" />{/if}Lecture Video mode
 							<DropdownBadge
 								extraClasses="border-red-400 from-red-100 to-red-200 text-red-800 py-0 px-1"
 								><span slot="name">In Development</span></DropdownBadge
