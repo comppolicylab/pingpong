@@ -2792,9 +2792,11 @@ class Assistant(Base):
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
 
     @classmethod
-    async def get_by_id(cls, session: AsyncSession, id_: int | None) -> "Assistant":
+    async def get_by_id(
+        cls, session: AsyncSession, id_: int | None
+    ) -> "Assistant" | None:
         if not id_:
-            return Assistant()
+            return None
         stmt = select(Assistant).where(Assistant.id == int(id_))
         return await session.scalar(stmt)
 
@@ -2814,9 +2816,9 @@ class Assistant(Base):
     @classmethod
     async def get_by_id_with_ci_files(
         cls, session: AsyncSession, id_: int | None
-    ) -> "Assistant":
+    ) -> "Assistant" | None:
         if not id_:
-            return Assistant()
+            return None
         stmt = (
             select(Assistant)
             .where(Assistant.id == int(id_))
@@ -2827,9 +2829,9 @@ class Assistant(Base):
     @classmethod
     async def get_by_id_with_ci_files_mcp(
         cls, session: AsyncSession, id_: int | None
-    ) -> "Assistant":
+    ) -> "Assistant" | None:
         if not id_:
-            return Assistant()
+            return None
         stmt = (
             select(Assistant)
             .where(Assistant.id == int(id_))

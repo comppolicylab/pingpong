@@ -107,6 +107,8 @@ async def delete_assistant(
     session: AsyncSession, auth: OpenFgaAuthzClient, assistant_id: int
 ) -> None:
     asst = await models.Assistant.get_by_id(session, int(assistant_id))
+    if not asst:
+        return
 
     # Detach the vector store from the assistant and delete it
     vector_store_obj_id = None
