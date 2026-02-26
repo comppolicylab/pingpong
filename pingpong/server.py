@@ -5297,6 +5297,11 @@ async def create_audio_thread(
             status_code=404,
             detail="Could not find the assistant you specified. Please try again.",
         )
+    if assistant.interaction_mode != schemas.InteractionMode.VOICE:
+        raise HTTPException(
+            status_code=400,
+            detail="This assistant is not compatible with this thread creation endpoint. Provide a voice assistant.",
+        )
 
     class_ = None
     if assistant.version <= 2:
@@ -5460,11 +5465,24 @@ async def create_lecture_thread(
     req: schemas.CreateLectureThread,
     request: StateRequest,
 ):
+    parties = list[models.User]()
+    anonymous_session: models.AnonymousSession | None = None
+    anonymous_user: models.User | None = None
+    if request.state["is_anonymous"]:
+        anonymous_session = await models.AnonymousSession.create(
+            request.state["db"],
+            str(uuid.uuid7()),
+            user_id=request.state["anonymous_session"].user.id,
+        )
+        anonymous_user = anonymous_session.user
+
+    anonymous_session_with_logged_in_user = False
     parties_ids = req.parties or []
     if (
         request.state["session"].user is not None
         and request.state["session"].status != schemas.SessionStatus.ANONYMOUS
     ):
+        anonymous_session_with_logged_in_user = True
         if request.state["session"].user.id not in parties_ids:
             parties_ids.append(request.state["session"].user.id)
 
@@ -5508,6 +5526,8 @@ async def create_lecture_thread(
             detail="Class not found",
         )
     all_parties = parties or []
+    if anonymous_user:
+        all_parties.append(anonymous_user)
     new_thread = {
         "name": "Lecture Presentation",
         "class_id": int(class_id),
@@ -5515,8 +5535,8 @@ async def create_lecture_thread(
         "interaction_mode": "lecture_video",
         "users": all_parties,
         "thread_id": None,
-        "anonymous_sessions": [],
-        "conversation_id": None,
+        "anonymous_sessions": [anonymous_session] if anonymous_session else [],
+        "conversation_id": req.conversation_id,
         "assistant_id": req.assistant_id,
         "vector_store_id": None,
         "code_interpreter_file_ids": [],
@@ -5548,10 +5568,36 @@ async def create_lecture_thread(
         grants = [
             (f"class:{class_id}", "parent", f"thread:{result.id}"),
         ] + [(f"user:{p.id}", "party", f"thread:{result.id}") for p in parties]
-        await request.state["authz"].write(grant=grants)
+        if anonymous_session:
+            grants.extend(
+                [
+                    (
+                        f"anonymous_user:{anonymous_session.session_token}",
+                        "anonymous_party",
+                        f"thread:{result.id}",
+                    ),
+                    (
+                        f"anonymous_user:{anonymous_session.session_token}",
+                        "can_upload_user_files",
+                        f"class:{class_id}",
+                    ),
+                ]
+            )
+            if anonymous_session_with_logged_in_user:
+                grants.append(
+                    (
+                        f"user:{request.state['session'].user.id}",
+                        "anonymous_party",
+                        f"thread:{result.id}",
+                    )
+                )
+        await request.state["authz"].write_safe(grant=grants)
 
         return {
             "thread": result,
+            "session_token": anonymous_session.session_token
+            if anonymous_session
+            else None,
         }
     except Exception as e:
         logger.exception("Error creating thread: %s", e)

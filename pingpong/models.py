@@ -2805,7 +2805,7 @@ class Assistant(Base):
     @classmethod
     async def get_by_id(
         cls, session: AsyncSession, id_: int | None
-    ) -> "Assistant" | None:
+    ) -> Optional["Assistant"]:
         if not id_:
             return None
         stmt = select(Assistant).where(Assistant.id == int(id_))
@@ -2827,7 +2827,7 @@ class Assistant(Base):
     @classmethod
     async def get_by_id_with_ci_files(
         cls, session: AsyncSession, id_: int | None
-    ) -> "Assistant" | None:
+    ) -> Optional["Assistant"]:
         if not id_:
             return None
         stmt = (
@@ -2840,7 +2840,7 @@ class Assistant(Base):
     @classmethod
     async def get_by_id_with_ci_files_mcp(
         cls, session: AsyncSession, id_: int | None
-    ) -> "Assistant" | None:
+    ) -> Optional["Assistant"]:
         if not id_:
             return None
         stmt = (

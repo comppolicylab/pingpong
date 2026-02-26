@@ -809,6 +809,7 @@ class CreateLectureThread(BaseModel):
     parties: list[int] = []
     assistant_id: int
     timezone: str | None = None
+    conversation_id: str | None = None
 
 
 class VideoMetadata(BaseModel):

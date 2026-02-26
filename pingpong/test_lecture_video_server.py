@@ -149,7 +149,7 @@ async def test_create_thread_rejects_lecture_video_assistant(
         ("anonymous_link:anon-share-token", "can_create_thread", "class:1"),
     ]
 )
-async def test_anonymous_cannot_create_lecture_thread(api, db, institution):
+async def test_anonymous_can_create_lecture_thread(api, db, institution):
     async with db.async_session() as session:
         class_ = models.Class(
             id=1,
@@ -176,12 +176,21 @@ async def test_anonymous_cannot_create_lecture_thread(api, db, institution):
         session.add(anon_user)
         await session.commit()
 
+        lecture_video = models.LectureVideo(
+            key="anon-test-video-key",
+            name="Anonymous Test Video",
+        )
+        session.add(lecture_video)
+        await session.flush()
+
         assistant = models.Assistant(
             id=1,
             name="Lecture Assistant",
             class_id=class_.id,
             interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
             version=3,
+            lecture_video_id=lecture_video.id,
+            instructions="You are a lecture assistant.",
         )
         session.add(assistant)
         await session.commit()
@@ -191,8 +200,14 @@ async def test_anonymous_cannot_create_lecture_thread(api, db, institution):
         json={"assistant_id": 1},
         headers={"X-Anonymous-Link-Share": "anon-share-token"},
     )
-    assert response.status_code == 403
-    assert "anonymous session" in response.json()["detail"].lower()
+    assert response.status_code == 200
+    data = response.json()
+    assert data["thread"]["class_id"] == class_.id
+    assert data["thread"]["assistant_id"] == 1
+    assert data["thread"]["interaction_mode"] == "lecture_video"
+    assert data["thread"]["lecture_video_id"] == lecture_video.id
+    assert data["thread"]["private"] is True
+    assert data["session_token"] is not None
 
 
 @with_user(123)
