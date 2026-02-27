@@ -3902,7 +3902,7 @@ async def get_thread_video(
         or assistant.lecture_video_id != thread.lecture_video_id
     ):
         raise HTTPException(
-            status_code=404,
+            status_code=409,
             detail="This thread's lecture video no longer matches the assistant configuration.",
         )
 

@@ -18,7 +18,9 @@ ANONYMOUS_TOKEN_QUERY_PATH_ALLOWLIST = (
 
 
 def is_media_route(path: str) -> bool:
-    return any(pattern.fullmatch(path) for pattern in ANONYMOUS_TOKEN_QUERY_PATH_ALLOWLIST)
+    return any(
+        pattern.fullmatch(path) for pattern in ANONYMOUS_TOKEN_QUERY_PATH_ALLOWLIST
+    )
 
 
 def get_now_fn(req: StateRequest) -> NowFn:

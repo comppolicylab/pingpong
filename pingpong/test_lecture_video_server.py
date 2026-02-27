@@ -729,7 +729,7 @@ async def test_get_thread_video_rejects_assistant_mismatch(
         "/api/v1/class/1/thread/109/video",
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
-    assert video_response.status_code == 404
+    assert video_response.status_code == 409
     assert (
         video_response.json()["detail"]
         == "This thread's lecture video no longer matches the assistant configuration."
