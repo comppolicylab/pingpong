@@ -31,6 +31,7 @@
 	import Markdown from '$lib/components/Markdown.svelte';
 	import Logo from '$lib/components/Logo.svelte';
 	import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
+	import DropdownBadge from '$lib/components/DropdownBadge.svelte';
 	import AssistantVersionBadge from '$lib/components/AssistantVersionBadge.svelte';
 	import {
 		RefreshOutline,
@@ -49,7 +50,8 @@
 		MicrophoneSlashOutline,
 		UsersSolid,
 		LinkOutline,
-		TerminalOutline
+		TerminalOutline,
+		QuestionCircleOutline
 	} from 'flowbite-svelte-icons';
 	import { parseTextContent } from '$lib/content';
 	import { ThreadManager, type Message } from '$lib/stores/thread';
@@ -1394,47 +1396,62 @@
 
 <div class="relative flex min-h-0 w-full grow flex-col justify-between">
 	{#if data.threadInteractionMode === 'lecture_video'}
-		{#if effectiveLectureVideoMismatch}
-			<div class="flex h-full w-full items-center justify-center p-4">
-				<div
-					class="w-full max-w-2xl rounded-lg border border-amber-300 bg-amber-50 px-5 py-4 text-amber-900"
+		<div class="flex h-full w-full flex-col items-center justify-center">
+			<div class="mb-2 flex items-center gap-2">
+				<DropdownBadge
+					extraClasses="border-red-400 from-red-100 to-red-200 px-2 py-0.5 text-base text-red-800 w-fit"
+					><span slot="name">In Development</span></DropdownBadge
 				>
-					{#if effectiveLectureVideoAssistantMismatch}
-						This lecture video is no longer available for this thread because the assistant
-						configuration changed. Please start a new lecture thread.
-					{:else}
-						This lecture video could not be loaded. Please check your connection and try refreshing
-						the page.
-					{/if}
+				<QuestionCircleOutline
+					id="lecture-video-dev-tooltip-detail"
+					class="h-5 w-5 cursor-help text-gray-600"
+				/>
+				<Tooltip triggeredBy="#lecture-video-dev-tooltip-detail" class="font-light" arrow={false}
+					>Lecture Video mode is currently in development and not fully functional.</Tooltip
+				>
+			</div>
+			{#if effectiveLectureVideoMismatch}
+				<div class="flex w-full items-center justify-center p-4">
+					<div
+						class="w-full max-w-2xl rounded-lg border border-amber-300 bg-amber-50 px-5 py-4 text-amber-900"
+					>
+						{#if effectiveLectureVideoAssistantMismatch}
+							This lecture video is no longer available for this thread because the assistant
+							configuration changed. Please start a new lecture thread.
+						{:else}
+							This lecture video could not be loaded. Please check your connection and try
+							refreshing the page.
+						{/if}
+					</div>
 				</div>
-			</div>
-		{:else}
-			<div class="flex h-full w-full items-center justify-center rounded-lg p-4">
-				<!-- svelte-ignore a11y_media_has_caption -->
-				<video
-					class="h-auto max-h-full w-full max-w-6xl rounded-lg shadow-lg"
-					bind:this={lectureVideoElement}
-					controls
-					playsinline
-					preload="metadata"
-					src={lectureVideoSrc}
-					onerror={handleLectureVideoError}
-					onstalled={handleLectureVideoBuffering}
-					onwaiting={handleLectureVideoBuffering}
-					onloadstart={() => handleLectureVideoLifecycle('loadstart')}
-					onloadedmetadata={() => handleLectureVideoLifecycle('loadedmetadata')}
-					oncanplay={() => handleLectureVideoLifecycle('canplay')}
-					onplaying={() => handleLectureVideoLifecycle('playing')}
-					onpause={() => handleLectureVideoLifecycle('pause')}
-					onprogress={() => handleLectureVideoLifecycle('progress')}
-					onseeking={() => handleLectureVideoLifecycle('seeking')}
-					onseeked={() => handleLectureVideoLifecycle('seeked')}
-					onended={() => handleLectureVideoLifecycle('ended')}
-				>
-					Your browser does not support HTML5 video.
-				</video>
-			</div>
-		{/if}
+			{:else}
+				<div class="flex w-full items-center justify-center rounded-lg p-4">
+					<!-- svelte-ignore a11y_media_has_caption -->
+					<video
+						class="h-auto max-h-full w-full max-w-6xl rounded-lg shadow-lg"
+						bind:this={lectureVideoElement}
+						controls
+						playsinline
+						preload="metadata"
+						src={lectureVideoSrc}
+						onerror={handleLectureVideoError}
+						onstalled={handleLectureVideoBuffering}
+						onwaiting={handleLectureVideoBuffering}
+						onloadstart={() => handleLectureVideoLifecycle('loadstart')}
+						onloadedmetadata={() => handleLectureVideoLifecycle('loadedmetadata')}
+						oncanplay={() => handleLectureVideoLifecycle('canplay')}
+						onplaying={() => handleLectureVideoLifecycle('playing')}
+						onpause={() => handleLectureVideoLifecycle('pause')}
+						onprogress={() => handleLectureVideoLifecycle('progress')}
+						onseeking={() => handleLectureVideoLifecycle('seeking')}
+						onseeked={() => handleLectureVideoLifecycle('seeked')}
+						onended={() => handleLectureVideoLifecycle('ended')}
+					>
+						Your browser does not support HTML5 video.
+					</video>
+				</div>
+			{/if}
+		</div>
 	{:else}
 		<div
 			class={`messages-container overflow-y-auto px-2 pb-4 lg:px-4 ${
