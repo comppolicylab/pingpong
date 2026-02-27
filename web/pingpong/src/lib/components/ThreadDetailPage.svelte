@@ -105,16 +105,23 @@
 		const base = api.fullPath(`/class/${classId}/thread/${threadId}/video`);
 		const anonymousSessionToken = getAnonymousSessionToken();
 		const anonymousShareToken = getAnonymousShareToken();
-		if (!anonymousSessionToken && !anonymousShareToken) {
-			return base;
-		}
+		const queryParts: string[] = [];
 		if (anonymousSessionToken) {
-			return `${base}?anonymous_session_token=${encodeURIComponent(anonymousSessionToken)}`;
+			queryParts.push(
+				`anonymous_session_token=${encodeURIComponent(anonymousSessionToken)}`
+			);
 		}
 		if (anonymousShareToken) {
-			return `${base}?anonymous_share_token=${encodeURIComponent(anonymousShareToken)}`;
+			queryParts.push(`anonymous_share_token=${encodeURIComponent(anonymousShareToken)}`);
 		}
-		return base;
+		if (queryParts.length === 0) {
+			const ltiSessionToken = api.getLTISessionToken();
+			if (ltiSessionToken) {
+				queryParts.push(`lti_session=${encodeURIComponent(ltiSessionToken)}`);
+			}
+		}
+		const queryString = queryParts.join('&');
+		return queryParts.length > 0 ? `${base}?${queryString}` : base;
 	})();
 	$: error = threadMgr.error;
 	$: threadManagerError = $error?.detail || null;
@@ -1295,8 +1302,13 @@
 				<div
 					class="w-full max-w-2xl rounded-lg border border-amber-300 bg-amber-50 px-5 py-4 text-amber-900"
 				>
-					This lecture video is no longer available for this thread because the assistant
-					configuration changed. Please start a new lecture thread.
+					{#if threadLectureVideoMismatch}
+						This lecture video is no longer available for this thread because the assistant
+						configuration changed. Please start a new lecture thread.
+					{:else}
+						This lecture video could not be loaded. Please check your connection and try
+						refreshing the page.
+					{/if}
 				</div>
 			</div>
 		{:else}

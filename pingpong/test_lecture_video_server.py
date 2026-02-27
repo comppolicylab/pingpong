@@ -597,6 +597,74 @@ async def test_get_thread_video_with_anonymous_query_token(
         ("user:123", "can_view", "thread:109"),
     ]
 )
+async def test_get_thread_video_with_lti_session_query_token(
+    api, db, institution, valid_user_token, config, monkeypatch, tmp_path
+):
+    video_key = "lecture-video.mp4"
+    video_bytes = b"lti-video-bytes"
+    (tmp_path / video_key).write_bytes(video_bytes)
+    monkeypatch.setattr(
+        config,
+        "video_store",
+        LocalVideoStoreSettings(type="local", save_target=str(tmp_path)),
+    )
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+        )
+        session.add(class_)
+        await session.flush()
+
+        lecture_video = models.LectureVideo(
+            key=video_key,
+            name="Test Video",
+        )
+        session.add(lecture_video)
+        await session.flush()
+
+        assistant = models.Assistant(
+            id=1,
+            name="Lecture Assistant",
+            class_id=class_.id,
+            interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+            version=3,
+            lecture_video_id=lecture_video.id,
+        )
+        session.add(assistant)
+        await session.flush()
+
+        thread = models.Thread(
+            id=109,
+            name="Lecture Presentation",
+            version=3,
+            thread_id="thread-video-109",
+            class_id=class_.id,
+            assistant_id=assistant.id,
+            interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+            lecture_video_id=lecture_video.id,
+            private=True,
+            tools_available="[]",
+        )
+        session.add(thread)
+        await session.commit()
+
+    response = api.get(
+        f"/api/v1/class/1/thread/109/video?lti_session={valid_user_token}",
+    )
+    assert response.status_code == 200
+    assert response.content == video_bytes
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_view", "thread:109"),
+    ]
+)
 async def test_get_thread_video_rejects_assistant_mismatch(
     api, db, institution, valid_user_token, config, monkeypatch, tmp_path
 ):
@@ -661,7 +729,7 @@ async def test_get_thread_video_rejects_assistant_mismatch(
         "/api/v1/class/1/thread/109/video",
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
-    assert video_response.status_code == 409
+    assert video_response.status_code == 404
     assert (
         video_response.json()["detail"]
         == "This thread's lecture video no longer matches the assistant configuration."

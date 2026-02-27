@@ -3040,6 +3040,19 @@ async def get_thread(
     thread = await models.Thread.get_by_id_with_users_voice_mode(
         request.state["db"], int(thread_id)
     )
+
+    def _lecture_video_matches_assistant(
+        thread: models.Thread, assistant: models.Assistant | None
+    ) -> bool:
+        if thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
+            return True
+
+        return (
+            assistant is not None
+            and thread.lecture_video_id is not None
+            and assistant.lecture_video_id == thread.lecture_video_id
+        )
+
     if thread.version <= 2:
         (
             messages,
@@ -3142,14 +3155,8 @@ async def get_thread(
                     f"assistant:{assistant.id}",
                 )
 
-        lecture_video_matches_assistant = (
-            True
-            if thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO
-            else (
-                assistant is not None
-                and thread.lecture_video_id is not None
-                and assistant.lecture_video_id == thread.lecture_video_id
-            )
+        lecture_video_matches_assistant = _lecture_video_matches_assistant(
+            thread, assistant
         )
 
         return {
@@ -3737,14 +3744,8 @@ async def get_thread(
                     f"assistant:{assistant.id}",
                 )
 
-        lecture_video_matches_assistant = (
-            True
-            if thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO
-            else (
-                assistant is not None
-                and thread.lecture_video_id is not None
-                and assistant.lecture_video_id == thread.lecture_video_id
-            )
+        lecture_video_matches_assistant = _lecture_video_matches_assistant(
+            thread, assistant
         )
 
         if latest_run:
@@ -3901,7 +3902,7 @@ async def get_thread_video(
         or assistant.lecture_video_id != thread.lecture_video_id
     ):
         raise HTTPException(
-            status_code=409,
+            status_code=404,
             detail="This thread's lecture video no longer matches the assistant configuration.",
         )
 
@@ -3946,11 +3947,43 @@ async def get_thread_video(
             },
         ) from e
 
+    async def _prefetch_stream(gen):
+        it = gen.__aiter__()
+        try:
+            first = await it.__anext__()
+        except StopAsyncIteration:
+
+            async def _empty():
+                if False:
+                    yield b""
+
+            return _empty()
+        except VideoStoreError:
+            raise
+
+        async def _wrapped():
+            yield first
+            try:
+                async for chunk in it:
+                    yield chunk
+            except VideoStoreError:
+                logger.info(
+                    "VideoStoreError while streaming lecture video; aborting stream."
+                )
+                return
+            except Exception:
+                logger.exception("Unexpected error while streaming lecture video")
+                return
+
+        return _wrapped()
+
     try:
-        stream = config.video_store.store.stream_video_range(
-            key=lecture_video.key,
-            start=start,
-            end=end,
+        stream = await _prefetch_stream(
+            config.video_store.store.stream_video_range(
+                key=lecture_video.key,
+                start=start,
+                end=end,
+            )
         )
 
         response_headers = {
