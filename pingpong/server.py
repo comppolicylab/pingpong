@@ -78,6 +78,7 @@ from pingpong.stats import (
 )
 from pingpong.summary import send_class_summary_to_user_task
 from pingpong.video_store import VideoStoreError
+from pingpong.stream_utils import prefetch_stream
 from .animal_hash import name, process_threads, pseudonym, user_names
 from openai.types.beta.assistant_create_params import ToolResources
 from openai.types.beta.threads import MessageContentPartParam
@@ -237,6 +238,19 @@ async def _direct_institution_admin_ids(authz: Any, inst_id: int) -> list[int]:
         except (IndexError, ValueError):
             continue
     return admin_ids
+
+
+def _lecture_video_matches_assistant(
+    thread: models.Thread, assistant: models.Assistant | None
+) -> bool:
+    if thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
+        return True
+
+    return (
+        assistant is not None
+        and thread.lecture_video_id is not None
+        and assistant.lecture_video_id == thread.lecture_video_id
+    )
 
 
 if config.development:
@@ -3041,18 +3055,6 @@ async def get_thread(
         request.state["db"], int(thread_id)
     )
 
-    def _lecture_video_matches_assistant(
-        thread: models.Thread, assistant: models.Assistant | None
-    ) -> bool:
-        if thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
-            return True
-
-        return (
-            assistant is not None
-            and thread.lecture_video_id is not None
-            and assistant.lecture_video_id == thread.lecture_video_id
-        )
-
     if thread.version <= 2:
         (
             messages,
@@ -3896,11 +3898,7 @@ async def get_thread_video(
         if thread.assistant_id
         else None
     )
-    if (
-        not assistant
-        or assistant.lecture_video_id is None
-        or assistant.lecture_video_id != thread.lecture_video_id
-    ):
+    if not _lecture_video_matches_assistant(thread, assistant):
         raise HTTPException(
             status_code=409,
             detail="This thread's lecture video no longer matches the assistant configuration.",
@@ -3947,43 +3945,17 @@ async def get_thread_video(
             },
         ) from e
 
-    async def _prefetch_stream(gen):
-        it = gen.__aiter__()
-        try:
-            first = await it.__anext__()
-        except StopAsyncIteration:
-
-            async def _empty():
-                if False:
-                    yield b""
-
-            return _empty()
-        except VideoStoreError:
-            raise
-
-        async def _wrapped():
-            yield first
-            try:
-                async for chunk in it:
-                    yield chunk
-            except VideoStoreError:
-                logger.info(
-                    "VideoStoreError while streaming lecture video; aborting stream."
-                )
-                return
-            except Exception:
-                logger.exception("Unexpected error while streaming lecture video")
-                return
-
-        return _wrapped()
-
     try:
-        stream = await _prefetch_stream(
+        stream = await prefetch_stream(
             config.video_store.store.stream_video_range(
                 key=lecture_video.key,
                 start=start,
                 end=end,
-            )
+            ),
+            store_error=VideoStoreError,
+            logger=logger,
+            store_error_log="VideoStoreError while streaming lecture video; aborting stream.",
+            unexpected_error_log="Unexpected error while streaming lecture video",
         )
 
         response_headers = {
@@ -4071,39 +4043,13 @@ async def get_thread_recording(
             detail="You do not have permission to view this recording.",
         )
 
-    async def _prefetch_stream(gen):
-        it = gen.__aiter__()
-        try:
-            first = await it.__anext__()
-        except StopAsyncIteration:
-
-            async def _empty():
-                if False:
-                    yield b""
-
-            return _empty()
-        except AudioStoreError:
-            raise
-
-        async def _wrapped():
-            yield first
-            try:
-                async for chunk in it:
-                    yield chunk
-            except AudioStoreError:
-                logger.info(
-                    "AudioStoreError while streaming recording; aborting stream."
-                )
-                return
-            except Exception:
-                logger.exception("Unexpected error while streaming recording")
-                return
-
-        return _wrapped()
-
     try:
-        stream = await _prefetch_stream(
-            config.audio_store.store.get_file(thread.voice_mode_recording.recording_id)
+        stream = await prefetch_stream(
+            config.audio_store.store.get_file(thread.voice_mode_recording.recording_id),
+            store_error=AudioStoreError,
+            logger=logger,
+            store_error_log="AudioStoreError while streaming recording; aborting stream.",
+            unexpected_error_log="Unexpected error while streaming recording",
         )
         return StreamingResponse(
             stream,

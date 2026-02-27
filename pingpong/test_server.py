@@ -416,6 +416,14 @@ async def test_me_ignores_anonymous_query_tokens_on_non_media_routes(api, db):
     assert header_response.json()["user"]["id"] == 999
 
 
+@with_user(123)
+async def test_me_ignores_lti_query_token_on_non_media_routes(api, valid_user_token):
+    response = api.get(f"/api/v1/me?lti_session={valid_user_token}")
+    assert response.status_code == 200
+    assert response.json()["status"] == "missing"
+    assert response.json()["user"] is None
+
+
 async def test_me_with_expired_token(api, now):
     response = api.get(
         "/api/v1/me",

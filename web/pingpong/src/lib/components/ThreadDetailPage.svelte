@@ -112,11 +112,9 @@
 		if (anonymousShareToken) {
 			queryParts.push(`anonymous_share_token=${encodeURIComponent(anonymousShareToken)}`);
 		}
-		if (queryParts.length === 0) {
-			const ltiSessionToken = api.getLTISessionToken();
-			if (ltiSessionToken) {
-				queryParts.push(`lti_session=${encodeURIComponent(ltiSessionToken)}`);
-			}
+		const ltiSessionToken = api.getLTISessionToken();
+		if (ltiSessionToken) {
+			queryParts.push(`lti_session=${encodeURIComponent(ltiSessionToken)}`);
 		}
 		const queryString = queryParts.join('&');
 		return queryParts.length > 0 ? `${base}?${queryString}` : base;

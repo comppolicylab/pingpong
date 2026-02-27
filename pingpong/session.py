@@ -128,9 +128,11 @@ def populate_authorization_token(request: StateRequest | StateWebSocket):
             bearer_token = auth_header.removeprefix("Bearer ").strip()
             request.cookies["session"] = bearer_token
         elif isinstance(request, Request):
-            lti_session = request.query_params.get("lti_session")
-            if lti_session:
-                request.cookies["session"] = lti_session
+            req = cast(Request, request)
+            if is_media_route(req.url.path):
+                lti_session = req.query_params.get("lti_session")
+                if lti_session:
+                    request.cookies["session"] = lti_session
 
     return request
 
