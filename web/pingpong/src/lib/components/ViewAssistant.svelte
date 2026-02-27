@@ -54,9 +54,13 @@
 	export let currentClassId: number;
 
 	let sharedAssistantModalOpen = false;
+	let qualtricsCodeModalOpen = false;
 	let copyAssistantModalOpen = false;
 	let deleteAssistantModalOpen = false;
 	let notesAssistantModalOpen = false;
+	let qualtricsCodeLinkName = '';
+	let qualtricsQuestionJavaScript = '';
+	let qualtricsQuestionHTML = '';
 	let copyName = '';
 	let copyTargetClassId = `${currentClassId}`;
 	let copyPermissionAllowed: boolean | undefined = undefined;
@@ -71,10 +75,72 @@
 	$: shareLinks = assistant.share_links || [];
 
 	// Show info that we copied the link to the clipboard
-	const showCopiedLink = (e: Event) => {
-		e.preventDefault();
-		e.stopPropagation();
+	const showCopiedLink = () => {
 		happyToast('Link copied to clipboard', 3000);
+	};
+	const showCopiedText = (label: string) => {
+		happyToast(`${label} copied to clipboard`, 3000);
+	};
+
+	const buildQualtricsSnippets = (linkUrl: string) => {
+		const questionJavaScript = `Qualtrics.SurveyEngine.addOnReady(function()
+{
+	var questionContainer = this.getQuestionContainer();
+	if (!questionContainer) {
+		return;
+	}
+
+	var conversationIdInput = questionContainer.querySelector('input[type="text"], textarea');
+	if (!conversationIdInput) {
+		return;
+	}
+
+	var existingConversationId = conversationIdInput.value ? conversationIdInput.value.trim() : '';
+	var conversationId =
+		existingConversationId ||
+		String(Math.floor(Math.random() * 900000000000000) + 100000000000000);
+
+	conversationIdInput.value = conversationId;
+	conversationIdInput.dispatchEvent(new Event('input', { bubbles: true }));
+	conversationIdInput.dispatchEvent(new Event('change', { bubbles: true }));
+	conversationIdInput.style.display = 'none';
+
+	var iframe = questionContainer.querySelector('#pingpong-anonymous-session-iframe');
+	if (!iframe) {
+		return;
+	}
+
+	var baseLink = iframe.getAttribute('data-base-src') || '';
+	if (!baseLink) {
+		return;
+	}
+
+	var separator = baseLink.indexOf('?') >= 0 ? '&' : '?';
+	iframe.src = baseLink + separator + 'conversation_id=' + encodeURIComponent(conversationId);
+});`;
+
+		const questionHTML = `<iframe
+	id="pingpong-anonymous-session-iframe"
+	style="border:0"
+	data-base-src="${linkUrl}"
+	height="1000px"
+	width="100%"
+	allow="clipboard-write *; microphone *"
+></iframe>`;
+
+		return {
+			questionJavaScript,
+			questionHTML
+		};
+	};
+
+	const openQualtricsCodeModal = (linkName: string | null | undefined, shareToken: string) => {
+		const linkUrl = `${sharedAssistantLinkWithParam}${shareToken}`;
+		const snippets = buildQualtricsSnippets(linkUrl);
+		qualtricsCodeLinkName = linkName?.trim() || 'Shared Link';
+		qualtricsQuestionJavaScript = snippets.questionJavaScript;
+		qualtricsQuestionHTML = snippets.questionHTML;
+		qualtricsCodeModalOpen = true;
 	};
 
 	const checkCopyPermission = async (targetClassId: string) => {
@@ -253,12 +319,23 @@
 									onclick={(event) => {
 										event.preventDefault();
 									}}
-									oncopy={showCopiedLink}
-									use:copy={`${sharedAssistantLinkWithParam}${link.share_token}`}
+									use:copy={{
+										text: `${sharedAssistantLinkWithParam}${link.share_token}`,
+										onCopy: showCopiedLink
+									}}
 								>
 									<LinkOutline class="inline-block h-4 w-4" />
 									Copy Link
 								</button>
+								<Button
+									pill
+									size="sm"
+									class="flex w-fit shrink-0 flex-row items-center justify-center gap-1.5 rounded-full border border-blue-dark-40 bg-white p-1 px-3 text-xs text-blue-dark-40 transition-all hover:bg-blue-dark-40 hover:text-white"
+									disabled={!link.active}
+									onclick={() => openQualtricsCodeModal(link.name, link.share_token)}
+								>
+									Qualtrics Code
+								</Button>
 								{#if link.active}
 									<Button
 										pill
@@ -277,6 +354,89 @@
 			</TableBody>
 		</Table>
 	</div>
+</Modal>
+
+<Modal size="xl" bind:open={qualtricsCodeModalOpen}>
+	<slot name="header">
+		<Heading
+			tag="h2"
+			class="mr-5 mb-2 max-w-max shrink-0 font-serif text-3xl font-medium text-blue-dark-40"
+			color="blue">Qualtrics Code</Heading
+		>
+	</slot>
+	<p class="mb-2 text-sm text-blue-dark-50">
+		Use the instruction below to embed this assistant in a Qualtrics survey.
+	</p>
+	<ol class="ml-5 list-decimal text-blue-dark-50">
+		<li class="mb-2 text-sm text-blue-dark-50">
+			Create a new Text Entry question in your Qualtrics survey. This question will be used to store
+			the Conversation ID for each respondent.
+		</li>
+		<li class="mb-2 text-sm text-blue-dark-50">
+			On the left side of the question editing pane, click on the &ldquo;JavaScript&rdquo; option.
+			This will open a code editor where you can add custom JavaScript for this question. Copy the
+			JavaScript code from the &ldquo;Question JavaScript&rdquo; block below and <b>replace</b> the
+			placeholder code in the editor, then save your changes.
+			<div class="mt-2 mb-5 rounded-xl border border-blue-light-30 bg-white p-4">
+				<div class="mb-2 flex items-center justify-between gap-2">
+					<Heading tag="h3" class="text-lg font-medium text-blue-dark-40"
+						>Question JavaScript</Heading
+					>
+					<button
+						class="rounded-full border border-blue-dark-40 bg-white px-3 py-1 text-xs text-blue-dark-40 transition-all hover:bg-blue-dark-40 hover:text-white"
+						onclick={(event) => {
+							event.preventDefault();
+						}}
+						use:copy={{
+							text: qualtricsQuestionJavaScript,
+							onCopy: () => showCopiedText('Question JavaScript')
+						}}
+					>
+						Copy
+					</button>
+				</div>
+				<pre
+					class="max-h-72 overflow-auto rounded-lg bg-gray-50 p-3 font-mono text-xs leading-5 whitespace-pre text-gray-800">{qualtricsQuestionJavaScript}</pre>
+			</div>
+		</li>
+		<li class="mb-2 text-sm text-blue-dark-50">
+			Click on the placeholder text in your Text Entry question and select &ldquo;HTML View&rdquo;
+			on the top right. This will open a text editor where you can add custom HTML for this
+			question. Copy the HTML code from the &ldquo;Question HTML&rdquo; block below and <b
+				>replace</b
+			>
+			the placeholder content in the editor, then save your changes. You can change the
+			<span class="font-mono">{`height="1000px"`}</span>
+			attribute in the HTML code if you want to adjust the height of the assistant iframe in your
+			survey.
+			<div class="mt-2 mb-3 rounded-xl border border-blue-light-30 bg-white p-4">
+				<div class="mb-2 flex items-center justify-between gap-2">
+					<Heading tag="h3" class="text-lg font-medium text-blue-dark-40"
+						>Question HTML View</Heading
+					>
+					<button
+						class="rounded-full border border-blue-dark-40 bg-white px-3 py-1 text-xs text-blue-dark-40 transition-all hover:bg-blue-dark-40 hover:text-white"
+						onclick={(event) => {
+							event.preventDefault();
+						}}
+						use:copy={{
+							text: qualtricsQuestionHTML,
+							onCopy: () => showCopiedText('Question HTML')
+						}}
+					>
+						Copy
+					</button>
+				</div>
+				<pre
+					class="max-h-56 overflow-auto rounded-lg bg-gray-50 p-3 font-mono text-xs leading-5 whitespace-pre text-gray-800">{qualtricsQuestionHTML}</pre>
+			</div>
+		</li>
+		<li class="mb-2 text-sm text-blue-dark-50">
+			Done! When respondents take your survey, the assistant will appear embedded in this question.
+			The Text Entry question will be hidden from respondents, but it will store a unique
+			Conversation ID for each respondent that is used to track their conversation in PingPong.
+		</li>
+	</ol>
 </Modal>
 
 <div
@@ -352,7 +512,7 @@
 				>
 			{/if}
 
-			<button onclick={() => {}} oncopy={showCopiedLink} use:copy={assistantLink}
+			<button onclick={() => {}} use:copy={{ text: assistantLink, onCopy: showCopiedLink }}
 				><LinkOutline
 					class="inline-block h-6 w-6 text-blue-dark-30 hover:text-blue-dark-50 active:animate-ping"
 				/></button
