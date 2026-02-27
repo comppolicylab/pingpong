@@ -1483,7 +1483,14 @@
 	});
 </script>
 
-<svelte:window on:dragend={resetDropOverlay} on:drop={resetDropOverlay} />
+<svelte:window
+	on:dragend={resetDropOverlay}
+	on:drop={(e) => {
+		e.preventDefault();
+		e.stopPropagation();
+		resetDropOverlay();
+	}}
+/>
 
 <div
 	class="relative flex min-h-0 w-full grow flex-col justify-between"

@@ -274,11 +274,12 @@
 	};
 
 	const handleLandingDragLeave = (event: DragEvent) => {
-		if (isFileDrag(event)) {
+		const fileDrag = isFileDrag(event);
+		if (fileDrag) {
 			event.preventDefault();
 			event.stopPropagation();
 		}
-		if (!canDropUploadsOnLanding || !dropOverlayVisible) {
+		if (!canDropUploadsOnLanding || !fileDrag) {
 			return;
 		}
 		dropDragCounter = Math.max(0, dropDragCounter - 1);
