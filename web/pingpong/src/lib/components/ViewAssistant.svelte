@@ -334,13 +334,13 @@
 									disabled={!link.active}
 									onclick={() => openQualtricsCodeModal(link.name, link.share_token)}
 								>
-									Qualtrics Code
+									Qualtrics Instructions
 								</Button>
 								{#if link.active}
 									<Button
 										pill
 										size="sm"
-										class="flex w-fit shrink-0 flex-row items-center justify-center gap-1.5 rounded-full border border-gray-800 bg-white p-1 px-3 text-xs text-green-800 transition-all hover:bg-gray-800 hover:text-white"
+										class="flex w-fit shrink-0 flex-row items-center justify-center gap-1.5 rounded-full border border-gray-800 bg-white p-1 px-3 text-xs text-gray-800 transition-all hover:bg-gray-800 hover:text-white"
 										disabled={!link.active}
 										onclick={() => deleteLink(link.id)}
 									>
@@ -361,7 +361,7 @@
 		<Heading
 			tag="h2"
 			class="mr-5 mb-2 max-w-max shrink-0 font-serif text-3xl font-medium text-blue-dark-40"
-			color="blue">Qualtrics Code</Heading
+			color="blue">Qualtrics Instructions</Heading
 		>
 	</slot>
 	<p class="mb-2 text-sm text-blue-dark-50">
