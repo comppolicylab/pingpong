@@ -637,7 +637,7 @@
 								triggeredBy="#lecture-video-dev-tooltip-landing"
 								class="font-light"
 								arrow={false}
-								>Lecture Video mode is currently in development and not fully functional.</Tooltip
+								>Lecture Video mode is in active development and not fully functional.</Tooltip
 							>
 						</div>
 						<p class="font-base text-center text-xs text-gray-600 sm:text-base">

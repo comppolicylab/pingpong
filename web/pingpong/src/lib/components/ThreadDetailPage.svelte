@@ -1397,21 +1397,8 @@
 <div class="relative flex min-h-0 w-full grow flex-col justify-between">
 	{#if data.threadInteractionMode === 'lecture_video'}
 		<div class="flex h-full w-full flex-col items-center justify-center">
-			<div class="mb-2 flex items-center gap-2">
-				<DropdownBadge
-					extraClasses="border-red-400 from-red-100 to-red-200 px-2 py-0.5 text-base text-red-800 w-fit"
-					><span slot="name">In Development</span></DropdownBadge
-				>
-				<QuestionCircleOutline
-					id="lecture-video-dev-tooltip-detail"
-					class="h-5 w-5 cursor-help text-gray-600"
-				/>
-				<Tooltip triggeredBy="#lecture-video-dev-tooltip-detail" class="font-light" arrow={false}
-					>Lecture Video mode is currently in development and not fully functional.</Tooltip
-				>
-			</div>
 			{#if effectiveLectureVideoMismatch}
-				<div class="flex w-full items-center justify-center p-4">
+				<div class="flex h-full w-full items-center justify-center p-4">
 					<div
 						class="w-full max-w-2xl rounded-lg border border-amber-300 bg-amber-50 px-5 py-4 text-amber-900"
 					>
@@ -1425,7 +1412,24 @@
 					</div>
 				</div>
 			{:else}
-				<div class="flex w-full items-center justify-center rounded-lg p-4">
+				<div class="flex h-full w-full flex-col items-center justify-center rounded-lg p-4">
+					<div class="mb-2 flex items-center gap-2">
+						<DropdownBadge
+							extraClasses="border-red-400 from-red-100 to-red-200 px-2 py-0.5 text-base text-red-800"
+							><span slot="name">In Development</span></DropdownBadge
+						>
+						<QuestionCircleOutline
+							id="lecture-video-dev-tooltip-detail"
+							class="h-5 w-5 cursor-help text-gray-600"
+						/>
+						<Tooltip
+							triggeredBy="#lecture-video-dev-tooltip-detail"
+							class="font-light"
+							arrow={false}
+							>Lecture Video mode is in active development and not fully functional.</Tooltip
+						>
+					</div>
+
 					<!-- svelte-ignore a11y_media_has_caption -->
 					<video
 						class="h-auto max-h-full w-full max-w-6xl rounded-lg shadow-lg"
