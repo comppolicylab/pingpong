@@ -226,34 +226,63 @@
 	// Reference to the file upload HTML input element.
 	let uploadRef: HTMLInputElement;
 
-	/**
-	 * Handle file drop.
-	 */
-	const handleDropFiles = (e: DragEvent) => {
-		dropzoneActive = false;
-		e.preventDefault();
-		e.stopPropagation();
-		if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) {
-			return;
+	const normalizeMimeType = (mimeType: string) => mimeType.toLowerCase().split(';')[0].trim();
+
+	const matchesAcceptRule = (file: File, acceptRule: string) => {
+		if (acceptRule === '*/*') {
+			return true;
 		}
 
-		autoupload(
-			Array.from(e.dataTransfer.files),
-			upload,
-			files,
-			maxSize,
-			purpose,
-			useImageDescriptions,
-			dispatch
-		);
+		if (acceptRule.startsWith('.')) {
+			return file.name.toLowerCase().endsWith(acceptRule);
+		}
+
+		const fileType = normalizeMimeType(file.type);
+		if (!fileType) {
+			return false;
+		}
+
+		if (acceptRule.endsWith('/*')) {
+			return fileType.startsWith(acceptRule.slice(0, -1));
+		}
+
+		return fileType === acceptRule;
+	};
+
+	// Clipboard files are added programmatically and do not go through native
+	// input accept filtering, so we enforce the same accept rules here.
+	const filterAcceptedFiles = (selectedFiles: File[]) => {
+		const acceptRules = accept
+			.split(',')
+			.map((rule) => rule.trim().toLowerCase())
+			.filter((rule) => rule);
+
+		if (!acceptRules.length || acceptRules.includes('*/*')) {
+			return {
+				acceptedFiles: selectedFiles,
+				rejectedFiles: [] as File[]
+			};
+		}
+
+		const acceptedFiles: File[] = [];
+		const rejectedFiles: File[] = [];
+
+		for (const file of selectedFiles) {
+			if (acceptRules.some((acceptRule) => matchesAcceptRule(file, acceptRule))) {
+				acceptedFiles.push(file);
+			} else {
+				rejectedFiles.push(file);
+			}
+		}
+
+		return { acceptedFiles, rejectedFiles };
 	};
 
 	/**
-	 * Handle file input change.
+	 * Validate selected files and upload them.
 	 */
-	const handleFileInputChange = (e: Event) => {
-		const input = e.target as HTMLInputElement;
-		if (!input.files || !input.files.length) {
+	const queueFilesForUpload = (selectedFiles: File[], inputRef?: HTMLInputElement) => {
+		if (disabled || !selectedFiles.length) {
 			return;
 		}
 
@@ -262,8 +291,7 @@
 		let numberOfCodeInterpreterFiles = 0;
 		let numberOfVisionFiles = 0;
 
-		for (let i = 0; i < input.files.length; i++) {
-			const file = input.files[i];
+		for (const file of selectedFiles) {
 			if (
 				(fileSearchAcceptedFiles && fileSearchAcceptedFiles.includes(file.type)) ||
 				(codeInterpreterAcceptedFiles && codeInterpreterAcceptedFiles.includes(file.type))
@@ -326,7 +354,7 @@
 		}
 
 		autoupload(
-			Array.from(input.files),
+			selectedFiles,
 			upload,
 			files,
 			maxSize,
@@ -334,8 +362,52 @@
 			useImageDescriptions,
 			dispatch,
 			undefined,
-			uploadRef
+			inputRef
 		);
+	};
+
+	/**
+	 * Add files from external sources (e.g. clipboard paste) and upload them
+	 * through the same path as manually selected files.
+	 */
+	export const addFiles = (selectedFiles: File[]) => {
+		const { acceptedFiles, rejectedFiles } = filterAcceptedFiles(selectedFiles);
+
+		if (rejectedFiles.length) {
+			dispatch('error', {
+				message: `<strong>Some files were not added</strong><br>${rejectedFiles.length} ${
+					rejectedFiles.length === 1 ? 'file does' : 'files do'
+				} not match the allowed file types for this upload.`
+			});
+		}
+
+		queueFilesForUpload(acceptedFiles);
+	};
+
+	/**
+	 * Handle file drop.
+	 */
+	const handleDropFiles = (e: DragEvent) => {
+		dropzoneActive = false;
+		e.preventDefault();
+		e.stopPropagation();
+		if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) {
+			return;
+		}
+
+		queueFilesForUpload(Array.from(e.dataTransfer.files));
+	};
+
+	/**
+	 * Handle file input change.
+	 */
+	const handleFileInputChange = (e: Event) => {
+		const input = e.target as HTMLInputElement;
+		if (!input.files || !input.files.length) {
+			return;
+		}
+
+		queueFilesForUpload(Array.from(input.files), uploadRef);
 	};
 
 	// Due to how drag events are handled on child elements, we need to keep
