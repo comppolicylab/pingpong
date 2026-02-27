@@ -217,6 +217,7 @@
 	};
 
 	const handleLectureThreadCreate = async () => {
+		if ($loading) return;
 		$loading = true;
 		const partyIds = parties ? parties.split(',').map((id) => parseInt(id, 10)) : [];
 		try {
@@ -635,7 +636,6 @@
 						<Button
 							class="flex flex-row gap-1.5 rounded-lg bg-blue-dark-40 px-4 py-1.5 text-xs text-white transition-all hover:bg-blue-dark-50 hover:text-blue-light-50"
 							onclick={handleLectureThreadCreate}
-							ontouchstart={handleLectureThreadCreate}
 							type="button"
 						>
 							<CirclePlusSolid size="sm" />
