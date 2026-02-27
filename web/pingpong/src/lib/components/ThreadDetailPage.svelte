@@ -782,8 +782,6 @@
 		}
 		const droppedFiles = Array.from(event.dataTransfer?.files ?? []);
 		if (!droppedFiles.length) {
-			dropOverlayVisible = false;
-			dropDragCounter = 0;
 			return;
 		}
 		chatInputRef?.addFiles(droppedFiles);
