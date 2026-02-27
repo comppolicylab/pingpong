@@ -227,33 +227,10 @@
 	let uploadRef: HTMLInputElement;
 
 	/**
-	 * Handle file drop.
+	 * Validate selected files and upload them.
 	 */
-	const handleDropFiles = (e: DragEvent) => {
-		dropzoneActive = false;
-		e.preventDefault();
-		e.stopPropagation();
-		if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) {
-			return;
-		}
-
-		autoupload(
-			Array.from(e.dataTransfer.files),
-			upload,
-			files,
-			maxSize,
-			purpose,
-			useImageDescriptions,
-			dispatch
-		);
-	};
-
-	/**
-	 * Handle file input change.
-	 */
-	const handleFileInputChange = (e: Event) => {
-		const input = e.target as HTMLInputElement;
-		if (!input.files || !input.files.length) {
+	const queueFilesForUpload = (selectedFiles: File[], inputRef?: HTMLInputElement) => {
+		if (disabled || !selectedFiles.length) {
 			return;
 		}
 
@@ -262,8 +239,7 @@
 		let numberOfCodeInterpreterFiles = 0;
 		let numberOfVisionFiles = 0;
 
-		for (let i = 0; i < input.files.length; i++) {
-			const file = input.files[i];
+		for (const file of selectedFiles) {
 			if (
 				(fileSearchAcceptedFiles && fileSearchAcceptedFiles.includes(file.type)) ||
 				(codeInterpreterAcceptedFiles && codeInterpreterAcceptedFiles.includes(file.type))
@@ -326,7 +302,7 @@
 		}
 
 		autoupload(
-			Array.from(input.files),
+			selectedFiles,
 			upload,
 			files,
 			maxSize,
@@ -334,8 +310,42 @@
 			useImageDescriptions,
 			dispatch,
 			undefined,
-			uploadRef
+			inputRef
 		);
+	};
+
+	/**
+	 * Add files from external sources (e.g. clipboard paste) and upload them
+	 * through the same path as manually selected files.
+	 */
+	export const addFiles = (selectedFiles: File[]) => {
+		queueFilesForUpload(selectedFiles);
+	};
+
+	/**
+	 * Handle file drop.
+	 */
+	const handleDropFiles = (e: DragEvent) => {
+		dropzoneActive = false;
+		e.preventDefault();
+		e.stopPropagation();
+		if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) {
+			return;
+		}
+
+		queueFilesForUpload(Array.from(e.dataTransfer.files));
+	};
+
+	/**
+	 * Handle file input change.
+	 */
+	const handleFileInputChange = (e: Event) => {
+		const input = e.target as HTMLInputElement;
+		if (!input.files || !input.files.length) {
+			return;
+		}
+
+		queueFilesForUpload(Array.from(input.files), uploadRef);
 	};
 
 	// Due to how drag events are handled on child elements, we need to keep

@@ -155,6 +155,8 @@
 	let realRef: HTMLTextAreaElement;
 	// Container for the list of files, for calculating height.
 	let allFileListRef: HTMLDivElement;
+	type FileUploadHandle = { addFiles: (selectedFiles: File[]) => void };
+	let fileUploadRef: FileUploadHandle | null = null;
 
 	// The list of files being uploaded.
 	let allFiles = writable<FileUploadInfo[]>([]);
@@ -452,6 +454,32 @@
 		const target = e.target as HTMLTextAreaElement;
 		fixHeight(target);
 	};
+
+	const handlePaste = (e: ClipboardEvent) => {
+		if (!upload || !fileUploadRef) {
+			return;
+		}
+
+		const clipboardData = e.clipboardData;
+		if (!clipboardData) {
+			return;
+		}
+
+		let pastedFiles = Array.from(clipboardData.files ?? []);
+		if (!pastedFiles.length && clipboardData.items) {
+			pastedFiles = Array.from(clipboardData.items)
+				.filter((item) => item.kind === 'file')
+				.map((item) => item.getAsFile())
+				.filter((file): file is File => file !== null);
+		}
+
+		if (!pastedFiles.length) {
+			return;
+		}
+
+		e.preventDefault();
+		fileUploadRef.addFiles(pastedFiles);
+	};
 </script>
 
 <div use:init class="relative w-full">
@@ -588,6 +616,7 @@
 				disabled={!canSubmit || assistantDeleted || !canViewAssistant}
 				onkeydown={maybeSubmit}
 				oninput={handleTextAreaInput}
+				onpaste={handlePaste}
 				style={`max-height: ${maxHeight}px; font-size: 1rem; line-height: 1.5rem;`}
 			></textarea>
 			<textarea
@@ -597,6 +626,7 @@
 			<div class="flex flex-row gap-1">
 				{#if upload && purpose}
 					<FileUpload
+						bind:this={fileUploadRef}
 						{maxSize}
 						accept={currentAccept}
 						disabled={loading || disabled || !upload || tooManyFiles || uploading}
