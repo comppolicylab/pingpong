@@ -731,9 +731,12 @@
 	};
 
 	const handleThreadDragEnter = (event: DragEvent) => {
-		event.preventDefault();
-		event.stopPropagation();
-		if (!canDropUploadsIntoThread || !isFileDrag(event)) {
+		const fileDrag = isFileDrag(event);
+		if (fileDrag) {
+			event.preventDefault();
+			event.stopPropagation();
+		}
+		if (!canDropUploadsIntoThread || !fileDrag) {
 			return;
 		}
 		dropDragCounter += 1;
