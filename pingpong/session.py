@@ -1,3 +1,5 @@
+import logging
+import re
 from typing import cast
 
 from fastapi import Request
@@ -5,12 +7,20 @@ from jwt import PyJWTError
 from pingpong import models, schemas
 from pingpong.auth import TimeException, decode_session_token
 from pingpong.state_types import AppState, StateRequest, StateWebSocket
-from .now import NowFn, utcnow
 from pingpong.users import UserNotFoundException
-
-import logging
+from .now import NowFn, utcnow
 
 logger = logging.getLogger(__name__)
+
+ANONYMOUS_TOKEN_QUERY_PATH_ALLOWLIST = (
+    re.compile(r"^/api/v1/class/[^/]+/thread/[^/]+/video$"),
+)
+
+
+def is_media_route(path: str) -> bool:
+    return any(
+        pattern.fullmatch(path) for pattern in ANONYMOUS_TOKEN_QUERY_PATH_ALLOWLIST
+    )
 
 
 def get_now_fn(req: StateRequest) -> NowFn:
@@ -43,11 +53,23 @@ async def populate_anonymous_tokens(
     user: models.User | None = None
 
     if is_http_request:
-        request.state["anonymous_share_token"] = request.headers.get(
+        req = cast(Request, request)
+        allow_query_param_tokens = is_media_route(req.url.path)
+        # Support token auth via query params only on allowlisted media URLs that
+        # cannot send custom headers.
+        request.state["anonymous_share_token"] = req.headers.get(
             "X-Anonymous-Link-Share"
+        ) or (
+            req.query_params.get("anonymous_share_token")
+            if allow_query_param_tokens
+            else None
         )
-        request.state["anonymous_session_token"] = request.headers.get(
+        request.state["anonymous_session_token"] = req.headers.get(
             "X-Anonymous-Thread-Session"
+        ) or (
+            req.query_params.get("anonymous_session_token")
+            if allow_query_param_tokens
+            else None
         )
 
     if (
@@ -105,6 +127,12 @@ def populate_authorization_token(request: StateRequest | StateWebSocket):
         if auth_header and auth_header.startswith("Bearer "):
             bearer_token = auth_header.removeprefix("Bearer ").strip()
             request.cookies["session"] = bearer_token
+        elif isinstance(request, Request):
+            req = cast(Request, request)
+            if is_media_route(req.url.path):
+                lti_session = req.query_params.get("lti_session")
+                if lti_session:
+                    request.cookies["session"] = lti_session
 
     return request
 

@@ -4,6 +4,7 @@
 	import { resolve } from '$app/paths';
 	import * as api from '$lib/api';
 	import {
+		getAnonymousSessionToken,
 		getAnonymousShareToken,
 		hasAnonymousShareToken,
 		resetAnonymousSessionToken
@@ -100,6 +101,24 @@
 	$: threadName = threadMgr.thread?.name || 'Thread';
 	$: groupName = data.class?.name || `Group ${classId}`;
 	$: threadLink = `${$page.url.origin}/group/${classId}/thread/${threadId}`;
+	$: lectureVideoSrc = (() => {
+		const base = api.fullPath(`/class/${classId}/thread/${threadId}/video`);
+		const anonymousSessionToken = getAnonymousSessionToken();
+		const anonymousShareToken = getAnonymousShareToken();
+		const queryParts: string[] = [];
+		if (anonymousSessionToken) {
+			queryParts.push(`anonymous_session_token=${encodeURIComponent(anonymousSessionToken)}`);
+		}
+		if (anonymousShareToken) {
+			queryParts.push(`anonymous_share_token=${encodeURIComponent(anonymousShareToken)}`);
+		}
+		const ltiSessionToken = api.getLTISessionToken();
+		if (ltiSessionToken) {
+			queryParts.push(`lti_session=${encodeURIComponent(ltiSessionToken)}`);
+		}
+		const queryString = queryParts.join('&');
+		return queryParts.length > 0 ? `${base}?${queryString}` : base;
+	})();
 	$: error = threadMgr.error;
 	$: threadManagerError = $error?.detail || null;
 	$: assistantId = threadMgr.assistantId;
@@ -107,6 +126,25 @@
 	$: threadInstructions = threadMgr.instructions;
 	$: threadRecording = data.threadRecording;
 	$: displayUserInfo = data.threadDisplayUserInfo;
+	$: threadLectureVideoMismatch = data.threadLectureVideoMismatch === true;
+	let lectureVideoRuntimeMismatch = false;
+	let lectureVideoRuntimeAssistantMismatch = false;
+	let lectureVideoElement: HTMLVideoElement | null = null;
+	let lectureVideoAvailabilityCheckPending = false;
+	let lectureVideoLastAvailabilityCheck = 0;
+	let lectureVideoStateThreadId: number | null = null;
+	$: {
+		if (lectureVideoStateThreadId !== threadId) {
+			lectureVideoStateThreadId = threadId;
+			lectureVideoRuntimeMismatch = false;
+			lectureVideoRuntimeAssistantMismatch = false;
+			lectureVideoAvailabilityCheckPending = false;
+			lectureVideoLastAvailabilityCheck = 0;
+		}
+	}
+	$: effectiveLectureVideoMismatch = threadLectureVideoMismatch || lectureVideoRuntimeMismatch;
+	$: effectiveLectureVideoAssistantMismatch =
+		threadLectureVideoMismatch || lectureVideoRuntimeAssistantMismatch;
 	let trashThreadFiles = writable<string[]>([]);
 	let allFiles: Record<string, api.FileUploadInfo> = {};
 	$: threadAttachments = threadMgr.attachments;
@@ -191,7 +229,7 @@
 	let useLatex = false;
 	let useImageDescriptions = false;
 	let assistantVersion: number | null = null;
-	let assistantInteractionMode: 'voice' | 'chat' | null = null;
+	let assistantInteractionMode: 'voice' | 'chat' | 'lecture_video' | null = null;
 	let allowUserFileUploads = true;
 	let allowUserImageUploads = true;
 	let bypassedSettingsSections: {
@@ -1231,6 +1269,107 @@
 		}
 	};
 
+	const logLectureVideoEvent = (eventName: string, details?: Record<string, unknown>) => {
+		const mediaError = lectureVideoElement?.error;
+		const mediaState = lectureVideoElement
+			? {
+					readyState: lectureVideoElement.readyState,
+					networkState: lectureVideoElement.networkState,
+					currentTime: lectureVideoElement.currentTime,
+					paused: lectureVideoElement.paused,
+					errorCode: mediaError?.code ?? null,
+					errorMessage: mediaError?.message ?? null
+				}
+			: null;
+
+		console.info('[lecture-video]', eventName, {
+			threadId,
+			classId,
+			src: lectureVideoSrc,
+			timestamp: new Date().toISOString(),
+			...mediaState,
+			...details
+		});
+	};
+
+	const markLectureVideoUnavailable = (reason: 'generic' | 'assistant_mismatch') => {
+		if (effectiveLectureVideoMismatch) {
+			logLectureVideoEvent('mark-unavailable:skipped', {
+				reason: 'already-mismatch',
+				unavailableReason: reason
+			});
+			return;
+		}
+
+		logLectureVideoEvent('mark-unavailable:start', { unavailableReason: reason });
+
+		// Detach the source immediately so the browser stops retrying failed segment requests.
+		if (lectureVideoElement) {
+			lectureVideoElement.pause();
+			lectureVideoElement.removeAttribute('src');
+			lectureVideoElement.load();
+		}
+
+		// Stop retries by unmounting the video player immediately.
+		lectureVideoRuntimeAssistantMismatch = reason === 'assistant_mismatch';
+		lectureVideoRuntimeMismatch = true;
+		logLectureVideoEvent('mark-unavailable:done', { unavailableReason: reason });
+	};
+
+	const checkLectureVideoAvailability = async () => {
+		if (
+			effectiveLectureVideoMismatch ||
+			lectureVideoAvailabilityCheckPending ||
+			Date.now() - lectureVideoLastAvailabilityCheck < 2000
+		) {
+			logLectureVideoEvent('availability-check:skipped', {
+				effectiveLectureVideoMismatch,
+				lectureVideoAvailabilityCheckPending,
+				withinThrottleWindow: Date.now() - lectureVideoLastAvailabilityCheck < 2000
+			});
+			return;
+		}
+
+		lectureVideoAvailabilityCheckPending = true;
+		lectureVideoLastAvailabilityCheck = Date.now();
+		logLectureVideoEvent('availability-check:start');
+		try {
+			const response = await fetch(lectureVideoSrc, {
+				headers: { Range: 'bytes=0-0' }
+			});
+			logLectureVideoEvent('availability-check:response', {
+				status: response.status,
+				ok: response.ok
+			});
+			if (response.status !== 200 && response.status !== 206) {
+				const isAssistantMismatch = response.status === 409;
+				markLectureVideoUnavailable(isAssistantMismatch ? 'assistant_mismatch' : 'generic');
+			}
+		} catch (e) {
+			logLectureVideoEvent('availability-check:error', {
+				error: errorMessage(e, 'unknown error')
+			});
+			markLectureVideoUnavailable('generic');
+		} finally {
+			lectureVideoAvailabilityCheckPending = false;
+			logLectureVideoEvent('availability-check:done');
+		}
+	};
+
+	const handleLectureVideoError = () => {
+		logLectureVideoEvent('video:error');
+		markLectureVideoUnavailable('generic');
+	};
+
+	const handleLectureVideoBuffering = () => {
+		logLectureVideoEvent('video:buffering');
+		void checkLectureVideoAvailability();
+	};
+
+	const handleLectureVideoLifecycle = (name: string) => {
+		logLectureVideoEvent(`video:${name}`);
+	};
+
 	afterNavigate(async () => {
 		await resetAudioSession();
 	});
@@ -1254,219 +1393,247 @@
 </script>
 
 <div class="relative flex min-h-0 w-full grow flex-col justify-between">
-	<div
-		class={`messages-container overflow-y-auto px-2 pb-4 lg:px-4 ${
-			data.isSharedAssistantPage || data.isSharedThreadPage ? 'pt-10' : ''
-		}`}
-		bind:this={messagesContainer}
-		use:scroll={{ messages: $messages, threadId }}
-	>
-		<div class="print-only print-header">
-			<div class="print-header__brand">
-				<Logo size={9} />
-				<div class="print-header__brand-text">PingPong</div>
-			</div>
-			<div class="print-header__meta">
-				<div><span class="label">Group</span><span>{groupName}</span></div>
-				<div><span class="label">Thread</span><span>{threadName}</span></div>
-			</div>
-			<div class="print-header__link">{threadLink}</div>
-		</div>
-		{#if $canFetchMore}
-			<div class="flex grow justify-center">
-				<Button size="sm" class="text-sky-600 hover:text-sky-800" onclick={fetchMoreMessages}>
-					<RefreshOutline class="me-2 h-3 w-3" /> Load earlier messages ...
-				</Button>
-			</div>
-		{/if}
-		{#each $messages as message (message.data.id)}
-			{@const attachment_file_ids = message.data.attachments
-				? new Set(message.data.attachments.map((attachment) => attachment.file_id))
-				: new Set([])}
-			<div class="flex gap-x-3 px-6 py-4">
-				<div class="shrink-0">
-					{#if message.data.role === 'user'}
-						<Avatar size="sm" src={getImage(message.data)} />
+	{#if data.threadInteractionMode === 'lecture_video'}
+		{#if effectiveLectureVideoMismatch}
+			<div class="flex h-full w-full items-center justify-center p-4">
+				<div
+					class="w-full max-w-2xl rounded-lg border border-amber-300 bg-amber-50 px-5 py-4 text-amber-900"
+				>
+					{#if effectiveLectureVideoAssistantMismatch}
+						This lecture video is no longer available for this thread because the assistant
+						configuration changed. Please start a new lecture thread.
 					{:else}
-						<Logo size={8} />
+						This lecture video could not be loaded. Please check your connection and try refreshing
+						the page.
 					{/if}
 				</div>
-				<div class="w-full max-w-full">
-					<div class="mt-1 mb-2 flex flex-wrap items-center gap-2 font-semibold text-blue-dark-40">
-						<span class="flex items-center gap-2">
-							{getName(message.data)}
-							{#if message.data.role !== 'user' && !assistantDeleted}
-								<AssistantVersionBadge version={$version} extraClasses="shrink-0" />
-							{/if}
-						</span>
-						<span
-							class="ml-1 text-xs font-normal text-gray-500 hover:underline"
-							id={`short-timestamp-${message.data.id}`}
-							>{getShortMessageTimestamp(message.data.created_at)}</span
-						>
-					</div>
-					<Tooltip triggeredBy={`#short-timestamp-${message.data.id}`}>
-						{getMessageTimestamp(message.data.created_at)}
-					</Tooltip>
-					{#each groupMessageContent(message.data.content) as block (block.key)}
-						{#if block.type === 'mcp_group'}
-							<div class="my-3">
-								<div class="flex items-center gap-2 text-gray-600">
-									<ServerOutline class="h-4 w-4 text-gray-600" />
-									<span class="text-xs font-medium tracking-wide uppercase"
-										>{block.serverLabel}</span
-									>
-								</div>
-								<div class="mt-2 ml-2 border-l border-gray-200 pl-4">
-									{#each block.items as item (item.step_id)}
-										{#if item.type === 'mcp_server_call'}
-											<MCPServerCallItem
-												content={item}
-												forceOpen={printingThread}
-												showServerLabel={false}
-												compact={true}
-											/>
-										{:else if item.type === 'mcp_list_tools_call'}
-											<MCPListToolsCallItem
-												content={item}
-												forceOpen={printingThread}
-												showServerLabel={false}
-												compact={true}
-											/>
-										{/if}
-									{/each}
-								</div>
-							</div>
+			</div>
+		{:else}
+			<div class="flex h-full w-full items-center justify-center rounded-lg p-4">
+				<!-- svelte-ignore a11y_media_has_caption -->
+				<video
+					class="h-auto max-h-full w-full max-w-6xl rounded-lg shadow-lg"
+					bind:this={lectureVideoElement}
+					controls
+					playsinline
+					preload="metadata"
+					src={lectureVideoSrc}
+					onerror={handleLectureVideoError}
+					onstalled={handleLectureVideoBuffering}
+					onwaiting={handleLectureVideoBuffering}
+					onloadstart={() => handleLectureVideoLifecycle('loadstart')}
+					onloadedmetadata={() => handleLectureVideoLifecycle('loadedmetadata')}
+					oncanplay={() => handleLectureVideoLifecycle('canplay')}
+					onplaying={() => handleLectureVideoLifecycle('playing')}
+					onpause={() => handleLectureVideoLifecycle('pause')}
+					onprogress={() => handleLectureVideoLifecycle('progress')}
+					onseeking={() => handleLectureVideoLifecycle('seeking')}
+					onseeked={() => handleLectureVideoLifecycle('seeked')}
+					onended={() => handleLectureVideoLifecycle('ended')}
+				>
+					Your browser does not support HTML5 video.
+				</video>
+			</div>
+		{/if}
+	{:else}
+		<div
+			class={`messages-container overflow-y-auto px-2 pb-4 lg:px-4 ${
+				data.isSharedAssistantPage || data.isSharedThreadPage ? 'pt-10' : ''
+			}`}
+			bind:this={messagesContainer}
+			use:scroll={{ messages: $messages, threadId }}
+		>
+			<div class="print-only print-header">
+				<div class="print-header__brand">
+					<Logo size={9} />
+					<div class="print-header__brand-text">PingPong</div>
+				</div>
+				<div class="print-header__meta">
+					<div><span class="label">Group</span><span>{groupName}</span></div>
+					<div><span class="label">Thread</span><span>{threadName}</span></div>
+				</div>
+				<div class="print-header__link">{threadLink}</div>
+			</div>
+			{#if $canFetchMore}
+				<div class="flex grow justify-center">
+					<Button size="sm" class="text-sky-600 hover:text-sky-800" onclick={fetchMoreMessages}>
+						<RefreshOutline class="me-2 h-3 w-3" /> Load earlier messages ...
+					</Button>
+				</div>
+			{/if}
+			{#each $messages as message (message.data.id)}
+				{@const attachment_file_ids = message.data.attachments
+					? new Set(message.data.attachments.map((attachment) => attachment.file_id))
+					: new Set([])}
+				<div class="flex gap-x-3 px-6 py-4">
+					<div class="shrink-0">
+						{#if message.data.role === 'user'}
+							<Avatar size="sm" src={getImage(message.data)} />
 						{:else}
-							{@const content = block.content}
-							{#if content.type === 'text'}
-								{@const { clean_string, images } = processString(content.text.value)}
-								{@const imageInfo = convertImageProxyToInfo(images)}
-								{@const quoteCitations = (content.text.annotations ?? []).filter(isFileCitation)}
-								{@const parsedTextContent = parseTextContent(
-									{ value: clean_string, annotations: content.text.annotations },
-									$version,
-									api.fullPath(`/class/${classId}/thread/${threadId}`)
-								)}
-
-								<div class="leading-6">
-									<Markdown
-										content={parsedTextContent.content}
-										inlineWebSources={parsedTextContent.inlineWebSources}
-										syntax={true}
-										latex={useLatex}
-									/>
-								</div>
-								{#if quoteCitations.length > 0}
-									<div class="flex flex-wrap gap-2">
-										{#each quoteCitations as citation (citation.file_citation.file_id)}
-											<FileCitation
-												name={citation.file_citation.file_name}
-												quote={citation.file_citation.quote}
-											/>
-										{/each}
-									</div>
+							<Logo size={8} />
+						{/if}
+					</div>
+					<div class="w-full max-w-full">
+						<div
+							class="mt-1 mb-2 flex flex-wrap items-center gap-2 font-semibold text-blue-dark-40"
+						>
+							<span class="flex items-center gap-2">
+								{getName(message.data)}
+								{#if message.data.role !== 'user' && !assistantDeleted}
+									<AssistantVersionBadge version={$version} extraClasses="shrink-0" />
 								{/if}
-								{#if attachment_file_ids.size > 0}
-									<div class="flex flex-wrap gap-2">
-										{#each imageInfo as image (image.response && 'file_id' in image.response ? image.response.file_id : image.file.name)}
-											{#if !(image.response && 'file_id' in image.response && image.response.file_id in allFiles)}
-												<FilePlaceholder
-													info={image}
-													purpose="vision"
-													mimeType={data.uploadInfo.mimeType}
-													preventDeletion={true}
-													on:delete={() => {}}
+							</span>
+							<span
+								class="ml-1 text-xs font-normal text-gray-500 hover:underline"
+								id={`short-timestamp-${message.data.id}`}
+								>{getShortMessageTimestamp(message.data.created_at)}</span
+							>
+						</div>
+						<Tooltip triggeredBy={`#short-timestamp-${message.data.id}`}>
+							{getMessageTimestamp(message.data.created_at)}
+						</Tooltip>
+						{#each groupMessageContent(message.data.content) as block (block.key)}
+							{#if block.type === 'mcp_group'}
+								<div class="my-3">
+									<div class="flex items-center gap-2 text-gray-600">
+										<ServerOutline class="h-4 w-4 text-gray-600" />
+										<span class="text-xs font-medium tracking-wide uppercase"
+											>{block.serverLabel}</span
+										>
+									</div>
+									<div class="mt-2 ml-2 border-l border-gray-200 pl-4">
+										{#each block.items as item (item.step_id)}
+											{#if item.type === 'mcp_server_call'}
+												<MCPServerCallItem
+													content={item}
+													forceOpen={printingThread}
+													showServerLabel={false}
+													compact={true}
+												/>
+											{:else if item.type === 'mcp_list_tools_call'}
+												<MCPListToolsCallItem
+													content={item}
+													forceOpen={printingThread}
+													showServerLabel={false}
+													compact={true}
 												/>
 											{/if}
 										{/each}
 									</div>
-								{/if}
-							{:else if content.type === 'code'}
-								{#if printingThread}
-									<div class="w-full leading-6">
-										<div class="mb-2 flex flex-row items-center space-x-2">
-											<div><CodeOutline size="lg" /></div>
-											<div>Code Interpreter Code</div>
-										</div>
-										<pre style="white-space: pre-wrap;" class="text-black">{content.code}</pre>
-									</div>
-								{:else}
-									<div class="w-full leading-6">
-										<Accordion flush>
-											<AccordionItem>
-												<span slot="header"
-													><div class="flex flex-row items-center space-x-2">
-														<div><CodeOutline size="lg" /></div>
-														<div>Code Interpreter Code</div>
-													</div></span
-												>
-												<pre style="white-space: pre-wrap;" class="text-black">{content.code}</pre>
-											</AccordionItem>
-										</Accordion>
-									</div>
-								{/if}
-							{:else if content.type === 'code_interpreter_call_placeholder'}
-								<Card padding="md" class="flex max-w-full flex-row items-center justify-between">
-									<div class="flex flex-row items-center space-x-2">
-										<div><CodeOutline size="lg" /></div>
-										<div>Code Interpreter</div>
-									</div>
+								</div>
+							{:else}
+								{@const content = block.content}
+								{#if content.type === 'text'}
+									{@const { clean_string, images } = processString(content.text.value)}
+									{@const imageInfo = convertImageProxyToInfo(images)}
+									{@const quoteCitations = (content.text.annotations ?? []).filter(isFileCitation)}
+									{@const parsedTextContent = parseTextContent(
+										{ value: clean_string, annotations: content.text.annotations },
+										$version,
+										api.fullPath(`/class/${classId}/thread/${threadId}`)
+									)}
 
-									<div class="flex flex-wrap items-center gap-2">
-										<Button
-											outline
-											disabled={$loading || $submitting || $waiting}
-											pill
-											size="xs"
-											color="alternative"
-											onclick={() => fetchCodeInterpreterResult(content)}
-											ontouchstart={() => fetchCodeInterpreterResult(content)}
-										>
-											Load Code Interpreter Results
-										</Button>
-									</div></Card
-								>
-							{:else if content.type === 'file_search_call'}
-								<FileSearchCallItem {content} forceOpen={printingThread} />
-							{:else if content.type === 'web_search_call'}
-								<WebSearchCallItem
-									{content}
-									forceOpen={printingThread}
-									forceEagerImages={printingThread}
-								/>
-							{:else if content.type === 'mcp_server_call'}
-								<MCPServerCallItem {content} forceOpen={printingThread} />
-							{:else if content.type === 'mcp_list_tools_call'}
-								<MCPListToolsCallItem {content} forceOpen={printingThread} />
-							{:else if content.type === 'reasoning'}
-								<ReasoningCallItem {content} forceOpen={printingThread} />
-							{:else if content.type === 'code_output_image_file'}
-								{#if printingThread}
-									<div class="w-full leading-6">
-										<div class="mb-2 flex flex-row items-center space-x-2">
-											<div><ImageSolid size="lg" /></div>
-											<div>Output Image</div>
-										</div>
-										<div class="w-full leading-6">
-											<img
-												class="img-attachment m-auto"
-												src={api.fullPath(
-													`/class/${classId}/thread/${threadId}/image/${content.image_file.file_id}`
-												)}
-												alt="Attachment generated by the assistant"
-											/>
-										</div>
+									<div class="leading-6">
+										<Markdown
+											content={parsedTextContent.content}
+											inlineWebSources={parsedTextContent.inlineWebSources}
+											syntax={true}
+											latex={useLatex}
+										/>
 									</div>
-								{:else}
-									<Accordion flush>
-										<AccordionItem>
-											<span slot="header"
-												><div class="flex flex-row items-center space-x-2">
-													<div><ImageSolid size="lg" /></div>
-													<div>Output Image</div>
-												</div></span
+									{#if quoteCitations.length > 0}
+										<div class="flex flex-wrap gap-2">
+											{#each quoteCitations as citation (citation.file_citation.file_id)}
+												<FileCitation
+													name={citation.file_citation.file_name}
+													quote={citation.file_citation.quote}
+												/>
+											{/each}
+										</div>
+									{/if}
+									{#if attachment_file_ids.size > 0}
+										<div class="flex flex-wrap gap-2">
+											{#each imageInfo as image (image.response && 'file_id' in image.response ? image.response.file_id : image.file.name)}
+												{#if !(image.response && 'file_id' in image.response && image.response.file_id in allFiles)}
+													<FilePlaceholder
+														info={image}
+														purpose="vision"
+														mimeType={data.uploadInfo.mimeType}
+														preventDeletion={true}
+														on:delete={() => {}}
+													/>
+												{/if}
+											{/each}
+										</div>
+									{/if}
+								{:else if content.type === 'code'}
+									{#if printingThread}
+										<div class="w-full leading-6">
+											<div class="mb-2 flex flex-row items-center space-x-2">
+												<div><CodeOutline size="lg" /></div>
+												<div>Code Interpreter Code</div>
+											</div>
+											<pre style="white-space: pre-wrap;" class="text-black">{content.code}</pre>
+										</div>
+									{:else}
+										<div class="w-full leading-6">
+											<Accordion flush>
+												<AccordionItem>
+													<span slot="header"
+														><div class="flex flex-row items-center space-x-2">
+															<div><CodeOutline size="lg" /></div>
+															<div>Code Interpreter Code</div>
+														</div></span
+													>
+													<pre
+														style="white-space: pre-wrap;"
+														class="text-black">{content.code}</pre>
+												</AccordionItem>
+											</Accordion>
+										</div>
+									{/if}
+								{:else if content.type === 'code_interpreter_call_placeholder'}
+									<Card padding="md" class="flex max-w-full flex-row items-center justify-between">
+										<div class="flex flex-row items-center space-x-2">
+											<div><CodeOutline size="lg" /></div>
+											<div>Code Interpreter</div>
+										</div>
+
+										<div class="flex flex-wrap items-center gap-2">
+											<Button
+												outline
+												disabled={$loading || $submitting || $waiting}
+												pill
+												size="xs"
+												color="alternative"
+												onclick={() => fetchCodeInterpreterResult(content)}
+												ontouchstart={() => fetchCodeInterpreterResult(content)}
 											>
+												Load Code Interpreter Results
+											</Button>
+										</div></Card
+									>
+								{:else if content.type === 'file_search_call'}
+									<FileSearchCallItem {content} forceOpen={printingThread} />
+								{:else if content.type === 'web_search_call'}
+									<WebSearchCallItem
+										{content}
+										forceOpen={printingThread}
+										forceEagerImages={printingThread}
+									/>
+								{:else if content.type === 'mcp_server_call'}
+									<MCPServerCallItem {content} forceOpen={printingThread} />
+								{:else if content.type === 'mcp_list_tools_call'}
+									<MCPListToolsCallItem {content} forceOpen={printingThread} />
+								{:else if content.type === 'reasoning'}
+									<ReasoningCallItem {content} forceOpen={printingThread} />
+								{:else if content.type === 'code_output_image_file'}
+									{#if printingThread}
+										<div class="w-full leading-6">
+											<div class="mb-2 flex flex-row items-center space-x-2">
+												<div><ImageSolid size="lg" /></div>
+												<div>Output Image</div>
+											</div>
 											<div class="w-full leading-6">
 												<img
 													class="img-attachment m-auto"
@@ -1476,33 +1643,35 @@
 													alt="Attachment generated by the assistant"
 												/>
 											</div>
-										</AccordionItem>
-									</Accordion>
-								{/if}
-							{:else if content.type === 'code_output_image_url'}
-								{#if printingThread}
-									<div class="w-full leading-6">
-										<div class="mb-2 flex flex-row items-center space-x-2">
-											<div><ImageSolid size="lg" /></div>
-											<div>Output Image</div>
 										</div>
+									{:else}
+										<Accordion flush>
+											<AccordionItem>
+												<span slot="header"
+													><div class="flex flex-row items-center space-x-2">
+														<div><ImageSolid size="lg" /></div>
+														<div>Output Image</div>
+													</div></span
+												>
+												<div class="w-full leading-6">
+													<img
+														class="img-attachment m-auto"
+														src={api.fullPath(
+															`/class/${classId}/thread/${threadId}/image/${content.image_file.file_id}`
+														)}
+														alt="Attachment generated by the assistant"
+													/>
+												</div>
+											</AccordionItem>
+										</Accordion>
+									{/if}
+								{:else if content.type === 'code_output_image_url'}
+									{#if printingThread}
 										<div class="w-full leading-6">
-											<img
-												class="img-attachment m-auto"
-												src={content.url}
-												alt="Attachment generated by the assistant"
-											/>
-										</div>
-									</div>
-								{:else}
-									<Accordion flush>
-										<AccordionItem>
-											<span slot="header"
-												><div class="flex flex-row items-center space-x-2">
-													<div><ImageSolid size="lg" /></div>
-													<div>Output Image</div>
-												</div></span
-											>
+											<div class="mb-2 flex flex-row items-center space-x-2">
+												<div><ImageSolid size="lg" /></div>
+												<div>Output Image</div>
+											</div>
 											<div class="w-full leading-6">
 												<img
 													class="img-attachment m-auto"
@@ -1510,512 +1679,534 @@
 													alt="Attachment generated by the assistant"
 												/>
 											</div>
-										</AccordionItem>
-									</Accordion>
-								{/if}
-							{:else if content.type === 'code_output_logs'}
-								{#if printingThread}
-									<div class="w-full leading-6">
-										<div class="mb-2 flex flex-row items-center space-x-2">
-											<div><TerminalOutline size="lg" /></div>
-											<div>Output Logs</div>
 										</div>
+									{:else}
+										<Accordion flush>
+											<AccordionItem>
+												<span slot="header"
+													><div class="flex flex-row items-center space-x-2">
+														<div><ImageSolid size="lg" /></div>
+														<div>Output Image</div>
+													</div></span
+												>
+												<div class="w-full leading-6">
+													<img
+														class="img-attachment m-auto"
+														src={content.url}
+														alt="Attachment generated by the assistant"
+													/>
+												</div>
+											</AccordionItem>
+										</Accordion>
+									{/if}
+								{:else if content.type === 'code_output_logs'}
+									{#if printingThread}
 										<div class="w-full leading-6">
-											<pre style="white-space: pre-wrap;" class="text-black">{content.logs}</pre>
-										</div>
-									</div>
-								{:else}
-									<Accordion flush>
-										<AccordionItem>
-											<span slot="header"
-												><div class="flex flex-row items-center space-x-2">
-													<div><TerminalOutline size="lg" /></div>
-													<div>Output Logs</div>
-												</div></span
-											>
+											<div class="mb-2 flex flex-row items-center space-x-2">
+												<div><TerminalOutline size="lg" /></div>
+												<div>Output Logs</div>
+											</div>
 											<div class="w-full leading-6">
 												<pre style="white-space: pre-wrap;" class="text-black">{content.logs}</pre>
 											</div>
-										</AccordionItem>
-									</Accordion>
-								{/if}
-							{:else if content.type === 'image_file'}
-								<div class="w-full leading-6">
-									<img
-										class="img-attachment m-auto"
-										src={api.fullPath(
-											`/class/${classId}/thread/${threadId}/image/${content.image_file.file_id}`
-										)}
-										alt="Attachment generated by the assistant"
-									/>
-								</div>
-							{:else}
-								<div class="leading-6"><pre>{JSON.stringify(content, null, 2)}</pre></div>
-							{/if}
-						{/if}
-					{/each}
-					{#if attachment_file_ids.size > 0}
-						<div class="mt-4 flex flex-wrap gap-2">
-							{#each attachment_file_ids as file_id (file_id)}
-								{#if allFiles[file_id]}
-									<FilePlaceholder
-										info={allFiles[file_id]}
-										mimeType={data.uploadInfo.mimeType}
-										on:delete={removeFile}
-									/>
+										</div>
+									{:else}
+										<Accordion flush>
+											<AccordionItem>
+												<span slot="header"
+													><div class="flex flex-row items-center space-x-2">
+														<div><TerminalOutline size="lg" /></div>
+														<div>Output Logs</div>
+													</div></span
+												>
+												<div class="w-full leading-6">
+													<pre
+														style="white-space: pre-wrap;"
+														class="text-black">{content.logs}</pre>
+												</div>
+											</AccordionItem>
+										</Accordion>
+									{/if}
+								{:else if content.type === 'image_file'}
+									<div class="w-full leading-6">
+										<img
+											class="img-attachment m-auto"
+											src={api.fullPath(
+												`/class/${classId}/thread/${threadId}/image/${content.image_file.file_id}`
+											)}
+											alt="Attachment generated by the assistant"
+										/>
+									</div>
 								{:else}
-									<AttachmentDeletedPlaceholder {file_id} />
+									<div class="leading-6"><pre>{JSON.stringify(content, null, 2)}</pre></div>
 								{/if}
-							{/each}
-						</div>
-					{/if}
+							{/if}
+						{/each}
+						{#if attachment_file_ids.size > 0}
+							<div class="mt-4 flex flex-wrap gap-2">
+								{#each attachment_file_ids as file_id (file_id)}
+									{#if allFiles[file_id]}
+										<FilePlaceholder
+											info={allFiles[file_id]}
+											mimeType={data.uploadInfo.mimeType}
+											on:delete={removeFile}
+										/>
+									{:else}
+										<AttachmentDeletedPlaceholder {file_id} />
+									{/if}
+								{/each}
+							</div>
+						{/if}
+					</div>
+				</div>
+			{/each}
+		</div>
+		<Modal title="Group Moderators" bind:open={showModerators} autoclose outsideclose
+			><ModeratorsTable moderators={teachers} /></Modal
+		>
+		<Modal title="Assistant Prompt" size="lg" bind:open={showAssistantPrompt} autoclose outsideclose
+			><span class="whitespace-pre-wrap text-gray-700"
+				><Sanitize html={$threadInstructions ?? ''} /></span
+			></Modal
+		>
+		<Modal title="Copy Link" bind:open={copyLinkModalOpen} autoclose outsideclose>
+			<div class="flex flex-col gap-3 p-1">
+				<span class="text-sm text-gray-700">Press Cmd+C / Ctrl+C to copy the thread link.</span>
+				<input
+					class="w-full rounded-md border border-gray-300 bg-gray-50 px-2 py-1 text-sm text-gray-800"
+					readonly
+					bind:this={shareLinkInputEl}
+					value={shareLink}
+				/>
+				<div class="flex justify-end pt-1">
+					<Button size="xs" color="alternative" onclick={() => (copyLinkModalOpen = false)}
+						>Done</Button
+					>
 				</div>
 			</div>
-		{/each}
-	</div>
-	<Modal title="Group Moderators" bind:open={showModerators} autoclose outsideclose
-		><ModeratorsTable moderators={teachers} /></Modal
-	>
-	<Modal title="Assistant Prompt" size="lg" bind:open={showAssistantPrompt} autoclose outsideclose
-		><span class="whitespace-pre-wrap text-gray-700"
-			><Sanitize html={$threadInstructions ?? ''} /></span
-		></Modal
-	>
-	<Modal title="Copy Link" bind:open={copyLinkModalOpen} autoclose outsideclose>
-		<div class="flex flex-col gap-3 p-1">
-			<span class="text-sm text-gray-700">Press Cmd+C / Ctrl+C to copy the thread link.</span>
-			<input
-				class="w-full rounded-md border border-gray-300 bg-gray-50 px-2 py-1 text-sm text-gray-800"
-				readonly
-				bind:this={shareLinkInputEl}
-				value={shareLink}
-			/>
-			<div class="flex justify-end pt-1">
-				<Button size="xs" color="alternative" onclick={() => (copyLinkModalOpen = false)}
-					>Done</Button
-				>
-			</div>
-		</div>
-	</Modal>
-	{#if !$loading}
-		<div class="print-hide">
-			{#if data.threadInteractionMode === 'voice' && !microphoneAccess && $messages.length === 0 && assistantInteractionMode === 'voice'}
-				{#if $isFirefox}
-					<div class="flex h-full w-full flex-col items-center justify-center gap-4">
-						<div class="rounded-lg bg-blue-light-50 p-3">
-							<MicrophoneSlashOutline size="xl" class="text-blue-dark-40" />
-						</div>
-						<div class="flex w-2/5 flex-col items-center">
-							<p class="text-center text-xl font-semibold text-blue-dark-40">
-								Voice mode not available on Firefox
-							</p>
-							<p class="font-base text-center text-base text-gray-600">
-								We're working on bringing Voice mode to Firefox in a future update. For the best
-								experience, please use Safari, Chrome, or Edge in the meantime.
-							</p>
-						</div>
-					</div>
-				{:else}
-					<div class="flex h-full w-full flex-col items-center justify-center gap-4">
-						<div class="rounded-lg bg-blue-light-50 p-3">
-							<MicrophoneOutline size="xl" class="text-blue-dark-40" />
-						</div>
-						<div class="flex w-2/5 flex-col items-center">
-							<p class="text-center text-xl font-semibold text-blue-dark-40">Voice mode</p>
-							<p class="font-base text-center text-base text-gray-600">
-								To get started, enable microphone access.
-							</p>
-						</div>
-						<Button
-							class="flex flex-row gap-1.5 rounded-sm bg-blue-dark-40 px-4 py-1.5 text-center text-sm text-xs font-normal text-white transition-all hover:bg-blue-dark-50 hover:text-blue-light-50"
-							type="button"
-							onclick={handleSessionSetup}
-							ontouchstart={handleSessionSetup}
-						>
-							Enable access
-						</Button>
-					</div>
-				{/if}
-			{:else if data.threadInteractionMode === 'voice' && microphoneAccess && $messages.length === 0 && assistantInteractionMode === 'voice'}
-				{#if $isFirefox}
-					<div class="flex h-full w-full flex-col items-center justify-center gap-4">
-						<div class="rounded-lg bg-blue-light-50 p-3">
-							<MicrophoneSlashOutline size="xl" class="text-blue-dark-40" />
-						</div>
-						<div class="flex w-2/5 flex-col items-center">
-							<p class="text-center text-xl font-semibold text-blue-dark-40">
-								Voice mode not available on Firefox
-							</p>
-							<p class="font-base text-center text-base text-gray-600">
-								We're working on bringing Voice mode to Firefox in a future update. For the best
-								experience, please use Safari, Chrome, or Edge in the meantime.
-							</p>
-						</div>
-					</div>
-				{:else}
-					<div class="flex h-full w-full flex-col items-center justify-center gap-4">
-						<div class="rounded-lg bg-blue-light-50 p-3">
-							<MicrophoneOutline size="xl" class="text-blue-dark-40" />
-						</div>
-						<div class="flex w-2/5 flex-col items-center">
-							<p class="text-center text-xl font-semibold text-blue-dark-40">Voice mode</p>
-							{#if endingAudioSession}
-								<p class="font-base text-center text-base text-gray-600">
-									Finishing up your session...
+		</Modal>
+		{#if !$loading}
+			<div class="print-hide">
+				{#if data.threadInteractionMode === 'voice' && !microphoneAccess && $messages.length === 0 && assistantInteractionMode === 'voice'}
+					{#if $isFirefox}
+						<div class="flex h-full w-full flex-col items-center justify-center gap-4">
+							<div class="rounded-lg bg-blue-light-50 p-3">
+								<MicrophoneSlashOutline size="xl" class="text-blue-dark-40" />
+							</div>
+							<div class="flex w-2/5 flex-col items-center">
+								<p class="text-center text-xl font-semibold text-blue-dark-40">
+									Voice mode not available on Firefox
 								</p>
-							{:else}
 								<p class="font-base text-center text-base text-gray-600">
-									When you're ready, start the session to begin recording.
+									We're working on bringing Voice mode to Firefox in a future update. For the best
+									experience, please use Safari, Chrome, or Edge in the meantime.
 								</p>
+							</div>
+						</div>
+					{:else}
+						<div class="flex h-full w-full flex-col items-center justify-center gap-4">
+							<div class="rounded-lg bg-blue-light-50 p-3">
+								<MicrophoneOutline size="xl" class="text-blue-dark-40" />
+							</div>
+							<div class="flex w-2/5 flex-col items-center">
+								<p class="text-center text-xl font-semibold text-blue-dark-40">Voice mode</p>
+								<p class="font-base text-center text-base text-gray-600">
+									To get started, enable microphone access.
+								</p>
+							</div>
+							<Button
+								class="flex flex-row gap-1.5 rounded-sm bg-blue-dark-40 px-4 py-1.5 text-center text-sm text-xs font-normal text-white transition-all hover:bg-blue-dark-50 hover:text-blue-light-50"
+								type="button"
+								onclick={handleSessionSetup}
+								ontouchstart={handleSessionSetup}
+							>
+								Enable access
+							</Button>
+						</div>
+					{/if}
+				{:else if data.threadInteractionMode === 'voice' && microphoneAccess && $messages.length === 0 && assistantInteractionMode === 'voice'}
+					{#if $isFirefox}
+						<div class="flex h-full w-full flex-col items-center justify-center gap-4">
+							<div class="rounded-lg bg-blue-light-50 p-3">
+								<MicrophoneSlashOutline size="xl" class="text-blue-dark-40" />
+							</div>
+							<div class="flex w-2/5 flex-col items-center">
+								<p class="text-center text-xl font-semibold text-blue-dark-40">
+									Voice mode not available on Firefox
+								</p>
+								<p class="font-base text-center text-base text-gray-600">
+									We're working on bringing Voice mode to Firefox in a future update. For the best
+									experience, please use Safari, Chrome, or Edge in the meantime.
+								</p>
+							</div>
+						</div>
+					{:else}
+						<div class="flex h-full w-full flex-col items-center justify-center gap-4">
+							<div class="rounded-lg bg-blue-light-50 p-3">
+								<MicrophoneOutline size="xl" class="text-blue-dark-40" />
+							</div>
+							<div class="flex w-2/5 flex-col items-center">
+								<p class="text-center text-xl font-semibold text-blue-dark-40">Voice mode</p>
+								{#if endingAudioSession}
+									<p class="font-base text-center text-base text-gray-600">
+										Finishing up your session...
+									</p>
+								{:else}
+									<p class="font-base text-center text-base text-gray-600">
+										When you're ready, start the session to begin recording.
+									</p>
+								{/if}
+							</div>
+							{#if !isPrivate && displayUserInfo}
+								<div
+									class="my-5 flex max-w-sm flex-col items-center justify-center gap-1 rounded-2xl border border-red-600 px-3 py-2 text-center"
+								>
+									<UsersSolid class="h-10 w-10 text-red-600" />
+									<span class="text-sm font-normal text-gray-700"
+										><Button
+											class="p-0 text-sm font-normal text-gray-700 underline"
+											onclick={showModeratorsModal}
+											ontouchstart={showModeratorsModal}>Moderators</Button
+										> have enabled a setting for this thread only that allows them to see the thread,
+										<span class="font-semibold"
+											>your full name, and listen to a recording of your conversation</span
+										>.</span
+									>
+								</div>
 							{/if}
-						</div>
-						{#if !isPrivate && displayUserInfo}
-							<div
-								class="my-5 flex max-w-sm flex-col items-center justify-center gap-1 rounded-2xl border border-red-600 px-3 py-2 text-center"
-							>
-								<UsersSolid class="h-10 w-10 text-red-600" />
-								<span class="text-sm font-normal text-gray-700"
-									><Button
-										class="p-0 text-sm font-normal text-gray-700 underline"
-										onclick={showModeratorsModal}
-										ontouchstart={showModeratorsModal}>Moderators</Button
-									> have enabled a setting for this thread only that allows them to see the thread,
-									<span class="font-semibold"
-										>your full name, and listen to a recording of your conversation</span
-									>.</span
+							<div class="flex w-full justify-center">
+								<div
+									class="flex h-fit w-fit flex-row items-center justify-center gap-2 rounded-xl bg-gray-100 px-2 py-1.5 shadow-xl"
 								>
-							</div>
-						{/if}
-						<div class="flex w-full justify-center">
-							<div
-								class="flex h-fit w-fit flex-row items-center justify-center gap-2 rounded-xl bg-gray-100 px-2 py-1.5 shadow-xl"
-							>
-								{#if !audioSessionStarted}
-									<Button
-										class="flex flex-row gap-1 rounded-lg bg-blue-dark-40 px-3 py-2 text-center text-sm font-normal text-white transition-all hover:bg-blue-dark-50"
-										type="button"
-										onclick={handleSessionStart}
-										ontouchstart={handleSessionStart}
-										disabled={!microphoneAccess}
-									>
-										{#if startingAudioSession}
-											<Spinner color="custom" customColor="fill-white" class="mr-1 h-4 w-4" />
-										{:else}
-											<PlaySolid class="ml-0 pl-0" size="md" />
-										{/if}
-										<span class="mr-1">Start session</span>
-									</Button>
-								{:else}
-									<Button
-										class="flex flex-row gap-1 rounded-lg bg-amber-700 px-3 py-2 text-center text-sm font-normal text-white transition-all hover:bg-amber-800"
-										type="button"
-										onclick={handleSessionEnd}
-										ontouchstart={handleSessionEnd}
-										disabled={!microphoneAccess}
-									>
-										{#if endingAudioSession}
-											<Spinner color="custom" customColor="fill-white" class="mr-1 h-4 w-4" />
-										{:else}
-											<StopSolid class="ml-0 pl-0" size="md" />
-										{/if}
-										<span class="mr-1">End session</span>
-									</Button>
-								{/if}
-								<Button
-									id="top-dd"
-									class="flex max-w-56 min-w-56 shrink-0 grow-0 flex-row justify-between gap-2 rounded-lg px-3 py-2 text-sm font-normal text-gray-800 transition-all hover:bg-gray-300"
-									disabled={!microphoneAccess ||
-										audioSessionStarted ||
-										startingAudioSession ||
-										endingAudioSession}
-								>
-									<div class="flex w-5/6 flex-row justify-start gap-2">
-										<MicrophoneOutline class="h-5 w-5" />
-										<span class="truncate"
-											>{selectedAudioDevice?.label || 'Select microphone...'}</span
+									{#if !audioSessionStarted}
+										<Button
+											class="flex flex-row gap-1 rounded-lg bg-blue-dark-40 px-3 py-2 text-center text-sm font-normal text-white transition-all hover:bg-blue-dark-50"
+											type="button"
+											onclick={handleSessionStart}
+											ontouchstart={handleSessionStart}
+											disabled={!microphoneAccess}
 										>
-									</div>
-									<ChevronSortOutline class="ml-2 h-4 w-4" strokeWidth="2" /></Button
-								>
-								{#if audioDevices.length === 0}
-									<Dropdown placement="top" triggeredBy="#top-dd" bind:open={openMicrophoneModal}>
-										<DropdownItem class="flex flex-row items-center gap-2">
-											<span>No microphones available</span>
-										</DropdownItem>
-									</Dropdown>
-								{:else}
-									<Dropdown placement="top" triggeredBy="#top-dd" bind:open={openMicrophoneModal}>
-										{#each audioDevices as audioDevice (audioDevice.deviceId)}
-											<DropdownItem
-												class="flex flex-row items-center gap-2"
-												onclick={() => {
-													selectAudioDevice(audioDevice.deviceId);
-													openMicrophoneModal = false;
-												}}
-											>
-												{#if audioDevice.deviceId === selectedAudioDevice?.deviceId}
-													<CheckOutline class="h-5 w-5" />
-												{:else}
-													<span class="h-5 w-5"></span>
-												{/if}
-												<span>{audioDevice.label}</span>
-											</DropdownItem>
-										{/each}
-									</Dropdown>
-								{/if}
-							</div>
-						</div>
-					</div>
-				{/if}
-			{/if}
-
-			<div class="w-full bg-gradient-to-t from-white to-transparent">
-				<div class="relative mx-auto flex w-11/12 flex-col">
-					<StatusErrors {assistantStatusUpdates} />
-					{#if data.threadInteractionMode == 'chat' && assistantInteractionMode === 'chat'}
-						{#if $waiting || $submitting}
-							<div
-								class="absolute -top-10 flex w-full justify-center"
-								transition:blur={{ amount: 10 }}
-							>
-								<DoubleBounce color="#0ea5e9" size="30" />
-							</div>
-						{/if}
-						{#key threadId}
-							<ChatInput
-								mimeType={data.uploadInfo.mimeType}
-								maxSize={data.uploadInfo.private_file_max_size}
-								bind:attachments={currentMessageAttachments}
-								{threadManagerError}
-								visionAcceptedFiles={allowUserImageUploads ? visionAcceptedFiles : null}
-								fileSearchAcceptedFiles={allowUserFileUploads ? fileSearchAcceptedFiles : null}
-								codeInterpreterAcceptedFiles={allowUserFileUploads
-									? codeInterpreterAcceptedFiles
-									: null}
-								{visionSupportOverride}
-								{useImageDescriptions}
-								{assistantDeleted}
-								{canViewAssistant}
-								canSubmit={canSubmit && !assistantDeleted && canViewAssistant}
-								disabled={!canSubmit || assistantDeleted || !!$navigating || !canViewAssistant}
-								loading={$submitting || $waiting}
-								{fileSearchAttachmentCount}
-								{codeInterpreterAttachmentCount}
-								upload={handleUpload}
-								remove={handleRemove}
-								threadVersion={$version}
-								assistantVersion={resolvedAssistantVersion}
-								{bypassedSettingsSections}
-								on:submit={handleSubmit}
-								on:dismissError={handleDismissError}
-								on:startNewChat={startNewChat}
-							/>
-						{/key}
-					{:else if data.threadInteractionMode === 'voice' && ($messages.length > 0 || assistantInteractionMode === 'chat')}
-						{#if threadRecording && $messages.length > 0 && assistantInteractionMode === 'voice'}
-							<div
-								class="relative z-10 -mb-3 flex flex-wrap gap-2 rounded-t-2xl border border-b-0 border-gray-500 bg-gray-100 px-3.5 pt-2.5 pb-5 text-blue-dark-40"
-							>
-								<div class="w-full">
-									{#if showPlayer && audioUrl}
-										<AudioPlayer bind:src={audioUrl} duration={threadRecording.duration} />
+											{#if startingAudioSession}
+												<Spinner color="custom" customColor="fill-white" class="mr-1 h-4 w-4" />
+											{:else}
+												<PlaySolid class="ml-0 pl-0" size="md" />
+											{/if}
+											<span class="mr-1">Start session</span>
+										</Button>
 									{:else}
-										<div class="flex w-full flex-col items-center gap-2 md:flex-row">
-											<div class="text-danger-000 flex flex-row items-center gap-2 md:w-full">
-												<div class="flex w-fit flex-col">
-													<div class="text-xs font-semibold uppercase">Recording available</div>
-													<div class="text-sm">
-														You can listen to a recording of this conversation.
-													</div>
-												</div>
-											</div>
-											<Button
-												class="w-fit shrink-0 rounded-lg bg-gradient-to-b from-blue-dark-30 to-blue-dark-40 px-2 py-1 text-xs font-normal text-white transition-all hover:from-blue-dark-40 hover:to-blue-dark-50"
-												onclick={fetchRecording}
-											>
-												Load Recording
-											</Button>
-										</div>
+										<Button
+											class="flex flex-row gap-1 rounded-lg bg-amber-700 px-3 py-2 text-center text-sm font-normal text-white transition-all hover:bg-amber-800"
+											type="button"
+											onclick={handleSessionEnd}
+											ontouchstart={handleSessionEnd}
+											disabled={!microphoneAccess}
+										>
+											{#if endingAudioSession}
+												<Spinner color="custom" customColor="fill-white" class="mr-1 h-4 w-4" />
+											{:else}
+												<StopSolid class="ml-0 pl-0" size="md" />
+											{/if}
+											<span class="mr-1">End session</span>
+										</Button>
 									{/if}
-								</div>
-							</div>
-						{/if}
-
-						<div
-							class="relative z-20 flex flex-col items-stretch gap-2 rounded-2xl border border-melon bg-seasalt py-2.5 pr-3 pl-4 shadow-[0_0.25rem_1.25rem_rgba(254,184,175,0.15)] transition-all duration-200 focus-within:border-coral-pink focus-within:shadow-[0_0.25rem_1.25rem_rgba(253,148,134,0.25)] hover:border-coral-pink"
-						>
-							<div class="flex flex-row gap-2">
-								<MicrophoneOutline class="h-6 w-6 text-gray-700" />
-								<div class="flex flex-col">
-									<span class="text-base font-semibold text-gray-700">Voice Mode Session</span><span
-										class="text-base font-normal text-gray-700"
-										>This conversation was completed in Voice mode and is read-only. To continue
-										chatting, start a new conversation.</span
+									<Button
+										id="top-dd"
+										class="flex max-w-56 min-w-56 shrink-0 grow-0 flex-row justify-between gap-2 rounded-lg px-3 py-2 text-sm font-normal text-gray-800 transition-all hover:bg-gray-300"
+										disabled={!microphoneAccess ||
+											audioSessionStarted ||
+											startingAudioSession ||
+											endingAudioSession}
 									>
-								</div>
-							</div>
-						</div>
-					{:else if data.threadInteractionMode === 'chat' && assistantInteractionMode === 'voice'}
-						<div
-							class="relative z-20 flex flex-col items-stretch gap-2 rounded-2xl border border-melon bg-seasalt py-2.5 pr-3 pl-4 shadow-[0_0.25rem_1.25rem_rgba(254,184,175,0.15)] transition-all duration-200 focus-within:border-coral-pink focus-within:shadow-[0_0.25rem_1.25rem_rgba(253,148,134,0.25)] hover:border-coral-pink"
-						>
-							<div class="flex flex-row gap-2">
-								<MicrophoneOutline class="h-6 w-6 text-gray-700" />
-								<div class="flex flex-col">
-									<span class="text-base font-semibold text-gray-700">Assistant in Voice mode</span
-									><span class="text-base font-normal text-gray-700"
-										>This assistant uses audio. Start a new session to keep the conversation going.</span
+										<div class="flex w-5/6 flex-row justify-start gap-2">
+											<MicrophoneOutline class="h-5 w-5" />
+											<span class="truncate"
+												>{selectedAudioDevice?.label || 'Select microphone...'}</span
+											>
+										</div>
+										<ChevronSortOutline class="ml-2 h-4 w-4" strokeWidth="2" /></Button
 									>
+									{#if audioDevices.length === 0}
+										<Dropdown placement="top" triggeredBy="#top-dd" bind:open={openMicrophoneModal}>
+											<DropdownItem class="flex flex-row items-center gap-2">
+												<span>No microphones available</span>
+											</DropdownItem>
+										</Dropdown>
+									{:else}
+										<Dropdown placement="top" triggeredBy="#top-dd" bind:open={openMicrophoneModal}>
+											{#each audioDevices as audioDevice (audioDevice.deviceId)}
+												<DropdownItem
+													class="flex flex-row items-center gap-2"
+													onclick={() => {
+														selectAudioDevice(audioDevice.deviceId);
+														openMicrophoneModal = false;
+													}}
+												>
+													{#if audioDevice.deviceId === selectedAudioDevice?.deviceId}
+														<CheckOutline class="h-5 w-5" />
+													{:else}
+														<span class="h-5 w-5"></span>
+													{/if}
+													<span>{audioDevice.label}</span>
+												</DropdownItem>
+											{/each}
+										</Dropdown>
+									{/if}
 								</div>
 							</div>
 						</div>
 					{/if}
-					<div class="my-3 flex w-full grow items-center justify-between gap-2 text-sm">
-						<div class="flex min-w-0 shrink grow gap-2">
-							{#if !$published && isPrivate && !displayUserInfo}
-								<LockSolid size="sm" class="text-orange" />
-								<Span class="text-xs font-normal text-gray-600"
-									><Button
-										class="p-0 text-xs font-normal text-gray-600 underline"
-										onclick={showModeratorsModal}
-										ontouchstart={showModeratorsModal}>Moderators</Button
-									> <span class="font-semibold">cannot</span> see this thread or your name. {#if isCurrentUser}For
-										more information, please review <a
-											href={resolve('/privacy-policy')}
-											rel="noopener noreferrer"
-											class="underline">PingPong's privacy statement</a
-										>.
-									{/if}Assistants can make mistakes. Check important info.</Span
+				{/if}
+
+				<div class="w-full bg-gradient-to-t from-white to-transparent">
+					<div class="relative mx-auto flex w-11/12 flex-col">
+						<StatusErrors {assistantStatusUpdates} />
+						{#if data.threadInteractionMode == 'chat' && assistantInteractionMode === 'chat'}
+							{#if $waiting || $submitting}
+								<div
+									class="absolute -top-10 flex w-full justify-center"
+									transition:blur={{ amount: 10 }}
 								>
-							{:else if !$published}
-								{#if displayUserInfo}
-									{#if data.threadInteractionMode === 'voice'}
-										<div class="flex w-full flex-wrap items-start gap-2 text-sm lg:flex-nowrap">
-											<UsersSolid size="sm" class="pt-0 text-orange" />
-											<Span class="text-xs font-normal text-gray-600"
-												><Button
-													class="p-0 text-xs font-normal text-gray-600 underline"
-													onclick={showModeratorsModal}
-													ontouchstart={showModeratorsModal}>Moderators</Button
-												> can see this thread,
-												<span class="font-semibold"
-													>{isCurrentUser ? 'your' : "the user's"} full name, and listen to a recording
-													of {isCurrentUser ? 'your' : 'the'} conversation</span
-												>. For more information, please review
-												<a
-													href={resolve('/privacy-policy')}
-													rel="noopener noreferrer"
-													class="underline">PingPong's privacy statement</a
-												>. Assistants can make mistakes. Check important info.</Span
-											>
-										</div>
-									{:else}
-										<div class="flex w-full flex-wrap items-start gap-2 text-sm lg:flex-nowrap">
-											<UsersSolid size="sm" class="pt-0 text-orange" />
-											<Span class="text-xs font-normal text-gray-600"
-												><Button
-													class="p-0 text-xs font-normal text-gray-600 underline"
-													onclick={showModeratorsModal}
-													ontouchstart={showModeratorsModal}>Moderators</Button
-												> can see this thread and
-												<span class="font-semibold"
-													>{isCurrentUser ? 'your' : "the user's"} full name</span
-												>. For more information, please review
-												<a
-													href={resolve('/privacy-policy')}
-													rel="noopener noreferrer"
-													class="underline">PingPong's privacy statement</a
-												>. Assistants can make mistakes. Check important info.</Span
-											>
-										</div>
-									{/if}
-								{:else}
-									<EyeSlashOutline size="sm" class="text-orange" />
+									<DoubleBounce color="#0ea5e9" size="30" />
+								</div>
+							{/if}
+							{#key threadId}
+								<ChatInput
+									mimeType={data.uploadInfo.mimeType}
+									maxSize={data.uploadInfo.private_file_max_size}
+									bind:attachments={currentMessageAttachments}
+									{threadManagerError}
+									visionAcceptedFiles={allowUserImageUploads ? visionAcceptedFiles : null}
+									fileSearchAcceptedFiles={allowUserFileUploads ? fileSearchAcceptedFiles : null}
+									codeInterpreterAcceptedFiles={allowUserFileUploads
+										? codeInterpreterAcceptedFiles
+										: null}
+									{visionSupportOverride}
+									{useImageDescriptions}
+									{assistantDeleted}
+									{canViewAssistant}
+									canSubmit={canSubmit && !assistantDeleted && canViewAssistant}
+									disabled={!canSubmit || assistantDeleted || !!$navigating || !canViewAssistant}
+									loading={$submitting || $waiting}
+									{fileSearchAttachmentCount}
+									{codeInterpreterAttachmentCount}
+									upload={handleUpload}
+									remove={handleRemove}
+									threadVersion={$version}
+									assistantVersion={resolvedAssistantVersion}
+									{bypassedSettingsSections}
+									on:submit={handleSubmit}
+									on:dismissError={handleDismissError}
+									on:startNewChat={startNewChat}
+								/>
+							{/key}
+						{:else if data.threadInteractionMode === 'voice' && ($messages.length > 0 || assistantInteractionMode === 'chat')}
+							{#if threadRecording && $messages.length > 0 && assistantInteractionMode === 'voice'}
+								<div
+									class="relative z-10 -mb-3 flex flex-wrap gap-2 rounded-t-2xl border border-b-0 border-gray-500 bg-gray-100 px-3.5 pt-2.5 pb-5 text-blue-dark-40"
+								>
+									<div class="w-full">
+										{#if showPlayer && audioUrl}
+											<AudioPlayer bind:src={audioUrl} duration={threadRecording.duration} />
+										{:else}
+											<div class="flex w-full flex-col items-center gap-2 md:flex-row">
+												<div class="text-danger-000 flex flex-row items-center gap-2 md:w-full">
+													<div class="flex w-fit flex-col">
+														<div class="text-xs font-semibold uppercase">Recording available</div>
+														<div class="text-sm">
+															You can listen to a recording of this conversation.
+														</div>
+													</div>
+												</div>
+												<Button
+													class="w-fit shrink-0 rounded-lg bg-gradient-to-b from-blue-dark-30 to-blue-dark-40 px-2 py-1 text-xs font-normal text-white transition-all hover:from-blue-dark-40 hover:to-blue-dark-50"
+													onclick={fetchRecording}
+												>
+													Load Recording
+												</Button>
+											</div>
+										{/if}
+									</div>
+								</div>
+							{/if}
+
+							<div
+								class="relative z-20 flex flex-col items-stretch gap-2 rounded-2xl border border-melon bg-seasalt py-2.5 pr-3 pl-4 shadow-[0_0.25rem_1.25rem_rgba(254,184,175,0.15)] transition-all duration-200 focus-within:border-coral-pink focus-within:shadow-[0_0.25rem_1.25rem_rgba(253,148,134,0.25)] hover:border-coral-pink"
+							>
+								<div class="flex flex-row gap-2">
+									<MicrophoneOutline class="h-6 w-6 text-gray-700" />
+									<div class="flex flex-col">
+										<span class="text-base font-semibold text-gray-700">Voice Mode Session</span
+										><span class="text-base font-normal text-gray-700"
+											>This conversation was completed in Voice mode and is read-only. To continue
+											chatting, start a new conversation.</span
+										>
+									</div>
+								</div>
+							</div>
+						{:else if data.threadInteractionMode === 'chat' && assistantInteractionMode === 'voice'}
+							<div
+								class="relative z-20 flex flex-col items-stretch gap-2 rounded-2xl border border-melon bg-seasalt py-2.5 pr-3 pl-4 shadow-[0_0.25rem_1.25rem_rgba(254,184,175,0.15)] transition-all duration-200 focus-within:border-coral-pink focus-within:shadow-[0_0.25rem_1.25rem_rgba(253,148,134,0.25)] hover:border-coral-pink"
+							>
+								<div class="flex flex-row gap-2">
+									<MicrophoneOutline class="h-6 w-6 text-gray-700" />
+									<div class="flex flex-col">
+										<span class="text-base font-semibold text-gray-700"
+											>Assistant in Voice mode</span
+										><span class="text-base font-normal text-gray-700"
+											>This assistant uses audio. Start a new session to keep the conversation
+											going.</span
+										>
+									</div>
+								</div>
+							</div>
+						{/if}
+						<div class="my-3 flex w-full grow items-center justify-between gap-2 text-sm">
+							<div class="flex min-w-0 shrink grow gap-2">
+								{#if !$published && isPrivate && !displayUserInfo}
+									<LockSolid size="sm" class="text-orange" />
 									<Span class="text-xs font-normal text-gray-600"
 										><Button
 											class="p-0 text-xs font-normal text-gray-600 underline"
 											onclick={showModeratorsModal}
 											ontouchstart={showModeratorsModal}>Moderators</Button
-										> can see this thread but not {isCurrentUser ? 'your' : "the user's"} name.
-										{#if isCurrentUser}For more information, please review <a
+										> <span class="font-semibold">cannot</span> see this thread or your name. {#if isCurrentUser}For
+											more information, please review <a
 												href={resolve('/privacy-policy')}
 												rel="noopener noreferrer"
 												class="underline">PingPong's privacy statement</a
 											>.
 										{/if}Assistants can make mistakes. Check important info.</Span
 									>
+								{:else if !$published}
+									{#if displayUserInfo}
+										{#if data.threadInteractionMode === 'voice'}
+											<div class="flex w-full flex-wrap items-start gap-2 text-sm lg:flex-nowrap">
+												<UsersSolid size="sm" class="pt-0 text-orange" />
+												<Span class="text-xs font-normal text-gray-600"
+													><Button
+														class="p-0 text-xs font-normal text-gray-600 underline"
+														onclick={showModeratorsModal}
+														ontouchstart={showModeratorsModal}>Moderators</Button
+													> can see this thread,
+													<span class="font-semibold"
+														>{isCurrentUser ? 'your' : "the user's"} full name, and listen to a recording
+														of {isCurrentUser ? 'your' : 'the'} conversation</span
+													>. For more information, please review
+													<a
+														href={resolve('/privacy-policy')}
+														rel="noopener noreferrer"
+														class="underline">PingPong's privacy statement</a
+													>. Assistants can make mistakes. Check important info.</Span
+												>
+											</div>
+										{:else}
+											<div class="flex w-full flex-wrap items-start gap-2 text-sm lg:flex-nowrap">
+												<UsersSolid size="sm" class="pt-0 text-orange" />
+												<Span class="text-xs font-normal text-gray-600"
+													><Button
+														class="p-0 text-xs font-normal text-gray-600 underline"
+														onclick={showModeratorsModal}
+														ontouchstart={showModeratorsModal}>Moderators</Button
+													> can see this thread and
+													<span class="font-semibold"
+														>{isCurrentUser ? 'your' : "the user's"} full name</span
+													>. For more information, please review
+													<a
+														href={resolve('/privacy-policy')}
+														rel="noopener noreferrer"
+														class="underline">PingPong's privacy statement</a
+													>. Assistants can make mistakes. Check important info.</Span
+												>
+											</div>
+										{/if}
+									{:else}
+										<EyeSlashOutline size="sm" class="text-orange" />
+										<Span class="text-xs font-normal text-gray-600"
+											><Button
+												class="p-0 text-xs font-normal text-gray-600 underline"
+												onclick={showModeratorsModal}
+												ontouchstart={showModeratorsModal}>Moderators</Button
+											> can see this thread but not {isCurrentUser ? 'your' : "the user's"} name.
+											{#if isCurrentUser}For more information, please review <a
+													href={resolve('/privacy-policy')}
+													rel="noopener noreferrer"
+													class="underline">PingPong's privacy statement</a
+												>.
+											{/if}Assistants can make mistakes. Check important info.</Span
+										>
+									{/if}
+								{:else}
+									<EyeOutline size="sm" class="text-orange" />
+									<Span class="text-xs font-normal text-gray-600"
+										>Everyone in this group can see this thread but not {isCurrentUser
+											? 'your'
+											: "the user's"} name. {#if displayUserInfo}{#if data.threadInteractionMode === 'voice'}<Button
+													class="p-0 text-xs font-normal text-gray-600 underline"
+													onclick={showModeratorsModal}
+													ontouchstart={showModeratorsModal}>Moderators</Button
+												> can see this thread,
+												<span class="font-semibold"
+													>{isCurrentUser ? 'your' : "the user's"} full name, and listen to a recording
+													of
+													{isCurrentUser ? 'your' : 'the'} conversation</span
+												>.{:else}<Button
+													class="p-0 text-xs font-normal text-gray-600 underline"
+													onclick={showModeratorsModal}
+													ontouchstart={showModeratorsModal}>Moderators</Button
+												> can see this thread and
+												<span class="font-semibold"
+													>{isCurrentUser ? 'your' : "the user's"} full name</span
+												>.{/if}{/if} Assistants can make mistakes. Check important info.</Span
+									>
 								{/if}
-							{:else}
-								<EyeOutline size="sm" class="text-orange" />
-								<Span class="text-xs font-normal text-gray-600"
-									>Everyone in this group can see this thread but not {isCurrentUser
-										? 'your'
-										: "the user's"} name. {#if displayUserInfo}{#if data.threadInteractionMode === 'voice'}<Button
-												class="p-0 text-xs font-normal text-gray-600 underline"
-												onclick={showModeratorsModal}
-												ontouchstart={showModeratorsModal}>Moderators</Button
-											> can see this thread,
-											<span class="font-semibold"
-												>{isCurrentUser ? 'your' : "the user's"} full name, and listen to a recording
-												of
-												{isCurrentUser ? 'your' : 'the'} conversation</span
-											>.{:else}<Button
-												class="p-0 text-xs font-normal text-gray-600 underline"
-												onclick={showModeratorsModal}
-												ontouchstart={showModeratorsModal}>Moderators</Button
-											> can see this thread and
-											<span class="font-semibold"
-												>{isCurrentUser ? 'your' : "the user's"} full name</span
-											>.{/if}{/if} Assistants can make mistakes. Check important info.</Span
-								>
+							</div>
+							<button onclick={handleCopyLinkClick} title="Copy link" aria-label="Copy link"
+								><LinkOutline
+									class="inline-block h-6 w-5 font-medium text-blue-dark-30 hover:text-blue-dark-50 active:animate-ping dark:text-white"
+									size="lg"
+								/></button
+							>
+							{#if !(data.threadInteractionMode === 'voice' && $messages.length === 0 && assistantInteractionMode === 'voice')}
+								<div class="h-auto shrink-0 grow-0">
+									<CogOutline class="h-4 w-6 cursor-pointer font-light dark:text-white" size="lg" />
+									<Dropdown bind:open={settingsOpen}>
+										{#if $threadInstructions}
+											<DropdownItem
+												onclick={() => ((showAssistantPrompt = true), (settingsOpen = false))}
+											>
+												<span>Prompt</span>
+											</DropdownItem>
+											<DropdownDivider />
+										{/if}
+										<DropdownItem onclick={handlePrintThread} disabled={printingThread}>
+											<span class:text-gray-300={printingThread}>Print</span>
+										</DropdownItem>
+										{#if threadRecording}
+											<DropdownItem onclick={transcribeRecording} disabled={transcribingRecording}>
+												<span class:text-gray-300={transcribingRecording}>Transcribe</span>
+											</DropdownItem>
+										{/if}
+										<DropdownDivider />
+										<DropdownItem onclick={togglePublish} disabled={!canPublishThread}>
+											<span class:text-gray-300={!canPublishThread}>
+												{#if $published}
+													Unpublish
+												{:else}
+													Publish
+												{/if}
+											</span>
+										</DropdownItem>
+										<DropdownItem onclick={deleteThread} disabled={!canDeleteThread}>
+											<span class:text-gray-300={!canDeleteThread}>Delete</span>
+										</DropdownItem>
+									</Dropdown>
+								</div>
 							{/if}
 						</div>
-						<button onclick={handleCopyLinkClick} title="Copy link" aria-label="Copy link"
-							><LinkOutline
-								class="inline-block h-6 w-5 font-medium text-blue-dark-30 hover:text-blue-dark-50 active:animate-ping dark:text-white"
-								size="lg"
-							/></button
-						>
-						{#if !(data.threadInteractionMode === 'voice' && $messages.length === 0 && assistantInteractionMode === 'voice')}
-							<div class="h-auto shrink-0 grow-0">
-								<CogOutline class="h-4 w-6 cursor-pointer font-light dark:text-white" size="lg" />
-								<Dropdown bind:open={settingsOpen}>
-									{#if $threadInstructions}
-										<DropdownItem
-											onclick={() => ((showAssistantPrompt = true), (settingsOpen = false))}
-										>
-											<span>Prompt</span>
-										</DropdownItem>
-										<DropdownDivider />
-									{/if}
-									<DropdownItem onclick={handlePrintThread} disabled={printingThread}>
-										<span class:text-gray-300={printingThread}>Print</span>
-									</DropdownItem>
-									{#if threadRecording}
-										<DropdownItem onclick={transcribeRecording} disabled={transcribingRecording}>
-											<span class:text-gray-300={transcribingRecording}>Transcribe</span>
-										</DropdownItem>
-									{/if}
-									<DropdownDivider />
-									<DropdownItem onclick={togglePublish} disabled={!canPublishThread}>
-										<span class:text-gray-300={!canPublishThread}>
-											{#if $published}
-												Unpublish
-											{:else}
-												Publish
-											{/if}
-										</span>
-									</DropdownItem>
-									<DropdownItem onclick={deleteThread} disabled={!canDeleteThread}>
-										<span class:text-gray-300={!canDeleteThread}>Delete</span>
-									</DropdownItem>
-								</Dropdown>
-							</div>
-						{/if}
 					</div>
 				</div>
 			</div>
-		</div>
+		{/if}
 	{/if}
 </div>
 

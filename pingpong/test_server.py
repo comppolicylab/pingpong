@@ -377,6 +377,53 @@ async def test_me_without_token(api):
     }
 
 
+async def test_me_ignores_anonymous_query_tokens_on_non_media_routes(api, db):
+    async with db.async_session() as session:
+        anon_link = models.AnonymousLink(
+            id=1,
+            share_token="anon-share-token",
+            active=True,
+        )
+        session.add(anon_link)
+        await session.flush()
+
+        anon_user = models.User(
+            id=999,
+            email="anon-user@test.org",
+            anonymous_link_id=anon_link.id,
+        )
+        session.add(anon_user)
+        await session.flush()
+
+        anon_session = models.AnonymousSession(
+            session_token="anon-session-token",
+            user_id=anon_user.id,
+        )
+        session.add(anon_session)
+        await session.commit()
+
+    query_response = api.get("/api/v1/me?anonymous_session_token=anon-session-token")
+    assert query_response.status_code == 200
+    assert query_response.json()["status"] == "missing"
+    assert query_response.json()["user"] is None
+
+    header_response = api.get(
+        "/api/v1/me",
+        headers={"X-Anonymous-Thread-Session": "anon-session-token"},
+    )
+    assert header_response.status_code == 200
+    assert header_response.json()["status"] == "anonymous"
+    assert header_response.json()["user"]["id"] == 999
+
+
+@with_user(123)
+async def test_me_ignores_lti_query_token_on_non_media_routes(api, valid_user_token):
+    response = api.get(f"/api/v1/me?lti_session={valid_user_token}")
+    assert response.status_code == 200
+    assert response.json()["status"] == "missing"
+    assert response.json()["user"] is None
+
+
 async def test_me_with_expired_token(api, now):
     response = api.get(
         "/api/v1/me",

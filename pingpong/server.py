@@ -78,6 +78,7 @@ from pingpong.stats import (
 )
 from pingpong.summary import send_class_summary_to_user_task
 from pingpong.video_store import VideoStoreError
+from pingpong.stream_utils import prefetch_stream
 from .animal_hash import name, process_threads, pseudonym, user_names
 from openai.types.beta.assistant_create_params import ToolResources
 from openai.types.beta.threads import MessageContentPartParam
@@ -237,6 +238,19 @@ async def _direct_institution_admin_ids(authz: Any, inst_id: int) -> list[int]:
         except (IndexError, ValueError):
             continue
     return admin_ids
+
+
+def _lecture_video_matches_assistant(
+    thread: models.Thread, assistant: models.Assistant | None
+) -> bool:
+    if thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
+        return True
+
+    return (
+        assistant is not None
+        and thread.lecture_video_id is not None
+        and assistant.lecture_video_id == thread.lecture_video_id
+    )
 
 
 if config.development:
@@ -3040,6 +3054,7 @@ async def get_thread(
     thread = await models.Thread.get_by_id_with_users_voice_mode(
         request.state["db"], int(thread_id)
     )
+
     if thread.version <= 2:
         (
             messages,
@@ -3142,6 +3157,10 @@ async def get_thread(
                     f"assistant:{assistant.id}",
                 )
 
+        lecture_video_matches_assistant = _lecture_video_matches_assistant(
+            thread, assistant
+        )
+
         return {
             "thread": thread,
             "model": assistant.model if assistant else "None",
@@ -3156,6 +3175,7 @@ async def get_thread(
             "reasoning_messages": [],
             "attachments": all_files,
             "instructions": thread.instructions if can_view_prompt else None,
+            "lecture_video_matches_assistant": lecture_video_matches_assistant,
             "recording": thread.voice_mode_recording
             if is_supervisor or is_current_user
             else None,
@@ -3726,6 +3746,10 @@ async def get_thread(
                     f"assistant:{assistant.id}",
                 )
 
+        lecture_video_matches_assistant = _lecture_video_matches_assistant(
+            thread, assistant
+        )
+
         if latest_run:
             last_run_db = schemas.OpenAIRun(
                 id=str(latest_run.run_id),
@@ -3768,6 +3792,7 @@ async def get_thread(
             "attachments": all_files,
             "instructions": thread.instructions if can_view_prompt else None,
             "lecture_video_id": thread.lecture_video_id,
+            "lecture_video_matches_assistant": lecture_video_matches_assistant,
             "recording": thread.voice_mode_recording
             if is_supervisor or is_current_user
             else None,
@@ -3775,6 +3800,203 @@ async def get_thread(
         }
     else:
         raise HTTPException(status_code=400, detail="Invalid thread version")
+
+
+def _parse_single_byte_range(
+    range_header: str | None, content_length: int
+) -> tuple[int | None, int | None, bool]:
+    """Parse a single HTTP bytes range.
+
+    Returns:
+        tuple: (start, end, is_partial)
+    """
+    if not range_header:
+        return None, None, False
+
+    if content_length <= 0:
+        raise ValueError("Range not satisfiable.")
+
+    if not range_header.startswith("bytes="):
+        raise ValueError("Malformed Range header.")
+
+    ranges = range_header[len("bytes=") :].strip()
+    if "," in ranges:
+        raise ValueError("Multiple byte ranges are not supported.")
+
+    if "-" not in ranges:
+        raise ValueError("Malformed Range header.")
+
+    start_raw, end_raw = ranges.split("-", 1)
+    if not start_raw and not end_raw:
+        raise ValueError("Malformed Range header.")
+
+    # Suffix byte range request, e.g. bytes=-1024
+    if not start_raw:
+        try:
+            suffix_length = int(end_raw)
+        except ValueError as e:
+            raise ValueError("Malformed Range header.") from e
+        if suffix_length <= 0:
+            raise ValueError("Invalid Range header.")
+        if suffix_length >= content_length:
+            return 0, content_length - 1, True
+        return content_length - suffix_length, content_length - 1, True
+
+    try:
+        start = int(start_raw)
+    except ValueError as e:
+        raise ValueError("Malformed Range header.") from e
+
+    if start < 0 or start >= content_length:
+        raise ValueError("Range not satisfiable.")
+
+    if not end_raw:
+        return start, content_length - 1, True
+
+    try:
+        end = int(end_raw)
+    except ValueError as e:
+        raise ValueError("Malformed Range header.") from e
+
+    if end < start:
+        raise ValueError("Range not satisfiable.")
+
+    return start, min(end, content_length - 1), True
+
+
+@v1.get(
+    "/class/{class_id}/thread/{thread_id}/video",
+    dependencies=[
+        Depends(
+            Authz("can_view", "thread:{thread_id}"),
+        )
+    ],
+    response_class=StreamingResponse,
+)
+async def get_thread_video(
+    class_id: str,
+    thread_id: str,
+    request: StateRequest,
+):
+    if not config.video_store:
+        raise HTTPException(status_code=404, detail="No Video Store exists.")
+
+    thread = await models.Thread.get_by_id(request.state["db"], int(thread_id))
+    if not thread or thread.class_id != int(class_id):
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if (
+        thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO
+        or not thread.lecture_video_id
+    ):
+        raise HTTPException(
+            status_code=404,
+            detail="This thread does not have a lecture video.",
+        )
+
+    assistant = (
+        await models.Assistant.get_by_id(request.state["db"], int(thread.assistant_id))
+        if thread.assistant_id
+        else None
+    )
+    if not _lecture_video_matches_assistant(thread, assistant):
+        raise HTTPException(
+            status_code=409,
+            detail="This thread's lecture video no longer matches the assistant configuration.",
+        )
+
+    lecture_video = await request.state["db"].get(
+        models.LectureVideo, thread.lecture_video_id
+    )
+    if not lecture_video:
+        raise HTTPException(
+            status_code=404,
+            detail="This thread does not have a lecture video.",
+        )
+
+    try:
+        metadata = await config.video_store.store.get_video_metadata(lecture_video.key)
+    except VideoStoreError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unable to retrieve lecture video: {e.detail or str(e)}",
+        ) from e
+    except TypeError as e:
+        raise HTTPException(
+            status_code=400, detail=f"Invalid lecture video: {e}"
+        ) from e
+    except Exception as e:
+        logger.exception("Unexpected error retrieving lecture video metadata")
+        raise HTTPException(
+            status_code=500,
+            detail="An internal error occurred while retrieving the lecture video.",
+        ) from e
+
+    total_length = metadata.content_length
+    range_header = request.headers.get("range")
+    try:
+        start, end, is_partial = _parse_single_byte_range(range_header, total_length)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=416,
+            detail=str(e),
+            headers={
+                "Accept-Ranges": "bytes",
+                "Content-Range": f"bytes */{total_length}",
+            },
+        ) from e
+
+    try:
+        stream = await prefetch_stream(
+            config.video_store.store.stream_video_range(
+                key=lecture_video.key,
+                start=start,
+                end=end,
+            ),
+            store_error=VideoStoreError,
+            logger=logger,
+            store_error_log="VideoStoreError while streaming lecture video; aborting stream.",
+            unexpected_error_log="Unexpected error while streaming lecture video",
+        )
+
+        response_headers = {
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(
+                (end - start + 1)
+                if is_partial and start is not None and end is not None
+                else total_length
+            ),
+        }
+        status_code = 200
+        if is_partial and start is not None and end is not None:
+            response_headers["Content-Range"] = f"bytes {start}-{end}/{total_length}"
+            status_code = 206
+
+        return StreamingResponse(
+            stream,
+            status_code=status_code,
+            media_type=metadata.content_type,
+            headers=response_headers,
+        )
+    except VideoStoreError as e:
+        if e.detail and "range" in e.detail.lower():
+            raise HTTPException(
+                status_code=416,
+                detail=e.detail,
+                headers={
+                    "Accept-Ranges": "bytes",
+                    "Content-Range": f"bytes */{total_length}",
+                },
+            ) from e
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unable to stream lecture video: {e.detail or str(e)}",
+        ) from e
+    except Exception as e:
+        logger.exception("get_thread_video: Unexpected exception occurred")
+        raise HTTPException(
+            status_code=500,
+            detail="An internal error occurred while streaming the lecture video.",
+        ) from e
 
 
 @v1.get(
@@ -3821,39 +4043,13 @@ async def get_thread_recording(
             detail="You do not have permission to view this recording.",
         )
 
-    async def _prefetch_stream(gen):
-        it = gen.__aiter__()
-        try:
-            first = await it.__anext__()
-        except StopAsyncIteration:
-
-            async def _empty():
-                if False:
-                    yield b""
-
-            return _empty()
-        except AudioStoreError:
-            raise
-
-        async def _wrapped():
-            yield first
-            try:
-                async for chunk in it:
-                    yield chunk
-            except AudioStoreError:
-                logger.info(
-                    "AudioStoreError while streaming recording; aborting stream."
-                )
-                return
-            except Exception:
-                logger.exception("Unexpected error while streaming recording")
-                return
-
-        return _wrapped()
-
     try:
-        stream = await _prefetch_stream(
-            config.audio_store.store.get_file(thread.voice_mode_recording.recording_id)
+        stream = await prefetch_stream(
+            config.audio_store.store.get_file(thread.voice_mode_recording.recording_id),
+            store_error=AudioStoreError,
+            logger=logger,
+            store_error_log="AudioStoreError while streaming recording; aborting stream.",
+            unexpected_error_log="Unexpected error while streaming recording",
         )
         return StreamingResponse(
             stream,
@@ -7842,11 +8038,6 @@ async def share_assistant(
         raise HTTPException(
             status_code=400,
             detail="This assistant is not published and cannot be shared.",
-        )
-
-    if asst.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
-        raise HTTPException(
-            status_code=403, detail="Lecture Video assistants cannot be shared."
         )
 
     # Create a new anonymous link for the assistant

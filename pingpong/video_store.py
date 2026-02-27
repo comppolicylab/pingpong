@@ -2,6 +2,7 @@ import re
 import aioboto3
 import logging
 import mimetypes
+import inspect
 from pathlib import Path
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
@@ -124,9 +125,16 @@ class S3VideoStore(BaseVideoStore):
                     params["Range"] = f"bytes={start or 0}-{'' if end is None else end}"
 
                 s3_object = await s3_client.get_object(**params)
-
-                async for chunk in s3_object["Body"].iter_chunks(chunk_size=chunk_size):
-                    yield chunk
+                body = s3_object["Body"]
+                try:
+                    async for chunk in body.iter_chunks(chunk_size=chunk_size):
+                        yield chunk
+                finally:
+                    close = getattr(body, "close", None)
+                    if callable(close):
+                        close_result = close()
+                        if inspect.isawaitable(close_result):
+                            await close_result
 
             except ClientError as e:
                 error_code = e.response.get("Error", {}).get("Code", "")
