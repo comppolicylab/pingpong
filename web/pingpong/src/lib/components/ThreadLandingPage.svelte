@@ -236,6 +236,18 @@
 		dropDragCounter = 0;
 	};
 
+	const handleWindowDragEnd = (event: DragEvent) => {
+		event.preventDefault();
+		event.stopPropagation();
+		resetDropOverlay();
+	};
+
+	const handleWindowDrop = (event: DragEvent) => {
+		event.preventDefault();
+		event.stopPropagation();
+		resetDropOverlay();
+	};
+
 	const handleLandingDragEnter = (event: DragEvent) => {
 		const fileDrag = isFileDrag(event);
 		if (fileDrag) {
@@ -250,12 +262,9 @@
 	};
 
 	const handleLandingDragOver = (event: DragEvent) => {
-		const fileDrag = isFileDrag(event);
-		if (fileDrag) {
-			event.preventDefault();
-			event.stopPropagation();
-		}
-		if (!canDropUploadsOnLanding || !fileDrag) {
+		event.preventDefault();
+		event.stopPropagation();
+		if (!canDropUploadsOnLanding || !isFileDrag(event)) {
 			return;
 		}
 		if (event.dataTransfer) {
@@ -486,7 +495,7 @@
 	};
 </script>
 
-<svelte:window on:dragend={resetDropOverlay} on:drop={resetDropOverlay} />
+<svelte:window ondragend={handleWindowDragEnd} ondrop={handleWindowDrop} />
 
 <div
 	class="relative flex min-h-0 shrink grow justify-center"

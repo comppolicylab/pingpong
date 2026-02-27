@@ -756,9 +756,12 @@
 	};
 
 	const handleThreadDragLeave = (event: DragEvent) => {
-		event.preventDefault();
-		event.stopPropagation();
-		if (!canDropUploadsIntoThread || !dropOverlayVisible) {
+		const fileDrag = isFileDrag(event);
+		if (fileDrag) {
+			event.preventDefault();
+			event.stopPropagation();
+		}
+		if (!canDropUploadsIntoThread || !fileDrag) {
 			return;
 		}
 		dropDragCounter = Math.max(0, dropDragCounter - 1);
@@ -768,14 +771,19 @@
 	};
 
 	const handleThreadDrop = (event: DragEvent) => {
-		event.preventDefault();
-		event.stopPropagation();
-		if (!canDropUploadsIntoThread || !isFileDrag(event)) {
+		const fileDrag = isFileDrag(event);
+		if (fileDrag) {
+			event.preventDefault();
+			event.stopPropagation();
+		}
+		resetDropOverlay();
+		if (!canDropUploadsIntoThread || !fileDrag) {
 			return;
 		}
 		const droppedFiles = Array.from(event.dataTransfer?.files ?? []);
-		resetDropOverlay();
 		if (!droppedFiles.length) {
+			dropOverlayVisible = false;
+			dropDragCounter = 0;
 			return;
 		}
 		chatInputRef?.addFiles(droppedFiles);
