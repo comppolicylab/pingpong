@@ -159,9 +159,7 @@
 		$loading = false;
 	};
 
-	const showCopiedLink = (e: Event) => {
-		e.preventDefault();
-		e.stopPropagation();
+	const showCopiedLink = () => {
 		happyToast('Link copied to clipboard', 2000);
 	};
 
@@ -310,8 +308,10 @@
 										class="hover:text-blue-dark-100 text-blue-dark-40"
 										aria-label="Copy assistant link"
 										onclick={() => {}}
-										oncopy={showCopiedLink}
-										use:copy={assistantLink(assistant.id)}
+										use:copy={{
+											text: assistantLink(assistant.id),
+											onCopy: showCopiedLink
+										}}
 									>
 										<LinkOutline class="h-5 w-5" />
 									</button>
