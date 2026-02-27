@@ -365,9 +365,10 @@
 		>
 	</slot>
 	<p class="mb-2 text-sm text-blue-dark-50">
-		Use the instructions below to embed <i>&ldquo;{assistant.name}&rdquo;</i> in a Qualtrics survey. Each respondent will be
-		assigned a random Conversation ID that can be used to match their conversation between PingPong thread
-		exports and Qualtrics data exports.
+		Use the instructions below to embed <i
+			>&ldquo;{assistant.name}&rdquo; ({qualtricsCodeLinkName})</i
+		> in a Qualtrics survey. Each respondent will be assigned a random Conversation ID that can be used
+		to match their conversation between PingPong thread exports and Qualtrics data exports.
 	</p>
 	<ol class="ml-5 list-decimal text-blue-dark-50">
 		<li class="mb-2 text-sm text-blue-dark-50">
@@ -408,7 +409,7 @@
 				>replace</b
 			>
 			the placeholder content in the editor, then save your changes. You can change the
-			<span class="font-mono">{`height="1000px"`}</span>
+			<span class="font-mono">height="1000px"</span>
 			attribute in the HTML code if you want to adjust the height of the assistant iframe in your survey.
 			<div class="mt-2 mb-3 rounded-xl border border-blue-light-30 bg-white p-4">
 				<div class="mb-2 flex items-center justify-between gap-2">
