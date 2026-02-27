@@ -365,7 +365,7 @@
 		>
 	</slot>
 	<p class="mb-2 text-sm text-blue-dark-50">
-		Use the instructions below to embed {assistant.name} in a Qualtrics survey. Each respondent will be
+		Use the instructions below to embed <i>&ldquo;{assistant.name}&rdquo;</i> in a Qualtrics survey. Each respondent will be
 		assigned a random Conversation ID that can be used to match their conversation between PingPong thread
 		exports and Qualtrics data exports.
 	</p>
