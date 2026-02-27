@@ -148,15 +148,16 @@
 						?.azure_supports_vision
 				: undefined;
 	}
-	let allowVisionUpload = true;
 	$: landingVisionAcceptedFiles =
-		allowUserImageUploads && supportsVision && allowVisionUpload
+		allowUserImageUploads && supportsVision
 			? data.uploadInfo.fileTypes({
 					file_search: false,
 					code_interpreter: false,
 					vision: true
 				})
 			: null;
+	$: effectiveLandingVisionAcceptedFiles =
+		visionSupportOverride === false && !useImageDescriptions ? null : landingVisionAcceptedFiles;
 	$: landingFileSearchAcceptedFiles =
 		allowUserFileUploads && supportsFileSearch
 			? data.uploadInfo.fileTypes({
@@ -180,7 +181,7 @@
 		!(assistant.assistant_should_message_first ?? false) &&
 		!($loading || !!$navigating) &&
 		!!(
-			landingVisionAcceptedFiles ||
+			effectiveLandingVisionAcceptedFiles ||
 			landingFileSearchAcceptedFiles ||
 			landingCodeInterpreterAcceptedFiles
 		);
@@ -236,21 +237,27 @@
 	};
 
 	const handleLandingDragEnter = (event: DragEvent) => {
-		if (!canDropUploadsOnLanding || !isFileDrag(event)) {
+		const fileDrag = isFileDrag(event);
+		if (fileDrag) {
+			event.preventDefault();
+			event.stopPropagation();
+		}
+		if (!canDropUploadsOnLanding || !fileDrag) {
 			return;
 		}
-		event.preventDefault();
-		event.stopPropagation();
 		dropDragCounter += 1;
 		dropOverlayVisible = true;
 	};
 
 	const handleLandingDragOver = (event: DragEvent) => {
-		if (!canDropUploadsOnLanding || !isFileDrag(event)) {
+		const fileDrag = isFileDrag(event);
+		if (fileDrag) {
+			event.preventDefault();
+			event.stopPropagation();
+		}
+		if (!canDropUploadsOnLanding || !fileDrag) {
 			return;
 		}
-		event.preventDefault();
-		event.stopPropagation();
 		if (event.dataTransfer) {
 			event.dataTransfer.dropEffect = 'copy';
 		}
@@ -258,11 +265,13 @@
 	};
 
 	const handleLandingDragLeave = (event: DragEvent) => {
+		if (isFileDrag(event)) {
+			event.preventDefault();
+			event.stopPropagation();
+		}
 		if (!canDropUploadsOnLanding || !dropOverlayVisible) {
 			return;
 		}
-		event.preventDefault();
-		event.stopPropagation();
 		dropDragCounter = Math.max(0, dropDragCounter - 1);
 		if (dropDragCounter === 0) {
 			dropOverlayVisible = false;
@@ -270,11 +279,14 @@
 	};
 
 	const handleLandingDrop = (event: DragEvent) => {
-		if (!canDropUploadsOnLanding || !isFileDrag(event)) {
+		const fileDrag = isFileDrag(event);
+		if (fileDrag) {
+			event.preventDefault();
+			event.stopPropagation();
+		}
+		if (!canDropUploadsOnLanding || !fileDrag) {
 			return;
 		}
-		event.preventDefault();
-		event.stopPropagation();
 		const droppedFiles = Array.from(event.dataTransfer?.files ?? []);
 		resetDropOverlay();
 		if (!droppedFiles.length) {

@@ -240,6 +240,8 @@
 	let allowUserFileUploads = true;
 	let allowUserImageUploads = true;
 	$: chatVisionAcceptedFiles = allowUserImageUploads ? visionAcceptedFiles : null;
+	$: effectiveChatVisionAcceptedFiles =
+		visionSupportOverride === false && !useImageDescriptions ? null : chatVisionAcceptedFiles;
 	$: chatFileSearchAcceptedFiles = allowUserFileUploads ? fileSearchAcceptedFiles : null;
 	$: chatCodeInterpreterAcceptedFiles = allowUserFileUploads ? codeInterpreterAcceptedFiles : null;
 	$: chatInputDisabled = !canSubmit || assistantDeleted || !!$navigating || !canViewAssistant;
@@ -249,7 +251,11 @@
 		chatInputRef !== null &&
 		!chatInputDisabled &&
 		!($submitting || $waiting) &&
-		!!(chatVisionAcceptedFiles || chatFileSearchAcceptedFiles || chatCodeInterpreterAcceptedFiles);
+		!!(
+			effectiveChatVisionAcceptedFiles ||
+			chatFileSearchAcceptedFiles ||
+			chatCodeInterpreterAcceptedFiles
+		);
 	let bypassedSettingsSections: {
 		id: string;
 		title: string;
@@ -725,21 +731,21 @@
 	};
 
 	const handleThreadDragEnter = (event: DragEvent) => {
+		event.preventDefault();
+		event.stopPropagation();
 		if (!canDropUploadsIntoThread || !isFileDrag(event)) {
 			return;
 		}
-		event.preventDefault();
-		event.stopPropagation();
 		dropDragCounter += 1;
 		dropOverlayVisible = true;
 	};
 
 	const handleThreadDragOver = (event: DragEvent) => {
+		event.preventDefault();
+		event.stopPropagation();
 		if (!canDropUploadsIntoThread || !isFileDrag(event)) {
 			return;
 		}
-		event.preventDefault();
-		event.stopPropagation();
 		if (event.dataTransfer) {
 			event.dataTransfer.dropEffect = 'copy';
 		}
@@ -747,11 +753,11 @@
 	};
 
 	const handleThreadDragLeave = (event: DragEvent) => {
+		event.preventDefault();
+		event.stopPropagation();
 		if (!canDropUploadsIntoThread || !dropOverlayVisible) {
 			return;
 		}
-		event.preventDefault();
-		event.stopPropagation();
 		dropDragCounter = Math.max(0, dropDragCounter - 1);
 		if (dropDragCounter === 0) {
 			dropOverlayVisible = false;
@@ -759,11 +765,11 @@
 	};
 
 	const handleThreadDrop = (event: DragEvent) => {
+		event.preventDefault();
+		event.stopPropagation();
 		if (!canDropUploadsIntoThread || !isFileDrag(event)) {
 			return;
 		}
-		event.preventDefault();
-		event.stopPropagation();
 		const droppedFiles = Array.from(event.dataTransfer?.files ?? []);
 		resetDropOverlay();
 		if (!droppedFiles.length) {
