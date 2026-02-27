@@ -43,12 +43,14 @@ async def populate_anonymous_tokens(
     user: models.User | None = None
 
     if is_http_request:
+        req = cast(Request, request)
+        # Support token auth via query params for media URLs that cannot send custom headers.
         request.state["anonymous_share_token"] = request.headers.get(
             "X-Anonymous-Link-Share"
-        )
+        ) or req.query_params.get("anonymous_share_token")
         request.state["anonymous_session_token"] = request.headers.get(
             "X-Anonymous-Thread-Session"
-        )
+        ) or req.query_params.get("anonymous_session_token")
 
     if (
         request.state["anonymous_share_token"] is None

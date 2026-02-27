@@ -2811,6 +2811,8 @@ export type ThreadWithMeta = {
 	reasoning_messages: OpenAIMessage[];
 	attachments: Record<string, ServerFile>;
 	instructions: string | null;
+	lecture_video_id?: number | null;
+	lecture_video_matches_assistant?: boolean | null;
 	recording: VoiceModeRecordingInfo | null;
 	has_more: boolean;
 };

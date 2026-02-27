@@ -243,6 +243,46 @@ async def test_s3_authenticated_stream_full(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_s3_stream_closes_body_on_early_exit(monkeypatch):
+    """S3 response body is closed when the caller stops consuming early."""
+
+    mock_client = AsyncMock()
+    mock_session = AsyncMock()
+
+    def mock_client_context(*args, **kwargs):
+        return AsyncContextManager(mock_client)
+
+    mock_session.client = mock_client_context
+    mock_session_class = Mock(return_value=mock_session)
+    monkeypatch.setattr("pingpong.video_store.aioboto3.Session", mock_session_class)
+
+    mock_body = AsyncMock()
+
+    async def mock_iter_chunks(chunk_size):
+        yield b"first"
+        yield b"second"
+
+    mock_body.iter_chunks = mock_iter_chunks
+    mock_body.close = AsyncMock()
+
+    mock_client.get_object = AsyncMock(
+        return_value={
+            "Body": mock_body,
+            "ContentType": "video/mp4",
+            "ContentLength": 10,
+        }
+    )
+
+    store = S3VideoStore(bucket="test-bucket", allow_unsigned=False)
+    stream = store.stream_video_range(key="test.mp4")
+    first_chunk = await anext(stream)
+    assert first_chunk == b"first"
+    await stream.aclose()
+
+    mock_body.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_local_stream_range_invalid(monkeypatch, tmp_path):
     """Out of bounds or inverted ranges return VideoStoreError"""
 
