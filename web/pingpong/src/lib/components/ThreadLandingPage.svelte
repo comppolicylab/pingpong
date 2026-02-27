@@ -16,6 +16,7 @@
 		EyeSlashOutline,
 		LockSolid,
 		MicrophoneOutline,
+		ClapperboardPlayOutline,
 		CirclePlusSolid,
 		MicrophoneSlashOutline,
 		BadgeCheckOutline,
@@ -190,6 +191,38 @@
 		try {
 			const newThreadOpts = api.explodeResponse(
 				await api.createAudioThread(fetch, data.class.id, {
+					assistant_id: assistant.id,
+					parties: partyIds,
+					timezone: userTimezone,
+					conversation_id:
+						data.isSharedAssistantPage || data.isSharedThreadPage ? conversationId : null
+				})
+			);
+			data.threads = [newThreadOpts.thread as api.Thread, ...data.threads];
+			setAnonymousSessionToken(newThreadOpts.session_token || null);
+			$loading = false;
+			if (hasAnonymousSessionToken()) {
+				await goto(
+					resolve(`/group/${$page.params.classId}/shared/thread/${newThreadOpts.thread.id}`)
+				);
+			} else {
+				await goto(resolve(`/group/${$page.params.classId}/thread/${newThreadOpts.thread.id}`));
+			}
+		} catch (e) {
+			$loading = false;
+			sadToast(
+				`Failed to create thread. Error: ${errorMessage(e, "Something went wrong while creating your conversation. If the issue persists, check PingPong's status page for updates.")}`
+			);
+		}
+	};
+
+	const handleLectureThreadCreate = async () => {
+		if ($loading) return;
+		$loading = true;
+		const partyIds = parties ? parties.split(',').map((id) => parseInt(id, 10)) : [];
+		try {
+			const newThreadOpts = api.explodeResponse(
+				await api.createLectureThread(fetch, data.class.id, {
 					assistant_id: assistant.id,
 					parties: partyIds,
 					timezone: userTimezone,
@@ -413,6 +446,12 @@
 														class="inline align-text-bottom text-gray-400"
 													/>
 													<Tooltip>Voice mode assistant</Tooltip>
+												{:else if asst.interaction_mode === 'lecture_video'}
+													<ClapperboardPlayOutline
+														size="sm"
+														class="inline align-text-bottom text-gray-400"
+													/>
+													<Tooltip>Lecture Video mode assistant</Tooltip>
 												{/if}
 												{asst.name}
 											</div>
@@ -458,6 +497,12 @@
 															class="inline align-text-bottom text-gray-400"
 														/>
 														<Tooltip>Voice mode assistant</Tooltip>
+													{:else if asst.interaction_mode === 'lecture_video'}
+														<ClapperboardPlayOutline
+															size="sm"
+															class="inline align-text-bottom text-gray-400"
+														/>
+														<Tooltip>Lecture Video mode assistant</Tooltip>
 													{/if}
 													{asst.name}
 												</div>
@@ -503,6 +548,12 @@
 															class="inline align-text-bottom text-gray-400"
 														/>
 														<Tooltip>Voice mode assistant</Tooltip>
+													{:else if asst.interaction_mode === 'lecture_video'}
+														<ClapperboardPlayOutline
+															size="sm"
+															class="inline align-text-bottom text-gray-400"
+														/>
+														<Tooltip>Lecture Video mode assistant</Tooltip>
 													{/if}
 													{asst.name}
 												</div>
@@ -562,6 +613,35 @@
 							</Button>
 						</div>
 					{/if}
+				{:else if assistant.interaction_mode === 'lecture_video'}
+					<div class="h-[5%] max-h-8"></div>
+					<div class="rounded-lg bg-blue-light-50 p-3">
+						<ClapperboardPlayOutline size="xl" class="text-blue-dark-40" />
+					</div>
+					<div class="flex min-w-2/5 flex-col items-center">
+						<p class="text-center text-sm font-semibold text-blue-dark-40 sm:text-xl">
+							Lecture Video mode
+						</p>
+						<p class="font-base text-center text-xs text-gray-600 sm:text-base">
+							Review a lecture video with comprehension questions.<br />Create a new session to
+							begin.
+						</p>
+						{#if assistant.lecture_video_key}
+							<p class="mt-1 text-center text-xs text-gray-500">
+								Video: {assistant.lecture_video_key}
+							</p>
+						{/if}
+					</div>
+					<div class="flex flex-row p-1.5">
+						<Button
+							class="flex flex-row gap-1.5 rounded-lg bg-blue-dark-40 px-4 py-1.5 text-xs text-white transition-all hover:bg-blue-dark-50 hover:text-blue-light-50"
+							onclick={handleLectureThreadCreate}
+							type="button"
+						>
+							<CirclePlusSolid size="sm" />
+							<span class="text-center text-sm font-normal"> Create session </span>
+						</Button>
+					</div>
 				{:else if assistant.interaction_mode === 'chat' && !(assistant.assistant_should_message_first ?? false)}
 					<div class="h-[8%] max-h-16"></div>
 					{#if !isPrivate && assistantMeta.willDisplayUserInfo}
