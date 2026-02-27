@@ -31,6 +31,7 @@
 	import Markdown from '$lib/components/Markdown.svelte';
 	import Logo from '$lib/components/Logo.svelte';
 	import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
+	import ChatDropOverlay from '$lib/components/ChatDropOverlay.svelte';
 	import DropdownBadge from '$lib/components/DropdownBadge.svelte';
 	import AssistantVersionBadge from '$lib/components/AssistantVersionBadge.svelte';
 	import {
@@ -194,6 +195,10 @@
 			!$trashThreadFiles.includes(k) &&
 			(codeInterpreterAcceptedFiles ?? '').includes(v.content_type)
 	).length;
+	type ChatInputHandle = { addFiles: (selectedFiles: File[]) => void };
+	let chatInputRef: ChatInputHandle | null = null;
+	let dropOverlayVisible = false;
+	let dropDragCounter = 0;
 
 	let supportsVision = false;
 	$: {
@@ -234,6 +239,23 @@
 	let assistantInteractionMode: 'voice' | 'chat' | 'lecture_video' | null = null;
 	let allowUserFileUploads = true;
 	let allowUserImageUploads = true;
+	$: chatVisionAcceptedFiles = allowUserImageUploads ? visionAcceptedFiles : null;
+	$: effectiveChatVisionAcceptedFiles =
+		visionSupportOverride === false && !useImageDescriptions ? null : chatVisionAcceptedFiles;
+	$: chatFileSearchAcceptedFiles = allowUserFileUploads ? fileSearchAcceptedFiles : null;
+	$: chatCodeInterpreterAcceptedFiles = allowUserFileUploads ? codeInterpreterAcceptedFiles : null;
+	$: chatInputDisabled = !canSubmit || assistantDeleted || !!$navigating || !canViewAssistant;
+	$: canDropUploadsIntoThread =
+		data.threadInteractionMode === 'chat' &&
+		assistantInteractionMode === 'chat' &&
+		chatInputRef !== null &&
+		!chatInputDisabled &&
+		!($submitting || $waiting) &&
+		!!(
+			effectiveChatVisionAcceptedFiles ||
+			chatFileSearchAcceptedFiles ||
+			chatCodeInterpreterAcceptedFiles
+		);
 	let bypassedSettingsSections: {
 		id: string;
 		title: string;
@@ -698,6 +720,71 @@
 
 	const handleDismissError = () => {
 		threadMgr.dismissError();
+	};
+
+	const isFileDrag = (event: DragEvent) =>
+		Array.from(event.dataTransfer?.types ?? []).includes('Files');
+
+	const resetDropOverlay = () => {
+		dropOverlayVisible = false;
+		dropDragCounter = 0;
+	};
+
+	const handleThreadDragEnter = (event: DragEvent) => {
+		const fileDrag = isFileDrag(event);
+		if (fileDrag) {
+			event.preventDefault();
+			event.stopPropagation();
+		}
+		if (!canDropUploadsIntoThread || !fileDrag) {
+			return;
+		}
+		dropDragCounter += 1;
+		dropOverlayVisible = true;
+	};
+
+	const handleThreadDragOver = (event: DragEvent) => {
+		event.preventDefault();
+		event.stopPropagation();
+		if (!canDropUploadsIntoThread || !isFileDrag(event)) {
+			return;
+		}
+		if (event.dataTransfer) {
+			event.dataTransfer.dropEffect = 'copy';
+		}
+		dropOverlayVisible = true;
+	};
+
+	const handleThreadDragLeave = (event: DragEvent) => {
+		const fileDrag = isFileDrag(event);
+		if (fileDrag) {
+			event.preventDefault();
+			event.stopPropagation();
+		}
+		if (!canDropUploadsIntoThread || !fileDrag) {
+			return;
+		}
+		dropDragCounter = Math.max(0, dropDragCounter - 1);
+		if (dropDragCounter === 0) {
+			dropOverlayVisible = false;
+		}
+	};
+
+	const handleThreadDrop = (event: DragEvent) => {
+		const fileDrag = isFileDrag(event);
+		if (fileDrag) {
+			event.preventDefault();
+			event.stopPropagation();
+		}
+		resetDropOverlay();
+		if (!canDropUploadsIntoThread || !fileDrag) {
+			return;
+		}
+		const droppedFiles = Array.from(event.dataTransfer?.files ?? []);
+		if (!droppedFiles.length) {
+			return;
+		}
+		chatInputRef?.addFiles(droppedFiles);
 	};
 
 	const startNewChat = async () => {
@@ -1394,7 +1481,24 @@
 	});
 </script>
 
-<div class="relative flex min-h-0 w-full grow flex-col justify-between">
+<svelte:window
+	on:dragend={resetDropOverlay}
+	on:drop={(e) => {
+		e.preventDefault();
+		e.stopPropagation();
+		resetDropOverlay();
+	}}
+/>
+
+<div
+	class="relative flex min-h-0 w-full grow flex-col justify-between"
+	role="region"
+	aria-label="Thread detail"
+	ondragenter={handleThreadDragEnter}
+	ondragover={handleThreadDragOver}
+	ondragleave={handleThreadDragLeave}
+	ondrop={handleThreadDrop}
+>
 	{#if data.threadInteractionMode === 'lecture_video'}
 		<div class="flex h-full w-full flex-col items-center justify-center">
 			{#if effectiveLectureVideoMismatch}
@@ -1992,21 +2096,20 @@
 							{/if}
 							{#key threadId}
 								<ChatInput
+									bind:this={chatInputRef}
 									mimeType={data.uploadInfo.mimeType}
 									maxSize={data.uploadInfo.private_file_max_size}
 									bind:attachments={currentMessageAttachments}
 									{threadManagerError}
-									visionAcceptedFiles={allowUserImageUploads ? visionAcceptedFiles : null}
-									fileSearchAcceptedFiles={allowUserFileUploads ? fileSearchAcceptedFiles : null}
-									codeInterpreterAcceptedFiles={allowUserFileUploads
-										? codeInterpreterAcceptedFiles
-										: null}
+									visionAcceptedFiles={chatVisionAcceptedFiles}
+									fileSearchAcceptedFiles={chatFileSearchAcceptedFiles}
+									codeInterpreterAcceptedFiles={chatCodeInterpreterAcceptedFiles}
 									{visionSupportOverride}
 									{useImageDescriptions}
 									{assistantDeleted}
 									{canViewAssistant}
 									canSubmit={canSubmit && !assistantDeleted && canViewAssistant}
-									disabled={!canSubmit || assistantDeleted || !!$navigating || !canViewAssistant}
+									disabled={chatInputDisabled}
 									loading={$submitting || $waiting}
 									{fileSearchAttachmentCount}
 									{codeInterpreterAttachmentCount}
@@ -2229,6 +2332,7 @@
 			</div>
 		{/if}
 	{/if}
+	<ChatDropOverlay visible={dropOverlayVisible && canDropUploadsIntoThread} />
 </div>
 
 <style lang="css">

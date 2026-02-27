@@ -3,6 +3,7 @@
 	import { resolve } from '$app/paths';
 	import { navigating, page } from '$app/stores';
 	import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
+	import ChatDropOverlay from '$lib/components/ChatDropOverlay.svelte';
 	import {
 		Button,
 		Span,
@@ -44,6 +45,10 @@
 	 */
 	export let data;
 	$: conversationId = $page.url.searchParams.get('conversation_id');
+	type ChatInputHandle = { addFiles: (selectedFiles: File[]) => void };
+	let chatInputRef: ChatInputHandle | null = null;
+	let dropOverlayVisible = false;
+	let dropDragCounter = 0;
 
 	const errorMessages: Record<number, string> = {
 		1: 'We faced an issue when trying to sync with Canvas.'
@@ -143,7 +148,43 @@
 						?.azure_supports_vision
 				: undefined;
 	}
-	let allowVisionUpload = true;
+	$: landingVisionAcceptedFiles =
+		allowUserImageUploads && supportsVision
+			? data.uploadInfo.fileTypes({
+					file_search: false,
+					code_interpreter: false,
+					vision: true
+				})
+			: null;
+	$: effectiveLandingVisionAcceptedFiles =
+		visionSupportOverride === false && !useImageDescriptions ? null : landingVisionAcceptedFiles;
+	$: landingFileSearchAcceptedFiles =
+		allowUserFileUploads && supportsFileSearch
+			? data.uploadInfo.fileTypes({
+					file_search: true,
+					code_interpreter: false,
+					vision: false
+				})
+			: null;
+	$: landingCodeInterpreterAcceptedFiles =
+		allowUserFileUploads && supportsCodeInterpreter
+			? data.uploadInfo.fileTypes({
+					file_search: false,
+					code_interpreter: true,
+					vision: false
+				})
+			: null;
+	$: canDropUploadsOnLanding =
+		isConfigured &&
+		assistant.interaction_mode === 'chat' &&
+		chatInputRef !== null &&
+		!(assistant.assistant_should_message_first ?? false) &&
+		!($loading || !!$navigating) &&
+		!!(
+			effectiveLandingVisionAcceptedFiles ||
+			landingFileSearchAcceptedFiles ||
+			landingCodeInterpreterAcceptedFiles
+		);
 	let showModerators = false;
 
 	$: statusComponents = (data.statusComponents || {}) as Partial<
@@ -185,6 +226,85 @@
 			sadToast(`Failed to delete file. Error: ${result.detail || 'unknown error'}`);
 			throw new Error(result.detail || 'unknown error');
 		}
+	};
+
+	const isFileDrag = (event: DragEvent) =>
+		Array.from(event.dataTransfer?.types ?? []).includes('Files');
+
+	const resetDropOverlay = () => {
+		dropOverlayVisible = false;
+		dropDragCounter = 0;
+	};
+
+	const handleWindowDragEnd = (event: DragEvent) => {
+		event.preventDefault();
+		event.stopPropagation();
+		resetDropOverlay();
+	};
+
+	const handleWindowDrop = (event: DragEvent) => {
+		event.preventDefault();
+		event.stopPropagation();
+		resetDropOverlay();
+	};
+
+	const handleLandingDragEnter = (event: DragEvent) => {
+		const fileDrag = isFileDrag(event);
+		if (fileDrag) {
+			event.preventDefault();
+			event.stopPropagation();
+		}
+		if (!canDropUploadsOnLanding || !fileDrag) {
+			return;
+		}
+		dropDragCounter += 1;
+		dropOverlayVisible = true;
+	};
+
+	const handleLandingDragOver = (event: DragEvent) => {
+		event.preventDefault();
+		event.stopPropagation();
+		if (!canDropUploadsOnLanding || !isFileDrag(event)) {
+			return;
+		}
+		if (event.dataTransfer) {
+			event.dataTransfer.dropEffect = 'copy';
+		}
+		dropOverlayVisible = true;
+	};
+
+	const handleLandingDragLeave = (event: DragEvent) => {
+		const fileDrag = isFileDrag(event);
+		if (fileDrag) {
+			event.preventDefault();
+			event.stopPropagation();
+		}
+		if (!canDropUploadsOnLanding || !fileDrag) {
+			return;
+		}
+		dropDragCounter = Math.max(0, dropDragCounter - 1);
+		if (dropDragCounter === 0) {
+			dropOverlayVisible = false;
+		}
+	};
+
+	const handleLandingDrop = (event: DragEvent) => {
+		const fileDrag = isFileDrag(event);
+		if (fileDrag) {
+			event.preventDefault();
+			event.stopPropagation();
+		}
+		if (!canDropUploadsOnLanding || !fileDrag) {
+			dropOverlayVisible = false;
+			dropDragCounter = 0;
+			return;
+		}
+		const droppedFiles = Array.from(event.dataTransfer?.files ?? []);
+		resetDropOverlay();
+		if (!droppedFiles.length) {
+			return;
+		}
+		chatInputRef?.addFiles(droppedFiles);
 	};
 
 	const handleAudioThreadCreate = async () => {
@@ -376,7 +496,17 @@
 	};
 </script>
 
-<div class="relative flex min-h-0 shrink grow justify-center">
+<svelte:window ondragend={handleWindowDragEnd} ondrop={handleWindowDrop} />
+
+<div
+	class="relative flex min-h-0 shrink grow justify-center"
+	role="region"
+	aria-label="Thread landing"
+	ondragenter={handleLandingDragEnter}
+	ondragover={handleLandingDragOver}
+	ondragleave={handleLandingDragLeave}
+	ondrop={handleLandingDrop}
+>
 	<div
 		class="flex h-full w-11/12 flex-col justify-between transition-opacity ease-in"
 		class:opacity-0={$loading}
@@ -681,33 +811,16 @@
 						<StatusErrors {assistantStatusUpdates} />
 						{#key assistant.id}
 							<ChatInput
+								bind:this={chatInputRef}
 								mimeType={data.uploadInfo.mimeType}
 								maxSize={data.uploadInfo.private_file_max_size}
 								loading={$loading || !!$navigating}
 								canSubmit={true}
-								visionAcceptedFiles={allowUserImageUploads && supportsVision && allowVisionUpload
-									? data.uploadInfo.fileTypes({
-											file_search: false,
-											code_interpreter: false,
-											vision: true
-										})
-									: null}
+								visionAcceptedFiles={landingVisionAcceptedFiles}
 								{visionSupportOverride}
 								{useImageDescriptions}
-								fileSearchAcceptedFiles={allowUserFileUploads && supportsFileSearch
-									? data.uploadInfo.fileTypes({
-											file_search: true,
-											code_interpreter: false,
-											vision: false
-										})
-									: null}
-								codeInterpreterAcceptedFiles={allowUserFileUploads && supportsCodeInterpreter
-									? data.uploadInfo.fileTypes({
-											file_search: false,
-											code_interpreter: true,
-											vision: false
-										})
-									: null}
+								fileSearchAcceptedFiles={landingFileSearchAcceptedFiles}
+								codeInterpreterAcceptedFiles={landingCodeInterpreterAcceptedFiles}
 								upload={handleUpload}
 								remove={handleRemove}
 								on:submit={handleSubmit}
@@ -824,4 +937,5 @@
 			</div>
 		{/if}
 	</div>
+	<ChatDropOverlay visible={dropOverlayVisible && canDropUploadsOnLanding} />
 </div>

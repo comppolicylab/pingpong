@@ -485,6 +485,13 @@
 		e.preventDefault();
 		fileUploadRef.addFiles(pastedFiles);
 	};
+
+	export const addFiles = (selectedFiles: File[]) => {
+		if (!upload || !fileUploadRef || !selectedFiles.length || !canUploadFiles) {
+			return;
+		}
+		fileUploadRef.addFiles(selectedFiles);
+	};
 </script>
 
 <div use:init class="relative w-full">
