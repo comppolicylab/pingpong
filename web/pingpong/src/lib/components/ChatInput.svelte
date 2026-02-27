@@ -161,6 +161,7 @@
 	// The list of files being uploaded.
 	let allFiles = writable<FileUploadInfo[]>([]);
 	$: uploading = $allFiles.some((f) => f.state === 'pending');
+	$: canUploadFiles = !!upload && !loading && !disabled && !tooManyFiles && !uploading;
 	let purpose: FileUploadPurpose | null = null;
 	$: purpose =
 		codeInterpreterAcceptedFiles && fileSearchAcceptedFiles && finalVisionAcceptedFiles
@@ -477,6 +478,10 @@
 			return;
 		}
 
+		if (!canUploadFiles) {
+			return;
+		}
+
 		e.preventDefault();
 		fileUploadRef.addFiles(pastedFiles);
 	};
@@ -629,7 +634,7 @@
 						bind:this={fileUploadRef}
 						{maxSize}
 						accept={currentAccept}
-						disabled={loading || disabled || !upload || tooManyFiles || uploading}
+						disabled={!canUploadFiles}
 						type="multimodal"
 						{fileSearchAcceptedFiles}
 						{codeInterpreterAcceptedFiles}

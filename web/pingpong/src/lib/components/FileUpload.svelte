@@ -226,6 +226,58 @@
 	// Reference to the file upload HTML input element.
 	let uploadRef: HTMLInputElement;
 
+	const normalizeMimeType = (mimeType: string) => mimeType.toLowerCase().split(';')[0].trim();
+
+	const matchesAcceptRule = (file: File, acceptRule: string) => {
+		if (acceptRule === '*/*') {
+			return true;
+		}
+
+		if (acceptRule.startsWith('.')) {
+			return file.name.toLowerCase().endsWith(acceptRule);
+		}
+
+		const fileType = normalizeMimeType(file.type);
+		if (!fileType) {
+			return false;
+		}
+
+		if (acceptRule.endsWith('/*')) {
+			return fileType.startsWith(acceptRule.slice(0, -1));
+		}
+
+		return fileType === acceptRule;
+	};
+
+	// Clipboard files are added programmatically and do not go through native
+	// input accept filtering, so we enforce the same accept rules here.
+	const filterAcceptedFiles = (selectedFiles: File[]) => {
+		const acceptRules = accept
+			.split(',')
+			.map((rule) => rule.trim().toLowerCase())
+			.filter((rule) => rule);
+
+		if (!acceptRules.length || acceptRules.includes('*/*')) {
+			return {
+				acceptedFiles: selectedFiles,
+				rejectedFiles: [] as File[]
+			};
+		}
+
+		const acceptedFiles: File[] = [];
+		const rejectedFiles: File[] = [];
+
+		for (const file of selectedFiles) {
+			if (acceptRules.some((acceptRule) => matchesAcceptRule(file, acceptRule))) {
+				acceptedFiles.push(file);
+			} else {
+				rejectedFiles.push(file);
+			}
+		}
+
+		return { acceptedFiles, rejectedFiles };
+	};
+
 	/**
 	 * Validate selected files and upload them.
 	 */
@@ -319,7 +371,17 @@
 	 * through the same path as manually selected files.
 	 */
 	export const addFiles = (selectedFiles: File[]) => {
-		queueFilesForUpload(selectedFiles);
+		const { acceptedFiles, rejectedFiles } = filterAcceptedFiles(selectedFiles);
+
+		if (rejectedFiles.length) {
+			dispatch('error', {
+				message: `<strong>Some files were not added</strong><br>${rejectedFiles.length} ${
+					rejectedFiles.length === 1 ? 'file does' : 'files do'
+				} not match the allowed file types for this upload.`
+			});
+		}
+
+		queueFilesForUpload(acceptedFiles);
 	};
 
 	/**
