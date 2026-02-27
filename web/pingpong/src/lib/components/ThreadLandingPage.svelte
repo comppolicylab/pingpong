@@ -285,6 +285,8 @@
 			event.stopPropagation();
 		}
 		if (!canDropUploadsOnLanding || !fileDrag) {
+			dropOverlayVisible = false;
+			dropDragCounter = 0;
 			return;
 		}
 		const droppedFiles = Array.from(event.dataTransfer?.files ?? []);
