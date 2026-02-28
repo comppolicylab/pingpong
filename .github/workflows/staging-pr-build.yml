@@ -1,0 +1,278 @@
+name: Push PR code to AWS Staging
+run-name: "Staging Deploy: PR #${{ inputs.pr_number }} (${{ inputs.target }})"
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number
+        required: true
+        type: string
+      pr_sha:
+        description: Commit SHA to deploy
+        required: true
+        type: string
+      target:
+        description: Deployment target
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - web
+          - srv
+      force:
+        description: Force redeploy even if this SHA is already pushed
+        required: true
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+      requested_by:
+        description: User who requested deployment
+        required: false
+        type: string
+      request_comment_id:
+        description: Issue comment id that requested deployment
+        required: false
+        type: string
+
+permissions:
+  checks: write
+  contents: read
+  pull-requests: read
+
+concurrency: staging-pr-${{ inputs.pr_number }}
+
+jobs:
+  release:
+    name: Build and Push/Tag Docker Images for Testing
+    timeout-minutes: 25
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate requested PR commit
+        id: validate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          pr_json="$(gh api "/repos/${{ github.repository }}/pulls/${{ inputs.pr_number }}")"
+          pr_repo="$(jq -r '.head.repo.full_name' <<<"$pr_json")"
+          pr_is_fork="$(jq -r '.head.repo.fork' <<<"$pr_json")"
+
+          if [ "$pr_repo" != "${{ github.repository }}" ] || [ "$pr_is_fork" = "true" ]; then
+            echo "Fork PR deployments are blocked for this workflow." >&2
+            exit 1
+          fi
+
+          requested_sha="${{ inputs.pr_sha }}"
+          sha_match="$(gh api --paginate "/repos/${{ github.repository }}/pulls/${{ inputs.pr_number }}/commits" --jq ".[] | select(.sha == \"${requested_sha}\") | .sha" | head -n1)"
+          if [ -z "${sha_match}" ]; then
+            echo "Requested SHA ${requested_sha} is not in PR #${{ inputs.pr_number }} commit history." >&2
+            exit 1
+          fi
+
+          short_sha="$(printf '%s' "${requested_sha}" | cut -c1-12)"
+          echo "short_sha=${short_sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout requested PR commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ inputs.pr_sha }}
+
+      - name: Create version tags
+        run: |
+          set -euo pipefail
+          release_tag="pr_${{ inputs.pr_number }}"
+          unique_tag="${release_tag}_${{ steps.validate.outputs.short_sha }}"
+
+          echo "PR_SHA=${{ inputs.pr_sha }}" >> "$GITHUB_ENV"
+          echo "ENVIRONMENT=stage" >> "$GITHUB_ENV"
+          echo "STABLE_TAG=${release_tag}" >> "$GITHUB_ENV"
+          echo "UNIQUE_TAG=${unique_tag}" >> "$GITHUB_ENV"
+          echo "SRV_VERSION=${unique_tag}" >> "$GITHUB_ENV"
+          echo "WEB_VERSION=${unique_tag}" >> "$GITHUB_ENV"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@6e631f05b2a5f53c9f1e27150d5e8af2f907b03b
+        with:
+          aws-access-key-id: ${{ secrets.PINGPONG_AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.PINGPONG_AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@fe725d47d3009d901b44f3df285a6dc9d438e63a
+
+      - name: Check if this SHA is already deployed
+        id: dedupe
+        env:
+          TARGET: ${{ inputs.target }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -euo pipefail
+
+          if [ "$FORCE" = "true" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "reason=Force flag set." >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          need_srv='false'
+          need_web='false'
+          if [ "$TARGET" = "all" ] || [ "$TARGET" = "srv" ]; then
+            need_srv='true'
+          fi
+          if [ "$TARGET" = "all" ] || [ "$TARGET" = "web" ]; then
+            need_web='true'
+          fi
+
+          srv_exists='false'
+          web_exists='false'
+
+          if [ "$need_srv" = "true" ]; then
+            srv_repo="${{ vars.PINGPONG_SRV_REGISTRY }}"
+            srv_repo="${srv_repo##*/}"
+            if aws ecr describe-images --repository-name "$srv_repo" --image-ids imageTag="${UNIQUE_TAG}" --region "${{ vars.AWS_REGION }}" > /dev/null 2>&1; then
+              srv_exists='true'
+            fi
+          fi
+
+          if [ "$need_web" = "true" ]; then
+            web_repo="${{ vars.PINGPONG_WEB_REGISTRY }}"
+            web_repo="${web_repo##*/}"
+            if aws ecr describe-images --repository-name "$web_repo" --image-ids imageTag="${UNIQUE_TAG}" --region "${{ vars.AWS_REGION }}" > /dev/null 2>&1; then
+              web_exists='true'
+            fi
+          fi
+
+          should_skip='true'
+          if [ "$need_srv" = "true" ] && [ "$srv_exists" != "true" ]; then
+            should_skip='false'
+          fi
+          if [ "$need_web" = "true" ] && [ "$web_exists" != "true" ]; then
+            should_skip='false'
+          fi
+
+          if [ "$should_skip" = "true" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "reason=Image tag ${UNIQUE_TAG} already exists for target ${TARGET}." >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "reason=No existing image tag for at least one requested target." >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Complete check run for already deployed server image
+        if: (inputs.target == 'all' || inputs.target == 'srv') && steps.dedupe.outputs.skip == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X POST -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -f 'name=Server: Building & Pushing Image on AWS for Testing' \
+            -f 'head_sha=${{ env.PR_SHA }}' \
+            -f 'status=completed' \
+            -f 'conclusion=success' \
+            -f 'output[title]=Staging deploy skipped' \
+            -f 'output[summary]=${{ steps.dedupe.outputs.reason }} Use /test-on-staging --force to redeploy this SHA.' \
+            /repos/${{ github.repository }}/check-runs
+
+      - name: Complete check run for already deployed web image
+        if: (inputs.target == 'all' || inputs.target == 'web') && steps.dedupe.outputs.skip == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X POST -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -f 'name=Web: Building & Pushing Image on AWS for Testing' \
+            -f 'head_sha=${{ env.PR_SHA }}' \
+            -f 'status=completed' \
+            -f 'conclusion=success' \
+            -f 'output[title]=Staging deploy skipped' \
+            -f 'output[summary]=${{ steps.dedupe.outputs.reason }} Use /test-on-staging --force to redeploy this SHA.' \
+            /repos/${{ github.repository }}/check-runs
+
+      - name: Create server check run
+        if: (inputs.target == 'all' || inputs.target == 'srv') && steps.dedupe.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X POST -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -f 'name=Server: Building & Pushing Image on AWS for Testing' \
+            -f 'head_sha=${{ env.PR_SHA }}' \
+            -f 'status=in_progress' \
+            /repos/${{ github.repository }}/check-runs
+
+      - name: Create web check run
+        if: (inputs.target == 'all' || inputs.target == 'web') && steps.dedupe.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X POST -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -f 'name=Web: Building & Pushing Image on AWS for Testing' \
+            -f 'head_sha=${{ env.PR_SHA }}' \
+            -f 'status=in_progress' \
+            /repos/${{ github.repository }}/check-runs
+
+      - name: Build server image for release
+        if: (inputs.target == 'all' || inputs.target == 'srv') && steps.dedupe.outputs.skip != 'true'
+        run: |
+          echo "Building Server image with tag ${SRV_VERSION}"
+          docker compose -f docker-compose.yml -f docker-compose.prod.yml build srv
+
+      - name: Push server image for release
+        if: (inputs.target == 'all' || inputs.target == 'srv') && steps.dedupe.outputs.skip != 'true'
+        run: |
+          aws ecr get-login-password --region "${{ vars.AWS_REGION }}" | docker login --username AWS --password-stdin "${{ vars.PINGPONG_REGISTRY_ENDPOINT }}"
+          docker tag "${{ vars.PINGPONG_SRV_REGISTRY }}:${SRV_VERSION}" "${{ vars.PINGPONG_SRV_REGISTRY }}:${STABLE_TAG}"
+          docker tag "${{ vars.PINGPONG_SRV_REGISTRY }}:${SRV_VERSION}" "${{ vars.PINGPONG_SRV_REGISTRY }}:${ENVIRONMENT}"
+          docker push "${{ vars.PINGPONG_SRV_REGISTRY }}:${SRV_VERSION}"
+          docker push "${{ vars.PINGPONG_SRV_REGISTRY }}:${STABLE_TAG}"
+          docker push "${{ vars.PINGPONG_SRV_REGISTRY }}:${ENVIRONMENT}"
+          echo "Built and pushed Server image (${SRV_VERSION}), stable tag (${STABLE_TAG}), and ${ENVIRONMENT} tag."
+
+      - name: Complete check run (server image pushed)
+        if: (inputs.target == 'all' || inputs.target == 'srv') && steps.dedupe.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X POST -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -f 'name=Server: Building & Pushing Image on AWS for Testing' \
+            -f 'head_sha=${{ env.PR_SHA }}' \
+            -f 'status=completed' \
+            -f 'conclusion=success' \
+            /repos/${{ github.repository }}/check-runs
+
+      - name: Build web image for release
+        if: (inputs.target == 'all' || inputs.target == 'web') && steps.dedupe.outputs.skip != 'true'
+        run: |
+          echo "Building Web image with tag ${WEB_VERSION}"
+          docker compose -f docker-compose.yml -f docker-compose.prod.yml build web
+
+      - name: Push web image for release
+        if: (inputs.target == 'all' || inputs.target == 'web') && steps.dedupe.outputs.skip != 'true'
+        run: |
+          aws ecr get-login-password --region "${{ vars.AWS_REGION }}" | docker login --username AWS --password-stdin "${{ vars.PINGPONG_REGISTRY_ENDPOINT }}"
+          docker tag "${{ vars.PINGPONG_WEB_REGISTRY }}:${WEB_VERSION}" "${{ vars.PINGPONG_WEB_REGISTRY }}:${STABLE_TAG}"
+          docker tag "${{ vars.PINGPONG_WEB_REGISTRY }}:${WEB_VERSION}" "${{ vars.PINGPONG_WEB_REGISTRY }}:${ENVIRONMENT}"
+          docker push "${{ vars.PINGPONG_WEB_REGISTRY }}:${WEB_VERSION}"
+          docker push "${{ vars.PINGPONG_WEB_REGISTRY }}:${STABLE_TAG}"
+          docker push "${{ vars.PINGPONG_WEB_REGISTRY }}:${ENVIRONMENT}"
+          echo "Built and pushed Web image (${WEB_VERSION}), stable tag (${STABLE_TAG}), and ${ENVIRONMENT} tag."
+
+      - name: Complete check run (web image pushed)
+        if: (inputs.target == 'all' || inputs.target == 'web') && steps.dedupe.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X POST -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -f 'name=Web: Building & Pushing Image on AWS for Testing' \
+            -f 'head_sha=${{ env.PR_SHA }}' \
+            -f 'status=completed' \
+            -f 'conclusion=success' \
+            /repos/${{ github.repository }}/check-runs

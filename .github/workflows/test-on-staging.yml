@@ -1,136 +1,97 @@
-name: Push PR code to AWS Staging
-run-name: "Staging Test: Push ${{ github.event.issue.number }} on AWS"
-permissions:
-  contents: read
-  checks: write
-concurrency: release
+name: Request PR deployment on AWS Staging
+run-name: "Staging Request: PR #${{ github.event.issue.number }}"
 
 on:
   issue_comment:
     types: [created]
+
+permissions:
+  actions: write
+  contents: read
+  pull-requests: read
+  issues: write
+
 jobs:
-  release:
-    name: Build and Push/Tag Docker Images for Testing
-    if: github.event.issue.pull_request != null && contains(github.event.comment.body, '/test-on-staging')
-    timeout-minutes: 20
+  request-staging-deploy:
+    name: Route /test-on-staging command
+    if: |
+      github.event.issue.pull_request != null &&
+      contains(github.event.comment.body, '/test-on-staging') &&
+      contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - name: Checkout release code at tag commit
-        uses: actions/checkout@v6
-        with:
-          ref: refs/pull/${{ github.event.issue.number }}/head
-
-      - name: Get latest commit SHA
-        run: echo "PR_SHA=$(git rev-parse HEAD)" >> $GITHUB_ENV
-
-      - name: Create version tag
+      - name: Parse command flags
+        id: parse
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
-          # Get the release tag
-          RELEASE_TAG=${{ github.event.issue.number }}
-          # Set GitHub environment variables
-          echo "SRV_VERSION=pr_${RELEASE_TAG}" >> $GITHUB_ENV
-          echo "WEB_VERSION=pr_${RELEASE_TAG}" >> $GITHUB_ENV
-        shell: bash
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import os
+          import re
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@6e631f05b2a5f53c9f1e27150d5e8af2f907b03b
-        with:
-          aws-access-key-id: ${{ secrets.PINGPONG_AWS_ACCESS_KEY }}
-          aws-secret-access-key: ${{ secrets.PINGPONG_AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ vars.AWS_REGION }}
+          body = os.environ.get("COMMENT_BODY", "")
+          normalized = " ".join(body.split()).lower()
+          force = "--force" in normalized
 
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@fe725d47d3009d901b44f3df285a6dc9d438e63a
+          tokens = set(re.findall(r"[a-z0-9_-]+", normalized))
+          wants_web = "web" in tokens
+          wants_srv = "server" in tokens or "srv" in tokens
 
-      - name: Create Server Check Run
-        if: contains(github.event.comment.body, 'server') || contains(github.event.comment.body, 'srv') || contains(github.event.comment.body, 'all')
+          if "all" in tokens or (wants_web and wants_srv) or (not wants_web and not wants_srv):
+              target = "all"
+          elif wants_web:
+              target = "web"
+          else:
+              target = "srv"
+
+          print(f"target={target}")
+          print(f"force={'true' if force else 'false'}")
+          PY
+
+      - name: Resolve PR head metadata
+        id: pr
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-           gh api -X POST -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            -f 'name=Server: Building & Pushing Image on AWS for Testing' \
-            -f 'head_sha=${{ env.PR_SHA }}' \
-            -f 'status=in_progress' \
-            /repos/${{ github.repository }}/check-runs
+          pr_json="$(gh api "/repos/${{ github.repository }}/pulls/${{ github.event.issue.number }}")"
+          pr_sha="$(jq -r '.head.sha' <<<"$pr_json")"
+          pr_repo="$(jq -r '.head.repo.full_name' <<<"$pr_json")"
+          pr_is_fork="$(jq -r '.head.repo.fork' <<<"$pr_json")"
 
-      - name: Create Web Check Run
-        if: contains(github.event.comment.body, 'web') || contains(github.event.comment.body, 'all')
+          echo "sha=${pr_sha}" >> "$GITHUB_OUTPUT"
+          if [ "$pr_repo" != "${{ github.repository }}" ] || [ "$pr_is_fork" = "true" ]; then
+            echo "is_blocked=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_blocked=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Block fork PR requests
+        if: steps.pr.outputs.is_blocked == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-            gh api -X POST -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            -f 'name=Web: Building & Pushing Image on AWS for Testing' \
-            -f 'head_sha=${{ env.PR_SHA }}' \
-            -f 'status=in_progress' \
-            /repos/${{ github.repository }}/check-runs
+          gh api -X POST "/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments" \
+            -f "body=Staging deployment is blocked for fork PRs. Run this command from a branch in this repository."
 
-      - name: Build server image for release
-        if: contains(github.event.comment.body, 'server') || contains(github.event.comment.body, 'srv') || contains(github.event.comment.body, 'all')
-        env:
-          ENVIRONMENT: 'stage'
-          SRV_VERSION: ${{ env.SRV_VERSION }}
-        run: |
-          echo "Building Server Image with tag ${{ env.SRV_VERSION }}"
-          docker compose -f docker-compose.yml -f docker-compose.prod.yml build srv
-
-      - name: Push server image for release
-        if: contains(github.event.comment.body, 'server') || contains(github.event.comment.body, 'srv') || contains(github.event.comment.body, 'all')
-        env:
-          ENVIRONMENT: 'stage'
-          SRV_VERSION: ${{ env.SRV_VERSION }}
-        run: |
-          aws ecr get-login-password --region ${{ vars.AWS_REGION }} | docker login --username AWS --password-stdin ${{ vars.PINGPONG_REGISTRY_ENDPOINT }}
-          docker tag ${{ vars.PINGPONG_SRV_REGISTRY }}:${{ env.SRV_VERSION }} ${{ vars.PINGPONG_SRV_REGISTRY }}:${{ env.ENVIRONMENT }}
-          docker push ${{ vars.PINGPONG_SRV_REGISTRY }}:${{ env.SRV_VERSION }}
-          docker push ${{ vars.PINGPONG_SRV_REGISTRY }}:${{ env.ENVIRONMENT }}
-          echo "Built and pushed Server Image (${{ env.SRV_VERSION }}) with ${{ env.ENVIRONMENT }} tag"
-
-      - name: Complete Check Run (Server image pushed)
-        if: contains(github.event.comment.body, 'server') || contains(github.event.comment.body, 'srv') || contains(github.event.comment.body, 'all')
+      - name: Trigger staging deployment workflow
+        if: steps.pr.outputs.is_blocked == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-           gh api -X POST -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            -f 'name=Server: Building & Pushing Image on AWS for Testing' \
-            -f 'head_sha=${{ env.PR_SHA }}' \
-            -f 'status=completed' \
-            -f 'conclusion=success' \
-            /repos/${{ github.repository }}/check-runs
+          gh api -X POST "/repos/${{ github.repository }}/actions/workflows/staging-pr-build.yml/dispatches" \
+            -f "ref=${{ github.event.repository.default_branch }}" \
+            -f "inputs[pr_number]=${{ github.event.issue.number }}" \
+            -f "inputs[pr_sha]=${{ steps.pr.outputs.sha }}" \
+            -f "inputs[target]=${{ steps.parse.outputs.target }}" \
+            -f "inputs[force]=${{ steps.parse.outputs.force }}" \
+            -f "inputs[requested_by]=${{ github.actor }}" \
+            -f "inputs[request_comment_id]=${{ github.event.comment.id }}"
 
-      - name: Build web image for release
-        if: contains(github.event.comment.body, 'web') || contains(github.event.comment.body, 'all')
-        env:
-          ENVIRONMENT: 'stage'
-          WEB_VERSION: ${{ env.WEB_VERSION }}
-        run: |
-          echo "Building Web Image with tag ${{ env.WEB_VERSION }}"
-          docker compose -f docker-compose.yml -f docker-compose.prod.yml build web
-
-      - name: Push web image for release
-        if: contains(github.event.comment.body, 'web') || contains(github.event.comment.body, 'all')
-        env:
-          ENVIRONMENT: 'stage'
-          WEB_VERSION: ${{ env.WEB_VERSION }}
-        run: |
-          aws ecr get-login-password --region ${{ vars.AWS_REGION }} | docker login --username AWS --password-stdin ${{ vars.PINGPONG_REGISTRY_ENDPOINT }}
-          docker tag ${{ vars.PINGPONG_WEB_REGISTRY }}:${{ env.WEB_VERSION }} ${{ vars.PINGPONG_WEB_REGISTRY }}:${{ env.ENVIRONMENT }}
-          docker push ${{ vars.PINGPONG_WEB_REGISTRY }}:${{ env.WEB_VERSION }}
-          docker push ${{ vars.PINGPONG_WEB_REGISTRY }}:${{ env.ENVIRONMENT }}
-          echo "Built and pushed Web Image (${{ env.WEB_VERSION }}) with ${{ env.ENVIRONMENT }} tag"
-
-      - name: Complete Check Run (Web image pushed)
-        if: contains(github.event.comment.body, 'web') || contains(github.event.comment.body, 'all')
+      - name: Acknowledge staging request
+        if: steps.pr.outputs.is_blocked == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-           gh api -X POST -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            -f 'name=Web: Building & Pushing Image on AWS for Testing' \
-            -f 'head_sha=${{ env.PR_SHA }}' \
-            -f 'status=completed' \
-            -f 'conclusion=success' \
-            /repos/${{ github.repository }}/check-runs
+          gh api -X POST "/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments" \
+            -f "body=Queued staging deployment for \`${{ steps.parse.outputs.target }}\` at commit \`${{ steps.pr.outputs.sha }}\` (force: \`${{ steps.parse.outputs.force }}\`)."
