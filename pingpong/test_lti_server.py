@@ -297,9 +297,13 @@ def _make_lti_server_config(
     public_url: str = "https://tool.example.com",
     openid_paths_mode: str = "replace",
     openid_paths: list[str] | None = None,
+    development: bool = False,
+    dev_http_hosts: list[str] | None = None,
 ):
     if openid_paths is None:
         openid_paths = list(DEFAULT_OPENID_CONFIGURATION_PATHS)
+    if dev_http_hosts is None:
+        dev_http_hosts = []
     normalized_paths = {path.strip() for path in openid_paths}
     if openid_paths_mode == "append":
         allowed_openid_configuration_paths = (
@@ -310,10 +314,12 @@ def _make_lti_server_config(
     return SimpleNamespace(
         url=lambda path: f"{public_url}{path}",
         public_url=public_url,
+        development=development,
         email=SimpleNamespace(sender="sender"),
         lti=SimpleNamespace(
             platform_url_allowlist=allowlist or [],
             allowed_openid_configuration_paths=allowed_openid_configuration_paths,
+            dev_http_hosts=dev_http_hosts,
             openid_configuration_paths=SimpleNamespace(
                 mode=openid_paths_mode,
                 paths=openid_paths,
@@ -478,6 +484,21 @@ def test_require_allowlisted_lti_url_returns_canonical_url(monkeypatch):
     assert url == "https://platform.example.com/.well-known/openid?foo=bar"
 
 
+def test_require_allowlisted_lti_url_allows_explicit_https_default_port(monkeypatch):
+    monkeypatch.setattr(
+        server_module,
+        "config",
+        _make_lti_server_config(allowlist=["platform.example.com"]),
+    )
+
+    url = server_module._require_allowlisted_lti_url(
+        "https://platform.example.com:443/.well-known/openid",
+        "openid_configuration",
+    )
+
+    assert url == "https://platform.example.com/.well-known/openid"
+
+
 @pytest.mark.parametrize(
     "url",
     [
@@ -487,6 +508,32 @@ def test_require_allowlisted_lti_url_returns_canonical_url(monkeypatch):
     ],
 )
 def test_require_allowlisted_lti_url_rejects_unsafe_components(monkeypatch, url):
+    monkeypatch.setattr(
+        server_module,
+        "config",
+        _make_lti_server_config(allowlist=["platform.example.com"]),
+    )
+
+    with pytest.raises(HTTPException) as excinfo:
+        server_module._require_allowlisted_lti_url(
+            url,
+            "openid_configuration",
+        )
+
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail == "Invalid URL for openid_configuration"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://platform.example.com:abc/.well-known/openid",
+        "https://platform.example.com:99999/.well-known/openid",
+    ],
+)
+def test_require_allowlisted_lti_url_rejects_malformed_or_out_of_range_ports(
+    monkeypatch, url
+):
     monkeypatch.setattr(
         server_module,
         "config",
@@ -571,6 +618,25 @@ def test_require_openid_configuration_url_uses_append_mode_paths(monkeypatch):
 
     assert default_url == "https://platform.example.com/.well-known/openid"
     assert custom_url == "https://platform.example.com/custom/openid"
+
+
+def test_require_openid_configuration_url_uses_dev_http_host_scheme(monkeypatch):
+    monkeypatch.setattr(
+        server_module,
+        "config",
+        _make_lti_server_config(
+            allowlist=["canvas.docker"],
+            development=True,
+            dev_http_hosts=["canvas.docker"],
+        ),
+    )
+
+    url = server_module._require_allowlisted_openid_configuration_url(
+        "https://canvas.docker/.well-known/openid",
+        ["canvas.docker"],
+    )
+
+    assert url == "http://canvas.docker/.well-known/openid"
 
 
 @pytest.mark.asyncio

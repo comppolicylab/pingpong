@@ -3,7 +3,7 @@
 import json
 import logging
 from datetime import datetime
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 from urllib.parse import urlencode, urlsplit
 import aiohttp
 import jwt
@@ -108,6 +108,13 @@ logger = logging.getLogger(__name__)
 lti_router: APIRouter = APIRouter()
 
 
+class _AllowlistedLTIUrlParts(NamedTuple):
+    scheme: str
+    host: str
+    path: str
+    query: str
+
+
 def _is_public_sso_provider(provider: ExternalLoginProvider) -> bool:
     return provider.name != "email" and not getattr(provider, "internal_only", False)
 
@@ -132,6 +139,27 @@ def _get_lti_platform_url_allowlist() -> list[str]:
 def _require_allowlisted_lti_url(
     url: Any, field_name: str, allowlist: list[str] | None = None
 ) -> str:
+    parts = _require_allowlisted_lti_url_parts(url, field_name, allowlist)
+    query = f"?{parts.query}" if parts.query else ""
+    return f"{parts.scheme}://{parts.host}{parts.path}{query}"
+
+
+def _allow_http_for_lti_host(host: str) -> bool:
+    if not getattr(config, "development", False):
+        return False
+
+    lti_settings = getattr(config, "lti", None)
+    dev_http_hosts = (
+        {h.lower() for h in lti_settings.dev_http_hosts}
+        if lti_settings and hasattr(lti_settings, "dev_http_hosts")
+        else set()
+    )
+    return host.lower() in dev_http_hosts
+
+
+def _require_allowlisted_lti_url_parts(
+    url: Any, field_name: str, allowlist: list[str] | None = None
+) -> _AllowlistedLTIUrlParts:
     if not isinstance(url, str) or not url:
         raise HTTPException(status_code=400, detail=f"Missing or invalid {field_name}")
 
@@ -146,21 +174,26 @@ def _require_allowlisted_lti_url(
     ):
         raise HTTPException(status_code=400, detail=f"Invalid URL for {field_name}")
 
-    if parsed.username or parsed.password or parsed.fragment or parsed.port is not None:
+    try:
+        port = parsed.port
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400, detail=f"Invalid URL for {field_name}"
+        ) from e
+
+    if parsed.username or parsed.password or parsed.fragment:
         raise HTTPException(status_code=400, detail=f"Invalid URL for {field_name}")
+
+    if port is not None:
+        is_default_port = (parsed.scheme == "https" and port == 443) or (
+            parsed.scheme == "http" and port == 80
+        )
+        if not is_default_port:
+            raise HTTPException(status_code=400, detail=f"Invalid URL for {field_name}")
 
     # Reject cleartext HTTP — LTI endpoints carry bearer tokens and must
     # be accessed over TLS.  Allow HTTP only for configured dev hosts in
     # development mode (see lti.dev_http_hosts in config.toml).
-    if parsed.scheme != "https":
-        lti = getattr(config, "lti", None)
-        dev_hosts = {h.lower() for h in lti.dev_http_hosts} if lti else set()
-        if not (config.development and parsed.hostname.lower() in dev_hosts):
-            raise HTTPException(
-                status_code=400,
-                detail=f"{field_name} must use HTTPS",
-            )
-
     host_allowlist = (
         allowlist if allowlist is not None else _get_lti_platform_url_allowlist()
     )
@@ -173,47 +206,49 @@ def _require_allowlisted_lti_url(
             detail=f"{field_name} host is not allowlisted",
         )
 
-    scheme = "https" if parsed.scheme == "https" else "http"
-    path = parsed.path or "/"
-    query = f"?{parsed.query}" if parsed.query else ""
-    return f"{scheme}://{matched_host}{path}{query}"
+    if parsed.scheme != "https" and not _allow_http_for_lti_host(matched_host):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{field_name} must use HTTPS",
+        )
+
+    return _AllowlistedLTIUrlParts(
+        scheme="https" if parsed.scheme == "https" else "http",
+        host=matched_host,
+        path=parsed.path or "/",
+        query=parsed.query,
+    )
 
 
 def _require_allowlisted_openid_configuration_url(
     url: Any, allowlist: list[str] | None = None
 ) -> str:
-    normalized_url = _require_allowlisted_lti_url(
-        url, "openid_configuration", allowlist
-    )
-    parsed = urlsplit(normalized_url)
-    path = parsed.path or "/"
+    parts = _require_allowlisted_lti_url_parts(url, "openid_configuration", allowlist)
     lti_settings = config.lti
     if lti_settings is None:
         raise HTTPException(
             status_code=503,
             detail=MISSING_PLATFORM_URL_ALLOWLIST_DETAIL,
         )
-    if parsed.query:
+    if parts.query:
         raise HTTPException(
             status_code=400, detail="Invalid URL for openid_configuration"
         )
     # Look up the matching path from the server-controlled set so the
     # returned URL contains no user-supplied components.
     matched_path = next(
-        (p for p in lti_settings.allowed_openid_configuration_paths if p == path),
+        (p for p in lti_settings.allowed_openid_configuration_paths if p == parts.path),
         None,
     )
     if matched_path is None:
         raise HTTPException(
             status_code=400, detail="Invalid URL for openid_configuration"
         )
-    host = parsed.hostname
-    if not host:
-        raise HTTPException(
-            status_code=400, detail="Invalid URL for openid_configuration"
-        )
-    scheme = "https" if parsed.scheme == "https" else "http"
-    return f"{scheme}://{host}{matched_path}"
+    # Keep OpenID discovery URL construction fully server-controlled:
+    # host/path come from allowlisted settings and scheme is derived from
+    # trusted environment config (HTTP only for explicit dev hosts).
+    scheme = "http" if _allow_http_for_lti_host(parts.host) else "https"
+    return f"{scheme}://{parts.host}{matched_path}"
 
 
 def _extract_context_memberships_url_from_claims(claims: dict[str, Any]) -> str | None:
