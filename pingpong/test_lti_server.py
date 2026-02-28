@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -29,9 +30,10 @@ class FakeResponse:
 
 
 class FakeSession:
-    def __init__(self, get_payload=None, post_payload=None):
+    def __init__(self, get_payload=None, post_payload=None, request_log=None):
         self.get_payload = get_payload
         self.post_payload = post_payload
+        self.request_log = request_log
 
     async def __aenter__(self):
         return self
@@ -40,9 +42,13 @@ class FakeSession:
         return False
 
     def get(self, *args, **kwargs):
+        if self.request_log is not None:
+            self.request_log.append(("GET", args[0]))
         return FakeResponse(self.get_payload)
 
     def post(self, *args, **kwargs):
+        if self.request_log is not None:
+            self.request_log.append(("POST", args[0]))
         return FakeResponse(self.post_payload)
 
 
@@ -407,12 +413,35 @@ def test_get_lti_key_manager_success(monkeypatch):
     assert server_module.get_lti_key_manager() is key_manager
 
 
-def test_test_config_includes_lti_platform_url_allowlist():
-    assert server_module.config.lti is not None
-    assert server_module.config.lti.platform_url_allowlist == [
+def test_test_config_includes_lti_platform_url_allowlist(config):
+    assert config.lti is not None
+    assert config.lti.platform_url_allowlist == [
         "platform.example.com",
         "tool.example.com",
     ]
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "platform.example.com/path",
+        "platform.example.com:443",
+    ],
+)
+def test_get_lti_platform_url_allowlist_rejects_invalid_bare_host_entries(
+    monkeypatch, entry
+):
+    monkeypatch.setattr(
+        server_module,
+        "config",
+        _make_lti_server_config(allowlist=[entry]),
+    )
+
+    with pytest.raises(HTTPException) as excinfo:
+        server_module._get_lti_platform_url_allowlist()
+
+    assert excinfo.value.status_code == 500
+    assert excinfo.value.detail == "LTI platform URL allowlist contains invalid entries"
 
 
 @pytest.mark.asyncio
@@ -632,6 +661,94 @@ async def test_register_lti_instance_rejects_mistyped_openid_configuration_url(
 
     assert excinfo.value.status_code == 400
     assert "Invalid URL for openid_configuration" in excinfo.value.detail
+
+
+@pytest.mark.asyncio
+async def test_register_lti_instance_uses_normalized_urls_for_http_calls(monkeypatch):
+    platform_config = {
+        "product_family_code": "canvas",
+        "messages_supported": [
+            {
+                "type": "LtiResourceLinkRequest",
+                "placements": [server_module.CANVAS_MESSAGE_PLACEMENT],
+            }
+        ],
+    }
+    openid_payload = {
+        "issuer": "issuer",
+        "authorization_endpoint": "https://platform.example.com/auth",
+        "registration_endpoint": r"https://platform.example.com\@evil.example.com/reg",
+        "jwks_uri": "https://platform.example.com/jwks",
+        "token_endpoint": "https://platform.example.com/token",
+        "scopes_supported": server_module.REQUIRED_SCOPES,
+        "id_token_signing_alg_values_supported": ["RS256"],
+        "subject_types_supported": ["public"],
+        server_module.PLATFORM_CONFIGURATION_KEY: platform_config,
+    }
+    registration_payload = {"client_id": "client"}
+    request_log: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(
+        server_module.aiohttp,
+        "ClientSession",
+        lambda: FakeSession(
+            get_payload=openid_payload,
+            post_payload=registration_payload,
+            request_log=request_log,
+        ),
+    )
+    monkeypatch.setattr(
+        server_module.Institution,
+        "all_have_default_api_key",
+        lambda db, ids: _async_return(True),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "send_lti_registration_submitted",
+        lambda *args, **kwargs: _async_return(None),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "config",
+        _make_lti_server_config(allowlist=["platform.example.com"]),
+    )
+
+    created = {}
+
+    async def _create(db, data, institution_ids):
+        created["data"] = data
+        created["institution_ids"] = institution_ids
+
+    monkeypatch.setattr(server_module.LTIRegistration, "create", _create)
+
+    data = LTIRegisterRequest(
+        name="PingPong",
+        admin_name="Admin",
+        admin_email="admin@example.com",
+        provider_id=0,
+        sso_field=None,
+        openid_configuration=r"https://platform.example.com\@evil.example.com/.well-known/openid",
+        registration_token="token",
+        institution_ids=[1],
+    )
+    request = FakeRequest(state=SimpleNamespace(db="db"))
+
+    result = await server_module.register_lti_instance(request, data)
+
+    assert result == {"status": "ok"}
+    assert request_log == [
+        (
+            "GET",
+            "https://platform.example.com/@evil.example.com/.well-known/openid",
+        ),
+        ("POST", "https://platform.example.com/@evil.example.com/reg"),
+    ]
+    openid_configuration = json.loads(created["data"]["openid_configuration"])
+    assert (
+        openid_configuration[server_module.REGISTRATION_ENDPOINT_KEY]
+        == "https://platform.example.com/@evil.example.com/reg"
+    )
+    assert created["institution_ids"] == [1]
 
 
 @pytest.mark.asyncio
@@ -1851,6 +1968,54 @@ async def test_lti_launch_rejects_unallowlisted_registration_jwks_url(monkeypatc
 
     assert excinfo.value.status_code == 400
     assert "host is not allowlisted" in excinfo.value.detail
+
+
+@pytest.mark.asyncio
+async def test_lti_launch_uses_normalized_registration_jwks_url(monkeypatch):
+    oidc_session = _make_oidc_session(
+        redirect_uri="https://tool.example.com/api/v1/lti/launch"
+    )
+    registration = _make_registration(
+        review_status=LTIRegistrationReviewStatus.APPROVED,
+        enabled=True,
+        key_set_url=r"https://platform.example.com\@evil.example.com/jwks",
+    )
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "get_by_state",
+        lambda db, state: _async_return(oidc_session),
+    )
+    monkeypatch.setattr(
+        server_module.LTIRegistration,
+        "get_by_client_id",
+        lambda db, client_id: _async_return(registration),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "config",
+        _make_lti_server_config(allowlist=["platform.example.com"]),
+    )
+    monkeypatch.setattr(
+        server_module, "get_now_fn", lambda request: lambda: datetime.now(timezone.utc)
+    )
+
+    observed: dict[str, str] = {}
+
+    async def _verify_capture_jwks_url(**kwargs):
+        observed["jwks_url"] = kwargs["jwks_url"]
+        raise HTTPException(status_code=418, detail="stop-after-jwks-url-capture")
+
+    monkeypatch.setattr(server_module, "_verify_lti_id_token", _verify_capture_jwks_url)
+
+    request = FakeRequest(
+        payload={"state": "state", "id_token": "token"}, state=_make_request_state()
+    )
+
+    with pytest.raises(HTTPException) as excinfo:
+        await server_module.lti_launch(request, tasks=SimpleNamespace())
+
+    assert excinfo.value.status_code == 418
+    assert observed["jwks_url"] == "https://platform.example.com/@evil.example.com/jwks"
 
 
 @pytest.mark.asyncio

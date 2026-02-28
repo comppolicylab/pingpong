@@ -13,6 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from pingpong.authz.openfga import OpenFgaAuthzClient
 from pingpong.config import config
+from pingpong.lti.allowlist import (
+    is_lti_host_allowlisted,
+    normalize_lti_platform_url_allowlist,
+)
 from pingpong.lti.constants import (
     AUTHORIZATION_ENDPOINT_KEY,
     CANVAS_CONNECT_SYNC_WAIT_DEFAULT_SECONDS,
@@ -130,6 +134,22 @@ def _try_parse_json_object(raw_value: object) -> dict[str, object] | None:
     return _as_dict(parsed)
 
 
+def _get_lti_platform_url_allowlist() -> list[str]:
+    lti_settings = getattr(config, "lti", None)
+    allowlist = (
+        getattr(lti_settings, "platform_url_allowlist", None) if lti_settings else None
+    )
+    if not isinstance(allowlist, list) or not allowlist:
+        return []
+    try:
+        return normalize_lti_platform_url_allowlist(allowlist)
+    except ValueError:
+        logger.warning(
+            "Ignoring invalid LTI platform URL allowlist while validating Canvas Connect hosts"
+        )
+        return []
+
+
 def _extract_sync_row_errors(results: CreateUserResults) -> list[str]:
     row_errors: list[str] = []
     for row_result in results.results:
@@ -245,18 +265,16 @@ class CanvasConnectClient:
         openid_configuration = _try_parse_json_object(
             getattr(registration, "openid_configuration", None)
         )
-        if openid_configuration is None:
-            return hosts
-
-        for key in (
-            AUTHORIZATION_ENDPOINT_KEY,
-            REGISTRATION_ENDPOINT_KEY,
-            KEYS_ENDPOINT_KEY,
-            TOKEN_ENDPOINT_KEY,
-        ):
-            host = _extract_url_hostname(openid_configuration.get(key))
-            if host:
-                hosts.add(host)
+        if openid_configuration is not None:
+            for key in (
+                AUTHORIZATION_ENDPOINT_KEY,
+                REGISTRATION_ENDPOINT_KEY,
+                KEYS_ENDPOINT_KEY,
+                TOKEN_ENDPOINT_KEY,
+            ):
+                host = _extract_url_hostname(openid_configuration.get(key))
+                if host:
+                    hosts.add(host)
 
         return hosts
 
@@ -270,11 +288,18 @@ class CanvasConnectClient:
         ):
             raise CanvasConnectException(detail=f"Invalid URL for {field_name}")
 
+        host = parsed.hostname.lower()
         lti_class = await self._get_lti_class()
         allowed_hosts = self._registration_allowed_hosts(lti_class.registration)
-        if parsed.hostname.lower() not in allowed_hosts:
+        if host not in allowed_hosts:
             raise CanvasConnectException(
                 detail=f"{field_name} host is not allowed for this registration"
+            )
+
+        allowlist = _get_lti_platform_url_allowlist()
+        if not is_lti_host_allowlisted(host, allowlist):
+            raise CanvasConnectException(
+                detail=f"{field_name} host is not allowlisted",
             )
 
         return normalized_url

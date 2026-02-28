@@ -1203,9 +1203,12 @@ async def _send_activity_summaries(
 
 
 def _extract_allowlist_hostname(url_value: Any) -> str | None:
-    if not isinstance(url_value, str) or not url_value:
+    if not isinstance(url_value, str):
         return None
-    normalized_url = url_value.replace("\\", "/")
+    trimmed_url = url_value.strip()
+    if not trimmed_url:
+        return None
+    normalized_url = trimmed_url.replace("\\", "/")
     parsed = urlsplit(normalized_url)
     if (
         parsed.scheme not in {"http", "https"}

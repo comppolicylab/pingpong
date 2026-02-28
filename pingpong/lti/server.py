@@ -15,6 +15,11 @@ from pingpong.authz.openfga import OpenFgaAuthzClient
 from pingpong.config import config
 from pingpong.invite import send_lti_registration_submitted
 from pingpong.log_utils import sanitize_for_log
+from pingpong.lti.allowlist import (
+    INVALID_PLATFORM_URL_ALLOWLIST_DETAIL,
+    is_lti_host_allowlisted,
+    normalize_lti_platform_url_allowlist,
+)
 from pingpong.lti.constants import (
     AUTHORIZATION_ENDPOINT_KEY,
     CANVAS_ACCOUNT_LTI_GUID_KEY,
@@ -117,44 +122,16 @@ def _get_lti_platform_url_allowlist() -> list[str]:
                 "Set lti.platform_url_allowlist in config.toml."
             ),
         )
-    normalized: list[str] = []
-    for entry in allowlist:
-        if not isinstance(entry, str):
-            raise HTTPException(
-                status_code=500,
-                detail="LTI platform URL allowlist contains invalid entries",
-            )
-        value = entry.strip().lower()
-        if not value:
-            raise HTTPException(
-                status_code=500,
-                detail="LTI platform URL allowlist contains invalid entries",
-            )
-        if "://" in value:
-            parsed = urlsplit(value)
-            if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-                raise HTTPException(
-                    status_code=500,
-                    detail="LTI platform URL allowlist contains invalid entries",
-                )
-            value = parsed.hostname
-        normalized.append(value)
-    return normalized
+    try:
+        return normalize_lti_platform_url_allowlist(allowlist)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=INVALID_PLATFORM_URL_ALLOWLIST_DETAIL,
+        ) from e
 
 
-def _is_allowlisted_lti_host(host: str, allowlist: list[str]) -> bool:
-    host_lower = host.lower()
-    for allowed in allowlist:
-        if allowed.startswith("*."):
-            suffix = allowed[1:]  # ".example.com"
-            if host_lower.endswith(suffix) and host_lower != allowed[2:]:
-                return True
-        elif host_lower == allowed:
-            return True
-    return False
-
-
-def _require_allowlisted_lti_url(url: Any, field_name: str) -> None:
+def _require_allowlisted_lti_url(url: Any, field_name: str) -> str:
     if not isinstance(url, str) or not url:
         raise HTTPException(status_code=400, detail=f"Missing or invalid {field_name}")
 
@@ -170,11 +147,13 @@ def _require_allowlisted_lti_url(url: Any, field_name: str) -> None:
         raise HTTPException(status_code=400, detail=f"Invalid URL for {field_name}")
 
     allowlist = _get_lti_platform_url_allowlist()
-    if not _is_allowlisted_lti_host(parsed.hostname, allowlist):
+    if not is_lti_host_allowlisted(parsed.hostname, allowlist):
         raise HTTPException(
             status_code=400,
             detail=f"{field_name} host is not allowlisted",
         )
+
+    return normalized_url
 
 
 def _extract_context_memberships_url_from_claims(claims: dict[str, Any]) -> str | None:
@@ -187,8 +166,9 @@ def _extract_context_memberships_url_from_claims(claims: dict[str, Any]) -> str 
     context_memberships_url = nrps_claim.get("context_memberships_url")
     if context_memberships_url is None:
         return None
-    _require_allowlisted_lti_url(context_memberships_url, "context_memberships_url")
-    return cast(str, context_memberships_url)
+    return _require_allowlisted_lti_url(
+        context_memberships_url, "context_memberships_url"
+    )
 
 
 async def _fetch_jwks(jwks_url: str) -> dict[str, Any]:
@@ -355,12 +335,14 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
     )
 
     headers = {"Authorization": f"Bearer {data.registration_token}"}
-    _require_allowlisted_lti_url(data.openid_configuration, "openid_configuration")
+    openid_configuration_url = _require_allowlisted_lti_url(
+        data.openid_configuration, "openid_configuration"
+    )
 
     response_data: dict[str, Any] | None = None
     async with aiohttp.ClientSession() as session:
         async with session.get(
-            data.openid_configuration, raise_for_status=True, headers=headers
+            openid_configuration_url, raise_for_status=True, headers=headers
         ) as response:
             payload = await response.json()
             if not isinstance(payload, dict):
@@ -408,10 +390,21 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
         raise HTTPException(
             status_code=400, detail="Missing required OpenID configuration fields"
         )
-    _require_allowlisted_lti_url(authorization_endpoint, AUTHORIZATION_ENDPOINT_KEY)
-    _require_allowlisted_lti_url(registration_endpoint, REGISTRATION_ENDPOINT_KEY)
-    _require_allowlisted_lti_url(keys_endpoint, KEYS_ENDPOINT_KEY)
-    _require_allowlisted_lti_url(token_endpoint, TOKEN_ENDPOINT_KEY)
+    authorization_endpoint = _require_allowlisted_lti_url(
+        authorization_endpoint, AUTHORIZATION_ENDPOINT_KEY
+    )
+    registration_endpoint = _require_allowlisted_lti_url(
+        registration_endpoint, REGISTRATION_ENDPOINT_KEY
+    )
+    keys_endpoint = _require_allowlisted_lti_url(keys_endpoint, KEYS_ENDPOINT_KEY)
+    token_endpoint = _require_allowlisted_lti_url(token_endpoint, TOKEN_ENDPOINT_KEY)
+
+    # Persist canonical endpoint URLs so downstream consumers do not re-use
+    # unnormalized OpenID response values.
+    response_data[AUTHORIZATION_ENDPOINT_KEY] = authorization_endpoint
+    response_data[REGISTRATION_ENDPOINT_KEY] = registration_endpoint
+    response_data[KEYS_ENDPOINT_KEY] = keys_endpoint
+    response_data[TOKEN_ENDPOINT_KEY] = token_endpoint
 
     if not all(scope in scopes_supported for scope in REQUIRED_SCOPES):
         raise HTTPException(
@@ -623,7 +616,9 @@ async def lti_login(request: StateRequest):
         raise HTTPException(
             status_code=400, detail="No known OIDC authorization endpoint for issuer"
         )
-    _require_allowlisted_lti_url(oidc_authorization_endpoint, "auth_login_url")
+    oidc_authorization_endpoint = _require_allowlisted_lti_url(
+        oidc_authorization_endpoint, "auth_login_url"
+    )
 
     # Optional deployment binding if the platform supplies it at initiation time.
     request_deployment_id = payload.get("deployment_id") or payload.get(
@@ -736,11 +731,11 @@ async def lti_launch(
         raise HTTPException(status_code=404, detail="Unknown LTI client_id")
     if registration.issuer != oidc_session.issuer:
         raise HTTPException(status_code=400, detail="Issuer mismatch for state")
-    _require_allowlisted_lti_url(registration.key_set_url, KEYS_ENDPOINT_KEY)
+    jwks_url = _require_allowlisted_lti_url(registration.key_set_url, KEYS_ENDPOINT_KEY)
 
     claims = await _verify_lti_id_token(
         id_token=id_token,
-        jwks_url=registration.key_set_url,
+        jwks_url=jwks_url,
         expected_issuer=oidc_session.issuer,
         expected_audience=oidc_session.client_id,
         expected_algorithm=registration.token_algorithm,

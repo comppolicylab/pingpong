@@ -94,6 +94,21 @@ class FakeSSOProvider:
         self.name = name
 
 
+@pytest.fixture(autouse=True)
+def _allowlisted_platform_hosts(monkeypatch):
+    assert canvas_connect_module.config.lti is not None
+    monkeypatch.setattr(
+        canvas_connect_module.config.lti,
+        "platform_url_allowlist",
+        [
+            "canvas.example.com",
+            "fallback.example.com",
+            "platform.example.com",
+            "tool.example.com",
+        ],
+    )
+
+
 @pytest.mark.asyncio
 async def test_get_nrps_access_token_uses_oidc_token_endpoint_and_signed_assertion(
     monkeypatch,
@@ -452,7 +467,7 @@ async def test_get_context_memberships_url_returns_saved_value(monkeypatch):
     lti_class = SimpleNamespace(
         id=16,
         registration=registration,
-        context_memberships_url="https://saved.example.com/memberships",
+        context_memberships_url="https://canvas.example.com/memberships",
         course_id="123",
     )
 
@@ -472,7 +487,7 @@ async def test_get_context_memberships_url_returns_saved_value(monkeypatch):
     )
     memberships_url = await client.get_context_memberships_url()
 
-    assert memberships_url == "https://saved.example.com/memberships"
+    assert memberships_url == "https://canvas.example.com/memberships"
 
 
 @pytest.mark.asyncio
@@ -551,6 +566,67 @@ async def test_get_context_memberships_url_raises_when_host_is_not_allowed(monke
 
 
 @pytest.mark.asyncio
+async def test_get_context_memberships_url_raises_when_host_is_not_allowlisted(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        canvas_connect_module.config.lti,
+        "platform_url_allowlist",
+        ["tool.example.com"],
+    )
+    registration = SimpleNamespace(
+        client_id="client-123",
+        issuer="https://canvas.example.com",
+        auth_login_url="https://canvas.example.com/login",
+        key_set_url="https://canvas.example.com/jwks",
+        openid_configuration='{"token_endpoint":"https://canvas.example.com/token"}',
+        auth_token_url="https://canvas.example.com/fallback-token",
+    )
+    lti_class = SimpleNamespace(
+        id=1702,
+        registration=registration,
+        context_memberships_url="https://canvas.example.com/memberships",
+        course_id="123",
+    )
+
+    async def _get_by_id_with_registration(cls, db, id_):
+        return lti_class
+
+    monkeypatch.setattr(
+        canvas_connect_module.LTIClass,
+        "get_by_id_with_registration",
+        classmethod(_get_by_id_with_registration),
+    )
+
+    client = canvas_connect_module.CanvasConnectClient(
+        db=SimpleNamespace(),
+        lti_class_id=1702,
+        key_manager=FakeKeyManager(),
+    )
+    with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+        await client.get_context_memberships_url()
+
+    assert excinfo.value.detail == "context_memberships_url host is not allowlisted"
+
+
+def test_registration_allowed_hosts_extracts_hosts_from_registration_urls():
+    registration = SimpleNamespace(
+        auth_login_url="https://evil.example.com/login",
+        auth_token_url="https://canvas.example.com/token",
+        key_set_url="https://evil.example.com/jwks",
+        openid_configuration='{"authorization_endpoint":"https://evil.example.com/auth"}',
+    )
+
+    allowed_hosts = (
+        canvas_connect_module.CanvasConnectClient._registration_allowed_hosts(
+            registration
+        )
+    )
+
+    assert allowed_hosts == {"canvas.example.com", "evil.example.com"}
+
+
+@pytest.mark.asyncio
 async def test_get_lti_class_is_cached_per_client_instance(monkeypatch):
     registration = SimpleNamespace(
         client_id="client-123",
@@ -561,7 +637,7 @@ async def test_get_lti_class_is_cached_per_client_instance(monkeypatch):
     lti_class = SimpleNamespace(
         id=18,
         registration=registration,
-        context_memberships_url="https://saved.example.com/memberships",
+        context_memberships_url="https://canvas.example.com/memberships",
         course_id="123",
     )
     call_count = {"count": 0}
@@ -584,8 +660,8 @@ async def test_get_lti_class_is_cached_per_client_instance(monkeypatch):
     first = await client.get_context_memberships_url()
     second = await client.get_context_memberships_url()
 
-    assert first == "https://saved.example.com/memberships"
-    assert second == "https://saved.example.com/memberships"
+    assert first == "https://canvas.example.com/memberships"
+    assert second == "https://canvas.example.com/memberships"
     assert call_count["count"] == 1
 
 
