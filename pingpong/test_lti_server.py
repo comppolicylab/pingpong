@@ -409,7 +409,10 @@ def test_get_lti_key_manager_success(monkeypatch):
 
 def test_test_config_includes_lti_platform_url_allowlist():
     assert server_module.config.lti is not None
-    assert "platform.example.com" in server_module.config.lti.platform_url_allowlist
+    assert server_module.config.lti.platform_url_allowlist == [
+        "platform.example.com",
+        "tool.example.com",
+    ]
 
 
 @pytest.mark.asyncio
@@ -794,7 +797,9 @@ async def test_lti_login_rejects_mistyped_authorization_url(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_lti_login_rejects_triple_slash_authorization_url(monkeypatch):
-    registration = _make_registration(auth_login_url="https:///platform.example.com/auth")
+    registration = _make_registration(
+        auth_login_url="https:///platform.example.com/auth"
+    )
     monkeypatch.setattr(
         server_module.LTIRegistration,
         "get_by_client_id",
@@ -1724,6 +1729,128 @@ async def test_lti_launch_instructor_pending_class_redirect(monkeypatch):
 
     assert response.status_code == 302
     assert "/lti/setup" in response.headers["location"]
+
+
+@pytest.mark.asyncio
+async def test_lti_launch_rejects_unallowlisted_context_memberships_url(monkeypatch):
+    oidc_session = _make_oidc_session(
+        redirect_uri="https://tool.example.com/api/v1/lti/launch"
+    )
+    registration = _make_registration(
+        review_status=LTIRegistrationReviewStatus.APPROVED, enabled=True
+    )
+    claims = {
+        "nonce": "nonce",
+        "email": "user@example.com",
+        "https://purl.imsglobal.org/spec/lti/claim/custom": {
+            "canvas_course_id": "course-1",
+            "sso_provider_id": "0",
+        },
+        "https://purl.imsglobal.org/spec/lti/claim/roles": [
+            "http://purl.imsglobal.org/vocab/lis/v2/membership#Instructor"
+        ],
+        "https://purl.imsglobal.org/spec/lti-nrps/claim/namesroleservice": {
+            "context_memberships_url": "https://evil.example.com/memberships"
+        },
+    }
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "get_by_state",
+        lambda db, state: _async_return(oidc_session),
+    )
+    monkeypatch.setattr(
+        server_module.LTIRegistration,
+        "get_by_client_id",
+        lambda db, client_id: _async_return(registration),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "_verify_lti_id_token",
+        lambda **kwargs: _async_return(claims),
+    )
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "validate_and_consume",
+        lambda *args, **kwargs: _async_return(True),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "find_class_by_course_id",
+        lambda *args, **kwargs: _async_return(None),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "config",
+        _make_lti_server_config(allowlist=["platform.example.com"]),
+    )
+    monkeypatch.setattr(server_module, "User", FakeUserModel)
+    monkeypatch.setattr(
+        server_module.User,
+        "get_by_email",
+        lambda db, email: _async_return(FakeUserModel(email)),
+    )
+    monkeypatch.setattr(server_module, "LTIClass", FakeLTIClass)
+    monkeypatch.setattr(
+        server_module, "encode_session_token", lambda user_id, nowfn: "token"
+    )
+    monkeypatch.setattr(
+        server_module, "get_now_fn", lambda request: lambda: datetime.now(timezone.utc)
+    )
+
+    request = FakeRequest(
+        payload={"state": "state", "id_token": "token"}, state=_make_request_state()
+    )
+
+    with pytest.raises(HTTPException) as excinfo:
+        await server_module.lti_launch(request, tasks=SimpleNamespace())
+
+    assert excinfo.value.status_code == 400
+    assert "context_memberships_url host is not allowlisted" in excinfo.value.detail
+
+
+@pytest.mark.asyncio
+async def test_lti_launch_rejects_unallowlisted_registration_jwks_url(monkeypatch):
+    oidc_session = _make_oidc_session(
+        redirect_uri="https://tool.example.com/api/v1/lti/launch"
+    )
+    registration = _make_registration(
+        review_status=LTIRegistrationReviewStatus.APPROVED,
+        enabled=True,
+        key_set_url="https://evil.example.com/jwks",
+    )
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "get_by_state",
+        lambda db, state: _async_return(oidc_session),
+    )
+    monkeypatch.setattr(
+        server_module.LTIRegistration,
+        "get_by_client_id",
+        lambda db, client_id: _async_return(registration),
+    )
+
+    async def _verify_should_not_run(**kwargs):
+        raise AssertionError("unexpected verify call")
+
+    monkeypatch.setattr(server_module, "_verify_lti_id_token", _verify_should_not_run)
+    monkeypatch.setattr(
+        server_module,
+        "config",
+        _make_lti_server_config(allowlist=["platform.example.com"]),
+    )
+    monkeypatch.setattr(
+        server_module, "get_now_fn", lambda request: lambda: datetime.now(timezone.utc)
+    )
+
+    request = FakeRequest(
+        payload={"state": "state", "id_token": "token"}, state=_make_request_state()
+    )
+
+    with pytest.raises(HTTPException) as excinfo:
+        await server_module.lti_launch(request, tasks=SimpleNamespace())
+
+    assert excinfo.value.status_code == 400
+    assert "host is not allowlisted" in excinfo.value.detail
 
 
 @pytest.mark.asyncio

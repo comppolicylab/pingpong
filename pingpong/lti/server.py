@@ -162,7 +162,11 @@ def _require_allowlisted_lti_url(url: Any, field_name: str) -> None:
     # Normalize first so validation mirrors browser behavior.
     normalized_url = url.replace("\\", "/")
     parsed = urlsplit(normalized_url)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc or not parsed.hostname:
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or not parsed.hostname
+    ):
         raise HTTPException(status_code=400, detail=f"Invalid URL for {field_name}")
 
     allowlist = _get_lti_platform_url_allowlist()
@@ -171,6 +175,20 @@ def _require_allowlisted_lti_url(url: Any, field_name: str) -> None:
             status_code=400,
             detail=f"{field_name} host is not allowlisted",
         )
+
+
+def _extract_context_memberships_url_from_claims(claims: dict[str, Any]) -> str | None:
+    nrps_claim = claims.get(LTI_CLAIM_NRPS_KEY)
+    if nrps_claim is None:
+        return None
+    if not isinstance(nrps_claim, dict):
+        raise HTTPException(status_code=400, detail="Invalid NRPS claim")
+
+    context_memberships_url = nrps_claim.get("context_memberships_url")
+    if context_memberships_url is None:
+        return None
+    _require_allowlisted_lti_url(context_memberships_url, "context_memberships_url")
+    return cast(str, context_memberships_url)
 
 
 async def _fetch_jwks(jwks_url: str) -> dict[str, Any]:
@@ -390,9 +408,7 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
         raise HTTPException(
             status_code=400, detail="Missing required OpenID configuration fields"
         )
-    _require_allowlisted_lti_url(
-        authorization_endpoint, AUTHORIZATION_ENDPOINT_KEY
-    )
+    _require_allowlisted_lti_url(authorization_endpoint, AUTHORIZATION_ENDPOINT_KEY)
     _require_allowlisted_lti_url(registration_endpoint, REGISTRATION_ENDPOINT_KEY)
     _require_allowlisted_lti_url(keys_endpoint, KEYS_ENDPOINT_KEY)
     _require_allowlisted_lti_url(token_endpoint, TOKEN_ENDPOINT_KEY)
@@ -720,6 +736,7 @@ async def lti_launch(
         raise HTTPException(status_code=404, detail="Unknown LTI client_id")
     if registration.issuer != oidc_session.issuer:
         raise HTTPException(status_code=400, detail="Issuer mismatch for state")
+    _require_allowlisted_lti_url(registration.key_set_url, KEYS_ENDPOINT_KEY)
 
     claims = await _verify_lti_id_token(
         id_token=id_token,
@@ -1003,8 +1020,9 @@ async def lti_launch(
                     in LTI_CUSTOM_PARAM_DEFAULT_VALUES["canvas_term_name"]
                 ):
                     course_term = None
-                nrps_claim = claims.get(LTI_CLAIM_NRPS_KEY, {})
-                context_memberships_url = nrps_claim.get("context_memberships_url")
+                context_memberships_url = _extract_context_memberships_url_from_claims(
+                    claims
+                )
 
                 pending_lti_class = LTIClass(
                     registration_id=registration.id,
@@ -1129,8 +1147,9 @@ async def lti_launch(
                     in LTI_CUSTOM_PARAM_DEFAULT_VALUES["canvas_term_name"]
                 ):
                     course_term = None
-                nrps_claim = claims.get(LTI_CLAIM_NRPS_KEY, {})
-                context_memberships_url = nrps_claim.get("context_memberships_url")
+                context_memberships_url = _extract_context_memberships_url_from_claims(
+                    claims
+                )
                 second_lti_class = LTIClass(
                     registration_id=registration.id,
                     lti_status=LTIStatus.LINKED,
@@ -1229,8 +1248,9 @@ async def lti_launch(
                     in LTI_CUSTOM_PARAM_DEFAULT_VALUES["canvas_term_name"]
                 ):
                     course_term = None
-                nrps_claim = claims.get(LTI_CLAIM_NRPS_KEY, {})
-                context_memberships_url = nrps_claim.get("context_memberships_url")
+                context_memberships_url = _extract_context_memberships_url_from_claims(
+                    claims
+                )
                 new_lti_class = LTIClass(
                     registration_id=registration.id,
                     lti_status=LTIStatus.LINKED,

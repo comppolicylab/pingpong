@@ -511,6 +511,46 @@ async def test_get_context_memberships_url_raises_when_missing(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_get_context_memberships_url_raises_when_host_is_not_allowed(monkeypatch):
+    registration = SimpleNamespace(
+        client_id="client-123",
+        issuer="https://canvas.example.com",
+        auth_login_url="https://canvas.example.com/login",
+        key_set_url="https://canvas.example.com/jwks",
+        openid_configuration='{"token_endpoint":"https://canvas.example.com/token"}',
+        auth_token_url="https://canvas.example.com/fallback-token",
+    )
+    lti_class = SimpleNamespace(
+        id=1701,
+        registration=registration,
+        context_memberships_url="https://evil.example.com/memberships",
+        course_id="123",
+    )
+
+    async def _get_by_id_with_registration(cls, db, id_):
+        return lti_class
+
+    monkeypatch.setattr(
+        canvas_connect_module.LTIClass,
+        "get_by_id_with_registration",
+        classmethod(_get_by_id_with_registration),
+    )
+
+    client = canvas_connect_module.CanvasConnectClient(
+        db=SimpleNamespace(),
+        lti_class_id=1701,
+        key_manager=FakeKeyManager(),
+    )
+    with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+        await client.get_context_memberships_url()
+
+    assert (
+        excinfo.value.detail
+        == "context_memberships_url host is not allowed for this registration"
+    )
+
+
+@pytest.mark.asyncio
 async def test_get_lti_class_is_cached_per_client_instance(monkeypatch):
     registration = SimpleNamespace(
         client_id="client-123",
@@ -899,6 +939,84 @@ async def test_get_nrps_create_user_class_roles_maps_members_and_pages(monkeypat
         fake_session.requests[1]["url"]
         == f"{context_memberships_url}?rlid=resource-link-id"
     )
+
+
+@pytest.mark.asyncio
+async def test_get_nrps_create_user_class_roles_rejects_untrusted_next_page(
+    monkeypatch,
+):
+    token_endpoint = "https://canvas.example.com/login/oauth2/token"
+    context_memberships_url = (
+        "https://canvas.example.com/api/lti/courses/1/names_and_roles"
+    )
+    registration = SimpleNamespace(
+        client_id="client-123",
+        issuer="https://canvas.example.com",
+        auth_login_url="https://canvas.example.com/login",
+        key_set_url="https://canvas.example.com/jwks",
+        openid_configuration=f'{{"token_endpoint":"{token_endpoint}"}}',
+        auth_token_url="https://canvas.example.com/fallback-token",
+    )
+    lti_class = SimpleNamespace(
+        id=2101,
+        registration=registration,
+        context_memberships_url=context_memberships_url,
+        resource_link_id="resource-link-id",
+        course_id="1",
+    )
+
+    async def _get_by_id_with_registration(cls, db, id_):
+        return lti_class
+
+    monkeypatch.setattr(
+        canvas_connect_module.LTIClass,
+        "get_by_id_with_registration",
+        classmethod(_get_by_id_with_registration),
+    )
+    monkeypatch.setattr(
+        canvas_connect_module.jwt,
+        "encode",
+        lambda *args, **kwargs: "signed-client-assertion",
+    )
+    monkeypatch.setattr(canvas_connect_module.uuid, "uuid7", lambda: "uuid7-test")
+
+    fake_session = FakeClientSession(
+        [
+            FakeTokenResponse(
+                payload={
+                    "access_token": "short-lived-token",
+                    "expires_in": 3600,
+                }
+            ),
+            FakeTokenResponse(
+                payload={
+                    "members": [],
+                    canvas_connect_module.NRPS_NEXT_PAGE_KEY: "https://evil.example.com/next",
+                }
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        canvas_connect_module.aiohttp,
+        "ClientSession",
+        lambda: fake_session,
+    )
+
+    async with canvas_connect_module.CanvasConnectClient(
+        db=SimpleNamespace(),
+        lti_class_id=2101,
+        key_manager=FakeKeyManager(),
+        nowfn=lambda: datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc),
+    ) as client:
+        with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+            await client.get_nrps_create_user_class_roles()
+
+    assert (
+        excinfo.value.detail
+        == "nrps_page_url host is not allowed for this registration"
+    )
+    assert len(fake_session.requests) == 2
+    assert fake_session.requests[1]["method"] == "GET"
 
 
 @pytest.mark.asyncio

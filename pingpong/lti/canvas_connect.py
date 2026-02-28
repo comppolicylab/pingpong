@@ -2,7 +2,7 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from datetime import datetime, timedelta
-from typing import cast
+from typing import Any, cast
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import aiohttp
@@ -14,9 +14,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pingpong.authz.openfga import OpenFgaAuthzClient
 from pingpong.config import config
 from pingpong.lti.constants import (
+    AUTHORIZATION_ENDPOINT_KEY,
     CANVAS_CONNECT_SYNC_WAIT_DEFAULT_SECONDS,
     CLIENT_ASSERTION_EXPIRY_SECONDS,
     CLIENT_ASSERTION_TYPE,
+    KEYS_ENDPOINT_KEY,
     CLIENT_CREDENTIALS_GRANT_TYPE,
     LTI_CLAIM_CUSTOM_KEY,
     LTI_CUSTOM_SSO_PROVIDER_ID_KEY,
@@ -36,6 +38,7 @@ from pingpong.lti.constants import (
     NRPS_MEMBERS_KEY,
     NRPS_NEXT_PAGE_KEY,
     NRPS_RESOURCE_LINK_QUERY_KEY,
+    REGISTRATION_ENDPOINT_KEY,
     TOKEN_ENDPOINT_KEY,
     TOKEN_REQUEST_CONTENT_TYPE,
 )
@@ -101,6 +104,30 @@ def _extract_error_detail(payload: object) -> str | None:
     if isinstance(error, str) and error:
         return error
     return None
+
+
+def _extract_url_hostname(url: Any) -> str | None:
+    if not isinstance(url, str) or not url:
+        return None
+    normalized_url = url.replace("\\", "/")
+    parsed = urlparse(normalized_url)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or not parsed.hostname
+    ):
+        return None
+    return parsed.hostname.lower()
+
+
+def _try_parse_json_object(raw_value: object) -> dict[str, object] | None:
+    if not isinstance(raw_value, str) or not raw_value:
+        return None
+    try:
+        parsed = json.loads(raw_value)
+    except json.JSONDecodeError:
+        return None
+    return _as_dict(parsed)
 
 
 def _extract_sync_row_errors(results: CreateUserResults) -> list[str]:
@@ -203,6 +230,55 @@ class CanvasConnectClient:
         self._cached_lti_class = lti_class
         return lti_class
 
+    @staticmethod
+    def _registration_allowed_hosts(registration: LTIRegistration) -> set[str]:
+        hosts: set[str] = set()
+        for url in (
+            getattr(registration, "auth_login_url", None),
+            getattr(registration, "auth_token_url", None),
+            getattr(registration, "key_set_url", None),
+        ):
+            host = _extract_url_hostname(url)
+            if host:
+                hosts.add(host)
+
+        openid_configuration = _try_parse_json_object(
+            getattr(registration, "openid_configuration", None)
+        )
+        if openid_configuration is None:
+            return hosts
+
+        for key in (
+            AUTHORIZATION_ENDPOINT_KEY,
+            REGISTRATION_ENDPOINT_KEY,
+            KEYS_ENDPOINT_KEY,
+            TOKEN_ENDPOINT_KEY,
+        ):
+            host = _extract_url_hostname(openid_configuration.get(key))
+            if host:
+                hosts.add(host)
+
+        return hosts
+
+    async def _validate_nrps_url(self, url: str, field_name: str) -> str:
+        normalized_url = url.replace("\\", "/")
+        parsed = urlparse(normalized_url)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+            or not parsed.hostname
+        ):
+            raise CanvasConnectException(detail=f"Invalid URL for {field_name}")
+
+        lti_class = await self._get_lti_class()
+        allowed_hosts = self._registration_allowed_hosts(lti_class.registration)
+        if parsed.hostname.lower() not in allowed_hosts:
+            raise CanvasConnectException(
+                detail=f"{field_name} host is not allowed for this registration"
+            )
+
+        return normalized_url
+
     async def _build_client_assertion(self, client_id: str, token_endpoint: str) -> str:
         key = await self.key_manager.get_current_key()
         if key is None:
@@ -247,7 +323,9 @@ class CanvasConnectClient:
             isinstance(existing_context_memberships_url, str)
             and existing_context_memberships_url
         ):
-            return existing_context_memberships_url
+            return await self._validate_nrps_url(
+                existing_context_memberships_url, "context_memberships_url"
+            )
 
         raise CanvasConnectException(
             detail="LTI class is missing context_memberships_url",
@@ -333,6 +411,7 @@ class CanvasConnectClient:
         next_page: str | None = start_url
         seen_pages: set[str] = set()
         while next_page:
+            next_page = await self._validate_nrps_url(next_page, "nrps_page_url")
             if next_page in seen_pages:
                 logger.warning(
                     "Detected NRPS pagination loop for lti_class_id=%s at url=%s",

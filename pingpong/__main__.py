@@ -56,7 +56,7 @@ from pingpong.migrations.m06_cleanup_orphaned_lti_classes import (
     cleanup_orphaned_lti_classes,
 )
 from pingpong.now import _get_next_run_time, croner, utcnow
-from pingpong.schemas import LMSType, RunStatus
+from pingpong.schemas import LMSType, LTIRegistrationReviewStatus, RunStatus
 from pingpong.lti.canvas_connect import canvas_connect_sync_all
 from pingpong.lti.constants import (
     AUTHORIZATION_ENDPOINT_KEY,
@@ -1207,7 +1207,11 @@ def _extract_allowlist_hostname(url_value: Any) -> str | None:
         return None
     normalized_url = url_value.replace("\\", "/")
     parsed = urlsplit(normalized_url)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc or not parsed.hostname:
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or not parsed.hostname
+    ):
         return None
     return parsed.hostname.lower()
 
@@ -1239,7 +1243,15 @@ def lti_suggest_config_from_db(json_output: bool) -> None:
     async def _suggest_config_from_db() -> None:
         async with config.db.driver.async_session() as session:
             result = await session.execute(
-                select(LTIRegistration).order_by(LTIRegistration.id.asc())
+                select(LTIRegistration)
+                .where(
+                    and_(
+                        LTIRegistration.enabled.is_(True),
+                        LTIRegistration.review_status
+                        == LTIRegistrationReviewStatus.APPROVED,
+                    )
+                )
+                .order_by(LTIRegistration.id.asc())
             )
             registrations = list(result.scalars().all())
 
@@ -1261,7 +1273,9 @@ def lti_suggest_config_from_db(json_output: bool) -> None:
             _record_url(registration.auth_token_url, f"{source_prefix}.auth_token_url")
             _record_url(registration.key_set_url, f"{source_prefix}.key_set_url")
 
-            openid_configuration = _try_parse_json_object(registration.openid_configuration)
+            openid_configuration = _try_parse_json_object(
+                registration.openid_configuration
+            )
             if registration.openid_configuration and openid_configuration is None:
                 warnings.append(
                     f"{source_prefix}.openid_configuration: invalid JSON payload"
