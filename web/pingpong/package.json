@@ -69,7 +69,7 @@
 			"glob": ">=10.5.0",
 			"devalue": ">=5.6.2",
 			"@isaacs/brace-expansion": ">=5.0.1",
-			"minimatch": ">=10.2.1",
+			"minimatch": ">=10.2.3",
 			"ajv": ">=6.14.0, <7.0.0"
 		}
 	}
