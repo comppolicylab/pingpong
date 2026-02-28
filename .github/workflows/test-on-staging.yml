@@ -32,9 +32,16 @@ jobs:
 
           body = os.environ.get("COMMENT_BODY", "")
           normalized = " ".join(body.split()).lower()
-          force = "--force" in normalized
 
-          tokens = set(re.findall(r"[a-z0-9_-]+", normalized))
+          # Split into whitespace-delimited tokens, strip leading dashes/slashes and trailing punctuation.
+          tokens = set()
+          for raw_token in normalized.split():
+              cleaned = re.sub(r"^[\-/]+", "", raw_token)
+              cleaned = re.sub(r"[^a-z0-9_-]", "", cleaned)
+              if cleaned:
+                  tokens.add(cleaned)
+
+          force = "force" in tokens
           wants_web = "web" in tokens
           wants_srv = "server" in tokens or "srv" in tokens
 

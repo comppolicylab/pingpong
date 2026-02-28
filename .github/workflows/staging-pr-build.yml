@@ -194,36 +194,42 @@ jobs:
             /repos/${{ github.repository }}/check-runs
 
       - name: Create server check run
+        id: create_server_check_run
         if: (inputs.target == 'all' || inputs.target == 'srv') && steps.dedupe.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api -X POST -H "Accept: application/vnd.github+json" \
+          check_run_id="$(gh api -X POST -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             -f 'name=Server: Building & Pushing Image on AWS for Testing' \
             -f 'head_sha=${{ env.PR_SHA }}' \
             -f 'status=in_progress' \
-            /repos/${{ github.repository }}/check-runs
+            /repos/${{ github.repository }}/check-runs --jq '.id')"
+          echo "check_run_id=${check_run_id}" >> "$GITHUB_OUTPUT"
 
       - name: Create web check run
+        id: create_web_check_run
         if: (inputs.target == 'all' || inputs.target == 'web') && steps.dedupe.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api -X POST -H "Accept: application/vnd.github+json" \
+          check_run_id="$(gh api -X POST -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             -f 'name=Web: Building & Pushing Image on AWS for Testing' \
             -f 'head_sha=${{ env.PR_SHA }}' \
             -f 'status=in_progress' \
-            /repos/${{ github.repository }}/check-runs
+            /repos/${{ github.repository }}/check-runs --jq '.id')"
+          echo "check_run_id=${check_run_id}" >> "$GITHUB_OUTPUT"
 
       - name: Build server image for release
+        id: build_server_image
         if: (inputs.target == 'all' || inputs.target == 'srv') && steps.dedupe.outputs.skip != 'true'
         run: |
           echo "Building Server image with tag ${SRV_VERSION}"
           docker compose -f docker-compose.yml -f docker-compose.prod.yml build srv
 
       - name: Push server image for release
+        id: push_server_image
         if: (inputs.target == 'all' || inputs.target == 'srv') && steps.dedupe.outputs.skip != 'true'
         run: |
           aws ecr get-login-password --region "${{ vars.AWS_REGION }}" | docker login --username AWS --password-stdin "${{ vars.PINGPONG_REGISTRY_ENDPOINT }}"
@@ -235,25 +241,30 @@ jobs:
           echo "Built and pushed Server image (${SRV_VERSION}), stable tag (${STABLE_TAG}), and ${ENVIRONMENT} tag."
 
       - name: Complete check run (server image pushed)
-        if: (inputs.target == 'all' || inputs.target == 'srv') && steps.dedupe.outputs.skip != 'true'
+        if: always() && (inputs.target == 'all' || inputs.target == 'srv') && steps.dedupe.outputs.skip != 'true' && steps.create_server_check_run.outputs.check_run_id != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api -X POST -H "Accept: application/vnd.github+json" \
+          conclusion='success'
+          if [ '${{ steps.build_server_image.outcome }}' != 'success' ] || [ '${{ steps.push_server_image.outcome }}' != 'success' ]; then
+            conclusion='failure'
+          fi
+
+          gh api -X PATCH -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
-            -f 'name=Server: Building & Pushing Image on AWS for Testing' \
-            -f 'head_sha=${{ env.PR_SHA }}' \
             -f 'status=completed' \
-            -f 'conclusion=success' \
-            /repos/${{ github.repository }}/check-runs
+            -f "conclusion=${conclusion}" \
+            /repos/${{ github.repository }}/check-runs/${{ steps.create_server_check_run.outputs.check_run_id }}
 
       - name: Build web image for release
+        id: build_web_image
         if: (inputs.target == 'all' || inputs.target == 'web') && steps.dedupe.outputs.skip != 'true'
         run: |
           echo "Building Web image with tag ${WEB_VERSION}"
           docker compose -f docker-compose.yml -f docker-compose.prod.yml build web
 
       - name: Push web image for release
+        id: push_web_image
         if: (inputs.target == 'all' || inputs.target == 'web') && steps.dedupe.outputs.skip != 'true'
         run: |
           aws ecr get-login-password --region "${{ vars.AWS_REGION }}" | docker login --username AWS --password-stdin "${{ vars.PINGPONG_REGISTRY_ENDPOINT }}"
@@ -265,14 +276,17 @@ jobs:
           echo "Built and pushed Web image (${WEB_VERSION}), stable tag (${STABLE_TAG}), and ${ENVIRONMENT} tag."
 
       - name: Complete check run (web image pushed)
-        if: (inputs.target == 'all' || inputs.target == 'web') && steps.dedupe.outputs.skip != 'true'
+        if: always() && (inputs.target == 'all' || inputs.target == 'web') && steps.dedupe.outputs.skip != 'true' && steps.create_web_check_run.outputs.check_run_id != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api -X POST -H "Accept: application/vnd.github+json" \
+          conclusion='success'
+          if [ '${{ steps.build_web_image.outcome }}' != 'success' ] || [ '${{ steps.push_web_image.outcome }}' != 'success' ]; then
+            conclusion='failure'
+          fi
+
+          gh api -X PATCH -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
-            -f 'name=Web: Building & Pushing Image on AWS for Testing' \
-            -f 'head_sha=${{ env.PR_SHA }}' \
             -f 'status=completed' \
-            -f 'conclusion=success' \
-            /repos/${{ github.repository }}/check-runs
+            -f "conclusion=${conclusion}" \
+            /repos/${{ github.repository }}/check-runs/${{ steps.create_web_check_run.outputs.check_run_id }}
