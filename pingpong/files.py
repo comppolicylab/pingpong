@@ -12,6 +12,7 @@ import uuid_utils as uuid
 from .ai_error import get_details_from_api_error
 from .authz import AuthzClient, Relation
 from .config import config
+from .log_utils import sanitize_for_log
 from .models import File, S3File
 from .schemas import FileTypeInfo, FileUploadPurpose, GenericStatus, ImageProxy
 from .schemas import File as FileSchema
@@ -177,7 +178,8 @@ async def handle_delete_files(
     missing_ids = [file_id for file_id in file_ids if file_id not in file_ids_found]
     if missing_ids:
         logger.warning(
-            f"Could not find the following files for deletion: {missing_ids}"
+            "Could not find the following files for deletion: %s",
+            sanitize_for_log(",".join(str(file_id) for file_id in missing_ids)),
         )
 
     usage_rows = await File.assistant_count_using_files(
@@ -219,7 +221,8 @@ async def handle_delete_files(
 
         if missing_ids:
             logger.warning(
-                f"Could not find the following files for deletion: {missing_ids}"
+                "Could not find the following files for deletion: %s",
+                sanitize_for_log(",".join(str(file_id) for file_id in missing_ids)),
             )
     except IntegrityError:
         await authz.write_safe(grant=revoked_grants_class_only)

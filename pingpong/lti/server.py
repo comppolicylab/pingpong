@@ -475,7 +475,8 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
         )
     except Exception:
         logger.exception(
-            f"Failed to send LTI registration submitted email: {data.admin_email}",
+            "Failed to send LTI registration submitted email: %s",
+            sanitize_for_log(data.admin_email),
         )
 
     return {"status": "ok"}

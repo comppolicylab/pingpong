@@ -19,6 +19,7 @@ from pingpong.ai import (
     OpenAIClientType,
 )
 import pingpong.schemas as schemas
+from pingpong.log_utils import sanitize_for_log
 from pingpong.models import Thread, MessagePart, Message, Run
 from pingpong.realtime_recorder import RealtimeRecorder
 from pingpong.websocket import (
@@ -590,7 +591,10 @@ async def handle_browser_messages(
                     type = data.get("type")
                     if not type:
                         browser_connection_logger.exception(
-                            f"Received unexpected message: {data}"
+                            "Received unexpected message: %s",
+                            sanitize_for_log(
+                                json.dumps(data, sort_keys=True), max_len=512
+                            ),
                         )
                     elif type == "conversation.item.truncate":
                         item_id = data.get("item_id")
@@ -625,7 +629,10 @@ async def handle_browser_messages(
                             or started_playing_at_ms is None
                         ):
                             browser_connection_logger.exception(
-                                f"Received response.audio.delta.started message without item_id, event_id, or started_playing_at {data}"
+                                "Received response.audio.delta.started message without item_id, event_id, or started_playing_at: %s",
+                                sanitize_for_log(
+                                    json.dumps(data, sort_keys=True), max_len=512
+                                ),
                             )
                             continue
                         await (
@@ -661,7 +668,8 @@ async def handle_browser_messages(
                     )
             else:
                 browser_connection_logger.exception(
-                    f"Received unexpected message: {message}"
+                    "Received unexpected message: %s",
+                    sanitize_for_log(str(message), max_len=512),
                 )
 
     except WebSocketDisconnect:
