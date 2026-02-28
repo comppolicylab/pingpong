@@ -50,6 +50,9 @@ jobs:
     name: Build and Push/Tag Docker Images for Testing
     timeout-minutes: 25
     runs-on: ubuntu-latest
+    env:
+      PR_NUMBER: ${{ inputs.pr_number }}
+      PR_SHA: ${{ inputs.pr_sha }}
     steps:
       - name: Validate requested PR commit
         id: validate
@@ -58,7 +61,17 @@ jobs:
         run: |
           set -euo pipefail
 
-          pr_json="$(gh api "/repos/${{ github.repository }}/pulls/${{ inputs.pr_number }}")"
+          if ! [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
+            echo "Invalid PR number: $PR_NUMBER" >&2
+            exit 1
+          fi
+          if ! [[ "$PR_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "Invalid PR SHA format: $PR_SHA" >&2
+            exit 1
+          fi
+          requested_sha="$(printf '%s' "$PR_SHA" | tr '[:upper:]' '[:lower:]')"
+
+          pr_json="$(gh api "/repos/${{ github.repository }}/pulls/${PR_NUMBER}")"
           pr_repo="$(jq -r '.head.repo.full_name' <<<"$pr_json")"
           pr_is_fork="$(jq -r '.head.repo.fork' <<<"$pr_json")"
 
@@ -67,10 +80,9 @@ jobs:
             exit 1
           fi
 
-          requested_sha="${{ inputs.pr_sha }}"
-          sha_match="$(gh api --paginate "/repos/${{ github.repository }}/pulls/${{ inputs.pr_number }}/commits" --jq ".[] | select(.sha == \"${requested_sha}\") | .sha" | head -n1)"
+          sha_match="$(gh api --paginate "/repos/${{ github.repository }}/pulls/${PR_NUMBER}/commits" --jq ".[] | select(.sha == \"${requested_sha}\") | .sha" | head -n1)"
           if [ -z "${sha_match}" ]; then
-            echo "Requested SHA ${requested_sha} is not in PR #${{ inputs.pr_number }} commit history." >&2
+            echo "Requested SHA ${requested_sha} is not in PR #${PR_NUMBER} commit history." >&2
             exit 1
           fi
 
@@ -80,15 +92,15 @@ jobs:
       - name: Checkout requested PR commit
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
-          ref: ${{ inputs.pr_sha }}
+          ref: ${{ env.PR_SHA }}
 
       - name: Create version tags
         run: |
           set -euo pipefail
-          release_tag="pr_${{ inputs.pr_number }}"
+          release_tag="pr_${PR_NUMBER}"
           unique_tag="${release_tag}_${{ steps.validate.outputs.short_sha }}"
 
-          echo "PR_SHA=${{ inputs.pr_sha }}" >> "$GITHUB_ENV"
+          echo "PR_SHA=${PR_SHA}" >> "$GITHUB_ENV"
           echo "ENVIRONMENT=stage" >> "$GITHUB_ENV"
           echo "STABLE_TAG=${release_tag}" >> "$GITHUB_ENV"
           echo "UNIQUE_TAG=${unique_tag}" >> "$GITHUB_ENV"
