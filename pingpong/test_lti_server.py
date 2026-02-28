@@ -285,6 +285,19 @@ def _make_registration(
     )
 
 
+def _make_lti_server_config(
+    *,
+    allowlist: list[str] | None = None,
+    public_url: str = "https://tool.example.com",
+):
+    return SimpleNamespace(
+        url=lambda path: f"{public_url}{path}",
+        public_url=public_url,
+        email=SimpleNamespace(sender="sender"),
+        lti=SimpleNamespace(platform_url_allowlist=allowlist or []),
+    )
+
+
 @pytest.mark.asyncio
 async def test_fetch_jwks_returns_dict(monkeypatch):
     monkeypatch.setattr(
@@ -394,6 +407,11 @@ def test_get_lti_key_manager_success(monkeypatch):
     assert server_module.get_lti_key_manager() is key_manager
 
 
+def test_test_config_includes_lti_platform_url_allowlist():
+    assert server_module.config.lti is not None
+    assert "platform.example.com" in server_module.config.lti.platform_url_allowlist
+
+
 @pytest.mark.asyncio
 async def test_get_jwks_success():
     async def _get_public_keys_jwks():
@@ -496,11 +514,7 @@ async def test_register_lti_instance_success(monkeypatch):
     monkeypatch.setattr(
         server_module,
         "config",
-        SimpleNamespace(
-            url=lambda path: f"https://tool.example.com{path}",
-            public_url="https://tool.example.com",
-            email=SimpleNamespace(sender="sender"),
-        ),
+        _make_lti_server_config(allowlist=["platform.example.com"]),
     )
 
     data = LTIRegisterRequest(
@@ -523,6 +537,101 @@ async def test_register_lti_instance_success(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_register_lti_instance_requires_platform_url_allowlist(monkeypatch):
+    monkeypatch.setattr(
+        server_module.Institution,
+        "all_have_default_api_key",
+        lambda db, ids: _async_return(True),
+    )
+    monkeypatch.setattr(server_module, "config", _make_lti_server_config())
+
+    data = LTIRegisterRequest(
+        name="PingPong",
+        admin_name="Admin",
+        admin_email="admin@example.com",
+        provider_id=0,
+        sso_field=None,
+        openid_configuration="https://platform.example.com/.well-known/openid",
+        registration_token="token",
+        institution_ids=[1],
+    )
+    request = FakeRequest(state=SimpleNamespace(db="db"))
+
+    with pytest.raises(HTTPException) as excinfo:
+        await server_module.register_lti_instance(request, data)
+
+    assert excinfo.value.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_register_lti_instance_rejects_unallowlisted_openid_configuration(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        server_module.Institution,
+        "all_have_default_api_key",
+        lambda db, ids: _async_return(True),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "config",
+        _make_lti_server_config(allowlist=["canvas.example.edu"]),
+    )
+
+    data = LTIRegisterRequest(
+        name="PingPong",
+        admin_name="Admin",
+        admin_email="admin@example.com",
+        provider_id=0,
+        sso_field=None,
+        openid_configuration="https://platform.example.com/.well-known/openid",
+        registration_token="token",
+        institution_ids=[1],
+    )
+    request = FakeRequest(state=SimpleNamespace(db="db"))
+
+    with pytest.raises(HTTPException) as excinfo:
+        await server_module.register_lti_instance(request, data)
+
+    assert excinfo.value.status_code == 400
+    assert "openid_configuration host is not allowlisted" in excinfo.value.detail
+
+
+@pytest.mark.asyncio
+async def test_register_lti_instance_rejects_mistyped_openid_configuration_url(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        server_module.Institution,
+        "all_have_default_api_key",
+        lambda db, ids: _async_return(True),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "config",
+        _make_lti_server_config(allowlist=["platform.example.com"]),
+    )
+
+    data = LTIRegisterRequest(
+        name="PingPong",
+        admin_name="Admin",
+        admin_email="admin@example.com",
+        provider_id=0,
+        sso_field=None,
+        openid_configuration="https:/platform.example.com/.well-known/openid",
+        registration_token="token",
+        institution_ids=[1],
+    )
+    request = FakeRequest(state=SimpleNamespace(db="db"))
+
+    with pytest.raises(HTTPException) as excinfo:
+        await server_module.register_lti_instance(request, data)
+
+    assert excinfo.value.status_code == 400
+    assert "Invalid URL for openid_configuration" in excinfo.value.detail
+
+
+@pytest.mark.asyncio
 async def test_lti_login_redirect(monkeypatch):
     registration = _make_registration()
     monkeypatch.setattr(
@@ -538,7 +647,7 @@ async def test_lti_login_redirect(monkeypatch):
     monkeypatch.setattr(
         server_module,
         "config",
-        SimpleNamespace(url=lambda path: f"https://tool.example.com{path}"),
+        _make_lti_server_config(allowlist=["platform.example.com"]),
     )
     monkeypatch.setattr(
         server_module, "get_now_fn", lambda request: lambda: datetime.now(timezone.utc)
@@ -574,7 +683,7 @@ async def test_lti_login_redirect_post(monkeypatch):
     monkeypatch.setattr(
         server_module,
         "config",
-        SimpleNamespace(url=lambda path: f"https://tool.example.com{path}"),
+        _make_lti_server_config(allowlist=["platform.example.com"]),
     )
     monkeypatch.setattr(
         server_module, "get_now_fn", lambda request: lambda: datetime.now(timezone.utc)
@@ -594,6 +703,122 @@ async def test_lti_login_redirect_post(monkeypatch):
 
     assert response.status_code == 302
     assert response.headers["location"].startswith(registration.auth_login_url)
+
+
+@pytest.mark.asyncio
+async def test_lti_login_rejects_unallowlisted_auth_login_url(monkeypatch):
+    registration = _make_registration(auth_login_url="https://evil.example.com/auth")
+    monkeypatch.setattr(
+        server_module.LTIRegistration,
+        "get_by_client_id",
+        lambda db, client_id: _async_return(registration),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "config",
+        _make_lti_server_config(allowlist=["platform.example.com"]),
+    )
+
+    payload = {
+        "client_id": "client",
+        "iss": "issuer",
+        "login_hint": "hint",
+        "target_link_uri": "https://tool.example.com/launch",
+    }
+    request = FakeRequest(method="GET", payload=payload, state=SimpleNamespace(db="db"))
+
+    with pytest.raises(HTTPException) as excinfo:
+        await server_module.lti_login(request)
+
+    assert excinfo.value.status_code == 400
+    assert "auth_login_url host is not allowlisted" in excinfo.value.detail
+
+
+@pytest.mark.asyncio
+async def test_lti_login_rejects_backslash_authorization_url(monkeypatch):
+    registration = _make_registration(auth_login_url=r"https:\\evil.example.com\auth")
+    monkeypatch.setattr(
+        server_module.LTIRegistration,
+        "get_by_client_id",
+        lambda db, client_id: _async_return(registration),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "config",
+        _make_lti_server_config(allowlist=["platform.example.com"]),
+    )
+
+    payload = {
+        "client_id": "client",
+        "iss": "issuer",
+        "login_hint": "hint",
+        "target_link_uri": "https://tool.example.com/launch",
+    }
+    request = FakeRequest(method="GET", payload=payload, state=SimpleNamespace(db="db"))
+
+    with pytest.raises(HTTPException) as excinfo:
+        await server_module.lti_login(request)
+
+    assert excinfo.value.status_code == 400
+    assert "auth_login_url host is not allowlisted" in excinfo.value.detail
+
+
+@pytest.mark.asyncio
+async def test_lti_login_rejects_mistyped_authorization_url(monkeypatch):
+    registration = _make_registration(auth_login_url="https:/platform.example.com/auth")
+    monkeypatch.setattr(
+        server_module.LTIRegistration,
+        "get_by_client_id",
+        lambda db, client_id: _async_return(registration),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "config",
+        _make_lti_server_config(allowlist=["platform.example.com"]),
+    )
+
+    payload = {
+        "client_id": "client",
+        "iss": "issuer",
+        "login_hint": "hint",
+        "target_link_uri": "https://tool.example.com/launch",
+    }
+    request = FakeRequest(method="GET", payload=payload, state=SimpleNamespace(db="db"))
+
+    with pytest.raises(HTTPException) as excinfo:
+        await server_module.lti_login(request)
+
+    assert excinfo.value.status_code == 400
+    assert "Invalid URL for auth_login_url" in excinfo.value.detail
+
+
+@pytest.mark.asyncio
+async def test_lti_login_rejects_triple_slash_authorization_url(monkeypatch):
+    registration = _make_registration(auth_login_url="https:///platform.example.com/auth")
+    monkeypatch.setattr(
+        server_module.LTIRegistration,
+        "get_by_client_id",
+        lambda db, client_id: _async_return(registration),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "config",
+        _make_lti_server_config(allowlist=["platform.example.com"]),
+    )
+
+    payload = {
+        "client_id": "client",
+        "iss": "issuer",
+        "login_hint": "hint",
+        "target_link_uri": "https://tool.example.com/launch",
+    }
+    request = FakeRequest(method="GET", payload=payload, state=SimpleNamespace(db="db"))
+
+    with pytest.raises(HTTPException) as excinfo:
+        await server_module.lti_login(request)
+
+    assert excinfo.value.status_code == 400
+    assert "Invalid URL for auth_login_url" in excinfo.value.detail
 
 
 def test_is_instructor_and_student():

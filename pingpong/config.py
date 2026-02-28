@@ -329,6 +329,10 @@ class LTISettings(BaseSettings):
 
     key_store: LTIKeyStoreSettings
     sync_wait: int = Field(60 * 10, gt=0)  # 10 mins
+    # Allowed LMS platform URL hosts for LTI setup and login redirects.
+    # Entries support exact hosts (e.g. "canvas.example.edu") and wildcards
+    # (e.g. "*.instructure.com").
+    platform_url_allowlist: list[str] = Field(default_factory=list)
 
     # Key rotation settings
     rotation_schedule: str = Field("0 0 1 * *")  # First day of every month at midnight

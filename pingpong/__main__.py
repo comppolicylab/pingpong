@@ -1,7 +1,8 @@
 import asyncio
 import logging
 import sys
-from typing import Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional
+from urllib.parse import urlsplit
 import webbrowser
 import click
 import json
@@ -57,6 +58,12 @@ from pingpong.migrations.m06_cleanup_orphaned_lti_classes import (
 from pingpong.now import _get_next_run_time, croner, utcnow
 from pingpong.schemas import LMSType, RunStatus
 from pingpong.lti.canvas_connect import canvas_connect_sync_all
+from pingpong.lti.constants import (
+    AUTHORIZATION_ENDPOINT_KEY,
+    KEYS_ENDPOINT_KEY,
+    REGISTRATION_ENDPOINT_KEY,
+    TOKEN_ENDPOINT_KEY,
+)
 from pingpong.summary import send_class_summary_for_class
 
 from .auth import encode_auth_token
@@ -74,6 +81,7 @@ from .models import (
     PeriodicTask,
     User,
     Class,
+    LTIRegistration,
     UserClassRole,
 )
 from .authz.admin_migration import remove_class_admin_perms
@@ -1192,6 +1200,143 @@ async def _send_activity_summaries(
                 logger.info("All summaries sent successfully.")
                 job.completed_at = utcnow()
             await session.commit()
+
+
+def _extract_allowlist_hostname(url_value: Any) -> str | None:
+    if not isinstance(url_value, str) or not url_value:
+        return None
+    normalized_url = url_value.replace("\\", "/")
+    parsed = urlsplit(normalized_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc or not parsed.hostname:
+        return None
+    return parsed.hostname.lower()
+
+
+def _try_parse_json_object(raw_value: Any) -> dict[str, Any] | None:
+    if not isinstance(raw_value, str) or not raw_value:
+        return None
+    try:
+        parsed = json.loads(raw_value)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    return parsed
+
+
+@lti.command("suggest-config-from-db")
+@click.option(
+    "--json-output/--text-output",
+    default=False,
+    show_default=True,
+    help="Print the suggested values as JSON.",
+)
+def lti_suggest_config_from_db(json_output: bool) -> None:
+    """
+    Suggest LTI config values based on existing DB registrations.
+    """
+
+    async def _suggest_config_from_db() -> None:
+        async with config.db.driver.async_session() as session:
+            result = await session.execute(
+                select(LTIRegistration).order_by(LTIRegistration.id.asc())
+            )
+            registrations = list(result.scalars().all())
+
+        hosts_to_sources: dict[str, set[str]] = {}
+        warnings: list[str] = []
+
+        def _record_url(url_value: Any, source: str) -> None:
+            if not isinstance(url_value, str) or not url_value:
+                return
+            host = _extract_allowlist_hostname(url_value)
+            if host is None:
+                warnings.append(f"{source}: invalid URL {url_value!r}")
+                return
+            hosts_to_sources.setdefault(host, set()).add(source)
+
+        for registration in registrations:
+            source_prefix = f"registration[{registration.id}]"
+            _record_url(registration.auth_login_url, f"{source_prefix}.auth_login_url")
+            _record_url(registration.auth_token_url, f"{source_prefix}.auth_token_url")
+            _record_url(registration.key_set_url, f"{source_prefix}.key_set_url")
+
+            openid_configuration = _try_parse_json_object(registration.openid_configuration)
+            if registration.openid_configuration and openid_configuration is None:
+                warnings.append(
+                    f"{source_prefix}.openid_configuration: invalid JSON payload"
+                )
+                continue
+            if openid_configuration is None:
+                continue
+
+            _record_url(
+                openid_configuration.get(AUTHORIZATION_ENDPOINT_KEY),
+                f"{source_prefix}.openid_configuration.{AUTHORIZATION_ENDPOINT_KEY}",
+            )
+            _record_url(
+                openid_configuration.get(REGISTRATION_ENDPOINT_KEY),
+                f"{source_prefix}.openid_configuration.{REGISTRATION_ENDPOINT_KEY}",
+            )
+            _record_url(
+                openid_configuration.get(KEYS_ENDPOINT_KEY),
+                f"{source_prefix}.openid_configuration.{KEYS_ENDPOINT_KEY}",
+            )
+            _record_url(
+                openid_configuration.get(TOKEN_ENDPOINT_KEY),
+                f"{source_prefix}.openid_configuration.{TOKEN_ENDPOINT_KEY}",
+            )
+
+        suggested_hosts = sorted(hosts_to_sources.keys())
+        suggested_config = {
+            "lti": {
+                "platform_url_allowlist": suggested_hosts,
+            }
+        }
+
+        if json_output:
+            click.echo(
+                json.dumps(
+                    {
+                        "registration_count": len(registrations),
+                        "suggested_config": suggested_config,
+                        "sources_by_host": {
+                            host: sorted(host_sources)
+                            for host, host_sources in hosts_to_sources.items()
+                        },
+                        "warnings": warnings,
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return
+
+        if not registrations:
+            click.echo("No LTI registrations found in the database.")
+            click.echo("[lti]")
+            click.echo("platform_url_allowlist = []")
+            return
+
+        click.echo("# Suggested config.toml values based on existing LTI registrations")
+        click.echo("[lti]")
+        quoted_hosts = ", ".join(f'"{host}"' for host in suggested_hosts)
+        click.echo(f"platform_url_allowlist = [{quoted_hosts}]")
+        click.echo("")
+        click.echo(
+            f"# Found {len(suggested_hosts)} unique host(s) from {len(registrations)} registration(s)."
+        )
+        for host in suggested_hosts:
+            click.echo(f"# {host}")
+            for source in sorted(hosts_to_sources[host]):
+                click.echo(f"#   - {source}")
+        if warnings:
+            click.echo("")
+            click.echo("# Warnings")
+            for warning in warnings:
+                click.echo(f"# {warning}")
+
+    asyncio.run(_suggest_config_from_db())
 
 
 @lti.command("rotate-keys")
