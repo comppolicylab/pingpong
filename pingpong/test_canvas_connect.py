@@ -526,7 +526,9 @@ async def test_get_context_memberships_url_raises_when_missing(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_get_context_memberships_url_raises_when_host_is_not_allowed(monkeypatch):
+async def test_get_context_memberships_url_raises_when_host_is_not_allowlisted(
+    monkeypatch,
+):
     registration = SimpleNamespace(
         client_id="client-123",
         issuer="https://canvas.example.com",
@@ -559,14 +561,11 @@ async def test_get_context_memberships_url_raises_when_host_is_not_allowed(monke
     with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
         await client.get_context_memberships_url()
 
-    assert (
-        excinfo.value.detail
-        == "context_memberships_url host is not allowed for this registration"
-    )
+    assert excinfo.value.detail == "context_memberships_url host is not allowlisted"
 
 
 @pytest.mark.asyncio
-async def test_get_context_memberships_url_raises_when_host_is_not_allowlisted(
+async def test_get_context_memberships_url_raises_when_global_allowlist_excludes_host(
     monkeypatch,
 ):
     monkeypatch.setattr(
@@ -607,6 +606,51 @@ async def test_get_context_memberships_url_raises_when_host_is_not_allowlisted(
         await client.get_context_memberships_url()
 
     assert excinfo.value.detail == "context_memberships_url host is not allowlisted"
+
+
+@pytest.mark.asyncio
+async def test_get_context_memberships_url_raises_when_allowlist_is_invalid(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        canvas_connect_module.config.lti,
+        "platform_url_allowlist",
+        ["platform.example.com/path"],
+    )
+    registration = SimpleNamespace(
+        client_id="client-123",
+        issuer="https://canvas.example.com",
+        openid_configuration='{"token_endpoint":"https://canvas.example.com/token"}',
+        auth_token_url="https://canvas.example.com/fallback-token",
+    )
+    lti_class = SimpleNamespace(
+        id=1703,
+        registration=registration,
+        context_memberships_url="https://canvas.example.com/memberships",
+        course_id="123",
+    )
+
+    async def _get_by_id_with_registration(cls, db, id_):
+        return lti_class
+
+    monkeypatch.setattr(
+        canvas_connect_module.LTIClass,
+        "get_by_id_with_registration",
+        classmethod(_get_by_id_with_registration),
+    )
+
+    client = canvas_connect_module.CanvasConnectClient(
+        db=SimpleNamespace(),
+        lti_class_id=1703,
+        key_manager=FakeKeyManager(),
+    )
+    with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+        await client.get_context_memberships_url()
+
+    assert (
+        excinfo.value.detail
+        == canvas_connect_module.INVALID_PLATFORM_URL_ALLOWLIST_DETAIL
+    )
 
 
 def test_registration_allowed_hosts_extracts_hosts_from_registration_urls():
@@ -1087,10 +1131,7 @@ async def test_get_nrps_create_user_class_roles_rejects_untrusted_next_page(
         with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
             await client.get_nrps_create_user_class_roles()
 
-    assert (
-        excinfo.value.detail
-        == "nrps_page_url host is not allowed for this registration"
-    )
+    assert excinfo.value.detail == "nrps_page_url host is not allowlisted"
     assert len(fake_session.requests) == 2
     assert fake_session.requests[1]["method"] == "GET"
 

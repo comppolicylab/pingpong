@@ -2,8 +2,8 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from datetime import datetime, timedelta
-from typing import Any, cast
-from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from typing import cast
+from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit, urlunparse
 
 import aiohttp
 from fastapi import BackgroundTasks
@@ -14,15 +14,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pingpong.authz.openfga import OpenFgaAuthzClient
 from pingpong.config import config
 from pingpong.lti.allowlist import (
+    extract_lti_url_hostname,
+    get_lti_platform_url_allowlist_from_settings,
+    INVALID_PLATFORM_URL_ALLOWLIST_DETAIL,
+    InvalidLTIPlatformUrlAllowlistError,
     is_lti_host_allowlisted,
-    normalize_lti_platform_url_allowlist,
+    MissingLTIPlatformUrlAllowlistError,
+    try_parse_json_object,
 )
 from pingpong.lti.constants import (
-    AUTHORIZATION_ENDPOINT_KEY,
     CANVAS_CONNECT_SYNC_WAIT_DEFAULT_SECONDS,
     CLIENT_ASSERTION_EXPIRY_SECONDS,
     CLIENT_ASSERTION_TYPE,
-    KEYS_ENDPOINT_KEY,
     CLIENT_CREDENTIALS_GRANT_TYPE,
     LTI_CLAIM_CUSTOM_KEY,
     LTI_CUSTOM_SSO_PROVIDER_ID_KEY,
@@ -42,7 +45,8 @@ from pingpong.lti.constants import (
     NRPS_MEMBERS_KEY,
     NRPS_NEXT_PAGE_KEY,
     NRPS_RESOURCE_LINK_QUERY_KEY,
-    REGISTRATION_ENDPOINT_KEY,
+    LTI_OPENID_CONFIGURATION_URL_KEYS,
+    LTI_REGISTRATION_URL_FIELDS,
     TOKEN_ENDPOINT_KEY,
     TOKEN_REQUEST_CONTENT_TYPE,
 )
@@ -110,44 +114,17 @@ def _extract_error_detail(payload: object) -> str | None:
     return None
 
 
-def _extract_url_hostname(url: Any) -> str | None:
-    if not isinstance(url, str) or not url:
-        return None
-    normalized_url = url.replace("\\", "/")
-    parsed = urlparse(normalized_url)
-    if (
-        parsed.scheme not in {"http", "https"}
-        or not parsed.netloc
-        or not parsed.hostname
-    ):
-        return None
-    return parsed.hostname.lower()
-
-
-def _try_parse_json_object(raw_value: object) -> dict[str, object] | None:
-    if not isinstance(raw_value, str) or not raw_value:
-        return None
-    try:
-        parsed = json.loads(raw_value)
-    except json.JSONDecodeError:
-        return None
-    return _as_dict(parsed)
-
-
 def _get_lti_platform_url_allowlist() -> list[str]:
-    lti_settings = getattr(config, "lti", None)
-    allowlist = (
-        getattr(lti_settings, "platform_url_allowlist", None) if lti_settings else None
-    )
-    if not isinstance(allowlist, list) or not allowlist:
-        return []
     try:
-        return normalize_lti_platform_url_allowlist(allowlist)
-    except ValueError:
-        logger.warning(
-            "Ignoring invalid LTI platform URL allowlist while validating Canvas Connect hosts"
+        return get_lti_platform_url_allowlist_from_settings(
+            getattr(config, "lti", None)
         )
+    except MissingLTIPlatformUrlAllowlistError:
         return []
+    except InvalidLTIPlatformUrlAllowlistError:
+        raise CanvasConnectException(
+            detail=INVALID_PLATFORM_URL_ALLOWLIST_DETAIL,
+        )
 
 
 def _extract_sync_row_errors(results: CreateUserResults) -> list[str]:
@@ -191,6 +168,7 @@ class CanvasConnectClient:
         self.key_manager = key_manager
         self.http_session: aiohttp.ClientSession | None = None
         self._cached_lti_class: LTIClass | None = None
+        self._cached_platform_url_allowlist: list[str] | None = None
         self._cached_nrps_access_token: CanvasConnectAccessToken | None = None
         self._cached_nrps_access_token_valid_until: int | None = None
 
@@ -209,6 +187,11 @@ class CanvasConnectClient:
                 "CanvasConnectClient must be used as an async context manager"
             )
         return self.http_session
+
+    def _get_platform_url_allowlist(self) -> list[str]:
+        if self._cached_platform_url_allowlist is None:
+            self._cached_platform_url_allowlist = _get_lti_platform_url_allowlist()
+        return self._cached_platform_url_allowlist
 
     @staticmethod
     def _get_token_endpoint(registration: LTIRegistration) -> str:
@@ -253,26 +236,18 @@ class CanvasConnectClient:
     @staticmethod
     def _registration_allowed_hosts(registration: LTIRegistration) -> set[str]:
         hosts: set[str] = set()
-        for url in (
-            getattr(registration, "auth_login_url", None),
-            getattr(registration, "auth_token_url", None),
-            getattr(registration, "key_set_url", None),
-        ):
-            host = _extract_url_hostname(url)
+        for field_name in LTI_REGISTRATION_URL_FIELDS:
+            url = getattr(registration, field_name, None)
+            host = extract_lti_url_hostname(url)
             if host:
                 hosts.add(host)
 
-        openid_configuration = _try_parse_json_object(
+        openid_configuration = try_parse_json_object(
             getattr(registration, "openid_configuration", None)
         )
         if openid_configuration is not None:
-            for key in (
-                AUTHORIZATION_ENDPOINT_KEY,
-                REGISTRATION_ENDPOINT_KEY,
-                KEYS_ENDPOINT_KEY,
-                TOKEN_ENDPOINT_KEY,
-            ):
-                host = _extract_url_hostname(openid_configuration.get(key))
+            for key in LTI_OPENID_CONFIGURATION_URL_KEYS:
+                host = extract_lti_url_hostname(openid_configuration.get(key))
                 if host:
                     hosts.add(host)
 
@@ -280,7 +255,7 @@ class CanvasConnectClient:
 
     async def _validate_nrps_url(self, url: str, field_name: str) -> str:
         normalized_url = url.replace("\\", "/")
-        parsed = urlparse(normalized_url)
+        parsed = urlsplit(normalized_url)
         if (
             parsed.scheme not in {"http", "https"}
             or not parsed.netloc
@@ -289,14 +264,7 @@ class CanvasConnectClient:
             raise CanvasConnectException(detail=f"Invalid URL for {field_name}")
 
         host = parsed.hostname.lower()
-        lti_class = await self._get_lti_class()
-        allowed_hosts = self._registration_allowed_hosts(lti_class.registration)
-        if host not in allowed_hosts:
-            raise CanvasConnectException(
-                detail=f"{field_name} host is not allowed for this registration"
-            )
-
-        allowlist = _get_lti_platform_url_allowlist()
+        allowlist = self._get_platform_url_allowlist()
         if not is_lti_host_allowlisted(host, allowlist):
             raise CanvasConnectException(
                 detail=f"{field_name} host is not allowlisted",

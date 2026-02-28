@@ -2,7 +2,6 @@ import asyncio
 import logging
 import sys
 from typing import Any, Callable, Dict, Optional
-from urllib.parse import urlsplit
 import webbrowser
 import click
 import json
@@ -58,11 +57,10 @@ from pingpong.migrations.m06_cleanup_orphaned_lti_classes import (
 from pingpong.now import _get_next_run_time, croner, utcnow
 from pingpong.schemas import LMSType, LTIRegistrationReviewStatus, RunStatus
 from pingpong.lti.canvas_connect import canvas_connect_sync_all
+from pingpong.lti.allowlist import extract_lti_url_hostname, try_parse_json_object
 from pingpong.lti.constants import (
-    AUTHORIZATION_ENDPOINT_KEY,
-    KEYS_ENDPOINT_KEY,
-    REGISTRATION_ENDPOINT_KEY,
-    TOKEN_ENDPOINT_KEY,
+    LTI_OPENID_CONFIGURATION_URL_KEYS,
+    LTI_REGISTRATION_URL_FIELDS,
 )
 from pingpong.summary import send_class_summary_for_class
 
@@ -1202,35 +1200,6 @@ async def _send_activity_summaries(
             await session.commit()
 
 
-def _extract_allowlist_hostname(url_value: Any) -> str | None:
-    if not isinstance(url_value, str):
-        return None
-    trimmed_url = url_value.strip()
-    if not trimmed_url:
-        return None
-    normalized_url = trimmed_url.replace("\\", "/")
-    parsed = urlsplit(normalized_url)
-    if (
-        parsed.scheme not in {"http", "https"}
-        or not parsed.netloc
-        or not parsed.hostname
-    ):
-        return None
-    return parsed.hostname.lower()
-
-
-def _try_parse_json_object(raw_value: Any) -> dict[str, Any] | None:
-    if not isinstance(raw_value, str) or not raw_value:
-        return None
-    try:
-        parsed = json.loads(raw_value)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(parsed, dict):
-        return None
-    return parsed
-
-
 @lti.command("suggest-config-from-db")
 @click.option(
     "--json-output/--text-output",
@@ -1264,7 +1233,7 @@ def lti_suggest_config_from_db(json_output: bool) -> None:
         def _record_url(url_value: Any, source: str) -> None:
             if not isinstance(url_value, str) or not url_value:
                 return
-            host = _extract_allowlist_hostname(url_value)
+            host = extract_lti_url_hostname(url_value.strip())
             if host is None:
                 warnings.append(f"{source}: invalid URL {url_value!r}")
                 return
@@ -1272,11 +1241,13 @@ def lti_suggest_config_from_db(json_output: bool) -> None:
 
         for registration in registrations:
             source_prefix = f"registration[{registration.id}]"
-            _record_url(registration.auth_login_url, f"{source_prefix}.auth_login_url")
-            _record_url(registration.auth_token_url, f"{source_prefix}.auth_token_url")
-            _record_url(registration.key_set_url, f"{source_prefix}.key_set_url")
+            for field_name in LTI_REGISTRATION_URL_FIELDS:
+                _record_url(
+                    getattr(registration, field_name),
+                    f"{source_prefix}.{field_name}",
+                )
 
-            openid_configuration = _try_parse_json_object(
+            openid_configuration = try_parse_json_object(
                 registration.openid_configuration
             )
             if registration.openid_configuration and openid_configuration is None:
@@ -1287,22 +1258,11 @@ def lti_suggest_config_from_db(json_output: bool) -> None:
             if openid_configuration is None:
                 continue
 
-            _record_url(
-                openid_configuration.get(AUTHORIZATION_ENDPOINT_KEY),
-                f"{source_prefix}.openid_configuration.{AUTHORIZATION_ENDPOINT_KEY}",
-            )
-            _record_url(
-                openid_configuration.get(REGISTRATION_ENDPOINT_KEY),
-                f"{source_prefix}.openid_configuration.{REGISTRATION_ENDPOINT_KEY}",
-            )
-            _record_url(
-                openid_configuration.get(KEYS_ENDPOINT_KEY),
-                f"{source_prefix}.openid_configuration.{KEYS_ENDPOINT_KEY}",
-            )
-            _record_url(
-                openid_configuration.get(TOKEN_ENDPOINT_KEY),
-                f"{source_prefix}.openid_configuration.{TOKEN_ENDPOINT_KEY}",
-            )
+            for key in LTI_OPENID_CONFIGURATION_URL_KEYS:
+                _record_url(
+                    openid_configuration.get(key),
+                    f"{source_prefix}.openid_configuration.{key}",
+                )
 
         suggested_hosts = sorted(hosts_to_sources.keys())
         suggested_config = {

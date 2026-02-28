@@ -16,9 +16,12 @@ from pingpong.config import config
 from pingpong.invite import send_lti_registration_submitted
 from pingpong.log_utils import sanitize_for_log
 from pingpong.lti.allowlist import (
+    get_lti_platform_url_allowlist_from_settings,
+    InvalidLTIPlatformUrlAllowlistError,
     INVALID_PLATFORM_URL_ALLOWLIST_DETAIL,
+    MISSING_PLATFORM_URL_ALLOWLIST_DETAIL,
+    MissingLTIPlatformUrlAllowlistError,
     is_lti_host_allowlisted,
-    normalize_lti_platform_url_allowlist,
 )
 from pingpong.lti.constants import (
     AUTHORIZATION_ENDPOINT_KEY,
@@ -110,28 +113,25 @@ def _is_public_sso_provider(provider: ExternalLoginProvider) -> bool:
 
 
 def _get_lti_platform_url_allowlist() -> list[str]:
-    lti_settings = getattr(config, "lti", None)
-    allowlist = (
-        getattr(lti_settings, "platform_url_allowlist", None) if lti_settings else None
-    )
-    if not isinstance(allowlist, list) or not allowlist:
+    try:
+        return get_lti_platform_url_allowlist_from_settings(
+            getattr(config, "lti", None)
+        )
+    except MissingLTIPlatformUrlAllowlistError:
         raise HTTPException(
             status_code=503,
-            detail=(
-                "LTI platform URL allowlist is not configured. "
-                "Set lti.platform_url_allowlist in config.toml."
-            ),
+            detail=MISSING_PLATFORM_URL_ALLOWLIST_DETAIL,
         )
-    try:
-        return normalize_lti_platform_url_allowlist(allowlist)
-    except ValueError as e:
+    except InvalidLTIPlatformUrlAllowlistError as e:
         raise HTTPException(
             status_code=500,
             detail=INVALID_PLATFORM_URL_ALLOWLIST_DETAIL,
         ) from e
 
 
-def _require_allowlisted_lti_url(url: Any, field_name: str) -> str:
+def _require_allowlisted_lti_url(
+    url: Any, field_name: str, allowlist: list[str] | None = None
+) -> str:
     if not isinstance(url, str) or not url:
         raise HTTPException(status_code=400, detail=f"Missing or invalid {field_name}")
 
@@ -146,14 +146,22 @@ def _require_allowlisted_lti_url(url: Any, field_name: str) -> str:
     ):
         raise HTTPException(status_code=400, detail=f"Invalid URL for {field_name}")
 
-    allowlist = _get_lti_platform_url_allowlist()
-    if not is_lti_host_allowlisted(parsed.hostname, allowlist):
+    if parsed.username or parsed.password or parsed.fragment or parsed.port is not None:
+        raise HTTPException(status_code=400, detail=f"Invalid URL for {field_name}")
+
+    host = parsed.hostname.lower()
+    host_allowlist = (
+        allowlist if allowlist is not None else _get_lti_platform_url_allowlist()
+    )
+    if not is_lti_host_allowlisted(host, host_allowlist):
         raise HTTPException(
             status_code=400,
             detail=f"{field_name} host is not allowlisted",
         )
 
-    return normalized_url
+    path = parsed.path or "/"
+    query = f"?{parsed.query}" if parsed.query else ""
+    return f"{parsed.scheme}://{host}{path}{query}"
 
 
 def _extract_context_memberships_url_from_claims(claims: dict[str, Any]) -> str | None:
@@ -335,8 +343,9 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
     )
 
     headers = {"Authorization": f"Bearer {data.registration_token}"}
+    allowlist = _get_lti_platform_url_allowlist()
     openid_configuration_url = _require_allowlisted_lti_url(
-        data.openid_configuration, "openid_configuration"
+        data.openid_configuration, "openid_configuration", allowlist
     )
 
     response_data: dict[str, Any] | None = None
@@ -391,13 +400,17 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
             status_code=400, detail="Missing required OpenID configuration fields"
         )
     authorization_endpoint = _require_allowlisted_lti_url(
-        authorization_endpoint, AUTHORIZATION_ENDPOINT_KEY
+        authorization_endpoint, AUTHORIZATION_ENDPOINT_KEY, allowlist
     )
     registration_endpoint = _require_allowlisted_lti_url(
-        registration_endpoint, REGISTRATION_ENDPOINT_KEY
+        registration_endpoint, REGISTRATION_ENDPOINT_KEY, allowlist
     )
-    keys_endpoint = _require_allowlisted_lti_url(keys_endpoint, KEYS_ENDPOINT_KEY)
-    token_endpoint = _require_allowlisted_lti_url(token_endpoint, TOKEN_ENDPOINT_KEY)
+    keys_endpoint = _require_allowlisted_lti_url(
+        keys_endpoint, KEYS_ENDPOINT_KEY, allowlist
+    )
+    token_endpoint = _require_allowlisted_lti_url(
+        token_endpoint, TOKEN_ENDPOINT_KEY, allowlist
+    )
 
     # Persist canonical endpoint URLs so downstream consumers do not re-use
     # unnormalized OpenID response values.

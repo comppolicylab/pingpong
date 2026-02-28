@@ -426,6 +426,7 @@ def test_test_config_includes_lti_platform_url_allowlist(config):
     [
         "platform.example.com/path",
         "platform.example.com:443",
+        "*.example.com",
     ],
 )
 def test_get_lti_platform_url_allowlist_rejects_invalid_bare_host_entries(
@@ -439,6 +440,65 @@ def test_get_lti_platform_url_allowlist_rejects_invalid_bare_host_entries(
 
     with pytest.raises(HTTPException) as excinfo:
         server_module._get_lti_platform_url_allowlist()
+
+    assert excinfo.value.status_code == 500
+    assert excinfo.value.detail == "LTI platform URL allowlist contains invalid entries"
+
+
+def test_require_allowlisted_lti_url_returns_canonical_url(monkeypatch):
+    monkeypatch.setattr(
+        server_module,
+        "config",
+        _make_lti_server_config(allowlist=["platform.example.com"]),
+    )
+
+    url = server_module._require_allowlisted_lti_url(
+        "https://platform.example.com/.well-known/openid?foo=bar",
+        "openid_configuration",
+    )
+
+    assert url == "https://platform.example.com/.well-known/openid?foo=bar"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://user:pass@platform.example.com/.well-known/openid",
+        "https://platform.example.com:8443/.well-known/openid",
+        "https://platform.example.com/.well-known/openid#frag",
+    ],
+)
+def test_require_allowlisted_lti_url_rejects_unsafe_components(monkeypatch, url):
+    monkeypatch.setattr(
+        server_module,
+        "config",
+        _make_lti_server_config(allowlist=["platform.example.com"]),
+    )
+
+    with pytest.raises(HTTPException) as excinfo:
+        server_module._require_allowlisted_lti_url(
+            url,
+            "openid_configuration",
+        )
+
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail == "Invalid URL for openid_configuration"
+
+
+def test_require_allowlisted_lti_url_rejects_wildcard_only_allowlist(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        server_module,
+        "config",
+        _make_lti_server_config(allowlist=["*.example.com"]),
+    )
+
+    with pytest.raises(HTTPException) as excinfo:
+        server_module._require_allowlisted_lti_url(
+            "https://platform.example.com/.well-known/openid",
+            "openid_configuration",
+        )
 
     assert excinfo.value.status_code == 500
     assert excinfo.value.detail == "LTI platform URL allowlist contains invalid entries"
