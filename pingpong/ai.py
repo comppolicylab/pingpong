@@ -301,7 +301,10 @@ async def generate_name(
         # We are typically seeing this error when the Azure content filter
         # is triggered. We should print the message that triggered the error
         # and return None.
-        logger.exception(f"Error generating thread name. Message: {transcript}")
+        logger.exception(
+            "Error generating thread name. Transcript length=%s",
+            sanitize_for_log(len(transcript)),
+        )
         return None
     except openai.APIError:
         logger.exception("Error generating thread name.")
@@ -4152,10 +4155,15 @@ def format_instructions(
         )
 
     if thread_id is not None and user_id is not None:
-        logger.debug(f"Replacing random blocks in instructions for thread {thread_id}")
+        logger.debug(
+            "Replacing random blocks in instructions for thread %s",
+            sanitize_for_log(thread_id),
+        )
         instructions = replace_random_blocks(instructions, thread_id, user_id)
         logger.debug(
-            f"Instructions after replacing random blocks for thread {thread_id}: {instructions}"
+            "Instructions after replacing random blocks for thread %s (length=%s)",
+            sanitize_for_log(thread_id),
+            sanitize_for_log(len(instructions)),
         )
 
     return instructions
@@ -4170,7 +4178,10 @@ def inject_timestamp_to_instructions(
         try:
             tz = ZoneInfo(timezone)
         except ZoneInfoNotFoundError:
-            logger.warning(f"Invalid timezone: {timezone}. Using UTC instead.")
+            logger.warning(
+                "Invalid timezone: %s. Using UTC instead.",
+                sanitize_for_log(timezone),
+            )
             tz = ZoneInfo("UTC")
     else:
         tz = ZoneInfo("UTC")

@@ -141,6 +141,7 @@ from .files import (
     handle_delete_file,
     handle_delete_files,
 )
+from .log_utils import sanitize_for_log
 from .now import NowFn, utcnow
 from .permission import Authz, InstitutionAdmin, LoggedIn, ClassInstitutionAdmin
 from .runs import get_placeholder_ci_calls
@@ -387,7 +388,12 @@ async def inspect_authz(request: StateRequest, subj: str, obj: str, rel: str):
     try:
         result: schemas.InspectAuthzResult | None = None
         if obj_id_ and subj_id_:
-            logger.info(f"Inspecting authz for {subj} {rel} {obj}")
+            logger.info(
+                "Inspecting authz for %s %s %s",
+                sanitize_for_log(subj),
+                sanitize_for_log(rel),
+                sanitize_for_log(obj),
+            )
             verdict = await request.state["authz"].test(subj, rel, obj)
             result = schemas.InspectAuthzTestResult(
                 verdict=verdict,
@@ -2303,7 +2309,9 @@ async def unlink_canvas_class(
     )
     await delete_canvas_permissions(request.state["authz"], userIds, class_id)
     logger.info(
-        f"Canvas class unlinked from PingPong class {class_id} by user {request.state['session'].user.id}."
+        "Canvas class unlinked from PingPong class %s by user %s.",
+        sanitize_for_log(class_id),
+        sanitize_for_log(request.state["session"].user.id),
     )
     return {"status": "ok"}
 
@@ -2361,7 +2369,9 @@ async def remove_canvas_connection(
             )
             await delete_canvas_permissions(request.state["authz"], userIds, class_id)
             logger.info(
-                f"Canvas account removed from PingPong class {class_id} by user {request.state['session'].user.id}."
+                "Canvas account removed from PingPong class %s by user %s.",
+                sanitize_for_log(class_id),
+                sanitize_for_log(request.state["session"].user.id),
             )
         except Exception:
             logger.exception("remove_canvas_connection: Exception occurred")
@@ -7771,7 +7781,12 @@ async def create_assistant(
 
                 # Log which user created the MCP server tool and some basic info
                 logger.info(
-                    f"User {request.state['session'].user.id} created MCP server tool {tool.server_label} for assistant {assistant_id} with URL {tool.server_url} and display name '{tool.display_name}'"
+                    "User %s created MCP server tool %s for assistant %s with URL %s and display name '%s'",
+                    sanitize_for_log(request.state["session"].user.id),
+                    sanitize_for_log(tool.server_label),
+                    sanitize_for_log(assistant_id),
+                    sanitize_for_log(tool.server_url),
+                    sanitize_for_log(tool.display_name),
                 )
                 return tool
 
@@ -8825,10 +8840,18 @@ async def update_assistant(
                 and mcp_input.server_label in existing_mcp_by_label
             ):
                 existing_server = existing_mcp_by_label[mcp_input.server_label]
+                safe_user_id = sanitize_for_log(request.state["session"].user.id)
+                safe_server_label = sanitize_for_log(existing_server.server_label)
+                safe_assistant_id = sanitize_for_log(assistant_id)
                 has_changes = False
                 if existing_server.server_url != mcp_input.server_url_str:
                     logger.info(
-                        f"User {request.state['session'].user.id} updated MCP server tool URL for tool {existing_server.server_label} for assistant {assistant_id} from {existing_server.server_url} to {mcp_input.server_url_str}"
+                        "User %s updated MCP server tool URL for tool %s for assistant %s from %s to %s",
+                        safe_user_id,
+                        safe_server_label,
+                        safe_assistant_id,
+                        sanitize_for_log(existing_server.server_url),
+                        sanitize_for_log(mcp_input.server_url_str),
                     )
                     existing_server.server_url = mcp_input.server_url_str
                     has_changes = True
@@ -8837,13 +8860,23 @@ async def update_assistant(
                     has_changes = True
                 if existing_server.enabled != mcp_input.enabled:
                     logger.info(
-                        f"User {request.state['session'].user.id} updated MCP server tool enabled status for tool {existing_server.server_label} for assistant {assistant_id} from {existing_server.enabled} to {mcp_input.enabled}"
+                        "User %s updated MCP server tool enabled status for tool %s for assistant %s from %s to %s",
+                        safe_user_id,
+                        safe_server_label,
+                        safe_assistant_id,
+                        sanitize_for_log(existing_server.enabled),
+                        sanitize_for_log(mcp_input.enabled),
                     )
                     existing_server.enabled = mcp_input.enabled
                     has_changes = True
                 if existing_server.display_name != mcp_input.display_name:
                     logger.info(
-                        f"User {request.state['session'].user.id} updated MCP server tool display name for tool {existing_server.server_label} for assistant {assistant_id} from '{existing_server.display_name}' to '{mcp_input.display_name}'"
+                        "User %s updated MCP server tool display name for tool %s for assistant %s from '%s' to '%s'",
+                        safe_user_id,
+                        safe_server_label,
+                        safe_assistant_id,
+                        sanitize_for_log(existing_server.display_name),
+                        sanitize_for_log(mcp_input.display_name),
                     )
                     existing_server.display_name = mcp_input.display_name
                     has_changes = True
@@ -8854,7 +8887,10 @@ async def update_assistant(
                         or existing_server.authorization_token is not None
                     ):
                         logger.info(
-                            f"User {request.state['session'].user.id} removed authentication for MCP server tool {existing_server.server_label} for assistant {assistant_id}"
+                            "User %s removed authentication for MCP server tool %s for assistant %s",
+                            safe_user_id,
+                            safe_server_label,
+                            safe_assistant_id,
                         )
                     if existing_server.headers is not None:
                         existing_server.headers = None
@@ -8865,27 +8901,39 @@ async def update_assistant(
                 elif mcp_input.auth_type == schemas.MCPAuthType.HEADER:
                     if existing_server.headers != headers_json:
                         logger.info(
-                            f"User {request.state['session'].user.id} updated MCP server tool headers for tool {existing_server.server_label} for assistant {assistant_id}"
+                            "User %s updated MCP server tool headers for tool %s for assistant %s",
+                            safe_user_id,
+                            safe_server_label,
+                            safe_assistant_id,
                         )
                         existing_server.headers = headers_json
                         has_changes = True
                     if existing_server.authorization_token is not None:
                         logger.info(
-                            f"User {request.state['session'].user.id} switched MCP server tool {existing_server.server_label} for assistant {assistant_id} to header-based authentication, removing existing authorization token"
+                            "User %s switched MCP server tool %s for assistant %s to header-based authentication, removing existing authorization token",
+                            safe_user_id,
+                            safe_server_label,
+                            safe_assistant_id,
                         )
                         existing_server.authorization_token = None
                         has_changes = True
                 elif mcp_input.auth_type == schemas.MCPAuthType.TOKEN:
                     if existing_server.headers is not None:
                         logger.info(
-                            f"User {request.state['session'].user.id} switched MCP server tool {existing_server.server_label} for assistant {assistant_id} to token-based authentication, removing existing headers"
+                            "User %s switched MCP server tool %s for assistant %s to token-based authentication, removing existing headers",
+                            safe_user_id,
+                            safe_server_label,
+                            safe_assistant_id,
                         )
                         existing_server.headers = None
                         has_changes = True
                     if authorization_token:
                         if existing_server.authorization_token != authorization_token:
                             logger.info(
-                                f"User {request.state['session'].user.id} updated MCP server tool authorization token for tool {existing_server.server_label} for assistant {assistant_id}"
+                                "User %s updated MCP server tool authorization token for tool %s for assistant %s",
+                                safe_user_id,
+                                safe_server_label,
+                                safe_assistant_id,
                             )
                             existing_server.authorization_token = authorization_token
                             has_changes = True
@@ -8910,7 +8958,12 @@ async def update_assistant(
                     },
                 )
                 logger.info(
-                    f"User {request.state['session'].user.id} created MCP server tool {mcp_server.server_label} for assistant {assistant_id} with URL {mcp_server.server_url} and display name '{mcp_server.display_name}'"
+                    "User %s created MCP server tool %s for assistant %s with URL %s and display name '%s'",
+                    sanitize_for_log(request.state["session"].user.id),
+                    sanitize_for_log(mcp_server.server_label),
+                    sanitize_for_log(assistant_id),
+                    sanitize_for_log(mcp_server.server_url),
+                    sanitize_for_log(mcp_server.display_name),
                 )
                 return mcp_server.id
 

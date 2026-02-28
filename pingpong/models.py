@@ -1023,7 +1023,7 @@ class ExternalLogin(Base):
                         logger.info(
                             "ELDEBUG: (%s) Creating new external login for user %s with provider %s and identifier %s",
                             sanitize_for_log(called_by),
-                            user_id,
+                            sanitize_for_log(user_id),
                             sanitize_for_log(provider),
                             sanitize_for_log(identifier),
                         )
@@ -1065,7 +1065,7 @@ class ExternalLogin(Base):
                     logger.info(
                         "ELDEBUG: (%s) Upserting external login for user %s provider=%s identifier=%s",
                         sanitize_for_log(called_by),
-                        user_id,
+                        sanitize_for_log(user_id),
                         sanitize_for_log(provider),
                         sanitize_for_log(identifier),
                     )
