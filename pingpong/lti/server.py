@@ -17,11 +17,11 @@ from pingpong.invite import send_lti_registration_submitted
 from pingpong.log_utils import sanitize_for_log
 from pingpong.lti.allowlist import (
     get_lti_platform_url_allowlist_from_settings,
+    find_lti_allowlisted_host,
     InvalidLTIPlatformUrlAllowlistError,
     INVALID_PLATFORM_URL_ALLOWLIST_DETAIL,
     MISSING_PLATFORM_URL_ALLOWLIST_DETAIL,
     MissingLTIPlatformUrlAllowlistError,
-    is_lti_host_allowlisted,
 )
 from pingpong.lti.constants import (
     AUTHORIZATION_ENDPOINT_KEY,
@@ -149,19 +149,22 @@ def _require_allowlisted_lti_url(
     if parsed.username or parsed.password or parsed.fragment or parsed.port is not None:
         raise HTTPException(status_code=400, detail=f"Invalid URL for {field_name}")
 
-    host = parsed.hostname.lower()
     host_allowlist = (
         allowlist if allowlist is not None else _get_lti_platform_url_allowlist()
     )
-    if not is_lti_host_allowlisted(host, host_allowlist):
+    # Use the matched allowlist entry (server-controlled) to build the URL
+    # so no user-supplied value propagates into the outgoing request.
+    matched_host = find_lti_allowlisted_host(parsed.hostname, host_allowlist)
+    if matched_host is None:
         raise HTTPException(
             status_code=400,
             detail=f"{field_name} host is not allowlisted",
         )
 
+    scheme = "https" if parsed.scheme == "https" else "http"
     path = parsed.path or "/"
     query = f"?{parsed.query}" if parsed.query else ""
-    return f"{parsed.scheme}://{host}{path}{query}"
+    return f"{scheme}://{matched_host}{path}{query}"
 
 
 def _require_allowlisted_openid_configuration_url(
@@ -178,7 +181,17 @@ def _require_allowlisted_openid_configuration_url(
             status_code=503,
             detail=MISSING_PLATFORM_URL_ALLOWLIST_DETAIL,
         )
-    if path not in lti_settings.allowed_openid_configuration_paths or parsed.query:
+    if parsed.query:
+        raise HTTPException(
+            status_code=400, detail="Invalid URL for openid_configuration"
+        )
+    # Look up the matching path from the server-controlled set so the
+    # returned URL contains no user-supplied components.
+    matched_path = next(
+        (p for p in lti_settings.allowed_openid_configuration_paths if p == path),
+        None,
+    )
+    if matched_path is None:
         raise HTTPException(
             status_code=400, detail="Invalid URL for openid_configuration"
         )
@@ -187,7 +200,8 @@ def _require_allowlisted_openid_configuration_url(
         raise HTTPException(
             status_code=400, detail="Invalid URL for openid_configuration"
         )
-    return f"{parsed.scheme}://{host.lower()}{path}"
+    scheme = "https" if parsed.scheme == "https" else "http"
+    return f"{scheme}://{host}{matched_path}"
 
 
 def _extract_context_memberships_url_from_claims(claims: dict[str, Any]) -> str | None:

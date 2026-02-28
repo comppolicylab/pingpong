@@ -88,8 +88,18 @@ def extract_lti_url_hostname(url: object) -> str | None:
 
 
 def is_lti_host_allowlisted(host: str, allowlist: Sequence[str]) -> bool:
+    return find_lti_allowlisted_host(host, allowlist) is not None
+
+
+def find_lti_allowlisted_host(host: str, allowlist: Sequence[str]) -> str | None:
+    """Return the matched allowlist entry for *host*, or ``None``.
+
+    Returning the allowlist entry (a server-controlled string) instead of the
+    caller-supplied *host* lets callers reconstruct URLs without propagating
+    user-supplied values, which satisfies static-analysis taint tracking.
+    """
     host_lower = host.lower()
     for allowed in allowlist:
         if host_lower == allowed:
-            return True
-    return False
+            return allowed
+    return None
