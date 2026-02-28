@@ -360,6 +360,11 @@ class LTISettings(BaseSettings):
     # Allowed LMS platform URL hosts for LTI setup and login redirects.
     # Entries support exact hosts only (e.g. "canvas.example.edu").
     platform_url_allowlist: list[str] = Field(default_factory=list)
+    # Hosts permitted to use plain HTTP in development mode (e.g. "canvas.docker").
+    # Ignored when ``config.development`` is ``False``.
+    dev_http_hosts: list[str] = Field(
+        default=["localhost", "127.0.0.1", "::1", "canvas.docker"]
+    )
     openid_configuration_paths: LTIOpenIDConfigurationPathsSettings = Field(
         default_factory=LTIOpenIDConfigurationPathsSettings
     )

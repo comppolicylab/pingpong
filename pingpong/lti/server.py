@@ -117,11 +117,11 @@ def _get_lti_platform_url_allowlist() -> list[str]:
         return get_lti_platform_url_allowlist_from_settings(
             getattr(config, "lti", None)
         )
-    except MissingLTIPlatformUrlAllowlistError:
+    except MissingLTIPlatformUrlAllowlistError as e:
         raise HTTPException(
             status_code=503,
             detail=MISSING_PLATFORM_URL_ALLOWLIST_DETAIL,
-        ) from None
+        ) from e
     except InvalidLTIPlatformUrlAllowlistError as e:
         raise HTTPException(
             status_code=500,
@@ -148,6 +148,18 @@ def _require_allowlisted_lti_url(
 
     if parsed.username or parsed.password or parsed.fragment or parsed.port is not None:
         raise HTTPException(status_code=400, detail=f"Invalid URL for {field_name}")
+
+    # Reject cleartext HTTP — LTI endpoints carry bearer tokens and must
+    # be accessed over TLS.  Allow HTTP only for configured dev hosts in
+    # development mode (see lti.dev_http_hosts in config.toml).
+    if parsed.scheme != "https":
+        lti = getattr(config, "lti", None)
+        dev_hosts = {h.lower() for h in lti.dev_http_hosts} if lti else set()
+        if not (config.development and parsed.hostname.lower() in dev_hosts):
+            raise HTTPException(
+                status_code=400,
+                detail=f"{field_name} must use HTTPS",
+            )
 
     host_allowlist = (
         allowlist if allowlist is not None else _get_lti_platform_url_allowlist()

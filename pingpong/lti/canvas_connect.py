@@ -121,10 +121,10 @@ def _get_lti_platform_url_allowlist() -> list[str]:
         )
     except MissingLTIPlatformUrlAllowlistError:
         return []
-    except InvalidLTIPlatformUrlAllowlistError:
+    except InvalidLTIPlatformUrlAllowlistError as e:
         raise CanvasConnectException(
             detail=INVALID_PLATFORM_URL_ALLOWLIST_DETAIL,
-        ) from None
+        ) from e
 
 
 def _extract_sync_row_errors(results: CreateUserResults) -> list[str]:
