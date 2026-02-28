@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Literal, Union
 
 from glowplug import PostgresSettings, SqliteSettings
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from pingpong.artifacts import LocalArtifactStore, S3ArtifactStore
@@ -20,6 +20,12 @@ from .lti import AWSLTIKeyStore, LocalLTIKeyStore, LTIKeyManager
 from .support import SupportSettings, NoSupportSettings
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_OPENID_CONFIGURATION_PATHS = (
+    "/.well-known/openid-configuration",
+    "/.well-known/openid",
+    "/api/lti/security/openid-configuration",
+)
 
 
 class OpenFgaAuthzSettings(BaseSettings):
@@ -324,20 +330,51 @@ class LocalLTIKeyStoreSettings(BaseSettings):
 LTIKeyStoreSettings = Union[AWSLTIKeyStoreSettings, LocalLTIKeyStoreSettings]
 
 
+class LTIOpenIDConfigurationPathsSettings(BaseSettings):
+    """OpenID discovery path customization settings."""
+
+    mode: Literal["append", "replace"] = Field("replace")
+    paths: list[str] = Field(
+        default_factory=lambda: list(DEFAULT_OPENID_CONFIGURATION_PATHS)
+    )
+
+    @field_validator("paths")
+    @classmethod
+    def validate_paths(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        for entry in value:
+            path = entry.strip()
+            if not path or not path.startswith("/") or "?" in path or "#" in path:
+                raise ValueError(
+                    "openid_configuration_paths.paths entries must be absolute URL paths without query or fragment"
+                )
+            normalized.append(path)
+        return normalized
+
+
 class LTISettings(BaseSettings):
     """LTI Advantage Service settings."""
 
     key_store: LTIKeyStoreSettings
     sync_wait: int = Field(60 * 10, gt=0)  # 10 mins
     # Allowed LMS platform URL hosts for LTI setup and login redirects.
-    # Entries support exact hosts (e.g. "canvas.example.edu") and wildcards
-    # (e.g. "*.instructure.com").
+    # Entries support exact hosts only (e.g. "canvas.example.edu").
     platform_url_allowlist: list[str] = Field(default_factory=list)
+    openid_configuration_paths: LTIOpenIDConfigurationPathsSettings = Field(
+        default_factory=LTIOpenIDConfigurationPathsSettings
+    )
 
     # Key rotation settings
     rotation_schedule: str = Field("0 0 1 * *")  # First day of every month at midnight
     key_retention_count: int = Field(3)  # Keep last 3 keys
     key_size: int = Field(2048)  # RSA key size in bits
+
+    @cached_property
+    def allowed_openid_configuration_paths(self) -> set[str]:
+        configured_paths = set(self.openid_configuration_paths.paths)
+        if self.openid_configuration_paths.mode == "append":
+            return set(DEFAULT_OPENID_CONFIGURATION_PATHS) | configured_paths
+        return configured_paths
 
 
 class FeatureFlags(BaseSettings):

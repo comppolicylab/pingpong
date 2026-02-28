@@ -177,6 +177,17 @@ auth_token_expiry = 3600
 # # for OpenID discovery, registration endpoints, JWKS/token endpoints, and OIDC
 # # login redirects. Exact hosts only.
 # platform_url_allowlist = ["canvas.instructure.com", "school.instructure.com"]
+# # Customize which OpenID discovery paths are allowed for initial
+# # openid_configuration fetches.
+# # mode = "replace" uses only the listed paths; mode = "append" adds listed
+# # paths to the defaults.
+# [lti.openid_configuration_paths]
+# mode = "replace"
+# paths = [
+#   "/.well-known/openid-configuration",
+#   "/.well-known/openid",
+#   "/api/lti/security/openid-configuration",
+# ]
 #
 # [lti.key_store]
 # # accepts "local" or "aws"

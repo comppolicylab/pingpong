@@ -1,4 +1,3 @@
-import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -6,6 +5,7 @@ import pytest
 from fastapi import HTTPException
 from starlette.datastructures import State
 
+from pingpong.config import DEFAULT_OPENID_CONFIGURATION_PATHS
 from pingpong.lti import server as server_module
 from pingpong.lti.schemas import (
     LTIRegisterRequest,
@@ -295,12 +295,30 @@ def _make_lti_server_config(
     *,
     allowlist: list[str] | None = None,
     public_url: str = "https://tool.example.com",
+    openid_paths_mode: str = "replace",
+    openid_paths: list[str] | None = None,
 ):
+    if openid_paths is None:
+        openid_paths = list(DEFAULT_OPENID_CONFIGURATION_PATHS)
+    normalized_paths = {path.strip() for path in openid_paths}
+    if openid_paths_mode == "append":
+        allowed_openid_configuration_paths = (
+            set(DEFAULT_OPENID_CONFIGURATION_PATHS) | normalized_paths
+        )
+    else:
+        allowed_openid_configuration_paths = normalized_paths
     return SimpleNamespace(
         url=lambda path: f"{public_url}{path}",
         public_url=public_url,
         email=SimpleNamespace(sender="sender"),
-        lti=SimpleNamespace(platform_url_allowlist=allowlist or []),
+        lti=SimpleNamespace(
+            platform_url_allowlist=allowlist or [],
+            allowed_openid_configuration_paths=allowed_openid_configuration_paths,
+            openid_configuration_paths=SimpleNamespace(
+                mode=openid_paths_mode,
+                paths=openid_paths,
+            ),
+        ),
     )
 
 
@@ -502,6 +520,57 @@ def test_require_allowlisted_lti_url_rejects_wildcard_only_allowlist(
 
     assert excinfo.value.status_code == 500
     assert excinfo.value.detail == "LTI platform URL allowlist contains invalid entries"
+
+
+def test_require_openid_configuration_url_uses_replace_mode_paths(monkeypatch):
+    monkeypatch.setattr(
+        server_module,
+        "config",
+        _make_lti_server_config(
+            allowlist=["platform.example.com"],
+            openid_paths_mode="replace",
+            openid_paths=["/custom/openid"],
+        ),
+    )
+
+    url = server_module._require_allowlisted_openid_configuration_url(
+        "https://platform.example.com/custom/openid",
+        ["platform.example.com"],
+    )
+
+    assert url == "https://platform.example.com/custom/openid"
+
+    with pytest.raises(HTTPException) as excinfo:
+        server_module._require_allowlisted_openid_configuration_url(
+            "https://platform.example.com/.well-known/openid",
+            ["platform.example.com"],
+        )
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail == "Invalid URL for openid_configuration"
+
+
+def test_require_openid_configuration_url_uses_append_mode_paths(monkeypatch):
+    monkeypatch.setattr(
+        server_module,
+        "config",
+        _make_lti_server_config(
+            allowlist=["platform.example.com"],
+            openid_paths_mode="append",
+            openid_paths=["/custom/openid"],
+        ),
+    )
+
+    default_url = server_module._require_allowlisted_openid_configuration_url(
+        "https://platform.example.com/.well-known/openid",
+        ["platform.example.com"],
+    )
+    custom_url = server_module._require_allowlisted_openid_configuration_url(
+        "https://platform.example.com/custom/openid",
+        ["platform.example.com"],
+    )
+
+    assert default_url == "https://platform.example.com/.well-known/openid"
+    assert custom_url == "https://platform.example.com/custom/openid"
 
 
 @pytest.mark.asyncio
@@ -724,7 +793,77 @@ async def test_register_lti_instance_rejects_mistyped_openid_configuration_url(
 
 
 @pytest.mark.asyncio
-async def test_register_lti_instance_uses_normalized_urls_for_http_calls(monkeypatch):
+async def test_register_lti_instance_rejects_openid_configuration_with_query(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        server_module.Institution,
+        "all_have_default_api_key",
+        lambda db, ids: _async_return(True),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "config",
+        _make_lti_server_config(allowlist=["platform.example.com"]),
+    )
+
+    data = LTIRegisterRequest(
+        name="PingPong",
+        admin_name="Admin",
+        admin_email="admin@example.com",
+        provider_id=0,
+        sso_field=None,
+        openid_configuration="https://platform.example.com/.well-known/openid?x=1",
+        registration_token="token",
+        institution_ids=[1],
+    )
+    request = FakeRequest(state=SimpleNamespace(db="db"))
+
+    with pytest.raises(HTTPException) as excinfo:
+        await server_module.register_lti_instance(request, data)
+
+    assert excinfo.value.status_code == 400
+    assert "Invalid URL for openid_configuration" in excinfo.value.detail
+
+
+@pytest.mark.asyncio
+async def test_register_lti_instance_rejects_unknown_openid_configuration_path(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        server_module.Institution,
+        "all_have_default_api_key",
+        lambda db, ids: _async_return(True),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "config",
+        _make_lti_server_config(allowlist=["platform.example.com"]),
+    )
+
+    data = LTIRegisterRequest(
+        name="PingPong",
+        admin_name="Admin",
+        admin_email="admin@example.com",
+        provider_id=0,
+        sso_field=None,
+        openid_configuration="https://platform.example.com/custom/openid",
+        registration_token="token",
+        institution_ids=[1],
+    )
+    request = FakeRequest(state=SimpleNamespace(db="db"))
+
+    with pytest.raises(HTTPException) as excinfo:
+        await server_module.register_lti_instance(request, data)
+
+    assert excinfo.value.status_code == 400
+    assert "Invalid URL for openid_configuration" in excinfo.value.detail
+
+
+@pytest.mark.asyncio
+async def test_register_lti_instance_rejects_openid_username_style_confusion(
+    monkeypatch,
+):
     platform_config = {
         "product_family_code": "canvas",
         "messages_supported": [
@@ -747,7 +886,6 @@ async def test_register_lti_instance_uses_normalized_urls_for_http_calls(monkeyp
     }
     registration_payload = {"client_id": "client"}
     request_log: list[tuple[str, str]] = []
-
     monkeypatch.setattr(
         server_module.aiohttp,
         "ClientSession",
@@ -773,14 +911,6 @@ async def test_register_lti_instance_uses_normalized_urls_for_http_calls(monkeyp
         _make_lti_server_config(allowlist=["platform.example.com"]),
     )
 
-    created = {}
-
-    async def _create(db, data, institution_ids):
-        created["data"] = data
-        created["institution_ids"] = institution_ids
-
-    monkeypatch.setattr(server_module.LTIRegistration, "create", _create)
-
     data = LTIRegisterRequest(
         name="PingPong",
         admin_name="Admin",
@@ -793,22 +923,12 @@ async def test_register_lti_instance_uses_normalized_urls_for_http_calls(monkeyp
     )
     request = FakeRequest(state=SimpleNamespace(db="db"))
 
-    result = await server_module.register_lti_instance(request, data)
+    with pytest.raises(HTTPException) as excinfo:
+        await server_module.register_lti_instance(request, data)
 
-    assert result == {"status": "ok"}
-    assert request_log == [
-        (
-            "GET",
-            "https://platform.example.com/@evil.example.com/.well-known/openid",
-        ),
-        ("POST", "https://platform.example.com/@evil.example.com/reg"),
-    ]
-    openid_configuration = json.loads(created["data"]["openid_configuration"])
-    assert (
-        openid_configuration[server_module.REGISTRATION_ENDPOINT_KEY]
-        == "https://platform.example.com/@evil.example.com/reg"
-    )
-    assert created["institution_ids"] == [1]
+    assert excinfo.value.status_code == 400
+    assert "Invalid URL for openid_configuration" in excinfo.value.detail
+    assert request_log == []
 
 
 @pytest.mark.asyncio

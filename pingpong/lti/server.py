@@ -164,6 +164,32 @@ def _require_allowlisted_lti_url(
     return f"{parsed.scheme}://{host}{path}{query}"
 
 
+def _require_allowlisted_openid_configuration_url(
+    url: Any, allowlist: list[str] | None = None
+) -> str:
+    normalized_url = _require_allowlisted_lti_url(
+        url, "openid_configuration", allowlist
+    )
+    parsed = urlsplit(normalized_url)
+    path = parsed.path or "/"
+    lti_settings = config.lti
+    if lti_settings is None:
+        raise HTTPException(
+            status_code=503,
+            detail=MISSING_PLATFORM_URL_ALLOWLIST_DETAIL,
+        )
+    if path not in lti_settings.allowed_openid_configuration_paths or parsed.query:
+        raise HTTPException(
+            status_code=400, detail="Invalid URL for openid_configuration"
+        )
+    host = parsed.hostname
+    if not host:
+        raise HTTPException(
+            status_code=400, detail="Invalid URL for openid_configuration"
+        )
+    return f"{parsed.scheme}://{host.lower()}{path}"
+
+
 def _extract_context_memberships_url_from_claims(claims: dict[str, Any]) -> str | None:
     nrps_claim = claims.get(LTI_CLAIM_NRPS_KEY)
     if nrps_claim is None:
@@ -344,8 +370,8 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
 
     headers = {"Authorization": f"Bearer {data.registration_token}"}
     allowlist = _get_lti_platform_url_allowlist()
-    openid_configuration_url = _require_allowlisted_lti_url(
-        data.openid_configuration, "openid_configuration", allowlist
+    openid_configuration_url = _require_allowlisted_openid_configuration_url(
+        data.openid_configuration, allowlist
     )
 
     response_data: dict[str, Any] | None = None
