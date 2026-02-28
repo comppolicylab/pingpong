@@ -121,7 +121,7 @@ def _get_lti_platform_url_allowlist() -> list[str]:
         raise HTTPException(
             status_code=503,
             detail=MISSING_PLATFORM_URL_ALLOWLIST_DETAIL,
-        )
+        ) from None
     except InvalidLTIPlatformUrlAllowlistError as e:
         raise HTTPException(
             status_code=500,
