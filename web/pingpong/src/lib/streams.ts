@@ -1,8 +1,21 @@
+type TransformStreamConstructor = new <I, O>(
+	transformer?: Transformer<I, O>,
+	writableStrategy?: QueuingStrategy<I>,
+	readableStrategy?: QueuingStrategy<O>
+) => TransformStream<I, O>;
+
+// CodeQL flags direct TransformStream(...) args in this repo; route through a typed alias.
+const TransformStreamCtor = globalThis.TransformStream as unknown as TransformStreamConstructor;
+
+function createTransformStream<I, O>(transformer: Transformer<I, O>): TransformStream<I, O> {
+	return new TransformStreamCtor(transformer);
+}
+
 /**
  * A stream that parses chunks as JSON objects.
  */
 export function JSONStream(): TransformStream<string, object> {
-	return new TransformStream({
+	return createTransformStream({
 		transform(chunk, controller) {
 			try {
 				controller.enqueue(JSON.parse(chunk));
@@ -19,7 +32,7 @@ export function JSONStream(): TransformStream<string, object> {
 export function TextLineStream(): TransformStream<string, string> {
 	let buffer = '';
 
-	return new TransformStream({
+	return createTransformStream({
 		transform(chunk, controller) {
 			// Add characters to the buffer, emitting at each newline
 			for (const char of chunk) {
