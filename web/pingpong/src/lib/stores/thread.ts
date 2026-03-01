@@ -439,21 +439,6 @@ export class ThreadManager {
 		const t0 = Date.now();
 
 		while (true) {
-			await sleep(5000);
-
-			const response = await api.getThread(this.#fetcher, this.classId, this.threadId);
-			const expanded = api.expandResponse(response);
-
-			if (api.finished(expanded.data?.run)) {
-				this.#data.update((d) => ({
-					...d,
-					data: expanded.data,
-					error: expanded.error ? { detail: expanded.error?.detail, wasSent: true } : null,
-					waiting: false
-				}));
-				return;
-			}
-
 			if (Date.now() - t0 > timeout) {
 				this.#data.update((d) => ({
 					...d,
@@ -465,6 +450,25 @@ export class ThreadManager {
 				}));
 				throw new Error('The thread run took too long to complete.');
 			}
+
+			try {
+				const response = await api.getThread(this.#fetcher, this.classId, this.threadId);
+				const expanded = api.expandResponse(response);
+
+				if (api.finished(expanded.data?.run)) {
+					this.#data.update((d) => ({
+						...d,
+						data: expanded.data,
+						error: expanded.error ? { detail: expanded.error?.detail, wasSent: true } : null,
+						waiting: false
+					}));
+					return;
+				}
+			} catch {
+				// Keep polling on transient transport failures until timeout.
+			}
+
+			await sleep(5000);
 		}
 	}
 
