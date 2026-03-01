@@ -26,7 +26,7 @@ export const errorMessage = (error: unknown, fallback: string = 'unknown error')
 				.join('\n');
 		}
 	} else if (typeof error === 'string') {
-		return error || fallback;
+		return error;
 	} else {
 		return JSON.stringify(error);
 	}
