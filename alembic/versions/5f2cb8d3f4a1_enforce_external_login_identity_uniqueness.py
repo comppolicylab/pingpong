@@ -66,6 +66,8 @@ def _assert_no_provider_identifier_duplicates() -> None:
 
 
 def upgrade() -> None:
+    # Resolves CodeQL's py/unused-global-variable
+    _ = revision, down_revision, branch_labels, depends_on
     _assert_no_provider_identifier_duplicates()
     op.create_unique_constraint(
         "uq_external_logins_provider_identifier",

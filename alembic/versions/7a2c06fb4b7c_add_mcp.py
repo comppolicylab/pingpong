@@ -72,6 +72,8 @@ toolcallstatus_simplified_table = sa.sql.table(
 
 
 def upgrade() -> None:
+    # Resolves CodeQL's py/unused-global-variable
+    _ = revision, down_revision, branch_labels, depends_on
     toolcalltype_temp_type.create(op.get_bind(), checkfirst=False)
     toolcallstatus_temp_type.create(op.get_bind(), checkfirst=False)
 
