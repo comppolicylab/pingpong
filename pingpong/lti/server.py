@@ -776,7 +776,7 @@ async def lti_login(request: StateRequest):
     if lti_message_hint:
         auth_params["lti_message_hint"] = lti_message_hint
 
-    redirect_url = f"{oidc_authorization_endpoint}?{urlencode(auth_params)}"
+    redirect_url = oidc_authorization_endpoint + "?" + urlencode(auth_params)
     return RedirectResponse(url=redirect_url, status_code=302)
 
 
