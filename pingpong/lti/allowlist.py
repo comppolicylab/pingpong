@@ -1,7 +1,8 @@
 import json
+import re
 from collections.abc import Sequence
 from typing import NamedTuple
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit
 
 INVALID_PLATFORM_URL_ALLOWLIST_DETAIL = (
     "LTI platform URL allowlist contains invalid entries"
@@ -148,6 +149,37 @@ def allow_http_for_lti_host(host: str, context: LTIHostValidationContext) -> boo
     return host.lower() in context.dev_http_hosts
 
 
+_UNSAFE_PATH_RE = re.compile(r"[\x00-\x1f\x7f@]")
+_UNSAFE_QUERY_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _sanitize_url_path(path: str, field_name: str) -> str:
+    """Re-encode a URL path to produce a fresh, untainted string.
+
+    Rejects paths containing control characters, ``@`` (authority confusion),
+    or ``..`` segments (path traversal).  The returned string is safe to embed
+    in a redirect URL.
+    """
+    if _UNSAFE_PATH_RE.search(path):
+        raise LTIUrlValidationError(f"Invalid URL path for {field_name}")
+    segments = path.split("/")
+    if ".." in segments:
+        raise LTIUrlValidationError(f"Invalid URL path for {field_name}")
+    return quote(path, safe="/:=+!*'(),@&~")
+
+
+def _sanitize_url_query(query: str, field_name: str) -> str:
+    """Re-encode a URL query string to produce a fresh, untainted string.
+
+    Rejects query strings containing control characters.  The returned string
+    is reconstructed via :func:`urlencode` so it is no longer tainted.
+    """
+    if _UNSAFE_QUERY_RE.search(query):
+        raise LTIUrlValidationError(f"Invalid URL query for {field_name}")
+    pairs = parse_qsl(query, keep_blank_values=True)
+    return urlencode(pairs)
+
+
 def validate_allowlisted_lti_url_parts(
     url: object,
     field_name: str,
@@ -187,9 +219,12 @@ def validate_allowlisted_lti_url_parts(
     if parsed.scheme != "https" and not allow_http_for_lti_host(matched_host, context):
         raise LTIUrlValidationError(f"{field_name} must use HTTPS")
 
+    safe_path = _sanitize_url_path(parsed.path or "/", field_name)
+    safe_query = _sanitize_url_query(parsed.query, field_name) if parsed.query else ""
+
     return AllowlistedLTIUrlParts(
         scheme="https" if parsed.scheme == "https" else "http",
         host=matched_host,
-        path=parsed.path or "/",
-        query=parsed.query,
+        path=safe_path,
+        query=safe_query,
     )
