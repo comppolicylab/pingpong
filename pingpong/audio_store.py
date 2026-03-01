@@ -160,7 +160,7 @@ class LocalAudioUploadObject(BaseAudioUploadObject):
             raise AudioStoreError(code=400, detail="File path not set")
 
         # No action needed for local storage
-        pass
+        return None
 
     async def delete_file(self):
         """Delete the file from local storage."""
@@ -310,7 +310,6 @@ class LocalAudioStore(BaseAudioStore):
         """Complete the upload."""
         # No action needed for local storage
         logger.debug("Added the following parts to the file: %s", parts)
-        pass
 
     async def delete_file(self, key: str, upload_id: str | None = None):
         """Delete a file from local storage."""

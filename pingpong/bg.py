@@ -34,7 +34,6 @@ class BackgroundServer(uvicorn.Server):
         try:
             while not self.started:
                 time.sleep(0.001)
-                pass
             yield
         finally:
             self.should_exit = True

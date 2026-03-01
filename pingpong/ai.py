@@ -3780,7 +3780,6 @@ async def run_response(
 
                     except Exception as e:
                         logger.exception(f"Error writing to stream: {e}")
-                        pass
                 else:
                     try:
                         logger.exception("Error in response stream")
@@ -3821,7 +3820,6 @@ async def run_response(
 
                     except Exception as e:
                         logger.exception(f"Error writing to stream: {e}")
-                        pass
             except (ValueError, Exception) as e:
                 try:
                     logger.exception(f"Error in response stream: {e}")
@@ -3853,7 +3851,6 @@ async def run_response(
                         )
                 except Exception as e_:
                     logger.exception(f"Error writing to stream: {e_}")
-                    pass
             finally:
                 if not is_canceled:
                     if handler:
@@ -4028,7 +4025,6 @@ async def run_thread(
                 )
             except Exception as e:
                 logger.exception(f"Error writing to stream: {e}")
-                pass
         if openai_error.type == "server_error":
             try:
                 logger.exception(f"Server error in thread run: {openai_error}")
@@ -4043,7 +4039,6 @@ async def run_thread(
                 )
             except Exception as e:
                 logger.exception(f"Error writing to stream: {e}")
-                pass
         else:
             try:
                 logger.exception("Error adding new thread message")
@@ -4062,14 +4057,12 @@ async def run_thread(
                 )
             except Exception as e:
                 logger.exception(f"Error writing to stream: {e}")
-                pass
     except (ValueError, Exception) as e:
         try:
             logger.exception(f"Error adding new thread message: {e}")
             yield orjson.dumps({"type": "presend_error", "detail": str(e)}) + b"\n"
         except Exception as e_:
             logger.exception(f"Error writing to stream: {e_}")
-            pass
     finally:
         yield b'{"type":"done"}\n'
 
