@@ -150,6 +150,7 @@ def allow_http_for_lti_host(host: str, context: LTIHostValidationContext) -> boo
 
 
 _UNSAFE_PATH_RE = re.compile(r"[\x00-\x1f\x7f@]")
+_UNSAFE_QUERY_RE = re.compile(r"[\x00-\x1f\x7f]")
 
 
 def _sanitize_url_path(path: str, field_name: str) -> str:
@@ -173,7 +174,7 @@ def _sanitize_url_query(query: str, field_name: str) -> str:
     Rejects query strings containing control characters.  The returned string
     is reconstructed via :func:`urlencode` so it is no longer tainted.
     """
-    if _UNSAFE_PATH_RE.search(query):
+    if _UNSAFE_QUERY_RE.search(query):
         raise LTIUrlValidationError(f"Invalid URL query for {field_name}")
     pairs = parse_qsl(query, keep_blank_values=True)
     return urlencode(pairs)

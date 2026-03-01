@@ -730,6 +730,22 @@ def test_require_allowlisted_lti_url_preserves_valid_path_and_query(monkeypatch)
     )
 
 
+def test_require_allowlisted_lti_url_allows_at_sign_in_query_values(monkeypatch):
+    monkeypatch.setattr(
+        server_module,
+        "config",
+        _make_lti_server_config(allowlist=["platform.example.com"]),
+    )
+
+    url = server_module._require_allowlisted_lti_url(
+        "https://platform.example.com/api/lti/authorize_redirect"
+        "?login_hint=user%40example.com&scope=openid",
+        "auth_login_url",
+    )
+
+    assert "login_hint=user%40example.com" in url
+
+
 @pytest.mark.asyncio
 async def test_get_jwks_success():
     async def _get_public_keys_jwks():
