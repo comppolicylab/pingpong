@@ -28,7 +28,7 @@ class AzureEmailSender(EmailSender):
         poller.add_done_callback(send_future.set_result)
 
         # Wait for the send operation to complete
-        await send_future
-        result = poller.result()
+        completed_poller = await send_future
+        result = completed_poller.result()
         if result["error"]:
             raise Exception('Failed to send email: {result["error"]}')

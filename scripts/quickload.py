@@ -203,7 +203,8 @@ class LoadTest:
             )
 
     @abstractmethod
-    def test(self, *args, **kwargs): ...
+    def test(self, *args, **kwargs):
+        raise NotImplementedError
 
 
 COUNTRIES = [
