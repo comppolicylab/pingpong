@@ -1,8 +1,8 @@
 import { writable, derived, get } from 'svelte/store';
 import type { Writable, Readable } from 'svelte/store';
 import * as api from '$lib/api';
-import type { ThreadWithMeta, Error, BaseResponse } from '$lib/api';
-import { Deferred } from '$lib/deferred';
+import type { ThreadWithMeta, Error as ApiError, BaseResponse } from '$lib/api';
+import { errorMessage } from '$lib/errors';
 
 /**
  * State for the thread manager.
@@ -38,7 +38,7 @@ export type CallbackParams = {
  */
 export type Message = {
 	data: api.OpenAIMessage;
-	error: Error | null;
+	error: ApiError | null;
 	persisted: boolean;
 };
 
@@ -190,7 +190,7 @@ export class ThreadManager {
 		fetcher: api.Fetcher,
 		classId: number,
 		threadId: number,
-		threadData: BaseResponse & (ThreadWithMeta | Error | api.ValidationError),
+		threadData: BaseResponse & (ThreadWithMeta | ApiError | api.ValidationError),
 		interactionMode: 'chat' | 'voice' | 'lecture_video' = 'chat',
 		timezone?: string
 	) {
@@ -374,7 +374,7 @@ export class ThreadManager {
 		});
 	}
 
-	async #ensureRun(threadData: BaseResponse & (ThreadWithMeta | Error)) {
+	async #ensureRun(threadData: BaseResponse & (ThreadWithMeta | ApiError | api.ValidationError)) {
 		// Only run this in the browser
 		if (typeof window === 'undefined') {
 			return;
@@ -397,10 +397,10 @@ export class ThreadManager {
 		}
 
 		this.#data.update((d) => ({ ...d, submitting: true }));
-		const chunks = await api.createThreadRun(this.#fetcher, this.classId, this.threadId, {
-			timezone: this.timezone
-		});
 		try {
+			const chunks = await api.createThreadRun(this.#fetcher, this.classId, this.threadId, {
+				timezone: this.timezone
+			});
 			await this.#handleStreamChunks(chunks);
 		} catch (e) {
 			if (e instanceof api.StreamError) {
@@ -422,7 +422,11 @@ export class ThreadManager {
 					submitting: false
 				}));
 			} else {
-				this.#data.update((d) => ({ ...d, error: { detail: (e as Error).detail, wasSent: true } }));
+				this.#data.update((d) => ({
+					...d,
+					error: { detail: errorMessage(e, 'Unknown error'), wasSent: true },
+					submitting: false
+				}));
 			}
 		}
 	}
@@ -433,36 +437,55 @@ export class ThreadManager {
 	async #pollThread(timeout: number = 120_000) {
 		this.#data.update((d) => ({ ...d, waiting: true }));
 
-		const deferred = new Deferred();
-
+		const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 		const t0 = Date.now();
-		const interval = setInterval(async () => {
-			const response = await api.getThread(this.#fetcher, this.classId, this.threadId);
+
+		while (true) {
+			if (Date.now() - t0 > timeout) {
+				this.#data.update((d) => ({
+					...d,
+					error: {
+						detail: 'The thread run took too long to complete.',
+						wasSent: true
+					},
+					waiting: false
+				}));
+				throw new Error('The thread run took too long to complete.');
+			}
+
+			let response;
+			try {
+				response = await api.getThread(this.#fetcher, this.classId, this.threadId);
+			} catch {
+				// Keep polling on transient transport failures until timeout.
+				await sleep(5000);
+				continue;
+			}
+
 			const expanded = api.expandResponse(response);
+
+			if (expanded.error) {
+				const detail = expanded.error?.detail || 'Polling failed';
+				this.#data.update((d) => ({
+					...d,
+					error: { detail, wasSent: true },
+					waiting: false
+				}));
+				throw new Error(detail);
+			}
+
 			if (api.finished(expanded.data?.run)) {
-				clearInterval(interval);
 				this.#data.update((d) => ({
 					...d,
 					data: expanded.data,
-					error: expanded.error ? { detail: expanded.error?.detail, wasSent: true } : null,
+					error: null,
 					waiting: false
 				}));
-				deferred.resolve();
 				return;
 			}
 
-			if (Date.now() - t0 > timeout) {
-				clearInterval(interval);
-				this.#data.update((d) => ({
-					...d,
-					error: { detail: 'The thread run took too long to complete.', wasSent: true },
-					waiting: false
-				}));
-				deferred.reject(new Error('The thread run took too long to complete.'));
-			}
-		}, 5000);
-
-		return deferred.promise;
+			await sleep(5000);
+		}
 	}
 
 	/**
@@ -481,7 +504,7 @@ export class ThreadManager {
 		} catch (e) {
 			this.#data.update((d) => ({
 				...d,
-				error: { detail: (e as Error).detail, wasSent: true },
+				error: { detail: errorMessage(e, 'Unknown error'), wasSent: true },
 				loading: false
 			}));
 			throw e;
@@ -499,7 +522,7 @@ export class ThreadManager {
 		} catch (e) {
 			this.#data.update((d) => ({
 				...d,
-				error: { detail: (e as Error).detail, wasSent: true },
+				error: { detail: errorMessage(e, 'Unknown error'), wasSent: true },
 				loading: false
 			}));
 			throw e;
@@ -517,7 +540,7 @@ export class ThreadManager {
 		} catch (e) {
 			this.#data.update((d) => ({
 				...d,
-				error: { detail: (e as Error).detail, wasSent: true },
+				error: { detail: errorMessage(e, 'Unknown error'), wasSent: true },
 				loading: false
 			}));
 			throw e;
@@ -619,7 +642,7 @@ export class ThreadManager {
 		} catch (e) {
 			this.#data.update((d) => ({
 				...d,
-				error: { detail: (e as Error).detail, wasSent: true },
+				error: { detail: errorMessage(e, 'Unknown error'), wasSent: true },
 				waiting: false
 			}));
 			throw e;
@@ -774,7 +797,10 @@ export class ThreadManager {
 					error: { detail: e.message, wasSent: true }
 				}));
 			} else {
-				this.#data.update((d) => ({ ...d, error: { detail: (e as Error).detail, wasSent: true } }));
+				this.#data.update((d) => ({
+					...d,
+					error: { detail: errorMessage(e, 'Unknown error'), wasSent: true }
+				}));
 			}
 		}
 	}
