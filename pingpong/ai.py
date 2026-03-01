@@ -634,20 +634,21 @@ async def build_response_input_item_list(
                                     )
                                 )
                             case AnnotationType.CONTAINER_FILE_CITATION:
+                                continue
                                 # The API currently rejects
                                 # container_file_citation as input
-                                continue
-                                annotations.append(
-                                    AnnotationContainerFileCitation(
-                                        file_id=annotation.file_id,
-                                        container_id=annotation.container_id,
-                                        filename=annotation.filename,
-                                        start_index=annotation.start_index or 0,
-                                        end_index=annotation.end_index or 0,
-                                        type="container_file_citation",
-                                        index=0,
-                                    )
-                                )
+                                #
+                                # annotations.append(
+                                #     AnnotationContainerFileCitation(
+                                #         file_id=annotation.file_id,
+                                #         container_id=annotation.container_id,
+                                #         filename=annotation.filename,
+                                #         start_index=annotation.start_index or 0,
+                                #         end_index=annotation.end_index or 0,
+                                #         type="container_file_citation",
+                                #         index=0,
+                                #     )
+                                # )
                             case _:
                                 continue  # Skip unsupported annotation types
 
