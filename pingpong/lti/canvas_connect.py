@@ -13,6 +13,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from pingpong.authz.openfga import OpenFgaAuthzClient
 from pingpong.config import config
+from pingpong.lti.allowlist import (
+    build_lti_host_validation_context,
+    get_lti_platform_url_allowlist_from_settings,
+    INVALID_PLATFORM_URL_ALLOWLIST_DETAIL,
+    InvalidLTIPlatformUrlAllowlistError,
+    LTIHostValidationContext,
+    LTIUrlValidationError,
+    MISSING_PLATFORM_URL_ALLOWLIST_DETAIL,
+    MissingLTIPlatformUrlAllowlistError,
+    validate_allowlisted_lti_url_parts,
+)
 from pingpong.lti.constants import (
     CANVAS_CONNECT_SYNC_WAIT_DEFAULT_SECONDS,
     CLIENT_ASSERTION_EXPIRY_SECONDS,
@@ -71,6 +82,13 @@ def exception_detail(e: Exception) -> str:
     return str(e)
 
 
+def _is_global_lti_allowlist_error_detail(detail: str | None) -> bool:
+    return detail in {
+        MISSING_PLATFORM_URL_ALLOWLIST_DETAIL,
+        INVALID_PLATFORM_URL_ALLOWLIST_DETAIL,
+    }
+
+
 def _as_dict(value: object) -> dict[str, object] | None:
     if not isinstance(value, dict):
         return None
@@ -101,6 +119,20 @@ def _extract_error_detail(payload: object) -> str | None:
     if isinstance(error, str) and error:
         return error
     return None
+
+
+def _get_lti_platform_url_allowlist() -> list[str]:
+    lti_settings = getattr(config, "lti", None)
+    try:
+        return get_lti_platform_url_allowlist_from_settings(lti_settings)
+    except MissingLTIPlatformUrlAllowlistError as e:
+        raise CanvasConnectException(
+            detail=MISSING_PLATFORM_URL_ALLOWLIST_DETAIL,
+        ) from e
+    except InvalidLTIPlatformUrlAllowlistError as e:
+        raise CanvasConnectException(
+            detail=INVALID_PLATFORM_URL_ALLOWLIST_DETAIL,
+        ) from e
 
 
 def _extract_sync_row_errors(results: CreateUserResults) -> list[str]:
@@ -144,6 +176,8 @@ class CanvasConnectClient:
         self.key_manager = key_manager
         self.http_session: aiohttp.ClientSession | None = None
         self._cached_lti_class: LTIClass | None = None
+        self._cached_platform_url_allowlist: list[str] | None = None
+        self._cached_host_validation_context: LTIHostValidationContext | None = None
         self._cached_nrps_access_token: CanvasConnectAccessToken | None = None
         self._cached_nrps_access_token_valid_until: int | None = None
 
@@ -162,6 +196,29 @@ class CanvasConnectClient:
                 "CanvasConnectClient must be used as an async context manager"
             )
         return self.http_session
+
+    def _get_platform_url_allowlist(self) -> list[str]:
+        if self._cached_platform_url_allowlist is None:
+            self._cached_platform_url_allowlist = _get_lti_platform_url_allowlist()
+        return self._cached_platform_url_allowlist
+
+    def _get_host_validation_context(self) -> LTIHostValidationContext:
+        if self._cached_host_validation_context is None:
+            lti_settings = getattr(config, "lti", None)
+            if lti_settings and hasattr(lti_settings, "dev_http_hosts_set"):
+                dev_http_hosts = list(getattr(lti_settings, "dev_http_hosts_set"))
+            else:
+                dev_http_hosts = (
+                    list(getattr(lti_settings, "dev_http_hosts", []))
+                    if lti_settings
+                    else []
+                )
+            self._cached_host_validation_context = build_lti_host_validation_context(
+                allowlist=self._get_platform_url_allowlist(),
+                development=bool(getattr(config, "development", False)),
+                dev_http_hosts=dev_http_hosts,
+            )
+        return self._cached_host_validation_context
 
     @staticmethod
     def _get_token_endpoint(registration: LTIRegistration) -> str:
@@ -202,6 +259,19 @@ class CanvasConnectClient:
 
         self._cached_lti_class = lti_class
         return lti_class
+
+    def _validate_nrps_url(self, url: str, field_name: str) -> str:
+        try:
+            parts = validate_allowlisted_lti_url_parts(
+                url,
+                field_name,
+                self._get_host_validation_context(),
+            )
+        except LTIUrlValidationError as e:
+            raise CanvasConnectException(detail=str(e)) from e
+
+        query = f"?{parts.query}" if parts.query else ""
+        return f"{parts.scheme}://{parts.host}{parts.path}{query}"
 
     async def _build_client_assertion(self, client_id: str, token_endpoint: str) -> str:
         key = await self.key_manager.get_current_key()
@@ -247,7 +317,9 @@ class CanvasConnectClient:
             isinstance(existing_context_memberships_url, str)
             and existing_context_memberships_url
         ):
-            return existing_context_memberships_url
+            return self._validate_nrps_url(
+                existing_context_memberships_url, "context_memberships_url"
+            )
 
         raise CanvasConnectException(
             detail="LTI class is missing context_memberships_url",
@@ -303,6 +375,7 @@ class CanvasConnectClient:
         async with http_session.get(
             url,
             headers=headers,
+            allow_redirects=False,
         ) as response:
             response_payload: object = None
             try:
@@ -333,6 +406,7 @@ class CanvasConnectClient:
         next_page: str | None = start_url
         seen_pages: set[str] = set()
         while next_page:
+            next_page = self._validate_nrps_url(next_page, "nrps_page_url")
             if next_page in seen_pages:
                 logger.warning(
                     "Detected NRPS pagination loop for lti_class_id=%s at url=%s",
@@ -637,7 +711,10 @@ class CanvasConnectClient:
         except CanvasConnectWarning:
             raise
         except Exception as e:
-            await self._mark_sync_error(lti_class, exception_detail(e))
+            detail = exception_detail(e)
+            if _is_global_lti_allowlist_error_detail(detail):
+                raise
+            await self._mark_sync_error(lti_class, detail)
             self._raise_sync_error_if_manual()
             raise
 
@@ -676,7 +753,13 @@ class CanvasConnectClient:
             )
 
         token_endpoint = self._get_token_endpoint(registration)
-        client_assertion = await self._build_client_assertion(client_id, token_endpoint)
+        normalized_token_endpoint = self._validate_nrps_url(
+            token_endpoint, "token_endpoint"
+        )
+
+        client_assertion = await self._build_client_assertion(
+            client_id, normalized_token_endpoint
+        )
 
         request_data = {
             "client_id": client_id,
@@ -687,7 +770,7 @@ class CanvasConnectClient:
         }
 
         async with http_session.post(
-            token_endpoint,
+            normalized_token_endpoint,
             headers={"Content-Type": TOKEN_REQUEST_CONTENT_TYPE},
             data=request_data,
         ) as response:
@@ -858,6 +941,8 @@ async def canvas_connect_sync_all(
             except Exception as e:
                 logger.exception(f"Error syncing LTI class {lti_class.id}: {e}")
                 await savepoint.rollback()
+                if _is_global_lti_allowlist_error_detail(exception_detail(e)):
+                    continue
 
                 # sync_roster() already marks the class as errored, but that write is part
                 # of the rolled-back savepoint above. Re-apply the error marker outside the

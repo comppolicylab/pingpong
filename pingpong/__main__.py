@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import sys
-from typing import Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 import webbrowser
 import click
 import json
@@ -55,8 +55,13 @@ from pingpong.migrations.m06_cleanup_orphaned_lti_classes import (
     cleanup_orphaned_lti_classes,
 )
 from pingpong.now import _get_next_run_time, croner, utcnow
-from pingpong.schemas import LMSType, RunStatus
+from pingpong.schemas import LMSType, LTIRegistrationReviewStatus, RunStatus
 from pingpong.lti.canvas_connect import canvas_connect_sync_all
+from pingpong.lti.allowlist import extract_lti_url_hostname, try_parse_json_object
+from pingpong.lti.constants import (
+    LTI_OPENID_CONFIGURATION_URL_KEYS,
+    LTI_REGISTRATION_URL_FIELDS,
+)
 from pingpong.summary import send_class_summary_for_class
 
 from .auth import encode_auth_token
@@ -74,6 +79,7 @@ from .models import (
     PeriodicTask,
     User,
     Class,
+    LTIRegistration,
     UserClassRole,
 )
 from .authz.admin_migration import remove_class_admin_perms
@@ -1192,6 +1198,133 @@ async def _send_activity_summaries(
                 logger.info("All summaries sent successfully.")
                 job.completed_at = utcnow()
             await session.commit()
+
+
+@lti.command("suggest-config-from-db")
+@click.option(
+    "--json-output/--text-output",
+    default=False,
+    show_default=True,
+    help="Print the suggested values as JSON.",
+)
+def lti_suggest_config_from_db(json_output: bool) -> None:
+    """
+    Suggest LTI config values based on existing DB registrations.
+    """
+
+    async def _suggest_config_from_db() -> None:
+        registration_count = 0
+        registration_url_columns = {
+            field_name: getattr(LTIRegistration, field_name)
+            for field_name in LTI_REGISTRATION_URL_FIELDS
+        }
+        openid_configuration_column = LTIRegistration.openid_configuration
+
+        hosts_to_sources: dict[str, set[str]] = {}
+        warnings: list[str] = []
+
+        def _record_url(url_value: Any, source: str) -> None:
+            if not isinstance(url_value, str) or not url_value:
+                return
+            host = extract_lti_url_hostname(url_value.strip())
+            if host is None:
+                warnings.append(f"{source}: invalid URL {url_value!r}")
+                return
+            hosts_to_sources.setdefault(host, set()).add(source)
+
+        async with config.db.driver.async_session() as session:
+            result = await session.stream(
+                select(
+                    LTIRegistration.id,
+                    openid_configuration_column,
+                    *registration_url_columns.values(),
+                )
+                .where(
+                    and_(
+                        LTIRegistration.enabled.is_(True),
+                        LTIRegistration.review_status
+                        == LTIRegistrationReviewStatus.APPROVED,
+                    )
+                )
+                .order_by(LTIRegistration.id.asc())
+            )
+
+            async for registration in result:
+                registration_count += 1
+                source_prefix = f"registration[{registration.id}]"
+                for field_name in LTI_REGISTRATION_URL_FIELDS:
+                    _record_url(
+                        getattr(registration, field_name),
+                        f"{source_prefix}.{field_name}",
+                    )
+
+                openid_configuration = try_parse_json_object(
+                    registration.openid_configuration
+                )
+                if registration.openid_configuration and openid_configuration is None:
+                    warnings.append(
+                        f"{source_prefix}.openid_configuration: invalid JSON payload"
+                    )
+                    continue
+                if openid_configuration is None:
+                    continue
+
+                for key in LTI_OPENID_CONFIGURATION_URL_KEYS:
+                    _record_url(
+                        openid_configuration.get(key),
+                        f"{source_prefix}.openid_configuration.{key}",
+                    )
+
+        suggested_hosts = sorted(hosts_to_sources.keys())
+        suggested_config = {
+            "lti": {
+                "platform_url_allowlist": suggested_hosts,
+            }
+        }
+
+        if json_output:
+            click.echo(
+                json.dumps(
+                    {
+                        "registration_count": registration_count,
+                        "suggested_config": suggested_config,
+                        "sources_by_host": {
+                            host: sorted(host_sources)
+                            for host, host_sources in hosts_to_sources.items()
+                        },
+                        "warnings": warnings,
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return
+
+        if registration_count == 0:
+            click.echo("No LTI registrations found in the database.")
+            click.echo("[lti]")
+            click.echo("platform_url_allowlist = []")
+            return
+
+        click.echo("# Suggested config.toml values based on existing LTI registrations")
+        click.echo("[lti]")
+        quoted_hosts = ", ".join(f'"{host}"' for host in suggested_hosts)
+        click.echo(f"platform_url_allowlist = [{quoted_hosts}]")
+        click.echo("")
+        click.echo(
+            f"# Found {len(suggested_hosts)} unique host(s) from {registration_count} registration(s)."
+        )
+        for host in suggested_hosts:
+            click.echo(f"# {host}")
+            for source in sorted(hosts_to_sources[host]):
+                click.echo(f"#   - {source}")
+        if warnings:
+            click.echo("")
+            click.echo("# Warnings")
+            for warning in warnings:
+                click.echo(f"# {warning}")
+
+    asyncio.run(_suggest_config_from_db())
 
 
 @lti.command("rotate-keys")

@@ -14,6 +14,17 @@ TOKEN_ENDPOINT_KEY = "token_endpoint"
 SCOPES_SUPPORTED_KEY = "scopes_supported"
 TOKEN_ALG_KEY = "id_token_signing_alg_values_supported"
 SUBJECT_TYPES_KEY = "subject_types_supported"
+LTI_REGISTRATION_URL_FIELDS = (
+    "auth_login_url",
+    "auth_token_url",
+    "key_set_url",
+)
+LTI_OPENID_CONFIGURATION_URL_KEYS = (
+    AUTHORIZATION_ENDPOINT_KEY,
+    REGISTRATION_ENDPOINT_KEY,
+    KEYS_ENDPOINT_KEY,
+    TOKEN_ENDPOINT_KEY,
+)
 
 PLATFORM_CONFIGURATION_KEY = (
     "https://purl.imsglobal.org/spec/lti-platform-configuration"

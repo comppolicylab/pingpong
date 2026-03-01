@@ -4,7 +4,7 @@ import json
 import logging
 from datetime import datetime
 from typing import Any, cast
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 import aiohttp
 import jwt
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends
@@ -15,6 +15,19 @@ from pingpong.authz.openfga import OpenFgaAuthzClient
 from pingpong.config import config
 from pingpong.invite import send_lti_registration_submitted
 from pingpong.log_utils import sanitize_for_log
+from pingpong.lti.allowlist import (
+    AllowlistedLTIUrlParts as _AllowlistedLTIUrlParts,
+    allow_http_for_lti_host,
+    build_lti_host_validation_context,
+    get_lti_platform_url_allowlist_from_settings,
+    InvalidLTIPlatformUrlAllowlistError,
+    INVALID_PLATFORM_URL_ALLOWLIST_DETAIL,
+    LTIHostValidationContext as _LTIHostValidationContext,
+    LTIUrlValidationError,
+    MISSING_PLATFORM_URL_ALLOWLIST_DETAIL,
+    MissingLTIPlatformUrlAllowlistError,
+    validate_allowlisted_lti_url_parts,
+)
 from pingpong.lti.constants import (
     AUTHORIZATION_ENDPOINT_KEY,
     CANVAS_ACCOUNT_LTI_GUID_KEY,
@@ -104,10 +117,162 @@ def _is_public_sso_provider(provider: ExternalLoginProvider) -> bool:
     return provider.name != "email" and not getattr(provider, "internal_only", False)
 
 
+def _get_lti_platform_url_allowlist() -> list[str]:
+    lti_settings = getattr(config, "lti", None)
+    try:
+        return get_lti_platform_url_allowlist_from_settings(lti_settings)
+    except MissingLTIPlatformUrlAllowlistError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=MISSING_PLATFORM_URL_ALLOWLIST_DETAIL,
+        ) from e
+    except InvalidLTIPlatformUrlAllowlistError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=INVALID_PLATFORM_URL_ALLOWLIST_DETAIL,
+        ) from e
+
+
+def _require_allowlisted_lti_url(
+    url: Any,
+    field_name: str,
+    allowlist: list[str] | None = None,
+    validation_context: _LTIHostValidationContext | None = None,
+) -> str:
+    parts = _require_allowlisted_lti_url_parts(
+        url,
+        field_name,
+        allowlist=allowlist,
+        validation_context=validation_context,
+    )
+    query = f"?{parts.query}" if parts.query else ""
+    return f"{parts.scheme}://{parts.host}{parts.path}{query}"
+
+
+def _build_lti_host_validation_context(
+    allowlist: list[str] | None = None,
+) -> _LTIHostValidationContext:
+    host_allowlist = (
+        allowlist if allowlist is not None else _get_lti_platform_url_allowlist()
+    )
+    lti_settings = getattr(config, "lti", None)
+    if lti_settings and hasattr(lti_settings, "dev_http_hosts_set"):
+        dev_http_hosts = list(getattr(lti_settings, "dev_http_hosts_set"))
+    else:
+        dev_http_hosts = (
+            list(getattr(lti_settings, "dev_http_hosts", [])) if lti_settings else []
+        )
+    return build_lti_host_validation_context(
+        allowlist=host_allowlist,
+        development=bool(getattr(config, "development", False)),
+        dev_http_hosts=dev_http_hosts,
+    )
+
+
+def _require_allowlisted_lti_url_parts(
+    url: Any,
+    field_name: str,
+    allowlist: list[str] | None = None,
+    validation_context: _LTIHostValidationContext | None = None,
+) -> _AllowlistedLTIUrlParts:
+    context = (
+        validation_context
+        if validation_context is not None
+        else _build_lti_host_validation_context(allowlist)
+    )
+    try:
+        return validate_allowlisted_lti_url_parts(url, field_name, context)
+    except LTIUrlValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+def _require_allowlisted_openid_configuration_url(
+    url: Any,
+    allowlist: list[str] | None = None,
+    validation_context: _LTIHostValidationContext | None = None,
+) -> str:
+    host_validation_context = (
+        validation_context
+        if validation_context is not None
+        else _build_lti_host_validation_context(allowlist)
+    )
+    parts = _require_allowlisted_lti_url_parts(
+        url,
+        "openid_configuration",
+        validation_context=host_validation_context,
+    )
+    lti_settings = config.lti
+    if lti_settings is None:
+        raise HTTPException(
+            status_code=503,
+            detail=MISSING_PLATFORM_URL_ALLOWLIST_DETAIL,
+        )
+    if parts.query:
+        raise HTTPException(
+            status_code=400, detail="Invalid URL for openid_configuration"
+        )
+    path_lookup = getattr(
+        lti_settings, "allowed_openid_configuration_path_lookup", None
+    )
+    if isinstance(path_lookup, dict):
+        matched_path = path_lookup.get(parts.path)
+    else:
+        matched_path = (
+            parts.path
+            if parts.path in lti_settings.allowed_openid_configuration_paths
+            else None
+        )
+    if matched_path is None:
+        raise HTTPException(
+            status_code=400, detail="Invalid URL for openid_configuration"
+        )
+    # Keep OpenID discovery URL construction fully server-controlled:
+    # host/path come from allowlisted settings and scheme is derived from
+    # trusted environment config (HTTP only for explicit dev hosts).
+    scheme = (
+        "http"
+        if allow_http_for_lti_host(parts.host, host_validation_context)
+        else "https"
+    )
+    return f"{scheme}://{parts.host}{matched_path}"
+
+
+def _extract_context_memberships_url_from_claims(
+    claims: dict[str, Any],
+    validation_context: _LTIHostValidationContext | None = None,
+) -> str | None:
+    nrps_claim = claims.get(LTI_CLAIM_NRPS_KEY)
+    if nrps_claim is None:
+        return None
+    if not isinstance(nrps_claim, dict):
+        raise HTTPException(status_code=400, detail="Invalid NRPS claim")
+
+    context_memberships_url = nrps_claim.get("context_memberships_url")
+    if context_memberships_url is None:
+        return None
+    return _require_allowlisted_lti_url(
+        context_memberships_url,
+        "context_memberships_url",
+        validation_context=validation_context,
+    )
+
+
 async def _fetch_jwks(jwks_url: str) -> dict[str, Any]:
+    parsed = urlsplit(jwks_url)
+    if not parsed.hostname:
+        raise HTTPException(status_code=400, detail="Invalid JWKS URL")
+    expected_host = parsed.hostname.lower()
+
     timeout = aiohttp.ClientTimeout(total=10)
     async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.get(jwks_url, raise_for_status=True) as response:
+        async with session.get(
+            jwks_url, raise_for_status=True, allow_redirects=False
+        ) as response:
+            response_host = response.url.host
+            if not response_host or response_host.lower() != expected_host:
+                raise HTTPException(
+                    status_code=400, detail="Invalid JWKS response host"
+                )
             payload = await response.json()
             if not isinstance(payload, dict):
                 raise HTTPException(status_code=500, detail="Invalid JWKS response")
@@ -268,11 +433,19 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
     )
 
     headers = {"Authorization": f"Bearer {data.registration_token}"}
+    host_validation_context = _build_lti_host_validation_context()
+    openid_configuration_url = _require_allowlisted_openid_configuration_url(
+        data.openid_configuration,
+        validation_context=host_validation_context,
+    )
 
     response_data: dict[str, Any] | None = None
     async with aiohttp.ClientSession() as session:
         async with session.get(
-            data.openid_configuration, raise_for_status=True, headers=headers
+            openid_configuration_url,
+            raise_for_status=True,
+            headers=headers,
+            allow_redirects=False,
         ) as response:
             payload = await response.json()
             if not isinstance(payload, dict):
@@ -320,6 +493,33 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
         raise HTTPException(
             status_code=400, detail="Missing required OpenID configuration fields"
         )
+    authorization_endpoint = _require_allowlisted_lti_url(
+        authorization_endpoint,
+        AUTHORIZATION_ENDPOINT_KEY,
+        validation_context=host_validation_context,
+    )
+    registration_endpoint = _require_allowlisted_lti_url(
+        registration_endpoint,
+        REGISTRATION_ENDPOINT_KEY,
+        validation_context=host_validation_context,
+    )
+    keys_endpoint = _require_allowlisted_lti_url(
+        keys_endpoint,
+        KEYS_ENDPOINT_KEY,
+        validation_context=host_validation_context,
+    )
+    token_endpoint = _require_allowlisted_lti_url(
+        token_endpoint,
+        TOKEN_ENDPOINT_KEY,
+        validation_context=host_validation_context,
+    )
+
+    # Persist canonical endpoint URLs so downstream consumers do not re-use
+    # unnormalized OpenID response values.
+    response_data[AUTHORIZATION_ENDPOINT_KEY] = authorization_endpoint
+    response_data[REGISTRATION_ENDPOINT_KEY] = registration_endpoint
+    response_data[KEYS_ENDPOINT_KEY] = keys_endpoint
+    response_data[TOKEN_ENDPOINT_KEY] = token_endpoint
 
     if not all(scope in scopes_supported for scope in REQUIRED_SCOPES):
         raise HTTPException(
@@ -531,6 +731,12 @@ async def lti_login(request: StateRequest):
         raise HTTPException(
             status_code=400, detail="No known OIDC authorization endpoint for issuer"
         )
+    host_validation_context = _build_lti_host_validation_context()
+    oidc_authorization_endpoint = _require_allowlisted_lti_url(
+        oidc_authorization_endpoint,
+        "auth_login_url",
+        validation_context=host_validation_context,
+    )
 
     # Optional deployment binding if the platform supplies it at initiation time.
     request_deployment_id = payload.get("deployment_id") or payload.get(
@@ -643,13 +849,23 @@ async def lti_launch(
         raise HTTPException(status_code=404, detail="Unknown LTI client_id")
     if registration.issuer != oidc_session.issuer:
         raise HTTPException(status_code=400, detail="Issuer mismatch for state")
+    host_validation_context = _build_lti_host_validation_context()
+    jwks_url = _require_allowlisted_lti_url(
+        registration.key_set_url,
+        KEYS_ENDPOINT_KEY,
+        validation_context=host_validation_context,
+    )
 
     claims = await _verify_lti_id_token(
         id_token=id_token,
-        jwks_url=registration.key_set_url,
+        jwks_url=jwks_url,
         expected_issuer=oidc_session.issuer,
         expected_audience=oidc_session.client_id,
         expected_algorithm=registration.token_algorithm,
+    )
+    context_memberships_url = _extract_context_memberships_url_from_claims(
+        claims,
+        validation_context=host_validation_context,
     )
 
     nonce = claims.get("nonce")
@@ -926,9 +1142,6 @@ async def lti_launch(
                     in LTI_CUSTOM_PARAM_DEFAULT_VALUES["canvas_term_name"]
                 ):
                     course_term = None
-                nrps_claim = claims.get(LTI_CLAIM_NRPS_KEY, {})
-                context_memberships_url = nrps_claim.get("context_memberships_url")
-
                 pending_lti_class = LTIClass(
                     registration_id=registration.id,
                     lti_status=LTIStatus.PENDING,
@@ -1052,8 +1265,6 @@ async def lti_launch(
                     in LTI_CUSTOM_PARAM_DEFAULT_VALUES["canvas_term_name"]
                 ):
                     course_term = None
-                nrps_claim = claims.get(LTI_CLAIM_NRPS_KEY, {})
-                context_memberships_url = nrps_claim.get("context_memberships_url")
                 second_lti_class = LTIClass(
                     registration_id=registration.id,
                     lti_status=LTIStatus.LINKED,
@@ -1152,8 +1363,6 @@ async def lti_launch(
                     in LTI_CUSTOM_PARAM_DEFAULT_VALUES["canvas_term_name"]
                 ):
                     course_term = None
-                nrps_claim = claims.get(LTI_CLAIM_NRPS_KEY, {})
-                context_memberships_url = nrps_claim.get("context_memberships_url")
                 new_lti_class = LTIClass(
                     registration_id=registration.id,
                     lti_status=LTIStatus.LINKED,

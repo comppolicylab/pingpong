@@ -7,19 +7,30 @@ from pathlib import Path
 from typing import Literal, Union
 
 from glowplug import PostgresSettings, SqliteSettings
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from pingpong.artifacts import LocalArtifactStore, S3ArtifactStore
 from pingpong.audio_store import LocalAudioStore, S3AudioStore
 from pingpong.video_store import LocalVideoStore, S3VideoStore
 from pingpong.log_filters import IgnoreHealthEndpoint
+from pingpong.lti.allowlist import normalize_lti_platform_url_allowlist
 from .authz import OpenFgaAuthzDriver
 from .email import AzureEmailSender, GmailEmailSender, MockEmailSender, SmtpEmailSender
 from .lti import AWSLTIKeyStore, LocalLTIKeyStore, LTIKeyManager
 from .support import SupportSettings, NoSupportSettings
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_OPENID_CONFIGURATION_PATHS = (
+    "/.well-known/openid-configuration",
+    "/.well-known/openid",
+    "/api/lti/security/openid-configuration",
+)
+OPENID_CONFIGURATION_PATHS_ERROR = (
+    "openid_configuration_paths.paths entries must be absolute URL paths "
+    "without query or fragment"
+)
 
 
 class OpenFgaAuthzSettings(BaseSettings):
@@ -324,16 +335,74 @@ class LocalLTIKeyStoreSettings(BaseSettings):
 LTIKeyStoreSettings = Union[AWSLTIKeyStoreSettings, LocalLTIKeyStoreSettings]
 
 
+class LTIOpenIDConfigurationPathsSettings(BaseSettings):
+    """OpenID discovery path customization settings."""
+
+    mode: Literal["append", "replace"] = Field("replace")
+    paths: list[str] = Field(
+        default_factory=lambda: list(DEFAULT_OPENID_CONFIGURATION_PATHS)
+    )
+
+    @field_validator("paths")
+    @classmethod
+    def validate_paths(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        for entry in value:
+            path = entry.strip()
+            if not path or not path.startswith("/") or "?" in path or "#" in path:
+                raise ValueError(OPENID_CONFIGURATION_PATHS_ERROR)
+            normalized.append(path)
+        return normalized
+
+
 class LTISettings(BaseSettings):
     """LTI Advantage Service settings."""
 
     key_store: LTIKeyStoreSettings
     sync_wait: int = Field(60 * 10, gt=0)  # 10 mins
+    # Allowed LMS platform URL hosts for LTI setup and login redirects.
+    # Entries support exact hosts only (e.g. "canvas.example.edu").
+    platform_url_allowlist: list[str] = Field(default_factory=list)
+    # Hosts permitted to use plain HTTP in development mode (e.g. "canvas.docker").
+    # Ignored when ``config.development`` is ``False``.
+    dev_http_hosts: list[str] = Field(
+        default_factory=lambda: ["localhost", "127.0.0.1", "::1", "canvas.docker"]
+    )
+    openid_configuration_paths: LTIOpenIDConfigurationPathsSettings = Field(
+        default_factory=LTIOpenIDConfigurationPathsSettings
+    )
 
     # Key rotation settings
     rotation_schedule: str = Field("0 0 1 * *")  # First day of every month at midnight
     key_retention_count: int = Field(3)  # Keep last 3 keys
     key_size: int = Field(2048)  # RSA key size in bits
+
+    @cached_property
+    def allowed_openid_configuration_paths(self) -> set[str]:
+        configured_paths = set(self.openid_configuration_paths.paths)
+        if self.openid_configuration_paths.mode == "append":
+            return set(DEFAULT_OPENID_CONFIGURATION_PATHS) | configured_paths
+        return configured_paths
+
+    @cached_property
+    def allowed_openid_configuration_path_lookup(self) -> dict[str, str]:
+        return {path: path for path in self.allowed_openid_configuration_paths}
+
+    @cached_property
+    def normalized_platform_url_allowlist(self) -> list[str]:
+        return normalize_lti_platform_url_allowlist(self.platform_url_allowlist)
+
+    @cached_property
+    def platform_url_allowlist_lookup(self) -> dict[str, str]:
+        return {host: host for host in self.normalized_platform_url_allowlist}
+
+    @cached_property
+    def dev_http_hosts_set(self) -> set[str]:
+        return {
+            host.strip().lower()
+            for host in self.dev_http_hosts
+            if isinstance(host, str) and host.strip()
+        }
 
 
 class FeatureFlags(BaseSettings):

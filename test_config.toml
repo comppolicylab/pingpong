@@ -55,3 +55,11 @@ client_id = "your client id here"
 client_secret = "your client secret here"
 sync_wait = 600
 auth_token_expiry = 3600
+
+[lti]
+sync_wait = 600
+platform_url_allowlist = ["platform.example.com", "tool.example.com"]
+
+[lti.key_store]
+type = "local"
+directory = "local_exports/lti_keys"
