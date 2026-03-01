@@ -44,7 +44,9 @@ def db_session_handler(
 
         try:
             return await asyncio.shield(_execute_with_session())
-        except BaseException as e:
+        except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as e:
             logger.warning(f"DB operation {func.__name__} failed, retrying. Error: {e}")
             return await asyncio.shield(_execute_with_session())
 
