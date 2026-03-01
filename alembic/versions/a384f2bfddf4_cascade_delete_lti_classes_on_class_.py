@@ -19,6 +19,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # Resolves CodeQL's py/unused-global-variable
+    _ = revision, down_revision, branch_labels, depends_on
     op.drop_constraint("lti_classes_class_id_fkey", "lti_classes", type_="foreignkey")
     op.create_foreign_key(
         "lti_classes_class_id_fkey",
