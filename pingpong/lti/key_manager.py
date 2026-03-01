@@ -96,12 +96,12 @@ class BaseLTIKeyStore(ABC):
     @abstractmethod
     async def load_keys(self) -> List[LTIKeyPair]:
         """Load all keys from storage."""
-        ...
+        raise NotImplementedError
 
     @abstractmethod
     async def save_keys(self, keys: List[LTIKeyPair]) -> None:
         """Save keys to storage."""
-        ...
+        raise NotImplementedError
 
 
 class AWSLTIKeyStore(BaseLTIKeyStore):

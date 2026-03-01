@@ -4811,13 +4811,15 @@ def replace_annotations_in_text_v3(
 @overload
 def get_openai_client(
     api_key: str, provider: Literal["openai"] = "openai"
-) -> openai.AsyncClient: ...
+) -> openai.AsyncClient:
+    raise NotImplementedError
 
 
 @overload
 def get_openai_client(
     api_key: str, *, provider: Literal["azure"], endpoint: str | None
-) -> openai.AsyncAzureOpenAI: ...
+) -> openai.AsyncAzureOpenAI:
+    raise NotImplementedError
 
 
 @overload
@@ -4827,7 +4829,8 @@ def get_openai_client(
     provider: Literal["azure"],
     endpoint: str | None,
     api_version: str | None,
-) -> openai.AsyncAzureOpenAI: ...
+) -> openai.AsyncAzureOpenAI:
+    raise NotImplementedError
 
 
 @functools.cache

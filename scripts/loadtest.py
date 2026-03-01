@@ -143,7 +143,7 @@ class TestInstance:
 
     def cleanup(self):
         # self._delete_test_ai(self.cls_id, self.ai_id)
-        ...
+        return None
 
     def _create_test_class(self, name: str):
         # Create the institution

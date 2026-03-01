@@ -20,7 +20,7 @@ class BaseArtifactStore(ABC):
     @abstractmethod
     async def put(self, name: str, content: IO, content_type: str):
         """Save file to the store and return a URL."""
-        ...
+        raise NotImplementedError
 
     @abstractmethod
     async def get(

@@ -20,17 +20,17 @@ class BaseAudioUploadObject(ABC):
     @abstractmethod
     def next_part(self) -> int:
         """Get the next part number for the upload."""
-        ...
+        raise NotImplementedError
 
     @abstractmethod
     async def upload_part(self, content: IO):
         """Upload a part to the store."""
-        ...
+        raise NotImplementedError
 
     @abstractmethod
     async def complete_upload(self):
         """Complete the multipart upload."""
-        ...
+        raise NotImplementedError
 
 
 class AudioUploadPart(TypedDict):
@@ -46,26 +46,26 @@ class BaseAudioStore(ABC):
         self, name: str, content_type: str
     ) -> BaseAudioUploadObject:
         """Create a new multipart upload and return the upload object."""
-        ...
+        raise NotImplementedError
 
     @abstractmethod
     async def upload_part(
         self, content: IO, key: str, part_number: int, upload_id: str
     ) -> AudioUploadPart:
         """Upload a part to the store."""
-        ...
+        raise NotImplementedError
 
     @abstractmethod
     async def complete_upload(
         self, key: str, parts: list[AudioUploadPart], upload_id: str
     ):
         """Complete the multipart upload."""
-        ...
+        raise NotImplementedError
 
     @abstractmethod
     async def delete_file(self, key: str, upload_id: str | None = None):
         """Delete a file from the store."""
-        ...
+        raise NotImplementedError
 
     @abstractmethod
     async def get_file(
