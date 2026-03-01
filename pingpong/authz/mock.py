@@ -266,5 +266,6 @@ class MockFgaAuthzServer:
                         if resp.status == 200:
                             return
             except aiohttp.ClientError:
+                # Service may still be starting; retry until timeout.
                 pass
             await asyncio.sleep(0.1)

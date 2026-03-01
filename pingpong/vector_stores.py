@@ -155,6 +155,7 @@ async def sync_vector_store_files(
             )
         # Don't raise an error if the file is already deleted
         except openai.NotFoundError:
+            # File is already absent in OpenAI; continue syncing remaining files.
             pass
         except openai.BadRequestError as e:
             raise HTTPException(
@@ -259,6 +260,7 @@ async def delete_vector_store_oai(
     try:
         await openai_client.vector_stores.delete(vector_store_id)
     except openai.NotFoundError:
+        # Vector store was already removed in OpenAI; delete should be idempotent.
         pass
     except openai.BadRequestError as e:
         raise HTTPException(

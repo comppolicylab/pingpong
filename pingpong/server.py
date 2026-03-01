@@ -7044,6 +7044,7 @@ async def remove_file_from_thread(
         await models.File.delete_by_file_id(request.state["db"], file_id)
         await openai_client.files.delete(file_id)
     except openai.NotFoundError:
+        # File was already deleted in OpenAI or DB; treat delete as idempotent.
         pass
     except openai.BadRequestError as e:
         raise HTTPException(
@@ -7135,6 +7136,7 @@ async def delete_thread(
         try:
             await openai_client.beta.threads.delete(thread_obj_id)
         except openai.NotFoundError:
+            # Thread was already removed in OpenAI; local cleanup can continue.
             pass
         except openai.BadRequestError as e:
             raise HTTPException(
@@ -9385,6 +9387,7 @@ async def delete_assistant(
         try:
             await openai_client.beta.assistants.delete(assistant_id)
         except openai.NotFoundError:
+            # Assistant was already removed in OpenAI; local cleanup can continue.
             pass
         except openai.BadRequestError as e:
             raise HTTPException(
