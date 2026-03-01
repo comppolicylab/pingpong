@@ -3185,8 +3185,8 @@ const streamThreadChunks = (res: Response) => {
 	}
 	const stream = res.body
 		.pipeThrough(new TextDecoderStream())
-		.pipeThrough(new TextLineStream())
-		.pipeThrough(new JSONStream());
+		.pipeThrough(TextLineStream())
+		.pipeThrough(JSONStream());
 	const reader = stream.getReader();
 	if (res.status === 422) {
 		return {
