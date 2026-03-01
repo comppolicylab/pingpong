@@ -35,8 +35,7 @@ class AddUserException(Exception):
 async def delete_canvas_permissions(
     client: OpenFgaAuthzClient, user_ids: list[int], class_id: str
 ) -> None:
-    revokes = list[Relation]()
-    revokes = [
+    revokes: list[Relation] = [
         (f"user:{user_id}", role, f"class:{class_id}")
         for user_id in user_ids
         for role in ["admin", "teacher", "student"]

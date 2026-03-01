@@ -5478,7 +5478,6 @@ async def create_audio_thread(
     request: StateRequest,
     openai_client: OpenAIClient,
 ):
-    parties = list[models.User]()
     thread = None
 
     anonymous_session: models.AnonymousSession | None = None
@@ -5832,7 +5831,6 @@ async def create_thread(
     request: StateRequest,
     openai_client: OpenAIClient,
 ):
-    parties = list[models.User]()
     vector_store_id = None
     vector_store_object_id = None
     tool_resources: ToolResources = {}
@@ -7494,8 +7492,6 @@ async def create_assistant(
         ):
             raise HTTPException(403, "You lack permission to publish an assistant.")
 
-        class_ = await models.Class.get_by_id(request.state["db"], int(class_id))
-
     class_ = await models.Class.get_by_id(request.state["db"], class_id_int)
     if not class_:
         raise HTTPException(
@@ -7512,7 +7508,6 @@ async def create_assistant(
             detail="Assistants in Lecture video mode do not support Azure OpenAI. Please select a different interaction mode or use another group.",
         )
 
-    assistant_version = 2
     if req.interaction_mode == schemas.InteractionMode.VOICE:
         # Voice mode assistants are only supported in version 2
         assistant_version = 2

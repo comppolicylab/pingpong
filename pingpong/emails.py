@@ -91,7 +91,7 @@ async def revalidate_email_addresses(
             email.valid = False
             email.error = str(e)
 
-        email = await update_user_info(session, email)
+        await update_user_info(session, email)
 
     deduplicated_addresses = deduplicate_emails(input)
 
