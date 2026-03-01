@@ -209,7 +209,6 @@ async def set_as_default_azure_api_key(
         raise ValueError(
             f"set_as_default_azure_api_key: No API key entry found for the provided redacted API key: {prefix}...{suffix}."
         )
-        return
     if len(api_key_object) > 1:
         raise ValueError(
             f"set_as_default_azure_api_key: Multiple API key entries found for the given provided API key: {prefix}...{suffix}. No updates performed."
