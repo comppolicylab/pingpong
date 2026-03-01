@@ -3,7 +3,7 @@ import logging
 from collections.abc import AsyncIterator
 from datetime import datetime, timedelta
 from typing import cast
-from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit, urlunparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import aiohttp
 from fastapi import BackgroundTasks
@@ -14,11 +14,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pingpong.authz.openfga import OpenFgaAuthzClient
 from pingpong.config import config
 from pingpong.lti.allowlist import (
+    build_lti_host_validation_context,
     get_lti_platform_url_allowlist_from_settings,
     INVALID_PLATFORM_URL_ALLOWLIST_DETAIL,
     InvalidLTIPlatformUrlAllowlistError,
+    LTIHostValidationContext,
+    LTIUrlValidationError,
     MISSING_PLATFORM_URL_ALLOWLIST_DETAIL,
     MissingLTIPlatformUrlAllowlistError,
+    validate_allowlisted_lti_url_parts,
 )
 from pingpong.lti.constants import (
     CANVAS_CONNECT_SYNC_WAIT_DEFAULT_SECONDS,
@@ -118,10 +122,9 @@ def _extract_error_detail(payload: object) -> str | None:
 
 
 def _get_lti_platform_url_allowlist() -> list[str]:
+    lti_settings = getattr(config, "lti", None)
     try:
-        return get_lti_platform_url_allowlist_from_settings(
-            getattr(config, "lti", None)
-        )
+        return get_lti_platform_url_allowlist_from_settings(lti_settings)
     except MissingLTIPlatformUrlAllowlistError as e:
         raise CanvasConnectException(
             detail=MISSING_PLATFORM_URL_ALLOWLIST_DETAIL,
@@ -174,7 +177,7 @@ class CanvasConnectClient:
         self.http_session: aiohttp.ClientSession | None = None
         self._cached_lti_class: LTIClass | None = None
         self._cached_platform_url_allowlist: list[str] | None = None
-        self._cached_platform_url_allowlist_set: set[str] | None = None
+        self._cached_host_validation_context: LTIHostValidationContext | None = None
         self._cached_nrps_access_token: CanvasConnectAccessToken | None = None
         self._cached_nrps_access_token_valid_until: int | None = None
 
@@ -199,12 +202,23 @@ class CanvasConnectClient:
             self._cached_platform_url_allowlist = _get_lti_platform_url_allowlist()
         return self._cached_platform_url_allowlist
 
-    def _get_platform_url_allowlist_set(self) -> set[str]:
-        if self._cached_platform_url_allowlist_set is None:
-            self._cached_platform_url_allowlist_set = set(
-                self._get_platform_url_allowlist()
+    def _get_host_validation_context(self) -> LTIHostValidationContext:
+        if self._cached_host_validation_context is None:
+            lti_settings = getattr(config, "lti", None)
+            if lti_settings and hasattr(lti_settings, "dev_http_hosts_set"):
+                dev_http_hosts = list(getattr(lti_settings, "dev_http_hosts_set"))
+            else:
+                dev_http_hosts = (
+                    list(getattr(lti_settings, "dev_http_hosts", []))
+                    if lti_settings
+                    else []
+                )
+            self._cached_host_validation_context = build_lti_host_validation_context(
+                allowlist=self._get_platform_url_allowlist(),
+                development=bool(getattr(config, "development", False)),
+                dev_http_hosts=dev_http_hosts,
             )
-        return self._cached_platform_url_allowlist_set
+        return self._cached_host_validation_context
 
     @staticmethod
     def _get_token_endpoint(registration: LTIRegistration) -> str:
@@ -247,22 +261,17 @@ class CanvasConnectClient:
         return lti_class
 
     def _validate_nrps_url(self, url: str, field_name: str) -> str:
-        normalized_url = url.replace("\\", "/")
-        parsed = urlsplit(normalized_url)
-        if (
-            parsed.scheme not in {"http", "https"}
-            or not parsed.netloc
-            or not parsed.hostname
-        ):
-            raise CanvasConnectException(detail=f"Invalid URL for {field_name}")
-
-        host = parsed.hostname.lower()
-        if host not in self._get_platform_url_allowlist_set():
-            raise CanvasConnectException(
-                detail=f"{field_name} host is not allowlisted",
+        try:
+            parts = validate_allowlisted_lti_url_parts(
+                url,
+                field_name,
+                self._get_host_validation_context(),
             )
+        except LTIUrlValidationError as e:
+            raise CanvasConnectException(detail=str(e)) from e
 
-        return normalized_url
+        query = f"?{parts.query}" if parts.query else ""
+        return f"{parts.scheme}://{parts.host}{parts.path}{query}"
 
     async def _build_client_assertion(self, client_id: str, token_endpoint: str) -> str:
         key = await self.key_manager.get_current_key()
@@ -366,6 +375,7 @@ class CanvasConnectClient:
         async with http_session.get(
             url,
             headers=headers,
+            allow_redirects=False,
         ) as response:
             response_payload: object = None
             try:
@@ -743,7 +753,13 @@ class CanvasConnectClient:
             )
 
         token_endpoint = self._get_token_endpoint(registration)
-        client_assertion = await self._build_client_assertion(client_id, token_endpoint)
+        normalized_token_endpoint = self._validate_nrps_url(
+            token_endpoint, "token_endpoint"
+        )
+
+        client_assertion = await self._build_client_assertion(
+            client_id, normalized_token_endpoint
+        )
 
         request_data = {
             "client_id": client_id,
@@ -754,7 +770,7 @@ class CanvasConnectClient:
         }
 
         async with http_session.post(
-            token_endpoint,
+            normalized_token_endpoint,
             headers={"Content-Type": TOKEN_REQUEST_CONTENT_TYPE},
             data=request_data,
         ) as response:

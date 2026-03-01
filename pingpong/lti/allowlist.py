@@ -1,5 +1,6 @@
 import json
 from collections.abc import Sequence
+from typing import NamedTuple
 from urllib.parse import urlsplit
 
 INVALID_PLATFORM_URL_ALLOWLIST_DETAIL = (
@@ -17,6 +18,23 @@ class MissingLTIPlatformUrlAllowlistError(ValueError):
 
 class InvalidLTIPlatformUrlAllowlistError(ValueError):
     pass
+
+
+class LTIUrlValidationError(ValueError):
+    pass
+
+
+class AllowlistedLTIUrlParts(NamedTuple):
+    scheme: str
+    host: str
+    path: str
+    query: str
+
+
+class LTIHostValidationContext(NamedTuple):
+    allowlist_lookup: dict[str, str]
+    dev_http_hosts: set[str]
+    development: bool
 
 
 def normalize_lti_platform_url_allowlist(allowlist: Sequence[object]) -> list[str]:
@@ -103,3 +121,75 @@ def find_lti_allowlisted_host(host: str, allowlist: Sequence[str]) -> str | None
         if host_lower == allowed:
             return allowed
     return None
+
+
+def build_lti_host_validation_context(
+    *,
+    allowlist: Sequence[str],
+    development: bool,
+    dev_http_hosts: Sequence[object],
+) -> LTIHostValidationContext:
+    allowlist_lookup = {host.lower(): host for host in allowlist}
+    dev_http_hosts_set = {
+        candidate.strip().lower()
+        for candidate in dev_http_hosts
+        if isinstance(candidate, str) and candidate.strip()
+    }
+    return LTIHostValidationContext(
+        allowlist_lookup=allowlist_lookup,
+        dev_http_hosts=dev_http_hosts_set,
+        development=development,
+    )
+
+
+def allow_http_for_lti_host(host: str, context: LTIHostValidationContext) -> bool:
+    if not context.development:
+        return False
+    return host.lower() in context.dev_http_hosts
+
+
+def validate_allowlisted_lti_url_parts(
+    url: object,
+    field_name: str,
+    context: LTIHostValidationContext,
+) -> AllowlistedLTIUrlParts:
+    if not isinstance(url, str) or not url:
+        raise LTIUrlValidationError(f"Missing or invalid {field_name}")
+
+    normalized_url = url.replace("\\", "/")
+    parsed = urlsplit(normalized_url)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or not parsed.hostname
+    ):
+        raise LTIUrlValidationError(f"Invalid URL for {field_name}")
+
+    try:
+        port = parsed.port
+    except ValueError as e:
+        raise LTIUrlValidationError(f"Invalid URL for {field_name}") from e
+
+    if parsed.username or parsed.password or parsed.fragment:
+        raise LTIUrlValidationError(f"Invalid URL for {field_name}")
+
+    if port is not None:
+        is_default_port = (parsed.scheme == "https" and port == 443) or (
+            parsed.scheme == "http" and port == 80
+        )
+        if not is_default_port:
+            raise LTIUrlValidationError(f"Invalid URL for {field_name}")
+
+    matched_host = context.allowlist_lookup.get(parsed.hostname.lower())
+    if matched_host is None:
+        raise LTIUrlValidationError(f"{field_name} host is not allowlisted")
+
+    if parsed.scheme != "https" and not allow_http_for_lti_host(matched_host, context):
+        raise LTIUrlValidationError(f"{field_name} must use HTTPS")
+
+    return AllowlistedLTIUrlParts(
+        scheme="https" if parsed.scheme == "https" else "http",
+        host=matched_host,
+        path=parsed.path or "/",
+        query=parsed.query,
+    )

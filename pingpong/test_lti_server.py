@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from urllib.parse import urlsplit
 
 import pytest
 from fastapi import HTTPException
@@ -16,8 +17,9 @@ from pingpong.schemas import LMSPlatform, LTIRegistrationReviewStatus, LTIStatus
 
 
 class FakeResponse:
-    def __init__(self, payload):
+    def __init__(self, payload, url: str = "https://example.com"):
         self._payload = payload
+        self.url = SimpleNamespace(host=urlsplit(url).hostname)
 
     async def __aenter__(self):
         return self
@@ -44,12 +46,12 @@ class FakeSession:
     def get(self, *args, **kwargs):
         if self.request_log is not None:
             self.request_log.append(("GET", args[0]))
-        return FakeResponse(self.get_payload)
+        return FakeResponse(self.get_payload, url=args[0])
 
     def post(self, *args, **kwargs):
         if self.request_log is not None:
             self.request_log.append(("POST", args[0]))
-        return FakeResponse(self.post_payload)
+        return FakeResponse(self.post_payload, url=args[0])
 
 
 class FakeRequest:
@@ -353,6 +355,25 @@ async def test_fetch_jwks_rejects_non_dict(monkeypatch):
         await server_module._fetch_jwks("https://example.com/jwks")
 
     assert excinfo.value.status_code == 500
+
+
+@pytest.mark.asyncio
+async def test_fetch_jwks_rejects_mismatched_response_host(monkeypatch):
+    class HostMismatchSession(FakeSession):
+        def get(self, *args, **kwargs):
+            return FakeResponse(self.get_payload, url="https://evil.example.com/jwks")
+
+    monkeypatch.setattr(
+        server_module.aiohttp,
+        "ClientSession",
+        lambda timeout=None: HostMismatchSession(get_payload={"keys": []}),
+    )
+
+    with pytest.raises(HTTPException) as excinfo:
+        await server_module._fetch_jwks("https://platform.example.com/jwks")
+
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail == "Invalid JWKS response host"
 
 
 def test_select_jwk_with_kid():

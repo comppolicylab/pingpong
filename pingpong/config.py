@@ -27,6 +27,10 @@ DEFAULT_OPENID_CONFIGURATION_PATHS = (
     "/.well-known/openid",
     "/api/lti/security/openid-configuration",
 )
+OPENID_CONFIGURATION_PATHS_ERROR = (
+    "openid_configuration_paths.paths entries must be absolute URL paths "
+    "without query or fragment"
+)
 
 
 class OpenFgaAuthzSettings(BaseSettings):
@@ -346,9 +350,7 @@ class LTIOpenIDConfigurationPathsSettings(BaseSettings):
         for entry in value:
             path = entry.strip()
             if not path or not path.startswith("/") or "?" in path or "#" in path:
-                raise ValueError(
-                    "openid_configuration_paths.paths entries must be absolute URL paths without query or fragment"
-                )
+                raise ValueError(OPENID_CONFIGURATION_PATHS_ERROR)
             normalized.append(path)
         return normalized
 

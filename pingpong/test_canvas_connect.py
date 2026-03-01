@@ -52,12 +52,13 @@ class FakeClientSession:
             raise AssertionError("No fake responses configured")
         return self.responses.pop(0)
 
-    def get(self, url: str, *, headers: dict):
+    def get(self, url: str, *, headers: dict, allow_redirects: bool = True):
         self.requests.append(
             {
                 "method": "GET",
                 "url": url,
                 "headers": headers,
+                "allow_redirects": allow_redirects,
             }
         )
         if not self.responses:
@@ -305,6 +306,101 @@ async def test_get_nrps_access_token_raises_on_token_endpoint_error(monkeypatch)
             await client.get_nrps_access_token()
 
     assert excinfo.value.detail == "invalid client assertion"
+
+
+@pytest.mark.asyncio
+async def test_get_nrps_access_token_rejects_unallowlisted_token_endpoint(monkeypatch):
+    registration = SimpleNamespace(
+        client_id="client-123",
+        openid_configuration='{"token_endpoint":"https://evil.example.com/token"}',
+        auth_token_url="https://canvas.example.com/fallback-token",
+    )
+    lti_class = SimpleNamespace(id=1301, registration=registration)
+
+    async def _get_by_id_with_registration(cls, db, id_):
+        return lti_class
+
+    monkeypatch.setattr(
+        canvas_connect_module.LTIClass,
+        "get_by_id_with_registration",
+        classmethod(_get_by_id_with_registration),
+    )
+    monkeypatch.setattr(
+        canvas_connect_module.jwt,
+        "encode",
+        lambda *args, **kwargs: "signed-client-assertion",
+    )
+    monkeypatch.setattr(canvas_connect_module.uuid, "uuid7", lambda: "uuid7-test")
+
+    fake_session = FakeClientSession(
+        FakeTokenResponse(payload={"access_token": "short-lived-token"})
+    )
+    monkeypatch.setattr(
+        canvas_connect_module.aiohttp,
+        "ClientSession",
+        lambda: fake_session,
+    )
+
+    async with canvas_connect_module.CanvasConnectClient(
+        db=SimpleNamespace(),
+        lti_class_id=1301,
+        key_manager=FakeKeyManager(),
+        nowfn=lambda: datetime.now(timezone.utc),
+    ) as client:
+        with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+            await client.get_nrps_access_token()
+
+    assert excinfo.value.detail == "token_endpoint host is not allowlisted"
+    assert fake_session.requests == []
+
+
+@pytest.mark.asyncio
+async def test_get_nrps_access_token_rejects_http_token_endpoint_in_non_dev(
+    monkeypatch,
+):
+    registration = SimpleNamespace(
+        client_id="client-123",
+        openid_configuration='{"token_endpoint":"http://canvas.example.com/token"}',
+        auth_token_url="https://canvas.example.com/fallback-token",
+    )
+    lti_class = SimpleNamespace(id=1302, registration=registration)
+
+    async def _get_by_id_with_registration(cls, db, id_):
+        return lti_class
+
+    monkeypatch.setattr(
+        canvas_connect_module.LTIClass,
+        "get_by_id_with_registration",
+        classmethod(_get_by_id_with_registration),
+    )
+    monkeypatch.setattr(
+        canvas_connect_module.jwt,
+        "encode",
+        lambda *args, **kwargs: "signed-client-assertion",
+    )
+    monkeypatch.setattr(canvas_connect_module.uuid, "uuid7", lambda: "uuid7-test")
+    monkeypatch.setattr(canvas_connect_module.config, "development", False)
+
+    fake_session = FakeClientSession(
+        FakeTokenResponse(payload={"access_token": "short-lived-token"})
+    )
+    monkeypatch.setattr(
+        canvas_connect_module.aiohttp,
+        "ClientSession",
+        lambda: fake_session,
+    )
+
+    async with canvas_connect_module.CanvasConnectClient(
+        db=SimpleNamespace(),
+        lti_class_id=1302,
+        key_manager=FakeKeyManager(),
+        nowfn=lambda: datetime.now(timezone.utc),
+    ) as client:
+        with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+            await client.get_nrps_access_token()
+
+    assert excinfo.value.detail == "token_endpoint must use HTTPS"
+    assert fake_session.requests == []
 
 
 @pytest.mark.asyncio
@@ -907,6 +1003,7 @@ async def test_get_resource_link_id_uses_nrps_context_id_as_transient_fallback(
     assert len(fake_session.requests) == 2
     assert fake_session.requests[1]["method"] == "GET"
     assert fake_session.requests[1]["url"] == context_memberships_url
+    assert fake_session.requests[1]["allow_redirects"] is False
 
 
 @pytest.mark.asyncio
@@ -1083,6 +1180,8 @@ async def test_get_nrps_create_user_class_roles_maps_members_and_pages(monkeypat
     assert fake_session.requests[0]["method"] == "POST"
     assert fake_session.requests[1]["method"] == "GET"
     assert fake_session.requests[2]["method"] == "GET"
+    assert fake_session.requests[1]["allow_redirects"] is False
+    assert fake_session.requests[2]["allow_redirects"] is False
     assert (
         fake_session.requests[1]["url"]
         == f"{context_memberships_url}?rlid=resource-link-id"
@@ -1162,6 +1261,7 @@ async def test_get_nrps_create_user_class_roles_rejects_untrusted_next_page(
     assert excinfo.value.detail == "nrps_page_url host is not allowlisted"
     assert len(fake_session.requests) == 2
     assert fake_session.requests[1]["method"] == "GET"
+    assert fake_session.requests[1]["allow_redirects"] is False
 
 
 @pytest.mark.asyncio
@@ -1233,10 +1333,12 @@ async def test_get_nrps_create_user_class_roles_allows_missing_members(monkeypat
     assert create_roles.roles == []
     assert len(fake_session.requests) == 3
     assert fake_session.requests[1]["url"] == context_memberships_url
+    assert fake_session.requests[1]["allow_redirects"] is False
     assert (
         fake_session.requests[2]["url"]
         == f"{context_memberships_url}?rlid=fallback-context-id"
     )
+    assert fake_session.requests[2]["allow_redirects"] is False
 
 
 async def _async_return(value):

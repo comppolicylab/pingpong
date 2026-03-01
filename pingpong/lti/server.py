@@ -3,7 +3,7 @@
 import json
 import logging
 from datetime import datetime
-from typing import Any, NamedTuple, cast
+from typing import Any, cast
 from urllib.parse import urlencode, urlsplit
 import aiohttp
 import jwt
@@ -16,11 +16,17 @@ from pingpong.config import config
 from pingpong.invite import send_lti_registration_submitted
 from pingpong.log_utils import sanitize_for_log
 from pingpong.lti.allowlist import (
+    AllowlistedLTIUrlParts as _AllowlistedLTIUrlParts,
+    allow_http_for_lti_host,
+    build_lti_host_validation_context,
     get_lti_platform_url_allowlist_from_settings,
     InvalidLTIPlatformUrlAllowlistError,
     INVALID_PLATFORM_URL_ALLOWLIST_DETAIL,
+    LTIHostValidationContext as _LTIHostValidationContext,
+    LTIUrlValidationError,
     MISSING_PLATFORM_URL_ALLOWLIST_DETAIL,
     MissingLTIPlatformUrlAllowlistError,
+    validate_allowlisted_lti_url_parts,
 )
 from pingpong.lti.constants import (
     AUTHORIZATION_ENDPOINT_KEY,
@@ -107,19 +113,6 @@ logger = logging.getLogger(__name__)
 lti_router: APIRouter = APIRouter()
 
 
-class _AllowlistedLTIUrlParts(NamedTuple):
-    scheme: str
-    host: str
-    path: str
-    query: str
-
-
-class _LTIHostValidationContext(NamedTuple):
-    allowlist_lookup: dict[str, str]
-    dev_http_hosts: set[str]
-    development: bool
-
-
 def _is_public_sso_provider(provider: ExternalLoginProvider) -> bool:
     return provider.name != "email" and not getattr(provider, "internal_only", False)
 
@@ -127,8 +120,6 @@ def _is_public_sso_provider(provider: ExternalLoginProvider) -> bool:
 def _get_lti_platform_url_allowlist() -> list[str]:
     lti_settings = getattr(config, "lti", None)
     try:
-        if lti_settings and hasattr(lti_settings, "normalized_platform_url_allowlist"):
-            return list(getattr(lti_settings, "normalized_platform_url_allowlist"))
         return get_lti_platform_url_allowlist_from_settings(lti_settings)
     except MissingLTIPlatformUrlAllowlistError as e:
         raise HTTPException(
@@ -164,39 +155,18 @@ def _build_lti_host_validation_context(
     host_allowlist = (
         allowlist if allowlist is not None else _get_lti_platform_url_allowlist()
     )
-    allowlist_lookup = {entry.lower(): entry for entry in host_allowlist}
     lti_settings = getattr(config, "lti", None)
-    dev_http_hosts: set[str]
     if lti_settings and hasattr(lti_settings, "dev_http_hosts_set"):
-        dev_http_hosts = set(getattr(lti_settings, "dev_http_hosts_set"))
+        dev_http_hosts = list(getattr(lti_settings, "dev_http_hosts_set"))
     else:
-        raw_dev_http_hosts = (
-            getattr(lti_settings, "dev_http_hosts", []) if lti_settings else []
+        dev_http_hosts = (
+            list(getattr(lti_settings, "dev_http_hosts", [])) if lti_settings else []
         )
-        dev_http_hosts = {
-            host.strip().lower()
-            for host in raw_dev_http_hosts
-            if isinstance(host, str) and host.strip()
-        }
-    return _LTIHostValidationContext(
-        allowlist_lookup=allowlist_lookup,
-        dev_http_hosts=dev_http_hosts,
+    return build_lti_host_validation_context(
+        allowlist=host_allowlist,
         development=bool(getattr(config, "development", False)),
+        dev_http_hosts=dev_http_hosts,
     )
-
-
-def _allow_http_for_lti_host(
-    host: str, validation_context: _LTIHostValidationContext | None = None
-) -> bool:
-    context = (
-        validation_context
-        if validation_context is not None
-        else _build_lti_host_validation_context()
-    )
-    if not context.development:
-        return False
-
-    return host.lower() in context.dev_http_hosts
 
 
 def _require_allowlisted_lti_url_parts(
@@ -205,66 +175,15 @@ def _require_allowlisted_lti_url_parts(
     allowlist: list[str] | None = None,
     validation_context: _LTIHostValidationContext | None = None,
 ) -> _AllowlistedLTIUrlParts:
-    if not isinstance(url, str) or not url:
-        raise HTTPException(status_code=400, detail=f"Missing or invalid {field_name}")
-
-    # Browsers commonly treat backslashes as forward slashes in URLs.
-    # Normalize first so validation mirrors browser behavior.
-    normalized_url = url.replace("\\", "/")
-    parsed = urlsplit(normalized_url)
-    if (
-        parsed.scheme not in {"http", "https"}
-        or not parsed.netloc
-        or not parsed.hostname
-    ):
-        raise HTTPException(status_code=400, detail=f"Invalid URL for {field_name}")
-
-    try:
-        port = parsed.port
-    except ValueError as e:
-        raise HTTPException(
-            status_code=400, detail=f"Invalid URL for {field_name}"
-        ) from e
-
-    if parsed.username or parsed.password or parsed.fragment:
-        raise HTTPException(status_code=400, detail=f"Invalid URL for {field_name}")
-
-    if port is not None:
-        is_default_port = (parsed.scheme == "https" and port == 443) or (
-            parsed.scheme == "http" and port == 80
-        )
-        if not is_default_port:
-            raise HTTPException(status_code=400, detail=f"Invalid URL for {field_name}")
-
-    # Reject cleartext HTTP — LTI endpoints carry bearer tokens and must
-    # be accessed over TLS.  Allow HTTP only for configured dev hosts in
-    # development mode (see lti.dev_http_hosts in config.toml).
     context = (
         validation_context
         if validation_context is not None
         else _build_lti_host_validation_context(allowlist)
     )
-    # Use the matched allowlist entry (server-controlled) to build the URL
-    # so no user-supplied value propagates into the outgoing request.
-    matched_host = context.allowlist_lookup.get(parsed.hostname.lower())
-    if matched_host is None:
-        raise HTTPException(
-            status_code=400,
-            detail=f"{field_name} host is not allowlisted",
-        )
-
-    if parsed.scheme != "https" and not _allow_http_for_lti_host(matched_host, context):
-        raise HTTPException(
-            status_code=400,
-            detail=f"{field_name} must use HTTPS",
-        )
-
-    return _AllowlistedLTIUrlParts(
-        scheme="https" if parsed.scheme == "https" else "http",
-        host=matched_host,
-        path=parsed.path or "/",
-        query=parsed.query,
-    )
+    try:
+        return validate_allowlisted_lti_url_parts(url, field_name, context)
+    except LTIUrlValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 def _require_allowlisted_openid_configuration_url(
@@ -312,9 +231,7 @@ def _require_allowlisted_openid_configuration_url(
     # trusted environment config (HTTP only for explicit dev hosts).
     scheme = (
         "http"
-        if _allow_http_for_lti_host(
-            parts.host, validation_context=host_validation_context
-        )
+        if allow_http_for_lti_host(parts.host, host_validation_context)
         else "https"
     )
     return f"{scheme}://{parts.host}{matched_path}"
@@ -341,9 +258,21 @@ def _extract_context_memberships_url_from_claims(
 
 
 async def _fetch_jwks(jwks_url: str) -> dict[str, Any]:
+    parsed = urlsplit(jwks_url)
+    if not parsed.hostname:
+        raise HTTPException(status_code=400, detail="Invalid JWKS URL")
+    expected_host = parsed.hostname.lower()
+
     timeout = aiohttp.ClientTimeout(total=10)
     async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.get(jwks_url, raise_for_status=True) as response:
+        async with session.get(
+            jwks_url, raise_for_status=True, allow_redirects=False
+        ) as response:
+            response_host = response.url.host
+            if not response_host or response_host.lower() != expected_host:
+                raise HTTPException(
+                    status_code=400, detail="Invalid JWKS response host"
+                )
             payload = await response.json()
             if not isinstance(payload, dict):
                 raise HTTPException(status_code=500, detail="Invalid JWKS response")
@@ -513,7 +442,10 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
     response_data: dict[str, Any] | None = None
     async with aiohttp.ClientSession() as session:
         async with session.get(
-            openid_configuration_url, raise_for_status=True, headers=headers
+            openid_configuration_url,
+            raise_for_status=True,
+            headers=headers,
+            allow_redirects=False,
         ) as response:
             payload = await response.json()
             if not isinstance(payload, dict):
