@@ -32,9 +32,4 @@ export const load: PageLoad = async ({ parent, url }) => {
 	} else {
 		return redirect(302, '/about');
 	}
-
-	// If we get here it means the user has no visible items and is
-	// also not an admin. The page should just render a no-data state,
-	// with an explanation of why they're not seeing anything.
-	return {};
 };
