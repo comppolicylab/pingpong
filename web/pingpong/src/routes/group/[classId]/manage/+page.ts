@@ -66,7 +66,6 @@ export const load = async ({ fetch, params }: Parameters<PageLoad>[0]) => {
 		const apiKeyResponse = api.expandResponse(await api.getApiKey(fetch, classId));
 		if (apiKeyResponse.error) {
 			api_key = { api_key: 'error fetching API key!' };
-			console.error('Error fetching API key:', apiKeyResponse.error);
 		} else {
 			api_key = apiKeyResponse.data.api_key;
 		}
