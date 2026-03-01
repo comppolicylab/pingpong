@@ -106,13 +106,11 @@ def _sanitize_str_fields(data: dict) -> dict:
 def _get_upsert_stmt(session: AsyncSession):
     """Get the appropriate upsert statement for the current database."""
     dialect = session.bind.dialect.name
-    match dialect:
-        case "postgresql":
-            return postgres_upsert
-        case "sqlite":
-            return sqlite_upsert
-        case _:
-            raise NotImplementedError(f"Upsert not implemented for {dialect}")
+    if dialect == "postgresql":
+        return postgres_upsert
+    if dialect == "sqlite":
+        return sqlite_upsert
+    raise NotImplementedError(f"Upsert not implemented for {dialect}")
 
 
 class Base(AsyncAttrs, DeclarativeBase):
