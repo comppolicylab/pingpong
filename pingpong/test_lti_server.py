@@ -660,6 +660,76 @@ def test_require_openid_configuration_url_uses_dev_http_host_scheme(monkeypatch)
     assert url == "http://canvas.docker/.well-known/openid"
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://platform.example.com/auth\x00endpoint",
+        "https://platform.example.com/@evil/path",
+    ],
+)
+def test_require_allowlisted_lti_url_rejects_unsafe_path_chars(monkeypatch, url):
+    monkeypatch.setattr(
+        server_module,
+        "config",
+        _make_lti_server_config(allowlist=["platform.example.com"]),
+    )
+
+    with pytest.raises(HTTPException) as excinfo:
+        server_module._require_allowlisted_lti_url(url, "auth_login_url")
+
+    assert excinfo.value.status_code == 400
+
+
+def test_require_allowlisted_lti_url_rejects_path_traversal(monkeypatch):
+    monkeypatch.setattr(
+        server_module,
+        "config",
+        _make_lti_server_config(allowlist=["platform.example.com"]),
+    )
+
+    with pytest.raises(HTTPException) as excinfo:
+        server_module._require_allowlisted_lti_url(
+            "https://platform.example.com/auth/../../../etc/passwd",
+            "auth_login_url",
+        )
+
+    assert excinfo.value.status_code == 400
+
+
+def test_require_allowlisted_lti_url_rejects_control_chars_in_query(monkeypatch):
+    monkeypatch.setattr(
+        server_module,
+        "config",
+        _make_lti_server_config(allowlist=["platform.example.com"]),
+    )
+
+    with pytest.raises(HTTPException) as excinfo:
+        server_module._require_allowlisted_lti_url(
+            "https://platform.example.com/auth?foo=bar\x00baz",
+            "auth_login_url",
+        )
+
+    assert excinfo.value.status_code == 400
+
+
+def test_require_allowlisted_lti_url_preserves_valid_path_and_query(monkeypatch):
+    monkeypatch.setattr(
+        server_module,
+        "config",
+        _make_lti_server_config(allowlist=["platform.example.com"]),
+    )
+
+    url = server_module._require_allowlisted_lti_url(
+        "https://platform.example.com/api/lti/authorize_redirect?scope=openid&response_type=id_token",
+        "auth_login_url",
+    )
+
+    assert url == (
+        "https://platform.example.com/api/lti/authorize_redirect"
+        "?scope=openid&response_type=id_token"
+    )
+
+
 @pytest.mark.asyncio
 async def test_get_jwks_success():
     async def _get_public_keys_jwks():
@@ -1014,7 +1084,7 @@ async def test_register_lti_instance_rejects_openid_username_style_confusion(
         await server_module.register_lti_instance(request, data)
 
     assert excinfo.value.status_code == 400
-    assert "Invalid URL for openid_configuration" in excinfo.value.detail
+    assert "openid_configuration" in excinfo.value.detail
     assert request_log == []
 
 
@@ -2238,7 +2308,8 @@ async def test_lti_launch_rejects_unallowlisted_registration_jwks_url(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_lti_launch_uses_normalized_registration_jwks_url(monkeypatch):
+async def test_lti_launch_rejects_at_sign_in_registration_jwks_url(monkeypatch):
+    """A jwks URL with \\@ (backslash-at) confusion is rejected by path sanitization."""
     oidc_session = _make_oidc_session(
         redirect_uri="https://tool.example.com/api/v1/lti/launch"
     )
@@ -2266,14 +2337,6 @@ async def test_lti_launch_uses_normalized_registration_jwks_url(monkeypatch):
         server_module, "get_now_fn", lambda request: lambda: datetime.now(timezone.utc)
     )
 
-    observed: dict[str, str] = {}
-
-    async def _verify_capture_jwks_url(**kwargs):
-        observed["jwks_url"] = kwargs["jwks_url"]
-        raise HTTPException(status_code=418, detail="stop-after-jwks-url-capture")
-
-    monkeypatch.setattr(server_module, "_verify_lti_id_token", _verify_capture_jwks_url)
-
     request = FakeRequest(
         payload={"state": "state", "id_token": "token"}, state=_make_request_state()
     )
@@ -2281,8 +2344,8 @@ async def test_lti_launch_uses_normalized_registration_jwks_url(monkeypatch):
     with pytest.raises(HTTPException) as excinfo:
         await server_module.lti_launch(request, tasks=SimpleNamespace())
 
-    assert excinfo.value.status_code == 418
-    assert observed["jwks_url"] == "https://platform.example.com/@evil.example.com/jwks"
+    assert excinfo.value.status_code == 400
+    assert "jwks_uri" in excinfo.value.detail
 
 
 @pytest.mark.asyncio
