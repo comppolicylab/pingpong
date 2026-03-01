@@ -453,31 +453,35 @@ export class ThreadManager {
 				throw new Error('The thread run took too long to complete.');
 			}
 
+			let response;
 			try {
-				const response = await api.getThread(this.#fetcher, this.classId, this.threadId);
-				const expanded = api.expandResponse(response);
-
-				if (expanded.error) {
-					const detail = expanded.error?.detail || 'Polling failed';
-					this.#data.update((d) => ({
-						...d,
-						error: { detail, wasSent: true },
-						waiting: false
-					}));
-					throw new Error(detail);
-				}
-
-				if (api.finished(expanded.data?.run)) {
-					this.#data.update((d) => ({
-						...d,
-						data: expanded.data,
-						error: null,
-						waiting: false
-					}));
-					return;
-				}
+				response = await api.getThread(this.#fetcher, this.classId, this.threadId);
 			} catch {
 				// Keep polling on transient transport failures until timeout.
+				await sleep(5000);
+				continue;
+			}
+
+			const expanded = api.expandResponse(response);
+
+			if (expanded.error) {
+				const detail = expanded.error?.detail || 'Polling failed';
+				this.#data.update((d) => ({
+					...d,
+					error: { detail, wasSent: true },
+					waiting: false
+				}));
+				throw new Error(detail);
+			}
+
+			if (api.finished(expanded.data?.run)) {
+				this.#data.update((d) => ({
+					...d,
+					data: expanded.data,
+					error: null,
+					waiting: false
+				}));
+				return;
 			}
 
 			await sleep(5000);
