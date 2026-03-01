@@ -128,7 +128,9 @@ class AWSLTIKeyStore(BaseLTIKeyStore):
         except ClientError as e:
             error_code = e.response["Error"]["Code"]
             if error_code == "ResourceNotFoundException":
-                logger.info(f"Secret {self.secret_name} not found, will create it")
+                logger.info(
+                    "LTI key secret not found in Secrets Manager; will create it"
+                )
                 return []
             else:
                 logger.error(f"Error loading keys from Secrets Manager: {e}")
@@ -159,7 +161,7 @@ class AWSLTIKeyStore(BaseLTIKeyStore):
                             SecretString=json.dumps(secret_data, indent=2),
                         )
                         logger.info(
-                            f"Created new secret {self.secret_name} with {len(keys)} keys"
+                            "Created new LTI key secret with %d keys", len(keys)
                         )
                     else:
                         raise
