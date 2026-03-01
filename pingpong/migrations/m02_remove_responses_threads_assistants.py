@@ -91,6 +91,7 @@ async def delete_thread(
         try:
             await openai_client.beta.threads.delete(thread.thread_id)
         except openai.NotFoundError:
+            # Thread was already removed in OpenAI; local cleanup can continue.
             pass
         except openai.BadRequestError as e:
             logger.warning(
@@ -155,6 +156,7 @@ async def delete_assistant(
         try:
             await openai_client.beta.assistants.delete(assistant_id)
         except openai.NotFoundError:
+            # Assistant was already removed in OpenAI; local cleanup can continue.
             pass
         except openai.BadRequestError as e:
             logger.warning(
