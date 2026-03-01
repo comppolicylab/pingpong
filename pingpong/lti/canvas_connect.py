@@ -14,13 +14,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pingpong.authz.openfga import OpenFgaAuthzClient
 from pingpong.config import config
 from pingpong.lti.allowlist import (
-    extract_lti_url_hostname,
     get_lti_platform_url_allowlist_from_settings,
     INVALID_PLATFORM_URL_ALLOWLIST_DETAIL,
     InvalidLTIPlatformUrlAllowlistError,
-    is_lti_host_allowlisted,
+    MISSING_PLATFORM_URL_ALLOWLIST_DETAIL,
     MissingLTIPlatformUrlAllowlistError,
-    try_parse_json_object,
 )
 from pingpong.lti.constants import (
     CANVAS_CONNECT_SYNC_WAIT_DEFAULT_SECONDS,
@@ -45,8 +43,6 @@ from pingpong.lti.constants import (
     NRPS_MEMBERS_KEY,
     NRPS_NEXT_PAGE_KEY,
     NRPS_RESOURCE_LINK_QUERY_KEY,
-    LTI_OPENID_CONFIGURATION_URL_KEYS,
-    LTI_REGISTRATION_URL_FIELDS,
     TOKEN_ENDPOINT_KEY,
     TOKEN_REQUEST_CONTENT_TYPE,
 )
@@ -80,6 +76,13 @@ def exception_detail(e: Exception) -> str:
     if isinstance(detail, str) and detail:
         return detail
     return str(e)
+
+
+def _is_global_lti_allowlist_error_detail(detail: str | None) -> bool:
+    return detail in {
+        MISSING_PLATFORM_URL_ALLOWLIST_DETAIL,
+        INVALID_PLATFORM_URL_ALLOWLIST_DETAIL,
+    }
 
 
 def _as_dict(value: object) -> dict[str, object] | None:
@@ -119,8 +122,10 @@ def _get_lti_platform_url_allowlist() -> list[str]:
         return get_lti_platform_url_allowlist_from_settings(
             getattr(config, "lti", None)
         )
-    except MissingLTIPlatformUrlAllowlistError:
-        return []
+    except MissingLTIPlatformUrlAllowlistError as e:
+        raise CanvasConnectException(
+            detail=MISSING_PLATFORM_URL_ALLOWLIST_DETAIL,
+        ) from e
     except InvalidLTIPlatformUrlAllowlistError as e:
         raise CanvasConnectException(
             detail=INVALID_PLATFORM_URL_ALLOWLIST_DETAIL,
@@ -169,6 +174,7 @@ class CanvasConnectClient:
         self.http_session: aiohttp.ClientSession | None = None
         self._cached_lti_class: LTIClass | None = None
         self._cached_platform_url_allowlist: list[str] | None = None
+        self._cached_platform_url_allowlist_set: set[str] | None = None
         self._cached_nrps_access_token: CanvasConnectAccessToken | None = None
         self._cached_nrps_access_token_valid_until: int | None = None
 
@@ -192,6 +198,13 @@ class CanvasConnectClient:
         if self._cached_platform_url_allowlist is None:
             self._cached_platform_url_allowlist = _get_lti_platform_url_allowlist()
         return self._cached_platform_url_allowlist
+
+    def _get_platform_url_allowlist_set(self) -> set[str]:
+        if self._cached_platform_url_allowlist_set is None:
+            self._cached_platform_url_allowlist_set = set(
+                self._get_platform_url_allowlist()
+            )
+        return self._cached_platform_url_allowlist_set
 
     @staticmethod
     def _get_token_endpoint(registration: LTIRegistration) -> str:
@@ -233,27 +246,7 @@ class CanvasConnectClient:
         self._cached_lti_class = lti_class
         return lti_class
 
-    @staticmethod
-    def _registration_allowed_hosts(registration: LTIRegistration) -> set[str]:
-        hosts: set[str] = set()
-        for field_name in LTI_REGISTRATION_URL_FIELDS:
-            url = getattr(registration, field_name, None)
-            host = extract_lti_url_hostname(url)
-            if host:
-                hosts.add(host)
-
-        openid_configuration = try_parse_json_object(
-            getattr(registration, "openid_configuration", None)
-        )
-        if openid_configuration is not None:
-            for key in LTI_OPENID_CONFIGURATION_URL_KEYS:
-                host = extract_lti_url_hostname(openid_configuration.get(key))
-                if host:
-                    hosts.add(host)
-
-        return hosts
-
-    async def _validate_nrps_url(self, url: str, field_name: str) -> str:
+    def _validate_nrps_url(self, url: str, field_name: str) -> str:
         normalized_url = url.replace("\\", "/")
         parsed = urlsplit(normalized_url)
         if (
@@ -264,8 +257,7 @@ class CanvasConnectClient:
             raise CanvasConnectException(detail=f"Invalid URL for {field_name}")
 
         host = parsed.hostname.lower()
-        allowlist = self._get_platform_url_allowlist()
-        if not is_lti_host_allowlisted(host, allowlist):
+        if host not in self._get_platform_url_allowlist_set():
             raise CanvasConnectException(
                 detail=f"{field_name} host is not allowlisted",
             )
@@ -316,7 +308,7 @@ class CanvasConnectClient:
             isinstance(existing_context_memberships_url, str)
             and existing_context_memberships_url
         ):
-            return await self._validate_nrps_url(
+            return self._validate_nrps_url(
                 existing_context_memberships_url, "context_memberships_url"
             )
 
@@ -404,7 +396,7 @@ class CanvasConnectClient:
         next_page: str | None = start_url
         seen_pages: set[str] = set()
         while next_page:
-            next_page = await self._validate_nrps_url(next_page, "nrps_page_url")
+            next_page = self._validate_nrps_url(next_page, "nrps_page_url")
             if next_page in seen_pages:
                 logger.warning(
                     "Detected NRPS pagination loop for lti_class_id=%s at url=%s",
@@ -709,7 +701,10 @@ class CanvasConnectClient:
         except CanvasConnectWarning:
             raise
         except Exception as e:
-            await self._mark_sync_error(lti_class, exception_detail(e))
+            detail = exception_detail(e)
+            if _is_global_lti_allowlist_error_detail(detail):
+                raise
+            await self._mark_sync_error(lti_class, detail)
             self._raise_sync_error_if_manual()
             raise
 
@@ -930,6 +925,8 @@ async def canvas_connect_sync_all(
             except Exception as e:
                 logger.exception(f"Error syncing LTI class {lti_class.id}: {e}")
                 await savepoint.rollback()
+                if _is_global_lti_allowlist_error_detail(exception_detail(e)):
+                    continue
 
                 # sync_roster() already marks the class as errored, but that write is part
                 # of the rolled-back savepoint above. Re-apply the error marker outside the

@@ -653,21 +653,49 @@ async def test_get_context_memberships_url_raises_when_allowlist_is_invalid(
     )
 
 
-def test_registration_allowed_hosts_extracts_hosts_from_registration_urls():
+@pytest.mark.asyncio
+async def test_get_context_memberships_url_raises_when_allowlist_is_missing(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        canvas_connect_module.config.lti,
+        "platform_url_allowlist",
+        [],
+    )
     registration = SimpleNamespace(
-        auth_login_url="https://evil.example.com/login",
-        auth_token_url="https://canvas.example.com/token",
-        key_set_url="https://evil.example.com/jwks",
-        openid_configuration='{"authorization_endpoint":"https://evil.example.com/auth"}',
+        client_id="client-123",
+        issuer="https://canvas.example.com",
+        openid_configuration='{"token_endpoint":"https://canvas.example.com/token"}',
+        auth_token_url="https://canvas.example.com/fallback-token",
+    )
+    lti_class = SimpleNamespace(
+        id=1704,
+        registration=registration,
+        context_memberships_url="https://canvas.example.com/memberships",
+        course_id="123",
     )
 
-    allowed_hosts = (
-        canvas_connect_module.CanvasConnectClient._registration_allowed_hosts(
-            registration
-        )
+    async def _get_by_id_with_registration(cls, db, id_):
+        return lti_class
+
+    monkeypatch.setattr(
+        canvas_connect_module.LTIClass,
+        "get_by_id_with_registration",
+        classmethod(_get_by_id_with_registration),
     )
 
-    assert allowed_hosts == {"canvas.example.com", "evil.example.com"}
+    client = canvas_connect_module.CanvasConnectClient(
+        db=SimpleNamespace(),
+        lti_class_id=1704,
+        key_manager=FakeKeyManager(),
+    )
+    with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+        await client.get_context_memberships_url()
+
+    assert (
+        excinfo.value.detail
+        == canvas_connect_module.MISSING_PLATFORM_URL_ALLOWLIST_DETAIL
+    )
 
 
 @pytest.mark.asyncio
@@ -1847,6 +1875,63 @@ async def test_manual_canvas_connect_sync_roster_raises_manual_error_on_failure(
     assert lti_class.last_sync_error == "downstream-add-users-failure"
     assert db.added == [lti_class]
     assert db.flush_count == 1
+
+
+@pytest.mark.asyncio
+async def test_manual_canvas_connect_sync_roster_does_not_mark_error_on_missing_allowlist(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc)
+    lti_class = SimpleNamespace(
+        id=282,
+        class_id=321,
+        setup_user_id=42,
+        last_synced=fixed_now - timedelta(minutes=30),
+        lti_status=canvas_connect_module.LTIStatus.LINKED,
+        last_sync_error=None,
+    )
+
+    async def _get_sync_context(self):
+        return lti_class, 321, 42
+
+    async def _get_nrps_create_user_class_roles(self):
+        raise canvas_connect_module.CanvasConnectException(
+            detail=canvas_connect_module.MISSING_PLATFORM_URL_ALLOWLIST_DETAIL
+        )
+
+    monkeypatch.setattr(
+        canvas_connect_module.CanvasConnectClient,
+        "_get_sync_context",
+        _get_sync_context,
+    )
+    monkeypatch.setattr(
+        canvas_connect_module.CanvasConnectClient,
+        "get_nrps_create_user_class_roles",
+        _get_nrps_create_user_class_roles,
+    )
+
+    db = FakeWriteDB()
+    request = SimpleNamespace(state={"db": db})
+    tasks = SimpleNamespace()
+    client = canvas_connect_module.ManualCanvasConnectClient(
+        lti_class_id=282,
+        request=request,
+        tasks=tasks,
+        key_manager=FakeKeyManager(),
+        nowfn=lambda: fixed_now,
+    )
+
+    with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+        await client.sync_roster()
+
+    assert (
+        excinfo.value.detail
+        == canvas_connect_module.MISSING_PLATFORM_URL_ALLOWLIST_DETAIL
+    )
+    assert lti_class.lti_status == canvas_connect_module.LTIStatus.LINKED
+    assert lti_class.last_sync_error is None
+    assert db.added == []
+    assert db.flush_count == 0
 
 
 @pytest.mark.asyncio

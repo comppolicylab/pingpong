@@ -1213,19 +1213,12 @@ def lti_suggest_config_from_db(json_output: bool) -> None:
     """
 
     async def _suggest_config_from_db() -> None:
-        async with config.db.driver.async_session() as session:
-            result = await session.execute(
-                select(LTIRegistration)
-                .where(
-                    and_(
-                        LTIRegistration.enabled.is_(True),
-                        LTIRegistration.review_status
-                        == LTIRegistrationReviewStatus.APPROVED,
-                    )
-                )
-                .order_by(LTIRegistration.id.asc())
-            )
-            registrations = list(result.scalars().all())
+        registration_count = 0
+        registration_url_columns = {
+            field_name: getattr(LTIRegistration, field_name)
+            for field_name in LTI_REGISTRATION_URL_FIELDS
+        }
+        openid_configuration_column = LTIRegistration.openid_configuration
 
         hosts_to_sources: dict[str, set[str]] = {}
         warnings: list[str] = []
@@ -1239,30 +1232,48 @@ def lti_suggest_config_from_db(json_output: bool) -> None:
                 return
             hosts_to_sources.setdefault(host, set()).add(source)
 
-        for registration in registrations:
-            source_prefix = f"registration[{registration.id}]"
-            for field_name in LTI_REGISTRATION_URL_FIELDS:
-                _record_url(
-                    getattr(registration, field_name),
-                    f"{source_prefix}.{field_name}",
+        async with config.db.driver.async_session() as session:
+            result = await session.stream(
+                select(
+                    LTIRegistration.id,
+                    openid_configuration_column,
+                    *registration_url_columns.values(),
                 )
-
-            openid_configuration = try_parse_json_object(
-                registration.openid_configuration
+                .where(
+                    and_(
+                        LTIRegistration.enabled.is_(True),
+                        LTIRegistration.review_status
+                        == LTIRegistrationReviewStatus.APPROVED,
+                    )
+                )
+                .order_by(LTIRegistration.id.asc())
             )
-            if registration.openid_configuration and openid_configuration is None:
-                warnings.append(
-                    f"{source_prefix}.openid_configuration: invalid JSON payload"
-                )
-                continue
-            if openid_configuration is None:
-                continue
 
-            for key in LTI_OPENID_CONFIGURATION_URL_KEYS:
-                _record_url(
-                    openid_configuration.get(key),
-                    f"{source_prefix}.openid_configuration.{key}",
+            async for registration in result:
+                registration_count += 1
+                source_prefix = f"registration[{registration.id}]"
+                for field_name in LTI_REGISTRATION_URL_FIELDS:
+                    _record_url(
+                        getattr(registration, field_name),
+                        f"{source_prefix}.{field_name}",
+                    )
+
+                openid_configuration = try_parse_json_object(
+                    registration.openid_configuration
                 )
+                if registration.openid_configuration and openid_configuration is None:
+                    warnings.append(
+                        f"{source_prefix}.openid_configuration: invalid JSON payload"
+                    )
+                    continue
+                if openid_configuration is None:
+                    continue
+
+                for key in LTI_OPENID_CONFIGURATION_URL_KEYS:
+                    _record_url(
+                        openid_configuration.get(key),
+                        f"{source_prefix}.openid_configuration.{key}",
+                    )
 
         suggested_hosts = sorted(hosts_to_sources.keys())
         suggested_config = {
@@ -1275,7 +1286,7 @@ def lti_suggest_config_from_db(json_output: bool) -> None:
             click.echo(
                 json.dumps(
                     {
-                        "registration_count": len(registrations),
+                        "registration_count": registration_count,
                         "suggested_config": suggested_config,
                         "sources_by_host": {
                             host: sorted(host_sources)
@@ -1289,7 +1300,7 @@ def lti_suggest_config_from_db(json_output: bool) -> None:
             )
             return
 
-        if not registrations:
+        if registration_count == 0:
             click.echo("No LTI registrations found in the database.")
             click.echo("[lti]")
             click.echo("platform_url_allowlist = []")
@@ -1301,7 +1312,7 @@ def lti_suggest_config_from_db(json_output: bool) -> None:
         click.echo(f"platform_url_allowlist = [{quoted_hosts}]")
         click.echo("")
         click.echo(
-            f"# Found {len(suggested_hosts)} unique host(s) from {len(registrations)} registration(s)."
+            f"# Found {len(suggested_hosts)} unique host(s) from {registration_count} registration(s)."
         )
         for host in suggested_hosts:
             click.echo(f"# {host}")

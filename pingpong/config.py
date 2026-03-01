@@ -14,6 +14,7 @@ from pingpong.artifacts import LocalArtifactStore, S3ArtifactStore
 from pingpong.audio_store import LocalAudioStore, S3AudioStore
 from pingpong.video_store import LocalVideoStore, S3VideoStore
 from pingpong.log_filters import IgnoreHealthEndpoint
+from pingpong.lti.allowlist import normalize_lti_platform_url_allowlist
 from .authz import OpenFgaAuthzDriver
 from .email import AzureEmailSender, GmailEmailSender, MockEmailSender, SmtpEmailSender
 from .lti import AWSLTIKeyStore, LocalLTIKeyStore, LTIKeyManager
@@ -363,7 +364,7 @@ class LTISettings(BaseSettings):
     # Hosts permitted to use plain HTTP in development mode (e.g. "canvas.docker").
     # Ignored when ``config.development`` is ``False``.
     dev_http_hosts: list[str] = Field(
-        default=["localhost", "127.0.0.1", "::1", "canvas.docker"]
+        default_factory=lambda: ["localhost", "127.0.0.1", "::1", "canvas.docker"]
     )
     openid_configuration_paths: LTIOpenIDConfigurationPathsSettings = Field(
         default_factory=LTIOpenIDConfigurationPathsSettings
@@ -380,6 +381,26 @@ class LTISettings(BaseSettings):
         if self.openid_configuration_paths.mode == "append":
             return set(DEFAULT_OPENID_CONFIGURATION_PATHS) | configured_paths
         return configured_paths
+
+    @cached_property
+    def allowed_openid_configuration_path_lookup(self) -> dict[str, str]:
+        return {path: path for path in self.allowed_openid_configuration_paths}
+
+    @cached_property
+    def normalized_platform_url_allowlist(self) -> list[str]:
+        return normalize_lti_platform_url_allowlist(self.platform_url_allowlist)
+
+    @cached_property
+    def platform_url_allowlist_lookup(self) -> dict[str, str]:
+        return {host: host for host in self.normalized_platform_url_allowlist}
+
+    @cached_property
+    def dev_http_hosts_set(self) -> set[str]:
+        return {
+            host.strip().lower()
+            for host in self.dev_http_hosts
+            if isinstance(host, str) and host.strip()
+        }
 
 
 class FeatureFlags(BaseSettings):
