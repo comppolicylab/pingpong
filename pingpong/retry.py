@@ -32,6 +32,9 @@ def with_retry(
                 if last_error.status in raise_custom_errors:
                     raise raise_custom_errors[last_error.status]
                 raise last_error
+            raise RuntimeError(
+                "Retry loop exited without returning or capturing an error"
+            )
 
         return wrapper
 

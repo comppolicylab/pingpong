@@ -432,6 +432,7 @@ async def validate_api_key(
             return APIKeyValidationResponse(
                 valid=False,
             )
+    raise ValueError(f"Unsupported provider: {provider}")
 
 
 async def get_ci_messages_from_step(
@@ -4847,15 +4848,13 @@ def get_openai_client(api_key, provider="openai", endpoint=None, api_version=Non
     """
     if not api_key:
         raise ValueError("API key is required")
-    match provider:
-        case "azure":
-            _api_version = api_version or "2025-03-01-preview"
-            if not endpoint:
-                raise ValueError("Azure client requires endpoint.")
-            return openai.AsyncAzureOpenAI(
-                api_key=api_key, azure_endpoint=endpoint, api_version=_api_version
-            )
-        case "openai":
-            return openai.AsyncClient(api_key=api_key)
-        case _:
-            raise ValueError(f"Unknown provider {provider}")
+    if provider == "azure":
+        _api_version = api_version or "2025-03-01-preview"
+        if not endpoint:
+            raise ValueError("Azure client requires endpoint.")
+        return openai.AsyncAzureOpenAI(
+            api_key=api_key, azure_endpoint=endpoint, api_version=_api_version
+        )
+    if provider == "openai":
+        return openai.AsyncClient(api_key=api_key)
+    raise ValueError(f"Unknown provider {provider}")

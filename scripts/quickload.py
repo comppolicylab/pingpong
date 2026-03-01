@@ -173,9 +173,9 @@ class LoadTest:
         return result
 
     @property
-    def latest(self):
+    def latest(self) -> LoadTestResult | None:
         if not self.results:
-            return
+            return None
         return self.results[-1]
 
     def _run_test(self, idx: int, *args, **kwargs):
