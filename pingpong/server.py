@@ -4478,7 +4478,7 @@ async def list_thread_messages(
             else:
                 message.metadata["name"] = (
                     name(users[user_id])
-                    if thread.display_user_info and is_supervisor_check[0]
+                    if thread.display_user_info and is_supervisor
                     else "Anonymous User"
                     if thread.private
                     else pseudonym(thread, users[user_id])
