@@ -109,7 +109,6 @@ const markedKatexExtension = (
 						delim = candidate;
 						startMatch = startMatchCandidate;
 					}
-					break;
 				}
 			}
 
