@@ -1,4 +1,6 @@
 import * as api from '$lib/api';
+import { ltiHeaderState } from '$lib/stores/ltiHeader';
+import { error } from '@sveltejs/kit';
 import type { PageLoad } from './$types';
 
 export const load: PageLoad = async ({ fetch, params }) => {
@@ -14,6 +16,12 @@ export const load: PageLoad = async ({ fetch, params }) => {
 	]);
 
 	const expanded = api.expandResponse(threadData);
+	if (expanded.error) {
+		// Clear any previously-registered LTI header before aborting this navigation.
+		ltiHeaderState.set({ kind: 'none' });
+		error(expanded.$status || 500, expanded.error.detail || 'Failed to load thread');
+	}
+
 	let threadModel = '';
 	let threadTools = '';
 	let threadInteractionMode: 'chat' | 'voice' | 'lecture_video' | null = null;
@@ -21,24 +29,22 @@ export const load: PageLoad = async ({ fetch, params }) => {
 	let threadDisplayUserInfo = false;
 	let threadLectureVideoMismatch = false;
 	let assistantGrants = { canViewAssistant: false };
-	if (!expanded.error) {
-		threadTools = expanded.data.tools_available || '';
-		threadModel = expanded.data.model || '';
-		threadInteractionMode = expanded.data.thread.interaction_mode || 'chat';
-		threadRecording = expanded.data.recording || null;
-		threadDisplayUserInfo = expanded.data.thread.display_user_info || false;
-		threadLectureVideoMismatch =
-			expanded.data.lecture_video_matches_assistant === false &&
-			threadInteractionMode === 'lecture_video';
-		if (expanded.data.thread.assistant_id) {
-			assistantGrants = await api.grants(fetch, {
-				canViewAssistant: {
-					target_type: 'assistant',
-					target_id: expanded.data.thread.assistant_id,
-					relation: 'can_view'
-				}
-			});
-		}
+	threadTools = expanded.data.tools_available || '';
+	threadModel = expanded.data.model || '';
+	threadInteractionMode = expanded.data.thread.interaction_mode || 'chat';
+	threadRecording = expanded.data.recording || null;
+	threadDisplayUserInfo = expanded.data.thread.display_user_info || false;
+	threadLectureVideoMismatch =
+		expanded.data.lecture_video_matches_assistant === false &&
+		threadInteractionMode === 'lecture_video';
+	if (expanded.data.thread.assistant_id) {
+		assistantGrants = await api.grants(fetch, {
+			canViewAssistant: {
+				target_type: 'assistant',
+				target_id: expanded.data.thread.assistant_id,
+				relation: 'can_view'
+			}
+		});
 	}
 
 	return {
