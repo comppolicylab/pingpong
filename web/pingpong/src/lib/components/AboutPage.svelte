@@ -12,10 +12,10 @@
 
 <div class="about flex h-full flex-col gap-8 overflow-y-auto">
 	<slot name="header" />
-	<div class="px-12 pt-12 text-center">
-		<Heading tag="h2" class="mt-4 mb-6" customSize="text-4xl font-extrabold md:text-5xl lg:text-6xl"
+	<div class="px-12 text-center">
+		<Heading tag="h2" class="mt-2 mb-6" customSize="text-4xl font-extrabold md:text-5xl lg:text-6xl"
 			>{#if nonAuthed}Welcome to{:else}About{/if}
-			<span class="bg-gradient-to-t from-orange-dark to-orange bg-clip-text text-transparent"
+			<span class="bg-linear-to-t from-orange-dark to-orange bg-clip-text text-transparent"
 				>PingPong</span
 			></Heading
 		>
