@@ -8,6 +8,13 @@
 	--default-ring-color: var(--color-blue-500);
 }
 
+@layer base {
+	/* Flowbite form controls use --color-brand for checked/focus states. */
+	:root {
+		--color-brand: var(--color-blue-600);
+	}
+}
+
 @media print {
 	body {
 		background: white !important;
