@@ -304,7 +304,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
 			return timeB - timeA;
 		});
 	}
-	await new Promise((r) => setTimeout(r, 3000));
+
 	return {
 		isPublicPage,
 		needsOnboarding,
