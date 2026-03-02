@@ -44,7 +44,11 @@ jobs:
     if: |
       always() &&
       (
-        (github.event_name == 'pull_request' && github.event.pull_request.user.type != 'Bot') ||
+        (
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.user.type != 'Bot' &&
+          !contains(github.event.pull_request.labels.*.name, 'skip-ai-reviews')
+        ) ||
         needs.detect-claude-command.outputs.run_review == 'true'
       )
     runs-on:
