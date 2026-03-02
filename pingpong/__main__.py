@@ -73,6 +73,7 @@ from .models import (
     Assistant,
     Base,
     ExternalLogin,
+    LTIClass,
     Run,
     S3File,
     ScheduledJob,
@@ -1274,6 +1275,34 @@ def lti_suggest_config_from_db(json_output: bool) -> None:
                         openid_configuration.get(key),
                         f"{source_prefix}.openid_configuration.{key}",
                     )
+
+            memberships_result = await session.stream(
+                select(
+                    LTIClass.id,
+                    LTIClass.registration_id,
+                    LTIClass.context_memberships_url,
+                )
+                .join(LTIRegistration, LTIClass.registration_id == LTIRegistration.id)
+                .where(
+                    and_(
+                        LTIRegistration.enabled.is_(True),
+                        LTIRegistration.review_status
+                        == LTIRegistrationReviewStatus.APPROVED,
+                    )
+                )
+                .order_by(LTIClass.registration_id.asc(), LTIClass.id.asc())
+            )
+            async for lti_class in memberships_result:
+                _record_url(
+                    lti_class.context_memberships_url,
+                    (
+                        "registration["
+                        f"{lti_class.registration_id}"
+                        "].lti_classes["
+                        f"{lti_class.id}"
+                        "].context_memberships_url"
+                    ),
+                )
 
         suggested_hosts = sorted(hosts_to_sources.keys())
         suggested_config = {
