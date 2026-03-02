@@ -1,4 +1,5 @@
 import * as api from '$lib/api';
+import { ltiHeaderState } from '$lib/stores/ltiHeader';
 import { error } from '@sveltejs/kit';
 import type { PageLoad } from './$types';
 
@@ -16,6 +17,8 @@ export const load: PageLoad = async ({ fetch, params }) => {
 
 	const expanded = api.expandResponse(threadData);
 	if (expanded.error) {
+		// Clear any previously-registered LTI header before aborting this navigation.
+		ltiHeaderState.set({ kind: 'none' });
 		error(expanded.$status || 500, expanded.error.detail || 'Failed to load thread');
 	}
 

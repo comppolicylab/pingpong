@@ -35,34 +35,52 @@
 					: 'An unexpected error occurred while loading this page.';
 </script>
 
-<div class="error-shell">
-	<div class="card-glow-wrapper">
-		<div class="gradient-orb orb-1"></div>
-		<div class="gradient-orb orb-2"></div>
-		<div class="gradient-orb orb-3"></div>
-		<section class="error-card">
-			<div class="error-content">
-				<div class="error-grid">
+<div
+	class="relative box-border flex h-full min-h-full w-full items-center justify-center overflow-hidden bg-[#201e45] p-4 md:p-6"
+>
+	<div class="relative w-full max-w-208">
+		<div
+			class="pointer-events-none absolute -left-15 -top-20 h-75 w-75 rounded-full opacity-[0.5] [background:radial-gradient(circle,#6d28d9_0%,transparent_70%)] filter-[blur(120px)]"
+		></div>
+		<div
+			class="pointer-events-none absolute -bottom-17.5 -right-12.5 h-70 w-70 rounded-full opacity-[0.5] [background:radial-gradient(circle,#2563eb_0%,transparent_70%)] filter-[blur(120px)]"
+		></div>
+		<div
+			class="pointer-events-none absolute -bottom-22.5 left-[30%] h-70 w-70 rounded-full opacity-[0.3] [background:radial-gradient(circle,#db2777_0%,transparent_70%)] filter-[blur(120px)]"
+		></div>
+		<section
+			class="relative z-1 w-full rounded-[1.75rem] border border-white/30 bg-white/95 shadow-[0_1px_1px_rgba(15,23,42,0.04),0_24px_50px_-24px_rgba(15,23,42,0.24)] backdrop-blur-[18px] backdrop-saturate-160"
+		>
+			<div class="mx-auto w-full max-w-312 px-6 py-10 md:px-12 md:pb-12 md:pt-[3.2rem]">
+				<div class="grid grid-cols-1 gap-8">
 					<div>
-						<h1 class="error-title">{title}</h1>
-						<p class="error-description">{description}</p>
+						<h1
+							class="m-0 max-w-[24ch] text-[clamp(1.35rem,2.5vw,2.1rem)] font-semibold leading-[1.15] tracking-[-0.02em] text-slate-900"
+						>
+							{title}
+						</h1>
+						<p class="mb-0 mt-4 max-w-[62ch] text-base leading-[1.7] text-slate-700">
+							{description}
+						</p>
 					</div>
 				</div>
 
-				<div class="error-details">
+				<div class="mt-7 border-t border-slate-900/10 pt-4">
 					<button
 						type="button"
-						class="error-details-toggle"
+						class="inline-flex cursor-pointer items-center gap-2 border-none bg-transparent p-0 text-[0.85rem] font-semibold text-slate-700"
 						aria-expanded={showTechnicalDetails}
 						aria-controls="error-details-panel"
 						on:click={() => (showTechnicalDetails = !showTechnicalDetails)}
 					>
 						<span>Technical details</span>
 						<span
-							class={`summary-icon ${showTechnicalDetails ? 'is-open' : ''}`}
+							class={`inline-flex h-[1.1rem] w-[1.1rem] items-center justify-center rounded-full bg-slate-400/20 text-slate-600 transition-[transform,background-color,color] duration-180 ${
+								showTechnicalDetails ? 'rotate-180 bg-blue-600/15 text-blue-700' : ''
+							}`}
 							aria-hidden="true"
 						>
-							<svg viewBox="0 0 20 20" fill="none">
+							<svg viewBox="0 0 20 20" fill="none" class="h-3 w-3">
 								<path
 									d="M6 8l4 4 4-4"
 									stroke="currentColor"
@@ -75,10 +93,14 @@
 					{#if showTechnicalDetails}
 						<div
 							id="error-details-panel"
-							class="error-details-panel"
+							class="overflow-hidden"
 							transition:slide={{ duration: 180, easing: cubicOut }}
 						>
-							<p class="error-details-copy">HTTP {status}: {rawMessage}</p>
+							<p
+								class="mb-0 mt-3 rounded-xl border border-slate-900/10 bg-slate-50/90 px-[0.85rem] py-3 font-mono text-xs leading-normal text-slate-700 wrap-anywhere"
+							>
+								HTTP {status}: {rawMessage}
+							</p>
 						</div>
 					{/if}
 				</div>
@@ -86,180 +108,3 @@
 		</section>
 	</div>
 </div>
-
-<style>
-	.error-shell {
-		position: relative;
-		display: flex;
-		width: 100%;
-		height: 100%;
-		min-height: 100%;
-		box-sizing: border-box;
-		align-items: center;
-		justify-content: center;
-		overflow: hidden;
-		padding: 1rem;
-		background-color: #201e45;
-	}
-
-	.card-glow-wrapper {
-		position: relative;
-		width: min(100%, 52rem);
-	}
-
-	.gradient-orb {
-		position: absolute;
-		border-radius: 50%;
-		filter: blur(120px);
-		opacity: 0.5;
-		pointer-events: none;
-	}
-
-	.orb-1 {
-		width: 300px;
-		height: 300px;
-		top: -80px;
-		left: -60px;
-		background: radial-gradient(circle, #6d28d9 0%, transparent 70%);
-	}
-
-	.orb-2 {
-		width: 280px;
-		height: 280px;
-		bottom: -70px;
-		right: -50px;
-		background: radial-gradient(circle, #2563eb 0%, transparent 70%);
-	}
-
-	.orb-3 {
-		width: 240px;
-		height: 240px;
-		bottom: -90px;
-		left: 30%;
-		background: radial-gradient(circle, #db2777 0%, transparent 70%);
-		opacity: 0.3;
-	}
-
-	.error-card {
-		position: relative;
-		z-index: 1;
-		width: 100%;
-		height: auto;
-		border-radius: 1.75rem;
-		border: 1px solid rgba(255, 255, 255, 0.3);
-		background: rgba(255, 255, 255, 0.95);
-		box-shadow:
-			0 1px 1px rgba(15, 23, 42, 0.04),
-			0 24px 50px -24px rgba(15, 23, 42, 0.24);
-		backdrop-filter: saturate(160%) blur(18px);
-	}
-
-	.error-content {
-		width: 100%;
-		max-width: 78rem;
-		margin: 0 auto;
-		padding: 2.5rem 1.5rem 2.5rem;
-	}
-
-	.error-grid {
-		display: grid;
-		grid-template-columns: 1fr;
-		gap: 2rem;
-	}
-
-	.error-title {
-		margin-top: 0;
-		margin-bottom: 0;
-		font-size: clamp(1.35rem, 2.5vw, 2.1rem);
-		line-height: 1.15;
-		letter-spacing: -0.02em;
-		font-weight: 600;
-		color: #0f172a;
-		max-width: 24ch;
-	}
-
-	.error-description {
-		margin-top: 1rem;
-		margin-bottom: 0;
-		max-width: 62ch;
-		font-size: 1rem;
-		line-height: 1.7;
-		color: #334155;
-	}
-
-	.error-details {
-		margin-top: 1.75rem;
-		padding-top: 1rem;
-		border-top: 1px solid rgba(15, 23, 42, 0.08);
-	}
-
-	.error-details-toggle {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.5rem;
-		cursor: pointer;
-		border: none;
-		background: transparent;
-		padding: 0;
-		font: inherit;
-		font-size: 0.85rem;
-		font-weight: 600;
-		color: #334155;
-	}
-
-	.summary-icon {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		width: 1.1rem;
-		height: 1.1rem;
-		border-radius: 9999px;
-		background: rgba(148, 163, 184, 0.18);
-		color: #475569;
-		transition:
-			transform 180ms ease,
-			background-color 180ms ease,
-			color 180ms ease;
-	}
-
-	.summary-icon svg {
-		width: 0.75rem;
-		height: 0.75rem;
-	}
-
-	.summary-icon.is-open {
-		transform: rotate(180deg);
-		background: rgba(37, 99, 235, 0.15);
-		color: #1d4ed8;
-	}
-
-	.error-details-panel {
-		overflow: hidden;
-	}
-
-	.error-details-copy {
-		margin-top: 0.75rem;
-		margin-bottom: 0;
-		padding: 0.75rem 0.85rem;
-		border-radius: 0.75rem;
-		border: 1px solid rgba(15, 23, 42, 0.08);
-		background: rgba(248, 250, 252, 0.9);
-		font-size: 0.75rem;
-		line-height: 1.5;
-		font-family:
-			ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
-			monospace;
-		color: #334155;
-		overflow-wrap: anywhere;
-	}
-
-	@media (min-width: 768px) {
-		.error-shell {
-			padding: 1.5rem;
-		}
-
-		.error-content {
-			padding: 3.2rem 3rem 3rem;
-		}
-	}
-</style>
