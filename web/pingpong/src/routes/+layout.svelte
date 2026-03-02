@@ -13,6 +13,7 @@
 
 	onMount(() => {
 		detectBrowser();
+		document.getElementById('loading-screen')?.remove();
 	});
 
 	$: showSidebar =
