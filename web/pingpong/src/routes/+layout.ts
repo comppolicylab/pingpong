@@ -1,4 +1,4 @@
-import { redirect, error } from '@sveltejs/kit';
+import { redirect } from '@sveltejs/kit';
 import * as api from '$lib/api';
 import { hasAnonymousSessionToken, setAnonymousShareToken } from '$lib/stores/anonymous';
 import type { LayoutLoad } from './$types';
@@ -51,26 +51,37 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
 		return path;
 	};
 
-	// Fetch the current user
-	const me = api.expandResponse(await api.me(fetch));
+	// Fetch the current user.
+	// If the request itself fails (network, CORS, etc), convert it to an error response shape.
+	const me = await api
+		.me(fetch)
+		.then((response) => api.expandResponse(response))
+		.catch((err: unknown) => ({
+			$status: 503,
+			error: { detail: err instanceof Error ? err.message : 'An unknown error occurred.' },
+			data: null
+		}));
 
 	// If we can't even load `me` then the server is probably down.
 	// Redirect to the login page if we're not already there, just
 	// in case that will work. Otherwise, just show the error.
-	if (me.error) {
-		if (url.pathname !== LOGIN) {
-			redirect(302, LOGIN);
-		} else {
-			const errorObject = (me.error || {}) as { $status: number; detail: string };
-			const code = errorObject.$status || 500;
-			const message = errorObject.detail || 'An unknown error occurred.';
-			error(code, { message: `Error reaching the server: ${message}` });
-		}
+	if (me.error && url.pathname !== LOGIN) {
+		redirect(302, LOGIN);
 	}
 
-	const authed = me.data.status === 'valid';
-	const needsOnboarding = !!me.data?.user && (!me.data.user.first_name || !me.data.user.last_name);
-	const needsAgreements = me.data?.agreement_id !== null;
+	const meData: api.SessionState & api.BaseResponse = me.data ?? {
+		$status: me.$status || 500,
+		status: 'error',
+		error: `Error reaching the server: ${me.error?.detail || 'An unknown error occurred.'}`,
+		token: null,
+		user: null,
+		profile: null,
+		agreement_id: null
+	};
+
+	const authed = meData.status === 'valid';
+	const needsOnboarding = !!meData.user && (!meData.user.first_name || !meData.user.last_name);
+	const needsAgreements = meData.agreement_id !== null;
 	let doNotShowSidebar = false;
 	let forceShowSidebarButton = isLTIContext;
 	let forceCollapsedLayout = isLTIContext;
@@ -134,7 +145,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
 				// If the user is logged in and hasn't agreed to the terms, redirect them to the terms page. Exclude the privacy policy page.
 				doNotShowSidebar = true;
 				const destination = encodeURIComponent(`${url.pathname}${url.search}`);
-				redirect(302, buildRedirect(`${TERMS}?forward=${destination}&id=${me.data.agreement_id}`));
+				redirect(302, buildRedirect(`${TERMS}?forward=${destination}&id=${meData.agreement_id}`));
 			} else if (!needsAgreements && url.pathname === TERMS) {
 				// Just in case someone tries to go to the terms page when they don't need to.
 				const destination = url.searchParams.get('forward') || HOME;
@@ -315,7 +326,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
 		openAllLinksInNewTab,
 		logoIsClickable,
 		showSidebarItems,
-		me: me.data,
+		me: meData,
 		authed,
 		classes,
 		threads,

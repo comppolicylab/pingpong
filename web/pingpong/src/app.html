@@ -43,6 +43,7 @@
 				style="max-width: 300px; width: 80%"
 			/>
 			<div
+				id="loading-screen-spinner"
 				style="
 					margin-top: 32px;
 					box-sizing: content-box;
@@ -58,6 +59,11 @@
 				@keyframes pp-spin {
 					to {
 						transform: rotate(360deg);
+					}
+				}
+				@media (prefers-reduced-motion: reduce) {
+					#loading-screen-spinner {
+						animation: none !important;
 					}
 				}
 			</style>
