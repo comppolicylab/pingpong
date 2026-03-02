@@ -99,8 +99,8 @@
 		<Thumbnail
 			{...image_lte}
 			{selected}
-			class="h-24 rounded-md shadow-xl hover:outline hover:outline-orange-dark"
-			activeClass="outline outline-orange"
+			class="h-24 rounded-md shadow-xl hover:outline-2 hover:outline-offset-2 hover:outline-orange-dark"
+			activeClass="outline-2 outline-offset-2 outline-orange"
 		/>
 		<Tooltip
 			defaultClass="text-wrap py-2 px-3 text-sm font-normal shadow-xs"
