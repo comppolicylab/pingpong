@@ -324,11 +324,35 @@ class LocalLTIKeyStoreSettings(BaseSettings):
 LTIKeyStoreSettings = Union[AWSLTIKeyStoreSettings, LocalLTIKeyStoreSettings]
 
 
+class LTIAllowDenySettings(BaseSettings):
+    """Allow/deny pattern settings for LTI security checks."""
+
+    allow: list[str] = Field(["*"])
+    deny: list[str] = Field([])
+
+
+class LTIOpenIDConfigurationSecuritySettings(BaseSettings):
+    """Security allow/deny settings for OpenID configuration URLs."""
+
+    allow_http_in_development: bool = Field(True)
+    hosts: LTIAllowDenySettings = Field(LTIAllowDenySettings())
+    paths: LTIAllowDenySettings = Field(LTIAllowDenySettings())
+
+
+class LTISecuritySettings(BaseSettings):
+    """LTI security settings."""
+
+    openid_configuration: LTIOpenIDConfigurationSecuritySettings = Field(
+        LTIOpenIDConfigurationSecuritySettings()
+    )
+
+
 class LTISettings(BaseSettings):
     """LTI Advantage Service settings."""
 
     key_store: LTIKeyStoreSettings
     sync_wait: int = Field(60 * 10, gt=0)  # 10 mins
+    security: LTISecuritySettings = Field(LTISecuritySettings())
 
     # Key rotation settings
     rotation_schedule: str = Field("0 0 1 * *")  # First day of every month at midnight

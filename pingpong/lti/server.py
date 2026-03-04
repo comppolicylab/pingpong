@@ -15,6 +15,7 @@ from pingpong.authz.openfga import OpenFgaAuthzClient
 from pingpong.config import config
 from pingpong.invite import send_lti_registration_submitted
 from pingpong.log_utils import sanitize_for_log
+from pingpong.lti.allowlist import generate_openid_configuration_url
 from pingpong.lti.constants import (
     AUTHORIZATION_ENDPOINT_KEY,
     CANVAS_ACCOUNT_LTI_GUID_KEY,
@@ -268,11 +269,13 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
     )
 
     headers = {"Authorization": f"Bearer {data.registration_token}"}
-
+    openid_configuration_url = generate_openid_configuration_url(
+        data.openid_configuration
+    )
     response_data: dict[str, Any] | None = None
     async with aiohttp.ClientSession() as session:
         async with session.get(
-            data.openid_configuration, raise_for_status=True, headers=headers
+            openid_configuration_url, raise_for_status=True, headers=headers
         ) as response:
             payload = await response.json()
             if not isinstance(payload, dict):
@@ -570,7 +573,7 @@ async def lti_login(request: StateRequest):
     if lti_message_hint:
         auth_params["lti_message_hint"] = lti_message_hint
 
-    redirect_url = f"{oidc_authorization_endpoint}?{urlencode(auth_params)}"
+    redirect_url = oidc_authorization_endpoint + "?" + urlencode(auth_params)
     return RedirectResponse(url=redirect_url, status_code=302)
 
 
