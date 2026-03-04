@@ -177,12 +177,6 @@ auth_token_expiry = 3600
 # Defaults to 10 minutes.
 # sync_wait = 600
 
-[lti.key_store]
-# Key store backend for LTI RSA keys. Accepts `aws` or `local`.
-# Use `local` for development and `aws` (Secrets Manager) for production.
-type = "local"
-directory = "local_exports/lti_keys"
-
 # Key rotation settings
 # Cron schedule for automatic key rotation.
 # Defaults to the first day of every month at midnight.
@@ -191,6 +185,12 @@ directory = "local_exports/lti_keys"
 # key_retention_count = 3
 # RSA key size in bits. Defaults to 2048.
 # key_size = 2048
+
+[lti.key_store]
+# Key store backend for LTI RSA keys. Accepts `aws` or `local`.
+# Use `local` for development and `aws` (Secrets Manager) for production.
+type = "local"
+directory = "local_exports/lti_keys"
 
 [lti.security]
 # Security settings for LTI. Controls which hosts and paths are permitted
