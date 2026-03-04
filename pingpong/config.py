@@ -354,9 +354,10 @@ class LTISecuritySettings(BaseSettings):
     hosts: LTIAllowDenySettings = Field(LTIAllowDenySettings())
     paths: LTIAllowDenySettings = Field(LTIAllowDenySettings())
 
-    auth_login_url: LTIUrlSecuritySettings = Field(LTIUrlSecuritySettings())
-    context_memberships_url: LTIUrlSecuritySettings = Field(LTIUrlSecuritySettings())
+    authorization_endpoint: LTIUrlSecuritySettings = Field(LTIUrlSecuritySettings())
+    names_and_role_endpoint: LTIUrlSecuritySettings = Field(LTIUrlSecuritySettings())
     jwks_uri: LTIUrlSecuritySettings = Field(LTIUrlSecuritySettings())
+    registration_endpoint: LTIUrlSecuritySettings = Field(LTIUrlSecuritySettings())
     openid_configuration: LTIUrlSecuritySettings = Field(LTIUrlSecuritySettings())
     token_endpoint: LTIUrlSecuritySettings = Field(LTIUrlSecuritySettings())
 
@@ -473,26 +474,18 @@ class LTISettings(BaseSettings):
         else:
             security = {}
 
-        if "openid_configuration" in security:
-            openid_configuration = cls._mutable_dict(
-                security["openid_configuration"],
-                field_name="lti.security.openid_configuration",
-            )
-        else:
-            openid_configuration = {}
-
-        if "hosts" in openid_configuration:
+        if "hosts" in security:
             hosts = cls._mutable_dict(
-                openid_configuration["hosts"],
-                field_name="lti.security.openid_configuration.hosts",
+                security["hosts"],
+                field_name="lti.security.hosts",
             )
         else:
             hosts = {}
 
-        if "paths" in openid_configuration:
+        if "paths" in security:
             paths = cls._mutable_dict(
-                openid_configuration["paths"],
-                field_name="lti.security.openid_configuration.paths",
+                security["paths"],
+                field_name="lti.security.paths",
             )
         else:
             paths = {}
@@ -508,17 +501,17 @@ class LTISettings(BaseSettings):
             # Legacy configs defaulted to these explicit discovery paths.
             paths["allow"] = list(LEGACY_OPENID_CONFIGURATION_PATHS_DEFAULTS)
 
-        if (
-            dev_http_hosts is not None
-            and "allow_http_in_development" not in openid_configuration
-        ):
-            openid_configuration["allow_http_in_development"] = bool(
-                cls._validate_legacy_dev_http_hosts(dev_http_hosts)
-            )
+        if "allow_http_in_development" not in security:
+            if dev_http_hosts is not None:
+                security["allow_http_in_development"] = bool(
+                    cls._validate_legacy_dev_http_hosts(dev_http_hosts)
+                )
+            elif using_legacy_layout:
+                # Legacy configs defaulted to HTTP being allowed in development.
+                security["allow_http_in_development"] = True
 
-        openid_configuration["hosts"] = hosts
-        openid_configuration["paths"] = paths
-        security["openid_configuration"] = openid_configuration
+        security["hosts"] = hosts
+        security["paths"] = paths
         mapped_data["security"] = security
 
         for key in legacy_keys:
@@ -527,7 +520,7 @@ class LTISettings(BaseSettings):
                     "Deprecated config key 'lti.platform_url_allowlist' used. "
                     "It will be removed in PingPong 8.0. "
                     "Replace with:\n"
-                    "  [lti.security.openid_configuration.hosts]\n"
+                    "  [lti.security.hosts]\n"
                     "  allow = %r",
                     hosts.get("allow", ["*"]),
                 )
@@ -536,7 +529,7 @@ class LTISettings(BaseSettings):
                     "Deprecated config key 'lti.openid_configuration_paths' used. "
                     "It will be removed in PingPong 8.0. "
                     "Replace with:\n"
-                    "  [lti.security.openid_configuration.paths]\n"
+                    "  [lti.security.paths]\n"
                     "  allow = %r",
                     paths.get("allow", ["*"]),
                 )
@@ -545,9 +538,9 @@ class LTISettings(BaseSettings):
                     "Deprecated config key 'lti.dev_http_hosts' used. "
                     "It will be removed in PingPong 8.0. "
                     "Replace with:\n"
-                    "  [lti.security.openid_configuration]\n"
+                    "  [lti.security]\n"
                     "  allow_http_in_development = %r",
-                    openid_configuration.get("allow_http_in_development", True),
+                    security.get("allow_http_in_development", True),
                 )
 
         return mapped_data

@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import pingpong.config as config_module
 from pingpong.lti import canvas_connect as canvas_connect_module
 
 
@@ -39,25 +40,27 @@ class FakeClientSession:
         self.requests: list[dict] = []
         self.closed = False
 
-    def post(self, url: str, *, headers: dict, data: dict):
+    def post(self, url: str, *, headers: dict, data: dict, **kwargs):
         self.requests.append(
             {
                 "method": "POST",
                 "url": url,
                 "headers": headers,
                 "data": data,
+                **kwargs,
             }
         )
         if not self.responses:
             raise AssertionError("No fake responses configured")
         return self.responses.pop(0)
 
-    def get(self, url: str, *, headers: dict):
+    def get(self, url: str, *, headers: dict, **kwargs):
         self.requests.append(
             {
                 "method": "GET",
                 "url": url,
                 "headers": headers,
+                **kwargs,
             }
         )
         if not self.responses:
@@ -92,6 +95,33 @@ class FakeWriteDB:
 class FakeSSOProvider:
     def __init__(self, name: str):
         self.name = name
+
+
+@pytest.fixture(autouse=True)
+def _patch_lti_security_config(monkeypatch):
+    allow_deny = SimpleNamespace(allow=["*"], deny=[])
+    url_security = SimpleNamespace(
+        allow_http_in_development=True,
+        allow_redirects=True,
+        hosts=allow_deny,
+        paths=allow_deny,
+    )
+    security = SimpleNamespace(
+        allow_http_in_development=True,
+        allow_redirects=True,
+        hosts=allow_deny,
+        paths=allow_deny,
+        authorization_endpoint=url_security,
+        jwks_uri=url_security,
+        names_and_role_endpoint=url_security,
+        openid_configuration=url_security,
+        registration_endpoint=url_security,
+        token_endpoint=url_security,
+    )
+    lti = SimpleNamespace(security=security, sync_wait=600)
+    cfg = SimpleNamespace(lti=lti, development=False)
+    monkeypatch.setattr(config_module, "config", cfg)
+    monkeypatch.setattr(canvas_connect_module, "config", cfg)
 
 
 @pytest.mark.asyncio

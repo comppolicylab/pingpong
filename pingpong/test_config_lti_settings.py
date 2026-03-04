@@ -56,13 +56,12 @@ def test_lti_settings_maps_legacy_fields_and_logs_deprecation(caplog):
         }
     )
 
-    openid_security = settings.security.openid_configuration
-    assert openid_security.hosts.allow == ["platform.example.com", "tool.example.com"]
-    assert openid_security.paths.allow == [
+    assert settings.security.hosts.allow == ["platform.example.com", "tool.example.com"]
+    assert settings.security.paths.allow == [
         *LEGACY_OPENID_CONFIGURATION_PATHS_DEFAULTS,
         "/custom/openid",
     ]
-    assert openid_security.allow_http_in_development is True
+    assert settings.security.allow_http_in_development is True
 
     assert "Deprecated config key 'lti.platform_url_allowlist'" in caplog.text
     assert "['platform.example.com', 'tool.example.com']" in caplog.text
@@ -79,12 +78,11 @@ def test_lti_settings_maps_legacy_defaults_when_only_platform_allowlist_is_set()
         }
     )
 
-    openid_security = settings.security.openid_configuration
-    assert openid_security.hosts.allow == ["platform.example.com"]
-    assert openid_security.paths.allow == list(
+    assert settings.security.hosts.allow == ["platform.example.com"]
+    assert settings.security.paths.allow == list(
         LEGACY_OPENID_CONFIGURATION_PATHS_DEFAULTS
     )
-    assert openid_security.allow_http_in_development is True
+    assert settings.security.allow_http_in_development is True
 
 
 def test_lti_settings_rejects_unknown_extra_key():

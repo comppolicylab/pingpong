@@ -13,9 +13,14 @@ from fastapi.responses import RedirectResponse
 from pingpong.auth import encode_session_token
 from pingpong.authz.openfga import OpenFgaAuthzClient
 from pingpong.config import config
+from pingpong.lti.endpoints import allow_redirects, generate_authorization_endpoint_url
 from pingpong.invite import send_lti_registration_submitted
 from pingpong.log_utils import sanitize_for_log
-from pingpong.lti.allowlist import generate_openid_configuration_url
+from pingpong.lti.endpoints import (
+    generate_jwks_uri_url,
+    generate_openid_configuration_url,
+    generate_registration_endpoint_url,
+)
 from pingpong.lti.constants import (
     AUTHORIZATION_ENDPOINT_KEY,
     CANVAS_ACCOUNT_LTI_GUID_KEY,
@@ -107,8 +112,18 @@ def _is_public_sso_provider(provider: ExternalLoginProvider) -> bool:
 
 async def _fetch_jwks(jwks_url: str) -> dict[str, Any]:
     timeout = aiohttp.ClientTimeout(total=10)
+    try:
+        generated_jwks_url = generate_jwks_uri_url(jwks_url)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid jwks_url")
     async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.get(jwks_url, raise_for_status=True) as response:
+        async with session.get(
+            generated_jwks_url,
+            raise_for_status=True,
+            allow_redirects=allow_redirects(config.lti.security.jwks_uri)
+            if config.lti
+            else True,
+        ) as response:
             payload = await response.json()
             if not isinstance(payload, dict):
                 raise HTTPException(status_code=500, detail="Invalid JWKS response")
@@ -183,6 +198,13 @@ async def _verify_lti_id_token(
     if not isinstance(claims, dict):
         raise HTTPException(status_code=400, detail="Invalid id_token claims")
     return cast(dict[str, Any], claims)
+
+
+def _get_claim_object(claims: dict[str, Any], claim_key: str) -> dict[str, Any]:
+    claim_value = claims.get(claim_key)
+    if isinstance(claim_value, dict):
+        return claim_value
+    return {}
 
 
 def get_lti_key_manager() -> LTIKeyManager:
@@ -278,7 +300,12 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
     response_data: dict[str, Any] | None = None
     async with aiohttp.ClientSession() as session:
         async with session.get(
-            openid_configuration_url, raise_for_status=True, headers=headers
+            openid_configuration_url,
+            raise_for_status=True,
+            headers=headers,
+            allow_redirects=allow_redirects(config.lti.security.openid_configuration)
+            if config.lti
+            else True,
         ) as response:
             payload = await response.json()
             if not isinstance(payload, dict):
@@ -417,15 +444,23 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
     }
 
     registration_response_data: dict[str, Any] | None = None
+    registration_endpoint_url = generate_registration_endpoint_url(
+        registration_endpoint
+    )
     async with aiohttp.ClientSession() as session:
         try:
             async with session.post(
-                registration_endpoint,
+                registration_endpoint_url,
                 raise_for_status=True,
                 headers={
                     "Authorization": f"Bearer {data.registration_token}",
                     "Content-Type": "application/json",
                 },
+                allow_redirects=allow_redirects(
+                    config.lti.security.registration_endpoint
+                )
+                if config.lti
+                else True,
                 json=tool_registration_data,
             ) as response:
                 payload = await response.json()
@@ -533,6 +568,12 @@ async def lti_login(request: StateRequest):
 
     # Use the platform's authorization endpoint discovered during dynamic registration.
     oidc_authorization_endpoint = registration.auth_login_url
+    try:
+        oidc_authorization_endpoint = generate_authorization_endpoint_url(
+            oidc_authorization_endpoint
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     if not oidc_authorization_endpoint:
         raise HTTPException(
             status_code=400, detail="No known OIDC authorization endpoint for issuer"
@@ -685,13 +726,12 @@ async def lti_launch(
     )
     if consumed is None:
         raise HTTPException(status_code=400, detail="Invalid or expired state/nonce")
-    launch_custom_params = claims.get(LTI_CLAIM_CUSTOM_KEY, {})
-    resource_link_claim = claims.get(LTI_CLAIM_RESOURCE_LINK_KEY, {})
+    launch_custom_params = _get_claim_object(claims, LTI_CLAIM_CUSTOM_KEY)
+    resource_link_claim = _get_claim_object(claims, LTI_CLAIM_RESOURCE_LINK_KEY)
     resource_link_id = None
-    if isinstance(resource_link_claim, dict):
-        resource_link_id = resource_link_claim.get("id")
-        if not isinstance(resource_link_id, str) or not resource_link_id:
-            resource_link_id = None
+    resource_link_id = resource_link_claim.get("id")
+    if not isinstance(resource_link_id, str) or not resource_link_id:
+        resource_link_id = None
 
     if (
         registration.review_status != LTIRegistrationReviewStatus.APPROVED
@@ -922,7 +962,7 @@ async def lti_launch(
                 await request.state["db"].flush()
             else:
                 # Create new pending LTIClass to store context
-                course_details = claims.get(LTI_CLAIM_CONTEXT_KEY, {})
+                course_details = _get_claim_object(claims, LTI_CLAIM_CONTEXT_KEY)
                 course_code = course_details.get("label")
                 course_name = course_details.get("title")
                 course_term = launch_custom_params.get("canvas_term_name")
@@ -932,7 +972,7 @@ async def lti_launch(
                     in LTI_CUSTOM_PARAM_DEFAULT_VALUES["canvas_term_name"]
                 ):
                     course_term = None
-                nrps_claim = claims.get(LTI_CLAIM_NRPS_KEY, {})
+                nrps_claim = _get_claim_object(claims, LTI_CLAIM_NRPS_KEY)
                 context_memberships_url = nrps_claim.get("context_memberships_url")
 
                 pending_lti_class = LTIClass(
@@ -1048,7 +1088,7 @@ async def lti_launch(
                 )
 
             if is_instructor or is_admin_supervisor:
-                course_details = claims.get(LTI_CLAIM_CONTEXT_KEY, {})
+                course_details = _get_claim_object(claims, LTI_CLAIM_CONTEXT_KEY)
                 course_code = course_details.get("label")
                 course_name = course_details.get("title")
                 course_term = launch_custom_params.get("canvas_term_name")
@@ -1058,7 +1098,7 @@ async def lti_launch(
                     in LTI_CUSTOM_PARAM_DEFAULT_VALUES["canvas_term_name"]
                 ):
                     course_term = None
-                nrps_claim = claims.get(LTI_CLAIM_NRPS_KEY, {})
+                nrps_claim = _get_claim_object(claims, LTI_CLAIM_NRPS_KEY)
                 context_memberships_url = nrps_claim.get("context_memberships_url")
                 second_lti_class = LTIClass(
                     registration_id=registration.id,
@@ -1148,7 +1188,7 @@ async def lti_launch(
                 )
 
             if is_instructor or is_admin_supervisor:
-                course_details = claims.get(LTI_CLAIM_CONTEXT_KEY, {})
+                course_details = _get_claim_object(claims, LTI_CLAIM_CONTEXT_KEY)
                 course_code = course_details.get("label")
                 course_name = course_details.get("title")
                 course_term = launch_custom_params.get("canvas_term_name")
@@ -1158,7 +1198,7 @@ async def lti_launch(
                     in LTI_CUSTOM_PARAM_DEFAULT_VALUES["canvas_term_name"]
                 ):
                     course_term = None
-                nrps_claim = claims.get(LTI_CLAIM_NRPS_KEY, {})
+                nrps_claim = _get_claim_object(claims, LTI_CLAIM_NRPS_KEY)
                 context_memberships_url = nrps_claim.get("context_memberships_url")
                 new_lti_class = LTIClass(
                     registration_id=registration.id,

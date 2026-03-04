@@ -5,6 +5,7 @@ import pytest
 from fastapi import HTTPException
 from starlette.datastructures import State
 
+import pingpong.config as config_module
 from pingpong.lti import server as server_module
 from pingpong.lti.schemas import (
     LTIRegisterRequest,
@@ -260,6 +261,33 @@ def _patch_lti_external_login_io(monkeypatch):
     )
 
 
+@pytest.fixture(autouse=True)
+def _patch_lti_security_config(monkeypatch):
+    allow_deny = SimpleNamespace(allow=["*"], deny=[])
+    url_security = SimpleNamespace(
+        allow_http_in_development=True,
+        allow_redirects=True,
+        hosts=allow_deny,
+        paths=allow_deny,
+    )
+    security = SimpleNamespace(
+        allow_http_in_development=True,
+        allow_redirects=True,
+        hosts=allow_deny,
+        paths=allow_deny,
+        authorization_endpoint=url_security,
+        jwks_uri=url_security,
+        names_and_role_endpoint=url_security,
+        openid_configuration=url_security,
+        registration_endpoint=url_security,
+        token_endpoint=url_security,
+    )
+    lti = SimpleNamespace(security=security)
+    monkeypatch.setattr(
+        config_module, "config", SimpleNamespace(lti=lti, development=False)
+    )
+
+
 def _make_registration(
     issuer="issuer",
     client_id="client",
@@ -378,6 +406,32 @@ async def test_verify_lti_id_token_invalid_header(monkeypatch):
         )
 
     assert excinfo.value.status_code == 400
+
+
+def test_get_claim_object_returns_empty_dict_for_non_dict_claims():
+    claims = {
+        server_module.LTI_CLAIM_NRPS_KEY: "not-a-dict",
+        server_module.LTI_CLAIM_CUSTOM_KEY: ["also-not-a-dict"],
+    }
+
+    assert (
+        server_module._get_claim_object(claims, server_module.LTI_CLAIM_NRPS_KEY) == {}
+    )
+    assert (
+        server_module._get_claim_object(claims, server_module.LTI_CLAIM_CUSTOM_KEY)
+        == {}
+    )
+    assert server_module._get_claim_object(claims, "missing-claim") == {}
+
+
+def test_get_claim_object_returns_dict_for_dict_claim():
+    claim_value = {"context_memberships_url": "https://example.com/nrps"}
+    claims = {server_module.LTI_CLAIM_NRPS_KEY: claim_value}
+
+    assert (
+        server_module._get_claim_object(claims, server_module.LTI_CLAIM_NRPS_KEY)
+        == claim_value
+    )
 
 
 def test_get_lti_key_manager_missing_config(monkeypatch):
@@ -500,6 +554,7 @@ async def test_register_lti_instance_success(monkeypatch):
             url=lambda path: f"https://tool.example.com{path}",
             public_url="https://tool.example.com",
             email=SimpleNamespace(sender="sender"),
+            lti=config_module.config.lti,
         ),
     )
 
@@ -538,7 +593,10 @@ async def test_lti_login_redirect(monkeypatch):
     monkeypatch.setattr(
         server_module,
         "config",
-        SimpleNamespace(url=lambda path: f"https://tool.example.com{path}"),
+        SimpleNamespace(
+            url=lambda path: f"https://tool.example.com{path}",
+            lti=config_module.config.lti,
+        ),
     )
     monkeypatch.setattr(
         server_module, "get_now_fn", lambda request: lambda: datetime.now(timezone.utc)
@@ -574,7 +632,10 @@ async def test_lti_login_redirect_post(monkeypatch):
     monkeypatch.setattr(
         server_module,
         "config",
-        SimpleNamespace(url=lambda path: f"https://tool.example.com{path}"),
+        SimpleNamespace(
+            url=lambda path: f"https://tool.example.com{path}",
+            lti=config_module.config.lti,
+        ),
     )
     monkeypatch.setattr(
         server_module, "get_now_fn", lambda request: lambda: datetime.now(timezone.utc)

@@ -1,8 +1,6 @@
 from fnmatch import fnmatch
 import re
-from urllib.parse import urlsplit
-
-from pingpong.config import LTIUrlSecuritySettings
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 
 _HOST_RE = re.compile(
@@ -11,6 +9,35 @@ _HOST_RE = re.compile(
 _PATH_RE = re.compile(
     r"\A/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]+(?:/[A-Za-z0-9._~!$&'()*+,;=:@-]+)*)?/?\Z"
 )
+_UNSAFE_PATH_RE = re.compile(r"[\x00-\x1f\x7f@]")
+_UNSAFE_QUERY_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _sanitize_url_path(path: str, field_name: str) -> str:
+    """Re-encode a URL path to produce a fresh, untainted string.
+
+    Rejects paths containing control characters, ``@`` (authority confusion),
+    or ``..`` segments (path traversal).  The returned string is safe to embed
+    in a redirect URL.
+    """
+    if _UNSAFE_PATH_RE.search(path):
+        raise ValueError(f"Invalid URL path for {field_name}")
+    segments = path.split("/")
+    if ".." in segments:
+        raise ValueError(f"Invalid URL path for {field_name}")
+    return quote(path, safe="/:=+!*'(),@&~")
+
+
+def _sanitize_url_query(query: str, field_name: str) -> str:
+    """Re-encode a URL query string to produce a fresh, untainted string.
+
+    Rejects query strings containing control characters.  The returned string
+    is reconstructed via :func:`urlencode` so it is no longer tainted.
+    """
+    if _UNSAFE_QUERY_RE.search(query):
+        raise ValueError(f"Invalid URL query for {field_name}")
+    pairs = parse_qsl(query, keep_blank_values=True)
+    return urlencode(pairs)
 
 
 def _hostname_matches(hostname: str, pattern: str) -> bool:
@@ -22,9 +49,7 @@ def _hostname_matches(hostname: str, pattern: str) -> bool:
         return True
     if normalized_pattern.startswith("*."):
         suffix = normalized_pattern[2:]
-        return normalized_hostname == suffix or normalized_hostname.endswith(
-            "." + suffix
-        )
+        return normalized_hostname.endswith("." + suffix)
     return normalized_hostname == normalized_pattern
 
 
@@ -63,67 +88,6 @@ def _path_allowed(
     return False
 
 
-def _get_openid_configuration_patterns(
-    security_config: LTIUrlSecuritySettings,
-) -> tuple[list[str], list[str], list[str], list[str]]:
-    # Lazy import avoids config import cycles.
-    from pingpong.config import config
-
-    if config.lti is None:
-        raise ValueError(
-            "LTI configuration is required to determine OpenID configuration allow/deny patterns"
-        )
-
-    return (
-        security_config.hosts.allow
-        if security_config.hosts is not None
-        else config.lti.security.hosts.allow,
-        security_config.hosts.deny
-        if security_config.hosts is not None
-        else config.lti.security.hosts.deny,
-        security_config.paths.allow
-        if security_config.paths is not None
-        else config.lti.security.paths.allow,
-        security_config.paths.deny
-        if security_config.paths is not None
-        else config.lti.security.paths.deny,
-    )
-
-
-def _allow_http_in_development(
-    security_config: LTIUrlSecuritySettings,
-) -> bool:
-    # Lazy import avoids config import cycles.
-    from pingpong.config import config
-
-    if config.lti is None:
-        raise ValueError(
-            "LTI configuration is required to determine if HTTP is allowed in development"
-        )
-
-    return (
-        security_config.allow_http_in_development
-        if security_config.allow_http_in_development is not None
-        else config.lti.allow_http_in_development
-    )
-
-
-def _allow_redirects(security_config: LTIUrlSecuritySettings) -> bool:
-    # Lazy import avoids config import cycles.
-    from pingpong.config import config
-
-    if config.lti is None:
-        raise ValueError(
-            "LTI configuration is required to determine if redirects are allowed"
-        )
-
-    return (
-        security_config.allow_redirects
-        if security_config.allow_redirects is not None
-        else config.lti.allow_redirects
-    )
-
-
 def generate_safe_lti_url(
     unverified_url: str,
     url_type: str,
@@ -136,20 +100,29 @@ def generate_safe_lti_url(
     # Lazy import avoids config import cycles.
     from pingpong.config import config
 
-    _url = urlsplit(unverified_url)
-    hostname = (_url.hostname or "").lower().rstrip(".")
+    normalized_url = unverified_url.replace("\\", "/")
+    _url = urlsplit(normalized_url)
 
+    if _url.scheme not in {"http", "https"} or not _url.netloc or not _url.hostname:
+        raise ValueError(f"Invalid URL for {url_type}")
+
+    hostname = (_url.hostname or "").lower().rstrip(".")
     if not _HOST_RE.fullmatch(hostname):
         raise ValueError(f"Invalid {url_type} URL hostname")
 
     if not _hostname_allowed(hostname, host_allow, host_deny):
         raise ValueError(f"Invalid {url_type} URL hostname")
 
-    path = _url.path or "/"
+    path = _sanitize_url_path(_url.path, url_type)
     if not _PATH_RE.fullmatch(path):
         raise ValueError(f"Invalid {url_type} URL path")
     if not _path_allowed(path, path_allow, path_deny):
         raise ValueError(f"Invalid {url_type} URL path")
+
+    try:
+        port = _url.port
+    except ValueError as e:
+        raise ValueError(f"Invalid URL for {url_type}") from e
 
     is_development = config.development
     input_scheme = _url.scheme
@@ -159,83 +132,22 @@ def generate_safe_lti_url(
         else "https"
     )
 
+    if _url.username or _url.password or _url.fragment:
+        raise ValueError(f"Invalid URL for {url_type}")
+
+    if port is not None:
+        is_default_port = (scheme == "https" and port == 443) or (
+            scheme == "http" and port == 80
+        )
+        if not is_default_port:
+            raise ValueError(
+                f"Invalid URL for {url_type}: non-default port is not allowed"
+            )
+        # Fix CodeQL warning about using _url.port
+        # after validating it is a default port
+        port = 443 if scheme == "https" else 80
+
     # Reconstruct URL entirely from validated allowlist values
-    if _url.query:
-        path += "?" + _url.query
-    return scheme + "://" + hostname + path
-
-
-def generate_openid_configuration_url(openid_configuration_url: str) -> str:
-    # Lazy import avoids config import cycles.
-    from pingpong.config import config
-
-    if not config.lti:
-        raise ValueError(
-            "LTI configuration is required to validate context memberships URL"
-        )
-
-    host_allow, host_deny, path_allow, path_deny = _get_openid_configuration_patterns(
-        config.lti.security.openid_configuration
-    )
-
-    return generate_safe_lti_url(
-        unverified_url=openid_configuration_url,
-        url_type="OpenID configuration",
-        host_allow=host_allow,
-        host_deny=host_deny,
-        path_allow=path_allow,
-        path_deny=path_deny,
-        allow_http_in_development=_allow_http_in_development(
-            config.lti.security.openid_configuration
-        ),
-    )
-
-
-def generate_context_memberships_url(context_memberships_url: str) -> str:
-    # Lazy import avoids config import cycles.
-    from pingpong.config import config
-
-    if not config.lti:
-        raise ValueError(
-            "LTI configuration is required to validate context memberships URL"
-        )
-
-    host_allow, host_deny, path_allow, path_deny = _get_openid_configuration_patterns(
-        config.lti.security.context_memberships_url
-    )
-
-    return generate_safe_lti_url(
-        unverified_url=context_memberships_url,
-        url_type="context memberships",
-        host_allow=host_allow,
-        host_deny=host_deny,
-        path_allow=path_allow,
-        path_deny=path_deny,
-        allow_http_in_development=_allow_http_in_development(
-            config.lti.security.context_memberships_url
-        ),
-    )
-
-
-def generate_auth_token_url(auth_token_url: str) -> str:
-    # Lazy import avoids config import cycles.
-    from pingpong.config import config
-
-    if not config.lti:
-        raise ValueError("LTI configuration is required to validate auth token URL")
-
-    host_allow, host_deny, path_allow, path_deny = _get_openid_configuration_patterns(
-        config.lti.security.auth_login_url
-    )
-
-    return generate_safe_lti_url(
-        unverified_url=auth_token_url,
-        url_type="auth token",
-        host_allow=host_allow,
-        host_deny=host_deny,
-        path_allow=path_allow,
-        path_deny=path_deny,
-        allow_http_in_development=_allow_http_in_development(
-            config.lti.security.auth_login_url
-        ),
-    )
+    netloc = hostname if port is None else f"{hostname}:{port}"
+    query = _sanitize_url_query(_url.query, url_type) if _url.query else ""
+    return urlunsplit((scheme, netloc, path, query, ""))

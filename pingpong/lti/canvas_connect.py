@@ -39,6 +39,11 @@ from pingpong.lti.constants import (
     TOKEN_ENDPOINT_KEY,
     TOKEN_REQUEST_CONTENT_TYPE,
 )
+from pingpong.lti.endpoints import (
+    allow_redirects,
+    generate_names_and_role_api_url,
+    generate_token_endpoint_url,
+)
 from pingpong.lti.key_manager import LTIKeyManager
 from pingpong.lti.roles import class_user_roles_from_lti_roles
 from pingpong.models import (
@@ -299,10 +304,18 @@ class CanvasConnectClient:
             "Authorization": f"Bearer {access_token}",
             "Accept": NRPS_MEMBERSHIP_CONTAINER_CONTENT_TYPE,
         }
-
+        try:
+            generated_url = generate_names_and_role_api_url(url)
+        except ValueError as e:
+            raise CanvasConnectException(
+                detail=f"Invalid NRPS URL: {str(e)}",
+            ) from e
         async with http_session.get(
-            url,
+            generated_url,
             headers=headers,
+            allow_redirects=allow_redirects(config.lti.security.names_and_role_endpoint)
+            if config.lti
+            else True,
         ) as response:
             response_payload: object = None
             try:
@@ -686,10 +699,19 @@ class CanvasConnectClient:
             "scope": NRPS_CONTEXT_MEMBERSHIP_SCOPE,
         }
 
+        try:
+            generated_token_endpoint = generate_token_endpoint_url(token_endpoint)
+        except ValueError as e:
+            raise CanvasConnectException(
+                detail=f"Invalid token endpoint URL: {str(e)}",
+            ) from e
         async with http_session.post(
-            token_endpoint,
+            generated_token_endpoint,
             headers={"Content-Type": TOKEN_REQUEST_CONTENT_TYPE},
             data=request_data,
+            allow_redirects=allow_redirects(config.lti.security.token_endpoint)
+            if config.lti
+            else True,
         ) as response:
             response_payload: object = None
             try:
