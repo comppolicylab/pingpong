@@ -168,3 +168,64 @@ sync_wait = 600
 # Defaults to 1 hour.
 # See: https://canvas.instructure.com/doc/api/file.oauth.html#oauth2-flow-2
 auth_token_expiry = 3600
+
+
+[lti]
+# LTI 1.3 integration settings for connecting to learning management systems.
+
+# How often (in seconds) to allow automatic LTI roster syncs.
+# Defaults to 10 minutes.
+# sync_wait = 600
+
+[lti.key_store]
+# Key store backend for LTI RSA keys. Accepts `aws` or `local`.
+# Use `local` for development and `aws` (Secrets Manager) for production.
+type = "local"
+directory = "local_exports/lti_keys"
+
+# Key rotation settings
+# Cron schedule for automatic key rotation.
+# Defaults to the first day of every month at midnight.
+# rotation_schedule = "0 0 1 * *"
+# Number of previous keys to retain after rotation. Defaults to 3.
+# key_retention_count = 3
+# RSA key size in bits. Defaults to 2048.
+# key_size = 2048
+
+[lti.security]
+# Security settings for LTI. Controls which hosts and paths are permitted
+# during LTI OpenID Connect discovery.
+
+[lti.security.openid_configuration]
+# Allow/deny rules for OpenID configuration URLs provided by LMS platforms
+# during LTI registration and login. Each sub-section (`hosts` and `paths`)
+# uses an allow/deny pattern list. Deny rules are evaluated first: if a value
+# matches a deny pattern it is rejected. Then allow rules are checked: the
+# value must match at least one allow pattern to be accepted.
+# Whether to permit `http://` OpenID configuration URLs while `development = true`.
+# Defaults to true.
+# allow_http_in_development = true
+
+[lti.security.openid_configuration.hosts]
+# Hostnames permitted in OpenID configuration URLs.
+# Supports exact matches and wildcard subdomains (e.g. "*.instructure.com").
+# Defaults to ["*"] (all hosts allowed).
+# allow = ["*"]
+# Hostnames to reject. Evaluated before allow rules. Defaults to [] (none denied).
+# deny = []
+#
+# Example: only allow Canvas instances
+# allow = ["*.instructure.com", "canvas.docker"]
+# deny = []
+
+[lti.security.openid_configuration.paths]
+# URL paths permitted in OpenID configuration URLs.
+# Supports exact matches and glob patterns (e.g. "/api/lti/*").
+# Defaults to ["*"] (all paths allowed).
+# allow = ["*"]
+# Paths to reject. Evaluated before allow rules. Defaults to [] (none denied).
+# deny = []
+#
+# Example: restrict to well-known discovery paths
+# allow = ["/.well-known/openid-configuration", "/api/lti/security/openid-configuration"]
+# deny = []
