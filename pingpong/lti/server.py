@@ -269,9 +269,12 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
     )
 
     headers = {"Authorization": f"Bearer {data.registration_token}"}
-    openid_configuration_url = generate_openid_configuration_url(
-        data.openid_configuration
-    )
+    try:
+        openid_configuration_url = generate_openid_configuration_url(
+            data.openid_configuration
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     response_data: dict[str, Any] | None = None
     async with aiohttp.ClientSession() as session:
         async with session.get(
