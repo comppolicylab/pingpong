@@ -64,19 +64,11 @@ def test_lti_settings_maps_legacy_fields_and_logs_deprecation(caplog):
     ]
     assert openid_security.allow_http_in_development is True
 
-    assert "Deprecated LTI config keys used" in caplog.text
-    assert (
-        "platform_url_allowlist -> lti.security.openid_configuration.hosts.allow"
-        in caplog.text
-    )
-    assert (
-        "openid_configuration_paths -> lti.security.openid_configuration.paths.allow"
-        in caplog.text
-    )
-    assert (
-        "dev_http_hosts -> "
-        "lti.security.openid_configuration.allow_http_in_development" in caplog.text
-    )
+    assert "Deprecated config key 'lti.platform_url_allowlist'" in caplog.text
+    assert "['platform.example.com', 'tool.example.com']" in caplog.text
+    assert "Deprecated config key 'lti.openid_configuration_paths'" in caplog.text
+    assert "Deprecated config key 'lti.dev_http_hosts'" in caplog.text
+    assert "allow_http_in_development = True" in caplog.text
 
 
 def test_lti_settings_maps_legacy_defaults_when_only_platform_allowlist_is_set():

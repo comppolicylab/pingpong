@@ -513,29 +513,34 @@ class LTISettings(BaseSettings):
         security["openid_configuration"] = openid_configuration
         mapped_data["security"] = security
 
-        logger.warning(
-            "Deprecated LTI config keys used: %s",
-            "; ".join(
-                [
-                    f"{legacy_key} -> {replacement}"
-                    for legacy_key, replacement in (
-                        (
-                            "platform_url_allowlist",
-                            "lti.security.openid_configuration.hosts.allow",
-                        ),
-                        (
-                            "openid_configuration_paths",
-                            "lti.security.openid_configuration.paths.allow",
-                        ),
-                        (
-                            "dev_http_hosts",
-                            "lti.security.openid_configuration.allow_http_in_development",
-                        ),
-                    )
-                    if legacy_key in legacy_keys
-                ]
-            ),
-        )
+        for key in legacy_keys:
+            if key == "platform_url_allowlist":
+                logger.warning(
+                    "Deprecated config key 'lti.platform_url_allowlist' used. "
+                    "It will be removed in PingPong 8.0. "
+                    "Replace with:\n"
+                    "  [lti.security.openid_configuration.hosts]\n"
+                    "  allow = %r",
+                    hosts.get("allow", ["*"]),
+                )
+            elif key == "openid_configuration_paths":
+                logger.warning(
+                    "Deprecated config key 'lti.openid_configuration_paths' used. "
+                    "It will be removed in PingPong 8.0. "
+                    "Replace with:\n"
+                    "  [lti.security.openid_configuration.paths]\n"
+                    "  allow = %r",
+                    paths.get("allow", ["*"]),
+                )
+            elif key == "dev_http_hosts":
+                logger.warning(
+                    "Deprecated config key 'lti.dev_http_hosts' used. "
+                    "It will be removed in PingPong 8.0. "
+                    "Replace with:\n"
+                    "  [lti.security.openid_configuration]\n"
+                    "  allow_http_in_development = %r",
+                    openid_configuration.get("allow_http_in_development", True),
+                )
 
         return mapped_data
 
