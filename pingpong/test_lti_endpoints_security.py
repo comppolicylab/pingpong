@@ -3,7 +3,6 @@ from types import SimpleNamespace
 import pytest
 
 import pingpong.config as config_module
-from pingpong.config import LTISettings
 from pingpong.lti import endpoints
 
 
@@ -11,7 +10,9 @@ def _base_lti_settings() -> dict[str, object]:
     return {"key_store": {"type": "local", "directory": "local_exports/lti_keys"}}
 
 
-def _patch_runtime_config(monkeypatch, *, lti: LTISettings, development: bool) -> None:
+def _patch_runtime_config(
+    monkeypatch, *, lti: config_module.LTISettings, development: bool
+) -> None:
     monkeypatch.setattr(
         config_module,
         "config",
@@ -23,7 +24,7 @@ def _patch_runtime_config(monkeypatch, *, lti: LTISettings, development: bool) -
 
 
 def test_lti_security_empty_uses_defaults(monkeypatch):
-    settings = LTISettings.model_validate(_base_lti_settings())
+    settings = config_module.LTISettings.model_validate(_base_lti_settings())
     _patch_runtime_config(monkeypatch, lti=settings, development=True)
 
     generated = endpoints.generate_token_endpoint_url(
@@ -35,7 +36,7 @@ def test_lti_security_empty_uses_defaults(monkeypatch):
 
 
 def test_lti_security_only_global_applies_to_endpoint(monkeypatch):
-    settings = LTISettings.model_validate(
+    settings = config_module.LTISettings.model_validate(
         {
             **_base_lti_settings(),
             "security": {
@@ -60,7 +61,7 @@ def test_lti_security_only_global_applies_to_endpoint(monkeypatch):
 
 
 def test_lti_security_specific_without_global_override(monkeypatch):
-    settings = LTISettings.model_validate(
+    settings = config_module.LTISettings.model_validate(
         {
             **_base_lti_settings(),
             "security": {
@@ -87,7 +88,7 @@ def test_lti_security_specific_without_global_override(monkeypatch):
 
 
 def test_lti_security_specific_overrides_global(monkeypatch):
-    settings = LTISettings.model_validate(
+    settings = config_module.LTISettings.model_validate(
         {
             **_base_lti_settings(),
             "security": {
