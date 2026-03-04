@@ -337,20 +337,28 @@ class LTIAllowDenySettings(BaseSettings):
     deny: list[str] = Field([])
 
 
-class LTIOpenIDConfigurationSecuritySettings(BaseSettings):
-    """Security allow/deny settings for OpenID configuration URLs."""
+class LTIUrlSecuritySettings(BaseSettings):
+    """Security allow/deny settings for URLs."""
 
-    allow_http_in_development: bool = Field(True)
-    hosts: LTIAllowDenySettings = Field(LTIAllowDenySettings())
-    paths: LTIAllowDenySettings = Field(LTIAllowDenySettings())
+    allow_http_in_development: bool | None = Field(None)
+    allow_redirects: bool | None = Field(None)
+    hosts: LTIAllowDenySettings | None = Field(None)
+    paths: LTIAllowDenySettings | None = Field(None)
 
 
 class LTISecuritySettings(BaseSettings):
     """LTI security settings."""
 
-    openid_configuration: LTIOpenIDConfigurationSecuritySettings = Field(
-        LTIOpenIDConfigurationSecuritySettings()
-    )
+    allow_http_in_development: bool = Field(True)
+    allow_redirects: bool = Field(True)
+    hosts: LTIAllowDenySettings = Field(LTIAllowDenySettings())
+    paths: LTIAllowDenySettings = Field(LTIAllowDenySettings())
+
+    auth_login_url: LTIUrlSecuritySettings = Field(LTIUrlSecuritySettings())
+    context_memberships_url: LTIUrlSecuritySettings = Field(LTIUrlSecuritySettings())
+    jwks_uri: LTIUrlSecuritySettings = Field(LTIUrlSecuritySettings())
+    openid_configuration: LTIUrlSecuritySettings = Field(LTIUrlSecuritySettings())
+    token_endpoint: LTIUrlSecuritySettings = Field(LTIUrlSecuritySettings())
 
 
 class LTISettings(BaseSettings):
