@@ -444,9 +444,12 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
     }
 
     registration_response_data: dict[str, Any] | None = None
-    registration_endpoint_url = generate_registration_endpoint_url(
-        registration_endpoint
-    )
+    try:
+        registration_endpoint_url = generate_registration_endpoint_url(
+            registration_endpoint
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     async with aiohttp.ClientSession() as session:
         try:
             async with session.post(

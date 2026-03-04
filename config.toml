@@ -193,39 +193,108 @@ type = "local"
 directory = "local_exports/lti_keys"
 
 [lti.security]
-# Security settings for LTI. Controls which hosts and paths are permitted
-# during LTI OpenID Connect discovery.
-
-[lti.security.openid_configuration]
-# Allow/deny rules for OpenID configuration URLs provided by LMS platforms
-# during LTI registration and login. Each sub-section (`hosts` and `paths`)
-# uses an allow/deny pattern list. Deny rules are evaluated first: if a value
-# matches a deny pattern it is rejected. Then allow rules are checked: the
-# value must match at least one allow pattern to be accepted.
-# Whether to permit `http://` OpenID configuration URLs while `development = true`.
+# Global defaults for all validated LTI URLs.
+# Endpoint-specific blocks below inherit these values unless overridden.
+#
+# Whether to permit `http://` URLs while `development = true`.
 # Defaults to true.
 # allow_http_in_development = true
-
-[lti.security.openid_configuration.hosts]
-# Hostnames permitted in OpenID configuration URLs.
-# Supports exact matches and wildcard subdomains (e.g. "*.instructure.com").
-# Defaults to ["*"] (all hosts allowed).
-# allow = ["*"]
-# Hostnames to reject. Evaluated before allow rules. Defaults to [] (none denied).
-# deny = []
 #
-# Example: only allow Canvas instances
+# Whether HTTP redirects are allowed when requesting LTI URLs.
+# Defaults to true.
+# allow_redirects = true
+
+[lti.security.hosts]
+# Global host allow/deny patterns applied to all LTI URL validations.
+# Supports exact matches and wildcard subdomains (e.g. "*.instructure.com").
+#
+# Example values:
+allow = ["*.instructure.com", "canvas.docker"]
+deny = ["evil.instructure.com"]
+
+[lti.security.paths]
+# Global path allow/deny patterns applied to all LTI URL validations.
+# Supports exact matches and glob patterns (e.g. "/api/lti/*").
+#
+# Example values:
+allow = [
+  "/.well-known/openid-configuration",
+  "/.well-known/openid",
+  "/api/lti/security/openid-configuration",
+  "/api/lti/*",
+  "/login/oauth2/*",
+]
+deny = ["/private/*"]
+
+[lti.security.openid_configuration]
+# Optional per-endpoint overrides for OpenID configuration discovery URLs.
+# Uncomment to override global defaults above for this endpoint only.
+# allow_http_in_development = true
+# allow_redirects = false
+#
+# [lti.security.openid_configuration.hosts]
 # allow = ["*.instructure.com", "canvas.docker"]
 # deny = []
-
-[lti.security.openid_configuration.paths]
-# URL paths permitted in OpenID configuration URLs.
-# Supports exact matches and glob patterns (e.g. "/api/lti/*").
-# Defaults to ["*"] (all paths allowed).
-# allow = ["*"]
-# Paths to reject. Evaluated before allow rules. Defaults to [] (none denied).
-# deny = []
 #
-# Example: restrict to well-known discovery paths
-# allow = ["/.well-known/openid-configuration", "/api/lti/security/openid-configuration"]
+# [lti.security.openid_configuration.paths]
+# allow = [
+#   "/.well-known/openid-configuration",
+#   "/.well-known/openid",
+#   "/api/lti/security/openid-configuration",
+# ]
+# deny = []
+
+[lti.security.authorization_endpoint]
+# Optional overrides for OIDC authorization endpoints.
+# allow_http_in_development = true
+# allow_redirects = true
+# [lti.security.authorization_endpoint.hosts]
+# allow = ["*.instructure.com", "canvas.docker"]
+# deny = []
+# [lti.security.authorization_endpoint.paths]
+# allow = ["/login/oauth2/*"]
+# deny = []
+
+[lti.security.registration_endpoint]
+# Optional overrides for dynamic registration endpoints.
+# allow_http_in_development = true
+# allow_redirects = true
+# [lti.security.registration_endpoint.hosts]
+# allow = ["*.instructure.com"]
+# deny = []
+# [lti.security.registration_endpoint.paths]
+# allow = ["/api/lti/registrations", "/api/lti/*"]
+# deny = []
+
+[lti.security.jwks_uri]
+# Optional overrides for platform JWKS URI fetches.
+# allow_http_in_development = true
+# allow_redirects = true
+# [lti.security.jwks_uri.hosts]
+# allow = ["*.instructure.com", "canvas.docker"]
+# deny = []
+# [lti.security.jwks_uri.paths]
+# allow = ["/api/lti/security/jwks", "/jwks", "/*/jwks"]
+# deny = []
+
+[lti.security.token_endpoint]
+# Optional overrides for OAuth token endpoint requests.
+# allow_http_in_development = true
+# allow_redirects = true
+# [lti.security.token_endpoint.hosts]
+# allow = ["*.instructure.com", "canvas.docker"]
+# deny = []
+# [lti.security.token_endpoint.paths]
+# allow = ["/login/oauth2/token", "/oauth2/token", "/api/lti/*"]
+# deny = []
+
+[lti.security.names_and_role_endpoint]
+# Optional overrides for NRPS (Names and Roles) endpoint requests.
+# allow_http_in_development = true
+# allow_redirects = true
+# [lti.security.names_and_role_endpoint.hosts]
+# allow = ["*.instructure.com", "canvas.docker"]
+# deny = []
+# [lti.security.names_and_role_endpoint.paths]
+# allow = ["/api/lti/*/names_and_roles", "/api/lti/*"]
 # deny = []
