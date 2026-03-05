@@ -8,7 +8,11 @@ import logging
 from fastapi import UploadFile
 import openai
 import orjson
-from pingpong.ai_models import VERBOSITY_MAP, get_reasoning_effort_map
+from pingpong.ai_models import (
+    VERBOSITY_MAP,
+    get_reasoning_effort_map,
+    supports_temperature_for_reasoning,
+)
 from pingpong.animal_hash import name as user_display_name
 from pingpong.auth import encode_auth_token
 from pingpong.authz.base import AuthzClient
@@ -3457,7 +3461,13 @@ async def run_response(
                 )
 
             temperature_setting: float | openai.NotGiven = (
-                run.temperature if run.temperature is not None else openai.NOT_GIVEN
+                run.temperature
+                if run.temperature is not None
+                and supports_temperature_for_reasoning(
+                    run.model,
+                    run.reasoning_effort,
+                )
+                else openai.NOT_GIVEN
             )
             async with config.db.driver.async_session() as session_:
                 input_items = await build_response_input_item_list(

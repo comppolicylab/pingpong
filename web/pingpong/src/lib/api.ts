@@ -1448,6 +1448,7 @@ export type AssistantModel = {
 	created: string;
 	owner: string;
 	name: string;
+	sort_order: number;
 	type: 'chat' | 'voice';
 	description: string;
 	is_latest: boolean;
@@ -1458,10 +1459,12 @@ export type AssistantModel = {
 	supports_file_search: boolean;
 	supports_code_interpreter: boolean;
 	supports_temperature: boolean;
+	supports_temperature_with_reasoning_none: boolean;
 	supports_classic_assistants: boolean;
 	supports_next_gen_assistants: boolean;
 	supports_minimal_reasoning_effort: boolean;
 	supports_none_reasoning_effort: boolean;
+	supports_tools_with_none_reasoning_effort: boolean;
 	supports_verbosity: boolean;
 	supports_web_search: boolean;
 	supports_reasoning: boolean;

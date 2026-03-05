@@ -11,12 +11,15 @@
 </script>
 
 <div
-	class="sticky {name} top-0 z-{(order + 2) * 10} bg-gradient-to-r {colorClasses} drop-shadow-md"
+	data-dropdown-header
+	class="sticky {name} top-0 z-{(order + 2) * 10} bg-gradient-to-r {colorClasses} {topHeader
+		? 'rounded-t-lg'
+		: ''} drop-shadow-md"
 >
 	{#if topHeader}
 		<div class="absolute inset-x-0 -top-96 h-96 bg-gradient-to-r {colorClasses}"></div>
 	{/if}
-	<DropdownItem disabled defaultClass="font-normal py-2 px-4 text-sm text-white"
+	<DropdownItem disabled defaultClass="font-normal py-2 px-4 text-sm text-white bg-transparent"
 		><slot /></DropdownItem
 	>
 </div>

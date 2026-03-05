@@ -1647,6 +1647,7 @@ class AssistantModel(BaseModel):
     created: datetime
     owner: str
     name: str
+    sort_order: float
     description: str
     default_prompt_id: str | None = None
     type: InteractionMode
@@ -1657,6 +1658,7 @@ class AssistantModel(BaseModel):
     supports_next_gen_assistants: bool
     supports_minimal_reasoning_effort: bool
     supports_none_reasoning_effort: bool
+    supports_tools_with_none_reasoning_effort: bool = False
     supports_verbosity: bool
     supports_web_search: bool
     supports_mcp_server: bool
@@ -1665,6 +1667,7 @@ class AssistantModel(BaseModel):
     supports_file_search: bool
     supports_code_interpreter: bool
     supports_temperature: bool
+    supports_temperature_with_reasoning_none: bool = False
     supports_reasoning: bool
     hide_in_model_selector: bool | None = None
     reasoning_effort_levels: list[int] | None = None
@@ -1696,6 +1699,7 @@ class AssistantModelDict(TypedDict):
     supports_next_gen_assistants: bool
     supports_minimal_reasoning_effort: bool
     supports_none_reasoning_effort: bool
+    supports_tools_with_none_reasoning_effort: NotRequired[bool]
     supports_verbosity: bool
     supports_web_search: bool
     supports_mcp_server: bool
@@ -1703,6 +1707,7 @@ class AssistantModelDict(TypedDict):
     supports_file_search: bool
     supports_code_interpreter: bool
     supports_temperature: bool
+    supports_temperature_with_reasoning_none: NotRequired[bool]
     supports_reasoning: bool
     description: str
     reasoning_effort_levels: NotRequired[list[int]]

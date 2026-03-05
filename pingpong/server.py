@@ -50,6 +50,7 @@ from pingpong.ai_models import (
     ADMIN_ONLY_MODELS,
     HIDDEN_MODELS,
     get_reasoning_effort_map,
+    supports_temperature_for_reasoning,
 )
 from pingpong.artifacts import ArtifactStoreError
 from pingpong.audio_store import AudioStoreError
@@ -2909,10 +2910,16 @@ async def list_class_models(
             "supports_none_reasoning_effort": KNOWN_MODELS[m.id][
                 "supports_none_reasoning_effort"
             ],
+            "supports_tools_with_none_reasoning_effort": KNOWN_MODELS[m.id].get(
+                "supports_tools_with_none_reasoning_effort", False
+            ),
             "supports_verbosity": KNOWN_MODELS[m.id]["supports_verbosity"],
             "supports_web_search": KNOWN_MODELS[m.id]["supports_web_search"],
             "supports_mcp_server": KNOWN_MODELS[m.id]["supports_mcp_server"],
             "supports_temperature": KNOWN_MODELS[m.id]["supports_temperature"],
+            "supports_temperature_with_reasoning_none": KNOWN_MODELS[m.id].get(
+                "supports_temperature_with_reasoning_none", False
+            ),
             "supports_reasoning": KNOWN_MODELS[m.id]["supports_reasoning"],
             "reasoning_effort_levels": KNOWN_MODELS[m.id].get(
                 "reasoning_effort_levels"
@@ -2939,11 +2946,13 @@ async def list_class_models(
                 "supports_file_search": True,
                 "supports_code_interpreter": True,
                 "supports_temperature": True,
+                "supports_temperature_with_reasoning_none": False,
                 "supports_reasoning": False,
                 "supports_classic_assistants": True,
                 "supports_next_gen_assistants": False,
                 "supports_minimal_reasoning_effort": False,
                 "supports_none_reasoning_effort": False,
+                "supports_tools_with_none_reasoning_effort": False,
                 "supports_verbosity": False,
                 "supports_web_search": False,
                 "supports_mcp_server": False,
@@ -2968,11 +2977,13 @@ async def list_class_models(
                 "supports_file_search": True,
                 "supports_code_interpreter": True,
                 "supports_temperature": True,
+                "supports_temperature_with_reasoning_none": False,
                 "supports_reasoning": False,
                 "supports_classic_assistants": True,
                 "supports_next_gen_assistants": False,
                 "supports_minimal_reasoning_effort": False,
                 "supports_none_reasoning_effort": False,
+                "supports_tools_with_none_reasoning_effort": False,
                 "supports_verbosity": False,
                 "supports_web_search": False,
                 "supports_mcp_server": False,
@@ -7450,17 +7461,40 @@ async def create_assistant(
         req.reasoning_effort == -1
         and req.tools
         and len(req.tools) > 0
-        and "minimal" in reasoning_effort_map.values()
+        and (
+            "minimal" in reasoning_effort_map.values()
+            or (
+                reasoning_effort_map.get(-1) == "none"
+                and not model_record.supports_tools_with_none_reasoning_effort
+            )
+        )
     ):
         raise HTTPException(
             400,
-            "You cannot use tools when the reasoning effort is set to 'Minimal'. Please select a higher reasoning effort level.",
+            (
+                "You cannot use tools when the reasoning effort is set to 'None'. Please select a higher reasoning effort level."
+                if reasoning_effort_map.get(-1) == "none"
+                and not model_record.supports_tools_with_none_reasoning_effort
+                else "You cannot use tools when the reasoning effort is set to 'Minimal'. Please select a higher reasoning effort level."
+            ),
         )
 
     if req.verbosity is not None and not model_record.supports_verbosity:
         raise HTTPException(
             400,
             "The selected model does not support verbosity settings. Please select a different model or remove the verbosity setting.",
+        )
+
+    if req.temperature is not None and not supports_temperature_for_reasoning(
+        model_record.id, req.reasoning_effort
+    ):
+        raise HTTPException(
+            400,
+            (
+                "Temperature is only available for GPT-5.4 when reasoning effort is set to 'None'."
+                if model_record.id == "gpt-5.4"
+                else "The selected model does not support temperature settings. Please select a different model or remove the temperature setting."
+            ),
         )
 
     # Check that the model is not admin-only
@@ -8497,6 +8531,9 @@ async def update_assistant(
     reasoning_effort_map = (
         get_reasoning_effort_map(model_record.id) if model_record else {}
     )
+    supports_tools_with_none_reasoning_effort = bool(
+        model_record and model_record.supports_tools_with_none_reasoning_effort
+    )
 
     new_reasoning_effort_body = None
     if "reasoning_effort" in req.model_fields_set:
@@ -8514,7 +8551,13 @@ async def update_assistant(
             else None
         )
 
-        if (reasoning_effort == "minimal" or reasoning_effort == "none") and (
+        if (
+            reasoning_effort == "minimal"
+            or (
+                reasoning_effort == "none"
+                and not supports_tools_with_none_reasoning_effort
+            )
+        ) and (
             (
                 "tools" in req.model_fields_set
                 and req.tools is not None
@@ -8527,7 +8570,12 @@ async def update_assistant(
         ):
             raise HTTPException(
                 400,
-                "You cannot use tools when the reasoning effort is set to 'Minimal'. Please select a higher reasoning effort level.",
+                (
+                    "You cannot use tools when the reasoning effort is set to 'None'. Please select a higher reasoning effort level."
+                    if reasoning_effort == "none"
+                    and not supports_tools_with_none_reasoning_effort
+                    else "You cannot use tools when the reasoning effort is set to 'Minimal'. Please select a higher reasoning effort level."
+                ),
             )
 
         reasoning_extra_body: dict[str, Optional[str]] = (
@@ -8544,7 +8592,13 @@ async def update_assistant(
         if (
             asst.reasoning_effort is not None
             and asst.reasoning_effort == -1
-            and "minimal" in reasoning_effort_map.values()
+            and (
+                "minimal" in reasoning_effort_map.values()
+                or (
+                    reasoning_effort_map.get(-1) == "none"
+                    and not supports_tools_with_none_reasoning_effort
+                )
+            )
             and (
                 (
                     "tools" in req.model_fields_set
@@ -8559,7 +8613,12 @@ async def update_assistant(
         ):
             raise HTTPException(
                 400,
-                "You cannot use tools when the reasoning effort is set to 'Minimal'. Please select a higher reasoning effort level.",
+                (
+                    "You cannot use tools when the reasoning effort is set to 'None'. Please select a higher reasoning effort level."
+                    if reasoning_effort_map.get(-1) == "none"
+                    and not supports_tools_with_none_reasoning_effort
+                    else "You cannot use tools when the reasoning effort is set to 'Minimal'. Please select a higher reasoning effort level."
+                ),
             )
         if model_record:
             reasoning_effort_map = get_reasoning_effort_map(model_record.id)
@@ -8572,6 +8631,34 @@ async def update_assistant(
             new_reasoning_effort_body = (
                 {"reasoning_effort": None} if asst.reasoning_effort else {}
             )
+
+    if (
+        model_record
+        and "temperature" in req.model_fields_set
+        and req.temperature is not None
+        and not supports_temperature_for_reasoning(
+            model_record.id, asst.reasoning_effort
+        )
+    ):
+        raise HTTPException(
+            400,
+            (
+                "Temperature is only available for GPT-5.4 when reasoning effort is set to 'None'."
+                if model_record.id == "gpt-5.4"
+                else "The selected model does not support temperature settings. Please select a different model or remove the temperature setting."
+            ),
+        )
+
+    if model_record and model_record.id == "gpt-5.4":
+        if not supports_temperature_for_reasoning(
+            model_record.id, asst.reasoning_effort
+        ):
+            if (
+                "temperature" not in req.model_fields_set
+                and asst.temperature is not None
+            ):
+                openai_update["temperature"] = None
+            asst.temperature = None
 
     uses_web_search = False
     if "tools" in req.model_fields_set:

@@ -365,7 +365,18 @@ async def test_add_message_to_thread_skips_empty_transcript_for_classic_thread(
 
 
 def _fake_class_models_response(
-    model_id: str = "gpt-4o-mini", model_type: str = "chat"
+    model_id: str = "gpt-4o-mini",
+    model_type: str = "chat",
+    *,
+    model_name: str = "GPT-4o mini",
+    sort_order: float = 1.0,
+    supports_temperature: bool = True,
+    supports_reasoning: bool = False,
+    supports_none_reasoning_effort: bool = False,
+    supports_tools_with_none_reasoning_effort: bool = False,
+    supports_temperature_with_reasoning_none: bool = False,
+    supports_classic_assistants: bool = True,
+    supports_next_gen_assistants: bool = True,
 ) -> dict:
     return {
         "models": [
@@ -373,24 +384,27 @@ def _fake_class_models_response(
                 "id": model_id,
                 "created": datetime(2024, 1, 1, tzinfo=timezone.utc),
                 "owner": "openai",
-                "name": "GPT-4o mini",
+                "name": model_name,
+                "sort_order": sort_order,
                 "description": "Test model",
                 "type": model_type,
                 "is_latest": True,
                 "is_new": False,
                 "highlight": False,
-                "supports_classic_assistants": True,
-                "supports_next_gen_assistants": True,
+                "supports_classic_assistants": supports_classic_assistants,
+                "supports_next_gen_assistants": supports_next_gen_assistants,
                 "supports_minimal_reasoning_effort": False,
-                "supports_none_reasoning_effort": False,
+                "supports_none_reasoning_effort": supports_none_reasoning_effort,
+                "supports_tools_with_none_reasoning_effort": supports_tools_with_none_reasoning_effort,
                 "supports_verbosity": True,
                 "supports_web_search": True,
                 "supports_mcp_server": True,
                 "supports_vision": True,
                 "supports_file_search": True,
                 "supports_code_interpreter": True,
-                "supports_temperature": True,
-                "supports_reasoning": False,
+                "supports_temperature": supports_temperature,
+                "supports_temperature_with_reasoning_none": supports_temperature_with_reasoning_none,
+                "supports_reasoning": supports_reasoning,
             }
         ],
         "default_prompts": [],
@@ -408,6 +422,330 @@ def test_voice_model_capabilities_support_next_gen():
     assert all(
         KNOWN_MODELS[model_name]["supports_next_gen_assistants"]
         for model_name in voice_models
+    )
+
+
+@with_user(123)
+@with_authz(grants=[("user:123", "can_create_assistants", "class:1")])
+async def test_create_assistant_allows_gpt_5_4_temperature_with_reasoning_none(
+    api, db, valid_user_token, monkeypatch
+):
+    async def fake_list_class_models(class_id: str, request, openai_client):  # type: ignore[no-untyped-def]
+        return _fake_class_models_response(
+            model_id="gpt-5.4",
+            model_name="GPT-5.4",
+            supports_temperature=False,
+            supports_reasoning=True,
+            supports_none_reasoning_effort=True,
+            supports_tools_with_none_reasoning_effort=True,
+            supports_temperature_with_reasoning_none=True,
+            supports_classic_assistants=False,
+        )
+
+    server_module = importlib.import_module("pingpong.server")
+    monkeypatch.setattr(server_module, "list_class_models", fake_list_class_models)
+
+    async with db.async_session() as session:
+        session.add(
+            models.Class(
+                id=1,
+                name="Chat Class",
+                term="Spring 2026",
+                api_key="sk-test",
+                private=False,
+            )
+        )
+        await session.commit()
+
+    response = api.post(
+        "/api/v1/class/1/assistant",
+        json={
+            "name": "GPT-5.4 Assistant",
+            "instructions": "You are helpful.",
+            "description": "Test assistant",
+            "interaction_mode": "chat",
+            "model": "gpt-5.4",
+            "reasoning_effort": -1,
+            "temperature": 0.7,
+            "tools": [],
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["temperature"] == 0.7
+    assert response.json()["reasoning_effort"] == -1
+
+
+@with_user(123)
+@with_authz(grants=[("user:123", "can_create_assistants", "class:1")])
+async def test_create_assistant_rejects_gpt_5_4_temperature_without_reasoning_none(
+    api, db, valid_user_token, monkeypatch
+):
+    async def fake_list_class_models(class_id: str, request, openai_client):  # type: ignore[no-untyped-def]
+        return _fake_class_models_response(
+            model_id="gpt-5.4",
+            model_name="GPT-5.4",
+            supports_temperature=False,
+            supports_reasoning=True,
+            supports_none_reasoning_effort=True,
+            supports_tools_with_none_reasoning_effort=True,
+            supports_temperature_with_reasoning_none=True,
+            supports_classic_assistants=False,
+        )
+
+    server_module = importlib.import_module("pingpong.server")
+    monkeypatch.setattr(server_module, "list_class_models", fake_list_class_models)
+
+    async with db.async_session() as session:
+        session.add(
+            models.Class(
+                id=1,
+                name="Chat Class",
+                term="Spring 2026",
+                api_key="sk-test",
+                private=False,
+            )
+        )
+        await session.commit()
+
+    response = api.post(
+        "/api/v1/class/1/assistant",
+        json={
+            "name": "GPT-5.4 Assistant",
+            "instructions": "You are helpful.",
+            "description": "Test assistant",
+            "interaction_mode": "chat",
+            "model": "gpt-5.4",
+            "reasoning_effort": 0,
+            "temperature": 0.7,
+            "tools": [],
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        "Temperature is only available for GPT-5.4 when reasoning effort is set to 'None'."
+    )
+
+
+@with_user(123)
+@with_authz(grants=[("user:123", "can_edit", "assistant:11")])
+async def test_update_assistant_clears_gpt_5_4_temperature_without_reasoning_none(
+    api, db, valid_user_token, monkeypatch
+):
+    async def fake_list_class_models(class_id: str, request, openai_client):  # type: ignore[no-untyped-def]
+        return _fake_class_models_response(
+            model_id="gpt-5.4",
+            model_name="GPT-5.4",
+            supports_temperature=False,
+            supports_reasoning=True,
+            supports_none_reasoning_effort=True,
+            supports_tools_with_none_reasoning_effort=True,
+            supports_temperature_with_reasoning_none=True,
+            supports_classic_assistants=False,
+        )
+
+    server_module = importlib.import_module("pingpong.server")
+    monkeypatch.setattr(server_module, "list_class_models", fake_list_class_models)
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Chat Class",
+            term="Spring 2026",
+            api_key="sk-test",
+            private=False,
+        )
+        assistant = models.Assistant(
+            id=11,
+            name="GPT-5.4 Assistant",
+            version=3,
+            instructions="You are helpful.",
+            interaction_mode=schemas.InteractionMode.CHAT,
+            description="Test assistant",
+            tools="[]",
+            model="gpt-5.4",
+            reasoning_effort=-1,
+            temperature=0.9,
+            class_id=class_.id,
+            creator_id=123,
+            use_latex=False,
+            use_image_descriptions=False,
+            locked=False,
+        )
+        session.add_all([class_, assistant])
+        await session.commit()
+
+    response = api.put(
+        "/api/v1/class/1/assistant/11",
+        json={"reasoning_effort": 0, "tools": None},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["temperature"] is None
+    assert response.json()["reasoning_effort"] == 0
+
+    async with db.async_session() as session:
+        updated = await models.Assistant.get_by_id(session, 11)
+        assert updated.temperature is None
+        assert updated.reasoning_effort == 0
+
+
+@with_user(123)
+@with_authz(
+    grants=[
+        ("user:123", "can_edit", "assistant:11"),
+        ("user:123", "can_edit", "assistant:12"),
+    ]
+)
+async def test_update_assistant_allows_tools_with_none_reasoning_effort(
+    api, db, valid_user_token, monkeypatch
+):
+    model_52 = _fake_class_models_response(
+        model_id="gpt-5.2",
+        model_name="GPT-5.2",
+        supports_temperature=False,
+        supports_reasoning=True,
+        supports_none_reasoning_effort=True,
+        supports_tools_with_none_reasoning_effort=True,
+        supports_classic_assistants=False,
+    )["models"][0]
+    model_54 = _fake_class_models_response(
+        model_id="gpt-5.4",
+        model_name="GPT-5.4",
+        supports_temperature=False,
+        supports_reasoning=True,
+        supports_none_reasoning_effort=True,
+        supports_tools_with_none_reasoning_effort=True,
+        supports_temperature_with_reasoning_none=True,
+        supports_classic_assistants=False,
+    )["models"][0]
+
+    async def fake_list_class_models(class_id: str, request, openai_client):  # type: ignore[no-untyped-def]
+        return {
+            "models": [model_52, model_54],
+            "default_prompts": [],
+            "enforce_classic_assistants": False,
+        }
+
+    server_module = importlib.import_module("pingpong.server")
+    monkeypatch.setattr(server_module, "list_class_models", fake_list_class_models)
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Chat Class",
+            term="Spring 2026",
+            api_key="sk-test",
+            private=False,
+        )
+        assistant_52 = models.Assistant(
+            id=11,
+            name="GPT-5.2 Assistant",
+            version=3,
+            instructions="You are helpful.",
+            interaction_mode=schemas.InteractionMode.CHAT,
+            description="Test assistant",
+            tools='[{"type":"web_search"}]',
+            model="gpt-5.2",
+            reasoning_effort=0,
+            class_id=class_.id,
+            creator_id=123,
+            use_latex=False,
+            use_image_descriptions=False,
+            locked=False,
+        )
+        assistant_54 = models.Assistant(
+            id=12,
+            name="GPT-5.4 Assistant",
+            version=3,
+            instructions="You are helpful.",
+            interaction_mode=schemas.InteractionMode.CHAT,
+            description="Test assistant",
+            tools='[{"type":"web_search"}]',
+            model="gpt-5.4",
+            reasoning_effort=0,
+            class_id=class_.id,
+            creator_id=123,
+            use_latex=False,
+            use_image_descriptions=False,
+            locked=False,
+        )
+        session.add_all([class_, assistant_52, assistant_54])
+        await session.commit()
+
+    for assistant_id in (11, 12):
+        response = api.put(
+            f"/api/v1/class/1/assistant/{assistant_id}",
+            json={"reasoning_effort": -1, "tools": [{"type": "web_search"}]},
+            headers={"Authorization": f"Bearer {valid_user_token}"},
+        )
+        assert response.status_code == 200
+        assert response.json()["reasoning_effort"] == -1
+
+    async with db.async_session() as session:
+        updated_52 = await models.Assistant.get_by_id(session, 11)
+        updated_54 = await models.Assistant.get_by_id(session, 12)
+        assert updated_52.reasoning_effort == -1
+        assert updated_54.reasoning_effort == -1
+        assert updated_52.tools == '[{"type": "web_search"}]'
+        assert updated_54.tools == '[{"type": "web_search"}]'
+
+
+@with_user(123)
+@with_authz(grants=[("user:123", "can_edit", "assistant:11")])
+async def test_update_assistant_rejects_tools_with_none_reasoning_without_model_support(
+    api, db, valid_user_token, monkeypatch
+):
+    async def fake_list_class_models(class_id: str, request, openai_client):  # type: ignore[no-untyped-def]
+        return _fake_class_models_response(
+            model_id="gpt-5.1",
+            model_name="GPT-5.1",
+            supports_temperature=False,
+            supports_reasoning=True,
+            supports_none_reasoning_effort=True,
+            supports_tools_with_none_reasoning_effort=False,
+            supports_classic_assistants=False,
+        )
+
+    server_module = importlib.import_module("pingpong.server")
+    monkeypatch.setattr(server_module, "list_class_models", fake_list_class_models)
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Chat Class",
+            term="Spring 2026",
+            api_key="sk-test",
+            private=False,
+        )
+        assistant = models.Assistant(
+            id=11,
+            name="GPT-5.1 Assistant",
+            version=3,
+            instructions="You are helpful.",
+            interaction_mode=schemas.InteractionMode.CHAT,
+            description="Test assistant",
+            tools='[{"type":"web_search"}]',
+            model="gpt-5.1",
+            reasoning_effort=0,
+            class_id=class_.id,
+            creator_id=123,
+            use_latex=False,
+            use_image_descriptions=False,
+            locked=False,
+        )
+        session.add_all([class_, assistant])
+        await session.commit()
+
+    response = api.put(
+        "/api/v1/class/1/assistant/11",
+        json={"reasoning_effort": -1, "tools": [{"type": "web_search"}]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        "You cannot use tools when the reasoning effort is set to 'None'. Please select a higher reasoning effort level."
     )
 
 

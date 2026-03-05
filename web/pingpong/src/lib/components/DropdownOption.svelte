@@ -8,9 +8,12 @@
 	export let subtitle: string;
 	export let smallNameText: boolean = false;
 	export let addBrainIcon: boolean = false;
+
+	$: reasoningTooltipTriggerId = `reasoning-model-tooltip-${value.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
 </script>
 
 <DropdownItem
+	data-dropdown-option
 	onclick={() => update(value)}
 	defaultClass="flex flex-col gap-x-1 gap-y-1 font-medium py-2 px-4 text-sm scroll-mt-9 {value ==
 	selectedValue
@@ -18,11 +21,15 @@
 		: 'hover:bg-gray-100 dark:hover:bg-gray-600'}"
 >
 	<div class="flex w-full flex-row flex-wrap items-center justify-between gap-x-3">
-		<div class="flex flex-row items-center gap-2">
+		<div
+			id={reasoningTooltipTriggerId}
+			class="-mx-1 -my-0.5 flex flex-row items-center gap-2 px-1 py-0.5"
+		>
 			<span class={smallNameText ? 'text-base' : 'text-lg'}>{name}</span>
 			{#if addBrainIcon}<BrainOutline size={smallNameText ? 'sm' : 'md'} /><Tooltip
+					triggeredBy={`#${reasoningTooltipTriggerId}`}
 					class="z-[100] font-light {smallNameText ? 'text-xs' : 'text-sm'}"
-					>Reasoning model</Tooltip
+					placement="right-end">Reasoning model</Tooltip
 				>
 			{/if}
 		</div>
