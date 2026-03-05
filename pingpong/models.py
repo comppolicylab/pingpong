@@ -2551,7 +2551,7 @@ class VectorStore(Base):
         session: AsyncSession,
         vector_store_obj_id: int,
         file_ids: list[str],
-        max_files: int = 100,
+        max_files: int = 1000,
     ) -> tuple[str, list[str], list[str]]:
         current_file_ids = dict()
         current_file_ids = {
