@@ -1619,8 +1619,7 @@
 								>This model is no longer available for new assistants on PingPong. You can continue
 								using it with this assistant, but you won't be able to switch back after saving a
 								new model selection. <span class="font-semibold"
-									>We recommend upgrading to one of the auto-updating models for the best
-									experience.</span
+									>We recommend upgrading to one of the recommended models for the best experience.</span
 								></span
 							>
 						</div>
