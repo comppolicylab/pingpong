@@ -145,7 +145,10 @@ async def sync_vector_store_files(
         file_ids_to_add,
         file_ids_to_remove,
     ) = await models.VectorStore.sync_files(
-        session, vector_store_obj_id, file_search_file_ids
+        session,
+        vector_store_obj_id,
+        file_search_file_ids,
+        max_files=1000,
     )
 
     for file_id in file_ids_to_remove:

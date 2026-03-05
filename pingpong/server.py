@@ -7599,6 +7599,11 @@ async def create_assistant(
     is_video = req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
 
     if req.file_search_file_ids:
+        if len(req.file_search_file_ids) > 1000:
+            raise HTTPException(
+                status_code=400,
+                detail="You can only select up to 1000 files for File Search.",
+            )
         if uses_voice:
             raise HTTPException(
                 status_code=400,
@@ -8725,6 +8730,11 @@ async def update_assistant(
         if "file_search_file_ids" in req.model_fields_set:
             update_tool_resources = True
             if req.file_search_file_ids is not None and req.file_search_file_ids != []:
+                if len(req.file_search_file_ids) > 1000:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="You can only select up to 1000 files for File Search.",
+                    )
                 if uses_voice:
                     raise HTTPException(
                         status_code=400,
