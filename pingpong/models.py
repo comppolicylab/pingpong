@@ -2547,7 +2547,11 @@ class VectorStore(Base):
 
     @classmethod
     async def sync_files(
-        cls, session: AsyncSession, vector_store_obj_id: int, file_ids: list[str]
+        cls,
+        session: AsyncSession,
+        vector_store_obj_id: int,
+        file_ids: list[str],
+        max_files: int = 100,
     ) -> tuple[str, list[str], list[str]]:
         current_file_ids = dict()
         current_file_ids = {
@@ -2578,9 +2582,12 @@ class VectorStore(Base):
                 f"Vector store with id {vector_store_obj_id} does not exist."
             )
 
-        if len(current_file_ids) - len(file_ids_to_remove) + len(file_ids_to_add) > 100:
+        if (
+            len(current_file_ids) - len(file_ids_to_remove) + len(file_ids_to_add)
+            > max_files
+        ):
             raise ValueError(
-                "The number of files in the vector store exceeds the limit of 100."
+                f"The number of files in the vector store exceeds the limit of {max_files}."
             )
         vector_store_id = vector_store.vector_store_id
 
