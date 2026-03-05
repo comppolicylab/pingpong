@@ -160,7 +160,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_verbosity": False,
         "supports_web_search": True,
         "supports_mcp_server": True,
-        "description": "Smartest non-reasoning model. Excels at instruction following, with broad knowledge across domains.",
+        "description": "Older, smart non-reasoning model. Great at instruction following, with broad knowledge across domains. We recommend upgrading to GPT-5.4 with reasoning effort set to none for better performance.",
     },
     "gpt-4.1-mini": {
         "name": "GPT-4.1 mini",
