@@ -1417,7 +1417,6 @@ AZURE_UNAVAILABLE_MODELS = [
     "gpt-realtime-mini-2025-10-06",
     "o1",
     "o1-2024-12-17",
-    "o1-2024-12-17",
     "o3",
     "o3-mini",
     "o3-mini-2025-01-31",
