@@ -652,6 +652,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_minimal_reasoning_effort": False,
         "supports_none_reasoning_effort": True,
         "supports_tools_with_none_reasoning_effort": True,
+        "supports_temperature_with_reasoning_none": True,
         "supports_verbosity": True,
         "supports_web_search": True,
         "supports_mcp_server": True,
