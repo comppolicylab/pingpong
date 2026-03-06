@@ -1,5 +1,8 @@
 <script lang="ts">
 	import { DropdownItem } from 'flowbite-svelte';
+	import { getContext } from 'svelte';
+	import type { Writable } from 'svelte/store';
+	import { writable } from 'svelte/store';
 	// The name of the header.
 	export let name: string;
 	// The z-index order of the header. Increase this value to make the header appear on top of other elements.
@@ -8,12 +11,17 @@
 	export let colorClasses: string = 'from-orange-dark to-orange';
 	// If true, the header will have a gradient background that extends above the dropdown.
 	export let topHeader = false;
+
+	const hasScrollableOverflow =
+		getContext<Writable<boolean> | undefined>('dropdownHasScrollableOverflow') ?? writable(false);
 </script>
 
 <div
 	data-dropdown-header
 	class="sticky {name} top-0 z-{(order + 2) * 10} bg-gradient-to-r {colorClasses} {topHeader
-		? 'rounded-t-lg'
+		? $hasScrollableOverflow
+			? ''
+			: 'rounded-t-lg'
 		: ''} drop-shadow-md"
 >
 	{#if topHeader}
