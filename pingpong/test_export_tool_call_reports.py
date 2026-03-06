@@ -173,6 +173,7 @@ def test_process_tool_call_content_v3_includes_mcp_list_tools_details():
     report = json.loads(process_tool_call_content_v3(tool_call))
 
     assert report["server_label"] == "weather"
+    assert report["server_name"] == "Weather MCP"
     assert report["tools"] == [
         {
             "annotations": {"readOnlyHint": True},

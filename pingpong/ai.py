@@ -4888,6 +4888,8 @@ def process_tool_call_content_v3(tool_call: models.ToolCall) -> str:
                 }
                 for tool in tool_call.mcp_tools_listed
             ]
+        case _:
+            logger.warning(f"Unknown tool call type for export: {tool_call.type}")
 
     _set_if_not_none(report, "error", _parse_json_string(tool_call.error))
     return json.dumps(report, indent=2, sort_keys=True)
@@ -4927,23 +4929,14 @@ def build_export_rows_v3(
 async def list_export_rows_v3(
     session: AsyncSession, thread_id: int, file_names: dict[str, str]
 ) -> list[tuple[str, datetime, str]]:
-    async def collect_messages() -> list[models.Message]:
-        return [
-            message
-            async for message in models.Thread.list_all_messages_gen(session, thread_id)
-        ]
-
-    async def collect_tool_calls() -> list[models.ToolCall]:
-        return [
-            tool_call
-            async for tool_call in models.Thread.list_all_tool_calls_gen(
-                session, thread_id
-            )
-        ]
-
-    messages, tool_calls = await asyncio.gather(
-        collect_messages(), collect_tool_calls()
-    )
+    messages = [
+        message
+        async for message in models.Thread.list_all_messages_gen(session, thread_id)
+    ]
+    tool_calls = [
+        tool_call
+        async for tool_call in models.Thread.list_all_tool_calls_gen(session, thread_id)
+    ]
     return build_export_rows_v3(messages, tool_calls, file_names)
 
 
