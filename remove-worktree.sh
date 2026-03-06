@@ -2,6 +2,30 @@
 
 set -e
 
+resolve_repo_root() {
+  git rev-parse --show-toplevel 2>/dev/null || {
+    echo "ERROR: remove-worktree.sh must be run from within a git checkout." >&2
+    exit 1
+  }
+}
+
+resolve_shared_worktree_root() {
+  local git_common_dir
+  local main_repo_root
+  local repo_parent
+  local repo_name
+
+  git_common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || {
+    echo "ERROR: Could not determine the shared git directory." >&2
+    exit 1
+  }
+
+  main_repo_root="$(cd "${git_common_dir}/.." && pwd -P)" || exit 1
+  repo_parent="$(dirname "${main_repo_root}")"
+  repo_name="$(basename "${main_repo_root}")"
+  echo "${repo_parent}/${repo_name}-worktrees"
+}
+
 if [[ -z "${1:-}" ]]; then
   echo "Usage: $0 <worktree-name>" >&2
   exit 1
@@ -21,7 +45,8 @@ if [[ "$1" == *".."* ]] || [[ "$1" == *"//"* ]] || [[ "$1" == */ ]]; then
 fi
 
 INPUT_NAME="$1"
-WORKTREE_ROOT="../pingpong-worktrees"
+REPO_ROOT="$(resolve_repo_root)"
+WORKTREE_ROOT="$(resolve_shared_worktree_root)"
 PORTS_FILE="${WORKTREE_ROOT}/.worktree-ports.json"
 PORTS_LOCKFILE="${WORKTREE_ROOT}/.worktree-ports.lock"
 
@@ -86,8 +111,30 @@ sanitize_db_suffix() {
   echo "${cleaned}"
 }
 
+build_worktree_name() {
+  local username="$1"
+  local branch_type="$2"
+  local branch_name="$3"
+  echo "${username}_${branch_type}_${branch_name}"
+}
+
+build_worktree_name_for_branch() {
+  local branch_name="$1"
+  local username=""
+  local branch_type=""
+  local branch_short_name=""
+  local extra=""
+
+  IFS='/' read -r username branch_type branch_short_name extra <<< "${branch_name}"
+  if [[ -n "${extra}" || -z "${username}" || -z "${branch_type}" || -z "${branch_short_name}" ]]; then
+    return 1
+  fi
+
+  build_worktree_name "${username}" "${branch_type}" "${branch_short_name}"
+}
+
 # Parse authz settings from config file
-CONFIG_FILE="${CONFIG_FILE:-config.local.toml}"
+CONFIG_FILE="${CONFIG_FILE:-${REPO_ROOT}/config.local.toml}"
 if [[ ! -f "${CONFIG_FILE}" ]]; then
   echo "ERROR: Config file not found: ${CONFIG_FILE}" >&2
   exit 1
@@ -118,7 +165,7 @@ AUTHZ_HOST="$(get_toml_value "${CONFIG_FILE}" "authz" "host" "localhost")"
 AUTHZ_TOKEN="$(get_toml_value "${CONFIG_FILE}" "authz" "key" "devkey")"
 
 # Get authz port from docker-compose.yml (first port in authz service ports mapping)
-DOCKER_COMPOSE_FILE="${DOCKER_COMPOSE_FILE:-docker-compose.yml}"
+DOCKER_COMPOSE_FILE="${DOCKER_COMPOSE_FILE:-${REPO_ROOT}/docker-compose.yml}"
 if [[ -f "${DOCKER_COMPOSE_FILE}" ]]; then
   AUTHZ_PORT="$(awk '/^  authz:/,/^  [a-z]/' "${DOCKER_COMPOSE_FILE}" | grep -E '^\s+ports:' | grep -oE '"[0-9]+:' | head -1 | tr -d '":' || echo "8080")"
   [[ -z "${AUTHZ_PORT}" ]] && AUTHZ_PORT="8080"
@@ -155,7 +202,7 @@ get_branch_for_worktree_name() {
   local worktree_name="$1"
   local target_path
 
-  target_path="$(cd .. && pwd -P)/pingpong-worktrees/${worktree_name}"
+  target_path="${WORKTREE_ROOT}/${worktree_name}"
   git worktree list --porcelain | awk -v target="${target_path}" '
     $1 == "worktree" {
       path = $0
@@ -186,6 +233,44 @@ find_unique_branch_by_short_name() {
     return 0
   fi
 
+  if [[ ${#matches[@]} -gt 1 ]]; then
+    echo "ERROR: Short worktree name '${short_name}' is ambiguous." >&2
+    echo "Matching branches:" >&2
+    printf '  %s\n' "${matches[@]}" >&2
+    echo "Pass the full branch name instead." >&2
+    return 2
+  fi
+
+  return 1
+}
+
+find_unique_branch_by_worktree_name() {
+  local worktree_name="$1"
+  local matches=()
+  local branch=""
+  local candidate_worktree_name=""
+
+  while IFS= read -r branch; do
+    [[ -z "${branch}" ]] && continue
+    candidate_worktree_name="$(build_worktree_name_for_branch "${branch}" || true)"
+    if [[ "${candidate_worktree_name}" == "${worktree_name}" ]]; then
+      matches+=("${branch}")
+    fi
+  done < <(git for-each-ref --format='%(refname:strip=2)' "refs/heads/*/*/*")
+
+  if [[ ${#matches[@]} -eq 1 ]]; then
+    echo "${matches[0]}"
+    return 0
+  fi
+
+  if [[ ${#matches[@]} -gt 1 ]]; then
+    echo "ERROR: Worktree name '${worktree_name}' is ambiguous." >&2
+    echo "Matching branches:" >&2
+    printf '  %s\n' "${matches[@]}" >&2
+    echo "Pass the full branch name instead." >&2
+    return 2
+  fi
+
   return 1
 }
 
@@ -204,27 +289,50 @@ resolve_branch_name() {
     return 0
   fi
 
-  resolved_branch="$(find_unique_branch_by_short_name "${input_name}" || true)"
-  if [[ -n "${resolved_branch}" ]]; then
-    echo "${resolved_branch}"
-    return 0
+  if resolved_branch="$(find_unique_branch_by_worktree_name "${input_name}")"; then
+    if [[ -n "${resolved_branch}" ]]; then
+      echo "${resolved_branch}"
+      return 0
+    fi
+  else
+    local find_status=$?
+    if [[ ${find_status} -eq 2 ]]; then
+      return 2
+    fi
+  fi
+
+  if resolved_branch="$(find_unique_branch_by_short_name "${input_name}")"; then
+    if [[ -n "${resolved_branch}" ]]; then
+      echo "${resolved_branch}"
+      return 0
+    fi
+  else
+    local find_status=$?
+    if [[ ${find_status} -eq 2 ]]; then
+      return 2
+    fi
   fi
 
   return 1
 }
 
-BRANCH_NAME="$(resolve_branch_name "${INPUT_NAME}" || true)"
-if [[ -z "${BRANCH_NAME}" ]]; then
+BRANCH_NAME="$(resolve_branch_name "${INPUT_NAME}")"
+resolve_status=$?
+if [[ ${resolve_status} -ne 0 ]]; then
+  if [[ ${resolve_status} -eq 2 ]]; then
+    exit 1
+  fi
   echo "ERROR: Could not resolve branch for worktree '${INPUT_NAME}'." >&2
-  echo "Pass the short worktree name or the full branch name." >&2
+  echo "Pass the worktree name, short worktree name, or the full branch name." >&2
   exit 1
 fi
 
-WORKTREE_NAME="${BRANCH_NAME##*/}"
+LEGACY_SHORT_WORKTREE_NAME="${BRANCH_NAME##*/}"
+WORKTREE_NAME="$(build_worktree_name_for_branch "${BRANCH_NAME}")"
 DB_SUFFIX="$(sanitize_db_suffix "${BRANCH_NAME}")"
 WORKTREE_PATH="${WORKTREE_ROOT}/${WORKTREE_NAME}"
 SANITIZED_WORKTREE_PATH="${WORKTREE_ROOT}/${DB_SUFFIX}"
-LEGACY_WORKTREE_PATH="${WORKTREE_ROOT}/${INPUT_NAME}"
+LEGACY_WORKTREE_PATH="${WORKTREE_ROOT}/${LEGACY_SHORT_WORKTREE_NAME}"
 DB_NAME="pingpong_${DB_SUFFIX}"
 AUTHZ_STORE_NAME="pingpong_${DB_SUFFIX}"
 
@@ -324,7 +432,10 @@ echo "Cleanup complete for ${WORKTREE_NAME}"
 if [[ -f "${PORTS_FILE}" ]]; then
   if acquire_ports_lock; then
     tmp_ports="$(mktemp)"
-    if jq --arg name "${WORKTREE_NAME}" --arg branch "${BRANCH_NAME}" 'del(.[$name], .[$branch])' "${PORTS_FILE}" > "${tmp_ports}"; then
+    if jq --arg name "${WORKTREE_NAME}" \
+      --arg legacy "${LEGACY_SHORT_WORKTREE_NAME}" \
+      --arg branch "${BRANCH_NAME}" \
+      'del(.[$name], .[$legacy], .[$branch])' "${PORTS_FILE}" > "${tmp_ports}"; then
       mv "${tmp_ports}" "${PORTS_FILE}"
       echo "Released reserved ports for ${WORKTREE_NAME}."
     else
