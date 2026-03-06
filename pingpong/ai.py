@@ -4098,7 +4098,12 @@ def format_instructions(
             "surrounding it to delimit "
             "inline math. For block-level math, use double dollar signs $$ "
             "with newlines before and after them as the opening and closing "
-            "delimiter. Do not use LaTeX inside backticks."
+            "delimiter. Do not use LaTeX inside backticks.\n\n"
+            "---Formatting: Mermaid---\n"
+            "When a diagram would make the answer clearer, use Mermaid. "
+            "Wrap Mermaid diagrams in fenced code blocks with the language "
+            "set to mermaid, for example ```mermaid. Do not put Mermaid "
+            "inside inline backticks or mix Mermaid syntax with LaTeX math."
         )
 
     if use_image_descriptions:

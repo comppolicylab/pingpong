@@ -1904,6 +1904,7 @@ export type AssistantInstructionsPreviewResponse = {
 
 export type AssistantInstructionsPreviewRequest = {
 	instructions: string;
+	use_latex?: boolean;
 };
 
 /**

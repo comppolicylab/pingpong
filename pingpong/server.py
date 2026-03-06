@@ -7874,8 +7874,7 @@ async def preview_assistant_instructions(
     return {
         "instructions_preview": format_instructions(
             req.instructions,
-            use_latex=False,
-            use_image_descriptions=False,
+            use_latex=req.use_latex,
             user_id=request.state["session"].user.id,
             thread_id=f"preview_{uuid.uuid4()}",
         )

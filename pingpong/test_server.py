@@ -1476,6 +1476,29 @@ async def test_copy_assistant_within_class(
 
 @with_user(123)
 @with_institution(1, "Test Institution")
+@with_authz(grants=[("user:123", "can_create_assistants", "class:1")])
+async def test_preview_assistant_instructions_includes_latex_formatting(
+    api, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_ = models.Class(id=1, name="Test Class", institution_id=institution.id)
+        session.add(class_)
+        await session.commit()
+
+    response = api.post(
+        "/api/v1/class/1/assistant_instructions",
+        json={"instructions": "Be helpful", "use_latex": True},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    instructions_preview = response.json()["instructions_preview"]
+    assert "---Formatting: LaTeX---" in instructions_preview
+    assert "---Formatting: Mermaid---" in instructions_preview
+
+
+@with_user(123)
+@with_institution(1, "Test Institution")
 @with_authz(
     grants=[
         ("user:123", "can_create_assistants", "class:1"),

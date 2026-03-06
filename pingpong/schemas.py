@@ -634,6 +634,7 @@ class CreateAssistant(BaseModel):
 
 class AssistantInstructionsPreviewRequest(BaseModel):
     instructions: str
+    use_latex: bool = False
 
 
 class AssistantInstructionsPreviewResponse(BaseModel):
