@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { afterUpdate, onDestroy, tick } from 'svelte';
-	import { mount, unmount } from 'svelte';
 	import { markdown } from '$lib/markdown';
 	import type { InlineWebSource } from '$lib/content';
 	import MermaidDiagram from './MermaidDiagram.svelte';
 	import Sanitize from './Sanitize.svelte';
+	import SvgDiagram from './SvgDiagram.svelte';
 	import WebSourceChip from './WebSourceChip.svelte';
 	import 'katex/dist/katex.min.css';
 
@@ -13,22 +13,101 @@
 	export let latex = false;
 	export let inlineWebSources: InlineWebSource[] = [];
 
-	type MountedMermaidComponent = ReturnType<typeof mount>;
+	type MarkdownSegment =
+		| { type: 'html'; content: string }
+		| { type: 'mermaid-complete'; source: string }
+		| { type: 'mermaid-streaming'; source: string }
+		| { type: 'svg-complete'; source: string }
+		| { type: 'svg-streaming'; source: string };
 
 	let container: HTMLDivElement;
 	let mountedChips: WebSourceChip[] = [];
-	let mountedMermaidDiagrams: { target: HTMLElement; component: MountedMermaidComponent }[] = [];
+
+	const SVG_FENCE_OPEN_PATTERN = /^```(?:svg|image\/svg\+xml)\b/i;
+
+	const parseMarkdownSegments = (markdownContent: string): MarkdownSegment[] => {
+		const segments: MarkdownSegment[] = [];
+		const htmlLines: string[] = [];
+		const mermaidLines: string[] = [];
+		const svgLines: string[] = [];
+		let inMermaidBlock = false;
+		let inSvgBlock = false;
+
+		const flushHtml = () => {
+			if (!htmlLines.length) {
+				return;
+			}
+			segments.push({ type: 'html', content: htmlLines.join('\n') });
+			htmlLines.length = 0;
+		};
+
+		for (const line of markdownContent.split('\n')) {
+			if (!inMermaidBlock && !inSvgBlock && line.startsWith('```mermaid')) {
+				flushHtml();
+				inMermaidBlock = true;
+				continue;
+			}
+
+			if (!inMermaidBlock && !inSvgBlock && SVG_FENCE_OPEN_PATTERN.test(line)) {
+				flushHtml();
+				inSvgBlock = true;
+				continue;
+			}
+
+			if (inMermaidBlock && line.trim() === '```') {
+				segments.push({
+					type: 'mermaid-complete',
+					source: mermaidLines.join('\n').trim()
+				});
+				mermaidLines.length = 0;
+				inMermaidBlock = false;
+				continue;
+			}
+
+			if (inSvgBlock && line.trim() === '```') {
+				segments.push({
+					type: 'svg-complete',
+					source: svgLines.join('\n').trim()
+				});
+				svgLines.length = 0;
+				inSvgBlock = false;
+				continue;
+			}
+
+			if (inMermaidBlock) {
+				mermaidLines.push(line);
+			} else if (inSvgBlock) {
+				svgLines.push(line);
+			} else {
+				htmlLines.push(line);
+			}
+		}
+
+		if (inMermaidBlock) {
+			segments.push({
+				type: 'mermaid-streaming',
+				source: mermaidLines.join('\n').trimEnd()
+			});
+		} else if (inSvgBlock) {
+			segments.push({
+				type: 'svg-streaming',
+				source: svgLines.join('\n').trimEnd()
+			});
+		} else {
+			flushHtml();
+		}
+
+		if (!segments.length) {
+			segments.push({ type: 'html', content: markdownContent });
+		}
+
+		return segments;
+	};
+	$: segments = parseMarkdownSegments(content);
 
 	const destroyInlineWebSources = () => {
 		mountedChips.forEach((chip) => chip.$destroy());
 		mountedChips = [];
-	};
-
-	const destroyMermaidDiagrams = () => {
-		mountedMermaidDiagrams.forEach(({ component }) => {
-			void unmount(component);
-		});
-		mountedMermaidDiagrams = [];
 	};
 
 	// Replace placeholder spans from parseTextContent with live WebSourceChip instances.
@@ -67,53 +146,40 @@
 		});
 	};
 
-	const mountMermaidDiagrams = async () => {
-		if (!container) {
-			return;
-		}
-
-		mountedMermaidDiagrams = mountedMermaidDiagrams.filter(({ target, component }) => {
-			const stillMounted = target.isConnected && container.contains(target);
-			if (!stillMounted) {
-				void unmount(component);
-			}
-			return stillMounted;
-		});
-
-		const mermaidBlocks = [
-			...container.querySelectorAll<HTMLElement>('pre > code.language-mermaid')
-		];
-		mermaidBlocks.forEach((block) => {
-			const pre = block.parentElement;
-			const source = block.textContent?.trim();
-			if (!pre || !source) {
-				return;
-			}
-
-			const target = document.createElement('div');
-			target.className = 'mb-4 overflow-hidden';
-			pre.replaceWith(target);
-
-			const component = mount(MermaidDiagram, {
-				target,
-				props: { source }
-			}) as MountedMermaidComponent;
-
-			mountedMermaidDiagrams.push({ target, component });
-		});
-	};
-
 	afterUpdate(() => {
 		mountInlineWebSources();
-		mountMermaidDiagrams();
 	});
 
 	onDestroy(() => {
 		destroyInlineWebSources();
-		destroyMermaidDiagrams();
 	});
 </script>
 
 <div class="markdown max-w-full" bind:this={container}>
-	<Sanitize html={markdown(content, { syntax, latex })} />
+	{#each segments as segment, index (`${segment.type}-${index}`)}
+		{#if segment.type === 'html'}
+			<Sanitize html={markdown(segment.content, { syntax, latex })} />
+		{:else if segment.type === 'mermaid-complete'}
+			<MermaidDiagram source={segment.source} />
+		{:else if segment.type === 'svg-complete'}
+			<SvgDiagram source={segment.source} isClosed={true} />
+		{:else if segment.type === 'mermaid-streaming'}
+			<div
+				class="mermaid-block not-prose relative mb-4 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm"
+			>
+				<div
+					class="flex items-center justify-between gap-3 border-b border-gray-200 bg-linear-to-r from-gray-50 to-white px-3 py-2"
+				>
+					<div class="text-xs font-semibold tracking-[0.18em] text-gray-500 uppercase">Mermaid</div>
+					<div class="text-xs font-medium text-gray-500">Streaming code...</div>
+				</div>
+				<pre
+					class="overflow-x-auto bg-gray-950 p-4 text-xs leading-6 whitespace-pre-wrap text-gray-100"><code
+						>{segment.source}</code
+					></pre>
+			</div>
+		{:else if segment.type === 'svg-streaming'}
+			<SvgDiagram source={segment.source} isClosed={false} />
+		{/if}
+	{/each}
 </div>

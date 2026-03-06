@@ -37,17 +37,21 @@ const DEFAULT_OPTIONS: MarkdownRendererOptions = {
  * Get a markdown renderer instance.
  */
 const getMarkdownRenderer = (options: MarkdownRendererOptions) => {
-	// Build list of enabled extensions
-	const extensions: MarkedExtension[] = [];
-	for (const [key, enabled] of Object.entries(options)) {
-		if (enabled) {
-			const ext = EXTENSIONS[key as keyof typeof EXTENSIONS];
-			if (!ext) {
-				throw new Error(`Unknown markdown extension: ${key}`);
-			}
-			extensions.push(ext);
+	for (const key of Object.keys(options)) {
+		if (!(key in EXTENSIONS)) {
+			throw new Error(`Unknown markdown extension: ${key}`);
 		}
 	}
+
+	// Build list of enabled extensions
+	const extensions: MarkedExtension[] = [];
+	if (options.syntax) {
+		extensions.push(EXTENSIONS.syntax);
+	}
+	if (options.latex) {
+		extensions.push(EXTENSIONS.latex);
+	}
+
 	return new Marked(...extensions);
 };
 

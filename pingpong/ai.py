@@ -4108,7 +4108,19 @@ def format_instructions(
             "    A-->B\n"
             "```\n"
             "Do not put Mermaid inside inline backticks or mix Mermaid "
-            "syntax with LaTeX math."
+            "syntax with LaTeX math.\n\n"
+            "---Formatting: SVG---\n"
+            "When a static diagram would make the answer clearer, you may use SVG. "
+            "Wrap SVG in fenced code blocks with the language set to svg, for example:\n"
+            "```svg\n"
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">\n'
+            '  <circle cx="50" cy="50" r="40" />\n'
+            "</svg>\n"
+            "```\n"
+            "Output a complete standalone <svg> document. Always include the closing "
+            "</svg> tag and close the fenced code block. Do not include JavaScript, "
+            "foreignObject, or external assets inside SVG. Prefer simple inline "
+            "styles or attributes and include a viewBox."
         )
 
     if use_image_descriptions:

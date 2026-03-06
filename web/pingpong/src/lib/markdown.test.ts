@@ -43,6 +43,30 @@ const x = 1;
 </code></pre>`);
 	});
 
+	it('should render fenced svg blocks as highlighted code blocks before component mounting', () => {
+		const rendered = markdown(`
+\`\`\`svg
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">
+  <circle cx="5" cy="5" r="4" />
+</svg>
+\`\`\`
+		`);
+
+		expect(rendered).toContain('<pre><code class="hljs language-svg">');
+		expect(rendered).toContain('<span class="hljs-name">svg</span>');
+		expect(rendered).toContain('<span class="hljs-name">circle</span>');
+	});
+
+	it('should render non-document svg fences as code blocks', () => {
+		const rendered = markdown(`
+\`\`\`svg
+<div>not an svg document</div>
+\`\`\`
+`);
+
+		expect(rendered).toContain('<pre><code class="hljs language-svg">');
+	});
+
 	it('should render inline LaTeX with punctuation after it', () => {
 		expect(markdown(`This is $N$'s test.`, { latex: true })).toBe(
 			`<p>This is <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>N</mi></mrow><annotation encoding="application/x-tex">N</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.10903em;">N</span></span></span></span>&#39;s test.</p>

@@ -21,6 +21,7 @@
 	import type { Tool, ServerFile, FileUploadInfo, MCPServerToolInput, MCPAuthType } from '$lib/api';
 	import { beforeNavigate, goto, invalidate } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import { browser } from '$app/environment';
 	import * as api from '$lib/api';
 	import { setsEqual } from '$lib/set';
 	import { happyToast, sadToast } from '$lib/toast';
@@ -57,7 +58,6 @@
 	import ConfirmationModal from '$lib/components/ConfirmationModal.svelte';
 	import DropdownBadge from '$lib/components/DropdownBadge.svelte';
 	import StatusErrors from '$lib/components/StatusErrors.svelte';
-	import Sanitize from '$lib/components/Sanitize.svelte';
 	import { page } from '$app/stores';
 	import { computeLatestIncidentTimestamps, filterLatestIncidentUpdates } from '$lib/statusUpdates';
 	import { tick } from 'svelte';
@@ -134,6 +134,16 @@
 	$: currentLectureVideoKey = assistant?.lecture_video_key || '';
 	let lectureVideoKey = '';
 	let hasSetLectureVideoKey = false;
+	const decodeHtmlEntities = (value: string) => {
+		if (!browser) {
+			return value;
+		}
+
+		const textarea = document.createElement('textarea');
+		textarea.innerHTML = value;
+		return textarea.value;
+	};
+
 	$: if (!hasSetLectureVideoKey) {
 		if (!data.isCreating && assistant?.lecture_video_key) {
 			lectureVideoKey = assistant.lecture_video_key;
@@ -1508,8 +1518,9 @@
 		bind:open={showAssistantInstructionsPreview}
 		autoclose
 		outsideclose
-		><span class="whitespace-pre-wrap text-gray-700"><Sanitize html={instructionsPreview} /></span
-		></Modal
+		><pre class="m-0 text-sm whitespace-pre-wrap text-gray-700">{decodeHtmlEntities(
+				instructionsPreview
+			)}</pre></Modal
 	>
 	{#if showMCPServerModal}
 		<MCPServerModal
