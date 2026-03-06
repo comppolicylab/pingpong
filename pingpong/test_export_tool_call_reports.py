@@ -255,30 +255,73 @@ def test_process_reasoning_content_v3_includes_time_spent_and_sorted_summaries()
 
 
 def test_process_message_content_v3_links_container_file_citations():
-    content = [
-        models.MessagePart(
-            type=schemas.MessagePartType.OUTPUT_TEXT,
-            part_index=0,
-            text="Generated chart",
-            annotations=[
-                models.Annotation(
-                    type=schemas.AnnotationType.CONTAINER_FILE_CITATION,
-                    annotation_index=0,
-                    filename="chart.png",
-                    vision_file_object_id=77,
-                )
-            ],
-        )
-    ]
+    message = models.Message(
+        message_status=schemas.MessageStatus.COMPLETED,
+        run_id=1,
+        thread_id=20,
+        output_index=1,
+        role=schemas.MessageRole.ASSISTANT,
+        created=NOW,
+        content=[
+            models.MessagePart(
+                type=schemas.MessagePartType.OUTPUT_TEXT,
+                part_index=0,
+                text="Generated chart",
+                annotations=[
+                    models.Annotation(
+                        type=schemas.AnnotationType.CONTAINER_FILE_CITATION,
+                        annotation_index=0,
+                        filename="chart.png",
+                        vision_file_object_id=77,
+                    )
+                ],
+            )
+        ],
+    )
 
     assert process_message_content_v3(
-        content,
+        message,
+        file_names={},
+        class_id=10,
+        thread_id=20,
+    ) == ("Generated chart\n [Code Interpreter Output File Annotation: chart.png] ")
+
+
+def test_process_message_content_v3_notes_user_uploads():
+    message = models.Message(
+        message_status=schemas.MessageStatus.COMPLETED,
+        run_id=1,
+        thread_id=20,
+        output_index=1,
+        role=schemas.MessageRole.USER,
+        created=NOW,
+        content=[
+            models.MessagePart(
+                type=schemas.MessagePartType.INPUT_TEXT,
+                part_index=0,
+                text="Here are my files",
+                annotations=[],
+            )
+        ],
+        file_search_attachments=[
+            models.File(id=11, name="policy.pdf"),
+        ],
+        code_interpreter_attachments=[
+            models.File(id=12, name="data.csv"),
+            models.File(id=11, name="policy.pdf"),
+        ],
+    )
+
+    assert process_message_content_v3(
+        message,
         file_names={},
         class_id=10,
         thread_id=20,
     ) == (
-        "Generated chart\n"
-        f" [Code Interpreter Output File Annotation: chart.png ({config.url('/api/v1/class/10/thread/20/file/77')})] "
+        "Here are my files\n\n"
+        "[Uploads]\n"
+        "- data.csv [code_interpreter]\n"
+        "- policy.pdf [code_interpreter, file_search]"
     )
 
 

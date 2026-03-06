@@ -4727,8 +4727,38 @@ def process_message_content(
     return "\n".join(processed_content)
 
 
+def _format_message_uploads_v3(
+    message: models.Message, class_id: int, thread_id: int
+) -> str | None:
+    attachment_names: dict[int, str | None] = {}
+    attachment_tools: dict[int, set[str]] = {}
+
+    for attachment in message.file_search_attachments:
+        attachment_names.setdefault(attachment.id, attachment.name)
+        attachment_tools.setdefault(attachment.id, set()).add("file_search")
+
+    for attachment in message.code_interpreter_attachments:
+        attachment_names.setdefault(attachment.id, attachment.name)
+        attachment_tools.setdefault(attachment.id, set()).add("code_interpreter")
+
+    if not attachment_tools:
+        return None
+
+    lines = ["[Uploads]"]
+    for attachment_id, tools in sorted(
+        attachment_tools.items(),
+        key=lambda item: (_normalize_newlines(attachment_names.get(item[0])), item[0]),
+    ):
+        tool_labels = ", ".join(sorted(tools))
+        lines.append(
+            f"- {_normalize_newlines(attachment_names.get(attachment_id))} [{tool_labels}]"
+        )
+
+    return "\n".join(lines)
+
+
 def process_message_content_v3(
-    content: list[models.MessagePart],
+    message: models.Message,
     file_names: dict[str, str],
     class_id: int,
     thread_id: int,
@@ -4738,7 +4768,7 @@ def process_message_content_v3(
     File citations are replaced with their file names inside the text
     """
     processed_content = []
-    for part in content:
+    for part in message.content:
         match part.type:
             case MessagePartType.INPUT_TEXT:
                 processed_content.append(
@@ -4768,6 +4798,11 @@ def process_message_content_v3(
                 )
             case _:
                 logger.warning(f"Unknown content type: {part}")
+
+    uploads = _format_message_uploads_v3(message, class_id, thread_id)
+    if uploads:
+        processed_content.append(f"\n{uploads}")
+
     return "\n".join(processed_content)
 
 
@@ -5117,9 +5152,7 @@ def build_export_rows_v3(
                 message.output_index,
                 message.created,
                 _enum_value(message.role),
-                process_message_content_v3(
-                    message.content, file_names, class_id, thread_id
-                ),
+                process_message_content_v3(message, file_names, class_id, thread_id),
             )
         )
 
@@ -5196,14 +5229,7 @@ def replace_annotations_in_text(
 def _annotation_download_url(
     annotation: models.Annotation, class_id: int, thread_id: int
 ) -> str | None:
-    file_id = (
-        annotation.vision_file_object_id
-        if annotation.vision_file_object_id is not None
-        else annotation.file_object_id
-    )
-    if file_id is None:
-        return None
-    return config.url(f"/api/v1/class/{class_id}/thread/{thread_id}/file/{file_id}")
+    return None
 
 
 def replace_annotations_in_text_v3(
