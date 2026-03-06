@@ -32,6 +32,7 @@ from pingpong.schemas import (
     BufferedStreamHandlerToolCallState,
     CodeInterpreterOutputType,
     FileSearchToolAnnotationResult,
+    MessageRole,
     MessageStatus,
     ReasoningStatus,
     RunStatus,
@@ -4726,19 +4727,55 @@ def process_message_content(
     return "\n".join(processed_content)
 
 
+def _format_message_uploads_v3(message: models.Message) -> str | None:
+    attachment_names: dict[int, str | None] = {}
+    attachment_tools: dict[int, set[str]] = {}
+
+    for attachment in message.file_search_attachments:
+        attachment_names.setdefault(attachment.id, attachment.name)
+        attachment_tools.setdefault(attachment.id, set()).add("file_search")
+
+    for attachment in message.code_interpreter_attachments:
+        attachment_names.setdefault(attachment.id, attachment.name)
+        attachment_tools.setdefault(attachment.id, set()).add("code_interpreter")
+
+    if not attachment_tools:
+        return None
+
+    lines = ["[Uploads]"]
+    for attachment_id, tools in sorted(
+        attachment_tools.items(),
+        key=lambda item: (_normalize_newlines(attachment_names.get(item[0])), item[0]),
+    ):
+        tool_labels = ", ".join(sorted(tools))
+        lines.append(
+            f"- {_normalize_newlines(attachment_names.get(attachment_id))} [{tool_labels}]"
+        )
+
+    return "\n".join(lines)
+
+
 def process_message_content_v3(
-    content: list[models.MessagePart], file_names: dict[str, str]
+    message: models.Message,
+    file_names: dict[str, str],
+    class_id: int,
+    thread_id: int,
 ) -> str:
     """Process message content for CSV export. The end result is a single string with all the content combined.
     Images are replaced with their file names, and text is extracted from the content parts.
     File citations are replaced with their file names inside the text
     """
     processed_content = []
-    for part in content:
+    for part in message.content:
         match part.type:
             case MessagePartType.INPUT_TEXT:
                 processed_content.append(
-                    replace_annotations_in_text_v3(part=part, file_names=file_names)
+                    replace_annotations_in_text_v3(
+                        part=part,
+                        file_names=file_names,
+                        class_id=class_id,
+                        thread_id=thread_id,
+                    )
                 )
             case MessagePartType.INPUT_IMAGE:
                 processed_content.append(
@@ -4746,7 +4783,12 @@ def process_message_content_v3(
                 )
             case MessagePartType.OUTPUT_TEXT:
                 processed_content.append(
-                    replace_annotations_in_text_v3(part=part, file_names=file_names)
+                    replace_annotations_in_text_v3(
+                        part=part,
+                        file_names=file_names,
+                        class_id=class_id,
+                        thread_id=thread_id,
+                    )
                 )
             case MessagePartType.REFUSAL:
                 processed_content.append(
@@ -4754,7 +4796,16 @@ def process_message_content_v3(
                 )
             case _:
                 logger.warning(f"Unknown content type: {part}")
+
+    uploads = _format_message_uploads_v3(message)
+    if uploads:
+        processed_content.append(f"\n{uploads}")
+
     return "\n".join(processed_content)
+
+
+def _normalize_newlines(value: str | None) -> str:
+    return (value or "").replace("\r\n", "\n").replace("\r", "\n")
 
 
 def _enum_value(value: object) -> str:
@@ -4775,7 +4826,179 @@ def _set_if_not_none(report: dict[str, object], key: str, value: object | None) 
         report[key] = value
 
 
+def _format_json_inline(value: str | None) -> str:
+    parsed = _parse_json_string(value)
+    return json.dumps(parsed)
+
+
+def _format_mcp_server_call_content_v3(tool_call: models.ToolCall) -> str:
+    mcp_server = tool_call.mcp_server_tool
+    server_name = (
+        mcp_server.display_name
+        if mcp_server and mcp_server.display_name
+        else tool_call.mcp_server_label
+        or (mcp_server.server_label if mcp_server else None)
+        or "Unknown server"
+    )
+    tool_name = tool_call.mcp_tool_name or "Unknown tool"
+    arguments = _format_json_inline(tool_call.mcp_arguments)
+    outputs = _format_json_inline(tool_call.mcp_output)
+    return (
+        "[MCP Server Call]\n"
+        f"Called server: {server_name}\n"
+        f"Used tool: {tool_name}\n\n"
+        f"Call arguments: {arguments}\n"
+        f"Tool outputs: {outputs}"
+    )
+
+
+def _format_mcp_list_tools_content_v3(tool_call: models.ToolCall) -> str:
+    mcp_server = tool_call.mcp_server_tool
+    server_name = (
+        mcp_server.display_name
+        if mcp_server and mcp_server.display_name
+        else tool_call.mcp_server_label
+        or (mcp_server.server_label if mcp_server else None)
+        or "Unknown server"
+    )
+    tool_names = ", ".join(
+        json.dumps(tool.name) for tool in tool_call.mcp_tools_listed if tool.name
+    )
+    tool_details = json.dumps(
+        [
+            {
+                "name": tool.name,
+                "description": tool.description,
+                **(
+                    {"input_schema": parsed_input_schema}
+                    if (parsed_input_schema := _parse_json_string(tool.input_schema))
+                    is not None
+                    else {}
+                ),
+                **(
+                    {"annotations": parsed_annotations}
+                    if (parsed_annotations := _parse_json_string(tool.annotations))
+                    is not None
+                    else {}
+                ),
+            }
+            for tool in tool_call.mcp_tools_listed
+        ]
+    )
+    return (
+        "[MCP List Tools Call]\n"
+        f"Called server: {server_name}\n"
+        f"Tools returned: {tool_names}\n\n"
+        f"Tool details: {tool_details}"
+    )
+
+
+def _format_file_search_content_v3(tool_call: models.ToolCall) -> str:
+    queries = _parse_json_string(tool_call.queries)
+    formatted_queries = (
+        ", ".join(json.dumps(query) for query in queries)
+        if isinstance(queries, list)
+        else ""
+    )
+
+    sections = [f"[File Search]\nQueries: {formatted_queries}"]
+    for index, result in enumerate(tool_call.results):
+        sections.append(
+            "\n".join(
+                [
+                    f"[Results.{index + 1}]",
+                    f"File name: {_normalize_newlines(result.filename) or 'Unknown file'}",
+                    f"Relevancy score: {result.score if result.score is not None else 'Unknown'}",
+                    f"Relevant excerpt: {_normalize_newlines(result.text)}",
+                ]
+            )
+        )
+
+    return "\n\n".join(sections)
+
+
+def _format_web_search_content_v3(tool_call: models.ToolCall) -> str:
+    sections: list[str] = []
+
+    for action in tool_call.web_search_actions:
+        match action.type:
+            case WebSearchActionType.SEARCH:
+                sources = [
+                    (
+                        f"- {json.dumps(_normalize_newlines(source.name))} | {source.url}"
+                        if source.name
+                        else f"- {source.url}"
+                    )
+                    for source in action.sources
+                    if source.url
+                ]
+                section_lines = [
+                    "[Web Search]",
+                    "Action type: Search",
+                    f"Query: {_normalize_newlines(action.query)}",
+                ]
+                if sources:
+                    section_lines.extend(["", "Sources:", *sources])
+                sections.append("\n".join(section_lines))
+            case WebSearchActionType.OPEN_PAGE:
+                sections.append(
+                    "\n".join(
+                        [
+                            "[Web Search]",
+                            "Action type: Open Page",
+                            f"URL: {action.url or ''}",
+                        ]
+                    )
+                )
+            case WebSearchActionType.FIND:
+                sections.append(
+                    "\n".join(
+                        [
+                            "[Web Search]",
+                            "Action type: Find",
+                            f"URL: {action.url or ''}",
+                            f"Pattern: {_normalize_newlines(action.pattern)}",
+                        ]
+                    )
+                )
+
+    return "\n\n".join(sections)
+
+
+def _format_code_interpreter_content_v3(tool_call: models.ToolCall) -> str:
+    output_lines: list[str] = []
+    for output in tool_call.outputs:
+        match output.output_type:
+            case CodeInterpreterOutputType.LOGS:
+                output_lines.append(f"Logs: {_normalize_newlines(output.logs)}")
+            case CodeInterpreterOutputType.IMAGE:
+                line = "Image: [Generated Image]"
+                output_lines.append(line)
+
+    outputs = "\n".join(output_lines) if output_lines else "None"
+    return (
+        "[Code Interpreter Call]\n"
+        f"Code run:\n{_normalize_newlines(tool_call.code)}\n\n"
+        f"Outputs:\n{outputs}"
+    )
+
+
 def process_tool_call_content_v3(tool_call: models.ToolCall) -> str:
+    if tool_call.type == ToolCallType.CODE_INTERPRETER:
+        return _format_code_interpreter_content_v3(tool_call)
+
+    if tool_call.type == ToolCallType.FILE_SEARCH:
+        return _format_file_search_content_v3(tool_call)
+
+    if tool_call.type == ToolCallType.WEB_SEARCH:
+        return _format_web_search_content_v3(tool_call)
+
+    if tool_call.type == ToolCallType.MCP_SERVER:
+        return _format_mcp_server_call_content_v3(tool_call)
+
+    if tool_call.type == ToolCallType.MCP_LIST_TOOLS:
+        return _format_mcp_list_tools_content_v3(tool_call)
+
     report: dict[str, object] = {
         "tool_call_id": tool_call.tool_call_id,
         "type": _enum_value(tool_call.type),
@@ -4785,109 +5008,6 @@ def process_tool_call_content_v3(tool_call: models.ToolCall) -> str:
     }
 
     match tool_call.type:
-        case ToolCallType.CODE_INTERPRETER:
-            _set_if_not_none(report, "code", tool_call.code)
-            _set_if_not_none(report, "container_id", tool_call.container_id)
-            report["outputs"] = [
-                {
-                    "type": _enum_value(output.output_type),
-                    **({"logs": output.logs} if output.logs is not None else {}),
-                    **({"url": output.url} if output.url is not None else {}),
-                }
-                for output in tool_call.outputs
-            ]
-        case ToolCallType.FILE_SEARCH:
-            report["queries"] = _parse_json_string(tool_call.queries) or []
-            report["results"] = [
-                {
-                    "file_id": result.file_id,
-                    "filename": result.filename,
-                    "score": result.score,
-                    "text": result.text,
-                    **(
-                        {"attributes": parsed_attributes}
-                        if (parsed_attributes := _parse_json_string(result.attributes))
-                        is not None
-                        else {}
-                    ),
-                }
-                for result in tool_call.results
-            ]
-        case ToolCallType.WEB_SEARCH:
-            report["actions"] = [
-                {
-                    "type": _enum_value(action.type),
-                    **({"query": action.query} if action.query is not None else {}),
-                    **({"url": action.url} if action.url is not None else {}),
-                    **(
-                        {"pattern": action.pattern}
-                        if action.pattern is not None
-                        else {}
-                    ),
-                    "sources": [
-                        {
-                            **({"url": source.url} if source.url is not None else {}),
-                            **(
-                                {"name": source.name} if source.name is not None else {}
-                            ),
-                        }
-                        for source in action.sources
-                    ],
-                }
-                for action in tool_call.web_search_actions
-            ]
-        case ToolCallType.MCP_SERVER:
-            mcp_server = tool_call.mcp_server_tool
-            _set_if_not_none(
-                report,
-                "server_label",
-                tool_call.mcp_server_label
-                or (mcp_server.server_label if mcp_server else None),
-            )
-            _set_if_not_none(
-                report,
-                "server_name",
-                mcp_server.display_name if mcp_server else None,
-            )
-            _set_if_not_none(report, "tool_name", tool_call.mcp_tool_name)
-            _set_if_not_none(
-                report, "arguments", _parse_json_string(tool_call.mcp_arguments)
-            )
-            _set_if_not_none(report, "output", _parse_json_string(tool_call.mcp_output))
-        case ToolCallType.MCP_LIST_TOOLS:
-            mcp_server = tool_call.mcp_server_tool
-            _set_if_not_none(
-                report,
-                "server_label",
-                tool_call.mcp_server_label
-                or (mcp_server.server_label if mcp_server else None),
-            )
-            _set_if_not_none(
-                report,
-                "server_name",
-                mcp_server.display_name if mcp_server else None,
-            )
-            report["tools"] = [
-                {
-                    "name": tool.name,
-                    "description": tool.description,
-                    **(
-                        {"input_schema": parsed_input_schema}
-                        if (
-                            parsed_input_schema := _parse_json_string(tool.input_schema)
-                        )
-                        is not None
-                        else {}
-                    ),
-                    **(
-                        {"annotations": parsed_annotations}
-                        if (parsed_annotations := _parse_json_string(tool.annotations))
-                        is not None
-                        else {}
-                    ),
-                }
-                for tool in tool_call.mcp_tools_listed
-            ]
         case _:
             logger.warning(f"Unknown tool call type for export: {tool_call.type}")
 
@@ -4895,9 +5015,28 @@ def process_tool_call_content_v3(tool_call: models.ToolCall) -> str:
     return json.dumps(report, indent=2, sort_keys=True)
 
 
+def process_reasoning_content_v3(reasoning_step: models.ReasoningStep) -> str:
+    summary = "\n".join(
+        _normalize_newlines(part.summary_text)
+        for part in sorted(
+            reasoning_step.summary_parts,
+            key=lambda part: (part.part_index, part.id or 0),
+        )
+        if part.summary_text
+    )
+    return (
+        "[Reasoning]\n"
+        f"Thought for {reasoning_step.thought_for or ''}\n"
+        f"Summary: {summary or 'None generated'}"
+    )
+
+
 def build_export_rows_v3(
     messages: list[models.Message],
     tool_calls: list[models.ToolCall],
+    reasoning_steps: list[models.ReasoningStep],
+    class_id: int,
+    thread_id: int,
     file_names: dict[str, str],
 ) -> list[tuple[str, datetime, str]]:
     rows: list[tuple[int, datetime, str, str]] = []
@@ -4908,7 +5047,7 @@ def build_export_rows_v3(
                 message.output_index,
                 message.created,
                 _enum_value(message.role),
-                process_message_content_v3(message.content, file_names),
+                process_message_content_v3(message, file_names, class_id, thread_id),
             )
         )
 
@@ -4917,8 +5056,18 @@ def build_export_rows_v3(
             (
                 tool_call.output_index,
                 tool_call.created,
-                _enum_value(tool_call.type),
+                MessageRole.ASSISTANT.value,
                 process_tool_call_content_v3(tool_call),
+            )
+        )
+
+    for reasoning_step in reasoning_steps:
+        rows.append(
+            (
+                reasoning_step.output_index,
+                reasoning_step.created,
+                MessageRole.ASSISTANT.value,
+                process_reasoning_content_v3(reasoning_step),
             )
         )
 
@@ -4937,13 +5086,29 @@ async def list_export_rows_v3(
         tool_call
         async for tool_call in models.Thread.list_all_tool_calls_gen(session, thread_id)
     ]
-    return build_export_rows_v3(messages, tool_calls, file_names)
+    reasoning_steps = [
+        reasoning_step
+        async for reasoning_step in models.Thread.list_all_reasoning_steps_gen(
+            session, thread_id
+        )
+    ]
+    thread = await models.Thread.get_by_id(session, thread_id)
+    if not thread:
+        return []
+    return build_export_rows_v3(
+        messages,
+        tool_calls,
+        reasoning_steps,
+        thread.class_id,
+        thread_id,
+        file_names,
+    )
 
 
 def replace_annotations_in_text(
     text: TextContentBlock, file_names: dict[str, str]
 ) -> str:
-    updated_text = text.text.value
+    updated_text = _normalize_newlines(text.text.value)
     for annotation in text.text.annotations:
         if isinstance(annotation, FileCitationAnnotation) and annotation.text:
             updated_text = updated_text.replace(
@@ -4953,10 +5118,23 @@ def replace_annotations_in_text(
     return updated_text
 
 
+def _annotation_download_url(
+    annotation: models.Annotation, class_id: int, thread_id: int
+) -> str | None:
+    file_id = (
+        annotation.vision_file_object_id
+        if annotation.vision_file_object_id is not None
+        else annotation.file_object_id
+    )
+    if file_id is None:
+        return None
+    return config.url(f"/api/v1/class/{class_id}/thread/{thread_id}/file/{file_id}")
+
+
 def replace_annotations_in_text_v3(
-    part: models.MessagePart, file_names: dict[str, str]
+    part: models.MessagePart, file_names: dict[str, str], class_id: int, thread_id: int
 ) -> str:
-    updated_text = part.text
+    updated_text = _normalize_newlines(part.text)
     for annotation in part.annotations:
         match annotation.type:
             case AnnotationType.FILE_PATH:
@@ -4964,7 +5142,16 @@ def replace_annotations_in_text_v3(
             case AnnotationType.FILE_CITATION:
                 updated_text += f"\n [File Citation Annotation: {annotation.filename or 'Unknown file/Deleted Assistant'}] "
             case AnnotationType.CONTAINER_FILE_CITATION:
-                updated_text += f"\n [Code Interpreter Output File Annotation: {annotation.filename or 'Unknown file/Deleted Assistant'}] "
+                annotation_label = (
+                    annotation.filename or "Unknown file/Deleted Assistant"
+                )
+                annotation_url = _annotation_download_url(
+                    annotation, class_id, thread_id
+                )
+                if annotation_url:
+                    updated_text += f"\n [Code Interpreter Output File Annotation: {annotation_label} ({annotation_url})] "
+                else:
+                    updated_text += f"\n [Code Interpreter Output File Annotation: {annotation_label}] "
             case AnnotationType.URL_CITATION:
                 updated_text += f"\n [URL Citation Annotation: {annotation.title or 'Unknown Website/Deleted Assistant'} ({annotation.url or 'Unknown URL/Deleted Assistant'})] "
     return updated_text
