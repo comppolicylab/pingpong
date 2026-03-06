@@ -216,17 +216,13 @@ def test_process_tool_call_content_v3_formats_code_interpreter_block():
         ],
     )
 
-    assert process_tool_call_content_v3(
-        tool_call,
-        [("report.csv", "https://example.com/report.csv")],
-    ) == (
+    assert process_tool_call_content_v3(tool_call) == (
         "[Code Interpreter Call]\n"
         "Code run:\n"
         "print(6 * 7)\n\n"
         "Outputs:\n"
         "Logs: 42\n"
-        "Image: [Generated Image]\n"
-        "File: report.csv (https://example.com/report.csv)"
+        "Image: [Generated Image]"
     )
 
 
@@ -404,56 +400,6 @@ def test_build_export_rows_v3_interleaves_messages_tool_calls_and_reasoning():
         "[Reasoning]\n"
         "Thought for 5 seconds\n"
         "Summary: Calculated the multiplication directly."
-    )
-
-
-def test_build_export_rows_v3_includes_code_interpreter_file_download_links():
-    tool_call = make_tool_call(
-        schemas.ToolCallType.CODE_INTERPRETER,
-        output_index=2,
-        created=NOW,
-        code="print('done')",
-        outputs=[],
-    )
-    assistant_message = models.Message(
-        message_status=schemas.MessageStatus.COMPLETED,
-        run_id=1,
-        thread_id=20,
-        output_index=2,
-        role=schemas.MessageRole.ASSISTANT,
-        created=NOW + timedelta(seconds=1),
-        content=[
-            models.MessagePart(
-                type=schemas.MessagePartType.OUTPUT_TEXT,
-                part_index=0,
-                text="Generated report",
-                annotations=[
-                    models.Annotation(
-                        type=schemas.AnnotationType.CONTAINER_FILE_CITATION,
-                        annotation_index=0,
-                        filename="report.csv",
-                        file_object_id=99,
-                    )
-                ],
-            )
-        ],
-    )
-
-    rows = build_export_rows_v3(
-        [assistant_message],
-        [tool_call],
-        [],
-        class_id=10,
-        thread_id=20,
-        file_names={},
-    )
-
-    assert rows[0][2] == (
-        "[Code Interpreter Call]\n"
-        "Code run:\n"
-        "print('done')\n\n"
-        "Outputs:\n"
-        f"File: report.csv ({config.url('/api/v1/class/10/thread/20/file/99')})"
     )
 
 

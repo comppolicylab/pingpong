@@ -4965,10 +4965,7 @@ def _format_web_search_content_v3(tool_call: models.ToolCall) -> str:
     return "\n\n".join(sections)
 
 
-def _format_code_interpreter_content_v3(
-    tool_call: models.ToolCall,
-    file_outputs: list[tuple[str, str | None]] | None = None,
-) -> str:
+def _format_code_interpreter_content_v3(tool_call: models.ToolCall) -> str:
     output_lines: list[str] = []
     for output in tool_call.outputs:
         match output.output_type:
@@ -4978,12 +4975,6 @@ def _format_code_interpreter_content_v3(
                 line = "Image: [Generated Image]"
                 output_lines.append(line)
 
-    for file_name, file_url in file_outputs or []:
-        line = f"File: {_normalize_newlines(file_name)}"
-        if file_url:
-            line += f" ({file_url})"
-        output_lines.append(line)
-
     outputs = "\n".join(output_lines) if output_lines else "None"
     return (
         "[Code Interpreter Call]\n"
@@ -4992,12 +4983,9 @@ def _format_code_interpreter_content_v3(
     )
 
 
-def process_tool_call_content_v3(
-    tool_call: models.ToolCall,
-    file_outputs: list[tuple[str, str | None]] | None = None,
-) -> str:
+def process_tool_call_content_v3(tool_call: models.ToolCall) -> str:
     if tool_call.type == ToolCallType.CODE_INTERPRETER:
-        return _format_code_interpreter_content_v3(tool_call, file_outputs)
+        return _format_code_interpreter_content_v3(tool_call)
 
     if tool_call.type == ToolCallType.FILE_SEARCH:
         return _format_file_search_content_v3(tool_call)
@@ -5043,39 +5031,6 @@ def process_reasoning_content_v3(reasoning_step: models.ReasoningStep) -> str:
     )
 
 
-def _collect_code_interpreter_file_outputs(
-    messages: list[models.Message],
-    class_id: int,
-    thread_id: int,
-) -> dict[int, list[tuple[str, str | None]]]:
-    file_outputs_by_output_index: dict[int, list[tuple[str, str | None]]] = {}
-
-    for message in messages:
-        for part in message.content:
-            for annotation in part.annotations:
-                if annotation.type != AnnotationType.CONTAINER_FILE_CITATION:
-                    continue
-                if not annotation.filename:
-                    continue
-                if annotation.vision_file_object_id is not None:
-                    continue
-                download_file_id = annotation.file_object_id
-                download_url = (
-                    config.url(
-                        f"/api/v1/class/{class_id}/thread/{thread_id}/file/{download_file_id}"
-                    )
-                    if download_file_id is not None
-                    else None
-                )
-                file_outputs = file_outputs_by_output_index.setdefault(
-                    message.output_index, []
-                )
-                if (annotation.filename, download_url) not in file_outputs:
-                    file_outputs.append((annotation.filename, download_url))
-
-    return file_outputs_by_output_index
-
-
 def build_export_rows_v3(
     messages: list[models.Message],
     tool_calls: list[models.ToolCall],
@@ -5085,9 +5040,6 @@ def build_export_rows_v3(
     file_names: dict[str, str],
 ) -> list[tuple[str, datetime, str]]:
     rows: list[tuple[int, datetime, str, str]] = []
-    code_interpreter_file_outputs = _collect_code_interpreter_file_outputs(
-        messages, class_id, thread_id
-    )
 
     for message in messages:
         rows.append(
@@ -5105,10 +5057,7 @@ def build_export_rows_v3(
                 tool_call.output_index,
                 tool_call.created,
                 MessageRole.ASSISTANT.value,
-                process_tool_call_content_v3(
-                    tool_call,
-                    code_interpreter_file_outputs.get(tool_call.output_index),
-                ),
+                process_tool_call_content_v3(tool_call),
             )
         )
 
