@@ -13,7 +13,7 @@
 	export let latex = false;
 	export let inlineWebSources: InlineWebSource[] = [];
 
-	type MountedMermaidComponent = Record<string, never>;
+	type MountedMermaidComponent = ReturnType<typeof mount>;
 
 	let container: HTMLDivElement;
 	let mountedChips: WebSourceChip[] = [];

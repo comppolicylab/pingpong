@@ -14,6 +14,7 @@
 	import { onMount, tick } from 'svelte';
 	import { copy } from 'svelte-copy';
 	import { happyToast, sadToast } from '$lib/toast';
+	import { Tooltip } from 'flowbite-svelte';
 
 	export let source: string;
 
@@ -33,13 +34,20 @@
 	let modalContainer: HTMLDivElement;
 	let previewViewport: HTMLDivElement;
 	let modalViewport: HTMLDivElement;
+	let modalDialog: HTMLDivElement;
+	let openButton: HTMLButtonElement;
+	let closeButton: HTMLButtonElement;
 	let modalOpen = false;
 	let loading = true;
+	let modalLoading = false;
 	let error = '';
 	let previewView: ViewState = { scale: 1, x: 0, y: 0 };
 	let modalView: ViewState = { scale: 1, x: 0, y: 0 };
 	let previewTouchState: TouchState = { lastX: 0, lastY: 0, lastDistance: null };
 	let modalTouchState: TouchState = { lastX: 0, lastY: 0, lastDistance: null };
+	let previewGesturesEnabled = false;
+	let lastFocusedElement: HTMLElement | null = null;
+	let renderedSource = source;
 
 	const diagramId = `mermaid-${Math.random().toString(36).slice(2)}`;
 	let mermaidPromise: Promise<typeof import('mermaid').default> | null = null;
@@ -118,6 +126,8 @@
 	const getTouchState = (view: ViewMode) =>
 		view === 'preview' ? previewTouchState : modalTouchState;
 
+	const gesturesEnabled = (view: ViewMode) => view === 'modal' || previewGesturesEnabled;
+
 	const setViewState = (view: ViewMode, next: ViewState) => {
 		if (view === 'preview') {
 			previewView = next;
@@ -131,6 +141,13 @@
 			previewTouchState = next;
 		} else {
 			modalTouchState = next;
+		}
+	};
+
+	const togglePreviewGestures = () => {
+		previewGesturesEnabled = !previewGesturesEnabled;
+		if (!previewGesturesEnabled) {
+			setTouchState('preview', { lastX: 0, lastY: 0, lastDistance: null });
 		}
 	};
 
@@ -290,6 +307,10 @@
 	};
 
 	const handleWheel = (view: ViewMode, event: WheelEvent) => {
+		if (!gesturesEnabled(view)) {
+			return;
+		}
+
 		event.preventDefault();
 
 		const point = getRelativePoint(view, event.clientX, event.clientY);
@@ -303,6 +324,10 @@
 	};
 
 	const handleTouchStart = (view: ViewMode, event: TouchEvent) => {
+		if (!gesturesEnabled(view)) {
+			return;
+		}
+
 		if (event.touches.length === 1) {
 			const point = getRelativePoint(view, event.touches[0].clientX, event.touches[0].clientY);
 			if (!point) {
@@ -323,6 +348,10 @@
 	};
 
 	const handleTouchMove = (view: ViewMode, event: TouchEvent) => {
+		if (!gesturesEnabled(view)) {
+			return;
+		}
+
 		if (event.touches.length === 1) {
 			const point = getRelativePoint(view, event.touches[0].clientX, event.touches[0].clientY);
 			if (!point) {
@@ -359,6 +388,10 @@
 	};
 
 	const handleTouchEnd = (view: ViewMode, event: TouchEvent) => {
+		if (!gesturesEnabled(view)) {
+			return;
+		}
+
 		if (event.touches.length === 1) {
 			const point = getRelativePoint(view, event.touches[0].clientX, event.touches[0].clientY);
 			if (!point) {
@@ -387,13 +420,13 @@
 		return mermaidPromise;
 	};
 
-	const renderInto = async (container: HTMLDivElement | undefined, suffix: string) => {
+	const renderInto = async (container: HTMLDivElement | undefined, view: ViewMode) => {
 		if (!container) {
 			return;
 		}
 
 		const mermaid = await getMermaid();
-		const { svg, bindFunctions } = await mermaid.render(`${diagramId}-${suffix}`, source);
+		const { svg, bindFunctions } = await mermaid.render(`${diagramId}-${view}`, source);
 		delete container.dataset.baseWidth;
 		delete container.dataset.baseHeight;
 		container.innerHTML = svg;
@@ -408,7 +441,7 @@
 			metrics.svg.style.maxWidth = 'none';
 		}
 
-		fitView(suffix === 'preview' ? 'preview' : 'modal');
+		fitView(view);
 	};
 
 	const renderPreview = async () => {
@@ -427,10 +460,13 @@
 	};
 
 	const renderModalDiagram = async () => {
+		modalLoading = true;
 		try {
 			await renderInto(modalContainer, 'modal');
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to render Mermaid diagram.';
+		} finally {
+			modalLoading = false;
 		}
 	};
 
@@ -438,9 +474,68 @@
 		happyToast('Mermaid code copied to clipboard', 2000);
 	};
 
+	const getModalFocusableElements = () => {
+		if (!modalDialog) {
+			return [];
+		}
+
+		return Array.from(
+			modalDialog.querySelectorAll<HTMLElement>(
+				'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+			)
+		).filter(
+			(element) => !element.hasAttribute('disabled') && !element.getAttribute('aria-hidden')
+		);
+	};
+
 	const openModal = () => {
-		resetView('modal');
+		lastFocusedElement =
+			document.activeElement instanceof HTMLElement ? document.activeElement : openButton;
 		modalOpen = true;
+	};
+
+	const closeModal = async () => {
+		modalOpen = false;
+		setTouchState('modal', { lastX: 0, lastY: 0, lastDistance: null });
+		await tick();
+		lastFocusedElement?.focus();
+		lastFocusedElement = null;
+	};
+
+	const handleModalKeydown = (event: KeyboardEvent) => {
+		if (event.key === 'Escape') {
+			event.preventDefault();
+			void closeModal();
+			return;
+		}
+
+		if (event.key !== 'Tab') {
+			return;
+		}
+
+		const focusableElements = getModalFocusableElements();
+		if (!focusableElements.length) {
+			event.preventDefault();
+			closeButton?.focus();
+			return;
+		}
+
+		const firstElement = focusableElements[0];
+		const lastElement = focusableElements[focusableElements.length - 1];
+		const activeElement = document.activeElement;
+
+		if (event.shiftKey) {
+			if (activeElement === firstElement || !modalDialog.contains(activeElement)) {
+				event.preventDefault();
+				lastElement.focus();
+			}
+			return;
+		}
+
+		if (activeElement === lastElement) {
+			event.preventDefault();
+			firstElement.focus();
+		}
 	};
 
 	onMount(() => {
@@ -459,10 +554,24 @@
 		};
 	});
 
+	$: if (source !== renderedSource) {
+		renderedSource = source;
+		resetView('preview');
+		void (async () => {
+			await renderPreview();
+			if (modalOpen) {
+				await tick();
+				await renderModalDiagram();
+			}
+		})();
+	}
+
 	$: if (modalOpen) {
-		tick().then(() => {
-			void renderModalDiagram();
-		});
+		void (async () => {
+			await tick();
+			await renderModalDiagram();
+			closeButton?.focus();
+		})();
 	}
 </script>
 
@@ -475,6 +584,7 @@
 		<div class="text-xs font-semibold tracking-[0.18em] text-gray-500 uppercase">Mermaid</div>
 		<div class="flex items-center gap-1">
 			<button
+				bind:this={openButton}
 				class="rounded-md border border-gray-200 p-2 text-gray-600 transition hover:border-gray-300 hover:bg-gray-100 hover:text-gray-900"
 				aria-label="Open Mermaid diagram in a larger view"
 				onclick={openModal}
@@ -495,7 +605,8 @@
 	<div class="relative max-w-full min-w-0 overflow-hidden bg-white px-3 py-4">
 		<div
 			bind:this={previewViewport}
-			class="relative h-[26rem] touch-none overflow-hidden rounded-lg border border-gray-100 bg-gray-50/40"
+			class="relative h-[26rem] overflow-hidden rounded-lg border border-gray-100 bg-gray-50/40"
+			class:touch-none={previewGesturesEnabled}
 			role="application"
 			aria-label="Interactive Mermaid diagram preview"
 			onwheel={(event) => handleWheel('preview', event)}
@@ -506,6 +617,32 @@
 		>
 			{#if !loading && !error}
 				<div class={controlPanelClass}>
+					<button
+						class:border-emerald-300={previewGesturesEnabled}
+						class:bg-emerald-50={previewGesturesEnabled}
+						class:text-emerald-700={previewGesturesEnabled}
+						class={`${controlButtonBaseClass} relative col-start-1 row-start-3`}
+						aria-label={previewGesturesEnabled
+							? 'Disable preview gestures'
+							: 'Enable preview gestures'}
+						aria-pressed={previewGesturesEnabled}
+						onclick={togglePreviewGestures}
+					>
+						<span class="text-[9px] font-semibold tracking-[0.18em]">PAN</span>
+						{#if !previewGesturesEnabled}
+							<span
+								aria-hidden="true"
+								class="absolute top-1/2 left-1/2 h-0.5 w-7 -translate-x-1/2 -translate-y-1/2 -rotate-45 rounded-full bg-current"
+							></span>
+						{/if}
+					</button>
+					<Tooltip class="font-normal" arrow={false}>
+						{#if previewGesturesEnabled}
+							Disable touch gestures
+						{:else}
+							Enable touch gestures
+						{/if}
+					</Tooltip>
 					{#each controls as control (control.key)}
 						<button
 							class={`${controlButtonBaseClass} ${controlPositionClass[control.key]}`}
@@ -541,6 +678,7 @@
 
 {#if modalOpen}
 	<div
+		bind:this={modalDialog}
 		class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/20 p-6"
 		role="dialog"
 		aria-modal="true"
@@ -548,14 +686,10 @@
 		tabindex="-1"
 		onclick={(event) => {
 			if (event.target === event.currentTarget) {
-				modalOpen = false;
+				void closeModal();
 			}
 		}}
-		onkeydown={(event) => {
-			if (event.key === 'Escape') {
-				modalOpen = false;
-			}
-		}}
+		onkeydown={handleModalKeydown}
 	>
 		<div class="h-full max-h-[92vh] w-full max-w-[96vw]">
 			<div
@@ -570,9 +704,10 @@
 				ontouchcancel={(event) => handleTouchEnd('modal', event)}
 			>
 				<button
+					bind:this={closeButton}
 					class="absolute top-3 right-3 z-20 rounded-md border border-gray-200 bg-white p-2 text-gray-600 transition hover:border-gray-300 hover:bg-gray-100 hover:text-gray-900"
 					aria-label="Close diagram"
-					onclick={() => (modalOpen = false)}
+					onclick={() => void closeModal()}
 				>
 					<CloseOutline class="h-6 w-6" />
 				</button>
@@ -587,7 +722,18 @@
 						</button>
 					{/each}
 				</div>
-				<div bind:this={modalContainer} class={diagramCanvasClass}></div>
+				<div
+					bind:this={modalContainer}
+					class:hidden={modalLoading}
+					class={diagramCanvasClass}
+				></div>
+				{#if modalLoading}
+					<div
+						class="m-4 rounded-lg border border-dashed border-gray-200 bg-gray-50 px-4 py-8 text-center text-sm text-gray-500"
+					>
+						Rendering diagram...
+					</div>
+				{/if}
 			</div>
 		</div>
 	</div>

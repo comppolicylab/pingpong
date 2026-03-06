@@ -1798,7 +1798,7 @@
 			</div>
 			<div class="col-span-2 mb-4">
 				{#if interactionMode === 'chat'}
-					<Checkbox id="use_latex" name="use_latex" disabled={preventEdits} checked={useLatex}
+					<Checkbox id="use_latex" name="use_latex" disabled={preventEdits} bind:checked={useLatex}
 						>Use LaTeX and other markup</Checkbox
 					>
 					<Helper

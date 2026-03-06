@@ -4102,8 +4102,13 @@ def format_instructions(
             "---Formatting: Mermaid---\n"
             "When a diagram would make the answer clearer, use Mermaid. "
             "Wrap Mermaid diagrams in fenced code blocks with the language "
-            "set to mermaid, for example ```mermaid. Do not put Mermaid "
-            "inside inline backticks or mix Mermaid syntax with LaTeX math."
+            "set to mermaid, for example:\n"
+            "```mermaid\n"
+            "graph TD\n"
+            "    A-->B\n"
+            "```\n"
+            "Do not put Mermaid inside inline backticks or mix Mermaid "
+            "syntax with LaTeX math."
         )
 
     if use_image_descriptions:
