@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { ArrowUpOutline, ChevronDownOutline } from 'flowbite-svelte-icons';
-	import { afterUpdate, setContext, tick } from 'svelte';
+	import { afterUpdate, onDestroy, setContext, tick } from 'svelte';
 	import { writable } from 'svelte/store';
 
 	// Whether to show the footer.
@@ -24,11 +24,13 @@
 	// Optional label to show when options exist above the current scroll position.
 	export let topOverflowLabel = '';
 	const activeUrlStore = writable('');
+	const hasScrollableOverflow = writable(false);
 	setContext('DropdownType', {
 		activeClass:
 			'text-primary-700 dark:text-primary-700 hover:text-primary-900 dark:hover:text-primary-900'
 	});
 	setContext('activeUrl', activeUrlStore);
+	setContext('dropdownHasScrollableOverflow', hasScrollableOverflow);
 
 	let dropdownRoot: HTMLElement;
 	let dropdownContainer: HTMLElement;
@@ -36,6 +38,7 @@
 	let previousSelectedOption = '';
 	let topOverflowLabelOpacity = 0;
 	let topOverflowLabelOffset = 0;
+	let resizeObserver: ResizeObserver | undefined;
 
 	const TOP_OVERFLOW_LABEL_THRESHOLD = 8;
 	const TOP_OVERFLOW_LABEL_FADE_START_VISIBLE_PX = 20;
@@ -116,6 +119,30 @@
 		topOverflowLabelOffset = activeStickyHeaderOffset;
 	}
 
+	function updateScrollableOverflow() {
+		hasScrollableOverflow.set(
+			!!dropdownOpen &&
+				!!dropdownContainer &&
+				dropdownContainer.scrollHeight > dropdownContainer.clientHeight + 1
+		);
+	}
+
+	function observeDropdownContainer() {
+		resizeObserver?.disconnect();
+		resizeObserver = undefined;
+
+		if (!dropdownOpen || !dropdownContainer) {
+			hasScrollableOverflow.set(false);
+			return;
+		}
+
+		resizeObserver = new ResizeObserver(() => {
+			updateScrollableOverflow();
+		});
+		resizeObserver.observe(dropdownContainer);
+		updateScrollableOverflow();
+	}
+
 	function scrollSelectedOptionIntoView() {
 		const currentNode = optionNodes[selectedOption];
 		if (!currentNode || !dropdownContainer) {
@@ -183,14 +210,25 @@
 		if (shouldScrollSelectedOption) {
 			await tick();
 			scrollSelectedOptionIntoView();
+			observeDropdownContainer();
 			return;
 		}
 
 		updateTopOverflowLabel();
+		observeDropdownContainer();
+		updateScrollableOverflow();
+	});
+
+	onDestroy(() => {
+		resizeObserver?.disconnect();
 	});
 </script>
 
-<svelte:window onclick={handleWindowClick} onkeydown={handleWindowKeydown} />
+<svelte:window
+	onclick={handleWindowClick}
+	onkeydown={handleWindowKeydown}
+	onresize={updateScrollableOverflow}
+/>
 
 <div class="relative w-full min-w-0 grow" bind:this={dropdownRoot}>
 	<button
