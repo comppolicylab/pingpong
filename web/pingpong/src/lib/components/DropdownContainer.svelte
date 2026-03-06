@@ -216,7 +216,6 @@
 
 		updateTopOverflowLabel();
 		observeDropdownContainer();
-		updateScrollableOverflow();
 	});
 
 	onDestroy(() => {
