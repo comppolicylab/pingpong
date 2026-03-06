@@ -4727,9 +4727,7 @@ def process_message_content(
     return "\n".join(processed_content)
 
 
-def _format_message_uploads_v3(
-    message: models.Message, class_id: int, thread_id: int
-) -> str | None:
+def _format_message_uploads_v3(message: models.Message) -> str | None:
     attachment_names: dict[int, str | None] = {}
     attachment_tools: dict[int, set[str]] = {}
 
@@ -4760,8 +4758,6 @@ def _format_message_uploads_v3(
 def process_message_content_v3(
     message: models.Message,
     file_names: dict[str, str],
-    class_id: int,
-    thread_id: int,
 ) -> str:
     """Process message content for CSV export. The end result is a single string with all the content combined.
     Images are replaced with their file names, and text is extracted from the content parts.
@@ -4775,8 +4771,6 @@ def process_message_content_v3(
                     replace_annotations_in_text_v3(
                         part=part,
                         file_names=file_names,
-                        class_id=class_id,
-                        thread_id=thread_id,
                     )
                 )
             case MessagePartType.INPUT_IMAGE:
@@ -4788,8 +4782,6 @@ def process_message_content_v3(
                     replace_annotations_in_text_v3(
                         part=part,
                         file_names=file_names,
-                        class_id=class_id,
-                        thread_id=thread_id,
                     )
                 )
             case MessagePartType.REFUSAL:
@@ -4799,11 +4791,15 @@ def process_message_content_v3(
             case _:
                 logger.warning(f"Unknown content type: {part}")
 
-    uploads = _format_message_uploads_v3(message, class_id, thread_id)
+    uploads = _format_message_uploads_v3(message)
     if uploads:
         processed_content.append(f"\n{uploads}")
 
     return "\n".join(processed_content)
+
+
+def _normalize_newlines(value: str | None) -> str:
+    return (value or "").replace("\r\n", "\n").replace("\r", "\n")
 
 
 def _enum_value(value: object) -> str:
@@ -4824,13 +4820,9 @@ def _set_if_not_none(report: dict[str, object], key: str, value: object | None) 
         report[key] = value
 
 
-def _normalize_newlines(value: str | None) -> str:
-    return (value or "").replace("\r\n", "\n").replace("\r", "\n")
-
-
 def _format_json_inline(value: str | None) -> str:
     parsed = _parse_json_string(value)
-    return json.dumps(parsed) if not isinstance(parsed, str) else json.dumps(parsed)
+    return json.dumps(parsed)
 
 
 def _format_mcp_server_call_content_v3(tool_call: models.ToolCall) -> str:
@@ -5022,57 +5014,6 @@ def process_tool_call_content_v3(
     }
 
     match tool_call.type:
-        case ToolCallType.CODE_INTERPRETER:
-            _set_if_not_none(report, "code", tool_call.code)
-            _set_if_not_none(report, "container_id", tool_call.container_id)
-            report["outputs"] = [
-                {
-                    "type": _enum_value(output.output_type),
-                    **({"logs": output.logs} if output.logs is not None else {}),
-                    **({"url": output.url} if output.url is not None else {}),
-                }
-                for output in tool_call.outputs
-            ]
-        case ToolCallType.FILE_SEARCH:
-            report["queries"] = _parse_json_string(tool_call.queries) or []
-            report["results"] = [
-                {
-                    "file_id": result.file_id,
-                    "filename": result.filename,
-                    "score": result.score,
-                    "text": result.text,
-                    **(
-                        {"attributes": parsed_attributes}
-                        if (parsed_attributes := _parse_json_string(result.attributes))
-                        is not None
-                        else {}
-                    ),
-                }
-                for result in tool_call.results
-            ]
-        case ToolCallType.WEB_SEARCH:
-            report["actions"] = [
-                {
-                    "type": _enum_value(action.type),
-                    **({"query": action.query} if action.query is not None else {}),
-                    **({"url": action.url} if action.url is not None else {}),
-                    **(
-                        {"pattern": action.pattern}
-                        if action.pattern is not None
-                        else {}
-                    ),
-                    "sources": [
-                        {
-                            **({"url": source.url} if source.url is not None else {}),
-                            **(
-                                {"name": source.name} if source.name is not None else {}
-                            ),
-                        }
-                        for source in action.sources
-                    ],
-                }
-                for action in tool_call.web_search_actions
-            ]
         case _:
             logger.warning(f"Unknown tool call type for export: {tool_call.type}")
 
@@ -5112,11 +5053,7 @@ def _collect_code_interpreter_file_outputs(
                     continue
                 if annotation.vision_file_object_id is not None:
                     continue
-                download_file_id = (
-                    annotation.file_object_id
-                    if annotation.file_object_id is not None
-                    else annotation.vision_file_object_id
-                )
+                download_file_id = annotation.file_object_id
                 download_url = (
                     config.url(
                         f"/api/v1/class/{class_id}/thread/{thread_id}/file/{download_file_id}"
@@ -5152,7 +5089,7 @@ def build_export_rows_v3(
                 message.output_index,
                 message.created,
                 _enum_value(message.role),
-                process_message_content_v3(message, file_names, class_id, thread_id),
+                process_message_content_v3(message, file_names),
             )
         )
 
@@ -5226,14 +5163,8 @@ def replace_annotations_in_text(
     return updated_text
 
 
-def _annotation_download_url(
-    annotation: models.Annotation, class_id: int, thread_id: int
-) -> str | None:
-    return None
-
-
 def replace_annotations_in_text_v3(
-    part: models.MessagePart, file_names: dict[str, str], class_id: int, thread_id: int
+    part: models.MessagePart, file_names: dict[str, str]
 ) -> str:
     updated_text = _normalize_newlines(part.text)
     for annotation in part.annotations:
@@ -5246,13 +5177,9 @@ def replace_annotations_in_text_v3(
                 annotation_label = (
                     annotation.filename or "Unknown file/Deleted Assistant"
                 )
-                annotation_url = _annotation_download_url(
-                    annotation, class_id, thread_id
+                updated_text += (
+                    f"\n [Code Interpreter Output File Annotation: {annotation_label}] "
                 )
-                if annotation_url:
-                    updated_text += f"\n [Code Interpreter Output File Annotation: {annotation_label} ({annotation_url})] "
-                else:
-                    updated_text += f"\n [Code Interpreter Output File Annotation: {annotation_label}] "
             case AnnotationType.URL_CITATION:
                 updated_text += f"\n [URL Citation Annotation: {annotation.title or 'Unknown Website/Deleted Assistant'} ({annotation.url or 'Unknown URL/Deleted Assistant'})] "
     return updated_text
