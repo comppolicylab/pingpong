@@ -23,6 +23,11 @@
 		x: number;
 		y: number;
 	};
+	type TouchState = {
+		lastX: number;
+		lastY: number;
+		lastDistance: number | null;
+	};
 
 	let previewContainer: HTMLDivElement;
 	let modalContainer: HTMLDivElement;
@@ -33,12 +38,14 @@
 	let error = '';
 	let previewView: ViewState = { scale: 1, x: 0, y: 0 };
 	let modalView: ViewState = { scale: 1, x: 0, y: 0 };
+	let previewTouchState: TouchState = { lastX: 0, lastY: 0, lastDistance: null };
+	let modalTouchState: TouchState = { lastX: 0, lastY: 0, lastDistance: null };
 
 	const diagramId = `mermaid-${Math.random().toString(36).slice(2)}`;
 	let mermaidPromise: Promise<typeof import('mermaid').default> | null = null;
 	const ZOOM_STEP = 0.15;
 	const PAN_STEP = 60;
-	const MIN_SCALE = 0.5;
+	const MIN_SCALE = 0.05;
 	const MAX_SCALE = 2.5;
 	const controlPanelClass = 'absolute right-3 bottom-3 z-10 grid grid-cols-3 gap-1';
 	const controlButtonBaseClass =
@@ -53,7 +60,7 @@
 		'zoom-out': 'col-start-3 row-start-3'
 	};
 	const diagramCanvasClass =
-		'min-w-max [&_svg]:block [&_svg]:h-auto [&_svg]:max-w-none [&_.label]:font-inherit';
+		'absolute top-0 left-0 w-max max-w-none will-change-transform [&_svg]:block [&_svg]:h-auto [&_svg]:max-w-none [&_.label]:font-inherit';
 
 	const controls = [
 		{
@@ -108,6 +115,9 @@
 
 	const getViewState = (view: ViewMode) => (view === 'preview' ? previewView : modalView);
 
+	const getTouchState = (view: ViewMode) =>
+		view === 'preview' ? previewTouchState : modalTouchState;
+
 	const setViewState = (view: ViewMode, next: ViewState) => {
 		if (view === 'preview') {
 			previewView = next;
@@ -116,53 +126,124 @@
 		}
 	};
 
+	const setTouchState = (view: ViewMode, next: TouchState) => {
+		if (view === 'preview') {
+			previewTouchState = next;
+		} else {
+			modalTouchState = next;
+		}
+	};
+
+	const getDiagramMetrics = (container: HTMLDivElement | undefined) => {
+		if (!container) {
+			return null;
+		}
+
+		const svg = container.querySelector('svg');
+		if (!(svg instanceof SVGSVGElement)) {
+			return null;
+		}
+
+		let width = Number(container.dataset.baseWidth);
+		let height = Number(container.dataset.baseHeight);
+
+		if (!width || !height) {
+			const viewBox = svg.viewBox.baseVal;
+			width = viewBox?.width || svg.getBBox().width || svg.clientWidth;
+			height = viewBox?.height || svg.getBBox().height || svg.clientHeight;
+			if (!width || !height) {
+				return null;
+			}
+
+			container.dataset.baseWidth = `${width}`;
+			container.dataset.baseHeight = `${height}`;
+		}
+
+		return { svg, width, height };
+	};
+
 	const applyTransform = (view: ViewMode) => {
 		const container = getContainer(view);
-		if (!container) {
+		const metrics = getDiagramMetrics(container);
+		if (!container || !metrics) {
 			return;
 		}
 
 		const state = getViewState(view);
-		container.style.transform = `translate(${state.x}px, ${state.y}px) scale(${state.scale})`;
+		const renderedWidth = metrics.width * state.scale;
+		const renderedHeight = metrics.height * state.scale;
+		container.style.width = `${renderedWidth}px`;
+		container.style.height = `${renderedHeight}px`;
+		container.style.transform = `translate(${state.x}px, ${state.y}px)`;
 		container.style.transformOrigin = 'top left';
+		metrics.svg.setAttribute('width', `${renderedWidth}`);
+		metrics.svg.setAttribute('height', `${renderedHeight}`);
+		metrics.svg.style.width = `${renderedWidth}px`;
+		metrics.svg.style.height = `${renderedHeight}px`;
+		metrics.svg.style.maxWidth = 'none';
 	};
 
 	const fitView = (view: ViewMode) => {
 		const container = getContainer(view);
 		const viewport = getViewport(view);
-		const svg = container?.querySelector('svg');
-		if (!container || !viewport || !(svg instanceof SVGSVGElement)) {
-			return;
-		}
-
-		const viewBox = svg.viewBox.baseVal;
-		const width = viewBox?.width || svg.getBBox().width || svg.clientWidth;
-		const height = viewBox?.height || svg.getBBox().height || svg.clientHeight;
-		if (!width || !height) {
+		const metrics = getDiagramMetrics(container);
+		if (!container || !viewport || !metrics) {
 			return;
 		}
 
 		const padding = 32;
 		const scale = clampScale(
 			Math.min(
-				(viewport.clientWidth - padding) / width,
-				(viewport.clientHeight - padding) / height,
+				(viewport.clientWidth - padding) / metrics.width,
+				(viewport.clientHeight - padding) / metrics.height,
 				1
 			)
 		);
 
 		setViewState(view, {
 			scale,
-			x: (viewport.clientWidth - width * scale) / 2,
-			y: (viewport.clientHeight - height * scale) / 2
+			x: (viewport.clientWidth - metrics.width * scale) / 2,
+			y: (viewport.clientHeight - metrics.height * scale) / 2
+		});
+		applyTransform(view);
+	};
+
+	const setScaleAtPoint = (view: ViewMode, nextScale: number, anchorX: number, anchorY: number) => {
+		const container = getContainer(view);
+		const metrics = getDiagramMetrics(container);
+		const state = getViewState(view);
+		const scale = clampScale(nextScale);
+		if (!metrics || scale === state.scale) {
+			setViewState(view, { ...state, scale });
+			applyTransform(view);
+			return;
+		}
+
+		const oldWidth = metrics.width * state.scale;
+		const oldHeight = metrics.height * state.scale;
+		const focusX = oldWidth ? (anchorX - state.x) / oldWidth : 0.5;
+		const focusY = oldHeight ? (anchorY - state.y) / oldHeight : 0.5;
+		const newWidth = metrics.width * scale;
+		const newHeight = metrics.height * scale;
+
+		setViewState(view, {
+			scale,
+			x: anchorX - focusX * newWidth,
+			y: anchorY - focusY * newHeight
 		});
 		applyTransform(view);
 	};
 
 	const zoom = (view: ViewMode, delta: number) => {
+		const viewport = getViewport(view);
 		const state = getViewState(view);
-		setViewState(view, { ...state, scale: clampScale(state.scale + delta) });
-		applyTransform(view);
+		const scale = clampScale(state.scale + delta);
+		if (!viewport) {
+			setScaleAtPoint(view, scale, 0, 0);
+			return;
+		}
+
+		setScaleAtPoint(view, scale, viewport.clientWidth / 2, viewport.clientHeight / 2);
 	};
 
 	const pan = (view: ViewMode, dx: number, dy: number) => {
@@ -173,6 +254,122 @@
 
 	const resetView = (view: ViewMode) => {
 		fitView(view);
+	};
+
+	const getRelativePoint = (view: ViewMode, clientX: number, clientY: number) => {
+		const viewport = getViewport(view);
+		if (!viewport) {
+			return null;
+		}
+
+		const rect = viewport.getBoundingClientRect();
+		return {
+			x: clientX - rect.left,
+			y: clientY - rect.top
+		};
+	};
+
+	const getTouchMetrics = (view: ViewMode, touches: TouchList) => {
+		if (touches.length < 2) {
+			return null;
+		}
+
+		const first = getRelativePoint(view, touches[0].clientX, touches[0].clientY);
+		const second = getRelativePoint(view, touches[1].clientX, touches[1].clientY);
+		if (!first || !second) {
+			return null;
+		}
+
+		const dx = second.x - first.x;
+		const dy = second.y - first.y;
+		return {
+			x: (first.x + second.x) / 2,
+			y: (first.y + second.y) / 2,
+			distance: Math.hypot(dx, dy)
+		};
+	};
+
+	const handleWheel = (view: ViewMode, event: WheelEvent) => {
+		event.preventDefault();
+
+		const point = getRelativePoint(view, event.clientX, event.clientY);
+		if (point && (event.ctrlKey || event.metaKey)) {
+			const nextScale = clampScale(getViewState(view).scale * Math.exp(-event.deltaY * 0.003));
+			setScaleAtPoint(view, nextScale, point.x, point.y);
+			return;
+		}
+
+		pan(view, -event.deltaX, -event.deltaY);
+	};
+
+	const handleTouchStart = (view: ViewMode, event: TouchEvent) => {
+		if (event.touches.length === 1) {
+			const point = getRelativePoint(view, event.touches[0].clientX, event.touches[0].clientY);
+			if (!point) {
+				return;
+			}
+
+			setTouchState(view, { lastX: point.x, lastY: point.y, lastDistance: null });
+			return;
+		}
+
+		const metrics = getTouchMetrics(view, event.touches);
+		if (!metrics) {
+			return;
+		}
+
+		event.preventDefault();
+		setTouchState(view, { lastX: metrics.x, lastY: metrics.y, lastDistance: metrics.distance });
+	};
+
+	const handleTouchMove = (view: ViewMode, event: TouchEvent) => {
+		if (event.touches.length === 1) {
+			const point = getRelativePoint(view, event.touches[0].clientX, event.touches[0].clientY);
+			if (!point) {
+				return;
+			}
+
+			event.preventDefault();
+			const touchState = getTouchState(view);
+			pan(view, point.x - touchState.lastX, point.y - touchState.lastY);
+			setTouchState(view, { lastX: point.x, lastY: point.y, lastDistance: null });
+			return;
+		}
+
+		const metrics = getTouchMetrics(view, event.touches);
+		if (!metrics) {
+			return;
+		}
+
+		event.preventDefault();
+		const touchState = getTouchState(view);
+		if (touchState.lastDistance) {
+			pan(view, metrics.x - touchState.lastX, metrics.y - touchState.lastY);
+			const nextScale = clampScale(
+				getViewState(view).scale * (metrics.distance / touchState.lastDistance)
+			);
+			setScaleAtPoint(view, nextScale, metrics.x, metrics.y);
+		}
+
+		setTouchState(view, {
+			lastX: metrics.x,
+			lastY: metrics.y,
+			lastDistance: metrics.distance
+		});
+	};
+
+	const handleTouchEnd = (view: ViewMode, event: TouchEvent) => {
+		if (event.touches.length === 1) {
+			const point = getRelativePoint(view, event.touches[0].clientX, event.touches[0].clientY);
+			if (!point) {
+				return;
+			}
+
+			setTouchState(view, { lastX: point.x, lastY: point.y, lastDistance: null });
+			return;
+		}
+
+		setTouchState(view, { lastX: 0, lastY: 0, lastDistance: null });
 	};
 
 	const getMermaid = async () => {
@@ -197,8 +394,20 @@
 
 		const mermaid = await getMermaid();
 		const { svg, bindFunctions } = await mermaid.render(`${diagramId}-${suffix}`, source);
+		delete container.dataset.baseWidth;
+		delete container.dataset.baseHeight;
 		container.innerHTML = svg;
 		bindFunctions?.(container);
+
+		const metrics = getDiagramMetrics(container);
+		if (metrics) {
+			metrics.svg.setAttribute('width', `${metrics.width}`);
+			metrics.svg.setAttribute('height', `${metrics.height}`);
+			metrics.svg.style.width = `${metrics.width}px`;
+			metrics.svg.style.height = `${metrics.height}px`;
+			metrics.svg.style.maxWidth = 'none';
+		}
+
 		fitView(suffix === 'preview' ? 'preview' : 'modal');
 	};
 
@@ -258,7 +467,7 @@
 </script>
 
 <div
-	class="mermaid-block not-prose relative mb-4 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm"
+	class="mermaid-block not-prose relative mb-4 max-w-full overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm"
 >
 	<div
 		class="flex items-center justify-between gap-3 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-white px-3 py-2"
@@ -283,10 +492,17 @@
 		</div>
 	</div>
 
-	<div class="relative overflow-hidden bg-white px-3 py-4">
+	<div class="relative max-w-full min-w-0 overflow-hidden bg-white px-3 py-4">
 		<div
 			bind:this={previewViewport}
-			class="relative h-[26rem] overflow-hidden rounded-lg border border-gray-100 bg-gray-50/40"
+			class="relative h-[26rem] touch-none overflow-hidden rounded-lg border border-gray-100 bg-gray-50/40"
+			role="application"
+			aria-label="Interactive Mermaid diagram preview"
+			onwheel={(event) => handleWheel('preview', event)}
+			ontouchstart={(event) => handleTouchStart('preview', event)}
+			ontouchmove={(event) => handleTouchMove('preview', event)}
+			ontouchend={(event) => handleTouchEnd('preview', event)}
+			ontouchcancel={(event) => handleTouchEnd('preview', event)}
 		>
 			{#if !loading && !error}
 				<div class={controlPanelClass}>
@@ -344,7 +560,14 @@
 		<div class="h-full max-h-[92vh] w-full max-w-[96vw]">
 			<div
 				bind:this={modalViewport}
-				class="relative h-full overflow-hidden rounded-lg border border-gray-200 bg-white"
+				class="relative h-full touch-none overflow-hidden rounded-lg border border-gray-200 bg-white"
+				role="application"
+				aria-label="Interactive Mermaid diagram"
+				onwheel={(event) => handleWheel('modal', event)}
+				ontouchstart={(event) => handleTouchStart('modal', event)}
+				ontouchmove={(event) => handleTouchMove('modal', event)}
+				ontouchend={(event) => handleTouchEnd('modal', event)}
+				ontouchcancel={(event) => handleTouchEnd('modal', event)}
 			>
 				<button
 					class="absolute top-3 right-3 z-20 rounded-md border border-gray-200 bg-white p-2 text-gray-600 transition hover:border-gray-300 hover:bg-gray-100 hover:text-gray-900"
