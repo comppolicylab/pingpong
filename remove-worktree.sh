@@ -330,7 +330,7 @@ fi
 LEGACY_SHORT_WORKTREE_NAME="${BRANCH_NAME##*/}"
 WORKTREE_NAME="$(build_worktree_name_for_branch "${BRANCH_NAME}")"
 DB_SUFFIX="$(sanitize_db_suffix "${BRANCH_NAME}")"
-WORKTREE_PATH="${WORKTREE_ROOT}/${WORKTREE_NAME}"
+WORKTREE_PATH=""
 SANITIZED_WORKTREE_PATH="${WORKTREE_ROOT}/${DB_SUFFIX}"
 LEGACY_WORKTREE_PATH="${WORKTREE_ROOT}/${LEGACY_SHORT_WORKTREE_NAME}"
 DB_NAME="pingpong_${DB_SUFFIX}"
@@ -348,7 +348,7 @@ fi
 echo "Removing worktree: ${WORKTREE_NAME}"
 echo "  Database: ${DB_NAME}"
 echo "  Authz store: ${AUTHZ_STORE_NAME}"
-echo "  Worktree path: ${WORKTREE_PATH}"
+echo "  Worktree path: ${WORKTREE_PATH:-not found}"
 echo ""
 
 # Confirm removal
