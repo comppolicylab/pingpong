@@ -282,7 +282,12 @@ def test_process_message_content_v3_links_container_file_citations():
     assert process_message_content_v3(
         message,
         file_names={},
-    ) == ("Generated chart\n [Code Interpreter Output File Annotation: chart.png] ")
+        class_id=10,
+        thread_id=20,
+    ) == (
+        "Generated chart\n"
+        f" [Code Interpreter Output File Annotation: chart.png ({config.url('/api/v1/class/10/thread/20/file/77')})] "
+    )
 
 
 def test_process_message_content_v3_notes_user_uploads():
@@ -313,6 +318,8 @@ def test_process_message_content_v3_notes_user_uploads():
     assert process_message_content_v3(
         message,
         file_names={},
+        class_id=10,
+        thread_id=20,
     ) == (
         "Here are my files\n\n"
         "[Uploads]\n"

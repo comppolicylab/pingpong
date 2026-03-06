@@ -4758,6 +4758,8 @@ def _format_message_uploads_v3(message: models.Message) -> str | None:
 def process_message_content_v3(
     message: models.Message,
     file_names: dict[str, str],
+    class_id: int,
+    thread_id: int,
 ) -> str:
     """Process message content for CSV export. The end result is a single string with all the content combined.
     Images are replaced with their file names, and text is extracted from the content parts.
@@ -4771,6 +4773,8 @@ def process_message_content_v3(
                     replace_annotations_in_text_v3(
                         part=part,
                         file_names=file_names,
+                        class_id=class_id,
+                        thread_id=thread_id,
                     )
                 )
             case MessagePartType.INPUT_IMAGE:
@@ -4782,6 +4786,8 @@ def process_message_content_v3(
                     replace_annotations_in_text_v3(
                         part=part,
                         file_names=file_names,
+                        class_id=class_id,
+                        thread_id=thread_id,
                     )
                 )
             case MessagePartType.REFUSAL:
@@ -5089,7 +5095,7 @@ def build_export_rows_v3(
                 message.output_index,
                 message.created,
                 _enum_value(message.role),
-                process_message_content_v3(message, file_names),
+                process_message_content_v3(message, file_names, class_id, thread_id),
             )
         )
 
@@ -5163,8 +5169,21 @@ def replace_annotations_in_text(
     return updated_text
 
 
+def _annotation_download_url(
+    annotation: models.Annotation, class_id: int, thread_id: int
+) -> str | None:
+    file_id = (
+        annotation.vision_file_object_id
+        if annotation.vision_file_object_id is not None
+        else annotation.file_object_id
+    )
+    if file_id is None:
+        return None
+    return config.url(f"/api/v1/class/{class_id}/thread/{thread_id}/file/{file_id}")
+
+
 def replace_annotations_in_text_v3(
-    part: models.MessagePart, file_names: dict[str, str]
+    part: models.MessagePart, file_names: dict[str, str], class_id: int, thread_id: int
 ) -> str:
     updated_text = _normalize_newlines(part.text)
     for annotation in part.annotations:
@@ -5177,9 +5196,13 @@ def replace_annotations_in_text_v3(
                 annotation_label = (
                     annotation.filename or "Unknown file/Deleted Assistant"
                 )
-                updated_text += (
-                    f"\n [Code Interpreter Output File Annotation: {annotation_label}] "
+                annotation_url = _annotation_download_url(
+                    annotation, class_id, thread_id
                 )
+                if annotation_url:
+                    updated_text += f"\n [Code Interpreter Output File Annotation: {annotation_label} ({annotation_url})] "
+                else:
+                    updated_text += f"\n [Code Interpreter Output File Annotation: {annotation_label}] "
             case AnnotationType.URL_CITATION:
                 updated_text += f"\n [URL Citation Annotation: {annotation.title or 'Unknown Website/Deleted Assistant'} ({annotation.url or 'Unknown URL/Deleted Assistant'})] "
     return updated_text
