@@ -18,26 +18,181 @@ if [[ ${#MISSING_TOOLS[@]} -gt 0 ]]; then
   exit 1
 fi
 
-if [[ -z "${1:-}" ]]; then
-  echo "Usage: $0 <branch-and-worktree-name>" >&2
-  exit 1
-fi
+TYPE_OPTIONS=(feat change chore fix)
 
-# Validate worktree name: allow alphanumeric, hyphens, underscores, and slashes for nested branches
-if [[ ! "$1" =~ ^[a-zA-Z0-9][a-zA-Z0-9_/-]*$ ]]; then
-  echo "ERROR: Invalid worktree name '$1'" >&2
-  echo "Names must start with alphanumeric and contain only letters, numbers, hyphens, underscores, or slashes." >&2
-  exit 1
-fi
+usage() {
+  echo "Usage:" >&2
+  echo "  $0                     # prompt for branch type and name" >&2
+  echo "  $0 <name>              # prompt for branch type" >&2
+  echo "  $0 <type> <name>       # create <github-user>/<type>/<name>" >&2
+  echo "  $0 <user> <type> <name>" >&2
+  echo "  $0 <user>/<type>/<name>" >&2
+}
 
-# Reject path traversal attempts and consecutive slashes
-if [[ "$1" == *".."* ]] || [[ "$1" == *"//"* ]] || [[ "$1" == */ ]]; then
-  echo "ERROR: Invalid worktree name '$1' (contains '..' or invalid slashes)" >&2
-  exit 1
-fi
+is_valid_worktree_name() {
+  local value="$1"
+  [[ "${value}" =~ ^[a-zA-Z0-9][a-zA-Z0-9_/-]*$ ]] \
+    && [[ "${value}" != *".."* ]] \
+    && [[ "${value}" != *"//"* ]] \
+    && [[ "${value}" != */ ]]
+}
 
-BRANCH_NAME="$1"
-WORKTREE_NAME="$1"
+require_valid_worktree_name() {
+  local value="$1"
+  if ! is_valid_worktree_name "${value}"; then
+    echo "ERROR: Invalid worktree name '${value}'" >&2
+    echo "Names must start with alphanumeric and contain only letters, numbers, hyphens, underscores, or slashes." >&2
+    echo "Names cannot contain '..', consecutive slashes, or end with a slash." >&2
+    exit 1
+  fi
+}
+
+is_valid_branch_type() {
+  local type="$1"
+  for option in "${TYPE_OPTIONS[@]}"; do
+    if [[ "${type}" == "${option}" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+require_valid_branch_type() {
+  local type="$1"
+  if ! is_valid_branch_type "${type}"; then
+    echo "ERROR: Invalid branch type '${type}'." >&2
+    echo "Allowed types: ${TYPE_OPTIONS[*]}" >&2
+    exit 1
+  fi
+}
+
+prompt_branch_type() {
+  local branch_type
+  while true; do
+    read -r -p "Branch type [feat/change/chore/fix]: " branch_type
+    if is_valid_branch_type "${branch_type}"; then
+      echo "${branch_type}"
+      return 0
+    fi
+    echo "Please enter one of: ${TYPE_OPTIONS[*]}" >&2
+  done
+}
+
+prompt_branch_name() {
+  local branch_name
+  while true; do
+    read -r -p "Branch name: " branch_name
+    if ! is_valid_worktree_name "${branch_name}"; then
+      echo "Names must start with alphanumeric and contain only letters, numbers, hyphens, or underscores." >&2
+      echo "Names cannot contain '..', slashes, consecutive slashes, or end with a slash." >&2
+      continue
+    fi
+    if [[ "${branch_name}" == *"/"* ]]; then
+      echo "ERROR: Branch name must be a single path segment. Use hyphens or underscores instead of '/'." >&2
+      continue
+    fi
+    echo "${branch_name}"
+    return 0
+  done
+}
+
+resolve_github_username() {
+  local username=""
+
+  username="${GITHUB_USERNAME:-}"
+  if [[ -n "${username}" ]]; then
+    echo "${username}"
+    return 0
+  fi
+
+  for key in github.user github.username user.github; do
+    username="$(git config --get "${key}" 2>/dev/null || true)"
+    if [[ -n "${username}" ]]; then
+      echo "${username}"
+      return 0
+    fi
+  done
+
+  if command -v gh >/dev/null 2>&1; then
+    username="$(gh api user -q .login 2>/dev/null || true)"
+    if [[ -n "${username}" ]]; then
+      echo "${username}"
+      return 0
+    fi
+  fi
+
+  echo "ERROR: Could not determine GitHub username." >&2
+  echo "Set one of git config keys 'github.user', 'github.username', or 'user.github', export GITHUB_USERNAME, or authenticate with gh." >&2
+  exit 1
+}
+
+build_branch_name() {
+  local username="$1"
+  local branch_type="$2"
+  local branch_name="$3"
+  echo "${username}/${branch_type}/${branch_name}"
+}
+
+parse_branch_input() {
+  local username=""
+  local branch_type=""
+  local branch_name=""
+
+  case "$#" in
+    0)
+      username="$(resolve_github_username)"
+      branch_type="$(prompt_branch_type)"
+      branch_name="$(prompt_branch_name)"
+      ;;
+    1)
+      if [[ "${1}" == */* ]]; then
+        require_valid_worktree_name "${1}"
+        IFS='/' read -r username branch_type branch_name extra <<< "${1}"
+        if [[ -n "${extra:-}" || -z "${username}" || -z "${branch_type}" || -z "${branch_name}" ]]; then
+          echo "ERROR: Expected branch name in the form <user>/<type>/<name>." >&2
+          exit 1
+        fi
+      else
+        username="$(resolve_github_username)"
+        branch_type="$(prompt_branch_type)"
+        branch_name="${1}"
+      fi
+      ;;
+    2)
+      username="$(resolve_github_username)"
+      branch_type="${1}"
+      branch_name="${2}"
+      ;;
+    3)
+      username="${1}"
+      branch_type="${2}"
+      branch_name="${3}"
+      ;;
+    *)
+      usage
+      exit 1
+      ;;
+  esac
+
+  require_valid_worktree_name "${username}"
+  if [[ "${username}" == *"/"* ]]; then
+    echo "ERROR: GitHub username must be a single path segment." >&2
+    exit 1
+  fi
+
+  require_valid_branch_type "${branch_type}"
+  require_valid_worktree_name "${branch_name}"
+  if [[ "${branch_name}" == *"/"* ]]; then
+    echo "ERROR: Branch name must be a single path segment. Use hyphens or underscores instead of '/'." >&2
+    exit 1
+  fi
+
+  BRANCH_NAME="$(build_branch_name "${username}" "${branch_type}" "${branch_name}")"
+  WORKTREE_NAME="${branch_name}"
+}
+
+parse_branch_input "$@"
+
 WORKTREE_ROOT="../pingpong-worktrees"
 PORTS_FILE="${WORKTREE_ROOT}/.worktree-ports.json"
 
@@ -69,7 +224,7 @@ sanitize_db_suffix() {
 }
 
 DB_SUFFIX="$(sanitize_db_suffix "${BRANCH_NAME}")"
-WORKTREE_PATH="${WORKTREE_ROOT}/${DB_SUFFIX}"
+WORKTREE_PATH="${WORKTREE_ROOT}/${WORKTREE_NAME}"
 DB_NAME="pingpong_${DB_SUFFIX}"
 AUTHZ_STORE_NAME="pingpong_${DB_SUFFIX}"
 
@@ -227,12 +382,25 @@ wait_for_db_ready() {
 wait_for_authz_ready() {
   local max_attempts=30
   local attempt=1
+  local response=""
 
-  until docker exec pingpong-authz /usr/local/bin/grpc_health_probe -addr=authz:8081 >/dev/null 2>&1; do
+  while true; do
+    response="$(authz_api "${AUTHZ_API}/stores" 2>/dev/null || true)"
+    if [[ -n "${response}" ]] && echo "${response}" | jq -e '.stores' >/dev/null 2>&1; then
+      return 0
+    fi
+
     if (( attempt >= max_attempts )); then
-      echo "Authz server is not ready. Please run ./start-dev-docker.sh first." >&2
+      echo "Authz API is not ready after ${max_attempts} attempts." >&2
+      echo "Recent pingpong-authz logs:" >&2
+      docker logs --tail 20 pingpong-authz >&2 || true
       exit 1
     fi
+
+    if (( attempt == 1 || attempt % 5 == 0 )); then
+      echo "Waiting for authz API to become ready (attempt ${attempt}/${max_attempts})..."
+    fi
+
     attempt=$((attempt + 1))
     sleep 1
   done
@@ -454,6 +622,7 @@ if [[ -e "${WORKTREE_PATH}" ]]; then
 fi
 
 mkdir -p "${WORKTREE_ROOT}"
+mkdir -p "$(dirname "${WORKTREE_PATH}")"
 
 if git show-ref --verify --quiet "refs/heads/${BRANCH_NAME}"; then
   git worktree add "${WORKTREE_PATH}" "${BRANCH_NAME}"
@@ -532,16 +701,21 @@ release_ports_lock() {
   fi
 }
 
-get_worktree_path_for_branch() {
-  local branch_name="$1"
-  git worktree list --porcelain 2>/dev/null | awk -v branch="refs/heads/${branch_name}" '
+get_worktree_path_for_name() {
+  local worktree_name="$1"
+  local target_path
+
+  target_path="$(cd .. && pwd -P)/pingpong-worktrees/${worktree_name}"
+  git worktree list --porcelain 2>/dev/null | awk -v target="${target_path}" '
     $1 == "worktree" {
       path = $0
       sub(/^worktree /, "", path)
     }
-    $1 == "branch" && $2 == branch {
-      print path
-      exit
+    $1 == "branch" {
+      if (path == target) {
+        print path
+        exit
+      }
     }
   '
 }
@@ -558,12 +732,11 @@ cleanup_stale_reservations() {
   worktrees=$(jq -r 'keys[]' "${PORTS_FILE}" 2>/dev/null) || return 0
 
   for worktree in ${worktrees}; do
-    local legacy_worktree_path="${WORKTREE_ROOT}/${worktree}"
-    local sanitized_worktree_path="${WORKTREE_ROOT}/$(sanitize_db_suffix "${worktree}")"
+    local worktree_path="${WORKTREE_ROOT}/${worktree}"
     local registered_worktree_path
 
-    registered_worktree_path="$(get_worktree_path_for_branch "${worktree}")"
-    if [[ -d "${legacy_worktree_path}" ]] || [[ -d "${sanitized_worktree_path}" ]] || [[ -n "${registered_worktree_path}" ]]; then
+    registered_worktree_path="$(get_worktree_path_for_name "${worktree}")"
+    if [[ -d "${worktree_path}" ]] || [[ -n "${registered_worktree_path}" ]]; then
       continue
     fi
 

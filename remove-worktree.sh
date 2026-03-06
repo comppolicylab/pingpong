@@ -20,7 +20,7 @@ if [[ "$1" == *".."* ]] || [[ "$1" == *"//"* ]] || [[ "$1" == */ ]]; then
   exit 1
 fi
 
-WORKTREE_NAME="$1"
+INPUT_NAME="$1"
 WORKTREE_ROOT="../pingpong-worktrees"
 PORTS_FILE="${WORKTREE_ROOT}/.worktree-ports.json"
 PORTS_LOCKFILE="${WORKTREE_ROOT}/.worktree-ports.lock"
@@ -85,12 +85,6 @@ sanitize_db_suffix() {
 
   echo "${cleaned}"
 }
-
-DB_SUFFIX="$(sanitize_db_suffix "${WORKTREE_NAME}")"
-SANITIZED_WORKTREE_PATH="${WORKTREE_ROOT}/${DB_SUFFIX}"
-LEGACY_WORKTREE_PATH="${WORKTREE_ROOT}/${WORKTREE_NAME}"
-DB_NAME="pingpong_${DB_SUFFIX}"
-AUTHZ_STORE_NAME="pingpong_${DB_SUFFIX}"
 
 # Parse authz settings from config file
 CONFIG_FILE="${CONFIG_FILE:-config.local.toml}"
@@ -157,14 +151,89 @@ get_worktree_path_for_branch() {
   '
 }
 
-REGISTERED_WORKTREE_PATH="$(get_worktree_path_for_branch "${WORKTREE_NAME}")"
+get_branch_for_worktree_name() {
+  local worktree_name="$1"
+  local target_path
+
+  target_path="$(cd .. && pwd -P)/pingpong-worktrees/${worktree_name}"
+  git worktree list --porcelain | awk -v target="${target_path}" '
+    $1 == "worktree" {
+      path = $0
+      sub(/^worktree /, "", path)
+    }
+    $1 == "branch" {
+      branch = $2
+      sub(/^refs\/heads\//, "", branch)
+      if (path == target) {
+        print branch
+        exit
+      }
+    }
+  '
+}
+
+find_unique_branch_by_short_name() {
+  local short_name="$1"
+  local matches=()
+  local branch=""
+
+  while IFS= read -r branch; do
+    [[ -n "${branch}" ]] && matches+=("${branch}")
+  done < <(git for-each-ref --format='%(refname:strip=2)' "refs/heads/*/*/${short_name}")
+
+  if [[ ${#matches[@]} -eq 1 ]]; then
+    echo "${matches[0]}"
+    return 0
+  fi
+
+  return 1
+}
+
+resolve_branch_name() {
+  local input_name="$1"
+  local resolved_branch=""
+
+  if git show-ref --verify --quiet "refs/heads/${input_name}"; then
+    echo "${input_name}"
+    return 0
+  fi
+
+  resolved_branch="$(get_branch_for_worktree_name "${input_name}")"
+  if [[ -n "${resolved_branch}" ]]; then
+    echo "${resolved_branch}"
+    return 0
+  fi
+
+  resolved_branch="$(find_unique_branch_by_short_name "${input_name}" || true)"
+  if [[ -n "${resolved_branch}" ]]; then
+    echo "${resolved_branch}"
+    return 0
+  fi
+
+  return 1
+}
+
+BRANCH_NAME="$(resolve_branch_name "${INPUT_NAME}" || true)"
+if [[ -z "${BRANCH_NAME}" ]]; then
+  echo "ERROR: Could not resolve branch for worktree '${INPUT_NAME}'." >&2
+  echo "Pass the short worktree name or the full branch name." >&2
+  exit 1
+fi
+
+WORKTREE_NAME="${BRANCH_NAME##*/}"
+DB_SUFFIX="$(sanitize_db_suffix "${BRANCH_NAME}")"
+WORKTREE_PATH="${WORKTREE_ROOT}/${WORKTREE_NAME}"
+SANITIZED_WORKTREE_PATH="${WORKTREE_ROOT}/${DB_SUFFIX}"
+LEGACY_WORKTREE_PATH="${WORKTREE_ROOT}/${INPUT_NAME}"
+DB_NAME="pingpong_${DB_SUFFIX}"
+AUTHZ_STORE_NAME="pingpong_${DB_SUFFIX}"
+
+REGISTERED_WORKTREE_PATH="$(get_worktree_path_for_branch "${BRANCH_NAME}")"
 if [[ -n "${REGISTERED_WORKTREE_PATH}" ]]; then
   WORKTREE_PATH="${REGISTERED_WORKTREE_PATH}"
-elif [[ -e "${SANITIZED_WORKTREE_PATH}" ]]; then
-  WORKTREE_PATH="${SANITIZED_WORKTREE_PATH}"
 elif [[ -e "${LEGACY_WORKTREE_PATH}" ]]; then
   WORKTREE_PATH="${LEGACY_WORKTREE_PATH}"
-else
+elif [[ -e "${SANITIZED_WORKTREE_PATH}" ]]; then
   WORKTREE_PATH="${SANITIZED_WORKTREE_PATH}"
 fi
 
@@ -235,7 +304,6 @@ else
 fi
 
 # ====== 4. Remove git branch ======
-BRANCH_NAME="${WORKTREE_NAME}"
 if git show-ref --verify --quiet "refs/heads/${BRANCH_NAME}"; then
   REMAINING_WORKTREE_PATH="$(get_worktree_path_for_branch "${BRANCH_NAME}")"
   if [[ -n "${REMAINING_WORKTREE_PATH}" ]]; then
@@ -256,7 +324,7 @@ echo "Cleanup complete for ${WORKTREE_NAME}"
 if [[ -f "${PORTS_FILE}" ]]; then
   if acquire_ports_lock; then
     tmp_ports="$(mktemp)"
-    if jq --arg name "${WORKTREE_NAME}" 'del(.[$name])' "${PORTS_FILE}" > "${tmp_ports}"; then
+    if jq --arg name "${WORKTREE_NAME}" --arg branch "${BRANCH_NAME}" 'del(.[$name], .[$branch])' "${PORTS_FILE}" > "${tmp_ports}"; then
       mv "${tmp_ports}" "${PORTS_FILE}"
       echo "Released reserved ports for ${WORKTREE_NAME}."
     else
