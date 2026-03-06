@@ -4405,44 +4405,31 @@ async def export_threads_multiple_classes(
                                 break
                             after = messages.data[-1].id
                     elif thread.version == 3:
-                        while True:
-                            messages = await models.Thread.list_messages(
-                                session,
-                                thread.id,
-                                after=after,
-                                order="asc",
-                                include_annotations=True,
+                        export_rows = await list_export_rows_v3(
+                            session, thread.id, file_names
+                        )
+
+                        for role, created_at, content in export_rows:
+                            row = [user_hashes_str]
+
+                            if include_user_emails:
+                                row.append(user_emails_str)
+
+                            row.extend(
+                                [
+                                    class_.id,
+                                    class_.name,
+                                    assistant_id,
+                                    assistant_name,
+                                    role,
+                                    thread.id,
+                                    created_at.astimezone(ZoneInfo("America/New_York"))
+                                    .replace(microsecond=0)
+                                    .isoformat(),
+                                    content,
+                                ]
                             )
-
-                            for message in messages:
-                                row = [user_hashes_str]
-
-                                if include_user_emails:
-                                    row.append(user_emails_str)
-
-                                row.extend(
-                                    [
-                                        class_.id,
-                                        class_.name,
-                                        assistant_id,
-                                        assistant_name,
-                                        message.role,
-                                        thread.id,
-                                        message.created.astimezone(
-                                            ZoneInfo("America/New_York")
-                                        )
-                                        .replace(microsecond=0)
-                                        .isoformat(),
-                                        process_message_content_v3(
-                                            message.content, file_names
-                                        ),
-                                    ]
-                                )
-                                csvwriter.writerow(row)
-
-                            if len(messages) == 0:
-                                break
-                            after = messages[-1].id
+                            csvwriter.writerow(row)
                     else:
                         logger.exception(f"Unknown thread version: {thread.version}")
                         continue
@@ -4630,44 +4617,31 @@ async def export_class_threads(
                             break
                         after = messages.data[-1].id
                 elif thread.version == 3:
-                    while True:
-                        messages = await models.Thread.list_messages(
-                            session,
-                            thread.id,
-                            after=after,
-                            order="asc",
-                            include_annotations=True,
+                    export_rows = await list_export_rows_v3(
+                        session, thread.id, file_names
+                    )
+
+                    for role, created_at, content in export_rows:
+                        row = [user_hashes_str]
+
+                        if include_user_emails:
+                            row.append(user_emails_str)
+
+                        row.extend(
+                            [
+                                class_.id,
+                                class_.name,
+                                assistant_id,
+                                assistant_name,
+                                role,
+                                thread.id,
+                                created_at.astimezone(ZoneInfo("America/New_York"))
+                                .replace(microsecond=0)
+                                .isoformat(),
+                                content,
+                            ]
                         )
-
-                        for message in messages:
-                            row = [user_hashes_str]
-
-                            if include_user_emails:
-                                row.append(user_emails_str)
-
-                            row.extend(
-                                [
-                                    class_.id,
-                                    class_.name,
-                                    assistant_id,
-                                    assistant_name,
-                                    message.role,
-                                    thread.id,
-                                    message.created.astimezone(
-                                        ZoneInfo("America/New_York")
-                                    )
-                                    .replace(microsecond=0)
-                                    .isoformat(),
-                                    process_message_content_v3(
-                                        message.content, file_names
-                                    ),
-                                ]
-                            )
-                            csvwriter.writerow(row)
-
-                        if len(messages) == 0:
-                            break
-                        after = messages[-1].id
+                        csvwriter.writerow(row)
                 else:
                     logger.exception(f"Unknown thread version: {thread.version}")
                     continue
@@ -4781,6 +4755,196 @@ def process_message_content_v3(
             case _:
                 logger.warning(f"Unknown content type: {part}")
     return "\n".join(processed_content)
+
+
+def _enum_value(value: object) -> str:
+    return value.value if hasattr(value, "value") else str(value)
+
+
+def _parse_json_string(value: str | None) -> object | None:
+    if value is None:
+        return None
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return value
+
+
+def _set_if_not_none(report: dict[str, object], key: str, value: object | None) -> None:
+    if value is not None:
+        report[key] = value
+
+
+def process_tool_call_content_v3(tool_call: models.ToolCall) -> str:
+    report: dict[str, object] = {
+        "tool_call_id": tool_call.tool_call_id,
+        "type": _enum_value(tool_call.type),
+        "status": _enum_value(tool_call.status),
+        "run_id": tool_call.run_id,
+        "output_index": tool_call.output_index,
+    }
+
+    match tool_call.type:
+        case ToolCallType.CODE_INTERPRETER:
+            _set_if_not_none(report, "code", tool_call.code)
+            _set_if_not_none(report, "container_id", tool_call.container_id)
+            report["outputs"] = [
+                {
+                    "type": _enum_value(output.output_type),
+                    **({"logs": output.logs} if output.logs is not None else {}),
+                    **({"url": output.url} if output.url is not None else {}),
+                }
+                for output in tool_call.outputs
+            ]
+        case ToolCallType.FILE_SEARCH:
+            report["queries"] = _parse_json_string(tool_call.queries) or []
+            report["results"] = [
+                {
+                    "file_id": result.file_id,
+                    "filename": result.filename,
+                    "score": result.score,
+                    "text": result.text,
+                    **(
+                        {"attributes": parsed_attributes}
+                        if (parsed_attributes := _parse_json_string(result.attributes))
+                        is not None
+                        else {}
+                    ),
+                }
+                for result in tool_call.results
+            ]
+        case ToolCallType.WEB_SEARCH:
+            report["actions"] = [
+                {
+                    "type": _enum_value(action.type),
+                    **({"query": action.query} if action.query is not None else {}),
+                    **({"url": action.url} if action.url is not None else {}),
+                    **(
+                        {"pattern": action.pattern}
+                        if action.pattern is not None
+                        else {}
+                    ),
+                    "sources": [
+                        {
+                            **({"url": source.url} if source.url is not None else {}),
+                            **(
+                                {"name": source.name} if source.name is not None else {}
+                            ),
+                        }
+                        for source in action.sources
+                    ],
+                }
+                for action in tool_call.web_search_actions
+            ]
+        case ToolCallType.MCP_SERVER:
+            mcp_server = tool_call.mcp_server_tool
+            _set_if_not_none(
+                report,
+                "server_label",
+                tool_call.mcp_server_label
+                or (mcp_server.server_label if mcp_server else None),
+            )
+            _set_if_not_none(
+                report,
+                "server_name",
+                mcp_server.display_name if mcp_server else None,
+            )
+            _set_if_not_none(report, "tool_name", tool_call.mcp_tool_name)
+            _set_if_not_none(
+                report, "arguments", _parse_json_string(tool_call.mcp_arguments)
+            )
+            _set_if_not_none(report, "output", _parse_json_string(tool_call.mcp_output))
+        case ToolCallType.MCP_LIST_TOOLS:
+            mcp_server = tool_call.mcp_server_tool
+            _set_if_not_none(
+                report,
+                "server_label",
+                tool_call.mcp_server_label
+                or (mcp_server.server_label if mcp_server else None),
+            )
+            _set_if_not_none(
+                report,
+                "server_name",
+                mcp_server.display_name if mcp_server else None,
+            )
+            report["tools"] = [
+                {
+                    "name": tool.name,
+                    "description": tool.description,
+                    **(
+                        {"input_schema": parsed_input_schema}
+                        if (
+                            parsed_input_schema := _parse_json_string(tool.input_schema)
+                        )
+                        is not None
+                        else {}
+                    ),
+                    **(
+                        {"annotations": parsed_annotations}
+                        if (parsed_annotations := _parse_json_string(tool.annotations))
+                        is not None
+                        else {}
+                    ),
+                }
+                for tool in tool_call.mcp_tools_listed
+            ]
+
+    _set_if_not_none(report, "error", _parse_json_string(tool_call.error))
+    return json.dumps(report, indent=2, sort_keys=True)
+
+
+def build_export_rows_v3(
+    messages: list[models.Message],
+    tool_calls: list[models.ToolCall],
+    file_names: dict[str, str],
+) -> list[tuple[str, datetime, str]]:
+    rows: list[tuple[int, datetime, str, str]] = []
+
+    for message in messages:
+        rows.append(
+            (
+                message.output_index,
+                message.created,
+                _enum_value(message.role),
+                process_message_content_v3(message.content, file_names),
+            )
+        )
+
+    for tool_call in tool_calls:
+        rows.append(
+            (
+                tool_call.output_index,
+                tool_call.created,
+                _enum_value(tool_call.type),
+                process_tool_call_content_v3(tool_call),
+            )
+        )
+
+    rows.sort(key=lambda row: (row[0], row[1]))
+    return [(role, created, content) for _, created, role, content in rows]
+
+
+async def list_export_rows_v3(
+    session: AsyncSession, thread_id: int, file_names: dict[str, str]
+) -> list[tuple[str, datetime, str]]:
+    async def collect_messages() -> list[models.Message]:
+        return [
+            message
+            async for message in models.Thread.list_all_messages_gen(session, thread_id)
+        ]
+
+    async def collect_tool_calls() -> list[models.ToolCall]:
+        return [
+            tool_call
+            async for tool_call in models.Thread.list_all_tool_calls_gen(
+                session, thread_id
+            )
+        ]
+
+    messages, tool_calls = await asyncio.gather(
+        collect_messages(), collect_tool_calls()
+    )
+    return build_export_rows_v3(messages, tool_calls, file_names)
 
 
 def replace_annotations_in_text(
