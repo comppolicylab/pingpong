@@ -169,27 +169,132 @@ sync_wait = 600
 # See: https://canvas.instructure.com/doc/api/file.oauth.html#oauth2-flow-2
 auth_token_expiry = 3600
 
-# LTI configuration (optional; required if you enable LTI registration/login)
-# [lti]
-# # How often to allow manual Canvas Connect roster syncs.
+
+[lti]
+# LTI 1.3 integration settings for connecting to learning management systems.
+
+# How often (in seconds) to allow automatic LTI roster syncs.
+# Defaults to 10 minutes.
 # sync_wait = 600
-# # Required for LTI setup/login security: only these platform hosts are allowed
-# # for OpenID discovery, registration endpoints, JWKS/token endpoints, and OIDC
-# # login redirects. Exact hosts only.
-# platform_url_allowlist = ["canvas.instructure.com", "school.instructure.com"]
-# # Customize which OpenID discovery paths are allowed for initial
-# # openid_configuration fetches.
-# # mode = "replace" uses only the listed paths; mode = "append" adds listed
-# # paths to the defaults.
-# [lti.openid_configuration_paths]
-# mode = "replace"
-# paths = [
+
+# Key rotation settings
+# Cron schedule for automatic key rotation.
+# Defaults to the first day of every month at midnight.
+# rotation_schedule = "0 0 1 * *"
+# Number of previous keys to retain after rotation. Defaults to 3.
+# key_retention_count = 3
+# RSA key size in bits. Defaults to 2048.
+# key_size = 2048
+
+[lti.key_store]
+# Key store backend for LTI RSA keys. Accepts `aws` or `local`.
+# Use `local` for development and `aws` (Secrets Manager) for production.
+type = "local"
+directory = "local_exports/lti_keys"
+
+[lti.security]
+# Global defaults for all validated LTI URLs.
+# Endpoint-specific blocks below inherit these values unless overridden.
+#
+# Whether to permit `http://` URLs while `development = true`.
+# Defaults to true.
+# allow_http_in_development = true
+#
+# Whether HTTP redirects are allowed when requesting LTI URLs.
+# Defaults to true.
+# allow_redirects = true
+
+[lti.security.hosts]
+# Global host allow/deny patterns applied to all LTI URL validations.
+# Supports exact matches and wildcard subdomains (e.g. "*.instructure.com").
+#
+# Example values:
+allow = ["*.instructure.com", "canvas.docker"]
+deny = ["evil.instructure.com"]
+
+[lti.security.paths]
+# Global path allow/deny patterns applied to all LTI URL validations.
+# Supports exact matches and glob patterns (e.g. "/api/lti/*").
+#
+# Example values:
+allow = [
+  "/.well-known/openid-configuration",
+  "/.well-known/openid",
+  "/api/lti/security/openid-configuration",
+  "/api/lti/*",
+  "/login/oauth2/*",
+]
+deny = ["/private/*"]
+
+[lti.security.openid_configuration]
+# Optional per-endpoint overrides for OpenID configuration discovery URLs.
+# Uncomment to override global defaults above for this endpoint only.
+# allow_http_in_development = true
+# allow_redirects = false
+#
+# [lti.security.openid_configuration.hosts]
+# allow = ["*.instructure.com", "canvas.docker"]
+# deny = []
+#
+# [lti.security.openid_configuration.paths]
+# allow = [
 #   "/.well-known/openid-configuration",
 #   "/.well-known/openid",
 #   "/api/lti/security/openid-configuration",
 # ]
-#
-# [lti.key_store]
-# # accepts "local" or "aws"
-# type = "local"
-# directory = "local_exports/lti_keys"
+# deny = []
+
+[lti.security.authorization_endpoint]
+# Optional overrides for OIDC authorization endpoints.
+# allow_http_in_development = true
+# allow_redirects = true
+# [lti.security.authorization_endpoint.hosts]
+# allow = ["*.instructure.com", "canvas.docker"]
+# deny = []
+# [lti.security.authorization_endpoint.paths]
+# allow = ["/login/oauth2/*"]
+# deny = []
+
+[lti.security.registration_endpoint]
+# Optional overrides for dynamic registration endpoints.
+# allow_http_in_development = true
+# allow_redirects = true
+# [lti.security.registration_endpoint.hosts]
+# allow = ["*.instructure.com"]
+# deny = []
+# [lti.security.registration_endpoint.paths]
+# allow = ["/api/lti/registrations", "/api/lti/*"]
+# deny = []
+
+[lti.security.jwks_uri]
+# Optional overrides for platform JWKS URI fetches.
+# allow_http_in_development = true
+# allow_redirects = true
+# [lti.security.jwks_uri.hosts]
+# allow = ["*.instructure.com", "canvas.docker"]
+# deny = []
+# [lti.security.jwks_uri.paths]
+# allow = ["/api/lti/security/jwks", "/jwks", "/*/jwks"]
+# deny = []
+
+[lti.security.token_endpoint]
+# Optional overrides for OAuth token endpoint requests.
+# allow_http_in_development = true
+# allow_redirects = true
+# [lti.security.token_endpoint.hosts]
+# allow = ["*.instructure.com", "canvas.docker"]
+# deny = []
+# [lti.security.token_endpoint.paths]
+# allow = ["/login/oauth2/token", "/oauth2/token", "/api/lti/*"]
+# deny = []
+
+[lti.security.names_and_role_endpoint]
+# Optional overrides for NRPS (Names and Roles) endpoint requests.
+# allow_http_in_development = true
+# allow_redirects = true
+# [lti.security.names_and_role_endpoint.hosts]
+# allow = ["*.instructure.com", "canvas.docker"]
+# deny = []
+# [lti.security.names_and_role_endpoint.paths]
+# allow = ["/api/lti/*/names_and_roles", "/api/lti/*"]
+# deny = []

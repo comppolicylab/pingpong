@@ -123,7 +123,6 @@ from .lti.canvas_connect import (
     CanvasConnectWarning,
     ManualCanvasConnectClient,
 )
-from .lti.allowlist import MISSING_PLATFORM_URL_ALLOWLIST_DETAIL
 from .canvas import (
     CanvasAccessException,
     CanvasException,
@@ -1929,11 +1928,8 @@ async def sync_lti_class_roster(
                 or "A roster sync through Canvas Connect was recently completed.",
             ) from e
         except CanvasConnectException as e:
-            status_code = (
-                503 if e.detail == MISSING_PLATFORM_URL_ALLOWLIST_DETAIL else 500
-            )
             raise HTTPException(
-                status_code=status_code,
+                status_code=500,
                 detail=e.detail
                 or "Syncing your roster through Canvas Connect failed. Please try again later.",
             ) from e
