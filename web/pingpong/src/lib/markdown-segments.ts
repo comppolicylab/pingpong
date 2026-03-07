@@ -7,7 +7,13 @@ export type MarkdownSegment =
 	| { type: 'mermaid-complete'; source: string }
 	| { type: 'mermaid-streaming'; source: string }
 	| { type: 'svg-complete'; source: string }
-	| { type: 'svg-streaming'; source: string };
+	| { type: 'svg-streaming'; source: string }
+	| {
+			type: 'wrapped-diagram';
+			content: string;
+			placeholderId: string;
+			diagram: DiagramSegment;
+	  };
 
 type DiagramSegment =
 	| { type: 'mermaid-complete'; source: string }
@@ -15,7 +21,13 @@ type DiagramSegment =
 	| { type: 'svg-complete'; source: string }
 	| { type: 'svg-streaming'; source: string };
 type HtmlTokenSegment = { type: 'html-tokens'; tokens: TokensList };
-type InternalSegment = HtmlTokenSegment | DiagramSegment;
+type WrappedDiagramTokenSegment = {
+	type: 'wrapped-diagram-tokens';
+	tokens: TokensList;
+	placeholderId: string;
+	diagram: DiagramSegment;
+};
+type InternalSegment = HtmlTokenSegment | DiagramSegment | WrappedDiagramTokenSegment;
 type TokenWithChildren = {
 	type?: string;
 	tokens?: TokensList;
@@ -23,11 +35,14 @@ type TokenWithChildren = {
 	lang?: string;
 	raw?: string;
 	text?: string;
+	ordered?: boolean;
+	start?: number;
 };
 
 const SVG_LANGUAGES = new Set(['svg', 'image/svg+xml']);
 const DIAGRAM_FENCE_OPEN_PATTERN = /^[ \t]{0,3}(`{3,})[ \t]*(mermaid|svg|image\/svg\+xml)\b/i;
 const FENCE_CLOSE_PATTERN = /^[ \t]{0,3}(`{3,})[ \t]*$/;
+let placeholderIdCounter = 0;
 
 const withLinks = (tokens: unknown[], links: TokensList['links']) => {
 	const tokenList = tokens as TokensList;
@@ -35,11 +50,35 @@ const withLinks = (tokens: unknown[], links: TokensList['links']) => {
 	return tokenList;
 };
 
+const nextPlaceholderId = () => `markdown-diagram-${placeholderIdCounter++}`;
+
+const createPlaceholderToken = (placeholderId: string) => ({
+	type: 'html',
+	raw: `<div data-markdown-diagram-placeholder="${placeholderId}"></div>`,
+	block: true,
+	pre: false,
+	text: `<div data-markdown-diagram-placeholder="${placeholderId}"></div>`
+});
+
 const createHtmlTokenSegment = (
 	tokens: unknown[],
 	links: TokensList['links']
 ): HtmlTokenSegment => {
 	return { type: 'html-tokens', tokens: withLinks(tokens, links) };
+};
+
+const createWrappedDiagramTokenSegment = (
+	tokens: unknown[],
+	links: TokensList['links'],
+	placeholderId: string,
+	diagram: DiagramSegment
+): WrappedDiagramTokenSegment => {
+	return {
+		type: 'wrapped-diagram-tokens',
+		tokens: withLinks(tokens, links),
+		placeholderId,
+		diagram
+	};
 };
 
 const normalizeLanguage = (lang: string | undefined) => lang?.trim().toLowerCase() ?? '';
@@ -85,7 +124,22 @@ const wrapChildSegments = (
 ) => {
 	return childSegments.map((segment) => {
 		if (segment.type !== 'html-tokens') {
-			return segment;
+			if (segment.type === 'wrapped-diagram-tokens') {
+				return segment;
+			}
+
+			const placeholderId = nextPlaceholderId();
+			return createWrappedDiagramTokenSegment(
+				[
+					{
+						...token,
+						tokens: withLinks([createPlaceholderToken(placeholderId)], links)
+					}
+				],
+				links,
+				placeholderId,
+				segment
+			);
 		}
 
 		return createHtmlTokenSegment([{ ...token, tokens: segment.tokens }], links);
@@ -98,13 +152,26 @@ const splitListToken = (
 ): InternalSegment[] => {
 	const segments: InternalSegment[] = [];
 	const bufferedItems: TokenWithChildren[] = [];
+	let bufferedItemStartOffset = 0;
 
 	const flushItems = () => {
 		if (!bufferedItems.length) {
 			return;
 		}
 
-		segments.push(createHtmlTokenSegment([{ ...token, items: [...bufferedItems] }], links));
+		segments.push(
+			createHtmlTokenSegment(
+				[
+					{
+						...token,
+						items: [...bufferedItems],
+						start: token.ordered ? (token.start ?? 1) + bufferedItemStartOffset : token.start
+					}
+				],
+				links
+			)
+		);
+		bufferedItemStartOffset += bufferedItems.length;
 		bufferedItems.length = 0;
 	};
 
@@ -122,7 +189,30 @@ const splitListToken = (
 			}
 
 			flushItems();
-			segments.push(segment);
+			if (segment.type === 'wrapped-diagram-tokens') {
+				segments.push(
+					createWrappedDiagramTokenSegment(
+						[
+							{
+								...token,
+								items: [
+									{
+										...item,
+										tokens: withLinks([createPlaceholderToken(segment.placeholderId)], links)
+									}
+								],
+								start: token.ordered ? (token.start ?? 1) + bufferedItemStartOffset : token.start
+							}
+						],
+						links,
+						segment.placeholderId,
+						segment.diagram
+					)
+				);
+			} else {
+				segments.push(segment);
+			}
+			bufferedItemStartOffset += 1;
 		}
 	}
 
@@ -188,17 +278,29 @@ export const parseMarkdownSegments = (
 	markdownContent: string,
 	options: MarkdownRendererOptions
 ): MarkdownSegment[] => {
+	placeholderIdCounter = 0;
 	const tokens = lexMarkdown(markdownContent, options);
-	const segments = splitBlockTokens(tokens).map((segment) => {
-		if (segment.type !== 'html-tokens') {
-			return segment;
-		}
+	const segments = splitBlockTokens(tokens)
+		.map((segment) => {
+			if (segment.type !== 'html-tokens') {
+				if (segment.type === 'wrapped-diagram-tokens') {
+					return {
+						type: 'wrapped-diagram' as const,
+						content: renderMarkdownTokens(segment.tokens, options),
+						placeholderId: segment.placeholderId,
+						diagram: segment.diagram
+					};
+				}
 
-		return {
-			type: 'html' as const,
-			content: renderMarkdownTokens(segment.tokens, options)
-		};
-	});
+				return segment;
+			}
+
+			return {
+				type: 'html' as const,
+				content: renderMarkdownTokens(segment.tokens, options)
+			};
+		})
+		.filter((segment) => segment.type !== 'html' || segment.content.length > 0);
 
 	if (!segments.length) {
 		return [{ type: 'html', content: renderMarkdownTokens(tokens, options) }];
