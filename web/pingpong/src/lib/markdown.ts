@@ -79,26 +79,20 @@ const keyFromOpts = (opts: MarkdownRendererOptions) => {
  */
 const getCachedRenderer = memoize(getMarkdownRenderer, keyFromOpts);
 
+const getRenderer = (options?: MarkdownRendererOptions) => {
+	const fullOpts = { ...DEFAULT_OPTIONS, ...(options || {}) };
+	validateMarkdownRendererOptions(fullOpts);
+	return getCachedRenderer(fullOpts);
+};
+
 /**
  * Convert markdown to HTML.
  */
-export const markdown = (str: string, options?: MarkdownRendererOptions) => {
-	const fullOpts = { ...DEFAULT_OPTIONS, ...(options || {}) };
-	validateMarkdownRendererOptions(fullOpts);
-	const renderer = getCachedRenderer(fullOpts);
-	return renderer.parse(str);
-};
+export const markdown = (str: string, options?: MarkdownRendererOptions) =>
+	getRenderer(options).parse(str);
 
-export const lexMarkdown = (str: string, options?: MarkdownRendererOptions) => {
-	const fullOpts = { ...DEFAULT_OPTIONS, ...(options || {}) };
-	validateMarkdownRendererOptions(fullOpts);
-	const renderer = getCachedRenderer(fullOpts);
-	return renderer.lexer(str);
-};
+export const lexMarkdown = (str: string, options?: MarkdownRendererOptions) =>
+	getRenderer(options).lexer(str);
 
-export const renderMarkdownTokens = (tokens: TokensList, options?: MarkdownRendererOptions) => {
-	const fullOpts = { ...DEFAULT_OPTIONS, ...(options || {}) };
-	validateMarkdownRendererOptions(fullOpts);
-	const renderer = getCachedRenderer(fullOpts);
-	return renderer.parser(tokens);
-};
+export const renderMarkdownTokens = (tokens: TokensList, options?: MarkdownRendererOptions) =>
+	getRenderer(options).parser(tokens);
