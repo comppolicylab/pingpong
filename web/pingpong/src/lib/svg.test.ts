@@ -1,44 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import { getSvgFenceClosureStates } from './svg';
+import { SVG_DOCUMENT_PATTERN } from './svg';
 
-describe('getSvgFenceClosureStates', () => {
-	it('marks closed svg fences as complete', () => {
+describe('SVG_DOCUMENT_PATTERN', () => {
+	it('matches a complete svg document', () => {
 		expect(
-			getSvgFenceClosureStates(`
-\`\`\`svg
-<svg viewBox="0 0 10 10"></svg>
-\`\`\`
+			SVG_DOCUMENT_PATTERN.test(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">
+  <circle cx="5" cy="5" r="4" />
+</svg>
 `)
-		).toEqual([true]);
+		).toBe(true);
 	});
 
-	it('marks an unclosed trailing svg fence as incomplete', () => {
+	it('matches an svg document with an xml declaration', () => {
 		expect(
-			getSvgFenceClosureStates(`
-\`\`\`svg
-<svg viewBox="0 0 10 10"></svg>
-`)
-		).toEqual([false]);
+			SVG_DOCUMENT_PATTERN.test(
+				`<?xml version="1.0" encoding="UTF-8"?><svg viewBox="0 0 10 10"></svg>`
+			)
+		).toBe(true);
 	});
 
-	it('tracks multiple svg fences and ignores other languages', () => {
-		expect(
-			getSvgFenceClosureStates(`
-\`\`\`svg
-<svg viewBox="0 0 10 10"></svg>
-\`\`\`
-
-\`\`\`typescript
-const svg = false;
-\`\`\`
-
-\`\`\`image/svg+xml
-<svg viewBox="0 0 20 20"></svg>
-\`\`\`
-
-\`\`\`svg
-<svg viewBox="0 0 30 30"></svg>
-`)
-		).toEqual([true, true, false]);
+	it('rejects non-svg markup', () => {
+		expect(SVG_DOCUMENT_PATTERN.test('<div>not an svg</div>')).toBe(false);
 	});
 });

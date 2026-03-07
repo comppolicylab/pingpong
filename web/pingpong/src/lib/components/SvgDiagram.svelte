@@ -31,6 +31,7 @@
 	let canPreview = false;
 	let copied = false;
 	let copyResetTimeout: ReturnType<typeof setTimeout> | undefined;
+	let previewMarkup = '';
 
 	const decorateSvgMarkup = (markup: string) => {
 		const parsed = new DOMParser().parseFromString(markup, 'image/svg+xml');
@@ -46,6 +47,24 @@
 				? `${currentClass} ${SVG_PREVIEW_CANVAS_SVG_CLASS}`
 				: SVG_PREVIEW_CANVAS_SVG_CLASS
 		);
+
+		// Give viewBox-only SVGs an intrinsic size so they don't collapse in preview.
+		if (!svg.hasAttribute('width') || !svg.hasAttribute('height')) {
+			const viewBox = svg
+				.getAttribute('viewBox')
+				?.trim()
+				.split(/[\s,]+/);
+			if (viewBox?.length === 4) {
+				const width = Number(viewBox[2]);
+				const height = Number(viewBox[3]);
+				if (!svg.hasAttribute('width') && Number.isFinite(width) && width > 0) {
+					svg.setAttribute('width', `${width}`);
+				}
+				if (!svg.hasAttribute('height') && Number.isFinite(height) && height > 0) {
+					svg.setAttribute('height', `${height}`);
+				}
+			}
+		}
 
 		return new XMLSerializer().serializeToString(svg);
 	};
@@ -63,26 +82,30 @@
 		return typeof sanitized === 'string' ? decorateSvgMarkup(sanitized) : '';
 	};
 
-	const renderInto = async (container: HTMLDivElement | undefined) => {
+	const renderInto = async (container: HTMLDivElement | undefined, markup: string) => {
 		if (!container) {
 			return;
 		}
 
-		const previewMarkup = getPreviewMarkup(source, isClosed);
-		container.innerHTML = previewMarkup;
+		container.innerHTML = markup;
 	};
 
 	const renderPreview = async () => {
-		canPreview = isClosed && SVG_DOCUMENT_PATTERN.test(source.trim());
+		previewMarkup = getPreviewMarkup(source, isClosed);
+		canPreview = previewMarkup.length > 0;
 		loading = canPreview;
 		error = '';
 
 		try {
 			await tick();
-			await renderInto(previewContainer);
+			if (canPreview) {
+				await renderInto(previewContainer, previewMarkup);
+			}
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to render SVG preview.';
 			sadToast('Could not render SVG preview.');
+			canPreview = false;
+			previewMarkup = '';
 		} finally {
 			loading = false;
 		}

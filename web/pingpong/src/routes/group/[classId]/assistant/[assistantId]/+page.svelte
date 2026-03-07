@@ -139,9 +139,11 @@
 			return value;
 		}
 
-		const textarea = document.createElement('textarea');
-		textarea.innerHTML = value;
-		return textarea.value;
+		return value.replace(/&(?:#\d+|#x[\da-f]+|[a-z]+);/gi, (entity) => {
+			const textarea = document.createElement('textarea');
+			textarea.innerHTML = entity;
+			return textarea.value;
+		});
 	};
 
 	$: if (!hasSetLectureVideoKey) {
