@@ -162,19 +162,17 @@
 </script>
 
 <div class="markdown max-w-full" bind:this={container}>
-	{#each segments as segment, index (`${segment.type}-${index}`)}
+	{#each segments as segment, index (index)}
 		{#if segment.type === 'html'}
 			<Sanitize html={segment.content} />
 		{:else if segment.type === 'wrapped-diagram'}
 			<Sanitize html={segment.content} />
 		{:else if segment.type === 'mermaid-complete'}
 			<MermaidDiagram source={segment.source} />
-		{:else if segment.type === 'svg-complete'}
-			<SvgDiagram source={segment.source} isClosed={true} />
+		{:else if segment.type === 'svg-complete' || segment.type === 'svg-streaming'}
+			<SvgDiagram source={segment.source} isClosed={segment.type === 'svg-complete'} />
 		{:else if segment.type === 'mermaid-streaming'}
 			<MermaidStreaming source={segment.source} />
-		{:else if segment.type === 'svg-streaming'}
-			<SvgDiagram source={segment.source} isClosed={false} />
 		{/if}
 	{/each}
 </div>

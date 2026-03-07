@@ -82,6 +82,8 @@
 		return typeof sanitized === 'string' ? decorateSvgMarkup(sanitized) : '';
 	};
 
+	// Keep this async so a synchronous innerHTML failure becomes a rejected Promise
+	// that renderPreview's try/catch can handle.
 	const renderInto = async (container: HTMLDivElement | undefined, markup: string) => {
 		if (!container) {
 			return;
