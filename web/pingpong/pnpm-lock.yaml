@@ -6,6 +6,7 @@ settings:
 
 overrides:
   cookie: '>=0.7.0, <1.0.0'
+  dompurify: '>=3.3.2, <4.0.0'
 
 importers:
 
