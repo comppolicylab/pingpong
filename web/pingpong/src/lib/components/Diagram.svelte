@@ -132,13 +132,14 @@
 	let openButton: HTMLButtonElement;
 	let closeButton: HTMLButtonElement;
 	let modalOpen = false;
-	let loading = state === 'complete';
+	let loading = false;
 	let modalLoading = false;
 	let canPreview = false;
 	let error = '';
 	let label = getDiagramLabel(kind);
 	let codeLanguage = 'plaintext';
 	let highlightedCode = '';
+	let previewInteractive = false;
 	let previewView: ViewState = { scale: 1, x: 0, y: 0 };
 	let modalView: ViewState = { scale: 1, x: 0, y: 0 };
 	let previewTouchState: TouchState = { lastX: 0, lastY: 0, lastDistance: null };
@@ -740,7 +741,7 @@
 
 			if (previewViewport) {
 				previewResizeObserver = new ResizeObserver(() => {
-					if (canPreview && showInteractivePreview) {
+					if (canPreview && previewInteractive) {
 						resetView('preview');
 					}
 				});
@@ -772,6 +773,7 @@
 	$: label = getDiagramLabel(kind);
 	$: diagramSignature = `${kind}:${state}:${source}`;
 	$: showInteractivePreview = state === 'complete' && (loading || canPreview);
+	$: previewInteractive = showInteractivePreview;
 	$: codeLanguage = getCodeLanguage(kind);
 	$: highlightedCode = hljs.highlight(source, { language: codeLanguage }).value;
 	$: previewDisabled = computeDisabledControls('preview', previewView);

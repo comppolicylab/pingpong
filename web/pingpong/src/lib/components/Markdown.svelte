@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { dev } from '$app/environment';
 	import { afterUpdate, mount, onDestroy, tick, unmount } from 'svelte';
 	import type { InlineWebSource } from '$lib/content';
 	import { parseMarkdownSegments, type MarkdownSegment } from '$lib/markdown-segments';
@@ -17,7 +16,6 @@
 	let mountedChips: WebSourceChip[] = [];
 	let mountedDiagrams: object[] = [];
 	let wrappedDiagramMountVersion = 0;
-	let loggedDiagramSignature = '';
 
 	$: segments = parseMarkdownSegments(content, { syntax, latex });
 	$: wrappedDiagramSegments = segments.filter(
@@ -141,23 +139,6 @@
 		mountInlineWebSources();
 		mountWrappedDiagrams();
 	});
-
-	$: if (dev) {
-		const diagramSegments = segments
-			.filter((segment): segment is Extract<MarkdownSegment, { type: 'diagram' }> => {
-				return segment.type === 'diagram';
-			})
-			.map((segment) => ({
-				kind: segment.diagram.kind,
-				state: segment.diagram.state,
-				sourceLength: segment.diagram.source.length,
-				wrapped: 'wrapperHtml' in segment
-			}));
-		const diagramSignature = JSON.stringify(diagramSegments);
-		if (diagramSegments.length && diagramSignature !== loggedDiagramSignature) {
-			loggedDiagramSignature = diagramSignature;
-		}
-	}
 
 	onDestroy(() => {
 		wrappedDiagramMountVersion += 1;
