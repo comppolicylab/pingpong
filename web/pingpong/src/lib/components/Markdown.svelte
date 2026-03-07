@@ -1,11 +1,10 @@
 <script lang="ts">
+	import { dev } from '$app/environment';
 	import { afterUpdate, mount, onDestroy, tick, unmount } from 'svelte';
 	import type { InlineWebSource } from '$lib/content';
 	import { parseMarkdownSegments, type MarkdownSegment } from '$lib/markdown-segments';
-	import MermaidDiagram from './MermaidDiagram.svelte';
-	import MermaidStreaming from './MermaidStreaming.svelte';
+	import Diagram from './Diagram.svelte';
 	import Sanitize from './Sanitize.svelte';
-	import SvgDiagram from './SvgDiagram.svelte';
 	import WebSourceChip from './WebSourceChip.svelte';
 	import 'katex/dist/katex.min.css';
 
@@ -16,21 +15,26 @@
 
 	let container: HTMLDivElement;
 	let mountedChips: WebSourceChip[] = [];
-	let mountedDiagrams: Array<{ component: object; placeholderId: string }> = [];
+	let mountedDiagrams: object[] = [];
 	let wrappedDiagramMountVersion = 0;
+	let loggedDiagramSignature = '';
 
 	$: segments = parseMarkdownSegments(content, { syntax, latex });
+	$: wrappedDiagramSegments = segments.filter(
+		(
+			segment
+		): segment is Extract<
+			MarkdownSegment,
+			{ type: 'diagram'; wrapperHtml: string; placeholderId: string }
+		> => segment.type === 'diagram' && 'wrapperHtml' in segment
+	);
 	$: wrappedDiagramSignature = JSON.stringify(
-		segments
-			.filter(
-				(segment): segment is Extract<MarkdownSegment, { type: 'wrapped-diagram' }> =>
-					segment.type === 'wrapped-diagram'
-			)
-			.map((segment) => ({
-				placeholderId: segment.placeholderId,
-				type: segment.diagram.type,
-				source: segment.diagram.source
-			}))
+		wrappedDiagramSegments.map((segment) => ({
+			placeholderId: segment.placeholderId,
+			kind: segment.diagram.kind,
+			state: segment.diagram.state,
+			source: segment.diagram.source
+		}))
 	);
 	let mountedWrappedDiagramSignature = '';
 
@@ -42,7 +46,7 @@
 	const destroyMountedDiagrams = async () => {
 		const mounted = mountedDiagrams;
 		mountedDiagrams = [];
-		await Promise.all(mounted.map(({ component }) => unmount(component)));
+		await Promise.all(mounted.map((component) => unmount(component)));
 	};
 
 	// Replace placeholder spans from parseTextContent with live WebSourceChip instances.
@@ -103,11 +107,6 @@
 			return;
 		}
 
-		const wrappedDiagramSegments = segments.filter(
-			(segment): segment is Extract<MarkdownSegment, { type: 'wrapped-diagram' }> =>
-				segment.type === 'wrapped-diagram'
-		);
-
 		if (!wrappedDiagramSegments.length) {
 			mountedWrappedDiagramSignature = wrappedDiagramSignature;
 			return;
@@ -121,26 +120,16 @@
 				continue;
 			}
 
-			const component =
-				segment.diagram.type === 'svg-complete' || segment.diagram.type === 'svg-streaming'
-					? mount(SvgDiagram, {
-							target: placeholder,
-							props: {
-								source: segment.diagram.source,
-								isClosed: segment.diagram.type === 'svg-complete'
-							}
-						})
-					: segment.diagram.type === 'mermaid-streaming'
-						? mount(MermaidStreaming, {
-								target: placeholder,
-								props: { source: segment.diagram.source }
-							})
-						: mount(MermaidDiagram, {
-								target: placeholder,
-								props: { source: segment.diagram.source }
-							});
-
-			mountedDiagrams.push({ component, placeholderId: segment.placeholderId });
+			mountedDiagrams.push(
+				mount(Diagram, {
+					target: placeholder,
+					props: {
+						kind: segment.diagram.kind,
+						state: segment.diagram.state,
+						source: segment.diagram.source
+					}
+				})
+			);
 		}
 
 		if (mountVersion === wrappedDiagramMountVersion) {
@@ -152,6 +141,23 @@
 		mountInlineWebSources();
 		mountWrappedDiagrams();
 	});
+
+	$: if (dev) {
+		const diagramSegments = segments
+			.filter((segment): segment is Extract<MarkdownSegment, { type: 'diagram' }> => {
+				return segment.type === 'diagram';
+			})
+			.map((segment) => ({
+				kind: segment.diagram.kind,
+				state: segment.diagram.state,
+				sourceLength: segment.diagram.source.length,
+				wrapped: 'wrapperHtml' in segment
+			}));
+		const diagramSignature = JSON.stringify(diagramSegments);
+		if (diagramSegments.length && diagramSignature !== loggedDiagramSignature) {
+			loggedDiagramSignature = diagramSignature;
+		}
+	}
 
 	onDestroy(() => {
 		wrappedDiagramMountVersion += 1;
@@ -165,14 +171,14 @@
 	{#each segments as segment, index (index)}
 		{#if segment.type === 'html'}
 			<Sanitize html={segment.content} />
-		{:else if segment.type === 'wrapped-diagram'}
-			<Sanitize html={segment.content} />
-		{:else if segment.type === 'mermaid-complete'}
-			<MermaidDiagram source={segment.source} />
-		{:else if segment.type === 'svg-complete' || segment.type === 'svg-streaming'}
-			<SvgDiagram source={segment.source} isClosed={segment.type === 'svg-complete'} />
-		{:else if segment.type === 'mermaid-streaming'}
-			<MermaidStreaming source={segment.source} />
+		{:else if 'wrapperHtml' in segment}
+			<Sanitize html={segment.wrapperHtml} />
+		{:else}
+			<Diagram
+				kind={segment.diagram.kind}
+				state={segment.diagram.state}
+				source={segment.diagram.source}
+			/>
 		{/if}
 	{/each}
 </div>

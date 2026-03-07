@@ -43,13 +43,15 @@ graph TD
 		expect(segments).toHaveLength(3);
 		expect(segments[0]).toMatchObject({ type: 'html' });
 		expect(segments[1]).toMatchObject({
-			type: 'wrapped-diagram',
-			diagram: { type: 'mermaid-complete', source: 'graph TD\nA-->B' }
+			type: 'diagram',
+			diagram: { kind: 'mermaid', state: 'complete', source: 'graph TD\nA-->B' }
 		});
 		expect(segments[2]).toMatchObject({ type: 'html' });
 		expect(segments[0].type === 'html' && segments[0].content).toContain('<ul>');
 		expect(segments[0].type === 'html' && segments[0].content).toContain('<li><p>before</p>');
-		expect(segments[1].type === 'wrapped-diagram' && segments[1].content).toContain('<ul>');
+		expect(
+			segments[1].type === 'diagram' && 'wrapperHtml' in segments[1] && segments[1].wrapperHtml
+		).toContain('<ul>');
 		expect(segments[2].type === 'html' && segments[2].content).toContain('<ul>');
 		expect(segments[2].type === 'html' && segments[2].content).toContain('<li><p>after</p>');
 	});
@@ -71,13 +73,15 @@ graph TD
 		expect(segments).toHaveLength(3);
 		expect(segments[0]).toMatchObject({ type: 'html' });
 		expect(segments[1]).toMatchObject({
-			type: 'wrapped-diagram',
-			diagram: { type: 'svg-complete', source: '<svg viewBox="0 0 10 10"></svg>' }
+			type: 'diagram',
+			diagram: { kind: 'svg', state: 'complete', source: '<svg viewBox="0 0 10 10"></svg>' }
 		});
 		expect(segments[2]).toMatchObject({ type: 'html' });
 		expect(segments[0].type === 'html' && segments[0].content).toContain('<ul>');
 		expect(segments[0].type === 'html' && segments[0].content).toContain('<li><p>before</p>');
-		expect(segments[1].type === 'wrapped-diagram' && segments[1].content).toContain('<ul>');
+		expect(
+			segments[1].type === 'diagram' && 'wrapperHtml' in segments[1] && segments[1].wrapperHtml
+		).toContain('<ul>');
 		expect(segments[2].type === 'html' && segments[2].content).toContain('<ul>');
 		expect(segments[2].type === 'html' && segments[2].content).toContain('<li><p>after</p>');
 	});
@@ -95,10 +99,39 @@ graph TD
 
 		expect(segments).toHaveLength(1);
 		expect(segments[0]).toMatchObject({
-			type: 'wrapped-diagram',
-			diagram: { type: 'mermaid-complete', source: 'graph TD\nA-->B' }
+			type: 'diagram',
+			diagram: { kind: 'mermaid', state: 'complete', source: 'graph TD\nA-->B' }
 		});
-		expect(segments[0].type === 'wrapped-diagram' && segments[0].content).toContain('<blockquote>');
+		expect(
+			segments[0].type === 'diagram' && 'wrapperHtml' in segments[0] && segments[0].wrapperHtml
+		).toContain('<blockquote>');
+	});
+
+	it('preserves nested blockquote and list context around diagram segments', () => {
+		const segments = parseMarkdownSegments(
+			`
+> - before
+>
+>   \`\`\`svg
+>   <svg viewBox="0 0 10 10"></svg>
+>   \`\`\`
+>
+>   after
+`,
+			{ syntax: true, latex: false }
+		);
+
+		expect(segments).toHaveLength(3);
+		expect(segments[1]).toMatchObject({
+			type: 'diagram',
+			diagram: { kind: 'svg', state: 'complete', source: '<svg viewBox="0 0 10 10"></svg>' }
+		});
+		expect(
+			segments[1].type === 'diagram' && 'wrapperHtml' in segments[1] && segments[1].wrapperHtml
+		).toContain('<blockquote>');
+		expect(
+			segments[1].type === 'diagram' && 'wrapperHtml' in segments[1] && segments[1].wrapperHtml
+		).toContain('<ul>');
 	});
 
 	it('returns svg-streaming for an unclosed svg fence', () => {
@@ -111,7 +144,10 @@ graph TD
 		);
 
 		expect(segments).toEqual([
-			{ type: 'svg-streaming', source: '<svg viewBox="0 0 10 10"></svg>' }
+			{
+				type: 'diagram',
+				diagram: { kind: 'svg', state: 'streaming', source: '<svg viewBox="0 0 10 10"></svg>' }
+			}
 		]);
 	});
 });

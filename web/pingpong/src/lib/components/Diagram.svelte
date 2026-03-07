@@ -11,12 +11,23 @@
 		PlusOutline,
 		RefreshOutline
 	} from 'flowbite-svelte-icons';
-	import { onMount, tick } from 'svelte';
+	import { Spinner, Tooltip } from 'flowbite-svelte';
+	import hljs from 'highlight.js';
+	import { afterUpdate, onDestroy, onMount, tick } from 'svelte';
 	import { copy } from 'svelte-copy';
-	import { getMermaid } from '$lib/mermaid';
+	import DOMPurify from '$lib/purify';
+	import {
+		type DiagramKind,
+		type DiagramState,
+		getDiagramLabel,
+		getMermaid,
+		SVG_DOCUMENT_PATTERN
+	} from '$lib/diagram';
 	import { happyToast, sadToast } from '$lib/toast';
-	import { Tooltip } from 'flowbite-svelte';
+	import Sanitize from './Sanitize.svelte';
 
+	export let kind: DiagramKind;
+	export let state: DiagramState;
 	export let source: string;
 
 	type ViewMode = 'preview' | 'modal';
@@ -30,34 +41,28 @@
 		lastY: number;
 		lastDistance: number | null;
 	};
+	type RenderResult = {
+		markup: string;
+		bind?: (element: Element) => void;
+	};
 
-	let previewContainer: HTMLDivElement;
-	let modalContainer: HTMLDivElement;
-	let previewViewport: HTMLDivElement;
-	let modalViewport: HTMLDivElement;
-	let modalDialog: HTMLDivElement;
-	let openButton: HTMLButtonElement;
-	let closeButton: HTMLButtonElement;
-	let modalOpen = false;
-	let loading = true;
-	let modalLoading = false;
-	let error = '';
-	let previewView: ViewState = { scale: 1, x: 0, y: 0 };
-	let modalView: ViewState = { scale: 1, x: 0, y: 0 };
-	let previewTouchState: TouchState = { lastX: 0, lastY: 0, lastDistance: null };
-	let modalTouchState: TouchState = { lastX: 0, lastY: 0, lastDistance: null };
-	let previewGesturesEnabled = false;
-	let lastFocusedElement: HTMLElement | null = null;
-	let renderedSource = source;
-
-	const diagramId = `mermaid-${Math.random().toString(36).slice(2)}`;
 	const ZOOM_STEP = 0.15;
 	const PAN_STEP = 60;
 	const MIN_SCALE = 0.05;
 	const MAX_SCALE = 2.5;
+	const CONTROL_BUTTON_SIZE = 40;
+	const CONTROL_GAP = 4;
+	const CONTROL_INSET = 12;
+	const PREVIEW_MIN_HEIGHT = CONTROL_BUTTON_SIZE * 3 + CONTROL_GAP * 2 + CONTROL_INSET * 2;
+	const cardClass =
+		'diagram-block not-prose relative mb-4 max-w-full overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm';
+	const headerClass =
+		'flex items-center justify-between gap-3 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-white px-3 py-2';
+	const actionButtonClass =
+		'rounded-md border border-gray-200 p-2 text-gray-600 transition hover:border-gray-300 hover:bg-gray-100 hover:text-gray-900';
 	const controlPanelClass = 'absolute right-3 bottom-3 z-10 grid grid-cols-3 gap-1';
 	const controlButtonBaseClass =
-		'inline-flex h-10 w-10 items-center justify-center rounded-md border border-gray-200 bg-white/95 p-2 text-gray-800 transition hover:border-gray-300 hover:bg-gray-100 hover:text-gray-950';
+		'inline-flex h-10 w-10 items-center justify-center rounded-md border border-gray-200 bg-white/95 p-2 text-gray-800 transition hover:border-gray-300 hover:bg-gray-100 hover:text-gray-950 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-gray-200 disabled:hover:bg-white/95 disabled:hover:text-gray-800';
 	const controlPositionClass: Record<string, string> = {
 		up: 'col-start-2 row-start-1',
 		'zoom-in': 'col-start-3 row-start-1',
@@ -69,7 +74,9 @@
 	};
 	const diagramCanvasClass =
 		'absolute top-0 left-0 w-max max-w-none will-change-transform [&_svg]:block [&_svg]:h-auto [&_svg]:max-w-none [&_.label]:font-inherit';
-
+	const codeBlockClass =
+		'!m-0 overflow-x-auto rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm leading-5 whitespace-pre-wrap text-gray-900';
+	const svgCanvasClass = 'block h-auto max-w-none';
 	const controls = [
 		{
 			key: 'zoom-in',
@@ -115,18 +122,71 @@
 		}
 	];
 
+	let previewContainer: HTMLDivElement;
+	let modalContainer: HTMLDivElement;
+	let previewViewport: HTMLDivElement;
+	let modalViewport: HTMLDivElement;
+	let modalDialog: HTMLDivElement;
+	let previewResizeObserver: ResizeObserver | null = null;
+	let modalResizeObserver: ResizeObserver | null = null;
+	let openButton: HTMLButtonElement;
+	let closeButton: HTMLButtonElement;
+	let modalOpen = false;
+	let loading = state === 'complete';
+	let modalLoading = false;
+	let canPreview = false;
+	let error = '';
+	let label = getDiagramLabel(kind);
+	let codeLanguage = 'plaintext';
+	let highlightedCode = '';
+	let previewView: ViewState = { scale: 1, x: 0, y: 0 };
+	let modalView: ViewState = { scale: 1, x: 0, y: 0 };
+	let previewTouchState: TouchState = { lastX: 0, lastY: 0, lastDistance: null };
+	let modalTouchState: TouchState = { lastX: 0, lastY: 0, lastDistance: null };
+	let previewGesturesEnabled = false;
+	let lastFocusedElement: HTMLElement | null = null;
+	let renderedDiagramSignature = `${kind}:${state}:${source}`;
+	let previewRenderVersion = 0;
+	let renderedModalSignature = '';
+
+	const diagramId = `diagram-${Math.random().toString(36).slice(2)}`;
 	const clampScale = (value: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, value));
-
+	const gesturesEnabled = (view: ViewMode) => view === 'modal' || previewGesturesEnabled;
 	const getContainer = (view: ViewMode) => (view === 'preview' ? previewContainer : modalContainer);
-
 	const getViewport = (view: ViewMode) => (view === 'preview' ? previewViewport : modalViewport);
-
 	const getViewState = (view: ViewMode) => (view === 'preview' ? previewView : modalView);
-
 	const getTouchState = (view: ViewMode) =>
 		view === 'preview' ? previewTouchState : modalTouchState;
+	const getCodeLanguage = (nextKind: DiagramKind) => {
+		if (nextKind === 'svg' && hljs.getLanguage('svg')) {
+			return 'svg';
+		}
 
-	const gesturesEnabled = (view: ViewMode) => view === 'modal' || previewGesturesEnabled;
+		return hljs.getLanguage(nextKind) ? nextKind : 'plaintext';
+	};
+
+	const computeDisabledControls = (view: ViewMode, state: ViewState): Record<string, boolean> => {
+		const container = getContainer(view);
+		const viewport = getViewport(view);
+		const metrics = getDiagramMetrics(container);
+		if (!metrics || !viewport) {
+			return {};
+		}
+
+		const contentWidth = metrics.width * state.scale;
+		const contentHeight = metrics.height * state.scale;
+		const vw = viewport.clientWidth;
+		const vh = viewport.clientHeight;
+
+		return {
+			'zoom-in': state.scale >= MAX_SCALE,
+			'zoom-out': state.scale <= MIN_SCALE,
+			up: state.y + contentHeight <= 0,
+			down: state.y >= vh,
+			left: state.x + contentWidth <= 0,
+			right: state.x >= vw
+		};
+	};
 
 	const setViewState = (view: ViewMode, next: ViewState) => {
 		if (view === 'preview') {
@@ -142,6 +202,19 @@
 		} else {
 			modalTouchState = next;
 		}
+	};
+
+	const clearRenderedContainer = (container: HTMLDivElement | undefined) => {
+		if (!container) {
+			return;
+		}
+
+		container.innerHTML = '';
+		container.style.width = '';
+		container.style.height = '';
+		container.style.transform = '';
+		delete container.dataset.baseWidth;
+		delete container.dataset.baseHeight;
 	};
 
 	const togglePreviewGestures = () => {
@@ -205,10 +278,35 @@
 		const viewport = getViewport(view);
 		const metrics = getDiagramMetrics(container);
 		if (!container || !viewport || !metrics) {
-			return;
+			return false;
 		}
 
 		const padding = 32;
+		if (view === 'preview') {
+			if (viewport.clientWidth <= padding) {
+				return false;
+			}
+
+			const scale = clampScale(Math.min((viewport.clientWidth - padding) / metrics.width, 1));
+			const previewHeight = Math.max(
+				Math.ceil(metrics.height * scale + padding),
+				PREVIEW_MIN_HEIGHT
+			);
+			viewport.style.height = `${previewHeight}px`;
+
+			setViewState(view, {
+				scale,
+				x: (viewport.clientWidth - metrics.width * scale) / 2,
+				y: (previewHeight - metrics.height * scale) / 2
+			});
+			applyTransform(view);
+			return true;
+		}
+
+		if (viewport.clientWidth <= padding || viewport.clientHeight <= padding) {
+			return false;
+		}
+
 		const scale = clampScale(
 			Math.min(
 				(viewport.clientWidth - padding) / metrics.width,
@@ -223,6 +321,7 @@
 			y: (viewport.clientHeight - metrics.height * scale) / 2
 		});
 		applyTransform(view);
+		return true;
 	};
 
 	const setScaleAtPoint = (view: ViewMode, nextScale: number, anchorX: number, anchorY: number) => {
@@ -405,17 +504,77 @@
 		setTouchState(view, { lastX: 0, lastY: 0, lastDistance: null });
 	};
 
-	const renderInto = async (container: HTMLDivElement | undefined, view: ViewMode) => {
-		if (!container) {
-			return;
+	const decorateSvgMarkup = (markup: string) => {
+		const parsed = new DOMParser().parseFromString(markup, 'image/svg+xml');
+		const svg = parsed.documentElement;
+		if (svg.tagName.toLowerCase() !== 'svg') {
+			return null;
+		}
+
+		const currentClass = svg.getAttribute('class');
+		svg.setAttribute('class', currentClass ? `${currentClass} ${svgCanvasClass}` : svgCanvasClass);
+
+		if (!svg.hasAttribute('width') || !svg.hasAttribute('height')) {
+			const viewBox = svg
+				.getAttribute('viewBox')
+				?.trim()
+				.split(/[\s,]+/);
+			if (viewBox?.length === 4) {
+				const width = Number(viewBox[2]);
+				const height = Number(viewBox[3]);
+				if (!svg.hasAttribute('width') && Number.isFinite(width) && width > 0) {
+					svg.setAttribute('width', `${width}`);
+				}
+				if (!svg.hasAttribute('height') && Number.isFinite(height) && height > 0) {
+					svg.setAttribute('height', `${height}`);
+				}
+			}
+		}
+
+		return new XMLSerializer().serializeToString(svg);
+	};
+
+	const getSvgMarkup = () => {
+		const trimmed = source.trim();
+		if (!SVG_DOCUMENT_PATTERN.test(trimmed)) {
+			return null;
+		}
+
+		const sanitized = DOMPurify.sanitize(trimmed, {
+			USE_PROFILES: { svg: true, svgFilters: true, html: false }
+		});
+		if (typeof sanitized !== 'string') {
+			return null;
+		}
+
+		return decorateSvgMarkup(sanitized);
+	};
+
+	const buildDiagramMarkup = async (view: ViewMode): Promise<RenderResult | null> => {
+		if (kind === 'svg') {
+			const markup = getSvgMarkup();
+			return markup ? { markup } : null;
 		}
 
 		const mermaid = await getMermaid();
 		const { svg, bindFunctions } = await mermaid.render(`${diagramId}-${view}`, source);
-		delete container.dataset.baseWidth;
-		delete container.dataset.baseHeight;
-		container.innerHTML = svg;
-		bindFunctions?.(container);
+		return { markup: svg, bind: bindFunctions };
+	};
+
+	const renderInto = async (container: HTMLDivElement | undefined, view: ViewMode) => {
+		if (!container) {
+			return false;
+		}
+
+		const rendered = await buildDiagramMarkup(view);
+		if (!rendered) {
+			clearRenderedContainer(container);
+			return false;
+		}
+
+		clearRenderedContainer(container);
+		container.innerHTML = rendered.markup;
+		rendered.bind?.(container);
 
 		const metrics = getDiagramMetrics(container);
 		if (metrics) {
@@ -427,36 +586,68 @@
 		}
 
 		fitView(view);
+		return true;
 	};
 
 	const renderPreview = async () => {
-		loading = true;
+		const renderVersion = ++previewRenderVersion;
+		canPreview = false;
 		error = '';
+		loading = state === 'complete';
+
+		if (state !== 'complete') {
+			clearRenderedContainer(previewContainer);
+			loading = false;
+			return;
+		}
 
 		try {
 			await tick();
-			await renderInto(previewContainer, 'preview');
+			if (renderVersion !== previewRenderVersion) {
+				return;
+			}
+
+			const nextCanPreview = await renderInto(previewContainer, 'preview');
+			if (renderVersion !== previewRenderVersion) {
+				return;
+			}
+
+			canPreview = nextCanPreview;
 		} catch (err) {
-			error = err instanceof Error ? err.message : 'Failed to render Mermaid diagram.';
-			sadToast('Could not render Mermaid diagram.');
+			if (renderVersion !== previewRenderVersion) {
+				return;
+			}
+
+			canPreview = false;
+			error = err instanceof Error ? err.message : `Failed to render ${label} diagram.`;
+			sadToast(`Could not render ${label} diagram.`);
 		} finally {
-			loading = false;
+			if (renderVersion === previewRenderVersion) {
+				loading = false;
+			}
 		}
 	};
 
 	const renderModalDiagram = async () => {
+		if (!modalOpen || !canPreview) {
+			clearRenderedContainer(modalContainer);
+			return;
+		}
+
 		modalLoading = true;
 		try {
 			await renderInto(modalContainer, 'modal');
 		} catch (err) {
-			error = err instanceof Error ? err.message : 'Failed to render Mermaid diagram.';
+			error = err instanceof Error ? err.message : `Failed to render ${label} diagram.`;
+			sadToast(`Could not render ${label} diagram.`);
+			modalOpen = false;
 		} finally {
 			modalLoading = false;
 		}
 	};
 
 	const handleCopy = () => {
-		happyToast('Mermaid code copied to clipboard', 2000);
+		happyToast(`${label} code copied to clipboard`, 2000);
 	};
 
 	const getModalFocusableElements = () => {
@@ -474,6 +665,10 @@
 	};
 
 	const openModal = () => {
+		if (!canPreview || loading) {
+			return;
+		}
+
 		lastFocusedElement =
 			document.activeElement instanceof HTMLElement ? document.activeElement : openButton;
 		modalOpen = true;
@@ -482,6 +677,7 @@
 	const closeModal = async () => {
 		modalOpen = false;
 		setTouchState('modal', { lastX: 0, lastY: 0, lastDistance: null });
+		clearRenderedContainer(modalContainer);
 		await tick();
 		lastFocusedElement?.focus();
 		lastFocusedElement = null;
@@ -525,6 +721,10 @@
 
 	onMount(() => {
 		const handleResize = () => {
+			if (!canPreview) {
+				return;
+			}
+
 			resetView('preview');
 			if (modalOpen) {
 				resetView('modal');
@@ -533,52 +733,107 @@
 
 		window.addEventListener('resize', handleResize);
 		void renderPreview();
+		void tick().then(() => {
+			if (typeof ResizeObserver === 'undefined') {
+				return;
+			}
+
+			if (previewViewport) {
+				previewResizeObserver = new ResizeObserver(() => {
+					if (canPreview && showInteractivePreview) {
+						resetView('preview');
+					}
+				});
+				previewResizeObserver.observe(previewViewport);
+			}
+
+			if (modalViewport) {
+				modalResizeObserver = new ResizeObserver(() => {
+					if (modalOpen && canPreview) {
+						resetView('modal');
+					}
+				});
+				modalResizeObserver.observe(modalViewport);
+			}
+		});
 
 		return () => {
 			window.removeEventListener('resize', handleResize);
+			previewResizeObserver?.disconnect();
+			modalResizeObserver?.disconnect();
 		};
 	});
 
-	$: if (source !== renderedSource) {
-		renderedSource = source;
+	onDestroy(() => {
+		clearRenderedContainer(previewContainer);
+		clearRenderedContainer(modalContainer);
+	});
+
+	$: label = getDiagramLabel(kind);
+	$: diagramSignature = `${kind}:${state}:${source}`;
+	$: showInteractivePreview = state === 'complete' && (loading || canPreview);
+	$: codeLanguage = getCodeLanguage(kind);
+	$: highlightedCode = hljs.highlight(source, { language: codeLanguage }).value;
+	$: previewDisabled = computeDisabledControls('preview', previewView);
+	$: modalDisabled = computeDisabledControls('modal', modalView);
+
+	afterUpdate(() => {
+		if (diagramSignature === renderedDiagramSignature) {
+			return;
+		}
+
+		renderedDiagramSignature = diagramSignature;
 		resetView('preview');
 		void (async () => {
 			await renderPreview();
-			if (modalOpen) {
-				await tick();
-				await renderModalDiagram();
+			if (!canPreview && modalOpen) {
+				await closeModal();
 			}
 		})();
-	}
+	});
 
-	$: if (modalOpen) {
+	afterUpdate(() => {
+		const modalSignature = modalOpen && canPreview ? `${diagramSignature}:${modalOpen}` : '';
+		if (modalSignature === renderedModalSignature) {
+			return;
+		}
+
+		renderedModalSignature = modalSignature;
+		if (!modalSignature) {
+			return;
+		}
+
 		void (async () => {
 			await tick();
 			await renderModalDiagram();
 			closeButton?.focus();
 		})();
-	}
+	});
 </script>
 
-<div
-	class="mermaid-block not-prose relative mb-4 max-w-full overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm"
->
-	<div
-		class="flex items-center justify-between gap-3 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-white px-3 py-2"
-	>
-		<div class="text-xs font-semibold tracking-[0.18em] text-gray-500 uppercase">Mermaid</div>
-		<div class="flex items-center gap-1">
+<div class={cardClass}>
+	<div class={headerClass}>
+		<div class="text-xs font-semibold tracking-[0.18em] text-gray-500 uppercase">{label}</div>
+		<div class="flex items-center gap-2">
+			{#if state === 'streaming'}
+				<div class="flex flex-row items-center gap-1.5">
+					<Spinner color="custom" customColor="fill-gray-500" class="h-3 w-3" />
+					<div class="text-xs font-medium text-gray-500">Generating code...</div>
+				</div>
+			{/if}
+			{#if canPreview}
+				<button
+					bind:this={openButton}
+					class={actionButtonClass}
+					aria-label={`Open ${label} diagram in a larger view`}
+					onclick={openModal}
+				>
+					<ExpandOutline class="h-4 w-4" />
+				</button>
+			{/if}
 			<button
-				bind:this={openButton}
-				class="rounded-md border border-gray-200 p-2 text-gray-600 transition hover:border-gray-300 hover:bg-gray-100 hover:text-gray-900"
-				aria-label="Open Mermaid diagram in a larger view"
-				onclick={openModal}
-			>
-				<ExpandOutline class="h-4 w-4" />
-			</button>
-			<button
-				class="rounded-md border border-gray-200 p-2 text-gray-600 transition hover:border-gray-300 hover:bg-gray-100 hover:text-gray-900"
-				aria-label="Copy Mermaid code"
+				class={actionButtonClass}
+				aria-label={`Copy ${label} code`}
 				onclick={() => {}}
 				use:copy={{ text: source, onCopy: handleCopy }}
 			>
@@ -590,10 +845,11 @@
 	<div class="relative max-w-full min-w-0 overflow-hidden bg-white px-3 py-4">
 		<div
 			bind:this={previewViewport}
-			class="relative h-[26rem] overflow-hidden rounded-lg border border-gray-100 bg-gray-50/40"
+			class="relative overflow-hidden rounded-lg border border-gray-100 bg-gray-50/40"
+			class:hidden={!showInteractivePreview}
 			class:touch-none={previewGesturesEnabled}
 			role="application"
-			aria-label="Interactive Mermaid diagram preview"
+			aria-label={`Interactive ${label} diagram preview`}
 			onwheel={(event) => handleWheel('preview', event)}
 			ontouchstart={(event) => handleTouchStart('preview', event)}
 			ontouchmove={(event) => handleTouchMove('preview', event)}
@@ -632,6 +888,7 @@
 						<button
 							class={`${controlButtonBaseClass} ${controlPositionClass[control.key]}`}
 							aria-label={control.label}
+							disabled={previewDisabled[control.key]}
 							onclick={() => control.action('preview')}
 						>
 							<svelte:component this={control.icon} class="h-5 w-5" />
@@ -646,28 +903,29 @@
 				>
 					Rendering diagram...
 				</div>
-			{:else if error}
-				<div class="space-y-3">
-					<div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-						{error}
-					</div>
-					<pre
-						class="overflow-x-auto rounded-lg bg-gray-950 p-4 text-xs leading-6 whitespace-pre-wrap text-gray-100"><code
-							>{source}</code
-						></pre>
-				</div>
 			{/if}
 		</div>
+
+		{#if !showInteractivePreview}
+			{#if error}
+				<div class="mb-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+					{error}
+				</div>
+			{/if}
+			<pre class={codeBlockClass}><code class={`language-${codeLanguage}`}
+					><Sanitize html={highlightedCode} /></code
+				></pre>
+		{/if}
 	</div>
 </div>
 
-{#if modalOpen}
+{#if modalOpen && canPreview}
 	<div
 		bind:this={modalDialog}
-		class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/20 p-6"
+		class="fixed inset-0 z-60 flex items-center justify-center bg-slate-950/20 p-6"
 		role="dialog"
 		aria-modal="true"
-		aria-label="Mermaid diagram"
+		aria-label={`${label} diagram`}
 		tabindex="-1"
 		onclick={(event) => {
 			if (event.target === event.currentTarget) {
@@ -681,7 +939,7 @@
 				bind:this={modalViewport}
 				class="relative h-full touch-none overflow-hidden rounded-lg border border-gray-200 bg-white"
 				role="application"
-				aria-label="Interactive Mermaid diagram"
+				aria-label={`Interactive ${label} diagram`}
 				onwheel={(event) => handleWheel('modal', event)}
 				ontouchstart={(event) => handleTouchStart('modal', event)}
 				ontouchmove={(event) => handleTouchMove('modal', event)}
@@ -701,6 +959,7 @@
 						<button
 							class={`${controlButtonBaseClass} ${controlPositionClass[control.key]}`}
 							aria-label={control.label}
+							disabled={modalDisabled[control.key]}
 							onclick={() => control.action('modal')}
 						>
 							<svelte:component this={control.icon} class="h-5 w-5" />

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SVG_DOCUMENT_PATTERN } from './svg';
+import { SVG_DOCUMENT_PATTERN, parseDiagramFence } from './diagram';
 
 describe('SVG_DOCUMENT_PATTERN', () => {
 	it('matches a complete svg document', () => {
@@ -22,5 +22,19 @@ describe('SVG_DOCUMENT_PATTERN', () => {
 
 	it('rejects non-svg markup', () => {
 		expect(SVG_DOCUMENT_PATTERN.test('<div>not an svg</div>')).toBe(false);
+	});
+
+	it('parses svg fences into the shared diagram shape', () => {
+		expect(
+			parseDiagramFence(
+				'svg',
+				'```svg\n<svg viewBox="0 0 10 10"></svg>\n```',
+				'<svg viewBox="0 0 10 10"></svg>'
+			)
+		).toEqual({
+			kind: 'svg',
+			state: 'complete',
+			source: '<svg viewBox="0 0 10 10"></svg>'
+		});
 	});
 });
