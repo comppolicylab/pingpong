@@ -13,6 +13,7 @@
 	} from 'flowbite-svelte-icons';
 	import { onMount, tick } from 'svelte';
 	import { copy } from 'svelte-copy';
+	import { getMermaid } from '$lib/mermaid';
 	import { happyToast, sadToast } from '$lib/toast';
 	import { Tooltip } from 'flowbite-svelte';
 
@@ -50,7 +51,6 @@
 	let renderedSource = source;
 
 	const diagramId = `mermaid-${Math.random().toString(36).slice(2)}`;
-	let mermaidPromise: Promise<typeof import('mermaid').default> | null = null;
 	const ZOOM_STEP = 0.15;
 	const PAN_STEP = 60;
 	const MIN_SCALE = 0.05;
@@ -403,21 +403,6 @@
 		}
 
 		setTouchState(view, { lastX: 0, lastY: 0, lastDistance: null });
-	};
-
-	const getMermaid = async () => {
-		if (!mermaidPromise) {
-			mermaidPromise = import('mermaid').then(({ default: mermaid }) => {
-				mermaid.initialize({
-					startOnLoad: false,
-					theme: 'neutral',
-					securityLevel: 'strict'
-				});
-				return mermaid;
-			});
-		}
-
-		return mermaidPromise;
 	};
 
 	const renderInto = async (container: HTMLDivElement | undefined, view: ViewMode) => {
