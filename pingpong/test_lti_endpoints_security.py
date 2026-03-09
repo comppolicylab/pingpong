@@ -118,3 +118,76 @@ def test_lti_security_specific_overrides_global(monkeypatch):
         endpoints.generate_token_endpoint_url(
             "https://global.example.com/specific/access"
         )
+
+
+def test_lti_security_empty_nested_endpoint_tables_inherit_global(monkeypatch):
+    settings = config_module.LTISettings.model_validate(
+        {
+            **_base_lti_settings(),
+            "security": {
+                "allow_http_in_development": False,
+                "allow_redirects": False,
+                "hosts": {"allow": ["global.example.com"], "deny": []},
+                "paths": {"allow": ["/global/*"], "deny": ["/private/*"]},
+                "token_endpoint": {
+                    "hosts": {},
+                    "paths": {},
+                },
+            },
+        }
+    )
+    _patch_runtime_config(monkeypatch, lti=settings, development=True)
+
+    generated = endpoints.generate_token_endpoint_url(
+        "http://global.example.com/global/token"
+    )
+
+    assert generated == "https://global.example.com/global/token"
+    assert endpoints.allow_redirects(settings.security.token_endpoint) is False
+
+    with pytest.raises(ValueError, match="Invalid token endpoint URL hostname"):
+        endpoints.generate_token_endpoint_url("https://other.example.com/global/token")
+
+    with pytest.raises(ValueError, match="Invalid token endpoint URL path"):
+        endpoints.generate_token_endpoint_url(
+            "https://global.example.com/private/token"
+        )
+
+
+def test_lti_security_partial_nested_endpoint_tables_merge_with_global(monkeypatch):
+    settings = config_module.LTISettings.model_validate(
+        {
+            **_base_lti_settings(),
+            "security": {
+                "hosts": {
+                    "allow": ["global.example.com"],
+                    "deny": ["blocked.example.com"],
+                },
+                "paths": {"allow": ["/global/*"], "deny": ["/private/*"]},
+                "token_endpoint": {
+                    "hosts": {"allow": ["specific.example.com"]},
+                    "paths": {"deny": ["/blocked/*"]},
+                },
+            },
+        }
+    )
+    _patch_runtime_config(monkeypatch, lti=settings, development=False)
+
+    generated = endpoints.generate_token_endpoint_url(
+        "https://specific.example.com/global/token"
+    )
+
+    assert generated == "https://specific.example.com/global/token"
+
+    with pytest.raises(ValueError, match="Invalid token endpoint URL hostname"):
+        endpoints.generate_token_endpoint_url(
+            "https://blocked.example.com/global/token"
+        )
+
+    with pytest.raises(ValueError, match="Invalid token endpoint URL hostname"):
+        endpoints.generate_token_endpoint_url("https://global.example.com/global/token")
+
+    with pytest.raises(ValueError, match="Invalid token endpoint URL path"):
+        endpoints.generate_token_endpoint_url(
+            "https://specific.example.com/blocked/token"
+        )

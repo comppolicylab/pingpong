@@ -114,8 +114,8 @@ async def _fetch_jwks(jwks_url: str) -> dict[str, Any]:
     timeout = aiohttp.ClientTimeout(total=10)
     try:
         generated_jwks_url = generate_jwks_uri_url(jwks_url)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid jwks_url")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="Invalid jwks_url") from e
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.get(
             generated_jwks_url,
@@ -976,7 +976,14 @@ async def lti_launch(
                 ):
                     course_term = None
                 nrps_claim = _get_claim_object(claims, LTI_CLAIM_NRPS_KEY)
-                context_memberships_url = nrps_claim.get("context_memberships_url")
+                context_memberships_url_value = nrps_claim.get(
+                    "context_memberships_url"
+                )
+                context_memberships_url = (
+                    context_memberships_url_value
+                    if isinstance(context_memberships_url_value, str)
+                    else None
+                )
 
                 pending_lti_class = LTIClass(
                     registration_id=registration.id,
@@ -1102,7 +1109,14 @@ async def lti_launch(
                 ):
                     course_term = None
                 nrps_claim = _get_claim_object(claims, LTI_CLAIM_NRPS_KEY)
-                context_memberships_url = nrps_claim.get("context_memberships_url")
+                context_memberships_url_value = nrps_claim.get(
+                    "context_memberships_url"
+                )
+                context_memberships_url = (
+                    context_memberships_url_value
+                    if isinstance(context_memberships_url_value, str)
+                    else None
+                )
                 second_lti_class = LTIClass(
                     registration_id=registration.id,
                     lti_status=LTIStatus.LINKED,
@@ -1202,7 +1216,14 @@ async def lti_launch(
                 ):
                     course_term = None
                 nrps_claim = _get_claim_object(claims, LTI_CLAIM_NRPS_KEY)
-                context_memberships_url = nrps_claim.get("context_memberships_url")
+                context_memberships_url_value = nrps_claim.get(
+                    "context_memberships_url"
+                )
+                context_memberships_url = (
+                    context_memberships_url_value
+                    if isinstance(context_memberships_url_value, str)
+                    else None
+                )
                 new_lti_class = LTIClass(
                     registration_id=registration.id,
                     lti_status=LTIStatus.LINKED,

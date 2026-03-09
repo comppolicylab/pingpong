@@ -490,8 +490,20 @@ class LTISettings(BaseSettings):
         else:
             paths = {}
 
-        if platform_url_allowlist is not None and "allow" not in hosts:
-            hosts["allow"] = platform_url_allowlist
+        normalized_dev_http_hosts: list[str] | None = None
+        if dev_http_hosts is not None:
+            normalized_dev_http_hosts = cls._validate_legacy_dev_http_hosts(
+                dev_http_hosts
+            )
+
+        legacy_host_allow = []
+        if platform_url_allowlist is not None:
+            legacy_host_allow.extend(platform_url_allowlist)
+        if normalized_dev_http_hosts:
+            legacy_host_allow.extend(normalized_dev_http_hosts)
+
+        if legacy_host_allow and "allow" not in hosts:
+            hosts["allow"] = list(dict.fromkeys(legacy_host_allow))
 
         if openid_configuration_paths is not None and "allow" not in paths:
             paths["allow"] = cls._validate_legacy_openid_configuration_paths(
@@ -503,9 +515,7 @@ class LTISettings(BaseSettings):
 
         if "allow_http_in_development" not in security:
             if dev_http_hosts is not None:
-                security["allow_http_in_development"] = bool(
-                    cls._validate_legacy_dev_http_hosts(dev_http_hosts)
-                )
+                security["allow_http_in_development"] = bool(normalized_dev_http_hosts)
             elif using_legacy_layout:
                 # Legacy configs defaulted to HTTP being allowed in development.
                 security["allow_http_in_development"] = True
@@ -539,8 +549,11 @@ class LTISettings(BaseSettings):
                     "It will be removed in PingPong 8.0. "
                     "Replace with:\n"
                     "  [lti.security]\n"
-                    "  allow_http_in_development = %r",
+                    "  allow_http_in_development = %r\n"
+                    "  [lti.security.hosts]\n"
+                    "  allow = %r",
                     security.get("allow_http_in_development", True),
+                    hosts.get("allow", ["*"]),
                 )
 
         return mapped_data

@@ -1,4 +1,4 @@
-from pingpong.config import LTIUrlSecuritySettings
+from pingpong.config import LTIAllowDenySettings, LTIUrlSecuritySettings
 from pingpong.lti.allowlist import (
     generate_safe_lti_url,
 )
@@ -15,20 +15,44 @@ def _get_openid_configuration_patterns(
             "LTI configuration is required to determine OpenID configuration allow/deny patterns"
         )
 
-    return (
-        security_config.hosts.allow
-        if security_config.hosts is not None
-        else config.lti.security.hosts.allow,
-        security_config.hosts.deny
-        if security_config.hosts is not None
-        else config.lti.security.hosts.deny,
-        security_config.paths.allow
-        if security_config.paths is not None
-        else config.lti.security.paths.allow,
-        security_config.paths.deny
-        if security_config.paths is not None
-        else config.lti.security.paths.deny,
+    host_allow, host_deny = _merge_allow_deny_settings(
+        config.lti.security.hosts, security_config.hosts
     )
+    path_allow, path_deny = _merge_allow_deny_settings(
+        config.lti.security.paths, security_config.paths
+    )
+
+    return host_allow, host_deny, path_allow, path_deny
+
+
+def _merge_allow_deny_settings(
+    global_settings: LTIAllowDenySettings,
+    endpoint_settings: LTIAllowDenySettings | None,
+) -> tuple[list[str], list[str]]:
+    if endpoint_settings is None:
+        return global_settings.allow, global_settings.deny
+
+    return (
+        endpoint_settings.allow
+        if "allow" in endpoint_settings.model_fields_set
+        else global_settings.allow,
+        endpoint_settings.deny
+        if "deny" in endpoint_settings.model_fields_set
+        else global_settings.deny,
+    )
+
+
+def _get_security_setting(
+    security_config: LTIUrlSecuritySettings,
+    *,
+    field_name: str,
+    default: bool,
+) -> bool:
+    if field_name not in security_config.model_fields_set:
+        return default
+
+    value = getattr(security_config, field_name)
+    return default if value is None else value
 
 
 def _allow_http_in_development(
@@ -42,10 +66,10 @@ def _allow_http_in_development(
             "LTI configuration is required to determine if HTTP is allowed in development"
         )
 
-    return (
-        security_config.allow_http_in_development
-        if security_config.allow_http_in_development is not None
-        else config.lti.security.allow_http_in_development
+    return _get_security_setting(
+        security_config,
+        field_name="allow_http_in_development",
+        default=config.lti.security.allow_http_in_development,
     )
 
 
@@ -84,10 +108,10 @@ def allow_redirects(security_config: LTIUrlSecuritySettings) -> bool:
             "LTI configuration is required to determine if redirects are allowed"
         )
 
-    return (
-        security_config.allow_redirects
-        if security_config.allow_redirects is not None
-        else config.lti.security.allow_redirects
+    return _get_security_setting(
+        security_config,
+        field_name="allow_redirects",
+        default=config.lti.security.allow_redirects,
     )
 
 
