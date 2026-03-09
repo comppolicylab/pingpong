@@ -2007,7 +2007,6 @@
 							class="flex flex-row gap-1.5 rounded-sm bg-blue-dark-40 px-4 py-1.5 text-center text-sm text-xs font-normal text-white transition-all hover:bg-blue-dark-50 hover:text-blue-light-50"
 							type="button"
 							onclick={handleSessionSetup}
-							ontouchstart={handleSessionSetup}
 						>
 							Enable access
 						</Button>

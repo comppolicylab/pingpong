@@ -195,6 +195,7 @@
 	let showMenuButtonTooltip = false;
 	let menuButtonStyle = '';
 	let menuButtonTooltipStyle = '';
+	let inIframe = false;
 	$: showMenuToggle = !(inIframe && sharedPage) || forceShowSidebarButton;
 	$: shouldRenderFloatingMenuButton =
 		showMenuToggle && forceCollapsedLayout && forceShowSidebarButton && isNewHeaderLayout;
@@ -213,6 +214,15 @@
 				node.remove();
 			}
 		};
+	};
+
+	const handleWindowScroll = () => {
+		if (shouldRenderFloatingMenuButton) {
+			updateMenuButtonPosition();
+		}
+		if (showMenuButtonTooltip) {
+			updateMenuButtonTooltipPosition();
+		}
 	};
 
 	const updateMenuButtonPosition = () => {
@@ -238,7 +248,6 @@
 		}
 	};
 
-	let inIframe = false;
 	onMount(() => {
 		inIframe = window.self !== window.top;
 		initializePlacement();
@@ -575,7 +584,7 @@
 
 <svelte:window
 	on:scroll={shouldRenderFloatingMenuButton || showMenuButtonTooltip
-		? updateMenuButtonPosition
+		? handleWindowScroll
 		: undefined}
 />
 
