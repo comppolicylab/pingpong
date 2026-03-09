@@ -24,7 +24,7 @@
 	} from 'flowbite-svelte-icons';
 	import { sadToast, happyToast } from '$lib/toast';
 	import { invalidateAll } from '$app/navigation';
-	import { ltiHeaderState } from '$lib/stores/ltiHeader';
+	import { headerState } from '$lib/stores/header';
 
 	export let data;
 
@@ -52,7 +52,7 @@
 
 	// Update props reactively when data changes
 	$: if (isLtiHeaderLayout) {
-		ltiHeaderState.set({
+		headerState.set({
 			kind: 'nongroup',
 			props: {
 				title: 'Your Profile'

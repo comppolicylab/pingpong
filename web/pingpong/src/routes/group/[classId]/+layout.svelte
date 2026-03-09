@@ -3,7 +3,7 @@
 	import { page } from '$app/stores';
 	import { onMount, setContext } from 'svelte';
 	import { writable } from 'svelte/store';
-	import { ltiHeaderState } from '$lib/stores/ltiHeader';
+	import { headerState } from '$lib/stores/header';
 
 	export let data;
 
@@ -15,7 +15,7 @@
 
 	// Update props reactively when data changes
 	$: if (isLtiHeaderLayout) {
-		ltiHeaderState.set({
+		headerState.set({
 			kind: 'thread',
 			props: {
 				current: data.class,

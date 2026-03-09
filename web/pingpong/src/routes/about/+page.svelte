@@ -2,15 +2,15 @@
 	import { Select, Label, Input, Textarea, Heading, P, Button, Modal } from 'flowbite-svelte';
 	import Sanitize from '$lib/components/Sanitize.svelte';
 	import { writable } from 'svelte/store';
-	import { happyToast, sadToast } from '$lib/toast.js';
+	import { happyToast, sadToast } from '$lib/toast';
 	import * as api from '$lib/api';
 	import { ExclamationCircleOutline, InfoCircleSolid, LockSolid } from 'flowbite-svelte-icons';
 	import AboutPage from '$lib/components/AboutPage.svelte';
 	import { onMount } from 'svelte';
-	import { ltiHeaderState } from '$lib/stores/ltiHeader';
+	import { headerState } from '$lib/stores/header';
 
 	onMount(() => {
-		ltiHeaderState.set({ kind: 'none' });
+		headerState.set({ kind: 'none' });
 	});
 
 	export let data;

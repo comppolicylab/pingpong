@@ -1627,7 +1627,7 @@
 		</div>
 	{:else}
 		<div
-		class={`messages-container min-h-0 grow overflow-y-auto py-2 ${
+			class={`messages-container min-h-0 grow overflow-y-auto py-2 ${
 				data.isSharedAssistantPage || data.isSharedThreadPage ? 'pt-10' : ''
 			}`}
 			bind:this={messagesContainer}

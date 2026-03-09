@@ -17,7 +17,7 @@
 		TableHeadCell
 	} from 'flowbite-svelte';
 	import { ArrowRightOutline, PlusOutline } from 'flowbite-svelte-icons';
-	import { ltiHeaderState } from '$lib/stores/ltiHeader';
+	import { headerState } from '$lib/stores/header';
 
 	export let data;
 
@@ -28,7 +28,7 @@
 
 	// Update props reactively when data changes
 	$: if (isLtiHeaderLayout) {
-		ltiHeaderState.set({
+		headerState.set({
 			kind: 'nongroup',
 			props: {
 				title: 'User Agreements',

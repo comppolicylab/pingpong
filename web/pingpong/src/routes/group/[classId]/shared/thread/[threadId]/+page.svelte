@@ -6,10 +6,10 @@
 	 */
 	export let data;
 	import { onMount } from 'svelte';
-	import { ltiHeaderState } from '$lib/stores/ltiHeader';
+	import { headerState } from '$lib/stores/header';
 
 	onMount(() => {
-		ltiHeaderState.set({ kind: 'none' });
+		headerState.set({ kind: 'none' });
 	});
 </script>
 

@@ -4,7 +4,7 @@
 	import { Pulse } from 'svelte-loading-spinners';
 	import { blur } from 'svelte/transition';
 	import { loading, loadingMessage } from '$lib/stores/general';
-	import { ltiHeaderState } from '$lib/stores/ltiHeader';
+	import { headerState } from '$lib/stores/header';
 
 	export let data;
 	export let isNewHeaderLayout: boolean = false;
@@ -12,7 +12,7 @@
 	$: forceCollapsedLayout = data.forceCollapsedLayout;
 	$: isCollapsedSidebarOpen = $appMenuOpen && isNewHeaderLayout;
 	$: isMenuOpen = $appMenuOpen && !isCollapsedSidebarOpen;
-	$: hasLtiHeaderComponent = $ltiHeaderState.kind !== 'none';
+	$: hasHeaderComponent = $headerState.kind !== 'none';
 </script>
 
 <div
@@ -26,29 +26,25 @@
 	class:md:left-80={isMenuOpen}
 	class:pb-4={isNewHeaderLayout}
 >
-	{#if !!$navigating || $loading}
-		<div
-			class="absolute top-0 left-0 z-[9998] flex h-full w-full items-center bg-white/75 print:!hidden"
-			class:rounded-tl-4xl={isNewHeaderLayout}
-			class:rounded-t-4xl={!isNewHeaderLayout || !hasLtiHeaderComponent}
-			class:md:rounded-tl-none={$appMenuOpen && isNewHeaderLayout && hasLtiHeaderComponent}
-			class:rounded-b-4xl={isNewHeaderLayout}
-		>
-			<div class="m-auto flex flex-col items-center gap-5" transition:blur={{ amount: 10 }}>
-				<Pulse color="#0ea5e9" />
-				{#if $loadingMessage}
-					<p>{$loadingMessage}</p>
-				{/if}
-			</div>
-		</div>
-	{/if}
 	<div
-		class={`relative h-full grow ${isNewHeaderLayout ? 'overflow-y-auto' : 'overflow-hidden'} bg-white ${$appMenuTransitionsEnabled ? 'transition-all' : ''} print:!h-auto print:!overflow-visible print:!rounded-none print:!bg-transparent`}
+		class={`relative h-full grow overflow-y-auto bg-white ${$appMenuTransitionsEnabled ? 'transition-all' : ''} print:!h-auto print:!overflow-visible print:!rounded-none print:!bg-transparent`}
 		class:rounded-tl-4xl={isNewHeaderLayout}
-		class:rounded-t-4xl={!isNewHeaderLayout || !hasLtiHeaderComponent}
-		class:md:rounded-tl-none={$appMenuOpen && isNewHeaderLayout && hasLtiHeaderComponent}
+		class:rounded-t-4xl={!isNewHeaderLayout || !hasHeaderComponent}
+		class:md:rounded-tl-none={$appMenuOpen && isNewHeaderLayout && hasHeaderComponent}
 		class:rounded-b-4xl={isNewHeaderLayout}
 	>
+		{#if !!$navigating || $loading}
+			<div
+				class="sticky top-0 left-0 z-[9998] flex h-full w-full items-center bg-white/75 print:!hidden"
+			>
+				<div class="m-auto flex flex-col items-center gap-5" transition:blur={{ amount: 10 }}>
+					<Pulse color="#0ea5e9" />
+					{#if $loadingMessage}
+						<p>{$loadingMessage}</p>
+					{/if}
+				</div>
+			</div>
+		{/if}
 		{#if isNewHeaderLayout}
 			<div class="mx-auto h-full max-w-screen-2xl">
 				<slot />

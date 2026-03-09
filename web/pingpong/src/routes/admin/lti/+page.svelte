@@ -17,7 +17,7 @@
 	import * as api from '$lib/api';
 	import { happyToast, sadToast } from '$lib/toast';
 	import { resolve } from '$app/paths';
-	import { ltiHeaderState } from '$lib/stores/ltiHeader';
+	import { headerState } from '$lib/stores/header';
 
 	export let data;
 
@@ -28,7 +28,7 @@
 
 	// Update props reactively when data changes
 	$: if (isLtiHeaderLayout) {
-		ltiHeaderState.set({
+		headerState.set({
 			kind: 'nongroup',
 			props: {
 				title: 'LTI Registrations',

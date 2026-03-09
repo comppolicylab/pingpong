@@ -45,7 +45,7 @@
 	import { afterNavigate, goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import { resolve } from '$app/paths';
-	import { ltiHeaderState } from '$lib/stores/ltiHeader';
+	import { headerState } from '$lib/stores/header';
 
 	export let data: LayoutData;
 
@@ -59,7 +59,8 @@
 			isMyAssistant
 		};
 	};
-	$: hasLtiHeaderComponent = $ltiHeaderState.kind !== 'none';
+	$: hasHeaderComponent = $headerState.kind !== 'none';
+	$: isNewHeaderLayout = data.forceCollapsedLayout && data.forceShowSidebarButton;
 	$: sharedPage = data.isSharedAssistantPage || data.isSharedThreadPage;
 	$: forceShowSidebarButton = data.forceShowSidebarButton;
 	$: forceCollapsedLayout = data.forceCollapsedLayout;
@@ -156,16 +157,21 @@
 	};
 
 	function syncViewportState(options?: { disableTransition?: boolean }) {
-		if (window.innerWidth >= lgBreakpoint) {
+		const nextIsLgOrWider = window.innerWidth >= lgBreakpoint;
+
+		if (nextIsLgOrWider) {
 			// lg breakpoint
 			placement = 'right-start';
-			isLgOrWider = true;
 		} else {
 			placement = 'top-end';
-			isLgOrWider = false;
 		}
 
-		togglePanel(isLgOrWider, options);
+		const breakpointChanged = nextIsLgOrWider !== isLgOrWider;
+		isLgOrWider = nextIsLgOrWider;
+
+		if (options?.disableTransition || breakpointChanged) {
+			togglePanel(nextIsLgOrWider, options);
+		}
 	}
 
 	function initializePlacement() {
@@ -191,7 +197,7 @@
 	let menuButtonTooltipStyle = '';
 	$: showMenuToggle = !(inIframe && sharedPage) || forceShowSidebarButton;
 	$: shouldRenderFloatingMenuButton =
-		showMenuToggle && forceCollapsedLayout && forceShowSidebarButton && hasLtiHeaderComponent;
+		showMenuToggle && forceCollapsedLayout && forceShowSidebarButton && isNewHeaderLayout;
 	const goToPage = async (
 		destination: '/about' | '/privacy-policy' | '/admin' | '/logout' | '/profile'
 	) => {
@@ -250,8 +256,8 @@
 </script>
 
 <Sidebar
-	asideClass={`absolute top-0 left-0 ${forceCollapsedLayout && forceShowSidebarButton && hasLtiHeaderComponent ? '-z-1 md:z-0' : 'z-0'} px-2 h-full ${
-		forceCollapsedLayout && forceShowSidebarButton ? 'w-80' : 'w-[90%] md:w-80'
+	asideClass={`absolute top-0 left-0 ${isNewHeaderLayout && hasHeaderComponent ? '-z-1 md:z-0' : 'z-0'} px-2 h-full ${
+		isNewHeaderLayout ? 'w-80' : 'w-[90%] md:w-80'
 	} ${!forceCollapsedLayout ? 'lg:static lg:h-full lg:w-full' : ''} print:!hidden`}
 	activeUrl={$page.url.pathname}
 >
@@ -317,9 +323,7 @@
 				{/if}
 				<NavBrand
 					href={(inIframe && sharedPage) || !logoIsClickable ? undefined : '/'}
-					class={forceCollapsedLayout && forceShowSidebarButton && hasLtiHeaderComponent
-						? 'hidden md:block'
-						: ''}
+					class={isNewHeaderLayout && hasHeaderComponent ? 'hidden md:block' : ''}
 					target={openAllLinksInNewTab ? '_blank' : undefined}
 				>
 					<PingPongLogo size={10} extraClass="fill-amber-600" />
@@ -327,11 +331,7 @@
 			</div>
 		</SidebarGroup>
 		{#if showSidebarItems}
-			<SidebarGroup
-				class="mt-6 {forceCollapsedLayout && forceShowSidebarButton
-					? 'mt-0 pt-6 md:mt-2 md:mb-2 md:pt-0'
-					: ''}"
-			>
+			<SidebarGroup class="mt-6 {isNewHeaderLayout ? 'mt-0 pt-6 md:mt-2 md:mb-2 md:pt-0' : ''}">
 				<SidebarItem
 					target={openAllLinksInNewTab ? '_blank' : undefined}
 					href={nonAuthed
@@ -574,9 +574,6 @@
 </Dropdown>
 
 <svelte:window
-	on:resize={shouldRenderFloatingMenuButton || showMenuButtonTooltip
-		? updateMenuButtonPosition
-		: undefined}
 	on:scroll={shouldRenderFloatingMenuButton || showMenuButtonTooltip
 		? updateMenuButtonPosition
 		: undefined}

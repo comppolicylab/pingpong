@@ -9,7 +9,7 @@
 	import { getValue, updateSearch } from '$lib/urlstate';
 	import { loading } from '$lib/stores/general';
 	import { afterUpdate } from 'svelte';
-	import { ltiHeaderState } from '$lib/stores/ltiHeader';
+	import { headerState } from '$lib/stores/header';
 
 	export let data;
 
@@ -38,7 +38,7 @@
 
 	// Update props reactively when data changes
 	$: if (isLtiHeaderLayout) {
-		ltiHeaderState.set({
+		headerState.set({
 			kind: 'nongroup',
 			props: {
 				title: 'Threads Archive'

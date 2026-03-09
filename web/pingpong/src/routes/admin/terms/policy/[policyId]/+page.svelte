@@ -18,7 +18,7 @@
 	} from 'flowbite-svelte';
 	import { ArrowRightOutline, LockSolid } from 'flowbite-svelte-icons';
 	import { writable } from 'svelte/store';
-	import { ltiHeaderState } from '$lib/stores/ltiHeader';
+	import { headerState } from '$lib/stores/header';
 
 	export let data;
 
@@ -39,7 +39,7 @@
 
 	// Update props reactively when data changes
 	$: if (isLtiHeaderLayout) {
-		ltiHeaderState.set({
+		headerState.set({
 			kind: 'nongroup',
 			props: {
 				title: 'Agreement Policies',

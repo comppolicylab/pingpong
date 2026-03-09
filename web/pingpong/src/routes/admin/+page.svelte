@@ -5,7 +5,7 @@
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import { updateSearch, getValue } from '$lib/urlstate';
 	import { resolve } from '$app/paths';
-	import { ltiHeaderState } from '$lib/stores/ltiHeader';
+	import { headerState } from '$lib/stores/header';
 
 	export let data;
 
@@ -27,7 +27,7 @@
 
 	// Update props reactively when data changes
 	$: if (isLtiHeaderLayout) {
-		ltiHeaderState.set({
+		headerState.set({
 			kind: 'nongroup',
 			props: {
 				title: 'Admin'

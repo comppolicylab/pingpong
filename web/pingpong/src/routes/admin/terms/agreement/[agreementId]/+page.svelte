@@ -8,7 +8,7 @@
 	import { ArrowRightOutline, LockSolid } from 'flowbite-svelte-icons';
 	import Modal from '$lib/components/CustomModal.svelte';
 	import { resolve } from '$app/paths';
-	import { ltiHeaderState } from '$lib/stores/ltiHeader';
+	import { headerState } from '$lib/stores/header';
 
 	export let data;
 
@@ -19,7 +19,7 @@
 
 	// Update props reactively when data changes
 	$: if (isLtiHeaderLayout) {
-		ltiHeaderState.set({
+		headerState.set({
 			kind: 'nongroup',
 			props: {
 				title: 'User Agreements',

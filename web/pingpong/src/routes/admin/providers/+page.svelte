@@ -6,7 +6,7 @@
 	import { happyToast, sadToast } from '$lib/toast';
 	import { Button, Heading, Input, Label, Modal, P, Textarea } from 'flowbite-svelte';
 	import { ArrowRightOutline } from 'flowbite-svelte-icons';
-	import { ltiHeaderState } from '$lib/stores/ltiHeader';
+	import { headerState } from '$lib/stores/header';
 
 	export let data;
 	$: externalProviders = data.externalProviders;
@@ -15,7 +15,7 @@
 
 	// Update props reactively when data changes
 	$: if (isLtiHeaderLayout) {
-		ltiHeaderState.set({
+		headerState.set({
 			kind: 'nongroup',
 			props: {
 				title: 'External Login Providers',
