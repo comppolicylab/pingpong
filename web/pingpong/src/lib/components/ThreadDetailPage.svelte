@@ -551,23 +551,15 @@
 		return '';
 	};
 
-	// Find the nearest scrollable ancestor element.
-	const getScrollContainer = (el: HTMLElement): HTMLElement => {
-		let parent = el.parentElement;
-		while (parent) {
-			const { overflowY } = getComputedStyle(parent);
-			if (overflowY === 'auto' || overflowY === 'scroll') return parent;
-			parent = parent.parentElement;
-		}
-		return document.documentElement;
-	};
-
 	// Scroll to the bottom of the chat thread.
 	const scroll = (el: HTMLDivElement, params: { messages: Message[]; threadId: number }) => {
-		const scrollEl = getScrollContainer(el);
+		const scrollEl = el;
 		let lastScrollTop = scrollEl.scrollTop;
 		let userPausedAutoScroll = false;
 		let isProgrammaticScroll = false;
+		let settleFrame: number | null = null;
+		let settlePassesRemaining = 0;
+		let lastKnownScrollHeight = scrollEl.scrollHeight;
 		let lastMessageId: string | null = params.messages[params.messages.length - 1]?.data.id ?? null;
 		let currentThreadId = params.threadId;
 
@@ -579,8 +571,49 @@
 			});
 			requestAnimationFrame(() => {
 				lastScrollTop = scrollEl.scrollTop;
+				lastKnownScrollHeight = scrollEl.scrollHeight;
 				isProgrammaticScroll = false;
 			});
+		};
+
+		const cancelSettledScroll = () => {
+			if (settleFrame !== null) {
+				cancelAnimationFrame(settleFrame);
+				settleFrame = null;
+			}
+			settlePassesRemaining = 0;
+		};
+
+		const scheduleScrollToBottom = (passes = 6) => {
+			if (userPausedAutoScroll) {
+				return;
+			}
+
+			settlePassesRemaining = Math.max(settlePassesRemaining, passes);
+			if (settleFrame !== null) {
+				return;
+			}
+
+			const run = () => {
+				settleFrame = null;
+				if (userPausedAutoScroll) {
+					settlePassesRemaining = 0;
+					return;
+				}
+
+				const scrollHeightChanged = scrollEl.scrollHeight !== lastKnownScrollHeight;
+				scrollToBottom();
+				lastKnownScrollHeight = scrollEl.scrollHeight;
+				settlePassesRemaining -= 1;
+				if (scrollHeightChanged) {
+					settlePassesRemaining = Math.max(settlePassesRemaining, 2);
+				}
+				if (settlePassesRemaining > 0) {
+					settleFrame = requestAnimationFrame(run);
+				}
+			};
+
+			settleFrame = requestAnimationFrame(run);
 		};
 
 		const onScroll = () => {
@@ -600,11 +633,27 @@
 			if (userPausedAutoScroll && isScrollingDown && distanceFromBottom < 50) {
 				userPausedAutoScroll = false;
 			}
+			if (!userPausedAutoScroll && distanceFromBottom < 50) {
+				scheduleScrollToBottom(2);
+			}
 			lastScrollTop = scrollEl.scrollTop;
 		};
 
+		const mutationObserver = new MutationObserver(() => {
+			scheduleScrollToBottom(4);
+		});
+		const onDescendantLoad = () => {
+			scheduleScrollToBottom(4);
+		};
+
 		scrollEl.addEventListener('scroll', onScroll, { passive: true });
-		scrollToBottom();
+		scrollEl.addEventListener('load', onDescendantLoad, true);
+		mutationObserver.observe(scrollEl, {
+			childList: true,
+			subtree: true,
+			characterData: true
+		});
+		scheduleScrollToBottom();
 
 		return {
 			update: (nextParams: { messages: Message[]; threadId: number }) => {
@@ -614,7 +663,8 @@
 					userPausedAutoScroll = false;
 					lastMessageId = null;
 					lastScrollTop = 0;
-					scrollToBottom();
+					lastKnownScrollHeight = scrollEl.scrollHeight;
+					scheduleScrollToBottom();
 					return;
 				}
 
@@ -632,11 +682,14 @@
 						userPausedAutoScroll = false;
 					}
 					if (!userPausedAutoScroll) {
-						scrollToBottom();
+						scheduleScrollToBottom();
 					}
 				});
 			},
 			destroy: () => {
+				cancelSettledScroll();
+				mutationObserver.disconnect();
+				scrollEl.removeEventListener('load', onDescendantLoad, true);
 				scrollEl.removeEventListener('scroll', onScroll);
 			}
 		};
@@ -1503,7 +1556,7 @@
 />
 
 <div
-	class="relative flex w-full grow flex-col justify-between"
+	class="relative flex h-full min-h-0 w-full grow flex-col justify-between overflow-hidden"
 	role="region"
 	aria-label="Thread detail"
 	ondragenter={handleThreadDragEnter}
@@ -1574,7 +1627,7 @@
 		</div>
 	{:else}
 		<div
-			class={`messages-container py-2 ${
+		class={`messages-container min-h-0 grow overflow-y-auto py-2 ${
 				data.isSharedAssistantPage || data.isSharedThreadPage ? 'pt-10' : ''
 			}`}
 			bind:this={messagesContainer}
