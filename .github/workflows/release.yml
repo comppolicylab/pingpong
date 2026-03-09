@@ -93,7 +93,7 @@ jobs:
           echo "Computed RELEASE_VERSION=$RELEASE_VERSION"
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@45ab090e1002c78ee8fb5970cebb6486b35c3e73
+        uses: aws-actions/configure-aws-credentials@2e454faab91acfe1250b33b97d80ed198a8ce8f6
         with:
           aws-access-key-id: ${{ secrets.PINGPONG_AWS_ACCESS_KEY }}
           aws-secret-access-key: ${{ secrets.PINGPONG_AWS_SECRET_ACCESS_KEY }}
