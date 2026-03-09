@@ -114,7 +114,7 @@
 </script>
 
 <AboutPage {nonAuthed} {isNewHeaderLayout} linksOpenInNewTab={openAllLinksInNewTab}>
-	<div slot="header" class="px-12 pt-8">
+	<div slot="header" class="px-12 pt-8" class:hidden={!hasNoGroups || isAnonymous}>
 		{#if hasNoGroups && !isAnonymous}
 			<div class="rounded-lg border border-gray-300 bg-gray-100 p-6">
 				<div class="flex items-start gap-4">
