@@ -110,7 +110,7 @@
 
 	let handleModalConfirm: () => void;
 	let handleModalCancel: () => void;
-	let isAnonymous = data.isAnonymous;
+	$: isAnonymous = data.isAnonymous;
 </script>
 
 <AboutPage {nonAuthed} {isNewHeaderLayout} linksOpenInNewTab={openAllLinksInNewTab}>

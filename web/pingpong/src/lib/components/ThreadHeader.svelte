@@ -70,7 +70,7 @@
 				</div>
 				{#each filteredClasses as cls (cls.id)}
 					<DropdownItem
-						class="flex w-full items-center gap-4 py-3  text-base leading-6 hover:bg-blue-light-50"
+						class="flex w-full items-center gap-4 py-3 text-base leading-6 hover:bg-blue-light-50"
 						onclick={() => goToClass(cls.id)}>{cls.name}</DropdownItem
 					>
 				{/each}
