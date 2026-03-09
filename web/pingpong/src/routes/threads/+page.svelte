@@ -9,7 +9,7 @@
 	import { getValue, updateSearch } from '$lib/urlstate';
 	import { loading } from '$lib/stores/general';
 	import { afterUpdate } from 'svelte';
-	import { ltiHeaderState } from '$lib/stores/ltiHeader';
+	import { headerState } from '$lib/stores/header';
 
 	export let data;
 
@@ -34,11 +34,11 @@
 		}
 	});
 
-	$: isLtiHeaderLayout = data.forceCollapsedLayout && data.forceShowSidebarButton;
+	$: isNewHeaderLayout = data.forceCollapsedLayout && data.forceShowSidebarButton;
 
 	// Update props reactively when data changes
-	$: if (isLtiHeaderLayout) {
-		ltiHeaderState.set({
+	$: if (isNewHeaderLayout) {
+		headerState.set({
 			kind: 'nongroup',
 			props: {
 				title: 'Threads Archive'
@@ -80,7 +80,7 @@
 </script>
 
 <div class="flex h-full w-full flex-col">
-	{#if !isLtiHeaderLayout}
+	{#if !isNewHeaderLayout}
 		<PageHeader>
 			<h2 class="text-color-blue-dark-50 px-4 py-3 font-serif text-3xl font-bold" slot="left">
 				Threads Archive

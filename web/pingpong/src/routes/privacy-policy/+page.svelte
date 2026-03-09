@@ -1,21 +1,33 @@
 <script lang="ts">
 	import { Heading, P } from 'flowbite-svelte';
-	import { onMount } from 'svelte';
-	import { ltiHeaderState } from '$lib/stores/ltiHeader';
+	import { headerState } from '$lib/stores/header';
 
-	onMount(() => {
-		ltiHeaderState.set({ kind: 'none' });
-	});
+	export let data;
+	$: isNewHeaderLayout = data.forceCollapsedLayout && data.forceShowSidebarButton;
+
+	$: if (isNewHeaderLayout) {
+		headerState.set({
+			kind: 'nongroup',
+			props: {
+				title: 'Privacy Policy'
+			}
+		});
+	}
 </script>
 
-<div class="about flex h-full flex-col gap-4 overflow-y-auto px-12 py-12">
-	<div class="text-center">
-		<Heading tag="h2" class="mt-4 mb-3" customSize="text-4xl font-extrabold md:text-5xl lg:text-6xl"
-			>Privacy Policy
-		</Heading>
-	</div>
+<div class="about flex flex-col gap-4 px-12 py-12 {isNewHeaderLayout ? 'pt-6' : ''}">
+	{#if !isNewHeaderLayout}
+		<div class="text-center">
+			<Heading
+				tag="h2"
+				class="mt-4 mb-3"
+				customSize="text-4xl font-extrabold md:text-5xl lg:text-6xl"
+				>Privacy Policy
+			</Heading>
+		</div>
+	{/if}
 	<div>
-		<P class="mt-4"
+		<P
 			>This Privacy Statement discloses the privacy practices related to the HKS developed tool,
 			PingPong, in its use by Harvard affiliates at Harvard University in Cambridge, MA. By using
 			PingPong, you are consenting to our collection and use of information in accordance with this

@@ -5,6 +5,7 @@ import { writable } from 'svelte/store';
  * Store for the app menu open state.
  */
 export const appMenuOpen = writable(false);
+export const appMenuTransitionsEnabled = writable(true);
 
 /**
  * Store for a big loading indicator over the main page.

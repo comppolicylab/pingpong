@@ -7,10 +7,10 @@
 	import * as api from '$lib/api';
 	import { page } from '$app/stores';
 	import { onMount } from 'svelte';
-	import { ltiHeaderState } from '$lib/stores/ltiHeader';
+	import { headerState } from '$lib/stores/header';
 
 	onMount(() => {
-		ltiHeaderState.set({ kind: 'none' });
+		headerState.set({ kind: 'none' });
 	});
 
 	export let form;

@@ -16,9 +16,9 @@
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import * as api from '$lib/api';
 	import { happyToast, sadToast } from '$lib/toast';
-	import { loading } from '$lib/stores/general.js';
+	import { loading } from '$lib/stores/general';
 	import { resolve } from '$app/paths';
-	import { ltiHeaderState } from '$lib/stores/ltiHeader';
+	import { headerState } from '$lib/stores/header';
 
 	export let data;
 
@@ -44,11 +44,11 @@
 		name: inst.name
 	}));
 
-	$: isLtiHeaderLayout = data.forceCollapsedLayout && data.forceShowSidebarButton;
+	$: isNewHeaderLayout = data.forceCollapsedLayout && data.forceShowSidebarButton;
 
 	// Update props reactively when data changes
-	$: if (isLtiHeaderLayout) {
-		ltiHeaderState.set({
+	$: if (isNewHeaderLayout) {
+		headerState.set({
 			kind: 'nongroup',
 			props: {
 				title: 'LTI Registration',
@@ -234,7 +234,7 @@
 </script>
 
 <div class="relative flex h-full w-full flex-col">
-	{#if !isLtiHeaderLayout}
+	{#if !isNewHeaderLayout}
 		<PageHeader>
 			<div slot="left">
 				<h2 class="text-color-blue-dark-50 px-4 py-3 font-serif text-3xl font-bold">
@@ -251,7 +251,7 @@
 		</PageHeader>
 	{/if}
 
-	<div class="h-full w-full space-y-8 overflow-y-auto p-12">
+	<div class="w-full space-y-8 p-12">
 		<div class="mb-4 flex flex-row flex-wrap items-center justify-between gap-y-4">
 			<div class="flex items-center gap-4">
 				<Heading

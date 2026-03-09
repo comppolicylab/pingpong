@@ -4,151 +4,159 @@
 	import { resolve } from '$app/paths';
 
 	export let nonAuthed: boolean;
+	export let isNewHeaderLayout: boolean = false;
 	export let linksOpenInNewTab: boolean = false;
 
 	const year = new Date().getFullYear();
 	let acknowledgementsModal = false;
 </script>
 
-<div class="about flex h-full flex-col gap-8 overflow-y-auto">
+<div class="about flex h-full flex-col overflow-y-auto">
 	<slot name="header" />
-	<div class="px-12 text-center">
-		<Heading tag="h2" class="mt-2 mb-6" customSize="text-4xl font-extrabold md:text-5xl lg:text-6xl"
-			>{#if nonAuthed}Welcome to{:else}About{/if}
-			<span class="bg-linear-to-t from-orange-dark to-orange bg-clip-text text-transparent"
-				>PingPong</span
-			></Heading
-		>
-	</div>
-	<div class="px-12">
-		<Heading tag="h3" class="my-4">What is it?</Heading>
-		<P class="mt-4 ml-0.5"
-			>PingPong is a platform for using large language models (LLMs) for teaching and learning. You
-			can use it to create and share custom bots for specific tasks, like serving as a virtual
-			teaching assistant with access to course documents. PingPong has been used by thousands of
-			students in dozens of colleges across the United States.</P
-		>
-		<P class="mt-4 ml-0.5"
-			>PingPong is built on top of OpenAI's latest text- and voice-based models. We've designed the
-			platform from the ground up with teachers and students in mind. For example:</P
-		>
-		<ul class="ml-7 list-disc">
-			<li class="my-2">
-				Each week, instructors get an AI-generated summary of how students are using the bots in
-				their courses, which can help to tailor class content. Instructors can also view individual,
-				de-identified chats, to gain further insights.
-			</li>
-			<li class="my-2">
-				We make it straightforward to create real-time, voice-based bots. These bots can be used,
-				for example, to quiz students on their understanding of the course material.
-			</li>
-			<li class="my-2">
-				Bot instructions can be randomized, both to facilitate experimentation and to ensure
-				variation across interactions (e.g., so bot-administered "quizzes" are not all the same).
-			</li>
-			<li class="my-2">
-				None of the information entered on PingPong will be used by OpenAI to train their models,
-				ensuring user data are kept private.
-			</li>
-			<li class="my-2">
-				PingPong is integrated into Canvas, making it easy for faculty and students to get up and
-				running quickly.
-			</li>
-		</ul>
-	</div>
-	{#if nonAuthed}
-		<div class="px-14"><PingPongDemoCarousel /></div>
-	{/if}
-	<div class="px-12">
-		<Heading tag="h3" class="my-4">What kinds of data do you collect?</Heading>
-		<P class="mt-4 ml-0.5">
-			Please read our <a
-				href={resolve('/privacy-policy')}
-				class="underline"
-				rel="noopener noreferrer"
-				target={linksOpenInNewTab ? '_blank' : undefined}>privacy policy</a
-			> to learn about what information we collect and how we keep it safe.
-		</P>
-	</div>
-
-	<div class="px-12">
-		<Heading tag="h3" class="my-4">Who built it?</Heading>
-		<P class="mt-4 ml-0.5">
-			This app was developed by the <a
-				href="https://policylab.hks.harvard.edu"
-				class="underline"
-				rel="noopener noreferrer"
-				target="_blank">Computational Policy Lab</a
-			>
-			at the
-			<a href="https://hks.harvard.edu" class="underline" rel="noopener noreferrer" target="_blank"
-				>Harvard Kennedy School</a
-			>.
-		</P>
-	</div>
-
-	<div class="px-12">
-		<Heading tag="h3" class="my-4">What else should I know?</Heading>
-		<P class="mt-4 ml-0.5">Here are a few disclosures, rules, and disclaimers about this app:</P>
-		<ol class="ml-7 list-decimal">
-			<li class="my-2">
-				We are monitoring the app for signs of abuse and will take action if we see it.
-			</li>
-			<li class="my-2">
-				"Abuse" includes prompt injection, or any activity that could compromise the performance or
-				integrity of our app, or anything else inconsistent with the app's intended use.
-			</li>
-			<li class="my-2">
-				You must adhere to <a
-					href="https://policy.security.harvard.edu/policies"
-					rel="noopener noreferrer"
-					class="underline"
-					target="_blank">Harvard's Information Security Policy</a
-				> while using this app.
-			</li>
-			<li class="my-2">
-				This is an experimental, beta version of the app. We are actively developing this project,
-				and while we are doing our best to ensure uptime and reliability, we make no guarantees at
-				this time!
-			</li>
-		</ol>
-	</div>
-
-	<slot name="footer" />
-	<div class="flex w-full flex-col gap-8 bg-blue-dark-40 p-8">
-		<div class="flex flex-row items-center justify-evenly gap-2 px-12">
-			<div class="w-48">
-				<a href="https://shorensteincenter.org/" rel="noopener noreferrer" target="_blank">
-					<img
-						src="/HKSlogo_shorenstein_transparent-1.png"
-						alt="Harvard Kennedy School - Shorenstein Center logo"
-					/>
-				</a>
-			</div>
-			<div>
-				<a
-					href="https://policylab.hks.harvard.edu"
-					class="flex flex-row items-center gap-2"
-					rel="noopener noreferrer"
-					target="_blank"
+	<div class="flex flex-col gap-8">
+		{#if !isNewHeaderLayout}
+			<div class="px-12 pt-16 text-center">
+				<Heading tag="h2" customSize="text-4xl font-extrabold md:text-5xl lg:text-6xl"
+					>{#if nonAuthed}Welcome to{:else}About{/if}
+					<span class="bg-linear-to-t from-orange-dark to-orange bg-clip-text text-transparent"
+						>PingPong</span
+					></Heading
 				>
-					<img
-						src="/cpl_logo_white.svg"
-						style="height: 1.2rem"
-						alt="Computational Policy Lab logo"
-					/>
-					<span class="font-mono text-sm text-gray-100">COMPUTATIONAL POLICY LAB</span>
-				</a>
 			</div>
+		{/if}
+		<div class="px-12" class:pt-4={isNewHeaderLayout}>
+			<Heading tag="h3" class="my-4">What is it?</Heading>
+			<P class="mt-4 ml-0.5"
+				>PingPong is a platform for using large language models (LLMs) for teaching and learning.
+				You can use it to create and share custom bots for specific tasks, like serving as a virtual
+				teaching assistant with access to course documents. PingPong has been used by thousands of
+				students in dozens of colleges across the United States.</P
+			>
+			<P class="mt-4 ml-0.5"
+				>PingPong is built on top of OpenAI's latest text- and voice-based models. We've designed
+				the platform from the ground up with teachers and students in mind. For example:</P
+			>
+			<ul class="ml-7 list-disc">
+				<li class="my-2">
+					Each week, instructors get an AI-generated summary of how students are using the bots in
+					their courses, which can help to tailor class content. Instructors can also view
+					individual, de-identified chats, to gain further insights.
+				</li>
+				<li class="my-2">
+					We make it straightforward to create real-time, voice-based bots. These bots can be used,
+					for example, to quiz students on their understanding of the course material.
+				</li>
+				<li class="my-2">
+					Bot instructions can be randomized, both to facilitate experimentation and to ensure
+					variation across interactions (e.g., so bot-administered "quizzes" are not all the same).
+				</li>
+				<li class="my-2">
+					None of the information entered on PingPong will be used by OpenAI to train their models,
+					ensuring user data are kept private.
+				</li>
+				<li class="my-2">
+					PingPong is integrated into Canvas, making it easy for faculty and students to get up and
+					running quickly.
+				</li>
+			</ul>
 		</div>
-		<P class="mt-4 w-full text-center text-xs text-gray-100"
-			>All content &copy; {year} Computational Policy Lab. All rights reserved. <A
-				class="underline"
-				onclick={() => {
-					acknowledgementsModal = true;
-				}}>Acknowledgements</A
-			></P
-		>
+		{#if nonAuthed}
+			<div class="px-14"><PingPongDemoCarousel /></div>
+		{/if}
+		<div class="px-12">
+			<Heading tag="h3" class="my-4">What kinds of data do you collect?</Heading>
+			<P class="mt-4 ml-0.5">
+				Please read our <a
+					href={resolve('/privacy-policy')}
+					class="underline"
+					rel="noopener noreferrer"
+					target={linksOpenInNewTab ? '_blank' : undefined}>privacy policy</a
+				> to learn about what information we collect and how we keep it safe.
+			</P>
+		</div>
+
+		<div class="px-12">
+			<Heading tag="h3" class="my-4">Who built it?</Heading>
+			<P class="mt-4 ml-0.5">
+				This app was developed by the <a
+					href="https://policylab.hks.harvard.edu"
+					class="underline"
+					rel="noopener noreferrer"
+					target="_blank">Computational Policy Lab</a
+				>
+				at the
+				<a
+					href="https://hks.harvard.edu"
+					class="underline"
+					rel="noopener noreferrer"
+					target="_blank">Harvard Kennedy School</a
+				>.
+			</P>
+		</div>
+
+		<div class="px-12">
+			<Heading tag="h3" class="my-4">What else should I know?</Heading>
+			<P class="mt-4 ml-0.5">Here are a few disclosures, rules, and disclaimers about this app:</P>
+			<ol class="ml-7 list-decimal">
+				<li class="my-2">
+					We are monitoring the app for signs of abuse and will take action if we see it.
+				</li>
+				<li class="my-2">
+					"Abuse" includes prompt injection, or any activity that could compromise the performance
+					or integrity of our app, or anything else inconsistent with the app's intended use.
+				</li>
+				<li class="my-2">
+					You must adhere to <a
+						href="https://policy.security.harvard.edu/policies"
+						rel="noopener noreferrer"
+						class="underline"
+						target="_blank">Harvard's Information Security Policy</a
+					> while using this app.
+				</li>
+				<li class="my-2">
+					This is an experimental, beta version of the app. We are actively developing this project,
+					and while we are doing our best to ensure uptime and reliability, we make no guarantees at
+					this time!
+				</li>
+			</ol>
+		</div>
+
+		<slot name="footer" />
+		<div class="flex w-full flex-col gap-8 bg-blue-dark-40 p-8">
+			<div class="flex flex-row items-center justify-evenly gap-2 px-12">
+				<div class="w-48">
+					<a href="https://shorensteincenter.org/" rel="noopener noreferrer" target="_blank">
+						<img
+							src="/HKSlogo_shorenstein_transparent-1.png"
+							alt="Harvard Kennedy School - Shorenstein Center logo"
+						/>
+					</a>
+				</div>
+				<div>
+					<a
+						href="https://policylab.hks.harvard.edu"
+						class="flex flex-row items-center gap-2"
+						rel="noopener noreferrer"
+						target="_blank"
+					>
+						<img
+							src="/cpl_logo_white.svg"
+							style="height: 1.2rem"
+							alt="Computational Policy Lab logo"
+						/>
+						<span class="font-mono text-sm text-gray-100">COMPUTATIONAL POLICY LAB</span>
+					</a>
+				</div>
+			</div>
+			<P class="mt-4 w-full text-center text-xs text-gray-100"
+				>All content &copy; {year} Computational Policy Lab. All rights reserved. <A
+					class="underline"
+					onclick={() => {
+						acknowledgementsModal = true;
+					}}>Acknowledgements</A
+				></P
+			>
+		</div>
 	</div>
 </div>
 

@@ -80,11 +80,13 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
 	};
 
 	const authed = meData.status === 'valid';
+	const isAnonymous = meData.status === 'anonymous';
+	const hasAuthenticatedContext = authed || isLTIContext;
 	const needsOnboarding = !!meData.user && (!meData.user.first_name || !meData.user.last_name);
 	const needsAgreements = meData.agreement_id !== null;
 	let doNotShowSidebar = false;
-	let forceShowSidebarButton = isLTIContext;
-	let forceCollapsedLayout = isLTIContext;
+	let forceShowSidebarButton = hasAuthenticatedContext;
+	let forceCollapsedLayout = hasAuthenticatedContext;
 	let openAllLinksInNewTab = false;
 	let logoIsClickable = true;
 	let showSidebarItems = true;
@@ -336,6 +338,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
 		isSharedAssistantPage,
 		isSharedThreadPage,
 		statusComponents,
-		hasNonComponentIncidents
+		hasNonComponentIncidents,
+		isAnonymous
 	};
 };

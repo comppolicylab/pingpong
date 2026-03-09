@@ -17,18 +17,18 @@
 		TableHeadCell
 	} from 'flowbite-svelte';
 	import { ArrowRightOutline, PlusOutline } from 'flowbite-svelte-icons';
-	import { ltiHeaderState } from '$lib/stores/ltiHeader';
+	import { headerState } from '$lib/stores/header';
 
 	export let data;
 
 	$: agreements = data.agreements;
 	$: policies = data.policies;
 
-	$: isLtiHeaderLayout = data.forceCollapsedLayout && data.forceShowSidebarButton;
+	$: isNewHeaderLayout = data.forceCollapsedLayout && data.forceShowSidebarButton;
 
 	// Update props reactively when data changes
-	$: if (isLtiHeaderLayout) {
-		ltiHeaderState.set({
+	$: if (isNewHeaderLayout) {
+		headerState.set({
 			kind: 'nongroup',
 			props: {
 				title: 'User Agreements',
@@ -74,7 +74,7 @@
 </script>
 
 <div class="relative flex h-full w-full flex-col">
-	{#if !isLtiHeaderLayout}
+	{#if !isNewHeaderLayout}
 		<PageHeader>
 			<div slot="left">
 				<h2 class="text-color-blue-dark-50 px-4 py-3 font-serif text-3xl font-bold">
@@ -90,7 +90,7 @@
 			</div>
 		</PageHeader>
 	{/if}
-	<div class="h-full w-full overflow-y-auto p-12">
+	<div class="w-full p-12 pt-6">
 		<div class="mb-4 flex flex-row flex-wrap items-center justify-between gap-y-4">
 			<Heading
 				tag="h2"

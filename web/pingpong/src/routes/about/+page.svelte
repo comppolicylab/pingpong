@@ -2,22 +2,27 @@
 	import { Select, Label, Input, Textarea, Heading, P, Button, Modal } from 'flowbite-svelte';
 	import Sanitize from '$lib/components/Sanitize.svelte';
 	import { writable } from 'svelte/store';
-	import { happyToast, sadToast } from '$lib/toast.js';
+	import { happyToast, sadToast } from '$lib/toast';
 	import * as api from '$lib/api';
 	import { ExclamationCircleOutline, InfoCircleSolid, LockSolid } from 'flowbite-svelte-icons';
 	import AboutPage from '$lib/components/AboutPage.svelte';
-	import { onMount } from 'svelte';
-	import { ltiHeaderState } from '$lib/stores/ltiHeader';
-
-	onMount(() => {
-		ltiHeaderState.set({ kind: 'none' });
-	});
+	import { headerState } from '$lib/stores/header';
 
 	export let data;
 
 	$: nonAuthed = data.isPublicPage && !data?.me?.user;
 	$: openAllLinksInNewTab = data.openAllLinksInNewTab;
 	$: hasNoGroups = !nonAuthed && data.classes?.length === 0;
+	$: isNewHeaderLayout = data.forceCollapsedLayout && data.forceShowSidebarButton;
+
+	$: if (isNewHeaderLayout) {
+		headerState.set({
+			kind: 'nongroup',
+			props: {
+				title: 'About PingPong'
+			}
+		});
+	}
 
 	const categories = [
 		{ value: 'bug', name: 'Bug Report' },
@@ -105,12 +110,13 @@
 
 	let handleModalConfirm: () => void;
 	let handleModalCancel: () => void;
+	$: isAnonymous = data.isAnonymous;
 </script>
 
-<AboutPage {nonAuthed} linksOpenInNewTab={openAllLinksInNewTab}>
-	<div class="px-12 pt-8" slot="header">
-		{#if hasNoGroups}
-			<div class="w-full rounded-lg border border-gray-300 bg-gray-100 p-6">
+<AboutPage {nonAuthed} {isNewHeaderLayout} linksOpenInNewTab={openAllLinksInNewTab}>
+	<div slot="header" class="px-12 pt-8" class:hidden={!hasNoGroups || isAnonymous}>
+		{#if hasNoGroups && !isAnonymous}
+			<div class="rounded-lg border border-gray-300 bg-gray-100 p-6">
 				<div class="flex items-start gap-4">
 					<InfoCircleSolid class="mt-0.5 h-6 w-6 shrink-0 text-gray-500" />
 					<div class="flex-1">

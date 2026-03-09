@@ -7,12 +7,12 @@
 	import PingPongLogo from '$lib/components/PingPongLogo.svelte';
 	import { page } from '$app/stores';
 	import SanitizeFlowbite from '$lib/components/SanitizeFlowbite.svelte';
-	import { loading } from '$lib/stores/general.js';
+	import { loading } from '$lib/stores/general';
 	import { onMount } from 'svelte';
-	import { ltiHeaderState } from '$lib/stores/ltiHeader';
+	import { headerState } from '$lib/stores/header';
 
 	onMount(() => {
-		ltiHeaderState.set({ kind: 'none' });
+		headerState.set({ kind: 'none' });
 	});
 
 	export let data;

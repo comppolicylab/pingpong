@@ -11,7 +11,7 @@
 	export let current: api.Class | null = null;
 	export let canManage: boolean = false;
 	export let isSharedPage: boolean = false;
-	export let isLtiHeaderLayout: boolean = false;
+	export let isNewHeaderLayout: boolean = false;
 
 	$: sortedClasses = classes.sort((a: api.Class, b: api.Class) => a.name.localeCompare(b.name));
 	let searchTerm = '';
@@ -46,13 +46,13 @@
 	</PageHeader>
 {:else}
 	<PageHeader
-		paddingClass={isLtiHeaderLayout
+		paddingClass={isNewHeaderLayout
 			? 'p-2 pt-3 pr-4 flex flex-row shrink rounded-t-4xl'
 			: undefined}
 	>
-		<div slot="left" class="min-w-0 {isLtiHeaderLayout ? 'pt-2' : ''}">
+		<div slot="left" class="min-w-0 {isNewHeaderLayout ? 'pt-2' : ''}">
 			<div class="eyebrow eyebrow-dark ml-4">Select group</div>
-			<Button class="{mainTextClass} max-w-full overflow-hidden {isLtiHeaderLayout ? 'pt-0.5' : ''}"
+			<Button class="{mainTextClass} max-w-full overflow-hidden {isNewHeaderLayout ? 'pt-0.5' : ''}"
 				><span class="truncate">{current?.name || 'Anonymous Session'}</span>
 				<ChevronDownOutline
 					size="sm"
@@ -60,18 +60,27 @@
 				/></Button
 			>
 			<Dropdown
-				class="max-h-[400px] min-h-0 w-64 overflow-y-auto py-1"
+				class="overflow-y-auto"
+				classContainer="max-h-[400px] min-h-0 md:max-w-1/2 lg:max-w-1/3"
 				bind:open={classDropdownOpen}
+				placement="bottom-start"
 			>
-				<div slot="header" class="w-64 p-3">
+				<div slot="header" class="p-3">
 					<Search size="md" bind:value={searchTerm} />
 				</div>
 				{#each filteredClasses as cls (cls.id)}
 					<DropdownItem
-						class="flex items-center gap-4 py-4 text-base text-sm font-medium font-semibold tracking-wide uppercase hover:bg-blue-light-50"
+						class="flex w-full items-center gap-4 py-3 text-base leading-6 hover:bg-blue-light-50"
 						onclick={() => goToClass(cls.id)}>{cls.name}</DropdownItem
 					>
 				{/each}
+				{#if filteredClasses.length === 0}
+					<div
+						class="px-4 py-4 text-sm font-medium font-semibold tracking-wide text-gray-500 uppercase select-none"
+					>
+						No groups found
+					</div>
+				{/if}
 			</Dropdown>
 		</div>
 		<div slot="right">
