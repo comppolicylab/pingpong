@@ -11,10 +11,10 @@
 	const headerHeightStore = writable(0);
 
 	// Register the LTI header component when this layout mounts
-	$: isLtiHeaderLayout = data.forceCollapsedLayout && data.forceShowSidebarButton;
+	$: isNewHeaderLayout = data.forceCollapsedLayout && data.forceShowSidebarButton;
 
 	// Update props reactively when data changes
-	$: if (isLtiHeaderLayout) {
+	$: if (isNewHeaderLayout) {
 		headerState.set({
 			kind: 'thread',
 			props: {
@@ -23,7 +23,7 @@
 				canManage: data.canManage,
 				isOnClassPage,
 				isSharedPage: data.isSharedAssistantPage || data.isSharedThreadPage,
-				isLtiHeaderLayout: true
+				isNewHeaderLayout: true
 			}
 		});
 	}
@@ -41,7 +41,7 @@
 </script>
 
 <div class="relative flex h-full w-full flex-col">
-	{#if !(data.isSharedAssistantPage || data.isSharedThreadPage) && !isLtiHeaderLayout}
+	{#if !(data.isSharedAssistantPage || data.isSharedThreadPage) && !isNewHeaderLayout}
 		<div bind:this={headerEl} class="print-hidden sticky top-0 z-20 bg-white">
 			<ThreadHeader
 				current={data.class}

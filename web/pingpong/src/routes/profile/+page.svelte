@@ -48,10 +48,10 @@
 			return a.identifier.localeCompare(b.identifier);
 		}) || [];
 
-	$: isLtiHeaderLayout = data.forceCollapsedLayout && data.forceShowSidebarButton;
+	$: isNewHeaderLayout = data.forceCollapsedLayout && data.forceShowSidebarButton;
 
 	// Update props reactively when data changes
-	$: if (isLtiHeaderLayout) {
+	$: if (isNewHeaderLayout) {
 		headerState.set({
 			kind: 'nongroup',
 			props: {
@@ -185,7 +185,7 @@
 </script>
 
 <div class="relative flex h-full w-full flex-col">
-	{#if !isLtiHeaderLayout}
+	{#if !isNewHeaderLayout}
 		<PageHeader>
 			<h2 class="text-color-blue-dark-50 px-4 py-3 font-serif text-3xl font-bold" slot="left">
 				Your Profile

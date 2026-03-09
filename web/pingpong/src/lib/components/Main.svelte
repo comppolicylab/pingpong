@@ -26,16 +26,13 @@
 	class:md:left-80={isMenuOpen}
 	class:pb-4={isNewHeaderLayout}
 >
-	<div
-		class={`relative h-full grow overflow-y-auto bg-white ${$appMenuTransitionsEnabled ? 'transition-all' : ''} print:!h-auto print:!overflow-visible print:!rounded-none print:!bg-transparent`}
-		class:rounded-tl-4xl={isNewHeaderLayout}
-		class:rounded-t-4xl={!isNewHeaderLayout || !hasHeaderComponent}
-		class:md:rounded-tl-none={$appMenuOpen && isNewHeaderLayout && hasHeaderComponent}
-		class:rounded-b-4xl={isNewHeaderLayout}
-	>
+	<div class="relative h-full grow">
 		{#if !!$navigating || $loading}
 			<div
-				class="sticky top-0 left-0 z-[9998] flex h-full w-full items-center bg-white/75 print:!hidden"
+				class="absolute inset-0 z-[9998] flex items-center bg-white/75 print:!hidden"
+				class:rounded-tl-4xl={isNewHeaderLayout}
+				class:rounded-t-4xl={!isNewHeaderLayout || !hasHeaderComponent}
+				class:rounded-b-4xl={isNewHeaderLayout}
 			>
 				<div class="m-auto flex flex-col items-center gap-5" transition:blur={{ amount: 10 }}>
 					<Pulse color="#0ea5e9" />
@@ -45,12 +42,20 @@
 				</div>
 			</div>
 		{/if}
-		{#if isNewHeaderLayout}
-			<div class="mx-auto h-full max-w-screen-2xl">
+		<div
+			class={`h-full overflow-y-auto bg-white ${$appMenuTransitionsEnabled ? 'transition-all' : ''} print:!h-auto print:!overflow-visible print:!rounded-none print:!bg-transparent`}
+			class:rounded-tl-4xl={isNewHeaderLayout}
+			class:rounded-t-4xl={!isNewHeaderLayout || !hasHeaderComponent}
+			class:md:rounded-tl-none={$appMenuOpen && isNewHeaderLayout && hasHeaderComponent}
+			class:rounded-b-4xl={isNewHeaderLayout}
+		>
+			{#if isNewHeaderLayout}
+				<div class="mx-auto h-full max-w-screen-2xl">
+					<slot />
+				</div>
+			{:else}
 				<slot />
-			</div>
-		{:else}
-			<slot />
-		{/if}
+			{/if}
+		</div>
 	</div>
 </div>

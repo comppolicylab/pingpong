@@ -11,7 +11,7 @@
 	export let current: api.Class | null = null;
 	export let canManage: boolean = false;
 	export let isSharedPage: boolean = false;
-	export let isLtiHeaderLayout: boolean = false;
+	export let isNewHeaderLayout: boolean = false;
 
 	$: sortedClasses = classes.sort((a: api.Class, b: api.Class) => a.name.localeCompare(b.name));
 	let searchTerm = '';
@@ -46,13 +46,13 @@
 	</PageHeader>
 {:else}
 	<PageHeader
-		paddingClass={isLtiHeaderLayout
+		paddingClass={isNewHeaderLayout
 			? 'p-2 pt-3 pr-4 flex flex-row shrink rounded-t-4xl'
 			: undefined}
 	>
-		<div slot="left" class="min-w-0 {isLtiHeaderLayout ? 'pt-2' : ''}">
+		<div slot="left" class="min-w-0 {isNewHeaderLayout ? 'pt-2' : ''}">
 			<div class="eyebrow eyebrow-dark ml-4">Select group</div>
-			<Button class="{mainTextClass} max-w-full overflow-hidden {isLtiHeaderLayout ? 'pt-0.5' : ''}"
+			<Button class="{mainTextClass} max-w-full overflow-hidden {isNewHeaderLayout ? 'pt-0.5' : ''}"
 				><span class="truncate">{current?.name || 'Anonymous Session'}</span>
 				<ChevronDownOutline
 					size="sm"

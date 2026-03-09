@@ -6,18 +6,23 @@
 	import * as api from '$lib/api';
 	import { ExclamationCircleOutline, InfoCircleSolid, LockSolid } from 'flowbite-svelte-icons';
 	import AboutPage from '$lib/components/AboutPage.svelte';
-	import { onMount } from 'svelte';
 	import { headerState } from '$lib/stores/header';
-
-	onMount(() => {
-		headerState.set({ kind: 'none' });
-	});
 
 	export let data;
 
 	$: nonAuthed = data.isPublicPage && !data?.me?.user;
 	$: openAllLinksInNewTab = data.openAllLinksInNewTab;
 	$: hasNoGroups = !nonAuthed && data.classes?.length === 0;
+	$: isNewHeaderLayout = data.forceCollapsedLayout && data.forceShowSidebarButton;
+
+	$: if (isNewHeaderLayout) {
+		headerState.set({
+			kind: 'nongroup',
+			props: {
+				title: 'About PingPong'
+			}
+		});
+	}
 
 	const categories = [
 		{ value: 'bug', name: 'Bug Report' },
@@ -108,10 +113,10 @@
 	let isAnonymous = data.isAnonymous;
 </script>
 
-<AboutPage {nonAuthed} linksOpenInNewTab={openAllLinksInNewTab}>
-	<div class="px-12 pt-8" slot="header">
+<AboutPage {nonAuthed} {isNewHeaderLayout} linksOpenInNewTab={openAllLinksInNewTab}>
+	<div slot="header" class="px-12 pt-8">
 		{#if hasNoGroups && !isAnonymous}
-			<div class="w-full rounded-lg border border-gray-300 bg-gray-100 p-6">
+			<div class="rounded-lg border border-gray-300 bg-gray-100 p-6">
 				<div class="flex items-start gap-4">
 					<InfoCircleSolid class="mt-0.5 h-6 w-6 shrink-0 text-gray-500" />
 					<div class="flex-1">
