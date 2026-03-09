@@ -128,7 +128,8 @@ def _patch_lti_security_config(monkeypatch):
 async def test_get_nrps_access_token_uses_oidc_token_endpoint_and_signed_assertion(
     monkeypatch,
 ):
-    token_endpoint = "https://canvas.example.com/login/oauth2/token"
+    token_endpoint = "http://canvas.example.com/login/oauth2/token"
+    normalized_token_endpoint = "https://canvas.example.com/login/oauth2/token"
     registration = SimpleNamespace(
         client_id="client-123",
         openid_configuration=f'{{"token_endpoint":"{token_endpoint}"}}',
@@ -190,7 +191,7 @@ async def test_get_nrps_access_token_uses_oidc_token_endpoint_and_signed_asserti
 
     assert len(fake_session.requests) == 1
     req = fake_session.requests[0]
-    assert req["url"] == token_endpoint
+    assert req["url"] == normalized_token_endpoint
     assert req["headers"] == {
         "Content-Type": canvas_connect_module.TOKEN_REQUEST_CONTENT_TYPE
     }
@@ -212,7 +213,7 @@ async def test_get_nrps_access_token_uses_oidc_token_endpoint_and_signed_asserti
     assert jwt_calls["payload"] == {
         "iss": "client-123",
         "sub": "client-123",
-        "aud": token_endpoint,
+        "aud": normalized_token_endpoint,
         "iat": expected_iat,
         "exp": expected_exp,
         "jti": "uuid7-test",
@@ -320,6 +321,69 @@ async def test_get_nrps_access_token_raises_on_token_endpoint_error(monkeypatch)
             await client.get_nrps_access_token()
 
     assert excinfo.value.detail == "invalid client assertion"
+
+
+@pytest.mark.asyncio
+async def test_make_authed_nrps_get_rejects_redirect_to_unallowlisted_host(
+    monkeypatch,
+):
+    allow_deny = SimpleNamespace(allow=["canvas.example.com"], deny=[])
+    url_security = SimpleNamespace(
+        allow_http_in_development=True,
+        allow_redirects=True,
+        hosts=allow_deny,
+        paths=SimpleNamespace(allow=["/api/lti/*"], deny=[]),
+    )
+    restricted_config = SimpleNamespace(
+        lti=SimpleNamespace(
+            security=SimpleNamespace(
+                allow_http_in_development=True,
+                allow_redirects=True,
+                hosts=SimpleNamespace(allow=["*"], deny=[]),
+                paths=SimpleNamespace(allow=["*"], deny=[]),
+                authorization_endpoint=url_security,
+                jwks_uri=url_security,
+                names_and_role_endpoint=url_security,
+                openid_configuration=url_security,
+                registration_endpoint=url_security,
+                token_endpoint=url_security,
+            ),
+            sync_wait=600,
+        ),
+        development=False,
+    )
+    monkeypatch.setattr(config_module, "config", restricted_config)
+    monkeypatch.setattr(canvas_connect_module, "config", restricted_config)
+
+    fake_session = FakeClientSession(
+        FakeTokenResponse(
+            status=302,
+            headers={"Location": "https://evil.example.com/api/lti/memberships"},
+        )
+    )
+    monkeypatch.setattr(
+        canvas_connect_module.aiohttp,
+        "ClientSession",
+        lambda: fake_session,
+    )
+
+    async with canvas_connect_module.CanvasConnectClient(
+        db=SimpleNamespace(),
+        lti_class_id=11,
+        key_manager=FakeKeyManager(),
+    ) as client:
+        client.get_short_lived_auth_token = lambda: _async_return("short-lived-token")
+        with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+            await client._make_authed_nrps_get(
+                "https://canvas.example.com/api/lti/memberships"
+            )
+
+    assert (
+        excinfo.value.detail
+        == "Invalid NRPS URL: Invalid Names and Role API URL hostname"
+    )
+    assert len(fake_session.requests) == 1
+    assert fake_session.requests[0]["allow_redirects"] is False
 
 
 @pytest.mark.asyncio

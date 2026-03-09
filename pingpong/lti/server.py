@@ -4,7 +4,7 @@ import json
 import logging
 from datetime import datetime
 from typing import Any, cast
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urljoin
 import aiohttp
 import jwt
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends
@@ -104,6 +104,7 @@ from pingpong.schemas import (
 logger = logging.getLogger(__name__)
 
 lti_router: APIRouter = APIRouter()
+MAX_LTI_REDIRECTS = 5
 
 
 def _is_public_sso_provider(provider: ExternalLoginProvider) -> bool:
@@ -116,18 +117,49 @@ async def _fetch_jwks(jwks_url: str) -> dict[str, Any]:
         generated_jwks_url = generate_jwks_uri_url(jwks_url)
     except ValueError as e:
         raise HTTPException(status_code=400, detail="Invalid jwks_url") from e
+    redirects_allowed = (
+        allow_redirects(config.lti.security.jwks_uri) if config.lti else True
+    )
     async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.get(
-            generated_jwks_url,
-            raise_for_status=True,
-            allow_redirects=allow_redirects(config.lti.security.jwks_uri)
-            if config.lti
-            else True,
-        ) as response:
-            payload = await response.json()
-            if not isinstance(payload, dict):
-                raise HTTPException(status_code=500, detail="Invalid JWKS response")
-            return cast(dict[str, Any], payload)
+        redirect_count = 0
+        while True:
+            async with session.get(
+                generated_jwks_url,
+                raise_for_status=True,
+                allow_redirects=False,
+            ) as response:
+                if response.status in {301, 302, 303, 307, 308}:
+                    if not redirects_allowed:
+                        raise HTTPException(
+                            status_code=400, detail="Unexpected redirect from jwks_url"
+                        )
+
+                    location = response.headers.get("Location")
+                    if not location:
+                        raise HTTPException(
+                            status_code=500, detail="Invalid JWKS redirect response"
+                        )
+
+                    redirect_count += 1
+                    if redirect_count > MAX_LTI_REDIRECTS:
+                        raise HTTPException(
+                            status_code=400, detail="Too many redirects for jwks_url"
+                        )
+
+                    try:
+                        generated_jwks_url = generate_jwks_uri_url(
+                            urljoin(generated_jwks_url, location)
+                        )
+                    except ValueError as e:
+                        raise HTTPException(
+                            status_code=400, detail="Invalid jwks_url"
+                        ) from e
+                    continue
+
+                payload = await response.json()
+                if not isinstance(payload, dict):
+                    raise HTTPException(status_code=500, detail="Invalid JWKS response")
+                return cast(dict[str, Any], payload)
 
 
 def _select_jwk(jwks: dict[str, Any], kid: str | None) -> dict[str, Any]:

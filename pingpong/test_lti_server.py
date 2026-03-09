@@ -16,8 +16,10 @@ from pingpong.schemas import LMSPlatform, LTIRegistrationReviewStatus, LTIStatus
 
 
 class FakeResponse:
-    def __init__(self, payload):
+    def __init__(self, payload, *, status=200, headers=None):
         self._payload = payload
+        self.status = status
+        self.headers = headers or {}
 
     async def __aenter__(self):
         return self
@@ -30,9 +32,18 @@ class FakeResponse:
 
 
 class FakeSession:
-    def __init__(self, get_payload=None, post_payload=None):
+    def __init__(
+        self,
+        get_payload=None,
+        post_payload=None,
+        *,
+        get_responses=None,
+        post_responses=None,
+    ):
         self.get_payload = get_payload
         self.post_payload = post_payload
+        self.get_responses = list(get_responses or [])
+        self.post_responses = list(post_responses or [])
 
     async def __aenter__(self):
         return self
@@ -41,9 +52,13 @@ class FakeSession:
         return False
 
     def get(self, *args, **kwargs):
+        if self.get_responses:
+            return self.get_responses.pop(0)
         return FakeResponse(self.get_payload)
 
     def post(self, *args, **kwargs):
+        if self.post_responses:
+            return self.post_responses.pop(0)
         return FakeResponse(self.post_payload)
 
 
@@ -338,6 +353,55 @@ async def test_fetch_jwks_rejects_non_dict(monkeypatch):
         await server_module._fetch_jwks("https://example.com/jwks")
 
     assert excinfo.value.status_code == 500
+
+
+@pytest.mark.asyncio
+async def test_fetch_jwks_rejects_redirect_to_unallowlisted_host(monkeypatch):
+    allow_deny = SimpleNamespace(allow=["example.com"], deny=[])
+    url_security = SimpleNamespace(
+        allow_http_in_development=True,
+        allow_redirects=True,
+        hosts=allow_deny,
+        paths=SimpleNamespace(allow=["/jwks"], deny=[]),
+    )
+    restricted_config = SimpleNamespace(
+        lti=SimpleNamespace(
+            security=SimpleNamespace(
+                allow_http_in_development=True,
+                allow_redirects=True,
+                hosts=allow_deny,
+                paths=SimpleNamespace(allow=["*"], deny=[]),
+                authorization_endpoint=url_security,
+                jwks_uri=url_security,
+                names_and_role_endpoint=url_security,
+                openid_configuration=url_security,
+                registration_endpoint=url_security,
+                token_endpoint=url_security,
+            )
+        ),
+        development=False,
+    )
+    monkeypatch.setattr(config_module, "config", restricted_config)
+    monkeypatch.setattr(server_module, "config", restricted_config)
+    monkeypatch.setattr(
+        server_module.aiohttp,
+        "ClientSession",
+        lambda timeout=None: FakeSession(
+            get_responses=[
+                FakeResponse(
+                    None,
+                    status=302,
+                    headers={"Location": "https://evil.example.com/jwks"},
+                )
+            ]
+        ),
+    )
+
+    with pytest.raises(HTTPException) as excinfo:
+        await server_module._fetch_jwks("https://example.com/jwks")
+
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail == "Invalid jwks_url"
 
 
 def test_select_jwk_with_kid():

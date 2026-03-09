@@ -32,13 +32,13 @@ def _merge_allow_deny_settings(
     if endpoint_settings is None:
         return global_settings.allow, global_settings.deny
 
+    field_names = getattr(endpoint_settings, "model_fields_set", None)
+    if field_names is None:
+        return endpoint_settings.allow, endpoint_settings.deny
+
     return (
-        endpoint_settings.allow
-        if "allow" in endpoint_settings.model_fields_set
-        else global_settings.allow,
-        endpoint_settings.deny
-        if "deny" in endpoint_settings.model_fields_set
-        else global_settings.deny,
+        endpoint_settings.allow if "allow" in field_names else global_settings.allow,
+        endpoint_settings.deny if "deny" in field_names else global_settings.deny,
     )
 
 
@@ -48,7 +48,8 @@ def _get_security_setting(
     field_name: str,
     default: bool,
 ) -> bool:
-    if field_name not in security_config.model_fields_set:
+    field_names = getattr(security_config, "model_fields_set", None)
+    if field_names is not None and field_name not in field_names:
         return default
 
     value = getattr(security_config, field_name)

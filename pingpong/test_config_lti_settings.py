@@ -61,7 +61,8 @@ def test_lti_settings_maps_legacy_fields_and_logs_deprecation(caplog):
         "tool.example.com",
         "canvas.docker",
     ]
-    assert settings.security.paths.allow == [
+    assert settings.security.paths.allow == ["*"]
+    assert settings.security.openid_configuration.paths.allow == [
         *LEGACY_OPENID_CONFIGURATION_PATHS_DEFAULTS,
         "/custom/openid",
     ]
@@ -91,7 +92,8 @@ def test_lti_settings_maps_legacy_dev_http_hosts_into_security_hosts_allow():
     )
 
     assert settings.security.hosts.allow == ["canvas.docker", "localhost"]
-    assert settings.security.paths.allow == list(
+    assert settings.security.paths.allow == ["*"]
+    assert settings.security.openid_configuration.paths.allow == list(
         LEGACY_OPENID_CONFIGURATION_PATHS_DEFAULTS
     )
     assert settings.security.allow_http_in_development is True
@@ -106,7 +108,8 @@ def test_lti_settings_maps_legacy_defaults_when_only_platform_allowlist_is_set()
     )
 
     assert settings.security.hosts.allow == ["platform.example.com"]
-    assert settings.security.paths.allow == list(
+    assert settings.security.paths.allow == ["*"]
+    assert settings.security.openid_configuration.paths.allow == list(
         LEGACY_OPENID_CONFIGURATION_PATHS_DEFAULTS
     )
     assert settings.security.allow_http_in_development is True

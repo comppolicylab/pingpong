@@ -3,7 +3,7 @@ import logging
 from collections.abc import AsyncIterator
 from datetime import datetime, timedelta
 from typing import cast
-from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 import aiohttp
 from fastapi import BackgroundTasks
@@ -67,6 +67,7 @@ from pingpong.users import AddNewUsersManual, AddNewUsersScript
 
 logger = logging.getLogger(__name__)
 SYNC_ROW_ERROR_DETAIL_LIMIT = 3
+MAX_LTI_REDIRECTS = 5
 
 
 def exception_detail(e: Exception) -> str:
@@ -310,35 +311,70 @@ class CanvasConnectClient:
             raise CanvasConnectException(
                 detail=f"Invalid NRPS URL: {str(e)}",
             ) from e
-        async with http_session.get(
-            generated_url,
-            headers=headers,
-            allow_redirects=allow_redirects(config.lti.security.names_and_role_endpoint)
+        redirects_allowed = (
+            allow_redirects(config.lti.security.names_and_role_endpoint)
             if config.lti
-            else True,
-        ) as response:
-            response_payload: object = None
-            try:
-                response_payload = await response.json(content_type=None)
-            except Exception:
-                response_payload = None
+            else True
+        )
+        redirect_count = 0
+        while True:
+            async with http_session.get(
+                generated_url,
+                headers=headers,
+                allow_redirects=False,
+            ) as response:
+                if response.status in {301, 302, 303, 307, 308}:
+                    if not redirects_allowed:
+                        raise CanvasConnectException(
+                            detail="Unexpected redirect from NRPS endpoint",
+                        )
 
-            if response.status >= 400:
-                detail = _extract_error_detail(response_payload)
-                if not detail:
-                    detail = (await response.text()).strip()
-                raise CanvasConnectException(
-                    detail=detail or "Failed to fetch NRPS page",
+                    location = response.headers.get("Location")
+                    if not location:
+                        raise CanvasConnectException(
+                            detail="Invalid NRPS redirect response",
+                        )
+
+                    redirect_count += 1
+                    if redirect_count > MAX_LTI_REDIRECTS:
+                        raise CanvasConnectException(
+                            detail="Too many redirects for NRPS endpoint",
+                        )
+
+                    try:
+                        generated_url = generate_names_and_role_api_url(
+                            urljoin(generated_url, location)
+                        )
+                    except ValueError as e:
+                        raise CanvasConnectException(
+                            detail=f"Invalid NRPS URL: {str(e)}",
+                        ) from e
+                    continue
+
+                response_payload: object = None
+                try:
+                    response_payload = await response.json(content_type=None)
+                except Exception:
+                    response_payload = None
+
+                if response.status >= 400:
+                    detail = _extract_error_detail(response_payload)
+                    if not detail:
+                        detail = (await response.text()).strip()
+                    raise CanvasConnectException(
+                        detail=detail or "Failed to fetch NRPS page",
+                    )
+
+                response_payload_dict = _as_dict(response_payload)
+                if response_payload_dict is None:
+                    raise CanvasConnectException(
+                        detail="Invalid NRPS response payload",
+                    )
+
+                next_page_url = self._extract_next_page_url(
+                    response, response_payload_dict
                 )
-
-            response_payload_dict = _as_dict(response_payload)
-            if response_payload_dict is None:
-                raise CanvasConnectException(
-                    detail="Invalid NRPS response payload",
-                )
-
-            next_page_url = self._extract_next_page_url(response, response_payload_dict)
-            return response_payload_dict, next_page_url
+                return response_payload_dict, next_page_url
 
     async def _request_all_nrps_pages(
         self, start_url: str
@@ -689,7 +725,15 @@ class CanvasConnectClient:
             )
 
         token_endpoint = self._get_token_endpoint(registration)
-        client_assertion = await self._build_client_assertion(client_id, token_endpoint)
+        try:
+            generated_token_endpoint = generate_token_endpoint_url(token_endpoint)
+        except ValueError as e:
+            raise CanvasConnectException(
+                detail=f"Invalid token endpoint URL: {str(e)}",
+            ) from e
+        client_assertion = await self._build_client_assertion(
+            client_id, generated_token_endpoint
+        )
 
         request_data = {
             "client_id": client_id,
@@ -698,13 +742,6 @@ class CanvasConnectClient:
             "client_assertion": client_assertion,
             "scope": NRPS_CONTEXT_MEMBERSHIP_SCOPE,
         }
-
-        try:
-            generated_token_endpoint = generate_token_endpoint_url(token_endpoint)
-        except ValueError as e:
-            raise CanvasConnectException(
-                detail=f"Invalid token endpoint URL: {str(e)}",
-            ) from e
         async with http_session.post(
             generated_token_endpoint,
             headers={"Content-Type": TOKEN_REQUEST_CONTENT_TYPE},

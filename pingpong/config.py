@@ -490,6 +490,18 @@ class LTISettings(BaseSettings):
         else:
             paths = {}
 
+        openid_configuration = cls._mutable_dict(
+            security.get("openid_configuration", {}),
+            field_name="lti.security.openid_configuration",
+        )
+        if "paths" in openid_configuration:
+            openid_paths = cls._mutable_dict(
+                openid_configuration["paths"],
+                field_name="lti.security.openid_configuration.paths",
+            )
+        else:
+            openid_paths = {}
+
         normalized_dev_http_hosts: list[str] | None = None
         if dev_http_hosts is not None:
             normalized_dev_http_hosts = cls._validate_legacy_dev_http_hosts(
@@ -505,13 +517,13 @@ class LTISettings(BaseSettings):
         if legacy_host_allow and "allow" not in hosts:
             hosts["allow"] = list(dict.fromkeys(legacy_host_allow))
 
-        if openid_configuration_paths is not None and "allow" not in paths:
-            paths["allow"] = cls._validate_legacy_openid_configuration_paths(
+        if openid_configuration_paths is not None and "allow" not in openid_paths:
+            openid_paths["allow"] = cls._validate_legacy_openid_configuration_paths(
                 openid_configuration_paths
             )
-        elif using_legacy_layout and "allow" not in paths:
+        elif using_legacy_layout and "allow" not in openid_paths:
             # Legacy configs defaulted to these explicit discovery paths.
-            paths["allow"] = list(LEGACY_OPENID_CONFIGURATION_PATHS_DEFAULTS)
+            openid_paths["allow"] = list(LEGACY_OPENID_CONFIGURATION_PATHS_DEFAULTS)
 
         if "allow_http_in_development" not in security:
             if dev_http_hosts is not None:
@@ -522,6 +534,8 @@ class LTISettings(BaseSettings):
 
         security["hosts"] = hosts
         security["paths"] = paths
+        openid_configuration["paths"] = openid_paths
+        security["openid_configuration"] = openid_configuration
         mapped_data["security"] = security
 
         for key in legacy_keys:
@@ -539,9 +553,11 @@ class LTISettings(BaseSettings):
                     "Deprecated config key 'lti.openid_configuration_paths' used. "
                     "It will be removed in PingPong 8.0. "
                     "Replace with:\n"
-                    "  [lti.security.paths]\n"
+                    "  [lti.security.openid_configuration.paths]\n"
                     "  allow = %r",
-                    paths.get("allow", ["*"]),
+                    openid_paths.get(
+                        "allow", list(LEGACY_OPENID_CONFIGURATION_PATHS_DEFAULTS)
+                    ),
                 )
             elif key == "dev_http_hosts":
                 logger.warning(
