@@ -192,7 +192,7 @@
 			</h2>
 		</PageHeader>
 	{/if}
-	<div class="h-full w-full overflow-y-auto p-12">
+	<div class="w-full p-12 pt-6">
 		<div class="mb-4 flex flex-row flex-wrap items-center justify-between gap-y-4">
 			<Heading
 				tag="h2"

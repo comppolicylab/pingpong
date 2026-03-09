@@ -210,7 +210,7 @@
 	}
 </script>
 
-<div class="h-full w-full overflow-y-auto p-12">
+<div class="w-full p-12 pt-6">
 	{#if !hasApiKey}
 		<Heading tag="h2" class="text-dark-blue-40 mb-4 font-serif text-3xl font-medium"
 			>No API key.</Heading
@@ -323,7 +323,7 @@
 												onclick={(event) => {
 													event.preventDefault();
 													openNotesModal(assistant.id);
-												}}><InfoCircleOutline side="md" /></button
+												}}><InfoCircleOutline size="md" /></button
 											>
 										{/if}
 										<a

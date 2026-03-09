@@ -105,11 +105,12 @@
 
 	let handleModalConfirm: () => void;
 	let handleModalCancel: () => void;
+	let isAnonymous = data.isAnonymous;
 </script>
 
 <AboutPage {nonAuthed} linksOpenInNewTab={openAllLinksInNewTab}>
 	<div class="px-12 pt-8" slot="header">
-		{#if hasNoGroups}
+		{#if hasNoGroups && !isAnonymous}
 			<div class="w-full rounded-lg border border-gray-300 bg-gray-100 p-6">
 				<div class="flex items-start gap-4">
 					<InfoCircleSolid class="mt-0.5 h-6 w-6 shrink-0 text-gray-500" />

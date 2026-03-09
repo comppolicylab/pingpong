@@ -42,7 +42,7 @@
 
 <div class="relative flex h-full w-full flex-col">
 	{#if !(data.isSharedAssistantPage || data.isSharedThreadPage) && !isLtiHeaderLayout}
-		<div bind:this={headerEl} class="print-hidden">
+		<div bind:this={headerEl} class="print-hidden sticky top-0 z-20 bg-white">
 			<ThreadHeader
 				current={data.class}
 				classes={data.classes}

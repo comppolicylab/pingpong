@@ -109,7 +109,7 @@
 	};
 </script>
 
-<div class="flex h-full w-full flex-col items-center gap-8 overflow-y-auto p-8">
+<div class="flex w-full flex-col items-center gap-8 p-8">
 	<Heading tag="h2" class="serif">Set up your LTI instance with PingPong</Heading>
 	<form class="flex max-w-lg flex-col gap-4 sm:min-w-[32rem]" onsubmit={handleSubmit}>
 		<div>

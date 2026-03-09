@@ -482,7 +482,7 @@
 						onclick={(event) => {
 							event.preventDefault();
 							notesAssistantModalOpen = true;
-						}}><InfoCircleOutline side="md" /></button
+						}}><InfoCircleOutline size="md" /></button
 					>
 				{/if}
 				<button

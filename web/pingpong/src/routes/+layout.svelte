@@ -32,24 +32,26 @@
 	$: showBackground = data.isSharedAssistantPage || data.isSharedThreadPage;
 	$: forceCollapsedLayout = data.forceCollapsedLayout;
 	$: forceShowSidebarButton = data.forceShowSidebarButton;
-	$: isLtiHeaderLayout = forceCollapsedLayout && forceShowSidebarButton;
+	$: isNewHeaderLayout = forceCollapsedLayout && forceShowSidebarButton;
 </script>
 
 <SvelteToast />
 {#if showSidebar}
 	<div
-		class="flex h-full w-full md:h-[calc(100vh-3rem)] {isLtiHeaderLayout ? 'md:gap-4' : 'lg:gap-4'}"
+		class="flex h-full w-full md:h-[calc(100vh-3rem)] {isNewHeaderLayout
+			? 'md:gap-4'
+			: 'mx-auto max-w-screen-2xl lg:gap-4'}"
 	>
 		<div
-			class="sidebar min-w-0 shrink-0 grow-0 {isLtiHeaderLayout
+			class="sidebar min-w-0 shrink-0 grow-0 {isNewHeaderLayout
 				? 'basis-16 md:basis-[320px]'
 				: 'basis-[320px]'}"
 		>
 			<Sidebar {data} />
 		</div>
 		<div class="main-content flex min-w-0 shrink grow flex-col">
-			{#if isLtiHeaderLayout && $ltiHeaderState.kind !== 'none'}
-				<div class="-mt-8 mr-4 shrink-0">
+			{#if isNewHeaderLayout && $ltiHeaderState.kind !== 'none'}
+				<div class="-mt-8 mr-4 shrink-0 print:!hidden">
 					{#if $ltiHeaderState.kind === 'thread'}
 						<ThreadHeader {...$ltiHeaderState.props} />
 					{:else if $ltiHeaderState.kind === 'nongroup'}
@@ -57,7 +59,7 @@
 					{/if}
 				</div>
 			{/if}
-			<Main {isLtiHeaderLayout} {data}>
+			<Main {isNewHeaderLayout} {data}>
 				<slot />
 			</Main>
 		</div>

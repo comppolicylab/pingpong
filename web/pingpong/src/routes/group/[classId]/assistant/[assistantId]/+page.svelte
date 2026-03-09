@@ -1455,7 +1455,7 @@
 	});
 </script>
 
-<div class="h-full w-full overflow-y-auto p-12">
+<div class="w-full p-12 pt-6">
 	<div class="flex flex-row justify-between">
 		<Heading tag="h2" class="mb-6 font-serif text-3xl font-medium text-blue-dark-40">
 			{#if data.isCreating}

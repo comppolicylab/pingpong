@@ -1,12 +1,10 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import {
-		CloseOutline,
 		UserSettingsOutline,
 		QuestionCircleOutline,
 		ArrowRightToBracketOutline,
 		EyeSlashOutline,
-		BarsOutline,
 		CirclePlusSolid,
 		DotsVerticalOutline,
 		ArrowRightOutline,
@@ -19,6 +17,8 @@
 		BadgeCheckOutline,
 		UsersOutline,
 		InboxOutline,
+		OpenSidebarAltOutline,
+		CloseSidebarAltOutline,
 		ClapperboardPlayOutline
 	} from 'flowbite-svelte-icons';
 
@@ -41,7 +41,7 @@
 	import * as api from '$lib/api';
 	import { anonymousShareToken } from '$lib/stores/anonymous';
 	import type { LayoutData } from '../../routes/$types';
-	import { appMenuOpen } from '$lib/stores/general';
+	import { appMenuOpen, appMenuTransitionsEnabled } from '$lib/stores/general';
 	import { afterNavigate, goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import { resolve } from '$app/paths';
@@ -121,7 +121,24 @@
 	$: hasNoClasses = !nonAuthed && data.classes?.length === 0;
 
 	// Toggle whether menu is open.
-	const togglePanel = (state?: boolean) => {
+	const restorePanelTransitions = () => {
+		requestAnimationFrame(() => {
+			requestAnimationFrame(() => {
+				$appMenuTransitionsEnabled = true;
+			});
+		});
+	};
+
+	const togglePanel = (state?: boolean, options?: { disableTransition?: boolean }) => {
+		const nextState = state ?? !$appMenuOpen;
+		if (options?.disableTransition && nextState !== $appMenuOpen) {
+			$appMenuTransitionsEnabled = false;
+			$appMenuOpen = nextState;
+			restorePanelTransitions();
+			return;
+		}
+
+		$appMenuTransitionsEnabled = true;
 		if (state !== undefined) {
 			$appMenuOpen = state;
 		} else {
@@ -130,10 +147,16 @@
 	};
 
 	type Placement = 'top-end' | 'right-start';
+	const lgBreakpoint = 1024;
 	let placement: Placement = 'top-end';
 	let isLgOrWider = false;
-	function updatePlacement() {
-		if (window.innerWidth >= 1024) {
+
+	const togglePanelFromUser = () => {
+		togglePanel();
+	};
+
+	function syncViewportState(options?: { disableTransition?: boolean }) {
+		if (window.innerWidth >= lgBreakpoint) {
 			// lg breakpoint
 			placement = 'right-start';
 			isLgOrWider = true;
@@ -141,18 +164,34 @@
 			placement = 'top-end';
 			isLgOrWider = false;
 		}
+
+		togglePanel(isLgOrWider, options);
 	}
 
-	// Close the menu when navigating.
+	function initializePlacement() {
+		syncViewportState({ disableTransition: true });
+	}
+
+	// Keep the sidebar open on lg+ and collapse it after navigation on smaller screens.
 	afterNavigate(() => {
-		// Don't close the sidebar in LTI context on lg or larger screens
-		if (!(forceCollapsedLayout && forceShowSidebarButton && isLgOrWider)) {
+		if (!isLgOrWider) {
 			togglePanel(false);
 		}
 		dropdownOpen = false;
+		if (shouldRenderFloatingMenuButton) {
+			requestAnimationFrame(updateMenuButtonPosition);
+		}
 	});
 
 	let dropdownOpen = false;
+	let menuButtonEl: HTMLButtonElement | null = null;
+	let menuButtonAnchorEl: HTMLDivElement | null = null;
+	let showMenuButtonTooltip = false;
+	let menuButtonStyle = '';
+	let menuButtonTooltipStyle = '';
+	$: showMenuToggle = !(inIframe && sharedPage) || forceShowSidebarButton;
+	$: shouldRenderFloatingMenuButton =
+		showMenuToggle && forceCollapsedLayout && forceShowSidebarButton && hasLtiHeaderComponent;
 	const goToPage = async (
 		destination: '/about' | '/privacy-policy' | '/admin' | '/logout' | '/profile'
 	) => {
@@ -160,38 +199,121 @@
 		await goto(resolve(destination));
 	};
 
+	const portal = (node: HTMLElement) => {
+		document.body.appendChild(node);
+
+		return {
+			destroy() {
+				node.remove();
+			}
+		};
+	};
+
+	const updateMenuButtonPosition = () => {
+		if (!menuButtonAnchorEl) return;
+
+		const rect = menuButtonAnchorEl.getBoundingClientRect();
+		menuButtonStyle = `top: ${Math.round(rect.top)}px; left: ${Math.round(rect.left)}px;`;
+	};
+
+	const updateMenuButtonTooltipPosition = () => {
+		const rect = shouldRenderFloatingMenuButton
+			? menuButtonAnchorEl?.getBoundingClientRect()
+			: menuButtonEl?.getBoundingClientRect();
+		if (!rect) return;
+
+		menuButtonTooltipStyle = `top: ${Math.round(rect.bottom + 8)}px; left: ${Math.round(rect.left)}px;`;
+	};
+
+	const setMenuButtonTooltip = (visible: boolean) => {
+		showMenuButtonTooltip = visible;
+		if (visible) {
+			updateMenuButtonTooltipPosition();
+		}
+	};
+
 	let inIframe = false;
 	onMount(() => {
 		inIframe = window.self !== window.top;
-		updatePlacement();
-		window.addEventListener('resize', updatePlacement);
-		return () => window.removeEventListener('resize', updatePlacement);
+		initializePlacement();
+		updateMenuButtonPosition();
+		const handleResize = () => {
+			syncViewportState();
+			updateMenuButtonPosition();
+			if (showMenuButtonTooltip) {
+				updateMenuButtonTooltipPosition();
+			}
+		};
+		window.addEventListener('resize', handleResize);
+		return () => window.removeEventListener('resize', handleResize);
 	});
 </script>
 
 <Sidebar
 	asideClass={`absolute top-0 left-0 ${forceCollapsedLayout && forceShowSidebarButton && hasLtiHeaderComponent ? '-z-1 md:z-0' : 'z-0'} px-2 h-full ${
 		forceCollapsedLayout && forceShowSidebarButton ? 'w-80' : 'w-[90%] md:w-80'
-	} ${!inIframe || !forceCollapsedLayout ? 'lg:static lg:h-full lg:w-full' : ''}`}
+	} ${!forceCollapsedLayout ? 'lg:static lg:h-full lg:w-full' : ''} print:!hidden`}
 	activeUrl={$page.url.pathname}
 >
 	<SidebarWrapper class="flex h-full flex-col bg-transparent">
 		<SidebarGroup class="mb-6">
 			<div class="flex items-center" data-sveltekit-preload-data="off">
-				{#if !(inIframe && sharedPage) || forceShowSidebarButton}
-					<button
-						class="menu-button mt-1 mr-3 border-none bg-transparent {inIframe &&
-						forceCollapsedLayout
-							? ''
-							: 'lg:hidden'}"
-						onclick={() => togglePanel()}
-					>
-						{#if $appMenuOpen}
-							<CloseOutline size="xl" class="menu-close text-white" />
-						{:else}
-							<BarsOutline size="xl" class="menu-open text-white" />
-						{/if}
-					</button>
+				{#if showMenuToggle}
+					{#if shouldRenderFloatingMenuButton}
+						<div
+							bind:this={menuButtonAnchorEl}
+							class="menu-button mt-10 mr-3 h-8 w-8 shrink-0 md:mt-1 {forceCollapsedLayout
+								? ''
+								: 'lg:hidden'}"
+							aria-hidden="true"
+						></div>
+						<button
+							use:portal
+							bind:this={menuButtonEl}
+							class="menu-button fixed z-[30] border-none bg-transparent print:!hidden"
+							style={menuButtonStyle}
+							aria-label="Toggle sidebar"
+							onclick={togglePanelFromUser}
+							onmouseenter={() => setMenuButtonTooltip(true)}
+							onmouseleave={() => setMenuButtonTooltip(false)}
+							onfocus={() => setMenuButtonTooltip(true)}
+							onblur={() => setMenuButtonTooltip(false)}
+						>
+							{#if $appMenuOpen}
+								<CloseSidebarAltOutline size="xl" class="menu-open text-white" strokeWidth={1.5} />
+							{:else}
+								<OpenSidebarAltOutline size="xl" class="menu-open text-white" strokeWidth={1.5} />
+							{/if}
+						</button>
+					{:else}
+						<button
+							bind:this={menuButtonEl}
+							class="menu-button mt-1 mr-3 border-none bg-transparent {forceCollapsedLayout
+								? ''
+								: 'lg:hidden'}"
+							aria-label="Toggle sidebar"
+							onclick={togglePanelFromUser}
+							onmouseenter={() => setMenuButtonTooltip(true)}
+							onmouseleave={() => setMenuButtonTooltip(false)}
+							onfocus={() => setMenuButtonTooltip(true)}
+							onblur={() => setMenuButtonTooltip(false)}
+						>
+							{#if $appMenuOpen}
+								<CloseSidebarAltOutline size="xl" class="menu-open text-white" strokeWidth={1.5} />
+							{:else}
+								<OpenSidebarAltOutline size="xl" class="menu-open text-white" strokeWidth={1.5} />
+							{/if}
+						</button>
+					{/if}
+					{#if showMenuButtonTooltip}
+						<div
+							use:portal
+							class="pointer-events-none fixed z-[50] rounded-lg bg-gray-900 px-2.5 py-1.5 text-sm font-light text-white shadow-lg"
+							style={menuButtonTooltipStyle}
+						>
+							Toggle sidebar
+						</div>
+					{/if}
 				{/if}
 				<NavBrand
 					href={(inIframe && sharedPage) || !logoIsClickable ? undefined : '/'}
@@ -206,7 +328,9 @@
 		</SidebarGroup>
 		{#if showSidebarItems}
 			<SidebarGroup
-				class="mt-6 {forceCollapsedLayout && forceShowSidebarButton ? 'pt-6 md:pt-0' : ''}"
+				class="mt-6 {forceCollapsedLayout && forceShowSidebarButton
+					? 'mt-0 pt-6 md:mt-2 md:mb-2 md:pt-0'
+					: ''}"
 			>
 				<SidebarItem
 					target={openAllLinksInNewTab ? '_blank' : undefined}
@@ -448,6 +572,15 @@
 		<span>Logout</span>
 	</DropdownItem>
 </Dropdown>
+
+<svelte:window
+	on:resize={shouldRenderFloatingMenuButton || showMenuButtonTooltip
+		? updateMenuButtonPosition
+		: undefined}
+	on:scroll={shouldRenderFloatingMenuButton || showMenuButtonTooltip
+		? updateMenuButtonPosition
+		: undefined}
+/>
 
 <style lang="css">
 	:global(.logo) {

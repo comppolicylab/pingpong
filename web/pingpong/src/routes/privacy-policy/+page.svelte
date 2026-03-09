@@ -8,7 +8,7 @@
 	});
 </script>
 
-<div class="about flex h-full flex-col gap-4 overflow-y-auto px-12 py-12">
+<div class="about flex flex-col gap-4 px-12 py-12">
 	<div class="text-center">
 		<Heading tag="h2" class="mt-4 mb-3" customSize="text-4xl font-extrabold md:text-5xl lg:text-6xl"
 			>Privacy Policy
