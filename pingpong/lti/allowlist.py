@@ -12,6 +12,8 @@ _HOST_RE = re.compile(
 _PATH_SEGMENT_RE = r"(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f]{2})+"
 _PATH_RE = re.compile(rf"\A/(?:{_PATH_SEGMENT_RE}(?:/{_PATH_SEGMENT_RE})*)?/?\Z")
 _ENCODED_PATH_SEPARATOR_RE = re.compile(r"%2f|%5c", re.IGNORECASE)
+_HEX_ESCAPE_RE = re.compile(r"%[0-9A-Fa-f]{2}")
+_ENCODED_DOT_RE = re.compile(r"%2e", re.IGNORECASE)
 _UNSAFE_PATH_RE = re.compile(r"[\x00-\x1f\x7f@]")
 _UNSAFE_QUERY_RE = re.compile(r"[\x00-\x1f\x7f]")
 
@@ -24,11 +26,31 @@ def _sanitize_url_path(path: str, field_name: str) -> str:
     in a redirect URL.
     """
     if _UNSAFE_PATH_RE.search(path):
-        raise ValueError(f"Invalid URL path for {field_name}")
+        raise ValueError(f"Invalid {field_name} URL path")
     segments = path.split("/")
     if ".." in segments:
-        raise ValueError(f"Invalid URL path for {field_name}")
-    return quote(path, safe="/%:=+!*'(),@&~")
+        raise ValueError(f"Invalid {field_name} URL path")
+    if any(_ENCODED_DOT_RE.sub(".", segment) == ".." for segment in segments):
+        raise ValueError(f"Invalid {field_name} URL path")
+    sanitized_parts: list[str] = []
+    previous_end = 0
+    for match in _HEX_ESCAPE_RE.finditer(path):
+        if match.start() > previous_end:
+            sanitized_parts.append(
+                quote(path[previous_end : match.start()], safe="/:=+!*'(),@&~")
+            )
+
+        escape = match.group(0)
+        if _ENCODED_PATH_SEPARATOR_RE.fullmatch(escape):
+            sanitized_parts.append(quote(escape, safe="/:=+!*'(),@&~"))
+        else:
+            sanitized_parts.append(escape)
+        previous_end = match.end()
+
+    if previous_end < len(path):
+        sanitized_parts.append(quote(path[previous_end:], safe="/:=+!*'(),@&~"))
+
+    return "".join(sanitized_parts)
 
 
 def _sanitize_url_query(query: str, field_name: str) -> str:

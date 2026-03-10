@@ -231,6 +231,31 @@ def test_generate_safe_lti_url_rejects_disallowed_path(development_config):
         )
 
 
+@pytest.mark.parametrize(
+    "unverified_url",
+    [
+        "https://platform.example.com/%2e%2e/secret",
+        "https://platform.example.com/.%2e/secret",
+        "https://platform.example.com/%2e./secret",
+        "https://platform.example.com/%2E%2e/secret",
+    ],
+)
+@pytest.mark.parametrize("development_config", [False], indirect=True)
+def test_generate_safe_lti_url_rejects_encoded_parent_path_segments(
+    development_config, unverified_url
+):
+    with pytest.raises(ValueError, match="Invalid OpenID configuration URL path"):
+        allowlist.generate_safe_lti_url(
+            unverified_url=unverified_url,
+            url_type="OpenID configuration",
+            host_allow=["*.example.com"],
+            host_deny=[],
+            path_allow=["*"],
+            path_deny=[],
+            allow_http_in_development=True,
+        )
+
+
 @pytest.mark.parametrize("development_config", [False], indirect=True)
 def test_generate_safe_lti_url_double_encodes_encoded_path_separators(
     development_config,
@@ -276,3 +301,52 @@ def test_generate_safe_lti_url_accepts_percent_encoded_sanitized_paths(
     )
 
     assert result == expected
+
+
+@pytest.mark.parametrize(
+    ("unverified_url", "expected"),
+    [
+        (
+            "https://platform.example.com/foo%20bar",
+            "https://platform.example.com/foo%20bar",
+        ),
+        (
+            "https://platform.example.com/caf%C3%A9",
+            "https://platform.example.com/caf%C3%A9",
+        ),
+    ],
+)
+@pytest.mark.parametrize("development_config", [False], indirect=True)
+def test_generate_safe_lti_url_preserves_existing_percent_encoded_path_bytes(
+    development_config, unverified_url, expected
+):
+    result = allowlist.generate_safe_lti_url(
+        unverified_url=unverified_url,
+        url_type="OpenID configuration",
+        host_allow=["*.example.com"],
+        host_deny=[],
+        path_allow=["*"],
+        path_deny=[],
+        allow_http_in_development=True,
+    )
+
+    assert result == expected
+
+
+@pytest.mark.parametrize("development_config", [False], indirect=True)
+def test_generate_safe_lti_url_does_not_corrupt_literal_placeholder_text(
+    development_config,
+):
+    result = allowlist.generate_safe_lti_url(
+        unverified_url=(
+            "https://platform.example.com/foo%20/__PINGPONG_PATH_ESCAPE__0__"
+        ),
+        url_type="OpenID configuration",
+        host_allow=["*.example.com"],
+        host_deny=[],
+        path_allow=["*"],
+        path_deny=[],
+        allow_http_in_development=True,
+    )
+
+    assert result == "https://platform.example.com/foo%20/__PINGPONG_PATH_ESCAPE__0__"
