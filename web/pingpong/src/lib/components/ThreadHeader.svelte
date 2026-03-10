@@ -60,27 +60,28 @@
 				/></Button
 			>
 			<Dropdown
-				class="overflow-y-auto"
-				classContainer="max-h-[400px] min-h-0 md:max-w-1/2 lg:max-w-1/3"
+				classContainer="min-h-0 overflow-hidden md:max-w-1/2 lg:max-w-1/3"
 				bind:open={classDropdownOpen}
 				placement="bottom-start"
 			>
 				<div slot="header" class="p-3">
 					<Search size="md" bind:value={searchTerm} />
 				</div>
-				{#each filteredClasses as cls (cls.id)}
-					<DropdownItem
-						class="flex w-full items-center gap-4 py-3 text-base leading-6 hover:bg-blue-light-50"
-						onclick={() => goToClass(cls.id)}>{cls.name}</DropdownItem
-					>
-				{/each}
-				{#if filteredClasses.length === 0}
-					<div
-						class="px-4 py-4 text-sm font-medium font-semibold tracking-wide text-gray-500 uppercase select-none"
-					>
-						No groups found
-					</div>
-				{/if}
+				<div class="max-h-[400px] overflow-y-auto overscroll-contain">
+					{#each filteredClasses as cls (cls.id)}
+						<DropdownItem
+							class="flex w-full items-center gap-4 py-3 text-base leading-6 hover:bg-blue-light-50"
+							onclick={() => goToClass(cls.id)}>{cls.name}</DropdownItem
+						>
+					{/each}
+					{#if filteredClasses.length === 0}
+						<div
+							class="px-4 py-4 text-sm font-medium font-semibold tracking-wide text-gray-500 uppercase select-none"
+						>
+							No groups found
+						</div>
+					{/if}
+				</div>
 			</Dropdown>
 		</div>
 		<div slot="right">
