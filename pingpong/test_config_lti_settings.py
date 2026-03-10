@@ -60,7 +60,6 @@ def test_lti_settings_maps_legacy_fields_and_logs_deprecation(caplog):
     assert settings.security.hosts.allow == [
         "platform.example.com",
         "tool.example.com",
-        "canvas.docker",
     ]
     assert settings.security.paths.allow == ["*"]
     assert settings.security.openid_configuration.paths.allow == [
@@ -70,9 +69,7 @@ def test_lti_settings_maps_legacy_fields_and_logs_deprecation(caplog):
     assert settings.security.allow_http_in_development is True
 
     assert "Deprecated config key 'lti.platform_url_allowlist'" in caplog.text
-    assert (
-        "['platform.example.com', 'tool.example.com', 'canvas.docker']" in caplog.text
-    )
+    assert "['platform.example.com', 'tool.example.com']" in caplog.text
     assert "Deprecated config key 'lti.openid_configuration_paths'" in caplog.text
     assert "Deprecated config key 'lti.dev_http_hosts'" in caplog.text
     assert "allow_http_in_development = True" in caplog.text
@@ -84,7 +81,7 @@ def test_lti_settings_maps_legacy_fields_and_logs_deprecation(caplog):
     assert "[lti.security.hosts]" in dev_http_hosts_warning
 
 
-def test_lti_settings_maps_legacy_dev_http_hosts_into_security_hosts_allow():
+def test_lti_settings_legacy_dev_http_hosts_only_enable_http_in_development():
     settings = LTISettings.model_validate(
         {
             **_base_lti_settings(),
@@ -92,7 +89,7 @@ def test_lti_settings_maps_legacy_dev_http_hosts_into_security_hosts_allow():
         }
     )
 
-    assert settings.security.hosts.allow == ["canvas.docker", "localhost"]
+    assert settings.security.hosts.allow == ["*"]
     assert settings.security.paths.allow == ["*"]
     assert settings.security.openid_configuration.paths.allow == list(
         LEGACY_OPENID_CONFIGURATION_PATHS_DEFAULTS

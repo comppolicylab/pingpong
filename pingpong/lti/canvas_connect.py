@@ -385,17 +385,26 @@ class CanvasConnectClient:
         next_page: str | None = start_url
         seen_pages: set[str] = set()
         while next_page:
-            if next_page in seen_pages:
+            try:
+                normalized_next_page = generate_names_and_role_api_url(next_page)
+            except ValueError as e:
+                raise CanvasConnectException(
+                    detail=f"Invalid NRPS URL: {e!s}",
+                ) from e
+
+            if normalized_next_page in seen_pages:
                 logger.warning(
                     "Detected NRPS pagination loop for lti_class_id=%s at url=%s",
                     self.lti_class_id,
-                    next_page,
+                    normalized_next_page,
                 )
                 raise CanvasConnectException(
                     detail="NRPS pagination loop detected while fetching memberships",
                 )
-            seen_pages.add(next_page)
-            response_payload, next_page = await self._make_authed_nrps_get(next_page)
+            seen_pages.add(normalized_next_page)
+            response_payload, next_page = await self._make_authed_nrps_get(
+                normalized_next_page
+            )
             yield response_payload
 
     @staticmethod

@@ -1309,6 +1309,94 @@ async def test_get_nrps_create_user_class_roles_allows_missing_members(monkeypat
     )
 
 
+@pytest.mark.asyncio
+async def test_request_all_nrps_pages_detects_loop_for_canonicalized_next_page(
+    monkeypatch,
+):
+    token_endpoint = "https://canvas.example.com/login/oauth2/token"
+    context_memberships_url = (
+        "https://canvas.example.com/api/lti/courses/1/names_and_roles"
+    )
+    registration = SimpleNamespace(
+        client_id="client-123",
+        issuer="https://canvas.example.com",
+        openid_configuration=f'{{"token_endpoint":"{token_endpoint}"}}',
+        auth_token_url="https://canvas.example.com/fallback-token",
+    )
+    lti_class = SimpleNamespace(
+        id=23,
+        registration=registration,
+        context_memberships_url=context_memberships_url,
+        resource_link_id=None,
+        course_id="1",
+    )
+
+    async def _get_by_id_with_registration(cls, db, id_):
+        return lti_class
+
+    monkeypatch.setattr(
+        canvas_connect_module.LTIClass,
+        "get_by_id_with_registration",
+        classmethod(_get_by_id_with_registration),
+    )
+    monkeypatch.setattr(
+        canvas_connect_module.jwt,
+        "encode",
+        lambda *args, **kwargs: "signed-client-assertion",
+    )
+    monkeypatch.setattr(canvas_connect_module.uuid, "uuid7", lambda: "uuid7-test")
+
+    fake_session = FakeClientSession(
+        [
+            FakeTokenResponse(
+                payload={
+                    "access_token": "short-lived-token",
+                    "expires_in": 3600,
+                }
+            ),
+            FakeTokenResponse(
+                payload={
+                    "members": [],
+                    "next": "http://Canvas.Example.com./api/lti/courses/1/names_and_roles",
+                }
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        canvas_connect_module.aiohttp,
+        "ClientSession",
+        lambda: fake_session,
+    )
+
+    async with canvas_connect_module.CanvasConnectClient(
+        db=SimpleNamespace(),
+        lti_class_id=23,
+        key_manager=FakeKeyManager(),
+        nowfn=lambda: datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc),
+    ) as client:
+        pages = []
+        with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+            async for response_payload in client._request_all_nrps_pages(
+                context_memberships_url
+            ):
+                pages.append(response_payload)
+
+    assert (
+        excinfo.value.detail
+        == "NRPS pagination loop detected while fetching memberships"
+    )
+    assert pages == [
+        {
+            "members": [],
+            "next": "http://Canvas.Example.com./api/lti/courses/1/names_and_roles",
+        }
+    ]
+    assert len(fake_session.requests) == 2
+    assert fake_session.requests[0]["method"] == "POST"
+    assert fake_session.requests[1]["method"] == "GET"
+    assert fake_session.requests[1]["url"] == context_memberships_url
+
+
 async def _async_return(value):
     return value
 
