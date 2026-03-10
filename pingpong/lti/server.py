@@ -1,5 +1,6 @@
 """FastAPI routes for LTI Advantage Service."""
 
+import asyncio
 import json
 import logging
 from datetime import datetime
@@ -154,6 +155,21 @@ async def _fetch_jwks(jwks_url: str) -> dict[str, Any]:
             raise HTTPException(
                 status_code=400, detail="Too many redirects for jwks_url"
             ) from e
+        except aiohttp.ClientResponseError as e:
+            raise HTTPException(
+                status_code=e.status or 502,
+                detail=f"Upstream error: {e}",
+            ) from e
+        except asyncio.TimeoutError as e:
+            raise HTTPException(
+                status_code=504,
+                detail="Timeout fetching remote JWKS/OpenID configuration",
+            ) from e
+        except aiohttp.ClientError as e:
+            raise HTTPException(
+                status_code=502,
+                detail="Network error fetching remote JWKS/OpenID configuration",
+            ) from e
 
 
 async def _fetch_openid_configuration(
@@ -203,6 +219,21 @@ async def _fetch_openid_configuration(
             raise HTTPException(
                 status_code=400,
                 detail="Too many redirects for openid_configuration",
+            ) from e
+        except aiohttp.ClientResponseError as e:
+            raise HTTPException(
+                status_code=e.status or 502,
+                detail=f"Upstream error: {e}",
+            ) from e
+        except asyncio.TimeoutError as e:
+            raise HTTPException(
+                status_code=504,
+                detail="Timeout fetching remote JWKS/OpenID configuration",
+            ) from e
+        except aiohttp.ClientError as e:
+            raise HTTPException(
+                status_code=502,
+                detail="Network error fetching remote JWKS/OpenID configuration",
             ) from e
 
 
@@ -281,6 +312,32 @@ def _get_claim_object(claims: dict[str, Any], claim_key: str) -> dict[str, Any]:
     if isinstance(claim_value, dict):
         return claim_value
     return {}
+
+
+def parse_lti_context_and_nrps(
+    claims: dict[str, Any], launch_custom_params: dict[str, str]
+) -> tuple[str | None, str | None, str | None, str | None]:
+    context = _get_claim_object(claims, LTI_CLAIM_CONTEXT_KEY)
+    nrps_claim = _get_claim_object(claims, LTI_CLAIM_NRPS_KEY)
+
+    course_code = context.get("label")
+    course_name = context.get("title")
+
+    course_term = launch_custom_params.get("canvas_term_name")
+    if (
+        not course_term
+        or course_term in LTI_CUSTOM_PARAM_DEFAULT_VALUES["canvas_term_name"]
+    ):
+        course_term = None
+
+    context_memberships_url_value = nrps_claim.get("context_memberships_url")
+    context_memberships_url = (
+        context_memberships_url_value
+        if isinstance(context_memberships_url_value, str)
+        else None
+    )
+
+    return course_code, course_name, course_term, context_memberships_url
 
 
 def get_lti_key_manager() -> LTIKeyManager:
@@ -557,11 +614,20 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
                 detail="Too many redirects for registration_endpoint",
             ) from e
         except aiohttp.ClientResponseError as e:
-            logger.error(f"Error during LTI tool registration: {e.status} {e.message}")
             raise HTTPException(
-                status_code=e.status,
-                detail=f"Failed to create registration: {e.message}",
-            )
+                status_code=e.status or 502,
+                detail=f"Upstream error: {e}",
+            ) from e
+        except asyncio.TimeoutError as e:
+            raise HTTPException(
+                status_code=504,
+                detail="Timeout fetching remote JWKS/OpenID configuration",
+            ) from e
+        except aiohttp.ClientError as e:
+            raise HTTPException(
+                status_code=502,
+                detail="Network error fetching remote JWKS/OpenID configuration",
+            ) from e
 
     if not registration_response_data:
         raise HTTPException(status_code=500, detail="Failed to create registration")
@@ -1048,24 +1114,14 @@ async def lti_launch(
                 await request.state["db"].flush()
             else:
                 # Create new pending LTIClass to store context
-                course_details = _get_claim_object(claims, LTI_CLAIM_CONTEXT_KEY)
-                course_code = course_details.get("label")
-                course_name = course_details.get("title")
-                course_term = launch_custom_params.get("canvas_term_name")
-                if (
-                    not course_term
-                    or course_term
-                    in LTI_CUSTOM_PARAM_DEFAULT_VALUES["canvas_term_name"]
-                ):
-                    course_term = None
-                nrps_claim = _get_claim_object(claims, LTI_CLAIM_NRPS_KEY)
-                context_memberships_url_value = nrps_claim.get(
-                    "context_memberships_url"
-                )
-                context_memberships_url = (
-                    context_memberships_url_value
-                    if isinstance(context_memberships_url_value, str)
-                    else None
+                (
+                    course_code,
+                    course_name,
+                    course_term,
+                    context_memberships_url,
+                ) = parse_lti_context_and_nrps(
+                    claims,
+                    launch_custom_params,
                 )
 
                 pending_lti_class = LTIClass(
@@ -1181,24 +1237,14 @@ async def lti_launch(
                 )
 
             if is_instructor or is_admin_supervisor:
-                course_details = _get_claim_object(claims, LTI_CLAIM_CONTEXT_KEY)
-                course_code = course_details.get("label")
-                course_name = course_details.get("title")
-                course_term = launch_custom_params.get("canvas_term_name")
-                if (
-                    not course_term
-                    or course_term
-                    in LTI_CUSTOM_PARAM_DEFAULT_VALUES["canvas_term_name"]
-                ):
-                    course_term = None
-                nrps_claim = _get_claim_object(claims, LTI_CLAIM_NRPS_KEY)
-                context_memberships_url_value = nrps_claim.get(
-                    "context_memberships_url"
-                )
-                context_memberships_url = (
-                    context_memberships_url_value
-                    if isinstance(context_memberships_url_value, str)
-                    else None
+                (
+                    course_code,
+                    course_name,
+                    course_term,
+                    context_memberships_url,
+                ) = parse_lti_context_and_nrps(
+                    claims,
+                    launch_custom_params,
                 )
                 second_lti_class = LTIClass(
                     registration_id=registration.id,
@@ -1288,24 +1334,14 @@ async def lti_launch(
                 )
 
             if is_instructor or is_admin_supervisor:
-                course_details = _get_claim_object(claims, LTI_CLAIM_CONTEXT_KEY)
-                course_code = course_details.get("label")
-                course_name = course_details.get("title")
-                course_term = launch_custom_params.get("canvas_term_name")
-                if (
-                    not course_term
-                    or course_term
-                    in LTI_CUSTOM_PARAM_DEFAULT_VALUES["canvas_term_name"]
-                ):
-                    course_term = None
-                nrps_claim = _get_claim_object(claims, LTI_CLAIM_NRPS_KEY)
-                context_memberships_url_value = nrps_claim.get(
-                    "context_memberships_url"
-                )
-                context_memberships_url = (
-                    context_memberships_url_value
-                    if isinstance(context_memberships_url_value, str)
-                    else None
+                (
+                    course_code,
+                    course_name,
+                    course_term,
+                    context_memberships_url,
+                ) = parse_lti_context_and_nrps(
+                    claims,
+                    launch_custom_params,
                 )
                 new_lti_class = LTIClass(
                     registration_id=registration.id,

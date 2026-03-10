@@ -391,9 +391,9 @@ def _patch_lti_security_config(monkeypatch):
         token_endpoint=url_security,
     )
     lti = SimpleNamespace(security=security)
-    monkeypatch.setattr(
-        config_module, "config", SimpleNamespace(lti=lti, development=False)
-    )
+    patched_config = SimpleNamespace(lti=lti, development=False)
+    monkeypatch.setattr(config_module, "config", patched_config)
+    monkeypatch.setattr(server_module, "config", patched_config)
 
 
 def _make_registration(

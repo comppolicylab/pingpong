@@ -1,5 +1,3 @@
-from types import SimpleNamespace
-
 import pytest
 
 from pingpong.lti import allowlist
@@ -51,19 +49,14 @@ def test_path_matches(path, pattern, expected):
     assert allowlist._path_matches(path, pattern) is expected
 
 
-def _patch_development(monkeypatch, *, is_development: bool):
-    import pingpong.config as config_module
-
-    monkeypatch.setattr(
-        config_module,
-        "config",
-        SimpleNamespace(development=is_development),
-    )
+@pytest.fixture
+def development_config(config, monkeypatch, request):
+    monkeypatch.setattr(config, "development", request.param)
+    return config
 
 
-def test_generate_safe_lti_url_normalizes_and_validates(monkeypatch):
-    _patch_development(monkeypatch, is_development=False)
-
+@pytest.mark.parametrize("development_config", [False], indirect=True)
+def test_generate_safe_lti_url_normalizes_and_validates(development_config):
     result = allowlist.generate_safe_lti_url(
         unverified_url="https://Platform.Example.com./.well-known/openid-configuration?x=1&y=2",
         url_type="OpenID configuration",
@@ -80,9 +73,8 @@ def test_generate_safe_lti_url_normalizes_and_validates(monkeypatch):
     )
 
 
-def test_generate_safe_lti_url_allows_http_only_in_development(monkeypatch):
-    _patch_development(monkeypatch, is_development=True)
-
+@pytest.mark.parametrize("development_config", [True], indirect=True)
+def test_generate_safe_lti_url_allows_http_only_in_development(development_config):
     result = allowlist.generate_safe_lti_url(
         unverified_url="http://platform.example.com/openid",
         url_type="OpenID configuration",
@@ -96,9 +88,10 @@ def test_generate_safe_lti_url_allows_http_only_in_development(monkeypatch):
     assert result == "http://platform.example.com/openid"
 
 
-def test_generate_safe_lti_url_forces_https_when_http_not_allowed(monkeypatch):
-    _patch_development(monkeypatch, is_development=True)
-
+@pytest.mark.parametrize("development_config", [True], indirect=True)
+def test_generate_safe_lti_url_forces_https_when_http_not_allowed(
+    development_config,
+):
     result = allowlist.generate_safe_lti_url(
         unverified_url="http://platform.example.com/openid",
         url_type="OpenID configuration",
@@ -112,11 +105,10 @@ def test_generate_safe_lti_url_forces_https_when_http_not_allowed(monkeypatch):
     assert result == "https://platform.example.com/openid"
 
 
+@pytest.mark.parametrize("development_config", [True], indirect=True)
 def test_generate_safe_lti_url_accepts_default_http_port_before_https_upgrade(
-    monkeypatch,
+    development_config,
 ):
-    _patch_development(monkeypatch, is_development=True)
-
     result = allowlist.generate_safe_lti_url(
         unverified_url="http://platform.example.com:80/openid",
         url_type="OpenID configuration",
@@ -130,9 +122,8 @@ def test_generate_safe_lti_url_accepts_default_http_port_before_https_upgrade(
     assert result == "https://platform.example.com:443/openid"
 
 
-def test_generate_safe_lti_url_rejects_invalid_hostname(monkeypatch):
-    _patch_development(monkeypatch, is_development=False)
-
+@pytest.mark.parametrize("development_config", [False], indirect=True)
+def test_generate_safe_lti_url_rejects_invalid_hostname(development_config):
     with pytest.raises(ValueError, match="Invalid OpenID configuration URL hostname"):
         allowlist.generate_safe_lti_url(
             unverified_url="https://invalid_host.example.com/openid",
@@ -145,9 +136,8 @@ def test_generate_safe_lti_url_rejects_invalid_hostname(monkeypatch):
         )
 
 
-def test_generate_safe_lti_url_rejects_invalid_url_shape(monkeypatch):
-    _patch_development(monkeypatch, is_development=False)
-
+@pytest.mark.parametrize("development_config", [False], indirect=True)
+def test_generate_safe_lti_url_rejects_invalid_url_shape(development_config):
     with pytest.raises(ValueError, match="Invalid URL for OpenID configuration"):
         allowlist.generate_safe_lti_url(
             unverified_url="/.well-known/openid-configuration",
@@ -160,9 +150,8 @@ def test_generate_safe_lti_url_rejects_invalid_url_shape(monkeypatch):
         )
 
 
-def test_generate_safe_lti_url_rejects_disallowed_host(monkeypatch):
-    _patch_development(monkeypatch, is_development=False)
-
+@pytest.mark.parametrize("development_config", [False], indirect=True)
+def test_generate_safe_lti_url_rejects_disallowed_host(development_config):
     with pytest.raises(ValueError, match="Invalid OpenID configuration URL hostname"):
         allowlist.generate_safe_lti_url(
             unverified_url="https://platform.example.com/openid",
@@ -175,9 +164,8 @@ def test_generate_safe_lti_url_rejects_disallowed_host(monkeypatch):
         )
 
 
-def test_generate_safe_lti_url_rejects_disallowed_path(monkeypatch):
-    _patch_development(monkeypatch, is_development=False)
-
+@pytest.mark.parametrize("development_config", [False], indirect=True)
+def test_generate_safe_lti_url_rejects_disallowed_path(development_config):
     with pytest.raises(ValueError, match="Invalid OpenID configuration URL path"):
         allowlist.generate_safe_lti_url(
             unverified_url="https://platform.example.com/openid",
@@ -190,9 +178,10 @@ def test_generate_safe_lti_url_rejects_disallowed_path(monkeypatch):
         )
 
 
-def test_generate_safe_lti_url_double_encodes_encoded_path_separators(monkeypatch):
-    _patch_development(monkeypatch, is_development=False)
-
+@pytest.mark.parametrize("development_config", [False], indirect=True)
+def test_generate_safe_lti_url_double_encodes_encoded_path_separators(
+    development_config,
+):
     result = allowlist.generate_safe_lti_url(
         unverified_url="https://platform.example.com/api/private%2Ftoken",
         url_type="OpenID configuration",
@@ -219,11 +208,10 @@ def test_generate_safe_lti_url_double_encodes_encoded_path_separators(monkeypatc
         ),
     ],
 )
+@pytest.mark.parametrize("development_config", [False], indirect=True)
 def test_generate_safe_lti_url_accepts_percent_encoded_sanitized_paths(
-    monkeypatch, unverified_url, expected
+    development_config, unverified_url, expected
 ):
-    _patch_development(monkeypatch, is_development=False)
-
     result = allowlist.generate_safe_lti_url(
         unverified_url=unverified_url,
         url_type="OpenID configuration",

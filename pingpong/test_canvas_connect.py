@@ -183,7 +183,11 @@ def _patch_lti_security_config(monkeypatch):
         registration_endpoint=url_security,
         token_endpoint=url_security,
     )
-    lti = SimpleNamespace(security=security, sync_wait=600)
+    lti = SimpleNamespace(
+        security=security,
+        sync_wait=600,
+        key_store=SimpleNamespace(key_manager=FakeKeyManager()),
+    )
     cfg = SimpleNamespace(lti=lti, development=False)
     monkeypatch.setattr(config_module, "config", cfg)
     monkeypatch.setattr(canvas_connect_module, "config", cfg)
@@ -485,6 +489,7 @@ async def test_get_nrps_access_token_rejects_redirect_to_unallowlisted_host(
                 token_endpoint=url_security,
             ),
             sync_wait=600,
+            key_store=SimpleNamespace(key_manager=FakeKeyManager()),
         ),
         development=False,
     )
@@ -568,6 +573,7 @@ async def test_make_authed_nrps_get_rejects_redirect_to_unallowlisted_host(
                 token_endpoint=url_security,
             ),
             sync_wait=600,
+            key_store=SimpleNamespace(key_manager=FakeKeyManager()),
         ),
         development=False,
     )
