@@ -324,6 +324,157 @@ async def test_get_nrps_access_token_raises_on_token_endpoint_error(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_get_nrps_access_token_reposts_to_validated_redirect(
+    monkeypatch,
+):
+    token_endpoint = "https://canvas.example.com/login/oauth2/token"
+    redirected_token_endpoint = "https://canvas.example.com/login/oauth2/token/redirect"
+    registration = SimpleNamespace(
+        client_id="client-123",
+        openid_configuration=f'{{"token_endpoint":"{token_endpoint}"}}',
+        auth_token_url="https://fallback.example.com/token",
+    )
+    lti_class = SimpleNamespace(id=14, registration=registration)
+
+    async def _get_by_id_with_registration(cls, db, id_):
+        assert id_ == 14
+        return lti_class
+
+    monkeypatch.setattr(
+        canvas_connect_module.LTIClass,
+        "get_by_id_with_registration",
+        classmethod(_get_by_id_with_registration),
+    )
+    monkeypatch.setattr(
+        canvas_connect_module.jwt,
+        "encode",
+        lambda *args, **kwargs: "signed-client-assertion",
+    )
+    monkeypatch.setattr(canvas_connect_module.uuid, "uuid7", lambda: "uuid7-test")
+
+    fake_session = FakeClientSession(
+        [
+            FakeTokenResponse(
+                status=302,
+                headers={"Location": "/login/oauth2/token/redirect"},
+            ),
+            FakeTokenResponse(
+                payload={
+                    "access_token": "short-lived-token",
+                    "expires_in": 3600,
+                    "token_type": "Bearer",
+                    "scope": canvas_connect_module.NRPS_CONTEXT_MEMBERSHIP_SCOPE,
+                }
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        canvas_connect_module.aiohttp,
+        "ClientSession",
+        lambda: fake_session,
+    )
+
+    async with canvas_connect_module.CanvasConnectClient(
+        db=SimpleNamespace(),
+        lti_class_id=14,
+        key_manager=FakeKeyManager(),
+        nowfn=lambda: datetime.now(timezone.utc),
+    ) as client:
+        token = await client.get_nrps_access_token()
+
+    assert token.access_token == "short-lived-token"
+    assert len(fake_session.requests) == 2
+    assert fake_session.requests[0]["url"] == token_endpoint
+    assert fake_session.requests[1]["url"] == redirected_token_endpoint
+    assert fake_session.requests[0]["allow_redirects"] is False
+    assert fake_session.requests[1]["allow_redirects"] is False
+    assert fake_session.requests[0]["data"] == fake_session.requests[1]["data"]
+
+
+@pytest.mark.asyncio
+async def test_get_nrps_access_token_rejects_redirect_to_unallowlisted_host(
+    monkeypatch,
+):
+    allow_deny = SimpleNamespace(allow=["canvas.example.com"], deny=[])
+    url_security = SimpleNamespace(
+        allow_http_in_development=True,
+        allow_redirects=True,
+        hosts=allow_deny,
+        paths=SimpleNamespace(allow=["/login/oauth2/*"], deny=[]),
+    )
+    restricted_config = SimpleNamespace(
+        lti=SimpleNamespace(
+            security=SimpleNamespace(
+                allow_http_in_development=True,
+                allow_redirects=True,
+                hosts=SimpleNamespace(allow=["*"], deny=[]),
+                paths=SimpleNamespace(allow=["*"], deny=[]),
+                authorization_endpoint=url_security,
+                jwks_uri=url_security,
+                names_and_role_endpoint=url_security,
+                openid_configuration=url_security,
+                registration_endpoint=url_security,
+                token_endpoint=url_security,
+            ),
+            sync_wait=600,
+        ),
+        development=False,
+    )
+    monkeypatch.setattr(config_module, "config", restricted_config)
+    monkeypatch.setattr(canvas_connect_module, "config", restricted_config)
+
+    registration = SimpleNamespace(
+        client_id="client-123",
+        openid_configuration='{"token_endpoint":"https://canvas.example.com/login/oauth2/token"}',
+        auth_token_url=None,
+    )
+    lti_class = SimpleNamespace(id=15, registration=registration)
+
+    async def _get_by_id_with_registration(cls, db, id_):
+        return lti_class
+
+    monkeypatch.setattr(
+        canvas_connect_module.LTIClass,
+        "get_by_id_with_registration",
+        classmethod(_get_by_id_with_registration),
+    )
+    monkeypatch.setattr(
+        canvas_connect_module.jwt,
+        "encode",
+        lambda *args, **kwargs: "signed-client-assertion",
+    )
+    monkeypatch.setattr(canvas_connect_module.uuid, "uuid7", lambda: "uuid7-test")
+
+    fake_session = FakeClientSession(
+        FakeTokenResponse(
+            status=302,
+            headers={"Location": "https://evil.example.com/login/oauth2/token"},
+        )
+    )
+    monkeypatch.setattr(
+        canvas_connect_module.aiohttp,
+        "ClientSession",
+        lambda: fake_session,
+    )
+
+    async with canvas_connect_module.CanvasConnectClient(
+        db=SimpleNamespace(),
+        lti_class_id=15,
+        key_manager=FakeKeyManager(),
+        nowfn=lambda: datetime.now(timezone.utc),
+    ) as client:
+        with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+            await client.get_nrps_access_token()
+
+    assert (
+        excinfo.value.detail
+        == "Invalid token endpoint URL: Invalid token endpoint URL hostname"
+    )
+    assert len(fake_session.requests) == 1
+    assert fake_session.requests[0]["allow_redirects"] is False
+
+
+@pytest.mark.asyncio
 async def test_make_authed_nrps_get_rejects_redirect_to_unallowlisted_host(
     monkeypatch,
 ):
@@ -424,7 +575,9 @@ async def test_make_authed_nrps_get_raises_when_lti_config_missing(monkeypatch):
     monkeypatch.setattr(
         canvas_connect_module,
         "generate_names_and_role_api_url",
-        lambda url: url,
+        lambda url: (_ for _ in ()).throw(
+            AssertionError("generate_names_and_role_api_url should not be called")
+        ),
     )
 
     fake_session = FakeClientSession(FakeTokenResponse(payload={"members": []}))
@@ -476,7 +629,9 @@ async def test_get_nrps_access_token_raises_canvas_connect_exception_when_lti_co
     monkeypatch.setattr(
         canvas_connect_module,
         "generate_token_endpoint_url",
-        lambda url: url,
+        lambda url: (_ for _ in ()).throw(
+            AssertionError("generate_token_endpoint_url should not be called")
+        ),
     )
     monkeypatch.setattr(config_module, "config", SimpleNamespace(lti=None))
     monkeypatch.setattr(canvas_connect_module, "config", SimpleNamespace(lti=None))

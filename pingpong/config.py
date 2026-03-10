@@ -553,8 +553,6 @@ class LTISettings(BaseSettings):
         legacy_host_allow = []
         if normalized_platform_url_allowlist is not None:
             legacy_host_allow.extend(normalized_platform_url_allowlist)
-        if normalized_dev_http_hosts:
-            legacy_host_allow.extend(normalized_dev_http_hosts)
 
         if legacy_host_allow and "allow" not in hosts:
             hosts["allow"] = list(dict.fromkeys(legacy_host_allow))

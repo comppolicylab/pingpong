@@ -3,7 +3,7 @@ import logging
 from collections.abc import AsyncIterator
 from datetime import datetime, timedelta
 from typing import cast
-from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import aiohttp
 from fastapi import BackgroundTasks
@@ -18,7 +18,6 @@ from pingpong.lti.constants import (
     CLIENT_ASSERTION_EXPIRY_SECONDS,
     CLIENT_ASSERTION_TYPE,
     CLIENT_CREDENTIALS_GRANT_TYPE,
-    MAX_LTI_REDIRECTS,
     LTI_CLAIM_CUSTOM_KEY,
     LTI_CUSTOM_SSO_PROVIDER_ID_KEY,
     LTI_CUSTOM_SSO_VALUE_KEY,
@@ -45,6 +44,7 @@ from pingpong.lti.endpoints import (
     generate_names_and_role_api_url,
     generate_token_endpoint_url,
 )
+from pingpong.lti.http import request_with_validated_redirects
 from pingpong.lti.key_manager import LTIKeyManager
 from pingpong.lti.roles import class_user_roles_from_lti_roles
 from pingpong.models import (
@@ -313,6 +313,10 @@ class CanvasConnectClient:
         url: str,
     ) -> tuple[dict[str, object], str | None]:
         http_session = self._require_http_session()
+        security_settings = _require_lti_security()
+        redirects_allowed = _allow_redirects_or_raise(
+            security_settings.names_and_role_endpoint
+        )
 
         access_token = await self.get_short_lived_auth_token()
         headers = {
@@ -325,75 +329,55 @@ class CanvasConnectClient:
             raise CanvasConnectException(
                 detail=f"Invalid NRPS URL: {e!s}",
             ) from e
-        redirects_allowed = _allow_redirects_or_raise(
-            _require_lti_security().names_and_role_endpoint
-        )
-        redirect_count = 0
-        while True:
-            async with http_session.get(
-                generated_url,
+        async with request_with_validated_redirects(
+            initial_url=generated_url,
+            request=lambda request_url: http_session.get(
+                request_url,
                 headers=headers,
                 allow_redirects=False,
-            ) as response:
-                if response.status in {301, 302, 303, 307, 308}:
-                    if not redirects_allowed:
-                        raise CanvasConnectException(
-                            detail="Unexpected redirect from NRPS endpoint",
-                        )
+            ),
+            validate_redirect_url=generate_names_and_role_api_url,
+            redirects_allowed=redirects_allowed,
+            unexpected_redirect_error=lambda: CanvasConnectException(
+                detail="Unexpected redirect from NRPS endpoint",
+            ),
+            invalid_redirect_response_error=lambda: CanvasConnectException(
+                detail="Invalid NRPS redirect response",
+            ),
+            too_many_redirects_error=lambda: CanvasConnectException(
+                detail="Too many redirects for NRPS endpoint",
+            ),
+            invalid_redirect_url_error=lambda e: CanvasConnectException(
+                detail=f"Invalid NRPS URL: {e!s}",
+            ),
+        ) as (response, _):
+            response_payload: object = None
+            try:
+                response_payload = await response.json(content_type=None)
+            except (
+                json.JSONDecodeError,
+                ValueError,
+                aiohttp.ContentTypeError,
+            ) as e:
+                logger.warning("Failed to parse NRPS response payload as JSON: %s", e)
+                response_payload = None
 
-                    location = response.headers.get("Location")
-                    if not location:
-                        raise CanvasConnectException(
-                            detail="Invalid NRPS redirect response",
-                        )
-
-                    redirect_count += 1
-                    if redirect_count > MAX_LTI_REDIRECTS:
-                        raise CanvasConnectException(
-                            detail="Too many redirects for NRPS endpoint",
-                        )
-
-                    try:
-                        generated_url = generate_names_and_role_api_url(
-                            urljoin(generated_url, location)
-                        )
-                    except ValueError as e:
-                        raise CanvasConnectException(
-                            detail=f"Invalid NRPS URL: {e!s}",
-                        ) from e
-                    continue
-
-                response_payload: object = None
-                try:
-                    response_payload = await response.json(content_type=None)
-                except (
-                    json.JSONDecodeError,
-                    ValueError,
-                    aiohttp.ContentTypeError,
-                ) as e:
-                    logger.warning(
-                        "Failed to parse NRPS response payload as JSON: %s", e
-                    )
-                    response_payload = None
-
-                if response.status >= 400:
-                    detail = _extract_error_detail(response_payload)
-                    if not detail:
-                        detail = (await response.text()).strip()
-                    raise CanvasConnectException(
-                        detail=detail or "Failed to fetch NRPS page",
-                    )
-
-                response_payload_dict = _as_dict(response_payload)
-                if response_payload_dict is None:
-                    raise CanvasConnectException(
-                        detail="Invalid NRPS response payload",
-                    )
-
-                next_page_url = self._extract_next_page_url(
-                    response, response_payload_dict
+            if response.status >= 400:
+                detail = _extract_error_detail(response_payload)
+                if not detail:
+                    detail = (await response.text()).strip()
+                raise CanvasConnectException(
+                    detail=detail or "Failed to fetch NRPS page",
                 )
-                return response_payload_dict, next_page_url
+
+            response_payload_dict = _as_dict(response_payload)
+            if response_payload_dict is None:
+                raise CanvasConnectException(
+                    detail="Invalid NRPS response payload",
+                )
+
+            next_page_url = self._extract_next_page_url(response, response_payload_dict)
+            return response_payload_dict, next_page_url
 
     async def _request_all_nrps_pages(
         self, start_url: str
@@ -734,6 +718,7 @@ class CanvasConnectClient:
 
     async def _request_nrps_access_token(self) -> CanvasConnectAccessToken:
         http_session = self._require_http_session()
+        security_settings = _require_lti_security()
 
         lti_class = await self._get_lti_class()
         registration = lti_class.registration
@@ -761,15 +746,31 @@ class CanvasConnectClient:
             "client_assertion": client_assertion,
             "scope": NRPS_CONTEXT_MEMBERSHIP_SCOPE,
         }
-        async with http_session.post(
-            generated_token_endpoint,
-            headers={"Content-Type": TOKEN_REQUEST_CONTENT_TYPE},
-            data=request_data,
-            allow_redirects=_allow_redirects_or_raise(
-                _require_lti_security().token_endpoint
+        redirects_allowed = _allow_redirects_or_raise(security_settings.token_endpoint)
+        response_payload: object = None
+        async with request_with_validated_redirects(
+            initial_url=generated_token_endpoint,
+            request=lambda request_url: http_session.post(
+                request_url,
+                headers={"Content-Type": TOKEN_REQUEST_CONTENT_TYPE},
+                data=request_data,
+                allow_redirects=False,
             ),
-        ) as response:
-            response_payload: object = None
+            validate_redirect_url=generate_token_endpoint_url,
+            redirects_allowed=redirects_allowed,
+            unexpected_redirect_error=lambda: CanvasConnectException(
+                detail="Unexpected redirect from token endpoint",
+            ),
+            invalid_redirect_response_error=lambda: CanvasConnectException(
+                detail="Invalid token endpoint redirect response",
+            ),
+            too_many_redirects_error=lambda: CanvasConnectException(
+                detail="Too many redirects for token endpoint",
+            ),
+            invalid_redirect_url_error=lambda e: CanvasConnectException(
+                detail=f"Invalid token endpoint URL: {e!s}",
+            ),
+        ) as (response, _):
             try:
                 response_payload = await response.json(content_type=None)
             except Exception:
