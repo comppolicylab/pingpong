@@ -371,6 +371,7 @@ def _patch_lti_external_login_io(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _patch_lti_security_config(monkeypatch):
+    real_config = config_module.config
     allow_deny = SimpleNamespace(allow=["*"], deny=[])
     url_security = SimpleNamespace(
         allow_http_in_development=True,
@@ -391,7 +392,12 @@ def _patch_lti_security_config(monkeypatch):
         token_endpoint=url_security,
     )
     lti = SimpleNamespace(security=security)
-    patched_config = SimpleNamespace(lti=lti, development=False)
+    patched_config = SimpleNamespace(
+        lti=lti,
+        development=False,
+        url=real_config.url,
+        public_url=real_config.public_url,
+    )
     monkeypatch.setattr(config_module, "config", patched_config)
     monkeypatch.setattr(server_module, "config", patched_config)
 
