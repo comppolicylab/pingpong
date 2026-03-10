@@ -63,9 +63,9 @@ class FakeClientSession:
             request = {
                 "method": current_method,
                 "url": current_url,
-                "headers": current_headers.copy(),
                 **kwargs,
             }
+            request["headers"] = current_headers.copy()
             request["allow_redirects"] = allow_redirects
             if "data" in kwargs or current_data is not None:
                 request["data"] = current_data
@@ -155,6 +155,35 @@ class FakeWriteDB:
 
     async def flush(self):
         self.flush_count += 1
+
+
+class FakeSavepoint:
+    def __init__(self):
+        self.rollback_count = 0
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def rollback(self):
+        self.rollback_count += 1
+
+
+class FakeSyncSession(FakeWriteDB):
+    def __init__(self):
+        super().__init__()
+        self.savepoints: list[FakeSavepoint] = []
+        self.commit_count = 0
+
+    def begin_nested(self):
+        savepoint = FakeSavepoint()
+        self.savepoints.append(savepoint)
+        return savepoint
+
+    async def commit(self):
+        self.commit_count += 1
 
 
 class FakeSSOProvider:
@@ -507,6 +536,7 @@ async def test_get_nrps_access_token_converts_post_302_redirect_to_get(
     assert fake_session.requests[1]["allow_redirects"] is True
     assert fake_session.requests[0]["data"]["client_id"] == "client-123"
     assert fake_session.requests[1]["data"] is None
+    assert fake_session.requests[1]["headers"].get("Authorization") is None
 
 
 @pytest.mark.asyncio
@@ -2392,6 +2422,61 @@ async def test_script_canvas_connect_sync_roster_marks_error_on_row_failures(
 
 
 @pytest.mark.asyncio
+async def test_script_canvas_connect_sync_roster_skips_class_error_for_global_failure(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc)
+    previous_sync = fixed_now - timedelta(hours=3)
+    fake_lti_class = SimpleNamespace(
+        id=292,
+        class_id=321,
+        setup_user_id=42,
+        lti_status=canvas_connect_module.LTIStatus.LINKED,
+        last_sync_error="old-error",
+        last_synced=previous_sync,
+    )
+
+    async def _get_sync_context(self):
+        return fake_lti_class, 321, 42
+
+    async def _get_nrps_create_user_class_roles(self):
+        raise canvas_connect_module.CanvasConnectGlobalException(
+            detail="LTI service is not configured"
+        )
+
+    monkeypatch.setattr(
+        canvas_connect_module.CanvasConnectClient,
+        "_get_sync_context",
+        _get_sync_context,
+    )
+    monkeypatch.setattr(
+        canvas_connect_module.CanvasConnectClient,
+        "get_nrps_create_user_class_roles",
+        _get_nrps_create_user_class_roles,
+    )
+
+    db = FakeWriteDB()
+    authz_client = SimpleNamespace()
+    client = canvas_connect_module.ScriptCanvasConnectClient(
+        db=db,
+        client=authz_client,
+        lti_class_id=292,
+        key_manager=FakeKeyManager(),
+        nowfn=lambda: fixed_now,
+    )
+
+    with pytest.raises(canvas_connect_module.CanvasConnectGlobalException) as excinfo:
+        await client.sync_roster()
+
+    assert excinfo.value.detail == "LTI service is not configured"
+    assert fake_lti_class.lti_status == canvas_connect_module.LTIStatus.LINKED
+    assert fake_lti_class.last_sync_error == "old-error"
+    assert fake_lti_class.last_synced == previous_sync
+    assert db.added == []
+    assert db.flush_count == 0
+
+
+@pytest.mark.asyncio
 async def test_manual_canvas_connect_sync_roster_marks_error_on_row_failures(
     monkeypatch,
 ):
@@ -2472,3 +2557,57 @@ async def test_manual_canvas_connect_sync_roster_marks_error_on_row_failures(
     assert fake_lti_class.last_synced == previous_sync
     assert db.added == [fake_lti_class]
     assert db.flush_count == 1
+
+
+@pytest.mark.asyncio
+async def test_canvas_connect_sync_all_skips_class_error_for_global_failure(
+    monkeypatch,
+):
+    lti_class = SimpleNamespace(
+        id=301,
+        lti_status=canvas_connect_module.LTIStatus.LINKED,
+        last_sync_error="old-error",
+    )
+
+    async def _get_all_to_sync(cls, session, sync_classes_with_error_status=False):
+        yield lti_class
+
+    class FakeScriptCanvasConnectClient:
+        def __init__(self, *, db, client, lti_class_id):
+            assert db is session
+            assert client is authz_client
+            assert lti_class_id == lti_class.id
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def sync_roster(self):
+            raise canvas_connect_module.CanvasConnectGlobalException(
+                detail="LTI service is not configured"
+            )
+
+    monkeypatch.setattr(
+        canvas_connect_module.LTIClass,
+        "get_all_to_sync",
+        classmethod(_get_all_to_sync),
+    )
+    monkeypatch.setattr(
+        canvas_connect_module,
+        "ScriptCanvasConnectClient",
+        FakeScriptCanvasConnectClient,
+    )
+
+    session = FakeSyncSession()
+    authz_client = SimpleNamespace()
+
+    await canvas_connect_module.canvas_connect_sync_all(session, authz_client)
+
+    assert len(session.savepoints) == 1
+    assert session.savepoints[0].rollback_count == 1
+    assert lti_class.lti_status == canvas_connect_module.LTIStatus.LINKED
+    assert lti_class.last_sync_error == "old-error"
+    assert session.added == []
+    assert session.commit_count == 1

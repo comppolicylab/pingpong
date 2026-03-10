@@ -503,6 +503,11 @@ class LTISettings(BaseSettings):
         openid_configuration_paths = mapped_data.pop("openid_configuration_paths", None)
         dev_http_hosts = mapped_data.pop("dev_http_hosts", None)
         using_legacy_layout = "security" not in data
+        explicit_openid_paths = (
+            isinstance(data.get("security"), dict)
+            and isinstance(data["security"].get("openid_configuration"), dict)
+            and "paths" in data["security"]["openid_configuration"]
+        )
 
         if "security" in mapped_data:
             security = cls._mutable_dict(
@@ -561,7 +566,9 @@ class LTISettings(BaseSettings):
             openid_paths["allow"] = cls._validate_legacy_openid_configuration_paths(
                 openid_configuration_paths
             )
-        elif using_legacy_layout and "allow" not in openid_paths:
+        elif (
+            using_legacy_layout or not explicit_openid_paths
+        ) and "allow" not in openid_paths:
             # Legacy configs defaulted to these explicit discovery paths.
             openid_paths["allow"] = list(LEGACY_OPENID_CONFIGURATION_PATHS_DEFAULTS)
 

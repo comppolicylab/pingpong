@@ -28,7 +28,7 @@ def _sanitize_url_path(path: str, field_name: str) -> str:
     segments = path.split("/")
     if ".." in segments:
         raise ValueError(f"Invalid URL path for {field_name}")
-    return quote(path, safe="/:=+!*'(),@&~")
+    return quote(path, safe="/%:=+!*'(),@&~")
 
 
 def _sanitize_url_query(query: str, field_name: str) -> str:

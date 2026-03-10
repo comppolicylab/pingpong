@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -85,12 +86,12 @@ class FakeSession:
         current_json = kwargs.get("json")
         current_data = kwargs.get("data")
         allow_redirects = kwargs.get("allow_redirects", True)
-        response_pool = (
-            self.get_responses if current_method == "GET" else self.post_responses
-        )
-        payload = self.get_payload if current_method == "GET" else self.post_payload
 
         while True:
+            response_pool = (
+                self.get_responses if current_method == "GET" else self.post_responses
+            )
+            payload = self.get_payload if current_method == "GET" else self.post_payload
             request_kwargs = dict(kwargs)
             request_kwargs["headers"] = current_headers.copy()
             request_kwargs["allow_redirects"] = allow_redirects
@@ -455,6 +456,25 @@ async def test_fetch_jwks_rejects_non_dict(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_fetch_jwks_returns_bad_gateway_for_invalid_json(monkeypatch):
+    class InvalidJSONResponse(FakeResponse):
+        async def json(self):
+            raise json.JSONDecodeError("Expecting value", "<html>", 0)
+
+    monkeypatch.setattr(
+        server_module.aiohttp,
+        "ClientSession",
+        _fake_session_factory(get_responses=[InvalidJSONResponse(None)]),
+    )
+
+    with pytest.raises(HTTPException) as excinfo:
+        await server_module._fetch_jwks("https://example.com/jwks")
+
+    assert excinfo.value.status_code == 502
+    assert excinfo.value.detail == "Invalid JSON from jwks_url"
+
+
+@pytest.mark.asyncio
 async def test_fetch_jwks_rejects_redirect_to_unallowlisted_host(monkeypatch):
     allow_deny = SimpleNamespace(allow=["example.com"], deny=[])
     url_security = SimpleNamespace(
@@ -644,6 +664,33 @@ def test_get_claim_object_returns_dict_for_dict_claim():
         server_module._get_claim_object(claims, server_module.LTI_CLAIM_NRPS_KEY)
         == claim_value
     )
+
+
+def test_parse_lti_context_and_nrps_filters_non_string_values():
+    claims = {
+        server_module.LTI_CLAIM_CONTEXT_KEY: {
+            "label": 123,
+            "title": ["Course Name"],
+        },
+        server_module.LTI_CLAIM_NRPS_KEY: {
+            "context_memberships_url": "https://example.com/nrps"
+        },
+    }
+
+    (
+        course_code,
+        course_name,
+        course_term,
+        context_memberships_url,
+    ) = server_module.parse_lti_context_and_nrps(
+        claims,
+        {"canvas_term_name": {"name": "Fall"}},
+    )
+
+    assert course_code is None
+    assert course_name is None
+    assert course_term is None
+    assert context_memberships_url == "https://example.com/nrps"
 
 
 def test_get_lti_key_manager_missing_config(monkeypatch):
@@ -922,6 +969,44 @@ async def test_register_lti_instance_rejects_openid_redirect_to_unallowlisted_ho
 
 
 @pytest.mark.asyncio
+async def test_register_lti_instance_returns_bad_gateway_for_invalid_openid_json(
+    monkeypatch,
+):
+    class InvalidJSONResponse(FakeResponse):
+        async def json(self):
+            raise json.JSONDecodeError("Expecting value", "<html>", 0)
+
+    monkeypatch.setattr(
+        server_module.aiohttp,
+        "ClientSession",
+        _fake_session_factory(get_responses=[InvalidJSONResponse(None)]),
+    )
+    monkeypatch.setattr(
+        server_module.Institution,
+        "all_have_default_api_key",
+        lambda db, ids: _async_return(True),
+    )
+
+    data = LTIRegisterRequest(
+        name="PingPong",
+        admin_name="Admin",
+        admin_email="admin@example.com",
+        provider_id=0,
+        sso_field=None,
+        openid_configuration="https://platform.example.com/.well-known/openid",
+        registration_token="token",
+        institution_ids=[1],
+    )
+    request = FakeRequest(state=SimpleNamespace(db="db"))
+
+    with pytest.raises(HTTPException) as excinfo:
+        await server_module.register_lti_instance(request, data)
+
+    assert excinfo.value.status_code == 502
+    assert excinfo.value.detail == "Invalid OpenID configuration response payload"
+
+
+@pytest.mark.asyncio
 async def test_register_lti_instance_rejects_invalid_authorization_endpoint(
     monkeypatch,
 ):
@@ -1161,6 +1246,68 @@ async def test_register_lti_instance_preserves_auth_on_same_origin_openid_redire
 
 
 @pytest.mark.asyncio
+async def test_register_lti_instance_returns_bad_gateway_for_invalid_registration_json(
+    monkeypatch,
+):
+    class InvalidJSONResponse(FakeResponse):
+        async def json(self):
+            raise json.JSONDecodeError("Expecting value", "<html>", 0)
+
+    platform_config = {
+        "product_family_code": "canvas",
+        "messages_supported": [
+            {
+                "type": "LtiResourceLinkRequest",
+                "placements": [server_module.CANVAS_MESSAGE_PLACEMENT],
+            }
+        ],
+    }
+    openid_payload = {
+        "issuer": "issuer",
+        "authorization_endpoint": "https://platform.example.com/auth",
+        "registration_endpoint": "https://platform.example.com/reg",
+        "jwks_uri": "https://platform.example.com/jwks",
+        "token_endpoint": "https://platform.example.com/token",
+        "scopes_supported": server_module.REQUIRED_SCOPES,
+        "id_token_signing_alg_values_supported": ["RS256"],
+        "subject_types_supported": ["public"],
+        server_module.PLATFORM_CONFIGURATION_KEY: platform_config,
+    }
+
+    monkeypatch.setattr(
+        server_module.aiohttp,
+        "ClientSession",
+        _fake_session_factory(
+            get_payload=openid_payload,
+            post_responses=[InvalidJSONResponse(None)],
+        ),
+    )
+    monkeypatch.setattr(
+        server_module.Institution,
+        "all_have_default_api_key",
+        lambda db, ids: _async_return(True),
+    )
+
+    data = LTIRegisterRequest(
+        name="PingPong",
+        admin_name="Admin",
+        admin_email="admin@example.com",
+        provider_id=0,
+        sso_field=None,
+        openid_configuration="https://platform.example.com/.well-known/openid",
+        registration_token="token",
+        institution_ids=[1],
+    )
+    request = FakeRequest(state=SimpleNamespace(db="db"))
+
+    with pytest.raises(HTTPException) as excinfo:
+        await server_module.register_lti_instance(request, data)
+
+    assert excinfo.value.status_code == 502
+    assert excinfo.value.detail == "Invalid JSON from registration_endpoint"
+
+
+@pytest.mark.asyncio
 async def test_register_lti_instance_converts_post_302_redirect_to_get(
     monkeypatch,
 ):
@@ -1185,13 +1332,15 @@ async def test_register_lti_instance_converts_post_302_redirect_to_get(
         server_module.PLATFORM_CONFIGURATION_KEY: platform_config,
     }
     session = FakeSession(
-        get_payload=openid_payload,
         post_responses=[
             FakeResponse(
                 None,
                 status=302,
                 headers={"Location": "/reg-redirect"},
             ),
+        ],
+        get_responses=[
+            FakeResponse(openid_payload),
             FakeResponse({"client_id": "client"}),
         ],
     )

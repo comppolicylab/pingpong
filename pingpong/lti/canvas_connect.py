@@ -125,7 +125,7 @@ def _extract_sync_row_errors(results: CreateUserResults) -> list[str]:
 def _require_lti_security() -> LTISecuritySettings:
     lti_settings = config.lti
     if lti_settings is None:
-        raise CanvasConnectException(detail="LTI service is not configured")
+        raise CanvasConnectGlobalException(detail="LTI service is not configured")
     return lti_settings.security
 
 
@@ -140,6 +140,10 @@ class CanvasConnectException(Exception):
     def __init__(self, detail: str = ""):
         self.detail = detail
         super().__init__(detail)
+
+
+class CanvasConnectGlobalException(CanvasConnectException):
+    """Raised for deployment-wide failures that should not mutate class state."""
 
 
 class CanvasConnectWarning(Exception):
@@ -161,7 +165,7 @@ class CanvasConnectClient:
         self.nowfn = nowfn
         if key_manager is None:
             if config.lti is None:
-                raise CanvasConnectException(
+                raise CanvasConnectGlobalException(
                     detail="LTI service is not configured",
                 )
             key_manager = config.lti.key_store.key_manager
@@ -324,17 +328,17 @@ class CanvasConnectClient:
             security_settings.names_and_role_endpoint
         )
 
-        access_token = await self.get_short_lived_auth_token()
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Accept": NRPS_MEMBERSHIP_CONTAINER_CONTENT_TYPE,
-        }
         try:
             generated_url = generate_names_and_role_api_url(url)
         except ValueError as e:
             raise CanvasConnectException(
                 detail=f"Invalid NRPS URL: {e!s}",
             ) from e
+        access_token = await self.get_short_lived_auth_token()
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Accept": NRPS_MEMBERSHIP_CONTAINER_CONTENT_TYPE,
+        }
         try:
             async with request_with_validated_redirects(
                 session=http_session,
@@ -700,7 +704,7 @@ class CanvasConnectClient:
                         f"{displayed_row_errors}{overflow_suffix}"
                     )
                 )
-        except CanvasConnectWarning:
+        except (CanvasConnectWarning, CanvasConnectGlobalException):
             raise
         except Exception as e:
             await self._mark_sync_error(lti_class, exception_detail(e))
@@ -948,6 +952,9 @@ async def canvas_connect_sync_all(
             except Exception as e:
                 logger.exception(f"Error syncing LTI class {lti_class.id}: {e}")
                 await savepoint.rollback()
+
+                if isinstance(e, CanvasConnectGlobalException):
+                    continue
 
                 # sync_roster() already marks the class as errored, but that write is part
                 # of the rolled-back savepoint above. Re-apply the error marker outside the

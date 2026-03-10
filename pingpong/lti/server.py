@@ -148,7 +148,13 @@ async def _fetch_jwks(jwks_url: str) -> dict[str, Any]:
                 redirects_allowed=redirects_allowed,
                 raise_for_status=True,
             ) as response:
-                payload = await response.json()
+                try:
+                    payload = await response.json()
+                except json.JSONDecodeError as e:
+                    raise HTTPException(
+                        status_code=502,
+                        detail="Invalid JSON from jwks_url",
+                    ) from e
                 if not isinstance(payload, dict):
                     raise HTTPException(status_code=500, detail="Invalid JWKS response")
                 return cast(dict[str, Any], payload)
@@ -209,7 +215,13 @@ async def _fetch_openid_configuration(
                 raise_for_status=True,
                 headers=headers,
             ) as response:
-                payload = await response.json()
+                try:
+                    payload = await response.json()
+                except json.JSONDecodeError as e:
+                    raise HTTPException(
+                        status_code=502,
+                        detail="Invalid OpenID configuration response payload",
+                    ) from e
                 if not isinstance(payload, dict):
                     raise HTTPException(
                         status_code=500,
@@ -320,15 +332,19 @@ def _get_claim_object(claims: dict[str, Any], claim_key: str) -> dict[str, Any]:
 
 
 def parse_lti_context_and_nrps(
-    claims: dict[str, Any], launch_custom_params: dict[str, str]
+    claims: dict[str, Any], launch_custom_params: dict[str, Any]
 ) -> tuple[str | None, str | None, str | None, str | None]:
     context = _get_claim_object(claims, LTI_CLAIM_CONTEXT_KEY)
     nrps_claim = _get_claim_object(claims, LTI_CLAIM_NRPS_KEY)
 
-    course_code = context.get("label")
-    course_name = context.get("title")
+    course_code_value = context.get("label")
+    course_code = course_code_value if isinstance(course_code_value, str) else None
 
-    course_term = launch_custom_params.get("canvas_term_name")
+    course_name_value = context.get("title")
+    course_name = course_name_value if isinstance(course_name_value, str) else None
+
+    course_term_value = launch_custom_params.get("canvas_term_name")
+    course_term = course_term_value if isinstance(course_term_value, str) else None
     if (
         not course_term
         or course_term in LTI_CUSTOM_PARAM_DEFAULT_VALUES["canvas_term_name"]
@@ -606,7 +622,13 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
                 },
                 json=tool_registration_data,
             ) as response:
-                payload = await response.json()
+                try:
+                    payload = await response.json()
+                except json.JSONDecodeError as e:
+                    raise HTTPException(
+                        status_code=502,
+                        detail="Invalid JSON from registration_endpoint",
+                    ) from e
                 if not isinstance(payload, dict):
                     raise HTTPException(
                         status_code=500,
