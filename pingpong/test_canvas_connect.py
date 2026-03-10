@@ -1,7 +1,9 @@
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
+from multidict import CIMultiDict
 import pytest
+from yarl import URL
 
 import pingpong.config as config_module
 from pingpong.lti import canvas_connect as canvas_connect_module
@@ -32,43 +34,106 @@ class FakeTokenResponse:
 
 
 class FakeClientSession:
-    def __init__(self, response: FakeTokenResponse | list[FakeTokenResponse]):
+    def __init__(
+        self,
+        response: FakeTokenResponse | list[FakeTokenResponse],
+        *,
+        trace_configs=None,
+    ):
         if isinstance(response, list):
             self.responses = list(response)
         else:
             self.responses = [response]
         self.requests: list[dict] = []
         self.closed = False
+        self._trace_configs = list(trace_configs or [])
 
-    def post(self, url: str, *, headers: dict, data: dict, **kwargs):
-        self.requests.append(
-            {
-                "method": "POST",
-                "url": url,
-                "headers": headers,
-                "data": data,
+    def request(self, method: str, url: str, **kwargs):
+        return FakeTokenRequestContext(self, method, url, kwargs)
+
+    async def _request(self, method: str, url: str, **kwargs):
+        current_method = method.upper()
+        current_url = url
+        current_headers = dict(kwargs.get("headers") or {})
+        current_data = kwargs.get("data")
+        current_json = kwargs.get("json")
+        allow_redirects = kwargs.get("allow_redirects", True)
+
+        while True:
+            request = {
+                "method": current_method,
+                "url": current_url,
+                "headers": current_headers.copy(),
                 **kwargs,
             }
-        )
-        if not self.responses:
-            raise AssertionError("No fake responses configured")
-        return self.responses.pop(0)
+            request["allow_redirects"] = allow_redirects
+            if "data" in kwargs or current_data is not None:
+                request["data"] = current_data
+            if "json" in kwargs or current_json is not None:
+                request["json"] = current_json
+            self.requests.append(request)
 
-    def get(self, url: str, *, headers: dict, **kwargs):
-        self.requests.append(
-            {
-                "method": "GET",
-                "url": url,
-                "headers": headers,
-                **kwargs,
-            }
-        )
-        if not self.responses:
-            raise AssertionError("No fake responses configured")
-        return self.responses.pop(0)
+            if not self.responses:
+                raise AssertionError("No fake responses configured")
+            response = self.responses.pop(0)
+            if response.status not in {301, 302, 303, 307, 308} or not allow_redirects:
+                return response
+
+            for trace_config in self._trace_configs:
+                trace_ctx = trace_config.trace_config_ctx(
+                    kwargs.get("trace_request_ctx")
+                )
+                params = SimpleNamespace(
+                    method=current_method,
+                    url=URL(current_url),
+                    headers=CIMultiDict(current_headers),
+                    response=response,
+                )
+                await trace_config.on_request_redirect.send(self, trace_ctx, params)
+
+            redirect_url = URL(current_url).join(
+                URL(response.headers.get("Location") or response.headers.get("URI"))
+            )
+            if URL(current_url).origin() != redirect_url.origin():
+                current_headers.pop("Authorization", None)
+
+            if (response.status == 303 and current_method != "HEAD") or (
+                response.status in {301, 302} and current_method == "POST"
+            ):
+                current_method = "GET"
+                current_data = None
+                current_json = None
+
+            current_url = str(redirect_url)
 
     async def close(self):
         self.closed = True
+
+
+class FakeTokenRequestContext:
+    def __init__(self, session: FakeClientSession, method: str, url: str, kwargs: dict):
+        self.session = session
+        self.method = method
+        self.url = url
+        self.kwargs = kwargs
+        self.response = None
+
+    async def __aenter__(self):
+        self.response = await self.session._request(
+            self.method, self.url, **self.kwargs
+        )
+        return self.response
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+def _client_session_factory(fake_session: FakeClientSession):
+    def _factory(*args, **kwargs):
+        fake_session._trace_configs = list(kwargs.get("trace_configs") or [])
+        return fake_session
+
+    return _factory
 
 
 class FakeKeyManager:
@@ -171,7 +236,7 @@ async def test_get_nrps_access_token_uses_oidc_token_endpoint_and_signed_asserti
     monkeypatch.setattr(
         canvas_connect_module.aiohttp,
         "ClientSession",
-        lambda: fake_session,
+        _client_session_factory(fake_session),
     )
 
     fixed_now = datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc)
@@ -260,7 +325,7 @@ async def test_get_nrps_access_token_falls_back_to_registration_auth_token_url(
     monkeypatch.setattr(
         canvas_connect_module.aiohttp,
         "ClientSession",
-        lambda: fake_session,
+        _client_session_factory(fake_session),
     )
 
     async with canvas_connect_module.CanvasConnectClient(
@@ -308,7 +373,7 @@ async def test_get_nrps_access_token_raises_on_token_endpoint_error(monkeypatch)
     monkeypatch.setattr(
         canvas_connect_module.aiohttp,
         "ClientSession",
-        lambda: fake_session,
+        _client_session_factory(fake_session),
     )
 
     async with canvas_connect_module.CanvasConnectClient(
@@ -324,7 +389,7 @@ async def test_get_nrps_access_token_raises_on_token_endpoint_error(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_get_nrps_access_token_reposts_to_validated_redirect(
+async def test_get_nrps_access_token_converts_post_302_redirect_to_get(
     monkeypatch,
 ):
     token_endpoint = "https://canvas.example.com/login/oauth2/token"
@@ -371,7 +436,7 @@ async def test_get_nrps_access_token_reposts_to_validated_redirect(
     monkeypatch.setattr(
         canvas_connect_module.aiohttp,
         "ClientSession",
-        lambda: fake_session,
+        _client_session_factory(fake_session),
     )
 
     async with canvas_connect_module.CanvasConnectClient(
@@ -386,9 +451,12 @@ async def test_get_nrps_access_token_reposts_to_validated_redirect(
     assert len(fake_session.requests) == 2
     assert fake_session.requests[0]["url"] == token_endpoint
     assert fake_session.requests[1]["url"] == redirected_token_endpoint
-    assert fake_session.requests[0]["allow_redirects"] is False
-    assert fake_session.requests[1]["allow_redirects"] is False
-    assert fake_session.requests[0]["data"] == fake_session.requests[1]["data"]
+    assert fake_session.requests[0]["method"] == "POST"
+    assert fake_session.requests[1]["method"] == "GET"
+    assert fake_session.requests[0]["allow_redirects"] is True
+    assert fake_session.requests[1]["allow_redirects"] is True
+    assert fake_session.requests[0]["data"]["client_id"] == "client-123"
+    assert fake_session.requests[1]["data"] is None
 
 
 @pytest.mark.asyncio
@@ -454,7 +522,7 @@ async def test_get_nrps_access_token_rejects_redirect_to_unallowlisted_host(
     monkeypatch.setattr(
         canvas_connect_module.aiohttp,
         "ClientSession",
-        lambda: fake_session,
+        _client_session_factory(fake_session),
     )
 
     async with canvas_connect_module.CanvasConnectClient(
@@ -471,7 +539,7 @@ async def test_get_nrps_access_token_rejects_redirect_to_unallowlisted_host(
         == "Invalid token endpoint URL: Invalid token endpoint URL hostname"
     )
     assert len(fake_session.requests) == 1
-    assert fake_session.requests[0]["allow_redirects"] is False
+    assert fake_session.requests[0]["allow_redirects"] is True
 
 
 @pytest.mark.asyncio
@@ -515,7 +583,7 @@ async def test_make_authed_nrps_get_rejects_redirect_to_unallowlisted_host(
     monkeypatch.setattr(
         canvas_connect_module.aiohttp,
         "ClientSession",
-        lambda: fake_session,
+        _client_session_factory(fake_session),
     )
 
     async with canvas_connect_module.CanvasConnectClient(
@@ -534,7 +602,7 @@ async def test_make_authed_nrps_get_rejects_redirect_to_unallowlisted_host(
         == "Invalid NRPS URL: Invalid Names and Role API URL hostname"
     )
     assert len(fake_session.requests) == 1
-    assert fake_session.requests[0]["allow_redirects"] is False
+    assert fake_session.requests[0]["allow_redirects"] is True
 
 
 @pytest.mark.asyncio
@@ -554,7 +622,7 @@ async def test_get_nrps_access_token_raises_when_lti_class_missing(monkeypatch):
     monkeypatch.setattr(
         canvas_connect_module.aiohttp,
         "ClientSession",
-        lambda: fake_session,
+        _client_session_factory(fake_session),
     )
 
     async with canvas_connect_module.CanvasConnectClient(
@@ -584,7 +652,7 @@ async def test_make_authed_nrps_get_raises_when_lti_config_missing(monkeypatch):
     monkeypatch.setattr(
         canvas_connect_module.aiohttp,
         "ClientSession",
-        lambda: fake_session,
+        _client_session_factory(fake_session),
     )
 
     async with canvas_connect_module.CanvasConnectClient(
@@ -642,7 +710,7 @@ async def test_get_nrps_access_token_raises_canvas_connect_exception_when_lti_co
     monkeypatch.setattr(
         canvas_connect_module.aiohttp,
         "ClientSession",
-        lambda: fake_session,
+        _client_session_factory(fake_session),
     )
 
     async with canvas_connect_module.CanvasConnectClient(
@@ -692,7 +760,7 @@ async def test_get_nrps_access_token_reuses_cached_token_until_expiry(monkeypatc
     monkeypatch.setattr(
         canvas_connect_module.aiohttp,
         "ClientSession",
-        lambda: fake_session,
+        _client_session_factory(fake_session),
     )
 
     fixed_now = datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc)
@@ -754,7 +822,7 @@ async def test_get_nrps_access_token_refreshes_when_cached_token_expired(monkeyp
     monkeypatch.setattr(
         canvas_connect_module.aiohttp,
         "ClientSession",
-        lambda: fake_session,
+        _client_session_factory(fake_session),
     )
 
     now_holder = {"value": datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc)}
@@ -910,7 +978,7 @@ async def test_get_resource_link_id_returns_existing_without_fetch(monkeypatch):
     monkeypatch.setattr(
         canvas_connect_module.aiohttp,
         "ClientSession",
-        lambda: fake_session,
+        _client_session_factory(fake_session),
     )
 
     async with canvas_connect_module.CanvasConnectClient(
@@ -955,7 +1023,7 @@ async def test_get_resource_link_id_returns_none_when_missing(monkeypatch):
     monkeypatch.setattr(
         canvas_connect_module.aiohttp,
         "ClientSession",
-        lambda: fake_session,
+        _client_session_factory(fake_session),
     )
 
     db = FakeWriteDB()
@@ -1031,7 +1099,7 @@ async def test_get_resource_link_id_uses_nrps_context_id_as_transient_fallback(
     monkeypatch.setattr(
         canvas_connect_module.aiohttp,
         "ClientSession",
-        lambda: fake_session,
+        _client_session_factory(fake_session),
     )
 
     db = FakeWriteDB()
@@ -1184,7 +1252,7 @@ async def test_get_nrps_create_user_class_roles_maps_members_and_pages(monkeypat
     monkeypatch.setattr(
         canvas_connect_module.aiohttp,
         "ClientSession",
-        lambda: fake_session,
+        _client_session_factory(fake_session),
     )
 
     async with canvas_connect_module.CanvasConnectClient(
@@ -1289,7 +1357,7 @@ async def test_get_nrps_create_user_class_roles_allows_missing_members(monkeypat
     monkeypatch.setattr(
         canvas_connect_module.aiohttp,
         "ClientSession",
-        lambda: fake_session,
+        _client_session_factory(fake_session),
     )
 
     async with canvas_connect_module.CanvasConnectClient(
@@ -1365,7 +1433,7 @@ async def test_request_all_nrps_pages_detects_loop_for_canonicalized_next_page(
     monkeypatch.setattr(
         canvas_connect_module.aiohttp,
         "ClientSession",
-        lambda: fake_session,
+        _client_session_factory(fake_session),
     )
 
     async with canvas_connect_module.CanvasConnectClient(
@@ -1480,7 +1548,7 @@ async def test_get_nrps_create_user_class_roles_no_sso_when_provider_id_zero(
     monkeypatch.setattr(
         canvas_connect_module.aiohttp,
         "ClientSession",
-        lambda: fake_session,
+        _client_session_factory(fake_session),
     )
 
     async with canvas_connect_module.CanvasConnectClient(
@@ -1594,7 +1662,7 @@ async def test_get_nrps_create_user_class_roles_ignores_sso_provider_ids_from_sk
     monkeypatch.setattr(
         canvas_connect_module.aiohttp,
         "ClientSession",
-        lambda: fake_session,
+        _client_session_factory(fake_session),
     )
 
     async with canvas_connect_module.CanvasConnectClient(

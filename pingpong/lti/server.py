@@ -52,7 +52,10 @@ from pingpong.lti.constants import (
     TOKEN_ALG_KEY,
     TOKEN_ENDPOINT_KEY,
 )
-from pingpong.lti.http import request_with_validated_redirects
+from pingpong.lti.http import (
+    create_lti_redirect_trace_config,
+    request_with_validated_redirects,
+)
 from pingpong.lti.lti_course import (
     find_class_by_course_id,
     find_class_by_course_id_search_by_canvas_account_lti_guid,
@@ -128,33 +131,29 @@ async def _fetch_jwks(jwks_url: str) -> dict[str, Any]:
     redirects_allowed = (
         allow_redirects(config.lti.security.jwks_uri) if config.lti else True
     )
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with request_with_validated_redirects(
-            initial_url=generated_jwks_url,
-            request=lambda url: session.get(
-                url,
+    async with aiohttp.ClientSession(
+        timeout=timeout,
+        trace_configs=[create_lti_redirect_trace_config()],
+    ) as session:
+        try:
+            async with request_with_validated_redirects(
+                session=session,
+                method="GET",
+                url=generated_jwks_url,
+                validate_redirect_url=generate_jwks_uri_url,
+                redirects_allowed=redirects_allowed,
                 raise_for_status=True,
-                allow_redirects=False,
-            ),
-            validate_redirect_url=generate_jwks_uri_url,
-            redirects_allowed=redirects_allowed,
-            unexpected_redirect_error=lambda: HTTPException(
-                status_code=400, detail="Unexpected redirect from jwks_url"
-            ),
-            invalid_redirect_response_error=lambda: HTTPException(
-                status_code=500, detail="Invalid JWKS redirect response"
-            ),
-            too_many_redirects_error=lambda: HTTPException(
+            ) as response:
+                payload = await response.json()
+                if not isinstance(payload, dict):
+                    raise HTTPException(status_code=500, detail="Invalid JWKS response")
+                return cast(dict[str, Any], payload)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail="Invalid jwks_url") from e
+        except aiohttp.TooManyRedirects as e:
+            raise HTTPException(
                 status_code=400, detail="Too many redirects for jwks_url"
-            ),
-            invalid_redirect_url_error=lambda e: HTTPException(
-                status_code=400, detail="Invalid jwks_url"
-            ),
-        ) as (response, _):
-            payload = await response.json()
-            if not isinstance(payload, dict):
-                raise HTTPException(status_code=500, detail="Invalid JWKS response")
-            return cast(dict[str, Any], payload)
+            ) from e
 
 
 async def _fetch_openid_configuration(
@@ -175,41 +174,36 @@ async def _fetch_openid_configuration(
         if config.lti
         else True
     )
-    initial_headers = headers.copy()
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with request_with_validated_redirects(
-            initial_url=generated_openid_configuration_url,
-            request=lambda url: session.get(
-                url,
+    async with aiohttp.ClientSession(
+        timeout=timeout,
+        trace_configs=[create_lti_redirect_trace_config()],
+    ) as session:
+        try:
+            async with request_with_validated_redirects(
+                session=session,
+                method="GET",
+                url=generated_openid_configuration_url,
+                validate_redirect_url=generate_openid_configuration_url,
+                redirects_allowed=redirects_allowed,
                 raise_for_status=True,
-                headers=initial_headers if url == generated_openid_configuration_url else {},
-                allow_redirects=False,
-            ),
-            validate_redirect_url=generate_openid_configuration_url,
-            redirects_allowed=redirects_allowed,
-            unexpected_redirect_error=lambda: HTTPException(
-                status_code=400,
-                detail="Unexpected redirect from openid_configuration",
-            ),
-            invalid_redirect_response_error=lambda: HTTPException(
-                status_code=500,
-                detail="Invalid OpenID configuration redirect response",
-            ),
-            too_many_redirects_error=lambda: HTTPException(
+                headers=headers,
+            ) as response:
+                payload = await response.json()
+                if not isinstance(payload, dict):
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Invalid OpenID configuration response payload",
+                    )
+                return cast(dict[str, Any], payload)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=400, detail="Invalid openid_configuration"
+            ) from e
+        except aiohttp.TooManyRedirects as e:
+            raise HTTPException(
                 status_code=400,
                 detail="Too many redirects for openid_configuration",
-            ),
-            invalid_redirect_url_error=lambda e: HTTPException(
-                status_code=400, detail="Invalid openid_configuration"
-            ),
-        ) as (response, _):
-            payload = await response.json()
-            if not isinstance(payload, dict):
-                raise HTTPException(
-                    status_code=500,
-                    detail="Invalid OpenID configuration response payload",
-                )
-            return cast(dict[str, Any], payload)
+            ) from e
 
 
 def _select_jwk(jwks: dict[str, Any], kid: str | None) -> dict[str, Any]:
@@ -530,38 +524,24 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
         else True
     )
     timeout = aiohttp.ClientTimeout(total=10)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
+    async with aiohttp.ClientSession(
+        timeout=timeout,
+        trace_configs=[create_lti_redirect_trace_config()],
+    ) as session:
         try:
             async with request_with_validated_redirects(
-                initial_url=registration_endpoint_url,
-                request=lambda url: session.post(
-                    url,
-                    raise_for_status=True,
-                    headers={
-                        "Authorization": f"Bearer {data.registration_token}",
-                        "Content-Type": "application/json",
-                    },
-                    allow_redirects=False,
-                    json=tool_registration_data,
-                ),
+                session=session,
+                method="POST",
+                url=registration_endpoint_url,
                 validate_redirect_url=generate_registration_endpoint_url,
                 redirects_allowed=redirects_allowed,
-                unexpected_redirect_error=lambda: HTTPException(
-                    status_code=400,
-                    detail="Unexpected redirect from registration_endpoint",
-                ),
-                invalid_redirect_response_error=lambda: HTTPException(
-                    status_code=500,
-                    detail="Invalid registration endpoint redirect response",
-                ),
-                too_many_redirects_error=lambda: HTTPException(
-                    status_code=400,
-                    detail="Too many redirects for registration_endpoint",
-                ),
-                invalid_redirect_url_error=lambda e: HTTPException(
-                    status_code=400, detail=str(e)
-                ),
-            ) as (response, _):
+                raise_for_status=True,
+                headers={
+                    "Authorization": f"Bearer {data.registration_token}",
+                    "Content-Type": "application/json",
+                },
+                json=tool_registration_data,
+            ) as response:
                 payload = await response.json()
                 if not isinstance(payload, dict):
                     raise HTTPException(
@@ -569,6 +549,13 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
                         detail="Invalid registration endpoint response payload",
                     )
                 registration_response_data = cast(dict[str, Any], payload)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        except aiohttp.TooManyRedirects as e:
+            raise HTTPException(
+                status_code=400,
+                detail="Too many redirects for registration_endpoint",
+            ) from e
         except aiohttp.ClientResponseError as e:
             logger.error(f"Error during LTI tool registration: {e.status} {e.message}")
             raise HTTPException(
