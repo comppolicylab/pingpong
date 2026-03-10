@@ -112,7 +112,7 @@ def generate_safe_lti_url(
     if not _hostname_allowed(hostname, host_allow, host_deny):
         raise ValueError(f"Invalid {url_type} URL hostname")
 
-    path = _sanitize_url_path(_url.path, url_type)
+    path = _sanitize_url_path(_url.path or "/", url_type)
     if not _PATH_RE.fullmatch(path):
         raise ValueError(f"Invalid {url_type} URL path")
     if not _path_allowed(path, path_allow, path_deny):

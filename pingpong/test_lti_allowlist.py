@@ -73,6 +73,21 @@ def test_generate_safe_lti_url_normalizes_and_validates(development_config):
     )
 
 
+@pytest.mark.parametrize("development_config", [False], indirect=True)
+def test_generate_safe_lti_url_treats_empty_path_as_root(development_config):
+    result = allowlist.generate_safe_lti_url(
+        unverified_url="https://platform.example.com",
+        url_type="Token endpoint",
+        host_allow=["*.example.com"],
+        host_deny=[],
+        path_allow=["/"],
+        path_deny=[],
+        allow_http_in_development=True,
+    )
+
+    assert result == "https://platform.example.com/"
+
+
 @pytest.mark.parametrize("development_config", [True], indirect=True)
 def test_generate_safe_lti_url_allows_http_only_in_development(development_config):
     result = allowlist.generate_safe_lti_url(
