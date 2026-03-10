@@ -1,7 +1,5 @@
 from pingpong.config import LTIAllowDenySettings, LTIUrlSecuritySettings
-from pingpong.lti.allowlist import (
-    generate_safe_lti_url,
-)
+from pingpong.lti.allowlist import LTIUrlValidationMode, generate_safe_lti_url
 
 
 def _get_patterns(
@@ -79,6 +77,7 @@ def _generate_lti_url(
     unverified_url: str,
     security_config: LTIUrlSecuritySettings | None,
     url_type: str,
+    validation_mode: LTIUrlValidationMode = "canonicalize",
 ) -> str:
     # Lazy import avoids config import cycles.
     from pingpong.config import config
@@ -103,6 +102,7 @@ def _generate_lti_url(
         path_allow=path_allow,
         path_deny=path_deny,
         allow_http_in_development=_allow_http_in_development(security_config),
+        validation_mode=validation_mode,
     )
 
 
@@ -122,7 +122,11 @@ def allow_redirects(security_config: LTIUrlSecuritySettings) -> bool:
     )
 
 
-def generate_openid_configuration_url(openid_configuration_url: str) -> str:
+def generate_openid_configuration_url(
+    openid_configuration_url: str,
+    *,
+    validation_mode: LTIUrlValidationMode = "canonicalize",
+) -> str:
     # Lazy import avoids config import cycles.
     from pingpong.config import config
 
@@ -132,10 +136,15 @@ def generate_openid_configuration_url(openid_configuration_url: str) -> str:
             config.lti.security.openid_configuration if config.lti else None
         ),
         url_type="OpenID configuration",
+        validation_mode=validation_mode,
     )
 
 
-def generate_names_and_role_api_url(names_and_role_api_url: str) -> str:
+def generate_names_and_role_api_url(
+    names_and_role_api_url: str,
+    *,
+    validation_mode: LTIUrlValidationMode = "canonicalize",
+) -> str:
     # Lazy import avoids config import cycles.
     from pingpong.config import config
 
@@ -145,10 +154,15 @@ def generate_names_and_role_api_url(names_and_role_api_url: str) -> str:
             config.lti.security.names_and_role_endpoint if config.lti else None
         ),
         url_type="Names and Role API",
+        validation_mode=validation_mode,
     )
 
 
-def generate_authorization_endpoint_url(authorization_endpoint_url: str) -> str:
+def generate_authorization_endpoint_url(
+    authorization_endpoint_url: str,
+    *,
+    validation_mode: LTIUrlValidationMode = "canonicalize",
+) -> str:
     # Lazy import avoids config import cycles.
     from pingpong.config import config
 
@@ -158,10 +172,15 @@ def generate_authorization_endpoint_url(authorization_endpoint_url: str) -> str:
             config.lti.security.authorization_endpoint if config.lti else None
         ),
         url_type="authorization endpoint",
+        validation_mode=validation_mode,
     )
 
 
-def generate_registration_endpoint_url(registration_endpoint_url: str) -> str:
+def generate_registration_endpoint_url(
+    registration_endpoint_url: str,
+    *,
+    validation_mode: LTIUrlValidationMode = "canonicalize",
+) -> str:
     # Lazy import avoids config import cycles.
     from pingpong.config import config
 
@@ -171,10 +190,15 @@ def generate_registration_endpoint_url(registration_endpoint_url: str) -> str:
             config.lti.security.registration_endpoint if config.lti else None
         ),
         url_type="registration endpoint",
+        validation_mode=validation_mode,
     )
 
 
-def generate_jwks_uri_url(jwks_uri_url: str) -> str:
+def generate_jwks_uri_url(
+    jwks_uri_url: str,
+    *,
+    validation_mode: LTIUrlValidationMode = "canonicalize",
+) -> str:
     # Lazy import avoids config import cycles.
     from pingpong.config import config
 
@@ -182,10 +206,15 @@ def generate_jwks_uri_url(jwks_uri_url: str) -> str:
         unverified_url=jwks_uri_url,
         security_config=config.lti.security.jwks_uri if config.lti else None,
         url_type="JWKS URI",
+        validation_mode=validation_mode,
     )
 
 
-def generate_token_endpoint_url(token_endpoint_url: str) -> str:
+def generate_token_endpoint_url(
+    token_endpoint_url: str,
+    *,
+    validation_mode: LTIUrlValidationMode = "canonicalize",
+) -> str:
     # Lazy import avoids config import cycles.
     from pingpong.config import config
 
@@ -193,4 +222,5 @@ def generate_token_endpoint_url(token_endpoint_url: str) -> str:
         unverified_url=token_endpoint_url,
         security_config=config.lti.security.token_endpoint if config.lti else None,
         url_type="token endpoint",
+        validation_mode=validation_mode,
     )

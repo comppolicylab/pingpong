@@ -197,8 +197,7 @@ def _patch_lti_security_config(monkeypatch):
 async def test_get_nrps_access_token_uses_oidc_token_endpoint_and_signed_assertion(
     monkeypatch,
 ):
-    token_endpoint = "http://canvas.example.com/login/oauth2/token"
-    normalized_token_endpoint = "https://canvas.example.com/login/oauth2/token"
+    token_endpoint = "https://canvas.example.com/login/oauth2/token"
     registration = SimpleNamespace(
         client_id="client-123",
         openid_configuration=f'{{"token_endpoint":"{token_endpoint}"}}',
@@ -260,7 +259,7 @@ async def test_get_nrps_access_token_uses_oidc_token_endpoint_and_signed_asserti
 
     assert len(fake_session.requests) == 1
     req = fake_session.requests[0]
-    assert req["url"] == normalized_token_endpoint
+    assert req["url"] == token_endpoint
     assert req["headers"] == {
         "Content-Type": canvas_connect_module.TOKEN_REQUEST_CONTENT_TYPE
     }
@@ -282,7 +281,7 @@ async def test_get_nrps_access_token_uses_oidc_token_endpoint_and_signed_asserti
     assert jwt_calls["payload"] == {
         "iss": "client-123",
         "sub": "client-123",
-        "aud": normalized_token_endpoint,
+        "aud": token_endpoint,
         "iat": expected_iat,
         "exp": expected_exp,
         "jti": "uuid7-test",
@@ -393,6 +392,53 @@ async def test_get_nrps_access_token_raises_on_token_endpoint_error(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_get_nrps_access_token_rejects_insecure_oidc_token_endpoint(
+    monkeypatch,
+):
+    token_endpoint = "http://canvas.example.com/login/oauth2/token"
+    registration = SimpleNamespace(
+        client_id="client-123",
+        openid_configuration=f'{{"token_endpoint":"{token_endpoint}"}}',
+        auth_token_url="https://fallback.example.com/token",
+    )
+    lti_class = SimpleNamespace(id=11, registration=registration)
+
+    async def _get_by_id_with_registration(cls, db, id_):
+        assert id_ == 11
+        return lti_class
+
+    monkeypatch.setattr(
+        canvas_connect_module.LTIClass,
+        "get_by_id_with_registration",
+        classmethod(_get_by_id_with_registration),
+    )
+
+    fake_session = FakeClientSession(
+        FakeTokenResponse(payload={"access_token": "ignored", "expires_in": 3600})
+    )
+    monkeypatch.setattr(
+        canvas_connect_module.aiohttp,
+        "ClientSession",
+        _client_session_factory(fake_session),
+    )
+
+    async with canvas_connect_module.CanvasConnectClient(
+        db=SimpleNamespace(),
+        lti_class_id=11,
+        key_manager=FakeKeyManager(),
+        nowfn=lambda: datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc),
+    ) as client:
+        with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+            await client.get_nrps_access_token()
+
+    assert (
+        excinfo.value.detail
+        == "Invalid token endpoint URL: Invalid URL for token endpoint: HTTP is not allowed"
+    )
+    assert fake_session.requests == []
+
+
+@pytest.mark.asyncio
 async def test_get_nrps_access_token_converts_post_302_redirect_to_get(
     monkeypatch,
 ):
@@ -461,6 +507,90 @@ async def test_get_nrps_access_token_converts_post_302_redirect_to_get(
     assert fake_session.requests[1]["allow_redirects"] is True
     assert fake_session.requests[0]["data"]["client_id"] == "client-123"
     assert fake_session.requests[1]["data"] is None
+
+
+@pytest.mark.asyncio
+async def test_get_nrps_access_token_rejects_redirect_that_requires_rewriting(
+    monkeypatch,
+):
+    allow_deny = SimpleNamespace(allow=["canvas.example.com"], deny=[])
+    url_security = SimpleNamespace(
+        allow_http_in_development=True,
+        allow_redirects=True,
+        hosts=allow_deny,
+        paths=SimpleNamespace(allow=["/login/oauth2/*"], deny=[]),
+    )
+    restricted_config = SimpleNamespace(
+        lti=SimpleNamespace(
+            security=SimpleNamespace(
+                allow_http_in_development=True,
+                allow_redirects=True,
+                hosts=SimpleNamespace(allow=["*"], deny=[]),
+                paths=SimpleNamespace(allow=["*"], deny=[]),
+                authorization_endpoint=url_security,
+                jwks_uri=url_security,
+                names_and_role_endpoint=url_security,
+                openid_configuration=url_security,
+                registration_endpoint=url_security,
+                token_endpoint=url_security,
+            ),
+            sync_wait=600,
+            key_store=SimpleNamespace(key_manager=FakeKeyManager()),
+        ),
+        development=False,
+    )
+    monkeypatch.setattr(config_module, "config", restricted_config)
+    monkeypatch.setattr(canvas_connect_module, "config", restricted_config)
+
+    registration = SimpleNamespace(
+        client_id="client-123",
+        openid_configuration='{"token_endpoint":"https://canvas.example.com/login/oauth2/token"}',
+        auth_token_url=None,
+    )
+    lti_class = SimpleNamespace(id=15, registration=registration)
+
+    async def _get_by_id_with_registration(cls, db, id_):
+        return lti_class
+
+    monkeypatch.setattr(
+        canvas_connect_module.LTIClass,
+        "get_by_id_with_registration",
+        classmethod(_get_by_id_with_registration),
+    )
+    monkeypatch.setattr(
+        canvas_connect_module.jwt,
+        "encode",
+        lambda *args, **kwargs: "signed-client-assertion",
+    )
+    monkeypatch.setattr(canvas_connect_module.uuid, "uuid7", lambda: "uuid7-test")
+
+    fake_session = FakeClientSession(
+        FakeTokenResponse(
+            status=302,
+            headers={"Location": "https://canvas.example.com./login/oauth2/token"},
+        )
+    )
+    monkeypatch.setattr(
+        canvas_connect_module.aiohttp,
+        "ClientSession",
+        _client_session_factory(fake_session),
+    )
+
+    async with canvas_connect_module.CanvasConnectClient(
+        db=SimpleNamespace(),
+        lti_class_id=15,
+        key_manager=FakeKeyManager(),
+        nowfn=lambda: datetime.now(timezone.utc),
+    ) as client:
+        with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+            await client.get_nrps_access_token()
+
+    assert (
+        excinfo.value.detail
+        == "Invalid token endpoint URL: Invalid token endpoint URL hostname"
+    )
+    assert len(fake_session.requests) == 1
+    assert fake_session.requests[0]["allow_redirects"] is True
 
 
 @pytest.mark.asyncio
@@ -1431,7 +1561,7 @@ async def test_request_all_nrps_pages_detects_loop_for_canonicalized_next_page(
             FakeTokenResponse(
                 payload={
                     "members": [],
-                    "next": "http://Canvas.Example.com./api/lti/courses/1/names_and_roles",
+                    "next": "https://Canvas.Example.com./api/lti/courses/1/names_and_roles",
                 }
             ),
         ]
@@ -1462,7 +1592,7 @@ async def test_request_all_nrps_pages_detects_loop_for_canonicalized_next_page(
     assert pages == [
         {
             "members": [],
-            "next": "http://Canvas.Example.com./api/lti/courses/1/names_and_roles",
+            "next": "https://Canvas.Example.com./api/lti/courses/1/names_and_roles",
         }
     ]
     assert len(fake_session.requests) == 2

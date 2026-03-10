@@ -2,6 +2,7 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from datetime import datetime, timedelta
+from functools import partial
 from typing import cast
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
@@ -339,7 +340,9 @@ class CanvasConnectClient:
                 session=http_session,
                 method="GET",
                 url=generated_url,
-                validate_redirect_url=generate_names_and_role_api_url,
+                validate_redirect_url=partial(
+                    generate_names_and_role_api_url, validation_mode="redirect"
+                ),
                 redirects_allowed=redirects_allowed,
                 headers=headers,
             ) as response:
@@ -764,7 +767,9 @@ class CanvasConnectClient:
                 session=http_session,
                 method="POST",
                 url=generated_token_endpoint,
-                validate_redirect_url=generate_token_endpoint_url,
+                validate_redirect_url=partial(
+                    generate_token_endpoint_url, validation_mode="redirect"
+                ),
                 redirects_allowed=redirects_allowed,
                 headers={"Content-Type": TOKEN_REQUEST_CONTENT_TYPE},
                 data=request_data,

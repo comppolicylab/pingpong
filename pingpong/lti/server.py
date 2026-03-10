@@ -1,6 +1,7 @@
 """FastAPI routes for LTI Advantage Service."""
 
 import asyncio
+from functools import partial
 import json
 import logging
 from datetime import datetime
@@ -141,7 +142,9 @@ async def _fetch_jwks(jwks_url: str) -> dict[str, Any]:
                 session=session,
                 method="GET",
                 url=generated_jwks_url,
-                validate_redirect_url=generate_jwks_uri_url,
+                validate_redirect_url=partial(
+                    generate_jwks_uri_url, validation_mode="redirect"
+                ),
                 redirects_allowed=redirects_allowed,
                 raise_for_status=True,
             ) as response:
@@ -199,7 +202,9 @@ async def _fetch_openid_configuration(
                 session=session,
                 method="GET",
                 url=generated_openid_configuration_url,
-                validate_redirect_url=generate_openid_configuration_url,
+                validate_redirect_url=partial(
+                    generate_openid_configuration_url, validation_mode="redirect"
+                ),
                 redirects_allowed=redirects_allowed,
                 raise_for_status=True,
                 headers=headers,
@@ -590,7 +595,9 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
                 session=session,
                 method="POST",
                 url=registration_endpoint_url,
-                validate_redirect_url=generate_registration_endpoint_url,
+                validate_redirect_url=partial(
+                    generate_registration_endpoint_url, validation_mode="redirect"
+                ),
                 redirects_allowed=redirects_allowed,
                 raise_for_status=True,
                 headers={

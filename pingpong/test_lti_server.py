@@ -503,6 +503,55 @@ async def test_fetch_jwks_rejects_redirect_to_unallowlisted_host(monkeypatch):
     assert excinfo.value.detail == "Invalid jwks_url"
 
 
+@pytest.mark.asyncio
+async def test_fetch_jwks_rejects_redirect_that_requires_rewriting(monkeypatch):
+    allow_deny = SimpleNamespace(allow=["example.com"], deny=[])
+    url_security = SimpleNamespace(
+        allow_http_in_development=True,
+        allow_redirects=True,
+        hosts=allow_deny,
+        paths=SimpleNamespace(allow=["/jwks"], deny=[]),
+    )
+    restricted_config = SimpleNamespace(
+        lti=SimpleNamespace(
+            security=SimpleNamespace(
+                allow_http_in_development=True,
+                allow_redirects=True,
+                hosts=allow_deny,
+                paths=SimpleNamespace(allow=["*"], deny=[]),
+                authorization_endpoint=url_security,
+                jwks_uri=url_security,
+                names_and_role_endpoint=url_security,
+                openid_configuration=url_security,
+                registration_endpoint=url_security,
+                token_endpoint=url_security,
+            )
+        ),
+        development=False,
+    )
+    monkeypatch.setattr(config_module, "config", restricted_config)
+    monkeypatch.setattr(server_module, "config", restricted_config)
+    monkeypatch.setattr(
+        server_module.aiohttp,
+        "ClientSession",
+        _fake_session_factory(
+            get_responses=[
+                FakeResponse(
+                    None,
+                    status=302,
+                    headers={"Location": "https://example.com./jwks"},
+                )
+            ]
+        ),
+    )
+
+    with pytest.raises(HTTPException) as excinfo:
+        await server_module._fetch_jwks("https://example.com/jwks")
+
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail == "Invalid jwks_url"
+
+
 def test_select_jwk_with_kid():
     jwk = {"kid": "abc", "kty": "RSA"}
     assert server_module._select_jwk({"keys": [jwk]}, "abc") == jwk

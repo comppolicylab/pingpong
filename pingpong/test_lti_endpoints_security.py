@@ -49,11 +49,10 @@ def test_lti_security_only_global_applies_to_endpoint(monkeypatch):
     )
     _patch_runtime_config(monkeypatch, lti=settings, development=True)
 
-    generated = endpoints.generate_token_endpoint_url(
-        "http://global.example.com/global/token"
-    )
-
-    assert generated == "https://global.example.com/global/token"
+    with pytest.raises(
+        ValueError, match="Invalid URL for token endpoint: HTTP is not allowed"
+    ):
+        endpoints.generate_token_endpoint_url("http://global.example.com/global/token")
     assert endpoints.allow_redirects(settings.security.token_endpoint) is False
 
     with pytest.raises(ValueError, match="Invalid token endpoint URL hostname"):
@@ -76,11 +75,12 @@ def test_lti_security_specific_without_global_override(monkeypatch):
     )
     _patch_runtime_config(monkeypatch, lti=settings, development=True)
 
-    generated = endpoints.generate_token_endpoint_url(
-        "http://specific.example.com/token/access"
-    )
-
-    assert generated == "https://specific.example.com/token/access"
+    with pytest.raises(
+        ValueError, match="Invalid URL for token endpoint: HTTP is not allowed"
+    ):
+        endpoints.generate_token_endpoint_url(
+            "http://specific.example.com/token/access"
+        )
     assert endpoints.allow_redirects(settings.security.token_endpoint) is False
 
     with pytest.raises(ValueError, match="Invalid token endpoint URL hostname"):
@@ -138,11 +138,10 @@ def test_lti_security_empty_nested_endpoint_tables_inherit_global(monkeypatch):
     )
     _patch_runtime_config(monkeypatch, lti=settings, development=True)
 
-    generated = endpoints.generate_token_endpoint_url(
-        "http://global.example.com/global/token"
-    )
-
-    assert generated == "https://global.example.com/global/token"
+    with pytest.raises(
+        ValueError, match="Invalid URL for token endpoint: HTTP is not allowed"
+    ):
+        endpoints.generate_token_endpoint_url("http://global.example.com/global/token")
     assert endpoints.allow_redirects(settings.security.token_endpoint) is False
 
     with pytest.raises(ValueError, match="Invalid token endpoint URL hostname"):

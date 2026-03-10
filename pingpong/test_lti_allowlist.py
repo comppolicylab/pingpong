@@ -104,37 +104,75 @@ def test_generate_safe_lti_url_allows_http_only_in_development(development_confi
 
 
 @pytest.mark.parametrize("development_config", [True], indirect=True)
-def test_generate_safe_lti_url_forces_https_when_http_not_allowed(
+def test_generate_safe_lti_url_rejects_http_when_http_not_allowed(
     development_config,
 ):
-    result = allowlist.generate_safe_lti_url(
-        unverified_url="http://platform.example.com/openid",
-        url_type="OpenID configuration",
-        host_allow=["*.example.com"],
-        host_deny=[],
-        path_allow=["/openid"],
-        path_deny=[],
-        allow_http_in_development=False,
-    )
-
-    assert result == "https://platform.example.com/openid"
+    with pytest.raises(
+        ValueError,
+        match="Invalid URL for OpenID configuration: HTTP is not allowed",
+    ):
+        allowlist.generate_safe_lti_url(
+            unverified_url="http://platform.example.com/openid",
+            url_type="OpenID configuration",
+            host_allow=["*.example.com"],
+            host_deny=[],
+            path_allow=["/openid"],
+            path_deny=[],
+            allow_http_in_development=False,
+        )
 
 
 @pytest.mark.parametrize("development_config", [True], indirect=True)
-def test_generate_safe_lti_url_accepts_default_http_port_before_https_upgrade(
+def test_generate_safe_lti_url_rejects_http_with_default_port_when_http_not_allowed(
     development_config,
 ):
-    result = allowlist.generate_safe_lti_url(
-        unverified_url="http://platform.example.com:80/openid",
-        url_type="OpenID configuration",
-        host_allow=["*.example.com"],
-        host_deny=[],
-        path_allow=["/openid"],
-        path_deny=[],
-        allow_http_in_development=False,
-    )
+    with pytest.raises(
+        ValueError,
+        match="Invalid URL for OpenID configuration: HTTP is not allowed",
+    ):
+        allowlist.generate_safe_lti_url(
+            unverified_url="http://platform.example.com:80/openid",
+            url_type="OpenID configuration",
+            host_allow=["*.example.com"],
+            host_deny=[],
+            path_allow=["/openid"],
+            path_deny=[],
+            allow_http_in_development=False,
+        )
 
-    assert result == "https://platform.example.com:443/openid"
+
+@pytest.mark.parametrize("development_config", [False], indirect=True)
+def test_generate_safe_lti_url_redirect_mode_rejects_trailing_dot_host(
+    development_config,
+):
+    with pytest.raises(ValueError, match="Invalid OpenID configuration URL hostname"):
+        allowlist.generate_safe_lti_url(
+            unverified_url="https://platform.example.com./openid",
+            url_type="OpenID configuration",
+            host_allow=["*.example.com"],
+            host_deny=[],
+            path_allow=["/openid"],
+            path_deny=[],
+            allow_http_in_development=True,
+            validation_mode="redirect",
+        )
+
+
+@pytest.mark.parametrize("development_config", [False], indirect=True)
+def test_generate_safe_lti_url_redirect_mode_rejects_encoded_path_separator(
+    development_config,
+):
+    with pytest.raises(ValueError, match="Invalid OpenID configuration URL path"):
+        allowlist.generate_safe_lti_url(
+            unverified_url="https://platform.example.com/api/private%2Ftoken",
+            url_type="OpenID configuration",
+            host_allow=["*.example.com"],
+            host_deny=[],
+            path_allow=["/api/*"],
+            path_deny=[],
+            allow_http_in_development=True,
+            validation_mode="redirect",
+        )
 
 
 @pytest.mark.parametrize("development_config", [False], indirect=True)

@@ -36,7 +36,8 @@ async def _validate_redirect(
     if not location:
         raise ValueError("Redirect response is missing a Location header")
 
-    validate_redirect_url(str(params.url.join(URL(location))))
+    resolved_redirect_url = str(params.url.join(URL(location)))
+    validate_redirect_url(resolved_redirect_url)
 
 
 def create_lti_redirect_trace_config() -> aiohttp.TraceConfig:
