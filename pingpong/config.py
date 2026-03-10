@@ -4,17 +4,17 @@ import os
 import tomllib
 from functools import cached_property
 from pathlib import Path
-from typing import Literal, Union
+from typing import Any, Literal, Union
+from urllib.parse import urlsplit
 
 from glowplug import PostgresSettings, SqliteSettings
-from pydantic import Field, field_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from pingpong.artifacts import LocalArtifactStore, S3ArtifactStore
 from pingpong.audio_store import LocalAudioStore, S3AudioStore
 from pingpong.video_store import LocalVideoStore, S3VideoStore
 from pingpong.log_filters import IgnoreHealthEndpoint
-from pingpong.lti.allowlist import normalize_lti_platform_url_allowlist
 from .authz import OpenFgaAuthzDriver
 from .email import AzureEmailSender, GmailEmailSender, MockEmailSender, SmtpEmailSender
 from .lti import AWSLTIKeyStore, LocalLTIKeyStore, LTIKeyManager
@@ -22,14 +22,10 @@ from .support import SupportSettings, NoSupportSettings
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_OPENID_CONFIGURATION_PATHS = (
+LEGACY_OPENID_CONFIGURATION_PATHS_DEFAULTS = (
     "/.well-known/openid-configuration",
     "/.well-known/openid",
     "/api/lti/security/openid-configuration",
-)
-OPENID_CONFIGURATION_PATHS_ERROR = (
-    "openid_configuration_paths.paths entries must be absolute URL paths "
-    "without query or fragment"
 )
 
 
@@ -335,24 +331,36 @@ class LocalLTIKeyStoreSettings(BaseSettings):
 LTIKeyStoreSettings = Union[AWSLTIKeyStoreSettings, LocalLTIKeyStoreSettings]
 
 
-class LTIOpenIDConfigurationPathsSettings(BaseSettings):
-    """OpenID discovery path customization settings."""
+class LTIAllowDenySettings(BaseSettings):
+    """Allow/deny pattern settings for LTI security checks."""
 
-    mode: Literal["append", "replace"] = Field("replace")
-    paths: list[str] = Field(
-        default_factory=lambda: list(DEFAULT_OPENID_CONFIGURATION_PATHS)
-    )
+    allow: list[str] = Field(["*"])
+    deny: list[str] = Field([])
 
-    @field_validator("paths")
-    @classmethod
-    def validate_paths(cls, value: list[str]) -> list[str]:
-        normalized: list[str] = []
-        for entry in value:
-            path = entry.strip()
-            if not path or not path.startswith("/") or "?" in path or "#" in path:
-                raise ValueError(OPENID_CONFIGURATION_PATHS_ERROR)
-            normalized.append(path)
-        return normalized
+
+class LTIUrlSecuritySettings(BaseSettings):
+    """Security allow/deny settings for URLs."""
+
+    allow_http_in_development: bool | None = Field(None)
+    allow_redirects: bool | None = Field(None)
+    hosts: LTIAllowDenySettings | None = Field(None)
+    paths: LTIAllowDenySettings | None = Field(None)
+
+
+class LTISecuritySettings(BaseSettings):
+    """LTI security settings."""
+
+    allow_http_in_development: bool = Field(True)
+    allow_redirects: bool = Field(True)
+    hosts: LTIAllowDenySettings = Field(LTIAllowDenySettings())
+    paths: LTIAllowDenySettings = Field(LTIAllowDenySettings())
+
+    authorization_endpoint: LTIUrlSecuritySettings = Field(LTIUrlSecuritySettings())
+    names_and_role_endpoint: LTIUrlSecuritySettings = Field(LTIUrlSecuritySettings())
+    jwks_uri: LTIUrlSecuritySettings = Field(LTIUrlSecuritySettings())
+    registration_endpoint: LTIUrlSecuritySettings = Field(LTIUrlSecuritySettings())
+    openid_configuration: LTIUrlSecuritySettings = Field(LTIUrlSecuritySettings())
+    token_endpoint: LTIUrlSecuritySettings = Field(LTIUrlSecuritySettings())
 
 
 class LTISettings(BaseSettings):
@@ -360,49 +368,258 @@ class LTISettings(BaseSettings):
 
     key_store: LTIKeyStoreSettings
     sync_wait: int = Field(60 * 10, gt=0)  # 10 mins
-    # Allowed LMS platform URL hosts for LTI setup and login redirects.
-    # Entries support exact hosts only (e.g. "canvas.example.edu").
-    platform_url_allowlist: list[str] = Field(default_factory=list)
-    # Hosts permitted to use plain HTTP in development mode (e.g. "canvas.docker").
-    # Ignored when ``config.development`` is ``False``.
-    dev_http_hosts: list[str] = Field(
-        default_factory=lambda: ["localhost", "127.0.0.1", "::1", "canvas.docker"]
-    )
-    openid_configuration_paths: LTIOpenIDConfigurationPathsSettings = Field(
-        default_factory=LTIOpenIDConfigurationPathsSettings
-    )
+    security: LTISecuritySettings = Field(LTISecuritySettings())
 
     # Key rotation settings
     rotation_schedule: str = Field("0 0 1 * *")  # First day of every month at midnight
     key_retention_count: int = Field(3)  # Keep last 3 keys
     key_size: int = Field(2048)  # RSA key size in bits
 
-    @cached_property
-    def allowed_openid_configuration_paths(self) -> set[str]:
-        configured_paths = set(self.openid_configuration_paths.paths)
-        if self.openid_configuration_paths.mode == "append":
-            return set(DEFAULT_OPENID_CONFIGURATION_PATHS) | configured_paths
-        return configured_paths
+    @staticmethod
+    def _validate_legacy_openid_configuration_paths(
+        openid_configuration_paths: object,
+    ) -> list[str]:
+        if not isinstance(openid_configuration_paths, dict):
+            raise TypeError(
+                "lti.openid_configuration_paths must be an object with mode and paths"
+            )
 
-    @cached_property
-    def allowed_openid_configuration_path_lookup(self) -> dict[str, str]:
-        return {path: path for path in self.allowed_openid_configuration_paths}
+        mode = openid_configuration_paths.get("mode", "replace")
+        if mode not in {"append", "replace"}:
+            raise ValueError(
+                "lti.openid_configuration_paths.mode must be either 'append' or 'replace'"
+            )
 
-    @cached_property
-    def normalized_platform_url_allowlist(self) -> list[str]:
-        return normalize_lti_platform_url_allowlist(self.platform_url_allowlist)
+        raw_paths = openid_configuration_paths.get(
+            "paths", list(LEGACY_OPENID_CONFIGURATION_PATHS_DEFAULTS)
+        )
+        if not isinstance(raw_paths, list):
+            raise ValueError("lti.openid_configuration_paths.paths must be a list")
 
-    @cached_property
-    def platform_url_allowlist_lookup(self) -> dict[str, str]:
-        return {host: host for host in self.normalized_platform_url_allowlist}
+        normalized_paths: list[str] = []
+        for raw_path in raw_paths:
+            if not isinstance(raw_path, str):
+                raise ValueError(
+                    "lti.openid_configuration_paths.paths must contain only strings"
+                )
 
-    @cached_property
-    def dev_http_hosts_set(self) -> set[str]:
-        return {
-            host.strip().lower()
-            for host in self.dev_http_hosts
-            if isinstance(host, str) and host.strip()
-        }
+            path = raw_path.strip()
+            if not path or not path.startswith("/") or "?" in path or "#" in path:
+                raise ValueError(
+                    "lti.openid_configuration_paths.paths entries must be absolute URL paths "
+                    "without query or fragment"
+                )
+            normalized_paths.append(path)
+
+        if mode == "append":
+            merged_paths = [
+                *LEGACY_OPENID_CONFIGURATION_PATHS_DEFAULTS,
+                *normalized_paths,
+            ]
+            return list(dict.fromkeys(merged_paths))
+
+        return normalized_paths
+
+    @staticmethod
+    def _validate_legacy_dev_http_hosts(dev_http_hosts: object) -> list[str]:
+        if not isinstance(dev_http_hosts, list):
+            raise ValueError("lti.dev_http_hosts must be a list")
+
+        normalized_hosts: list[str] = []
+        for host in dev_http_hosts:
+            if not isinstance(host, str):
+                raise ValueError("lti.dev_http_hosts entries must be strings")
+            if host.strip():
+                normalized_hosts.append(host.strip().lower())
+        return normalized_hosts
+
+    @staticmethod
+    def _validate_legacy_platform_url_allowlist(
+        platform_url_allowlist: object,
+    ) -> list[str]:
+        if not isinstance(platform_url_allowlist, list):
+            raise ValueError("lti.platform_url_allowlist must be a list")
+
+        normalized_hosts: list[str] = []
+        for entry in platform_url_allowlist:
+            if not isinstance(entry, str):
+                raise ValueError("lti.platform_url_allowlist entries must be strings")
+
+            value = entry.strip().lower()
+            if not value:
+                raise ValueError("lti.platform_url_allowlist entries must not be empty")
+            if value.startswith("*."):
+                raise ValueError(
+                    "lti.platform_url_allowlist entries must be exact hosts or URLs"
+                )
+
+            if "://" in value:
+                parsed = urlsplit(value)
+                if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+                    raise ValueError(
+                        "lti.platform_url_allowlist URL entries must use http or https"
+                    )
+                value = parsed.hostname.lower()
+            elif "/" in value or ":" in value:
+                raise ValueError(
+                    "lti.platform_url_allowlist entries must be hostnames or URLs"
+                )
+
+            normalized_hosts.append(value)
+
+        return normalized_hosts
+
+    @staticmethod
+    def _mutable_dict(value: object, *, field_name: str) -> dict[str, Any]:
+        if isinstance(value, dict):
+            return dict(value)
+        model_dump = getattr(value, "model_dump", None)
+        if callable(model_dump):
+            dumped = model_dump()
+            if isinstance(dumped, dict):
+                return dict(dumped)
+        raise ValueError(f"{field_name} must be an object")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _map_legacy_security_settings(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+
+        legacy_keys = [
+            key
+            for key in (
+                "platform_url_allowlist",
+                "openid_configuration_paths",
+                "dev_http_hosts",
+            )
+            if key in data
+        ]
+        if not legacy_keys:
+            return data
+
+        mapped_data = dict(data)
+        platform_url_allowlist = mapped_data.pop("platform_url_allowlist", None)
+        openid_configuration_paths = mapped_data.pop("openid_configuration_paths", None)
+        dev_http_hosts = mapped_data.pop("dev_http_hosts", None)
+        using_legacy_layout = "security" not in data
+        explicit_openid_paths = (
+            isinstance(data.get("security"), dict)
+            and isinstance(data["security"].get("openid_configuration"), dict)
+            and "paths" in data["security"]["openid_configuration"]
+        )
+
+        if "security" in mapped_data:
+            security = cls._mutable_dict(
+                mapped_data["security"], field_name="lti.security"
+            )
+        else:
+            security = {}
+
+        if "hosts" in security:
+            hosts = cls._mutable_dict(
+                security["hosts"],
+                field_name="lti.security.hosts",
+            )
+        else:
+            hosts = {}
+
+        if "paths" in security:
+            paths = cls._mutable_dict(
+                security["paths"],
+                field_name="lti.security.paths",
+            )
+        else:
+            paths = {}
+
+        openid_configuration = cls._mutable_dict(
+            security.get("openid_configuration", {}),
+            field_name="lti.security.openid_configuration",
+        )
+        if "paths" in openid_configuration:
+            openid_paths = cls._mutable_dict(
+                openid_configuration["paths"],
+                field_name="lti.security.openid_configuration.paths",
+            )
+        else:
+            openid_paths = {}
+
+        normalized_dev_http_hosts: list[str] | None = None
+        if dev_http_hosts is not None and "allow_http_in_development" not in security:
+            normalized_dev_http_hosts = cls._validate_legacy_dev_http_hosts(
+                dev_http_hosts
+            )
+        normalized_platform_url_allowlist: list[str] | None = None
+        if platform_url_allowlist is not None and "allow" not in hosts:
+            normalized_platform_url_allowlist = (
+                cls._validate_legacy_platform_url_allowlist(platform_url_allowlist)
+            )
+
+        legacy_host_allow = []
+        if normalized_platform_url_allowlist is not None:
+            legacy_host_allow.extend(normalized_platform_url_allowlist)
+
+        if legacy_host_allow and "allow" not in hosts:
+            hosts["allow"] = list(dict.fromkeys(legacy_host_allow))
+
+        if openid_configuration_paths is not None and "allow" not in openid_paths:
+            openid_paths["allow"] = cls._validate_legacy_openid_configuration_paths(
+                openid_configuration_paths
+            )
+        elif (
+            using_legacy_layout or not explicit_openid_paths
+        ) and "allow" not in openid_paths:
+            # Legacy configs defaulted to these explicit discovery paths.
+            openid_paths["allow"] = list(LEGACY_OPENID_CONFIGURATION_PATHS_DEFAULTS)
+
+        if "allow_http_in_development" not in security:
+            if dev_http_hosts is not None:
+                security["allow_http_in_development"] = bool(normalized_dev_http_hosts)
+            elif using_legacy_layout:
+                # Legacy configs defaulted to HTTP being allowed in development.
+                security["allow_http_in_development"] = True
+
+        security["hosts"] = hosts
+        security["paths"] = paths
+        openid_configuration["paths"] = openid_paths
+        security["openid_configuration"] = openid_configuration
+        mapped_data["security"] = security
+
+        for key in legacy_keys:
+            if key == "platform_url_allowlist":
+                logger.warning(
+                    "Deprecated config key 'lti.platform_url_allowlist' used. "
+                    "It will be removed in PingPong 8.0. "
+                    "Replace with:\n"
+                    "  [lti.security.hosts]\n"
+                    "  allow = %r",
+                    hosts.get("allow", ["*"]),
+                )
+            elif key == "openid_configuration_paths":
+                logger.warning(
+                    "Deprecated config key 'lti.openid_configuration_paths' used. "
+                    "It will be removed in PingPong 8.0. "
+                    "Replace with:\n"
+                    "  [lti.security.openid_configuration.paths]\n"
+                    "  allow = %r",
+                    openid_paths.get(
+                        "allow", list(LEGACY_OPENID_CONFIGURATION_PATHS_DEFAULTS)
+                    ),
+                )
+            elif key == "dev_http_hosts":
+                logger.warning(
+                    "Deprecated config key 'lti.dev_http_hosts' used. "
+                    "It will be removed in PingPong 8.0. "
+                    "Replace with:\n"
+                    "  [lti.security]\n"
+                    "  allow_http_in_development = %r\n"
+                    "  [lti.security.hosts]\n"
+                    "  allow = %r",
+                    security.get("allow_http_in_development", True),
+                    hosts.get("allow", ["*"]),
+                )
+
+        return mapped_data
 
 
 class FeatureFlags(BaseSettings):

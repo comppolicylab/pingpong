@@ -2,6 +2,7 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from datetime import datetime, timedelta
+from functools import partial
 from typing import cast
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
@@ -12,18 +13,7 @@ import uuid_utils as uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pingpong.authz.openfga import OpenFgaAuthzClient
-from pingpong.config import config
-from pingpong.lti.allowlist import (
-    build_lti_host_validation_context,
-    get_lti_platform_url_allowlist_from_settings,
-    INVALID_PLATFORM_URL_ALLOWLIST_DETAIL,
-    InvalidLTIPlatformUrlAllowlistError,
-    LTIHostValidationContext,
-    LTIUrlValidationError,
-    MISSING_PLATFORM_URL_ALLOWLIST_DETAIL,
-    MissingLTIPlatformUrlAllowlistError,
-    validate_allowlisted_lti_url_parts,
-)
+from pingpong.config import LTISecuritySettings, LTIUrlSecuritySettings, config
 from pingpong.lti.constants import (
     CANVAS_CONNECT_SYNC_WAIT_DEFAULT_SECONDS,
     CLIENT_ASSERTION_EXPIRY_SECONDS,
@@ -49,6 +39,15 @@ from pingpong.lti.constants import (
     NRPS_RESOURCE_LINK_QUERY_KEY,
     TOKEN_ENDPOINT_KEY,
     TOKEN_REQUEST_CONTENT_TYPE,
+)
+from pingpong.lti.endpoints import (
+    allow_redirects,
+    generate_names_and_role_api_url,
+    generate_token_endpoint_url,
+)
+from pingpong.lti.http import (
+    create_lti_redirect_trace_config,
+    request_with_validated_redirects,
 )
 from pingpong.lti.key_manager import LTIKeyManager
 from pingpong.lti.roles import class_user_roles_from_lti_roles
@@ -80,13 +79,6 @@ def exception_detail(e: Exception) -> str:
     if isinstance(detail, str) and detail:
         return detail
     return str(e)
-
-
-def _is_global_lti_allowlist_error_detail(detail: str | None) -> bool:
-    return detail in {
-        MISSING_PLATFORM_URL_ALLOWLIST_DETAIL,
-        INVALID_PLATFORM_URL_ALLOWLIST_DETAIL,
-    }
 
 
 def _as_dict(value: object) -> dict[str, object] | None:
@@ -121,20 +113,6 @@ def _extract_error_detail(payload: object) -> str | None:
     return None
 
 
-def _get_lti_platform_url_allowlist() -> list[str]:
-    lti_settings = getattr(config, "lti", None)
-    try:
-        return get_lti_platform_url_allowlist_from_settings(lti_settings)
-    except MissingLTIPlatformUrlAllowlistError as e:
-        raise CanvasConnectException(
-            detail=MISSING_PLATFORM_URL_ALLOWLIST_DETAIL,
-        ) from e
-    except InvalidLTIPlatformUrlAllowlistError as e:
-        raise CanvasConnectException(
-            detail=INVALID_PLATFORM_URL_ALLOWLIST_DETAIL,
-        ) from e
-
-
 def _extract_sync_row_errors(results: CreateUserResults) -> list[str]:
     row_errors: list[str] = []
     for row_result in results.results:
@@ -144,10 +122,28 @@ def _extract_sync_row_errors(results: CreateUserResults) -> list[str]:
     return row_errors
 
 
+def _require_lti_security() -> LTISecuritySettings:
+    lti_settings = config.lti
+    if lti_settings is None:
+        raise CanvasConnectGlobalException(detail="LTI service is not configured")
+    return lti_settings.security
+
+
+def _allow_redirects_or_raise(security_config: LTIUrlSecuritySettings) -> bool:
+    try:
+        return allow_redirects(security_config)
+    except ValueError as e:
+        raise CanvasConnectException(detail=str(e)) from e
+
+
 class CanvasConnectException(Exception):
     def __init__(self, detail: str = ""):
         self.detail = detail
         super().__init__(detail)
+
+
+class CanvasConnectGlobalException(CanvasConnectException):
+    """Raised for deployment-wide failures that should not mutate class state."""
 
 
 class CanvasConnectWarning(Exception):
@@ -169,20 +165,20 @@ class CanvasConnectClient:
         self.nowfn = nowfn
         if key_manager is None:
             if config.lti is None:
-                raise CanvasConnectException(
+                raise CanvasConnectGlobalException(
                     detail="LTI service is not configured",
                 )
             key_manager = config.lti.key_store.key_manager
         self.key_manager = key_manager
         self.http_session: aiohttp.ClientSession | None = None
         self._cached_lti_class: LTIClass | None = None
-        self._cached_platform_url_allowlist: list[str] | None = None
-        self._cached_host_validation_context: LTIHostValidationContext | None = None
         self._cached_nrps_access_token: CanvasConnectAccessToken | None = None
         self._cached_nrps_access_token_valid_until: int | None = None
 
     async def __aenter__(self):
-        self.http_session = aiohttp.ClientSession()
+        self.http_session = aiohttp.ClientSession(
+            trace_configs=[create_lti_redirect_trace_config()]
+        )
         return self
 
     async def __aexit__(self, exc_type, exc, tb):
@@ -196,29 +192,6 @@ class CanvasConnectClient:
                 "CanvasConnectClient must be used as an async context manager"
             )
         return self.http_session
-
-    def _get_platform_url_allowlist(self) -> list[str]:
-        if self._cached_platform_url_allowlist is None:
-            self._cached_platform_url_allowlist = _get_lti_platform_url_allowlist()
-        return self._cached_platform_url_allowlist
-
-    def _get_host_validation_context(self) -> LTIHostValidationContext:
-        if self._cached_host_validation_context is None:
-            lti_settings = getattr(config, "lti", None)
-            if lti_settings and hasattr(lti_settings, "dev_http_hosts_set"):
-                dev_http_hosts = list(getattr(lti_settings, "dev_http_hosts_set"))
-            else:
-                dev_http_hosts = (
-                    list(getattr(lti_settings, "dev_http_hosts", []))
-                    if lti_settings
-                    else []
-                )
-            self._cached_host_validation_context = build_lti_host_validation_context(
-                allowlist=self._get_platform_url_allowlist(),
-                development=bool(getattr(config, "development", False)),
-                dev_http_hosts=dev_http_hosts,
-            )
-        return self._cached_host_validation_context
 
     @staticmethod
     def _get_token_endpoint(registration: LTIRegistration) -> str:
@@ -259,19 +232,6 @@ class CanvasConnectClient:
 
         self._cached_lti_class = lti_class
         return lti_class
-
-    def _validate_nrps_url(self, url: str, field_name: str) -> str:
-        try:
-            parts = validate_allowlisted_lti_url_parts(
-                url,
-                field_name,
-                self._get_host_validation_context(),
-            )
-        except LTIUrlValidationError as e:
-            raise CanvasConnectException(detail=str(e)) from e
-
-        query = f"?{parts.query}" if parts.query else ""
-        return f"{parts.scheme}://{parts.host}{parts.path}{query}"
 
     async def _build_client_assertion(self, client_id: str, token_endpoint: str) -> str:
         key = await self.key_manager.get_current_key()
@@ -317,9 +277,7 @@ class CanvasConnectClient:
             isinstance(existing_context_memberships_url, str)
             and existing_context_memberships_url
         ):
-            return self._validate_nrps_url(
-                existing_context_memberships_url, "context_memberships_url"
-            )
+            return existing_context_memberships_url
 
         raise CanvasConnectException(
             detail="LTI class is missing context_memberships_url",
@@ -365,40 +323,70 @@ class CanvasConnectClient:
         url: str,
     ) -> tuple[dict[str, object], str | None]:
         http_session = self._require_http_session()
+        security_settings = _require_lti_security()
+        redirects_allowed = _allow_redirects_or_raise(
+            security_settings.names_and_role_endpoint
+        )
 
+        try:
+            generated_url = generate_names_and_role_api_url(url)
+        except ValueError as e:
+            raise CanvasConnectException(
+                detail=f"Invalid NRPS URL: {e!s}",
+            ) from e
         access_token = await self.get_short_lived_auth_token()
         headers = {
             "Authorization": f"Bearer {access_token}",
             "Accept": NRPS_MEMBERSHIP_CONTAINER_CONTENT_TYPE,
         }
+        try:
+            async with request_with_validated_redirects(
+                session=http_session,
+                method="GET",
+                url=generated_url,
+                validate_redirect_url=partial(
+                    generate_names_and_role_api_url, validation_mode="redirect"
+                ),
+                redirects_allowed=redirects_allowed,
+                headers=headers,
+            ) as response:
+                response_payload: object = None
+                try:
+                    response_payload = await response.json(content_type=None)
+                except (
+                    json.JSONDecodeError,
+                    ValueError,
+                    aiohttp.ContentTypeError,
+                ) as e:
+                    logger.warning(
+                        "Failed to parse NRPS response payload as JSON: %s", e
+                    )
+                    response_payload = None
 
-        async with http_session.get(
-            url,
-            headers=headers,
-            allow_redirects=False,
-        ) as response:
-            response_payload: object = None
-            try:
-                response_payload = await response.json(content_type=None)
-            except Exception:
-                response_payload = None
+                if response.status >= 400:
+                    detail = _extract_error_detail(response_payload)
+                    if not detail:
+                        detail = (await response.text()).strip()
+                    raise CanvasConnectException(
+                        detail=detail or "Failed to fetch NRPS page",
+                    )
 
-            if response.status >= 400:
-                detail = _extract_error_detail(response_payload)
-                if not detail:
-                    detail = (await response.text()).strip()
-                raise CanvasConnectException(
-                    detail=detail or "Failed to fetch NRPS page",
+                response_payload_dict = _as_dict(response_payload)
+                if response_payload_dict is None:
+                    raise CanvasConnectException(
+                        detail="Invalid NRPS response payload",
+                    )
+
+                next_page_url = self._extract_next_page_url(
+                    response, response_payload_dict
                 )
-
-            response_payload_dict = _as_dict(response_payload)
-            if response_payload_dict is None:
-                raise CanvasConnectException(
-                    detail="Invalid NRPS response payload",
-                )
-
-            next_page_url = self._extract_next_page_url(response, response_payload_dict)
-            return response_payload_dict, next_page_url
+                return response_payload_dict, next_page_url
+        except ValueError as e:
+            raise CanvasConnectException(detail=f"Invalid NRPS URL: {e!s}") from e
+        except aiohttp.TooManyRedirects as e:
+            raise CanvasConnectException(
+                detail="Too many redirects for NRPS endpoint",
+            ) from e
 
     async def _request_all_nrps_pages(
         self, start_url: str
@@ -406,18 +394,26 @@ class CanvasConnectClient:
         next_page: str | None = start_url
         seen_pages: set[str] = set()
         while next_page:
-            next_page = self._validate_nrps_url(next_page, "nrps_page_url")
-            if next_page in seen_pages:
+            try:
+                normalized_next_page = generate_names_and_role_api_url(next_page)
+            except ValueError as e:
+                raise CanvasConnectException(
+                    detail=f"Invalid NRPS URL: {e!s}",
+                ) from e
+
+            if normalized_next_page in seen_pages:
                 logger.warning(
                     "Detected NRPS pagination loop for lti_class_id=%s at url=%s",
                     self.lti_class_id,
-                    next_page,
+                    normalized_next_page,
                 )
                 raise CanvasConnectException(
                     detail="NRPS pagination loop detected while fetching memberships",
                 )
-            seen_pages.add(next_page)
-            response_payload, next_page = await self._make_authed_nrps_get(next_page)
+            seen_pages.add(normalized_next_page)
+            response_payload, next_page = await self._make_authed_nrps_get(
+                normalized_next_page
+            )
             yield response_payload
 
     @staticmethod
@@ -708,13 +704,10 @@ class CanvasConnectClient:
                         f"{displayed_row_errors}{overflow_suffix}"
                     )
                 )
-        except CanvasConnectWarning:
+        except (CanvasConnectWarning, CanvasConnectGlobalException):
             raise
         except Exception as e:
-            detail = exception_detail(e)
-            if _is_global_lti_allowlist_error_detail(detail):
-                raise
-            await self._mark_sync_error(lti_class, detail)
+            await self._mark_sync_error(lti_class, exception_detail(e))
             self._raise_sync_error_if_manual()
             raise
 
@@ -743,6 +736,7 @@ class CanvasConnectClient:
 
     async def _request_nrps_access_token(self) -> CanvasConnectAccessToken:
         http_session = self._require_http_session()
+        security_settings = _require_lti_security()
 
         lti_class = await self._get_lti_class()
         registration = lti_class.registration
@@ -753,12 +747,14 @@ class CanvasConnectClient:
             )
 
         token_endpoint = self._get_token_endpoint(registration)
-        normalized_token_endpoint = self._validate_nrps_url(
-            token_endpoint, "token_endpoint"
-        )
-
+        try:
+            generated_token_endpoint = generate_token_endpoint_url(token_endpoint)
+        except ValueError as e:
+            raise CanvasConnectException(
+                detail=f"Invalid token endpoint URL: {e!s}",
+            ) from e
         client_assertion = await self._build_client_assertion(
-            client_id, normalized_token_endpoint
+            client_id, generated_token_endpoint
         )
 
         request_data = {
@@ -768,25 +764,40 @@ class CanvasConnectClient:
             "client_assertion": client_assertion,
             "scope": NRPS_CONTEXT_MEMBERSHIP_SCOPE,
         }
+        redirects_allowed = _allow_redirects_or_raise(security_settings.token_endpoint)
+        response_payload: object = None
+        try:
+            async with request_with_validated_redirects(
+                session=http_session,
+                method="POST",
+                url=generated_token_endpoint,
+                validate_redirect_url=partial(
+                    generate_token_endpoint_url, validation_mode="redirect"
+                ),
+                redirects_allowed=redirects_allowed,
+                headers={"Content-Type": TOKEN_REQUEST_CONTENT_TYPE},
+                data=request_data,
+            ) as response:
+                try:
+                    response_payload = await response.json(content_type=None)
+                except Exception:
+                    response_payload = None
 
-        async with http_session.post(
-            normalized_token_endpoint,
-            headers={"Content-Type": TOKEN_REQUEST_CONTENT_TYPE},
-            data=request_data,
-        ) as response:
-            response_payload: object = None
-            try:
-                response_payload = await response.json(content_type=None)
-            except Exception:
-                response_payload = None
-
-            if response.status >= 400:
-                detail = _extract_error_detail(response_payload)
-                if not detail:
-                    detail = (await response.text()).strip()
-                raise CanvasConnectException(
-                    detail=detail or "Failed to request NRPS access token",
-                )
+                if response.status >= 400:
+                    detail = _extract_error_detail(response_payload)
+                    if not detail:
+                        detail = (await response.text()).strip()
+                    raise CanvasConnectException(
+                        detail=detail or "Failed to request NRPS access token",
+                    )
+        except ValueError as e:
+            raise CanvasConnectException(
+                detail=f"Invalid token endpoint URL: {e!s}",
+            ) from e
+        except aiohttp.TooManyRedirects as e:
+            raise CanvasConnectException(
+                detail="Too many redirects for token endpoint",
+            ) from e
 
         response_payload_dict = _as_dict(response_payload)
         if response_payload_dict is None:
@@ -941,7 +952,8 @@ async def canvas_connect_sync_all(
             except Exception as e:
                 logger.exception(f"Error syncing LTI class {lti_class.id}: {e}")
                 await savepoint.rollback()
-                if _is_global_lti_allowlist_error_detail(exception_detail(e)):
+
+                if isinstance(e, CanvasConnectGlobalException):
                     continue
 
                 # sync_roster() already marks the class as errored, but that write is part

@@ -1,8 +1,11 @@
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
+from multidict import CIMultiDict
 import pytest
+from yarl import URL
 
+import pingpong.config as config_module
 from pingpong.lti import canvas_connect as canvas_connect_module
 
 
@@ -31,42 +34,106 @@ class FakeTokenResponse:
 
 
 class FakeClientSession:
-    def __init__(self, response: FakeTokenResponse | list[FakeTokenResponse]):
+    def __init__(
+        self,
+        response: FakeTokenResponse | list[FakeTokenResponse],
+        *,
+        trace_configs=None,
+    ):
         if isinstance(response, list):
             self.responses = list(response)
         else:
             self.responses = [response]
         self.requests: list[dict] = []
         self.closed = False
+        self._trace_configs = list(trace_configs or [])
 
-    def post(self, url: str, *, headers: dict, data: dict):
-        self.requests.append(
-            {
-                "method": "POST",
-                "url": url,
-                "headers": headers,
-                "data": data,
-            }
-        )
-        if not self.responses:
-            raise AssertionError("No fake responses configured")
-        return self.responses.pop(0)
+    def request(self, method: str, url: str, **kwargs):
+        return FakeTokenRequestContext(self, method, url, kwargs)
 
-    def get(self, url: str, *, headers: dict, allow_redirects: bool = True):
-        self.requests.append(
-            {
-                "method": "GET",
-                "url": url,
-                "headers": headers,
-                "allow_redirects": allow_redirects,
+    async def _request(self, method: str, url: str, **kwargs):
+        current_method = method.upper()
+        current_url = url
+        current_headers = dict(kwargs.get("headers") or {})
+        current_data = kwargs.get("data")
+        current_json = kwargs.get("json")
+        allow_redirects = kwargs.get("allow_redirects", True)
+
+        while True:
+            request = {
+                "method": current_method,
+                "url": current_url,
+                **kwargs,
             }
-        )
-        if not self.responses:
-            raise AssertionError("No fake responses configured")
-        return self.responses.pop(0)
+            request["headers"] = current_headers.copy()
+            request["allow_redirects"] = allow_redirects
+            if "data" in kwargs or current_data is not None:
+                request["data"] = current_data
+            if "json" in kwargs or current_json is not None:
+                request["json"] = current_json
+            self.requests.append(request)
+
+            if not self.responses:
+                raise AssertionError("No fake responses configured")
+            response = self.responses.pop(0)
+            if response.status not in {301, 302, 303, 307, 308} or not allow_redirects:
+                return response
+
+            for trace_config in self._trace_configs:
+                trace_ctx = trace_config.trace_config_ctx(
+                    kwargs.get("trace_request_ctx")
+                )
+                params = SimpleNamespace(
+                    method=current_method,
+                    url=URL(current_url),
+                    headers=CIMultiDict(current_headers),
+                    response=response,
+                )
+                await trace_config.on_request_redirect.send(self, trace_ctx, params)
+
+            redirect_url = URL(current_url).join(
+                URL(response.headers.get("Location") or response.headers.get("URI"))
+            )
+            if URL(current_url).origin() != redirect_url.origin():
+                current_headers.pop("Authorization", None)
+
+            if (response.status == 303 and current_method != "HEAD") or (
+                response.status in {301, 302} and current_method == "POST"
+            ):
+                current_method = "GET"
+                current_data = None
+                current_json = None
+
+            current_url = str(redirect_url)
 
     async def close(self):
         self.closed = True
+
+
+class FakeTokenRequestContext:
+    def __init__(self, session: FakeClientSession, method: str, url: str, kwargs: dict):
+        self.session = session
+        self.method = method
+        self.url = url
+        self.kwargs = kwargs
+        self.response = None
+
+    async def __aenter__(self):
+        self.response = await self.session._request(
+            self.method, self.url, **self.kwargs
+        )
+        return self.response
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+def _client_session_factory(fake_session: FakeClientSession):
+    def _factory(*args, **kwargs):
+        fake_session._trace_configs = list(kwargs.get("trace_configs") or [])
+        return fake_session
+
+    return _factory
 
 
 class FakeKeyManager:
@@ -90,24 +157,69 @@ class FakeWriteDB:
         self.flush_count += 1
 
 
+class FakeSavepoint:
+    def __init__(self):
+        self.rollback_count = 0
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def rollback(self):
+        self.rollback_count += 1
+
+
+class FakeSyncSession(FakeWriteDB):
+    def __init__(self):
+        super().__init__()
+        self.savepoints: list[FakeSavepoint] = []
+        self.commit_count = 0
+
+    def begin_nested(self):
+        savepoint = FakeSavepoint()
+        self.savepoints.append(savepoint)
+        return savepoint
+
+    async def commit(self):
+        self.commit_count += 1
+
+
 class FakeSSOProvider:
     def __init__(self, name: str):
         self.name = name
 
 
 @pytest.fixture(autouse=True)
-def _allowlisted_platform_hosts(monkeypatch):
-    assert canvas_connect_module.config.lti is not None
-    monkeypatch.setattr(
-        canvas_connect_module.config.lti,
-        "platform_url_allowlist",
-        [
-            "canvas.example.com",
-            "fallback.example.com",
-            "platform.example.com",
-            "tool.example.com",
-        ],
+def _patch_lti_security_config(monkeypatch):
+    allow_deny = SimpleNamespace(allow=["*"], deny=[])
+    url_security = SimpleNamespace(
+        allow_http_in_development=True,
+        allow_redirects=True,
+        hosts=allow_deny,
+        paths=allow_deny,
     )
+    security = SimpleNamespace(
+        allow_http_in_development=True,
+        allow_redirects=True,
+        hosts=allow_deny,
+        paths=allow_deny,
+        authorization_endpoint=url_security,
+        jwks_uri=url_security,
+        names_and_role_endpoint=url_security,
+        openid_configuration=url_security,
+        registration_endpoint=url_security,
+        token_endpoint=url_security,
+    )
+    lti = SimpleNamespace(
+        security=security,
+        sync_wait=600,
+        key_store=SimpleNamespace(key_manager=FakeKeyManager()),
+    )
+    cfg = SimpleNamespace(lti=lti, development=False)
+    monkeypatch.setattr(config_module, "config", cfg)
+    monkeypatch.setattr(canvas_connect_module, "config", cfg)
 
 
 @pytest.mark.asyncio
@@ -156,7 +268,7 @@ async def test_get_nrps_access_token_uses_oidc_token_endpoint_and_signed_asserti
     monkeypatch.setattr(
         canvas_connect_module.aiohttp,
         "ClientSession",
-        lambda: fake_session,
+        _client_session_factory(fake_session),
     )
 
     fixed_now = datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc)
@@ -245,7 +357,7 @@ async def test_get_nrps_access_token_falls_back_to_registration_auth_token_url(
     monkeypatch.setattr(
         canvas_connect_module.aiohttp,
         "ClientSession",
-        lambda: fake_session,
+        _client_session_factory(fake_session),
     )
 
     async with canvas_connect_module.CanvasConnectClient(
@@ -293,7 +405,7 @@ async def test_get_nrps_access_token_raises_on_token_endpoint_error(monkeypatch)
     monkeypatch.setattr(
         canvas_connect_module.aiohttp,
         "ClientSession",
-        lambda: fake_session,
+        _client_session_factory(fake_session),
     )
 
     async with canvas_connect_module.CanvasConnectClient(
@@ -309,15 +421,19 @@ async def test_get_nrps_access_token_raises_on_token_endpoint_error(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_get_nrps_access_token_rejects_unallowlisted_token_endpoint(monkeypatch):
+async def test_get_nrps_access_token_rejects_insecure_oidc_token_endpoint(
+    monkeypatch,
+):
+    token_endpoint = "http://canvas.example.com/login/oauth2/token"
     registration = SimpleNamespace(
         client_id="client-123",
-        openid_configuration='{"token_endpoint":"https://evil.example.com/token"}',
-        auth_token_url="https://canvas.example.com/fallback-token",
+        openid_configuration=f'{{"token_endpoint":"{token_endpoint}"}}',
+        auth_token_url="https://fallback.example.com/token",
     )
-    lti_class = SimpleNamespace(id=1301, registration=registration)
+    lti_class = SimpleNamespace(id=11, registration=registration)
 
     async def _get_by_id_with_registration(cls, db, id_):
+        assert id_ == 11
         return lti_class
 
     monkeypatch.setattr(
@@ -325,45 +441,143 @@ async def test_get_nrps_access_token_rejects_unallowlisted_token_endpoint(monkey
         "get_by_id_with_registration",
         classmethod(_get_by_id_with_registration),
     )
-    monkeypatch.setattr(
-        canvas_connect_module.jwt,
-        "encode",
-        lambda *args, **kwargs: "signed-client-assertion",
-    )
-    monkeypatch.setattr(canvas_connect_module.uuid, "uuid7", lambda: "uuid7-test")
 
     fake_session = FakeClientSession(
-        FakeTokenResponse(payload={"access_token": "short-lived-token"})
+        FakeTokenResponse(payload={"access_token": "ignored", "expires_in": 3600})
     )
     monkeypatch.setattr(
         canvas_connect_module.aiohttp,
         "ClientSession",
-        lambda: fake_session,
+        _client_session_factory(fake_session),
     )
 
     async with canvas_connect_module.CanvasConnectClient(
         db=SimpleNamespace(),
-        lti_class_id=1301,
+        lti_class_id=11,
         key_manager=FakeKeyManager(),
-        nowfn=lambda: datetime.now(timezone.utc),
+        nowfn=lambda: datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc),
     ) as client:
         with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
             await client.get_nrps_access_token()
 
-    assert excinfo.value.detail == "token_endpoint host is not allowlisted"
+    assert (
+        excinfo.value.detail
+        == "Invalid token endpoint URL: Invalid URL for token endpoint: HTTP is not allowed"
+    )
     assert fake_session.requests == []
 
 
 @pytest.mark.asyncio
-async def test_get_nrps_access_token_rejects_http_token_endpoint_in_non_dev(
+async def test_get_nrps_access_token_converts_post_302_redirect_to_get(
     monkeypatch,
 ):
+    token_endpoint = "https://canvas.example.com/login/oauth2/token"
+    redirected_token_endpoint = "https://canvas.example.com/login/oauth2/token/redirect"
     registration = SimpleNamespace(
         client_id="client-123",
-        openid_configuration='{"token_endpoint":"http://canvas.example.com/token"}',
-        auth_token_url="https://canvas.example.com/fallback-token",
+        openid_configuration=f'{{"token_endpoint":"{token_endpoint}"}}',
+        auth_token_url="https://fallback.example.com/token",
     )
-    lti_class = SimpleNamespace(id=1302, registration=registration)
+    lti_class = SimpleNamespace(id=14, registration=registration)
+
+    async def _get_by_id_with_registration(cls, db, id_):
+        assert id_ == 14
+        return lti_class
+
+    monkeypatch.setattr(
+        canvas_connect_module.LTIClass,
+        "get_by_id_with_registration",
+        classmethod(_get_by_id_with_registration),
+    )
+    monkeypatch.setattr(
+        canvas_connect_module.jwt,
+        "encode",
+        lambda *args, **kwargs: "signed-client-assertion",
+    )
+    monkeypatch.setattr(canvas_connect_module.uuid, "uuid7", lambda: "uuid7-test")
+
+    fake_session = FakeClientSession(
+        [
+            FakeTokenResponse(
+                status=302,
+                headers={"Location": "/login/oauth2/token/redirect"},
+            ),
+            FakeTokenResponse(
+                payload={
+                    "access_token": "short-lived-token",
+                    "expires_in": 3600,
+                    "token_type": "Bearer",
+                    "scope": canvas_connect_module.NRPS_CONTEXT_MEMBERSHIP_SCOPE,
+                }
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        canvas_connect_module.aiohttp,
+        "ClientSession",
+        _client_session_factory(fake_session),
+    )
+
+    async with canvas_connect_module.CanvasConnectClient(
+        db=SimpleNamespace(),
+        lti_class_id=14,
+        key_manager=FakeKeyManager(),
+        nowfn=lambda: datetime.now(timezone.utc),
+    ) as client:
+        token = await client.get_nrps_access_token()
+
+    assert token.access_token == "short-lived-token"
+    assert len(fake_session.requests) == 2
+    assert fake_session.requests[0]["url"] == token_endpoint
+    assert fake_session.requests[1]["url"] == redirected_token_endpoint
+    assert fake_session.requests[0]["method"] == "POST"
+    assert fake_session.requests[1]["method"] == "GET"
+    assert fake_session.requests[0]["allow_redirects"] is True
+    assert fake_session.requests[1]["allow_redirects"] is True
+    assert fake_session.requests[0]["data"]["client_id"] == "client-123"
+    assert fake_session.requests[1]["data"] is None
+    assert fake_session.requests[1]["headers"].get("Authorization") is None
+
+
+@pytest.mark.asyncio
+async def test_get_nrps_access_token_rejects_redirect_that_requires_rewriting(
+    monkeypatch,
+):
+    allow_deny = SimpleNamespace(allow=["canvas.example.com"], deny=[])
+    url_security = SimpleNamespace(
+        allow_http_in_development=True,
+        allow_redirects=True,
+        hosts=allow_deny,
+        paths=SimpleNamespace(allow=["/login/oauth2/*"], deny=[]),
+    )
+    restricted_config = SimpleNamespace(
+        lti=SimpleNamespace(
+            security=SimpleNamespace(
+                allow_http_in_development=True,
+                allow_redirects=True,
+                hosts=SimpleNamespace(allow=["*"], deny=[]),
+                paths=SimpleNamespace(allow=["*"], deny=[]),
+                authorization_endpoint=url_security,
+                jwks_uri=url_security,
+                names_and_role_endpoint=url_security,
+                openid_configuration=url_security,
+                registration_endpoint=url_security,
+                token_endpoint=url_security,
+            ),
+            sync_wait=600,
+            key_store=SimpleNamespace(key_manager=FakeKeyManager()),
+        ),
+        development=False,
+    )
+    monkeypatch.setattr(config_module, "config", restricted_config)
+    monkeypatch.setattr(canvas_connect_module, "config", restricted_config)
+
+    registration = SimpleNamespace(
+        client_id="client-123",
+        openid_configuration='{"token_endpoint":"https://canvas.example.com/login/oauth2/token"}',
+        auth_token_url=None,
+    )
+    lti_class = SimpleNamespace(id=15, registration=registration)
 
     async def _get_by_id_with_registration(cls, db, id_):
         return lti_class
@@ -379,28 +593,182 @@ async def test_get_nrps_access_token_rejects_http_token_endpoint_in_non_dev(
         lambda *args, **kwargs: "signed-client-assertion",
     )
     monkeypatch.setattr(canvas_connect_module.uuid, "uuid7", lambda: "uuid7-test")
-    monkeypatch.setattr(canvas_connect_module.config, "development", False)
 
     fake_session = FakeClientSession(
-        FakeTokenResponse(payload={"access_token": "short-lived-token"})
+        FakeTokenResponse(
+            status=302,
+            headers={"Location": "https://canvas.example.com./login/oauth2/token"},
+        )
     )
     monkeypatch.setattr(
         canvas_connect_module.aiohttp,
         "ClientSession",
-        lambda: fake_session,
+        _client_session_factory(fake_session),
     )
 
     async with canvas_connect_module.CanvasConnectClient(
         db=SimpleNamespace(),
-        lti_class_id=1302,
+        lti_class_id=15,
         key_manager=FakeKeyManager(),
         nowfn=lambda: datetime.now(timezone.utc),
     ) as client:
         with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
             await client.get_nrps_access_token()
 
-    assert excinfo.value.detail == "token_endpoint must use HTTPS"
-    assert fake_session.requests == []
+    assert (
+        excinfo.value.detail
+        == "Invalid token endpoint URL: Invalid token endpoint URL hostname"
+    )
+    assert len(fake_session.requests) == 1
+    assert fake_session.requests[0]["allow_redirects"] is True
+
+
+@pytest.mark.asyncio
+async def test_get_nrps_access_token_rejects_redirect_to_unallowlisted_host(
+    monkeypatch,
+):
+    allow_deny = SimpleNamespace(allow=["canvas.example.com"], deny=[])
+    url_security = SimpleNamespace(
+        allow_http_in_development=True,
+        allow_redirects=True,
+        hosts=allow_deny,
+        paths=SimpleNamespace(allow=["/login/oauth2/*"], deny=[]),
+    )
+    restricted_config = SimpleNamespace(
+        lti=SimpleNamespace(
+            security=SimpleNamespace(
+                allow_http_in_development=True,
+                allow_redirects=True,
+                hosts=SimpleNamespace(allow=["*"], deny=[]),
+                paths=SimpleNamespace(allow=["*"], deny=[]),
+                authorization_endpoint=url_security,
+                jwks_uri=url_security,
+                names_and_role_endpoint=url_security,
+                openid_configuration=url_security,
+                registration_endpoint=url_security,
+                token_endpoint=url_security,
+            ),
+            sync_wait=600,
+            key_store=SimpleNamespace(key_manager=FakeKeyManager()),
+        ),
+        development=False,
+    )
+    monkeypatch.setattr(config_module, "config", restricted_config)
+    monkeypatch.setattr(canvas_connect_module, "config", restricted_config)
+
+    registration = SimpleNamespace(
+        client_id="client-123",
+        openid_configuration='{"token_endpoint":"https://canvas.example.com/login/oauth2/token"}',
+        auth_token_url=None,
+    )
+    lti_class = SimpleNamespace(id=15, registration=registration)
+
+    async def _get_by_id_with_registration(cls, db, id_):
+        return lti_class
+
+    monkeypatch.setattr(
+        canvas_connect_module.LTIClass,
+        "get_by_id_with_registration",
+        classmethod(_get_by_id_with_registration),
+    )
+    monkeypatch.setattr(
+        canvas_connect_module.jwt,
+        "encode",
+        lambda *args, **kwargs: "signed-client-assertion",
+    )
+    monkeypatch.setattr(canvas_connect_module.uuid, "uuid7", lambda: "uuid7-test")
+
+    fake_session = FakeClientSession(
+        FakeTokenResponse(
+            status=302,
+            headers={"Location": "https://evil.example.com/login/oauth2/token"},
+        )
+    )
+    monkeypatch.setattr(
+        canvas_connect_module.aiohttp,
+        "ClientSession",
+        _client_session_factory(fake_session),
+    )
+
+    async with canvas_connect_module.CanvasConnectClient(
+        db=SimpleNamespace(),
+        lti_class_id=15,
+        key_manager=FakeKeyManager(),
+        nowfn=lambda: datetime.now(timezone.utc),
+    ) as client:
+        with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+            await client.get_nrps_access_token()
+
+    assert (
+        excinfo.value.detail
+        == "Invalid token endpoint URL: Invalid token endpoint URL hostname"
+    )
+    assert len(fake_session.requests) == 1
+    assert fake_session.requests[0]["allow_redirects"] is True
+
+
+@pytest.mark.asyncio
+async def test_make_authed_nrps_get_rejects_redirect_to_unallowlisted_host(
+    monkeypatch,
+):
+    allow_deny = SimpleNamespace(allow=["canvas.example.com"], deny=[])
+    url_security = SimpleNamespace(
+        allow_http_in_development=True,
+        allow_redirects=True,
+        hosts=allow_deny,
+        paths=SimpleNamespace(allow=["/api/lti/*"], deny=[]),
+    )
+    restricted_config = SimpleNamespace(
+        lti=SimpleNamespace(
+            security=SimpleNamespace(
+                allow_http_in_development=True,
+                allow_redirects=True,
+                hosts=SimpleNamespace(allow=["*"], deny=[]),
+                paths=SimpleNamespace(allow=["*"], deny=[]),
+                authorization_endpoint=url_security,
+                jwks_uri=url_security,
+                names_and_role_endpoint=url_security,
+                openid_configuration=url_security,
+                registration_endpoint=url_security,
+                token_endpoint=url_security,
+            ),
+            sync_wait=600,
+            key_store=SimpleNamespace(key_manager=FakeKeyManager()),
+        ),
+        development=False,
+    )
+    monkeypatch.setattr(config_module, "config", restricted_config)
+    monkeypatch.setattr(canvas_connect_module, "config", restricted_config)
+
+    fake_session = FakeClientSession(
+        FakeTokenResponse(
+            status=302,
+            headers={"Location": "https://evil.example.com/api/lti/memberships"},
+        )
+    )
+    monkeypatch.setattr(
+        canvas_connect_module.aiohttp,
+        "ClientSession",
+        _client_session_factory(fake_session),
+    )
+
+    async with canvas_connect_module.CanvasConnectClient(
+        db=SimpleNamespace(),
+        lti_class_id=11,
+        key_manager=FakeKeyManager(),
+    ) as client:
+        client.get_short_lived_auth_token = lambda: _async_return("short-lived-token")
+        with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+            await client._make_authed_nrps_get(
+                "https://canvas.example.com/api/lti/memberships"
+            )
+
+    assert (
+        excinfo.value.detail
+        == "Invalid NRPS URL: Invalid Names and Role API URL hostname"
+    )
+    assert len(fake_session.requests) == 1
+    assert fake_session.requests[0]["allow_redirects"] is True
 
 
 @pytest.mark.asyncio
@@ -420,7 +788,7 @@ async def test_get_nrps_access_token_raises_when_lti_class_missing(monkeypatch):
     monkeypatch.setattr(
         canvas_connect_module.aiohttp,
         "ClientSession",
-        lambda: fake_session,
+        _client_session_factory(fake_session),
     )
 
     async with canvas_connect_module.CanvasConnectClient(
@@ -432,6 +800,94 @@ async def test_get_nrps_access_token_raises_when_lti_class_missing(monkeypatch):
             await client.get_nrps_access_token()
 
     assert excinfo.value.detail == "LTI class not found"
+
+
+@pytest.mark.asyncio
+async def test_make_authed_nrps_get_raises_when_lti_config_missing(monkeypatch):
+    monkeypatch.setattr(config_module, "config", SimpleNamespace(lti=None))
+    monkeypatch.setattr(canvas_connect_module, "config", SimpleNamespace(lti=None))
+    monkeypatch.setattr(
+        canvas_connect_module,
+        "generate_names_and_role_api_url",
+        lambda url: (_ for _ in ()).throw(
+            AssertionError("generate_names_and_role_api_url should not be called")
+        ),
+    )
+
+    fake_session = FakeClientSession(FakeTokenResponse(payload={"members": []}))
+    monkeypatch.setattr(
+        canvas_connect_module.aiohttp,
+        "ClientSession",
+        _client_session_factory(fake_session),
+    )
+
+    async with canvas_connect_module.CanvasConnectClient(
+        db=SimpleNamespace(),
+        lti_class_id=11,
+        key_manager=FakeKeyManager(),
+    ) as client:
+        client.get_short_lived_auth_token = lambda: _async_return("short-lived-token")
+        with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+            await client._make_authed_nrps_get(
+                "https://canvas.example.com/api/lti/memberships"
+            )
+
+    assert excinfo.value.detail == "LTI service is not configured"
+
+
+@pytest.mark.asyncio
+async def test_get_nrps_access_token_raises_canvas_connect_exception_when_lti_config_missing(
+    monkeypatch,
+):
+    registration = SimpleNamespace(
+        client_id="client-123",
+        openid_configuration='{"token_endpoint":"https://canvas.example.com/token"}',
+        auth_token_url=None,
+    )
+    lti_class = SimpleNamespace(id=11, registration=registration)
+
+    async def _get_by_id_with_registration(cls, db, id_):
+        return lti_class
+
+    monkeypatch.setattr(
+        canvas_connect_module.LTIClass,
+        "get_by_id_with_registration",
+        classmethod(_get_by_id_with_registration),
+    )
+    monkeypatch.setattr(
+        canvas_connect_module.jwt,
+        "encode",
+        lambda *args, **kwargs: "signed-client-assertion",
+    )
+    monkeypatch.setattr(canvas_connect_module.uuid, "uuid7", lambda: "uuid7-test")
+    monkeypatch.setattr(
+        canvas_connect_module,
+        "generate_token_endpoint_url",
+        lambda url: (_ for _ in ()).throw(
+            AssertionError("generate_token_endpoint_url should not be called")
+        ),
+    )
+    monkeypatch.setattr(config_module, "config", SimpleNamespace(lti=None))
+    monkeypatch.setattr(canvas_connect_module, "config", SimpleNamespace(lti=None))
+
+    fake_session = FakeClientSession(
+        FakeTokenResponse(payload={"access_token": "short-lived-token"})
+    )
+    monkeypatch.setattr(
+        canvas_connect_module.aiohttp,
+        "ClientSession",
+        _client_session_factory(fake_session),
+    )
+
+    async with canvas_connect_module.CanvasConnectClient(
+        db=SimpleNamespace(),
+        lti_class_id=11,
+        key_manager=FakeKeyManager(),
+    ) as client:
+        with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+            await client.get_nrps_access_token()
+
+    assert excinfo.value.detail == "LTI service is not configured"
 
 
 @pytest.mark.asyncio
@@ -470,7 +926,7 @@ async def test_get_nrps_access_token_reuses_cached_token_until_expiry(monkeypatc
     monkeypatch.setattr(
         canvas_connect_module.aiohttp,
         "ClientSession",
-        lambda: fake_session,
+        _client_session_factory(fake_session),
     )
 
     fixed_now = datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc)
@@ -532,7 +988,7 @@ async def test_get_nrps_access_token_refreshes_when_cached_token_expired(monkeyp
     monkeypatch.setattr(
         canvas_connect_module.aiohttp,
         "ClientSession",
-        lambda: fake_session,
+        _client_session_factory(fake_session),
     )
 
     now_holder = {"value": datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc)}
@@ -563,7 +1019,7 @@ async def test_get_context_memberships_url_returns_saved_value(monkeypatch):
     lti_class = SimpleNamespace(
         id=16,
         registration=registration,
-        context_memberships_url="https://canvas.example.com/memberships",
+        context_memberships_url="https://saved.example.com/memberships",
         course_id="123",
     )
 
@@ -583,7 +1039,7 @@ async def test_get_context_memberships_url_returns_saved_value(monkeypatch):
     )
     memberships_url = await client.get_context_memberships_url()
 
-    assert memberships_url == "https://canvas.example.com/memberships"
+    assert memberships_url == "https://saved.example.com/memberships"
 
 
 @pytest.mark.asyncio
@@ -622,179 +1078,6 @@ async def test_get_context_memberships_url_raises_when_missing(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_get_context_memberships_url_raises_when_host_is_not_allowlisted(
-    monkeypatch,
-):
-    registration = SimpleNamespace(
-        client_id="client-123",
-        issuer="https://canvas.example.com",
-        auth_login_url="https://canvas.example.com/login",
-        key_set_url="https://canvas.example.com/jwks",
-        openid_configuration='{"token_endpoint":"https://canvas.example.com/token"}',
-        auth_token_url="https://canvas.example.com/fallback-token",
-    )
-    lti_class = SimpleNamespace(
-        id=1701,
-        registration=registration,
-        context_memberships_url="https://evil.example.com/memberships",
-        course_id="123",
-    )
-
-    async def _get_by_id_with_registration(cls, db, id_):
-        return lti_class
-
-    monkeypatch.setattr(
-        canvas_connect_module.LTIClass,
-        "get_by_id_with_registration",
-        classmethod(_get_by_id_with_registration),
-    )
-
-    client = canvas_connect_module.CanvasConnectClient(
-        db=SimpleNamespace(),
-        lti_class_id=1701,
-        key_manager=FakeKeyManager(),
-    )
-    with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
-        await client.get_context_memberships_url()
-
-    assert excinfo.value.detail == "context_memberships_url host is not allowlisted"
-
-
-@pytest.mark.asyncio
-async def test_get_context_memberships_url_raises_when_global_allowlist_excludes_host(
-    monkeypatch,
-):
-    monkeypatch.setattr(
-        canvas_connect_module.config.lti,
-        "platform_url_allowlist",
-        ["tool.example.com"],
-    )
-    registration = SimpleNamespace(
-        client_id="client-123",
-        issuer="https://canvas.example.com",
-        auth_login_url="https://canvas.example.com/login",
-        key_set_url="https://canvas.example.com/jwks",
-        openid_configuration='{"token_endpoint":"https://canvas.example.com/token"}',
-        auth_token_url="https://canvas.example.com/fallback-token",
-    )
-    lti_class = SimpleNamespace(
-        id=1702,
-        registration=registration,
-        context_memberships_url="https://canvas.example.com/memberships",
-        course_id="123",
-    )
-
-    async def _get_by_id_with_registration(cls, db, id_):
-        return lti_class
-
-    monkeypatch.setattr(
-        canvas_connect_module.LTIClass,
-        "get_by_id_with_registration",
-        classmethod(_get_by_id_with_registration),
-    )
-
-    client = canvas_connect_module.CanvasConnectClient(
-        db=SimpleNamespace(),
-        lti_class_id=1702,
-        key_manager=FakeKeyManager(),
-    )
-    with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
-        await client.get_context_memberships_url()
-
-    assert excinfo.value.detail == "context_memberships_url host is not allowlisted"
-
-
-@pytest.mark.asyncio
-async def test_get_context_memberships_url_raises_when_allowlist_is_invalid(
-    monkeypatch,
-):
-    monkeypatch.setattr(
-        canvas_connect_module.config.lti,
-        "platform_url_allowlist",
-        ["platform.example.com/path"],
-    )
-    registration = SimpleNamespace(
-        client_id="client-123",
-        issuer="https://canvas.example.com",
-        openid_configuration='{"token_endpoint":"https://canvas.example.com/token"}',
-        auth_token_url="https://canvas.example.com/fallback-token",
-    )
-    lti_class = SimpleNamespace(
-        id=1703,
-        registration=registration,
-        context_memberships_url="https://canvas.example.com/memberships",
-        course_id="123",
-    )
-
-    async def _get_by_id_with_registration(cls, db, id_):
-        return lti_class
-
-    monkeypatch.setattr(
-        canvas_connect_module.LTIClass,
-        "get_by_id_with_registration",
-        classmethod(_get_by_id_with_registration),
-    )
-
-    client = canvas_connect_module.CanvasConnectClient(
-        db=SimpleNamespace(),
-        lti_class_id=1703,
-        key_manager=FakeKeyManager(),
-    )
-    with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
-        await client.get_context_memberships_url()
-
-    assert (
-        excinfo.value.detail
-        == canvas_connect_module.INVALID_PLATFORM_URL_ALLOWLIST_DETAIL
-    )
-
-
-@pytest.mark.asyncio
-async def test_get_context_memberships_url_raises_when_allowlist_is_missing(
-    monkeypatch,
-):
-    monkeypatch.setattr(
-        canvas_connect_module.config.lti,
-        "platform_url_allowlist",
-        [],
-    )
-    registration = SimpleNamespace(
-        client_id="client-123",
-        issuer="https://canvas.example.com",
-        openid_configuration='{"token_endpoint":"https://canvas.example.com/token"}',
-        auth_token_url="https://canvas.example.com/fallback-token",
-    )
-    lti_class = SimpleNamespace(
-        id=1704,
-        registration=registration,
-        context_memberships_url="https://canvas.example.com/memberships",
-        course_id="123",
-    )
-
-    async def _get_by_id_with_registration(cls, db, id_):
-        return lti_class
-
-    monkeypatch.setattr(
-        canvas_connect_module.LTIClass,
-        "get_by_id_with_registration",
-        classmethod(_get_by_id_with_registration),
-    )
-
-    client = canvas_connect_module.CanvasConnectClient(
-        db=SimpleNamespace(),
-        lti_class_id=1704,
-        key_manager=FakeKeyManager(),
-    )
-    with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
-        await client.get_context_memberships_url()
-
-    assert (
-        excinfo.value.detail
-        == canvas_connect_module.MISSING_PLATFORM_URL_ALLOWLIST_DETAIL
-    )
-
-
-@pytest.mark.asyncio
 async def test_get_lti_class_is_cached_per_client_instance(monkeypatch):
     registration = SimpleNamespace(
         client_id="client-123",
@@ -805,7 +1088,7 @@ async def test_get_lti_class_is_cached_per_client_instance(monkeypatch):
     lti_class = SimpleNamespace(
         id=18,
         registration=registration,
-        context_memberships_url="https://canvas.example.com/memberships",
+        context_memberships_url="https://saved.example.com/memberships",
         course_id="123",
     )
     call_count = {"count": 0}
@@ -828,8 +1111,8 @@ async def test_get_lti_class_is_cached_per_client_instance(monkeypatch):
     first = await client.get_context_memberships_url()
     second = await client.get_context_memberships_url()
 
-    assert first == "https://canvas.example.com/memberships"
-    assert second == "https://canvas.example.com/memberships"
+    assert first == "https://saved.example.com/memberships"
+    assert second == "https://saved.example.com/memberships"
     assert call_count["count"] == 1
 
 
@@ -861,7 +1144,7 @@ async def test_get_resource_link_id_returns_existing_without_fetch(monkeypatch):
     monkeypatch.setattr(
         canvas_connect_module.aiohttp,
         "ClientSession",
-        lambda: fake_session,
+        _client_session_factory(fake_session),
     )
 
     async with canvas_connect_module.CanvasConnectClient(
@@ -906,7 +1189,7 @@ async def test_get_resource_link_id_returns_none_when_missing(monkeypatch):
     monkeypatch.setattr(
         canvas_connect_module.aiohttp,
         "ClientSession",
-        lambda: fake_session,
+        _client_session_factory(fake_session),
     )
 
     db = FakeWriteDB()
@@ -982,7 +1265,7 @@ async def test_get_resource_link_id_uses_nrps_context_id_as_transient_fallback(
     monkeypatch.setattr(
         canvas_connect_module.aiohttp,
         "ClientSession",
-        lambda: fake_session,
+        _client_session_factory(fake_session),
     )
 
     db = FakeWriteDB()
@@ -1003,7 +1286,6 @@ async def test_get_resource_link_id_uses_nrps_context_id_as_transient_fallback(
     assert len(fake_session.requests) == 2
     assert fake_session.requests[1]["method"] == "GET"
     assert fake_session.requests[1]["url"] == context_memberships_url
-    assert fake_session.requests[1]["allow_redirects"] is False
 
 
 @pytest.mark.asyncio
@@ -1136,7 +1418,7 @@ async def test_get_nrps_create_user_class_roles_maps_members_and_pages(monkeypat
     monkeypatch.setattr(
         canvas_connect_module.aiohttp,
         "ClientSession",
-        lambda: fake_session,
+        _client_session_factory(fake_session),
     )
 
     async with canvas_connect_module.CanvasConnectClient(
@@ -1180,88 +1462,10 @@ async def test_get_nrps_create_user_class_roles_maps_members_and_pages(monkeypat
     assert fake_session.requests[0]["method"] == "POST"
     assert fake_session.requests[1]["method"] == "GET"
     assert fake_session.requests[2]["method"] == "GET"
-    assert fake_session.requests[1]["allow_redirects"] is False
-    assert fake_session.requests[2]["allow_redirects"] is False
     assert (
         fake_session.requests[1]["url"]
         == f"{context_memberships_url}?rlid=resource-link-id"
     )
-
-
-@pytest.mark.asyncio
-async def test_get_nrps_create_user_class_roles_rejects_untrusted_next_page(
-    monkeypatch,
-):
-    token_endpoint = "https://canvas.example.com/login/oauth2/token"
-    context_memberships_url = (
-        "https://canvas.example.com/api/lti/courses/1/names_and_roles"
-    )
-    registration = SimpleNamespace(
-        client_id="client-123",
-        issuer="https://canvas.example.com",
-        auth_login_url="https://canvas.example.com/login",
-        key_set_url="https://canvas.example.com/jwks",
-        openid_configuration=f'{{"token_endpoint":"{token_endpoint}"}}',
-        auth_token_url="https://canvas.example.com/fallback-token",
-    )
-    lti_class = SimpleNamespace(
-        id=2101,
-        registration=registration,
-        context_memberships_url=context_memberships_url,
-        resource_link_id="resource-link-id",
-        course_id="1",
-    )
-
-    async def _get_by_id_with_registration(cls, db, id_):
-        return lti_class
-
-    monkeypatch.setattr(
-        canvas_connect_module.LTIClass,
-        "get_by_id_with_registration",
-        classmethod(_get_by_id_with_registration),
-    )
-    monkeypatch.setattr(
-        canvas_connect_module.jwt,
-        "encode",
-        lambda *args, **kwargs: "signed-client-assertion",
-    )
-    monkeypatch.setattr(canvas_connect_module.uuid, "uuid7", lambda: "uuid7-test")
-
-    fake_session = FakeClientSession(
-        [
-            FakeTokenResponse(
-                payload={
-                    "access_token": "short-lived-token",
-                    "expires_in": 3600,
-                }
-            ),
-            FakeTokenResponse(
-                payload={
-                    "members": [],
-                    canvas_connect_module.NRPS_NEXT_PAGE_KEY: "https://evil.example.com/next",
-                }
-            ),
-        ]
-    )
-    monkeypatch.setattr(
-        canvas_connect_module.aiohttp,
-        "ClientSession",
-        lambda: fake_session,
-    )
-
-    async with canvas_connect_module.CanvasConnectClient(
-        db=SimpleNamespace(),
-        lti_class_id=2101,
-        key_manager=FakeKeyManager(),
-        nowfn=lambda: datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc),
-    ) as client:
-        with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
-            await client.get_nrps_create_user_class_roles()
-
-    assert excinfo.value.detail == "nrps_page_url host is not allowlisted"
-    assert len(fake_session.requests) == 2
-    assert fake_session.requests[1]["method"] == "GET"
-    assert fake_session.requests[1]["allow_redirects"] is False
 
 
 @pytest.mark.asyncio
@@ -1319,7 +1523,7 @@ async def test_get_nrps_create_user_class_roles_allows_missing_members(monkeypat
     monkeypatch.setattr(
         canvas_connect_module.aiohttp,
         "ClientSession",
-        lambda: fake_session,
+        _client_session_factory(fake_session),
     )
 
     async with canvas_connect_module.CanvasConnectClient(
@@ -1333,12 +1537,98 @@ async def test_get_nrps_create_user_class_roles_allows_missing_members(monkeypat
     assert create_roles.roles == []
     assert len(fake_session.requests) == 3
     assert fake_session.requests[1]["url"] == context_memberships_url
-    assert fake_session.requests[1]["allow_redirects"] is False
     assert (
         fake_session.requests[2]["url"]
         == f"{context_memberships_url}?rlid=fallback-context-id"
     )
-    assert fake_session.requests[2]["allow_redirects"] is False
+
+
+@pytest.mark.asyncio
+async def test_request_all_nrps_pages_detects_loop_for_canonicalized_next_page(
+    monkeypatch,
+):
+    token_endpoint = "https://canvas.example.com/login/oauth2/token"
+    context_memberships_url = (
+        "https://canvas.example.com/api/lti/courses/1/names_and_roles"
+    )
+    registration = SimpleNamespace(
+        client_id="client-123",
+        issuer="https://canvas.example.com",
+        openid_configuration=f'{{"token_endpoint":"{token_endpoint}"}}',
+        auth_token_url="https://canvas.example.com/fallback-token",
+    )
+    lti_class = SimpleNamespace(
+        id=23,
+        registration=registration,
+        context_memberships_url=context_memberships_url,
+        resource_link_id=None,
+        course_id="1",
+    )
+
+    async def _get_by_id_with_registration(cls, db, id_):
+        return lti_class
+
+    monkeypatch.setattr(
+        canvas_connect_module.LTIClass,
+        "get_by_id_with_registration",
+        classmethod(_get_by_id_with_registration),
+    )
+    monkeypatch.setattr(
+        canvas_connect_module.jwt,
+        "encode",
+        lambda *args, **kwargs: "signed-client-assertion",
+    )
+    monkeypatch.setattr(canvas_connect_module.uuid, "uuid7", lambda: "uuid7-test")
+
+    fake_session = FakeClientSession(
+        [
+            FakeTokenResponse(
+                payload={
+                    "access_token": "short-lived-token",
+                    "expires_in": 3600,
+                }
+            ),
+            FakeTokenResponse(
+                payload={
+                    "members": [],
+                    "next": "https://Canvas.Example.com./api/lti/courses/1/names_and_roles",
+                }
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        canvas_connect_module.aiohttp,
+        "ClientSession",
+        _client_session_factory(fake_session),
+    )
+
+    async with canvas_connect_module.CanvasConnectClient(
+        db=SimpleNamespace(),
+        lti_class_id=23,
+        key_manager=FakeKeyManager(),
+        nowfn=lambda: datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc),
+    ) as client:
+        pages = []
+        with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+            async for response_payload in client._request_all_nrps_pages(
+                context_memberships_url
+            ):
+                pages.append(response_payload)
+
+    assert (
+        excinfo.value.detail
+        == "NRPS pagination loop detected while fetching memberships"
+    )
+    assert pages == [
+        {
+            "members": [],
+            "next": "https://Canvas.Example.com./api/lti/courses/1/names_and_roles",
+        }
+    ]
+    assert len(fake_session.requests) == 2
+    assert fake_session.requests[0]["method"] == "POST"
+    assert fake_session.requests[1]["method"] == "GET"
+    assert fake_session.requests[1]["url"] == context_memberships_url
 
 
 async def _async_return(value):
@@ -1424,7 +1714,7 @@ async def test_get_nrps_create_user_class_roles_no_sso_when_provider_id_zero(
     monkeypatch.setattr(
         canvas_connect_module.aiohttp,
         "ClientSession",
-        lambda: fake_session,
+        _client_session_factory(fake_session),
     )
 
     async with canvas_connect_module.CanvasConnectClient(
@@ -1538,7 +1828,7 @@ async def test_get_nrps_create_user_class_roles_ignores_sso_provider_ids_from_sk
     monkeypatch.setattr(
         canvas_connect_module.aiohttp,
         "ClientSession",
-        lambda: fake_session,
+        _client_session_factory(fake_session),
     )
 
     async with canvas_connect_module.CanvasConnectClient(
@@ -1980,63 +2270,6 @@ async def test_manual_canvas_connect_sync_roster_raises_manual_error_on_failure(
 
 
 @pytest.mark.asyncio
-async def test_manual_canvas_connect_sync_roster_does_not_mark_error_on_missing_allowlist(
-    monkeypatch,
-):
-    fixed_now = datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc)
-    lti_class = SimpleNamespace(
-        id=282,
-        class_id=321,
-        setup_user_id=42,
-        last_synced=fixed_now - timedelta(minutes=30),
-        lti_status=canvas_connect_module.LTIStatus.LINKED,
-        last_sync_error=None,
-    )
-
-    async def _get_sync_context(self):
-        return lti_class, 321, 42
-
-    async def _get_nrps_create_user_class_roles(self):
-        raise canvas_connect_module.CanvasConnectException(
-            detail=canvas_connect_module.MISSING_PLATFORM_URL_ALLOWLIST_DETAIL
-        )
-
-    monkeypatch.setattr(
-        canvas_connect_module.CanvasConnectClient,
-        "_get_sync_context",
-        _get_sync_context,
-    )
-    monkeypatch.setattr(
-        canvas_connect_module.CanvasConnectClient,
-        "get_nrps_create_user_class_roles",
-        _get_nrps_create_user_class_roles,
-    )
-
-    db = FakeWriteDB()
-    request = SimpleNamespace(state={"db": db})
-    tasks = SimpleNamespace()
-    client = canvas_connect_module.ManualCanvasConnectClient(
-        lti_class_id=282,
-        request=request,
-        tasks=tasks,
-        key_manager=FakeKeyManager(),
-        nowfn=lambda: fixed_now,
-    )
-
-    with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
-        await client.sync_roster()
-
-    assert (
-        excinfo.value.detail
-        == canvas_connect_module.MISSING_PLATFORM_URL_ALLOWLIST_DETAIL
-    )
-    assert lti_class.lti_status == canvas_connect_module.LTIStatus.LINKED
-    assert lti_class.last_sync_error is None
-    assert db.added == []
-    assert db.flush_count == 0
-
-
-@pytest.mark.asyncio
 async def test_script_canvas_connect_sync_roster_uses_script_client(monkeypatch):
     captured: dict[str, object] = {}
     fake_lti_class = SimpleNamespace(
@@ -2189,6 +2422,61 @@ async def test_script_canvas_connect_sync_roster_marks_error_on_row_failures(
 
 
 @pytest.mark.asyncio
+async def test_script_canvas_connect_sync_roster_skips_class_error_for_global_failure(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc)
+    previous_sync = fixed_now - timedelta(hours=3)
+    fake_lti_class = SimpleNamespace(
+        id=292,
+        class_id=321,
+        setup_user_id=42,
+        lti_status=canvas_connect_module.LTIStatus.LINKED,
+        last_sync_error="old-error",
+        last_synced=previous_sync,
+    )
+
+    async def _get_sync_context(self):
+        return fake_lti_class, 321, 42
+
+    async def _get_nrps_create_user_class_roles(self):
+        raise canvas_connect_module.CanvasConnectGlobalException(
+            detail="LTI service is not configured"
+        )
+
+    monkeypatch.setattr(
+        canvas_connect_module.CanvasConnectClient,
+        "_get_sync_context",
+        _get_sync_context,
+    )
+    monkeypatch.setattr(
+        canvas_connect_module.CanvasConnectClient,
+        "get_nrps_create_user_class_roles",
+        _get_nrps_create_user_class_roles,
+    )
+
+    db = FakeWriteDB()
+    authz_client = SimpleNamespace()
+    client = canvas_connect_module.ScriptCanvasConnectClient(
+        db=db,
+        client=authz_client,
+        lti_class_id=292,
+        key_manager=FakeKeyManager(),
+        nowfn=lambda: fixed_now,
+    )
+
+    with pytest.raises(canvas_connect_module.CanvasConnectGlobalException) as excinfo:
+        await client.sync_roster()
+
+    assert excinfo.value.detail == "LTI service is not configured"
+    assert fake_lti_class.lti_status == canvas_connect_module.LTIStatus.LINKED
+    assert fake_lti_class.last_sync_error == "old-error"
+    assert fake_lti_class.last_synced == previous_sync
+    assert db.added == []
+    assert db.flush_count == 0
+
+
+@pytest.mark.asyncio
 async def test_manual_canvas_connect_sync_roster_marks_error_on_row_failures(
     monkeypatch,
 ):
@@ -2269,3 +2557,57 @@ async def test_manual_canvas_connect_sync_roster_marks_error_on_row_failures(
     assert fake_lti_class.last_synced == previous_sync
     assert db.added == [fake_lti_class]
     assert db.flush_count == 1
+
+
+@pytest.mark.asyncio
+async def test_canvas_connect_sync_all_skips_class_error_for_global_failure(
+    monkeypatch,
+):
+    lti_class = SimpleNamespace(
+        id=301,
+        lti_status=canvas_connect_module.LTIStatus.LINKED,
+        last_sync_error="old-error",
+    )
+
+    async def _get_all_to_sync(cls, session, sync_classes_with_error_status=False):
+        yield lti_class
+
+    class FakeScriptCanvasConnectClient:
+        def __init__(self, *, db, client, lti_class_id):
+            assert db is session
+            assert client is authz_client
+            assert lti_class_id == lti_class.id
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def sync_roster(self):
+            raise canvas_connect_module.CanvasConnectGlobalException(
+                detail="LTI service is not configured"
+            )
+
+    monkeypatch.setattr(
+        canvas_connect_module.LTIClass,
+        "get_all_to_sync",
+        classmethod(_get_all_to_sync),
+    )
+    monkeypatch.setattr(
+        canvas_connect_module,
+        "ScriptCanvasConnectClient",
+        FakeScriptCanvasConnectClient,
+    )
+
+    session = FakeSyncSession()
+    authz_client = SimpleNamespace()
+
+    await canvas_connect_module.canvas_connect_sync_all(session, authz_client)
+
+    assert len(session.savepoints) == 1
+    assert session.savepoints[0].rollback_count == 1
+    assert lti_class.lti_status == canvas_connect_module.LTIStatus.LINKED
+    assert lti_class.last_sync_error == "old-error"
+    assert session.added == []
+    assert session.commit_count == 1
