@@ -21,6 +21,7 @@ from pingpong.lti.endpoints import (
     allow_redirects,
     generate_authorization_endpoint_url,
     generate_jwks_uri_url,
+    generate_names_and_role_api_url,
     generate_openid_configuration_url,
     generate_registration_endpoint_url,
     generate_token_endpoint_url,
@@ -352,11 +353,17 @@ def parse_lti_context_and_nrps(
         course_term = None
 
     context_memberships_url_value = nrps_claim.get("context_memberships_url")
-    context_memberships_url = (
-        context_memberships_url_value
-        if isinstance(context_memberships_url_value, str)
-        else None
-    )
+    context_memberships_url = None
+    if isinstance(context_memberships_url_value, str):
+        try:
+            context_memberships_url = generate_names_and_role_api_url(
+                context_memberships_url_value
+            )
+        except ValueError as e:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid context_memberships_url",
+            ) from e
 
     return course_code, course_name, course_term, context_memberships_url
 

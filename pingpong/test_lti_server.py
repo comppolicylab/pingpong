@@ -693,6 +693,20 @@ def test_parse_lti_context_and_nrps_filters_non_string_values():
     assert context_memberships_url == "https://example.com/nrps"
 
 
+def test_parse_lti_context_and_nrps_rejects_invalid_context_memberships_url():
+    claims = {
+        server_module.LTI_CLAIM_NRPS_KEY: {
+            "context_memberships_url": "not-a-url",
+        },
+    }
+
+    with pytest.raises(HTTPException) as excinfo:
+        server_module.parse_lti_context_and_nrps(claims, {})
+
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail == "Invalid context_memberships_url"
+
+
 def test_get_lti_key_manager_missing_config(monkeypatch):
     monkeypatch.setattr(server_module, "config", SimpleNamespace(lti=None))
     with pytest.raises(HTTPException) as excinfo:
@@ -2285,6 +2299,81 @@ async def test_lti_launch_missing_course_id(monkeypatch):
     with pytest.raises(HTTPException) as excinfo:
         await server_module.lti_launch(request, tasks=SimpleNamespace())
     assert excinfo.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_lti_launch_rejects_invalid_context_memberships_url(monkeypatch):
+    oidc_session = _make_oidc_session(
+        redirect_uri=server_module.config.url("/api/v1/lti/launch")
+    )
+    registration = _make_registration(
+        review_status=LTIRegistrationReviewStatus.APPROVED, enabled=True
+    )
+    claims = {
+        "nonce": "nonce",
+        "email": "user@example.com",
+        server_module.LTI_CLAIM_CUSTOM_KEY: {
+            "canvas_course_id": "course-1",
+            "sso_provider_id": "0",
+        },
+        server_module.LTI_CLAIM_ROLES_KEY: [
+            "http://purl.imsglobal.org/vocab/lis/v2/membership#Instructor"
+        ],
+        server_module.LTI_CLAIM_NRPS_KEY: {
+            "context_memberships_url": "not-a-url",
+        },
+    }
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "get_by_state",
+        lambda db, state: _async_return(oidc_session),
+    )
+    monkeypatch.setattr(
+        server_module.LTIRegistration,
+        "get_by_client_id",
+        lambda db, client_id: _async_return(registration),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "_verify_lti_id_token",
+        lambda **kwargs: _async_return(claims),
+    )
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "validate_and_consume",
+        lambda *args, **kwargs: _async_return(True),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "find_class_by_course_id",
+        lambda *args, **kwargs: _async_return(None),
+    )
+    monkeypatch.setattr(server_module, "User", FakeUserModel)
+    monkeypatch.setattr(
+        server_module.User,
+        "get_by_email",
+        lambda db, email: _async_return(FakeUserModel(email)),
+    )
+    monkeypatch.setattr(server_module, "LTIClass", FakeLTIClass)
+    monkeypatch.setattr(
+        server_module, "encode_session_token", lambda user_id, nowfn: "token"
+    )
+    monkeypatch.setattr(
+        server_module, "get_now_fn", lambda request: lambda: datetime.now(timezone.utc)
+    )
+
+    state = _make_request_state()
+    request = FakeRequest(
+        payload={"state": "state", "id_token": "token"},
+        state=state,
+    )
+
+    with pytest.raises(HTTPException) as excinfo:
+        await server_module.lti_launch(request, tasks=SimpleNamespace())
+
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail == "Invalid context_memberships_url"
+    assert not any(isinstance(obj, FakeLTIClass) for obj in state.db.added)
 
 
 @pytest.mark.asyncio

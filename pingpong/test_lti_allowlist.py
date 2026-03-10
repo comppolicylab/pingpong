@@ -276,3 +276,33 @@ def test_generate_safe_lti_url_accepts_percent_encoded_sanitized_paths(
     )
 
     assert result == expected
+
+
+@pytest.mark.parametrize(
+    ("unverified_url", "expected"),
+    [
+        (
+            "https://platform.example.com/foo%20bar",
+            "https://platform.example.com/foo%20bar",
+        ),
+        (
+            "https://platform.example.com/caf%C3%A9",
+            "https://platform.example.com/caf%C3%A9",
+        ),
+    ],
+)
+@pytest.mark.parametrize("development_config", [False], indirect=True)
+def test_generate_safe_lti_url_preserves_existing_percent_encoded_path_bytes(
+    development_config, unverified_url, expected
+):
+    result = allowlist.generate_safe_lti_url(
+        unverified_url=unverified_url,
+        url_type="OpenID configuration",
+        host_allow=["*.example.com"],
+        host_deny=[],
+        path_allow=["*"],
+        path_deny=[],
+        allow_http_in_development=True,
+    )
+
+    assert result == expected

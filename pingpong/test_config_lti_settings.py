@@ -143,6 +143,25 @@ def test_lti_settings_prefers_security_http_flag_over_legacy_dev_http_hosts():
     assert settings.security.allow_http_in_development is False
 
 
+def test_lti_settings_mixed_legacy_config_preserves_global_openid_paths():
+    settings = LTISettings.model_validate(
+        {
+            **_base_lti_settings(),
+            "platform_url_allowlist": ["platform.example.com"],
+            "security": {
+                "paths": {
+                    "allow": ["/openid/custom/*"],
+                    "deny": [],
+                },
+            },
+        }
+    )
+
+    assert settings.security.paths.allow == ["/openid/custom/*"]
+    assert settings.security.openid_configuration.paths.allow == ["*"]
+    assert settings.security.openid_configuration.paths.model_fields_set == set()
+
+
 def test_lti_settings_normalizes_legacy_platform_allowlist_urls():
     settings = LTISettings.model_validate(
         {

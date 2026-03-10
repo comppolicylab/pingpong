@@ -190,3 +190,28 @@ def test_lti_security_partial_nested_endpoint_tables_merge_with_global(monkeypat
         endpoints.generate_token_endpoint_url(
             "https://specific.example.com/blocked/token"
         )
+
+
+def test_mixed_legacy_config_keeps_global_openid_path_rules(monkeypatch):
+    settings = config_module.LTISettings.model_validate(
+        {
+            **_base_lti_settings(),
+            "platform_url_allowlist": ["platform.example.com"],
+            "security": {
+                "hosts": {"allow": ["platform.example.com"], "deny": []},
+                "paths": {"allow": ["/openid/custom/*"], "deny": []},
+            },
+        }
+    )
+    _patch_runtime_config(monkeypatch, lti=settings, development=False)
+
+    generated = endpoints.generate_openid_configuration_url(
+        "https://platform.example.com/openid/custom/config"
+    )
+
+    assert generated == "https://platform.example.com/openid/custom/config"
+
+    with pytest.raises(ValueError, match="Invalid OpenID configuration URL path"):
+        endpoints.generate_openid_configuration_url(
+            "https://platform.example.com/.well-known/openid-configuration"
+        )

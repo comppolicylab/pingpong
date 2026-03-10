@@ -12,6 +12,7 @@ _HOST_RE = re.compile(
 _PATH_SEGMENT_RE = r"(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f]{2})+"
 _PATH_RE = re.compile(rf"\A/(?:{_PATH_SEGMENT_RE}(?:/{_PATH_SEGMENT_RE})*)?/?\Z")
 _ENCODED_PATH_SEPARATOR_RE = re.compile(r"%2f|%5c", re.IGNORECASE)
+_HEX_ESCAPE_RE = re.compile(r"%[0-9A-Fa-f]{2}")
 _UNSAFE_PATH_RE = re.compile(r"[\x00-\x1f\x7f@]")
 _UNSAFE_QUERY_RE = re.compile(r"[\x00-\x1f\x7f]")
 
@@ -28,7 +29,21 @@ def _sanitize_url_path(path: str, field_name: str) -> str:
     segments = path.split("/")
     if ".." in segments:
         raise ValueError(f"Invalid URL path for {field_name}")
-    return quote(path, safe="/%:=+!*'(),@&~")
+    preserved_escapes: list[str] = []
+    placeholder_prefix = "__PINGPONG_PATH_ESCAPE__"
+
+    def preserve_safe_escape(match: re.Match[str]) -> str:
+        escape = match.group(0)
+        if _ENCODED_PATH_SEPARATOR_RE.fullmatch(escape):
+            return escape
+        preserved_escapes.append(escape)
+        return f"{placeholder_prefix}{len(preserved_escapes) - 1}__"
+
+    path_with_placeholders = _HEX_ESCAPE_RE.sub(preserve_safe_escape, path)
+    sanitized = quote(path_with_placeholders, safe="/:=+!*'(),@&~")
+    for index, escape in enumerate(preserved_escapes):
+        sanitized = sanitized.replace(f"{placeholder_prefix}{index}__", escape)
+    return sanitized
 
 
 def _sanitize_url_query(query: str, field_name: str) -> str:
