@@ -21,6 +21,7 @@ from pingpong.lti.endpoints import (
     generate_jwks_uri_url,
     generate_openid_configuration_url,
     generate_registration_endpoint_url,
+    generate_token_endpoint_url,
 )
 from pingpong.lti.constants import (
     AUTHORIZATION_ENDPOINT_KEY,
@@ -174,13 +175,14 @@ async def _fetch_openid_configuration(
         if config.lti
         else True
     )
+    initial_headers = headers.copy()
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with request_with_validated_redirects(
             initial_url=generated_openid_configuration_url,
             request=lambda url: session.get(
                 url,
                 raise_for_status=True,
-                headers=headers,
+                headers=initial_headers if url == generated_openid_configuration_url else {},
                 allow_redirects=False,
             ),
             validate_redirect_url=generate_openid_configuration_url,
@@ -417,6 +419,14 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
     token_endpoint = _require_non_empty_string(
         token_endpoint, missing_required_fields_detail
     )
+    try:
+        authorization_endpoint = generate_authorization_endpoint_url(
+            authorization_endpoint
+        )
+        keys_endpoint = generate_jwks_uri_url(keys_endpoint)
+        token_endpoint = generate_token_endpoint_url(token_endpoint)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     if not all(scope in scopes_supported for scope in REQUIRED_SCOPES):
         raise HTTPException(
