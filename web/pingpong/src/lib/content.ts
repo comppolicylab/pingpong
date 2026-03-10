@@ -22,7 +22,8 @@ export type ParsedTextContent = {
 export const parseTextContent = (
 	text: Text,
 	threadVersion: number = 2,
-	baseUrl: string = ''
+	baseUrl: string = '',
+	messageId: string = ''
 ): ParsedTextContent => {
 	let content = text.value;
 	const replacements: Replacement[] = [];
@@ -36,7 +37,7 @@ export const parseTextContent = (
 					threadVersion === 2)
 			) {
 				const { start_index, end_index, file_path } = annotation;
-				const url = join(baseUrl, `/file/${file_path.file_id}`);
+				const url = join(baseUrl, `/message/${messageId}/file/${file_path.file_id}`);
 				replacements.push({ start: start_index, end: end_index, newValue: url });
 			} else if (annotation.type === 'file_citation' && annotation.text !== 'responses_v3') {
 				const { start_index, end_index, file_citation } = annotation;

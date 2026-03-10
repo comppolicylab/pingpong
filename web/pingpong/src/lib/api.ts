@@ -591,6 +591,18 @@ export type ImageProxy = {
 };
 
 /**
+ * Client-side metadata for optimistic vision uploads before the thread image is persisted.
+ */
+export type OptimisticVisionFile = {
+	name: string;
+	content_type: string;
+	vision_file_id: string;
+	preview_url?: string | null;
+	width?: number | null;
+	height?: number | null;
+};
+
+/**
  * Get the current user.
  */
 export const me = async (f: Fetcher) => {
@@ -2163,9 +2175,10 @@ export const deleteThreadFile = async (
 	f: Fetcher,
 	classId: number,
 	threadId: number,
-	fileId: string
+	messageId: string,
+	fileId: string | number
 ) => {
-	const url = `class/${classId}/thread/${threadId}/file/${fileId}`;
+	const url = `class/${classId}/thread/${threadId}/message/${messageId}/file/${fileId}`;
 	return await DELETE<never, GenericStatus>(f, url);
 };
 
@@ -2646,7 +2659,11 @@ export type Text = {
 	value: string;
 };
 
-export type MessageContentText = {
+export type ContentSource = {
+	source_message_id?: string;
+};
+
+export type MessageContentText = ContentSource & {
 	text: Text;
 	type: 'text';
 };
@@ -2655,38 +2672,38 @@ export type ImageFile = {
 	file_id: string;
 };
 
-export type MessageContentImageFile = {
+export type MessageContentImageFile = ContentSource & {
 	image_file: ImageFile;
 	type: 'image_file';
 };
 
-export type MessageContentCodeOutputImageURL = {
+export type MessageContentCodeOutputImageURL = ContentSource & {
 	url: string;
 	type: 'code_output_image_url';
 };
 
-export type MessageContentCodeOutputImageFile = {
+export type MessageContentCodeOutputImageFile = ContentSource & {
 	image_file: ImageFile;
 	type: 'code_output_image_file';
 };
 
-export type MessageContentCodeOutputLogs = {
+export type MessageContentCodeOutputLogs = ContentSource & {
 	logs: string;
 	type: 'code_output_logs';
 };
 
-export type MessageContentCode = {
+export type MessageContentCode = ContentSource & {
 	code: string;
 	type: 'code';
 };
 
-export type CodeInterpreterCallPlaceholder = {
+export type CodeInterpreterCallPlaceholder = ContentSource & {
 	run_id: string;
 	step_id: string;
 	type: 'code_interpreter_call_placeholder';
 };
 
-export type FileSearchCallItem = {
+export type FileSearchCallItem = ContentSource & {
 	step_id: string;
 	type: 'file_search_call';
 	queries?: string[];
@@ -2699,7 +2716,7 @@ export type WebSearchSource = {
 	type: 'url';
 };
 
-export type WebSearchCallItem = {
+export type WebSearchCallItem = ContentSource & {
 	step_id: string;
 	type: 'web_search_call';
 	action?: WebSearchAction | null;
@@ -2717,7 +2734,7 @@ export type MCPListToolsTool = {
 	annotations?: Record<string, unknown> | null;
 };
 
-export type MCPServerCallItem = {
+export type MCPServerCallItem = ContentSource & {
 	step_id: string;
 	type: 'mcp_server_call';
 	server_label: string;
@@ -2729,7 +2746,7 @@ export type MCPServerCallItem = {
 	status?: MCPToolCallStatus | null;
 };
 
-export type MCPListToolsCallItem = {
+export type MCPListToolsCallItem = ContentSource & {
 	step_id: string;
 	type: 'mcp_list_tools_call';
 	server_label: string;
@@ -2745,7 +2762,7 @@ export type ReasoningSummaryPart = {
 	summary_text: string;
 };
 
-export type ReasoningCallItem = {
+export type ReasoningCallItem = ContentSource & {
 	step_id: string;
 	type: 'reasoning';
 	summary: ReasoningSummaryPart[];

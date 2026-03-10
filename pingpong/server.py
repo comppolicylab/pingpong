@@ -4214,10 +4214,18 @@ async def get_ci_messages(
     step_id: str,
 ):
     thread = await models.Thread.get_by_id(request.state["db"], int(thread_id))
+    if not thread or thread.class_id != int(class_id):
+        raise HTTPException(status_code=404, detail="Thread not found")
     if thread.version <= 2:
         messages = await get_ci_messages_from_step(
             openai_client, thread.thread_id, run_id, step_id
         )
+        ci_call = await models.CodeInterpreterCall.get_by_step_id(
+            request.state["db"], thread.id, step_id
+        )
+        if ci_call:
+            for message in messages:
+                message.metadata["ci_call_id"] = str(ci_call.id)
     else:
         raise HTTPException(status_code=400, detail="Invalid thread version")
     return {
@@ -7032,7 +7040,7 @@ async def unpublish_thread(class_id: str, thread_id: str, request: StateRequest)
 
 
 @v1.delete(
-    "/class/{class_id}/thread/{thread_id}/file/{file_id}",
+    "/class/{class_id}/thread/{thread_id}/message/{message_id}/file/{file_id}",
     dependencies=[
         Depends(Authz("can_participate", "thread:{thread_id}")),
     ],
@@ -7041,16 +7049,174 @@ async def unpublish_thread(class_id: str, thread_id: str, request: StateRequest)
 async def remove_file_from_thread(
     class_id: str,
     thread_id: str,
+    message_id: str,
     file_id: str,
     request: StateRequest,
     openai_client: OpenAIClient,
 ):
+    thread = await models.Thread.get_by_id(request.state["db"], int(thread_id))
+
+    if not thread or thread.class_id != int(class_id):
+        raise HTTPException(
+            status_code=404,
+            detail="Thread not found",
+        )
+
+    if thread.version <= 2:
+        message = await _get_assistants_api_message_by_id(
+            openai_client,
+            thread.thread_id,
+            message_id,
+        )
+        attachment_tools = _assistants_api_message_attachment_tools(message, file_id)
+        if not attachment_tools:
+            raise HTTPException(status_code=404, detail="File not found")
+
+        file = await models.File.get_by_file_id(request.state["db"], file_id)
+        if not file or _is_image_content_type(file.content_type):
+            raise HTTPException(status_code=404, detail="File not found")
+        if not _request_session_owns_uploaded_file(request, file):
+            raise HTTPException(status_code=403, detail="You cannot delete this file")
+
+        if (
+            "file_search" in attachment_tools
+            and not await models.Thread.thread_vector_store_contains_file(
+                request.state["db"],
+                thread.id,
+                file.id,
+            )
+        ):
+            raise HTTPException(status_code=404, detail="File not found")
+        if (
+            "code_interpreter" in attachment_tools
+            and not await models.Thread.thread_code_interpreter_contains_file(
+                request.state["db"],
+                thread.id,
+                file.id,
+            )
+        ):
+            raise HTTPException(status_code=404, detail="File not found")
+
+        remote_vector_store_id = None
+        if "code_interpreter" in attachment_tools:
+            await models.Thread.detach_file_from_thread_code_interpreter(
+                request.state["db"], thread.id, file.id
+            )
+        if "file_search" in attachment_tools:
+            await models.Thread.detach_file_from_thread_vector_store(
+                request.state["db"], thread.id, file.id
+            )
+            if thread.vector_store_id:
+                remote_vector_store_id = (
+                    await models.VectorStore.get_vector_store_id_by_id(
+                        request.state["db"], thread.vector_store_id
+                    )
+                )
+    elif thread.version == 3:
+        try:
+            message_obj_id = int(message_id)
+            file_obj_id = int(file_id)
+        except ValueError:
+            raise HTTPException(status_code=404, detail="File not found")
+
+        message = await models.Message.get_by_id_with_annotations(
+            request.state["db"], message_obj_id
+        )
+        if (
+            not message
+            or message.thread_id != thread.id
+            or message.role != schemas.MessageRole.USER
+        ):
+            raise HTTPException(status_code=404, detail="File not found")
+
+        file = await models.File.get_by_id(request.state["db"], file_obj_id)
+        if not file:
+            raise HTTPException(status_code=404, detail="File not found")
+        if not _request_session_owns_uploaded_file(request, file):
+            raise HTTPException(status_code=403, detail="You cannot delete this file")
+
+        has_file_search_attachment = (
+            await models.Message.contains_file_search_attachment(
+                request.state["db"], message.id, file.id
+            )
+        )
+        has_code_interpreter_attachment = (
+            await models.Message.contains_code_interpreter_attachment(
+                request.state["db"], message.id, file.id
+            )
+        )
+        if not has_file_search_attachment and not has_code_interpreter_attachment:
+            raise HTTPException(status_code=404, detail="File not found")
+
+        if (
+            has_file_search_attachment
+            and not await models.Thread.thread_vector_store_contains_file(
+                request.state["db"],
+                thread.id,
+                file.id,
+            )
+        ):
+            raise HTTPException(status_code=404, detail="File not found")
+        if (
+            has_code_interpreter_attachment
+            and not await models.Thread.thread_code_interpreter_contains_file(
+                request.state["db"],
+                thread.id,
+                file.id,
+            )
+        ):
+            raise HTTPException(status_code=404, detail="File not found")
+
+        remote_vector_store_id = None
+        if has_code_interpreter_attachment:
+            await models.Message.detach_code_interpreter_attachment(
+                request.state["db"], message.id, file.id
+            )
+            if not await models.Message.thread_has_other_code_interpreter_attachment(
+                request.state["db"], thread.id, file.id, message.id
+            ):
+                await models.Thread.detach_file_from_thread_code_interpreter(
+                    request.state["db"], thread.id, file.id
+                )
+        if has_file_search_attachment:
+            await models.Message.detach_file_search_attachment(
+                request.state["db"], message.id, file.id
+            )
+            if not await models.Message.thread_has_other_file_search_attachment(
+                request.state["db"], thread.id, file.id, message.id
+            ):
+                await models.Thread.detach_file_from_thread_vector_store(
+                    request.state["db"], thread.id, file.id
+                )
+                if thread.vector_store_id:
+                    remote_vector_store_id = (
+                        await models.VectorStore.get_vector_store_id_by_id(
+                            request.state["db"], thread.vector_store_id
+                        )
+                    )
+    else:
+        raise HTTPException(status_code=400, detail="Invalid thread version")
+
+    if remote_vector_store_id:
+        try:
+            await openai_client.vector_stores.files.delete(
+                vector_store_id=remote_vector_store_id,
+                file_id=file.file_id,
+            )
+        except openai.NotFoundError:
+            pass
+        except openai.BadRequestError as e:
+            raise HTTPException(
+                400, get_details_from_api_error(e, "OpenAI rejected this request")
+            )
+
     try:
-        await models.File.delete_by_file_id(request.state["db"], file_id)
-        await openai_client.files.delete(file_id)
-    except openai.NotFoundError:
-        # File was already deleted in OpenAI or DB; treat delete as idempotent.
-        pass
+        await _delete_thread_attachment_file_if_unreferenced(
+            request,
+            openai_client,
+            file.id,
+            int(class_id),
+        )
     except openai.BadRequestError as e:
         raise HTTPException(
             400, get_details_from_api_error(e, "OpenAI rejected this request")
@@ -9516,39 +9682,329 @@ async def get_assistant_files(
 
 
 @v1.get(
-    "/class/{class_id}/thread/{thread_id}/image/{file_id}",
+    "/class/{class_id}/thread/{thread_id}/message/{message_id}/image/{file_id}",
     dependencies=[Depends(Authz("can_view", "thread:{thread_id}"))],
 )
-async def get_image(file_id: str, request: StateRequest, openai_client: OpenAIClient):
-    response = await openai_client.files.with_raw_response.retrieve_content(file_id)
-    if response.status_code != 200:
-        raise HTTPException(
-            status_code=response.status_code,
-            detail="An error occurred fetching the requested file",
-        )
-    return Response(content=response.content, media_type="image/png")
-
-
-@v1.get(
-    "/class/{class_id}/thread/{thread_id}/file/{file_id}",
-    dependencies=[Depends(Authz("can_view", "thread:{thread_id}"))],
-)
-async def download_file(
+async def get_message_image(
     class_id: str,
     thread_id: str,
+    message_id: str,
     file_id: str,
     request: StateRequest,
     openai_client: OpenAIClient,
 ):
     thread = await models.Thread.get_by_id(request.state["db"], int(thread_id))
 
-    if not thread:
+    if not thread or thread.class_id != int(class_id) or thread.version > 2:
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    message = await _get_assistants_api_message_by_id(
+        openai_client,
+        thread.thread_id,
+        message_id,
+    )
+    if not message or not _assistants_api_message_references_image(message, file_id):
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    return await _proxy_openai_file_response(
+        openai_client, file_id, detail="An error occurred fetching the requested image"
+    )
+
+
+@v1.get(
+    "/class/{class_id}/thread/{thread_id}/ci_call/{ci_call_id}/image/{file_id}",
+    dependencies=[Depends(Authz("can_view", "thread:{thread_id}"))],
+)
+async def get_ci_call_image(
+    class_id: str,
+    thread_id: str,
+    ci_call_id: str,
+    file_id: str,
+    request: StateRequest,
+    openai_client: OpenAIClient,
+):
+    thread = await models.Thread.get_by_id(request.state["db"], int(thread_id))
+
+    if not thread or thread.class_id != int(class_id) or thread.version > 2:
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    try:
+        ci_call_obj_id = int(ci_call_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    ci_call = await models.CodeInterpreterCall.get_by_id(
+        request.state["db"], ci_call_obj_id
+    )
+    if (
+        not ci_call
+        or ci_call.thread_id != thread.id
+        or not ci_call.run_id
+        or not ci_call.step_id
+    ):
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    if not await _assistants_api_ci_call_references_image(
+        openai_client,
+        thread.thread_id,
+        ci_call.run_id,
+        ci_call.step_id,
+        file_id,
+    ):
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    return await _proxy_openai_file_response(
+        openai_client, file_id, detail="An error occurred fetching the requested image"
+    )
+
+
+@v1.get(
+    "/class/{class_id}/thread/{thread_id}/image/{file_id}",
+    dependencies=[Depends(Authz("can_view", "thread:{thread_id}"))],
+)
+async def get_image(
+    class_id: str,
+    thread_id: str,
+    file_id: str,
+    request: StateRequest,
+):
+    thread = await models.Thread.get_by_id(request.state["db"], int(thread_id))
+
+    if not thread or thread.class_id != int(class_id):
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    if thread.version <= 2:
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    file = await models.Thread.get_image_file_by_thread_id_and_file_id(
+        request.state["db"], thread.id, file_id
+    )
+    if not file or not file.s3_file or not _is_image_content_type(file.content_type):
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    return StreamingResponse(
+        config.file_store.store.get(name=file.s3_file.key),
+        media_type=file.content_type,
+        headers={"Content-Disposition": f"inline; filename={file.name}"},
+    )
+
+
+async def _get_assistants_api_message_by_id(
+    openai_client: OpenAIClientType,
+    thread_id: str,
+    message_id: str,
+):
+    try:
+        return await openai_client.beta.threads.messages.retrieve(
+            message_id=message_id,
+            thread_id=thread_id,
+        )
+    except openai.NotFoundError:
+        return None
+
+
+async def _proxy_openai_file_response(
+    openai_client: OpenAIClientType, file_id: str, *, detail: str
+) -> Response:
+    response = await openai_client.files.with_raw_response.retrieve_content(file_id)
+    if response.status_code != 200:
+        raise HTTPException(
+            status_code=response.status_code,
+            detail=detail,
+        )
+    media_type = response.headers.get("content-type", "application/octet-stream")
+    disposition = response.headers.get(
+        "content-disposition", f"inline; filename={file_id}"
+    )
+    return Response(
+        content=response.content,
+        media_type=media_type,
+        headers={"Content-Disposition": disposition},
+    )
+
+
+def _is_image_content_type(content_type: str | None) -> bool:
+    return bool(content_type and content_type.startswith("image/"))
+
+
+def _assistants_api_message_references_image(message: Any, file_id: str) -> bool:
+    if getattr(message, "role", None) != "user":
+        return False
+    for content in getattr(message, "content", None) or []:
+        if getattr(content, "type", None) != "image_file":
+            continue
+        image_file = getattr(content, "image_file", None)
+        if getattr(image_file, "file_id", None) == file_id:
+            return True
+    return False
+
+
+async def _assistants_api_ci_call_references_image(
+    openai_client: OpenAIClientType,
+    thread_id: str,
+    run_id: str,
+    step_id: str,
+    file_id: str,
+) -> bool:
+    messages = await get_ci_messages_from_step(
+        openai_client, thread_id, run_id, step_id
+    )
+    for message in messages:
+        for content in message.content:
+            if getattr(content, "type", None) != "code_output_image_file":
+                continue
+            image_file = getattr(content, "image_file", None)
+            if getattr(image_file, "file_id", None) == file_id:
+                return True
+    return False
+
+
+def _assistants_api_message_references_file(message: Any, file_id: str) -> bool:
+    for content in getattr(message, "content", None) or []:
+        if getattr(content, "type", None) != "text":
+            continue
+        text = getattr(content, "text", None)
+        annotations = getattr(text, "annotations", None) or []
+        for annotation in annotations:
+            annotation_type = getattr(annotation, "type", None)
+            if annotation_type == "file_path":
+                file_path = getattr(annotation, "file_path", None)
+                if getattr(file_path, "file_id", None) == file_id:
+                    return True
+    return False
+
+
+def _assistants_api_message_attachment_tools(message: Any, file_id: str) -> set[str]:
+    if not message or getattr(message, "role", None) != "user":
+        return set()
+
+    tool_types: set[str] = set()
+    for attachment in getattr(message, "attachments", None) or []:
+        if getattr(attachment, "file_id", None) != file_id:
+            continue
+        for tool in getattr(attachment, "tools", None) or []:
+            tool_type = getattr(tool, "type", None)
+            if tool_type in {"file_search", "code_interpreter"}:
+                tool_types.add(tool_type)
+    return tool_types
+
+
+def _responses_api_message_references_file(
+    message: models.Message, file_id: str
+) -> bool:
+    for part in message.content:
+        for annotation in part.annotations:
+            if annotation.type != schemas.AnnotationType.CONTAINER_FILE_CITATION:
+                continue
+            if (
+                annotation.file_object_id is not None
+                and str(annotation.file_object_id) == file_id
+            ) or (
+                annotation.vision_file_object_id is not None
+                and str(annotation.vision_file_object_id) == file_id
+            ):
+                return True
+    return False
+
+
+def _request_session_owns_uploaded_file(
+    request: StateRequest, file: models.File
+) -> bool:
+    if request.state["session"].status == schemas.SessionStatus.ANONYMOUS:
+        anonymous_session_id = request.state["anonymous_session_id"]
+        return (
+            anonymous_session_id is not None
+            and file.anonymous_session_id == anonymous_session_id
+        )
+
+    session_user = request.state["session"].user
+    return session_user is not None and file.uploader_id == session_user.id
+
+
+async def _delete_thread_attachment_file_if_unreferenced(
+    request: StateRequest,
+    openai_client: OpenAIClientType,
+    file_id: int,
+    class_id: int,
+) -> None:
+    # Lock the file row before checking references so concurrent detach requests
+    # serialize on the same file and the last successful detach can clean it up.
+    file = await models.File.get_by_id_with_delete_context(
+        request.state["db"], file_id, for_update=True
+    )
+    if not file:
+        return
+    if await models.File.is_still_referenced_anywhere(request.state["db"], file_id):
+        return
+
+    target_type = "user_file" if file.private else "class_file"
+    target = f"{target_type}:{file.id}"
+    revokes: list[Relation] = [(f"class:{class_id}", "parent", target)]
+
+    if file.anonymous_session_id is not None:
+        anonymous_session = await models.AnonymousSession.get_by_id(
+            request.state["db"], file.anonymous_session_id
+        )
+        if anonymous_session:
+            revokes.append(
+                (f"anonymous_user:{anonymous_session.session_token}", "owner", target)
+            )
+    if file.anonymous_link_id is not None:
+        anonymous_link = await models.AnonymousLink.get_by_id(
+            request.state["db"], file.anonymous_link_id
+        )
+        if anonymous_link:
+            revokes.append(
+                (
+                    f"anonymous_link:{anonymous_link.share_token}",
+                    "can_delete",
+                    target,
+                )
+            )
+    if file.uploader_id is not None:
+        revokes.append((f"user:{file.uploader_id}", "owner", target))
+
+    await models.File.delete(request.state["db"], file.id)
+    try:
+        await openai_client.files.delete(file.file_id)
+    except openai.NotFoundError:
+        pass
+
+    await request.state["authz"].write_safe(revoke=revokes)
+
+
+@v1.get(
+    "/class/{class_id}/thread/{thread_id}/message/{message_id}/file/{file_id}",
+    dependencies=[Depends(Authz("can_view", "thread:{thread_id}"))],
+)
+async def download_file(
+    class_id: str,
+    thread_id: str,
+    message_id: str,
+    file_id: str,
+    request: StateRequest,
+    openai_client: OpenAIClient,
+):
+    thread = await models.Thread.get_by_id(request.state["db"], int(thread_id))
+
+    if not thread or thread.class_id != int(class_id):
         raise HTTPException(
             status_code=404,
             detail="Thread not found",
         )
 
     if thread.version <= 2:
+        message = await _get_assistants_api_message_by_id(
+            openai_client,
+            thread.thread_id,
+            message_id,
+        )
+        if not message or not _assistants_api_message_references_file(message, file_id):
+            raise HTTPException(
+                status_code=404,
+                detail="File not found",
+            )
+
         response = await openai_client.files.with_raw_response.retrieve_content(file_id)
         if response.status_code != 200:
             raise HTTPException(
@@ -9567,8 +10023,30 @@ async def download_file(
         }
         return Response(content=response.content, headers=headers)
     elif thread.version == 3:
+        try:
+            v3_message_id = int(message_id)
+            v3_file_id = int(file_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=404,
+                detail="File not found",
+            )
+
+        message = await models.Message.get_by_id_with_annotations(
+            request.state["db"], v3_message_id
+        )
+        if (
+            not message
+            or message.thread_id != thread.id
+            or not _responses_api_message_references_file(message, file_id)
+        ):
+            raise HTTPException(
+                status_code=404,
+                detail="File not found",
+            )
+
         file = await models.File.get_by_id_with_download(
-            request.state["db"], int(file_id)
+            request.state["db"], v3_file_id
         )
         if not file or not file.s3_file:
             raise HTTPException(

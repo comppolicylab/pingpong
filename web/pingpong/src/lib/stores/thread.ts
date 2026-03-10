@@ -104,6 +104,16 @@ const compareApiMessagesDesc = (a: api.OpenAIMessage, b: api.OpenAIMessage) => {
 	return compareMessageOrderAsc(b, a);
 };
 
+function withSourceMessageId(message: api.OpenAIMessage): api.OpenAIMessage {
+	return {
+		...message,
+		content: (message.content || []).map((content) => ({
+			...content,
+			source_message_id: message.id
+		}))
+	};
+}
+
 /**
  * Manager for a single conversation thread.
  */
@@ -224,37 +234,37 @@ export class ThreadManager {
 				return [];
 			}
 			const realMessages = ($data.data?.messages || []).map((message) => ({
-				data: message,
+				data: withSourceMessageId(message),
 				error: null,
 				persisted: true
 			}));
 			const ci_messages = ($data.data?.ci_messages || []).map((message) => ({
-				data: message,
+				data: withSourceMessageId(message),
 				error: null,
 				persisted: true
 			}));
 			const fs_messages = ($data.data?.fs_messages || []).map((message) => ({
-				data: message,
+				data: withSourceMessageId(message),
 				error: null,
 				persisted: true
 			}));
 			const ws_messages = ($data.data?.ws_messages || []).map((message) => ({
-				data: message,
+				data: withSourceMessageId(message),
 				error: null,
 				persisted: true
 			}));
 			const mcp_messages = ($data.data?.mcp_messages || []).map((message) => ({
-				data: message,
+				data: withSourceMessageId(message),
 				error: null,
 				persisted: true
 			}));
 			const reasoning_messages = ($data.data?.reasoning_messages || []).map((message) => ({
-				data: message,
+				data: withSourceMessageId(message),
 				error: null,
 				persisted: true
 			}));
 			const optimisticMessages = $data.optimistic.map((message) => ({
-				data: message,
+				data: withSourceMessageId(message),
 				error: null,
 				persisted: false
 			}));
@@ -675,6 +685,7 @@ export class ThreadManager {
 		file_search_file_ids?: string[],
 		vision_file_ids?: string[],
 		vision_image_descriptions?: api.ImageProxy[],
+		optimisticVisionFiles?: api.OptimisticVisionFile[],
 		attachments?: api.ServerFile[]
 	) {
 		if (!message) {
@@ -734,7 +745,24 @@ export class ThreadManager {
 				...optimisticImageContent
 			],
 			created_at: Math.floor(Date.now() / 1000),
-			metadata: { user_id: fromUserId, is_current_user: true },
+			metadata: {
+				user_id: fromUserId,
+				is_current_user: true,
+				optimistic_vision_files:
+					optimisticVisionFiles ||
+					(attachments || [])
+						.filter(
+							(file): file is api.ServerFile & { vision_file_id: string } =>
+								typeof file.vision_file_id === 'string' &&
+								(file.vision_file_id?.length ?? 0) > 0 &&
+								(vision_file_ids || []).includes(file.vision_file_id)
+						)
+						.map((file) => ({
+							name: file.name,
+							content_type: file.content_type,
+							vision_file_id: file.vision_file_id
+						}))
+			},
 			assistant_id: '',
 			file_search_file_ids: file_search_file_ids || [],
 			code_interpreter_file_ids: code_interpreter_file_ids || [],

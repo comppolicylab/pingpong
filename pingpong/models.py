@@ -2115,8 +2115,39 @@ class File(Base):
         return await session.scalar(stmt)
 
     @classmethod
+    async def get_by_id_with_delete_context(
+        cls,
+        session: AsyncSession,
+        id_: int,
+        *,
+        for_update: bool = False,
+    ) -> "File | None":
+        stmt = (
+            select(File)
+            .where(File.id == int(id_))
+            .options(
+                selectinload(File.anonymous_session),
+                selectinload(File.anonymous_link),
+            )
+        )
+        if for_update:
+            stmt = stmt.with_for_update()
+        return await session.scalar(stmt)
+
+    @classmethod
     async def get_by_file_id(cls, session: AsyncSession, file_id: str) -> "File":
         stmt = select(File).where(File.file_id == file_id)
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_file_id_with_download(
+        cls, session: AsyncSession, file_id: str
+    ) -> "File":
+        stmt = (
+            select(File)
+            .where(File.file_id == file_id)
+            .options(selectinload(File.s3_file))
+        )
         return await session.scalar(stmt)
 
     @classmethod
@@ -2362,6 +2393,46 @@ class File(Base):
         )
         result = await session.execute(stmt)
         return result.all()
+
+    @classmethod
+    async def is_still_referenced_anywhere(
+        cls, session: AsyncSession, id_: int
+    ) -> bool:
+        reference_queries = [
+            select(code_interpreter_file_assistant_association.c.file_id).where(
+                code_interpreter_file_assistant_association.c.file_id == id_
+            ),
+            select(code_interpreter_file_thread_association.c.file_id).where(
+                code_interpreter_file_thread_association.c.file_id == id_
+            ),
+            select(image_file_thread_association.c.file_id).where(
+                image_file_thread_association.c.file_id == id_
+            ),
+            select(file_vector_store_association.c.file_id).where(
+                file_vector_store_association.c.file_id == id_
+            ),
+            select(file_search_attachment_association.c.file_id).where(
+                file_search_attachment_association.c.file_id == id_
+            ),
+            select(code_interpreter_attachment_association.c.file_id).where(
+                code_interpreter_attachment_association.c.file_id == id_
+            ),
+            select(Annotation.file_object_id).where(Annotation.file_object_id == id_),
+            select(Annotation.vision_file_object_id).where(
+                Annotation.vision_file_object_id == id_
+            ),
+            select(FileSearchCallResult.file_object_id).where(
+                FileSearchCallResult.file_object_id == id_
+            ),
+            select(MessagePart.input_image_file_object_id).where(
+                MessagePart.input_image_file_object_id == id_
+            ),
+        ]
+
+        stmt = select(func.count()).select_from(
+            union_all(*reference_queries).subquery()
+        )
+        return bool(await session.scalar(stmt))
 
     @classmethod
     async def add_files_to_class(
@@ -4251,6 +4322,25 @@ class CodeInterpreterCall(Base):
         for row in result:
             yield row.CodeInterpreterCall
 
+    @classmethod
+    async def get_by_id(
+        cls, session: AsyncSession, id_: int
+    ) -> "CodeInterpreterCall | None":
+        stmt = select(CodeInterpreterCall).where(CodeInterpreterCall.id == int(id_))
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_step_id(
+        cls, session: AsyncSession, thread_id: int, step_id: str
+    ) -> "CodeInterpreterCall | None":
+        stmt = select(CodeInterpreterCall).where(
+            and_(
+                CodeInterpreterCall.thread_id == thread_id,
+                CodeInterpreterCall.step_id == step_id,
+            )
+        )
+        return await session.scalar(stmt)
+
 
 class VoiceModeRecording(Base):
     __tablename__ = "voice_mode_recordings"
@@ -5156,6 +5246,113 @@ class Message(Base):
         result = await session.execute(stmt)
         for row in result:
             yield row.Message
+
+    @classmethod
+    async def get_by_id_with_annotations(
+        cls, session: AsyncSession, id_: int
+    ) -> "Message | None":
+        stmt = (
+            select(Message)
+            .where(Message.id == id_)
+            .options(
+                selectinload(Message.content).selectinload(MessagePart.annotations),
+            )
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def contains_file_search_attachment(
+        cls, session: AsyncSession, message_id: int, file_id: int
+    ) -> bool:
+        stmt = (
+            select(func.count())
+            .select_from(file_search_attachment_association)
+            .where(
+                file_search_attachment_association.c.message_id == message_id,
+                file_search_attachment_association.c.file_id == file_id,
+            )
+        )
+        return bool(await session.scalar(stmt))
+
+    @classmethod
+    async def contains_code_interpreter_attachment(
+        cls, session: AsyncSession, message_id: int, file_id: int
+    ) -> bool:
+        stmt = (
+            select(func.count())
+            .select_from(code_interpreter_attachment_association)
+            .where(
+                code_interpreter_attachment_association.c.message_id == message_id,
+                code_interpreter_attachment_association.c.file_id == file_id,
+            )
+        )
+        return bool(await session.scalar(stmt))
+
+    @classmethod
+    async def detach_file_search_attachment(
+        cls, session: AsyncSession, message_id: int, file_id: int
+    ) -> None:
+        stmt = delete(file_search_attachment_association).where(
+            file_search_attachment_association.c.message_id == message_id,
+            file_search_attachment_association.c.file_id == file_id,
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def detach_code_interpreter_attachment(
+        cls, session: AsyncSession, message_id: int, file_id: int
+    ) -> None:
+        stmt = delete(code_interpreter_attachment_association).where(
+            code_interpreter_attachment_association.c.message_id == message_id,
+            code_interpreter_attachment_association.c.file_id == file_id,
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def thread_has_other_file_search_attachment(
+        cls,
+        session: AsyncSession,
+        thread_id: int,
+        file_id: int,
+        excluding_message_id: int,
+    ) -> bool:
+        stmt = (
+            select(func.count())
+            .select_from(file_search_attachment_association)
+            .join(
+                Message, Message.id == file_search_attachment_association.c.message_id
+            )
+            .where(
+                Message.thread_id == thread_id,
+                file_search_attachment_association.c.file_id == file_id,
+                file_search_attachment_association.c.message_id != excluding_message_id,
+            )
+        )
+        return bool(await session.scalar(stmt))
+
+    @classmethod
+    async def thread_has_other_code_interpreter_attachment(
+        cls,
+        session: AsyncSession,
+        thread_id: int,
+        file_id: int,
+        excluding_message_id: int,
+    ) -> bool:
+        stmt = (
+            select(func.count())
+            .select_from(code_interpreter_attachment_association)
+            .join(
+                Message,
+                Message.id == code_interpreter_attachment_association.c.message_id,
+            )
+            .where(
+                Message.thread_id == thread_id,
+                code_interpreter_attachment_association.c.file_id == file_id,
+                code_interpreter_attachment_association.c.message_id
+                != excluding_message_id,
+            )
+        )
+        return bool(await session.scalar(stmt))
 
     @classmethod
     async def mark_as_incomplete(cls, session: AsyncSession, id: int) -> None:
@@ -6206,6 +6403,81 @@ class Thread(Base):
             .on_conflict_do_nothing(
                 index_elements=["file_id", "thread_id"],
             )
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def get_image_file_by_thread_id_and_file_id(
+        cls, session: AsyncSession, thread_id: int, file_id: str
+    ) -> File | None:
+        stmt = (
+            select(File)
+            .join(image_file_thread_association)
+            .where(
+                and_(
+                    image_file_thread_association.c.thread_id == thread_id,
+                    File.file_id == file_id,
+                )
+            )
+            .options(selectinload(File.s3_file))
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def thread_vector_store_contains_file(
+        cls, session: AsyncSession, thread_id: int, file_id: int
+    ) -> bool:
+        stmt = (
+            select(func.count())
+            .select_from(Thread)
+            .join(
+                file_vector_store_association,
+                file_vector_store_association.c.vector_store_id
+                == Thread.vector_store_id,
+            )
+            .where(
+                Thread.id == thread_id,
+                file_vector_store_association.c.file_id == file_id,
+            )
+        )
+        return bool(await session.scalar(stmt))
+
+    @classmethod
+    async def thread_code_interpreter_contains_file(
+        cls, session: AsyncSession, thread_id: int, file_id: int
+    ) -> bool:
+        stmt = (
+            select(func.count())
+            .select_from(code_interpreter_file_thread_association)
+            .where(
+                code_interpreter_file_thread_association.c.thread_id == thread_id,
+                code_interpreter_file_thread_association.c.file_id == file_id,
+            )
+        )
+        return bool(await session.scalar(stmt))
+
+    @classmethod
+    async def detach_file_from_thread_vector_store(
+        cls, session: AsyncSession, thread_id: int, file_id: int
+    ) -> None:
+        vector_store_id = (
+            select(Thread.vector_store_id)
+            .where(Thread.id == thread_id)
+            .scalar_subquery()
+        )
+        stmt = delete(file_vector_store_association).where(
+            file_vector_store_association.c.vector_store_id == vector_store_id,
+            file_vector_store_association.c.file_id == file_id,
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def detach_file_from_thread_code_interpreter(
+        cls, session: AsyncSession, thread_id: int, file_id: int
+    ) -> None:
+        stmt = delete(code_interpreter_file_thread_association).where(
+            code_interpreter_file_thread_association.c.thread_id == thread_id,
+            code_interpreter_file_thread_association.c.file_id == file_id,
         )
         await session.execute(stmt)
 

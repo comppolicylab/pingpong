@@ -252,6 +252,7 @@ def test_process_reasoning_content_v3_includes_time_spent_and_sorted_summaries()
 
 def test_process_message_content_v3_links_container_file_citations():
     message = models.Message(
+        id=99,
         message_status=schemas.MessageStatus.COMPLETED,
         run_id=1,
         thread_id=20,
@@ -282,7 +283,7 @@ def test_process_message_content_v3_links_container_file_citations():
         thread_id=20,
     ) == (
         "Generated chart\n"
-        f" [Code Interpreter Output File Annotation: chart.png ({config.url('/api/v1/class/10/thread/20/file/77')})] "
+        f" [Code Interpreter Output File Annotation: chart.png ({config.url('/api/v1/class/10/thread/20/message/99/file/77')})] "
     )
 
 

@@ -70,6 +70,7 @@
 	import { isFirefox } from '$lib/stores/general';
 	import Sanitize from '$lib/components/Sanitize.svelte';
 	import AudioPlayer from '$lib/components/AudioPlayer.svelte';
+	import OptimisticImageAttachment from '$lib/components/OptimisticImageAttachment.svelte';
 	import { tick } from 'svelte';
 	import FileCitation from './FileCitation.svelte';
 	import StatusErrors from './StatusErrors.svelte';
@@ -81,8 +82,11 @@
 	export let data;
 
 	let userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-	$: classId = parseInt($page.params.classId ?? '');
-	$: threadId = parseInt($page.params.threadId ?? '');
+	$: routeClassId = parseInt($page.params.classId ?? '');
+	$: routeThreadId = parseInt($page.params.threadId ?? '');
+	$: expandedThreadData = api.expandResponse(data.threadData);
+	$: classId = expandedThreadData.data?.thread?.class_id ?? routeClassId;
+	$: threadId = expandedThreadData.data?.thread?.id ?? routeThreadId;
 	$: threadMgr = new ThreadManager(
 		fetch,
 		classId,
@@ -723,6 +727,57 @@
 		}
 	};
 
+	const getThreadImageUrl = (fileId: string) =>
+		api.fullPath(`/class/${classId}/thread/${threadId}/image/${fileId}`);
+
+	const getMessageImageUrl = (messageId: string, fileId: string) =>
+		api.fullPath(`/class/${classId}/thread/${threadId}/message/${messageId}/image/${fileId}`);
+
+	const getCodeInterpreterImageUrl = (message: api.OpenAIMessage, fileId: string) => {
+		const ciCallId = message.metadata?.['ci_call_id'];
+		if ($version <= 2 && typeof ciCallId === 'string' && ciCallId.length > 0) {
+			return api.fullPath(
+				`/class/${classId}/thread/${threadId}/ci_call/${ciCallId}/image/${fileId}`
+			);
+		}
+		return getThreadImageUrl(fileId);
+	};
+
+	const getOptimisticVisionFile = (
+		message: api.OpenAIMessage,
+		fileId: string
+	): api.OptimisticVisionFile | null => {
+		const files = message.metadata?.['optimistic_vision_files'];
+		if (!Array.isArray(files)) {
+			return null;
+		}
+
+		for (const file of files) {
+			if (
+				file &&
+				typeof file === 'object' &&
+				'name' in file &&
+				'content_type' in file &&
+				'vision_file_id' in file &&
+				typeof file.name === 'string' &&
+				typeof file.content_type === 'string' &&
+				typeof file.vision_file_id === 'string' &&
+				file.vision_file_id === fileId
+			) {
+				return {
+					name: file.name,
+					content_type: file.content_type,
+					vision_file_id: file.vision_file_id,
+					preview_url: 'preview_url' in file ? (file.preview_url as string | null) : null,
+					width: 'width' in file ? (file.width as number | null) : null,
+					height: 'height' in file ? (file.height as number | null) : null
+				};
+			}
+		}
+
+		return null;
+	};
+
 	// Handle sending a message
 	const postMessage = async ({
 		message,
@@ -730,6 +785,7 @@
 		file_search_file_ids,
 		vision_file_ids,
 		visionFileImageDescriptions,
+		optimisticVisionFiles,
 		callback
 	}: ChatInputMessage) => {
 		try {
@@ -741,6 +797,7 @@
 				file_search_file_ids,
 				vision_file_ids,
 				visionFileImageDescriptions,
+				optimisticVisionFiles,
 				currentMessageAttachments
 			);
 		} catch (e) {
@@ -1352,23 +1409,57 @@
 		};
 	};
 
-	const removeFile = async (evt: CustomEvent<api.FileUploadInfo>) => {
+	const isVisionOnlyFile = (file: api.FileUploadInfo) => {
+		if (!(file.response && 'file_id' in file.response)) {
+			return false;
+		}
+		const response = file.response as api.ServerFile;
+		return (
+			!!response.vision_file_id &&
+			!response.file_search_file_id &&
+			!response.code_interpreter_file_id
+		);
+	};
+
+	const fileDeletionDisabledReason = (message: Message, file: api.FileUploadInfo) => {
+		if (!message.persisted) {
+			return 'This message is still being saved. You can remove the file after it is persisted.';
+		}
+		if (isVisionOnlyFile(file)) {
+			return 'This file is an image file and cannot be removed from the conversation. Delete the Thread to remove it.';
+		}
+		return null;
+	};
+
+	const removeFile = async (
+		messageId: string,
+		messagePersisted: boolean,
+		evt: CustomEvent<api.FileUploadInfo>
+	) => {
 		const file = evt.detail;
-		if (file.state === 'deleting' || !(file.response && 'file_id' in file.response)) {
+		if (
+			!messagePersisted ||
+			file.state === 'deleting' ||
+			!(file.response && 'file_id' in file.response) ||
+			isVisionOnlyFile(file)
+		) {
 			return;
 		} else {
-			setFileState((file.response as api.ServerFile).file_id, 'deleting');
+			const response = file.response as api.ServerFile;
+			const deleteId = $version === 3 ? response.id : response.file_id;
+			setFileState(response.file_id, 'deleting');
 			const result = await api.deleteThreadFile(
 				fetch,
 				data.class.id,
 				threadId,
-				(file.response as api.ServerFile).file_id
+				messageId,
+				deleteId
 			);
 			if (result.$status >= 300) {
-				setFileState((file.response as api.ServerFile).file_id, 'success');
+				setFileState(response.file_id, 'success');
 				sadToast(`Failed to delete file: ${result.detail || 'unknown error'}`);
 			} else {
-				trashThreadFiles.update((files) => [...files, (file.response as api.ServerFile).file_id]);
+				trashThreadFiles.update((files) => [...files, response.file_id]);
 				happyToast('Thread file successfully deleted.');
 			}
 		}
@@ -1720,7 +1811,8 @@
 									{@const parsedTextContent = parseTextContent(
 										{ value: clean_string, annotations: content.text.annotations },
 										$version,
-										api.fullPath(`/class/${classId}/thread/${threadId}`)
+										api.fullPath(`/class/${classId}/thread/${threadId}`),
+										content.source_message_id || message.data.id
 									)}
 
 									<div class="leading-6">
@@ -1827,9 +1919,7 @@
 											<div class="w-full leading-6">
 												<img
 													class="img-attachment m-auto"
-													src={api.fullPath(
-														`/class/${classId}/thread/${threadId}/image/${content.image_file.file_id}`
-													)}
+													src={getCodeInterpreterImageUrl(message.data, content.image_file.file_id)}
 													alt="Attachment generated by the assistant"
 												/>
 											</div>
@@ -1846,8 +1936,9 @@
 												<div class="w-full leading-6">
 													<img
 														class="img-attachment m-auto"
-														src={api.fullPath(
-															`/class/${classId}/thread/${threadId}/image/${content.image_file.file_id}`
+														src={getCodeInterpreterImageUrl(
+															message.data,
+															content.image_file.file_id
 														)}
 														alt="Attachment generated by the assistant"
 													/>
@@ -1918,15 +2009,31 @@
 										</Accordion>
 									{/if}
 								{:else if content.type === 'image_file'}
-									<div class="w-full leading-6">
-										<img
-											class="img-attachment m-auto"
-											src={api.fullPath(
-												`/class/${classId}/thread/${threadId}/image/${content.image_file.file_id}`
-											)}
-											alt="Attachment generated by the assistant"
+									{@const optimisticVisionFile =
+										!message.persisted && $version === 3
+											? getOptimisticVisionFile(message.data, content.image_file.file_id)
+											: null}
+									{#if optimisticVisionFile}
+										<OptimisticImageAttachment
+											name={optimisticVisionFile.name}
+											previewUrl={optimisticVisionFile.preview_url ?? null}
+											width={optimisticVisionFile.width ?? null}
+											height={optimisticVisionFile.height ?? null}
 										/>
-									</div>
+									{:else}
+										<div class="w-full leading-6">
+											<img
+												class="img-attachment m-auto"
+												src={$version <= 2
+													? getMessageImageUrl(
+															content.source_message_id || message.data.id,
+															content.image_file.file_id
+														)
+													: getThreadImageUrl(content.image_file.file_id)}
+												alt="Attachment generated by the assistant"
+											/>
+										</div>
+									{/if}
 								{:else}
 									<div class="leading-6"><pre>{JSON.stringify(content, null, 2)}</pre></div>
 								{/if}
@@ -1936,10 +2043,17 @@
 							<div class="mt-4 flex flex-wrap gap-2">
 								{#each attachment_file_ids as file_id (file_id)}
 									{#if allFiles[file_id]}
+										{@const deleteDisabledReason = fileDeletionDisabledReason(
+											message,
+											allFiles[file_id]
+										)}
 										<FilePlaceholder
 											info={allFiles[file_id]}
+											purpose={isVisionOnlyFile(allFiles[file_id]) ? 'vision' : 'assistants'}
 											mimeType={data.uploadInfo.mimeType}
-											on:delete={removeFile}
+											preventDeletion={deleteDisabledReason !== null}
+											preventDeletionReason={deleteDisabledReason}
+											on:delete={(evt) => removeFile(message.data.id, message.persisted, evt)}
 										/>
 									{:else}
 										<AttachmentDeletedPlaceholder {file_id} />

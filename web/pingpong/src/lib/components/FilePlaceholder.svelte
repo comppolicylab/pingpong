@@ -26,6 +26,7 @@
 	export let mimeType: MimeTypeLookupFn;
 
 	export let preventDeletion = false;
+	export let preventDeletionReason: string | null = null;
 
 	// Custom events
 	const dispatch = createEventDispatcher();
@@ -82,11 +83,8 @@
 					<CloseOutline class="h-4 w-4" />
 				</Button>
 			</div>
-		{:else if preventDeletion && purpose === 'vision'}
-			<Tooltip arrow={false} class="w-64 font-light"
-				>This file is an image file and cannot be removed from the conversation. Delete the Thread
-				to remove it.</Tooltip
-			>
+		{:else if preventDeletionReason}
+			<Tooltip arrow={false} class="w-64 font-light">{preventDeletionReason}</Tooltip>
 		{/if}
 	{/if}
 </div>

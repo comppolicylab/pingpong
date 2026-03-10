@@ -4797,6 +4797,7 @@ def process_message_content_v3(
                         file_names=file_names,
                         class_id=class_id,
                         thread_id=thread_id,
+                        message_id=message.id,
                     )
                 )
             case MessagePartType.INPUT_IMAGE:
@@ -4810,6 +4811,7 @@ def process_message_content_v3(
                         file_names=file_names,
                         class_id=class_id,
                         thread_id=thread_id,
+                        message_id=message.id,
                     )
                 )
             case MessagePartType.REFUSAL:
@@ -5141,7 +5143,7 @@ def replace_annotations_in_text(
 
 
 def _annotation_download_url(
-    annotation: models.Annotation, class_id: int, thread_id: int
+    annotation: models.Annotation, class_id: int, thread_id: int, message_id: int
 ) -> str | None:
     file_id = (
         annotation.vision_file_object_id
@@ -5150,11 +5152,17 @@ def _annotation_download_url(
     )
     if file_id is None:
         return None
-    return config.url(f"/api/v1/class/{class_id}/thread/{thread_id}/file/{file_id}")
+    return config.url(
+        f"/api/v1/class/{class_id}/thread/{thread_id}/message/{message_id}/file/{file_id}"
+    )
 
 
 def replace_annotations_in_text_v3(
-    part: models.MessagePart, file_names: dict[str, str], class_id: int, thread_id: int
+    part: models.MessagePart,
+    file_names: dict[str, str],
+    class_id: int,
+    thread_id: int,
+    message_id: int,
 ) -> str:
     updated_text = _normalize_newlines(part.text)
     for annotation in part.annotations:
@@ -5168,7 +5176,7 @@ def replace_annotations_in_text_v3(
                     annotation.filename or "Unknown file/Deleted Assistant"
                 )
                 annotation_url = _annotation_download_url(
-                    annotation, class_id, thread_id
+                    annotation, class_id, thread_id, message_id
                 )
                 if annotation_url:
                     updated_text += f"\n [Code Interpreter Output File Annotation: {annotation_label} ({annotation_url})] "

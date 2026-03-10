@@ -10,6 +10,7 @@
 		file_search_file_ids: string[];
 		vision_file_ids: string[];
 		visionFileImageDescriptions: ImageProxy[];
+		optimisticVisionFiles: OptimisticVisionFile[];
 		message: string;
 		callback: ({ success, errorMessage, message_sent }: CallbackParams) => void;
 	};
@@ -27,7 +28,8 @@
 		FileUploader,
 		FileUploadInfo,
 		ServerFile,
-		ImageProxy
+		ImageProxy,
+		OptimisticVisionFile
 	} from '$lib/api';
 	import FilePlaceholder from '$lib/components/FilePlaceholder.svelte';
 	import FileUpload from '$lib/components/FileUpload.svelte';
@@ -325,8 +327,69 @@
 		dispatcher('dismissError');
 	};
 
+	const getImageDimensions = async (url: string) => {
+		return await new Promise<{ width: number; height: number }>((resolve, reject) => {
+			const img = new Image();
+			img.onload = () => {
+				resolve({
+					width: img.naturalWidth,
+					height: img.naturalHeight
+				});
+			};
+			img.onerror = () => reject(new Error('Failed to load image preview.'));
+			img.src = url;
+		});
+	};
+
+	const buildOptimisticVisionFiles = async (vision_file_ids: string[]) => {
+		const selectedVisionFiles = $allFiles.filter(
+			(file): file is FileUploadInfo & { response: ServerFile } =>
+				file.state === 'success' &&
+				!!(file.response as ServerFile).vision_file_id &&
+				vision_file_ids.includes((file.response as ServerFile).vision_file_id as string)
+		);
+
+		return await Promise.all(
+			selectedVisionFiles.map(async (file) => {
+				const response = file.response as ServerFile;
+				let preview_url: string | null = null;
+				let width: number | null = null;
+				let height: number | null = null;
+
+				if (browser && file.file.type.startsWith('image/')) {
+					preview_url = URL.createObjectURL(file.file);
+					try {
+						const dimensions = await getImageDimensions(preview_url);
+						width = dimensions.width;
+						height = dimensions.height;
+					} catch {
+						width = null;
+						height = null;
+					}
+				}
+
+				return {
+					name: response.name,
+					content_type: response.content_type,
+					vision_file_id: response.vision_file_id as string,
+					preview_url,
+					width,
+					height
+				} satisfies OptimisticVisionFile;
+			})
+		);
+	};
+
+	const revokeOptimisticVisionFiles = (files: OptimisticVisionFile[]) => {
+		for (const file of files) {
+			if (file.preview_url) {
+				URL.revokeObjectURL(file.preview_url);
+			}
+		}
+	};
+
 	// Submit the form.
-	const submit = () => {
+	const submit = async () => {
 		const code_interpreter_file_ids = (codeInterpreterAcceptedFiles ? codeInterpreterFileIds : '')
 			? codeInterpreterFileIds.split(',')
 			: [];
@@ -344,6 +407,15 @@
 		const message = ref.value;
 		const realMessage = realRef.value;
 		const tempFiles = $allFiles;
+		const optimisticVisionFiles = await buildOptimisticVisionFiles(vision_file_ids);
+		let revokedOptimisticVisionFiles = false;
+		const cleanupOptimisticVisionFiles = () => {
+			if (revokedOptimisticVisionFiles) {
+				return;
+			}
+			revokeOptimisticVisionFiles(optimisticVisionFiles);
+			revokedOptimisticVisionFiles = true;
+		};
 		$allFiles = [];
 		focusMessage();
 		ref.value = '';
@@ -355,12 +427,14 @@
 			code_interpreter_file_ids,
 			vision_file_ids,
 			visionFileImageDescriptions,
+			optimisticVisionFiles,
 			message,
 			callback: (params: CallbackParams) => {
 				if (params.success) {
 					return;
 				}
 				if (!params.message_sent) {
+					cleanupOptimisticVisionFiles();
 					errorMessage =
 						params.errorMessage ||
 						'We faced an error while trying to send your message. Please try again.';
