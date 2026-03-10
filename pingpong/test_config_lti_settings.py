@@ -113,6 +113,36 @@ def test_lti_settings_maps_legacy_defaults_when_only_platform_allowlist_is_set()
     assert settings.security.allow_http_in_development is True
 
 
+def test_lti_settings_prefers_security_hosts_over_legacy_platform_allowlist():
+    settings = LTISettings.model_validate(
+        {
+            **_base_lti_settings(),
+            "platform_url_allowlist": ["*.legacy.example.com"],
+            "security": {
+                "hosts": {
+                    "allow": ["canvas.example.edu"],
+                }
+            },
+        }
+    )
+
+    assert settings.security.hosts.allow == ["canvas.example.edu"]
+
+
+def test_lti_settings_prefers_security_http_flag_over_legacy_dev_http_hosts():
+    settings = LTISettings.model_validate(
+        {
+            **_base_lti_settings(),
+            "dev_http_hosts": "not-a-list",
+            "security": {
+                "allow_http_in_development": False,
+            },
+        }
+    )
+
+    assert settings.security.allow_http_in_development is False
+
+
 def test_lti_settings_normalizes_legacy_platform_allowlist_urls():
     settings = LTISettings.model_validate(
         {

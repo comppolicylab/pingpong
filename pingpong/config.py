@@ -540,12 +540,12 @@ class LTISettings(BaseSettings):
             openid_paths = {}
 
         normalized_dev_http_hosts: list[str] | None = None
-        if dev_http_hosts is not None:
+        if dev_http_hosts is not None and "allow_http_in_development" not in security:
             normalized_dev_http_hosts = cls._validate_legacy_dev_http_hosts(
                 dev_http_hosts
             )
         normalized_platform_url_allowlist: list[str] | None = None
-        if platform_url_allowlist is not None:
+        if platform_url_allowlist is not None and "allow" not in hosts:
             normalized_platform_url_allowlist = (
                 cls._validate_legacy_platform_url_allowlist(platform_url_allowlist)
             )
