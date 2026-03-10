@@ -6,9 +6,8 @@ from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 _HOST_RE = re.compile(
     r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*"
 )
-_PATH_RE = re.compile(
-    r"\A/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]+(?:/[A-Za-z0-9._~!$&'()*+,;=:@-]+)*)?/?\Z"
-)
+_PATH_SEGMENT_RE = r"(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f]{2})+"
+_PATH_RE = re.compile(rf"\A/(?:{_PATH_SEGMENT_RE}(?:/{_PATH_SEGMENT_RE})*)?/?\Z")
 _UNSAFE_PATH_RE = re.compile(r"[\x00-\x1f\x7f@]")
 _UNSAFE_QUERY_RE = re.compile(r"[\x00-\x1f\x7f]")
 
@@ -136,8 +135,8 @@ def generate_safe_lti_url(
         raise ValueError(f"Invalid URL for {url_type}")
 
     if port is not None:
-        is_default_port = (scheme == "https" and port == 443) or (
-            scheme == "http" and port == 80
+        is_default_port = (input_scheme == "https" and port == 443) or (
+            input_scheme == "http" and port == 80
         )
         if not is_default_port:
             raise ValueError(

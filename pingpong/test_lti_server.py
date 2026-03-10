@@ -590,7 +590,7 @@ async def test_register_lti_instance_success(monkeypatch):
     monkeypatch.setattr(
         server_module.aiohttp,
         "ClientSession",
-        lambda: FakeSession(
+        lambda timeout=None: FakeSession(
             get_payload=openid_payload, post_payload=registration_payload
         ),
     )
@@ -642,6 +642,83 @@ async def test_register_lti_instance_success(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_register_lti_instance_rejects_openid_redirect_to_unallowlisted_host(
+    monkeypatch,
+):
+    allow_deny = SimpleNamespace(allow=["platform.example.com"], deny=[])
+    url_security = SimpleNamespace(
+        allow_http_in_development=True,
+        allow_redirects=True,
+        hosts=allow_deny,
+        paths=SimpleNamespace(allow=["/.well-known/*"], deny=[]),
+    )
+    restricted_config = SimpleNamespace(
+        lti=SimpleNamespace(
+            security=SimpleNamespace(
+                allow_http_in_development=True,
+                allow_redirects=True,
+                hosts=allow_deny,
+                paths=SimpleNamespace(allow=["*"], deny=[]),
+                authorization_endpoint=url_security,
+                jwks_uri=url_security,
+                names_and_role_endpoint=url_security,
+                openid_configuration=url_security,
+                registration_endpoint=url_security,
+                token_endpoint=url_security,
+            )
+        ),
+        development=False,
+    )
+    monkeypatch.setattr(config_module, "config", restricted_config)
+    monkeypatch.setattr(
+        server_module,
+        "config",
+        SimpleNamespace(
+            url=lambda path: f"https://tool.example.com{path}",
+            public_url="https://tool.example.com",
+            email=SimpleNamespace(sender="sender"),
+            lti=restricted_config.lti,
+        ),
+    )
+    monkeypatch.setattr(
+        server_module.aiohttp,
+        "ClientSession",
+        lambda timeout=None: FakeSession(
+            get_responses=[
+                FakeResponse(
+                    None,
+                    status=302,
+                    headers={"Location": "https://evil.example.com/.well-known/openid"},
+                )
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        server_module.Institution,
+        "all_have_default_api_key",
+        lambda db, ids: _async_return(True),
+    )
+
+    data = LTIRegisterRequest(
+        name="PingPong",
+        admin_name="Admin",
+        admin_email="admin@example.com",
+        provider_id=0,
+        sso_field=None,
+        openid_configuration="https://platform.example.com/.well-known/openid",
+        registration_token="token",
+        institution_ids=[1],
+    )
+    request = FakeRequest(state=SimpleNamespace(db="db"))
+
+    with pytest.raises(HTTPException) as excinfo:
+        await server_module.register_lti_instance(request, data)
+
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail == "Invalid openid_configuration"
+
+
+@pytest.mark.asyncio
 async def test_lti_login_redirect(monkeypatch):
     registration = _make_registration()
     monkeypatch.setattr(
@@ -678,6 +755,46 @@ async def test_lti_login_redirect(monkeypatch):
 
     assert response.status_code == 302
     assert response.headers["location"].startswith(registration.auth_login_url)
+
+
+@pytest.mark.asyncio
+async def test_lti_login_rejects_missing_authorization_endpoint(monkeypatch):
+    registration = _make_registration(auth_login_url=None)
+    monkeypatch.setattr(
+        server_module.LTIRegistration,
+        "get_by_client_id",
+        lambda db, client_id: _async_return(registration),
+    )
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "create_pending",
+        lambda *args, **kwargs: _async_return((1, "state", "nonce")),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "config",
+        SimpleNamespace(
+            url=lambda path: f"https://tool.example.com{path}",
+            lti=config_module.config.lti,
+        ),
+    )
+    monkeypatch.setattr(
+        server_module, "get_now_fn", lambda request: lambda: datetime.now(timezone.utc)
+    )
+
+    payload = {
+        "client_id": "client",
+        "iss": "issuer",
+        "login_hint": "hint",
+        "target_link_uri": "https://tool.example.com/launch",
+    }
+    request = FakeRequest(method="GET", payload=payload, state=SimpleNamespace(db="db"))
+
+    with pytest.raises(HTTPException) as excinfo:
+        await server_module.lti_login(request)
+
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail == "No known OIDC authorization endpoint for issuer"
 
 
 @pytest.mark.asyncio

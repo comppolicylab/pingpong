@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from pingpong.config import LEGACY_OPENID_CONFIGURATION_PATHS_DEFAULTS, LTISettings
+from pingpong.lti.allowlist import generate_safe_lti_url
 
 
 def _base_lti_settings() -> dict[str, object]:
@@ -113,6 +114,29 @@ def test_lti_settings_maps_legacy_defaults_when_only_platform_allowlist_is_set()
         LEGACY_OPENID_CONFIGURATION_PATHS_DEFAULTS
     )
     assert settings.security.allow_http_in_development is True
+
+
+def test_lti_settings_normalizes_legacy_platform_allowlist_urls():
+    settings = LTISettings.model_validate(
+        {
+            **_base_lti_settings(),
+            "platform_url_allowlist": ["https://canvas.example.edu"],
+        }
+    )
+
+    assert settings.security.hosts.allow == ["canvas.example.edu"]
+    assert (
+        generate_safe_lti_url(
+            "https://canvas.example.edu/.well-known/openid-configuration",
+            "openid_configuration",
+            settings.security.hosts.allow,
+            settings.security.hosts.deny,
+            settings.security.openid_configuration.paths.allow or ["*"],
+            settings.security.openid_configuration.paths.deny or [],
+            settings.security.allow_http_in_development,
+        )
+        == "https://canvas.example.edu/.well-known/openid-configuration"
+    )
 
 
 def test_lti_settings_rejects_unknown_extra_key():

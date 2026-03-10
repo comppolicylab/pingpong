@@ -215,6 +215,10 @@ deny = ["evil.instructure.com"]
 [lti.security.paths]
 # Global path allow/deny patterns applied to all LTI URL validations.
 # Supports exact matches and glob patterns (e.g. "/api/lti/*").
+# Keep these broad enough to cover every validated LTI endpoint. If a path should
+# only apply to OpenID discovery, configure it under
+# `[lti.security.openid_configuration.paths]` below instead of relying on the
+# global path rules.
 #
 # Example values:
 allow = [
@@ -269,6 +273,7 @@ deny = ["/private/*"]
 [lti.security.jwks_uri]
 # Optional overrides for platform JWKS URI fetches.
 # allow_http_in_development = true
+# Redirects are validated hop-by-hop against these same host/path rules.
 # allow_redirects = true
 # [lti.security.jwks_uri.hosts]
 # allow = ["*.instructure.com", "canvas.docker"]
@@ -291,6 +296,7 @@ deny = ["/private/*"]
 [lti.security.names_and_role_endpoint]
 # Optional overrides for NRPS (Names and Roles) endpoint requests.
 # allow_http_in_development = true
+# Redirects are validated hop-by-hop against these same host/path rules.
 # allow_redirects = true
 # [lti.security.names_and_role_endpoint.hosts]
 # allow = ["*.instructure.com", "canvas.docker"]

@@ -4,7 +4,7 @@ from pingpong.lti.allowlist import (
 )
 
 
-def _get_openid_configuration_patterns(
+def _get_patterns(
     security_config: LTIUrlSecuritySettings,
 ) -> tuple[list[str], list[str], list[str], list[str]]:
     # Lazy import avoids config import cycles.
@@ -12,7 +12,7 @@ def _get_openid_configuration_patterns(
 
     if config.lti is None:
         raise ValueError(
-            "LTI configuration is required to determine OpenID configuration allow/deny patterns"
+            "LTI configuration is required to determine endpoint URL allow/deny patterns"
         )
 
     host_allow, host_deny = _merge_allow_deny_settings(
@@ -74,29 +74,35 @@ def _allow_http_in_development(
     )
 
 
-def generate_openid_configuration_url(openid_configuration_url: str) -> str:
+def _generate_lti_url(
+    *,
+    unverified_url: str,
+    security_config: LTIUrlSecuritySettings | None,
+    url_type: str,
+) -> str:
     # Lazy import avoids config import cycles.
     from pingpong.config import config
 
     if not config.lti:
         raise ValueError(
-            "LTI configuration is required to validate the OpenID configuration URL"
+            f"LTI configuration is required to validate the {url_type} URL"
         )
 
-    host_allow, host_deny, path_allow, path_deny = _get_openid_configuration_patterns(
-        config.lti.security.openid_configuration
-    )
+    if security_config is None:
+        raise ValueError(
+            f"LTI security configuration is required for the {url_type} URL"
+        )
+
+    host_allow, host_deny, path_allow, path_deny = _get_patterns(security_config)
 
     return generate_safe_lti_url(
-        unverified_url=openid_configuration_url,
-        url_type="OpenID configuration",
+        unverified_url=unverified_url,
+        url_type=url_type,
         host_allow=host_allow,
         host_deny=host_deny,
         path_allow=path_allow,
         path_deny=path_deny,
-        allow_http_in_development=_allow_http_in_development(
-            config.lti.security.openid_configuration
-        ),
+        allow_http_in_development=_allow_http_in_development(security_config),
     )
 
 
@@ -116,55 +122,42 @@ def allow_redirects(security_config: LTIUrlSecuritySettings) -> bool:
     )
 
 
+def generate_openid_configuration_url(openid_configuration_url: str) -> str:
+    # Lazy import avoids config import cycles.
+    from pingpong.config import config
+
+    return _generate_lti_url(
+        unverified_url=openid_configuration_url,
+        security_config=(
+            config.lti.security.openid_configuration if config.lti else None
+        ),
+        url_type="OpenID configuration",
+    )
+
+
 def generate_names_and_role_api_url(names_and_role_api_url: str) -> str:
     # Lazy import avoids config import cycles.
     from pingpong.config import config
 
-    if not config.lti:
-        raise ValueError(
-            "LTI configuration is required to validate the Names and Role API URL"
-        )
-
-    host_allow, host_deny, path_allow, path_deny = _get_openid_configuration_patterns(
-        config.lti.security.names_and_role_endpoint
-    )
-
-    return generate_safe_lti_url(
+    return _generate_lti_url(
         unverified_url=names_and_role_api_url,
-        url_type="Names and Role API",
-        host_allow=host_allow,
-        host_deny=host_deny,
-        path_allow=path_allow,
-        path_deny=path_deny,
-        allow_http_in_development=_allow_http_in_development(
-            config.lti.security.names_and_role_endpoint
+        security_config=(
+            config.lti.security.names_and_role_endpoint if config.lti else None
         ),
+        url_type="Names and Role API",
     )
 
 
-def generate_authorization_endpoint_url(auth_token_url: str) -> str:
+def generate_authorization_endpoint_url(authorization_endpoint_url: str) -> str:
     # Lazy import avoids config import cycles.
     from pingpong.config import config
 
-    if not config.lti:
-        raise ValueError(
-            "LTI configuration is required to validate the authorization endpoint URL"
-        )
-
-    host_allow, host_deny, path_allow, path_deny = _get_openid_configuration_patterns(
-        config.lti.security.authorization_endpoint
-    )
-
-    return generate_safe_lti_url(
-        unverified_url=auth_token_url,
-        url_type="authorization endpoint",
-        host_allow=host_allow,
-        host_deny=host_deny,
-        path_allow=path_allow,
-        path_deny=path_deny,
-        allow_http_in_development=_allow_http_in_development(
-            config.lti.security.authorization_endpoint
+    return _generate_lti_url(
+        unverified_url=authorization_endpoint_url,
+        security_config=(
+            config.lti.security.authorization_endpoint if config.lti else None
         ),
+        url_type="authorization endpoint",
     )
 
 
@@ -172,25 +165,12 @@ def generate_registration_endpoint_url(registration_endpoint_url: str) -> str:
     # Lazy import avoids config import cycles.
     from pingpong.config import config
 
-    if not config.lti:
-        raise ValueError(
-            "LTI configuration is required to validate the registration endpoint URL"
-        )
-
-    host_allow, host_deny, path_allow, path_deny = _get_openid_configuration_patterns(
-        config.lti.security.registration_endpoint
-    )
-
-    return generate_safe_lti_url(
+    return _generate_lti_url(
         unverified_url=registration_endpoint_url,
-        url_type="registration endpoint",
-        host_allow=host_allow,
-        host_deny=host_deny,
-        path_allow=path_allow,
-        path_deny=path_deny,
-        allow_http_in_development=_allow_http_in_development(
-            config.lti.security.registration_endpoint
+        security_config=(
+            config.lti.security.registration_endpoint if config.lti else None
         ),
+        url_type="registration endpoint",
     )
 
 
@@ -198,23 +178,10 @@ def generate_jwks_uri_url(jwks_uri_url: str) -> str:
     # Lazy import avoids config import cycles.
     from pingpong.config import config
 
-    if not config.lti:
-        raise ValueError("LTI configuration is required to validate the JWKS URI URL")
-
-    host_allow, host_deny, path_allow, path_deny = _get_openid_configuration_patterns(
-        config.lti.security.jwks_uri
-    )
-
-    return generate_safe_lti_url(
+    return _generate_lti_url(
         unverified_url=jwks_uri_url,
+        security_config=config.lti.security.jwks_uri if config.lti else None,
         url_type="JWKS URI",
-        host_allow=host_allow,
-        host_deny=host_deny,
-        path_allow=path_allow,
-        path_deny=path_deny,
-        allow_http_in_development=_allow_http_in_development(
-            config.lti.security.jwks_uri
-        ),
     )
 
 
@@ -222,23 +189,8 @@ def generate_token_endpoint_url(token_endpoint_url: str) -> str:
     # Lazy import avoids config import cycles.
     from pingpong.config import config
 
-    if not config.lti:
-        raise ValueError(
-            "LTI configuration is required to validate the token endpoint URL"
-        )
-
-    host_allow, host_deny, path_allow, path_deny = _get_openid_configuration_patterns(
-        config.lti.security.token_endpoint
-    )
-
-    return generate_safe_lti_url(
+    return _generate_lti_url(
         unverified_url=token_endpoint_url,
+        security_config=config.lti.security.token_endpoint if config.lti else None,
         url_type="token endpoint",
-        host_allow=host_allow,
-        host_deny=host_deny,
-        path_allow=path_allow,
-        path_deny=path_deny,
-        allow_http_in_development=_allow_http_in_development(
-            config.lti.security.token_endpoint
-        ),
     )

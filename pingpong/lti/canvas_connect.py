@@ -12,12 +12,13 @@ import uuid_utils as uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pingpong.authz.openfga import OpenFgaAuthzClient
-from pingpong.config import config
+from pingpong.config import LTISecuritySettings, LTIUrlSecuritySettings, config
 from pingpong.lti.constants import (
     CANVAS_CONNECT_SYNC_WAIT_DEFAULT_SECONDS,
     CLIENT_ASSERTION_EXPIRY_SECONDS,
     CLIENT_ASSERTION_TYPE,
     CLIENT_CREDENTIALS_GRANT_TYPE,
+    MAX_LTI_REDIRECTS,
     LTI_CLAIM_CUSTOM_KEY,
     LTI_CUSTOM_SSO_PROVIDER_ID_KEY,
     LTI_CUSTOM_SSO_VALUE_KEY,
@@ -67,7 +68,6 @@ from pingpong.users import AddNewUsersManual, AddNewUsersScript
 
 logger = logging.getLogger(__name__)
 SYNC_ROW_ERROR_DETAIL_LIMIT = 3
-MAX_LTI_REDIRECTS = 5
 
 
 def exception_detail(e: Exception) -> str:
@@ -116,6 +116,20 @@ def _extract_sync_row_errors(results: CreateUserResults) -> list[str]:
             continue
         row_errors.append(f"{row_result.email}: {row_result.error}")
     return row_errors
+
+
+def _require_lti_security() -> LTISecuritySettings:
+    lti_settings = config.lti
+    if lti_settings is None:
+        raise CanvasConnectException(detail="LTI service is not configured")
+    return lti_settings.security
+
+
+def _allow_redirects_or_raise(security_config: LTIUrlSecuritySettings) -> bool:
+    try:
+        return allow_redirects(security_config)
+    except ValueError as e:
+        raise CanvasConnectException(detail=str(e)) from e
 
 
 class CanvasConnectException(Exception):
@@ -309,12 +323,10 @@ class CanvasConnectClient:
             generated_url = generate_names_and_role_api_url(url)
         except ValueError as e:
             raise CanvasConnectException(
-                detail=f"Invalid NRPS URL: {str(e)}",
+                detail=f"Invalid NRPS URL: {e!s}",
             ) from e
-        redirects_allowed = (
-            allow_redirects(config.lti.security.names_and_role_endpoint)
-            if config.lti
-            else True
+        redirects_allowed = _allow_redirects_or_raise(
+            _require_lti_security().names_and_role_endpoint
         )
         redirect_count = 0
         while True:
@@ -347,14 +359,21 @@ class CanvasConnectClient:
                         )
                     except ValueError as e:
                         raise CanvasConnectException(
-                            detail=f"Invalid NRPS URL: {str(e)}",
+                            detail=f"Invalid NRPS URL: {e!s}",
                         ) from e
                     continue
 
                 response_payload: object = None
                 try:
                     response_payload = await response.json(content_type=None)
-                except Exception:
+                except (
+                    json.JSONDecodeError,
+                    ValueError,
+                    aiohttp.ContentTypeError,
+                ) as e:
+                    logger.warning(
+                        "Failed to parse NRPS response payload as JSON: %s", e
+                    )
                     response_payload = None
 
                 if response.status >= 400:
@@ -729,7 +748,7 @@ class CanvasConnectClient:
             generated_token_endpoint = generate_token_endpoint_url(token_endpoint)
         except ValueError as e:
             raise CanvasConnectException(
-                detail=f"Invalid token endpoint URL: {str(e)}",
+                detail=f"Invalid token endpoint URL: {e!s}",
             ) from e
         client_assertion = await self._build_client_assertion(
             client_id, generated_token_endpoint
@@ -746,9 +765,9 @@ class CanvasConnectClient:
             generated_token_endpoint,
             headers={"Content-Type": TOKEN_REQUEST_CONTENT_TYPE},
             data=request_data,
-            allow_redirects=allow_redirects(config.lti.security.token_endpoint)
-            if config.lti
-            else True,
+            allow_redirects=_allow_redirects_or_raise(
+                _require_lti_security().token_endpoint
+            ),
         ) as response:
             response_payload: object = None
             try:

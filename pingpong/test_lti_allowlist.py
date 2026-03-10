@@ -112,6 +112,24 @@ def test_generate_safe_lti_url_forces_https_when_http_not_allowed(monkeypatch):
     assert result == "https://platform.example.com/openid"
 
 
+def test_generate_safe_lti_url_accepts_default_http_port_before_https_upgrade(
+    monkeypatch,
+):
+    _patch_development(monkeypatch, is_development=True)
+
+    result = allowlist.generate_safe_lti_url(
+        unverified_url="http://platform.example.com:80/openid",
+        url_type="OpenID configuration",
+        host_allow=["*.example.com"],
+        host_deny=[],
+        path_allow=["/openid"],
+        path_deny=[],
+        allow_http_in_development=False,
+    )
+
+    assert result == "https://platform.example.com:443/openid"
+
+
 def test_generate_safe_lti_url_rejects_invalid_hostname(monkeypatch):
     _patch_development(monkeypatch, is_development=False)
 
@@ -170,3 +188,34 @@ def test_generate_safe_lti_url_rejects_disallowed_path(monkeypatch):
             path_deny=[],
             allow_http_in_development=True,
         )
+
+
+@pytest.mark.parametrize(
+    ("unverified_url", "expected"),
+    [
+        (
+            "https://platform.example.com/foo bar",
+            "https://platform.example.com/foo%20bar",
+        ),
+        (
+            "https://platform.example.com/caf\u00e9",
+            "https://platform.example.com/caf%C3%A9",
+        ),
+    ],
+)
+def test_generate_safe_lti_url_accepts_percent_encoded_sanitized_paths(
+    monkeypatch, unverified_url, expected
+):
+    _patch_development(monkeypatch, is_development=False)
+
+    result = allowlist.generate_safe_lti_url(
+        unverified_url=unverified_url,
+        url_type="OpenID configuration",
+        host_allow=["*.example.com"],
+        host_deny=[],
+        path_allow=["*"],
+        path_deny=[],
+        allow_http_in_development=True,
+    )
+
+    assert result == expected

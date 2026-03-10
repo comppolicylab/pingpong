@@ -418,6 +418,90 @@ async def test_get_nrps_access_token_raises_when_lti_class_missing(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_make_authed_nrps_get_raises_when_lti_config_missing(monkeypatch):
+    monkeypatch.setattr(config_module, "config", SimpleNamespace(lti=None))
+    monkeypatch.setattr(canvas_connect_module, "config", SimpleNamespace(lti=None))
+    monkeypatch.setattr(
+        canvas_connect_module,
+        "generate_names_and_role_api_url",
+        lambda url: url,
+    )
+
+    fake_session = FakeClientSession(FakeTokenResponse(payload={"members": []}))
+    monkeypatch.setattr(
+        canvas_connect_module.aiohttp,
+        "ClientSession",
+        lambda: fake_session,
+    )
+
+    async with canvas_connect_module.CanvasConnectClient(
+        db=SimpleNamespace(),
+        lti_class_id=11,
+        key_manager=FakeKeyManager(),
+    ) as client:
+        client.get_short_lived_auth_token = lambda: _async_return("short-lived-token")
+        with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+            await client._make_authed_nrps_get(
+                "https://canvas.example.com/api/lti/memberships"
+            )
+
+    assert excinfo.value.detail == "LTI service is not configured"
+
+
+@pytest.mark.asyncio
+async def test_get_nrps_access_token_raises_canvas_connect_exception_when_lti_config_missing(
+    monkeypatch,
+):
+    registration = SimpleNamespace(
+        client_id="client-123",
+        openid_configuration='{"token_endpoint":"https://canvas.example.com/token"}',
+        auth_token_url=None,
+    )
+    lti_class = SimpleNamespace(id=11, registration=registration)
+
+    async def _get_by_id_with_registration(cls, db, id_):
+        return lti_class
+
+    monkeypatch.setattr(
+        canvas_connect_module.LTIClass,
+        "get_by_id_with_registration",
+        classmethod(_get_by_id_with_registration),
+    )
+    monkeypatch.setattr(
+        canvas_connect_module.jwt,
+        "encode",
+        lambda *args, **kwargs: "signed-client-assertion",
+    )
+    monkeypatch.setattr(canvas_connect_module.uuid, "uuid7", lambda: "uuid7-test")
+    monkeypatch.setattr(
+        canvas_connect_module,
+        "generate_token_endpoint_url",
+        lambda url: url,
+    )
+    monkeypatch.setattr(config_module, "config", SimpleNamespace(lti=None))
+    monkeypatch.setattr(canvas_connect_module, "config", SimpleNamespace(lti=None))
+
+    fake_session = FakeClientSession(
+        FakeTokenResponse(payload={"access_token": "short-lived-token"})
+    )
+    monkeypatch.setattr(
+        canvas_connect_module.aiohttp,
+        "ClientSession",
+        lambda: fake_session,
+    )
+
+    async with canvas_connect_module.CanvasConnectClient(
+        db=SimpleNamespace(),
+        lti_class_id=11,
+        key_manager=FakeKeyManager(),
+    ) as client:
+        with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+            await client.get_nrps_access_token()
+
+    assert excinfo.value.detail == "LTI service is not configured"
+
+
+@pytest.mark.asyncio
 async def test_get_nrps_access_token_reuses_cached_token_until_expiry(monkeypatch):
     token_endpoint = "https://canvas.example.com/login/oauth2/token"
     registration = SimpleNamespace(

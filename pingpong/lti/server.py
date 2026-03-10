@@ -13,10 +13,11 @@ from fastapi.responses import RedirectResponse
 from pingpong.auth import encode_session_token
 from pingpong.authz.openfga import OpenFgaAuthzClient
 from pingpong.config import config
-from pingpong.lti.endpoints import allow_redirects, generate_authorization_endpoint_url
 from pingpong.invite import send_lti_registration_submitted
 from pingpong.log_utils import sanitize_for_log
 from pingpong.lti.endpoints import (
+    allow_redirects,
+    generate_authorization_endpoint_url,
     generate_jwks_uri_url,
     generate_openid_configuration_url,
     generate_registration_endpoint_url,
@@ -39,6 +40,7 @@ from pingpong.lti.constants import (
     LTI_CUSTOM_SSO_VALUE_KEY,
     LTI_DEPLOYMENT_ID_CLAIM,
     LTI_TOOL_CONFIGURATION_KEY,
+    MAX_LTI_REDIRECTS,
     MESSAGE_TYPES_KEY,
     MESSAGE_TYPE,
     PLATFORM_CONFIGURATION_KEY,
@@ -104,7 +106,6 @@ from pingpong.schemas import (
 logger = logging.getLogger(__name__)
 
 lti_router: APIRouter = APIRouter()
-MAX_LTI_REDIRECTS = 5
 
 
 def _is_public_sso_provider(provider: ExternalLoginProvider) -> bool:
@@ -159,6 +160,75 @@ async def _fetch_jwks(jwks_url: str) -> dict[str, Any]:
                 payload = await response.json()
                 if not isinstance(payload, dict):
                     raise HTTPException(status_code=500, detail="Invalid JWKS response")
+                return cast(dict[str, Any], payload)
+
+
+async def _fetch_openid_configuration(
+    openid_configuration_url: str, headers: dict[str, str]
+) -> dict[str, Any]:
+    timeout = aiohttp.ClientTimeout(total=10)
+    try:
+        generated_openid_configuration_url = generate_openid_configuration_url(
+            openid_configuration_url
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400, detail="Invalid openid_configuration"
+        ) from e
+
+    redirects_allowed = (
+        allow_redirects(config.lti.security.openid_configuration)
+        if config.lti
+        else True
+    )
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        redirect_count = 0
+        while True:
+            async with session.get(
+                generated_openid_configuration_url,
+                raise_for_status=True,
+                headers=headers,
+                allow_redirects=False,
+            ) as response:
+                if response.status in {301, 302, 303, 307, 308}:
+                    if not redirects_allowed:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Unexpected redirect from openid_configuration",
+                        )
+
+                    location = response.headers.get("Location")
+                    if not location:
+                        raise HTTPException(
+                            status_code=500,
+                            detail="Invalid OpenID configuration redirect response",
+                        )
+
+                    redirect_count += 1
+                    if redirect_count > MAX_LTI_REDIRECTS:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Too many redirects for openid_configuration",
+                        )
+
+                    try:
+                        generated_openid_configuration_url = (
+                            generate_openid_configuration_url(
+                                urljoin(generated_openid_configuration_url, location)
+                            )
+                        )
+                    except ValueError as e:
+                        raise HTTPException(
+                            status_code=400, detail="Invalid openid_configuration"
+                        ) from e
+                    continue
+
+                payload = await response.json()
+                if not isinstance(payload, dict):
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Invalid OpenID configuration response payload",
+                    )
                 return cast(dict[str, Any], payload)
 
 
@@ -323,29 +393,9 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
     )
 
     headers = {"Authorization": f"Bearer {data.registration_token}"}
-    try:
-        openid_configuration_url = generate_openid_configuration_url(
-            data.openid_configuration
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    response_data: dict[str, Any] | None = None
-    async with aiohttp.ClientSession() as session:
-        async with session.get(
-            openid_configuration_url,
-            raise_for_status=True,
-            headers=headers,
-            allow_redirects=allow_redirects(config.lti.security.openid_configuration)
-            if config.lti
-            else True,
-        ) as response:
-            payload = await response.json()
-            if not isinstance(payload, dict):
-                raise HTTPException(
-                    status_code=500,
-                    detail="Invalid OpenID configuration response payload",
-                )
-            response_data = cast(dict[str, Any], payload)
+    response_data = await _fetch_openid_configuration(
+        data.openid_configuration, headers
+    )
 
     if not response_data:
         raise HTTPException(
@@ -603,16 +653,16 @@ async def lti_login(request: StateRequest):
 
     # Use the platform's authorization endpoint discovered during dynamic registration.
     oidc_authorization_endpoint = registration.auth_login_url
+    if not oidc_authorization_endpoint:
+        raise HTTPException(
+            status_code=400, detail="No known OIDC authorization endpoint for issuer"
+        )
     try:
         oidc_authorization_endpoint = generate_authorization_endpoint_url(
             oidc_authorization_endpoint
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    if not oidc_authorization_endpoint:
-        raise HTTPException(
-            status_code=400, detail="No known OIDC authorization endpoint for issuer"
-        )
 
     # Optional deployment binding if the platform supplies it at initiation time.
     request_deployment_id = payload.get("deployment_id") or payload.get(

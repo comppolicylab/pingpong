@@ -5,6 +5,7 @@ import tomllib
 from functools import cached_property
 from pathlib import Path
 from typing import Any, Literal, Union
+from urllib.parse import urlsplit
 
 from glowplug import PostgresSettings, SqliteSettings
 from pydantic import Field, model_validator
@@ -379,7 +380,7 @@ class LTISettings(BaseSettings):
         openid_configuration_paths: object,
     ) -> list[str]:
         if not isinstance(openid_configuration_paths, dict):
-            raise ValueError(
+            raise TypeError(
                 "lti.openid_configuration_paths must be an object with mode and paths"
             )
 
@@ -430,6 +431,42 @@ class LTISettings(BaseSettings):
                 raise ValueError("lti.dev_http_hosts entries must be strings")
             if host.strip():
                 normalized_hosts.append(host.strip().lower())
+        return normalized_hosts
+
+    @staticmethod
+    def _validate_legacy_platform_url_allowlist(
+        platform_url_allowlist: object,
+    ) -> list[str]:
+        if not isinstance(platform_url_allowlist, list):
+            raise ValueError("lti.platform_url_allowlist must be a list")
+
+        normalized_hosts: list[str] = []
+        for entry in platform_url_allowlist:
+            if not isinstance(entry, str):
+                raise ValueError("lti.platform_url_allowlist entries must be strings")
+
+            value = entry.strip().lower()
+            if not value:
+                raise ValueError("lti.platform_url_allowlist entries must not be empty")
+            if value.startswith("*."):
+                raise ValueError(
+                    "lti.platform_url_allowlist entries must be exact hosts or URLs"
+                )
+
+            if "://" in value:
+                parsed = urlsplit(value)
+                if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+                    raise ValueError(
+                        "lti.platform_url_allowlist URL entries must use http or https"
+                    )
+                value = parsed.hostname.lower()
+            elif "/" in value or ":" in value:
+                raise ValueError(
+                    "lti.platform_url_allowlist entries must be hostnames or URLs"
+                )
+
+            normalized_hosts.append(value)
+
         return normalized_hosts
 
     @staticmethod
@@ -507,10 +544,15 @@ class LTISettings(BaseSettings):
             normalized_dev_http_hosts = cls._validate_legacy_dev_http_hosts(
                 dev_http_hosts
             )
+        normalized_platform_url_allowlist: list[str] | None = None
+        if platform_url_allowlist is not None:
+            normalized_platform_url_allowlist = (
+                cls._validate_legacy_platform_url_allowlist(platform_url_allowlist)
+            )
 
         legacy_host_allow = []
-        if platform_url_allowlist is not None:
-            legacy_host_allow.extend(platform_url_allowlist)
+        if normalized_platform_url_allowlist is not None:
+            legacy_host_allow.extend(normalized_platform_url_allowlist)
         if normalized_dev_http_hosts:
             legacy_host_allow.extend(normalized_dev_http_hosts)
 
