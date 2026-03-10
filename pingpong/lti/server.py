@@ -354,7 +354,10 @@ def parse_lti_context_and_nrps(
 
     context_memberships_url_value = nrps_claim.get("context_memberships_url")
     context_memberships_url = None
-    if isinstance(context_memberships_url_value, str):
+    if (
+        isinstance(context_memberships_url_value, str)
+        and context_memberships_url_value.strip()
+    ):
         try:
             context_memberships_url = generate_names_and_role_api_url(
                 context_memberships_url_value

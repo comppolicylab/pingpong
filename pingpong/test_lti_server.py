@@ -707,6 +707,23 @@ def test_parse_lti_context_and_nrps_rejects_invalid_context_memberships_url():
     assert excinfo.value.detail == "Invalid context_memberships_url"
 
 
+@pytest.mark.parametrize("claim_value", ["", "   "])
+def test_parse_lti_context_and_nrps_treats_blank_context_memberships_url_as_missing(
+    claim_value,
+):
+    claims = {
+        server_module.LTI_CLAIM_NRPS_KEY: {
+            "context_memberships_url": claim_value,
+        },
+    }
+
+    _, _, _, context_memberships_url = server_module.parse_lti_context_and_nrps(
+        claims, {}
+    )
+
+    assert context_memberships_url is None
+
+
 def test_get_lti_key_manager_missing_config(monkeypatch):
     monkeypatch.setattr(server_module, "config", SimpleNamespace(lti=None))
     with pytest.raises(HTTPException) as excinfo:
