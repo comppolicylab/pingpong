@@ -642,6 +642,61 @@ async def test_register_lti_instance_success(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_register_lti_instance_rejects_non_string_registration_endpoint(
+    monkeypatch,
+):
+    platform_config = {
+        "product_family_code": "canvas",
+        "messages_supported": [
+            {
+                "type": "LtiResourceLinkRequest",
+                "placements": [server_module.CANVAS_MESSAGE_PLACEMENT],
+            }
+        ],
+    }
+    openid_payload = {
+        "issuer": "issuer",
+        "authorization_endpoint": "https://platform.example.com/auth",
+        "registration_endpoint": {"url": "https://platform.example.com/reg"},
+        "jwks_uri": "https://platform.example.com/jwks",
+        "token_endpoint": "https://platform.example.com/token",
+        "scopes_supported": server_module.REQUIRED_SCOPES,
+        "id_token_signing_alg_values_supported": ["RS256"],
+        "subject_types_supported": ["public"],
+        server_module.PLATFORM_CONFIGURATION_KEY: platform_config,
+    }
+
+    monkeypatch.setattr(
+        server_module.aiohttp,
+        "ClientSession",
+        lambda timeout=None: FakeSession(get_payload=openid_payload),
+    )
+    monkeypatch.setattr(
+        server_module.Institution,
+        "all_have_default_api_key",
+        lambda db, ids: _async_return(True),
+    )
+
+    data = LTIRegisterRequest(
+        name="PingPong",
+        admin_name="Admin",
+        admin_email="admin@example.com",
+        provider_id=0,
+        sso_field=None,
+        openid_configuration="https://platform.example.com/.well-known/openid",
+        registration_token="token",
+        institution_ids=[1],
+    )
+    request = FakeRequest(state=SimpleNamespace(db="db"))
+
+    with pytest.raises(HTTPException) as excinfo:
+        await server_module.register_lti_instance(request, data)
+
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail == "Missing required OpenID configuration fields"
+
+
+@pytest.mark.asyncio
 async def test_register_lti_instance_rejects_openid_redirect_to_unallowlisted_host(
     monkeypatch,
 ):

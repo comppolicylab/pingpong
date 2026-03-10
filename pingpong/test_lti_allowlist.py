@@ -190,6 +190,22 @@ def test_generate_safe_lti_url_rejects_disallowed_path(monkeypatch):
         )
 
 
+def test_generate_safe_lti_url_double_encodes_encoded_path_separators(monkeypatch):
+    _patch_development(monkeypatch, is_development=False)
+
+    result = allowlist.generate_safe_lti_url(
+        unverified_url="https://platform.example.com/api/private%2Ftoken",
+        url_type="OpenID configuration",
+        host_allow=["*.example.com"],
+        host_deny=[],
+        path_allow=["/api/*"],
+        path_deny=["/api/private/*"],
+        allow_http_in_development=True,
+    )
+
+    assert result == "https://platform.example.com/api/private%252Ftoken"
+
+
 @pytest.mark.parametrize(
     ("unverified_url", "expected"),
     [

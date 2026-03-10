@@ -112,6 +112,12 @@ def _is_public_sso_provider(provider: ExternalLoginProvider) -> bool:
     return provider.name != "email" and not getattr(provider, "internal_only", False)
 
 
+def _require_non_empty_string(value: object, detail: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise HTTPException(status_code=400, detail=detail)
+    return value
+
+
 async def _fetch_jwks(jwks_url: str) -> dict[str, Any]:
     timeout = aiohttp.ClientTimeout(total=10)
     try:
@@ -425,16 +431,20 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
 
     platform = LMSPlatform(product_family_code)
 
-    if (
-        not issuer
-        or not authorization_endpoint
-        or not registration_endpoint
-        or not keys_endpoint
-        or not token_endpoint
-    ):
-        raise HTTPException(
-            status_code=400, detail="Missing required OpenID configuration fields"
-        )
+    missing_required_fields_detail = "Missing required OpenID configuration fields"
+    issuer = _require_non_empty_string(issuer, missing_required_fields_detail)
+    authorization_endpoint = _require_non_empty_string(
+        authorization_endpoint, missing_required_fields_detail
+    )
+    registration_endpoint = _require_non_empty_string(
+        registration_endpoint, missing_required_fields_detail
+    )
+    keys_endpoint = _require_non_empty_string(
+        keys_endpoint, missing_required_fields_detail
+    )
+    token_endpoint = _require_non_empty_string(
+        token_endpoint, missing_required_fields_detail
+    )
 
     if not all(scope in scopes_supported for scope in REQUIRED_SCOPES):
         raise HTTPException(
