@@ -32,22 +32,68 @@ resolve_language_config() {
     actions)
       CODEQL_LANGUAGE_NAME="actions"
       CODEQL_PACK="codeql/actions-queries"
-      CODEQL_SUITE_FILE="actions-security-extended.qls"
+      CODEQL_SUITE_FILE="actions-security-and-quality.qls"
       ;;
     javascript | javascript-typescript)
       CODEQL_LANGUAGE_NAME="javascript-typescript"
       CODEQL_PACK="codeql/javascript-queries"
-      CODEQL_SUITE_FILE="javascript-security-extended.qls"
+      CODEQL_SUITE_FILE="javascript-security-and-quality.qls"
       ;;
     python)
       CODEQL_LANGUAGE_NAME="python"
       CODEQL_PACK="codeql/python-queries"
-      CODEQL_SUITE_FILE="python-security-extended.qls"
+      CODEQL_SUITE_FILE="python-security-and-quality.qls"
       ;;
     *)
       return 1
       ;;
   esac
+}
+
+cleanup_language_artifacts() {
+  local lang="$1"
+  local db_path
+  local stale_db_path
+
+  if ! resolve_language_config "$lang"; then
+    echo "Unsupported language: $lang" >&2
+    usage
+    exit 2
+  fi
+
+  db_path="$DB_DIR/$CODEQL_LANGUAGE_NAME"
+
+  if [ -e "$db_path" ]; then
+    stale_db_path="${db_path}.stale.$$.$(date +%s)"
+    mv "$db_path" "$stale_db_path"
+
+    # Finder can recreate .DS_Store files while the old DB is being deleted.
+    # Move the DB out of the way first so a new run can proceed regardless.
+    find "$stale_db_path" -name '.DS_Store' -delete 2>/dev/null || true
+    rm -rf "$stale_db_path" 2>/dev/null || true
+  fi
+
+  rm -f "$OUT_DIR/$CODEQL_LANGUAGE_NAME.sarif"
+  rm -f "$LOG_DIR/$CODEQL_LANGUAGE_NAME.create-db.log" "$LOG_DIR/$CODEQL_LANGUAGE_NAME.analyze.log"
+}
+
+build_gitignored_lgtm_filters() {
+  local -a filters=()
+  local entry path
+
+  while IFS= read -r -d '' entry; do
+    [[ "$entry" == '!! '* ]] || continue
+
+    path="${entry#!! }"
+    path="${path%/}"
+    [ -n "$path" ] || continue
+
+    filters+=("exclude:$path")
+  done < <(git status --ignored --porcelain=v1 -z --untracked-files=normal)
+
+  if [ "${#filters[@]}" -gt 0 ]; then
+    printf '%s\n' "${filters[@]}"
+  fi
 }
 
 print_phase_summary() {
@@ -130,6 +176,17 @@ run_codeql() {
   local db="$DB_DIR/$CODEQL_LANGUAGE_NAME"
   local out="$OUT_DIR/$CODEQL_LANGUAGE_NAME.sarif"
   local lgtm_index_filters="${LGTM_INDEX_FILTERS:-}"
+  local gitignored_excludes
+
+  gitignored_excludes="$(build_gitignored_lgtm_filters)"
+  if [ -n "$gitignored_excludes" ]; then
+    if [ -n "$lgtm_index_filters" ]; then
+      lgtm_index_filters="${gitignored_excludes}"$'\n'"${lgtm_index_filters}"
+    else
+      lgtm_index_filters="$gitignored_excludes"
+    fi
+    echo "[$CODEQL_LANGUAGE_NAME] Excluding Git-ignored paths from this run."
+  fi
 
   # Prevent non-actions analyses from including GitHub Actions workflow coverage.
   if [ "$CODEQL_LANGUAGE_NAME" != "actions" ]; then
@@ -170,12 +227,13 @@ if [ -z "$target_language" ]; then
   exit 2
 fi
 
-rm -rf "$DB_DIR" "$OUT_DIR" "$LOG_DIR"
 mkdir -p "$DB_DIR" "$OUT_DIR" "$LOG_DIR"
 
 declare -a languages_to_run
 case "$target_language" in
   all)
+    rm -rf "$DB_DIR" "$OUT_DIR" "$LOG_DIR"
+    mkdir -p "$DB_DIR" "$OUT_DIR" "$LOG_DIR"
     languages_to_run=("actions" "javascript-typescript" "python")
     ;;
   actions | python | javascript | javascript-typescript)
@@ -189,13 +247,23 @@ case "$target_language" in
 esac
 
 for lang in "${languages_to_run[@]}"; do
+  cleanup_language_artifacts "$lang"
   run_codeql "$lang"
 done
 
 # Print findings summary and details
 if command -v jq >/dev/null 2>&1; then
-  for sarif in "$OUT_DIR"/*.sarif; do
-    lang_name="$(basename "$sarif" .sarif)"
+  total=0
+
+  for lang in "${languages_to_run[@]}"; do
+    resolve_language_config "$lang"
+    sarif="$OUT_DIR/$CODEQL_LANGUAGE_NAME.sarif"
+
+    if [ ! -f "$sarif" ]; then
+      continue
+    fi
+
+    lang_name="$CODEQL_LANGUAGE_NAME"
     count="$(jq '[.runs[].results[]] | length' "$sarif")"
     if [ "$count" -gt 0 ]; then
       echo "=== $lang_name: $count finding(s) ==="
@@ -209,9 +277,10 @@ if command -v jq >/dev/null 2>&1; then
     else
       echo "=== $lang_name: no findings ==="
     fi
+
+    total=$(( total + count ))
   done
 
-  total="$(jq -s '[.[].runs[].results[]] | length' "$OUT_DIR"/*.sarif)"
   if [ "$total" -gt 0 ]; then
     echo "Total findings: $total"
     exit 1
