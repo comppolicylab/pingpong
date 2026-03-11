@@ -7313,7 +7313,7 @@ async def delete_thread(
         except openai.NotFoundError:
             # Thread was already removed in OpenAI; local cleanup can continue.
             logger.debug(
-                "OpenAI file %s already deleted or missing when attempting cleanup",
+                "OpenAI thread %s already deleted or missing when attempting cleanup",
                 thread_obj_id,
             )
         except openai.BadRequestError as e:
