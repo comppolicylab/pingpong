@@ -7204,7 +7204,11 @@ async def remove_file_from_thread(
                 file_id=file.file_id,
             )
         except openai.NotFoundError:
-            pass
+            logger.debug(
+                "OpenAI file %s already deleted or missing when attempting cleanup",
+                file.file_id,
+            )
+
         except openai.BadRequestError as e:
             raise HTTPException(
                 400, get_details_from_api_error(e, "OpenAI rejected this request")
@@ -7308,7 +7312,10 @@ async def delete_thread(
             await openai_client.beta.threads.delete(thread_obj_id)
         except openai.NotFoundError:
             # Thread was already removed in OpenAI; local cleanup can continue.
-            pass
+            logger.debug(
+                "OpenAI file %s already deleted or missing when attempting cleanup",
+                thread_obj_id,
+            )
         except openai.BadRequestError as e:
             raise HTTPException(
                 400, get_details_from_api_error(e, "OpenAI rejected this request")
@@ -9641,7 +9648,10 @@ async def delete_assistant(
             await openai_client.beta.assistants.delete(assistant_id)
         except openai.NotFoundError:
             # Assistant was already removed in OpenAI; local cleanup can continue.
-            pass
+            logger.debug(
+                "OpenAI assistant %s already deleted or missing when attempting cleanup",
+                assistant_id,
+            )
         except openai.BadRequestError as e:
             raise HTTPException(
                 400, get_details_from_api_error(e, "OpenAI rejected this request")
@@ -9968,7 +9978,10 @@ async def _delete_thread_attachment_file_if_unreferenced(
     try:
         await openai_client.files.delete(file.file_id)
     except openai.NotFoundError:
-        pass
+        logger.debug(
+            "OpenAI file %s already deleted or missing when attempting cleanup",
+            file.file_id,
+        )
 
     await request.state["authz"].write_safe(revoke=revokes)
 
