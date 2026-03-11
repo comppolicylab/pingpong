@@ -227,6 +227,11 @@ if [ -z "$target_language" ]; then
   exit 2
 fi
 
+if ! command -v jq >/dev/null 2>&1; then
+  echo "Missing required dependency: jq" >&2
+  exit 2
+fi
+
 mkdir -p "$DB_DIR" "$OUT_DIR" "$LOG_DIR"
 
 declare -a languages_to_run
@@ -251,38 +256,35 @@ for lang in "${languages_to_run[@]}"; do
   run_codeql "$lang"
 done
 
-# Print findings summary and details
-if command -v jq >/dev/null 2>&1; then
-  total=0
+total=0
 
-  for lang in "${languages_to_run[@]}"; do
-    resolve_language_config "$lang"
-    sarif="$OUT_DIR/$CODEQL_LANGUAGE_NAME.sarif"
+for lang in "${languages_to_run[@]}"; do
+  resolve_language_config "$lang"
+  sarif="$OUT_DIR/$CODEQL_LANGUAGE_NAME.sarif"
 
-    if [ ! -f "$sarif" ]; then
-      continue
-    fi
-
-    lang_name="$CODEQL_LANGUAGE_NAME"
-    count="$(jq '[.runs[].results[]] | length' "$sarif")"
-    if [ "$count" -gt 0 ]; then
-      echo "=== $lang_name: $count finding(s) ==="
-      jq -r '
-        [.runs[].results[]] | to_entries[] |
-        "\(.key + 1). [\(.value.level // "warning")] \(.value.message.text)\n" +
-        "   Rule: \(.value.ruleId)\n" +
-        "   File: \(.value.locations[0].physicalLocation.artifactLocation.uri // "unknown"):" +
-        "\(.value.locations[0].physicalLocation.region.startLine // "?")\n"
-      ' "$sarif"
-    else
-      echo "=== $lang_name: no findings ==="
-    fi
-
-    total=$(( total + count ))
-  done
-
-  if [ "$total" -gt 0 ]; then
-    echo "Total findings: $total"
-    exit 1
+  if [ ! -f "$sarif" ]; then
+    continue
   fi
+
+  lang_name="$CODEQL_LANGUAGE_NAME"
+  count="$(jq '[.runs[].results[]] | length' "$sarif")"
+  if [ "$count" -gt 0 ]; then
+    echo "=== $lang_name: $count finding(s) ==="
+    jq -r '
+      [.runs[].results[]] | to_entries[] |
+      "\(.key + 1). [\(.value.level // "warning")] \(.value.message.text)\n" +
+      "   Rule: \(.value.ruleId)\n" +
+      "   File: \(.value.locations[0].physicalLocation.artifactLocation.uri // "unknown"):" +
+      "\(.value.locations[0].physicalLocation.region.startLine // "?")\n"
+    ' "$sarif"
+  else
+    echo "=== $lang_name: no findings ==="
+  fi
+
+  total=$(( total + count ))
+done
+
+if [ "$total" -gt 0 ]; then
+  echo "Total findings: $total"
+  exit 1
 fi
