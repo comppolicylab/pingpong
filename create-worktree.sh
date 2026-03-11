@@ -3,7 +3,7 @@
 set -e
 
 # Preflight checks for required tools
-REQUIRED_TOOLS=(curl docker git jq pnpm uv python)
+REQUIRED_TOOLS=(curl docker git jq pnpm uv)
 MISSING_TOOLS=()
 
 for tool in "${REQUIRED_TOOLS[@]}"; do
