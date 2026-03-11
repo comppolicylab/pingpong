@@ -30,3 +30,30 @@ repos:
       - id: end-of-file-fixer
       - id: check-yaml
       - id: check-added-large-files
+  - repo: local
+    hooks:
+      - id: codeql-actions
+        name: codeql (actions)
+        entry: ./run-codeql-pr.sh actions
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [manual]
+  - repo: local
+    hooks:
+      - id: codeql-javascript
+        name: codeql (javascript)
+        entry: ./run-codeql-pr.sh javascript
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [manual]
+  - repo: local
+    hooks:
+      - id: codeql-python
+        name: codeql (python)
+        entry: ./run-codeql-pr.sh python
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [manual]
