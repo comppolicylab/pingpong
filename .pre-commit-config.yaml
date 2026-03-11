@@ -37,6 +37,7 @@ repos:
         entry: ./run-codeql-pr.sh actions
         language: system
         pass_filenames: false
+        always_run: true
         stages: [manual]
   - repo: local
     hooks:
@@ -45,6 +46,7 @@ repos:
         entry: ./run-codeql-pr.sh javascript
         language: system
         pass_filenames: false
+        always_run: true
         stages: [manual]
   - repo: local
     hooks:
@@ -53,4 +55,5 @@ repos:
         entry: ./run-codeql-pr.sh python
         language: system
         pass_filenames: false
+        always_run: true
         stages: [manual]
