@@ -1,3 +1,4 @@
+import asyncio
 import re
 import aioboto3
 import logging
@@ -6,13 +7,12 @@ import inspect
 from pathlib import Path
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-from typing import AsyncGenerator
+from typing import IO, AsyncGenerator
 from botocore.exceptions import ClientError
 from botocore import UNSIGNED
 from botocore.client import Config
-from sqlalchemy.ext.asyncio import AsyncSession
+from boto3.s3.transfer import TransferConfig
 
-from pingpong.models import LectureVideo
 from .schemas import VideoMetadata
 
 logger = logging.getLogger(__name__)
@@ -29,18 +29,15 @@ class BaseVideoStore(ABC):
         """Get metadata about a video file from the store"""
         raise NotImplementedError()
 
-    async def get_or_create(
-        self, session: AsyncSession, key: str, user_id: int
-    ) -> LectureVideo:
-        """Get or create a LectureVideo record for a given video key and user ID"""
-        lecture_video = await LectureVideo.get_by_key(session, key)
+    @abstractmethod
+    async def put(self, key: str, content: IO, content_type: str):
+        """Write a video file to the store."""
+        raise NotImplementedError
 
-        if lecture_video:
-            return lecture_video
-
-        await self.get_video_metadata(key)
-
-        return await LectureVideo.create(session, key, user_id)
+    @abstractmethod
+    async def delete(self, key: str):
+        """Delete a video file from the store."""
+        raise NotImplementedError
 
     @abstractmethod
     async def stream_video(
@@ -64,9 +61,41 @@ class BaseVideoStore(ABC):
 class S3VideoStore(BaseVideoStore):
     """S3 video store for production use."""
 
+    _UPLOAD_CONFIG = TransferConfig(
+        multipart_threshold=8 * 1024 * 1024,
+        multipart_chunksize=8 * 1024 * 1024,
+    )
+
     def __init__(self, bucket: str, allow_unsigned: bool = False):
         self.__bucket = bucket
         self._allow_unsigned = allow_unsigned
+
+    async def put(self, key: str, content: IO, content_type: str):
+        content.seek(0)
+        async with aioboto3.Session().client("s3") as s3_client:
+            try:
+                await s3_client.upload_fileobj(
+                    content,
+                    self.__bucket,
+                    key,
+                    ExtraArgs={"ContentType": content_type},
+                    Config=self._UPLOAD_CONFIG,
+                )
+            except ClientError as e:
+                logger.exception("Error uploading lecture video to S3: %s", e)
+                raise VideoStoreError(
+                    f"Failed to upload lecture video: {str(e)}"
+                ) from e
+
+    async def delete(self, key: str):
+        async with aioboto3.Session().client("s3") as s3_client:
+            try:
+                await s3_client.delete_object(Bucket=self.__bucket, Key=key)
+            except ClientError as e:
+                logger.exception("Error deleting lecture video from S3: %s", e)
+                raise VideoStoreError(
+                    f"Failed to delete lecture video: {str(e)}"
+                ) from e
 
     async def get_video_metadata(self, key: str) -> VideoMetadata:
         """Get metadata about a video file from S3."""
@@ -172,6 +201,8 @@ class S3VideoStore(BaseVideoStore):
 class LocalVideoStore(BaseVideoStore):
     """Local video store for development and testing."""
 
+    _WRITE_CHUNK_SIZE = 1024 * 1024
+
     def __init__(self, directory: str):
         target = Path(directory).expanduser()
         if not target.is_absolute():
@@ -188,6 +219,36 @@ class LocalVideoStore(BaseVideoStore):
         except ValueError as e:
             raise VideoStoreError("Invalid key path") from e
         return file_path
+
+    def _write_file_in_chunks(self, file_path: Path, content: IO) -> None:
+        with open(file_path, "wb") as handle:
+            while True:
+                chunk = content.read(self._WRITE_CHUNK_SIZE)
+                if not chunk:
+                    break
+                if isinstance(chunk, str):
+                    chunk = chunk.encode("utf-8")
+                handle.write(chunk)
+
+    async def put(self, key: str, content: IO, content_type: str):
+        file_path = self._resolve_key_path(key)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            content.seek(0)
+            await asyncio.to_thread(self._write_file_in_chunks, file_path, content)
+        except Exception as e:
+            logger.exception("Error uploading lecture video to local store: %s", e)
+            raise VideoStoreError(f"Failed to upload lecture video: {str(e)}") from e
+
+    async def delete(self, key: str):
+        file_path = self._resolve_key_path(key)
+        try:
+            await asyncio.to_thread(file_path.unlink, missing_ok=True)
+        except FileNotFoundError:
+            return
+        except Exception as e:
+            logger.exception("Error deleting lecture video from local store: %s", e)
+            raise VideoStoreError(f"Failed to delete lecture video: {str(e)}") from e
 
     async def get_video_metadata(self, key: str) -> VideoMetadata:
         """get metadata about a video file from local filesystem."""

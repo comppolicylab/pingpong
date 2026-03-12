@@ -54,6 +54,9 @@ from pingpong.migrations.m05_populate_account_lti_guid import (
 from pingpong.migrations.m06_cleanup_orphaned_lti_classes import (
     cleanup_orphaned_lti_classes,
 )
+from pingpong.migrations.m07_backfill_lecture_video_content_lengths import (
+    backfill_lecture_video_content_lengths,
+)
 from pingpong.now import _get_next_run_time, croner, utcnow
 from pingpong.schemas import LMSType, RunStatus
 from pingpong.lti.canvas_connect import canvas_connect_sync_all
@@ -905,6 +908,21 @@ def m06_cleanup_orphaned_lti_classes(dry_run: bool) -> None:
             )
 
     asyncio.run(_m06_cleanup_orphaned_lti_classes())
+
+
+@db.command("m07_backfill_lecture_video_content_lengths")
+def m07_backfill_lecture_video_content_lengths() -> None:
+    async def _m07_backfill_lecture_video_content_lengths() -> None:
+        async with config.db.driver.async_session() as session:
+            logger.info("Backfilling lecture video content lengths...")
+            updated = await backfill_lecture_video_content_lengths(session)
+            await session.commit()
+            logger.info(
+                "Done! Backfilled content lengths for %s lecture video stored objects.",
+                updated,
+            )
+
+    asyncio.run(_m07_backfill_lecture_video_content_lengths())
 
 
 @db.command("m02_remove_responses_threads")

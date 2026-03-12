@@ -27,6 +27,7 @@ from pydantic import (
     Field,
     HttpUrl,
     SecretStr,
+    ValidationError,
     computed_field,
     field_validator,
     model_validator,
@@ -422,6 +423,24 @@ class InteractionMode(StrEnum):
     LECTURE_VIDEO = "lecture_video"
 
 
+class LectureVideoStatus(StrEnum):
+    UPLOADED = "uploaded"
+    PROCESSING = "processing"
+    READY = "ready"
+    FAILED = "failed"
+
+
+class LectureVideoQuestionType(StrEnum):
+    SINGLE_SELECT = "single_select"
+
+
+class LectureVideoNarrationStatus(StrEnum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    READY = "ready"
+    FAILED = "failed"
+
+
 class AnonymousLink(BaseModel):
     id: int
     name: str | None
@@ -437,6 +456,68 @@ class AnonymousLinkResponse(BaseModel):
     model_config = ConfigDict(
         from_attributes=True,
     )
+
+
+class LectureVideoManifestOptionV1(BaseModel):
+    option_text: str = Field(..., min_length=1)
+    post_answer_text: str
+    continue_offset_ms: int = Field(..., ge=0)
+    correct: bool
+
+
+class LectureVideoManifestQuestionV1(BaseModel):
+    type: LectureVideoQuestionType
+    question_text: str = Field(..., min_length=1)
+    intro_text: str
+    stop_offset_ms: int = Field(..., ge=0)
+    options: list[LectureVideoManifestOptionV1] = Field(..., min_length=2)
+
+    @model_validator(mode="after")
+    def validate_options(self):
+        correct_count = sum(1 for option in self.options if option.correct)
+        if correct_count != 1:
+            raise ValueError(
+                "Single-select questions must have exactly one correct option."
+            )
+        return self
+
+
+class LectureVideoManifestV1(BaseModel):
+    version: Literal[1]
+    questions: list[LectureVideoManifestQuestionV1] = Field(..., min_length=1)
+
+
+def _lecture_video_manifest_error_detail(exc: ValidationError) -> str:
+    errors = []
+    for error in exc.errors():
+        loc = ".".join(str(part) for part in error["loc"])
+        errors.append(f"{loc}: {error['msg']}")
+    return "; ".join(errors)
+
+
+def _validate_lecture_video_manifest(
+    lecture_video_manifest: LectureVideoManifestV1 | Any | None,
+) -> LectureVideoManifestV1 | None:
+    if lecture_video_manifest is None or isinstance(
+        lecture_video_manifest, LectureVideoManifestV1
+    ):
+        return lecture_video_manifest
+    try:
+        return LectureVideoManifestV1.model_validate(lecture_video_manifest)
+    except ValidationError as exc:
+        raise ValueError(
+            "Invalid lecture video manifest. "
+            f"{_lecture_video_manifest_error_detail(exc)}"
+        ) from exc
+
+
+class LectureVideoSummary(BaseModel):
+    id: int
+    filename: str
+    size: int
+    content_type: str
+    status: LectureVideoStatus
+    error_message: str | None = None
 
 
 class Assistant(BaseModel):
@@ -473,7 +554,7 @@ class Assistant(BaseModel):
     endorsed: bool | None = None
     created: datetime
     updated: datetime | None
-    lecture_video_key: str | None = None
+    lecture_video: LectureVideoSummary | None = None
     share_links: list[AnonymousLink] | None = None
 
     model_config = ConfigDict(
@@ -606,7 +687,8 @@ class CreateAssistant(BaseModel):
     reasoning_effort: int | None = Field(None, ge=-1, le=2)
     verbosity: int | None = Field(None, ge=0, le=2)
     tools: list[ToolOption] = Field(default_factory=list)
-    lecture_video_key: str | None = None
+    lecture_video_id: int | None = None
+    lecture_video_manifest: LectureVideoManifestV1 | None = None
     published: bool = False
     use_latex: bool = False
     use_image_descriptions: bool = False
@@ -625,6 +707,11 @@ class CreateAssistant(BaseModel):
     deleted_private_files: list[int] = []
     create_classic_assistant: bool = False
     mcp_servers: list[MCPServerToolInput] = []
+
+    @field_validator("lecture_video_manifest", mode="before")
+    @classmethod
+    def validate_lecture_video_manifest(cls, value):
+        return _validate_lecture_video_manifest(value)
 
     _temperature_check = model_validator(mode="after")(temperature_validator)
     _lecture_video_check = model_validator(mode="after")(
@@ -666,7 +753,8 @@ class UpdateAssistant(BaseModel):
     description: str | None = None
     notes: str | None = None
     interaction_mode: InteractionMode | None = None
-    lecture_video_key: str | None = None
+    lecture_video_id: int | None = None
+    lecture_video_manifest: LectureVideoManifestV1 | None = None
     model: str | None = Field(None, min_length=2)
     temperature: float | None = Field(None, ge=0.0, le=2.0)
     reasoning_effort: int | None = Field(None, ge=-1, le=2)
@@ -690,6 +778,11 @@ class UpdateAssistant(BaseModel):
     convert_to_next_gen: bool | None = None
     deleted_private_files: list[int] = []
     mcp_servers: list[MCPServerToolInput] | None = None
+
+    @field_validator("lecture_video_manifest", mode="before")
+    @classmethod
+    def validate_lecture_video_manifest(cls, value):
+        return _validate_lecture_video_manifest(value)
 
     _temperature_check = model_validator(mode="after")(temperature_validator)
     _lecture_video_check = model_validator(mode="after")(

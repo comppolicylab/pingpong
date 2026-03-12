@@ -296,6 +296,13 @@ async def copy_assistant(
             session, client, cli, target_class_id, assistant.vector_store_id
         )
 
+    new_lecture_video_id = None
+    if assistant.lecture_video:
+        cloned_lecture_video = await models.LectureVideo.clone_for_class(
+            session, assistant.lecture_video, target_class_id
+        )
+        new_lecture_video_id = cloned_lecture_video.id
+
     if assistant.version <= 2:
         tool_resources: ToolResources = {}
         if new_vector_store_obj_id:
@@ -323,6 +330,7 @@ async def copy_assistant(
         assistant_should_message_first=assistant.assistant_should_message_first,
         class_id=target_class_id,
         vector_store_id=new_vector_store_id,
+        lecture_video_id=new_lecture_video_id,
         creator_id=assistant.creator_id,
         published=None if force_private else assistant.published,
         should_record_user_information=assistant.should_record_user_information,

@@ -1918,43 +1918,447 @@ assistant_link_association = Table(
 )
 
 
+class LectureVideoStoredObject(Base):
+    __tablename__ = "lecture_video_stored_objects"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    key = Column(String, nullable=False, unique=True)
+    original_filename = Column(String, nullable=False)
+    content_type = Column(String, nullable=False)
+    content_length = Column(Integer, nullable=False, server_default="0")
+    lecture_videos = relationship("LectureVideo", back_populates="stored_object")
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
+
+    @classmethod
+    async def create(
+        cls,
+        session: AsyncSession,
+        *,
+        key: str,
+        original_filename: str,
+        content_type: str,
+        content_length: int,
+    ) -> "LectureVideoStoredObject":
+        stored_object = LectureVideoStoredObject(
+            key=key,
+            original_filename=original_filename,
+            content_type=content_type,
+            content_length=content_length,
+        )
+        session.add(stored_object)
+        await session.flush()
+        await session.refresh(stored_object)
+        return stored_object
+
+
+class LectureVideoNarrationStoredObject(Base):
+    __tablename__ = "lecture_video_narration_stored_objects"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    key = Column(String, nullable=False, unique=True)
+    content_type = Column(String, nullable=False)
+    content_length = Column(Integer, nullable=False, server_default="0")
+    narrations = relationship("LectureVideoNarration", back_populates="stored_object")
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
+
+
+lecture_video_question_correct_option_association = Table(
+    "lecture_video_question_correct_options",
+    Base.metadata,
+    Column(
+        "question_id",
+        Integer,
+        ForeignKey("lecture_video_questions.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column(
+        "option_id",
+        Integer,
+        ForeignKey("lecture_video_question_options.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Index(
+        "lecture_video_question_correct_option_idx",
+        "question_id",
+        "option_id",
+        unique=True,
+    ),
+)
+
+
 class LectureVideo(Base):
     __tablename__ = "lecture_videos"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    # Uploads are class-scoped because upload does not require an assistant to exist yet.
+    class_id = Column(Integer, ForeignKey("classes.id"), nullable=True, index=True)
+    class_ = relationship("Class", back_populates="lecture_videos")
+    stored_object_id = Column(
+        Integer,
+        ForeignKey(
+            "lecture_video_stored_objects.id",
+            name="fk_lecture_videos_stored_object_id_lecture_video_stored_object",
+        ),
+        nullable=False,
+    )
+    stored_object = relationship(
+        "LectureVideoStoredObject", back_populates="lecture_videos", uselist=False
+    )
     assistants = relationship("Assistant", back_populates="lecture_video")
     threads = relationship("Thread", back_populates="lecture_video")
-    key = Column(String, nullable=False, unique=True)
-    name = Column(String)
+    questions = relationship(
+        "LectureVideoQuestion",
+        back_populates="lecture_video",
+        cascade="all, delete-orphan",
+        order_by="LectureVideoQuestion.position",
+    )
+    display_name = Column(String)
+    status = Column(
+        String,
+        nullable=False,
+        server_default=schemas.LectureVideoStatus.UPLOADED.value,
+    )
+    error_message = Column(String, nullable=True)
     uploader_id = Column(Integer, ForeignKey("users.id"), nullable=True, default=None)
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
 
     @classmethod
     async def create(
-        cls, session: AsyncSession, key: str, user_id: int
+        cls,
+        session: AsyncSession,
+        *,
+        class_id: int | None,
+        stored_object_id: int,
+        user_id: int | None,
+        status: str = schemas.LectureVideoStatus.UPLOADED.value,
+        error_message: str | None = None,
     ) -> "LectureVideo":
-        stmt = (
-            _get_upsert_stmt(session)(LectureVideo)
-            .values(
-                key=key,
-                uploader_id=user_id,
-            )
-            .on_conflict_do_update(index_elements=["key"], set_=dict(key=key))
-            .returning(LectureVideo)
+        lecture_video = LectureVideo(
+            class_id=class_id,
+            stored_object_id=stored_object_id,
+            status=status,
+            error_message=error_message,
+            uploader_id=user_id,
         )
-        result = await session.scalar(stmt)
-        return result
+        session.add(lecture_video)
+        await session.flush()
+        await session.refresh(lecture_video)
+        return lecture_video
 
     @classmethod
-    async def delete(cls, session: AsyncSession, id_: int) -> None:
-        stmt = delete(LectureVideo).where(LectureVideo.id == id_)
-        await session.execute(stmt)
-
-    @classmethod
-    async def get_by_key(cls, session: AsyncSession, key: str) -> "LectureVideo | None":
-        stmt = select(LectureVideo).where(LectureVideo.key == key)
+    async def get_by_key(
+        cls, session: AsyncSession, key: str
+    ) -> Optional["LectureVideo"]:
+        stmt = (
+            select(LectureVideo)
+            .join(LectureVideo.stored_object)
+            .where(LectureVideoStoredObject.key == key)
+            .options(selectinload(LectureVideo.stored_object))
+        )
         return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_id(
+        cls, session: AsyncSession, id_: int
+    ) -> Optional["LectureVideo"]:
+        stmt = (
+            select(LectureVideo)
+            .where(LectureVideo.id == id_)
+            .options(selectinload(LectureVideo.stored_object))
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_id_for_class(
+        cls, session: AsyncSession, id_: int, class_id: int
+    ) -> Optional["LectureVideo"]:
+        stmt = (
+            select(LectureVideo)
+            .where(LectureVideo.id == id_, LectureVideo.class_id == class_id)
+            .options(selectinload(LectureVideo.stored_object))
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_id_with_copy_context(
+        cls, session: AsyncSession, id_: int
+    ) -> Optional["LectureVideo"]:
+        stmt = (
+            select(LectureVideo)
+            .where(LectureVideo.id == id_)
+            .options(selectinload(LectureVideo.stored_object))
+            .options(
+                selectinload(LectureVideo.questions).selectinload(
+                    LectureVideoQuestion.options
+                )
+            )
+            .options(
+                selectinload(LectureVideo.questions).selectinload(
+                    LectureVideoQuestion.correct_options
+                )
+            )
+            .options(
+                selectinload(LectureVideo.questions)
+                .selectinload(LectureVideoQuestion.intro_narration)
+                .selectinload(LectureVideoNarration.stored_object)
+            )
+            .options(
+                selectinload(LectureVideo.questions)
+                .selectinload(LectureVideoQuestion.options)
+                .selectinload(LectureVideoQuestionOption.post_narration)
+                .selectinload(LectureVideoNarration.stored_object)
+            )
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def clear_normalized_content(
+        cls, session: AsyncSession, lecture_video_id: int
+    ) -> None:
+        intro_narration_ids = list(
+            (
+                await session.scalars(
+                    select(LectureVideoQuestion.intro_narration_id).where(
+                        LectureVideoQuestion.lecture_video_id == lecture_video_id,
+                        LectureVideoQuestion.intro_narration_id.is_not(None),
+                    )
+                )
+            ).all()
+        )
+        post_narration_ids = list(
+            (
+                await session.scalars(
+                    select(LectureVideoQuestionOption.post_narration_id)
+                    .join(
+                        LectureVideoQuestion,
+                        LectureVideoQuestion.id
+                        == LectureVideoQuestionOption.question_id,
+                    )
+                    .where(
+                        LectureVideoQuestion.lecture_video_id == lecture_video_id,
+                        LectureVideoQuestionOption.post_narration_id.is_not(None),
+                    )
+                )
+            ).all()
+        )
+        question_ids = select(LectureVideoQuestion.id).where(
+            LectureVideoQuestion.lecture_video_id == lecture_video_id
+        )
+        narration_ids = [*intro_narration_ids, *post_narration_ids]
+        await session.execute(
+            delete(lecture_video_question_correct_option_association).where(
+                lecture_video_question_correct_option_association.c.question_id.in_(
+                    question_ids
+                )
+            )
+        )
+        await session.execute(
+            delete(LectureVideoQuestionOption).where(
+                LectureVideoQuestionOption.question_id.in_(question_ids)
+            )
+        )
+        await session.execute(
+            delete(LectureVideoQuestion).where(
+                LectureVideoQuestion.lecture_video_id == lecture_video_id
+            )
+        )
+        if narration_ids:
+            await session.execute(
+                delete(LectureVideoNarration).where(
+                    LectureVideoNarration.id.in_(narration_ids)
+                )
+            )
+
+    @classmethod
+    async def clone_for_class(
+        cls, session: AsyncSession, lecture_video: "LectureVideo", target_class_id: int
+    ) -> "LectureVideo":
+        new_lecture_video = await LectureVideo.create(
+            session,
+            class_id=target_class_id,
+            stored_object_id=lecture_video.stored_object_id,
+            user_id=lecture_video.uploader_id,
+            status=lecture_video.status,
+            error_message=lecture_video.error_message,
+        )
+
+        option_map: dict[int, LectureVideoQuestionOption] = {}
+
+        for question in sorted(lecture_video.questions, key=lambda item: item.position):
+            intro_narration = None
+            if question.intro_narration:
+                intro_narration = LectureVideoNarration(
+                    stored_object_id=question.intro_narration.stored_object_id,
+                    status=question.intro_narration.status,
+                    error_message=question.intro_narration.error_message,
+                )
+                session.add(intro_narration)
+                await session.flush()
+
+            new_question = LectureVideoQuestion(
+                lecture_video_id=new_lecture_video.id,
+                position=question.position,
+                question_type=question.question_type,
+                question_text=question.question_text,
+                intro_text=question.intro_text,
+                stop_offset_ms=question.stop_offset_ms,
+                intro_narration_id=intro_narration.id if intro_narration else None,
+            )
+            session.add(new_question)
+            await session.flush()
+
+            for option in sorted(question.options, key=lambda item: item.position):
+                post_narration = None
+                if option.post_narration:
+                    post_narration = LectureVideoNarration(
+                        stored_object_id=option.post_narration.stored_object_id,
+                        status=option.post_narration.status,
+                        error_message=option.post_narration.error_message,
+                    )
+                    session.add(post_narration)
+                    await session.flush()
+
+                new_option = LectureVideoQuestionOption(
+                    question_id=new_question.id,
+                    position=option.position,
+                    option_text=option.option_text,
+                    post_answer_text=option.post_answer_text,
+                    continue_offset_ms=option.continue_offset_ms,
+                    post_narration_id=post_narration.id if post_narration else None,
+                )
+                session.add(new_option)
+                await session.flush()
+                option_map[option.id] = new_option
+
+            for correct_option in question.correct_options:
+                await session.execute(
+                    lecture_video_question_correct_option_association.insert().values(
+                        question_id=new_question.id,
+                        option_id=option_map[correct_option.id].id,
+                    )
+                )
+
+        await session.flush()
+        await session.refresh(new_lecture_video)
+        return new_lecture_video
+
+
+class LectureVideoQuestion(Base):
+    __tablename__ = "lecture_video_questions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    lecture_video_id = Column(
+        Integer, ForeignKey("lecture_videos.id", ondelete="CASCADE"), nullable=False
+    )
+    position = Column(Integer, nullable=False)
+    question_type = Column(SQLEnum(schemas.LectureVideoQuestionType), nullable=False)
+    question_text = Column(String, nullable=False)
+    intro_text = Column(String, nullable=False)
+    stop_offset_ms = Column(Integer, nullable=False)
+    intro_narration_id = Column(
+        Integer,
+        ForeignKey(
+            "lecture_video_narrations.id",
+            ondelete="SET NULL",
+            name="fk_lv_questions_intro_narration_id",
+        ),
+        nullable=True,
+        unique=True,
+    )
+    lecture_video = relationship("LectureVideo", back_populates="questions")
+    options = relationship(
+        "LectureVideoQuestionOption",
+        back_populates="question",
+        cascade="all, delete-orphan",
+        order_by="LectureVideoQuestionOption.position",
+    )
+    correct_options = relationship(
+        "LectureVideoQuestionOption",
+        secondary=lecture_video_question_correct_option_association,
+        order_by="LectureVideoQuestionOption.position",
+    )
+    intro_narration = relationship(
+        "LectureVideoNarration",
+        foreign_keys=[intro_narration_id],
+        uselist=False,
+    )
+
+    __table_args__ = (
+        Index(
+            "lecture_video_question_position_idx",
+            "lecture_video_id",
+            "position",
+            unique=True,
+        ),
+    )
+
+
+class LectureVideoQuestionOption(Base):
+    __tablename__ = "lecture_video_question_options"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    question_id = Column(
+        Integer,
+        ForeignKey("lecture_video_questions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    position = Column(Integer, nullable=False)
+    option_text = Column(String, nullable=False)
+    post_answer_text = Column(String, nullable=False)
+    continue_offset_ms = Column(Integer, nullable=False)
+    post_narration_id = Column(
+        Integer,
+        ForeignKey(
+            "lecture_video_narrations.id",
+            ondelete="SET NULL",
+            name="fk_lv_question_options_post_narration_id",
+        ),
+        nullable=True,
+        unique=True,
+    )
+    question = relationship("LectureVideoQuestion", back_populates="options")
+    post_narration = relationship(
+        "LectureVideoNarration",
+        foreign_keys=[post_narration_id],
+        uselist=False,
+    )
+
+    __table_args__ = (
+        Index(
+            "lecture_video_question_option_position_idx",
+            "question_id",
+            "position",
+            unique=True,
+        ),
+    )
+
+
+class LectureVideoNarration(Base):
+    __tablename__ = "lecture_video_narrations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    stored_object_id = Column(
+        Integer,
+        ForeignKey(
+            "lecture_video_narration_stored_objects.id",
+            name="fk_lv_narrations_stored_object_id",
+        ),
+        nullable=True,
+    )
+    stored_object = relationship(
+        "LectureVideoNarrationStoredObject",
+        back_populates="narrations",
+        uselist=False,
+    )
+    status = Column(
+        String,
+        nullable=False,
+        server_default=schemas.LectureVideoNarrationStatus.PENDING.value,
+    )
+    error_message = Column(String, nullable=True)
 
 
 class S3File(Base):
@@ -2854,6 +3258,7 @@ class Assistant(Base):
         ForeignKey(
             "lecture_videos.id", name="fk_assistants_lecture_video_id_lecture_video"
         ),
+        unique=True,
     )
     lecture_video = relationship(
         "LectureVideo", back_populates="assistants", uselist=False
@@ -2896,8 +3301,25 @@ class Assistant(Base):
         stmt = (
             select(Assistant)
             .where(Assistant.id == int(id_))
-            .options(selectinload(Assistant.lecture_video))
+            .options(
+                selectinload(Assistant.lecture_video).selectinload(
+                    LectureVideo.stored_object
+                )
+            )
         )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_lecture_video_id(
+        cls,
+        session: AsyncSession,
+        lecture_video_id: int,
+        *,
+        exclude_assistant_id: int | None = None,
+    ) -> Optional["Assistant"]:
+        stmt = select(Assistant).where(Assistant.lecture_video_id == lecture_video_id)
+        if exclude_assistant_id is not None:
+            stmt = stmt.where(Assistant.id != exclude_assistant_id)
         return await session.scalar(stmt)
 
     @classmethod
@@ -2924,6 +3346,58 @@ class Assistant(Base):
             .where(Assistant.id == int(id_))
             .options(selectinload(Assistant.code_interpreter_files))
             .options(selectinload(Assistant.mcp_server_tools))
+            .options(
+                selectinload(Assistant.lecture_video).selectinload(
+                    LectureVideo.stored_object
+                )
+            )
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_id_with_copy_context(
+        cls, session: AsyncSession, id_: int | None
+    ) -> Optional["Assistant"]:
+        if not id_:
+            return None
+        stmt = (
+            select(Assistant)
+            .where(Assistant.id == int(id_))
+            .options(selectinload(Assistant.code_interpreter_files))
+            .options(selectinload(Assistant.mcp_server_tools))
+            .options(
+                selectinload(Assistant.lecture_video).selectinload(
+                    LectureVideo.stored_object
+                )
+            )
+            .options(
+                selectinload(Assistant.lecture_video).selectinload(
+                    LectureVideo.questions
+                )
+            )
+            .options(
+                selectinload(Assistant.lecture_video)
+                .selectinload(LectureVideo.questions)
+                .selectinload(LectureVideoQuestion.options)
+            )
+            .options(
+                selectinload(Assistant.lecture_video)
+                .selectinload(LectureVideo.questions)
+                .selectinload(LectureVideoQuestion.correct_options)
+            )
+            .options(
+                selectinload(Assistant.lecture_video)
+                .selectinload(LectureVideo.questions)
+                .selectinload(LectureVideoQuestion.intro_narration)
+                .selectinload(LectureVideoNarration.stored_object)
+            )
+            .options(
+                selectinload(Assistant.lecture_video)
+                .selectinload(LectureVideo.questions)
+                .selectinload(LectureVideoQuestion.options)
+                .selectinload(LectureVideoQuestionOption.post_narration)
+                .selectinload(LectureVideoNarration.stored_object)
+            )
         )
         return await session.scalar(stmt)
 
@@ -2942,7 +3416,11 @@ class Assistant(Base):
         stmt = (
             select(Assistant)
             .where(Assistant.class_id == int(class_id))
-            .options(selectinload(Assistant.lecture_video))
+            .options(
+                selectinload(Assistant.lecture_video).selectinload(
+                    LectureVideo.stored_object
+                )
+            )
         )
         result = await session.execute(stmt)
         return [row.Assistant for row in result]
@@ -2992,8 +3470,10 @@ class Assistant(Base):
         lecture_video_id: int | None = None,
         version: int = 1,
     ) -> "Assistant":
-        params = data.dict()
+        params = data.model_dump()
         code_interpreter_file_ids = params.pop("code_interpreter_file_ids", [])
+        params.pop("lecture_video_id", None)
+        params.pop("lecture_video_manifest", None)
         params["tools"] = json.dumps(params["tools"])
         params["class_id"] = int(class_id)
         params["creator_id"] = int(user_id)
@@ -3614,6 +4094,7 @@ class Class(Base):
         "Assistant",
         back_populates="class_",
     )
+    lecture_videos = relationship("LectureVideo", back_populates="class_")
     term = Column(String)
     api_key = Column(String, nullable=True)
     api_key_id = Column(Integer, ForeignKey("api_keys.id"), nullable=True)

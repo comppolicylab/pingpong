@@ -224,6 +224,7 @@ class UploadSettings(BaseSettings):
 
     private_file_max_size: int = Field(512 * 1024 * 1024)  # 512 MB
     class_file_max_size: int = Field(512 * 1024 * 1024)  # 512 MB
+    lecture_video_max_size: int = Field(512 * 1024 * 1024)  # 512 MB
 
 
 class S3StoreSettings(BaseSettings):
@@ -659,6 +660,9 @@ class Config(BaseSettings):
     )
     audio_store: AudioStoreSettings = LocalAudioStoreSettings(
         save_target="local_exports/voice_mode_recordings"
+    )
+    lecture_video_audio_store: AudioStoreSettings = LocalAudioStoreSettings(
+        save_target="local_exports/lecture_video_narrations"
     )
     video_store: VideoStoreSettings | None = Field(None)
     db: DbSettings

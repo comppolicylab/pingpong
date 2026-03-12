@@ -89,6 +89,8 @@ import pingpong.metrics as metrics
 import pingpong.models as models
 import pingpong.schemas as schemas
 from .auth import TimeException, authn_method_for_email
+from . import assistant_service
+from . import lecture_video_service
 from .template import email_template as message_template
 from .time import convert_seconds
 from .saml import get_saml2_client, get_saml2_settings, get_saml2_attrs
@@ -3925,8 +3927,8 @@ async def get_thread_video(
             detail="This thread's lecture video no longer matches the assistant configuration.",
         )
 
-    lecture_video = await request.state["db"].get(
-        models.LectureVideo, thread.lecture_video_id
+    lecture_video = await models.LectureVideo.get_by_id(
+        request.state["db"], thread.lecture_video_id
     )
     if not lecture_video:
         raise HTTPException(
@@ -3935,7 +3937,9 @@ async def get_thread_video(
         )
 
     try:
-        metadata = await config.video_store.store.get_video_metadata(lecture_video.key)
+        metadata = await config.video_store.store.get_video_metadata(
+            lecture_video.stored_object.key
+        )
     except VideoStoreError as e:
         raise HTTPException(
             status_code=400,
@@ -3969,7 +3973,7 @@ async def get_thread_video(
     try:
         stream = await prefetch_stream(
             config.video_store.store.stream_video_range(
-                key=lecture_video.key,
+                key=lecture_video.stored_object.key,
                 start=start,
                 end=end,
             ),
@@ -5729,6 +5733,11 @@ async def create_lecture_thread(
             status_code=400,
             detail="This assistant does not have a lecture video attached. Unable to create Lecture Presentation",
         )
+    if assistant.lecture_video.status != schemas.LectureVideoStatus.READY.value:
+        raise HTTPException(
+            status_code=409,
+            detail="This assistant's lecture video is not ready yet.",
+        )
 
     lecture_video_id = assistant.lecture_video_id
 
@@ -7392,6 +7401,109 @@ async def create_user_file(
     )
 
 
+@v1.post(
+    "/class/{class_id}/lecture-video",
+    dependencies=[Depends(Authz("admin", "class:{class_id}"))],
+    response_model=schemas.LectureVideoSummary,
+)
+async def create_lecture_video(
+    class_id: str,
+    request: StateRequest,
+    upload: UploadFile,
+):
+    # Uploads are class-scoped because upload does not require an assistant to exist yet.
+    lecture_video = await lecture_video_service.create_lecture_video(
+        request.state["db"],
+        class_id=int(class_id),
+        uploader_id=request.state["session"].user.id,
+        upload=upload,
+    )
+    return await lecture_video_service.lecture_video_summary_from_model(
+        request.state["db"], lecture_video
+    )
+
+
+@v1.post(
+    "/class/{class_id}/assistant/{assistant_id}/lecture-video",
+    dependencies=[Depends(Authz("can_edit", "assistant:{assistant_id}"))],
+    response_model=schemas.LectureVideoSummary,
+)
+async def create_assistant_lecture_video(
+    class_id: str,
+    assistant_id: str,
+    request: StateRequest,
+    upload: UploadFile,
+):
+    await lecture_video_service.get_lecture_video_assistant_for_class(
+        request.state["db"], int(assistant_id), int(class_id)
+    )
+    lecture_video = await lecture_video_service.create_lecture_video(
+        request.state["db"],
+        class_id=int(class_id),
+        uploader_id=request.state["session"].user.id,
+        upload=upload,
+    )
+    return await lecture_video_service.lecture_video_summary_from_model(
+        request.state["db"], lecture_video
+    )
+
+
+@v1.delete(
+    "/class/{class_id}/lecture-video/{lecture_video_id}",
+    dependencies=[Depends(Authz("admin", "class:{class_id}"))],
+    response_model=schemas.GenericStatus,
+)
+async def delete_lecture_video(
+    class_id: str, lecture_video_id: str, request: StateRequest
+):
+    lecture_video = await models.LectureVideo.get_by_id_for_class(
+        request.state["db"], int(lecture_video_id), int(class_id)
+    )
+    if lecture_video is None:
+        raise HTTPException(404, "Lecture video not found.")
+
+    lecture_video_service.ensure_lecture_video_uploaded_by_user(
+        lecture_video, request.state["session"].user.id
+    )
+    await lecture_video_service.ensure_lecture_video_is_unused(
+        request.state["db"], lecture_video.id
+    )
+    await lecture_video_service.delete_lecture_video(
+        request.state["db"], lecture_video.id
+    )
+    return {"status": "ok"}
+
+
+@v1.delete(
+    "/class/{class_id}/assistant/{assistant_id}/lecture-video/{lecture_video_id}",
+    dependencies=[Depends(Authz("can_edit", "assistant:{assistant_id}"))],
+    response_model=schemas.GenericStatus,
+)
+async def delete_assistant_lecture_video(
+    class_id: str, assistant_id: str, lecture_video_id: str, request: StateRequest
+):
+    await lecture_video_service.get_lecture_video_assistant_for_class(
+        request.state["db"], int(assistant_id), int(class_id)
+    )
+
+    lecture_video = await models.LectureVideo.get_by_id_for_class(
+        request.state["db"], int(lecture_video_id), int(class_id)
+    )
+    if lecture_video is None:
+        raise HTTPException(404, "Lecture video not found.")
+
+    lecture_video_service.ensure_lecture_video_uploaded_by_user(
+        lecture_video, request.state["session"].user.id
+    )
+    await lecture_video_service.ensure_lecture_video_is_unused(
+        request.state["db"], lecture_video.id
+    )
+    await lecture_video_service.delete_lecture_video(
+        request.state["db"], lecture_video.id
+    )
+    return {"status": "ok"}
+
+
 @v1.delete(
     "/class/{class_id}/file/{file_id}",
     dependencies=[Depends(Authz("can_delete", "class_file:{file_id}"))],
@@ -7517,19 +7629,15 @@ async def list_assistants(class_id: str, request: StateRequest):
         f"class:{class_id}",
     )
     for asst, has_elevated_permissions in zip(assts, has_elevated_perm_check):
-        cur_asst = schemas.Assistant.model_validate(asst)
+        cur_asst = await assistant_service.assistant_response_from_model(
+            request.state["db"], asst
+        )
 
         if not has_elevated_permissions:
             cur_asst.notes = None
 
             if asst.hide_prompt:
                 cur_asst.instructions = ""
-
-        if (
-            asst.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
-            and asst.lecture_video is not None
-        ):
-            cur_asst.lecture_video_key = asst.lecture_video.key
 
         # For now, "endorsed" creators are published assistants that were
         # created by a teacher or admin.
@@ -7800,6 +7908,39 @@ async def create_assistant(
     vector_store_object_id = None
     uses_voice = req.interaction_mode == schemas.InteractionMode.VOICE
     is_video = req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
+    lecture_video_object_id = None
+    lecture_video_manifest = None
+
+    if is_video:
+        if req.lecture_video_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Specifying a lecture_video_id is required for lecture video assistants.",
+            )
+        if req.lecture_video_manifest is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Specifying a lecture_video_manifest is required for lecture video assistants.",
+            )
+
+        lecture_video = await models.LectureVideo.get_by_id_for_class(
+            request.state["db"], req.lecture_video_id, class_id_int
+        )
+        if not lecture_video:
+            raise HTTPException(
+                status_code=404,
+                detail="Could not find the lecture video you specified. Please try again.",
+            )
+        await lecture_video_service.ensure_lecture_video_is_unassigned(
+            request.state["db"], lecture_video.id
+        )
+        lecture_video_object_id = lecture_video.id
+        lecture_video_manifest = req.lecture_video_manifest
+    elif req.lecture_video_id is not None or req.lecture_video_manifest is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Lecture video data can only be set for assistants in Lecture Video mode.",
+        )
 
     if req.file_search_file_ids:
         if len(req.file_search_file_ids) > 1000:
@@ -7830,39 +7971,6 @@ async def create_assistant(
                 detail="Code interpreter is not supported in Voice mode.",
             )
         tool_resources["code_interpreter"] = {"file_ids": req.code_interpreter_file_ids}
-
-    lecture_video_object_id = None
-    if is_video:
-        if not req.lecture_video_key:
-            raise HTTPException(
-                status_code=400,
-                detail="Specifying a lecture video is required for lecture video assistants.",
-            )
-        if not config.video_store:
-            raise HTTPException(status_code=404, detail="No Video Store exists.")
-
-        try:
-            lecture_video = await config.video_store.store.get_or_create(
-                request.state["db"],
-                req.lecture_video_key,
-                request.state["session"].user.id,
-            )
-        except VideoStoreError as e:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Error saving lecture video: {e.detail or str(e)}",
-            ) from e
-        except TypeError as e:
-            raise HTTPException(
-                status_code=400, detail=f"Invalid lecture video: {e}"
-            ) from e
-        except Exception as e:
-            logger.exception("Unexpected error saving lecture video")
-            raise HTTPException(
-                status_code=500,
-                detail="An unexpected error occurred while saving the lecture video. Please try again later.",
-            ) from e
-        lecture_video_object_id = lecture_video.id
 
     if assistant_version <= 2:
         try:
@@ -7935,7 +8043,8 @@ async def create_assistant(
         del req.deleted_private_files
         mcp_servers_input = req.mcp_servers or []
         del req.mcp_servers
-        del req.lecture_video_key
+        del req.lecture_video_id
+        del req.lecture_video_manifest
 
         asst = await models.Assistant.create(
             request.state["db"],
@@ -7947,6 +8056,12 @@ async def create_assistant(
             lecture_video_id=lecture_video_object_id,
             version=assistant_version,
         )
+
+        if is_video and lecture_video_manifest is not None:
+            assert lecture_video is not None  # for mypy
+            await lecture_video_service.persist_manifest(
+                request.state["db"], lecture_video, lecture_video_manifest
+            )
 
         # Delete private files uploaded but not attached to the assistant
         files_to_delete = await models.File.get_files_not_used_by_assistant(
@@ -8020,8 +8135,12 @@ async def create_assistant(
             )
 
         await request.state["authz"].write(grant=grants)
-
-        return asst
+        loaded_assistant = await models.Assistant.get_by_id_with_lecture_video(
+            request.state["db"], asst.id
+        )
+        return await assistant_service.assistant_response_from_model(
+            request.state["db"], loaded_assistant or asst
+        )
     except Exception as e:
         if vector_store_object_id:
             await openai_client.vector_stores.delete(vector_store_id)
@@ -8077,7 +8196,7 @@ async def copy_assistant(
     openai_client: OpenAIClient,
     copy_options: schemas.CopyAssistantRequest | None = Body(default=None),
 ):
-    assistant = await models.Assistant.get_by_id_with_ci_files_mcp(
+    assistant = await models.Assistant.get_by_id_with_copy_context(
         request.state["db"], int(assistant_id)
     )
     class_id_int = int(class_id)
@@ -8165,7 +8284,12 @@ async def copy_assistant(
     )
     if not new_assistant:
         raise HTTPException(status_code=400, detail="Assistant could not be copied.")
-    return new_assistant
+    loaded_assistant = await models.Assistant.get_by_id_with_lecture_video(
+        request.state["db"], new_assistant.id
+    )
+    return await assistant_service.assistant_response_from_model(
+        request.state["db"], loaded_assistant or new_assistant
+    )
 
 
 @v1.post(
@@ -8442,8 +8566,10 @@ async def update_assistant(
                 detail="You are not allowed to toggle the published status of assistants for this class.",
             )
 
-    if not req.model_dump():
-        return asst
+    if not req.model_fields_set:
+        return await assistant_service.assistant_response_from_model(
+            request.state["db"], asst
+        )
 
     interaction_mode = (
         req.interaction_mode
@@ -8490,6 +8616,12 @@ async def update_assistant(
     update_instructions = False
     uses_voice = interaction_mode == schemas.InteractionMode.VOICE
     is_video = interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
+    lecture_video = asst.lecture_video
+    lecture_video_manifest = None
+    lecture_video_fields_present = (
+        "lecture_video_id" in req.model_fields_set
+        or "lecture_video_manifest" in req.model_fields_set
+    )
 
     # Prevent updating existing assistants to lecture video mode
     if is_video and asst.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
@@ -8504,6 +8636,35 @@ async def update_assistant(
             status_code=400,
             detail="Assistants in Lecture Video mode cannot be switched to another interaction mode. Please create a new assistant.",
         )
+
+    if lecture_video_fields_present:
+        if not is_video:
+            raise HTTPException(
+                status_code=400,
+                detail="Lecture video data can only be set for assistants in Lecture Video mode.",
+            )
+        if req.lecture_video_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Specifying a lecture_video_id is required when updating lecture video data.",
+            )
+        if req.lecture_video_manifest is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Specifying a lecture_video_manifest is required when updating lecture video data.",
+            )
+        lecture_video = await models.LectureVideo.get_by_id_for_class(
+            request.state["db"], req.lecture_video_id, int(class_id)
+        )
+        if not lecture_video:
+            raise HTTPException(
+                status_code=404,
+                detail="Could not find the lecture video you specified. Please try again.",
+            )
+        await lecture_video_service.ensure_lecture_video_is_unassigned(
+            request.state["db"], lecture_video.id, exclude_assistant_id=asst.id
+        )
+        lecture_video_manifest = req.lecture_video_manifest
     convert_to_next_gen_requested = (
         "convert_to_next_gen" in req.model_fields_set
         and req.convert_to_next_gen is not None
@@ -8660,42 +8821,6 @@ async def update_assistant(
                 detail=f"Model {_model} is not available for use in {interaction_mode.capitalize()} mode.",
             )
 
-    if (
-        "lecture_video_key" in req.model_fields_set
-        and req.lecture_video_key is not None
-    ):
-        if interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
-            raise HTTPException(
-                status_code=400,
-                detail="Lecture video key can only be set for assistants in Lecture Video mode.",
-            )
-
-        if not config.video_store:
-            raise HTTPException(status_code=404, detail="No Video Store exists.")
-
-        try:
-            lecture_video = await config.video_store.store.get_or_create(
-                request.state["db"],
-                req.lecture_video_key,
-                request.state["session"].user.id,
-            )
-        except VideoStoreError as e:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Error saving lecture video: {e.detail or str(e)}",
-            ) from e
-        except TypeError as e:
-            raise HTTPException(
-                status_code=400, detail=f"Invalid lecture video: {e}"
-            ) from e
-        except Exception as e:
-            logger.exception("Unexpected error saving lecture video")
-            raise HTTPException(
-                status_code=500,
-                detail="An unexpected error occurred while saving the lecture video. Please try again later.",
-            ) from e
-        asst.lecture_video_id = lecture_video.id
-
     reasoning_effort_map = (
         get_reasoning_effort_map(model_record.id) if model_record else {}
     )
@@ -8835,9 +8960,9 @@ async def update_assistant(
         else:
             uses_web_search = {"type": "web_search"} in req.tools
     else:
-        uses_web_search = (
-            asst.tools is not None and {"type": "web_search"} in asst.tools
-        )
+        uses_web_search = asst.tools is not None and {
+            "type": "web_search"
+        } in json.loads(asst.tools)
 
     if uses_web_search and asst.version <= 2:
         raise HTTPException(
@@ -8950,6 +9075,7 @@ async def update_assistant(
 
     # Track whether we have an empty vector store to delete
     vector_store_id_to_delete = None
+    lecture_video_id_to_delete = None
 
     try:
         # ------------------- Code Interpreter -------------------
@@ -9366,6 +9492,16 @@ async def update_assistant(
     if "name" in req.model_fields_set and req.name is not None:
         asst.name = req.name
 
+    if lecture_video_fields_present and lecture_video is not None:
+        if asst.lecture_video_id != lecture_video.id:
+            lecture_video_id_to_delete = asst.lecture_video_id
+        asst.lecture_video_id = lecture_video.id
+        if lecture_video_manifest is None:
+            raise HTTPException(400, "Lecture video manifest is required.")
+        await lecture_video_service.persist_manifest(
+            request.state["db"], lecture_video, lecture_video_manifest
+        )
+
     await models.Thread.update_tools_available(
         request.state["db"], asst.id, asst.tools, asst.version, asst.interaction_mode
     )
@@ -9473,7 +9609,16 @@ async def update_assistant(
             )
 
     await request.state["authz"].write_safe(grant=grants, revoke=revokes)
-    return asst
+    if lecture_video_id_to_delete is not None:
+        await lecture_video_service.delete_lecture_video_if_unused(
+            request.state["db"], lecture_video_id_to_delete
+        )
+    loaded_assistant = await models.Assistant.get_by_id_with_lecture_video(
+        request.state["db"], asst.id
+    )
+    return await assistant_service.assistant_response_from_model(
+        request.state["db"], loaded_assistant or asst
+    )
 
 
 def mcp_server_to_response(

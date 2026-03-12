@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 import pytest
@@ -185,6 +186,112 @@ async def test_s3_authenticated_invalid_content_type(monkeypatch):
 
     assert "Unsupported video format" in str(excinfo.value)
     assert "application/pdf" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_s3_put_uses_upload_fileobj(monkeypatch):
+    mock_client = AsyncMock()
+    mock_session = AsyncMock()
+
+    def mock_client_context(*args, **kwargs):
+        return AsyncContextManager(mock_client)
+
+    mock_session.client = mock_client_context
+
+    mock_session_class = Mock(return_value=mock_session)
+    monkeypatch.setattr("pingpong.video_store.aioboto3.Session", mock_session_class)
+
+    store = S3VideoStore(bucket="test-bucket", allow_unsigned=False)
+    content = BytesIO(b"video-bytes")
+
+    await store.put("test.mp4", content, "video/mp4")
+
+    mock_client.upload_fileobj.assert_awaited_once()
+    args, kwargs = mock_client.upload_fileobj.await_args
+    assert args[0] is content
+    assert args[1] == "test-bucket"
+    assert args[2] == "test.mp4"
+    assert kwargs["ExtraArgs"] == {"ContentType": "video/mp4"}
+    assert kwargs["Config"] is not None
+    assert kwargs["Config"].multipart_threshold == 8 * 1024 * 1024
+    assert kwargs["Config"].multipart_chunksize == 8 * 1024 * 1024
+    mock_client.put_object.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_s3_delete_uses_delete_object(monkeypatch):
+    mock_client = AsyncMock()
+    mock_session = AsyncMock()
+
+    def mock_client_context(*args, **kwargs):
+        return AsyncContextManager(mock_client)
+
+    mock_session.client = mock_client_context
+
+    mock_session_class = Mock(return_value=mock_session)
+    monkeypatch.setattr("pingpong.video_store.aioboto3.Session", mock_session_class)
+
+    store = S3VideoStore(bucket="test-bucket", allow_unsigned=False)
+    await store.delete("test.mp4")
+
+    mock_client.delete_object.assert_awaited_once_with(
+        Bucket="test-bucket", Key="test.mp4"
+    )
+
+
+@pytest.mark.asyncio
+async def test_local_put_writes_in_chunks(tmp_path):
+    class ChunkedContent:
+        def __init__(self, data: bytes):
+            self._data = data
+            self._pos = 0
+            self.read_sizes: list[int] = []
+
+        def seek(self, pos: int, whence: int = 0):
+            if whence == 0:
+                self._pos = pos
+            elif whence == 1:
+                self._pos += pos
+            elif whence == 2:
+                self._pos = len(self._data) + pos
+            return self._pos
+
+        def read(self, size: int = -1):
+            self.read_sizes.append(size)
+            if size == -1:
+                raise AssertionError(
+                    "LocalVideoStore.put should not read the whole file at once."
+                )
+            if self._pos >= len(self._data):
+                return b""
+            end = min(self._pos + size, len(self._data))
+            chunk = self._data[self._pos : end]
+            self._pos = end
+            return chunk
+
+    store = LocalVideoStore(str(tmp_path))
+    payload = b"a" * (LocalVideoStore._WRITE_CHUNK_SIZE + 123)
+    content = ChunkedContent(payload)
+
+    await store.put("chunked.mp4", content, "video/mp4")
+
+    assert (tmp_path / "chunked.mp4").read_bytes() == payload
+    assert content.read_sizes
+    assert all(
+        size == LocalVideoStore._WRITE_CHUNK_SIZE for size in content.read_sizes[:-1]
+    )
+    assert content.read_sizes[-1] == LocalVideoStore._WRITE_CHUNK_SIZE
+
+
+@pytest.mark.asyncio
+async def test_local_delete_removes_file(tmp_path):
+    store = LocalVideoStore(str(tmp_path))
+    target = tmp_path / "delete-me.mp4"
+    target.write_bytes(b"video")
+
+    await store.delete("delete-me.mp4")
+
+    assert not target.exists()
 
 
 @pytest.mark.asyncio
