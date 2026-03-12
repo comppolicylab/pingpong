@@ -913,14 +913,18 @@ def m06_cleanup_orphaned_lti_classes(dry_run: bool) -> None:
 @db.command("m07_backfill_lecture_video_content_lengths")
 def m07_backfill_lecture_video_content_lengths() -> None:
     async def _m07_backfill_lecture_video_content_lengths() -> None:
+        await config.authz.driver.init()
         async with config.db.driver.async_session() as session:
-            logger.info("Backfilling lecture video content lengths...")
-            updated = await backfill_lecture_video_content_lengths(session)
-            await session.commit()
-            logger.info(
-                "Done! Backfilled content lengths for %s lecture video stored objects.",
-                updated,
-            )
+            async with config.authz.driver.get_client() as authz:
+                logger.info(
+                    "Backfilling lecture video content lengths and permissions..."
+                )
+                updated = await backfill_lecture_video_content_lengths(session, authz)
+                await session.commit()
+                logger.info(
+                    "Done! Backfilled content lengths for %s lecture video stored objects.",
+                    updated,
+                )
 
     asyncio.run(_m07_backfill_lecture_video_content_lengths())
 

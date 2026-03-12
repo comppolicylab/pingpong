@@ -2107,7 +2107,16 @@ class LectureVideo(Base):
         return await session.scalar(stmt)
 
     @classmethod
-    async def _clear_normalized_content_rows(
+    async def get_ids_by_class_id(
+        cls, session: AsyncSession, class_id: int
+    ) -> AsyncGenerator[int, None]:
+        stmt = select(LectureVideo.id).where(LectureVideo.class_id == int(class_id))
+        result = await session.execute(stmt)
+        for row in result:
+            yield row.id
+
+    @classmethod
+    async def clear_normalized_content_rows(
         cls, session: AsyncSession, lecture_video_id: int
     ) -> None:
         intro_narration_ids = list(
@@ -2343,6 +2352,7 @@ class LectureVideoNarration(Base):
             name="fk_lv_narrations_stored_object_id",
         ),
         nullable=True,
+        index=True,
     )
     stored_object = relationship(
         "LectureVideoNarrationStoredObject",

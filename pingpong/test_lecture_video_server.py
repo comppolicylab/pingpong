@@ -1,7 +1,10 @@
 import importlib
+import io
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException, UploadFile
 from pingpong import lecture_video_service
 from pingpong import models
 from pingpong.config import LocalAudioStoreSettings, LocalVideoStoreSettings
@@ -129,6 +132,20 @@ def test_generate_store_key_uses_lv_prefix(content_type: str, suffix: str):
 
     assert key.startswith("lv_")
     assert key.endswith(suffix)
+
+
+def test_get_upload_size_requires_known_size():
+    upload = UploadFile(
+        file=io.BytesIO(b"video-bytes"),
+        filename="lecture.mp4",
+        size=None,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        lecture_video_service.get_upload_size(upload)
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "Lecture video upload size could not be determined."
 
 
 @with_user(123)
@@ -381,7 +398,7 @@ async def test_non_v3_assistants_rejected(api, db, institution, valid_user_token
         json={"assistant_id": 1},
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
-    assert response.status_code == 409
+    assert response.status_code == 400
     assert (
         response.json()["detail"]
         == "Lecture presentation can only be created using v3 assistants."
@@ -424,7 +441,7 @@ async def test_lecture_thread_rejected_without_attached_video(
         json={"assistant_id": 1},
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
-    assert response.status_code == 409
+    assert response.status_code == 400
     assert (
         response.json()["detail"]
         == "This assistant does not have a lecture video attached. Unable to create Lecture Presentation"
@@ -466,7 +483,7 @@ async def test_lecture_endpoint_rejects_non_lecture_video_assistant(
         json={"assistant_id": 1},
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
-    assert response.status_code == 409
+    assert response.status_code == 400
     assert (
         response.json()["detail"]
         == "This assistant is not compatible with this thread creation endpoint. Provide a lecture_video assistant."
@@ -477,7 +494,7 @@ async def test_lecture_endpoint_rejects_non_lecture_video_assistant(
 @with_institution(11, "Test Institution")
 @with_authz(grants=[("user:123", "admin", "class:1")])
 async def test_uploading_same_video_twice_creates_distinct_rows(
-    api, db, institution, valid_user_token, config, monkeypatch, tmp_path
+    api, authz, db, institution, valid_user_token, config, monkeypatch, tmp_path
 ):
     monkeypatch.setattr(
         config,
@@ -535,6 +552,12 @@ async def test_uploading_same_video_twice_creates_distinct_rows(
     assert lecture_videos[0].stored_object_id != lecture_videos[1].stored_object_id
     assert lecture_videos[0].stored_object.key != lecture_videos[1].stored_object.key
     assert {lecture_video.class_id for lecture_video in lecture_videos} == {1}
+    assert await authz.get_all_calls() == [
+        ("grant", "class:1", "parent", f"lecture_video:{body_one['id']}"),
+        ("grant", "user:123", "owner", f"lecture_video:{body_one['id']}"),
+        ("grant", "class:1", "parent", f"lecture_video:{body_two['id']}"),
+        ("grant", "user:123", "owner", f"lecture_video:{body_two['id']}"),
+    ]
 
 
 @pytest.mark.asyncio
@@ -652,9 +675,16 @@ async def test_lecture_video_summary_logs_warning_when_store_returns_zero_conten
 
 @with_user(123)
 @with_institution(11, "Test Institution")
-@with_authz(grants=[("user:123", "admin", "class:1")])
+@with_authz(
+    grants=[
+        ("user:123", "admin", "class:1"),
+        ("class:1", "parent", "lecture_video:1"),
+        ("user:123", "owner", "lecture_video:1"),
+        ("user:123", "can_delete", "lecture_video:1"),
+    ]
+)
 async def test_delete_unused_lecture_video_endpoint_deletes_row_and_file(
-    api, db, institution, valid_user_token, config, monkeypatch, tmp_path
+    api, authz, db, institution, valid_user_token, config, monkeypatch, tmp_path
 ):
     monkeypatch.setattr(
         config,
@@ -700,11 +730,68 @@ async def test_delete_unused_lecture_video_endpoint_deletes_row_and_file(
     assert deleted_video is None
     assert deleted_stored_object is None
     assert not (tmp_path / "delete-endpoint.mp4").exists()
+    assert await authz.get_all_calls() == [
+        ("revoke", "class:1", "parent", "lecture_video:1"),
+        ("revoke", "user:123", "owner", "lecture_video:1"),
+    ]
 
 
 @with_user(123)
 @with_institution(11, "Test Institution")
 @with_authz(grants=[("user:123", "admin", "class:1")])
+async def test_delete_lecture_video_endpoint_requires_entry_can_delete(
+    api, db, institution, valid_user_token, config, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        config,
+        "video_store",
+        LocalVideoStoreSettings(type="local", save_target=str(tmp_path)),
+    )
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        lecture_video = make_lecture_video(
+            class_.id,
+            "delete-missing-entry-perm.mp4",
+            filename="delete-missing-entry-perm.mp4",
+            uploader_id=123,
+        )
+        session.add_all([class_, lecture_video])
+        await session.commit()
+        await session.refresh(lecture_video)
+
+    (tmp_path / "delete-missing-entry-perm.mp4").write_bytes(b"video-bytes")
+
+    response = api.delete(
+        f"/api/v1/class/1/lecture-video/{lecture_video.id}",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Missing required role"
+    assert (tmp_path / "delete-missing-entry-perm.mp4").exists()
+
+    async with db.async_session() as session:
+        existing_video = await session.get(models.LectureVideo, lecture_video.id)
+
+    assert existing_video is not None
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "admin", "class:1"),
+        ("class:1", "parent", "lecture_video:1"),
+        ("user:123", "owner", "lecture_video:1"),
+        ("user:123", "can_delete", "lecture_video:1"),
+    ]
+)
 async def test_delete_lecture_video_endpoint_returns_409_when_attached(
     api, db, institution, valid_user_token, config, monkeypatch, tmp_path
 ):
@@ -767,7 +854,7 @@ async def test_delete_lecture_video_endpoint_returns_409_when_attached(
 @with_institution(11, "Test Institution")
 @with_authz(grants=[("user:123", "can_edit", "assistant:1")])
 async def test_upload_assistant_lecture_video_endpoint_allows_editor(
-    api, db, institution, valid_user_token, config, monkeypatch, tmp_path
+    api, authz, db, institution, valid_user_token, config, monkeypatch, tmp_path
 ):
     monkeypatch.setattr(
         config,
@@ -828,6 +915,10 @@ async def test_upload_assistant_lecture_video_endpoint_allows_editor(
     assert lecture_videos[0].class_id == 1
     assert lecture_videos[0].stored_object.original_filename == "assistant-upload.mp4"
     assert (tmp_path / lecture_videos[0].stored_object.key).exists()
+    assert await authz.get_all_calls() == [
+        ("grant", "class:1", "parent", f"lecture_video:{body['id']}"),
+        ("grant", "user:123", "owner", f"lecture_video:{body['id']}"),
+    ]
 
 
 @with_user(123)
@@ -885,7 +976,14 @@ async def test_upload_assistant_lecture_video_endpoint_rejects_non_lecture_assis
 
 @with_user(123)
 @with_institution(11, "Test Institution")
-@with_authz(grants=[("user:123", "admin", "class:1")])
+@with_authz(
+    grants=[
+        ("user:123", "admin", "class:1"),
+        ("class:1", "parent", "lecture_video:1"),
+        ("user:123", "owner", "lecture_video:1"),
+        ("user:123", "can_delete", "lecture_video:1"),
+    ]
+)
 async def test_delete_lecture_video_endpoint_requires_uploader(
     api, db, institution, valid_user_token, config, monkeypatch, tmp_path
 ):
@@ -932,9 +1030,168 @@ async def test_delete_lecture_video_endpoint_requires_uploader(
 
 @with_user(123)
 @with_institution(11, "Test Institution")
-@with_authz(grants=[("user:123", "can_edit", "assistant:1")])
+@with_authz(
+    grants=[
+        ("user:123", "can_delete", "class:1"),
+        ("class:1", "parent", "lecture_video:1"),
+        ("user:123", "owner", "lecture_video:1"),
+    ]
+)
+async def test_delete_class_deletes_unattached_lecture_videos(
+    api, authz, db, institution, valid_user_token, config, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        config,
+        "video_store",
+        LocalVideoStoreSettings(type="local", save_target=str(tmp_path)),
+    )
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+        )
+        lecture_video = make_lecture_video(
+            class_.id,
+            "class-delete-unattached.mp4",
+            filename="class-delete-unattached.mp4",
+            uploader_id=123,
+            content_length=3,
+        )
+        session.add_all([class_, lecture_video])
+        await session.flush()
+        stored_object_id = lecture_video.stored_object.id
+        await session.commit()
+        await session.refresh(lecture_video)
+        lecture_video_id = lecture_video.id
+
+    (tmp_path / "class-delete-unattached.mp4").write_bytes(b"vid")
+
+    response = api.delete(
+        "/api/v1/class/1",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+    async with db.async_session() as session:
+        assert await session.get(models.Class, 1) is None
+        assert await session.get(models.LectureVideo, lecture_video_id) is None
+        assert (
+            await session.get(models.LectureVideoStoredObject, stored_object_id) is None
+        )
+
+    assert not (tmp_path / "class-delete-unattached.mp4").exists()
+    assert ("revoke", "class:1", "parent", f"lecture_video:{lecture_video_id}") in (
+        await authz.get_all_calls()
+    )
+    assert ("revoke", "user:123", "owner", f"lecture_video:{lecture_video_id}") in (
+        await authz.get_all_calls()
+    )
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_delete", "class:1"),
+        ("class:1", "parent", "lecture_video:1"),
+        ("user:123", "owner", "lecture_video:1"),
+    ]
+)
+async def test_delete_class_deletes_assistant_attached_lecture_videos(
+    api, authz, db, institution, valid_user_token, config, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        config,
+        "video_store",
+        LocalVideoStoreSettings(type="local", save_target=str(tmp_path)),
+    )
+
+    server_module = importlib.import_module("pingpong.server")
+
+    async def fake_get_openai_client_for_class(_request):
+        return SimpleNamespace()
+
+    monkeypatch.setattr(
+        server_module,
+        "get_openai_client_for_class",
+        fake_get_openai_client_for_class,
+    )
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        lecture_video = make_lecture_video(
+            class_.id,
+            "class-delete-attached.mp4",
+            filename="class-delete-attached.mp4",
+            uploader_id=123,
+            content_length=4,
+        )
+        session.add_all([class_, lecture_video])
+        await session.flush()
+        stored_object_id = lecture_video.stored_object.id
+        session.add(
+            models.Assistant(
+                id=1,
+                name="Lecture Assistant",
+                class_id=class_.id,
+                interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+                version=3,
+                lecture_video_id=lecture_video.id,
+                creator_id=123,
+            )
+        )
+        await session.commit()
+        await session.refresh(lecture_video)
+        lecture_video_id = lecture_video.id
+
+    (tmp_path / "class-delete-attached.mp4").write_bytes(b"vid2")
+
+    response = api.delete(
+        "/api/v1/class/1",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+    async with db.async_session() as session:
+        assert await session.get(models.Class, 1) is None
+        assert await session.get(models.Assistant, 1) is None
+        assert await session.get(models.LectureVideo, lecture_video_id) is None
+        assert (
+            await session.get(models.LectureVideoStoredObject, stored_object_id) is None
+        )
+
+    assert not (tmp_path / "class-delete-attached.mp4").exists()
+    assert ("revoke", "class:1", "parent", f"lecture_video:{lecture_video_id}") in (
+        await authz.get_all_calls()
+    )
+    assert ("revoke", "user:123", "owner", f"lecture_video:{lecture_video_id}") in (
+        await authz.get_all_calls()
+    )
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_edit", "assistant:1"),
+        ("class:1", "parent", "lecture_video:1"),
+        ("user:123", "owner", "lecture_video:1"),
+        ("user:123", "can_delete", "lecture_video:1"),
+    ]
+)
 async def test_delete_assistant_lecture_video_endpoint_allows_editor(
-    api, db, institution, valid_user_token, config, monkeypatch, tmp_path
+    api, authz, db, institution, valid_user_token, config, monkeypatch, tmp_path
 ):
     monkeypatch.setattr(
         config,
@@ -988,11 +1245,82 @@ async def test_delete_assistant_lecture_video_endpoint_allows_editor(
 
     assert deleted_video is None
     assert not (tmp_path / "assistant-delete.mp4").exists()
+    assert await authz.get_all_calls() == [
+        ("revoke", "class:1", "parent", "lecture_video:1"),
+        ("revoke", "user:123", "owner", "lecture_video:1"),
+    ]
 
 
 @with_user(123)
 @with_institution(11, "Test Institution")
 @with_authz(grants=[("user:123", "can_edit", "assistant:1")])
+async def test_delete_assistant_lecture_video_endpoint_requires_entry_can_delete(
+    api, db, institution, valid_user_token, config, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        config,
+        "video_store",
+        LocalVideoStoreSettings(type="local", save_target=str(tmp_path)),
+    )
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        lecture_video = make_lecture_video(
+            class_.id,
+            "assistant-delete-missing-entry-perm.mp4",
+            filename="assistant-delete-missing-entry-perm.mp4",
+            uploader_id=123,
+        )
+        session.add_all([class_, lecture_video])
+        await session.flush()
+        session.add(
+            models.Assistant(
+                id=1,
+                name="Lecture Assistant",
+                class_id=class_.id,
+                creator_id=123,
+                interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+                version=3,
+                model="gpt-4o-mini",
+                instructions="Teach the lecture.",
+                tools="[]",
+            )
+        )
+        await session.commit()
+        await session.refresh(lecture_video)
+
+    (tmp_path / "assistant-delete-missing-entry-perm.mp4").write_bytes(b"video-bytes")
+
+    response = api.delete(
+        f"/api/v1/class/1/assistant/1/lecture-video/{lecture_video.id}",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Missing required role"
+    assert (tmp_path / "assistant-delete-missing-entry-perm.mp4").exists()
+
+    async with db.async_session() as session:
+        existing_video = await session.get(models.LectureVideo, lecture_video.id)
+
+    assert existing_video is not None
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_edit", "assistant:1"),
+        ("class:1", "parent", "lecture_video:1"),
+        ("user:123", "owner", "lecture_video:1"),
+        ("user:123", "can_delete", "lecture_video:1"),
+    ]
+)
 async def test_delete_assistant_lecture_video_endpoint_rejects_non_lecture_assistant(
     api, db, institution, valid_user_token, config, monkeypatch, tmp_path
 ):
@@ -1046,7 +1374,14 @@ async def test_delete_assistant_lecture_video_endpoint_rejects_non_lecture_assis
 
 @with_user(123)
 @with_institution(11, "Test Institution")
-@with_authz(grants=[("user:123", "can_edit", "assistant:1")])
+@with_authz(
+    grants=[
+        ("user:123", "can_edit", "assistant:1"),
+        ("class:1", "parent", "lecture_video:1"),
+        ("user:123", "owner", "lecture_video:1"),
+        ("user:123", "can_delete", "lecture_video:1"),
+    ]
+)
 async def test_delete_assistant_lecture_video_endpoint_requires_uploader(
     api, db, institution, valid_user_token, config, monkeypatch, tmp_path
 ):
@@ -1411,6 +1746,101 @@ async def test_update_assistant_with_new_lecture_video_id_deletes_prior_video_wh
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
+    assert update_response.status_code == 200
+    assert update_response.json()["lecture_video"]["id"] == second_video.id
+
+    async with db.async_session() as session:
+        assistant = await session.get(models.Assistant, 1)
+        first_video_row = await session.get(models.LectureVideo, first_video.id)
+        second_question = await session.scalar(
+            select(models.LectureVideoQuestion.question_text).where(
+                models.LectureVideoQuestion.lecture_video_id == second_video.id
+            )
+        )
+
+    assert assistant is not None
+    assert assistant.lecture_video_id == second_video.id
+    assert first_video_row is None
+    assert second_question == "Second question?"
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_assistants", "class:1"),
+        ("user:123", "can_edit", "assistant:1"),
+        ("user:123", "admin", "class:1"),
+    ]
+)
+async def test_update_assistant_with_new_lecture_video_id_ignores_cleanup_delete_failures(
+    api, db, institution, valid_user_token, monkeypatch, config, tmp_path
+):
+    patch_lecture_video_model_list(monkeypatch)
+    monkeypatch.setattr(
+        config,
+        "video_store",
+        LocalVideoStoreSettings(type="local", save_target=str(tmp_path)),
+    )
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        first_video = make_lecture_video(
+            class_.id,
+            "cleanup-fail-first.mp4",
+            filename="cleanup-fail-first.mp4",
+            status=schemas.LectureVideoStatus.UPLOADED.value,
+        )
+        second_video = make_lecture_video(
+            class_.id,
+            "cleanup-fail-second.mp4",
+            filename="cleanup-fail-second.mp4",
+            status=schemas.LectureVideoStatus.UPLOADED.value,
+        )
+        session.add_all([class_, first_video, second_video])
+        await session.commit()
+        await session.refresh(first_video)
+        await session.refresh(second_video)
+
+    async def fail_delete(key: str) -> None:
+        raise RuntimeError(f"transient delete failure for {key}")
+
+    monkeypatch.setattr(config.video_store.store, "delete", fail_delete)
+
+    create_response = api.post(
+        "/api/v1/class/1/assistant",
+        json={
+            "name": "Lecture Assistant",
+            "instructions": "Guide the learner through the lecture.",
+            "description": "Lecture presentation assistant",
+            "interaction_mode": "lecture_video",
+            "model": "gpt-4o-mini",
+            "tools": [],
+            "lecture_video_id": first_video.id,
+            "lecture_video_manifest": lecture_video_manifest(
+                question_text="First question?"
+            ),
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+
+    update_response = api.put(
+        "/api/v1/class/1/assistant/1",
+        json={
+            "lecture_video_id": second_video.id,
+            "lecture_video_manifest": lecture_video_manifest(
+                question_text="Second question?"
+            ),
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
     assert update_response.status_code == 200
     assert update_response.json()["lecture_video"]["id"] == second_video.id
 

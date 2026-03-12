@@ -751,6 +751,67 @@ async def test_update_assistant_rejects_tools_with_none_reasoning_without_model_
 
 @with_user(123)
 @with_authz(grants=[("user:123", "can_edit", "assistant:11")])
+async def test_update_assistant_without_tools_field_handles_persisted_web_search_tools(
+    api, db, valid_user_token, monkeypatch
+):
+    async def fake_list_class_models(class_id: str, request, openai_client):  # type: ignore[no-untyped-def]
+        return _fake_class_models_response(
+            model_id="gpt-5.4",
+            model_name="GPT-5.4",
+            supports_temperature=True,
+            supports_reasoning=True,
+            supports_none_reasoning_effort=True,
+            supports_tools_with_none_reasoning_effort=True,
+            supports_classic_assistants=False,
+        )
+
+    server_module = importlib.import_module("pingpong.server")
+    monkeypatch.setattr(server_module, "list_class_models", fake_list_class_models)
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Chat Class",
+            term="Spring 2026",
+            api_key="sk-test",
+            private=False,
+        )
+        assistant = models.Assistant(
+            id=11,
+            name="GPT-5.4 Assistant",
+            version=3,
+            instructions="You are helpful.",
+            interaction_mode=schemas.InteractionMode.CHAT,
+            description="Test assistant",
+            tools='[{"type":"web_search"}]',
+            model="gpt-5.4",
+            reasoning_effort=0,
+            class_id=class_.id,
+            creator_id=123,
+            use_latex=False,
+            use_image_descriptions=False,
+            locked=False,
+        )
+        session.add_all([class_, assistant])
+        await session.commit()
+
+    response = api.put(
+        "/api/v1/class/1/assistant/11",
+        json={"reasoning_effort": 1},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["reasoning_effort"] == 1
+
+    async with db.async_session() as session:
+        updated = await models.Assistant.get_by_id(session, 11)
+
+    assert updated is not None
+    assert updated.tools == '[{"type":"web_search"}]'
+
+
+@with_user(123)
+@with_authz(grants=[("user:123", "can_edit", "assistant:11")])
 async def test_update_assistant_keeps_classic_v2_by_default(
     api, db, valid_user_token, monkeypatch
 ):

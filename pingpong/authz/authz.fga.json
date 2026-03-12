@@ -1165,6 +1165,59 @@
           }
         }
       }
+    },
+    {
+      "type": "lecture_video",
+      "relations": {
+        "parent": {
+          "this": {}
+        },
+        "owner": {
+          "this": {}
+        },
+        "can_delete": {
+          "union": {
+            "child": [
+              {
+                "computedUserset": {
+                  "relation": "owner"
+                }
+              },
+              {
+                "tupleToUserset": {
+                  "computedUserset": {
+                    "relation": "supervisor"
+                  },
+                  "tupleset": {
+                    "relation": "parent"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "metadata": {
+        "relations": {
+          "parent": {
+            "directly_related_user_types": [
+              {
+                "type": "class"
+              }
+            ]
+          },
+          "owner": {
+            "directly_related_user_types": [
+              {
+                "type": "user"
+              }
+            ]
+          },
+          "can_delete": {
+            "directly_related_user_types": []
+          }
+        }
+      }
     }
   ]
 }

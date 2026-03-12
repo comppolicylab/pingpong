@@ -369,6 +369,12 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("id"),
     )
+    op.create_index(
+        op.f("ix_lecture_video_narrations_stored_object_id"),
+        "lecture_video_narrations",
+        ["stored_object_id"],
+        unique=False,
+    )
 
     op.create_table(
         "lecture_video_questions",
@@ -470,6 +476,10 @@ def downgrade() -> None:
         op.get_bind(), checkfirst=True
     )
 
+    op.drop_index(
+        op.f("ix_lecture_video_narrations_stored_object_id"),
+        table_name="lecture_video_narrations",
+    )
     op.drop_table("lecture_video_narrations")
     sa.Enum(
         "PENDING", "PROCESSING", "READY", "FAILED", name="lecturevideonarrationstatus"
@@ -482,6 +492,7 @@ def downgrade() -> None:
     op.add_column(
         "lecture_videos", sa.Column("key", sa.String(), nullable=True, unique=True)
     )
+    op.create_unique_constraint("uq_lecture_videos_key", "lecture_videos", ["key"])
     op.execute(
         """
         UPDATE lecture_videos

@@ -11,7 +11,7 @@ pytestmark = pytest.mark.asyncio
 
 
 async def test_backfill_lecture_video_content_lengths_updates_zero_length_rows(
-    db, config, monkeypatch, tmp_path
+    authz, db, config, monkeypatch, tmp_path
 ):
     monkeypatch.setattr(
         config,
@@ -22,6 +22,7 @@ async def test_backfill_lecture_video_content_lengths_updates_zero_length_rows(
 
     async with db.async_session() as session:
         institution = models.Institution(id=1, name="Test Institution")
+        user = models.User(id=123, email="lecture-owner@example.com")
         class_ = models.Class(
             id=1,
             name="Test Class",
@@ -38,16 +39,21 @@ async def test_backfill_lecture_video_content_lengths_updates_zero_length_rows(
             class_id=class_.id,
             stored_object=stored_object,
             status="uploaded",
+            uploader_id=user.id,
         )
-        session.add_all([institution, class_, lecture_video])
+        session.add_all([institution, user, class_, lecture_video])
         await session.commit()
         stored_object_id = stored_object.id
 
     (tmp_path / "legacy-video.mp4").write_bytes(video_bytes)
 
+    await config.authz.driver.init()
     async with db.async_session() as session:
-        updated = await migration.backfill_lecture_video_content_lengths(session)
-        await session.commit()
+        async with config.authz.driver.get_client() as authz_client:
+            updated = await migration.backfill_lecture_video_content_lengths(
+                session, authz_client
+            )
+            await session.commit()
 
     assert updated == 1
 
@@ -58,6 +64,10 @@ async def test_backfill_lecture_video_content_lengths_updates_zero_length_rows(
 
     assert stored_object is not None
     assert stored_object.content_length == len(video_bytes)
+    assert await authz.get_all_calls() == [
+        ("grant", "class:1", "parent", "lecture_video:1"),
+        ("grant", "user:123", "owner", "lecture_video:1"),
+    ]
 
 
 async def test_backfill_lecture_video_content_lengths_batches_and_checkpoints(

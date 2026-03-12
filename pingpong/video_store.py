@@ -83,7 +83,7 @@ class S3VideoStore(BaseVideoStore):
                     ExtraArgs={"ContentType": content_type},
                     Config=self._UPLOAD_CONFIG,
                 )
-            except ClientError as e:
+            except Exception as e:
                 logger.exception("Error uploading lecture video to S3: %s", e)
                 raise VideoStoreError(
                     f"Failed to upload lecture video: {str(e)}"
@@ -93,10 +93,11 @@ class S3VideoStore(BaseVideoStore):
         async with aioboto3.Session().client("s3") as s3_client:
             try:
                 await s3_client.delete_object(Bucket=self.__bucket, Key=key)
-            except ClientError as e:
-                error_code = e.response.get("Error", {}).get("Code", "")
-                if error_code in {"NoSuchKey", "NotFound", "404"}:
-                    return
+            except Exception as e:
+                if isinstance(e, ClientError):
+                    error_code = e.response.get("Error", {}).get("Code", "")
+                    if error_code in {"NoSuchKey", "NotFound", "404"}:
+                        return
                 logger.exception("Error deleting lecture video from S3: %s", e)
                 raise VideoStoreError(
                     f"Failed to delete lecture video: {str(e)}"

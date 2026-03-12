@@ -147,7 +147,7 @@ from .files import (
 )
 from .log_utils import sanitize_for_log
 from .now import NowFn, utcnow
-from .permission import Authz, InstitutionAdmin, LoggedIn, ClassInstitutionAdmin
+from .permission import And, Authz, InstitutionAdmin, LoggedIn, ClassInstitutionAdmin
 from .runs import get_placeholder_ci_calls
 from .state_types import AppState, StateRequest, StateWebSocket
 from .vector_stores import (
@@ -1861,6 +1861,13 @@ async def delete_class(class_id: str, request: StateRequest):
             await delete_vector_store(
                 request.state["db"], openai_client, vector_store_id
             )
+
+    async for lecture_video_id in models.LectureVideo.get_ids_by_class_id(
+        request.state["db"], class_.id
+    ):
+        await lecture_video_service.delete_lecture_video(
+            request.state["db"], lecture_video_id, authz=request.state["authz"]
+        )
 
     # All private and class files associated with the class_id
     # are deleted by the database cascade
@@ -5873,7 +5880,7 @@ async def create_thread(
         schemas.InteractionMode.VOICE,
     ):
         raise HTTPException(
-            status_code=400,
+            status_code=409,
             detail="This assistant requires a dedicated thread creation endpoint.",
         )
 
@@ -7419,6 +7426,9 @@ async def create_lecture_video(
         uploader_id=request.state["session"].user.id,
         upload=upload,
     )
+    await request.state["authz"].write_safe(
+        grant=lecture_video_service.lecture_video_grants(lecture_video)
+    )
     return await lecture_video_service.lecture_video_summary_from_model(
         request.state["db"], lecture_video
     )
@@ -7444,6 +7454,9 @@ async def upload_lecture_video_for_assistant(
         uploader_id=request.state["session"].user.id,
         upload=upload,
     )
+    await request.state["authz"].write_safe(
+        grant=lecture_video_service.lecture_video_grants(lecture_video)
+    )
     return await lecture_video_service.lecture_video_summary_from_model(
         request.state["db"], lecture_video
     )
@@ -7451,7 +7464,14 @@ async def upload_lecture_video_for_assistant(
 
 @v1.delete(
     "/class/{class_id}/lecture-video/{lecture_video_id}",
-    dependencies=[Depends(Authz("admin", "class:{class_id}"))],
+    dependencies=[
+        Depends(
+            And(
+                Authz("admin", "class:{class_id}"),
+                Authz("can_delete", "lecture_video:{lecture_video_id}"),
+            )
+        )
+    ],
     response_model=schemas.GenericStatus,
 )
 async def delete_lecture_video(
@@ -7470,14 +7490,21 @@ async def delete_lecture_video(
         request.state["db"], lecture_video.id
     )
     await lecture_video_service.delete_lecture_video(
-        request.state["db"], lecture_video.id
+        request.state["db"], lecture_video.id, authz=request.state["authz"]
     )
     return {"status": "ok"}
 
 
 @v1.delete(
     "/class/{class_id}/assistant/{assistant_id}/lecture-video/{lecture_video_id}",
-    dependencies=[Depends(Authz("can_edit", "assistant:{assistant_id}"))],
+    dependencies=[
+        Depends(
+            And(
+                Authz("can_edit", "assistant:{assistant_id}"),
+                Authz("can_delete", "lecture_video:{lecture_video_id}"),
+            )
+        )
+    ],
     response_model=schemas.GenericStatus,
 )
 async def delete_assistant_lecture_video(
@@ -7500,7 +7527,7 @@ async def delete_assistant_lecture_video(
         request.state["db"], lecture_video.id
     )
     await lecture_video_service.delete_lecture_video(
-        request.state["db"], lecture_video.id
+        request.state["db"], lecture_video.id, authz=request.state["authz"]
     )
     return {"status": "ok"}
 
@@ -9623,9 +9650,18 @@ async def update_assistant(
 
     await request.state["authz"].write_safe(grant=grants, revoke=revokes)
     if lecture_video_id_to_delete is not None:
-        await lecture_video_service.delete_lecture_video_if_unused(
-            request.state["db"], lecture_video_id_to_delete
-        )
+        try:
+            await lecture_video_service.delete_lecture_video_if_unused(
+                request.state["db"],
+                lecture_video_id_to_delete,
+                authz=request.state["authz"],
+            )
+        except Exception:
+            logger.exception(
+                "Failed to delete old lecture video after assistant update. assistant_id=%s lecture_video_id=%s",
+                asst.id,
+                lecture_video_id_to_delete,
+            )
     loaded_assistant = await models.Assistant.get_by_id_with_lecture_video(
         request.state["db"], asst.id
     )

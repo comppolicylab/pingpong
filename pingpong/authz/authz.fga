@@ -80,3 +80,9 @@ type class_file
     define owner: [user]
     define can_delete: owner or supervisor from parent
     define can_view: member from parent
+
+type lecture_video
+  relations
+    define parent: [class]
+    define owner: [user]
+    define can_delete: owner or supervisor from parent

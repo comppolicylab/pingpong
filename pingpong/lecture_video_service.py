@@ -10,6 +10,7 @@ import uuid_utils as uuid
 
 import pingpong.models as models
 import pingpong.schemas as schemas
+from .authz import AuthzClient, Relation
 from .config import config
 from .video_store import VideoStoreError
 
@@ -22,14 +23,13 @@ LECTURE_VIDEO_ALREADY_ASSIGNED_DETAIL = (
 
 
 def get_upload_size(upload: UploadFile) -> int:
-    if upload.size is not None:
-        return upload.size
+    if upload.size is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Lecture video upload size could not be determined.",
+        )
 
-    current_position = upload.file.tell()
-    upload.file.seek(0, 2)
-    size = upload.file.tell()
-    upload.file.seek(current_position)
-    return size
+    return upload.size
 
 
 def generate_store_key(content_type: str) -> str:
@@ -39,6 +39,27 @@ def generate_store_key(content_type: str) -> str:
 
 def get_original_filename(upload: UploadFile, store_key: str) -> str:
     return Path(upload.filename or store_key).name
+
+
+def lecture_video_grants(
+    lecture_video: models.LectureVideo,
+) -> list[Relation]:
+    grants = [
+        (
+            f"class:{lecture_video.class_id}",
+            "parent",
+            f"lecture_video:{lecture_video.id}",
+        )
+    ]
+    if lecture_video.uploader_id is not None:
+        grants.append(
+            (
+                f"user:{lecture_video.uploader_id}",
+                "owner",
+                f"lecture_video:{lecture_video.id}",
+            )
+        )
+    return grants
 
 
 async def create_lecture_video(
@@ -217,7 +238,7 @@ async def ensure_lecture_video_is_unassigned(
     )
     if existing_assistant is not None:
         raise HTTPException(
-            status_code=409,
+            status_code=400,
             detail=LECTURE_VIDEO_ALREADY_ASSIGNED_DETAIL,
         )
 
@@ -238,7 +259,7 @@ def raise_if_lecture_video_assignment_conflict(exc: IntegrityError) -> None:
         and ("unique" in message or "duplicate" in message)
     ):
         raise HTTPException(
-            status_code=409, detail=LECTURE_VIDEO_ALREADY_ASSIGNED_DETAIL
+            status_code=400, detail=LECTURE_VIDEO_ALREADY_ASSIGNED_DETAIL
         ) from exc
 
 
@@ -348,7 +369,7 @@ async def _clear_normalized_content_rows_and_collect_audio_keys(
     orphaned_stored_objects = await _get_orphaned_narration_stored_objects_for_clear(
         session, lecture_video_id
     )
-    await models.LectureVideo._clear_normalized_content_rows(session, lecture_video_id)
+    await models.LectureVideo.clear_normalized_content_rows(session, lecture_video_id)
     if not orphaned_stored_objects:
         return []
 
@@ -362,11 +383,16 @@ async def _clear_normalized_content_rows_and_collect_audio_keys(
     return [key for _, key in orphaned_stored_objects]
 
 
-async def delete_lecture_video(session: AsyncSession, lecture_video_id: int) -> None:
+async def delete_lecture_video(
+    session: AsyncSession,
+    lecture_video_id: int,
+    authz: AuthzClient | None = None,
+) -> None:
     lecture_video = await models.LectureVideo.get_by_id(session, lecture_video_id)
     if lecture_video is None:
         return
 
+    revoke_grants = lecture_video_grants(lecture_video)
     stored_object_id = lecture_video.stored_object_id
     store_key = lecture_video.stored_object.key if lecture_video.stored_object else None
     is_orphaned_after_delete = not bool(
@@ -384,6 +410,8 @@ async def delete_lecture_video(session: AsyncSession, lecture_video_id: int) -> 
     await session.execute(
         delete(models.LectureVideo).where(models.LectureVideo.id == lecture_video_id)
     )
+    if authz is not None:
+        await authz.write_safe(revoke=revoke_grants)
 
     if is_orphaned_after_delete and stored_object_id is not None:
         await session.execute(
@@ -406,6 +434,12 @@ async def ensure_lecture_video_is_unused(
     *,
     exclude_assistant_id: int | None = None,
 ) -> None:
+    await session.scalar(
+        select(models.LectureVideo.id)
+        .where(models.LectureVideo.id == lecture_video_id)
+        .with_for_update()
+    )
+
     assistant_id = await session.scalar(
         select(models.Assistant.id).where(
             models.Assistant.lecture_video_id == lecture_video_id
@@ -430,7 +464,9 @@ async def ensure_lecture_video_is_unused(
 
 
 async def delete_lecture_video_if_unused(
-    session: AsyncSession, lecture_video_id: int | None
+    session: AsyncSession,
+    lecture_video_id: int | None,
+    authz: AuthzClient | None = None,
 ) -> bool:
     if lecture_video_id is None:
         return False
@@ -440,7 +476,7 @@ async def delete_lecture_video_if_unused(
     except HTTPException:
         return False
 
-    await delete_lecture_video(session, lecture_video_id)
+    await delete_lecture_video(session, lecture_video_id, authz=authz)
     return True
 
 
