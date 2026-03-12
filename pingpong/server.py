@@ -5880,7 +5880,7 @@ async def create_thread(
         schemas.InteractionMode.VOICE,
     ):
         raise HTTPException(
-            status_code=409,
+            status_code=400,
             detail="This assistant requires a dedicated thread creation endpoint.",
         )
 
