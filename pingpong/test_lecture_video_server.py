@@ -1337,9 +1337,10 @@ async def test_create_lecture_video_assistant_without_manifest_returns_422(
     )
 
     assert response.status_code == 422
-    assert "Specifying a lecture_video_manifest is required" in response.json()[
-        "detail"
-    ][0]["msg"]
+    assert (
+        "Specifying a lecture_video_manifest is required"
+        in response.json()["detail"][0]["msg"]
+    )
 
 
 @with_user(123)
@@ -1493,9 +1494,10 @@ async def test_update_assistant_with_new_lecture_video_id_without_manifest_retur
     )
 
     assert response.status_code == 422
-    assert "Specifying a lecture_video_manifest is required" in response.json()[
-        "detail"
-    ][0]["msg"]
+    assert (
+        "Specifying a lecture_video_manifest is required"
+        in response.json()["detail"][0]["msg"]
+    )
 
 
 @with_user(123)
