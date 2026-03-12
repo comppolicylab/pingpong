@@ -62,6 +62,28 @@ def lecture_video_grants(
     return grants
 
 
+async def grant_lecture_video_permissions_or_cleanup(
+    session: AsyncSession,
+    authz: AuthzClient,
+    lecture_video: models.LectureVideo,
+) -> None:
+    try:
+        await authz.write_safe(grant=lecture_video_grants(lecture_video))
+    except Exception:
+        logger.exception(
+            "Error granting permissions for lecture video. lecture_video_id=%s",
+            lecture_video.id,
+        )
+        try:
+            await delete_lecture_video(session, lecture_video.id)
+        except Exception:
+            logger.exception(
+                "Failed to clean up lecture video after permission grant error. lecture_video_id=%s",
+                lecture_video.id,
+            )
+        raise
+
+
 async def create_lecture_video(
     session: AsyncSession,
     class_id: int,
@@ -410,8 +432,6 @@ async def delete_lecture_video(
     await session.execute(
         delete(models.LectureVideo).where(models.LectureVideo.id == lecture_video_id)
     )
-    if authz is not None:
-        await authz.write_safe(revoke=revoke_grants)
 
     if is_orphaned_after_delete and stored_object_id is not None:
         await session.execute(
@@ -426,6 +446,9 @@ async def delete_lecture_video(
 
     if is_orphaned_after_delete and store_key and config.video_store:
         await config.video_store.store.delete(store_key)
+
+    if authz is not None:
+        await authz.write_safe(revoke=revoke_grants)
 
 
 async def ensure_lecture_video_is_unused(

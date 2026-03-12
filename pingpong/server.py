@@ -7426,8 +7426,8 @@ async def create_lecture_video(
         uploader_id=request.state["session"].user.id,
         upload=upload,
     )
-    await request.state["authz"].write_safe(
-        grant=lecture_video_service.lecture_video_grants(lecture_video)
+    await lecture_video_service.grant_lecture_video_permissions_or_cleanup(
+        request.state["db"], request.state["authz"], lecture_video
     )
     return await lecture_video_service.lecture_video_summary_from_model(
         request.state["db"], lecture_video
@@ -7454,8 +7454,8 @@ async def upload_lecture_video_for_assistant(
         uploader_id=request.state["session"].user.id,
         upload=upload,
     )
-    await request.state["authz"].write_safe(
-        grant=lecture_video_service.lecture_video_grants(lecture_video)
+    await lecture_video_service.grant_lecture_video_permissions_or_cleanup(
+        request.state["db"], request.state["authz"], lecture_video
     )
     return await lecture_video_service.lecture_video_summary_from_model(
         request.state["db"], lecture_video

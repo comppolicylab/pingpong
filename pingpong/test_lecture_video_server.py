@@ -7,6 +7,7 @@ import pytest
 from fastapi import HTTPException, UploadFile
 from pingpong import lecture_video_service
 from pingpong import models
+from pingpong.authz.openfga import OpenFgaAuthzClient
 from pingpong.config import LocalAudioStoreSettings, LocalVideoStoreSettings
 import pingpong.schemas as schemas
 from sqlalchemy import func, select, text
@@ -560,6 +561,57 @@ async def test_uploading_same_video_twice_creates_distinct_rows(
     ]
 
 
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(grants=[("user:123", "admin", "class:1")])
+async def test_create_lecture_video_cleans_up_upload_when_authz_grant_fails(
+    api, authz, db, institution, valid_user_token, config, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        config,
+        "video_store",
+        LocalVideoStoreSettings(type="local", save_target=str(tmp_path)),
+    )
+
+    async def fail_write_safe(self, grant=None, revoke=None):
+        raise HTTPException(status_code=503, detail="Authz unavailable")
+
+    monkeypatch.setattr(OpenFgaAuthzClient, "write_safe", fail_write_safe)
+
+    async with db.async_session() as session:
+        session.add(
+            models.Class(
+                id=1,
+                name="Test Class",
+                institution_id=institution.id,
+                api_key="test-key",
+            )
+        )
+        await session.commit()
+
+    response = api.post(
+        "/api/v1/class/1/lecture-video",
+        files={"upload": ("grant-failure.mp4", b"video-bytes", "video/mp4")},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Authz unavailable"
+
+    async with db.async_session() as session:
+        lecture_video_count = await session.scalar(
+            select(func.count()).select_from(models.LectureVideo)
+        )
+        stored_object_count = await session.scalar(
+            select(func.count()).select_from(models.LectureVideoStoredObject)
+        )
+
+    assert lecture_video_count == 0
+    assert stored_object_count == 0
+    assert list(tmp_path.iterdir()) == []
+    assert await authz.get_all_calls() == []
+
+
 @pytest.mark.asyncio
 async def test_lecture_video_summary_backfills_zero_content_length_from_store(
     db, config, monkeypatch, tmp_path
@@ -919,6 +971,70 @@ async def test_upload_assistant_lecture_video_endpoint_allows_editor(
         ("grant", "class:1", "parent", f"lecture_video:{body['id']}"),
         ("grant", "user:123", "owner", f"lecture_video:{body['id']}"),
     ]
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(grants=[("user:123", "can_edit", "assistant:1")])
+async def test_upload_assistant_lecture_video_cleans_up_upload_when_authz_grant_fails(
+    api, authz, db, institution, valid_user_token, config, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        config,
+        "video_store",
+        LocalVideoStoreSettings(type="local", save_target=str(tmp_path)),
+    )
+
+    async def fail_write_safe(self, grant=None, revoke=None):
+        raise HTTPException(status_code=503, detail="Authz unavailable")
+
+    monkeypatch.setattr(OpenFgaAuthzClient, "write_safe", fail_write_safe)
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        session.add(class_)
+        await session.flush()
+        session.add(
+            models.Assistant(
+                id=1,
+                name="Lecture Assistant",
+                class_id=class_.id,
+                creator_id=123,
+                interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+                version=3,
+                model="gpt-4o-mini",
+                instructions="Teach the lecture.",
+                tools="[]",
+            )
+        )
+        await session.commit()
+
+    response = api.post(
+        "/api/v1/class/1/assistant/1/lecture-video/upload",
+        files={"upload": ("assistant-grant-failure.mp4", b"video-bytes", "video/mp4")},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Authz unavailable"
+
+    async with db.async_session() as session:
+        lecture_video_count = await session.scalar(
+            select(func.count()).select_from(models.LectureVideo)
+        )
+        stored_object_count = await session.scalar(
+            select(func.count()).select_from(models.LectureVideoStoredObject)
+        )
+
+    assert lecture_video_count == 0
+    assert stored_object_count == 0
+    assert list(tmp_path.iterdir()) == []
+    assert await authz.get_all_calls() == []
 
 
 @with_user(123)
