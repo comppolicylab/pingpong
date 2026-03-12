@@ -2216,6 +2216,7 @@ async def test_copy_lecture_video_assistant_to_other_class_clones_lecture_video_
             "copy-source.mp4",
             filename="copy-source.mp4",
             status=schemas.LectureVideoStatus.READY.value,
+            uploader_id=123,
         )
         session.add(source_class)
         session.add(target_class)
@@ -2303,6 +2304,89 @@ async def test_copy_lecture_video_assistant_to_other_class_clones_lecture_video_
     assert copied_video.class_id == 2
     assert copied_video.stored_object_id == lecture_video.stored_object_id
     assert copied_question == "Copied question?"
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_edit", "assistant:1"),
+        ("user:123", "can_create_assistants", "class:2"),
+    ]
+)
+async def test_copy_lecture_video_assistant_writes_authz_grants_for_cloned_video(
+    api, authz, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        source_class = models.Class(
+            id=1,
+            name="Source Class",
+            institution_id=institution.id,
+            api_key="shared-key",
+        )
+        target_class = models.Class(
+            id=2,
+            name="Target Class",
+            institution_id=institution.id,
+            api_key="shared-key",
+        )
+        lecture_video = make_lecture_video(
+            source_class.id,
+            "copy-source.mp4",
+            filename="copy-source.mp4",
+            status=schemas.LectureVideoStatus.READY.value,
+            uploader_id=123,
+        )
+        session.add(source_class)
+        session.add(target_class)
+        session.add(lecture_video)
+        await session.flush()
+
+        session.add(
+            models.Assistant(
+                id=1,
+                name="Lecture Assistant",
+                class_id=source_class.id,
+                creator_id=123,
+                interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+                version=3,
+                model="gpt-4o-mini",
+                lecture_video_id=lecture_video.id,
+                instructions="Teach the lecture.",
+                tools="[]",
+            )
+        )
+        await session.commit()
+
+    response = api.post(
+        "/api/v1/class/1/assistant/1/copy",
+        json={"target_class_id": 2},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    copied = response.json()
+
+    async with db.async_session() as session:
+        copied_assistant = await session.get(models.Assistant, copied["id"])
+
+    assert copied_assistant is not None
+    copied_video_id = copied_assistant.lecture_video_id
+    assert copied_video_id is not None
+
+    authz_calls = await authz.get_all_calls()
+    assert (
+        "grant",
+        "class:2",
+        "parent",
+        f"lecture_video:{copied_video_id}",
+    ) in authz_calls
+    assert (
+        "grant",
+        "user:123",
+        "owner",
+        f"lecture_video:{copied_video_id}",
+    ) in authz_calls
 
 
 @with_user(123)

@@ -14,6 +14,7 @@ from pingpong.authz.openfga import OpenFgaAuthzClient
 from pingpong.config import config
 from pingpong.files import _file_grants
 from pingpong.invite import send_clone_group_failed, send_clone_group_notification
+from pingpong.lecture_video_service import lecture_video_grants
 from pingpong.schemas import (
     ClonedGroupNotification,
     CopyClassRequest,
@@ -301,6 +302,7 @@ async def copy_assistant(
         cloned_lecture_video = await models.LectureVideo.clone_for_class(
             session, assistant.lecture_video, target_class_id
         )
+        await client.write_safe(grant=lecture_video_grants(cloned_lecture_video))
         new_lecture_video_id = cloned_lecture_video.id
 
     if assistant.version <= 2:
