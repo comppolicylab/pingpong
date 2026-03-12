@@ -280,7 +280,7 @@ async def test_create_thread_rejects_lecture_video_assistant(
         json={"assistant_id": 1, "message": "hello"},
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
-    assert response.status_code == 409
+    assert response.status_code == 400
     assert (
         response.json()["detail"]
         == "This assistant requires a dedicated thread creation endpoint."
