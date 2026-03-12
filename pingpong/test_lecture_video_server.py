@@ -6,7 +6,8 @@ from pingpong import lecture_video_service
 from pingpong import models
 from pingpong.config import LocalAudioStoreSettings, LocalVideoStoreSettings
 import pingpong.schemas as schemas
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from .testutil import with_authz, with_user, with_institution
@@ -586,6 +587,69 @@ async def test_lecture_video_summary_backfills_zero_content_length_from_store(
     assert stored_object.content_length == len(video_bytes)
 
 
+@pytest.mark.asyncio
+async def test_lecture_video_summary_logs_warning_when_store_returns_zero_content_length(
+    db, config, monkeypatch, caplog, tmp_path
+):
+    monkeypatch.setattr(
+        config,
+        "video_store",
+        LocalVideoStoreSettings(type="local", save_target=str(tmp_path)),
+    )
+
+    async def fake_get_video_metadata(key: str) -> schemas.VideoMetadata:
+        return schemas.VideoMetadata(
+            key=key,
+            content_type="video/mp4",
+            content_length=0,
+        )
+
+    monkeypatch.setattr(
+        config.video_store.store, "get_video_metadata", fake_get_video_metadata
+    )
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1, name="Test Class", institution_id=1, api_key="test-key"
+        )
+        lecture_video = make_lecture_video(
+            class_id=1,
+            key="legacy-video.mp4",
+            filename="legacy-video.mp4",
+            content_length=0,
+        )
+        session.add(models.Institution(id=1, name="Test Institution"))
+        session.add(class_)
+        session.add(lecture_video)
+        await session.commit()
+        lecture_video_id = lecture_video.id
+        stored_object_id = lecture_video.stored_object.id
+
+    async with db.async_session() as session:
+        lecture_video = await models.LectureVideo.get_by_id(session, lecture_video_id)
+        assert lecture_video is not None
+        with caplog.at_level("WARNING"):
+            summary = await lecture_video_service.lecture_video_summary_from_model(
+                session, lecture_video
+            )
+        await session.commit()
+
+    assert summary is not None
+    assert summary.size == 0
+    assert (
+        "Video store returned content_length=0 during on-demand lecture video backfill"
+        in caplog.text
+    )
+
+    async with db.async_session() as session:
+        stored_object = await session.get(
+            models.LectureVideoStoredObject, stored_object_id
+        )
+
+    assert stored_object is not None
+    assert stored_object.content_length == 0
+
+
 @with_user(123)
 @with_institution(11, "Test Institution")
 @with_authz(grants=[("user:123", "admin", "class:1")])
@@ -736,7 +800,7 @@ async def test_upload_assistant_lecture_video_endpoint_allows_editor(
         await session.commit()
 
     response = api.post(
-        "/api/v1/class/1/assistant/1/lecture-video",
+        "/api/v1/class/1/assistant/1/lecture-video/upload",
         files={"upload": ("assistant-upload.mp4", b"video-bytes", "video/mp4")},
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -803,7 +867,7 @@ async def test_upload_assistant_lecture_video_endpoint_rejects_non_lecture_assis
         await session.commit()
 
     response = api.post(
-        "/api/v1/class/1/assistant/1/lecture-video",
+        "/api/v1/class/1/assistant/1/lecture-video/upload",
         files={"upload": ("assistant-upload.mp4", b"video-bytes", "video/mp4")},
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -1106,9 +1170,9 @@ async def test_create_lecture_video_assistant_persists_normalized_manifest(
             )
             .where(models.LectureVideoQuestion.lecture_video_id == lecture_video.id)
         )
-        correct_option_count = await session.scalar(
+        single_select_correct_option_count = await session.scalar(
             select(func.count()).select_from(
-                models.lecture_video_question_correct_option_association
+                models.lecture_video_question_single_select_correct_option_association
             )
         )
         narration_count = await session.scalar(
@@ -1119,7 +1183,7 @@ async def test_create_lecture_video_assistant_persists_normalized_manifest(
     assert refreshed_video.status == schemas.LectureVideoStatus.READY.value
     assert question_count == 1
     assert option_count == 2
-    assert correct_option_count == 1
+    assert single_select_correct_option_count == 1
     assert narration_count == 3
 
 
@@ -1637,7 +1701,7 @@ async def test_copy_lecture_video_assistant_to_other_class_clones_lecture_video_
         await session.flush()
 
         await session.execute(
-            models.lecture_video_question_correct_option_association.insert().values(
+            models.lecture_video_question_single_select_correct_option_association.insert().values(
                 question_id=question.id,
                 option_id=option.id,
             )
@@ -1745,6 +1809,141 @@ async def test_create_lecture_video_assistant_rejects_assigned_lecture_video(
             "model": "gpt-4o-mini",
             "tools": [],
             "lecture_video_id": lecture_video.id,
+            "lecture_video_manifest": lecture_video_manifest(),
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 400
+    assert "already attached to another assistant" in response.json()["detail"]
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "admin", "class:1"),
+        ("user:123", "can_create_assistants", "class:1"),
+    ]
+)
+async def test_create_assistant_handles_lecture_video_unique_conflict(
+    api, db, institution, valid_user_token, monkeypatch
+):
+    patch_lecture_video_model_list(monkeypatch)
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        lecture_video = make_lecture_video(
+            class_.id,
+            "race-create.mp4",
+            filename="race-create.mp4",
+            status=schemas.LectureVideoStatus.UPLOADED.value,
+        )
+        session.add(class_)
+        session.add(lecture_video)
+        await session.commit()
+        await session.refresh(lecture_video)
+
+    async def fail_create(*args, **kwargs):
+        raise IntegrityError(
+            "INSERT INTO assistants (lecture_video_id) VALUES (?)",
+            {},
+            Exception("UNIQUE constraint failed: assistants.lecture_video_id"),
+        )
+
+    monkeypatch.setattr(models.Assistant, "create", fail_create)
+
+    response = api.post(
+        "/api/v1/class/1/assistant",
+        json={
+            "name": "Another Lecture Assistant",
+            "instructions": "Guide the learner through the lecture.",
+            "description": "Lecture presentation assistant",
+            "interaction_mode": "lecture_video",
+            "model": "gpt-4o-mini",
+            "tools": [],
+            "lecture_video_id": lecture_video.id,
+            "lecture_video_manifest": lecture_video_manifest(),
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 400
+    assert "already attached to another assistant" in response.json()["detail"]
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "admin", "class:1"),
+        ("user:123", "can_create_assistants", "class:1"),
+        ("user:123", "can_edit", "assistant:1"),
+    ]
+)
+async def test_update_assistant_handles_lecture_video_unique_conflict(
+    api, db, institution, valid_user_token, monkeypatch
+):
+    patch_lecture_video_model_list(monkeypatch)
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        first_video = make_lecture_video(
+            class_.id,
+            "race-update-first.mp4",
+            filename="race-update-first.mp4",
+            status=schemas.LectureVideoStatus.UPLOADED.value,
+        )
+        second_video = make_lecture_video(
+            class_.id,
+            "race-update-second.mp4",
+            filename="race-update-second.mp4",
+            status=schemas.LectureVideoStatus.UPLOADED.value,
+        )
+        session.add_all([class_, first_video, second_video])
+        await session.flush()
+        session.add(
+            models.Assistant(
+                id=1,
+                name="Existing Lecture Assistant",
+                class_id=class_.id,
+                creator_id=123,
+                interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+                version=3,
+                model="gpt-4o-mini",
+                lecture_video_id=first_video.id,
+                instructions="Existing lecture assistant.",
+                tools="[]",
+            )
+        )
+        await session.commit()
+        await session.refresh(second_video)
+
+    async def fail_persist_manifest(*args, **kwargs):
+        raise IntegrityError(
+            "UPDATE assistants SET lecture_video_id=? WHERE assistants.id = ?",
+            {},
+            Exception("UNIQUE constraint failed: assistants.lecture_video_id"),
+        )
+
+    monkeypatch.setattr(
+        lecture_video_service, "persist_manifest", fail_persist_manifest
+    )
+
+    response = api.put(
+        "/api/v1/class/1/assistant/1",
+        json={
+            "lecture_video_id": second_video.id,
             "lecture_video_manifest": lecture_video_manifest(),
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
@@ -1931,6 +2130,205 @@ async def test_clear_normalized_content_preserves_shared_narration_stored_object
 
 
 @with_institution(11, "Test Institution")
+async def test_correct_option_association_requires_option_belongs_to_question(
+    db, institution
+):
+    async with db.async_session() as session:
+        await session.execute(text("PRAGMA foreign_keys=ON"))
+        class_ = models.Class(
+            id=1,
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        lecture_video = make_lecture_video(class_.id, "constraint-check.mp4")
+        session.add_all([class_, lecture_video])
+        await session.flush()
+
+        first_question = models.LectureVideoQuestion(
+            lecture_video_id=lecture_video.id,
+            position=0,
+            question_type=schemas.LectureVideoQuestionType.SINGLE_SELECT,
+            question_text="First question?",
+            intro_text="Intro",
+            stop_offset_ms=1000,
+        )
+        second_question = models.LectureVideoQuestion(
+            lecture_video_id=lecture_video.id,
+            position=1,
+            question_type=schemas.LectureVideoQuestionType.SINGLE_SELECT,
+            question_text="Second question?",
+            intro_text="Intro",
+            stop_offset_ms=2000,
+        )
+        session.add_all([first_question, second_question])
+        await session.flush()
+
+        second_question_option = models.LectureVideoQuestionOption(
+            question_id=second_question.id,
+            position=0,
+            option_text="Second option",
+            post_answer_text="Feedback",
+            continue_offset_ms=2500,
+        )
+        session.add(second_question_option)
+        await session.flush()
+
+        with pytest.raises(IntegrityError):
+            await session.execute(
+                models.lecture_video_question_single_select_correct_option_association.insert().values(
+                    question_id=first_question.id,
+                    option_id=second_question_option.id,
+                )
+            )
+            await session.flush()
+
+
+@with_institution(11, "Test Institution")
+async def test_single_select_correct_option_association_allows_only_one_option_per_question(
+    db, institution
+):
+    async with db.async_session() as session:
+        await session.execute(text("PRAGMA foreign_keys=ON"))
+        class_ = models.Class(
+            id=1,
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        lecture_video = make_lecture_video(class_.id, "single-select-limit.mp4")
+        session.add_all([class_, lecture_video])
+        await session.flush()
+
+        question = models.LectureVideoQuestion(
+            lecture_video_id=lecture_video.id,
+            position=0,
+            question_type=schemas.LectureVideoQuestionType.SINGLE_SELECT,
+            question_text="Question?",
+            intro_text="Intro",
+            stop_offset_ms=1000,
+        )
+        session.add(question)
+        await session.flush()
+
+        first_option = models.LectureVideoQuestionOption(
+            question_id=question.id,
+            position=0,
+            option_text="First option",
+            post_answer_text="First feedback",
+            continue_offset_ms=1500,
+        )
+        second_option = models.LectureVideoQuestionOption(
+            question_id=question.id,
+            position=1,
+            option_text="Second option",
+            post_answer_text="Second feedback",
+            continue_offset_ms=2000,
+        )
+        session.add_all([first_option, second_option])
+        await session.flush()
+
+        await session.execute(
+            models.lecture_video_question_single_select_correct_option_association.insert().values(
+                question_id=question.id,
+                option_id=first_option.id,
+            )
+        )
+
+        with pytest.raises(IntegrityError):
+            await session.execute(
+                models.lecture_video_question_single_select_correct_option_association.insert().values(
+                    question_id=question.id,
+                    option_id=second_option.id,
+                )
+            )
+            await session.flush()
+
+
+@with_institution(11, "Test Institution")
+async def test_clear_normalized_content_deletes_stored_object_shared_within_same_video(
+    db, institution, config, monkeypatch, tmp_path
+):
+    narration_dir = tmp_path / "narrations"
+    monkeypatch.setattr(
+        config,
+        "lecture_video_audio_store",
+        LocalAudioStoreSettings(save_target=str(narration_dir)),
+    )
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        lecture_video = make_lecture_video(class_.id, "shared-within-video.mp4")
+        session.add_all([class_, lecture_video])
+        await session.flush()
+
+        shared_stored_object = models.LectureVideoNarrationStoredObject(
+            key="shared-within-video.mp3",
+            content_type="audio/mpeg",
+            content_length=100,
+        )
+        session.add(shared_stored_object)
+        await session.flush()
+        (narration_dir / shared_stored_object.key).parent.mkdir(
+            parents=True, exist_ok=True
+        )
+        (narration_dir / shared_stored_object.key).write_bytes(b"shared-audio")
+
+        intro_narration = models.LectureVideoNarration(
+            stored_object_id=shared_stored_object.id,
+            status=schemas.LectureVideoNarrationStatus.READY.value,
+        )
+        post_narration = models.LectureVideoNarration(
+            stored_object_id=shared_stored_object.id,
+            status=schemas.LectureVideoNarrationStatus.READY.value,
+        )
+        session.add_all([intro_narration, post_narration])
+        await session.flush()
+
+        question = models.LectureVideoQuestion(
+            lecture_video_id=lecture_video.id,
+            position=0,
+            question_type=schemas.LectureVideoQuestionType.SINGLE_SELECT,
+            question_text="Question?",
+            intro_text="Intro",
+            stop_offset_ms=1000,
+            intro_narration_id=intro_narration.id,
+        )
+        session.add(question)
+        await session.flush()
+
+        option = models.LectureVideoQuestionOption(
+            question_id=question.id,
+            position=0,
+            option_text="Option",
+            post_answer_text="Feedback",
+            continue_offset_ms=1500,
+            post_narration_id=post_narration.id,
+        )
+        session.add(option)
+        await session.commit()
+
+        await lecture_video_service.clear_normalized_content(session, lecture_video.id)
+        await session.commit()
+
+        narration_count = await session.scalar(
+            select(func.count()).select_from(models.LectureVideoNarration)
+        )
+        narration_stored_object_count = await session.scalar(
+            select(func.count()).select_from(models.LectureVideoNarrationStoredObject)
+        )
+
+    assert narration_count == 0
+    assert narration_stored_object_count == 0
+    assert not (narration_dir / "shared-within-video.mp3").exists()
+
+
+@with_institution(11, "Test Institution")
 async def test_lecture_video_delete_deletes_unused_video_stored_object(
     db, institution, config, monkeypatch, tmp_path
 ):
@@ -1988,6 +2386,45 @@ async def test_lecture_video_delete_deletes_unused_video_stored_object(
     assert stored_object_after_first_delete is not None
     assert stored_object_after_second_delete is None
     assert not (video_dir / "shared-video.mp4").exists()
+
+
+@with_institution(11, "Test Institution")
+async def test_lecture_video_delete_deletes_unused_stored_object_without_video_store(
+    db, institution, config, monkeypatch
+):
+    monkeypatch.setattr(config, "video_store", None)
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        stored_object = models.LectureVideoStoredObject(
+            key="legacy-video.mp4",
+            original_filename="legacy-video.mp4",
+            content_type="video/mp4",
+            content_length=1000,
+        )
+        session.add_all([class_, stored_object])
+        await session.flush()
+
+        lecture_video = await models.LectureVideo.create(
+            session,
+            class_id=class_.id,
+            stored_object_id=stored_object.id,
+            user_id=None,
+        )
+        await session.commit()
+
+        await lecture_video_service.delete_lecture_video(session, lecture_video.id)
+        await session.commit()
+        stored_object_after_delete = await session.get(
+            models.LectureVideoStoredObject, stored_object.id
+        )
+
+    assert stored_object_after_delete is None
 
 
 @with_institution(11, "Test Institution")

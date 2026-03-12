@@ -3,7 +3,8 @@ from pathlib import Path
 
 import humanize
 from fastapi import HTTPException, UploadFile
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, union
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 import uuid_utils as uuid
 
@@ -13,6 +14,11 @@ from .config import config
 from .video_store import VideoStoreError
 
 logger = logging.getLogger(__name__)
+
+LECTURE_VIDEO_ALREADY_ASSIGNED_DETAIL = (
+    "This lecture video is already attached to another assistant. "
+    "Upload a new lecture video or copy the assistant instead."
+)
 
 
 def get_upload_size(upload: UploadFile) -> int:
@@ -42,7 +48,9 @@ async def create_lecture_video(
     upload: UploadFile,
 ) -> models.LectureVideo:
     if not config.video_store:
-        raise HTTPException(status_code=404, detail="No Video Store exists.")
+        raise HTTPException(
+            status_code=503, detail="Video store not configured or unavailable."
+        )
 
     upload_size = get_upload_size(upload)
     if upload_size > config.upload.lecture_video_max_size:
@@ -79,21 +87,38 @@ async def create_lecture_video(
             detail="An unexpected error occurred while saving the lecture video. Please try again later.",
         ) from e
 
-    stored_object = await models.LectureVideoStoredObject.create(
-        session,
-        key=store_key,
-        original_filename=original_filename,
-        content_type=content_type,
-        content_length=upload_size,
-    )
-    lecture_video = await models.LectureVideo.create(
-        session,
-        class_id=class_id,
-        stored_object_id=stored_object.id,
-        user_id=uploader_id,
-    )
-    lecture_video.stored_object = stored_object
-    return lecture_video
+    try:
+        stored_object = await models.LectureVideoStoredObject.create(
+            session,
+            key=store_key,
+            original_filename=original_filename,
+            content_type=content_type,
+            content_length=upload_size,
+        )
+        lecture_video = await models.LectureVideo.create(
+            session,
+            class_id=class_id,
+            stored_object_id=stored_object.id,
+            user_id=uploader_id,
+        )
+        lecture_video.stored_object = stored_object
+        return lecture_video
+    except Exception as e:
+        try:
+            await config.video_store.store.delete(store_key)
+        except Exception:
+            logger.exception(
+                "Failed to delete uploaded lecture video after database error. key=%s",
+                store_key,
+            )
+        logger.exception(
+            "Failed to create lecture video database records after upload. key=%s",
+            store_key,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="An unexpected error occurred while saving the lecture video. Please try again later.",
+        ) from e
 
 
 async def _backfill_lecture_video_content_length_if_missing(
@@ -129,6 +154,14 @@ async def _backfill_lecture_video_content_length_if_missing(
     except Exception:
         logger.exception(
             "Unexpected error backfilling lecture video content length. stored_object_id=%s key=%s",
+            stored_object.id,
+            stored_object.key,
+        )
+        return
+
+    if metadata.content_length == 0:
+        logger.warning(
+            "Video store returned content_length=0 during on-demand lecture video backfill. stored_object_id=%s key=%s",
             stored_object.id,
             stored_object.key,
         )
@@ -178,11 +211,28 @@ async def ensure_lecture_video_is_unassigned(
     if existing_assistant is not None:
         raise HTTPException(
             status_code=400,
-            detail=(
-                "This lecture video is already attached to another assistant. "
-                "Upload a new lecture video or copy the assistant instead."
-            ),
+            detail=LECTURE_VIDEO_ALREADY_ASSIGNED_DETAIL,
         )
+
+
+def raise_if_lecture_video_assignment_conflict(exc: IntegrityError) -> None:
+    message = " ".join(
+        part.lower()
+        for part in (
+            str(exc),
+            str(getattr(exc, "orig", "")),
+            str(getattr(exc, "statement", "")),
+        )
+        if part
+    )
+    if (
+        "lecture_video_id" in message
+        and "assistant" in message
+        and ("unique" in message or "duplicate" in message)
+    ):
+        raise HTTPException(
+            status_code=400, detail=LECTURE_VIDEO_ALREADY_ASSIGNED_DETAIL
+        ) from exc
 
 
 async def get_lecture_video_assistant_for_class(
@@ -218,83 +268,82 @@ def text_needs_audio(text: str) -> bool:
 async def _get_orphaned_narration_stored_objects_for_clear(
     session: AsyncSession, lecture_video_id: int
 ) -> list[tuple[int, str]]:
-    narration_ids = list(
+    narration_ids = union(
+        select(models.LectureVideoQuestion.intro_narration_id.label("id")).where(
+            models.LectureVideoQuestion.lecture_video_id == lecture_video_id,
+            models.LectureVideoQuestion.intro_narration_id.is_not(None),
+        ),
+        select(models.LectureVideoQuestionOption.post_narration_id.label("id"))
+        .join(
+            models.LectureVideoQuestion,
+            models.LectureVideoQuestion.id
+            == models.LectureVideoQuestionOption.question_id,
+        )
+        .where(
+            models.LectureVideoQuestion.lecture_video_id == lecture_video_id,
+            models.LectureVideoQuestionOption.post_narration_id.is_not(None),
+        ),
+    ).cte("narration_ids")
+    other_narrations = models.LectureVideoNarration.__table__.alias("other_narrations")
+    remaining_narration_exists = (
+        select(other_narrations.c.id)
+        .select_from(
+            other_narrations.outerjoin(
+                narration_ids, narration_ids.c.id == other_narrations.c.id
+            )
+        )
+        .where(
+            other_narrations.c.stored_object_id
+            == models.LectureVideoNarrationStoredObject.id,
+            narration_ids.c.id.is_(None),
+        )
+        .exists()
+    )
+
+    return list(
         (
-            await session.scalars(
-                select(models.LectureVideoQuestion.intro_narration_id).where(
-                    models.LectureVideoQuestion.lecture_video_id == lecture_video_id,
-                    models.LectureVideoQuestion.intro_narration_id.is_not(None),
+            await session.execute(
+                select(
+                    models.LectureVideoNarrationStoredObject.id,
+                    models.LectureVideoNarrationStoredObject.key,
                 )
+                .join(
+                    models.LectureVideoNarration,
+                    models.LectureVideoNarration.stored_object_id
+                    == models.LectureVideoNarrationStoredObject.id,
+                )
+                .join(
+                    narration_ids, narration_ids.c.id == models.LectureVideoNarration.id
+                )
+                .where(~remaining_narration_exists)
+                .distinct()
             )
         ).all()
     )
-    narration_ids.extend(
-        list(
-            (
-                await session.scalars(
-                    select(models.LectureVideoQuestionOption.post_narration_id)
-                    .join(
-                        models.LectureVideoQuestion,
-                        models.LectureVideoQuestion.id
-                        == models.LectureVideoQuestionOption.question_id,
-                    )
-                    .where(
-                        models.LectureVideoQuestion.lecture_video_id
-                        == lecture_video_id,
-                        models.LectureVideoQuestionOption.post_narration_id.is_not(
-                            None
-                        ),
-                    )
-                )
-            ).all()
-        )
-    )
-    if not narration_ids:
-        return []
-
-    rows = (
-        await session.execute(
-            select(
-                models.LectureVideoNarrationStoredObject.id,
-                models.LectureVideoNarrationStoredObject.key,
-            )
-            .join(
-                models.LectureVideoNarration,
-                models.LectureVideoNarration.stored_object_id
-                == models.LectureVideoNarrationStoredObject.id,
-            )
-            .where(models.LectureVideoNarration.id.in_(narration_ids))
-            .distinct()
-        )
-    ).all()
-
-    orphaned_rows: list[tuple[int, str]] = []
-    for row in rows:
-        other_narration_id = await session.scalar(
-            select(models.LectureVideoNarration.id).where(
-                models.LectureVideoNarration.stored_object_id == row.id,
-                models.LectureVideoNarration.id.not_in(narration_ids),
-            )
-        )
-        if other_narration_id is None:
-            orphaned_rows.append((row.id, row.key))
-
-    return orphaned_rows
 
 
 async def clear_normalized_content(
     session: AsyncSession, lecture_video_id: int
 ) -> None:
+    audio_keys_to_delete = await _clear_normalized_content_rows_and_collect_audio_keys(
+        session, lecture_video_id
+    )
+    if not audio_keys_to_delete or not config.lecture_video_audio_store:
+        return
+
+    for key in audio_keys_to_delete:
+        await config.lecture_video_audio_store.store.delete_file(key)
+
+
+async def _clear_normalized_content_rows_and_collect_audio_keys(
+    session: AsyncSession, lecture_video_id: int
+) -> list[str]:
     orphaned_stored_objects = await _get_orphaned_narration_stored_objects_for_clear(
         session, lecture_video_id
     )
-    await models.LectureVideo.clear_normalized_content(session, lecture_video_id)
+    await models.LectureVideo._clear_normalized_content_rows(session, lecture_video_id)
     if not orphaned_stored_objects:
-        return
-
-    if config.lecture_video_audio_store:
-        for _, key in orphaned_stored_objects:
-            await config.lecture_video_audio_store.store.delete_file(key)
+        return []
 
     await session.execute(
         delete(models.LectureVideoNarrationStoredObject).where(
@@ -303,6 +352,7 @@ async def clear_normalized_content(
             )
         )
     )
+    return [key for _, key in orphaned_stored_objects]
 
 
 async def delete_lecture_video(session: AsyncSession, lecture_video_id: int) -> None:
@@ -321,18 +371,26 @@ async def delete_lecture_video(session: AsyncSession, lecture_video_id: int) -> 
         )
     )
 
-    await clear_normalized_content(session, lecture_video_id)
+    audio_keys_to_delete = await _clear_normalized_content_rows_and_collect_audio_keys(
+        session, lecture_video_id
+    )
     await session.execute(
         delete(models.LectureVideo).where(models.LectureVideo.id == lecture_video_id)
     )
 
-    if is_orphaned_after_delete and store_key and config.video_store:
-        await config.video_store.store.delete(store_key)
+    if is_orphaned_after_delete and stored_object_id is not None:
         await session.execute(
             delete(models.LectureVideoStoredObject).where(
                 models.LectureVideoStoredObject.id == stored_object_id
             )
         )
+
+    if audio_keys_to_delete and config.lecture_video_audio_store:
+        for key in audio_keys_to_delete:
+            await config.lecture_video_audio_store.store.delete_file(key)
+
+    if is_orphaned_after_delete and store_key and config.video_store:
+        await config.video_store.store.delete(store_key)
 
 
 async def ensure_lecture_video_is_unused(
@@ -405,7 +463,6 @@ async def persist_manifest(
             session.add(intro_narration)
             await session.flush()
             question_row.intro_narration_id = intro_narration.id
-            session.add(question_row)
 
         option_rows: list[
             tuple[
@@ -429,7 +486,7 @@ async def persist_manifest(
         for option, option_row in option_rows:
             if option.correct:
                 await session.execute(
-                    models.lecture_video_question_correct_option_association.insert().values(
+                    models.lecture_video_question_single_select_correct_option_association.insert().values(
                         question_id=question_row.id,
                         option_id=option_row.id,
                     )
@@ -441,9 +498,7 @@ async def persist_manifest(
                 session.add(post_narration)
                 await session.flush()
                 option_row.post_narration_id = post_narration.id
-                session.add(option_row)
 
     lecture_video.status = schemas.LectureVideoStatus.READY
     lecture_video.error_message = None
-    session.add(lecture_video)
     await session.flush()

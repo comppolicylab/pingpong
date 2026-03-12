@@ -240,6 +240,31 @@ async def test_s3_delete_uses_delete_object(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_s3_delete_ignores_missing_key(monkeypatch):
+    mock_client = AsyncMock()
+    mock_session = AsyncMock()
+
+    def mock_client_context(*args, **kwargs):
+        return AsyncContextManager(mock_client)
+
+    mock_session.client = mock_client_context
+
+    mock_session_class = Mock(return_value=mock_session)
+    monkeypatch.setattr("pingpong.video_store.aioboto3.Session", mock_session_class)
+
+    mock_client.delete_object = AsyncMock(
+        side_effect=ClientError({"Error": {"Code": "NoSuchKey"}}, "DeleteObject")
+    )
+
+    store = S3VideoStore(bucket="test-bucket", allow_unsigned=False)
+    await store.delete("missing.mp4")
+
+    mock_client.delete_object.assert_awaited_once_with(
+        Bucket="test-bucket", Key="missing.mp4"
+    )
+
+
+@pytest.mark.asyncio
 async def test_local_put_writes_in_chunks(tmp_path):
     class ChunkedContent:
         def __init__(self, data: bytes):

@@ -83,6 +83,7 @@ from pingpong.stream_utils import prefetch_stream
 from .animal_hash import name, process_threads, pseudonym, user_names
 from openai.types.beta.assistant_create_params import ToolResources
 from openai.types.beta.threads import MessageContentPartParam
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql import func, delete, update
 
 import pingpong.metrics as metrics
@@ -7424,11 +7425,11 @@ async def create_lecture_video(
 
 
 @v1.post(
-    "/class/{class_id}/assistant/{assistant_id}/lecture-video",
+    "/class/{class_id}/assistant/{assistant_id}/lecture-video/upload",
     dependencies=[Depends(Authz("can_edit", "assistant:{assistant_id}"))],
     response_model=schemas.LectureVideoSummary,
 )
-async def create_assistant_lecture_video(
+async def upload_lecture_video_for_assistant(
     class_id: str,
     assistant_id: str,
     request: StateRequest,
@@ -8046,16 +8047,20 @@ async def create_assistant(
         del req.lecture_video_id
         del req.lecture_video_manifest
 
-        asst = await models.Assistant.create(
-            request.state["db"],
-            req,
-            class_id=class_id_int,
-            user_id=creator_id,
-            assistant_id=new_asst.id if new_asst else None,
-            vector_store_id=vector_store_object_id,
-            lecture_video_id=lecture_video_object_id,
-            version=assistant_version,
-        )
+        try:
+            asst = await models.Assistant.create(
+                request.state["db"],
+                req,
+                class_id=class_id_int,
+                user_id=creator_id,
+                assistant_id=new_asst.id if new_asst else None,
+                vector_store_id=vector_store_object_id,
+                lecture_video_id=lecture_video_object_id,
+                version=assistant_version,
+            )
+        except IntegrityError as e:
+            lecture_video_service.raise_if_lecture_video_assignment_conflict(e)
+            raise
 
         if is_video and lecture_video_manifest is not None:
             assert lecture_video is not None  # for mypy
@@ -9492,22 +9497,30 @@ async def update_assistant(
     if "name" in req.model_fields_set and req.name is not None:
         asst.name = req.name
 
-    if lecture_video_fields_present and lecture_video is not None:
-        if asst.lecture_video_id != lecture_video.id:
-            lecture_video_id_to_delete = asst.lecture_video_id
-        asst.lecture_video_id = lecture_video.id
-        if lecture_video_manifest is None:
-            raise HTTPException(400, "Lecture video manifest is required.")
-        await lecture_video_service.persist_manifest(
-            request.state["db"], lecture_video, lecture_video_manifest
-        )
+    try:
+        if lecture_video_fields_present and lecture_video is not None:
+            if asst.lecture_video_id != lecture_video.id:
+                lecture_video_id_to_delete = asst.lecture_video_id
+            asst.lecture_video_id = lecture_video.id
+            if lecture_video_manifest is None:
+                raise HTTPException(400, "Lecture video manifest is required.")
+            await lecture_video_service.persist_manifest(
+                request.state["db"], lecture_video, lecture_video_manifest
+            )
 
-    await models.Thread.update_tools_available(
-        request.state["db"], asst.id, asst.tools, asst.version, asst.interaction_mode
-    )
-    request.state["db"].add(asst)
-    await request.state["db"].flush()
-    await request.state["db"].refresh(asst)
+        await models.Thread.update_tools_available(
+            request.state["db"],
+            asst.id,
+            asst.tools,
+            asst.version,
+            asst.interaction_mode,
+        )
+        request.state["db"].add(asst)
+        await request.state["db"].flush()
+        await request.state["db"].refresh(asst)
+    except IntegrityError as e:
+        lecture_video_service.raise_if_lecture_video_assignment_conflict(e)
+        raise
 
     if not asst.instructions:
         raise HTTPException(400, "Instructions cannot be empty.")

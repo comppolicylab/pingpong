@@ -35,6 +35,7 @@ from sqlalchemy import (
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy import (
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -52,6 +53,7 @@ from sqlalchemy.ext.asyncio import AsyncAttrs, AsyncSession
 from sqlalchemy.orm import (
     DeclarativeBase,
     Mapped,
+    Load,
     joinedload,
     contains_eager,
     selectinload,
@@ -1964,26 +1966,26 @@ class LectureVideoNarrationStoredObject(Base):
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
 
 
-lecture_video_question_correct_option_association = Table(
-    "lecture_video_question_correct_options",
+# Single-select correctness gets its own storage so multi-select can use a
+# separate schema later without overloading the same table.
+lecture_video_question_single_select_correct_option_association = Table(
+    "lecture_video_question_single_select_correct_options",
     Base.metadata,
     Column(
         "question_id",
         Integer,
         ForeignKey("lecture_video_questions.id", ondelete="CASCADE"),
         nullable=False,
+        primary_key=True,
     ),
-    Column(
-        "option_id",
-        Integer,
-        ForeignKey("lecture_video_question_options.id", ondelete="CASCADE"),
-        nullable=False,
-    ),
-    Index(
-        "lecture_video_question_correct_option_idx",
-        "question_id",
-        "option_id",
-        unique=True,
+    Column("option_id", Integer, nullable=False),
+    ForeignKeyConstraint(
+        ["question_id", "option_id"],
+        [
+            "lecture_video_question_options.question_id",
+            "lecture_video_question_options.id",
+        ],
+        ondelete="CASCADE",
     ),
 )
 
@@ -2033,12 +2035,14 @@ class LectureVideo(Base):
         class_id: int | None,
         stored_object_id: int,
         user_id: int | None,
+        display_name: str | None = None,
         status: schemas.LectureVideoStatus = schemas.LectureVideoStatus.UPLOADED,
         error_message: str | None = None,
     ) -> "LectureVideo":
         lecture_video = LectureVideo(
             class_id=class_id,
             stored_object_id=stored_object_id,
+            display_name=display_name,
             status=status,
             error_message=error_message,
             uploader_id=user_id,
@@ -2047,18 +2051,6 @@ class LectureVideo(Base):
         await session.flush()
         await session.refresh(lecture_video)
         return lecture_video
-
-    @classmethod
-    async def get_by_key(
-        cls, session: AsyncSession, key: str
-    ) -> Optional["LectureVideo"]:
-        stmt = (
-            select(LectureVideo)
-            .join(LectureVideo.stored_object)
-            .where(LectureVideoStoredObject.key == key)
-            .options(selectinload(LectureVideo.stored_object))
-        )
-        return await session.scalar(stmt)
 
     @classmethod
     async def get_by_id(
@@ -2097,7 +2089,7 @@ class LectureVideo(Base):
             )
             .options(
                 selectinload(LectureVideo.questions).selectinload(
-                    LectureVideoQuestion.correct_options
+                    LectureVideoQuestion.correct_option
                 )
             )
             .options(
@@ -2115,7 +2107,7 @@ class LectureVideo(Base):
         return await session.scalar(stmt)
 
     @classmethod
-    async def clear_normalized_content(
+    async def _clear_normalized_content_rows(
         cls, session: AsyncSession, lecture_video_id: int
     ) -> None:
         intro_narration_ids = list(
@@ -2149,8 +2141,10 @@ class LectureVideo(Base):
         )
         narration_ids = [*intro_narration_ids, *post_narration_ids]
         await session.execute(
-            delete(lecture_video_question_correct_option_association).where(
-                lecture_video_question_correct_option_association.c.question_id.in_(
+            delete(
+                lecture_video_question_single_select_correct_option_association
+            ).where(
+                lecture_video_question_single_select_correct_option_association.c.question_id.in_(
                     question_ids
                 )
             )
@@ -2181,6 +2175,7 @@ class LectureVideo(Base):
             class_id=target_class_id,
             stored_object_id=lecture_video.stored_object_id,
             user_id=lecture_video.uploader_id,
+            display_name=lecture_video.display_name,
             status=lecture_video.status,
             error_message=lecture_video.error_message,
         )
@@ -2233,11 +2228,11 @@ class LectureVideo(Base):
                 await session.flush()
                 option_map[option.id] = new_option
 
-            for correct_option in question.correct_options:
+            if question.correct_option is not None:
                 await session.execute(
-                    lecture_video_question_correct_option_association.insert().values(
+                    lecture_video_question_single_select_correct_option_association.insert().values(
                         question_id=new_question.id,
-                        option_id=option_map[correct_option.id].id,
+                        option_id=option_map[question.correct_option.id].id,
                     )
                 )
 
@@ -2275,10 +2270,10 @@ class LectureVideoQuestion(Base):
         cascade="all, delete-orphan",
         order_by="LectureVideoQuestionOption.position",
     )
-    correct_options = relationship(
+    correct_option = relationship(
         "LectureVideoQuestionOption",
-        secondary=lecture_video_question_correct_option_association,
-        order_by="LectureVideoQuestionOption.position",
+        secondary=lecture_video_question_single_select_correct_option_association,
+        uselist=False,
     )
     intro_narration = relationship(
         "LectureVideoNarration",
@@ -2333,6 +2328,7 @@ class LectureVideoQuestionOption(Base):
             "position",
             unique=True,
         ),
+        UniqueConstraint("question_id", "id"),
     )
 
 
@@ -3283,6 +3279,32 @@ class Assistant(Base):
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
 
+    @staticmethod
+    def _copy_context_loader_options() -> tuple[Load, ...]:
+        return (
+            selectinload(Assistant.code_interpreter_files),
+            selectinload(Assistant.mcp_server_tools),
+            selectinload(Assistant.lecture_video).selectinload(
+                LectureVideo.stored_object
+            ),
+            selectinload(Assistant.lecture_video).selectinload(LectureVideo.questions),
+            selectinload(Assistant.lecture_video)
+            .selectinload(LectureVideo.questions)
+            .selectinload(LectureVideoQuestion.options),
+            selectinload(Assistant.lecture_video)
+            .selectinload(LectureVideo.questions)
+            .selectinload(LectureVideoQuestion.correct_option),
+            selectinload(Assistant.lecture_video)
+            .selectinload(LectureVideo.questions)
+            .selectinload(LectureVideoQuestion.intro_narration)
+            .selectinload(LectureVideoNarration.stored_object),
+            selectinload(Assistant.lecture_video)
+            .selectinload(LectureVideo.questions)
+            .selectinload(LectureVideoQuestion.options)
+            .selectinload(LectureVideoQuestionOption.post_narration)
+            .selectinload(LectureVideoNarration.stored_object),
+        )
+
     @classmethod
     async def get_by_id(
         cls, session: AsyncSession, id_: int | None
@@ -3363,41 +3385,7 @@ class Assistant(Base):
         stmt = (
             select(Assistant)
             .where(Assistant.id == int(id_))
-            .options(selectinload(Assistant.code_interpreter_files))
-            .options(selectinload(Assistant.mcp_server_tools))
-            .options(
-                selectinload(Assistant.lecture_video).selectinload(
-                    LectureVideo.stored_object
-                )
-            )
-            .options(
-                selectinload(Assistant.lecture_video).selectinload(
-                    LectureVideo.questions
-                )
-            )
-            .options(
-                selectinload(Assistant.lecture_video)
-                .selectinload(LectureVideo.questions)
-                .selectinload(LectureVideoQuestion.options)
-            )
-            .options(
-                selectinload(Assistant.lecture_video)
-                .selectinload(LectureVideo.questions)
-                .selectinload(LectureVideoQuestion.correct_options)
-            )
-            .options(
-                selectinload(Assistant.lecture_video)
-                .selectinload(LectureVideo.questions)
-                .selectinload(LectureVideoQuestion.intro_narration)
-                .selectinload(LectureVideoNarration.stored_object)
-            )
-            .options(
-                selectinload(Assistant.lecture_video)
-                .selectinload(LectureVideo.questions)
-                .selectinload(LectureVideoQuestion.options)
-                .selectinload(LectureVideoQuestionOption.post_narration)
-                .selectinload(LectureVideoNarration.stored_object)
-            )
+            .options(*cls._copy_context_loader_options())
         )
         return await session.scalar(stmt)
 
@@ -3591,8 +3579,7 @@ class Assistant(Base):
                     *condition,
                 )
             )
-            .options(selectinload(Assistant.code_interpreter_files))
-            .options(selectinload(Assistant.mcp_server_tools))
+            .options(*cls._copy_context_loader_options())
         )
 
         result = await session.execute(stmt)
