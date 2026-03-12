@@ -73,7 +73,7 @@ def _split_shared_lecture_videos_per_assistant() -> None:
             bind.execute(
                 sa.text(
                     """
-                SELECT class_id, stored_object_id, name, status, error_message, uploader_id
+                SELECT class_id, stored_object_id, display_name, status, error_message, uploader_id
                 FROM lecture_videos
                 WHERE id = :lecture_video_id
                 """
@@ -91,7 +91,7 @@ def _split_shared_lecture_videos_per_assistant() -> None:
                     INSERT INTO lecture_videos (
                         class_id,
                         stored_object_id,
-                        name,
+                        display_name,
                         status,
                         error_message,
                         uploader_id
@@ -99,7 +99,7 @@ def _split_shared_lecture_videos_per_assistant() -> None:
                     VALUES (
                         :class_id,
                         :stored_object_id,
-                        :name,
+                        :display_name,
                         :status,
                         :error_message,
                         :uploader_id
@@ -110,7 +110,7 @@ def _split_shared_lecture_videos_per_assistant() -> None:
                 {
                     "class_id": assistant["class_id"],
                     "stored_object_id": source_video["stored_object_id"],
-                    "name": source_video["name"],
+                    "display_name": source_video["display_name"],
                     "status": source_video["status"],
                     "error_message": source_video["error_message"],
                     "uploader_id": source_video["uploader_id"],
@@ -291,7 +291,14 @@ def upgrade() -> None:
     ).create(op.get_bind())
     op.add_column(
         "lecture_videos",
-        sa.Column("status", sa.String(), server_default="READY", nullable=False),
+        sa.Column(
+            "status",
+            sa.Enum(
+                "UPLOADED", "PROCESSING", "READY", "FAILED", name="lecturevideostatus"
+            ),
+            server_default="READY",
+            nullable=False,
+        ),
     )
     op.add_column(
         "lecture_videos", sa.Column("error_message", sa.String(), nullable=True)

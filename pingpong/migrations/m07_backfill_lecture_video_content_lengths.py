@@ -28,7 +28,9 @@ async def backfill_lecture_video_content_lengths(session: AsyncSession) -> int:
     skipped = 0
     for stored_object in stored_objects:
         try:
-            metadata = await config.video_store.store.get_video_metadata(stored_object.key)
+            metadata = await config.video_store.store.get_video_metadata(
+                stored_object.key
+            )
         except VideoStoreError as e:
             skipped += 1
             logger.warning(

@@ -5733,7 +5733,7 @@ async def create_lecture_thread(
             status_code=400,
             detail="This assistant does not have a lecture video attached. Unable to create Lecture Presentation",
         )
-    if assistant.lecture_video.status != schemas.LectureVideoStatus.READY.value:
+    if assistant.lecture_video.status != schemas.LectureVideoStatus.READY:
         raise HTTPException(
             status_code=409,
             detail="This assistant's lecture video is not ready yet.",

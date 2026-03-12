@@ -400,7 +400,7 @@ async def persist_manifest(
 
         if text_needs_audio(question.intro_text):
             intro_narration = models.LectureVideoNarration(
-                status=schemas.LectureVideoNarrationStatus.PENDING.value,
+                status=schemas.LectureVideoNarrationStatus.PENDING,
             )
             session.add(intro_narration)
             await session.flush()
@@ -436,14 +436,14 @@ async def persist_manifest(
                 )
             if text_needs_audio(option.post_answer_text):
                 post_narration = models.LectureVideoNarration(
-                    status=schemas.LectureVideoNarrationStatus.PENDING.value,
+                    status=schemas.LectureVideoNarrationStatus.PENDING,
                 )
                 session.add(post_narration)
                 await session.flush()
                 option_row.post_narration_id = post_narration.id
                 session.add(option_row)
 
-    lecture_video.status = schemas.LectureVideoStatus.READY.value
+    lecture_video.status = schemas.LectureVideoStatus.READY
     lecture_video.error_message = None
     session.add(lecture_video)
     await session.flush()

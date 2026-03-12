@@ -2016,9 +2016,9 @@ class LectureVideo(Base):
     )
     display_name = Column(String)
     status = Column(
-        String,
+        SQLEnum(schemas.LectureVideoStatus),
         nullable=False,
-        server_default=schemas.LectureVideoStatus.UPLOADED.value,
+        server_default=schemas.LectureVideoStatus.UPLOADED.name,
     )
     error_message = Column(String, nullable=True)
     uploader_id = Column(Integer, ForeignKey("users.id"), nullable=True, default=None)
@@ -2033,7 +2033,7 @@ class LectureVideo(Base):
         class_id: int | None,
         stored_object_id: int,
         user_id: int | None,
-        status: str = schemas.LectureVideoStatus.UPLOADED.value,
+        status: schemas.LectureVideoStatus = schemas.LectureVideoStatus.UPLOADED,
         error_message: str | None = None,
     ) -> "LectureVideo":
         lecture_video = LectureVideo(
@@ -2354,9 +2354,9 @@ class LectureVideoNarration(Base):
         uselist=False,
     )
     status = Column(
-        String,
+        SQLEnum(schemas.LectureVideoNarrationStatus),
         nullable=False,
-        server_default=schemas.LectureVideoNarrationStatus.PENDING.value,
+        server_default=schemas.LectureVideoNarrationStatus.PENDING.name,
     )
     error_message = Column(String, nullable=True)
 
