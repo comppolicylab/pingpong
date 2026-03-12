@@ -573,6 +573,19 @@ def temperature_validator(self):
 
 
 def lecture_video_validator_create_assistant(self):
+    if self.interaction_mode == InteractionMode.LECTURE_VIDEO:
+        if self.lecture_video_id is None:
+            raise ValueError(
+                "Specifying a lecture_video_id is required for lecture video assistants."
+            )
+        if self.lecture_video_manifest is None:
+            raise ValueError(
+                "Specifying a lecture_video_manifest is required for lecture video assistants."
+            )
+    elif self.lecture_video_id is not None or self.lecture_video_manifest is not None:
+        raise ValueError(
+            "Lecture video data can only be set for assistants in Lecture Video mode."
+        )
     if self.interaction_mode == InteractionMode.LECTURE_VIDEO and (
         (self.code_interpreter_file_ids and len(self.code_interpreter_file_ids) > 0)
         or (self.file_search_file_ids and len(self.file_search_file_ids) > 0)
@@ -592,6 +605,18 @@ def lecture_video_validator_create_assistant(self):
 
 
 def lecture_video_validator_update_assistant(self):
+    lecture_video_id_present = "lecture_video_id" in self.model_fields_set
+    lecture_video_manifest_present = "lecture_video_manifest" in self.model_fields_set
+
+    if lecture_video_id_present and self.lecture_video_manifest is None:
+        raise ValueError(
+            "Specifying a lecture_video_manifest is required when updating lecture video data."
+        )
+    if lecture_video_manifest_present and self.lecture_video_id is None:
+        raise ValueError(
+            "Specifying a lecture_video_id is required when updating lecture video data."
+        )
+
     if not self.interaction_mode:
         return self
     if self.interaction_mode == InteractionMode.LECTURE_VIDEO and (

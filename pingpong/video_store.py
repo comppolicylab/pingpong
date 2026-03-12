@@ -1,7 +1,9 @@
 import asyncio
-import re
-import aioboto3
 import logging
+import os
+import re
+from uuid import uuid4
+import aioboto3
 import mimetypes
 import inspect
 from pathlib import Path
@@ -236,10 +238,18 @@ class LocalVideoStore(BaseVideoStore):
     async def put(self, key: str, content: IO, content_type: str):
         file_path = self._resolve_key_path(key)
         file_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = file_path.with_name(f"{file_path.name}.{uuid4().hex}.tmp")
         try:
             content.seek(0)
-            await asyncio.to_thread(self._write_file_in_chunks, file_path, content)
+            await asyncio.to_thread(self._write_file_in_chunks, temp_path, content)
+            await asyncio.to_thread(os.replace, temp_path, file_path)
         except Exception as e:
+            try:
+                await asyncio.to_thread(temp_path.unlink, missing_ok=True)
+            except Exception:
+                logger.exception(
+                    "Error cleaning up temporary lecture video file: %s", temp_path
+                )
             logger.exception("Error uploading lecture video to local store: %s", e)
             raise VideoStoreError(f"Failed to upload lecture video: {str(e)}") from e
 

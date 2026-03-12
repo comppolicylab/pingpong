@@ -205,12 +205,19 @@ async def ensure_lecture_video_is_unassigned(
     *,
     exclude_assistant_id: int | None = None,
 ) -> None:
+    # Lock the lecture video row so the unassigned check and the later write/flush()
+    # happen in the same transaction window for this lecture_video_id.
+    await session.execute(
+        select(models.LectureVideo.id)
+        .where(models.LectureVideo.id == lecture_video_id)
+        .with_for_update()
+    )
     existing_assistant = await models.Assistant.get_by_lecture_video_id(
         session, lecture_video_id, exclude_assistant_id=exclude_assistant_id
     )
     if existing_assistant is not None:
         raise HTTPException(
-            status_code=400,
+            status_code=409,
             detail=LECTURE_VIDEO_ALREADY_ASSIGNED_DETAIL,
         )
 
@@ -231,7 +238,7 @@ def raise_if_lecture_video_assignment_conflict(exc: IntegrityError) -> None:
         and ("unique" in message or "duplicate" in message)
     ):
         raise HTTPException(
-            status_code=400, detail=LECTURE_VIDEO_ALREADY_ASSIGNED_DETAIL
+            status_code=409, detail=LECTURE_VIDEO_ALREADY_ASSIGNED_DETAIL
         ) from exc
 
 

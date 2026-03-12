@@ -263,7 +263,7 @@ async def test_create_thread_rejects_lecture_video_assistant(
         json={"assistant_id": 1, "message": "hello"},
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
-    assert response.status_code == 400
+    assert response.status_code == 409
     assert (
         response.json()["detail"]
         == "This assistant requires a dedicated thread creation endpoint."
@@ -381,7 +381,7 @@ async def test_non_v3_assistants_rejected(api, db, institution, valid_user_token
         json={"assistant_id": 1},
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
-    assert response.status_code == 400
+    assert response.status_code == 409
     assert (
         response.json()["detail"]
         == "Lecture presentation can only be created using v3 assistants."
@@ -424,7 +424,7 @@ async def test_lecture_thread_rejected_without_attached_video(
         json={"assistant_id": 1},
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
-    assert response.status_code == 400
+    assert response.status_code == 409
     assert (
         response.json()["detail"]
         == "This assistant does not have a lecture video attached. Unable to create Lecture Presentation"
@@ -466,7 +466,7 @@ async def test_lecture_endpoint_rejects_non_lecture_video_assistant(
         json={"assistant_id": 1},
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
-    assert response.status_code == 400
+    assert response.status_code == 409
     assert (
         response.json()["detail"]
         == "This assistant is not compatible with this thread creation endpoint. Provide a lecture_video assistant."
@@ -1297,6 +1297,55 @@ async def test_invalid_lecture_video_manifest_returns_422_and_preserves_uploaded
 @with_institution(11, "Test Institution")
 @with_authz(
     grants=[
+        ("user:123", "admin", "class:1"),
+        ("user:123", "can_create_assistants", "class:1"),
+    ]
+)
+async def test_create_lecture_video_assistant_without_manifest_returns_422(
+    api, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        lecture_video = make_lecture_video(
+            class_.id,
+            "missing-manifest.mp4",
+            filename="missing-manifest.mp4",
+            status=schemas.LectureVideoStatus.UPLOADED.value,
+        )
+        session.add(class_)
+        session.add(lecture_video)
+        await session.commit()
+        await session.refresh(lecture_video)
+
+    response = api.post(
+        "/api/v1/class/1/assistant",
+        json={
+            "name": "Lecture Assistant",
+            "instructions": "Guide the learner through the lecture.",
+            "description": "Lecture presentation assistant",
+            "interaction_mode": "lecture_video",
+            "model": "gpt-4o-mini",
+            "tools": [],
+            "lecture_video_id": lecture_video.id,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 422
+    assert "Specifying a lecture_video_manifest is required" in response.json()[
+        "detail"
+    ][0]["msg"]
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
         ("user:123", "can_create_assistants", "class:1"),
         ("user:123", "can_edit", "assistant:1"),
         ("user:123", "admin", "class:1"),
@@ -1377,6 +1426,76 @@ async def test_update_assistant_with_new_lecture_video_id_deletes_prior_video_wh
     assert assistant.lecture_video_id == second_video.id
     assert first_video_row is None
     assert second_question == "Second question?"
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_assistants", "class:1"),
+        ("user:123", "can_edit", "assistant:1"),
+        ("user:123", "admin", "class:1"),
+    ]
+)
+async def test_update_assistant_with_new_lecture_video_id_without_manifest_returns_422(
+    api, db, institution, valid_user_token, monkeypatch
+):
+    patch_lecture_video_model_list(monkeypatch)
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        first_video = make_lecture_video(
+            class_.id,
+            "first-lecture.mp4",
+            filename="first-lecture.mp4",
+            status=schemas.LectureVideoStatus.UPLOADED.value,
+        )
+        second_video = make_lecture_video(
+            class_.id,
+            "second-lecture.mp4",
+            filename="second-lecture.mp4",
+            status=schemas.LectureVideoStatus.UPLOADED.value,
+        )
+        session.add(class_)
+        session.add(first_video)
+        session.add(second_video)
+        await session.commit()
+        await session.refresh(first_video)
+        await session.refresh(second_video)
+
+    create_response = api.post(
+        "/api/v1/class/1/assistant",
+        json={
+            "name": "Lecture Assistant",
+            "instructions": "Guide the learner through the lecture.",
+            "description": "Lecture presentation assistant",
+            "interaction_mode": "lecture_video",
+            "model": "gpt-4o-mini",
+            "tools": [],
+            "lecture_video_id": first_video.id,
+            "lecture_video_manifest": lecture_video_manifest(
+                question_text="First question?"
+            ),
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+
+    response = api.put(
+        "/api/v1/class/1/assistant/1",
+        json={"lecture_video_id": second_video.id},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 422
+    assert "Specifying a lecture_video_manifest is required" in response.json()[
+        "detail"
+    ][0]["msg"]
 
 
 @with_user(123)
