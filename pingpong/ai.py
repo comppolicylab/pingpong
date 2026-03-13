@@ -1091,6 +1091,8 @@ class BufferedResponseStreamHandler:
         self.force_stopped = False
         self.force_stop_incomplete_reason: str | None = None
         self.last_output_item_type: str | None = None
+        self.has_seen_output_message_phase = False
+        self.has_seen_final_answer_output_message = False
         self.show_file_search_result_quotes = (
             show_file_search_result_quotes
             if show_file_search_result_quotes is not None
@@ -1122,6 +1124,16 @@ class BufferedResponseStreamHandler:
     def enqueue(self, data: Dict) -> None:
         self.__buffer.write(orjson.dumps(data))
         self.__buffer.write(b"\n")
+
+    def _should_stop_for_output_message(self) -> bool:
+        if self.has_seen_output_message_phase:
+            return self.has_seen_final_answer_output_message
+        return self.last_output_item_type == "message"
+
+    def _record_output_message_phase(self, phase: MessagePhase | None) -> None:
+        if phase is not None:
+            self.has_seen_output_message_phase = True
+        self.has_seen_final_answer_output_message = phase == MessagePhase.FINAL_ANSWER
 
     def flush(self) -> bytes:
         value = self.__buffer.getvalue()
@@ -1183,19 +1195,17 @@ class BufferedResponseStreamHandler:
                 f"Received output message created event with cached message. Data: {data}"
             )
             return
-
-        if self.last_output_item_type == "message":
+        phase = normalize_response_message_phase(getattr(data, "phase", None))
+        if self._should_stop_for_output_message():
             logger.warning(
-                "RESPONSES_MULTI_MESSAGE_CATCH: Received consecutive assistant messages in a single response. "
-                "Stopping after detecting back-to-back messages."
+                "RESPONSES_MULTI_MESSAGE_CATCH: Received an additional assistant message in a single response. "
+                "Stopping after a prior phased or consecutive message."
             )
             await self.stop_after_additional_output_message()
             return
 
         self.prev_output_index += 1
         self.last_output_item_type = "message"
-
-        phase = normalize_response_message_phase(getattr(data, "phase", None))
 
         message_data = {
             "output_index": self.prev_output_index,
@@ -1624,6 +1634,7 @@ class BufferedResponseStreamHandler:
             self.message_part_id = None
 
         phase = normalize_response_message_phase(getattr(data, "phase", None))
+        self._record_output_message_phase(phase)
 
         completed_time = utcnow()
 
@@ -3627,12 +3638,6 @@ async def run_response(
                         case "response.output_item.added":
                             match event.item.type:
                                 case "message":
-                                    if handler.last_output_item_type == "message":
-                                        logger.info(
-                                            "RESPONSES_MULTI_MESSAGE_FIX: Stopping response due to consecutive output messages in event streamer."
-                                        )
-                                        await handler.stop_after_additional_output_message()
-                                        break
                                     await handler.on_output_message_created(event.item)
                                     if handler.force_stopped:
                                         break

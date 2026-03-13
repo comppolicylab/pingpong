@@ -535,6 +535,127 @@ async def test_buffered_handler_accepts_message_after_tool_call(db):
     assert run.incomplete_reason is None
 
 
+async def test_buffered_handler_accepts_final_answer_after_commentary(db):
+    handler, thread_id = await _setup_handler_with_phase(db, "commentary")
+    assert handler.message_id is not None
+    assert handler.run_id is not None
+    run_id = handler.run_id
+    first_message_id = handler.message_id
+
+    commentary_done_event = SimpleNamespace(
+        id="msg-phase-1",
+        status=schemas.MessageStatus.COMPLETED.value,
+        phase=schemas.MessagePhase.COMMENTARY.value,
+    )
+    await handler.on_output_message_done(commentary_done_event)
+
+    tool_call_event = SimpleNamespace(
+        id="tc-phase-commentary",
+        status=schemas.ToolCallStatus.IN_PROGRESS.value,
+        container_id="container-commentary",
+        code="print('commentary')",
+    )
+    await handler.on_code_interpreter_tool_call_created(tool_call_event)
+
+    followup_event = SimpleNamespace(
+        id="msg-phase-2",
+        status=schemas.MessageStatus.IN_PROGRESS.value,
+        role="assistant",
+        phase=schemas.MessagePhase.FINAL_ANSWER.value,
+    )
+    await handler.on_output_message_created(followup_event)
+
+    assert handler.force_stopped is False
+    assert handler.run_id == run_id
+    assert handler.message_id is not None
+
+    async with db.async_session() as session:
+        first_message = await session.get(models.Message, first_message_id)
+        run = await session.get(models.Run, run_id)
+        messages = (
+            (
+                await session.execute(
+                    select(models.Message)
+                    .where(models.Message.thread_id == thread_id)
+                    .order_by(models.Message.output_index.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    assert first_message is not None
+    assert first_message.message_status == schemas.MessageStatus.COMPLETED
+    assert first_message.phase == schemas.MessagePhase.COMMENTARY.value
+    assert run is not None
+    assert run.status == schemas.RunStatus.IN_PROGRESS
+    assert run.incomplete_reason is None
+    assert len(messages) == 2
+    assert [message.phase for message in messages] == [
+        schemas.MessagePhase.COMMENTARY.value,
+        schemas.MessagePhase.FINAL_ANSWER.value,
+    ]
+
+
+async def test_buffered_handler_truncates_after_second_final_answer(db):
+    handler, _thread_id = await _setup_handler_with_phase(db, "final_answer")
+    assert handler.message_id is not None
+    assert handler.run_id is not None
+    run_id = handler.run_id
+    first_message_id = handler.message_id
+
+    first_done_event = SimpleNamespace(
+        id="msg-phase-1",
+        status=schemas.MessageStatus.COMPLETED.value,
+        phase=schemas.MessagePhase.FINAL_ANSWER.value,
+    )
+    await handler.on_output_message_done(first_done_event)
+
+    tool_call_event = SimpleNamespace(
+        id="tc-phase-1",
+        status=schemas.ToolCallStatus.IN_PROGRESS.value,
+        container_id="container-phase-1",
+        code="print('phase')",
+    )
+    await handler.on_code_interpreter_tool_call_created(tool_call_event)
+
+    second_final_answer_event = SimpleNamespace(
+        id="msg-phase-2",
+        status=schemas.MessageStatus.IN_PROGRESS.value,
+        role="assistant",
+        phase=schemas.MessagePhase.FINAL_ANSWER.value,
+    )
+    await handler.on_output_message_created(second_final_answer_event)
+
+    assert handler.force_stopped is True
+    assert handler.run_id is None
+    assert handler.run_status is None
+    assert handler.force_stop_incomplete_reason is None
+
+    async with db.async_session() as session:
+        first_message = await session.get(models.Message, first_message_id)
+        run = await session.get(models.Run, run_id)
+        messages = (
+            (
+                await session.execute(
+                    select(models.Message)
+                    .where(models.Message.run_id == run_id)
+                    .order_by(models.Message.output_index.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    assert first_message is not None
+    assert first_message.message_status == schemas.MessageStatus.COMPLETED
+    assert run is not None
+    assert run.status == schemas.RunStatus.COMPLETED
+    assert run.incomplete_reason == "multi_message_truncate"
+    assert len(messages) == 1
+    assert messages[0].phase == schemas.MessagePhase.FINAL_ANSWER.value
+
+
 @with_user(111)
 @with_authz(grants=[("user:111", "can_view", "thread:2101")])
 async def test_get_thread_skips_duplicate_assistant_messages(api, db, valid_user_token):
