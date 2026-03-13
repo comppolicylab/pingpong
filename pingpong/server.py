@@ -181,9 +181,9 @@ def allowed_assistant_message_ids(
 ) -> set[int]:
     """Return assistant message IDs to show for response runs.
 
-    Consecutive assistant messages in the same run are only treated as duplicates
-    when they are adjacent final_answer messages. This preserves valid
-    commentary/future-phase sequences while still hiding the extra terminal answer.
+    Consecutive assistant messages in the same run mirror the stream handler:
+    before any phased assistant output is seen, adjacent assistant messages are
+    deduplicated; after that, only adjacent final_answer messages are deduplicated.
     """
     allowed_ids: set[int] = {
         message.id
@@ -222,20 +222,26 @@ def allowed_assistant_message_ids(
         items.sort(key=lambda item: item[0])
         previous_type: str | None = None
         previous_assistant_phase: str | None = None
+        has_seen_assistant_phase = False
         for _, item_type, obj in items:
             if item_type == "message":
                 message_obj = obj  # type: ignore[assignment]
                 if message_obj.role == schemas.MessageRole.ASSISTANT:
-                    if (
-                        previous_type == "assistant_message"
-                        and previous_assistant_phase
-                        == schemas.MessagePhase.FINAL_ANSWER.value
-                        and message_obj.phase == schemas.MessagePhase.FINAL_ANSWER.value
-                    ):
-                        continue
+                    if previous_type == "assistant_message":
+                        if not has_seen_assistant_phase:
+                            continue
+                        if (
+                            previous_assistant_phase
+                            == schemas.MessagePhase.FINAL_ANSWER.value
+                            and message_obj.phase
+                            == schemas.MessagePhase.FINAL_ANSWER.value
+                        ):
+                            continue
                     allowed_ids.add(message_obj.id)
                     previous_type = "assistant_message"
                     previous_assistant_phase = message_obj.phase
+                    if message_obj.phase is not None:
+                        has_seen_assistant_phase = True
                 else:
                     previous_type = "other_message"
                     previous_assistant_phase = None

@@ -201,6 +201,62 @@ async def _create_thread_with_duplicate_assistant_messages(
         await session.commit()
 
 
+async def _create_thread_with_assistant_message_sequence(
+    db,
+    *,
+    class_id: int,
+    thread_id: int,
+    run_id: int,
+    assistant_id: int,
+    phases: list[str | None],
+) -> None:
+    base_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    async with db.async_session() as session:
+        class_ = models.Class(id=class_id, name=f"Class {class_id}", api_key="sk-test")
+        assistant = models.Assistant(
+            id=assistant_id,
+            name=f"Assistant {assistant_id}",
+            class_id=class_id,
+            assistant_id=f"asst-{assistant_id}",
+            model="gpt-4o-mini",
+            hide_reasoning_summaries=False,
+        )
+        thread = models.Thread(
+            id=thread_id,
+            thread_id=f"thread-{thread_id}",
+            class_id=class_id,
+            assistant_id=assistant_id,
+            version=3,
+            tools_available="",
+            private=False,
+        )
+        run = models.Run(
+            id=run_id,
+            run_id=f"run-{run_id}",
+            status=schemas.RunStatus.COMPLETED,
+            thread_id=thread_id,
+            assistant_id=assistant_id,
+            created=base_time,
+            updated=base_time,
+        )
+        messages = [
+            models.Message(
+                message_status=schemas.MessageStatus.COMPLETED,
+                run_id=run_id,
+                thread_id=thread_id,
+                assistant_id=assistant_id,
+                role=schemas.MessageRole.ASSISTANT,
+                output_index=index + 1,
+                phase=phase,
+                created=base_time + timedelta(seconds=index),
+            )
+            for index, phase in enumerate(phases)
+        ]
+
+        session.add_all([class_, assistant, thread, run, *messages])
+        await session.commit()
+
+
 async def _create_server_thread(db, *, class_id: int, thread_id: int, run_id: int):
     await _create_thread_with_duplicate_assistant_messages(
         db,
@@ -249,6 +305,27 @@ async def _create_thread_with_phase_separated_assistant_messages(
         newer_output_index=8,
         older_phase=older_phase,
         newer_phase=newer_phase,
+    )
+
+
+async def _create_thread_with_unphased_assistant_messages(
+    db,
+    *,
+    class_id: int,
+    thread_id: int,
+    run_id: int,
+    assistant_id: int,
+) -> None:
+    await _create_thread_with_duplicate_assistant_messages(
+        db,
+        class_id=class_id,
+        thread_id=thread_id,
+        run_id=run_id,
+        assistant_id=assistant_id,
+        older_output_index=2,
+        newer_output_index=8,
+        older_phase=None,
+        newer_phase=None,
     )
 
 
@@ -1100,6 +1177,124 @@ async def test_list_thread_messages_keeps_unknown_phase_separated_assistant_mess
     messages = response.json()["messages"]
     assert len(messages) == 2
     assert [message["output_index"] for message in messages] == [2, 8]
+    assert all(message["run_id"] == str(run_id) for message in messages)
+
+
+@with_user(338)
+@with_authz(grants=[("user:338", "can_view", "thread:3115")])
+async def test_get_thread_deduplicates_unphased_assistant_messages(
+    api, db, valid_user_token
+):
+    class_id = 3015
+    thread_id = 3115
+    run_id = 3215
+
+    await _create_thread_with_unphased_assistant_messages(
+        db,
+        class_id=class_id,
+        thread_id=thread_id,
+        run_id=run_id,
+        assistant_id=3315,
+    )
+
+    response = api.get(
+        f"/api/v1/class/{class_id}/thread/{thread_id}",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    messages = response.json()["messages"]
+    assert len(messages) == 1
+    assert messages[0]["output_index"] == 2
+    assert messages[0]["run_id"] == str(run_id)
+
+
+@with_user(339)
+@with_authz(grants=[("user:339", "can_view", "thread:3116")])
+async def test_list_thread_messages_deduplicates_unphased_assistant_messages(
+    api, db, valid_user_token
+):
+    class_id = 3016
+    thread_id = 3116
+    run_id = 3216
+
+    await _create_thread_with_unphased_assistant_messages(
+        db,
+        class_id=class_id,
+        thread_id=thread_id,
+        run_id=run_id,
+        assistant_id=3316,
+    )
+
+    response = api.get(
+        f"/api/v1/class/{class_id}/thread/{thread_id}/messages",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    messages = response.json()["messages"]
+    assert len(messages) == 1
+    assert messages[0]["output_index"] == 2
+    assert messages[0]["run_id"] == str(run_id)
+
+
+@with_user(340)
+@with_authz(grants=[("user:340", "can_view", "thread:3117")])
+async def test_get_thread_keeps_unphased_messages_after_phased_output(
+    api, db, valid_user_token
+):
+    class_id = 3017
+    thread_id = 3117
+    run_id = 3217
+
+    await _create_thread_with_assistant_message_sequence(
+        db,
+        class_id=class_id,
+        thread_id=thread_id,
+        run_id=run_id,
+        assistant_id=3317,
+        phases=[schemas.MessagePhase.COMMENTARY.value, None, None],
+    )
+
+    response = api.get(
+        f"/api/v1/class/{class_id}/thread/{thread_id}",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    messages = response.json()["messages"]
+    assert len(messages) == 3
+    assert [message["output_index"] for message in messages] == [1, 2, 3]
+    assert all(message["run_id"] == str(run_id) for message in messages)
+
+
+@with_user(341)
+@with_authz(grants=[("user:341", "can_view", "thread:3118")])
+async def test_list_thread_messages_keeps_unphased_messages_after_phased_output(
+    api, db, valid_user_token
+):
+    class_id = 3018
+    thread_id = 3118
+    run_id = 3218
+
+    await _create_thread_with_assistant_message_sequence(
+        db,
+        class_id=class_id,
+        thread_id=thread_id,
+        run_id=run_id,
+        assistant_id=3318,
+        phases=[schemas.MessagePhase.COMMENTARY.value, None, None],
+    )
+
+    response = api.get(
+        f"/api/v1/class/{class_id}/thread/{thread_id}/messages",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    messages = response.json()["messages"]
+    assert len(messages) == 3
+    assert [message["output_index"] for message in messages] == [1, 2, 3]
     assert all(message["run_id"] == str(run_id) for message in messages)
 
 
