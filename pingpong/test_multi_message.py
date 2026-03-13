@@ -144,6 +144,8 @@ async def _create_thread_with_duplicate_assistant_messages(
     assistant_id: int,
     older_output_index: int,
     newer_output_index: int,
+    older_phase: str | None = None,
+    newer_phase: str | None = None,
 ) -> None:
     base_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
     async with db.async_session() as session:
@@ -181,6 +183,7 @@ async def _create_thread_with_duplicate_assistant_messages(
             assistant_id=assistant_id,
             role=schemas.MessageRole.ASSISTANT,
             output_index=older_output_index,
+            phase=older_phase,
             created=base_time,
         )
         newer_message = models.Message(
@@ -190,6 +193,7 @@ async def _create_thread_with_duplicate_assistant_messages(
             assistant_id=assistant_id,
             role=schemas.MessageRole.ASSISTANT,
             output_index=newer_output_index,
+            phase=newer_phase,
             created=base_time + timedelta(seconds=1),
         )
 
@@ -206,6 +210,8 @@ async def _create_server_thread(db, *, class_id: int, thread_id: int, run_id: in
         assistant_id=run_id * 2,
         older_output_index=2,
         newer_output_index=8,
+        older_phase=schemas.MessagePhase.FINAL_ANSWER.value,
+        newer_phase=schemas.MessagePhase.FINAL_ANSWER.value,
     )
 
 
@@ -218,6 +224,31 @@ async def _create_server_thread_alt(db, *, class_id: int, thread_id: int, run_id
         assistant_id=run_id * 3,
         older_output_index=3,
         newer_output_index=7,
+        older_phase=schemas.MessagePhase.FINAL_ANSWER.value,
+        newer_phase=schemas.MessagePhase.FINAL_ANSWER.value,
+    )
+
+
+async def _create_thread_with_phase_separated_assistant_messages(
+    db,
+    *,
+    class_id: int,
+    thread_id: int,
+    run_id: int,
+    assistant_id: int,
+    older_phase: str = schemas.MessagePhase.COMMENTARY.value,
+    newer_phase: str = schemas.MessagePhase.FINAL_ANSWER.value,
+) -> None:
+    await _create_thread_with_duplicate_assistant_messages(
+        db,
+        class_id=class_id,
+        thread_id=thread_id,
+        run_id=run_id,
+        assistant_id=assistant_id,
+        older_output_index=2,
+        newer_output_index=8,
+        older_phase=older_phase,
+        newer_phase=newer_phase,
     )
 
 
@@ -954,6 +985,122 @@ async def test_list_thread_messages_deduplicates_extra_assistant_messages(
     assert len(messages) == 1
     assert messages[0]["output_index"] == 3
     assert messages[0]["run_id"] == str(run_id)
+
+
+@with_user(334)
+@with_authz(grants=[("user:334", "can_view", "thread:3111")])
+async def test_get_thread_keeps_phase_separated_assistant_messages(
+    api, db, valid_user_token
+):
+    class_id = 3011
+    thread_id = 3111
+    run_id = 3211
+
+    await _create_thread_with_phase_separated_assistant_messages(
+        db,
+        class_id=class_id,
+        thread_id=thread_id,
+        run_id=run_id,
+        assistant_id=3311,
+    )
+
+    response = api.get(
+        f"/api/v1/class/{class_id}/thread/{thread_id}",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    messages = response.json()["messages"]
+    assert len(messages) == 2
+    assert [message["output_index"] for message in messages] == [2, 8]
+
+
+@with_user(335)
+@with_authz(grants=[("user:335", "can_view", "thread:3112")])
+async def test_list_thread_messages_keeps_phase_separated_assistant_messages(
+    api, db, valid_user_token
+):
+    class_id = 3012
+    thread_id = 3112
+    run_id = 3212
+
+    await _create_thread_with_phase_separated_assistant_messages(
+        db,
+        class_id=class_id,
+        thread_id=thread_id,
+        run_id=run_id,
+        assistant_id=3312,
+    )
+
+    response = api.get(
+        f"/api/v1/class/{class_id}/thread/{thread_id}/messages",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    messages = response.json()["messages"]
+    assert len(messages) == 2
+    assert [message["output_index"] for message in messages] == [2, 8]
+
+
+@with_user(336)
+@with_authz(grants=[("user:336", "can_view", "thread:3113")])
+async def test_get_thread_keeps_unknown_phase_separated_assistant_messages(
+    api, db, valid_user_token
+):
+    class_id = 3013
+    thread_id = 3113
+    run_id = 3213
+
+    await _create_thread_with_phase_separated_assistant_messages(
+        db,
+        class_id=class_id,
+        thread_id=thread_id,
+        run_id=run_id,
+        assistant_id=3313,
+        older_phase="future_phase",
+    )
+
+    response = api.get(
+        f"/api/v1/class/{class_id}/thread/{thread_id}",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    messages = response.json()["messages"]
+    assert len(messages) == 2
+    assert [message["output_index"] for message in messages] == [2, 8]
+    assert all(message["run_id"] == str(run_id) for message in messages)
+
+
+@with_user(337)
+@with_authz(grants=[("user:337", "can_view", "thread:3114")])
+async def test_list_thread_messages_keeps_unknown_phase_separated_assistant_messages(
+    api, db, valid_user_token
+):
+    class_id = 3014
+    thread_id = 3114
+    run_id = 3214
+
+    await _create_thread_with_phase_separated_assistant_messages(
+        db,
+        class_id=class_id,
+        thread_id=thread_id,
+        run_id=run_id,
+        assistant_id=3314,
+        older_phase="future_phase",
+    )
+
+    response = api.get(
+        f"/api/v1/class/{class_id}/thread/{thread_id}/messages",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    messages = response.json()["messages"]
+    assert len(messages) == 2
+    assert [message["output_index"] for message in messages] == [2, 8]
+    assert all(message["run_id"] == str(run_id) for message in messages)
 
 
 async def test_buffered_handler_records_assistant_phase(db):

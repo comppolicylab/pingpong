@@ -179,7 +179,12 @@ def allowed_assistant_message_ids(
     tool_calls: list[models.ToolCall],
     reasoning_steps: list[models.ReasoningStep],
 ) -> set[int]:
-    """Return assistant message IDs that are not consecutive with another assistant message in the same run."""
+    """Return assistant message IDs to show for response runs.
+
+    Consecutive assistant messages in the same run are only treated as duplicates
+    when they are adjacent final_answer messages. This preserves valid
+    commentary/future-phase sequences while still hiding the extra terminal answer.
+    """
     allowed_ids: set[int] = {
         message.id
         for message in messages
@@ -216,18 +221,27 @@ def allowed_assistant_message_ids(
     for items in items_by_run.values():
         items.sort(key=lambda item: item[0])
         previous_type: str | None = None
+        previous_assistant_phase: str | None = None
         for _, item_type, obj in items:
             if item_type == "message":
                 message_obj = obj  # type: ignore[assignment]
                 if message_obj.role == schemas.MessageRole.ASSISTANT:
-                    if previous_type == "assistant_message":
+                    if (
+                        previous_type == "assistant_message"
+                        and previous_assistant_phase
+                        == schemas.MessagePhase.FINAL_ANSWER.value
+                        and message_obj.phase == schemas.MessagePhase.FINAL_ANSWER.value
+                    ):
                         continue
                     allowed_ids.add(message_obj.id)
                     previous_type = "assistant_message"
+                    previous_assistant_phase = message_obj.phase
                 else:
                     previous_type = "other_message"
+                    previous_assistant_phase = None
             else:
                 previous_type = item_type
+                previous_assistant_phase = None
 
     return allowed_ids
 
