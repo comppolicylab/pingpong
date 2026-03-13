@@ -5681,6 +5681,7 @@ class Message(Base):
     output_index = Column(Integer, nullable=False)
 
     role = Column(SQLEnum(schemas.MessageRole), nullable=False)
+    phase = Column(String, nullable=True)
     user_id = Column(
         Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
@@ -5859,16 +5860,17 @@ class Message(Base):
         id: int,
         status: schemas.MessageStatus,
         completed: datetime | None = None,
+        phase: schemas.MessagePhase | None = None,
     ) -> None:
         """Mark a message as a specific status."""
-        stmt = (
-            update(Message)
-            .where(Message.id == id)
-            .values(
-                message_status=status,
-                completed=completed,
-            )
-        )
+        values: dict[str, object] = {
+            "message_status": status,
+            "completed": completed,
+        }
+        if phase is not None:
+            values["phase"] = phase.value
+
+        stmt = update(Message).where(Message.id == id).values(**values)
         await session.execute(stmt)
 
 

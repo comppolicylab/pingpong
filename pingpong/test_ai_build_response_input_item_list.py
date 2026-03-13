@@ -213,3 +213,83 @@ async def test_build_response_input_item_list_drops_only_contiguous_reasoning(db
     ]
     assert "rst-keep" in reasoning_ids
     assert "rst-drop" not in reasoning_ids
+
+
+@pytest.mark.asyncio
+async def test_build_response_input_item_list_preserves_assistant_phase_only(db):
+    async with db.async_session() as session:
+        thread = models.Thread(thread_id="thread_message_phase", version=3)
+        session.add(thread)
+        await session.flush()
+
+        run = models.Run(status=schemas.RunStatus.COMPLETED, thread_id=thread.id)
+        session.add(run)
+        await session.flush()
+
+        base_time = utcnow() - timedelta(minutes=5)
+
+        user_message = models.Message(
+            message_status=schemas.MessageStatus.COMPLETED,
+            run_id=run.id,
+            thread_id=thread.id,
+            output_index=1,
+            role=schemas.MessageRole.USER,
+            created=base_time + timedelta(minutes=1),
+        )
+        assistant_message = models.Message(
+            message_status=schemas.MessageStatus.COMPLETED,
+            run_id=run.id,
+            thread_id=thread.id,
+            output_index=2,
+            role=schemas.MessageRole.ASSISTANT,
+            phase=schemas.MessagePhase.COMMENTARY.value,
+            created=base_time + timedelta(minutes=2),
+        )
+
+        session.add_all([user_message, assistant_message])
+        await session.commit()
+
+        thread_id = thread.id
+
+    async with db.async_session() as session:
+        items = await build_response_input_item_list(session, thread_id=thread_id)
+
+    assert len(items) == 2
+    assert items[0]["role"] == "user"
+    assert "phase" not in items[0] or items[0]["phase"] is None
+    assert items[1]["role"] == "assistant"
+    assert items[1]["phase"] == "commentary"
+
+
+@pytest.mark.asyncio
+async def test_build_response_input_item_list_drops_invalid_assistant_phase(db):
+    async with db.async_session() as session:
+        thread = models.Thread(thread_id="thread_invalid_message_phase", version=3)
+        session.add(thread)
+        await session.flush()
+
+        run = models.Run(status=schemas.RunStatus.COMPLETED, thread_id=thread.id)
+        session.add(run)
+        await session.flush()
+
+        message = models.Message(
+            message_status=schemas.MessageStatus.COMPLETED,
+            run_id=run.id,
+            thread_id=thread.id,
+            output_index=1,
+            role=schemas.MessageRole.ASSISTANT,
+            phase="not_supported",
+            created=utcnow(),
+        )
+
+        session.add(message)
+        await session.commit()
+
+        thread_id = thread.id
+
+    async with db.async_session() as session:
+        items = await build_response_input_item_list(session, thread_id=thread_id)
+
+    assert len(items) == 1
+    assert items[0]["role"] == "assistant"
+    assert "phase" not in items[0] or items[0]["phase"] is None

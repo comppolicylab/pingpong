@@ -26,12 +26,14 @@ from pingpong.invite import send_export_download, send_export_failed
 from pingpong.log_utils import sanitize_for_log
 import pingpong.models as models
 from pingpong.prompt import replace_random_blocks
+from typing import get_args, get_origin
 from pingpong.schemas import (
     APIKeyValidationResponse,
     AnnotationType,
     BufferedStreamHandlerToolCallState,
     CodeInterpreterOutputType,
     FileSearchToolAnnotationResult,
+    MessagePhase,
     MessageRole,
     MessageStatus,
     ReasoningStatus,
@@ -163,6 +165,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 logger = logging.getLogger(__name__)
+
+
+def _allowed_response_message_phases() -> set[str]:
+    annotation = ResponseOutputMessage.__annotations__["phase"]
+    allowed: set[str] = set()
+    for arg in get_args(annotation):
+        if get_origin(arg) is not None and str(get_origin(arg)) == "typing.Literal":
+            allowed.update(value for value in get_args(arg) if isinstance(value, str))
+    return allowed
+
+
+ALLOWED_RESPONSE_MESSAGE_PHASES = _allowed_response_message_phases()
+
+
+def normalize_response_message_phase(phase: object) -> MessagePhase | None:
+    if isinstance(phase, str) and phase in ALLOWED_RESPONSE_MESSAGE_PHASES:
+        return MessagePhase(phase)
+    return None
+
+
 responses_api_transition_logger = logging.getLogger("responses_api_transition")
 OpenAIClientType = Union[openai.AsyncClient, openai.AsyncAzureOpenAI]
 
@@ -594,6 +616,7 @@ async def build_response_input_item_list(
         return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
     async for message in models.Thread.list_all_messages_gen(session, thread_id):
+        phase = normalize_response_message_phase(message.phase)
         content_list: list[ResponseInputMessageContentListParam] = []
         for content in message.content:
             match content.type:
@@ -680,6 +703,7 @@ async def build_response_input_item_list(
                     content=content_list,
                     type="message",
                     id=message.message_id,
+                    phase=phase if message.role == MessageRole.ASSISTANT else None,
                 ),
             )
         )
@@ -1168,6 +1192,8 @@ class BufferedResponseStreamHandler:
         self.prev_output_index += 1
         self.last_output_item_type = "message"
 
+        phase = normalize_response_message_phase(getattr(data, "phase", None))
+
         message_data = {
             "output_index": self.prev_output_index,
             "thread_id": self.thread_id,
@@ -1176,6 +1202,7 @@ class BufferedResponseStreamHandler:
             "message_status": MessageStatus(data.status),
             "assistant_id": self.assistant_id,
             "role": data.role,
+            "phase": phase,
             "created": utcnow(),
         }
 
@@ -1593,6 +1620,8 @@ class BufferedResponseStreamHandler:
             )
             self.message_part_id = None
 
+        phase = normalize_response_message_phase(getattr(data, "phase", None))
+
         completed_time = utcnow()
 
         @db_session_handler
@@ -1604,6 +1633,7 @@ class BufferedResponseStreamHandler:
                 self.message_id,
                 MessageStatus(data.status),
                 completed=completed_time,
+                phase=phase,
             )
             await session_.commit()
 

@@ -2071,6 +2071,11 @@ class ThreadParticipants(BaseModel):
     assistant: dict[int, str]
 
 
+class MessagePhase(StrEnum):
+    COMMENTARY = "commentary"
+    FINAL_ANSWER = "final_answer"
+
+
 ThreadAnnotation: TypeAlias = Annotated[
     Union[FileCitationAnnotation, FilePathAnnotation, AnnotationURLCitation],
     PropertyInfo(discriminator="type"),
@@ -2112,6 +2117,9 @@ class ThreadMessage(OpenAIMessage):
 
     output_index: int | None = None
     """The output index of the message, if applicable for Next-Gen Assistants."""
+
+    phase: MessagePhase | None = None
+    """Assistant message phase for supported next-gen models; otherwise `None`."""
 
     content: list[ThreadMessageContent]
     """The content of the message in array of text and/or images."""

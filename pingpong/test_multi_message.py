@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy import select
 
 from pingpong import models, schemas
 from pingpong.ai import BufferedResponseStreamHandler
@@ -81,6 +82,76 @@ async def _setup_handler_with_initial_message(db):
     await handler.on_output_message_created(first_event)
     assert handler.message_id is not None
     return handler, run_id, handler.message_id
+
+
+async def _setup_handler_with_phase(db, phase: str):
+    base_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    user_id = 9002
+    class_id = 3002
+    assistant_id = 6002
+    thread_id = 4002
+    run_id = 5002
+
+    async with db.async_session() as session:
+        user = models.User(
+            id=user_id,
+            email="multi-message-phase@test.dev",
+            state=schemas.UserState.VERIFIED,
+        )
+        class_ = models.Class(
+            id=class_id, name="Multi Message Phase Class", api_key="sk-test"
+        )
+        assistant = models.Assistant(
+            id=assistant_id,
+            name="Handler Phase Assistant",
+            class_id=class_id,
+            assistant_id="asst-handler-phase",
+            model="gpt-5.3-codex",
+            creator_id=user_id,
+        )
+        thread = models.Thread(
+            id=thread_id,
+            thread_id="thread-handler-phase",
+            class_id=class_id,
+            assistant_id=assistant_id,
+            version=3,
+            tools_available="",
+            private=False,
+        )
+        run = models.Run(
+            id=run_id,
+            run_id="run-handler-phase",
+            status=schemas.RunStatus.IN_PROGRESS,
+            thread_id=thread_id,
+            assistant_id=assistant_id,
+            creator_id=user_id,
+            created=base_time,
+            updated=base_time,
+        )
+
+        session.add_all([user, class_, assistant, thread, run])
+        await session.commit()
+
+    handler = BufferedResponseStreamHandler(
+        auth=AsyncMock(),
+        cli=AsyncMock(),
+        run_id=run_id,
+        run_status=schemas.RunStatus.IN_PROGRESS,
+        prev_output_index=0,
+        file_names={},
+        class_id=class_id,
+        thread_id=thread_id,
+        assistant_id=assistant_id,
+        user_id=user_id,
+    )
+    event = SimpleNamespace(
+        id="msg-phase-1",
+        status=schemas.MessageStatus.IN_PROGRESS.value,
+        role="assistant",
+        phase=phase,
+    )
+    await handler.on_output_message_created(event)
+    return handler, thread_id
 
 
 async def _create_thread_with_duplicate_assistant_messages(
@@ -566,6 +637,21 @@ async def test_list_thread_messages_deduplicates_extra_assistant_messages(
     assert len(messages) == 1
     assert messages[0]["output_index"] == 3
     assert messages[0]["run_id"] == str(run_id)
+
+
+async def test_buffered_handler_records_assistant_phase(db):
+    handler, thread_id = await _setup_handler_with_phase(db, "commentary")
+    assert handler.message_id is not None
+
+    async with db.async_session() as session:
+        message = await session.scalar(
+            select(models.Message)
+            .where(models.Message.thread_id == thread_id)
+            .where(models.Message.message_id == "msg-phase-1")
+        )
+
+    assert message is not None
+    assert message.phase == "commentary"
 
 
 @with_user(444)
