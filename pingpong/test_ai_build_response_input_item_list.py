@@ -3,6 +3,7 @@ from datetime import timedelta
 import pytest
 
 from pingpong import models, schemas
+from pingpong import ai
 from pingpong.ai import build_response_input_item_list
 from pingpong.now import utcnow
 
@@ -262,7 +263,7 @@ async def test_build_response_input_item_list_preserves_assistant_phase_only(db)
 
 
 @pytest.mark.asyncio
-async def test_build_response_input_item_list_drops_invalid_assistant_phase(db):
+async def test_build_response_input_item_list_preserves_unknown_assistant_phase(db):
     async with db.async_session() as session:
         thread = models.Thread(thread_id="thread_invalid_message_phase", version=3)
         session.add(thread)
@@ -292,4 +293,17 @@ async def test_build_response_input_item_list_drops_invalid_assistant_phase(db):
 
     assert len(items) == 1
     assert items[0]["role"] == "assistant"
-    assert "phase" not in items[0] or items[0]["phase"] is None
+    assert items[0]["phase"] == "not_supported"
+
+
+def test_get_known_response_message_phase_returns_known_phase_only():
+    assert (
+        ai.get_known_response_message_phase("commentary")
+        == schemas.MessagePhase.COMMENTARY
+    )
+    assert ai.get_known_response_message_phase("future_phase") is None
+
+
+def test_get_response_message_phase_value_preserves_unknown_sdk_phase():
+    assert ai.get_response_message_phase_value("future_phase") == "future_phase"
+    assert ai.get_response_message_phase_value(None) is None
