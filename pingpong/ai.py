@@ -168,10 +168,13 @@ logger = logging.getLogger(__name__)
 
 
 def _allowed_response_message_phases() -> set[str]:
-    annotation = ResponseOutputMessage.__annotations__["phase"]
+    annotation = getattr(ResponseOutputMessage, "__annotations__", {}).get("phase")
+    if annotation is None:
+        return set()
+
     allowed: set[str] = set()
     for arg in get_args(annotation):
-        if get_origin(arg) is not None and str(get_origin(arg)) == "typing.Literal":
+        if get_origin(arg) is Literal:
             allowed.update(value for value in get_args(arg) if isinstance(value, str))
     return allowed
 
@@ -1202,7 +1205,7 @@ class BufferedResponseStreamHandler:
             "message_status": MessageStatus(data.status),
             "assistant_id": self.assistant_id,
             "role": data.role,
-            "phase": phase,
+            "phase": phase.value if phase is not None else None,
             "created": utcnow(),
         }
 
