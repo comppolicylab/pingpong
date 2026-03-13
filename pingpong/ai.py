@@ -26,7 +26,7 @@ from pingpong.invite import send_export_download, send_export_failed
 from pingpong.log_utils import sanitize_for_log
 import pingpong.models as models
 from pingpong.prompt import replace_random_blocks
-from typing import get_args, get_origin
+from typing import cast
 from pingpong.schemas import (
     APIKeyValidationResponse,
     AnnotationType,
@@ -167,25 +167,18 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 logger = logging.getLogger(__name__)
 
 
-def _allowed_response_message_phases() -> set[str]:
-    annotation = getattr(ResponseOutputMessage, "__annotations__", {}).get("phase")
-    if annotation is None:
-        return set()
-
-    allowed: set[str] = set()
-    for arg in get_args(annotation):
-        if get_origin(arg) is Literal:
-            allowed.update(value for value in get_args(arg) if isinstance(value, str))
-    return allowed
+def get_response_message_phase_value(phase: object) -> str | None:
+    return phase if isinstance(phase, str) else None
 
 
-ALLOWED_RESPONSE_MESSAGE_PHASES = _allowed_response_message_phases()
-
-
-def normalize_response_message_phase(phase: object) -> MessagePhase | None:
-    if isinstance(phase, str) and phase in ALLOWED_RESPONSE_MESSAGE_PHASES:
-        return MessagePhase(phase)
-    return None
+def get_known_response_message_phase(phase: object) -> MessagePhase | None:
+    phase_value = get_response_message_phase_value(phase)
+    if phase_value is None:
+        return None
+    try:
+        return MessagePhase(phase_value)
+    except ValueError:
+        return None
 
 
 responses_api_transition_logger = logging.getLogger("responses_api_transition")
@@ -619,7 +612,7 @@ async def build_response_input_item_list(
         return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
     async for message in models.Thread.list_all_messages_gen(session, thread_id):
-        phase = normalize_response_message_phase(message.phase)
+        phase = get_response_message_phase_value(message.phase)
         content_list: list[ResponseInputMessageContentListParam] = []
         for content in message.content:
             match content.type:
@@ -701,12 +694,17 @@ async def build_response_input_item_list(
                 message.created,
                 message.output_index,
                 "message",
-                ResponseOutputMessageParam(
-                    role=message.role,
-                    content=content_list,
-                    type="message",
-                    id=message.message_id,
-                    phase=phase if message.role == MessageRole.ASSISTANT else None,
+                cast(
+                    ResponseOutputMessageParam,
+                    {
+                        "role": message.role,
+                        "content": content_list,
+                        "type": "message",
+                        "id": message.message_id,
+                        "phase": (
+                            phase if message.role == MessageRole.ASSISTANT else None
+                        ),
+                    },
                 ),
             )
         )
@@ -1091,6 +1089,8 @@ class BufferedResponseStreamHandler:
         self.force_stopped = False
         self.force_stop_incomplete_reason: str | None = None
         self.last_output_item_type: str | None = None
+        self.has_seen_output_message_phase = False
+        self.last_output_message_phase: str | None = None
         self.show_file_search_result_quotes = (
             show_file_search_result_quotes
             if show_file_search_result_quotes is not None
@@ -1122,6 +1122,23 @@ class BufferedResponseStreamHandler:
     def enqueue(self, data: Dict) -> None:
         self.__buffer.write(orjson.dumps(data))
         self.__buffer.write(b"\n")
+
+    def _should_stop_for_output_message(self, incoming_phase: str | None) -> bool:
+        if self.has_seen_output_message_phase:
+            return (
+                self.last_output_message_phase == MessagePhase.FINAL_ANSWER.value
+                and incoming_phase == MessagePhase.FINAL_ANSWER.value
+            )
+        return self.last_output_item_type == "message"
+
+    def _record_output_message_phase(self, phase: str | None) -> None:
+        if phase is not None:
+            self.has_seen_output_message_phase = True
+        self.last_output_message_phase = phase
+
+    def _record_non_message_output_item(self, item_type: str) -> None:
+        self.last_output_item_type = item_type
+        self.last_output_message_phase = None
 
     def flush(self) -> bytes:
         value = self.__buffer.getvalue()
@@ -1183,19 +1200,17 @@ class BufferedResponseStreamHandler:
                 f"Received output message created event with cached message. Data: {data}"
             )
             return
-
-        if self.last_output_item_type == "message":
+        raw_phase = get_response_message_phase_value(getattr(data, "phase", None))
+        if self._should_stop_for_output_message(raw_phase):
             logger.warning(
-                "RESPONSES_MULTI_MESSAGE_CATCH: Received consecutive assistant messages in a single response. "
-                "Stopping after detecting back-to-back messages."
+                "RESPONSES_MULTI_MESSAGE_CATCH: Received an additional assistant message in a single response. "
+                "Stopping after a prior phased or consecutive message."
             )
             await self.stop_after_additional_output_message()
             return
 
         self.prev_output_index += 1
         self.last_output_item_type = "message"
-
-        phase = normalize_response_message_phase(getattr(data, "phase", None))
 
         message_data = {
             "output_index": self.prev_output_index,
@@ -1205,7 +1220,7 @@ class BufferedResponseStreamHandler:
             "message_status": MessageStatus(data.status),
             "assistant_id": self.assistant_id,
             "role": data.role,
-            "phase": phase.value if phase is not None else None,
+            "phase": raw_phase,
             "created": utcnow(),
         }
 
@@ -1623,7 +1638,8 @@ class BufferedResponseStreamHandler:
             )
             self.message_part_id = None
 
-        phase = normalize_response_message_phase(getattr(data, "phase", None))
+        raw_phase = get_response_message_phase_value(getattr(data, "phase", None))
+        self._record_output_message_phase(raw_phase)
 
         completed_time = utcnow()
 
@@ -1636,7 +1652,7 @@ class BufferedResponseStreamHandler:
                 self.message_id,
                 MessageStatus(data.status),
                 completed=completed_time,
-                phase=phase,
+                phase=raw_phase,
             )
             await session_.commit()
 
@@ -1689,7 +1705,7 @@ class BufferedResponseStreamHandler:
             return
 
         self.prev_output_index += 1
-        self.last_output_item_type = "code_interpreter_call"
+        self._record_non_message_output_item("code_interpreter_call")
 
         tool_call_data = {
             "run_id": self.run_id,
@@ -1981,7 +1997,7 @@ class BufferedResponseStreamHandler:
             return
 
         self.prev_output_index += 1
-        self.last_output_item_type = "mcp_call"
+        self._record_non_message_output_item("mcp_call")
 
         mcp_server_tool = self.mcp_server_tools_by_server_label.get(data.server_label)
         if not mcp_server_tool:
@@ -2221,7 +2237,7 @@ class BufferedResponseStreamHandler:
             return
 
         self.prev_output_index += 1
-        self.last_output_item_type = "mcp_list_tools"
+        self._record_non_message_output_item("mcp_list_tools")
 
         mcp_server_tool = self.mcp_server_tools_by_server_label.get(data.server_label)
         if not mcp_server_tool:
@@ -2460,7 +2476,7 @@ class BufferedResponseStreamHandler:
             return
 
         self.prev_output_index += 1
-        self.last_output_item_type = "web_search_call"
+        self._record_non_message_output_item("web_search_call")
 
         tool_call_data = {
             "run_id": self.run_id,
@@ -2697,7 +2713,7 @@ class BufferedResponseStreamHandler:
             return
 
         self.prev_output_index += 1
-        self.last_output_item_type = "file_search_call"
+        self._record_non_message_output_item("file_search_call")
 
         tool_call_data = {
             "run_id": self.run_id,
@@ -2917,7 +2933,7 @@ class BufferedResponseStreamHandler:
             return
 
         self.prev_output_index += 1
-        self.last_output_item_type = "reasoning"
+        self._record_non_message_output_item("reasoning")
 
         reasoning_data = {
             "run_id": self.run_id,
@@ -3627,12 +3643,6 @@ async def run_response(
                         case "response.output_item.added":
                             match event.item.type:
                                 case "message":
-                                    if handler.last_output_item_type == "message":
-                                        logger.info(
-                                            "RESPONSES_MULTI_MESSAGE_FIX: Stopping response due to consecutive output messages in event streamer."
-                                        )
-                                        await handler.stop_after_additional_output_message()
-                                        break
                                     await handler.on_output_message_created(event.item)
                                     if handler.force_stopped:
                                         break

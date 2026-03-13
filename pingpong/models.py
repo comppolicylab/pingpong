@@ -5860,7 +5860,7 @@ class Message(Base):
         id: int,
         status: schemas.MessageStatus,
         completed: datetime | None = None,
-        phase: schemas.MessagePhase | None = None,
+        phase: str | schemas.MessagePhase | None = None,
     ) -> None:
         """Mark a message as a specific status."""
         values: dict[str, object] = {
@@ -5868,7 +5868,9 @@ class Message(Base):
             "completed": completed,
         }
         if phase is not None:
-            values["phase"] = phase.value
+            values["phase"] = (
+                phase.value if isinstance(phase, schemas.MessagePhase) else phase
+            )
 
         stmt = update(Message).where(Message.id == id).values(**values)
         await session.execute(stmt)
