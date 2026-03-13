@@ -1135,6 +1135,10 @@ class BufferedResponseStreamHandler:
             self.has_seen_output_message_phase = True
         self.has_seen_final_answer_output_message = phase == MessagePhase.FINAL_ANSWER
 
+    def _record_non_message_output_item(self, item_type: str) -> None:
+        self.last_output_item_type = item_type
+        self.has_seen_final_answer_output_message = False
+
     def flush(self) -> bytes:
         value = self.__buffer.getvalue()
         self.__buffer.truncate(0)
@@ -1700,7 +1704,7 @@ class BufferedResponseStreamHandler:
             return
 
         self.prev_output_index += 1
-        self.last_output_item_type = "code_interpreter_call"
+        self._record_non_message_output_item("code_interpreter_call")
 
         tool_call_data = {
             "run_id": self.run_id,
@@ -1992,7 +1996,7 @@ class BufferedResponseStreamHandler:
             return
 
         self.prev_output_index += 1
-        self.last_output_item_type = "mcp_call"
+        self._record_non_message_output_item("mcp_call")
 
         mcp_server_tool = self.mcp_server_tools_by_server_label.get(data.server_label)
         if not mcp_server_tool:
@@ -2232,7 +2236,7 @@ class BufferedResponseStreamHandler:
             return
 
         self.prev_output_index += 1
-        self.last_output_item_type = "mcp_list_tools"
+        self._record_non_message_output_item("mcp_list_tools")
 
         mcp_server_tool = self.mcp_server_tools_by_server_label.get(data.server_label)
         if not mcp_server_tool:
@@ -2471,7 +2475,7 @@ class BufferedResponseStreamHandler:
             return
 
         self.prev_output_index += 1
-        self.last_output_item_type = "web_search_call"
+        self._record_non_message_output_item("web_search_call")
 
         tool_call_data = {
             "run_id": self.run_id,
@@ -2708,7 +2712,7 @@ class BufferedResponseStreamHandler:
             return
 
         self.prev_output_index += 1
-        self.last_output_item_type = "file_search_call"
+        self._record_non_message_output_item("file_search_call")
 
         tool_call_data = {
             "run_id": self.run_id,
@@ -2928,7 +2932,7 @@ class BufferedResponseStreamHandler:
             return
 
         self.prev_output_index += 1
-        self.last_output_item_type = "reasoning"
+        self._record_non_message_output_item("reasoning")
 
         reasoning_data = {
             "run_id": self.run_id,
