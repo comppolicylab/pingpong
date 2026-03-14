@@ -1,3 +1,4 @@
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 
 import uuid_utils as uuid
@@ -7,7 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import pingpong.models as models
 import pingpong.schemas as schemas
 from pingpong.now import NowFn, utcnow
-
 
 CONTROLLER_SESSION_HEADER = "x-lecture-video-controller-session"
 CONTROLLER_LEASE_DURATION = timedelta(seconds=30)
@@ -195,7 +195,7 @@ def build_lecture_video_session(
         current_continuation=(
             _build_continuation(thread, state) if request_has_control else None
         ),
-        state_version=state.version if request_has_control else None,
+        state_version=state.version,
         controller=schemas.LectureVideoSessionController(
             has_control=request_has_control,
             has_active_controller=active_controller,
@@ -283,6 +283,9 @@ async def initialize_thread_state(
             "thread_id": thread.id,
             "event_index": 1,
             "event_type": schemas.LectureVideoInteractionEventType.SESSION_INITIALIZED,
+            "idempotency_key": (
+                models.LectureVideoInteraction.generate_idempotency_key()
+            ),
         },
     )
     return state
@@ -383,12 +386,18 @@ async def _append_interaction(
     # get_next_event_index() is a read-then-write sequence. Callers must hold the
     # LectureVideoThreadState row lock acquired via get_or_initialize_thread_state(
     # ..., for_update=True) so concurrent requests for the same thread serialize.
-    assert getattr(state, "_locked_for_interaction_append", False), (
-        "LectureVideoThreadState must be loaded with FOR UPDATE before appending "
-        "lecture video interactions."
-    )
+    if not getattr(state, "_locked_for_interaction_append", False):
+        raise RuntimeError(
+            "LectureVideoThreadState must be loaded with FOR UPDATE before appending "
+            "lecture video interactions."
+        )
     event_index = await models.LectureVideoInteraction.get_next_event_index(
         session, state.thread_id
+    )
+    effective_idempotency_key = (
+        idempotency_key
+        if isinstance(idempotency_key, str) and idempotency_key.strip()
+        else models.LectureVideoInteraction.generate_idempotency_key()
     )
     return await models.LectureVideoInteraction.create(
         session,
@@ -402,7 +411,7 @@ async def _append_interaction(
             "offset_ms": offset_ms,
             "from_offset_ms": from_offset_ms,
             "to_offset_ms": to_offset_ms,
-            "idempotency_key": idempotency_key,
+            "idempotency_key": effective_idempotency_key,
         },
     )
 
@@ -546,6 +555,217 @@ def _find_option_for_question(
     return None
 
 
+InteractionHandler = Callable[..., Awaitable[None]]
+
+
+async def _handle_question_presented(
+    session: AsyncSession,
+    state: models.LectureVideoThreadState,
+    actor_user_id: int,
+    request: schemas.LectureVideoQuestionPresentedRequest,
+    *,
+    event_type: schemas.LectureVideoInteractionEventType,
+    current_time: datetime,
+) -> None:
+    current_question = _get_current_question(state.thread, state)
+    if (
+        state.state != schemas.LectureVideoSessionState.PLAYING
+        or current_question is None
+        or current_question.id != request.question_id
+    ):
+        raise _conflict(
+            detail="This question is no longer active.",
+        )
+
+    state.state = schemas.LectureVideoSessionState.AWAITING_ANSWER
+    state.last_known_offset_ms = request.offset_ms
+    await _append_interaction(
+        session,
+        state,
+        actor_user_id=actor_user_id,
+        event_type=event_type,
+        question_id=request.question_id,
+        offset_ms=request.offset_ms,
+        idempotency_key=request.idempotency_key,
+    )
+
+
+async def _handle_answer_submitted(
+    session: AsyncSession,
+    state: models.LectureVideoThreadState,
+    actor_user_id: int,
+    request: schemas.LectureVideoAnswerSubmittedRequest,
+    *,
+    event_type: schemas.LectureVideoInteractionEventType,
+    current_time: datetime,
+) -> None:
+    current_question = _get_current_question(state.thread, state)
+    if (
+        state.state != schemas.LectureVideoSessionState.AWAITING_ANSWER
+        or current_question is None
+        or current_question.id != request.question_id
+    ):
+        raise _conflict(
+            detail="This question is no longer accepting answers.",
+        )
+
+    option = _find_option_for_question(current_question, request.option_id)
+    if option is None:
+        raise LectureVideoValidationError(
+            "That option does not belong to this question."
+        )
+
+    state.state = schemas.LectureVideoSessionState.AWAITING_POST_ANSWER_RESUME
+    state.active_option = option
+    await _append_interaction(
+        session,
+        state,
+        actor_user_id=actor_user_id,
+        event_type=event_type,
+        question_id=request.question_id,
+        option_id=option.id,
+        idempotency_key=request.idempotency_key,
+    )
+
+
+async def _handle_resumed(
+    session: AsyncSession,
+    state: models.LectureVideoThreadState,
+    actor_user_id: int,
+    request: schemas.LectureVideoResumedRequest,
+    *,
+    event_type: schemas.LectureVideoInteractionEventType,
+    current_time: datetime,
+) -> None:
+    current_question = _get_current_question(state.thread, state)
+    active_option = state.active_option
+    if (
+        state.state != schemas.LectureVideoSessionState.AWAITING_POST_ANSWER_RESUME
+        or active_option is None
+        or request.offset_ms != active_option.continue_offset_ms
+    ):
+        raise _conflict(
+            detail="The lecture video cannot resume from this state.",
+        )
+
+    next_question = _get_next_question(state.thread, current_question)
+    state.last_known_offset_ms = request.offset_ms
+    state.active_option_id = None
+    state.active_option = None
+    if next_question is None:
+        state.current_question_id = None
+        state.current_question = None
+        state.state = schemas.LectureVideoSessionState.COMPLETED
+    else:
+        state.current_question_id = next_question.id
+        state.current_question = next_question
+        state.state = schemas.LectureVideoSessionState.PLAYING
+
+    await _append_interaction(
+        session,
+        state,
+        actor_user_id=actor_user_id,
+        event_type=event_type,
+        offset_ms=request.offset_ms,
+        idempotency_key=request.idempotency_key,
+    )
+    if next_question is None:
+        await _append_interaction(
+            session,
+            state,
+            actor_user_id=actor_user_id,
+            event_type=schemas.LectureVideoInteractionEventType.SESSION_COMPLETED,
+        )
+
+
+async def _handle_paused(
+    session: AsyncSession,
+    state: models.LectureVideoThreadState,
+    actor_user_id: int,
+    request: schemas.LectureVideoPausedRequest,
+    *,
+    event_type: schemas.LectureVideoInteractionEventType,
+    current_time: datetime,
+) -> None:
+    if state.state == schemas.LectureVideoSessionState.COMPLETED:
+        raise _conflict(
+            detail="Session is already completed.",
+        )
+
+    state.last_known_offset_ms = request.offset_ms
+    await _append_interaction(
+        session,
+        state,
+        actor_user_id=actor_user_id,
+        event_type=event_type,
+        offset_ms=request.offset_ms,
+        idempotency_key=request.idempotency_key,
+    )
+
+
+async def _handle_seeked(
+    session: AsyncSession,
+    state: models.LectureVideoThreadState,
+    actor_user_id: int,
+    request: schemas.LectureVideoSeekedRequest,
+    *,
+    event_type: schemas.LectureVideoInteractionEventType,
+    current_time: datetime,
+) -> None:
+    if state.state == schemas.LectureVideoSessionState.COMPLETED:
+        raise _conflict(
+            detail="Session is already completed.",
+        )
+
+    state.last_known_offset_ms = request.to_offset_ms
+    await _append_interaction(
+        session,
+        state,
+        actor_user_id=actor_user_id,
+        event_type=event_type,
+        from_offset_ms=request.from_offset_ms,
+        to_offset_ms=request.to_offset_ms,
+        idempotency_key=request.idempotency_key,
+    )
+
+
+async def _handle_ended(
+    session: AsyncSession,
+    state: models.LectureVideoThreadState,
+    actor_user_id: int,
+    request: schemas.LectureVideoEndedRequest,
+    *,
+    event_type: schemas.LectureVideoInteractionEventType,
+    current_time: datetime,
+) -> None:
+    if state.state == schemas.LectureVideoSessionState.COMPLETED:
+        raise _conflict(
+            detail="Session is already completed.",
+        )
+
+    state.last_known_offset_ms = request.offset_ms
+    await _append_interaction(
+        session,
+        state,
+        actor_user_id=actor_user_id,
+        event_type=event_type,
+        offset_ms=request.offset_ms,
+        idempotency_key=request.idempotency_key,
+    )
+
+
+_INTERACTION_HANDLERS: dict[
+    type[schemas.LectureVideoInteractionRequestBase], InteractionHandler
+] = {
+    schemas.LectureVideoQuestionPresentedRequest: _handle_question_presented,
+    schemas.LectureVideoAnswerSubmittedRequest: _handle_answer_submitted,
+    schemas.LectureVideoResumedRequest: _handle_resumed,
+    schemas.LectureVideoPausedRequest: _handle_paused,
+    schemas.LectureVideoSeekedRequest: _handle_seeked,
+    schemas.LectureVideoEndedRequest: _handle_ended,
+}
+
+
 async def process_interaction(
     session: AsyncSession,
     thread_id: int,
@@ -591,139 +811,20 @@ async def process_interaction(
             detail="Lecture video state is out of date. Refresh and try again.",
         )
 
-    current_question = _get_current_question(state.thread, state)
     event_type = schemas.LectureVideoInteractionEventType(request.type)
-
-    if isinstance(request, schemas.LectureVideoQuestionPresentedRequest):
-        if (
-            state.state != schemas.LectureVideoSessionState.PLAYING
-            or current_question is None
-            or current_question.id != request.question_id
-        ):
-            raise _conflict(
-                detail="This question is no longer active.",
-            )
-        state.state = schemas.LectureVideoSessionState.AWAITING_ANSWER
-        state.last_known_offset_ms = request.offset_ms
-        await _append_interaction(
-            session,
-            state,
-            actor_user_id=actor_user_id,
-            event_type=event_type,
-            question_id=request.question_id,
-            offset_ms=request.offset_ms,
-            idempotency_key=request.idempotency_key,
-        )
-    elif isinstance(request, schemas.LectureVideoAnswerSubmittedRequest):
-        if (
-            state.state != schemas.LectureVideoSessionState.AWAITING_ANSWER
-            or current_question is None
-            or current_question.id != request.question_id
-        ):
-            raise _conflict(
-                detail="This question is no longer accepting answers.",
-            )
-        option = _find_option_for_question(current_question, request.option_id)
-        if option is None:
-            raise LectureVideoValidationError(
-                "That option does not belong to this question."
-            )
-        state.state = schemas.LectureVideoSessionState.AWAITING_POST_ANSWER_RESUME
-        state.active_option = option
-        await _append_interaction(
-            session,
-            state,
-            actor_user_id=actor_user_id,
-            event_type=event_type,
-            question_id=request.question_id,
-            option_id=option.id,
-            idempotency_key=request.idempotency_key,
-        )
-    elif isinstance(request, schemas.LectureVideoResumedRequest):
-        active_option = state.active_option
-        if (
-            state.state != schemas.LectureVideoSessionState.AWAITING_POST_ANSWER_RESUME
-            or active_option is None
-            or request.offset_ms != active_option.continue_offset_ms
-        ):
-            raise _conflict(
-                detail="The lecture video cannot resume from this state.",
-            )
-        next_question = _get_next_question(state.thread, current_question)
-        state.last_known_offset_ms = request.offset_ms
-        state.active_option_id = None
-        state.active_option = None
-        if next_question is None:
-            state.current_question_id = None
-            state.current_question = None
-            state.state = schemas.LectureVideoSessionState.COMPLETED
-        else:
-            state.current_question_id = next_question.id
-            state.current_question = next_question
-            state.state = schemas.LectureVideoSessionState.PLAYING
-
-        await _append_interaction(
-            session,
-            state,
-            actor_user_id=actor_user_id,
-            event_type=event_type,
-            offset_ms=request.offset_ms,
-            idempotency_key=request.idempotency_key,
-        )
-        if next_question is None:
-            await _append_interaction(
-                session,
-                state,
-                actor_user_id=actor_user_id,
-                event_type=schemas.LectureVideoInteractionEventType.SESSION_COMPLETED,
-            )
-    elif isinstance(request, schemas.LectureVideoPausedRequest):
-        if state.state == schemas.LectureVideoSessionState.COMPLETED:
-            raise _conflict(
-                detail="Session is already completed.",
-            )
-        state.last_known_offset_ms = request.offset_ms
-        await _append_interaction(
-            session,
-            state,
-            actor_user_id=actor_user_id,
-            event_type=event_type,
-            offset_ms=request.offset_ms,
-            idempotency_key=request.idempotency_key,
-        )
-    elif isinstance(request, schemas.LectureVideoSeekedRequest):
-        if state.state == schemas.LectureVideoSessionState.COMPLETED:
-            raise _conflict(
-                detail="Session is already completed.",
-            )
-        state.last_known_offset_ms = request.to_offset_ms
-        await _append_interaction(
-            session,
-            state,
-            actor_user_id=actor_user_id,
-            event_type=event_type,
-            from_offset_ms=request.from_offset_ms,
-            to_offset_ms=request.to_offset_ms,
-            idempotency_key=request.idempotency_key,
-        )
-    elif isinstance(request, schemas.LectureVideoEndedRequest):
-        if state.state == schemas.LectureVideoSessionState.COMPLETED:
-            raise _conflict(
-                detail="Session is already completed.",
-            )
-        state.last_known_offset_ms = request.offset_ms
-        await _append_interaction(
-            session,
-            state,
-            actor_user_id=actor_user_id,
-            event_type=event_type,
-            offset_ms=request.offset_ms,
-            idempotency_key=request.idempotency_key,
-        )
-    else:
-        raise AssertionError(
+    handler = _INTERACTION_HANDLERS.get(type(request))
+    if handler is None:
+        raise TypeError(
             f"Unhandled lecture video interaction request type: {type(request).__name__}"
         )
+    await handler(
+        session,
+        state,
+        actor_user_id,
+        request,
+        event_type=event_type,
+        current_time=current_time,
+    )
 
     state.version += 1
     _renew_controller_lease(

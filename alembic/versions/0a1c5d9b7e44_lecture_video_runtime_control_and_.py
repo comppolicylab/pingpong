@@ -16,7 +16,7 @@ import sqlalchemy as sa
 revision: str = "0a1c5d9b7e44"
 down_revision: Union[str, None] = "4db0bf59f8c2"
 branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = "6812f442bbbb"
 
 
 lecture_video_session_state_enum = sa.Enum(
@@ -101,7 +101,7 @@ def upgrade() -> None:
         sa.Column("offset_ms", sa.Integer(), nullable=True),
         sa.Column("from_offset_ms", sa.Integer(), nullable=True),
         sa.Column("to_offset_ms", sa.Integer(), nullable=True),
-        sa.Column("idempotency_key", sa.String(), nullable=True),
+        sa.Column("idempotency_key", sa.String(length=255), nullable=False),
         sa.Column(
             "created",
             sa.DateTime(timezone=True),
@@ -152,6 +152,7 @@ def upgrade() -> None:
         sa.column("thread_id", sa.Integer()),
         sa.column("event_index", sa.Integer()),
         sa.column("event_type", lecture_video_interaction_event_type_enum),
+        sa.column("idempotency_key", sa.String()),
     )
 
     first_question_id = (
@@ -175,6 +176,9 @@ def upgrade() -> None:
         sa.literal("SESSION_INITIALIZED"),
         lecture_video_interaction_event_type_enum,
     )
+    session_initialized_idempotency_key = sa.literal(
+        "migration-session-initialized-"
+    ) + sa.cast(threads.c.id, sa.String())
 
     op.execute(
         sa.insert(thread_states).from_select(
@@ -203,11 +207,12 @@ def upgrade() -> None:
 
     op.execute(
         sa.insert(interactions).from_select(
-            ["thread_id", "event_index", "event_type"],
+            ["thread_id", "event_index", "event_type", "idempotency_key"],
             sa.select(
                 threads.c.id,
                 sa.literal(1),
                 session_initialized_event_type,
+                session_initialized_idempotency_key,
             ).where(
                 threads.c.interaction_mode == "LECTURE_VIDEO",
                 threads.c.lecture_video_id.is_not(None),

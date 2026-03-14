@@ -18,6 +18,7 @@ from typing import (
     cast,
 )
 
+import uuid_utils as uuid
 from sqlalchemy import (
     Boolean,
     Column,
@@ -2574,7 +2575,7 @@ class LectureVideoInteraction(Base):
     offset_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     from_offset_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     to_offset_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    idempotency_key: Mapped[str | None] = mapped_column(String, nullable=True)
+    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
     created: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -2600,10 +2601,18 @@ class LectureVideoInteraction(Base):
     async def create(
         cls, session: AsyncSession, data: dict
     ) -> "LectureVideoInteraction":
-        interaction = LectureVideoInteraction(**data)
+        payload = dict(data)
+        idempotency_key = payload.get("idempotency_key")
+        if not isinstance(idempotency_key, str) or not idempotency_key.strip():
+            payload["idempotency_key"] = cls.generate_idempotency_key()
+        interaction = LectureVideoInteraction(**payload)
         session.add(interaction)
         await session.flush()
         return interaction
+
+    @staticmethod
+    def generate_idempotency_key() -> str:
+        return f"server-{uuid.uuid7()}"
 
     @classmethod
     async def get_by_thread_and_idempotency_key(
@@ -2618,14 +2627,11 @@ class LectureVideoInteraction(Base):
     @classmethod
     async def get_next_event_index(cls, session: AsyncSession, thread_id: int) -> int:
         return (
-            (
-                await session.scalar(
-                    select(
-                        func.coalesce(func.max(LectureVideoInteraction.event_index), 0)
-                    ).where(LectureVideoInteraction.thread_id == thread_id)
-                )
+            await session.scalar(
+                select(
+                    func.coalesce(func.max(LectureVideoInteraction.event_index), 0)
+                ).where(LectureVideoInteraction.thread_id == thread_id)
             )
-            or 0
         ) + 1
 
     @classmethod

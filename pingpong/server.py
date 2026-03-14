@@ -2,18 +2,18 @@ import asyncio
 import json
 import logging
 import time
-from contextlib import asynccontextmanager
 from collections import defaultdict
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from math import ceil
-from typing import Annotated, Any, Literal, NoReturn, Optional, Union, cast
-import uuid_utils as uuid
-from aiohttp import ClientResponseError
+from typing import Annotated, Any, Literal, NoReturn, Union, cast
+
+import humanize
 import jwt
 import openai
-import humanize
+import uuid_utils as uuid
+from aiohttp import ClientResponseError
 from email_validator import EmailSyntaxError, validate_email
-from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import (
     BackgroundTasks,
     Body,
@@ -25,37 +25,46 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
-from pydantic import PositiveInt
-from openai.types.responses.response_output_text import AnnotationURLCitation
+from openai.types.beta.assistant_create_params import ToolResources
+from openai.types.beta.threads import MessageContentPartParam
+from openai.types.beta.threads.annotation import Annotation
+from openai.types.beta.threads.file_citation_annotation import (
+    FileCitation,
+    FileCitationAnnotation,
+)
+from openai.types.beta.threads.file_path_annotation import FilePath, FilePathAnnotation
+from openai.types.beta.threads.image_file import ImageFile
+from openai.types.beta.threads.image_file_content_block import ImageFileContentBlock
+from openai.types.beta.threads.message import Attachment
 from openai.types.responses.response_function_web_search import (
     ActionFind,
     ActionOpenPage,
     ActionSearch,
     ActionSearchSource,
 )
-from openai.types.beta.threads.message import Attachment
-from openai.types.beta.threads.image_file_content_block import ImageFileContentBlock
-from openai.types.beta.threads.image_file import ImageFile
-from openai.types.beta.threads.annotation import Annotation
-from openai.types.beta.threads.file_path_annotation import FilePathAnnotation, FilePath
-from openai.types.beta.threads.file_citation_annotation import (
-    FileCitationAnnotation,
-    FileCitation,
-)
+from openai.types.responses.response_output_text import AnnotationURLCitation
+from pydantic import PositiveInt
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql import delete, func, update
 
+import pingpong.metrics as metrics
+import pingpong.models as models
+import pingpong.schemas as schemas
 from pingpong.ai_models import (
+    ADMIN_ONLY_MODELS,
     AZURE_UNAVAILABLE_MODELS,
     DEFAULT_PROMPTS,
-    KNOWN_MODELS,
-    ADMIN_ONLY_MODELS,
     HIDDEN_MODELS,
+    KNOWN_MODELS,
     get_reasoning_effort_map,
     supports_temperature_for_reasoning,
 )
 from pingpong.artifacts import ArtifactStoreError
 from pingpong.audio_store import AudioStoreError
 from pingpong.bg_tasks import safe_task
-from pingpong.copy import copy_group, copy_assistant as copy_assistant_to_class
+from pingpong.copy import copy_assistant as copy_assistant_to_class
+from pingpong.copy import copy_group
 from pingpong.emails import (
     parse_addresses,
     revalidate_email_addresses,
@@ -74,12 +83,34 @@ from pingpong.session import populate_request
 from pingpong.stats import (
     get_runs_with_multiple_assistant_messages_stats,
     get_statistics,
-    get_statistics_by_institution as get_institution_statistics,
     get_thread_counts_by_class,
 )
+from pingpong.stats import (
+    get_statistics_by_institution as get_institution_statistics,
+)
+from pingpong.stream_utils import prefetch_stream
 from pingpong.summary import send_class_summary_to_user_task
 from pingpong.video_store import VideoStoreError
-from pingpong.stream_utils import prefetch_stream
+
+from . import assistant_service, lecture_video_runtime, lecture_video_service
+from .ai import (
+    GetOpenAIClientException,
+    export_class_threads_anonymized,
+    export_threads_multiple_classes,
+    format_instructions,
+    get_azure_model_deployment_name_equivalent,
+    get_ci_messages_from_step,
+    get_initial_thread_conversation_name,
+    get_openai_client_by_class_id,
+    get_original_model_name_by_azure_equivalent,
+    get_thread_conversation_name,
+    inject_timestamp_to_instructions,
+    run_response,
+    run_thread,
+    upgrade_assistants_model,
+    validate_api_key,
+)
+from .ai_error import get_details_from_api_error
 from .animal_hash import (
     display_name_for_thread_user,
     name,
@@ -87,52 +118,14 @@ from .animal_hash import (
     pseudonym,
     user_names,
 )
-from openai.types.beta.assistant_create_params import ToolResources
-from openai.types.beta.threads import MessageContentPartParam
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.sql import func, delete, update
-
-import pingpong.metrics as metrics
-import pingpong.models as models
-import pingpong.schemas as schemas
-from .auth import TimeException, authn_method_for_email
-from . import assistant_service
-from . import lecture_video_service
-from . import lecture_video_runtime
-from .template import email_template as message_template
-from .time import convert_seconds
-from .saml import get_saml2_client, get_saml2_settings, get_saml2_attrs
-
-from .ai import (
-    GetOpenAIClientException,
-    export_class_threads_anonymized,
-    export_threads_multiple_classes,
-    format_instructions,
-    get_openai_client_by_class_id,
-    get_original_model_name_by_azure_equivalent,
-    get_thread_conversation_name,
-    get_initial_thread_conversation_name,
-    inject_timestamp_to_instructions,
-    run_response,
-    run_thread,
-    upgrade_assistants_model,
-    validate_api_key,
-    get_ci_messages_from_step,
-    get_azure_model_deployment_name_equivalent,
-)
-from .ai_error import get_details_from_api_error
 from .auth import (
+    TimeException,
+    authn_method_for_email,
     decode_auth_token,
     generate_auth_link,
     redirect_with_session,
 )
 from .authz import Relation
-from .config import config
-from .lti.canvas_connect import (
-    CanvasConnectException,
-    CanvasConnectWarning,
-    ManualCanvasConnectClient,
-)
 from .canvas import (
     CanvasAccessException,
     CanvasException,
@@ -143,6 +136,7 @@ from .canvas import (
     decode_canvas_token,
     get_canvas_config,
 )
+from .config import config
 from .errors import sentry
 from .files import (
     FILE_TYPES,
@@ -153,6 +147,12 @@ from .files import (
     handle_delete_files,
 )
 from .log_utils import sanitize_for_log
+from .lti.canvas_connect import (
+    CanvasConnectException,
+    CanvasConnectWarning,
+    ManualCanvasConnectClient,
+)
+from .merge import list_all_permissions, merge
 from .now import NowFn, utcnow
 from .permission import (
     And,
@@ -163,17 +163,11 @@ from .permission import (
     can_participate_thread,
 )
 from .runs import get_placeholder_ci_calls
+from .saml import get_saml2_attrs, get_saml2_client, get_saml2_settings
 from .state_types import AppState, StateRequest, StateWebSocket
-from .vector_stores import (
-    add_vector_store_files_to_db,
-    append_vector_store_files,
-    create_vector_store,
-    delete_vector_store,
-    delete_vector_store_db_returning_file_ids,
-    sync_vector_store_files,
-    delete_vector_store_db,
-    delete_vector_store_oai,
-)
+from .template import email_template as message_template
+from .time import convert_seconds
+from .transcription import transcribe_thread_recording_and_email_link
 from .users import (
     AddNewUsersManual,
     AddUserException,
@@ -181,8 +175,16 @@ from .users import (
     check_permissions,
     delete_canvas_permissions,
 )
-from .merge import list_all_permissions, merge
-from .transcription import transcribe_thread_recording_and_email_link
+from .vector_stores import (
+    add_vector_store_files_to_db,
+    append_vector_store_files,
+    create_vector_store,
+    delete_vector_store,
+    delete_vector_store_db,
+    delete_vector_store_db_returning_file_ids,
+    delete_vector_store_oai,
+    sync_vector_store_files,
+)
 
 logger = logging.getLogger(__name__)
 responses_api_transition_logger = logging.getLogger("responses_api_transition")
@@ -302,6 +304,19 @@ def _raise_lecture_video_runtime_http_error(
     if isinstance(err, lecture_video_runtime.LectureVideoConflictError):
         raise HTTPException(status_code=409, detail=err.detail)
     raise HTTPException(status_code=500, detail=err.detail)
+
+
+async def get_lecture_video_thread_or_404(
+    db: Any, class_id: str, thread_id: str
+) -> models.Thread:
+    thread = await models.Thread.get_by_id_for_class_with_interaction_mode(
+        db, int(class_id), int(thread_id)
+    )
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
+        raise HTTPException(status_code=404, detail="Lecture video thread not found.")
+    return thread
 
 
 if config.development:
@@ -2789,9 +2804,7 @@ async def remove_user_from_class(class_id: str, user_id: str, request: StateRequ
 )
 async def check_class_api_key(class_id: str, request: StateRequest):
     result = await models.Class.get_api_key(request.state["db"], int(class_id))
-    if result.api_key_obj:
-        return {"has_api_key": True}
-    elif result.api_key:
+    if result.api_key_obj or result.api_key:
         return {"has_api_key": True}
     return {"has_api_key": False}
 
@@ -4130,30 +4143,35 @@ async def get_thread_lecture_video_narration(
             status_code=404, detail="No Lecture Video Audio Store exists."
         )
 
-    thread = await models.Thread.get_by_id_for_class_with_interaction_mode(
-        request.state["db"], int(class_id), int(thread_id)
+    thread = (
+        await models.Thread.get_by_id_for_class_with_lecture_video_narration_context(
+            request.state["db"], int(class_id), int(thread_id)
+        )
     )
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
     if thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
         raise HTTPException(status_code=404, detail="Lecture video thread not found.")
-    try:
-        state = await lecture_video_runtime.get_or_initialize_thread_state(
-            request.state["db"], thread.id
-        )
-    except lecture_video_runtime.LectureVideoRuntimeError as err:
-        _raise_lecture_video_runtime_http_error(err)
-    thread = state.thread
-    if thread is None:
-        raise HTTPException(status_code=404, detail="Thread not found")
-    if not _lecture_video_matches_assistant(thread, thread.assistant):
+    if thread.lecture_video_state is None:
+        try:
+            state = await lecture_video_runtime.get_or_initialize_thread_state(
+                request.state["db"], thread.id
+            )
+        except lecture_video_runtime.LectureVideoRuntimeError as err:
+            _raise_lecture_video_runtime_http_error(err)
+        narration_thread = state.thread
+    else:
+        narration_thread = thread
+    if not _lecture_video_matches_assistant(
+        narration_thread, narration_thread.assistant
+    ):
         raise HTTPException(
             status_code=409,
             detail="This thread's lecture video no longer matches the assistant configuration.",
         )
 
     if not lecture_video_runtime.narration_allowed_for_thread_state(
-        thread, narration_id
+        narration_thread, narration_id
     ):
         raise HTTPException(
             status_code=404, detail="Lecture video narration not found."
@@ -4186,11 +4204,11 @@ async def get_thread_lecture_video_narration(
             media_type=narration.stored_object.content_type
             or "application/octet-stream",
         )
-    except AudioStoreError:
+    except AudioStoreError as e:
         raise HTTPException(
             status_code=400,
             detail="Unable to retrieve the lecture narration audio.",
-        )
+        ) from e
     except Exception as e:
         logger.exception("get_thread_lecture_video_narration: Exception occurred")
         raise HTTPException(
@@ -4209,13 +4227,9 @@ async def acquire_lecture_video_control(
     thread_id: str,
     request: StateRequest,
 ):
-    thread = await models.Thread.get_by_id_for_class_with_interaction_mode(
-        request.state["db"], int(class_id), int(thread_id)
+    thread = await get_lecture_video_thread_or_404(
+        request.state["db"], class_id, thread_id
     )
-    if thread is None:
-        raise HTTPException(status_code=404, detail="Thread not found")
-    if thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
-        raise HTTPException(status_code=404, detail="Lecture video thread not found.")
     try:
         (
             controller_session_id,
@@ -4246,13 +4260,9 @@ async def release_lecture_video_control(
     data: schemas.LectureVideoControlReleaseRequest,
     request: StateRequest,
 ):
-    thread = await models.Thread.get_by_id_for_class_with_interaction_mode(
-        request.state["db"], int(class_id), int(thread_id)
+    thread = await get_lecture_video_thread_or_404(
+        request.state["db"], class_id, thread_id
     )
-    if thread is None:
-        raise HTTPException(status_code=404, detail="Thread not found")
-    if thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
-        raise HTTPException(status_code=404, detail="Lecture video thread not found.")
     try:
         lecture_video_session = await lecture_video_runtime.release_control(
             request.state["db"],
@@ -4277,13 +4287,9 @@ async def renew_lecture_video_control(
     data: schemas.LectureVideoControlRenewRequest,
     request: StateRequest,
 ):
-    thread = await models.Thread.get_by_id_for_class_with_interaction_mode(
-        request.state["db"], int(class_id), int(thread_id)
+    thread = await get_lecture_video_thread_or_404(
+        request.state["db"], class_id, thread_id
     )
-    if thread is None:
-        raise HTTPException(status_code=404, detail="Thread not found")
-    if thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
-        raise HTTPException(status_code=404, detail="Lecture video thread not found.")
     try:
         lease_expires_at = await lecture_video_runtime.renew_control(
             request.state["db"],
@@ -4308,13 +4314,9 @@ async def post_lecture_video_interaction(
     data: schemas.LectureVideoInteractionRequest,
     request: StateRequest,
 ):
-    thread = await models.Thread.get_by_id_for_class_with_interaction_mode(
-        request.state["db"], int(class_id), int(thread_id)
+    thread = await get_lecture_video_thread_or_404(
+        request.state["db"], class_id, thread_id
     )
-    if thread is None:
-        raise HTTPException(status_code=404, detail="Thread not found")
-    if thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
-        raise HTTPException(status_code=404, detail="Lecture video thread not found.")
     try:
         lecture_video_session = await lecture_video_runtime.process_interaction(
             request.state["db"],
@@ -4350,6 +4352,9 @@ async def get_lecture_video_history(
         request.state["db"], thread.id
     )
     user_id = request.state["session"].user.id
+    current_user_ids = [user_id] + await models.User.get_previous_ids_by_id(
+        request.state["db"], user_id
+    )
     is_supervisor = (
         await request.state["authz"].check(
             [(f"user:{user_id}", "supervisor", f"class:{class_id}")]
@@ -4366,7 +4371,7 @@ async def get_lecture_video_history(
                     thread,
                     interaction.actor_user_id,
                     users,
-                    current_user_ids=[user_id],
+                    current_user_ids=current_user_ids,
                     is_supervisor=is_supervisor,
                 ),
                 question_id=interaction.question_id,
@@ -5667,7 +5672,9 @@ async def list_recent_threads(
     )
     is_supervisor_dict = {
         class_id: is_supervisor
-        for class_id, is_supervisor in zip(class_ids, is_supervisor_in_class_check)
+        for class_id, is_supervisor in zip(
+            class_ids, is_supervisor_in_class_check, strict=False
+        )
     }
 
     return {
@@ -5731,7 +5738,7 @@ async def list_all_threads(
                     for t in threads
                 ]
             )
-            return [t for t, allow in zip(threads, allows) if allow]
+            return [t for t, allow in zip(threads, allows, strict=False) if allow]
 
         threads = await models.Thread.get_n(
             request.state["db"],
@@ -5775,7 +5782,9 @@ async def list_all_threads(
     )
     is_supervisor_dict = {
         class_id: is_supervisor
-        for class_id, is_supervisor in zip(class_ids, is_supervisor_in_class_check)
+        for class_id, is_supervisor in zip(
+            class_ids, is_supervisor_in_class_check, strict=False
+        )
     }
 
     return {
@@ -5839,7 +5848,9 @@ async def list_threads(
     )
     is_supervisor_dict = {
         class_id: is_supervisor
-        for class_id, is_supervisor in zip(class_ids, is_supervisor_in_class_check)
+        for class_id, is_supervisor in zip(
+            class_ids, is_supervisor_in_class_check, strict=False
+        )
     }
 
     return {
@@ -6200,6 +6211,14 @@ async def create_lecture_thread(
             if anonymous_session
             else None,
         }
+    except HTTPException:
+        logger.exception("Error creating thread")
+        if result:
+            # Delete users-threads mapping
+            for user in result.users:
+                result.users.remove(user)
+            await result.delete(request.state["db"])
+        raise
     except Exception as e:
         logger.exception("Error creating thread")
         if result:
@@ -7983,7 +8002,7 @@ async def list_assistants(class_id: str, request: StateRequest):
             for a in all_for_class
         ]
     )
-    assts = [a for a, f in zip(all_for_class, filters) if f]
+    assts = [a for a, f in zip(all_for_class, filters, strict=False) if f]
 
     creator_ids = {a.creator_id for a in assts}
     creators = await models.User.get_all_by_id(request.state["db"], list(creator_ids))
@@ -7997,7 +8016,9 @@ async def list_assistants(class_id: str, request: StateRequest):
             for id_ in creator_ids
         ]
     )
-    endorsed_creators = {id_ for id_, perm in zip(creator_ids, creator_perms) if perm}
+    endorsed_creators = {
+        id_ for id_, perm in zip(creator_ids, creator_perms, strict=False) if perm
+    }
 
     ret_assistants = list[schemas.Assistant]()
     has_elevated_perm_check = await request.state["authz"].check(
@@ -8017,7 +8038,9 @@ async def list_assistants(class_id: str, request: StateRequest):
         "supervisor",
         f"class:{class_id}",
     )
-    for asst, has_elevated_permissions in zip(assts, has_elevated_perm_check):
+    for asst, has_elevated_permissions in zip(
+        assts, has_elevated_perm_check, strict=False
+    ):
         cur_asst = await assistant_service.assistant_response_from_model(
             request.state["db"], asst
         )
@@ -8219,9 +8242,7 @@ async def create_assistant(
             class_.api_key_obj
             and class_.api_key_obj.provider == "openai"
             and not req.create_classic_assistant
-        ):
-            assistant_version = 3
-        elif (
+        ) or (
             not class_.api_key_obj
             and class_.api_key
             and not req.create_classic_assistant
@@ -9264,7 +9285,7 @@ async def update_assistant(
                 ),
             )
 
-        reasoning_extra_body: dict[str, Optional[str]] = (
+        reasoning_extra_body: dict[str, str | None] = (
             {"reasoning_effort": reasoning_effort}
             if reasoning_effort
             else (

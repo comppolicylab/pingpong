@@ -548,9 +548,9 @@ class LectureVideoQuestionPrompt(BaseModel):
     type: LectureVideoQuestionType
     question_text: str
     intro_text: str
-    stop_offset_ms: int
+    stop_offset_ms: int = Field(..., ge=0)
     intro_narration_id: int | None = None
-    options: list[LectureVideoOptionPrompt] = []
+    options: list[LectureVideoOptionPrompt]
 
 
 class LectureVideoContinuation(BaseModel):
@@ -567,6 +567,25 @@ class LectureVideoSessionController(BaseModel):
     has_active_controller: bool = False
     lease_expires_at: datetime | None = None
 
+    @model_validator(mode="after")
+    def validate_controller_state(self) -> "LectureVideoSessionController":
+        if not self.has_active_controller:
+            if self.has_control:
+                raise ValueError(
+                    "has_control must be false when there is no active controller"
+                )
+            if self.lease_expires_at is not None:
+                raise ValueError(
+                    "lease_expires_at must be null when there is no active controller"
+                )
+            return self
+
+        if self.lease_expires_at is None:
+            raise ValueError(
+                "lease_expires_at is required when there is an active controller"
+            )
+        return self
+
 
 class LectureVideoSession(BaseModel):
     state: LectureVideoSessionState
@@ -574,7 +593,7 @@ class LectureVideoSession(BaseModel):
     latest_interaction_at: datetime | None = None
     current_question: LectureVideoQuestionPrompt | None = None
     current_continuation: LectureVideoContinuation | None = None
-    state_version: int | None = None
+    state_version: int = Field(..., ge=1)
     controller: LectureVideoSessionController
 
 
@@ -603,6 +622,14 @@ class LectureVideoInteractionRequestBase(BaseModel):
     controller_session_id: str = Field(..., min_length=1)
     expected_state_version: int = Field(..., ge=1)
     idempotency_key: str = Field(..., min_length=1, max_length=255)
+
+    @field_validator("idempotency_key")
+    @classmethod
+    def validate_idempotency_key(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("idempotency_key must not be empty")
+        return value
 
 
 class LectureVideoQuestionPresentedRequest(LectureVideoInteractionRequestBase):
