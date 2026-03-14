@@ -252,9 +252,7 @@ async def merge_lecture_video_thread_states(
         update(LectureVideoThreadState)
         .where(LectureVideoThreadState.controller_user_id == old_user_id)
         .values(
-            controller_user_id=None,
-            controller_session_id=None,
-            controller_lease_expires_at=None,
+            controller_user_id=new_user_id,
         )
     )
     await session.execute(stmt)

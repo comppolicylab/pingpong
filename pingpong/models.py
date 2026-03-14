@@ -71,6 +71,10 @@ from pingpong.log_utils import sanitize_for_log
 logger = logging.getLogger(__name__)
 
 
+def generate_lecture_video_interaction_idempotency_key() -> str:
+    return f"server-{uuid.uuid7()}"
+
+
 class AmbiguousExternalLoginLookupError(ValueError):
     def __init__(
         self,
@@ -2575,7 +2579,11 @@ class LectureVideoInteraction(Base):
     offset_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     from_offset_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     to_offset_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        default=generate_lecture_video_interaction_idempotency_key,
+    )
     created: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -2612,7 +2620,7 @@ class LectureVideoInteraction(Base):
 
     @staticmethod
     def generate_idempotency_key() -> str:
-        return f"server-{uuid.uuid7()}"
+        return generate_lecture_video_interaction_idempotency_key()
 
     @classmethod
     async def get_by_thread_and_idempotency_key(
