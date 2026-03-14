@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from collections import defaultdict
 from datetime import datetime, timedelta
 from math import ceil
-from typing import Annotated, Any, Literal, Optional, Union, cast
+from typing import Annotated, Any, Literal, NoReturn, Optional, Union, cast
 import uuid_utils as uuid
 from aiohttp import ClientResponseError
 import jwt
@@ -294,7 +294,7 @@ def _lecture_video_matches_assistant(
 
 def _raise_lecture_video_runtime_http_error(
     err: lecture_video_runtime.LectureVideoRuntimeError,
-) -> None:
+) -> NoReturn:
     if isinstance(err, lecture_video_runtime.LectureVideoNotFoundError):
         raise HTTPException(status_code=404, detail=err.detail)
     if isinstance(err, lecture_video_runtime.LectureVideoValidationError):
@@ -3237,16 +3237,23 @@ async def get_thread(
         lecture_video_matches_assistant = _lecture_video_matches_assistant(
             thread, assistant
         )
-        lecture_video_can_participate = await can_participate_thread(request)
-        thread.is_current_user_participant = lecture_video_can_participate
-        lecture_video_session = await lecture_video_runtime.get_thread_session(
-            request.state["db"],
-            thread.id,
-            request_controller_session_id=request.headers.get(
-                lecture_video_runtime.CONTROLLER_SESSION_HEADER
-            ),
-            nowfn=get_now_fn(request),
-        )
+        lecture_video_session = None
+        if thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
+            lecture_video_can_participate = await can_participate_thread(request)
+            thread.is_current_user_participant = lecture_video_can_participate
+            lecture_video_session = await lecture_video_runtime.get_thread_session(
+                request.state["db"],
+                thread.id,
+                request_controller_session_id=request.headers.get(
+                    lecture_video_runtime.CONTROLLER_SESSION_HEADER
+                ),
+                request_actor_user_id=(
+                    request.state["session"].user.id
+                    if request.state["session"].user
+                    else None
+                ),
+                nowfn=get_now_fn(request),
+            )
 
         return {
             "thread": thread,
@@ -3837,16 +3844,23 @@ async def get_thread(
         lecture_video_matches_assistant = _lecture_video_matches_assistant(
             thread, assistant
         )
-        lecture_video_can_participate = await can_participate_thread(request)
-        thread.is_current_user_participant = lecture_video_can_participate
-        lecture_video_session = await lecture_video_runtime.get_thread_session(
-            request.state["db"],
-            thread.id,
-            request_controller_session_id=request.headers.get(
-                lecture_video_runtime.CONTROLLER_SESSION_HEADER
-            ),
-            nowfn=get_now_fn(request),
-        )
+        lecture_video_session = None
+        if thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
+            lecture_video_can_participate = await can_participate_thread(request)
+            thread.is_current_user_participant = lecture_video_can_participate
+            lecture_video_session = await lecture_video_runtime.get_thread_session(
+                request.state["db"],
+                thread.id,
+                request_controller_session_id=request.headers.get(
+                    lecture_video_runtime.CONTROLLER_SESSION_HEADER
+                ),
+                request_actor_user_id=(
+                    request.state["session"].user.id
+                    if request.state["session"].user
+                    else None
+                ),
+                nowfn=get_now_fn(request),
+            )
 
         if latest_run:
             last_run_db = schemas.OpenAIRun(
@@ -4108,7 +4122,7 @@ async def get_thread_video(
 async def get_thread_lecture_video_narration(
     class_id: str,
     thread_id: str,
-    narration_id: str,
+    narration_id: int,
     request: StateRequest,
 ):
     if not config.lecture_video_audio_store:
@@ -4116,31 +4130,37 @@ async def get_thread_lecture_video_narration(
             status_code=404, detail="No Lecture Video Audio Store exists."
         )
 
-    thread = (
-        await models.Thread.get_by_id_for_class_with_lecture_video_narration_context(
-            request.state["db"], int(class_id), int(thread_id)
-        )
+    thread = await models.Thread.get_by_id_for_class_with_interaction_mode(
+        request.state["db"], int(class_id), int(thread_id)
     )
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
-    if not thread or thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
+    if thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
         raise HTTPException(status_code=404, detail="Lecture video thread not found.")
+    try:
+        state = await lecture_video_runtime.get_or_initialize_thread_state(
+            request.state["db"], thread.id
+        )
+    except lecture_video_runtime.LectureVideoRuntimeError as err:
+        _raise_lecture_video_runtime_http_error(err)
+    thread = state.thread
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
     if not _lecture_video_matches_assistant(thread, thread.assistant):
         raise HTTPException(
             status_code=409,
             detail="This thread's lecture video no longer matches the assistant configuration.",
         )
 
-    narration_id_int = int(narration_id)
     if not lecture_video_runtime.narration_allowed_for_thread_state(
-        thread, narration_id_int
+        thread, narration_id
     ):
         raise HTTPException(
             status_code=404, detail="Lecture video narration not found."
         )
 
     narration = await models.LectureVideoNarration.get_by_id(
-        request.state["db"], narration_id_int
+        request.state["db"], narration_id
     )
     if (
         narration is None
@@ -4249,7 +4269,7 @@ async def release_lecture_video_control(
 @v1.post(
     "/class/{class_id}/thread/{thread_id}/lecture-video/control/renew",
     dependencies=[Depends(Authz("can_participate", "thread:{thread_id}"))],
-    response_model=schemas.GenericStatus,
+    response_model=schemas.LectureVideoControlRenewResponse,
 )
 async def renew_lecture_video_control(
     class_id: str,
@@ -4265,7 +4285,7 @@ async def renew_lecture_video_control(
     if thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
         raise HTTPException(status_code=404, detail="Lecture video thread not found.")
     try:
-        await lecture_video_runtime.renew_control(
+        lease_expires_at = await lecture_video_runtime.renew_control(
             request.state["db"],
             thread.id,
             request.state["session"].user.id,
@@ -4274,7 +4294,7 @@ async def renew_lecture_video_control(
         )
     except lecture_video_runtime.LectureVideoRuntimeError as err:
         _raise_lecture_video_runtime_http_error(err)
-    return {"status": "ok"}
+    return {"lease_expires_at": lease_expires_at}
 
 
 @v1.post(
@@ -4323,7 +4343,7 @@ async def get_lecture_video_history(
     )
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
-    if not thread or thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
+    if thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
         raise HTTPException(status_code=404, detail="Lecture video thread not found.")
 
     interactions = await models.LectureVideoInteraction.list_by_thread_id(

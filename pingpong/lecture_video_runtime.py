@@ -1,6 +1,7 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 import uuid_utils as uuid
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import pingpong.models as models
@@ -34,9 +35,7 @@ def has_active_controller(
     state: models.LectureVideoThreadState, now: datetime | None = None
 ) -> bool:
     current_time = now or utcnow()
-    lease_expires_at = state.controller_lease_expires_at
-    if lease_expires_at is not None and lease_expires_at.tzinfo is None:
-        lease_expires_at = lease_expires_at.replace(tzinfo=timezone.utc)
+    lease_expires_at = state.normalized_controller_lease_expires_at
     return bool(
         state.controller_session_id
         and state.controller_user_id is not None
@@ -155,7 +154,9 @@ def _build_continuation(
         post_answer_text=state.active_option.post_answer_text or None,
         post_answer_narration_id=_narration_id(state.active_option.post_narration),
         resume_offset_ms=state.active_option.continue_offset_ms,
-        next_question=_question_prompt(next_question) if next_question is not None else None,
+        next_question=_question_prompt(next_question)
+        if next_question is not None
+        else None,
         complete=next_question is None,
     )
 
@@ -166,6 +167,7 @@ def build_lecture_video_session(
     *,
     latest_interaction_at: datetime | None = None,
     request_controller_session_id: str | None = None,
+    request_actor_user_id: int | None = None,
     now: datetime | None = None,
 ) -> schemas.LectureVideoSession:
     current_time = now or utcnow()
@@ -175,6 +177,8 @@ def build_lecture_video_session(
         active_controller
         and request_controller_session_id
         and request_controller_session_id == state.controller_session_id
+        and request_actor_user_id is not None
+        and request_actor_user_id == state.controller_user_id
     )
 
     return schemas.LectureVideoSession(
@@ -196,12 +200,7 @@ def build_lecture_video_session(
             has_control=request_has_control,
             has_active_controller=active_controller,
             lease_expires_at=(
-                (
-                    state.controller_lease_expires_at.replace(tzinfo=timezone.utc)
-                    if state.controller_lease_expires_at is not None
-                    and state.controller_lease_expires_at.tzinfo is None
-                    else state.controller_lease_expires_at
-                )
+                state.normalized_controller_lease_expires_at
                 if active_controller
                 else None
             ),
@@ -214,23 +213,32 @@ async def get_thread_session(
     thread_id: int,
     *,
     request_controller_session_id: str | None = None,
+    request_actor_user_id: int | None = None,
     nowfn: NowFn | None = None,
 ) -> schemas.LectureVideoSession | None:
-    thread = await models.Thread.get_by_id_with_lecture_video_context(session, thread_id)
-    if not thread or thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
+    thread = await models.Thread.get_by_id_with_lecture_video_context(
+        session, thread_id
+    )
+    if (
+        not thread
+        or thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO
+        or thread.lecture_video is None
+    ):
         return None
-    if not thread.lecture_video_state:
-        return None
+    state = thread.lecture_video_state or await get_or_initialize_thread_state(
+        session, thread_id
+    )
     latest_interaction_at = (
         await models.LectureVideoInteraction.get_latest_created_by_thread_id(
             session, thread.id
         )
     )
     return build_lecture_video_session(
-        thread,
-        thread.lecture_video_state,
+        state.thread,
+        state,
         latest_interaction_at=latest_interaction_at,
         request_controller_session_id=request_controller_session_id,
+        request_actor_user_id=request_actor_user_id,
         now=nowfn() if nowfn is not None else None,
     )
 
@@ -238,7 +246,9 @@ async def get_thread_session(
 async def initialize_thread_state(
     session: AsyncSession, thread_id: int
 ) -> models.LectureVideoThreadState:
-    thread = await models.Thread.get_by_id_with_lecture_video_context(session, thread_id)
+    thread = await models.Thread.get_by_id_with_lecture_video_context(
+        session, thread_id
+    )
     if (
         thread is None
         or thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO
@@ -260,7 +270,9 @@ async def initialize_thread_state(
                 if first_question is not None
                 else schemas.LectureVideoSessionState.COMPLETED
             ),
-            "current_question_id": first_question.id if first_question is not None else None,
+            "current_question_id": first_question.id
+            if first_question is not None
+            else None,
             "last_known_offset_ms": 0,
             "version": 1,
         },
@@ -274,6 +286,44 @@ async def initialize_thread_state(
         },
     )
     return state
+
+
+async def get_or_initialize_thread_state(
+    session: AsyncSession,
+    thread_id: int,
+    *,
+    for_update: bool = False,
+) -> models.LectureVideoThreadState:
+    state = await models.LectureVideoThreadState.get_by_thread_id_with_context(
+        session, thread_id, for_update=for_update
+    )
+    if state is not None:
+        state.thread.lecture_video_state = state
+        return _require_state(state)
+
+    thread = await models.Thread.get_by_id_with_lecture_video_context(
+        session, thread_id
+    )
+    if (
+        thread is None
+        or thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO
+        or thread.lecture_video is None
+    ):
+        raise LectureVideoNotFoundError("Lecture video thread not found.")
+
+    try:
+        async with session.begin_nested():
+            await initialize_thread_state(session, thread_id)
+    except IntegrityError:
+        # Another request created the runtime state first. Re-read it below.
+        pass
+
+    state = await models.LectureVideoThreadState.get_by_thread_id_with_context(
+        session, thread_id, for_update=for_update
+    )
+    if state is not None:
+        state.thread.lecture_video_state = state
+    return _require_state(state)
 
 
 def _require_state(
@@ -290,7 +340,6 @@ def _require_state(
 
 
 def _conflict(
-    state: models.LectureVideoThreadState,
     *,
     detail: str,
 ) -> LectureVideoConflictError:
@@ -306,17 +355,14 @@ def _require_controller(
 ) -> None:
     if not has_active_controller(state, now):
         raise _conflict(
-            state,
             detail="Lecture video control has expired. Acquire control again.",
         )
     if state.controller_user_id != actor_user_id:
         raise _conflict(
-            state,
             detail="Another participant currently controls this lecture video.",
         )
     if state.controller_session_id != controller_session_id:
         raise _conflict(
-            state,
             detail="This browser window no longer controls the lecture video.",
         )
 
@@ -334,6 +380,13 @@ async def _append_interaction(
     to_offset_ms: int | None = None,
     idempotency_key: str | None = None,
 ) -> models.LectureVideoInteraction:
+    # get_next_event_index() is a read-then-write sequence. Callers must hold the
+    # LectureVideoThreadState row lock acquired via get_or_initialize_thread_state(
+    # ..., for_update=True) so concurrent requests for the same thread serialize.
+    assert getattr(state, "_locked_for_interaction_append", False), (
+        "LectureVideoThreadState must be loaded with FOR UPDATE before appending "
+        "lecture video interactions."
+    )
     event_index = await models.LectureVideoInteraction.get_next_event_index(
         session, state.thread_id
     )
@@ -373,20 +426,18 @@ async def acquire_control(
     *,
     nowfn: NowFn | None = None,
 ) -> tuple[str, schemas.LectureVideoSession]:
-    state = _require_state(
-        await models.LectureVideoThreadState.get_by_thread_id_with_context(
-            session, thread_id, for_update=True
-        )
-    )
+    state = await get_or_initialize_thread_state(session, thread_id, for_update=True)
     current_time = nowfn() if nowfn is not None else utcnow()
     if not lecture_video_matches_assistant(state.thread):
         raise LectureVideoConflictError(
             "This thread's lecture video no longer matches the assistant configuration."
         )
 
-    if has_active_controller(state, current_time) and state.controller_user_id != actor_user_id:
+    if (
+        has_active_controller(state, current_time)
+        and state.controller_user_id != actor_user_id
+    ):
         raise _conflict(
-            state,
             detail="Another participant currently controls this lecture video.",
         )
 
@@ -399,8 +450,10 @@ async def acquire_control(
         now=current_time,
     )
     await session.flush()
-    latest_interaction_at = await models.LectureVideoInteraction.get_latest_created_by_thread_id(
-        session, state.thread_id
+    latest_interaction_at = (
+        await models.LectureVideoInteraction.get_latest_created_by_thread_id(
+            session, state.thread_id
+        )
     )
 
     return (
@@ -410,6 +463,7 @@ async def acquire_control(
             state,
             latest_interaction_at=latest_interaction_at,
             request_controller_session_id=controller_session_id,
+            request_actor_user_id=actor_user_id,
             now=current_time,
         ),
     )
@@ -423,11 +477,7 @@ async def release_control(
     *,
     nowfn: NowFn | None = None,
 ) -> schemas.LectureVideoSession:
-    state = _require_state(
-        await models.LectureVideoThreadState.get_by_thread_id_with_context(
-            session, thread_id, for_update=True
-        )
-    )
+    state = await get_or_initialize_thread_state(session, thread_id, for_update=True)
     current_time = nowfn() if nowfn is not None else utcnow()
     _require_controller(
         state,
@@ -440,13 +490,16 @@ async def release_control(
     state.controller_user_id = None
     state.controller_lease_expires_at = None
     await session.flush()
-    latest_interaction_at = await models.LectureVideoInteraction.get_latest_created_by_thread_id(
-        session, state.thread_id
+    latest_interaction_at = (
+        await models.LectureVideoInteraction.get_latest_created_by_thread_id(
+            session, state.thread_id
+        )
     )
     return build_lecture_video_session(
         state.thread,
         state,
         latest_interaction_at=latest_interaction_at,
+        request_actor_user_id=actor_user_id,
         now=current_time,
     )
 
@@ -458,12 +511,8 @@ async def renew_control(
     controller_session_id: str,
     *,
     nowfn: NowFn | None = None,
-) -> schemas.LectureVideoSession:
-    state = _require_state(
-        await models.LectureVideoThreadState.get_by_thread_id_with_context(
-            session, thread_id, for_update=True
-        )
-    )
+) -> datetime:
+    state = await get_or_initialize_thread_state(session, thread_id, for_update=True)
     current_time = nowfn() if nowfn is not None else utcnow()
     if not lecture_video_matches_assistant(state.thread):
         raise LectureVideoConflictError(
@@ -483,16 +532,9 @@ async def renew_control(
         now=current_time,
     )
     await session.flush()
-    latest_interaction_at = await models.LectureVideoInteraction.get_latest_created_by_thread_id(
-        session, state.thread_id
-    )
-    return build_lecture_video_session(
-        state.thread,
-        state,
-        latest_interaction_at=latest_interaction_at,
-        request_controller_session_id=controller_session_id,
-        now=current_time,
-    )
+    lease_expires_at = state.normalized_controller_lease_expires_at
+    assert lease_expires_at is not None
+    return lease_expires_at
 
 
 def _find_option_for_question(
@@ -512,11 +554,7 @@ async def process_interaction(
     *,
     nowfn: NowFn | None = None,
 ) -> schemas.LectureVideoSession:
-    state = _require_state(
-        await models.LectureVideoThreadState.get_by_thread_id_with_context(
-            session, thread_id, for_update=True
-        )
-    )
+    state = await get_or_initialize_thread_state(session, thread_id, for_update=True)
     current_time = nowfn() if nowfn is not None else utcnow()
     if not lecture_video_matches_assistant(state.thread):
         raise LectureVideoConflictError(
@@ -534,20 +572,22 @@ async def process_interaction(
         session, thread_id, request.idempotency_key
     )
     if existing is not None:
-        latest_interaction_at = await models.LectureVideoInteraction.get_latest_created_by_thread_id(
-            session, state.thread_id
+        latest_interaction_at = (
+            await models.LectureVideoInteraction.get_latest_created_by_thread_id(
+                session, state.thread_id
+            )
         )
         return build_lecture_video_session(
             state.thread,
             state,
             latest_interaction_at=latest_interaction_at,
             request_controller_session_id=request.controller_session_id,
+            request_actor_user_id=actor_user_id,
             now=current_time,
         )
 
     if request.expected_state_version != state.version:
         raise _conflict(
-            state,
             detail="Lecture video state is out of date. Refresh and try again.",
         )
 
@@ -561,7 +601,6 @@ async def process_interaction(
             or current_question.id != request.question_id
         ):
             raise _conflict(
-                state,
                 detail="This question is no longer active.",
             )
         state.state = schemas.LectureVideoSessionState.AWAITING_ANSWER
@@ -582,7 +621,6 @@ async def process_interaction(
             or current_question.id != request.question_id
         ):
             raise _conflict(
-                state,
                 detail="This question is no longer accepting answers.",
             )
         option = _find_option_for_question(current_question, request.option_id)
@@ -605,13 +643,11 @@ async def process_interaction(
     elif isinstance(request, schemas.LectureVideoResumedRequest):
         active_option = state.active_option
         if (
-            state.state
-            != schemas.LectureVideoSessionState.AWAITING_POST_ANSWER_RESUME
+            state.state != schemas.LectureVideoSessionState.AWAITING_POST_ANSWER_RESUME
             or active_option is None
             or request.offset_ms != active_option.continue_offset_ms
         ):
             raise _conflict(
-                state,
                 detail="The lecture video cannot resume from this state.",
             )
         next_question = _get_next_question(state.thread, current_question)
@@ -643,6 +679,10 @@ async def process_interaction(
                 event_type=schemas.LectureVideoInteractionEventType.SESSION_COMPLETED,
             )
     elif isinstance(request, schemas.LectureVideoPausedRequest):
+        if state.state == schemas.LectureVideoSessionState.COMPLETED:
+            raise _conflict(
+                detail="Session is already completed.",
+            )
         state.last_known_offset_ms = request.offset_ms
         await _append_interaction(
             session,
@@ -653,6 +693,10 @@ async def process_interaction(
             idempotency_key=request.idempotency_key,
         )
     elif isinstance(request, schemas.LectureVideoSeekedRequest):
+        if state.state == schemas.LectureVideoSessionState.COMPLETED:
+            raise _conflict(
+                detail="Session is already completed.",
+            )
         state.last_known_offset_ms = request.to_offset_ms
         await _append_interaction(
             session,
@@ -664,6 +708,10 @@ async def process_interaction(
             idempotency_key=request.idempotency_key,
         )
     elif isinstance(request, schemas.LectureVideoEndedRequest):
+        if state.state == schemas.LectureVideoSessionState.COMPLETED:
+            raise _conflict(
+                detail="Session is already completed.",
+            )
         state.last_known_offset_ms = request.offset_ms
         await _append_interaction(
             session,
@@ -672,6 +720,10 @@ async def process_interaction(
             event_type=event_type,
             offset_ms=request.offset_ms,
             idempotency_key=request.idempotency_key,
+        )
+    else:
+        raise AssertionError(
+            f"Unhandled lecture video interaction request type: {type(request).__name__}"
         )
 
     state.version += 1
@@ -682,8 +734,10 @@ async def process_interaction(
         now=current_time,
     )
     await session.flush()
-    latest_interaction_at = await models.LectureVideoInteraction.get_latest_created_by_thread_id(
-        session, state.thread_id
+    latest_interaction_at = (
+        await models.LectureVideoInteraction.get_latest_created_by_thread_id(
+            session, state.thread_id
+        )
     )
 
     return build_lecture_video_session(
@@ -691,5 +745,6 @@ async def process_interaction(
         state,
         latest_interaction_at=latest_interaction_at,
         request_controller_session_id=request.controller_session_id,
+        request_actor_user_id=actor_user_id,
         now=current_time,
     )

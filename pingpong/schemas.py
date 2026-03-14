@@ -595,6 +595,10 @@ class LectureVideoControlRenewRequest(BaseModel):
     controller_session_id: str = Field(..., min_length=1)
 
 
+class LectureVideoControlRenewResponse(BaseModel):
+    lease_expires_at: datetime
+
+
 class LectureVideoInteractionRequestBase(BaseModel):
     controller_session_id: str = Field(..., min_length=1)
     expected_state_version: int = Field(..., ge=1)

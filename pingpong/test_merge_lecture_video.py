@@ -77,8 +77,10 @@ async def test_merge_preserves_lecture_video_user_references(db):
         assert lecture_video is not None
         assert lecture_video.uploader_id == new_user.id
 
-        thread_state = await models.LectureVideoThreadState.get_by_thread_id_with_context(
-            session, thread.id
+        thread_state = (
+            await models.LectureVideoThreadState.get_by_thread_id_with_context(
+                session, thread.id
+            )
         )
         assert thread_state is not None
         assert thread_state.controller_user_id == new_user.id
@@ -101,8 +103,10 @@ async def test_merge_preserves_lecture_video_user_references(db):
         assert lecture_video is not None
         assert lecture_video.uploader_id == new_user.id
 
-        thread_state = await models.LectureVideoThreadState.get_by_thread_id_with_context(
-            session, thread.id
+        thread_state = (
+            await models.LectureVideoThreadState.get_by_thread_id_with_context(
+                session, thread.id
+            )
         )
         assert thread_state is not None
         assert thread_state.controller_user_id == new_user.id

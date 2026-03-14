@@ -3,7 +3,7 @@ import base64
 import hashlib
 import json
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import (
     AsyncGenerator,
     Collection,
@@ -2379,6 +2379,68 @@ class LectureVideoNarration(Base):
         return await session.scalar(stmt)
 
 
+def _lecture_video_post_narration_loader() -> Load:
+    return selectinload(LectureVideoQuestionOption.post_narration).selectinload(
+        LectureVideoNarration.stored_object
+    )
+
+
+def _lecture_video_question_context_loaders(
+    *, include_correct_option: bool = True
+) -> tuple[Load, ...]:
+    loaders: list[Load] = [
+        selectinload(LectureVideoQuestion.options).options(
+            _lecture_video_post_narration_loader()
+        ),
+        selectinload(LectureVideoQuestion.intro_narration).selectinload(
+            LectureVideoNarration.stored_object
+        ),
+    ]
+    if include_correct_option:
+        loaders.append(selectinload(LectureVideoQuestion.correct_option))
+    return tuple(loaders)
+
+
+def _thread_lecture_video_base_loaders() -> tuple[Load, ...]:
+    return (
+        selectinload(Thread.users).load_only(
+            User.id,
+            User.created,
+            User.anonymous_link_id,
+            User.first_name,
+            User.last_name,
+            User.display_name,
+            User.email,
+        ),
+        selectinload(Thread.assistant).load_only(
+            Assistant.id, Assistant.name, Assistant.lecture_video_id
+        ),
+        selectinload(Thread.lecture_video).options(
+            selectinload(LectureVideo.questions).options(
+                *_lecture_video_question_context_loaders()
+            )
+        ),
+    )
+
+
+def _thread_lecture_video_state_loader() -> Load:
+    return selectinload(Thread.lecture_video_state).options(
+        selectinload(LectureVideoThreadState.current_question).options(
+            *_lecture_video_question_context_loaders(include_correct_option=False)
+        ),
+        selectinload(LectureVideoThreadState.active_option).options(
+            _lecture_video_post_narration_loader()
+        ),
+    )
+
+
+def _thread_lecture_video_context_loaders() -> tuple[Load, ...]:
+    return (
+        *_thread_lecture_video_base_loaders(),
+        _thread_lecture_video_state_loader(),
+    )
+
+
 class LectureVideoThreadState(Base):
     __tablename__ = "lecture_video_thread_states"
 
@@ -2433,6 +2495,13 @@ class LectureVideoThreadState(Base):
         "User", foreign_keys=[controller_user_id]
     )
 
+    @property
+    def normalized_controller_lease_expires_at(self) -> datetime | None:
+        lease_expires_at = self.controller_lease_expires_at
+        if lease_expires_at is not None and lease_expires_at.tzinfo is None:
+            return lease_expires_at.replace(tzinfo=timezone.utc)
+        return lease_expires_at
+
     @classmethod
     async def create(
         cls, session: AsyncSession, data: dict
@@ -2455,52 +2524,27 @@ class LectureVideoThreadState(Base):
             .where(LectureVideoThreadState.thread_id == thread_id)
             .options(
                 joinedload(LectureVideoThreadState.thread).options(
-                    selectinload(Thread.users).load_only(
-                        User.id,
-                        User.created,
-                        User.anonymous_link_id,
-                        User.first_name,
-                        User.last_name,
-                        User.display_name,
-                        User.email,
-                    ),
-                    selectinload(Thread.assistant).load_only(
-                        Assistant.id, Assistant.name, Assistant.lecture_video_id
-                    ),
-                    selectinload(Thread.lecture_video).options(
-                        selectinload(LectureVideo.questions).options(
-                            selectinload(LectureVideoQuestion.options).options(
-                                selectinload(
-                                    LectureVideoQuestionOption.post_narration
-                                ).selectinload(LectureVideoNarration.stored_object)
-                            ),
-                            selectinload(
-                                LectureVideoQuestion.intro_narration
-                            ).selectinload(LectureVideoNarration.stored_object),
-                            selectinload(LectureVideoQuestion.correct_option),
-                        )
-                    ),
+                    *_thread_lecture_video_base_loaders()
                 ),
                 selectinload(LectureVideoThreadState.current_question).options(
-                    selectinload(LectureVideoQuestion.options).options(
-                        selectinload(
-                            LectureVideoQuestionOption.post_narration
-                        ).selectinload(LectureVideoNarration.stored_object)
-                    ),
-                    selectinload(LectureVideoQuestion.intro_narration).selectinload(
-                        LectureVideoNarration.stored_object
-                    ),
+                    *_lecture_video_question_context_loaders(
+                        include_correct_option=False
+                    )
                 ),
                 selectinload(LectureVideoThreadState.active_option).options(
-                    selectinload(
-                        LectureVideoQuestionOption.post_narration
-                    ).selectinload(LectureVideoNarration.stored_object)
+                    _lecture_video_post_narration_loader()
                 ),
             )
         )
         if for_update:
             stmt = stmt.with_for_update()
-        return await session.scalar(stmt)
+        state = await session.scalar(stmt)
+        if state is not None:
+            # Runtime writes rely on callers taking a row lock before they allocate the
+            # next interaction event_index. Mark the loaded instance so downstream code
+            # can assert that invariant close to the write path.
+            state._locked_for_interaction_append = for_update
+        return state
 
 
 class LectureVideoInteraction(Base):
@@ -6616,7 +6660,7 @@ class Thread(Base):
         result = await session.execute(
             select(Thread)
             .options(
-                joinedload(Thread.users).load_only(
+                selectinload(Thread.users).load_only(
                     User.id,
                     User.created,
                     User.anonymous_link_id,
@@ -6701,7 +6745,7 @@ class Thread(Base):
             select(Thread)
             .where(Thread.id == int(id_))
             .options(
-                joinedload(Thread.users).load_only(
+                selectinload(Thread.users).load_only(
                     User.id,
                     User.created,
                     User.anonymous_link_id,
@@ -6723,50 +6767,7 @@ class Thread(Base):
         stmt = (
             select(Thread)
             .where(Thread.id == int(id_))
-            .options(
-                joinedload(Thread.users).load_only(
-                    User.id,
-                    User.created,
-                    User.anonymous_link_id,
-                    User.first_name,
-                    User.last_name,
-                    User.display_name,
-                    User.email,
-                ),
-                selectinload(Thread.assistant).load_only(
-                    Assistant.id, Assistant.name, Assistant.lecture_video_id
-                ),
-                selectinload(Thread.lecture_video).options(
-                    selectinload(LectureVideo.questions).options(
-                        selectinload(LectureVideoQuestion.options).options(
-                            selectinload(
-                                LectureVideoQuestionOption.post_narration
-                            ).selectinload(LectureVideoNarration.stored_object)
-                        ),
-                        selectinload(LectureVideoQuestion.intro_narration).selectinload(
-                            LectureVideoNarration.stored_object
-                        ),
-                        selectinload(LectureVideoQuestion.correct_option),
-                    )
-                ),
-                selectinload(Thread.lecture_video_state).options(
-                    selectinload(LectureVideoThreadState.current_question).options(
-                        selectinload(LectureVideoQuestion.options).options(
-                            selectinload(
-                                LectureVideoQuestionOption.post_narration
-                            ).selectinload(LectureVideoNarration.stored_object)
-                        ),
-                        selectinload(LectureVideoQuestion.intro_narration).selectinload(
-                            LectureVideoNarration.stored_object
-                        ),
-                    ),
-                    selectinload(LectureVideoThreadState.active_option).options(
-                        selectinload(
-                            LectureVideoQuestionOption.post_narration
-                        ).selectinload(LectureVideoNarration.stored_object)
-                    ),
-                ),
-            )
+            .options(*_thread_lecture_video_context_loaders())
         )
         return await session.scalar(stmt)
 
@@ -6780,50 +6781,7 @@ class Thread(Base):
                 Thread.id == int(id_),
                 Thread.class_id == int(class_id),
             )
-            .options(
-                joinedload(Thread.users).load_only(
-                    User.id,
-                    User.created,
-                    User.anonymous_link_id,
-                    User.first_name,
-                    User.last_name,
-                    User.display_name,
-                    User.email,
-                ),
-                selectinload(Thread.assistant).load_only(
-                    Assistant.id, Assistant.name, Assistant.lecture_video_id
-                ),
-                selectinload(Thread.lecture_video).options(
-                    selectinload(LectureVideo.questions).options(
-                        selectinload(LectureVideoQuestion.options).options(
-                            selectinload(
-                                LectureVideoQuestionOption.post_narration
-                            ).selectinload(LectureVideoNarration.stored_object)
-                        ),
-                        selectinload(LectureVideoQuestion.intro_narration).selectinload(
-                            LectureVideoNarration.stored_object
-                        ),
-                        selectinload(LectureVideoQuestion.correct_option),
-                    )
-                ),
-                selectinload(Thread.lecture_video_state).options(
-                    selectinload(LectureVideoThreadState.current_question).options(
-                        selectinload(LectureVideoQuestion.options).options(
-                            selectinload(
-                                LectureVideoQuestionOption.post_narration
-                            ).selectinload(LectureVideoNarration.stored_object)
-                        ),
-                        selectinload(LectureVideoQuestion.intro_narration).selectinload(
-                            LectureVideoNarration.stored_object
-                        ),
-                    ),
-                    selectinload(LectureVideoThreadState.active_option).options(
-                        selectinload(
-                            LectureVideoQuestionOption.post_narration
-                        ).selectinload(LectureVideoNarration.stored_object)
-                    ),
-                ),
-            )
+            .options(*_thread_lecture_video_context_loaders())
         )
         return await session.scalar(stmt)
 
