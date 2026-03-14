@@ -26,7 +26,6 @@ from pingpong.invite import send_export_download, send_export_failed
 from pingpong.log_utils import sanitize_for_log
 import pingpong.models as models
 from pingpong.prompt import replace_random_blocks
-from typing import cast
 from pingpong.schemas import (
     APIKeyValidationResponse,
     AnnotationType,
@@ -689,21 +688,32 @@ async def build_response_input_item_list(
                             refusal=content.refusal, type="output_refusal"
                         )
                     )
-        response_message: dict[str, object] = {
-            "role": message.role,
-            "content": content_list,
-            "type": "message",
-            "id": message.message_id,
-        }
-        if message.role == MessageRole.ASSISTANT and phase is not None:
-            response_message["phase"] = phase
+
+        if message.role == MessageRole.USER:
+            user_response_message: EasyInputMessageParam = {
+                "role": message.role,
+                "content": content_list,
+                "type": "message",
+                "id": message.message_id,
+            }
+            response_item = user_response_message
+        else:
+            assistant_response_message: ResponseOutputMessageParam = {
+                "role": message.role,
+                "content": content_list,
+                "type": "message",
+                "id": message.message_id,
+            }
+            if phase is not None:
+                assistant_response_message["phase"] = phase
+            response_item = assistant_response_message
 
         response_input_items_with_time.append(
             (
                 message.created,
                 message.output_index,
                 "message",
-                cast(ResponseOutputMessageParam, response_message),
+                response_item,
             )
         )
 
