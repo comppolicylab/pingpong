@@ -62,12 +62,19 @@ export const load = async ({ fetch, params }: Parameters<PageLoad>[0]) => {
 		error(ltiClasses.$status, ltiClasses.error.detail || 'Error loading LTI classes');
 	}
 	let api_key: api.ApiKey | undefined;
+	let classCredentials: api.ClassCredentialSlot[] = [];
 	if (grants.canViewApiKey) {
-		const apiKeyResponse = api.expandResponse(await api.getApiKey(fetch, classId));
+		const [apiKeyResponse, classCredentialsResponse] = await Promise.all([
+			api.getApiKey(fetch, classId).then(api.expandResponse),
+			api.getClassCredentials(fetch, classId).then(api.expandResponse)
+		]);
 		if (apiKeyResponse.error) {
 			api_key = { api_key: 'error fetching API key!' };
 		} else {
 			api_key = apiKeyResponse.data.api_key;
+		}
+		if (!classCredentialsResponse.error) {
+			classCredentials = classCredentialsResponse.data.credentials;
 		}
 	}
 
@@ -85,6 +92,7 @@ export const load = async ({ fetch, params }: Parameters<PageLoad>[0]) => {
 
 	return {
 		apiKey: api_key,
+		classCredentials,
 		grants,
 		class: classDataResponse.data,
 		subscription: subscription,

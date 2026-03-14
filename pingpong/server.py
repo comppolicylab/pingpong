@@ -65,6 +65,12 @@ from pingpong.audio_store import AudioStoreError
 from pingpong.bg_tasks import safe_task
 from pingpong.copy import copy_assistant as copy_assistant_to_class
 from pingpong.copy import copy_group
+from pingpong.class_credentials import (
+    ClassCredentialValidationUnavailableError,
+    expected_provider_for_purpose,
+    provider_matches_purpose,
+    validate_class_credential,
+)
 from pingpong.emails import (
     parse_addresses,
     revalidate_email_addresses,
@@ -2809,6 +2815,122 @@ async def check_class_api_key(class_id: str, request: StateRequest):
     return {"has_api_key": False}
 
 
+def _mask_api_key_value(api_key: str) -> str:
+    if len(api_key) <= 12:
+        return "*" * len(api_key)
+    return f"{api_key[:8]}{'*' * 20}{api_key[-4:]}"
+
+
+def _serialize_class_credential_slot(
+    purpose: schemas.ClassCredentialPurpose,
+    credential: models.ClassCredential | None,
+) -> schemas.ClassCredentialSlot:
+    if credential is None or credential.api_key_obj is None:
+        return schemas.ClassCredentialSlot(purpose=purpose, credential=None)
+    return schemas.ClassCredentialSlot(
+        purpose=purpose,
+        credential=schemas.ApiKey(
+            api_key=_mask_api_key_value(credential.api_key_obj.api_key),
+            provider=credential.api_key_obj.provider,
+        ),
+    )
+
+
+@v1.get(
+    "/class/{class_id}/credentials",
+    dependencies=[Depends(Authz("can_view_api_key", "class:{class_id}"))],
+    response_model=schemas.ClassCredentialsResponse,
+)
+async def get_class_credentials(class_id: str, request: StateRequest):
+    credentials = await models.ClassCredential.get_by_class_id(
+        request.state["db"], int(class_id)
+    )
+    credentials_by_purpose = {
+        credential.purpose: credential for credential in credentials
+    }
+    return {
+        "credentials": [
+            _serialize_class_credential_slot(
+                purpose,
+                credentials_by_purpose.get(purpose),
+            )
+            for purpose in schemas.ClassCredentialPurpose
+        ]
+    }
+
+
+@v1.post(
+    "/class/{class_id}/credentials",
+    dependencies=[Depends(Authz("admin", "class:{class_id}"))],
+    response_model=schemas.ClassCredentialResponse,
+)
+async def create_class_credential(
+    class_id: str,
+    update: schemas.CreateClassCredential,
+    request: StateRequest,
+):
+    purpose = update.purpose
+    if not update.api_key:
+        raise HTTPException(
+            status_code=400,
+            detail="API key must be provided to create the class credential.",
+        )
+    if not provider_matches_purpose(update.provider, purpose):
+        expected_provider = expected_provider_for_purpose(purpose)
+        raise HTTPException(
+            status_code=400,
+            detail=f"{purpose.value} only supports the {expected_provider.value} provider.",
+        )
+    existing_credential = await models.ClassCredential.get_by_class_id_and_purpose(
+        request.state["db"],
+        int(class_id),
+        purpose,
+    )
+    if existing_credential is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Credential already exists for this purpose and cannot be changed.",
+        )
+    try:
+        is_valid = await validate_class_credential(update.api_key, update.provider)
+    except ClassCredentialValidationUnavailableError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Unable to validate the API key right now because the provider is unavailable. "
+                "Please try again later."
+            ),
+        ) from exc
+    if not is_valid:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid API key provided. Please try again.",
+        )
+    try:
+        credential = await models.ClassCredential.create(
+            request.state["db"],
+            int(class_id),
+            purpose,
+            update.api_key,
+            update.provider,
+        )
+    except IntegrityError:
+        raise HTTPException(
+            status_code=400,
+            detail="Credential already exists for this purpose and cannot be changed.",
+        )
+    await request.state["authz"].write_safe(
+        grant=[
+            (
+                f"user:{request.state['session'].user.id}",
+                "can_view_api_key",
+                f"class:{class_id}",
+            )
+        ]
+    )
+    return {"credential": _serialize_class_credential_slot(purpose, credential)}
+
+
 @v1.put(
     "/class/{class_id}/api_key",
     dependencies=[Depends(Authz("admin", "class:{class_id}"))],
@@ -2885,14 +3007,14 @@ async def get_class_api_key(class_id: str, request: StateRequest):
     if result.api_key_obj:
         api_key_obj = result.api_key_obj
         response = schemas.ApiKey(
-            api_key=f"{api_key_obj.api_key[:8]}{'*' * 20}{api_key_obj.api_key[-4:]}",
+            api_key=_mask_api_key_value(api_key_obj.api_key),
             provider=api_key_obj.provider,
             endpoint=api_key_obj.endpoint,
             api_version=api_key_obj.api_version,
         )
     elif result.api_key:
         response = schemas.ApiKey(
-            api_key=f"{result.api_key[:8]}{'*' * 20}{result.api_key[-4:]}",
+            api_key=_mask_api_key_value(result.api_key),
             provider="openai",
         )
 

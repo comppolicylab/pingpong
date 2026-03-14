@@ -1776,6 +1776,16 @@ class AIProvider(StrEnum):
     AZURE = "azure"
 
 
+class ClassCredentialProvider(StrEnum):
+    GEMINI = "gemini"
+    ELEVENLABS = "elevenlabs"
+
+
+class ClassCredentialPurpose(StrEnum):
+    LECTURE_VIDEO_NARRATION_TTS = "lecture_video_narration_tts"
+    LECTURE_VIDEO_MANIFEST_GENERATION = "lecture_video_manifest_generation"
+
+
 class Class(BaseModel):
     id: int
     name: str
@@ -1887,6 +1897,21 @@ class UpdateApiKey(BaseModel):
     )
 
 
+class CreateClassCredential(BaseModel):
+    api_key: str
+    provider: ClassCredentialProvider
+    purpose: ClassCredentialPurpose
+
+    @field_validator("api_key")
+    @classmethod
+    def strip_api_key(cls, v: str) -> str:
+        return v.strip()
+
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+
 class ApiKey(BaseModel):
     api_key: str
     provider: str
@@ -1915,6 +1940,31 @@ class APIKeyResponse(BaseModel):
 class APIKeyModelResponse(BaseModel):
     api_key: str | None = None
     api_key_obj: ApiKey | None = None
+
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+
+class ClassCredentialSlot(BaseModel):
+    purpose: ClassCredentialPurpose
+    credential: ApiKey | None = None
+
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+
+class ClassCredentialResponse(BaseModel):
+    credential: ClassCredentialSlot
+
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+
+class ClassCredentialsResponse(BaseModel):
+    credentials: list[ClassCredentialSlot]
 
     model_config = ConfigDict(
         from_attributes=True,

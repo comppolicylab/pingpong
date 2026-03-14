@@ -1300,6 +1300,11 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/6e/c2/562aa1f086e53529ffbeb5b43d5d8bc42c1b968102b5e2163fad005ce298/google_genai-1.67.0-py3-none-any.whl", hash = "sha256:58b0484ff2d4335fa53c724b489e9f807fcca8115d9cdbd8fdf341121fbd6d2d", size = 733542, upload-time = "2026-03-12T20:39:14.615Z" },
 ]
 
+[package.optional-dependencies]
+aiohttp = [
+    { name = "aiohttp" },
+]
+
 [[package]]
 name = "greenlet"
 version = "3.3.1"
@@ -2284,7 +2289,7 @@ dependencies = [
     { name = "elevenlabs" },
     { name = "email-validator" },
     { name = "fastapi", extra = ["standard"] },
-    { name = "google-genai" },
+    { name = "google-genai", extra = ["aiohttp"] },
     { name = "httpx" },
     { name = "humanize" },
     { name = "mmh3" },
@@ -2336,7 +2341,7 @@ requires-dist = [
     { name = "elevenlabs", specifier = ">=2.39.0,<3.0.0" },
     { name = "email-validator", specifier = ">=2.3.0,<3.0.0" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.129.0,<1.0.0" },
-    { name = "google-genai", specifier = ">=1.67.0,<2.0.0" },
+    { name = "google-genai", extras = ["aiohttp"], specifier = ">=1.67.0,<2.0.0" },
     { name = "httpx", specifier = "==0.28.1" },
     { name = "humanize", specifier = ">=4.15.0,<5.0.0" },
     { name = "mmh3", specifier = ">=5.2.0,<6.0.0" },

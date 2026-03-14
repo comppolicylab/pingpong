@@ -1393,6 +1393,31 @@ export type UpdateApiKeyRequest = {
 	api_version?: string;
 };
 
+export type ClassCredentialProvider = 'gemini' | 'elevenlabs';
+
+export type ClassCredentialPurpose =
+	| 'lecture_video_narration_tts'
+	| 'lecture_video_manifest_generation';
+
+export type CreateClassCredentialRequest = {
+	api_key: string;
+	provider: ClassCredentialProvider;
+	purpose: ClassCredentialPurpose;
+};
+
+export type ClassCredentialSlot = {
+	purpose: ClassCredentialPurpose;
+	credential?: ApiKey | null;
+};
+
+export type ClassCredentialsResponse = {
+	credentials: ClassCredentialSlot[];
+};
+
+export type ClassCredentialResponse = {
+	credential: ClassCredentialSlot;
+};
+
 export type DefaultAPIKey = {
 	id: number;
 	redacted_key: string;
@@ -1437,6 +1462,32 @@ export const updateApiKey = async (
 export const getApiKey = async (f: Fetcher, classId: number) => {
 	const url = `class/${classId}/api_key`;
 	return await GET<never, ApiKeyResponse>(f, url);
+};
+
+/**
+ * Fetch purpose-scoped credentials for a class.
+ */
+export const getClassCredentials = async (f: Fetcher, classId: number) => {
+	const url = `class/${classId}/credentials`;
+	return await GET<never, ClassCredentialsResponse>(f, url);
+};
+
+/**
+ * Create a purpose-scoped credential for a class.
+ */
+export const createClassCredential = async (
+	f: Fetcher,
+	classId: number,
+	purpose: ClassCredentialPurpose,
+	provider: ClassCredentialProvider,
+	apiKey: string
+) => {
+	const url = `class/${classId}/credentials`;
+	return await PUT<CreateClassCredentialRequest, ClassCredentialResponse>(f, url, {
+		api_key: apiKey,
+		provider,
+		purpose
+	});
 };
 
 /**
