@@ -3,7 +3,7 @@ import base64
 import hashlib
 import json
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import (
     AsyncGenerator,
     Collection,
@@ -18,6 +18,7 @@ from typing import (
     cast,
 )
 
+import uuid_utils as uuid
 from sqlalchemy import (
     Boolean,
     Column,
@@ -56,6 +57,7 @@ from sqlalchemy.orm import (
     Load,
     joinedload,
     contains_eager,
+    load_only,
     selectinload,
     mapped_column,
     relationship,
@@ -67,6 +69,10 @@ import logging
 from pingpong.log_utils import sanitize_for_log
 
 logger = logging.getLogger(__name__)
+
+
+def generate_lecture_video_interaction_idempotency_key() -> str:
+    return f"server-{uuid.uuid7()}"
 
 
 class AmbiguousExternalLoginLookupError(ValueError):
@@ -2365,6 +2371,304 @@ class LectureVideoNarration(Base):
         server_default=schemas.LectureVideoNarrationStatus.PENDING.name,
     )
     error_message = Column(String, nullable=True)
+
+    @classmethod
+    async def get_by_id(
+        cls, session: AsyncSession, id_: int
+    ) -> "LectureVideoNarration | None":
+        stmt = (
+            select(LectureVideoNarration)
+            .where(LectureVideoNarration.id == int(id_))
+            .options(selectinload(LectureVideoNarration.stored_object))
+        )
+        return await session.scalar(stmt)
+
+
+def _lecture_video_post_narration_loader() -> Load:
+    return selectinload(LectureVideoQuestionOption.post_narration).selectinload(
+        LectureVideoNarration.stored_object
+    )
+
+
+def _lecture_video_question_context_loaders(
+    *, include_correct_option: bool = True
+) -> tuple[Load, ...]:
+    loaders: list[Load] = [
+        selectinload(LectureVideoQuestion.options).options(
+            _lecture_video_post_narration_loader()
+        ),
+        selectinload(LectureVideoQuestion.intro_narration).selectinload(
+            LectureVideoNarration.stored_object
+        ),
+    ]
+    if include_correct_option:
+        loaders.append(selectinload(LectureVideoQuestion.correct_option))
+    return tuple(loaders)
+
+
+def _thread_lecture_video_base_loaders() -> tuple[Load, ...]:
+    return (
+        selectinload(Thread.users).load_only(
+            User.id,
+            User.created,
+            User.anonymous_link_id,
+            User.first_name,
+            User.last_name,
+            User.display_name,
+            User.email,
+        ),
+        selectinload(Thread.assistant).load_only(
+            Assistant.id, Assistant.name, Assistant.lecture_video_id
+        ),
+        selectinload(Thread.lecture_video).options(
+            selectinload(LectureVideo.questions).options(
+                *_lecture_video_question_context_loaders()
+            )
+        ),
+    )
+
+
+def _thread_lecture_video_state_loader() -> Load:
+    return selectinload(Thread.lecture_video_state).options(
+        selectinload(LectureVideoThreadState.current_question).options(
+            *_lecture_video_question_context_loaders(include_correct_option=False)
+        ),
+        selectinload(LectureVideoThreadState.active_option).options(
+            _lecture_video_post_narration_loader()
+        ),
+    )
+
+
+def _thread_lecture_video_context_loaders() -> tuple[Load, ...]:
+    return (
+        *_thread_lecture_video_base_loaders(),
+        _thread_lecture_video_state_loader(),
+    )
+
+
+class LectureVideoThreadState(Base):
+    __tablename__ = "lecture_video_thread_states"
+
+    thread_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("threads.id", ondelete="CASCADE"), primary_key=True
+    )
+    thread: Mapped["Thread"] = relationship(
+        "Thread", back_populates="lecture_video_state", uselist=False
+    )
+    state: Mapped[schemas.LectureVideoSessionState] = mapped_column(
+        SQLEnum(schemas.LectureVideoSessionState),
+        nullable=False,
+        server_default=schemas.LectureVideoSessionState.PLAYING.name,
+    )
+    current_question_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("lecture_video_questions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    active_option_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("lecture_video_question_options.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    last_known_offset_ms: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    controller_session_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    controller_user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=True
+    )
+    controller_lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    current_question: Mapped["LectureVideoQuestion | None"] = relationship(
+        "LectureVideoQuestion", foreign_keys=[current_question_id]
+    )
+    active_option: Mapped["LectureVideoQuestionOption | None"] = relationship(
+        "LectureVideoQuestionOption", foreign_keys=[active_option_id]
+    )
+    controller_user: Mapped["User | None"] = relationship(
+        "User", foreign_keys=[controller_user_id]
+    )
+
+    @property
+    def normalized_controller_lease_expires_at(self) -> datetime | None:
+        lease_expires_at = self.controller_lease_expires_at
+        if lease_expires_at is not None and lease_expires_at.tzinfo is None:
+            return lease_expires_at.replace(tzinfo=timezone.utc)
+        return lease_expires_at
+
+    @classmethod
+    async def create(
+        cls, session: AsyncSession, data: dict
+    ) -> "LectureVideoThreadState":
+        state = LectureVideoThreadState(**data)
+        session.add(state)
+        await session.flush()
+        return state
+
+    @classmethod
+    async def get_by_thread_id_with_context(
+        cls,
+        session: AsyncSession,
+        thread_id: int,
+        *,
+        for_update: bool = False,
+    ) -> "LectureVideoThreadState | None":
+        stmt = (
+            select(LectureVideoThreadState)
+            .where(LectureVideoThreadState.thread_id == thread_id)
+            .options(
+                joinedload(LectureVideoThreadState.thread).options(
+                    *_thread_lecture_video_base_loaders()
+                ),
+                selectinload(LectureVideoThreadState.current_question).options(
+                    *_lecture_video_question_context_loaders(
+                        include_correct_option=False
+                    )
+                ),
+                selectinload(LectureVideoThreadState.active_option).options(
+                    _lecture_video_post_narration_loader()
+                ),
+            )
+        )
+        if for_update:
+            stmt = stmt.with_for_update()
+        state = await session.scalar(stmt)
+        if state is not None:
+            # Runtime writes rely on callers taking a row lock before they allocate the
+            # next interaction event_index. Mark the loaded instance so downstream code
+            # can assert that invariant close to the write path.
+            state._locked_for_interaction_append = for_update
+        return state
+
+
+class LectureVideoInteraction(Base):
+    __tablename__ = "lecture_video_interactions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    thread_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("threads.id", ondelete="CASCADE"), nullable=False
+    )
+    event_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    actor_user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=True
+    )
+    event_type: Mapped[schemas.LectureVideoInteractionEventType] = mapped_column(
+        SQLEnum(schemas.LectureVideoInteractionEventType), nullable=False
+    )
+    question_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("lecture_video_questions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    option_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("lecture_video_question_options.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    offset_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    from_offset_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    to_offset_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    idempotency_key: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        default=generate_lecture_video_interaction_idempotency_key,
+    )
+    created: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    thread: Mapped["Thread"] = relationship(
+        "Thread", back_populates="lecture_video_interactions"
+    )
+    actor: Mapped["User | None"] = relationship("User", foreign_keys=[actor_user_id])
+    question: Mapped["LectureVideoQuestion | None"] = relationship(
+        "LectureVideoQuestion", foreign_keys=[question_id]
+    )
+    option: Mapped["LectureVideoQuestionOption | None"] = relationship(
+        "LectureVideoQuestionOption", foreign_keys=[option_id]
+    )
+
+    __table_args__ = (
+        UniqueConstraint("thread_id", "event_index"),
+        UniqueConstraint("thread_id", "idempotency_key"),
+        Index("lecture_video_interaction_thread_created_idx", "thread_id", "created"),
+    )
+
+    @classmethod
+    async def create(
+        cls, session: AsyncSession, data: dict
+    ) -> "LectureVideoInteraction":
+        payload = dict(data)
+        idempotency_key = payload.get("idempotency_key")
+        if not isinstance(idempotency_key, str) or not idempotency_key.strip():
+            payload["idempotency_key"] = cls.generate_idempotency_key()
+        interaction = LectureVideoInteraction(**payload)
+        session.add(interaction)
+        await session.flush()
+        return interaction
+
+    @staticmethod
+    def generate_idempotency_key() -> str:
+        return generate_lecture_video_interaction_idempotency_key()
+
+    @classmethod
+    async def get_by_thread_and_idempotency_key(
+        cls, session: AsyncSession, thread_id: int, idempotency_key: str
+    ) -> "LectureVideoInteraction | None":
+        stmt = select(LectureVideoInteraction).where(
+            LectureVideoInteraction.thread_id == thread_id,
+            LectureVideoInteraction.idempotency_key == idempotency_key,
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_next_event_index(cls, session: AsyncSession, thread_id: int) -> int:
+        return (
+            await session.scalar(
+                select(
+                    func.coalesce(func.max(LectureVideoInteraction.event_index), 0)
+                ).where(LectureVideoInteraction.thread_id == thread_id)
+            )
+        ) + 1
+
+    @classmethod
+    async def list_by_thread_id(
+        cls, session: AsyncSession, thread_id: int
+    ) -> list["LectureVideoInteraction"]:
+        stmt = (
+            select(LectureVideoInteraction)
+            .where(LectureVideoInteraction.thread_id == thread_id)
+            .options(
+                selectinload(LectureVideoInteraction.question),
+                selectinload(LectureVideoInteraction.option),
+                selectinload(LectureVideoInteraction.actor),
+            )
+            .order_by(asc(LectureVideoInteraction.event_index))
+        )
+        return list((await session.scalars(stmt)).all())
+
+    @classmethod
+    async def get_latest_created_by_thread_id(
+        cls, session: AsyncSession, thread_id: int
+    ) -> datetime | None:
+        stmt = (
+            select(LectureVideoInteraction.created)
+            .where(LectureVideoInteraction.thread_id == thread_id)
+            .order_by(desc(LectureVideoInteraction.event_index))
+            .limit(1)
+        )
+        return await session.scalar(stmt)
 
 
 class S3File(Base):
@@ -6220,6 +6524,18 @@ class Thread(Base):
         back_populates="thread",
         uselist=False,
     )
+    lecture_video_state: Mapped["LectureVideoThreadState | None"] = relationship(
+        "LectureVideoThreadState",
+        back_populates="thread",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    lecture_video_interactions: Mapped[list["LectureVideoInteraction"]] = relationship(
+        "LectureVideoInteraction",
+        back_populates="thread",
+        cascade="all, delete-orphan",
+        order_by="LectureVideoInteraction.event_index",
+    )
     lecture_video_id = Column(
         Integer,
         ForeignKey(
@@ -6358,7 +6674,7 @@ class Thread(Base):
         result = await session.execute(
             select(Thread)
             .options(
-                joinedload(Thread.users).load_only(
+                selectinload(Thread.users).load_only(
                     User.id,
                     User.created,
                     User.anonymous_link_id,
@@ -6380,6 +6696,30 @@ class Thread(Base):
         return await session.scalar(stmt)
 
     @classmethod
+    async def get_by_id_for_class(
+        cls, session: AsyncSession, class_id: int, id_: int
+    ) -> "Thread | None":
+        stmt = select(Thread).where(
+            Thread.id == int(id_),
+            Thread.class_id == int(class_id),
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_id_for_class_with_interaction_mode(
+        cls, session: AsyncSession, class_id: int, id_: int
+    ) -> "Thread | None":
+        stmt = (
+            select(Thread)
+            .where(
+                Thread.id == int(id_),
+                Thread.class_id == int(class_id),
+            )
+            .options(load_only(Thread.id, Thread.interaction_mode))
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
     async def get_by_id_with_ci_file_ids(
         cls, session: AsyncSession, id_: int
     ) -> "Thread":
@@ -6398,7 +6738,7 @@ class Thread(Base):
             select(Thread)
             .where(Thread.id == int(id_))
             .options(
-                joinedload(Thread.users).load_only(
+                selectinload(Thread.users).load_only(
                     User.id,
                     User.created,
                     User.anonymous_link_id,
@@ -6419,7 +6759,7 @@ class Thread(Base):
             select(Thread)
             .where(Thread.id == int(id_))
             .options(
-                joinedload(Thread.users).load_only(
+                selectinload(Thread.users).load_only(
                     User.id,
                     User.created,
                     User.anonymous_link_id,
@@ -6430,6 +6770,65 @@ class Thread(Base):
                 ),
                 selectinload(Thread.voice_mode_recording),
                 selectinload(Thread.assistant).load_only(Assistant.name),
+            )
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_id_with_lecture_video_context(
+        cls, session: AsyncSession, id_: int
+    ) -> "Thread | None":
+        stmt = (
+            select(Thread)
+            .where(Thread.id == int(id_))
+            .options(*_thread_lecture_video_context_loaders())
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_id_for_class_with_lecture_video_context(
+        cls, session: AsyncSession, class_id: int, id_: int
+    ) -> "Thread | None":
+        stmt = (
+            select(Thread)
+            .where(
+                Thread.id == int(id_),
+                Thread.class_id == int(class_id),
+            )
+            .options(*_thread_lecture_video_context_loaders())
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_id_for_class_with_lecture_video_narration_context(
+        cls, session: AsyncSession, class_id: int, id_: int
+    ) -> "Thread | None":
+        stmt = (
+            select(Thread)
+            .where(
+                Thread.id == int(id_),
+                Thread.class_id == int(class_id),
+            )
+            .options(
+                selectinload(Thread.assistant).load_only(
+                    Assistant.id, Assistant.name, Assistant.lecture_video_id
+                ),
+                selectinload(Thread.lecture_video_state)
+                .load_only(
+                    LectureVideoThreadState.state,
+                    LectureVideoThreadState.current_question_id,
+                    LectureVideoThreadState.active_option_id,
+                )
+                .options(
+                    selectinload(LectureVideoThreadState.current_question).load_only(
+                        LectureVideoQuestion.id,
+                        LectureVideoQuestion.intro_narration_id,
+                    ),
+                    selectinload(LectureVideoThreadState.active_option).load_only(
+                        LectureVideoQuestionOption.id,
+                        LectureVideoQuestionOption.post_narration_id,
+                    ),
+                ),
             )
         )
         return await session.scalar(stmt)

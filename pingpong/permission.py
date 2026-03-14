@@ -157,6 +157,13 @@ class Authz(Expression):
         return f"Authz({self.relation}, {self.target})"
 
 
+THREAD_CAN_PARTICIPATE = Authz("can_participate", "thread:{thread_id}")
+
+
+async def can_participate_thread(request: StateRequest) -> bool:
+    return await THREAD_CAN_PARTICIPATE.test_with_cache(request)
+
+
 class InstitutionAdmin(Expression):
     async def test(self, request: StateRequest) -> bool:
         if not request.state["auth_user"]:

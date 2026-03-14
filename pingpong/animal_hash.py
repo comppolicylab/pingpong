@@ -58,15 +58,40 @@ def name(user: User) -> str:
     return " ".join(parts)
 
 
+def display_name_for_thread_user(
+    thread: Thread,
+    actor_user_id: int | None,
+    users: dict[int, User],
+    *,
+    current_user_ids: list[int],
+    is_supervisor: bool,
+) -> str | None:
+    if actor_user_id is None:
+        return None
+    if actor_user_id in current_user_ids:
+        return "Me"
+    user = users.get(actor_user_id)
+    if user is None:
+        return "Unknown User"
+    if thread.display_user_info and is_supervisor:
+        return name(user)
+    if thread.private:
+        return "Anonymous User"
+    return pseudonym(thread, user)
+
+
 def user_names(new_thread: Thread, user_id: int, is_supervisor=False) -> list[str]:
-    return [
-        "Me"
-        if u.id == user_id
-        else name(u)
-        if is_supervisor and new_thread.display_user_info
-        else pseudonym(new_thread, u)
-        if not new_thread.private
-        else "Anonymous User"
-        for u in new_thread.users
-        if not u.anonymous_link_id or u.id == user_id
-    ]
+    names: list[str] = []
+    for u in new_thread.users:
+        if u.anonymous_link_id and u.id != user_id:
+            continue
+        display_name = display_name_for_thread_user(
+            new_thread,
+            u.id,
+            {u.id: u},
+            current_user_ids=[user_id],
+            is_supervisor=is_supervisor,
+        )
+        if display_name is not None:
+            names.append(display_name)
+    return names

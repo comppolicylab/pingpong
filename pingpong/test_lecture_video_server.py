@@ -1,20 +1,27 @@
 import importlib
 import io
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from typing import Literal
 
 import pytest
 from fastapi import HTTPException, UploadFile
-from pingpong import lecture_video_service
-from pingpong import models
-from pingpong.authz.openfga import OpenFgaAuthzClient
-from pingpong.config import LocalAudioStoreSettings, LocalVideoStoreSettings
-import pingpong.schemas as schemas
-from sqlalchemy import func, select, text
+from pydantic import ValidationError
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
-from .testutil import with_authz, with_user, with_institution
+import pingpong.schemas as schemas
+from pingpong import lecture_video_runtime, lecture_video_service, models
+from pingpong.animal_hash import pseudonym
+from pingpong.authz.openfga import OpenFgaAuthzClient
+from pingpong.config import LocalAudioStoreSettings, LocalVideoStoreSettings
+
+from .testutil import with_authz, with_institution, with_user
+
+
+def _parse_timestamp(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 def make_lecture_video(
@@ -83,7 +90,7 @@ def fake_class_models_response(model_id: str = "gpt-4o-mini") -> dict:
         "models": [
             {
                 "id": model_id,
-                "created": datetime(2024, 1, 1, tzinfo=timezone.utc),
+                "created": datetime(2024, 1, 1, tzinfo=UTC),
                 "owner": "openai",
                 "name": "Test model",
                 "sort_order": 1.0,
@@ -121,6 +128,94 @@ def patch_lecture_video_model_list(monkeypatch, model_id: str = "gpt-4o-mini") -
     monkeypatch.setattr(server_module, "list_class_models", fake_list_class_models)
 
 
+async def grant_thread_permissions(config, thread_id: int, *user_ids: int) -> None:  # type: ignore[no-untyped-def]
+    async with config.authz.driver.get_client() as authz_client:
+        await authz_client.write(
+            grant=[
+                (f"user:{user_id}", relation, f"thread:{thread_id}")
+                for user_id in user_ids
+                for relation in ("can_view", "can_participate")
+            ]
+        )
+
+
+async def create_ready_lecture_video_assistant(
+    session,
+    institution,
+    *,
+    class_id: int = 1,
+    assistant_id: int = 1,
+    lecture_video_id: int = 1,
+    video_key: str = "lecture-runtime.mp4",
+    manifest: dict | None = None,
+):
+    class_ = models.Class(
+        id=class_id,
+        name="Test Class",
+        institution_id=institution.id,
+        api_key="test-key",
+    )
+    session.add(class_)
+    await session.flush()
+
+    lecture_video = make_lecture_video(
+        class_.id,
+        video_key,
+        filename=video_key,
+        content_length=128,
+    )
+    lecture_video.id = lecture_video_id
+    session.add(lecture_video)
+    await session.flush()
+
+    await lecture_video_service.persist_manifest(
+        session,
+        lecture_video,
+        schemas.LectureVideoManifestV1.model_validate(
+            manifest or lecture_video_manifest()
+        ),
+    )
+
+    assistant = models.Assistant(
+        id=assistant_id,
+        name="Lecture Assistant",
+        class_id=class_.id,
+        interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+        version=3,
+        lecture_video_id=lecture_video.id,
+        instructions="You are a lecture assistant.",
+        model="gpt-4o-mini",
+        tools="[]",
+        use_latex=False,
+        use_image_descriptions=False,
+        hide_prompt=False,
+    )
+    session.add(assistant)
+    await session.commit()
+    return class_, lecture_video, assistant
+
+
+async def attach_ready_narration(
+    session,
+    narration: models.LectureVideoNarration,
+    *,
+    key: str,
+    content_type: str = "audio/mpeg",
+    content_length: int = 16,
+):
+    stored_object = models.LectureVideoNarrationStoredObject(
+        key=key,
+        content_type=content_type,
+        content_length=content_length,
+    )
+    session.add(stored_object)
+    await session.flush()
+    narration.stored_object_id = stored_object.id
+    narration.stored_object = stored_object
+    narration.status = schemas.LectureVideoNarrationStatus.READY
+    await session.flush()
+
+
 @pytest.mark.parametrize(
     ("content_type", "suffix"),
     [
@@ -147,6 +242,19 @@ def test_get_upload_size_requires_known_size():
 
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail == "Lecture video upload size could not be determined."
+
+
+def test_lecture_video_question_prompt_requires_options_for_single_select():
+    with pytest.raises(ValidationError) as exc_info:
+        schemas.LectureVideoQuestionPrompt(
+            id=1,
+            type=schemas.LectureVideoQuestionType.SINGLE_SELECT,
+            question_text="What is the right answer?",
+            intro_text="Intro narration",
+            stop_offset_ms=1000,
+        )
+
+    assert "options" in str(exc_info.value)
 
 
 @with_user(123)
@@ -202,6 +310,1528 @@ async def test_create_lecture_thread_success(api, db, institution, valid_user_to
     assert data["thread"]["name"] == "Lecture Presentation"
     assert data["thread"]["private"] is True
     assert data["session_token"] is None
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
+    ]
+)
+async def test_get_thread_returns_lecture_video_session(
+    api, authz, config, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+
+    create_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/lecture",
+        json={"assistant_id": 1, "parties": [123]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+    thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
+
+    response = api.get(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert response.status_code == 200
+    session_data = response.json()["lecture_video_session"]
+    assert session_data["state"] == "playing"
+    assert session_data["last_known_offset_ms"] == 0
+    assert session_data["latest_interaction_at"] is not None
+    assert session_data["state_version"] == 1
+    assert session_data["current_question"] is None
+    assert session_data["current_continuation"] is None
+    assert session_data["controller"]["has_control"] is False
+    assert session_data["controller"]["has_active_controller"] is False
+    assert session_data["controller"]["lease_expires_at"] is None
+    assert response.json()["thread"]["is_current_user_participant"] is True
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_view", "thread:1"),
+        ("user:123", "supervisor", "class:1"),
+    ]
+)
+async def test_get_thread_skips_lecture_video_checks_for_chat_threads(
+    api, db, institution, user, valid_user_token, monkeypatch
+):
+    async with db.async_session() as session:
+        db_user = await session.get(models.User, user.id)
+        assert db_user is not None
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        assistant = models.Assistant(
+            id=1,
+            name="Chat Assistant",
+            class_id=class_.id,
+            creator_id=db_user.id,
+            interaction_mode=schemas.InteractionMode.CHAT,
+            version=3,
+            model="gpt-4o-mini",
+            instructions="Teach the lecture.",
+            tools="[]",
+        )
+        thread = models.Thread(
+            id=1,
+            thread_id="chat-thread-1",
+            class_id=class_.id,
+            assistant_id=assistant.id,
+            interaction_mode=schemas.InteractionMode.CHAT,
+            version=3,
+            private=False,
+            display_user_info=False,
+            tools_available="[]",
+        )
+        thread.users.append(db_user)
+        session.add_all([class_, assistant, thread])
+        await session.commit()
+
+    async def fail_can_participate(request):  # type: ignore[no-untyped-def]
+        raise AssertionError(
+            "can_participate_thread should not be called for chat threads"
+        )
+
+    async def fail_get_thread_session(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError(
+            "lecture_video_runtime.get_thread_session should not be called for chat threads"
+        )
+
+    server_module = importlib.import_module("pingpong.server")
+    monkeypatch.setattr(server_module, "can_participate_thread", fail_can_participate)
+    monkeypatch.setattr(
+        server_module.lecture_video_runtime,
+        "get_thread_session",
+        fail_get_thread_session,
+    )
+
+    response = api.get(
+        "/api/v1/class/1/thread/1",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["lecture_video_session"] is None
+    assert response.json()["thread"]["is_current_user_participant"] is False
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
+    ]
+)
+async def test_get_thread_lazily_initializes_legacy_lecture_video_runtime_state(
+    api, authz, config, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+
+    create_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/lecture",
+        json={"assistant_id": 1, "parties": [123]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+    thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
+
+    async with db.async_session() as session:
+        await session.execute(
+            delete(models.LectureVideoInteraction).where(
+                models.LectureVideoInteraction.thread_id == thread_id
+            )
+        )
+        await session.execute(
+            delete(models.LectureVideoThreadState).where(
+                models.LectureVideoThreadState.thread_id == thread_id
+            )
+        )
+        await session.commit()
+
+    response = api.get(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert response.status_code == 200
+    session_data = response.json()["lecture_video_session"]
+    assert session_data["state"] == "playing"
+    assert session_data["latest_interaction_at"] is not None
+
+    async with db.async_session() as session:
+        state = await models.LectureVideoThreadState.get_by_thread_id_with_context(
+            session, thread_id
+        )
+        assert state is not None
+        assert state.state == schemas.LectureVideoSessionState.PLAYING
+        interactions = await models.LectureVideoInteraction.list_by_thread_id(
+            session, thread_id
+        )
+        assert [interaction.event_type for interaction in interactions] == [
+            schemas.LectureVideoInteractionEventType.SESSION_INITIALIZED
+        ]
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
+    ]
+)
+async def test_lecture_video_control_reacquire_invalidates_old_controller(
+    api, authz, config, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+
+    create_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/lecture",
+        json={"assistant_id": 1, "parties": [123]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
+
+    acquire_one = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert acquire_one.status_code == 200
+    controller_one = acquire_one.json()["controller_session_id"]
+    version_one = acquire_one.json()["lecture_video_session"]["state_version"]
+
+    acquire_two = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert acquire_two.status_code == 200
+    controller_two = acquire_two.json()["controller_session_id"]
+    assert controller_two != controller_one
+    assert (
+        acquire_two.json()["lecture_video_session"]["controller"]["has_control"] is True
+    )
+
+    response = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "video_paused",
+            "controller_session_id": controller_one,
+            "expected_state_version": version_one,
+            "idempotency_key": "stale-window",
+            "offset_ms": 500,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert response.status_code == 409
+    assert "no longer controls" in response.json()["detail"]
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
+    ]
+)
+async def test_lecture_video_duplicate_idempotent_request_from_old_controller_is_rejected(
+    api, authz, config, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+
+    create_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/lecture",
+        json={"assistant_id": 1, "parties": [123]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
+
+    acquire_one = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert acquire_one.status_code == 200
+    controller_one = acquire_one.json()["controller_session_id"]
+    version_one = acquire_one.json()["lecture_video_session"]["state_version"]
+
+    initial_interaction = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "video_paused",
+            "controller_session_id": controller_one,
+            "expected_state_version": version_one,
+            "idempotency_key": "pause-once",
+            "offset_ms": 500,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert initial_interaction.status_code == 200
+
+    acquire_two = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert acquire_two.status_code == 200
+    assert acquire_two.json()["controller_session_id"] != controller_one
+
+    replay_from_old_controller = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "video_paused",
+            "controller_session_id": controller_one,
+            "expected_state_version": initial_interaction.json()[
+                "lecture_video_session"
+            ]["state_version"],
+            "idempotency_key": "pause-once",
+            "offset_ms": 500,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert replay_from_old_controller.status_code == 409
+    assert "no longer controls" in replay_from_old_controller.json()["detail"]
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
+    ]
+)
+async def test_process_interaction_rejects_unhandled_request_subclass(
+    api, authz, config, db, institution, valid_user_token
+):
+    class UnhandledPausedRequest(schemas.LectureVideoInteractionRequestBase):
+        type: Literal["video_paused"]
+        offset_ms: int
+
+    async with db.async_session() as session:
+        class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+
+    create_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/lecture",
+        json={"assistant_id": 1, "parties": [123]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+    thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
+
+    acquire = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert acquire.status_code == 200
+    lease_expires_at = _parse_timestamp(
+        acquire.json()["lecture_video_session"]["controller"]["lease_expires_at"]
+    )
+
+    request_data = UnhandledPausedRequest(
+        type="video_paused",
+        controller_session_id=acquire.json()["controller_session_id"],
+        expected_state_version=acquire.json()["lecture_video_session"]["state_version"],
+        idempotency_key="unhandled-subclass",
+        offset_ms=500,
+    )
+
+    async with db.async_session() as session:
+        with pytest.raises(TypeError, match="Unhandled lecture video interaction"):
+            await lecture_video_runtime.process_interaction(
+                session,
+                thread_id,
+                123,
+                request_data,
+                nowfn=lambda: lease_expires_at - timedelta(seconds=1),
+            )
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
+    ]
+)
+async def test_lecture_video_interactions_derive_continuation_and_history(
+    api, authz, config, db, institution, valid_user_token
+):
+    manifest = {
+        "version": 1,
+        "questions": [
+            lecture_video_manifest()["questions"][0],
+            {
+                "type": "single_select",
+                "question_text": "What comes next?",
+                "intro_text": "Second intro",
+                "stop_offset_ms": 2500,
+                "options": [
+                    {
+                        "option_text": "Continue",
+                        "post_answer_text": "Nice work",
+                        "continue_offset_ms": 3000,
+                        "correct": True,
+                    },
+                    {
+                        "option_text": "Stop",
+                        "post_answer_text": "Not this one",
+                        "continue_offset_ms": 3200,
+                        "correct": False,
+                    },
+                ],
+            },
+        ],
+    }
+
+    async with db.async_session() as session:
+        class_, lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+            manifest=manifest,
+        )
+        questions = list(
+            (
+                await session.scalars(
+                    select(models.LectureVideoQuestion)
+                    .where(
+                        models.LectureVideoQuestion.lecture_video_id == lecture_video.id
+                    )
+                    .order_by(models.LectureVideoQuestion.position)
+                )
+            ).all()
+        )
+        options = {
+            question.id: list(
+                (
+                    await session.scalars(
+                        select(models.LectureVideoQuestionOption)
+                        .where(
+                            models.LectureVideoQuestionOption.question_id == question.id
+                        )
+                        .order_by(models.LectureVideoQuestionOption.position)
+                    )
+                ).all()
+            )
+            for question in questions
+        }
+
+    create_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/lecture",
+        json={"assistant_id": 1, "parties": [123]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
+
+    acquire = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert acquire.status_code == 200
+    controller_session_id = acquire.json()["controller_session_id"]
+    state_version = acquire.json()["lecture_video_session"]["state_version"]
+
+    present_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "question_presented",
+            "controller_session_id": controller_session_id,
+            "expected_state_version": state_version,
+            "idempotency_key": "question-1-presented",
+            "question_id": questions[0].id,
+            "offset_ms": questions[0].stop_offset_ms,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert present_response.status_code == 200
+
+    answer_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "answer_submitted",
+            "controller_session_id": controller_session_id,
+            "expected_state_version": present_response.json()["lecture_video_session"][
+                "state_version"
+            ],
+            "idempotency_key": "question-1-answer",
+            "question_id": questions[0].id,
+            "option_id": options[questions[0].id][0].id,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert answer_response.status_code == 200
+    continuation = answer_response.json()["lecture_video_session"][
+        "current_continuation"
+    ]
+    assert (
+        continuation["resume_offset_ms"]
+        == options[questions[0].id][0].continue_offset_ms
+    )
+    assert "post_answer_narration_id" in continuation
+    assert continuation["next_question"]["id"] == questions[1].id
+
+    duplicate_answer = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "answer_submitted",
+            "controller_session_id": controller_session_id,
+            "expected_state_version": answer_response.json()["lecture_video_session"][
+                "state_version"
+            ],
+            "idempotency_key": "question-1-answer",
+            "question_id": questions[0].id,
+            "option_id": options[questions[0].id][0].id,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert duplicate_answer.status_code == 200
+    assert (
+        duplicate_answer.json()["lecture_video_session"]["state_version"]
+        == answer_response.json()["lecture_video_session"]["state_version"]
+    )
+
+    refreshed_thread = api.get(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}",
+        headers={
+            "Authorization": f"Bearer {valid_user_token}",
+            "X-Lecture-Video-Controller-Session": controller_session_id,
+        },
+    )
+    assert refreshed_thread.status_code == 200
+    refreshed_continuation = refreshed_thread.json()["lecture_video_session"][
+        "current_continuation"
+    ]
+    assert refreshed_continuation == continuation
+    assert (
+        refreshed_thread.json()["lecture_video_session"]["controller"]["has_control"]
+        is True
+    )
+
+    resume_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "video_resumed",
+            "controller_session_id": controller_session_id,
+            "expected_state_version": answer_response.json()["lecture_video_session"][
+                "state_version"
+            ],
+            "idempotency_key": "question-1-resume",
+            "offset_ms": options[questions[0].id][0].continue_offset_ms,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert resume_response.status_code == 200
+    resumed_session = resume_response.json()["lecture_video_session"]
+    assert resumed_session["state"] == "playing"
+    assert resumed_session["current_question"]["id"] == questions[1].id
+    assert resumed_session["current_continuation"] is None
+
+    stale_version = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "video_paused",
+            "controller_session_id": controller_session_id,
+            "expected_state_version": 1,
+            "idempotency_key": "stale-version",
+            "offset_ms": 1234,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert stale_version.status_code == 409
+    assert "out of date" in stale_version.json()["detail"]
+
+    history_response = api.get(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/history",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert history_response.status_code == 200
+    history = history_response.json()["interactions"]
+    assert [item["event_index"] for item in history] == [1, 2, 3, 4]
+    assert [item["event_type"] for item in history] == [
+        "session_initialized",
+        "question_presented",
+        "answer_submitted",
+        "video_resumed",
+    ]
+    assert history[1]["actor_name"] == "Me"
+    assert history[2]["question_text"] == questions[0].question_text
+    assert history[2]["option_text"] == options[questions[0].id][0].option_text
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
+    ]
+)
+async def test_lecture_video_interactions_reject_post_completion_playback_events(
+    api, authz, config, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_, lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+        lecture_video = await models.LectureVideo.get_by_id_with_copy_context(
+            session, lecture_video.id
+        )
+        question = lecture_video.questions[0]
+        option = question.options[0]
+
+    create_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/lecture",
+        json={"assistant_id": 1, "parties": [123]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
+
+    acquire = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert acquire.status_code == 200
+    controller_session_id = acquire.json()["controller_session_id"]
+    state_version = acquire.json()["lecture_video_session"]["state_version"]
+
+    present_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "question_presented",
+            "controller_session_id": controller_session_id,
+            "expected_state_version": state_version,
+            "idempotency_key": "only-question-presented",
+            "question_id": question.id,
+            "offset_ms": question.stop_offset_ms,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert present_response.status_code == 200
+
+    answer_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "answer_submitted",
+            "controller_session_id": controller_session_id,
+            "expected_state_version": present_response.json()["lecture_video_session"][
+                "state_version"
+            ],
+            "idempotency_key": "only-question-answer",
+            "question_id": question.id,
+            "option_id": option.id,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert answer_response.status_code == 200
+
+    resume_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "video_resumed",
+            "controller_session_id": controller_session_id,
+            "expected_state_version": answer_response.json()["lecture_video_session"][
+                "state_version"
+            ],
+            "idempotency_key": "only-question-resume",
+            "offset_ms": option.continue_offset_ms,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert resume_response.status_code == 200
+    completed_session = resume_response.json()["lecture_video_session"]
+    assert completed_session["state"] == "completed"
+
+    invalid_pause = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "video_paused",
+            "controller_session_id": controller_session_id,
+            "expected_state_version": completed_session["state_version"],
+            "idempotency_key": "post-completion-pause",
+            "offset_ms": option.continue_offset_ms + 250,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert invalid_pause.status_code == 409
+    assert invalid_pause.json()["detail"] == "Session is already completed."
+
+    invalid_seek = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "video_seeked",
+            "controller_session_id": controller_session_id,
+            "expected_state_version": completed_session["state_version"],
+            "idempotency_key": "post-completion-seek",
+            "from_offset_ms": option.continue_offset_ms,
+            "to_offset_ms": option.continue_offset_ms + 500,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert invalid_seek.status_code == 409
+    assert invalid_seek.json()["detail"] == "Session is already completed."
+
+    invalid_end = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "video_ended",
+            "controller_session_id": controller_session_id,
+            "expected_state_version": completed_session["state_version"],
+            "idempotency_key": "post-completion-ended",
+            "offset_ms": option.continue_offset_ms + 750,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert invalid_end.status_code == 409
+    assert invalid_end.json()["detail"] == "Session is already completed."
+
+    invalid_answer = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "answer_submitted",
+            "controller_session_id": controller_session_id,
+            "expected_state_version": completed_session["state_version"],
+            "idempotency_key": "post-completion-answer",
+            "question_id": question.id,
+            "option_id": option.id,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert invalid_answer.status_code == 409
+    assert (
+        invalid_answer.json()["detail"]
+        == "This question is no longer accepting answers."
+    )
+
+    refreshed_thread = api.get(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}",
+        headers={
+            "Authorization": f"Bearer {valid_user_token}",
+            "X-Lecture-Video-Controller-Session": controller_session_id,
+        },
+    )
+    assert refreshed_thread.status_code == 200
+    refreshed_session = refreshed_thread.json()["lecture_video_session"]
+    assert refreshed_session["state"] == "completed"
+    assert refreshed_session["state_version"] == completed_session["state_version"]
+    assert (
+        refreshed_session["last_known_offset_ms"]
+        == completed_session["last_known_offset_ms"]
+    )
+
+    history_response = api.get(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/history",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert history_response.status_code == 200
+    assert [item["event_type"] for item in history_response.json()["interactions"]] == [
+        "session_initialized",
+        "question_presented",
+        "answer_submitted",
+        "video_resumed",
+        "session_completed",
+    ]
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
+    ]
+)
+async def test_lecture_video_interactions_record_seek_and_end_events(
+    api, authz, config, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+
+    create_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/lecture",
+        json={"assistant_id": 1, "parties": [123]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+    thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
+
+    acquire = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert acquire.status_code == 200
+    controller_session_id = acquire.json()["controller_session_id"]
+    state_version = acquire.json()["lecture_video_session"]["state_version"]
+
+    seek_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "video_seeked",
+            "controller_session_id": controller_session_id,
+            "expected_state_version": state_version,
+            "idempotency_key": "seek-forward",
+            "from_offset_ms": 250,
+            "to_offset_ms": 1250,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert seek_response.status_code == 200
+    assert seek_response.json()["lecture_video_session"]["last_known_offset_ms"] == 1250
+
+    end_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "video_ended",
+            "controller_session_id": controller_session_id,
+            "expected_state_version": seek_response.json()["lecture_video_session"][
+                "state_version"
+            ],
+            "idempotency_key": "ended-once",
+            "offset_ms": 9000,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert end_response.status_code == 200
+    ended_session = end_response.json()["lecture_video_session"]
+    assert ended_session["last_known_offset_ms"] == 9000
+    assert ended_session["state"] == "playing"
+
+    history_response = api.get(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/history",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert history_response.status_code == 200
+    history = history_response.json()["interactions"]
+    assert [item["event_type"] for item in history] == [
+        "session_initialized",
+        "video_seeked",
+        "video_ended",
+    ]
+    assert history[1]["from_offset_ms"] == 250
+    assert history[1]["to_offset_ms"] == 1250
+    assert history[2]["offset_ms"] == 9000
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
+    ]
+)
+async def test_lecture_video_answer_submitted_rejects_option_from_another_question(
+    api, authz, config, db, institution, valid_user_token
+):
+    manifest = {
+        "version": 1,
+        "questions": [
+            lecture_video_manifest()["questions"][0],
+            {
+                "type": "single_select",
+                "question_text": "Second question?",
+                "intro_text": "Second intro",
+                "stop_offset_ms": 2500,
+                "options": [
+                    {
+                        "option_text": "Wrong question option",
+                        "post_answer_text": "Nope",
+                        "continue_offset_ms": 3000,
+                        "correct": True,
+                    },
+                    {
+                        "option_text": "Another wrong question option",
+                        "post_answer_text": "Still nope",
+                        "continue_offset_ms": 3250,
+                        "correct": False,
+                    },
+                ],
+            },
+        ],
+    }
+
+    async with db.async_session() as session:
+        class_, lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+            manifest=manifest,
+        )
+        questions = list(
+            (
+                await session.scalars(
+                    select(models.LectureVideoQuestion)
+                    .where(
+                        models.LectureVideoQuestion.lecture_video_id == lecture_video.id
+                    )
+                    .order_by(models.LectureVideoQuestion.position)
+                )
+            ).all()
+        )
+        second_question_option = (
+            await session.scalars(
+                select(models.LectureVideoQuestionOption)
+                .where(models.LectureVideoQuestionOption.question_id == questions[1].id)
+                .order_by(models.LectureVideoQuestionOption.position)
+            )
+        ).first()
+        assert second_question_option is not None
+
+    create_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/lecture",
+        json={"assistant_id": 1, "parties": [123]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+    thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
+
+    acquire = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert acquire.status_code == 200
+    controller_session_id = acquire.json()["controller_session_id"]
+    state_version = acquire.json()["lecture_video_session"]["state_version"]
+
+    present_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "question_presented",
+            "controller_session_id": controller_session_id,
+            "expected_state_version": state_version,
+            "idempotency_key": "question-presented",
+            "question_id": questions[0].id,
+            "offset_ms": questions[0].stop_offset_ms,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert present_response.status_code == 200
+
+    invalid_option_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "answer_submitted",
+            "controller_session_id": controller_session_id,
+            "expected_state_version": present_response.json()["lecture_video_session"][
+                "state_version"
+            ],
+            "idempotency_key": "invalid-option-id",
+            "question_id": questions[0].id,
+            "option_id": second_question_option.id,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert invalid_option_response.status_code == 422
+    assert (
+        invalid_option_response.json()["detail"]
+        == "That option does not belong to this question."
+    )
+
+
+@with_institution(11, "Test Institution")
+async def test_initialize_thread_state_completes_when_lecture_video_has_no_questions(
+    db, institution
+):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        session.add(class_)
+        await session.flush()
+
+        lecture_video = make_lecture_video(
+            class_.id,
+            "questionless-lecture.mp4",
+            filename="questionless-lecture.mp4",
+            content_length=128,
+        )
+        session.add(lecture_video)
+        await session.flush()
+
+        assistant = models.Assistant(
+            id=1,
+            name="Lecture Assistant",
+            class_id=class_.id,
+            interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+            version=3,
+            lecture_video_id=lecture_video.id,
+            instructions="You are a lecture assistant.",
+            model="gpt-4o-mini",
+            tools="[]",
+            use_latex=False,
+            use_image_descriptions=False,
+            hide_prompt=False,
+        )
+        session.add(assistant)
+        await session.flush()
+
+        thread = models.Thread(
+            id=1,
+            name="Lecture Presentation",
+            version=3,
+            thread_id="thread-no-questions",
+            class_id=class_.id,
+            assistant_id=assistant.id,
+            interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+            lecture_video_id=lecture_video.id,
+            private=False,
+            display_user_info=False,
+            tools_available="[]",
+        )
+        session.add(thread)
+        await session.flush()
+
+        state = await lecture_video_runtime.initialize_thread_state(session, thread.id)
+        interactions = await models.LectureVideoInteraction.list_by_thread_id(
+            session, thread.id
+        )
+
+    assert state.state == schemas.LectureVideoSessionState.COMPLETED
+    assert state.current_question_id is None
+    assert state.last_known_offset_ms == 0
+    assert state.version == 1
+    assert [interaction.event_type for interaction in interactions] == [
+        schemas.LectureVideoInteractionEventType.SESSION_INITIALIZED
+    ]
+
+
+@with_institution(11, "Test Institution")
+async def test_append_interaction_requires_for_update_locked_state(db, institution):
+    async with db.async_session() as session:
+        class_, lecture_video, assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+
+        thread = models.Thread(
+            id=1,
+            name="Lecture Presentation",
+            version=3,
+            thread_id="thread-append-lock",
+            class_id=class_.id,
+            assistant_id=assistant.id,
+            interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+            lecture_video_id=lecture_video.id,
+            private=False,
+            display_user_info=False,
+            tools_available="[]",
+        )
+        session.add(thread)
+        await session.flush()
+
+        await lecture_video_runtime.initialize_thread_state(session, thread.id)
+        unlocked_state = await lecture_video_runtime.get_or_initialize_thread_state(
+            session,
+            thread.id,
+        )
+
+        with pytest.raises(RuntimeError, match="FOR UPDATE before appending"):
+            await lecture_video_runtime._append_interaction(
+                session,
+                unlocked_state,
+                actor_user_id=None,
+                event_type=schemas.LectureVideoInteractionEventType.VIDEO_PAUSED,
+                offset_ms=500,
+            )
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
+    ]
+)
+async def test_lecture_video_history_uses_pseudonyms_for_other_participants(
+    api, authz, config, db, institution, valid_user_token
+):
+    from pingpong.auth import encode_session_token
+
+    async with db.async_session() as session:
+        class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+        other_user = models.User(
+            id=456,
+            email="other-user@test.org",
+            created=datetime(2024, 1, 2, tzinfo=UTC),
+        )
+        session.add(other_user)
+        await session.commit()
+
+    other_user_token = encode_session_token(456)
+
+    create_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/lecture",
+        json={"assistant_id": 1, "parties": [123, 456]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+    thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123, 456)
+
+    async with db.async_session() as session:
+        thread = await session.get(models.Thread, thread_id)
+        assert thread is not None
+        thread.private = False
+        thread.display_user_info = False
+        await session.commit()
+
+    acquire_me = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert acquire_me.status_code == 200
+    my_controller_session_id = acquire_me.json()["controller_session_id"]
+    my_state_version = acquire_me.json()["lecture_video_session"]["state_version"]
+
+    my_pause = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "video_paused",
+            "controller_session_id": my_controller_session_id,
+            "expected_state_version": my_state_version,
+            "idempotency_key": "my-pause",
+            "offset_ms": 500,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert my_pause.status_code == 200
+
+    release = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/release",
+        json={"controller_session_id": my_controller_session_id},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert release.status_code == 200
+
+    acquire_other = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
+        headers={"Authorization": f"Bearer {other_user_token}"},
+    )
+    assert acquire_other.status_code == 200
+    other_controller_session_id = acquire_other.json()["controller_session_id"]
+    other_state_version = acquire_other.json()["lecture_video_session"]["state_version"]
+
+    other_pause = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "video_paused",
+            "controller_session_id": other_controller_session_id,
+            "expected_state_version": other_state_version,
+            "idempotency_key": "other-pause",
+            "offset_ms": 750,
+        },
+        headers={"Authorization": f"Bearer {other_user_token}"},
+    )
+    assert other_pause.status_code == 200
+
+    history_response = api.get(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/history",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert history_response.status_code == 200
+
+    async with db.async_session() as session:
+        thread = await models.Thread.get_by_id_with_lecture_video_context(
+            session, thread_id
+        )
+        assert thread is not None
+        users = {user.id: user for user in thread.users}
+
+    history = history_response.json()["interactions"]
+    assert [item["event_type"] for item in history] == [
+        "session_initialized",
+        "video_paused",
+        "video_paused",
+    ]
+    assert history[1]["actor_name"] == "Me"
+    assert history[2]["actor_name"] == pseudonym(thread, users[456])
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
+    ]
+)
+async def test_lecture_video_control_lease_is_short_and_renewable(
+    api, authz, config, db, institution, valid_user_token, monkeypatch
+):
+    server_module = importlib.import_module("pingpong.server")
+    current_now = {"value": datetime(2024, 1, 1, 0, 0, tzinfo=UTC)}
+    monkeypatch.setattr(
+        server_module, "get_now_fn", lambda request: lambda: current_now["value"]
+    )
+
+    async with db.async_session() as session:
+        class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+
+    create_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/lecture",
+        json={"assistant_id": 1, "parties": [123]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
+
+    acquire = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert acquire.status_code == 200
+    controller_session_id = acquire.json()["controller_session_id"]
+    acquired_session = acquire.json()["lecture_video_session"]
+    assert acquired_session["state_version"] == 2
+    assert _parse_timestamp(
+        acquired_session["controller"]["lease_expires_at"]
+    ) == current_now["value"] + timedelta(seconds=30)
+
+    current_now["value"] = current_now["value"] + timedelta(seconds=15)
+    renew = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/renew",
+        json={"controller_session_id": controller_session_id},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert renew.status_code == 200
+    assert _parse_timestamp(renew.json()["lease_expires_at"]) == current_now[
+        "value"
+    ] + timedelta(seconds=30)
+
+    refreshed_thread = api.get(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}",
+        headers={
+            "Authorization": f"Bearer {valid_user_token}",
+            "X-Lecture-Video-Controller-Session": controller_session_id,
+        },
+    )
+    assert refreshed_thread.status_code == 200
+    renewed_session = refreshed_thread.json()["lecture_video_session"]
+    assert renewed_session["state_version"] == acquired_session["state_version"]
+    assert renewed_session["controller"]["has_control"] is True
+    assert renewed_session["controller"]["has_active_controller"] is True
+    assert _parse_timestamp(
+        renewed_session["controller"]["lease_expires_at"]
+    ) == current_now["value"] + timedelta(seconds=30)
+
+    release = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/release",
+        json={"controller_session_id": controller_session_id},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert release.status_code == 200
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
+    ]
+)
+async def test_lecture_video_control_release_and_interaction_fail_after_expiry(
+    api, authz, config, db, institution, valid_user_token, monkeypatch
+):
+    server_module = importlib.import_module("pingpong.server")
+    current_now = {"value": datetime(2024, 1, 1, 0, 0, tzinfo=UTC)}
+    monkeypatch.setattr(
+        server_module, "get_now_fn", lambda request: lambda: current_now["value"]
+    )
+
+    async with db.async_session() as session:
+        class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+
+    create_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/lecture",
+        json={"assistant_id": 1, "parties": [123]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
+
+    acquire = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert acquire.status_code == 200
+    controller_session_id = acquire.json()["controller_session_id"]
+    state_version = acquire.json()["lecture_video_session"]["state_version"]
+
+    current_now["value"] = current_now["value"] + timedelta(seconds=31)
+
+    release = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/release",
+        json={"controller_session_id": controller_session_id},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert release.status_code == 409
+    assert "expired" in release.json()["detail"]
+
+    interaction = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "video_paused",
+            "controller_session_id": controller_session_id,
+            "expected_state_version": state_version,
+            "idempotency_key": "expired-pause",
+            "offset_ms": 500,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert interaction.status_code == 409
+    assert "expired" in interaction.json()["detail"]
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
+    ]
+)
+async def test_lecture_video_control_blocks_other_users_until_expiry_then_allows_acquire(
+    api, authz, config, db, institution, valid_user_token, monkeypatch
+):
+    from pingpong.auth import encode_session_token
+    from pingpong.now import offset
+
+    server_module = importlib.import_module("pingpong.server")
+    current_now = {"value": datetime(2024, 1, 1, 0, 0, tzinfo=UTC)}
+    monkeypatch.setattr(
+        server_module, "get_now_fn", lambda request: lambda: current_now["value"]
+    )
+
+    async with db.async_session() as session:
+        class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+        other_user = models.User(
+            id=456,
+            email="user_456@domain.org",
+            created=datetime(2024, 1, 1, 0, 0, 0),
+        )
+        session.add(other_user)
+        await session.commit()
+
+    other_user_token = encode_session_token(
+        456, nowfn=offset(lambda: current_now["value"], seconds=-60)
+    )
+
+    create_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/lecture",
+        json={"assistant_id": 1, "parties": [123]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123, 456)
+
+    acquire = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert acquire.status_code == 200
+    acquired_state_version = acquire.json()["lecture_video_session"]["state_version"]
+
+    blocked = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
+        headers={"Authorization": f"Bearer {other_user_token}"},
+    )
+    assert blocked.status_code == 409
+    assert "Another participant" in blocked.json()["detail"]
+
+    other_thread = api.get(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}",
+        headers={"Authorization": f"Bearer {other_user_token}"},
+    )
+    assert other_thread.status_code == 200
+    other_session = other_thread.json()["lecture_video_session"]
+    assert other_session["controller"]["has_control"] is False
+    assert other_session["controller"]["has_active_controller"] is True
+    assert other_session["state_version"] == acquired_state_version
+    assert other_session["current_question"] is None
+
+    current_now["value"] = current_now["value"] + timedelta(seconds=31)
+
+    acquired_after_expiry = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
+        headers={"Authorization": f"Bearer {other_user_token}"},
+    )
+    assert acquired_after_expiry.status_code == 200
+    assert (
+        acquired_after_expiry.json()["lecture_video_session"]["controller"][
+            "has_control"
+        ]
+        is True
+    )
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
+    ]
+)
+async def test_get_thread_does_not_grant_control_from_leaked_controller_session_id(
+    api, authz, config, db, institution, valid_user_token
+):
+    from pingpong.auth import encode_session_token
+
+    async with db.async_session() as session:
+        class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+        other_user = models.User(
+            id=456,
+            email="user_456@domain.org",
+            created=datetime(2024, 1, 1, 0, 0, 0),
+        )
+        session.add(other_user)
+        await session.commit()
+
+    other_user_token = encode_session_token(456)
+
+    create_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/lecture",
+        json={"assistant_id": 1, "parties": [123, 456]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123, 456)
+
+    acquire = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert acquire.status_code == 200
+    controller_session_id = acquire.json()["controller_session_id"]
+    acquired_state_version = acquire.json()["lecture_video_session"]["state_version"]
+
+    leaked_session_response = api.get(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}",
+        headers={
+            "Authorization": f"Bearer {other_user_token}",
+            "X-Lecture-Video-Controller-Session": controller_session_id,
+        },
+    )
+    assert leaked_session_response.status_code == 200
+    leaked_session = leaked_session_response.json()["lecture_video_session"]
+    assert leaked_session["controller"]["has_control"] is False
+    assert leaked_session["state_version"] == acquired_state_version
+    assert leaked_session["current_question"] is None
+    assert leaked_session["current_continuation"] is None
+    assert leaked_session["controller"]["has_active_controller"] is True
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
+    ]
+)
+async def test_get_thread_hides_expired_controller_state(
+    api, authz, config, db, institution, valid_user_token, monkeypatch
+):
+    server_module = importlib.import_module("pingpong.server")
+    current_now = {"value": datetime(2024, 1, 1, 0, 0, tzinfo=UTC)}
+    monkeypatch.setattr(
+        server_module, "get_now_fn", lambda request: lambda: current_now["value"]
+    )
+
+    async with db.async_session() as session:
+        class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+
+    create_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/lecture",
+        json={"assistant_id": 1, "parties": [123]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
+
+    acquire = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert acquire.status_code == 200
+    controller_session_id = acquire.json()["controller_session_id"]
+
+    current_now["value"] = current_now["value"] + timedelta(seconds=31)
+
+    response = api.get(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}",
+        headers={
+            "Authorization": f"Bearer {valid_user_token}",
+            "X-Lecture-Video-Controller-Session": controller_session_id,
+        },
+    )
+    assert response.status_code == 200
+    controller = response.json()["lecture_video_session"]["controller"]
+    assert controller["has_control"] is False
+    assert controller["has_active_controller"] is False
+    assert controller["lease_expires_at"] is None
 
 
 @with_user(123)
@@ -3491,10 +5121,317 @@ async def test_get_thread_video_invalid_range_returns_416(
     assert response.headers["content-range"] == f"bytes */{len(video_bytes)}"
 
 
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
+    ]
+)
+async def test_get_thread_lecture_video_narration_streams_audio(
+    api, authz, db, institution, valid_user_token, config, monkeypatch, tmp_path
+):
+    narration_key = "intro-ready.mp3"
+    narration_bytes = b"intro-audio"
+    (tmp_path / narration_key).write_bytes(narration_bytes)
+    monkeypatch.setattr(
+        config,
+        "lecture_video_audio_store",
+        LocalAudioStoreSettings(type="local", save_target=str(tmp_path)),
+    )
+
+    async with db.async_session() as session:
+        class_, lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+        lecture_video = await models.LectureVideo.get_by_id_with_copy_context(
+            session, lecture_video.id
+        )
+        question = lecture_video.questions[0]
+        option = question.options[0]
+        assert question.intro_narration is not None
+        assert option.post_narration is not None
+        await attach_ready_narration(
+            session,
+            question.intro_narration,
+            key=narration_key,
+            content_length=len(narration_bytes),
+        )
+        await attach_ready_narration(
+            session,
+            option.post_narration,
+            key="lecture-post.mp3",
+            content_length=8,
+        )
+        await session.commit()
+
+    create_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/lecture",
+        json={"assistant_id": 1, "parties": [123]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+    thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
+
+    response = api.get(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/narration/{question.intro_narration.id}",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert response.status_code == 200
+    assert response.content == narration_bytes
+    assert response.headers["content-type"].startswith("audio/mpeg")
+
+    missing = api.get(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/narration/99999",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert missing.status_code == 404
+
+    out_of_order = api.get(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/narration/{option.post_narration.id}",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert out_of_order.status_code == 404
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
+    ]
+)
+async def test_get_thread_lecture_video_narration_rejects_non_numeric_id(
+    api, authz, db, institution, valid_user_token, config, monkeypatch, tmp_path
+):
+    narration_key = "intro-ready.mp3"
+    (tmp_path / narration_key).write_bytes(b"intro-audio")
+    monkeypatch.setattr(
+        config,
+        "lecture_video_audio_store",
+        LocalAudioStoreSettings(type="local", save_target=str(tmp_path)),
+    )
+
+    async with db.async_session() as session:
+        class_, lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+        lecture_video = await models.LectureVideo.get_by_id_with_copy_context(
+            session, lecture_video.id
+        )
+        question = lecture_video.questions[0]
+        assert question.intro_narration is not None
+        await attach_ready_narration(
+            session,
+            question.intro_narration,
+            key=narration_key,
+            content_length=len(b"intro-audio"),
+        )
+        await session.commit()
+
+    create_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/lecture",
+        json={"assistant_id": 1, "parties": [123]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+    thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
+
+    response = api.get(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/narration/not-a-number",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert response.status_code == 422
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
+    ]
+)
+async def test_get_thread_lecture_video_narration_lazily_initializes_legacy_runtime_state(
+    api, authz, db, institution, valid_user_token, config, monkeypatch, tmp_path
+):
+    narration_key = "legacy-intro-ready.mp3"
+    narration_bytes = b"legacy-intro-audio"
+    (tmp_path / narration_key).write_bytes(narration_bytes)
+    monkeypatch.setattr(
+        config,
+        "lecture_video_audio_store",
+        LocalAudioStoreSettings(type="local", save_target=str(tmp_path)),
+    )
+
+    async with db.async_session() as session:
+        class_, lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+        lecture_video = await models.LectureVideo.get_by_id_with_copy_context(
+            session, lecture_video.id
+        )
+        question = lecture_video.questions[0]
+        assert question.intro_narration is not None
+        await attach_ready_narration(
+            session,
+            question.intro_narration,
+            key=narration_key,
+            content_length=len(narration_bytes),
+        )
+        await session.commit()
+
+    create_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/lecture",
+        json={"assistant_id": 1, "parties": [123]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+    thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
+
+    async with db.async_session() as session:
+        await session.execute(
+            delete(models.LectureVideoInteraction).where(
+                models.LectureVideoInteraction.thread_id == thread_id
+            )
+        )
+        await session.execute(
+            delete(models.LectureVideoThreadState).where(
+                models.LectureVideoThreadState.thread_id == thread_id
+            )
+        )
+        await session.commit()
+
+    response = api.get(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/narration/{question.intro_narration.id}",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert response.status_code == 200
+    assert response.content == narration_bytes
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
+    ]
+)
+async def test_get_thread_lecture_video_narration_requires_can_participate(
+    api, db, institution, valid_user_token, config, monkeypatch, tmp_path
+):
+    narration_key = "intro-ready.mp3"
+    (tmp_path / narration_key).write_bytes(b"intro-audio")
+    monkeypatch.setattr(
+        config,
+        "lecture_video_audio_store",
+        LocalAudioStoreSettings(type="local", save_target=str(tmp_path)),
+    )
+
+    async with db.async_session() as session:
+        class_, lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+        lecture_video = await models.LectureVideo.get_by_id_with_copy_context(
+            session, lecture_video.id
+        )
+        question = lecture_video.questions[0]
+        assert question.intro_narration is not None
+        await attach_ready_narration(
+            session,
+            question.intro_narration,
+            key=narration_key,
+            content_length=len(b"intro-audio"),
+        )
+        await session.commit()
+
+    create_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/lecture",
+        json={"assistant_id": 1, "parties": [123]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+    thread_id = create_response.json()["thread"]["id"]
+
+    response = api.get(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/narration/{question.intro_narration.id}",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert response.status_code == 403
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
+    ]
+)
+async def test_get_thread_lecture_video_narration_requires_ready_status(
+    api, authz, db, institution, valid_user_token, config, monkeypatch, tmp_path
+):
+    narration_key = "intro-pending.mp3"
+    (tmp_path / narration_key).write_bytes(b"intro-audio")
+    monkeypatch.setattr(
+        config,
+        "lecture_video_audio_store",
+        LocalAudioStoreSettings(type="local", save_target=str(tmp_path)),
+    )
+
+    async with db.async_session() as session:
+        class_, lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+        lecture_video = await models.LectureVideo.get_by_id_with_copy_context(
+            session, lecture_video.id
+        )
+        question = lecture_video.questions[0]
+        assert question.intro_narration is not None
+        stored_object = models.LectureVideoNarrationStoredObject(
+            key=narration_key,
+            content_type="audio/mpeg",
+            content_length=len(b"intro-audio"),
+        )
+        session.add(stored_object)
+        await session.flush()
+        question.intro_narration.stored_object_id = stored_object.id
+        question.intro_narration.stored_object = stored_object
+        question.intro_narration.status = schemas.LectureVideoNarrationStatus.PENDING
+        await session.commit()
+
+    create_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/lecture",
+        json={"assistant_id": 1, "parties": [123]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+    thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
+
+    response = api.get(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/narration/{question.intro_narration.id}",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert response.status_code == 404
+
+
 @with_institution(11, "Test Institution")
 @with_authz(
     grants=[
         ("anonymous_user:anon-session-token", "can_view", "thread:109"),
+        ("anonymous_user:anon-session-token", "can_participate", "thread:109"),
     ]
 )
 async def test_get_thread_video_with_anonymous_query_token(
@@ -3584,6 +5521,87 @@ async def test_get_thread_video_with_anonymous_query_token(
     assert response.content == video_bytes
 
 
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("anonymous_user:anon-session-token", "can_participate", "thread:109"),
+    ]
+)
+async def test_get_thread_lecture_video_narration_with_anonymous_query_token(
+    api, db, institution, config, monkeypatch, tmp_path
+):
+    narration_key = "intro-ready.mp3"
+    narration_bytes = b"anonymous-intro-audio"
+    (tmp_path / narration_key).write_bytes(narration_bytes)
+    monkeypatch.setattr(
+        config,
+        "lecture_video_audio_store",
+        LocalAudioStoreSettings(type="local", save_target=str(tmp_path)),
+    )
+
+    async with db.async_session() as session:
+        class_, lecture_video, assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+        lecture_video = await models.LectureVideo.get_by_id_with_copy_context(
+            session, lecture_video.id
+        )
+        question = lecture_video.questions[0]
+        assert question.intro_narration is not None
+        await attach_ready_narration(
+            session,
+            question.intro_narration,
+            key=narration_key,
+            content_length=len(narration_bytes),
+        )
+
+        thread = models.Thread(
+            id=109,
+            name="Lecture Presentation",
+            version=assistant.version,
+            thread_id="thread-video-109",
+            class_id=class_.id,
+            assistant_id=assistant.id,
+            interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+            lecture_video_id=lecture_video.id,
+            private=True,
+            tools_available="[]",
+        )
+        session.add(thread)
+        await session.flush()
+
+        anon_link = models.AnonymousLink(
+            id=1,
+            share_token="anon-share-token",
+            active=True,
+        )
+        session.add(anon_link)
+        await session.flush()
+
+        anon_user = models.User(
+            id=999,
+            email="anon-user@test.org",
+            anonymous_link_id=anon_link.id,
+        )
+        session.add(anon_user)
+        await session.flush()
+
+        anon_session = models.AnonymousSession(
+            session_token="anon-session-token",
+            thread_id=thread.id,
+            user_id=anon_user.id,
+        )
+        session.add(anon_session)
+        await session.commit()
+
+    response = api.get(
+        f"/api/v1/class/1/thread/109/lecture-video/narration/{question.intro_narration.id}?anonymous_session_token=anon-session-token",
+    )
+    assert response.status_code == 200
+    assert response.content == narration_bytes
+
+
 @with_user(123)
 @with_institution(11, "Test Institution")
 @with_authz(
@@ -3652,6 +5670,64 @@ async def test_get_thread_video_with_lti_session_query_token(
     )
     assert response.status_code == 200
     assert response.content == video_bytes
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_participate", "thread:109"),
+    ]
+)
+async def test_get_thread_lecture_video_narration_with_lti_session_query_token(
+    api, db, institution, valid_user_token, config, monkeypatch, tmp_path
+):
+    narration_key = "intro-ready.mp3"
+    narration_bytes = b"lti-intro-audio"
+    (tmp_path / narration_key).write_bytes(narration_bytes)
+    monkeypatch.setattr(
+        config,
+        "lecture_video_audio_store",
+        LocalAudioStoreSettings(type="local", save_target=str(tmp_path)),
+    )
+
+    async with db.async_session() as session:
+        class_, lecture_video, assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+        lecture_video = await models.LectureVideo.get_by_id_with_copy_context(
+            session, lecture_video.id
+        )
+        question = lecture_video.questions[0]
+        assert question.intro_narration is not None
+        await attach_ready_narration(
+            session,
+            question.intro_narration,
+            key=narration_key,
+            content_length=len(narration_bytes),
+        )
+
+        thread = models.Thread(
+            id=109,
+            name="Lecture Presentation",
+            version=assistant.version,
+            thread_id="thread-video-109",
+            class_id=class_.id,
+            assistant_id=assistant.id,
+            interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+            lecture_video_id=lecture_video.id,
+            private=True,
+            tools_available="[]",
+        )
+        session.add(thread)
+        await session.commit()
+
+    response = api.get(
+        f"/api/v1/class/1/thread/109/lecture-video/narration/{question.intro_narration.id}?lti_session={valid_user_token}",
+    )
+    assert response.status_code == 200
+    assert response.content == narration_bytes
 
 
 @with_user(123)

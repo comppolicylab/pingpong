@@ -441,6 +441,24 @@ class LectureVideoNarrationStatus(StrEnum):
     FAILED = "failed"
 
 
+class LectureVideoSessionState(StrEnum):
+    PLAYING = "playing"
+    AWAITING_ANSWER = "awaiting_answer"
+    AWAITING_POST_ANSWER_RESUME = "awaiting_post_answer_resume"
+    COMPLETED = "completed"
+
+
+class LectureVideoInteractionEventType(StrEnum):
+    SESSION_INITIALIZED = "session_initialized"
+    QUESTION_PRESENTED = "question_presented"
+    ANSWER_SUBMITTED = "answer_submitted"
+    VIDEO_RESUMED = "video_resumed"
+    VIDEO_PAUSED = "video_paused"
+    VIDEO_SEEKED = "video_seeked"
+    VIDEO_ENDED = "video_ended"
+    SESSION_COMPLETED = "session_completed"
+
+
 class AnonymousLink(BaseModel):
     id: int
     name: str | None
@@ -518,6 +536,168 @@ class LectureVideoSummary(BaseModel):
     content_type: str
     status: LectureVideoStatus
     error_message: str | None = None
+
+
+class LectureVideoOptionPrompt(BaseModel):
+    id: int
+    option_text: str
+
+
+class LectureVideoQuestionPrompt(BaseModel):
+    id: int
+    type: LectureVideoQuestionType
+    question_text: str
+    intro_text: str
+    stop_offset_ms: int = Field(..., ge=0)
+    intro_narration_id: int | None = None
+    options: list[LectureVideoOptionPrompt]
+
+
+class LectureVideoContinuation(BaseModel):
+    option_id: int
+    post_answer_text: str | None = None
+    post_answer_narration_id: int | None = None
+    resume_offset_ms: int
+    next_question: LectureVideoQuestionPrompt | None = None
+    complete: bool = False
+
+
+class LectureVideoSessionController(BaseModel):
+    has_control: bool = False
+    has_active_controller: bool = False
+    lease_expires_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_controller_state(self) -> "LectureVideoSessionController":
+        if not self.has_active_controller:
+            if self.has_control:
+                raise ValueError(
+                    "has_control must be false when there is no active controller"
+                )
+            if self.lease_expires_at is not None:
+                raise ValueError(
+                    "lease_expires_at must be null when there is no active controller"
+                )
+            return self
+
+        if self.lease_expires_at is None:
+            raise ValueError(
+                "lease_expires_at is required when there is an active controller"
+            )
+        return self
+
+
+class LectureVideoSession(BaseModel):
+    state: LectureVideoSessionState
+    last_known_offset_ms: int | None = None
+    latest_interaction_at: datetime | None = None
+    current_question: LectureVideoQuestionPrompt | None = None
+    current_continuation: LectureVideoContinuation | None = None
+    state_version: int = Field(..., ge=1)
+    controller: LectureVideoSessionController
+
+
+class LectureVideoControlAcquireResponse(BaseModel):
+    controller_session_id: str
+    lecture_video_session: LectureVideoSession
+
+
+class LectureVideoControlReleaseRequest(BaseModel):
+    controller_session_id: str = Field(..., min_length=1)
+
+
+class LectureVideoControlReleaseResponse(BaseModel):
+    lecture_video_session: LectureVideoSession
+
+
+class LectureVideoControlRenewRequest(BaseModel):
+    controller_session_id: str = Field(..., min_length=1)
+
+
+class LectureVideoControlRenewResponse(BaseModel):
+    lease_expires_at: datetime
+
+
+class LectureVideoInteractionRequestBase(BaseModel):
+    controller_session_id: str = Field(..., min_length=1)
+    expected_state_version: int = Field(..., ge=1)
+    idempotency_key: str = Field(..., min_length=1, max_length=255)
+
+    @field_validator("idempotency_key")
+    @classmethod
+    def validate_idempotency_key(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("idempotency_key must not be empty")
+        return value
+
+
+class LectureVideoQuestionPresentedRequest(LectureVideoInteractionRequestBase):
+    type: Literal["question_presented"]
+    question_id: int
+    offset_ms: int = Field(..., ge=0)
+
+
+class LectureVideoAnswerSubmittedRequest(LectureVideoInteractionRequestBase):
+    type: Literal["answer_submitted"]
+    question_id: int
+    option_id: int
+
+
+class LectureVideoResumedRequest(LectureVideoInteractionRequestBase):
+    type: Literal["video_resumed"]
+    offset_ms: int = Field(..., ge=0)
+
+
+class LectureVideoPausedRequest(LectureVideoInteractionRequestBase):
+    type: Literal["video_paused"]
+    offset_ms: int = Field(..., ge=0)
+
+
+class LectureVideoSeekedRequest(LectureVideoInteractionRequestBase):
+    type: Literal["video_seeked"]
+    from_offset_ms: int = Field(..., ge=0)
+    to_offset_ms: int = Field(..., ge=0)
+
+
+class LectureVideoEndedRequest(LectureVideoInteractionRequestBase):
+    type: Literal["video_ended"]
+    offset_ms: int = Field(..., ge=0)
+
+
+LectureVideoInteractionRequest: TypeAlias = Annotated[
+    Union[
+        LectureVideoQuestionPresentedRequest,
+        LectureVideoAnswerSubmittedRequest,
+        LectureVideoResumedRequest,
+        LectureVideoPausedRequest,
+        LectureVideoSeekedRequest,
+        LectureVideoEndedRequest,
+    ],
+    PropertyInfo(discriminator="type"),
+]
+
+
+class LectureVideoInteractionResponse(BaseModel):
+    lecture_video_session: LectureVideoSession
+
+
+class LectureVideoInteractionHistoryItem(BaseModel):
+    event_index: int
+    event_type: LectureVideoInteractionEventType
+    actor_name: str | None = None
+    question_id: int | None = None
+    question_text: str | None = None
+    option_id: int | None = None
+    option_text: str | None = None
+    offset_ms: int | None = None
+    from_offset_ms: int | None = None
+    to_offset_ms: int | None = None
+    created: datetime
+
+
+class LectureVideoInteractionHistory(BaseModel):
+    interactions: list[LectureVideoInteractionHistoryItem]
 
 
 class Assistant(BaseModel):
@@ -2174,6 +2354,7 @@ class ThreadWithMeta(BaseModel):
     instructions: str | None
     lecture_video_id: int | None = None
     lecture_video_matches_assistant: bool | None = None
+    lecture_video_session: LectureVideoSession | None = None
     recording: VoiceModeRecording | None = None
     has_more: bool
 

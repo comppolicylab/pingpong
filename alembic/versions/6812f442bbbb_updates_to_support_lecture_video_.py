@@ -227,7 +227,7 @@ def upgrade() -> None:
         sa.Column(
             "created",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.func.now(),
             nullable=True,
         ),
         sa.Column("updated", sa.DateTime(timezone=True), nullable=True),
@@ -252,7 +252,7 @@ def upgrade() -> None:
         sa.Column(
             "created",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.func.now(),
             nullable=True,
         ),
         sa.Column("updated", sa.DateTime(timezone=True), nullable=True),
