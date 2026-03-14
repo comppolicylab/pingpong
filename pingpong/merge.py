@@ -15,6 +15,9 @@ from pingpong.models import (
     Class,
     ExternalLogin,
     ExternalLoginProvider,
+    LectureVideo,
+    LectureVideoInteraction,
+    LectureVideoThreadState,
     LTIClass,
     MCPServerTool,
     User,
@@ -54,6 +57,9 @@ async def merge_db_operations(
     await merge_mcp_created_by(session, new_user_id, old_user_id)
     await merge_mcp_updated_by(session, new_user_id, old_user_id)
     await merge_files(session, new_user_id, old_user_id)
+    await merge_lecture_videos(session, new_user_id, old_user_id)
+    await merge_lecture_video_thread_states(session, new_user_id, old_user_id)
+    await merge_lecture_video_interactions(session, new_user_id, old_user_id)
     await merge_lms_users(session, new_user_id, old_user_id)
     await merge_lti_users(session, new_user_id, old_user_id)
     await merge_external_logins(session, new_user_id, old_user_id)
@@ -224,6 +230,39 @@ async def merge_files(
         update(File)
         .where(File.uploader_id == old_user_id)
         .values(uploader_id=new_user_id)
+    )
+    await session.execute(stmt)
+
+
+async def merge_lecture_videos(
+    session: AsyncSession, new_user_id: int, old_user_id: int
+) -> None:
+    stmt = (
+        update(LectureVideo)
+        .where(LectureVideo.uploader_id == old_user_id)
+        .values(uploader_id=new_user_id)
+    )
+    await session.execute(stmt)
+
+
+async def merge_lecture_video_thread_states(
+    session: AsyncSession, new_user_id: int, old_user_id: int
+) -> None:
+    stmt = (
+        update(LectureVideoThreadState)
+        .where(LectureVideoThreadState.controller_user_id == old_user_id)
+        .values(controller_user_id=new_user_id)
+    )
+    await session.execute(stmt)
+
+
+async def merge_lecture_video_interactions(
+    session: AsyncSession, new_user_id: int, old_user_id: int
+) -> None:
+    stmt = (
+        update(LectureVideoInteraction)
+        .where(LectureVideoInteraction.actor_user_id == old_user_id)
+        .values(actor_user_id=new_user_id)
     )
     await session.execute(stmt)
 
