@@ -372,3 +372,28 @@ async def test_api_key_create_or_update_promotes_available_as_default_on_conflic
 
     assert created.id == updated.id
     assert updated.available_as_default is True
+
+
+async def test_api_key_create_or_update_preserves_available_as_default_on_false_upsert(
+    db,
+):
+    async with db.async_session() as session:
+        created = await models.APIKey.create_or_update(
+            session=session,
+            api_key="shared-gemini-key",
+            provider="gemini",
+            available_as_default=True,
+        )
+        await session.commit()
+
+        updated = await models.APIKey.create_or_update(
+            session=session,
+            api_key="shared-gemini-key",
+            provider="gemini",
+            available_as_default=False,
+        )
+        await session.commit()
+        await session.refresh(updated)
+
+    assert created.id == updated.id
+    assert updated.available_as_default is True

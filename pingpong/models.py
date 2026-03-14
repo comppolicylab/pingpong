@@ -4356,18 +4356,14 @@ class APIKey(Base):
             set_available_as_default = True
         else:
             set_available_as_default = APIKey.available_as_default
-        on_conflict_kwargs: dict[str, object] = {
-            "set_": dict(
+        stmt = insert_stmt.on_conflict_do_update(
+            index_elements=[APIKey.api_key, APIKey.provider],
+            set_=dict(
                 api_version=api_version,
                 region=region,
                 available_as_default=set_available_as_default,
-            )
-        }
-        if session.bind.dialect.name == "postgresql":
-            on_conflict_kwargs["constraint"] = "_key_provider_uc"
-        else:
-            on_conflict_kwargs["index_elements"] = ["api_key", "provider"]
-        stmt = insert_stmt.on_conflict_do_update(**on_conflict_kwargs).returning(APIKey)
+            ),
+        ).returning(APIKey)
         return await session.scalar(stmt)
 
     @classmethod

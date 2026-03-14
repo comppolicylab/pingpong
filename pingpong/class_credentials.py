@@ -6,6 +6,7 @@ from elevenlabs.errors import UnauthorizedError as ElevenLabsUnauthorizedError
 from google import genai
 
 from pingpong import schemas
+from pingpong.log_utils import sanitize_for_log
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ async def validate_class_credential(
     api_key: str,
     provider: schemas.ClassCredentialProvider,
 ) -> bool:
+    safe_provider = sanitize_for_log(provider.value)
     if provider == schemas.ClassCredentialProvider.ELEVENLABS:
         client = AsyncElevenLabs(api_key=api_key)
         try:
@@ -57,7 +59,7 @@ async def validate_class_credential(
         except ssl.SSLError as exc:
             logger.warning(
                 "SSL error validating %s class credential.",
-                provider.value,
+                safe_provider,
                 exc_info=exc,
             )
             raise ClassCredentialValidationSSLError(
@@ -67,7 +69,7 @@ async def validate_class_credential(
         except Exception as exc:
             logger.warning(
                 "Failed to validate %s class credential due to provider error.",
-                provider.value,
+                safe_provider,
                 exc_info=exc,
             )
             raise ClassCredentialValidationUnavailableError(
@@ -88,7 +90,7 @@ async def validate_class_credential(
                 return False
             logger.warning(
                 "Failed to validate %s class credential due to provider API error.",
-                provider.value,
+                safe_provider,
                 exc_info=exc,
             )
             raise ClassCredentialValidationUnavailableError(
@@ -98,7 +100,7 @@ async def validate_class_credential(
         except ssl.SSLError as exc:
             logger.warning(
                 "SSL error validating %s class credential.",
-                provider.value,
+                safe_provider,
                 exc_info=exc,
             )
             raise ClassCredentialValidationSSLError(
@@ -108,7 +110,7 @@ async def validate_class_credential(
         except Exception as exc:
             logger.warning(
                 "Failed to validate %s class credential due to provider error.",
-                provider.value,
+                safe_provider,
                 exc_info=exc,
             )
             raise ClassCredentialValidationUnavailableError(

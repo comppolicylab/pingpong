@@ -1483,7 +1483,7 @@ export const createClassCredential = async (
 	apiKey: string
 ) => {
 	const url = `class/${classId}/credentials`;
-	return await PUT<CreateClassCredentialRequest, ClassCredentialResponse>(f, url, {
+	return await POST<CreateClassCredentialRequest, ClassCredentialResponse>(f, url, {
 		api_key: apiKey,
 		provider,
 		purpose
