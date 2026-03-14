@@ -128,6 +128,17 @@ def patch_lecture_video_model_list(monkeypatch, model_id: str = "gpt-4o-mini") -
     monkeypatch.setattr(server_module, "list_class_models", fake_list_class_models)
 
 
+async def grant_thread_permissions(config, thread_id: int, *user_ids: int) -> None:  # type: ignore[no-untyped-def]
+    async with config.authz.driver.get_client() as authz_client:
+        await authz_client.write(
+            grant=[
+                (f"user:{user_id}", relation, f"thread:{thread_id}")
+                for user_id in user_ids
+                for relation in ("can_view", "can_participate")
+            ]
+        )
+
+
 async def create_ready_lecture_video_assistant(
     session,
     institution,
@@ -294,12 +305,10 @@ async def test_create_lecture_thread_success(api, db, institution, valid_user_to
     grants=[
         ("user:123", "can_create_thread", "class:1"),
         ("user:123", "student", "class:1"),
-        ("user:123", "can_view", "thread:1"),
-        ("user:123", "can_participate", "thread:1"),
     ]
 )
 async def test_get_thread_returns_lecture_video_session(
-    api, db, institution, valid_user_token
+    api, authz, config, db, institution, valid_user_token
 ):
     async with db.async_session() as session:
         class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
@@ -314,6 +323,7 @@ async def test_get_thread_returns_lecture_video_session(
     )
     assert create_response.status_code == 200
     thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
 
     response = api.get(
         f"/api/v1/class/{class_.id}/thread/{thread_id}",
@@ -413,12 +423,10 @@ async def test_get_thread_skips_lecture_video_checks_for_chat_threads(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
         ("user:123", "student", "class:1"),
-        ("user:123", "can_view", "thread:1"),
-        ("user:123", "can_participate", "thread:1"),
     ]
 )
 async def test_get_thread_lazily_initializes_legacy_lecture_video_runtime_state(
-    api, db, institution, valid_user_token
+    api, authz, config, db, institution, valid_user_token
 ):
     async with db.async_session() as session:
         class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
@@ -433,6 +441,7 @@ async def test_get_thread_lazily_initializes_legacy_lecture_video_runtime_state(
     )
     assert create_response.status_code == 200
     thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
 
     async with db.async_session() as session:
         await session.execute(
@@ -476,12 +485,10 @@ async def test_get_thread_lazily_initializes_legacy_lecture_video_runtime_state(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
         ("user:123", "student", "class:1"),
-        ("user:123", "can_view", "thread:1"),
-        ("user:123", "can_participate", "thread:1"),
     ]
 )
 async def test_lecture_video_control_reacquire_invalidates_old_controller(
-    api, db, institution, valid_user_token
+    api, authz, config, db, institution, valid_user_token
 ):
     async with db.async_session() as session:
         class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
@@ -495,6 +502,7 @@ async def test_lecture_video_control_reacquire_invalidates_old_controller(
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
 
     acquire_one = api.post(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
@@ -536,12 +544,10 @@ async def test_lecture_video_control_reacquire_invalidates_old_controller(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
         ("user:123", "student", "class:1"),
-        ("user:123", "can_view", "thread:1"),
-        ("user:123", "can_participate", "thread:1"),
     ]
 )
 async def test_lecture_video_duplicate_idempotent_request_from_old_controller_is_rejected(
-    api, db, institution, valid_user_token
+    api, authz, config, db, institution, valid_user_token
 ):
     async with db.async_session() as session:
         class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
@@ -555,6 +561,7 @@ async def test_lecture_video_duplicate_idempotent_request_from_old_controller_is
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
 
     acquire_one = api.post(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
@@ -607,12 +614,10 @@ async def test_lecture_video_duplicate_idempotent_request_from_old_controller_is
     grants=[
         ("user:123", "can_create_thread", "class:1"),
         ("user:123", "student", "class:1"),
-        ("user:123", "can_view", "thread:1"),
-        ("user:123", "can_participate", "thread:1"),
     ]
 )
 async def test_process_interaction_rejects_unhandled_request_subclass(
-    api, db, institution, valid_user_token
+    api, authz, config, db, institution, valid_user_token
 ):
     class UnhandledPausedRequest(schemas.LectureVideoInteractionRequestBase):
         type: Literal["video_paused"]
@@ -631,6 +636,7 @@ async def test_process_interaction_rejects_unhandled_request_subclass(
     )
     assert create_response.status_code == 200
     thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
 
     acquire = api.post(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
@@ -666,12 +672,10 @@ async def test_process_interaction_rejects_unhandled_request_subclass(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
         ("user:123", "student", "class:1"),
-        ("user:123", "can_view", "thread:1"),
-        ("user:123", "can_participate", "thread:1"),
     ]
 )
 async def test_lecture_video_interactions_derive_continuation_and_history(
-    api, db, institution, valid_user_token
+    api, authz, config, db, institution, valid_user_token
 ):
     manifest = {
         "version": 1,
@@ -738,6 +742,7 @@ async def test_lecture_video_interactions_derive_continuation_and_history(
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
 
     acquire = api.post(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
@@ -880,12 +885,10 @@ async def test_lecture_video_interactions_derive_continuation_and_history(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
         ("user:123", "student", "class:1"),
-        ("user:123", "can_view", "thread:1"),
-        ("user:123", "can_participate", "thread:1"),
     ]
 )
 async def test_lecture_video_interactions_reject_post_completion_playback_events(
-    api, db, institution, valid_user_token
+    api, authz, config, db, institution, valid_user_token
 ):
     async with db.async_session() as session:
         class_, lecture_video, _assistant = await create_ready_lecture_video_assistant(
@@ -904,6 +907,7 @@ async def test_lecture_video_interactions_reject_post_completion_playback_events
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
 
     acquire = api.post(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
@@ -1057,12 +1061,10 @@ async def test_lecture_video_interactions_reject_post_completion_playback_events
     grants=[
         ("user:123", "can_create_thread", "class:1"),
         ("user:123", "student", "class:1"),
-        ("user:123", "can_view", "thread:1"),
-        ("user:123", "can_participate", "thread:1"),
     ]
 )
 async def test_lecture_video_interactions_record_seek_and_end_events(
-    api, db, institution, valid_user_token
+    api, authz, config, db, institution, valid_user_token
 ):
     async with db.async_session() as session:
         class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
@@ -1077,6 +1079,7 @@ async def test_lecture_video_interactions_record_seek_and_end_events(
     )
     assert create_response.status_code == 200
     thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
 
     acquire = api.post(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
@@ -1141,12 +1144,10 @@ async def test_lecture_video_interactions_record_seek_and_end_events(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
         ("user:123", "student", "class:1"),
-        ("user:123", "can_view", "thread:1"),
-        ("user:123", "can_participate", "thread:1"),
     ]
 )
 async def test_lecture_video_answer_submitted_rejects_option_from_another_question(
-    api, db, institution, valid_user_token
+    api, authz, config, db, institution, valid_user_token
 ):
     manifest = {
         "version": 1,
@@ -1208,6 +1209,7 @@ async def test_lecture_video_answer_submitted_rejects_option_from_another_questi
     )
     assert create_response.status_code == 200
     thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
 
     acquire = api.post(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
@@ -1328,14 +1330,10 @@ async def test_initialize_thread_state_completes_when_lecture_video_has_no_quest
     grants=[
         ("user:123", "can_create_thread", "class:1"),
         ("user:123", "student", "class:1"),
-        ("user:123", "can_view", "thread:1"),
-        ("user:123", "can_participate", "thread:1"),
-        ("user:456", "can_view", "thread:1"),
-        ("user:456", "can_participate", "thread:1"),
     ]
 )
 async def test_lecture_video_history_uses_pseudonyms_for_other_participants(
-    api, db, institution, valid_user_token
+    api, authz, config, db, institution, valid_user_token
 ):
     from pingpong.auth import encode_session_token
 
@@ -1361,6 +1359,7 @@ async def test_lecture_video_history_uses_pseudonyms_for_other_participants(
     )
     assert create_response.status_code == 200
     thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123, 456)
 
     async with db.async_session() as session:
         thread = await session.get(models.Thread, thread_id)
@@ -1447,12 +1446,10 @@ async def test_lecture_video_history_uses_pseudonyms_for_other_participants(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
         ("user:123", "student", "class:1"),
-        ("user:123", "can_view", "thread:1"),
-        ("user:123", "can_participate", "thread:1"),
     ]
 )
 async def test_lecture_video_control_lease_is_short_and_renewable(
-    api, db, institution, valid_user_token, monkeypatch
+    api, authz, config, db, institution, valid_user_token, monkeypatch
 ):
     server_module = importlib.import_module("pingpong.server")
     current_now = {"value": datetime(2024, 1, 1, 0, 0, tzinfo=timezone.utc)}
@@ -1472,6 +1469,7 @@ async def test_lecture_video_control_lease_is_short_and_renewable(
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
 
     acquire = api.post(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
@@ -1526,12 +1524,10 @@ async def test_lecture_video_control_lease_is_short_and_renewable(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
         ("user:123", "student", "class:1"),
-        ("user:123", "can_view", "thread:1"),
-        ("user:123", "can_participate", "thread:1"),
     ]
 )
 async def test_lecture_video_control_release_and_interaction_fail_after_expiry(
-    api, db, institution, valid_user_token, monkeypatch
+    api, authz, config, db, institution, valid_user_token, monkeypatch
 ):
     server_module = importlib.import_module("pingpong.server")
     current_now = {"value": datetime(2024, 1, 1, 0, 0, tzinfo=timezone.utc)}
@@ -1551,6 +1547,7 @@ async def test_lecture_video_control_release_and_interaction_fail_after_expiry(
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
 
     acquire = api.post(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
@@ -1591,14 +1588,10 @@ async def test_lecture_video_control_release_and_interaction_fail_after_expiry(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
         ("user:123", "student", "class:1"),
-        ("user:123", "can_view", "thread:1"),
-        ("user:123", "can_participate", "thread:1"),
-        ("user:456", "can_view", "thread:1"),
-        ("user:456", "can_participate", "thread:1"),
     ]
 )
 async def test_lecture_video_control_blocks_other_users_until_expiry_then_allows_acquire(
-    api, db, institution, valid_user_token, monkeypatch
+    api, authz, config, db, institution, valid_user_token, monkeypatch
 ):
     from pingpong.auth import encode_session_token
     from pingpong.now import offset
@@ -1632,6 +1625,7 @@ async def test_lecture_video_control_blocks_other_users_until_expiry_then_allows
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123, 456)
 
     acquire = api.post(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
@@ -1678,14 +1672,10 @@ async def test_lecture_video_control_blocks_other_users_until_expiry_then_allows
     grants=[
         ("user:123", "can_create_thread", "class:1"),
         ("user:123", "student", "class:1"),
-        ("user:123", "can_view", "thread:1"),
-        ("user:123", "can_participate", "thread:1"),
-        ("user:456", "can_view", "thread:1"),
-        ("user:456", "can_participate", "thread:1"),
     ]
 )
 async def test_get_thread_does_not_grant_control_from_leaked_controller_session_id(
-    api, db, institution, valid_user_token
+    api, authz, config, db, institution, valid_user_token
 ):
     from pingpong.auth import encode_session_token
 
@@ -1710,6 +1700,7 @@ async def test_get_thread_does_not_grant_control_from_leaked_controller_session_
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123, 456)
 
     acquire = api.post(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
@@ -1740,12 +1731,10 @@ async def test_get_thread_does_not_grant_control_from_leaked_controller_session_
     grants=[
         ("user:123", "can_create_thread", "class:1"),
         ("user:123", "student", "class:1"),
-        ("user:123", "can_view", "thread:1"),
-        ("user:123", "can_participate", "thread:1"),
     ]
 )
 async def test_get_thread_hides_expired_controller_state(
-    api, db, institution, valid_user_token, monkeypatch
+    api, authz, config, db, institution, valid_user_token, monkeypatch
 ):
     server_module = importlib.import_module("pingpong.server")
     current_now = {"value": datetime(2024, 1, 1, 0, 0, tzinfo=timezone.utc)}
@@ -1765,6 +1754,7 @@ async def test_get_thread_hides_expired_controller_state(
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
 
     acquire = api.post(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
@@ -5082,12 +5072,10 @@ async def test_get_thread_video_invalid_range_returns_416(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
         ("user:123", "student", "class:1"),
-        ("user:123", "can_view", "thread:1"),
-        ("user:123", "can_participate", "thread:1"),
     ]
 )
 async def test_get_thread_lecture_video_narration_streams_audio(
-    api, db, institution, valid_user_token, config, monkeypatch, tmp_path
+    api, authz, db, institution, valid_user_token, config, monkeypatch, tmp_path
 ):
     narration_key = "intro-ready.mp3"
     narration_bytes = b"intro-audio"
@@ -5131,6 +5119,7 @@ async def test_get_thread_lecture_video_narration_streams_audio(
     )
     assert create_response.status_code == 200
     thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
 
     response = api.get(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/narration/{question.intro_narration.id}",
@@ -5159,12 +5148,10 @@ async def test_get_thread_lecture_video_narration_streams_audio(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
         ("user:123", "student", "class:1"),
-        ("user:123", "can_view", "thread:1"),
-        ("user:123", "can_participate", "thread:1"),
     ]
 )
 async def test_get_thread_lecture_video_narration_rejects_non_numeric_id(
-    api, db, institution, valid_user_token, config, monkeypatch, tmp_path
+    api, authz, db, institution, valid_user_token, config, monkeypatch, tmp_path
 ):
     narration_key = "intro-ready.mp3"
     (tmp_path / narration_key).write_bytes(b"intro-audio")
@@ -5199,6 +5186,7 @@ async def test_get_thread_lecture_video_narration_rejects_non_numeric_id(
     )
     assert create_response.status_code == 200
     thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
 
     response = api.get(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/narration/not-a-number",
@@ -5213,12 +5201,10 @@ async def test_get_thread_lecture_video_narration_rejects_non_numeric_id(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
         ("user:123", "student", "class:1"),
-        ("user:123", "can_view", "thread:1"),
-        ("user:123", "can_participate", "thread:1"),
     ]
 )
 async def test_get_thread_lecture_video_narration_lazily_initializes_legacy_runtime_state(
-    api, db, institution, valid_user_token, config, monkeypatch, tmp_path
+    api, authz, db, institution, valid_user_token, config, monkeypatch, tmp_path
 ):
     narration_key = "legacy-intro-ready.mp3"
     narration_bytes = b"legacy-intro-audio"
@@ -5254,6 +5240,7 @@ async def test_get_thread_lecture_video_narration_lazily_initializes_legacy_runt
     )
     assert create_response.status_code == 200
     thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
 
     async with db.async_session() as session:
         await session.execute(
@@ -5282,7 +5269,6 @@ async def test_get_thread_lecture_video_narration_lazily_initializes_legacy_runt
     grants=[
         ("user:123", "can_create_thread", "class:1"),
         ("user:123", "student", "class:1"),
-        ("user:123", "can_view", "thread:1"),
     ]
 )
 async def test_get_thread_lecture_video_narration_requires_can_participate(
@@ -5335,12 +5321,10 @@ async def test_get_thread_lecture_video_narration_requires_can_participate(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
         ("user:123", "student", "class:1"),
-        ("user:123", "can_view", "thread:1"),
-        ("user:123", "can_participate", "thread:1"),
     ]
 )
 async def test_get_thread_lecture_video_narration_requires_ready_status(
-    api, db, institution, valid_user_token, config, monkeypatch, tmp_path
+    api, authz, db, institution, valid_user_token, config, monkeypatch, tmp_path
 ):
     narration_key = "intro-pending.mp3"
     (tmp_path / narration_key).write_bytes(b"intro-audio")
@@ -5379,6 +5363,7 @@ async def test_get_thread_lecture_video_narration_requires_ready_status(
     )
     assert create_response.status_code == 200
     thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
 
     response = api.get(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/narration/{question.intro_narration.id}",

@@ -629,7 +629,6 @@ async def process_interaction(
                 "That option does not belong to this question."
             )
         state.state = schemas.LectureVideoSessionState.AWAITING_POST_ANSWER_RESUME
-        state.active_option_id = option.id
         state.active_option = option
         await _append_interaction(
             session,
