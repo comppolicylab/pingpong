@@ -98,6 +98,10 @@ class AmbiguousExternalLoginLookupError(ValueError):
         )
 
 
+class ClassCredentialAlreadyExistsError(ValueError):
+    pass
+
+
 T = TypeVar("T")
 
 
@@ -4318,11 +4322,19 @@ class APIKey(Base):
     name = Column(String, nullable=True)
     provider = Column(String, nullable=False)
     api_key = Column(String, nullable=False)
-    classes = relationship("Class", back_populates="api_key_obj")
+    classes: Mapped[List["Class"]] = relationship("Class", back_populates="api_key_obj")
+    class_credentials: Mapped[List["ClassCredential"]] = relationship(
+        "ClassCredential",
+        back_populates="api_key_obj",
+    )
     endpoint = Column(String, nullable=True)
     api_version = Column(String, nullable=True)
     region = Column(String, nullable=True)
     available_as_default = Column(Boolean, default=False)
+
+    @property
+    def redacted_api_key(self) -> str:
+        return schemas.mask_api_key_value(self.api_key)
 
     @classmethod
     async def get_by_id(cls, session: AsyncSession, id_: int) -> "APIKey | None":
@@ -4340,27 +4352,28 @@ class APIKey(Base):
         region: str | None = None,
         available_as_default: bool = False,
     ) -> "APIKey":
-        stmt = (
-            _get_upsert_stmt(session)(APIKey)
-            .values(
-                api_key=api_key,
-                provider=provider,
-                endpoint=endpoint,
-                api_version=api_version,
-                region=region,
-                available_as_default=available_as_default,
-            )
-            .on_conflict_do_update(
-                constraint="_key_provider_uc",
-                set_=dict(
-                    api_version=api_version,
-                    region=region,
-                    available_as_default=APIKey.available_as_default
-                    or available_as_default,
-                ),
-            )
-            .returning(APIKey)
+        insert_stmt = _get_upsert_stmt(session)(APIKey).values(
+            api_key=api_key,
+            provider=provider,
+            endpoint=endpoint,
+            api_version=api_version,
+            region=region,
+            available_as_default=available_as_default,
         )
+        if available_as_default:
+            set_available_as_default = True
+        else:
+            set_available_as_default = APIKey.available_as_default
+        update_values = dict(
+            api_version=api_version,
+            available_as_default=set_available_as_default,
+        )
+        if region is not None:
+            update_values["region"] = region
+        stmt = insert_stmt.on_conflict_do_update(
+            index_elements=[APIKey.api_key, APIKey.provider],
+            set_=update_values,
+        ).returning(APIKey)
         return await session.scalar(stmt)
 
     @classmethod
@@ -4400,6 +4413,11 @@ class Class(Base):
     api_key = Column(String, nullable=True)
     api_key_id = Column(Integer, ForeignKey("api_keys.id"), nullable=True)
     api_key_obj = relationship("APIKey", back_populates="classes")
+    feature_credentials: Mapped[List["ClassCredential"]] = relationship(
+        "ClassCredential",
+        back_populates="class_",
+        cascade="all, delete-orphan",
+    )
     private = Column(Boolean, default=False)
     lms_status = Column(SQLEnum(schemas.LMSStatus), default=schemas.LMSStatus.NONE)
     lms_tenant = Column(String, nullable=True)
@@ -4476,19 +4494,13 @@ class Class(Base):
         return await session.scalar(stmt)
 
     @classmethod
-    async def get_api_key(
-        cls, session: AsyncSession, id_: int
-    ) -> schemas.APIKeyModelResponse:
+    async def get_api_key(cls, session: AsyncSession, id_: int) -> "Class":
         stmt = (
             select(Class)
             .options(joinedload(Class.api_key_obj))
             .where(Class.id == int(id_))
         )
-        result = await session.scalar(stmt)
-        return schemas.APIKeyModelResponse(
-            api_key=result.api_key,
-            api_key_obj=result.api_key_obj,
-        )
+        return await session.scalar(stmt)
 
     @classmethod
     async def update_api_key(
@@ -5044,6 +5056,105 @@ class Class(Base):
         stmt = select(Class).where(Class.lms_course_id == lms_course_id)
         result = await session.execute(stmt)
         return [row.Class for row in result]
+
+
+class ClassCredential(Base):
+    __tablename__ = "class_credentials"
+    __table_args__ = (
+        UniqueConstraint("class_id", "purpose", name="_class_purpose_credential_uc"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    class_id: Mapped[int] = mapped_column(
+        ForeignKey("classes.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    purpose: Mapped[schemas.ClassCredentialPurpose] = mapped_column(
+        SQLEnum(schemas.ClassCredentialPurpose),
+        nullable=False,
+    )
+    api_key_id: Mapped[int] = mapped_column(
+        ForeignKey("api_keys.id"),
+        nullable=False,
+    )
+    created: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    class_: Mapped["Class"] = relationship(
+        "Class", back_populates="feature_credentials"
+    )
+    api_key_obj: Mapped["APIKey"] = relationship(
+        "APIKey",
+        back_populates="class_credentials",
+    )
+
+    @classmethod
+    async def get_by_class_id(
+        cls, session: AsyncSession, class_id: int
+    ) -> list["ClassCredential"]:
+        stmt = (
+            select(ClassCredential)
+            .options(joinedload(ClassCredential.api_key_obj))
+            .where(ClassCredential.class_id == int(class_id))
+        )
+        result = await session.execute(stmt)
+        return [row.ClassCredential for row in result]
+
+    @classmethod
+    async def get_by_class_id_and_purpose(
+        cls,
+        session: AsyncSession,
+        class_id: int,
+        purpose: schemas.ClassCredentialPurpose,
+    ) -> "ClassCredential | None":
+        stmt = (
+            select(ClassCredential)
+            .options(joinedload(ClassCredential.api_key_obj))
+            .where(
+                ClassCredential.class_id == int(class_id),
+                ClassCredential.purpose == purpose,
+            )
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def create(
+        cls,
+        session: AsyncSession,
+        class_id: int,
+        purpose: schemas.ClassCredentialPurpose,
+        api_key: str,
+        provider: schemas.ClassCredentialProvider,
+    ) -> "ClassCredential":
+        async with session.begin_nested():
+            api_key_obj = await APIKey.create_or_update(
+                session,
+                api_key=api_key,
+                provider=provider.value,
+            )
+            stmt = (
+                _get_upsert_stmt(session)(ClassCredential)
+                .values(
+                    class_id=int(class_id),
+                    purpose=purpose,
+                    api_key_id=api_key_obj.id,
+                )
+                .on_conflict_do_nothing(
+                    index_elements=[ClassCredential.class_id, ClassCredential.purpose],
+                )
+                .returning(ClassCredential)
+            )
+            credential = await session.scalar(stmt)
+            if credential is None:
+                raise ClassCredentialAlreadyExistsError(
+                    "Credential already exists for this purpose and cannot be changed."
+                )
+        await session.refresh(credential)
+        await credential.awaitable_attrs.api_key_obj
+        return credential
 
 
 class CodeInterpreterCall(Base):

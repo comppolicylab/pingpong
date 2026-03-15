@@ -1776,6 +1776,16 @@ class AIProvider(StrEnum):
     AZURE = "azure"
 
 
+class ClassCredentialProvider(StrEnum):
+    GEMINI = "gemini"
+    ELEVENLABS = "elevenlabs"
+
+
+class ClassCredentialPurpose(StrEnum):
+    LECTURE_VIDEO_NARRATION_TTS = "lecture_video_narration_tts"
+    LECTURE_VIDEO_MANIFEST_GENERATION = "lecture_video_manifest_generation"
+
+
 class Class(BaseModel):
     id: int
     name: str
@@ -1887,12 +1897,63 @@ class UpdateApiKey(BaseModel):
     )
 
 
-class ApiKey(BaseModel):
+class CreateClassCredential(BaseModel):
     api_key: str
+    provider: ClassCredentialProvider
+    purpose: ClassCredentialPurpose
+
+    @field_validator("api_key")
+    @classmethod
+    def strip_api_key(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("api_key must not be empty")
+        return v
+
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+
+def mask_api_key_value(api_key: str) -> str:
+    if len(api_key) <= 12:
+        return "*" * len(api_key)
+    return f"{api_key[:8]}{'*' * 20}{api_key[-4:]}"
+
+
+class RedactedApiKey(BaseModel):
+    redacted_api_key: str
     provider: str
     endpoint: str | None = None
     api_version: str | None = None
     available_as_default: bool | None = None
+
+    @classmethod
+    def from_api_key_obj(cls, api_key_obj: object) -> "RedactedApiKey":
+        return cls(
+            redacted_api_key=getattr(api_key_obj, "redacted_api_key"),
+            provider=getattr(api_key_obj, "provider"),
+            endpoint=getattr(api_key_obj, "endpoint", None),
+            api_version=getattr(api_key_obj, "api_version", None),
+            available_as_default=getattr(api_key_obj, "available_as_default", None),
+        )
+
+    @classmethod
+    def from_raw(
+        cls,
+        api_key: str,
+        provider: str,
+        endpoint: str | None = None,
+        api_version: str | None = None,
+        available_as_default: bool | None = None,
+    ) -> "RedactedApiKey":
+        return cls(
+            redacted_api_key=mask_api_key_value(api_key),
+            provider=provider,
+            endpoint=endpoint,
+            api_version=api_version,
+            available_as_default=available_as_default,
+        )
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -1905,16 +1966,32 @@ class APIKeyValidationResponse(BaseModel):
 
 
 class APIKeyResponse(BaseModel):
-    api_key: ApiKey | None = None
+    api_key: RedactedApiKey | None = None
 
     model_config = ConfigDict(
         from_attributes=True,
     )
 
 
-class APIKeyModelResponse(BaseModel):
-    api_key: str | None = None
-    api_key_obj: ApiKey | None = None
+class ClassCredentialSlot(BaseModel):
+    purpose: ClassCredentialPurpose
+    credential: RedactedApiKey | None = None
+
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+
+class ClassCredentialResponse(BaseModel):
+    credential: ClassCredentialSlot
+
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+
+class ClassCredentialsResponse(BaseModel):
+    credentials: list[ClassCredentialSlot]
 
     model_config = ConfigDict(
         from_attributes=True,

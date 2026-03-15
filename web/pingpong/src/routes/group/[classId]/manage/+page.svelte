@@ -74,7 +74,8 @@
 	import ConfirmationModal from '$lib/components/ConfirmationModal.svelte';
 	import OpenAILogo from '$lib/components/OpenAILogo.svelte';
 	import AzureLogo from '$lib/components/AzureLogo.svelte';
-	import OpenAiLogo from '$lib/components/OpenAILogo.svelte';
+	import ElevenLabsLogo from '$lib/components/ElevenLabsLogo.svelte';
+	import GeminiLogo from '$lib/components/GeminiLogo.svelte';
 	import DropdownBadge from '$lib/components/DropdownBadge.svelte';
 	import CloneClassModal from '$lib/components/CloneClassModal.svelte';
 	import CanvasConnectSyncBadge from '$lib/components/CanvasConnectSyncBadge.svelte';
@@ -128,6 +129,9 @@
 		if (errorCode) {
 			const errorMessage = getErrorMessage(parseInt(errorCode) || 0);
 			sadToast(errorMessage);
+		}
+		if (data.classCredentialsError) {
+			sadToast(data.classCredentialsError);
 		}
 
 		// If URL contains the section 'summary', scroll the manageContainer to the summaryElement
@@ -251,8 +255,43 @@
 			: dayjs(data.class.last_rate_limited_at).format('MMMM D, YYYY [at] h:mma')
 		: null;
 
-	$: apiKey = data.apiKey || null;
-	let apiProvider = 'openai';
+	const featureCredentialConfigs: {
+		purpose: api.ClassCredentialPurpose;
+		title: string;
+		description: string;
+		provider: api.ClassCredentialProvider;
+		providerLabel: string;
+	}[] = [
+		{
+			purpose: 'lecture_video_manifest_generation',
+			title: 'Video processing and question generation',
+			description:
+				'PingPong uses Google Gemini to process lecture videos you upload and generate comprehension questions based on their content.',
+			provider: 'gemini',
+			providerLabel: 'Google Gemini'
+		},
+		{
+			purpose: 'lecture_video_narration_tts',
+			title: 'Text-to-speech for video narration',
+			description:
+				"PingPong uses text-to-speech capabilities to generate transitions and other narration between lecture video snippets and questions. You'll select a voice when configuring the Lecture Video mode assistant.",
+			provider: 'elevenlabs',
+			providerLabel: 'ElevenLabs'
+		}
+	];
+	let apiKey = data.apiKey || null;
+	let loadedApiKey = data.apiKey || null;
+	let loadedHasApiKey = !!data?.hasAPIKey;
+	let loadedApiKeyClassId = data.class.id;
+	$: classCredentialsLoaded = data.classCredentials !== undefined;
+	$: classCredentials = data.classCredentials ?? [];
+	$: allFeatureCredentialsConfigured =
+		classCredentialsLoaded &&
+		featureCredentialConfigs.every((fc) =>
+			classCredentials.some((cc) => cc.purpose === fc.purpose && cc.credential)
+		);
+	let apiProvider = data.apiKey?.provider || 'openai';
+	let updatingClassCredentialPurpose: api.ClassCredentialPurpose | null = null;
 
 	$: subscriptionInfo = data.subscription || null;
 
@@ -276,7 +315,23 @@
 			return aName.localeCompare(bName);
 		}) as FileUploadInfo[];
 
-	$: hasApiKey = !!data?.hasAPIKey;
+	let hasApiKey = !!data?.hasAPIKey;
+	$: {
+		const nextApiKey = data.apiKey || null;
+		const nextHasApiKey = !!data?.hasAPIKey;
+		if (
+			data.class.id !== loadedApiKeyClassId ||
+			nextApiKey !== loadedApiKey ||
+			nextHasApiKey !== loadedHasApiKey
+		) {
+			loadedApiKeyClassId = data.class.id;
+			loadedApiKey = nextApiKey;
+			loadedHasApiKey = nextHasApiKey;
+			apiKey = nextApiKey;
+			hasApiKey = nextHasApiKey;
+			apiProvider = nextApiKey?.provider || 'openai';
+		}
+	}
 	$: canExportThreads = !!data?.grants?.isAdmin || !!data?.grants?.isTeacher;
 	$: canEditClassInfo = !!data?.grants?.canEditInfo;
 	$: canManageClassUsers = !!data?.grants?.canManageUsers;
@@ -505,9 +560,52 @@
 			let msg = result.detail || 'An unknown error occurred';
 			sadToast(msg);
 		} else {
-			invalidateAll();
+			const response = result as api.ApiKeyResponse;
+			apiKey = response.api_key || null;
+			hasApiKey = !!response.api_key;
 			$updatingApiKey = false;
 			happyToast('Saved API key!');
+		}
+	};
+
+	const submitCreateClassCredential = async (
+		evt: SubmitEvent,
+		purpose: api.ClassCredentialPurpose,
+		provider: api.ClassCredentialProvider
+	) => {
+		evt.preventDefault();
+		updatingClassCredentialPurpose = purpose;
+
+		const form = evt.target as HTMLFormElement;
+		const formData = new FormData(form);
+		const apiKeyValue = formData.get('apiKey')?.toString().trim() || '';
+
+		if (!apiKeyValue) {
+			updatingClassCredentialPurpose = null;
+			sadToast('Please provide an API key.');
+			return;
+		}
+
+		try {
+			const result = await api.createClassCredential(
+				fetch,
+				data.class.id,
+				purpose,
+				provider,
+				apiKeyValue
+			);
+			if (api.isErrorResponse(result)) {
+				sadToast(result.detail || 'An unknown error occurred');
+				return;
+			}
+
+			await invalidateAll();
+			happyToast('Saved feature credential!');
+		} catch (error) {
+			sadToast('An unknown error occurred');
+			throw error;
+		} finally {
+			updatingClassCredentialPurpose = null;
 		}
 	};
 
@@ -1425,7 +1523,7 @@
 									<div
 										class="inline-flex w-full min-w-fit cursor-pointer items-center gap-4 rounded-lg border border-gray-200 bg-white px-5 py-3 font-normal text-gray-900 peer-checked:border-red-600 peer-checked:font-medium peer-checked:text-red-600 hover:bg-gray-100 hover:text-gray-600 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700"
 									>
-										<OpenAiLogo size="8" extraClass="shrink-0" />
+										<OpenAILogo size="8" extraClass="shrink-0" />
 										<div class="w-full text-base">OpenAI</div>
 									</div>
 								</Radio>
@@ -1512,7 +1610,9 @@
 						{/if}
 						<Label for="apiKey" class="text-sm">API Key</Label>
 						<div class="relative mb-1 w-full">
-							<span id="apiKey" class="font-mono text-sm font-normal">{apiKey?.api_key}</span>
+							<span id="apiKey" class="font-mono text-sm font-normal"
+								>{apiKey?.redacted_api_key}</span
+							>
 						</div>
 						{#if apiKey?.provider == 'openai'}
 							<Helper
@@ -1560,6 +1660,127 @@
 					</Alert>
 				</div>
 			{/if}
+		</div>
+	{/if}
+	{#if canViewApiKey}
+		<div class="grid gap-x-6 gap-y-8 pt-6 md:grid-cols-3">
+			<div>
+				<Heading customSize="text-xl font-bold" tag="h3"
+					><Secondary class="text-3xl font-normal text-black">Additional Providers</Secondary
+					></Heading
+				>
+				<Info>Some PingPong features may require billing details from additional providers.</Info>
+			</div>
+			<div class="col-span-2">
+				<div class="mb-4 flex items-center justify-between">
+					<div class="text-lg font-medium text-gray-900">Lecture Videos</div>
+					{#if !classCredentialsLoaded}
+						<div class="flex items-center gap-1.5 text-sm font-medium text-red-600">
+							<ExclamationCircleOutline class="h-4 w-4" />
+							<span>Credential status unavailable</span>
+						</div>
+					{:else if allFeatureCredentialsConfigured && hasApiKey}
+						<div class="flex items-center gap-1.5 text-sm font-medium text-green-600">
+							<CheckCircleOutline class="h-4 w-4" />
+							<span>Ready to use</span>
+						</div>
+					{:else if allFeatureCredentialsConfigured}
+						<div class="flex items-center gap-1.5 text-sm font-medium text-amber-600">
+							<ExclamationCircleOutline class="h-4 w-4" />
+							<span>Additional providers configured, but AI provider key missing</span>
+						</div>
+					{:else}
+						<div class="flex items-center gap-1.5 text-sm font-medium text-amber-600">
+							<ExclamationCircleOutline class="h-4 w-4" />
+							<span>Needs setup before use</span>
+						</div>
+					{/if}
+				</div>
+				{#if !classCredentialsLoaded}
+					<Alert color="red">
+						<span class="font-medium">Unable to load saved provider credentials.</span>
+						Refresh the page and try again.
+					</Alert>
+				{:else}
+					{#each featureCredentialConfigs as featureCredential, i (featureCredential.purpose)}
+						{@const slot = classCredentials.find(
+							(c) => c.purpose === featureCredential.purpose
+						) || {
+							purpose: featureCredential.purpose,
+							credential: null
+						}}
+						{#if i > 0}
+							<hr class="my-5 border-gray-200" />
+						{/if}
+						{#if !slot.credential}
+							<form
+								onsubmit={(event) =>
+									submitCreateClassCredential(
+										event,
+										featureCredential.purpose,
+										featureCredential.provider
+									)}
+							>
+								<Label for={`feature-api-key-${featureCredential.purpose}`} class="text-sm"
+									>{featureCredential.providerLabel}: {featureCredential.title}</Label
+								>
+								<Helper class="mb-3"
+									>{featureCredential.description}
+									<b>You can't change the API key later.</b></Helper
+								>
+								<div class="relative w-full pt-2 pb-2">
+									<ButtonGroup class="w-full">
+										<InputAddon>
+											{#if featureCredential.provider === 'elevenlabs'}
+												<ElevenLabsLogo size="6" />
+											{:else if featureCredential.provider === 'gemini'}
+												<GeminiLogo size="6" />
+											{/if}
+										</InputAddon>
+										<Input
+											id={`feature-api-key-${featureCredential.purpose}`}
+											name="apiKey"
+											autocomplete="off"
+											placeholder="{featureCredential.providerLabel} API key"
+											defaultClass="block w-full disabled:cursor-not-allowed disabled:opacity-50 rtl:text-right font-mono"
+										/>
+										<Button
+											type="submit"
+											disabled={updatingClassCredentialPurpose !== null}
+											class="rounded-l-none bg-orange text-white hover:bg-orange-dark"
+											>{updatingClassCredentialPurpose === featureCredential.purpose
+												? 'Saving...'
+												: 'Save'}</Button
+										>
+									</ButtonGroup>
+								</div>
+							</form>
+						{:else}
+							<Label for={`feature-provider-${featureCredential.purpose}`} class="mb-1 text-sm"
+								>{featureCredential.title}</Label
+							>
+							<div
+								class="mb-5 flex flex-row items-center gap-1.5"
+								id={`feature-provider-${featureCredential.purpose}`}
+							>
+								{#if featureCredential.provider === 'elevenlabs'}
+									<ElevenLabsLogo size="5" />
+								{:else if featureCredential.provider === 'gemini'}
+									<GeminiLogo size="5" />
+								{/if}
+								<span class="text-sm font-normal">{featureCredential.providerLabel}</span>
+							</div>
+							<Label class="mb-1 text-sm">API Key</Label>
+							<div class="mb-1 font-mono text-sm font-normal">
+								{slot.credential.redacted_api_key}
+							</div>
+							<Helper
+								>This credential can't be changed because existing assistants may depend on it.</Helper
+							>
+						{/if}
+					{/each}
+				{/if}
+			</div>
 		</div>
 	{/if}
 

@@ -64,7 +64,14 @@ from pingpong.artifacts import ArtifactStoreError
 from pingpong.audio_store import AudioStoreError
 from pingpong.bg_tasks import safe_task
 from pingpong.copy import copy_assistant as copy_assistant_to_class
+from pingpong.copy import ensure_lecture_video_copy_credentials
 from pingpong.copy import copy_group
+from pingpong.class_credentials import (
+    ClassCredentialValidationUnavailableError,
+    expected_provider_for_purpose,
+    provider_matches_purpose,
+    validate_class_credential,
+)
 from pingpong.emails import (
     parse_addresses,
     revalidate_email_addresses,
@@ -2809,6 +2816,113 @@ async def check_class_api_key(class_id: str, request: StateRequest):
     return {"has_api_key": False}
 
 
+def _serialize_class_credential_slot(
+    purpose: schemas.ClassCredentialPurpose,
+    credential: models.ClassCredential | None,
+) -> schemas.ClassCredentialSlot:
+    if credential is None or credential.api_key_obj is None:
+        return schemas.ClassCredentialSlot(purpose=purpose, credential=None)
+    return schemas.ClassCredentialSlot(
+        purpose=purpose,
+        credential=schemas.RedactedApiKey.from_api_key_obj(credential.api_key_obj),
+    )
+
+
+@v1.get(
+    "/class/{class_id}/credentials",
+    dependencies=[Depends(Authz("can_view_api_key", "class:{class_id}"))],
+    response_model=schemas.ClassCredentialsResponse,
+)
+async def get_class_credentials(class_id: str, request: StateRequest):
+    credentials = await models.ClassCredential.get_by_class_id(
+        request.state["db"], int(class_id)
+    )
+    credentials_by_purpose = {
+        credential.purpose: credential for credential in credentials
+    }
+    return {
+        "credentials": [
+            _serialize_class_credential_slot(
+                purpose,
+                credentials_by_purpose.get(purpose),
+            )
+            for purpose in schemas.ClassCredentialPurpose
+        ]
+    }
+
+
+@v1.post(
+    "/class/{class_id}/credentials",
+    dependencies=[Depends(Authz("admin", "class:{class_id}"))],
+    response_model=schemas.ClassCredentialResponse,
+)
+async def create_class_credential(
+    class_id: str,
+    update: schemas.CreateClassCredential,
+    request: StateRequest,
+):
+    purpose = update.purpose
+    if not update.api_key:
+        raise HTTPException(
+            status_code=400,
+            detail="API key must be provided to create the class credential.",
+        )
+    if not provider_matches_purpose(update.provider, purpose):
+        expected_provider = expected_provider_for_purpose(purpose)
+        raise HTTPException(
+            status_code=400,
+            detail=f"{purpose.value} only supports the {expected_provider.value} provider.",
+        )
+    existing_credential = await models.ClassCredential.get_by_class_id_and_purpose(
+        request.state["db"],
+        int(class_id),
+        purpose,
+    )
+    if existing_credential is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Credential already exists for this purpose and cannot be changed.",
+        )
+    try:
+        is_valid = await validate_class_credential(update.api_key, update.provider)
+    except ClassCredentialValidationUnavailableError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Unable to validate the API key right now because the provider is unavailable. "
+                "Please try again later."
+            ),
+        ) from exc
+    if not is_valid:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid API key provided. Please try again.",
+        )
+    try:
+        credential = await models.ClassCredential.create(
+            request.state["db"],
+            int(class_id),
+            purpose,
+            update.api_key,
+            update.provider,
+        )
+    except (IntegrityError, models.ClassCredentialAlreadyExistsError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Credential already exists for this purpose and cannot be changed.",
+        ) from exc
+    await request.state["authz"].write_safe(
+        grant=[
+            (
+                f"user:{request.state['session'].user.id}",
+                "can_view_api_key",
+                f"class:{class_id}",
+            )
+        ]
+    )
+    return {"credential": _serialize_class_credential_slot(purpose, credential)}
+
+
 @v1.put(
     "/class/{class_id}/api_key",
     dependencies=[Depends(Authz("admin", "class:{class_id}"))],
@@ -2830,10 +2944,21 @@ async def update_class_api_key(
         and existing_key.api_key_obj.endpoint == update.endpoint
         and existing_key.api_key_obj.api_version == update.api_version
     ):
-        return {"api_key": existing_key.api_key_obj}
+        return {
+            "api_key": schemas.RedactedApiKey.from_raw(
+                existing_key.api_key_obj.api_key,
+                existing_key.api_key_obj.provider,
+                existing_key.api_key_obj.endpoint,
+                existing_key.api_key_obj.api_version,
+                existing_key.api_key_obj.available_as_default,
+            )
+        }
     if existing_key.api_key == update.api_key:
         return {
-            "api_key": schemas.ApiKey(api_key=existing_key.api_key, provider="openai")
+            "api_key": schemas.RedactedApiKey.from_raw(
+                existing_key.api_key,
+                "openai",
+            )
         }
     elif not existing_key.api_key_obj and not existing_key.api_key:
         response = await validate_api_key(
@@ -2866,7 +2991,7 @@ async def update_class_api_key(
                 )
             ]
         )
-        return {"api_key": api_key_obj}
+        return {"api_key": schemas.RedactedApiKey.from_api_key_obj(api_key_obj)}
     else:
         raise HTTPException(
             status_code=400,
@@ -2884,15 +3009,15 @@ async def get_class_api_key(class_id: str, request: StateRequest):
     result = await models.Class.get_api_key(request.state["db"], int(class_id))
     if result.api_key_obj:
         api_key_obj = result.api_key_obj
-        response = schemas.ApiKey(
-            api_key=f"{api_key_obj.api_key[:8]}{'*' * 20}{api_key_obj.api_key[-4:]}",
-            provider=api_key_obj.provider,
-            endpoint=api_key_obj.endpoint,
-            api_version=api_key_obj.api_version,
+        response = schemas.RedactedApiKey.from_raw(
+            api_key_obj.api_key,
+            api_key_obj.provider,
+            api_key_obj.endpoint,
+            api_key_obj.api_version,
         )
     elif result.api_key:
-        response = schemas.ApiKey(
-            api_key=f"{result.api_key[:8]}{'*' * 20}{result.api_key[-4:]}",
+        response = schemas.RedactedApiKey.from_raw(
+            result.api_key,
             provider="openai",
         )
 
@@ -8596,6 +8721,22 @@ def _classes_share_api_key(src: models.Class | None, tgt: models.Class | None) -
     return False
 
 
+async def _ensure_lecture_video_assistant_copy_allowed(
+    session: AsyncSession,
+    assistant: models.Assistant,
+    target_class_id: int,
+) -> None:
+    if assistant.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
+        return
+
+    try:
+        await ensure_lecture_video_copy_credentials(
+            session, assistant.class_id, target_class_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
 @v1.post(
     "/class/{class_id}/assistant/{assistant_id}/copy",
     dependencies=[
@@ -8660,6 +8801,9 @@ async def copy_assistant(
             status_code=400,
             detail="Source and target classes must share the same API key to copy assistants.",
         )
+    await _ensure_lecture_video_assistant_copy_allowed(
+        request.state["db"], assistant, target_class_id
+    )
 
     can_create_in_target = await request.state["authz"].test(
         request.state["auth_user"],
@@ -8755,6 +8899,9 @@ async def copy_assistant_check(
             status_code=400,
             detail="Source and target classes must share the same API key to copy assistants.",
         )
+    await _ensure_lecture_video_assistant_copy_allowed(
+        request.state["db"], assistant, target_class_id
+    )
 
     can_create_in_target = await request.state["authz"].test(
         request.state["auth_user"],

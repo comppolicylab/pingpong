@@ -218,8 +218,8 @@ has_access = await request.state["authz"].check("viewer", f"class:{class_id}", r
 **Grant permissions:**
 ```python
 await request.state["authz"].write_safe(
-    grants=[("viewer", f"class:{class_id}", f"user:{user_id}")],
-    revokes=[]
+    grant=[("viewer", f"class:{class_id}", f"user:{user_id}")],
+    revoke=[]
 )
 ```
 
