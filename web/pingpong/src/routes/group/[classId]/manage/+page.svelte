@@ -130,6 +130,9 @@
 			const errorMessage = getErrorMessage(parseInt(errorCode) || 0);
 			sadToast(errorMessage);
 		}
+		if (data.classCredentialsError) {
+			sadToast(data.classCredentialsError);
+		}
 
 		// If URL contains the section 'summary', scroll the manageContainer to the summaryElement
 		const waitForHeaderHeight = () => {
@@ -252,13 +255,6 @@
 			: dayjs(data.class.last_rate_limited_at).format('MMMM D, YYYY [at] h:mma')
 		: null;
 
-	$: apiKey = data.apiKey || null;
-	$: classCredentials = data.classCredentials || [];
-	$: allFeatureCredentialsConfigured = featureCredentialConfigs.every((fc) =>
-		classCredentials.some((cc) => cc.purpose === fc.purpose && cc.credential)
-	);
-	let apiProvider = 'openai';
-	let updatingClassCredentialPurpose: api.ClassCredentialPurpose | null = null;
 	const featureCredentialConfigs: {
 		purpose: api.ClassCredentialPurpose;
 		title: string;
@@ -283,6 +279,16 @@
 			providerLabel: 'ElevenLabs'
 		}
 	];
+	let apiKey = data.apiKey || null;
+	$: classCredentialsLoaded = data.classCredentials !== undefined;
+	$: classCredentials = data.classCredentials ?? [];
+	$: allFeatureCredentialsConfigured =
+		classCredentialsLoaded &&
+		featureCredentialConfigs.every((fc) =>
+			classCredentials.some((cc) => cc.purpose === fc.purpose && cc.credential)
+		);
+	let apiProvider = 'openai';
+	let updatingClassCredentialPurpose: api.ClassCredentialPurpose | null = null;
 
 	$: subscriptionInfo = data.subscription || null;
 
@@ -306,7 +312,7 @@
 			return aName.localeCompare(bName);
 		}) as FileUploadInfo[];
 
-	$: hasApiKey = !!data?.hasAPIKey;
+	let hasApiKey = !!data?.hasAPIKey;
 	$: canExportThreads = !!data?.grants?.isAdmin || !!data?.grants?.isTeacher;
 	$: canEditClassInfo = !!data?.grants?.canEditInfo;
 	$: canManageClassUsers = !!data?.grants?.canManageUsers;
@@ -535,7 +541,9 @@
 			let msg = result.detail || 'An unknown error occurred';
 			sadToast(msg);
 		} else {
-			invalidateAll();
+			const response = result as api.ApiKeyResponse;
+			apiKey = response.api_key || null;
+			hasApiKey = !!response.api_key;
 			$updatingApiKey = false;
 			happyToast('Saved API key!');
 		}
@@ -559,22 +567,27 @@
 			return;
 		}
 
-		const result = await api.createClassCredential(
-			fetch,
-			data.class.id,
-			purpose,
-			provider,
-			apiKeyValue
-		);
-		if (api.isErrorResponse(result)) {
-			updatingClassCredentialPurpose = null;
-			sadToast(result.detail || 'An unknown error occurred');
-			return;
-		}
+		try {
+			const result = await api.createClassCredential(
+				fetch,
+				data.class.id,
+				purpose,
+				provider,
+				apiKeyValue
+			);
+			if (api.isErrorResponse(result)) {
+				sadToast(result.detail || 'An unknown error occurred');
+				return;
+			}
 
-		await invalidateAll();
-		updatingClassCredentialPurpose = null;
-		happyToast('Saved feature credential!');
+			await invalidateAll();
+			happyToast('Saved feature credential!');
+		} catch (error) {
+			sadToast('An unknown error occurred');
+			throw error;
+		} finally {
+			updatingClassCredentialPurpose = null;
+		}
 	};
 
 	/**
@@ -1578,7 +1591,9 @@
 						{/if}
 						<Label for="apiKey" class="text-sm">API Key</Label>
 						<div class="relative mb-1 w-full">
-							<span id="apiKey" class="font-mono text-sm font-normal">{apiKey?.api_key}</span>
+							<span id="apiKey" class="font-mono text-sm font-normal"
+								>{apiKey?.redacted_api_key}</span
+							>
 						</div>
 						{#if apiKey?.provider == 'openai'}
 							<Helper
@@ -1640,10 +1655,20 @@
 			<div class="col-span-2">
 				<div class="mb-4 flex items-center justify-between">
 					<div class="text-lg font-medium text-gray-900">Lecture Videos</div>
-					{#if allFeatureCredentialsConfigured}
+					{#if !classCredentialsLoaded}
+						<div class="flex items-center gap-1.5 text-sm font-medium text-red-600">
+							<ExclamationCircleOutline class="h-4 w-4" />
+							<span>Credential status unavailable</span>
+						</div>
+					{:else if allFeatureCredentialsConfigured && hasApiKey}
 						<div class="flex items-center gap-1.5 text-sm font-medium text-green-600">
 							<CheckCircleOutline class="h-4 w-4" />
 							<span>Ready to use</span>
+						</div>
+					{:else if allFeatureCredentialsConfigured}
+						<div class="flex items-center gap-1.5 text-sm font-medium text-amber-600">
+							<ExclamationCircleOutline class="h-4 w-4" />
+							<span>Additional providers configured, but AI provider key missing</span>
 						</div>
 					{:else}
 						<div class="flex items-center gap-1.5 text-sm font-medium text-amber-600">
@@ -1652,81 +1677,90 @@
 						</div>
 					{/if}
 				</div>
-				{#each featureCredentialConfigs as featureCredential, i (featureCredential.purpose)}
-					{@const slot = classCredentials.find((c) => c.purpose === featureCredential.purpose) || {
-						purpose: featureCredential.purpose,
-						credential: null
-					}}
-					{#if i > 0}
-						<hr class="my-5 border-gray-200" />
-					{/if}
-					{#if !slot.credential}
-						<form
-							onsubmit={(event) =>
-								submitCreateClassCredential(
-									event,
-									featureCredential.purpose,
-									featureCredential.provider
-								)}
-						>
-							<Label for={`feature-api-key-${featureCredential.purpose}`} class="text-sm"
-								>{featureCredential.providerLabel}: {featureCredential.title}</Label
+				{#if !classCredentialsLoaded}
+					<Alert color="red">
+						<span class="font-medium">Unable to load saved provider credentials.</span>
+						Refresh the page and try again.
+					</Alert>
+				{:else}
+					{#each featureCredentialConfigs as featureCredential, i (featureCredential.purpose)}
+						{@const slot = classCredentials.find(
+							(c) => c.purpose === featureCredential.purpose
+						) || {
+							purpose: featureCredential.purpose,
+							credential: null
+						}}
+						{#if i > 0}
+							<hr class="my-5 border-gray-200" />
+						{/if}
+						{#if !slot.credential}
+							<form
+								onsubmit={(event) =>
+									submitCreateClassCredential(
+										event,
+										featureCredential.purpose,
+										featureCredential.provider
+									)}
 							>
-							<Helper class="mb-3"
-								>{featureCredential.description}
-								<b>You can't change the API key later.</b></Helper
+								<Label for={`feature-api-key-${featureCredential.purpose}`} class="text-sm"
+									>{featureCredential.providerLabel}: {featureCredential.title}</Label
+								>
+								<Helper class="mb-3"
+									>{featureCredential.description}
+									<b>You can't change the API key later.</b></Helper
+								>
+								<div class="relative w-full pt-2 pb-2">
+									<ButtonGroup class="w-full">
+										<InputAddon>
+											{#if featureCredential.provider === 'elevenlabs'}
+												<ElevenLabsLogo size="6" />
+											{:else if featureCredential.provider === 'gemini'}
+												<GeminiLogo size="6" />
+											{/if}
+										</InputAddon>
+										<Input
+											id={`feature-api-key-${featureCredential.purpose}`}
+											name="apiKey"
+											autocomplete="off"
+											placeholder="{featureCredential.providerLabel} API key"
+											defaultClass="block w-full disabled:cursor-not-allowed disabled:opacity-50 rtl:text-right font-mono"
+										/>
+										<Button
+											type="submit"
+											disabled={updatingClassCredentialPurpose !== null}
+											class="rounded-l-none bg-orange text-white hover:bg-orange-dark"
+											>{updatingClassCredentialPurpose === featureCredential.purpose
+												? 'Saving...'
+												: 'Save'}</Button
+										>
+									</ButtonGroup>
+								</div>
+							</form>
+						{:else}
+							<Label for={`feature-provider-${featureCredential.purpose}`} class="mb-1 text-sm"
+								>{featureCredential.title}</Label
 							>
-							<div class="relative w-full pt-2 pb-2">
-								<ButtonGroup class="w-full">
-									<InputAddon>
-										{#if featureCredential.provider === 'elevenlabs'}
-											<ElevenLabsLogo size="6" />
-										{:else if featureCredential.provider === 'gemini'}
-											<GeminiLogo size="6" />
-										{/if}
-									</InputAddon>
-									<Input
-										id={`feature-api-key-${featureCredential.purpose}`}
-										name="apiKey"
-										autocomplete="off"
-										placeholder="{featureCredential.providerLabel} API key"
-										defaultClass="block w-full disabled:cursor-not-allowed disabled:opacity-50 rtl:text-right font-mono"
-									/>
-									<Button
-										type="submit"
-										disabled={updatingClassCredentialPurpose !== null}
-										class="rounded-l-none bg-orange text-white hover:bg-orange-dark"
-										>{updatingClassCredentialPurpose === featureCredential.purpose
-											? 'Saving...'
-											: 'Save'}</Button
-									>
-								</ButtonGroup>
+							<div
+								class="mb-5 flex flex-row items-center gap-1.5"
+								id={`feature-provider-${featureCredential.purpose}`}
+							>
+								{#if featureCredential.provider === 'elevenlabs'}
+									<ElevenLabsLogo size="5" />
+								{:else if featureCredential.provider === 'gemini'}
+									<GeminiLogo size="5" />
+								{/if}
+								<span class="text-sm font-normal">{featureCredential.providerLabel}</span>
 							</div>
-						</form>
-					{:else}
-						<Label for={`feature-provider-${featureCredential.purpose}`} class="mb-1 text-sm"
-							>{featureCredential.title}</Label
-						>
-						<div
-							class="mb-5 flex flex-row items-center gap-1.5"
-							id={`feature-provider-${featureCredential.purpose}`}
-						>
-							{#if featureCredential.provider === 'elevenlabs'}
-								<ElevenLabsLogo size="5" />
-							{:else if featureCredential.provider === 'gemini'}
-								<GeminiLogo size="5" />
-							{/if}
-							<span class="text-sm font-normal">{featureCredential.providerLabel}</span>
-						</div>
-						<Label class="mb-1 text-sm">API Key</Label>
-						<div class="mb-1 font-mono text-sm font-normal">
-							{slot.credential.api_key}
-						</div>
-						<Helper
-							>This credential can't be changed because existing assistants may depend on it.</Helper
-						>
-					{/if}
-				{/each}
+							<Label class="mb-1 text-sm">API Key</Label>
+							<div class="mb-1 font-mono text-sm font-normal">
+								{slot.credential.redacted_api_key}
+							</div>
+							<Helper
+								>This credential can't be changed because existing assistants may depend on it.</Helper
+							>
+						{/if}
+					{/each}
+				{/if}
 			</div>
 		</div>
 	{/if}

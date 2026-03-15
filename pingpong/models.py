@@ -4328,6 +4328,10 @@ class APIKey(Base):
     region = Column(String, nullable=True)
     available_as_default = Column(Boolean, default=False)
 
+    @property
+    def redacted_api_key(self) -> str:
+        return schemas.mask_api_key_value(self.api_key)
+
     @classmethod
     async def get_by_id(cls, session: AsyncSession, id_: int) -> "APIKey | None":
         stmt = select(APIKey).where(APIKey.id == int(id_))
@@ -4356,13 +4360,15 @@ class APIKey(Base):
             set_available_as_default = True
         else:
             set_available_as_default = APIKey.available_as_default
+        update_values = dict(
+            api_version=api_version,
+            available_as_default=set_available_as_default,
+        )
+        if region is not None:
+            update_values["region"] = region
         stmt = insert_stmt.on_conflict_do_update(
             index_elements=[APIKey.api_key, APIKey.provider],
-            set_=dict(
-                api_version=api_version,
-                region=region,
-                available_as_default=set_available_as_default,
-            ),
+            set_=update_values,
         ).returning(APIKey)
         return await session.scalar(stmt)
 
@@ -5130,13 +5136,23 @@ class ClassCredential(Base):
             api_key=api_key,
             provider=provider.value,
         )
-        credential = ClassCredential(
-            class_id=int(class_id),
-            purpose=purpose,
-            api_key_id=api_key_obj.id,
+        stmt = (
+            _get_upsert_stmt(session)(ClassCredential)
+            .values(
+                class_id=int(class_id),
+                purpose=purpose,
+                api_key_id=api_key_obj.id,
+            )
+            .on_conflict_do_nothing(
+                index_elements=[ClassCredential.class_id, ClassCredential.purpose],
+            )
+            .returning(ClassCredential)
         )
-        session.add(credential)
-        await session.flush()
+        credential = await session.scalar(stmt)
+        if credential is None:
+            raise ValueError(
+                "Credential already exists for this purpose and cannot be changed."
+            )
         await session.refresh(credential)
         await credential.awaitable_attrs.api_key_obj
         return credential

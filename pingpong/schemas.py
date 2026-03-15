@@ -1905,19 +1905,67 @@ class CreateClassCredential(BaseModel):
     @field_validator("api_key")
     @classmethod
     def strip_api_key(cls, v: str) -> str:
-        return v.strip()
+        v = v.strip()
+        if not v:
+            raise ValueError("api_key must not be empty")
+        return v
 
     model_config = ConfigDict(
         from_attributes=True,
     )
 
 
-class ApiKey(BaseModel):
+def mask_api_key_value(api_key: str) -> str:
+    if len(api_key) <= 12:
+        return "*" * len(api_key)
+    return f"{api_key[:8]}{'*' * 20}{api_key[-4:]}"
+
+
+class ApiKeyPrivate(BaseModel):
     api_key: str
     provider: str
     endpoint: str | None = None
     api_version: str | None = None
     available_as_default: bool | None = None
+
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+
+class RedactedApiKey(BaseModel):
+    redacted_api_key: str
+    provider: str
+    endpoint: str | None = None
+    api_version: str | None = None
+    available_as_default: bool | None = None
+
+    @classmethod
+    def from_api_key_obj(cls, api_key_obj: object) -> "RedactedApiKey":
+        return cls(
+            redacted_api_key=getattr(api_key_obj, "redacted_api_key"),
+            provider=getattr(api_key_obj, "provider"),
+            endpoint=getattr(api_key_obj, "endpoint", None),
+            api_version=getattr(api_key_obj, "api_version", None),
+            available_as_default=getattr(api_key_obj, "available_as_default", None),
+        )
+
+    @classmethod
+    def from_raw(
+        cls,
+        api_key: str,
+        provider: str,
+        endpoint: str | None = None,
+        api_version: str | None = None,
+        available_as_default: bool | None = None,
+    ) -> "RedactedApiKey":
+        return cls(
+            redacted_api_key=mask_api_key_value(api_key),
+            provider=provider,
+            endpoint=endpoint,
+            api_version=api_version,
+            available_as_default=available_as_default,
+        )
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -1930,7 +1978,7 @@ class APIKeyValidationResponse(BaseModel):
 
 
 class APIKeyResponse(BaseModel):
-    api_key: ApiKey | None = None
+    api_key: RedactedApiKey | None = None
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -1939,7 +1987,7 @@ class APIKeyResponse(BaseModel):
 
 class APIKeyModelResponse(BaseModel):
     api_key: str | None = None
-    api_key_obj: ApiKey | None = None
+    api_key_obj: ApiKeyPrivate | None = None
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -1948,7 +1996,7 @@ class APIKeyModelResponse(BaseModel):
 
 class ClassCredentialSlot(BaseModel):
     purpose: ClassCredentialPurpose
-    credential: ApiKey | None = None
+    credential: RedactedApiKey | None = None
 
     model_config = ConfigDict(
         from_attributes=True,

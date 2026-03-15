@@ -261,8 +261,9 @@ async def test_copy_class_rejects_unauthorized_target_institution(
 
 @with_user(123)
 @with_institution(11, "Test Institution")
+@pytest.mark.usefixtures("authz")
 async def test_copy_group_copies_lecture_video_class_credentials(
-    authz, config, db, institution, monkeypatch, user
+    config, db, institution, monkeypatch, user
 ):
     monkeypatch.setattr(
         copy_module, "send_clone_group_notification", AsyncMock(return_value=None)

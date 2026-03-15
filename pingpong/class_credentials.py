@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import ssl
 
@@ -52,10 +53,20 @@ async def validate_class_credential(
     if provider == schemas.ClassCredentialProvider.ELEVENLABS:
         client = AsyncElevenLabs(api_key=api_key)
         try:
-            await client.voices.settings.get_default()
+            await asyncio.wait_for(client.voices.settings.get_default(), 10)
             return True
         except ElevenLabsUnauthorizedError:
             return False
+        except asyncio.TimeoutError as exc:
+            logger.warning(
+                "Timed out validating %s class credential.",
+                safe_provider,
+                exc_info=exc,
+            )
+            raise ClassCredentialValidationUnavailableError(
+                provider=provider,
+                message="Unable to validate the ElevenLabs API key right now.",
+            ) from exc
         except ssl.SSLError as exc:
             logger.warning(
                 "SSL error validating %s class credential.",
@@ -78,16 +89,25 @@ async def validate_class_credential(
             ) from exc
     elif provider == schemas.ClassCredentialProvider.GEMINI:
         try:
+            # The google-genai SDK documents `Client().aio` as an async context
+            # manager and supports the one-shot form used here:
+            # https://github.com/googleapis/python-genai/blob/main/README.md#client-context-managers
             async with genai.Client(api_key=api_key).aio as aclient:
-                await aclient.models.list(config={"page_size": 1})
+                await asyncio.wait_for(aclient.models.list(config={"page_size": 1}), 10)
             return True
+        except genai.errors.ClientError:
+            return False
+        except asyncio.TimeoutError as exc:
+            logger.warning(
+                "Timed out validating %s class credential.",
+                safe_provider,
+                exc_info=exc,
+            )
+            raise ClassCredentialValidationUnavailableError(
+                provider=provider,
+                message="Unable to validate the Gemini API key right now.",
+            ) from exc
         except genai.errors.APIError as exc:
-            status_code = getattr(exc, "code", None)
-            message = str(exc)
-            if status_code in {400, 401, 403} and (
-                "API_KEY_INVALID" in message or "API key not valid" in message
-            ):
-                return False
             logger.warning(
                 "Failed to validate %s class credential due to provider API error.",
                 safe_provider,

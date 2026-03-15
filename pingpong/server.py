@@ -2816,12 +2816,6 @@ async def check_class_api_key(class_id: str, request: StateRequest):
     return {"has_api_key": False}
 
 
-def _mask_api_key_value(api_key: str) -> str:
-    if len(api_key) <= 12:
-        return "*" * len(api_key)
-    return f"{api_key[:8]}{'*' * 20}{api_key[-4:]}"
-
-
 def _serialize_class_credential_slot(
     purpose: schemas.ClassCredentialPurpose,
     credential: models.ClassCredential | None,
@@ -2830,10 +2824,7 @@ def _serialize_class_credential_slot(
         return schemas.ClassCredentialSlot(purpose=purpose, credential=None)
     return schemas.ClassCredentialSlot(
         purpose=purpose,
-        credential=schemas.ApiKey(
-            api_key=_mask_api_key_value(credential.api_key_obj.api_key),
-            provider=credential.api_key_obj.provider,
-        ),
+        credential=schemas.RedactedApiKey.from_api_key_obj(credential.api_key_obj),
     )
 
 
@@ -2915,11 +2906,11 @@ async def create_class_credential(
             update.api_key,
             update.provider,
         )
-    except IntegrityError:
+    except (IntegrityError, ValueError) as exc:
         raise HTTPException(
             status_code=400,
             detail="Credential already exists for this purpose and cannot be changed.",
-        )
+        ) from exc
     await request.state["authz"].write_safe(
         grant=[
             (
@@ -2953,10 +2944,21 @@ async def update_class_api_key(
         and existing_key.api_key_obj.endpoint == update.endpoint
         and existing_key.api_key_obj.api_version == update.api_version
     ):
-        return {"api_key": existing_key.api_key_obj}
+        return {
+            "api_key": schemas.RedactedApiKey.from_raw(
+                existing_key.api_key_obj.api_key,
+                existing_key.api_key_obj.provider,
+                existing_key.api_key_obj.endpoint,
+                existing_key.api_key_obj.api_version,
+                existing_key.api_key_obj.available_as_default,
+            )
+        }
     if existing_key.api_key == update.api_key:
         return {
-            "api_key": schemas.ApiKey(api_key=existing_key.api_key, provider="openai")
+            "api_key": schemas.RedactedApiKey.from_raw(
+                existing_key.api_key,
+                "openai",
+            )
         }
     elif not existing_key.api_key_obj and not existing_key.api_key:
         response = await validate_api_key(
@@ -2989,7 +2991,7 @@ async def update_class_api_key(
                 )
             ]
         )
-        return {"api_key": api_key_obj}
+        return {"api_key": schemas.RedactedApiKey.from_api_key_obj(api_key_obj)}
     else:
         raise HTTPException(
             status_code=400,
@@ -3007,15 +3009,15 @@ async def get_class_api_key(class_id: str, request: StateRequest):
     result = await models.Class.get_api_key(request.state["db"], int(class_id))
     if result.api_key_obj:
         api_key_obj = result.api_key_obj
-        response = schemas.ApiKey(
-            api_key=_mask_api_key_value(api_key_obj.api_key),
-            provider=api_key_obj.provider,
-            endpoint=api_key_obj.endpoint,
-            api_version=api_key_obj.api_version,
+        response = schemas.RedactedApiKey.from_raw(
+            api_key_obj.api_key,
+            api_key_obj.provider,
+            api_key_obj.endpoint,
+            api_key_obj.api_version,
         )
     elif result.api_key:
-        response = schemas.ApiKey(
-            api_key=_mask_api_key_value(result.api_key),
+        response = schemas.RedactedApiKey.from_raw(
+            result.api_key,
             provider="openai",
         )
 
@@ -8732,7 +8734,7 @@ async def _ensure_lecture_video_assistant_copy_allowed(
             session, assistant.class_id, target_class_id
         )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @v1.post(

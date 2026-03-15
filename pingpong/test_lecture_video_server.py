@@ -9,6 +9,7 @@ from fastapi import HTTPException, UploadFile
 from pydantic import ValidationError
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 import pingpong.schemas as schemas
@@ -86,7 +87,7 @@ def lecture_video_manifest(
 
 
 async def create_lecture_video_copy_credentials(
-    session,
+    session: AsyncSession,
     class_id: int,
     *,
     gemini_key: str = "shared-gemini-key",

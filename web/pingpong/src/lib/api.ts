@@ -1375,7 +1375,7 @@ export const updateExternalLoginProvider = async (
  * Api key from the server.
  */
 export type ApiKey = {
-	api_key: string;
+	redacted_api_key: string;
 	provider?: string;
 	endpoint?: string;
 	api_version?: string;

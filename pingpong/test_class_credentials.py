@@ -1,12 +1,15 @@
 import importlib
 from unittest.mock import AsyncMock
 
+import pytest
 from sqlalchemy import func, select
 
-from pingpong import models
+from pingpong import models, schemas
+from pingpong import class_credentials as class_credentials_module
 from pingpong.class_credentials import (
     ClassCredentialValidationSSLError,
     ClassCredentialValidationUnavailableError,
+    validate_class_credential,
 )
 from .testutil import with_authz, with_user, with_institution
 
@@ -61,7 +64,7 @@ async def test_create_class_credential_grants_view_permission(
         server_module, "validate_class_credential", AsyncMock(return_value=True)
     )
 
-    api_key = "12345678abcdefghijklmnopqrstuv0000"
+    api_key = "example-api-key-0000"
     response = api.post(
         "/api/v1/class/1/credentials",
         json={
@@ -77,11 +80,11 @@ async def test_create_class_credential_grants_view_permission(
         "credential": {
             "purpose": "lecture_video_narration_tts",
             "credential": {
-                "api_key": _masked(api_key),
+                "redacted_api_key": _masked(api_key),
                 "provider": "elevenlabs",
                 "endpoint": None,
                 "api_version": None,
-                "available_as_default": None,
+                "available_as_default": False,
             },
         }
     }
@@ -97,11 +100,11 @@ async def test_create_class_credential_grants_view_permission(
             {
                 "purpose": "lecture_video_narration_tts",
                 "credential": {
-                    "api_key": _masked(api_key),
+                    "redacted_api_key": _masked(api_key),
                     "provider": "elevenlabs",
                     "endpoint": None,
                     "api_version": None,
-                    "available_as_default": None,
+                    "available_as_default": False,
                 },
             },
             {
@@ -269,6 +272,40 @@ async def test_create_class_credential_is_immutable_after_first_save(
 
 @with_user(123)
 @with_institution(11, "Test Institution")
+@with_authz(grants=[("user:123", "admin", "class:1")])
+async def test_create_class_credential_returns_400_when_model_create_raises_value_error(
+    api, db, institution, valid_user_token, monkeypatch
+):
+    await _create_class(db, institution.id, 1)
+    monkeypatch.setattr(
+        server_module, "validate_class_credential", AsyncMock(return_value=True)
+    )
+
+    async def _raise_value_error(*args, **kwargs):
+        raise ValueError(
+            "Credential already exists for this purpose and cannot be changed."
+        )
+
+    monkeypatch.setattr(models.ClassCredential, "create", _raise_value_error)
+
+    response = api.post(
+        "/api/v1/class/1/credentials",
+        json={
+            "api_key": "gemini-key-0002",
+            "provider": "gemini",
+            "purpose": "lecture_video_manifest_generation",
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": "Credential already exists for this purpose and cannot be changed."
+    }
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
 @with_authz(
     grants=[
         ("user:123", "admin", "class:1"),
@@ -343,12 +380,88 @@ async def test_create_class_credential_uses_body_purpose(
 
 
 def test_mask_api_key_value_fully_masks_short_values():
-    assert server_module._mask_api_key_value("short") == "*****"
-    assert server_module._mask_api_key_value("123456789012") == "************"
+    assert schemas.mask_api_key_value("short") == "*****"
+    assert schemas.mask_api_key_value("test-key-000") == "************"
     assert (
-        server_module._mask_api_key_value("12345678abcdefghijklmnopqrstuv0000")
-        == "12345678********************0000"
+        schemas.mask_api_key_value("example-api-key-0000")
+        == "example-********************0000"
     )
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "admin", "class:1"),
+        ("user:123", "can_view_api_key", "class:1"),
+    ]
+)
+async def test_class_api_key_responses_are_redacted_even_when_returning_models(
+    api, db, institution, valid_user_token, monkeypatch
+):
+    await _create_class(db, institution.id, 1)
+    monkeypatch.setattr(
+        server_module,
+        "validate_api_key",
+        AsyncMock(return_value=schemas.APIKeyValidationResponse(valid=True)),
+    )
+
+    api_key = "example-api-key-0000"
+    update_response = api.put(
+        "/api/v1/class/1/api_key",
+        json={
+            "api_key": api_key,
+            "provider": "openai",
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert update_response.status_code == 200
+    assert update_response.json() == {
+        "api_key": {
+            "redacted_api_key": _masked(api_key),
+            "provider": "openai",
+            "endpoint": None,
+            "api_version": None,
+            "available_as_default": False,
+        }
+    }
+
+    duplicate_update_response = api.put(
+        "/api/v1/class/1/api_key",
+        json={
+            "api_key": api_key,
+            "provider": "openai",
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert duplicate_update_response.status_code == 200
+    assert duplicate_update_response.json() == {
+        "api_key": {
+            "redacted_api_key": _masked(api_key),
+            "provider": "openai",
+            "endpoint": None,
+            "api_version": None,
+            "available_as_default": False,
+        }
+    }
+
+    get_response = api.get(
+        "/api/v1/class/1/api_key",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert get_response.status_code == 200
+    assert get_response.json() == {
+        "api_key": {
+            "redacted_api_key": _masked(api_key),
+            "provider": "openai",
+            "endpoint": None,
+            "api_version": None,
+            "available_as_default": None,
+        }
+    }
 
 
 async def test_api_key_create_or_update_promotes_available_as_default_on_conflict(db):
@@ -397,3 +510,106 @@ async def test_api_key_create_or_update_preserves_available_as_default_on_false_
 
     assert created.id == updated.id
     assert updated.available_as_default is True
+
+
+async def test_api_key_create_or_update_preserves_region_when_upsert_region_is_none(db):
+    async with db.async_session() as session:
+        created = await models.APIKey.create_or_update(
+            session=session,
+            api_key="shared-azure-key",
+            provider="azure_openai",
+            region="eastus",
+        )
+        await session.commit()
+
+        updated = await models.APIKey.create_or_update(
+            session=session,
+            api_key="shared-azure-key",
+            provider="azure_openai",
+        )
+        await session.commit()
+        await session.refresh(updated)
+
+    assert created.id == updated.id
+    assert updated.region == "eastus"
+
+
+async def test_class_credential_create_raises_on_duplicate_insert(db):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            name="Credential race class",
+            term="Fall 2026",
+        )
+        session.add(class_)
+        await session.commit()
+        await session.refresh(class_)
+
+        created = await models.ClassCredential.create(
+            session=session,
+            class_id=class_.id,
+            purpose=schemas.ClassCredentialPurpose.LECTURE_VIDEO_MANIFEST_GENERATION,
+            api_key="duplicate-gemini-key",
+            provider=schemas.ClassCredentialProvider.GEMINI,
+        )
+        await session.commit()
+
+        with pytest.raises(
+            ValueError,
+            match="Credential already exists for this purpose and cannot be changed.",
+        ):
+            await models.ClassCredential.create(
+                session=session,
+                class_id=class_.id,
+                purpose=schemas.ClassCredentialPurpose.LECTURE_VIDEO_MANIFEST_GENERATION,
+                api_key="duplicate-gemini-key-2",
+                provider=schemas.ClassCredentialProvider.GEMINI,
+            )
+
+        credential_count = await session.scalar(
+            select(func.count()).select_from(models.ClassCredential)
+        )
+        await session.refresh(created)
+        created_api_key = await created.awaitable_attrs.api_key_obj
+        assert created_api_key.api_key == "duplicate-gemini-key"
+    assert credential_count == 1
+
+
+async def test_validate_class_credential_for_gemini_closes_async_and_sync_clients(
+    monkeypatch,
+):
+    events: list[tuple[str, object | None]] = []
+
+    class FakeModels:
+        async def list(self, *, config):
+            events.append(("list", config))
+
+    class FakeAsyncClient:
+        def __init__(self):
+            self.models = FakeModels()
+
+        async def __aenter__(self):
+            events.append(("aenter", None))
+            return self
+
+        async def __aexit__(self, exc_type, exc_value, traceback):
+            events.append(("aexit", None))
+
+    class FakeClient:
+        def __init__(self, *, api_key):
+            events.append(("init", api_key))
+            self.aio = FakeAsyncClient()
+
+    monkeypatch.setattr(class_credentials_module.genai, "Client", FakeClient)
+
+    result = await validate_class_credential(
+        api_key="gemini-key",
+        provider=schemas.ClassCredentialProvider.GEMINI,
+    )
+
+    assert result is True
+    assert events == [
+        ("init", "gemini-key"),
+        ("aenter", None),
+        ("list", {"page_size": 1}),
+        ("aexit", None),
+    ]
