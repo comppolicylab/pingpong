@@ -2906,7 +2906,7 @@ async def create_class_credential(
             update.api_key,
             update.provider,
         )
-    except (IntegrityError, ValueError) as exc:
+    except (IntegrityError, models.ClassCredentialAlreadyExistsError) as exc:
         raise HTTPException(
             status_code=400,
             detail="Credential already exists for this purpose and cannot be changed.",

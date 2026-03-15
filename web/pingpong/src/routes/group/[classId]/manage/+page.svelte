@@ -280,6 +280,9 @@
 		}
 	];
 	let apiKey = data.apiKey || null;
+	let loadedApiKey = data.apiKey || null;
+	let loadedHasApiKey = !!data?.hasAPIKey;
+	let loadedApiKeyClassId = data.class.id;
 	$: classCredentialsLoaded = data.classCredentials !== undefined;
 	$: classCredentials = data.classCredentials ?? [];
 	$: allFeatureCredentialsConfigured =
@@ -287,7 +290,7 @@
 		featureCredentialConfigs.every((fc) =>
 			classCredentials.some((cc) => cc.purpose === fc.purpose && cc.credential)
 		);
-	let apiProvider = 'openai';
+	let apiProvider = data.apiKey?.provider || 'openai';
 	let updatingClassCredentialPurpose: api.ClassCredentialPurpose | null = null;
 
 	$: subscriptionInfo = data.subscription || null;
@@ -313,6 +316,22 @@
 		}) as FileUploadInfo[];
 
 	let hasApiKey = !!data?.hasAPIKey;
+	$: {
+		const nextApiKey = data.apiKey || null;
+		const nextHasApiKey = !!data?.hasAPIKey;
+		if (
+			data.class.id !== loadedApiKeyClassId ||
+			nextApiKey !== loadedApiKey ||
+			nextHasApiKey !== loadedHasApiKey
+		) {
+			loadedApiKeyClassId = data.class.id;
+			loadedApiKey = nextApiKey;
+			loadedHasApiKey = nextHasApiKey;
+			apiKey = nextApiKey;
+			hasApiKey = nextHasApiKey;
+			apiProvider = nextApiKey?.provider || 'openai';
+		}
+	}
 	$: canExportThreads = !!data?.grants?.isAdmin || !!data?.grants?.isTeacher;
 	$: canEditClassInfo = !!data?.grants?.canEditInfo;
 	$: canManageClassUsers = !!data?.grants?.canManageUsers;

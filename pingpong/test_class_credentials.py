@@ -273,7 +273,7 @@ async def test_create_class_credential_is_immutable_after_first_save(
 @with_user(123)
 @with_institution(11, "Test Institution")
 @with_authz(grants=[("user:123", "admin", "class:1")])
-async def test_create_class_credential_returns_400_when_model_create_raises_value_error(
+async def test_create_class_credential_returns_400_when_model_create_raises_conflict_error(
     api, db, institution, valid_user_token, monkeypatch
 ):
     await _create_class(db, institution.id, 1)
@@ -281,12 +281,12 @@ async def test_create_class_credential_returns_400_when_model_create_raises_valu
         server_module, "validate_class_credential", AsyncMock(return_value=True)
     )
 
-    async def _raise_value_error(*args, **kwargs):
-        raise ValueError(
+    async def _raise_conflict_error(*args, **kwargs):
+        raise models.ClassCredentialAlreadyExistsError(
             "Credential already exists for this purpose and cannot be changed."
         )
 
-    monkeypatch.setattr(models.ClassCredential, "create", _raise_value_error)
+    monkeypatch.setattr(models.ClassCredential, "create", _raise_conflict_error)
 
     response = api.post(
         "/api/v1/class/1/credentials",
@@ -554,7 +554,7 @@ async def test_class_credential_create_raises_on_duplicate_insert(db):
         await session.commit()
 
         with pytest.raises(
-            ValueError,
+            models.ClassCredentialAlreadyExistsError,
             match="Credential already exists for this purpose and cannot be changed.",
         ):
             await models.ClassCredential.create(
@@ -564,14 +564,19 @@ async def test_class_credential_create_raises_on_duplicate_insert(db):
                 api_key="duplicate-gemini-key-2",
                 provider=schemas.ClassCredentialProvider.GEMINI,
             )
+        await session.commit()
 
         credential_count = await session.scalar(
             select(func.count()).select_from(models.ClassCredential)
+        )
+        api_key_count = await session.scalar(
+            select(func.count()).select_from(models.APIKey)
         )
         await session.refresh(created)
         created_api_key = await created.awaitable_attrs.api_key_obj
         assert created_api_key.api_key == "duplicate-gemini-key"
     assert credential_count == 1
+    assert api_key_count == 1
 
 
 async def test_validate_class_credential_for_gemini_closes_async_and_sync_clients(

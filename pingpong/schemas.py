@@ -1921,18 +1921,6 @@ def mask_api_key_value(api_key: str) -> str:
     return f"{api_key[:8]}{'*' * 20}{api_key[-4:]}"
 
 
-class ApiKeyPrivate(BaseModel):
-    api_key: str
-    provider: str
-    endpoint: str | None = None
-    api_version: str | None = None
-    available_as_default: bool | None = None
-
-    model_config = ConfigDict(
-        from_attributes=True,
-    )
-
-
 class RedactedApiKey(BaseModel):
     redacted_api_key: str
     provider: str
@@ -1979,15 +1967,6 @@ class APIKeyValidationResponse(BaseModel):
 
 class APIKeyResponse(BaseModel):
     api_key: RedactedApiKey | None = None
-
-    model_config = ConfigDict(
-        from_attributes=True,
-    )
-
-
-class APIKeyModelResponse(BaseModel):
-    api_key: str | None = None
-    api_key_obj: ApiKeyPrivate | None = None
 
     model_config = ConfigDict(
         from_attributes=True,

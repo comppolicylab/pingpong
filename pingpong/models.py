@@ -98,6 +98,10 @@ class AmbiguousExternalLoginLookupError(ValueError):
         )
 
 
+class ClassCredentialAlreadyExistsError(ValueError):
+    pass
+
+
 T = TypeVar("T")
 
 
@@ -4490,19 +4494,13 @@ class Class(Base):
         return await session.scalar(stmt)
 
     @classmethod
-    async def get_api_key(
-        cls, session: AsyncSession, id_: int
-    ) -> schemas.APIKeyModelResponse:
+    async def get_api_key(cls, session: AsyncSession, id_: int) -> "Class":
         stmt = (
             select(Class)
             .options(joinedload(Class.api_key_obj))
             .where(Class.id == int(id_))
         )
-        result = await session.scalar(stmt)
-        return schemas.APIKeyModelResponse(
-            api_key=result.api_key,
-            api_key_obj=result.api_key_obj,
-        )
+        return await session.scalar(stmt)
 
     @classmethod
     async def update_api_key(
@@ -5131,28 +5129,29 @@ class ClassCredential(Base):
         api_key: str,
         provider: schemas.ClassCredentialProvider,
     ) -> "ClassCredential":
-        api_key_obj = await APIKey.create_or_update(
-            session,
-            api_key=api_key,
-            provider=provider.value,
-        )
-        stmt = (
-            _get_upsert_stmt(session)(ClassCredential)
-            .values(
-                class_id=int(class_id),
-                purpose=purpose,
-                api_key_id=api_key_obj.id,
+        async with session.begin_nested():
+            api_key_obj = await APIKey.create_or_update(
+                session,
+                api_key=api_key,
+                provider=provider.value,
             )
-            .on_conflict_do_nothing(
-                index_elements=[ClassCredential.class_id, ClassCredential.purpose],
+            stmt = (
+                _get_upsert_stmt(session)(ClassCredential)
+                .values(
+                    class_id=int(class_id),
+                    purpose=purpose,
+                    api_key_id=api_key_obj.id,
+                )
+                .on_conflict_do_nothing(
+                    index_elements=[ClassCredential.class_id, ClassCredential.purpose],
+                )
+                .returning(ClassCredential)
             )
-            .returning(ClassCredential)
-        )
-        credential = await session.scalar(stmt)
-        if credential is None:
-            raise ValueError(
-                "Credential already exists for this purpose and cannot be changed."
-            )
+            credential = await session.scalar(stmt)
+            if credential is None:
+                raise ClassCredentialAlreadyExistsError(
+                    "Credential already exists for this purpose and cannot be changed."
+                )
         await session.refresh(credential)
         await credential.awaitable_attrs.api_key_obj
         return credential
