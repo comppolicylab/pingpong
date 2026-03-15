@@ -17,15 +17,22 @@ from pingpong.invite import send_clone_group_failed, send_clone_group_notificati
 from pingpong.lecture_video_service import lecture_video_grants
 from pingpong.schemas import (
     ClonedGroupNotification,
+    ClassCredentialPurpose,
     CopyClassRequest,
     CreateClass,
-    VectorStoreType,
     InteractionMode,
+    VectorStoreType,
 )
 from pingpong.vector_stores import create_vector_store
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
+
+
+LECTURE_VIDEO_COPY_REQUIRED_PURPOSES = (
+    ClassCredentialPurpose.LECTURE_VIDEO_MANIFEST_GENERATION,
+    ClassCredentialPurpose.LECTURE_VIDEO_NARRATION_TTS,
+)
 
 
 async def create_new_class_object(
@@ -146,6 +153,70 @@ async def copy_shared_files(
         new_grants.extend(_file_grants(file, target_class_id))
 
     await client.write_safe(grant=new_grants)
+
+
+async def copy_class_credentials(
+    session: AsyncSession,
+    source_class_id: int,
+    target_class_id: int,
+):
+    credentials = await models.ClassCredential.get_by_class_id(session, source_class_id)
+
+    for credential in credentials:
+        session.add(
+            models.ClassCredential(
+                class_id=target_class_id,
+                purpose=credential.purpose,
+                api_key_id=credential.api_key_id,
+            )
+        )
+
+    await session.flush()
+
+
+async def lecture_video_copy_credentials_match(
+    session: AsyncSession,
+    source_class_id: int,
+    target_class_id: int,
+) -> bool:
+    source_credentials = {
+        credential.purpose: credential
+        for credential in await models.ClassCredential.get_by_class_id(
+            session, source_class_id
+        )
+    }
+    target_credentials = {
+        credential.purpose: credential
+        for credential in await models.ClassCredential.get_by_class_id(
+            session, target_class_id
+        )
+    }
+
+    for purpose in LECTURE_VIDEO_COPY_REQUIRED_PURPOSES:
+        source_credential = source_credentials.get(purpose)
+        target_credential = target_credentials.get(purpose)
+        if source_credential is None or target_credential is None:
+            return False
+        if source_credential.api_key_id != target_credential.api_key_id:
+            return False
+
+    return True
+
+
+async def ensure_lecture_video_copy_credentials(
+    session: AsyncSession,
+    source_class_id: int,
+    target_class_id: int,
+) -> None:
+    if await lecture_video_copy_credentials_match(
+        session, source_class_id, target_class_id
+    ):
+        return
+
+    raise ValueError(
+        "Source and target classes must both have matching Gemini and ElevenLabs "
+        "credentials to copy lecture video assistants."
+    )
 
 
 async def copy_supervisors(
@@ -290,6 +361,11 @@ async def copy_assistant(
     """
     if require_published and not assistant.published:
         return None
+
+    if assistant.interaction_mode == InteractionMode.LECTURE_VIDEO:
+        await ensure_lecture_video_copy_credentials(
+            session, assistant.class_id, target_class_id
+        )
 
     new_vector_store_id, new_vector_store_obj_id = None, None
     if assistant.vector_store_id:
@@ -540,6 +616,12 @@ async def copy_group(
                     new_class_options,
                     user_id,
                     user.dna_as_create,
+                )
+
+                await copy_class_credentials(
+                    session,
+                    class_.id,
+                    new_class.id,
                 )
 
                 await copy_shared_files(

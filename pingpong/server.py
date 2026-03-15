@@ -64,6 +64,7 @@ from pingpong.artifacts import ArtifactStoreError
 from pingpong.audio_store import AudioStoreError
 from pingpong.bg_tasks import safe_task
 from pingpong.copy import copy_assistant as copy_assistant_to_class
+from pingpong.copy import ensure_lecture_video_copy_credentials
 from pingpong.copy import copy_group
 from pingpong.class_credentials import (
     ClassCredentialValidationUnavailableError,
@@ -8718,6 +8719,22 @@ def _classes_share_api_key(src: models.Class | None, tgt: models.Class | None) -
     return False
 
 
+async def _ensure_lecture_video_assistant_copy_allowed(
+    session: AsyncSession,
+    assistant: models.Assistant,
+    target_class_id: int,
+) -> None:
+    if assistant.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
+        return
+
+    try:
+        await ensure_lecture_video_copy_credentials(
+            session, assistant.class_id, target_class_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @v1.post(
     "/class/{class_id}/assistant/{assistant_id}/copy",
     dependencies=[
@@ -8782,6 +8799,9 @@ async def copy_assistant(
             status_code=400,
             detail="Source and target classes must share the same API key to copy assistants.",
         )
+    await _ensure_lecture_video_assistant_copy_allowed(
+        request.state["db"], assistant, target_class_id
+    )
 
     can_create_in_target = await request.state["authz"].test(
         request.state["auth_user"],
@@ -8877,6 +8897,9 @@ async def copy_assistant_check(
             status_code=400,
             detail="Source and target classes must share the same API key to copy assistants.",
         )
+    await _ensure_lecture_video_assistant_copy_allowed(
+        request.state["db"], assistant, target_class_id
+    )
 
     can_create_in_target = await request.state["authz"].test(
         request.state["auth_user"],

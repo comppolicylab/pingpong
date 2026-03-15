@@ -85,6 +85,29 @@ def lecture_video_manifest(
     }
 
 
+async def create_lecture_video_copy_credentials(
+    session,
+    class_id: int,
+    *,
+    gemini_key: str = "shared-gemini-key",
+    elevenlabs_key: str = "shared-elevenlabs-key",
+) -> None:
+    await models.ClassCredential.create(
+        session,
+        class_id,
+        schemas.ClassCredentialPurpose.LECTURE_VIDEO_MANIFEST_GENERATION,
+        gemini_key,
+        schemas.ClassCredentialProvider.GEMINI,
+    )
+    await models.ClassCredential.create(
+        session,
+        class_id,
+        schemas.ClassCredentialPurpose.LECTURE_VIDEO_NARRATION_TTS,
+        elevenlabs_key,
+        schemas.ClassCredentialProvider.ELEVENLABS,
+    )
+
+
 def fake_class_models_response(model_id: str = "gpt-4o-mini") -> dict:
     return {
         "models": [
@@ -3892,6 +3915,7 @@ async def test_copy_lecture_video_assistant_within_class_clones_lecture_video_ro
         session.add(class_)
         session.add(lecture_video)
         await session.flush()
+        await create_lecture_video_copy_credentials(session, class_.id)
 
         session.add(
             models.Assistant(
@@ -3968,6 +3992,8 @@ async def test_copy_lecture_video_assistant_to_other_class_clones_lecture_video_
         session.add(target_class)
         session.add(lecture_video)
         await session.flush()
+        await create_lecture_video_copy_credentials(session, source_class.id)
+        await create_lecture_video_copy_credentials(session, target_class.id)
 
         question = models.LectureVideoQuestion(
             lecture_video_id=lecture_video.id,
@@ -4087,6 +4113,8 @@ async def test_copy_lecture_video_assistant_writes_authz_grants_for_cloned_video
         session.add(target_class)
         session.add(lecture_video)
         await session.flush()
+        await create_lecture_video_copy_credentials(session, source_class.id)
+        await create_lecture_video_copy_credentials(session, target_class.id)
 
         session.add(
             models.Assistant(
@@ -4133,6 +4161,143 @@ async def test_copy_lecture_video_assistant_writes_authz_grants_for_cloned_video
         "owner",
         f"lecture_video:{copied_video_id}",
     ) in authz_calls
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_edit", "assistant:1"),
+        ("user:123", "can_create_assistants", "class:2"),
+    ]
+)
+async def test_copy_lecture_video_assistant_requires_matching_class_credentials(
+    api, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        source_class = models.Class(
+            id=1,
+            name="Source Class",
+            institution_id=institution.id,
+            api_key="shared-key",
+        )
+        target_class = models.Class(
+            id=2,
+            name="Target Class",
+            institution_id=institution.id,
+            api_key="shared-key",
+        )
+        lecture_video = make_lecture_video(
+            source_class.id,
+            "copy-source.mp4",
+            filename="copy-source.mp4",
+            status=schemas.LectureVideoStatus.READY.value,
+            uploader_id=123,
+        )
+        session.add_all([source_class, target_class, lecture_video])
+        await session.flush()
+        await create_lecture_video_copy_credentials(session, source_class.id)
+        await create_lecture_video_copy_credentials(
+            session,
+            target_class.id,
+            elevenlabs_key="different-elevenlabs-key",
+        )
+
+        session.add(
+            models.Assistant(
+                id=1,
+                name="Lecture Assistant",
+                class_id=source_class.id,
+                creator_id=123,
+                interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+                version=3,
+                model="gpt-4o-mini",
+                lecture_video_id=lecture_video.id,
+                instructions="Teach the lecture.",
+                tools="[]",
+            )
+        )
+        await session.commit()
+
+    response = api.post(
+        "/api/v1/class/1/assistant/1/copy",
+        json={"target_class_id": 2},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": (
+            "Source and target classes must both have matching Gemini and ElevenLabs "
+            "credentials to copy lecture video assistants."
+        )
+    }
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_edit", "assistant:1"),
+        ("user:123", "can_create_assistants", "class:2"),
+    ]
+)
+async def test_copy_lecture_video_assistant_check_requires_matching_class_credentials(
+    api, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        source_class = models.Class(
+            id=1,
+            name="Source Class",
+            institution_id=institution.id,
+            api_key="shared-key",
+        )
+        target_class = models.Class(
+            id=2,
+            name="Target Class",
+            institution_id=institution.id,
+            api_key="shared-key",
+        )
+        lecture_video = make_lecture_video(
+            source_class.id,
+            "copy-source.mp4",
+            filename="copy-source.mp4",
+            status=schemas.LectureVideoStatus.READY.value,
+            uploader_id=123,
+        )
+        session.add_all([source_class, target_class, lecture_video])
+        await session.flush()
+        await create_lecture_video_copy_credentials(session, source_class.id)
+
+        session.add(
+            models.Assistant(
+                id=1,
+                name="Lecture Assistant",
+                class_id=source_class.id,
+                creator_id=123,
+                interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+                version=3,
+                model="gpt-4o-mini",
+                lecture_video_id=lecture_video.id,
+                instructions="Teach the lecture.",
+                tools="[]",
+            )
+        )
+        await session.commit()
+
+    response = api.post(
+        "/api/v1/class/1/assistant/1/copy/check",
+        json={"target_class_id": 2},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": (
+            "Source and target classes must both have matching Gemini and ElevenLabs "
+            "credentials to copy lecture video assistants."
+        )
+    }
 
 
 @with_user(123)

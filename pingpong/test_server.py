@@ -1,7 +1,9 @@
+import importlib
 from datetime import datetime
 from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy import select
 
 from pingpong import models
 import pingpong.schemas as schemas
@@ -9,6 +11,8 @@ import pingpong.schemas as schemas
 from .auth import encode_session_token
 from .now import offset
 from .testutil import with_authz, with_authz_series, with_user, with_institution
+
+copy_module = importlib.import_module("pingpong.copy")
 
 
 @with_user(123)
@@ -252,6 +256,90 @@ async def test_copy_class_rejects_unauthorized_target_institution(
     assert response.status_code == 403
     assert response.json() == {
         "detail": "You do not have permission to create a class in the target institution."
+    }
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+async def test_copy_group_copies_lecture_video_class_credentials(
+    authz, config, db, institution, monkeypatch, user
+):
+    monkeypatch.setattr(
+        copy_module, "send_clone_group_notification", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(
+        copy_module, "send_clone_group_failed", AsyncMock(return_value=None)
+    )
+
+    async with db.async_session() as session:
+        api_key = models.APIKey(api_key="test-key", provider="openai")
+        session.add(api_key)
+        await session.flush()
+
+        source_class = models.Class(
+            id=1,
+            name="Source Class",
+            term="Fall 2024",
+            institution_id=institution.id,
+            private=False,
+            api_key_id=api_key.id,
+        )
+        session.add(source_class)
+        await session.flush()
+
+        await models.ClassCredential.create(
+            session,
+            source_class.id,
+            schemas.ClassCredentialPurpose.LECTURE_VIDEO_MANIFEST_GENERATION,
+            "shared-gemini-key",
+            schemas.ClassCredentialProvider.GEMINI,
+        )
+        await models.ClassCredential.create(
+            session,
+            source_class.id,
+            schemas.ClassCredentialPurpose.LECTURE_VIDEO_NARRATION_TTS,
+            "shared-elevenlabs-key",
+            schemas.ClassCredentialProvider.ELEVENLABS,
+        )
+        await session.commit()
+
+    await config.authz.driver.init()
+    await copy_module.copy_group(
+        schemas.CopyClassRequest(
+            name="Copied Class",
+            term="Spring 2025",
+            private=False,
+            any_can_create_assistant=False,
+            any_can_publish_assistant=False,
+            any_can_share_assistant=False,
+            any_can_publish_thread=False,
+            any_can_upload_class_file=False,
+            copy_assistants="all",
+            copy_users="all",
+        ),
+        AsyncMock(),
+        "1",
+        user.id,
+    )
+
+    async with db.async_session() as session:
+        copied_class = await session.scalar(
+            select(models.Class).where(models.Class.id != 1)
+        )
+        source_credentials = await models.ClassCredential.get_by_class_id(session, 1)
+        copied_credentials = (
+            await models.ClassCredential.get_by_class_id(session, copied_class.id)
+            if copied_class is not None
+            else []
+        )
+
+    assert copied_class is not None
+    assert copied_class.api_key_id is not None
+    assert copied_class.api_key_id == api_key.id
+    assert {
+        (credential.purpose, credential.api_key_id) for credential in source_credentials
+    } == {
+        (credential.purpose, credential.api_key_id) for credential in copied_credentials
     }
 
 
