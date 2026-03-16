@@ -115,6 +115,7 @@
 			? threadAssistantId
 			: currentAssistantIdQueryVisible;
 	$: newChatAssistantId = currentAssistantId || fallbackAssistantId;
+	$: canStartNewSharedChat = isSharedThreadPage ? newChatAssistantId > 0 : true;
 	let assistantsToShow: api.Assistant[] = [];
 	// Offer the top 4 assistants. If the current assistant is not in the top 4, add it to the top and remove the 4th one.
 	$: if (assistants.length > 4) {
@@ -366,7 +367,9 @@
 						? isSharedAssistantPage
 							? `/login?forward=${pathName}%3Fshare_token=${shareToken}`
 							: isSharedThreadPage
-								? `/group/${currentClassId}/shared/assistant/${newChatAssistantId}?share_token=${$anonymousShareToken}`
+								? canStartNewSharedChat
+									? `/group/${currentClassId}/shared/assistant/${newChatAssistantId}?share_token=${$anonymousShareToken}`
+									: undefined
 								: '/login'
 						: onNewChatPage || hasNoClasses
 							? undefined
@@ -381,14 +384,18 @@
 						? isSharedAssistantPage
 							? 'Login to save this chat'
 							: isSharedThreadPage
-								? 'Start a new chat'
+								? canStartNewSharedChat
+									? 'Start a new chat'
+									: 'No assistants available'
 								: 'Login'
 						: 'Start a new chat'}
 					class={`flex flex-row-reverse justify-between rounded-full pr-4 text-white ${
-						onNewChatPage || hasNoClasses
+						onNewChatPage ||
+						hasNoClasses ||
+						(nonAuthed && isSharedThreadPage && !canStartNewSharedChat)
 							? 'cursor-default bg-blue-dark-40 text-blue-dark-30 select-none hover:bg-blue-dark-40'
 							: 'bg-orange hover:bg-orange-dark'
-					} ${onNewChatPage || hasNoClasses ? 'disabled' : ''}`}
+					} ${onNewChatPage || hasNoClasses || (nonAuthed && isSharedThreadPage && !canStartNewSharedChat) ? 'disabled' : ''}`}
 				>
 					<svelte:fragment slot="icon">
 						{#if nonAuthed && !isSharedThreadPage}
