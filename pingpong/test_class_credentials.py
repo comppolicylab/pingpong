@@ -942,6 +942,24 @@ async def test_validate_elevenlabs_api_key_returns_false_for_empty_api_key():
     assert await elevenlabs_module.validate_elevenlabs_api_key("") is False
 
 
+async def test_validate_elevenlabs_api_key_maps_client_construction_errors_to_unavailable(
+    monkeypatch,
+):
+    class FakeClient:
+        def __init__(self, *, api_key):
+            raise RuntimeError(f"boom: {api_key}")
+
+    monkeypatch.setattr(elevenlabs_module, "AsyncElevenLabs", FakeClient)
+
+    with pytest.raises(
+        ClassCredentialValidationUnavailableError,
+        match="Unable to validate the ElevenLabs API key right now.",
+    ) as exc_info:
+        await elevenlabs_module.validate_elevenlabs_api_key("elevenlabs-key")
+
+    assert exc_info.value.provider == schemas.ClassCredentialProvider.ELEVENLABS
+
+
 def test_get_elevenlabs_client_creates_new_client_for_each_call(monkeypatch):
     created: list[str] = []
 

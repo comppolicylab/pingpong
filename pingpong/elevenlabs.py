@@ -178,11 +178,9 @@ async def synthesize_elevenlabs_voice_sample(
 
 
 async def validate_elevenlabs_api_key(api_key: str) -> bool:
+    safe_provider = sanitize_for_log(schemas.ClassCredentialProvider.ELEVENLABS.value)
     try:
         client = get_elevenlabs_client(api_key)
-        safe_provider = sanitize_for_log(
-            schemas.ClassCredentialProvider.ELEVENLABS.value
-        )
         await asyncio.wait_for(client.voices.settings.get_default(), 10)
         return True
     except ValueError:
