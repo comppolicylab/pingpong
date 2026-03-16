@@ -308,6 +308,12 @@
 					error: `Question ${index + 1} must use a supported type (single_select).`
 				};
 			}
+			if (typeof question.question_text !== 'string' || question.question_text.length < 1) {
+				return {
+					manifest: null,
+					error: `Question ${index + 1} must include a non-empty question_text.`
+				};
+			}
 			if (
 				typeof question.stop_offset_ms !== 'number' ||
 				!Number.isFinite(question.stop_offset_ms) ||
@@ -332,6 +338,12 @@
 					return {
 						manifest: null,
 						error: `Question ${index + 1}, option ${optionIndex + 1} is invalid.`
+					};
+				}
+				if (typeof option.option_text !== 'string' || option.option_text.length < 1) {
+					return {
+						manifest: null,
+						error: `Question ${index + 1}, option ${optionIndex + 1} must include a non-empty option_text.`
 					};
 				}
 				if (
@@ -1496,18 +1508,18 @@
 		}
 	};
 
-	const lectureVideoDeletePath = (lectureVideoId: number) =>
-		data.isCreating
-			? `/api/v1/class/${data.class.id}/lecture-video/${lectureVideoId}`
-			: `/api/v1/class/${data.class.id}/assistant/${data.assistantId}/lecture-video/${lectureVideoId}`;
-
 	const deleteLectureVideoDraftById = async (lectureVideoId: number) => {
-		const response = await fetch(lectureVideoDeletePath(lectureVideoId), {
-			method: 'DELETE'
-		});
-		if (!response.ok) {
-			const detail = await api.readErrorDetail(response);
-			throw new Error(detail);
+		const response =
+			data.isCreating || !data.assistantId
+				? await api.deleteLectureVideo(fetch, data.class.id, lectureVideoId)
+				: await api.deleteAssistantLectureVideo(
+						fetch,
+						data.class.id,
+						data.assistantId,
+						lectureVideoId
+					);
+		if (response.$status >= 300) {
+			throw new Error(response.detail || 'Unknown error');
 		}
 		lectureVideoDraftIds.delete(lectureVideoId);
 	};
@@ -1539,25 +1551,17 @@
 				await deleteLectureVideoDraftById(selectedLectureVideo.id);
 			}
 
-			const formData = new FormData();
-			formData.append('upload', file);
-
-			const uploadPath =
+			const response =
 				data.isCreating || !data.assistantId
-					? `/api/v1/class/${data.class.id}/lecture-video`
-					: `/api/v1/class/${data.class.id}/assistant/${data.assistantId}/lecture-video/upload`;
-			const response = await fetch(uploadPath, {
-				method: 'POST',
-				body: formData
-			});
-			if (!response.ok) {
-				const detail = await api.readErrorDetail(response);
-				sadToast(`Could not upload lecture video:\n${detail}`);
+					? await api.uploadLectureVideo(fetch, data.class.id, file)
+					: await api.uploadAssistantLectureVideo(fetch, data.class.id, data.assistantId, file);
+			const expanded = api.expandResponse(response);
+			if (expanded.error) {
+				sadToast(`Could not upload lecture video:\n${expanded.error.detail || 'Unknown error'}`);
 				return;
 			}
-			const lectureVideo = (await response.json()) as api.LectureVideoSummary;
-			selectedLectureVideo = lectureVideo;
-			lectureVideoDraftIds.add(lectureVideo.id);
+			selectedLectureVideo = expanded.data;
+			lectureVideoDraftIds.add(expanded.data.id);
 			happyToast('Lecture video uploaded');
 		} catch (error) {
 			sadToast(

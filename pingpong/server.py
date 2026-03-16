@@ -3398,17 +3398,12 @@ async def list_class_models(
         for prompt_id in default_prompt_ids
         if prompt_id in DEFAULT_PROMPTS
     ]
-    lecture_video_policy = await _get_lecture_video_editor_policy(
-        request, int(class_id)
-    )
-
     return {
         "models": filtered,
         "default_prompts": default_prompts,
         "enforce_classic_assistants": isinstance(
             openai_client, openai.AsyncAzureOpenAI
         ),
-        "lecture_video": lecture_video_policy,
     }
 
 
@@ -8266,6 +8261,18 @@ async def _validate_lecture_video_voice_id(
 
 
 @v1.get(
+    "/class/{class_id}/lecture-video/editor-policy",
+    dependencies=[Depends(Authz("can_view", "class:{class_id}"))],
+    response_model=schemas.LectureVideoAssistantEditorPolicy,
+)
+async def get_class_lecture_video_editor_policy(
+    class_id: str,
+    request: StateRequest,
+):
+    return await _get_lecture_video_editor_policy(request, int(class_id))
+
+
+@v1.get(
     "/class/{class_id}/assistant/{assistant_id}/lecture-video/config",
     dependencies=[Depends(Authz("can_edit", "assistant:{assistant_id}"))],
     response_model=schemas.LectureVideoConfigResponse,
@@ -9544,11 +9551,6 @@ async def update_assistant(
             raise HTTPException(
                 status_code=400,
                 detail="Specifying a lecture_video_manifest is required when updating lecture video data.",
-            )
-        if not req.voice_id:
-            raise HTTPException(
-                status_code=400,
-                detail="Specifying a voice_id is required when updating lecture video data.",
             )
         lecture_video = await models.LectureVideo.get_by_id_for_class(
             request.state["db"], req.lecture_video_id, int(class_id)

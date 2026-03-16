@@ -2170,9 +2170,6 @@ class AssistantModels(BaseModel):
     models: list[AssistantModel]
     default_prompts: list[AssistantDefaultPrompt] = []
     enforce_classic_assistants: bool = False
-    lecture_video: LectureVideoAssistantEditorPolicy = Field(
-        default_factory=LectureVideoAssistantEditorPolicy
-    )
 
 
 class Classes(BaseModel):

@@ -1,4 +1,3 @@
-import functools
 import importlib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -824,8 +823,6 @@ async def test_validate_class_credential_for_gemini_closes_async_and_sync_client
 async def test_synthesize_elevenlabs_voice_sample_maps_generic_voice_not_found_api_error(
     monkeypatch,
 ):
-    elevenlabs_module.get_elevenlabs_client.cache_clear()
-
     def fake_convert(*, voice_id, text, output_format):
         raise ElevenLabsApiError(
             status_code=404,
@@ -856,7 +853,6 @@ async def test_synthesize_elevenlabs_voice_sample_maps_generic_voice_not_found_a
 
 
 async def test_synthesize_elevenlabs_voice_sample_requests_direct_ogg_opus(monkeypatch):
-    elevenlabs_module.get_elevenlabs_client.cache_clear()
     seen: dict[str, object] = {}
 
     async def fake_collect_audio_chunks(_audio_stream) -> bytes:
@@ -898,8 +894,7 @@ async def test_synthesize_elevenlabs_voice_sample_requests_direct_ogg_opus(monke
     assert audio == b"ogg-audio"
 
 
-def test_get_elevenlabs_client_caches_by_api_key(monkeypatch):
-    elevenlabs_module.get_elevenlabs_client.cache_clear()
+def test_get_elevenlabs_client_creates_new_client_for_each_call(monkeypatch):
     created: list[str] = []
 
     class FakeClient:
@@ -912,34 +907,6 @@ def test_get_elevenlabs_client_caches_by_api_key(monkeypatch):
     second = elevenlabs_module.get_elevenlabs_client("elevenlabs-key")
     third = elevenlabs_module.get_elevenlabs_client("other-elevenlabs-key")
 
-    assert first is second
+    assert first is not second
     assert first is not third
-    assert created == ["elevenlabs-key", "other-elevenlabs-key"]
-
-
-def test_get_elevenlabs_client_evicts_oldest_key_when_cache_is_full(monkeypatch):
-    elevenlabs_module.get_elevenlabs_client.cache_clear()
-    created: list[str] = []
-
-    class FakeClient:
-        def __init__(self, *, api_key):
-            created.append(api_key)
-
-    monkeypatch.setattr(elevenlabs_module, "AsyncElevenLabs", FakeClient)
-
-    original = elevenlabs_module.get_elevenlabs_client.__wrapped__
-    elevenlabs_module.get_elevenlabs_client = functools.lru_cache(maxsize=2)(original)
-    try:
-        first = elevenlabs_module.get_elevenlabs_client("key-1")
-        second = elevenlabs_module.get_elevenlabs_client("key-2")
-        first_again = elevenlabs_module.get_elevenlabs_client("key-1")
-        elevenlabs_module.get_elevenlabs_client("key-3")
-        second_again = elevenlabs_module.get_elevenlabs_client("key-2")
-    finally:
-        elevenlabs_module.get_elevenlabs_client = functools.lru_cache(maxsize=32)(
-            original
-        )
-
-    assert first is first_again
-    assert second is not second_again
-    assert created == ["key-1", "key-2", "key-3", "key-2"]
+    assert created == ["elevenlabs-key", "elevenlabs-key", "other-elevenlabs-key"]

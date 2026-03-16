@@ -1476,6 +1476,8 @@ export type LectureVideoConfigResponse = {
 	voice_id: string;
 };
 
+export type LectureVideoEditorPolicyResponse = LectureVideoAssistantEditorPolicy;
+
 export type ValidateLectureVideoVoiceRequest = {
 	voice_id: string;
 };
@@ -1597,6 +1599,14 @@ export const getAssistantLectureVideoConfig = async (
 ) => {
 	const url = `class/${classId}/assistant/${assistantId}/lecture-video/config`;
 	return await GET<never, LectureVideoConfigResponse>(f, url);
+};
+
+/**
+ * Load the lecture-video editor policy for a class.
+ */
+export const getLectureVideoEditorPolicy = async (f: Fetcher, classId: number) => {
+	const url = `class/${classId}/lecture-video/editor-policy`;
+	return await GET<never, LectureVideoEditorPolicyResponse>(f, url);
 };
 
 const VOICE_SAMPLE_TEXT_HEADER = 'X-PingPong-Voice-Sample-Text';
@@ -1731,7 +1741,6 @@ export type AssistantModels = {
 	models: AssistantModel[];
 	default_prompts?: AssistantDefaultPrompt[];
 	enforce_classic_assistants?: boolean;
-	lecture_video?: LectureVideoAssistantEditorPolicy;
 };
 
 export type AssistantModelLite = {

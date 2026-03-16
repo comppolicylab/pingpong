@@ -3914,6 +3914,37 @@ async def test_update_assistant_with_new_lecture_video_id_without_manifest_retur
 
 @with_user(123)
 @with_institution(11, "Test Institution")
+@with_authz(grants=[("user:123", "can_edit", "assistant:1")])
+async def test_update_assistant_with_whitespace_voice_id_returns_422(
+    api, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_, lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+
+    response = api.put(
+        f"/api/v1/class/{class_.id}/assistant/1",
+        json={
+            "lecture_video_id": lecture_video.id,
+            "lecture_video_manifest": lecture_video_manifest(
+                question_text="Updated question?"
+            ),
+            "voice_id": "   ",
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 422
+    assert (
+        "Specifying a voice_id is required when updating lecture video data."
+        in response.json()["detail"][0]["msg"]
+    )
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
 @with_authz(
     grants=[
         ("user:123", "can_create_assistants", "class:1"),

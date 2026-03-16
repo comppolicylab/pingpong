@@ -5,19 +5,19 @@ import type {
 	AssistantModel,
 	AssistantDefaultPrompt,
 	MCPServerToolInput,
-	LectureVideoSummary,
-	LectureVideoManifest,
-	LectureVideoAssistantEditorPolicy as LectureVideoEditorPolicy
+	LectureVideoAssistantEditorPolicy as LectureVideoEditorPolicy,
+	LectureVideoConfigResponse
 } from '$lib/api';
-import { getAssistantFiles, getAssistantMCPServers, expandResponse, getModels } from '$lib/api';
+import {
+	getAssistantFiles,
+	getAssistantMCPServers,
+	getAssistantLectureVideoConfig,
+	getLectureVideoEditorPolicy,
+	expandResponse,
+	getModels
+} from '$lib/api';
 import { modelsPromptsStore } from '$lib/stores/general';
 import { get } from 'svelte/store';
-
-type LectureVideoConfigResponse = {
-	lecture_video: LectureVideoSummary;
-	lecture_video_manifest: LectureVideoManifest;
-	voice_id: string;
-};
 
 const DEFAULT_LECTURE_VIDEO_EDITOR_POLICY: LectureVideoEditorPolicy = {
 	show_mode_in_assistant_editor: false,
@@ -35,15 +35,13 @@ async function ensureModels(
 	lectureVideoPolicy: LectureVideoEditorPolicy;
 }> {
 	const cache = get(modelsPromptsStore)[classId];
+
 	if (cache) {
-		const cacheWithPolicy = cache as typeof cache & {
-			lecture_video?: LectureVideoEditorPolicy;
-		};
 		return {
 			models: cache.models,
 			defaultPrompts: cache.default_prompts ?? [],
 			enforceClassicAssistants: cache.enforce_classic_assistants ?? false,
-			lectureVideoPolicy: cacheWithPolicy.lecture_video ?? DEFAULT_LECTURE_VIDEO_EDITOR_POLICY
+			lectureVideoPolicy: DEFAULT_LECTURE_VIDEO_EDITOR_POLICY
 		};
 	}
 
@@ -53,25 +51,22 @@ async function ensureModels(
 	const enforceClassicAssistants = modelsResponse.error
 		? false
 		: (modelsResponse.data.enforce_classic_assistants ?? false);
-	const lectureVideoPolicy = modelsResponse.error
-		? DEFAULT_LECTURE_VIDEO_EDITOR_POLICY
-		: ((
-				modelsResponse.data as typeof modelsResponse.data & {
-					lecture_video?: LectureVideoEditorPolicy;
-				}
-			).lecture_video ?? DEFAULT_LECTURE_VIDEO_EDITOR_POLICY);
 
 	modelsPromptsStore.update((m) => ({
 		...m,
 		[classId]: {
 			models,
 			default_prompts: defaultPrompts,
-			enforce_classic_assistants: enforceClassicAssistants,
-			lecture_video: lectureVideoPolicy
+			enforce_classic_assistants: enforceClassicAssistants
 		} as (typeof m)[number]
 	}));
 
-	return { models, defaultPrompts, enforceClassicAssistants, lectureVideoPolicy };
+	return {
+		models,
+		defaultPrompts,
+		enforceClassicAssistants,
+		lectureVideoPolicy: DEFAULT_LECTURE_VIDEO_EDITOR_POLICY
+	};
 }
 
 async function loadAssistantFilesOrNull(
@@ -99,17 +94,18 @@ async function loadAssistantLectureVideoConfig(
 	classId: number,
 	assistantId: number
 ): Promise<LectureVideoConfigResponse | null> {
-	try {
-		const response = await fetchFn(
-			`/api/v1/class/${classId}/assistant/${assistantId}/lecture-video/config`
-		);
-		if (!response.ok) {
-			return null;
-		}
-		return (await response.json()) as LectureVideoConfigResponse;
-	} catch {
-		return null;
-	}
+	const response = await getAssistantLectureVideoConfig(fetchFn, classId, assistantId).then(
+		expandResponse
+	);
+	return response.error ? null : response.data;
+}
+
+async function loadLectureVideoEditorPolicy(
+	fetchFn: typeof fetch,
+	classId: number
+): Promise<LectureVideoEditorPolicy> {
+	const response = await getLectureVideoEditorPolicy(fetchFn, classId).then(expandResponse);
+	return response.error ? DEFAULT_LECTURE_VIDEO_EDITOR_POLICY : response.data;
 }
 
 /**
@@ -119,8 +115,8 @@ export const load: PageLoad = async ({ params, fetch, parent }) => {
 	const classId = parseInt(params.classId, 10);
 	const isCreating = params.assistantId === 'new';
 	const parentData = await parent();
-	const { models, defaultPrompts, enforceClassicAssistants, lectureVideoPolicy } =
-		await ensureModels(fetch, classId);
+	const [{ models, defaultPrompts, enforceClassicAssistants }, lectureVideoPolicy] =
+		await Promise.all([ensureModels(fetch, classId), loadLectureVideoEditorPolicy(fetch, classId)]);
 
 	let assistant: Assistant | null = null;
 	let assistantFiles: AssistantFiles | null = null;
