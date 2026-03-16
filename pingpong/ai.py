@@ -4135,6 +4135,7 @@ def format_instructions(
     instructions: str,
     use_latex: bool = False,
     use_image_descriptions: bool = False,
+    disable_prompt_randomization: bool = False,
     thread_id: str | None = None,
     user_id: int | None = None,
 ) -> str:
@@ -4233,7 +4234,11 @@ def format_instructions(
             """
         )
 
-    if thread_id is not None and user_id is not None:
+    if (
+        not disable_prompt_randomization
+        and thread_id is not None
+        and user_id is not None
+    ):
         logger.debug(
             "Replacing random blocks in instructions for thread %s",
             sanitize_for_log(thread_id),

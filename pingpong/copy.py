@@ -412,6 +412,7 @@ async def copy_assistant(
         creator_id=assistant.creator_id,
         published=None if force_private else assistant.published,
         should_record_user_information=assistant.should_record_user_information,
+        disable_prompt_randomization=assistant.disable_prompt_randomization,
         allow_user_file_uploads=assistant.allow_user_file_uploads,
         allow_user_image_uploads=assistant.allow_user_image_uploads,
         hide_reasoning_summaries=assistant.hide_reasoning_summaries,

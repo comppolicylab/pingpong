@@ -3555,6 +3555,7 @@ class Assistant(Base):
     verbosity = Column(Integer, nullable=True)
     assistant_should_message_first = Column(Boolean, server_default="false")
     should_record_user_information = Column(Boolean, server_default="false")
+    disable_prompt_randomization = Column(Boolean, server_default="false")
     allow_user_file_uploads = Column(Boolean, server_default="true")
     allow_user_image_uploads = Column(Boolean, server_default="true")
     hide_reasoning_summaries = Column(Boolean, server_default="true")
