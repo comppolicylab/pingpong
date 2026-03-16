@@ -286,22 +286,20 @@
 	$: hasApiKeyReadError = !!data.apiKeyReadError;
 	$: classCredentialsLoaded = canViewApiKey && data.classCredentials !== undefined;
 	$: classCredentials = data.classCredentials ?? [];
-	$: hasGeminiCredential =
-		classCredentials.some(
-			(cc) => cc.purpose === 'lecture_video_manifest_generation' && !!cc.credential
-		)
-			? true
-			: hasApiKeyReadError
-				? undefined
-				: (data?.hasGeminiCredential ?? false);
-	$: hasElevenlabsCredential =
-		classCredentials.some(
-			(cc) => cc.purpose === 'lecture_video_narration_tts' && !!cc.credential
-		)
-			? true
-			: hasApiKeyReadError
-				? undefined
-				: (data?.hasElevenlabsCredential ?? false);
+	$: hasGeminiCredential = classCredentials.some(
+		(cc) => cc.purpose === 'lecture_video_manifest_generation' && !!cc.credential
+	)
+		? true
+		: hasApiKeyReadError
+			? undefined
+			: (data?.hasGeminiCredential ?? false);
+	$: hasElevenlabsCredential = classCredentials.some(
+		(cc) => cc.purpose === 'lecture_video_narration_tts' && !!cc.credential
+	)
+		? true
+		: hasApiKeyReadError
+			? undefined
+			: (data?.hasElevenlabsCredential ?? false);
 	$: allFeatureCredentialsConfigured =
 		hasGeminiCredential === true && hasElevenlabsCredential === true;
 	let apiProvider = data.apiKey?.provider || data.aiProvider || 'openai';

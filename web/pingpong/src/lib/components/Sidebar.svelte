@@ -364,7 +364,7 @@
 					target={openAllLinksInNewTab ? '_blank' : undefined}
 					href={nonAuthed
 						? isSharedAssistantPage
-								? `/login?forward=${pathName}%3Fshare_token=${shareToken}`
+							? `/login?forward=${pathName}%3Fshare_token=${shareToken}`
 							: isSharedThreadPage
 								? `/group/${currentClassId}/shared/assistant/${newChatAssistantId}?share_token=${$anonymousShareToken}`
 								: '/login'

@@ -1572,9 +1572,7 @@
 						: error instanceof Error
 							? error.message
 							: 'Unknown error';
-				sadToast(
-					`Could not upload lecture video:\n${detail}`
-				);
+				sadToast(`Could not upload lecture video:\n${detail}`);
 				return;
 			}
 			if ('error' in uploadedLectureVideo) {
@@ -3566,16 +3564,11 @@
 				pill
 				class="border border-orange bg-orange text-white hover:bg-orange-dark"
 				type="submit"
-				disabled={$loading ||
-					uploadingFSPrivate ||
-					uploadingCIPrivate ||
-					uploadingLectureVideo}>Save</Button
+				disabled={$loading || uploadingFSPrivate || uploadingCIPrivate || uploadingLectureVideo}
+				>Save</Button
 			>
 			<Button
-				disabled={$loading ||
-					uploadingFSPrivate ||
-					uploadingCIPrivate ||
-					uploadingLectureVideo}
+				disabled={$loading || uploadingFSPrivate || uploadingCIPrivate || uploadingLectureVideo}
 				href={`/group/${data.class.id}/assistant`}
 				color="red"
 				pill
