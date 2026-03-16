@@ -6290,6 +6290,7 @@ async def create_audio_thread(
             assistant.instructions,
             assistant.use_latex,
             assistant.use_image_descriptions,
+            disable_prompt_randomization=assistant.disable_prompt_randomization,
             thread_id=thread.id if thread else None,
             user_id=request.state["session"].user.id,
         ),
@@ -6306,6 +6307,7 @@ async def create_audio_thread(
                 assistant.instructions,
                 assistant.use_latex,
                 assistant.use_image_descriptions,
+                disable_prompt_randomization=assistant.disable_prompt_randomization,
                 thread_id=result.id,
                 user_id=request.state["session"].user.id,
             )
@@ -6467,6 +6469,7 @@ async def create_lecture_thread(
             assistant.instructions,
             assistant.use_latex,
             assistant.use_image_descriptions,
+            disable_prompt_randomization=assistant.disable_prompt_randomization,
             thread_id=result.id,
             user_id=request.state["session"].user.id,
         )

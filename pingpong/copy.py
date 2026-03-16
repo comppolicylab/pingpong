@@ -500,6 +500,7 @@ async def copy_assistant(
                 assistant.instructions,
                 use_latex=assistant.use_latex,
                 use_image_descriptions=assistant.use_image_descriptions,
+                disable_prompt_randomization=assistant.disable_prompt_randomization,
             ),
             model=_model,
             tools=json.loads(assistant.tools) if assistant.tools else None,
