@@ -501,6 +501,7 @@ class LectureVideoManifestQuestionV1(BaseModel):
 
 
 class LectureVideoManifestV1(BaseModel):
+    version: Literal[1] = 1
     questions: list[LectureVideoManifestQuestionV1] = Field(..., min_length=1)
 
 

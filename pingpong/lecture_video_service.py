@@ -3,6 +3,7 @@ from pathlib import Path
 
 import humanize
 from fastapi import HTTPException, UploadFile
+from pydantic import ValidationError
 from sqlalchemy import delete, select, union
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -281,7 +282,10 @@ def lecture_video_config_matches(
     requested_manifest: schemas.LectureVideoManifestV1,
     requested_voice_id: str,
 ) -> bool:
-    current_manifest = lecture_video_manifest_from_model(current_lecture_video)
+    try:
+        current_manifest = lecture_video_manifest_from_model(current_lecture_video)
+    except (ValidationError, ValueError):
+        return False
     return (
         current_lecture_video.stored_object_id
         == requested_lecture_video.stored_object_id

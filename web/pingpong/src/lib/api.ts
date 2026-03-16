@@ -260,7 +260,7 @@ const _fetchJSON = async <R extends BaseData>(
 	return { $status: res.status, ...data } as (R | Error) & BaseResponse;
 };
 
-const readErrorDetail = async (response: Response) => {
+export const readErrorDetail = async (response: Response) => {
 	try {
 		const payload = await response.json();
 		if (typeof payload?.detail === 'string') {
@@ -1466,6 +1466,7 @@ export type LectureVideoManifestQuestion = {
 };
 
 export type LectureVideoManifest = {
+	version: 1;
 	questions: LectureVideoManifestQuestion[];
 };
 

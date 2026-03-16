@@ -6,17 +6,12 @@ import type {
 	AssistantDefaultPrompt,
 	MCPServerToolInput,
 	LectureVideoSummary,
-	LectureVideoManifest
+	LectureVideoManifest,
+	LectureVideoAssistantEditorPolicy as LectureVideoEditorPolicy
 } from '$lib/api';
 import { getAssistantFiles, getAssistantMCPServers, expandResponse, getModels } from '$lib/api';
 import { modelsPromptsStore } from '$lib/stores/general';
 import { get } from 'svelte/store';
-
-type LectureVideoEditorPolicy = {
-	show_mode_in_assistant_editor: boolean;
-	can_select_mode_in_assistant_editor: boolean;
-	message: string | null;
-};
 
 type LectureVideoConfigResponse = {
 	lecture_video: LectureVideoSummary;
@@ -150,6 +145,14 @@ export const load: PageLoad = async ({ params, fetch, parent }) => {
 		}
 	}
 
+	const effectiveLectureVideoPolicy =
+		assistant?.interaction_mode === 'lecture_video'
+			? {
+					...lectureVideoPolicy,
+					show_mode_in_assistant_editor: true
+				}
+			: lectureVideoPolicy;
+
 	return {
 		isCreating,
 		assistantId: isCreating ? null : parseInt(params.assistantId, 10),
@@ -160,7 +163,7 @@ export const load: PageLoad = async ({ params, fetch, parent }) => {
 		models,
 		defaultPrompts,
 		enforceClassicAssistants,
-		lectureVideoPolicy,
+		lectureVideoPolicy: effectiveLectureVideoPolicy,
 		lectureVideoConfig,
 		statusComponents: parentData.statusComponents ?? {}
 	};

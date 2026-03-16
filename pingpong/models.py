@@ -4509,6 +4509,23 @@ class Class(Base):
         return await session.scalar(stmt)
 
     @classmethod
+    async def get_api_key_with_feature_credentials(
+        cls, session: AsyncSession, id_: int
+    ) -> "Class | None":
+        stmt = (
+            select(Class)
+            .options(joinedload(Class.api_key_obj))
+            .options(
+                joinedload(Class.feature_credentials).joinedload(
+                    ClassCredential.api_key_obj
+                )
+            )
+            .where(Class.id == int(id_))
+        )
+        result = await session.execute(stmt)
+        return result.unique().scalar_one_or_none()
+
+    @classmethod
     async def has_any_api_key(cls, session: AsyncSession, id_: int) -> bool:
         stmt = select(Class.api_key_id, Class.api_key).where(Class.id == int(id_))
         row = (await session.execute(stmt)).one()

@@ -72,6 +72,7 @@ def lecture_video_manifest(
     correct_flags: tuple[bool, bool] = (True, False),
 ) -> dict:
     return {
+        "version": 1,
         "questions": [
             {
                 "type": question_type,
@@ -3317,8 +3318,8 @@ async def test_create_lecture_video_assistant_persists_normalized_manifest(
     [
         pytest.param(
             {
-                "version": 1,
                 **lecture_video_manifest(),
+                "version": 2,
             },
             id="unexpected-version",
         ),

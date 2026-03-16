@@ -30,7 +30,7 @@ ELEVENLABS_VOICE_VALIDATION_CONTENT_TYPE = "audio/ogg"
 ELEVENLABS_VOICE_SAMPLE_TEXT_HEADER = "X-PingPong-Voice-Sample-Text"
 
 
-@functools.cache
+@functools.lru_cache(maxsize=32)
 def get_elevenlabs_client(api_key: str) -> AsyncElevenLabs:
     if not api_key:
         raise ValueError("API key is required")

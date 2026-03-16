@@ -18,7 +18,14 @@
 		InputAddon,
 		Tooltip
 	} from 'flowbite-svelte';
-	import type { Tool, ServerFile, FileUploadInfo, MCPServerToolInput, MCPAuthType } from '$lib/api';
+	import type {
+		Tool,
+		ServerFile,
+		FileUploadInfo,
+		MCPServerToolInput,
+		MCPAuthType,
+		LectureVideoAssistantEditorPolicy as LectureVideoEditorPolicy
+	} from '$lib/api';
 	import { beforeNavigate, goto, invalidate } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { browser } from '$app/environment';
@@ -71,6 +78,7 @@
 	const LECTURE_VIDEO_DEFAULT_INSTRUCTIONS = 'You are a lecture video assistant.';
 	const SUPPORTED_LECTURE_VIDEO_QUESTION_TYPES = new Set(['single_select']);
 	const DEFAULT_LECTURE_VIDEO_MANIFEST = {
+		version: 1,
 		questions: [
 			{
 				type: 'single_select',
@@ -95,12 +103,6 @@
 		]
 	};
 
-	type LectureVideoEditorPolicy = {
-		show_mode_in_assistant_editor: boolean;
-		can_select_mode_in_assistant_editor: boolean;
-		message: string | null;
-	};
-
 	type LectureVideoOptionInput = {
 		option_text: string;
 		post_answer_text: string;
@@ -117,6 +119,7 @@
 	};
 
 	type LectureVideoManifestInput = {
+		version?: number;
 		questions: LectureVideoQuestionInput[];
 	};
 
@@ -163,8 +166,7 @@
 	let lectureVideoPolicy: LectureVideoEditorPolicy = defaultLectureVideoPolicy;
 	$: lectureVideoPolicy = (data.lectureVideoPolicy ||
 		defaultLectureVideoPolicy) as LectureVideoEditorPolicy;
-	$: showLectureModeOption =
-		lectureVideoPolicy.show_mode_in_assistant_editor || isEditingLectureAssistant;
+	$: showLectureModeOption = lectureVideoPolicy.show_mode_in_assistant_editor;
 	$: lectureModeSelectionDisabled = preventEdits || !data.isCreating;
 	$: lectureModeTooltipText =
 		lectureVideoPolicy.message || 'Lecture Video mode is not available for this class yet.';
@@ -245,11 +247,10 @@
 	};
 
 	const editorLectureVideoManifest = (manifest: Record<string, unknown> | null | undefined) => {
-		const source = {
-			...((manifest || DEFAULT_LECTURE_VIDEO_MANIFEST) as Record<string, unknown>)
+		return {
+			...DEFAULT_LECTURE_VIDEO_MANIFEST,
+			...((manifest || {}) as Record<string, unknown>)
 		};
-		delete source.version;
-		return source;
 	};
 
 	const stringifyLectureVideoManifest = (manifest: Record<string, unknown> | null | undefined) =>
@@ -263,6 +264,8 @@
 		}
 	};
 
+	// Keep this client-side validation aligned with pingpong/schemas.py:
+	// LectureVideoManifestV1, LectureVideoManifestQuestionV1, and LectureVideoManifestOptionV1.
 	const parseLectureVideoManifest = (
 		raw: string
 	): { manifest: api.LectureVideoManifest | null; error: string | null } => {
@@ -278,6 +281,12 @@
 		}
 
 		const candidate = parsed as Partial<LectureVideoManifestInput>;
+		if (candidate.version !== undefined && candidate.version !== 1) {
+			return {
+				manifest: null,
+				error: 'Lecture video manifest version must be 1.'
+			};
+		}
 		if (!Array.isArray(candidate.questions) || candidate.questions.length < 1) {
 			return {
 				manifest: null,
@@ -349,6 +358,7 @@
 
 		return {
 			manifest: {
+				version: 1,
 				questions: candidate.questions
 			} as unknown as api.LectureVideoManifest,
 			error: null
@@ -1486,21 +1496,6 @@
 		}
 	};
 
-	const readErrorDetail = async (response: Response) => {
-		try {
-			const payload = await response.json();
-			if (typeof payload?.detail === 'string') {
-				return payload.detail;
-			}
-			if (payload?.detail) {
-				return JSON.stringify(payload.detail);
-			}
-		} catch {
-			return `Request failed with status ${response.status}.`;
-		}
-		return `Request failed with status ${response.status}.`;
-	};
-
 	const lectureVideoDeletePath = (lectureVideoId: number) =>
 		data.isCreating
 			? `/api/v1/class/${data.class.id}/lecture-video/${lectureVideoId}`
@@ -1511,7 +1506,7 @@
 			method: 'DELETE'
 		});
 		if (!response.ok) {
-			const detail = await readErrorDetail(response);
+			const detail = await api.readErrorDetail(response);
 			throw new Error(detail);
 		}
 		lectureVideoDraftIds.delete(lectureVideoId);
@@ -1556,7 +1551,7 @@
 				body: formData
 			});
 			if (!response.ok) {
-				const detail = await readErrorDetail(response);
+				const detail = await api.readErrorDetail(response);
 				sadToast(`Could not upload lecture video:\n${detail}`);
 				return;
 			}

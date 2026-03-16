@@ -2823,8 +2823,10 @@ async def _get_class_api_key_read_context(
     session: AsyncSession,
     class_id: int,
 ) -> dict[str, Any]:
-    class_ = await models.Class.get_api_key(session, class_id)
-    credentials = await models.ClassCredential.get_by_class_id(session, class_id)
+    class_ = await models.Class.get_api_key_with_feature_credentials(session, class_id)
+    if class_ is None:
+        raise HTTPException(status_code=404, detail="Class not found")
+    credentials = list(class_.feature_credentials)
     credentials_by_purpose = {
         credential.purpose: credential for credential in credentials
     }
@@ -2881,8 +2883,13 @@ async def _get_lecture_video_editor_policy(
     request: StateRequest,
     class_id: int,
 ) -> schemas.LectureVideoAssistantEditorPolicy:
-    is_institution_admin = await ClassInstitutionAdmin().test_with_cache(request)
-    show_mode_in_assistant_editor = is_institution_admin
+    show_mode_in_assistant_editor = bool(
+        request.state["auth_user"]
+    ) and await request.state["authz"].test(
+        request.state["auth_user"],
+        "admin",
+        f"class:{class_id}",
+    )
 
     if not show_mode_in_assistant_editor:
         return schemas.LectureVideoAssistantEditorPolicy(

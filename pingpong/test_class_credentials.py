@@ -1,3 +1,4 @@
+import functools
 import importlib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -597,7 +598,7 @@ async def test_api_key_check_returns_has_api_key_and_lecture_video_enabled(
 @with_authz(
     grants=[
         ("user:123", "can_view", "class:1"),
-        ("user:123", "admin", "institution:11"),
+        ("user:123", "admin", "class:1"),
     ]
 )
 async def test_list_class_models_includes_lecture_video_editor_policy(
@@ -914,3 +915,31 @@ def test_get_elevenlabs_client_caches_by_api_key(monkeypatch):
     assert first is second
     assert first is not third
     assert created == ["elevenlabs-key", "other-elevenlabs-key"]
+
+
+def test_get_elevenlabs_client_evicts_oldest_key_when_cache_is_full(monkeypatch):
+    elevenlabs_module.get_elevenlabs_client.cache_clear()
+    created: list[str] = []
+
+    class FakeClient:
+        def __init__(self, *, api_key):
+            created.append(api_key)
+
+    monkeypatch.setattr(elevenlabs_module, "AsyncElevenLabs", FakeClient)
+
+    original = elevenlabs_module.get_elevenlabs_client.__wrapped__
+    elevenlabs_module.get_elevenlabs_client = functools.lru_cache(maxsize=2)(original)
+    try:
+        first = elevenlabs_module.get_elevenlabs_client("key-1")
+        second = elevenlabs_module.get_elevenlabs_client("key-2")
+        first_again = elevenlabs_module.get_elevenlabs_client("key-1")
+        elevenlabs_module.get_elevenlabs_client("key-3")
+        second_again = elevenlabs_module.get_elevenlabs_client("key-2")
+    finally:
+        elevenlabs_module.get_elevenlabs_client = functools.lru_cache(maxsize=32)(
+            original
+        )
+
+    assert first is first_again
+    assert second is not second_again
+    assert created == ["key-1", "key-2", "key-3", "key-2"]
