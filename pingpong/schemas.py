@@ -742,6 +742,7 @@ class Assistant(BaseModel):
     locked: bool = False
     assistant_should_message_first: bool | None = None
     should_record_user_information: bool | None = None
+    disable_prompt_randomization: bool | None = None
     allow_user_file_uploads: bool | None = None
     allow_user_image_uploads: bool | None = None
     hide_reasoning_summaries: bool | None = None
@@ -941,6 +942,7 @@ class CreateAssistant(BaseModel):
     hide_prompt: bool = False
     assistant_should_message_first: bool = False
     should_record_user_information: bool = False
+    disable_prompt_randomization: bool = False
     allow_user_file_uploads: bool = True
     allow_user_image_uploads: bool = True
     hide_reasoning_summaries: bool = True
@@ -976,6 +978,7 @@ class CreateAssistant(BaseModel):
 class AssistantInstructionsPreviewRequest(BaseModel):
     instructions: str
     use_latex: bool = False
+    disable_prompt_randomization: bool = False
 
 
 class AssistantInstructionsPreviewResponse(BaseModel):
@@ -1020,6 +1023,7 @@ class UpdateAssistant(BaseModel):
     hide_prompt: bool | None = None
     assistant_should_message_first: bool | None = None
     should_record_user_information: bool | None = None
+    disable_prompt_randomization: bool | None = None
     allow_user_file_uploads: bool | None = None
     allow_user_image_uploads: bool | None = None
     hide_reasoning_summaries: bool | None = None

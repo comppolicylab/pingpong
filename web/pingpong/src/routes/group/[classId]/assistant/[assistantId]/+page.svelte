@@ -899,6 +899,17 @@
 		hasSetAllowUserImageUploads = true;
 	}
 
+	let disablePromptRandomization = false;
+	let hasSetDisablePromptRandomization = false;
+	$: if (
+		assistant?.disable_prompt_randomization !== undefined &&
+		assistant?.disable_prompt_randomization !== null &&
+		!hasSetDisablePromptRandomization
+	) {
+		disablePromptRandomization = assistant?.disable_prompt_randomization;
+		hasSetDisablePromptRandomization = true;
+	}
+
 	let hideReasoningSummaries = true;
 	let hasSetHideReasoningSummaries = false;
 	$: if (
@@ -1263,6 +1274,9 @@
 						? false
 						: (preventEdits ? !!assistant?.hide_prompt : newValue) !== oldValue;
 				break;
+			case 'disable_prompt_randomization':
+				dirty = newValue === undefined ? false : newValue !== !!oldValue;
+				break;
 			case 'tools':
 				dirty = !setsEqual(
 					new Set((newValue as api.Tool[]).map((t) => t.type)),
@@ -1299,6 +1313,7 @@
 					'use_latex',
 					'use_image_descriptions',
 					'hide_prompt',
+					'disable_prompt_randomization',
 					'tools',
 					'temperature',
 					'reasoning_effort'
@@ -1478,6 +1493,7 @@
 			create_classic_assistant: createClassicAssistant,
 			deleted_private_files: [...$trashPrivateFileIds, ...fileSearchCodeInterpreterUnusedFiles],
 			should_record_user_information: shouldRecordNameOrVoice,
+			disable_prompt_randomization: disablePromptRandomization,
 			allow_user_file_uploads: allowUserFileUploads,
 			allow_user_image_uploads: allowUserImageUploads,
 			hide_reasoning_summaries: hideReasoningSummaries,
@@ -1674,7 +1690,8 @@
 
 		const result = await api.previewAssistantInstructions(fetch, data.class.id, {
 			instructions,
-			use_latex: useLatex
+			use_latex: useLatex,
+			disable_prompt_randomization: disablePromptRandomization
 		});
 		const expanded = api.expandResponse(result);
 
@@ -3180,6 +3197,24 @@
 								</div>
 							</div>
 
+							<hr />
+
+							<div class="col-span-2 mb-1">
+								<Checkbox
+									id="disable_prompt_randomization"
+									name="disable_prompt_randomization"
+									disabled={preventEdits}
+									bind:checked={disablePromptRandomization}
+									><div class="flex flex-row gap-1">
+										<div>Disable Prompt Randomization</div>
+									</div></Checkbox
+								>
+								<Helper
+									>Leave <span class="font-mono">&lt;random&gt;</span> blocks in the assistant prompt
+									unprocessed. Use this when the prompt needs to show randomization syntax as an example
+									or template instead of executing it.</Helper
+								>
+							</div>
 							<hr />
 
 							<div class="col-span-2 mb-1">

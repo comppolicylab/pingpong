@@ -1940,6 +1940,7 @@ export type Assistant = {
 	locked: boolean | null;
 	assistant_should_message_first: boolean | null;
 	should_record_user_information: boolean | null;
+	disable_prompt_randomization: boolean | null;
 	allow_user_file_uploads: boolean | null;
 	allow_user_image_uploads: boolean | null;
 	hide_reasoning_summaries: boolean | null;
@@ -2067,6 +2068,7 @@ export type CreateAssistantRequest = {
 	deleted_private_files?: number[];
 	assistant_should_message_first?: boolean;
 	should_record_user_information?: boolean;
+	disable_prompt_randomization?: boolean;
 	allow_user_file_uploads?: boolean;
 	allow_user_image_uploads?: boolean;
 	hide_reasoning_summaries?: boolean;
@@ -2111,6 +2113,7 @@ export type UpdateAssistantRequest = {
 	deleted_private_files?: number[];
 	assistant_should_message_first?: boolean;
 	should_record_user_information?: boolean;
+	disable_prompt_randomization?: boolean;
 	allow_user_file_uploads?: boolean;
 	allow_user_image_uploads?: boolean;
 	hide_reasoning_summaries?: boolean;
@@ -2186,6 +2189,7 @@ export type AssistantInstructionsPreviewResponse = {
 export type AssistantInstructionsPreviewRequest = {
 	instructions: string;
 	use_latex: boolean;
+	disable_prompt_randomization: boolean;
 };
 
 /**

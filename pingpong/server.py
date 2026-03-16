@@ -6290,6 +6290,7 @@ async def create_audio_thread(
             assistant.instructions,
             assistant.use_latex,
             assistant.use_image_descriptions,
+            disable_prompt_randomization=assistant.disable_prompt_randomization,
             thread_id=thread.id if thread else None,
             user_id=request.state["session"].user.id,
         ),
@@ -6306,6 +6307,7 @@ async def create_audio_thread(
                 assistant.instructions,
                 assistant.use_latex,
                 assistant.use_image_descriptions,
+                disable_prompt_randomization=assistant.disable_prompt_randomization,
                 thread_id=result.id,
                 user_id=request.state["session"].user.id,
             )
@@ -6467,6 +6469,7 @@ async def create_lecture_thread(
             assistant.instructions,
             assistant.use_latex,
             assistant.use_image_descriptions,
+            disable_prompt_randomization=assistant.disable_prompt_randomization,
             thread_id=result.id,
             user_id=request.state["session"].user.id,
         )
@@ -6797,6 +6800,7 @@ async def create_thread(
             assistant.instructions,
             assistant.use_latex,
             assistant.use_image_descriptions,
+            disable_prompt_randomization=assistant.disable_prompt_randomization,
             thread_id=thread.id if thread and thread.id else None,
             user_id=request.state["session"].user.id,
         )
@@ -6824,6 +6828,7 @@ async def create_thread(
                 assistant.instructions,
                 assistant.use_latex,
                 assistant.use_image_descriptions,
+                disable_prompt_randomization=assistant.disable_prompt_randomization,
                 thread_id=thread_db_record.id,
                 user_id=request.state["session"].user.id,
             )
@@ -7055,6 +7060,7 @@ async def create_run(
                         asst.instructions,
                         asst.use_latex,
                         asst.use_image_descriptions,
+                        disable_prompt_randomization=asst.disable_prompt_randomization,
                         thread_id=str(thread.id),
                         user_id=request.state["session"].user.id,
                     )
@@ -7196,6 +7202,7 @@ async def create_run(
                     asst.instructions,
                     asst.use_latex,
                     asst.use_image_descriptions,
+                    disable_prompt_randomization=asst.disable_prompt_randomization,
                     thread_id=thread.thread_id,
                     user_id=request.state["session"].user.id,
                 )
@@ -7469,6 +7476,7 @@ async def send_message(
                 asst.instructions,
                 asst.use_latex,
                 asst.use_image_descriptions,
+                disable_prompt_randomization=asst.disable_prompt_randomization,
                 thread_id=thread.thread_id,
                 user_id=request.state["session"].user.id,
             )
@@ -9136,6 +9144,7 @@ async def preview_assistant_instructions(
         "instructions_preview": format_instructions(
             req.instructions,
             use_latex=req.use_latex,
+            disable_prompt_randomization=req.disable_prompt_randomization,
             user_id=request.state["session"].user.id,
             thread_id=f"preview_{uuid.uuid4()}",
         )
@@ -10425,6 +10434,12 @@ async def update_assistant(
         and req.allow_user_image_uploads is not None
     ):
         asst.allow_user_image_uploads = req.allow_user_image_uploads
+
+    if (
+        "disable_prompt_randomization" in req.model_fields_set
+        and req.disable_prompt_randomization is not None
+    ):
+        asst.disable_prompt_randomization = req.disable_prompt_randomization
 
     if (
         "hide_reasoning_summaries" in req.model_fields_set
