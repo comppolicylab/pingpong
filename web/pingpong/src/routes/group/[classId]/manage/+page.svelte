@@ -130,8 +130,8 @@
 			const errorMessage = getErrorMessage(parseInt(errorCode) || 0);
 			sadToast(errorMessage);
 		}
-		if (data.classCredentialsError) {
-			sadToast(data.classCredentialsError);
+		if (data.apiKeyReadError) {
+			sadToast(data.apiKeyReadError);
 		}
 
 		// If URL contains the section 'summary', scroll the manageContainer to the summaryElement
@@ -283,14 +283,36 @@
 	let loadedApiKey = data.apiKey || null;
 	let loadedHasApiKey = !!data?.hasAPIKey;
 	let loadedApiKeyClassId = data.class.id;
-	$: classCredentialsLoaded = data.classCredentials !== undefined;
+	$: hasApiKeyReadError = !!data.apiKeyReadError;
+	$: classCredentialsLoaded = canViewApiKey && data.classCredentials !== undefined;
 	$: classCredentials = data.classCredentials ?? [];
+	const deriveCredentialState = (
+		credentials: typeof classCredentials,
+		purpose: string,
+		fallbackFlag: boolean | undefined
+	): boolean | undefined => {
+		if (credentials.some((cc) => cc.purpose === purpose && !!cc.credential)) {
+			return true;
+		}
+		if (hasApiKeyReadError) {
+			return undefined;
+		}
+		return fallbackFlag ?? false;
+	};
+	$: hasGeminiCredential = deriveCredentialState(
+		classCredentials,
+		'lecture_video_manifest_generation',
+		data?.hasGeminiCredential
+	);
+	$: hasElevenlabsCredential = deriveCredentialState(
+		classCredentials,
+		'lecture_video_narration_tts',
+		data?.hasElevenlabsCredential
+	);
 	$: allFeatureCredentialsConfigured =
-		classCredentialsLoaded &&
-		featureCredentialConfigs.every((fc) =>
-			classCredentials.some((cc) => cc.purpose === fc.purpose && cc.credential)
-		);
-	let apiProvider = data.apiKey?.provider || 'openai';
+		hasGeminiCredential === true && hasElevenlabsCredential === true;
+	let apiProvider = data.apiKey?.provider || data.aiProvider || 'openai';
+	$: configuredAiProvider = data.aiProvider ?? apiKey?.provider ?? null;
 	let updatingClassCredentialPurpose: api.ClassCredentialPurpose | null = null;
 
 	$: subscriptionInfo = data.subscription || null;
@@ -329,7 +351,7 @@
 			loadedHasApiKey = nextHasApiKey;
 			apiKey = nextApiKey;
 			hasApiKey = nextHasApiKey;
-			apiProvider = nextApiKey?.provider || 'openai';
+			apiProvider = nextApiKey?.provider || data.aiProvider || 'openai';
 		}
 	}
 	$: canExportThreads = !!data?.grants?.isAdmin || !!data?.grants?.isTeacher;
@@ -563,6 +585,7 @@
 			const response = result as api.ApiKeyResponse;
 			apiKey = response.api_key || null;
 			hasApiKey = !!response.api_key;
+			apiProvider = response.api_key?.provider || apiProvider;
 			$updatingApiKey = false;
 			happyToast('Saved API key!');
 		}
@@ -1493,13 +1516,20 @@
 			</div>
 		</div>
 	{/if}
-	{#if canViewApiKey || lastRateLimitedAt}
+	{#if canViewApiKey || canEditClassInfo || lastRateLimitedAt}
 		<div class="grid gap-x-6 gap-y-8 pt-6 md:grid-cols-3">
 			<div>
-				<Heading customSize="text-xl font-bold" tag="h3"
-					><Secondary class="text-3xl font-normal text-black">Billing</Secondary></Heading
-				>
-				<Info>Information about your group's credentials.</Info>
+				{#if canViewApiKey}
+					<Heading customSize="text-xl font-bold" tag="h3"
+						><Secondary class="text-3xl font-normal text-black">Billing</Secondary></Heading
+					>
+					<Info>Information about your group's credentials.</Info>
+				{:else}
+					<Heading customSize="text-xl font-bold" tag="h3"
+						><Secondary class="text-3xl font-normal text-black">AI Provider</Secondary></Heading
+					>
+					<Info>Your AI Provider powers Chat and Voice mode interactions in your group.</Info>
+				{/if}
 			</div>
 			{#if canViewApiKey}
 				<div class="col-span-2">
@@ -1626,6 +1656,57 @@
 						{/if}
 					{/if}
 				</div>
+			{:else if canEditClassInfo}
+				<div class="col-span-2">
+					{#if configuredAiProvider}
+						<Label for="provider" class="mb-1 text-sm">Provider</Label>
+						<div class="mb-5 flex flex-row items-center gap-1.5" id="provider">
+							{#if configuredAiProvider === 'openai'}
+								<OpenAILogo size="5" />
+								<span class="text-sm font-normal">OpenAI</span>
+							{:else if configuredAiProvider === 'azure'}
+								<AzureLogo size="5" />
+								<span class="text-sm font-normal">Azure</span>
+							{:else}
+								<span class="text-sm font-normal">{configuredAiProvider}</span>
+							{/if}
+						</div>
+						<div class="mb-1 flex flex-row items-center gap-4" id="apiKeyStatus">
+							<Label class="text-sm">API Key</Label>
+							{#if hasApiKey}
+								<div class="flex items-center gap-1">
+									<CheckCircleOutline class="h-4 w-4 text-green-600" />
+									<span class="text-sm font-normal text-green-600">Configured</span>
+								</div>
+							{:else}
+								<div class="flex items-center gap-1">
+									<ExclamationCircleOutline class="h-4 w-4 text-amber-600" />
+									<span class="text-sm font-normal text-amber-600">Not configured</span>
+								</div>
+							{/if}
+						</div>
+						{#if !hasApiKey}
+							<Helper>Contact a group admin to set the API key.</Helper>
+						{/if}
+					{:else}
+						<Label class="mb-1 text-sm">Provider</Label>
+						{#if hasApiKeyReadError}
+							<div class="mb-1 flex flex-row items-center gap-1">
+								<ExclamationCircleOutline class="h-4 w-4 text-red-600" />
+								<span class="text-sm font-normal text-red-600">Unknown</span>
+							</div>
+							<Helper>Unable to load the AI provider status right now.</Helper>
+						{:else}
+							<div class="mb-1 flex flex-row items-center gap-1">
+								<ExclamationCircleOutline class="h-4 w-4 text-amber-600" />
+								<span class="text-sm font-normal text-amber-600">Not configured</span>
+							</div>
+							<Helper
+								>Contact a group admin to configure your AI Provider and start using PingPong.</Helper
+							>
+						{/if}
+					{/if}
+				</div>
 			{/if}
 
 			{#if lastRateLimitedAt}
@@ -1662,19 +1743,25 @@
 			{/if}
 		</div>
 	{/if}
-	{#if canViewApiKey}
+	{#if canViewApiKey || (canEditClassInfo && (hasGeminiCredential || hasElevenlabsCredential))}
 		<div class="grid gap-x-6 gap-y-8 pt-6 md:grid-cols-3">
 			<div>
 				<Heading customSize="text-xl font-bold" tag="h3"
 					><Secondary class="text-3xl font-normal text-black">Additional Providers</Secondary
 					></Heading
 				>
-				<Info>Some PingPong features may require billing details from additional providers.</Info>
+				{#if canViewApiKey}
+					<Info>Some PingPong features may require billing details from additional providers.</Info>
+				{:else}
+					<Info
+						>Some PingPong features may utilize additional providers for specialized capabilities.</Info
+					>
+				{/if}
 			</div>
 			<div class="col-span-2">
 				<div class="mb-4 flex items-center justify-between">
 					<div class="text-lg font-medium text-gray-900">Lecture Videos</div>
-					{#if !classCredentialsLoaded}
+					{#if canViewApiKey && !classCredentialsLoaded}
 						<div class="flex items-center gap-1.5 text-sm font-medium text-red-600">
 							<ExclamationCircleOutline class="h-4 w-4" />
 							<span>Credential status unavailable</span>
@@ -1696,12 +1783,12 @@
 						</div>
 					{/if}
 				</div>
-				{#if !classCredentialsLoaded}
+				{#if canViewApiKey && !classCredentialsLoaded}
 					<Alert color="red">
 						<span class="font-medium">Unable to load saved provider credentials.</span>
 						Refresh the page and try again.
 					</Alert>
-				{:else}
+				{:else if canViewApiKey}
 					{#each featureCredentialConfigs as featureCredential, i (featureCredential.purpose)}
 						{@const slot = classCredentials.find(
 							(c) => c.purpose === featureCredential.purpose
@@ -1759,6 +1846,7 @@
 							<Label for={`feature-provider-${featureCredential.purpose}`} class="mb-1 text-sm"
 								>{featureCredential.title}</Label
 							>
+							<Helper class="mb-3">{featureCredential.description}</Helper>
 							<div
 								class="mb-5 flex flex-row items-center gap-1.5"
 								id={`feature-provider-${featureCredential.purpose}`}
@@ -1777,6 +1865,54 @@
 							<Helper
 								>This credential can't be changed because existing assistants may depend on it.</Helper
 							>
+						{/if}
+					{/each}
+				{:else}
+					{#each featureCredentialConfigs as featureCredential, i (featureCredential.purpose)}
+						{#if i > 0}
+							<hr class="my-5 border-gray-200" />
+						{/if}
+						<Label for={`feature-provider-${featureCredential.purpose}`} class="mb-1 text-sm"
+							>{featureCredential.title}</Label
+						>
+						<Helper class="mb-3">{featureCredential.description}</Helper>
+						<div
+							class="mb-5 flex flex-row items-center gap-1.5"
+							id={`feature-provider-${featureCredential.purpose}`}
+						>
+							{#if featureCredential.provider === 'elevenlabs'}
+								<ElevenLabsLogo size="5" />
+							{:else if featureCredential.provider === 'gemini'}
+								<GeminiLogo size="5" />
+							{/if}
+							<span class="text-sm font-normal">{featureCredential.providerLabel}</span>
+						</div>
+						{@const isConfigured =
+							(featureCredential.provider === 'gemini' && hasGeminiCredential) ||
+							(featureCredential.provider === 'elevenlabs' && hasElevenlabsCredential)}
+						<div class="mb-1 flex flex-row items-center gap-4">
+							<Label class="text-sm">API Key</Label>
+							{#if isConfigured === true}
+								<div class="flex items-center gap-1">
+									<CheckCircleOutline class="h-4 w-4 text-green-600" />
+									<span class="text-sm font-normal text-green-600">Configured</span>
+								</div>
+							{:else if hasApiKeyReadError}
+								<div class="flex items-center gap-1">
+									<ExclamationCircleOutline class="h-4 w-4 text-red-600" />
+									<span class="text-sm font-normal text-red-600">Unknown</span>
+								</div>
+							{:else}
+								<div class="flex items-center gap-1">
+									<ExclamationCircleOutline class="h-4 w-4 text-amber-600" />
+									<span class="text-sm font-normal text-amber-600">Not configured</span>
+								</div>
+							{/if}
+						</div>
+						{#if isConfigured === false}
+							<Helper>Contact a group admin to set the API key.</Helper>
+						{:else if hasApiKeyReadError}
+							<Helper>Unable to load this provider credential status right now.</Helper>
 						{/if}
 					{/each}
 				{/if}

@@ -1,19 +1,45 @@
 import importlib
+from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock
 
+from elevenlabs.core.api_error import ApiError as ElevenLabsApiError
 import pytest
 from sqlalchemy import func, select
 
 from pingpong import models, schemas
-from pingpong import class_credentials as class_credentials_module
+from pingpong import elevenlabs as elevenlabs_module
+from pingpong import gemini as gemini_module
 from pingpong.class_credentials import (
+    _CLASS_CREDENTIAL_VALIDATORS,
     ClassCredentialValidationSSLError,
     ClassCredentialValidationUnavailableError,
+    expected_provider_for_purpose,
+    provider_matches_purpose,
     validate_class_credential,
 )
 from .testutil import with_authz, with_user, with_institution
 
 server_module = importlib.import_module("pingpong.server")
+
+
+def test_class_credential_purpose_helpers_raise_clear_error_for_unsupported_purpose():
+    unsupported_purpose = cast(schemas.ClassCredentialPurpose, object())
+
+    with pytest.raises(
+        ValueError,
+        match="Unsupported class credential purpose:",
+    ):
+        expected_provider_for_purpose(unsupported_purpose)
+
+    with pytest.raises(
+        ValueError,
+        match="Unsupported class credential purpose:",
+    ):
+        provider_matches_purpose(
+            schemas.ClassCredentialProvider.GEMINI,
+            unsupported_purpose,
+        )
 
 
 async def _create_class(db, institution_id: int, class_id: int) -> models.Class:
@@ -454,13 +480,138 @@ async def test_class_api_key_responses_are_redacted_even_when_returning_models(
 
     assert get_response.status_code == 200
     assert get_response.json() == {
+        "ai_provider": "openai",
+        "has_gemini_credential": False,
+        "has_elevenlabs_credential": False,
         "api_key": {
             "redacted_api_key": _masked(api_key),
             "provider": "openai",
             "endpoint": None,
             "api_version": None,
             "available_as_default": None,
-        }
+        },
+        "credentials": [
+            {
+                "purpose": "lecture_video_narration_tts",
+                "credential": None,
+            },
+            {
+                "purpose": "lecture_video_manifest_generation",
+                "credential": None,
+            },
+        ],
+    }
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(grants=[("user:123", "can_edit_info", "class:1")])
+async def test_get_class_api_key_returns_summary_without_key_material_for_can_edit_info(
+    api, db, institution, valid_user_token
+):
+    await _create_class(db, institution.id, 1)
+
+    async with db.async_session() as session:
+        await models.Class.update_api_key(
+            session,
+            1,
+            "class-openai-key",
+            provider="openai",
+            endpoint=None,
+            api_version=None,
+            region=None,
+            available_as_default=False,
+        )
+        await models.ClassCredential.create(
+            session,
+            1,
+            schemas.ClassCredentialPurpose.LECTURE_VIDEO_MANIFEST_GENERATION,
+            "gemini-key-1234",
+            schemas.ClassCredentialProvider.GEMINI,
+        )
+        await session.commit()
+
+    response = api.get(
+        "/api/v1/class/1/api_key",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "ai_provider": "openai",
+        "has_gemini_credential": True,
+        "has_elevenlabs_credential": False,
+        "api_key": None,
+        "credentials": None,
+    }
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(grants=[("user:123", "can_view", "class:1")])
+async def test_api_key_check_returns_has_api_key_and_lecture_video_enabled(
+    api, db, institution, valid_user_token
+):
+    await _create_class(db, institution.id, 1)
+
+    first_response = api.get(
+        "/api/v1/class/1/api_key/check",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert first_response.status_code == 200
+    assert first_response.json() == {
+        "has_api_key": False,
+        "has_lecture_video_providers": False,
+    }
+
+    async with db.async_session() as session:
+        await models.Class.update_api_key(
+            session,
+            1,
+            "class-openai-key",
+            provider="openai",
+            endpoint=None,
+            api_version=None,
+            region=None,
+            available_as_default=False,
+        )
+        await models.ClassCredential.create(
+            session,
+            1,
+            schemas.ClassCredentialPurpose.LECTURE_VIDEO_MANIFEST_GENERATION,
+            "gemini-key-1234",
+            schemas.ClassCredentialProvider.GEMINI,
+        )
+        await session.commit()
+
+    second_response = api.get(
+        "/api/v1/class/1/api_key/check",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert second_response.status_code == 200
+    assert second_response.json() == {
+        "has_api_key": True,
+        "has_lecture_video_providers": False,
+    }
+
+    async with db.async_session() as session:
+        await models.ClassCredential.create(
+            session,
+            1,
+            schemas.ClassCredentialPurpose.LECTURE_VIDEO_NARRATION_TTS,
+            "elevenlabs-key-1234",
+            schemas.ClassCredentialProvider.ELEVENLABS,
+        )
+        await session.commit()
+
+    third_response = api.get(
+        "/api/v1/class/1/api_key/check",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert third_response.status_code == 200
+    assert third_response.json() == {
+        "has_api_key": True,
+        "has_lecture_video_providers": True,
     }
 
 
@@ -604,7 +755,7 @@ async def test_validate_class_credential_for_gemini_closes_async_and_sync_client
             events.append(("init", api_key))
             self.aio = FakeAsyncClient()
 
-    monkeypatch.setattr(class_credentials_module.genai, "Client", FakeClient)
+    monkeypatch.setattr(gemini_module.genai, "Client", FakeClient)
 
     result = await validate_class_credential(
         api_key="gemini-key",
@@ -618,3 +769,210 @@ async def test_validate_class_credential_for_gemini_closes_async_and_sync_client
         ("list", {"page_size": 1}),
         ("aexit", None),
     ]
+
+
+def test_class_credential_validators_cover_all_providers():
+    assert set(_CLASS_CREDENTIAL_VALIDATORS) == set(schemas.ClassCredentialProvider)
+
+
+@pytest.mark.parametrize("status_code", [401, 403])
+async def test_validate_class_credential_for_gemini_returns_false_for_auth_client_errors(
+    monkeypatch, status_code
+):
+    class FakeModels:
+        async def list(self, *, config):
+            raise gemini_module.genai.errors.ClientError(
+                status_code,
+                {"error": {"status": "PERMISSION_DENIED", "message": "bad auth"}},
+            )
+
+    class FakeAsyncClient:
+        def __init__(self):
+            self.models = FakeModels()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc_value, traceback):
+            return None
+
+    class FakeClient:
+        def __init__(self, *, api_key):
+            self.aio = FakeAsyncClient()
+
+    monkeypatch.setattr(gemini_module.genai, "Client", FakeClient)
+
+    result = await validate_class_credential(
+        api_key="gemini-key",
+        provider=schemas.ClassCredentialProvider.GEMINI,
+    )
+
+    assert result is False
+
+
+async def test_validate_class_credential_for_gemini_raises_unavailable_for_non_auth_client_errors(
+    monkeypatch,
+):
+    class FakeModels:
+        async def list(self, *, config):
+            raise gemini_module.genai.errors.ClientError(
+                429,
+                {
+                    "error": {
+                        "status": "RESOURCE_EXHAUSTED",
+                        "message": "quota exceeded",
+                    }
+                },
+            )
+
+    class FakeAsyncClient:
+        def __init__(self):
+            self.models = FakeModels()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc_value, traceback):
+            return None
+
+    class FakeClient:
+        def __init__(self, *, api_key):
+            self.aio = FakeAsyncClient()
+
+    monkeypatch.setattr(gemini_module.genai, "Client", FakeClient)
+
+    with pytest.raises(
+        ClassCredentialValidationUnavailableError,
+        match=r"Unable to validate the Gemini API key right now\.",
+    ):
+        await validate_class_credential(
+            api_key="gemini-key",
+            provider=schemas.ClassCredentialProvider.GEMINI,
+        )
+
+
+async def test_synthesize_elevenlabs_voice_sample_maps_generic_voice_not_found_api_error(
+    monkeypatch,
+):
+    def fake_convert(*, voice_id, text, output_format):
+        raise ElevenLabsApiError(
+            status_code=404,
+            body={
+                "detail": {
+                    "type": "not_found",
+                    "code": "voice_not_found",
+                    "message": f"A voice with voice_id '{voice_id}' was not found.",
+                    "status": "voice_not_found",
+                }
+            },
+        )
+
+    class FakeClient:
+        def __init__(self, *, api_key):
+            self.text_to_speech = SimpleNamespace(convert=fake_convert)
+
+    monkeypatch.setattr(elevenlabs_module, "AsyncElevenLabs", FakeClient)
+
+    with pytest.raises(
+        elevenlabs_module.ClassCredentialVoiceValidationError,
+        match=r"Invalid voice ID provided. Please choose a different voice\.",
+    ):
+        await elevenlabs_module.synthesize_elevenlabs_voice_sample(
+            api_key="elevenlabs-key",
+            voice_id="4hMvr6P1cLNnRExeqE1d",
+        )
+
+
+async def test_synthesize_elevenlabs_voice_sample_requests_direct_ogg_opus(monkeypatch):
+    seen: dict[str, object] = {}
+
+    async def fake_collect_audio_chunks(_audio_stream) -> bytes:
+        return b"ogg-audio"
+
+    def fake_convert(*, voice_id, text, output_format):
+        seen["voice_id"] = voice_id
+        seen["text"] = text
+        seen["output_format"] = output_format
+        return object()
+
+    class FakeClient:
+        def __init__(self, *, api_key):
+            seen["api_key"] = api_key
+            self.text_to_speech = SimpleNamespace(convert=fake_convert)
+
+    monkeypatch.setattr(elevenlabs_module, "AsyncElevenLabs", FakeClient)
+    monkeypatch.setattr(
+        elevenlabs_module, "_collect_audio_chunks", fake_collect_audio_chunks
+    )
+
+    (
+        sample_text,
+        content_type,
+        audio,
+    ) = await elevenlabs_module.synthesize_elevenlabs_voice_sample(
+        api_key="elevenlabs-key",
+        voice_id="voice-123",
+    )
+
+    assert seen == {
+        "api_key": "elevenlabs-key",
+        "voice_id": "voice-123",
+        "text": elevenlabs_module.ELEVENLABS_VOICE_VALIDATION_SAMPLE_TEXT,
+        "output_format": "opus_48000_32",
+    }
+    assert sample_text == elevenlabs_module.ELEVENLABS_VOICE_VALIDATION_SAMPLE_TEXT
+    assert content_type == "audio/ogg"
+    assert audio == b"ogg-audio"
+
+
+async def test_synthesize_elevenlabs_voice_sample_maps_empty_api_key_to_unavailable():
+    with pytest.raises(
+        ClassCredentialValidationUnavailableError,
+        match="Unable to validate the ElevenLabs voice right now.",
+    ) as exc_info:
+        await elevenlabs_module.synthesize_elevenlabs_voice_sample(
+            api_key="",
+            voice_id="voice-123",
+        )
+
+    assert exc_info.value.provider == schemas.ClassCredentialProvider.ELEVENLABS
+
+
+async def test_validate_elevenlabs_api_key_returns_false_for_empty_api_key():
+    assert await elevenlabs_module.validate_elevenlabs_api_key("") is False
+
+
+async def test_validate_elevenlabs_api_key_maps_client_construction_errors_to_unavailable(
+    monkeypatch,
+):
+    class FakeClient:
+        def __init__(self, *, api_key):
+            raise RuntimeError(f"boom: {api_key}")
+
+    monkeypatch.setattr(elevenlabs_module, "AsyncElevenLabs", FakeClient)
+
+    with pytest.raises(
+        ClassCredentialValidationUnavailableError,
+        match="Unable to validate the ElevenLabs API key right now.",
+    ) as exc_info:
+        await elevenlabs_module.validate_elevenlabs_api_key("elevenlabs-key")
+
+    assert exc_info.value.provider == schemas.ClassCredentialProvider.ELEVENLABS
+
+
+def test_get_elevenlabs_client_creates_new_client_for_each_call(monkeypatch):
+    created: list[str] = []
+
+    class FakeClient:
+        def __init__(self, *, api_key):
+            created.append(api_key)
+
+    monkeypatch.setattr(elevenlabs_module, "AsyncElevenLabs", FakeClient)
+
+    first = elevenlabs_module.get_elevenlabs_client("elevenlabs-key")
+    second = elevenlabs_module.get_elevenlabs_client("elevenlabs-key")
+    third = elevenlabs_module.get_elevenlabs_client("other-elevenlabs-key")
+
+    assert first is not second
+    assert first is not third
+    assert created == ["elevenlabs-key", "elevenlabs-key", "other-elevenlabs-key"]

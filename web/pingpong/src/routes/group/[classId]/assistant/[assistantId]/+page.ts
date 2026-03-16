@@ -4,11 +4,27 @@ import type {
 	AssistantFiles,
 	AssistantModel,
 	AssistantDefaultPrompt,
-	MCPServerToolInput
+	MCPServerToolInput,
+	LectureVideoAssistantEditorPolicy as LectureVideoEditorPolicy,
+	LectureVideoConfigResponse,
+	Error as ApiError
 } from '$lib/api';
-import { getAssistantFiles, getAssistantMCPServers, expandResponse, getModels } from '$lib/api';
+import {
+	getAssistantFiles,
+	getAssistantMCPServers,
+	getAssistantLectureVideoConfig,
+	getLectureVideoEditorPolicy,
+	expandResponse,
+	getModels
+} from '$lib/api';
 import { modelsPromptsStore } from '$lib/stores/general';
 import { get } from 'svelte/store';
+
+const DEFAULT_LECTURE_VIDEO_EDITOR_POLICY: LectureVideoEditorPolicy = {
+	show_mode_in_assistant_editor: false,
+	can_select_mode_in_assistant_editor: false,
+	message: null
+};
 
 async function ensureModels(
 	fetchFn: typeof fetch,
@@ -19,6 +35,7 @@ async function ensureModels(
 	enforceClassicAssistants: boolean;
 }> {
 	const cache = get(modelsPromptsStore)[classId];
+
 	if (cache) {
 		return {
 			models: cache.models,
@@ -40,10 +57,14 @@ async function ensureModels(
 			models,
 			default_prompts: defaultPrompts,
 			enforce_classic_assistants: enforceClassicAssistants
-		}
+		} as (typeof m)[number]
 	}));
 
-	return { models, defaultPrompts, enforceClassicAssistants };
+	return {
+		models,
+		defaultPrompts,
+		enforceClassicAssistants
+	};
 }
 
 async function loadAssistantFilesOrNull(
@@ -66,6 +87,39 @@ async function loadAssistantMCPServers(
 	return response.error ? [] : response.data.mcp_servers;
 }
 
+async function loadAssistantLectureVideoConfig(
+	fetchFn: typeof fetch,
+	classId: number,
+	assistantId: number
+): Promise<{
+	lectureVideoConfig: LectureVideoConfigResponse | null;
+	lectureVideoConfigLoadError: (ApiError & { $status: number }) | null;
+}> {
+	const response = await getAssistantLectureVideoConfig(fetchFn, classId, assistantId).then(
+		expandResponse
+	);
+	return response.error
+		? {
+				lectureVideoConfig: null,
+				lectureVideoConfigLoadError: {
+					$status: response.$status,
+					...response.error
+				}
+			}
+		: {
+				lectureVideoConfig: response.data,
+				lectureVideoConfigLoadError: null
+			};
+}
+
+async function loadLectureVideoEditorPolicy(
+	fetchFn: typeof fetch,
+	classId: number
+): Promise<LectureVideoEditorPolicy> {
+	const response = await getLectureVideoEditorPolicy(fetchFn, classId).then(expandResponse);
+	return response.error ? DEFAULT_LECTURE_VIDEO_EDITOR_POLICY : response.data;
+}
+
 /**
  * Load additional data needed for managing the class.
  */
@@ -73,11 +127,14 @@ export const load: PageLoad = async ({ params, fetch, parent }) => {
 	const classId = parseInt(params.classId, 10);
 	const isCreating = params.assistantId === 'new';
 	const parentData = await parent();
-	const { models, defaultPrompts, enforceClassicAssistants } = await ensureModels(fetch, classId);
+	const [{ models, defaultPrompts, enforceClassicAssistants }, lectureVideoPolicy] =
+		await Promise.all([ensureModels(fetch, classId), loadLectureVideoEditorPolicy(fetch, classId)]);
 
 	let assistant: Assistant | null = null;
 	let assistantFiles: AssistantFiles | null = null;
 	let mcpServers: MCPServerToolInput[] = [];
+	let lectureVideoConfig: LectureVideoConfigResponse | null = null;
+	let lectureVideoConfigLoadError: (ApiError & { $status: number }) | null = null;
 
 	if (!isCreating) {
 		const assistants = parentData.assistants ?? [];
@@ -91,8 +148,25 @@ export const load: PageLoad = async ({ params, fetch, parent }) => {
 			]);
 			assistantFiles = files;
 			mcpServers = servers;
+			if (assistant.interaction_mode === 'lecture_video') {
+				const lectureVideoConfigResult = await loadAssistantLectureVideoConfig(
+					fetch,
+					classId,
+					assistant.id
+				);
+				lectureVideoConfig = lectureVideoConfigResult.lectureVideoConfig;
+				lectureVideoConfigLoadError = lectureVideoConfigResult.lectureVideoConfigLoadError;
+			}
 		}
 	}
+
+	const effectiveLectureVideoPolicy =
+		assistant?.interaction_mode === 'lecture_video'
+			? {
+					...lectureVideoPolicy,
+					show_mode_in_assistant_editor: true
+				}
+			: lectureVideoPolicy;
 
 	return {
 		isCreating,
@@ -104,6 +178,9 @@ export const load: PageLoad = async ({ params, fetch, parent }) => {
 		models,
 		defaultPrompts,
 		enforceClassicAssistants,
+		lectureVideoPolicy: effectiveLectureVideoPolicy,
+		lectureVideoConfig,
+		lectureVideoConfigLoadError,
 		statusComponents: parentData.statusComponents ?? {}
 	};
 };

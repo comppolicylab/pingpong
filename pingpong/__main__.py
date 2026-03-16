@@ -57,6 +57,9 @@ from pingpong.migrations.m06_cleanup_orphaned_lti_classes import (
 from pingpong.migrations.m07_backfill_lecture_video_content_lengths import (
     backfill_lecture_video_content_lengths,
 )
+from pingpong.migrations.m08_cleanup_invalid_lecture_video_schema_rows import (
+    cleanup_invalid_lecture_video_schema_rows,
+)
 from pingpong.now import _get_next_run_time, croner, utcnow
 from pingpong.schemas import LMSType, RunStatus
 from pingpong.lti.canvas_connect import canvas_connect_sync_all
@@ -927,6 +930,30 @@ def m07_backfill_lecture_video_content_lengths() -> None:
                 )
 
     asyncio.run(_m07_backfill_lecture_video_content_lengths())
+
+
+@db.command("m08_cleanup_invalid_lecture_video_schema_rows")
+def m08_cleanup_invalid_lecture_video_schema_rows() -> None:
+    async def _m08_cleanup_invalid_lecture_video_schema_rows() -> None:
+        await config.authz.driver.init()
+        async with config.db.driver.async_session() as session:
+            async with config.authz.driver.get_client() as authz:
+                logger.info("Cleaning invalid lecture-video assistants and threads...")
+                result = await cleanup_invalid_lecture_video_schema_rows(session, authz)
+                await session.commit()
+                logger.info(
+                    "Done! disabled_classes=%s invalid_lecture_videos=%s invalid_assistants=%s invalid_threads=%s lecture_videos_deleted=%s threads_deleted=%s assistants_deleted=%s revokes_attempted=%s",
+                    result.lecture_video_disabled_classes,
+                    result.invalid_lecture_videos,
+                    result.invalid_assistants,
+                    result.invalid_threads,
+                    result.lecture_videos_deleted,
+                    result.threads_deleted,
+                    result.assistants_deleted,
+                    result.revokes_attempted,
+                )
+
+    asyncio.run(_m08_cleanup_invalid_lecture_video_schema_rows())
 
 
 @db.command("m02_remove_responses_threads")

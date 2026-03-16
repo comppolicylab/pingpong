@@ -3,6 +3,7 @@ import io
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Literal
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException, UploadFile
@@ -13,12 +14,30 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 import pingpong.schemas as schemas
-from pingpong import lecture_video_runtime, lecture_video_service, models
+from pingpong import (
+    class_credentials as class_credentials_module,
+    elevenlabs as elevenlabs_module,
+    lecture_video_runtime,
+    lecture_video_service,
+    models,
+)
 from pingpong.animal_hash import pseudonym
 from pingpong.authz.openfga import OpenFgaAuthzClient
 from pingpong.config import LocalAudioStoreSettings, LocalVideoStoreSettings
 
 from .testutil import with_authz, with_institution, with_user
+
+DEFAULT_LECTURE_VIDEO_VOICE_ID = "voice-test-id"
+server_module = importlib.import_module("pingpong.server")
+
+
+@pytest.fixture(autouse=True)
+def mock_lecture_video_voice_validation(monkeypatch):
+    monkeypatch.setattr(
+        server_module,
+        "synthesize_elevenlabs_voice_sample",
+        AsyncMock(return_value=("Sample phrase", "audio/ogg", b"fake-audio")),
+    )
 
 
 def _parse_timestamp(value: str) -> datetime:
@@ -33,6 +52,7 @@ def make_lecture_video(
     status: str = schemas.LectureVideoStatus.READY.value,
     content_length: int = 0,
     uploader_id: int | None = None,
+    voice_id: str | None = None,
 ) -> models.LectureVideo:
     effective_filename = filename or key
     content_type = "video/webm" if key.endswith(".webm") else "video/mp4"
@@ -46,6 +66,7 @@ def make_lecture_video(
         ),
         status=status,
         uploader_id=uploader_id,
+        voice_id=voice_id,
     )
 
 
@@ -141,6 +162,11 @@ def fake_class_models_response(model_id: str = "gpt-4o-mini") -> dict:
         ],
         "default_prompts": [],
         "enforce_classic_assistants": False,
+        "lecture_video": {
+            "show_mode_in_assistant_editor": True,
+            "can_select_mode_in_assistant_editor": True,
+            "message": "Lecture Video mode is in active development.",
+        },
     }
 
 
@@ -198,6 +224,8 @@ async def create_ready_lecture_video_assistant(
         schemas.LectureVideoManifestV1.model_validate(
             manifest or lecture_video_manifest()
         ),
+        voice_id=DEFAULT_LECTURE_VIDEO_VOICE_ID,
+        create_narration_placeholders=True,
     )
 
     assistant = models.Assistant(
@@ -3233,6 +3261,7 @@ async def test_create_lecture_video_assistant_persists_normalized_manifest(
         )
         session.add(class_)
         session.add(lecture_video)
+        await create_lecture_video_copy_credentials(session, class_.id)
         await session.commit()
         await session.refresh(lecture_video)
 
@@ -3248,6 +3277,7 @@ async def test_create_lecture_video_assistant_persists_normalized_manifest(
             "tools": [],
             "lecture_video_id": lecture_video.id,
             "lecture_video_manifest": manifest,
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -3286,15 +3316,128 @@ async def test_create_lecture_video_assistant_persists_normalized_manifest(
 
     assert refreshed_video is not None
     assert refreshed_video.status == schemas.LectureVideoStatus.READY.value
+    assert refreshed_video.voice_id == DEFAULT_LECTURE_VIDEO_VOICE_ID
     assert question_count == 1
     assert option_count == 2
     assert single_select_correct_option_count == 1
-    assert narration_count == 3
+    assert narration_count == 0
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "admin", "class:1"),
+        ("user:123", "can_create_assistants", "class:1"),
+    ]
+)
+async def test_create_lecture_video_assistant_requires_provider_credentials(
+    api, db, institution, valid_user_token, monkeypatch
+):
+    patch_lecture_video_model_list(monkeypatch)
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        lecture_video = make_lecture_video(
+            class_.id,
+            "missing-providers.mp4",
+            filename="missing-providers.mp4",
+            status=schemas.LectureVideoStatus.UPLOADED.value,
+        )
+        session.add_all([class_, lecture_video])
+        await session.commit()
+        await session.refresh(lecture_video)
+
+    response = api.post(
+        "/api/v1/class/1/assistant",
+        json={
+            "name": "Lecture Assistant",
+            "instructions": "Guide the learner through the lecture.",
+            "description": "Lecture presentation assistant",
+            "interaction_mode": "lecture_video",
+            "model": "gpt-4o-mini",
+            "tools": [],
+            "lecture_video_id": lecture_video.id,
+            "lecture_video_manifest": lecture_video_manifest(),
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 400
+    assert (
+        response.json()["detail"]
+        == "Configure Gemini and ElevenLabs credentials in Manage Group to enable Lecture Video mode."
+    )
+
+    async with db.async_session() as session:
+        assistant_count = await session.scalar(
+            select(func.count()).select_from(models.Assistant)
+        )
+        refreshed_video = await session.get(models.LectureVideo, lecture_video.id)
+
+    assert assistant_count == 0
+    assert refreshed_video is not None
+    assert refreshed_video.status == schemas.LectureVideoStatus.UPLOADED.value
+
+
+def test_lecture_video_config_matches_logs_invalid_current_manifest(
+    monkeypatch, caplog
+):
+    try:
+        schemas.LectureVideoManifestV1.model_validate({"questions": []})
+    except ValidationError as exc:
+        validation_error = exc
+    else:
+        pytest.fail("Expected invalid manifest to raise ValidationError")
+
+    def raise_validation_error(_lecture_video):  # type: ignore[no-untyped-def]
+        raise validation_error
+
+    current_lecture_video = make_lecture_video(1, "current.mp4")
+    current_lecture_video.id = 123
+    requested_lecture_video = make_lecture_video(1, "requested.mp4")
+    requested_lecture_video.id = 456
+    requested_manifest = schemas.LectureVideoManifestV1.model_validate(
+        lecture_video_manifest()
+    )
+
+    monkeypatch.setattr(
+        lecture_video_service,
+        "lecture_video_manifest_from_model",
+        raise_validation_error,
+    )
+
+    with caplog.at_level("WARNING"):
+        matches = lecture_video_service.lecture_video_config_matches(
+            current_lecture_video,
+            requested_lecture_video,
+            requested_manifest,
+            DEFAULT_LECTURE_VIDEO_VOICE_ID,
+        )
+
+    assert matches is False
+    assert (
+        "Failed to serialize current lecture video manifest for comparison."
+        in caplog.text
+    )
 
 
 @pytest.mark.parametrize(
     "manifest",
     [
+        pytest.param(
+            {
+                **lecture_video_manifest(),
+                "version": 2,
+            },
+            id="unexpected-version",
+        ),
         pytest.param(
             {
                 **lecture_video_manifest(),
@@ -3364,6 +3507,7 @@ async def test_invalid_lecture_video_manifest_returns_422_and_preserves_uploaded
         )
         session.add(class_)
         session.add(lecture_video)
+        await create_lecture_video_copy_credentials(session, class_.id)
         await session.commit()
         await session.refresh(lecture_video)
 
@@ -3378,6 +3522,7 @@ async def test_invalid_lecture_video_manifest_returns_422_and_preserves_uploaded
             "tools": [],
             "lecture_video_id": lecture_video.id,
             "lecture_video_manifest": manifest,
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -3424,6 +3569,7 @@ async def test_create_lecture_video_assistant_without_manifest_returns_422(
         )
         session.add(class_)
         session.add(lecture_video)
+        await create_lecture_video_copy_credentials(session, class_.id)
         await session.commit()
         await session.refresh(lecture_video)
 
@@ -3437,6 +3583,7 @@ async def test_create_lecture_video_assistant_without_manifest_returns_422(
             "model": "gpt-4o-mini",
             "tools": [],
             "lecture_video_id": lecture_video.id,
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -3446,6 +3593,370 @@ async def test_create_lecture_video_assistant_without_manifest_returns_422(
         "Specifying a lecture_video_manifest is required"
         in response.json()["detail"][0]["msg"]
     )
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(grants=[("user:123", "can_edit", "assistant:1")])
+async def test_get_assistant_lecture_video_config_returns_manifest_and_voice_id(
+    api, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+            manifest=lecture_video_manifest(question_text="Config question?"),
+        )
+
+    response = api.get(
+        f"/api/v1/class/{class_.id}/assistant/1/lecture-video/config",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "lecture_video": {
+            "id": 1,
+            "filename": "lecture-runtime.mp4",
+            "size": 128,
+            "content_type": "video/mp4",
+            "status": "ready",
+            "error_message": None,
+        },
+        "lecture_video_manifest": lecture_video_manifest(
+            question_text="Config question?"
+        ),
+        "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+    }
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(grants=[("user:123", "can_edit", "assistant:1")])
+async def test_get_assistant_lecture_video_config_returns_409_for_invalid_stored_manifest(
+    api, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        lecture_video = make_lecture_video(
+            class_.id,
+            "invalid-manifest.mp4",
+            filename="invalid-manifest.mp4",
+            content_length=128,
+        )
+        lecture_video.id = 1
+        session.add_all([class_, lecture_video])
+        await session.flush()
+
+        question = models.LectureVideoQuestion(
+            lecture_video_id=lecture_video.id,
+            position=0,
+            question_type=schemas.LectureVideoQuestionType.SINGLE_SELECT,
+            question_text="Broken question",
+            intro_text="Broken intro",
+            stop_offset_ms=1000,
+        )
+        session.add(question)
+        await session.flush()
+        session.add(
+            models.LectureVideoQuestionOption(
+                question_id=question.id,
+                position=0,
+                option_text="Only option",
+                post_answer_text="Nope",
+                continue_offset_ms=1500,
+            )
+        )
+
+        assistant = models.Assistant(
+            id=1,
+            name="Lecture Assistant",
+            class_id=class_.id,
+            interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+            version=3,
+            lecture_video_id=lecture_video.id,
+            instructions="You are a lecture assistant.",
+            model="gpt-4o-mini",
+            tools="[]",
+            use_latex=False,
+            use_image_descriptions=False,
+            hide_prompt=False,
+        )
+        session.add(assistant)
+        await session.commit()
+
+    response = api.get(
+        "/api/v1/class/1/assistant/1/lecture-video/config",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Stored lecture video manifest is invalid."
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "admin", "class:1"),
+        ("user:123", "can_create_assistants", "class:1"),
+    ]
+)
+async def test_validate_class_lecture_video_voice_returns_audio_sample(
+    api, db, institution, valid_user_token, monkeypatch
+):
+    async with db.async_session() as session:
+        session.add(
+            models.Class(
+                id=1,
+                name="Lecture Class",
+                institution_id=institution.id,
+                api_key="sk-test",
+            )
+        )
+        await session.flush()
+        await models.ClassCredential.create(
+            session,
+            1,
+            schemas.ClassCredentialPurpose.LECTURE_VIDEO_NARRATION_TTS,
+            "elevenlabs-key-1234",
+            schemas.ClassCredentialProvider.ELEVENLABS,
+        )
+        await session.commit()
+
+    monkeypatch.setattr(
+        server_module,
+        "synthesize_elevenlabs_voice_sample",
+        AsyncMock(return_value=("Sample phrase", "audio/ogg", b"fake-audio")),
+    )
+
+    response = api.post(
+        "/api/v1/class/1/lecture-video/voice/validate",
+        json={"voice_id": "voice-123"},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.content == b"fake-audio"
+    assert response.headers["content-type"] == "audio/ogg"
+    assert (
+        response.headers[elevenlabs_module.ELEVENLABS_VOICE_SAMPLE_TEXT_HEADER]
+        == "Sample phrase"
+    )
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(grants=[("user:123", "can_create_assistants", "class:1")])
+async def test_validate_class_lecture_video_voice_requires_admin(
+    api, db, institution, valid_user_token, monkeypatch
+):
+    async with db.async_session() as session:
+        session.add(
+            models.Class(
+                id=1,
+                name="Lecture Class",
+                institution_id=institution.id,
+                api_key="sk-test",
+            )
+        )
+        await session.flush()
+        await models.ClassCredential.create(
+            session,
+            1,
+            schemas.ClassCredentialPurpose.LECTURE_VIDEO_NARRATION_TTS,
+            "elevenlabs-key-1234",
+            schemas.ClassCredentialProvider.ELEVENLABS,
+        )
+        await session.commit()
+
+    synthesize_mock = AsyncMock(
+        return_value=("Sample phrase", "audio/ogg", b"fake-audio")
+    )
+    monkeypatch.setattr(
+        server_module, "synthesize_elevenlabs_voice_sample", synthesize_mock
+    )
+
+    response = api.post(
+        "/api/v1/class/1/lecture-video/voice/validate",
+        json={"voice_id": "voice-123"},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 403
+    synthesize_mock.assert_not_awaited()
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_edit", "assistant:1"),
+        ("user:123", "can_create_assistants", "class:1"),
+    ]
+)
+async def test_validate_assistant_lecture_video_voice_returns_audio_sample(
+    api, db, institution, valid_user_token, monkeypatch
+):
+    async with db.async_session() as session:
+        class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+        await models.ClassCredential.create(
+            session,
+            class_.id,
+            schemas.ClassCredentialPurpose.LECTURE_VIDEO_NARRATION_TTS,
+            "elevenlabs-key-1234",
+            schemas.ClassCredentialProvider.ELEVENLABS,
+        )
+        await session.commit()
+
+    monkeypatch.setattr(
+        server_module,
+        "synthesize_elevenlabs_voice_sample",
+        AsyncMock(return_value=("Assistant phrase", "audio/ogg", b"assistant-audio")),
+    )
+
+    response = api.post(
+        "/api/v1/class/1/assistant/1/lecture-video/voice/validate",
+        json={"voice_id": "voice-123"},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.content == b"assistant-audio"
+    assert response.headers["content-type"] == "audio/ogg"
+    assert (
+        response.headers[elevenlabs_module.ELEVENLABS_VOICE_SAMPLE_TEXT_HEADER]
+        == "Assistant phrase"
+    )
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_edit", "assistant:1"),
+        ("user:123", "can_create_assistants", "class:1"),
+    ]
+)
+async def test_validate_assistant_lecture_video_voice_rejects_invalid_voice_id(
+    api, db, institution, valid_user_token, monkeypatch
+):
+    async with db.async_session() as session:
+        class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+        await models.ClassCredential.create(
+            session,
+            class_.id,
+            schemas.ClassCredentialPurpose.LECTURE_VIDEO_NARRATION_TTS,
+            "elevenlabs-key-1234",
+            schemas.ClassCredentialProvider.ELEVENLABS,
+        )
+        await session.commit()
+
+    monkeypatch.setattr(
+        server_module,
+        "synthesize_elevenlabs_voice_sample",
+        AsyncMock(
+            side_effect=class_credentials_module.ClassCredentialVoiceValidationError(
+                "Invalid voice ID provided. Please choose a different voice."
+            )
+        ),
+    )
+
+    response = api.post(
+        "/api/v1/class/1/assistant/1/lecture-video/voice/validate",
+        json={"voice_id": "bad-voice"},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": "Invalid voice ID provided. Please choose a different voice."
+    }
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_assistants", "class:1"),
+        ("user:123", "admin", "class:1"),
+    ]
+)
+async def test_create_lecture_video_assistant_rejects_invalid_voice_id(
+    api, db, institution, valid_user_token, monkeypatch
+):
+    patch_lecture_video_model_list(monkeypatch)
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        lecture_video = make_lecture_video(
+            class_.id,
+            "invalid-create.mp4",
+            filename="invalid-create.mp4",
+            status=schemas.LectureVideoStatus.UPLOADED.value,
+        )
+        session.add_all([class_, lecture_video])
+        await session.flush()
+        await create_lecture_video_copy_credentials(session, class_.id)
+        await session.commit()
+        await session.refresh(lecture_video)
+
+    monkeypatch.setattr(
+        server_module,
+        "synthesize_elevenlabs_voice_sample",
+        AsyncMock(
+            side_effect=class_credentials_module.ClassCredentialVoiceValidationError(
+                "Invalid voice ID provided. Please choose a different voice."
+            )
+        ),
+    )
+
+    response = api.post(
+        "/api/v1/class/1/assistant",
+        json={
+            "name": "Lecture Assistant",
+            "instructions": "Guide the learner through the lecture.",
+            "description": "Lecture presentation assistant",
+            "interaction_mode": "lecture_video",
+            "model": "gpt-4o-mini",
+            "tools": [],
+            "lecture_video_id": lecture_video.id,
+            "lecture_video_manifest": lecture_video_manifest(),
+            "voice_id": "bad-voice",
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": "Invalid voice ID provided. Please choose a different voice."
+    }
+
+    async with db.async_session() as session:
+        assistant_count = await session.scalar(
+            select(func.count()).select_from(models.Assistant)
+        )
+        refreshed_video = await session.get(models.LectureVideo, lecture_video.id)
+
+    assert assistant_count == 0
+    assert refreshed_video is not None
+    assert refreshed_video.voice_id is None
 
 
 @with_user(123)
@@ -3484,6 +3995,7 @@ async def test_update_assistant_with_new_lecture_video_id_deletes_prior_video_wh
         session.add(class_)
         session.add(first_video)
         session.add(second_video)
+        await create_lecture_video_copy_credentials(session, class_.id)
         await session.commit()
         await session.refresh(first_video)
         await session.refresh(second_video)
@@ -3501,6 +4013,7 @@ async def test_update_assistant_with_new_lecture_video_id_deletes_prior_video_wh
             "lecture_video_manifest": lecture_video_manifest(
                 question_text="First question?"
             ),
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -3513,6 +4026,7 @@ async def test_update_assistant_with_new_lecture_video_id_deletes_prior_video_wh
             "lecture_video_manifest": lecture_video_manifest(
                 question_text="Second question?"
             ),
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -3573,6 +4087,7 @@ async def test_update_assistant_with_new_lecture_video_id_ignores_cleanup_delete
             status=schemas.LectureVideoStatus.UPLOADED.value,
         )
         session.add_all([class_, first_video, second_video])
+        await create_lecture_video_copy_credentials(session, class_.id)
         await session.commit()
         await session.refresh(first_video)
         await session.refresh(second_video)
@@ -3595,6 +4110,7 @@ async def test_update_assistant_with_new_lecture_video_id_ignores_cleanup_delete
             "lecture_video_manifest": lecture_video_manifest(
                 question_text="First question?"
             ),
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -3607,6 +4123,7 @@ async def test_update_assistant_with_new_lecture_video_id_ignores_cleanup_delete
             "lecture_video_manifest": lecture_video_manifest(
                 question_text="Second question?"
             ),
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -3665,6 +4182,7 @@ async def test_update_assistant_with_new_lecture_video_id_without_manifest_retur
         session.add(class_)
         session.add(first_video)
         session.add(second_video)
+        await create_lecture_video_copy_credentials(session, class_.id)
         await session.commit()
         await session.refresh(first_video)
         await session.refresh(second_video)
@@ -3682,6 +4200,7 @@ async def test_update_assistant_with_new_lecture_video_id_without_manifest_retur
             "lecture_video_manifest": lecture_video_manifest(
                 question_text="First question?"
             ),
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -3689,7 +4208,10 @@ async def test_update_assistant_with_new_lecture_video_id_without_manifest_retur
 
     response = api.put(
         "/api/v1/class/1/assistant/1",
-        json={"lecture_video_id": second_video.id},
+        json={
+            "lecture_video_id": second_video.id,
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+        },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
 
@@ -3698,6 +4220,100 @@ async def test_update_assistant_with_new_lecture_video_id_without_manifest_retur
         "Specifying a lecture_video_manifest is required"
         in response.json()["detail"][0]["msg"]
     )
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(grants=[("user:123", "can_edit", "assistant:1")])
+async def test_update_assistant_with_whitespace_voice_id_returns_422(
+    api, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_, lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+
+    response = api.put(
+        f"/api/v1/class/{class_.id}/assistant/1",
+        json={
+            "lecture_video_id": lecture_video.id,
+            "lecture_video_manifest": lecture_video_manifest(
+                question_text="Updated question?"
+            ),
+            "voice_id": "   ",
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 422
+    assert (
+        "Specifying a voice_id is required when updating lecture video data."
+        in response.json()["detail"][0]["msg"]
+    )
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_edit", "assistant:1"),
+        ("user:123", "can_create_assistants", "class:1"),
+        ("user:123", "admin", "class:1"),
+    ]
+)
+async def test_update_assistant_rejects_invalid_voice_id(
+    api, db, institution, valid_user_token, monkeypatch
+):
+    async with db.async_session() as session:
+        class_, lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+        await create_lecture_video_copy_credentials(session, class_.id)
+        await session.commit()
+
+    monkeypatch.setattr(
+        server_module,
+        "synthesize_elevenlabs_voice_sample",
+        AsyncMock(
+            side_effect=class_credentials_module.ClassCredentialVoiceValidationError(
+                "Invalid voice ID provided. Please choose a different voice."
+            )
+        ),
+    )
+
+    response = api.put(
+        f"/api/v1/class/{class_.id}/assistant/1",
+        json={
+            "lecture_video_id": lecture_video.id,
+            "lecture_video_manifest": lecture_video_manifest(
+                question_text="Updated question?"
+            ),
+            "voice_id": "bad-voice",
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": "Invalid voice ID provided. Please choose a different voice."
+    }
+
+    async with db.async_session() as session:
+        assistant = await session.get(models.Assistant, 1)
+        refreshed_video = await session.get(models.LectureVideo, lecture_video.id)
+        question = await session.scalar(
+            select(models.LectureVideoQuestion.question_text).where(
+                models.LectureVideoQuestion.lecture_video_id == lecture_video.id
+            )
+        )
+
+    assert assistant is not None
+    assert refreshed_video is not None
+    assert assistant.lecture_video_id == lecture_video.id
+    assert refreshed_video.voice_id == DEFAULT_LECTURE_VIDEO_VOICE_ID
+    assert question == "What is the right answer?"
 
 
 @with_user(123)
@@ -3736,6 +4352,7 @@ async def test_update_assistant_with_new_lecture_video_id_preserves_prior_video_
         session.add(class_)
         session.add(first_video)
         session.add(second_video)
+        await create_lecture_video_copy_credentials(session, class_.id)
         await session.commit()
         await session.refresh(first_video)
         await session.refresh(second_video)
@@ -3753,6 +4370,7 @@ async def test_update_assistant_with_new_lecture_video_id_preserves_prior_video_
             "lecture_video_manifest": lecture_video_manifest(
                 question_text="First question?"
             ),
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -3782,6 +4400,7 @@ async def test_update_assistant_with_new_lecture_video_id_preserves_prior_video_
             "lecture_video_manifest": lecture_video_manifest(
                 question_text="Second question?"
             ),
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -3807,6 +4426,319 @@ async def test_update_assistant_with_new_lecture_video_id_preserves_prior_video_
     assert first_video_row is not None
     assert first_question == "First question?"
     assert second_question == "Second question?"
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_assistants", "class:1"),
+        ("user:123", "can_edit", "assistant:1"),
+        ("user:123", "admin", "class:1"),
+    ]
+)
+async def test_update_assistant_with_same_lecture_video_id_clones_snapshot_and_preserves_thread_history(
+    api, db, institution, valid_user_token, monkeypatch
+):
+    patch_lecture_video_model_list(monkeypatch)
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        lecture_video = make_lecture_video(
+            class_.id,
+            "same-video.mp4",
+            filename="same-video.mp4",
+            status=schemas.LectureVideoStatus.UPLOADED.value,
+        )
+        session.add_all([class_, lecture_video])
+        await create_lecture_video_copy_credentials(session, class_.id)
+        await session.commit()
+        await session.refresh(lecture_video)
+
+    create_response = api.post(
+        "/api/v1/class/1/assistant",
+        json={
+            "name": "Lecture Assistant",
+            "instructions": "Guide the learner through the lecture.",
+            "description": "Lecture presentation assistant",
+            "interaction_mode": "lecture_video",
+            "model": "gpt-4o-mini",
+            "tools": [],
+            "lecture_video_id": lecture_video.id,
+            "lecture_video_manifest": lecture_video_manifest(
+                question_text="Original question?"
+            ),
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+
+    async with db.async_session() as session:
+        session.add(
+            models.Thread(
+                id=1,
+                name="Lecture Thread",
+                version=3,
+                thread_id="thread-preserve-same-video",
+                class_id=1,
+                assistant_id=1,
+                interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+                lecture_video_id=lecture_video.id,
+                private=True,
+                tools_available="[]",
+            )
+        )
+        await session.commit()
+
+    update_response = api.put(
+        "/api/v1/class/1/assistant/1",
+        json={
+            "lecture_video_id": lecture_video.id,
+            "lecture_video_manifest": lecture_video_manifest(
+                question_text="Updated question?"
+            ),
+            "voice_id": "voice-updated",
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["lecture_video"]["id"] != lecture_video.id
+
+    async with db.async_session() as session:
+        assistant = await session.get(models.Assistant, 1)
+        original_video = await session.get(models.LectureVideo, lecture_video.id)
+        updated_video = await session.get(
+            models.LectureVideo, assistant.lecture_video_id
+        )
+        original_question = await session.scalar(
+            select(models.LectureVideoQuestion.question_text).where(
+                models.LectureVideoQuestion.lecture_video_id == lecture_video.id
+            )
+        )
+        updated_question = await session.scalar(
+            select(models.LectureVideoQuestion.question_text).where(
+                models.LectureVideoQuestion.lecture_video_id == updated_video.id
+            )
+        )
+
+    assert assistant is not None
+    assert original_video is not None
+    assert updated_video is not None
+    assert updated_video.id != original_video.id
+    assert updated_video.stored_object_id == original_video.stored_object_id
+    assert updated_video.voice_id == "voice-updated"
+    assert original_video.voice_id == DEFAULT_LECTURE_VIDEO_VOICE_ID
+    assert original_question == "Original question?"
+    assert updated_question == "Updated question?"
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_assistants", "class:1"),
+        ("user:123", "can_edit", "assistant:1"),
+        ("user:123", "admin", "class:1"),
+    ]
+)
+async def test_update_assistant_with_same_lecture_video_config_is_a_no_op(
+    api, db, institution, valid_user_token, monkeypatch
+):
+    patch_lecture_video_model_list(monkeypatch)
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        lecture_video = make_lecture_video(
+            class_.id,
+            "no-op-video.mp4",
+            filename="no-op-video.mp4",
+            status=schemas.LectureVideoStatus.UPLOADED.value,
+        )
+        session.add_all([class_, lecture_video])
+        await create_lecture_video_copy_credentials(session, class_.id)
+        await session.commit()
+        await session.refresh(lecture_video)
+
+    create_response = api.post(
+        "/api/v1/class/1/assistant",
+        json={
+            "name": "Lecture Assistant",
+            "instructions": "Guide the learner through the lecture.",
+            "description": "Lecture presentation assistant",
+            "interaction_mode": "lecture_video",
+            "model": "gpt-4o-mini",
+            "tools": [],
+            "lecture_video_id": lecture_video.id,
+            "lecture_video_manifest": lecture_video_manifest(
+                question_text="No-op question?"
+            ),
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+
+    update_response = api.put(
+        "/api/v1/class/1/assistant/1",
+        json={
+            "voice_id": f"  {DEFAULT_LECTURE_VIDEO_VOICE_ID}  ",
+            "lecture_video_id": lecture_video.id,
+            "lecture_video_manifest": {
+                "questions": [
+                    {
+                        "options": [
+                            {
+                                "continue_offset_ms": 1500,
+                                "correct": True,
+                                "post_answer_text": "Correct answer",
+                                "option_text": "Option A",
+                            },
+                            {
+                                "correct": False,
+                                "option_text": "Option B",
+                                "continue_offset_ms": 2000,
+                                "post_answer_text": "Try again",
+                            },
+                        ],
+                        "stop_offset_ms": 1000,
+                        "intro_text": "Intro narration",
+                        "question_text": "No-op question?",
+                        "type": "single_select",
+                    }
+                ]
+            },
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["lecture_video"]["id"] == lecture_video.id
+
+    async with db.async_session() as session:
+        assistant = await session.get(models.Assistant, 1)
+        lecture_video_count = await session.scalar(
+            select(func.count()).select_from(models.LectureVideo)
+        )
+        refreshed_video = await session.get(models.LectureVideo, lecture_video.id)
+        question = await session.scalar(
+            select(models.LectureVideoQuestion.question_text).where(
+                models.LectureVideoQuestion.lecture_video_id == lecture_video.id
+            )
+        )
+
+    assert assistant is not None
+    assert assistant.lecture_video_id == lecture_video.id
+    assert lecture_video_count == 1
+    assert refreshed_video is not None
+    assert refreshed_video.voice_id == DEFAULT_LECTURE_VIDEO_VOICE_ID
+    assert question == "No-op question?"
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(grants=[("user:123", "can_delete", "assistant:1")])
+async def test_delete_assistant_deletes_attached_lecture_video_when_unused(
+    api, db, institution, valid_user_token, config, monkeypatch
+):
+    monkeypatch.setattr(config, "video_store", None)
+
+    async with db.async_session() as session:
+        class_, lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+
+    async def fake_get_openai_client_for_class() -> SimpleNamespace:
+        return SimpleNamespace(
+            beta=SimpleNamespace(
+                assistants=SimpleNamespace(delete=AsyncMock(return_value=None))
+            )
+        )
+
+    api.app.dependency_overrides[server_module.get_openai_client_for_class] = (
+        fake_get_openai_client_for_class
+    )
+    try:
+        response = api.delete(
+            f"/api/v1/class/{class_.id}/assistant/1",
+            headers={"Authorization": f"Bearer {valid_user_token}"},
+        )
+    finally:
+        api.app.dependency_overrides.pop(
+            server_module.get_openai_client_for_class, None
+        )
+
+    assert response.status_code == 200
+
+    async with db.async_session() as session:
+        assert await session.get(models.Assistant, 1) is None
+        assert await session.get(models.LectureVideo, lecture_video.id) is None
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(grants=[("user:123", "can_delete", "assistant:1")])
+async def test_delete_assistant_preserves_attached_lecture_video_when_thread_uses_it(
+    api, db, institution, valid_user_token, config, monkeypatch
+):
+    monkeypatch.setattr(config, "video_store", None)
+
+    async with db.async_session() as session:
+        class_, lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+        session.add(
+            models.Thread(
+                id=1,
+                name="Lecture Thread",
+                version=3,
+                thread_id="thread-keep-video-on-delete",
+                class_id=class_.id,
+                assistant_id=1,
+                interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+                lecture_video_id=lecture_video.id,
+                private=True,
+                tools_available="[]",
+            )
+        )
+        await session.commit()
+
+    async def fake_get_openai_client_for_class() -> SimpleNamespace:
+        return SimpleNamespace(
+            beta=SimpleNamespace(
+                assistants=SimpleNamespace(delete=AsyncMock(return_value=None))
+            )
+        )
+
+    api.app.dependency_overrides[server_module.get_openai_client_for_class] = (
+        fake_get_openai_client_for_class
+    )
+    try:
+        response = api.delete(
+            f"/api/v1/class/{class_.id}/assistant/1",
+            headers={"Authorization": f"Bearer {valid_user_token}"},
+        )
+    finally:
+        api.app.dependency_overrides.pop(
+            server_module.get_openai_client_for_class, None
+        )
+
+    assert response.status_code == 200
+
+    async with db.async_session() as session:
+        assert await session.get(models.Assistant, 1) is None
+        assert await session.get(models.LectureVideo, lecture_video.id) is not None
 
 
 @with_user(123)
@@ -3881,6 +4813,7 @@ async def test_update_lecture_video_assistant_rejects_assigned_lecture_video(
         json={
             "lecture_video_id": first_video.id,
             "lecture_video_manifest": lecture_video_manifest(),
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -4330,6 +5263,7 @@ async def test_create_lecture_video_assistant_rejects_assigned_lecture_video(
         session.add(class_)
         session.add(lecture_video)
         await session.flush()
+        await create_lecture_video_copy_credentials(session, class_.id)
         session.add(
             models.Assistant(
                 id=1,
@@ -4357,6 +5291,7 @@ async def test_create_lecture_video_assistant_rejects_assigned_lecture_video(
             "tools": [],
             "lecture_video_id": lecture_video.id,
             "lecture_video_manifest": lecture_video_manifest(),
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -4393,6 +5328,7 @@ async def test_create_assistant_handles_lecture_video_unique_conflict(
         )
         session.add(class_)
         session.add(lecture_video)
+        await create_lecture_video_copy_credentials(session, class_.id)
         await session.commit()
         await session.refresh(lecture_video)
 
@@ -4416,6 +5352,7 @@ async def test_create_assistant_handles_lecture_video_unique_conflict(
             "tools": [],
             "lecture_video_id": lecture_video.id,
             "lecture_video_manifest": lecture_video_manifest(),
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -4459,6 +5396,7 @@ async def test_update_assistant_handles_lecture_video_unique_conflict(
         )
         session.add_all([class_, first_video, second_video])
         await session.flush()
+        await create_lecture_video_copy_credentials(session, class_.id)
         session.add(
             models.Assistant(
                 id=1,
@@ -4492,6 +5430,7 @@ async def test_update_assistant_handles_lecture_video_unique_conflict(
         json={
             "lecture_video_id": second_video.id,
             "lecture_video_manifest": lecture_video_manifest(),
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )

@@ -501,7 +501,7 @@ class LectureVideoManifestQuestionV1(BaseModel):
 
 
 class LectureVideoManifestV1(BaseModel):
-    version: Literal[1]
+    version: Literal[1] = 1
     questions: list[LectureVideoManifestQuestionV1] = Field(..., min_length=1)
 
 
@@ -536,6 +536,30 @@ class LectureVideoSummary(BaseModel):
     content_type: str
     status: LectureVideoStatus
     error_message: str | None = None
+
+
+class LectureVideoAssistantEditorPolicy(BaseModel):
+    show_mode_in_assistant_editor: bool = False
+    can_select_mode_in_assistant_editor: bool = False
+    message: str | None = None
+
+
+class LectureVideoConfigResponse(BaseModel):
+    lecture_video: LectureVideoSummary
+    lecture_video_manifest: LectureVideoManifestV1
+    voice_id: str
+
+
+class ValidateLectureVideoVoiceRequest(BaseModel):
+    voice_id: str
+
+    @field_validator("voice_id")
+    @classmethod
+    def strip_voice_id(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("voice_id must not be empty")
+        return value
 
 
 class LectureVideoOptionPrompt(BaseModel):
@@ -762,7 +786,15 @@ def lecture_video_validator_create_assistant(self):
             raise ValueError(
                 "Specifying a lecture_video_manifest is required for lecture video assistants."
             )
-    elif self.lecture_video_id is not None or self.lecture_video_manifest is not None:
+        if not self.voice_id:
+            raise ValueError(
+                "Specifying a voice_id is required for lecture video assistants."
+            )
+    elif (
+        self.lecture_video_id is not None
+        or self.lecture_video_manifest is not None
+        or self.voice_id is not None
+    ):
         raise ValueError(
             "Lecture video data can only be set for assistants in Lecture Video mode."
         )
@@ -787,14 +819,22 @@ def lecture_video_validator_create_assistant(self):
 def lecture_video_validator_update_assistant(self):
     lecture_video_id_present = "lecture_video_id" in self.model_fields_set
     lecture_video_manifest_present = "lecture_video_manifest" in self.model_fields_set
+    voice_id_present = "voice_id" in self.model_fields_set
+    lecture_video_payload_present = (
+        lecture_video_id_present or lecture_video_manifest_present or voice_id_present
+    )
 
-    if lecture_video_id_present and self.lecture_video_manifest is None:
+    if lecture_video_payload_present and self.lecture_video_id is None:
+        raise ValueError(
+            "Specifying a lecture_video_id is required when updating lecture video data."
+        )
+    if lecture_video_payload_present and self.lecture_video_manifest is None:
         raise ValueError(
             "Specifying a lecture_video_manifest is required when updating lecture video data."
         )
-    if lecture_video_manifest_present and self.lecture_video_id is None:
+    if lecture_video_payload_present and not self.voice_id:
         raise ValueError(
-            "Specifying a lecture_video_id is required when updating lecture video data."
+            "Specifying a voice_id is required when updating lecture video data."
         )
 
     if not self.interaction_mode:
@@ -894,6 +934,7 @@ class CreateAssistant(BaseModel):
     tools: list[ToolOption] = Field(default_factory=list)
     lecture_video_id: int | None = None
     lecture_video_manifest: LectureVideoManifestV1 | None = None
+    voice_id: str | None = None
     published: bool = False
     use_latex: bool = False
     use_image_descriptions: bool = False
@@ -917,6 +958,14 @@ class CreateAssistant(BaseModel):
     @classmethod
     def validate_lecture_video_manifest(cls, value):
         return _validate_lecture_video_manifest(value)
+
+    @field_validator("voice_id")
+    @classmethod
+    def validate_voice_id(cls, value: str | None):
+        if value is None:
+            return value
+        value = value.strip()
+        return value or None
 
     _temperature_check = model_validator(mode="after")(temperature_validator)
     _lecture_video_check = model_validator(mode="after")(
@@ -960,6 +1009,7 @@ class UpdateAssistant(BaseModel):
     interaction_mode: InteractionMode | None = None
     lecture_video_id: int | None = None
     lecture_video_manifest: LectureVideoManifestV1 | None = None
+    voice_id: str | None = None
     model: str | None = Field(None, min_length=2)
     temperature: float | None = Field(None, ge=0.0, le=2.0)
     reasoning_effort: int | None = Field(None, ge=-1, le=2)
@@ -988,6 +1038,14 @@ class UpdateAssistant(BaseModel):
     @classmethod
     def validate_lecture_video_manifest(cls, value):
         return _validate_lecture_video_manifest(value)
+
+    @field_validator("voice_id")
+    @classmethod
+    def validate_voice_id(cls, value: str | None):
+        if value is None:
+            return value
+        value = value.strip()
+        return value or None
 
     _temperature_check = model_validator(mode="after")(temperature_validator)
     _lecture_video_check = model_validator(mode="after")(
@@ -1877,6 +1935,7 @@ class TransferClassRequest(BaseModel):
 
 class APIKeyCheck(BaseModel):
     has_api_key: bool
+    has_lecture_video_providers: bool = False
 
 
 class UpdateApiKey(BaseModel):
@@ -1992,6 +2051,18 @@ class ClassCredentialResponse(BaseModel):
 
 class ClassCredentialsResponse(BaseModel):
     credentials: list[ClassCredentialSlot]
+
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+
+class ClassAPIKeyResponse(BaseModel):
+    ai_provider: AIProvider | None = None
+    has_gemini_credential: bool = False
+    has_elevenlabs_credential: bool = False
+    api_key: RedactedApiKey | None = None
+    credentials: list[ClassCredentialSlot] | None = None
 
     model_config = ConfigDict(
         from_attributes=True,

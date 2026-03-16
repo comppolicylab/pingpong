@@ -51,6 +51,9 @@ export const load: LayoutLoad = async ({ fetch, params, parent }) => {
 	const supervisors = teachersResponse.error ? [] : teachersResponse.data.users;
 
 	const hasAPIKey = hasAPIKeyResponse.error ? false : hasAPIKeyResponse.data.has_api_key;
+	const lectureVideoEnabled = hasAPIKeyResponse.error
+		? false
+		: hasAPIKeyResponse.data.has_lecture_video_providers;
 
 	return {
 		hasAssistants: !!assistants && assistants.length > 0,
@@ -62,6 +65,7 @@ export const load: LayoutLoad = async ({ fetch, params, parent }) => {
 		canManage: grants.canManage,
 		isSupervisor: grants.isSupervisor,
 		hasAPIKey,
+		lectureVideoEnabled,
 		supervisors
 	};
 };

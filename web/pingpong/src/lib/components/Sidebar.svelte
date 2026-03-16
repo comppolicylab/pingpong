@@ -82,26 +82,46 @@
 		},
 		{}
 	);
-	$: threads = ($page.data.threads || []) as api.Thread[];
+	$: lectureVideoEnabled = $page.data.lectureVideoEnabled ?? false;
+	$: threads = (($page.data.threads || []) as api.Thread[]).filter(
+		(thread: api.Thread) => lectureVideoEnabled || thread.interaction_mode !== 'lecture_video'
+	);
 	$: currentClassId = parseInt($page.params.classId ?? '', 10);
 	$: currentAssistantIdQuery = parseInt($page.url.searchParams.get('assistant') || '0', 10);
-	$: currentAssistantId = $page.data.threadData?.thread?.assistant_id || currentAssistantIdQuery;
-	$: assistants = [...(($page.data.assistants || []) as api.Assistant[])].sort((a, b) => {
-		// First sort by endorsement.
-		if (a.endorsed && !b.endorsed) return -1;
-		if (!a.endorsed && b.endorsed) return 1;
-		// Then sort by whether the assistant was created by the current user.
-		if (a.creator_id === data.me.user!.id && b.creator_id !== data.me.user!.id) return -1;
-		if (a.creator_id !== data.me.user!.id && b.creator_id === data.me.user!.id) return 1;
-		// Finally, sort alphabetically by name.
-		return a.name.localeCompare(b.name);
-	});
+	$: routeAssistantId = parseInt($page.params.assistantId ?? '', 10);
+	$: assistants = [...(($page.data.assistants || []) as api.Assistant[])]
+		.filter(
+			(assistant: api.Assistant) =>
+				lectureVideoEnabled || assistant.interaction_mode !== 'lecture_video'
+		)
+		.sort((a, b) => {
+			// First sort by endorsement.
+			if (a.endorsed && !b.endorsed) return -1;
+			if (!a.endorsed && b.endorsed) return 1;
+			// Then sort by whether the assistant was created by the current user.
+			if (a.creator_id === data.me.user!.id && b.creator_id !== data.me.user!.id) return -1;
+			if (a.creator_id !== data.me.user!.id && b.creator_id === data.me.user!.id) return 1;
+			// Finally, sort alphabetically by name.
+			return a.name.localeCompare(b.name);
+		});
+	$: fallbackAssistantId = assistants[0]?.id || 0;
+	$: currentAssistantIdQueryVisible = assistants.some((a) => a.id === currentAssistantIdQuery)
+		? currentAssistantIdQuery
+		: 0;
+	$: threadAssistantId = $page.data.threadData?.thread?.assistant_id || 0;
+	$: currentAssistantId = assistants.some((a) => a.id === routeAssistantId)
+		? routeAssistantId
+		: assistants.some((a) => a.id === threadAssistantId)
+			? threadAssistantId
+			: currentAssistantIdQueryVisible;
+	$: newChatAssistantId = currentAssistantId || fallbackAssistantId;
+	$: canStartNewSharedChat = isSharedThreadPage ? newChatAssistantId > 0 : true;
 	let assistantsToShow: api.Assistant[] = [];
 	// Offer the top 4 assistants. If the current assistant is not in the top 4, add it to the top and remove the 4th one.
 	$: if (assistants.length > 4) {
 		assistantsToShow = assistants.slice(0, 4);
 		if (currentAssistantId && !assistantsToShow.some((a) => a.id === currentAssistantId)) {
-			const foundAssistant = assistants.find((a) => a.id === currentAssistantIdQuery);
+			const foundAssistant = assistants.find((a) => a.id === currentAssistantId);
 			if (foundAssistant) {
 				assistantsToShow.unshift(foundAssistant);
 				assistantsToShow.pop();
@@ -347,7 +367,9 @@
 						? isSharedAssistantPage
 							? `/login?forward=${pathName}%3Fshare_token=${shareToken}`
 							: isSharedThreadPage
-								? `/group/${currentClassId}/shared/assistant/${currentAssistantId}?share_token=${$anonymousShareToken}`
+								? canStartNewSharedChat
+									? `/group/${currentClassId}/shared/assistant/${newChatAssistantId}?share_token=${$anonymousShareToken}`
+									: undefined
 								: '/login'
 						: onNewChatPage || hasNoClasses
 							? undefined
@@ -355,21 +377,25 @@
 								? `/`
 								: currentClassId
 									? `/group/${currentClassId}${
-											currentAssistantId ? `?assistant=${currentAssistantId}` : ''
+											newChatAssistantId ? `?assistant=${newChatAssistantId}` : ''
 										}`
 									: '/'}
 					label={nonAuthed
 						? isSharedAssistantPage
 							? 'Login to save this chat'
 							: isSharedThreadPage
-								? 'Start a new chat'
+								? canStartNewSharedChat
+									? 'Start a new chat'
+									: 'No assistants available'
 								: 'Login'
 						: 'Start a new chat'}
 					class={`flex flex-row-reverse justify-between rounded-full pr-4 text-white ${
-						onNewChatPage || hasNoClasses
+						onNewChatPage ||
+						hasNoClasses ||
+						(nonAuthed && isSharedThreadPage && !canStartNewSharedChat)
 							? 'cursor-default bg-blue-dark-40 text-blue-dark-30 select-none hover:bg-blue-dark-40'
 							: 'bg-orange hover:bg-orange-dark'
-					} ${onNewChatPage || hasNoClasses ? 'disabled' : ''}`}
+					} ${onNewChatPage || hasNoClasses || (nonAuthed && isSharedThreadPage && !canStartNewSharedChat) ? 'disabled' : ''}`}
 				>
 					<svelte:fragment slot="icon">
 						{#if nonAuthed && !isSharedThreadPage}
@@ -427,7 +453,7 @@
 							{#each assistantsToShow as assistant (assistant.id)}
 								<SidebarItem
 									class={'flex flex-wrap gap-2 truncate rounded-lg p-2 text-sm text-white ' +
-										(currentAssistantIdQuery === assistant.id
+										(currentAssistantId === assistant.id
 											? 'bg-orange-dark hover:bg-orange'
 											: 'hover:bg-blue-dark-30')}
 									spanClass="flex-1 truncate"

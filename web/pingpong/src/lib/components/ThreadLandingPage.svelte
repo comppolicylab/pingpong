@@ -44,6 +44,7 @@
 	 * Application data.
 	 */
 	export let data;
+	$: lectureVideoEnabled = data?.lectureVideoEnabled ?? true;
 	$: conversationId = $page.url.searchParams.get('conversation_id');
 	type ChatInputHandle = { addFiles: (selectedFiles: File[]) => void };
 	let chatInputRef: ChatInputHandle | null = null;
@@ -67,11 +68,23 @@
 			const errorMessage = getErrorMessage(parseInt(errorCode) || 0);
 			sadToast(errorMessage);
 		}
+		const linkedAssistantId = parseInt($page.url.searchParams.get('assistant') || '0', 10);
+		if (
+			!data.isSharedAssistantPage &&
+			linkedAssistantId &&
+			!assistants.some((asst: Assistant) => asst.id === linkedAssistantId) &&
+			assistants.length > 0
+		) {
+			await goto(resolve(`/group/${data.class.id}/?assistant=${assistants[0].id}`), {
+				replaceState: true
+			});
+			return;
+		}
 		// Make sure that an assistant is linked in the URL
 		if (!$page.url.searchParams.has('assistant') && !data.isSharedAssistantPage) {
-			if (data.assistants.length > 0) {
+			if (assistants.length > 0) {
 				// replace current URL with one that has the assistant ID
-				await goto(resolve(`/group/${data.class.id}/?assistant=${data.assistants[0].id}`), {
+				await goto(resolve(`/group/${data.class.id}/?assistant=${assistants[0].id}`), {
 					replaceState: true
 				});
 			}
@@ -79,10 +92,12 @@
 	});
 
 	// Get info about assistant provenance
-	const getAssistantMetadata = (assistant: Assistant) => {
+	const getAssistantMetadata = (assistant: Partial<Assistant>) => {
 		const isCourseAssistant = assistant.endorsed;
 		const isMyAssistant = data.me.user && assistant.creator_id === data.me.user.id;
-		const creator = data.assistantCreators[assistant.creator_id]?.name || 'Unknown creator';
+		const creator =
+			(assistant.creator_id ? data.assistantCreators[assistant.creator_id]?.name : null) ||
+			'Unknown creator';
 		const willDisplayUserInfo = data.class.private
 			? false
 			: (assistant.should_record_user_information ?? false);
@@ -97,7 +112,9 @@
 	let userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 	$: isPrivate = data.class.private || false;
 	// Currently selected assistant.
-	$: assistants = data?.assistants || [];
+	$: assistants = ((data?.assistants || []) as Assistant[]).filter(
+		(asst: Assistant) => lectureVideoEnabled || asst.interaction_mode !== 'lecture_video'
+	);
 	$: teachers = data?.supervisors || [];
 	$: courseAssistants = assistants.filter((asst: Assistant) => asst.endorsed);
 	$: myAssistantsAll = assistants.filter((asst: Assistant) => asst.creator_id === data.me.user?.id);
@@ -106,10 +123,11 @@
 		(asst: Assistant) => asst.creator_id !== data.me.user?.id
 	);
 	$: otherAssistants = otherAssistantsAll.filter((asst: Assistant) => !asst.endorsed);
-	let assistant = data?.assistants[0] || {};
+	let assistant = {} as Assistant;
 	$: assistantMeta = getAssistantMetadata(assistant);
 	// Whether billing is set up for the class (which controls everything).
-	$: isConfigured = data?.hasAssistants && data?.hasAPIKey;
+	$: hasVisibleAssistants = assistants.length > 0;
+	$: isConfigured = hasVisibleAssistants && data?.hasAPIKey;
 	$: parties = data.me.status === 'anonymous' ? '' : data.me.user?.id ? `${data.me.user.id}` : '';
 	// The assistant ID from the URL.
 	$: linkedAssistant = parseInt($page.url.searchParams.get('assistant') || '0', 10);
@@ -117,17 +135,13 @@
 	let allowUserFileUploads = true;
 	let allowUserImageUploads = true;
 	$: {
-		if (linkedAssistant && assistants) {
-			const selectedAssistant = (assistants || []).find(
-				(asst: Assistant) => asst.id === linkedAssistant
-			);
-			if (selectedAssistant) {
-				assistant = selectedAssistant;
-				useImageDescriptions = assistant.use_image_descriptions || false;
-				allowUserFileUploads = assistant.allow_user_file_uploads ?? true;
-				allowUserImageUploads = assistant.allow_user_image_uploads ?? true;
-			}
-		}
+		const selectedAssistant = linkedAssistant
+			? assistants.find((asst: Assistant) => asst.id === linkedAssistant)
+			: null;
+		assistant = selectedAssistant || assistants[0] || ({} as Assistant);
+		useImageDescriptions = assistant.use_image_descriptions || false;
+		allowUserFileUploads = assistant.allow_user_file_uploads ?? true;
+		allowUserImageUploads = assistant.allow_user_image_uploads ?? true;
 	}
 	$: supportsFileSearch = assistant.tools?.includes('file_search') || false;
 	$: supportsCodeInterpreter = assistant.tools?.includes('code_interpreter') || false;
@@ -774,11 +788,6 @@
 							Review a lecture video with comprehension questions.<br />Create a new session to
 							begin.
 						</p>
-						{#if assistant.lecture_video_key}
-							<p class="mt-1 text-center text-xs text-gray-500">
-								Video: {assistant.lecture_video_key}
-							</p>
-						{/if}
 					</div>
 					<div class="flex flex-row p-1.5">
 						<Button
@@ -927,7 +936,7 @@
 			</div>
 		{:else}
 			<div class="m-auto text-center">
-				{#if !data.hasAssistants}
+				{#if !hasVisibleAssistants}
 					<h1 class="text-2xl font-bold">No assistants configured.</h1>
 				{:else if !data.hasAPIKey}
 					<h1 class="text-2xl font-bold">No billing configured.</h1>

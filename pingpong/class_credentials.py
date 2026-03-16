@@ -1,140 +1,81 @@
-import asyncio
-import logging
-import ssl
-
-from elevenlabs.client import AsyncElevenLabs
-from elevenlabs.errors import UnauthorizedError as ElevenLabsUnauthorizedError
-from google import genai
+from collections.abc import Awaitable, Callable
 
 from pingpong import schemas
-from pingpong.log_utils import sanitize_for_log
+from pingpong.class_credential_validation import (
+    ClassCredentialValidationSSLError,
+    ClassCredentialValidationUnavailableError,
+    ClassCredentialVoiceValidationError,
+)
+from pingpong.elevenlabs import (
+    validate_elevenlabs_api_key,
+)
+from pingpong.gemini import validate_gemini_api_key
 
-logger = logging.getLogger(__name__)
-
+__all__ = [
+    "ClassCredentialValidationSSLError",
+    "ClassCredentialValidationUnavailableError",
+    "ClassCredentialVoiceValidationError",
+    "provider_matches_purpose",
+    "expected_provider_for_purpose",
+    "validate_class_credential",
+]
 
 _EXPECTED_PROVIDER_BY_PURPOSE = {
     schemas.ClassCredentialPurpose.LECTURE_VIDEO_NARRATION_TTS: schemas.ClassCredentialProvider.ELEVENLABS,
     schemas.ClassCredentialPurpose.LECTURE_VIDEO_MANIFEST_GENERATION: schemas.ClassCredentialProvider.GEMINI,
 }
 
+_CLASS_CREDENTIAL_VALIDATORS: dict[
+    schemas.ClassCredentialProvider, Callable[[str], Awaitable[bool]]
+] = {
+    schemas.ClassCredentialProvider.ELEVENLABS: validate_elevenlabs_api_key,
+    schemas.ClassCredentialProvider.GEMINI: validate_gemini_api_key,
+}
 
-class ClassCredentialValidationUnavailableError(Exception):
-    def __init__(
-        self,
-        provider: schemas.ClassCredentialProvider,
-        message: str,
-    ) -> None:
-        super().__init__(message)
-        self.provider = provider
+_missing_provider_validators = sorted(
+    str(provider)
+    for provider in set(schemas.ClassCredentialProvider)
+    - set(_CLASS_CREDENTIAL_VALIDATORS)
+)
+if _missing_provider_validators:
+    missing = ", ".join(_missing_provider_validators)
+    raise ValueError(f"Missing class credential validators for providers: {missing}")
 
 
-class ClassCredentialValidationSSLError(ClassCredentialValidationUnavailableError):
-    pass
+def _get_expected_provider_for_purpose(
+    purpose: schemas.ClassCredentialPurpose,
+) -> schemas.ClassCredentialProvider:
+    expected_provider = _EXPECTED_PROVIDER_BY_PURPOSE.get(purpose)
+    if expected_provider is None:
+        raise ValueError(f"Unsupported class credential purpose: {purpose}")
+    return expected_provider
 
 
 def provider_matches_purpose(
     provider: schemas.ClassCredentialProvider,
     purpose: schemas.ClassCredentialPurpose,
 ) -> bool:
-    return _EXPECTED_PROVIDER_BY_PURPOSE[purpose] == provider
+    return _get_expected_provider_for_purpose(purpose) == provider
 
 
 def expected_provider_for_purpose(
     purpose: schemas.ClassCredentialPurpose,
 ) -> schemas.ClassCredentialProvider:
-    return _EXPECTED_PROVIDER_BY_PURPOSE[purpose]
+    return _get_expected_provider_for_purpose(purpose)
+
+
+def _get_class_credential_validator(
+    provider: schemas.ClassCredentialProvider,
+) -> Callable[[str], Awaitable[bool]]:
+    validator = _CLASS_CREDENTIAL_VALIDATORS.get(provider)
+    if validator is None:
+        raise ValueError(f"Unsupported class credential provider: {provider}")
+    return validator
 
 
 async def validate_class_credential(
     api_key: str,
     provider: schemas.ClassCredentialProvider,
 ) -> bool:
-    safe_provider = sanitize_for_log(provider.value)
-    if provider == schemas.ClassCredentialProvider.ELEVENLABS:
-        client = AsyncElevenLabs(api_key=api_key)
-        try:
-            await asyncio.wait_for(client.voices.settings.get_default(), 10)
-            return True
-        except ElevenLabsUnauthorizedError:
-            return False
-        except asyncio.TimeoutError as exc:
-            logger.warning(
-                "Timed out validating %s class credential.",
-                safe_provider,
-                exc_info=exc,
-            )
-            raise ClassCredentialValidationUnavailableError(
-                provider=provider,
-                message="Unable to validate the ElevenLabs API key right now.",
-            ) from exc
-        except ssl.SSLError as exc:
-            logger.warning(
-                "SSL error validating %s class credential.",
-                safe_provider,
-                exc_info=exc,
-            )
-            raise ClassCredentialValidationSSLError(
-                provider=provider,
-                message="Unable to validate the ElevenLabs API key due to an SSL error.",
-            ) from exc
-        except Exception as exc:
-            logger.warning(
-                "Failed to validate %s class credential due to provider error.",
-                safe_provider,
-                exc_info=exc,
-            )
-            raise ClassCredentialValidationUnavailableError(
-                provider=provider,
-                message="Unable to validate the ElevenLabs API key right now.",
-            ) from exc
-    elif provider == schemas.ClassCredentialProvider.GEMINI:
-        try:
-            # The google-genai SDK documents `Client().aio` as an async context
-            # manager and supports the one-shot form used here:
-            # https://github.com/googleapis/python-genai/blob/main/README.md#client-context-managers
-            async with genai.Client(api_key=api_key).aio as aclient:
-                await asyncio.wait_for(aclient.models.list(config={"page_size": 1}), 10)
-            return True
-        except genai.errors.ClientError:
-            return False
-        except asyncio.TimeoutError as exc:
-            logger.warning(
-                "Timed out validating %s class credential.",
-                safe_provider,
-                exc_info=exc,
-            )
-            raise ClassCredentialValidationUnavailableError(
-                provider=provider,
-                message="Unable to validate the Gemini API key right now.",
-            ) from exc
-        except genai.errors.APIError as exc:
-            logger.warning(
-                "Failed to validate %s class credential due to provider API error.",
-                safe_provider,
-                exc_info=exc,
-            )
-            raise ClassCredentialValidationUnavailableError(
-                provider=provider,
-                message="Unable to validate the Gemini API key right now.",
-            ) from exc
-        except ssl.SSLError as exc:
-            logger.warning(
-                "SSL error validating %s class credential.",
-                safe_provider,
-                exc_info=exc,
-            )
-            raise ClassCredentialValidationSSLError(
-                provider=provider,
-                message="Unable to validate the Gemini API key due to an SSL error.",
-            ) from exc
-        except Exception as exc:
-            logger.warning(
-                "Failed to validate %s class credential due to provider error.",
-                safe_provider,
-                exc_info=exc,
-            )
-            raise ClassCredentialValidationUnavailableError(
-                provider=provider,
-                message="Unable to validate the Gemini API key right now.",
-            ) from exc
-    raise ValueError(f"Unsupported class credential provider: {provider}")
+    validator = _get_class_credential_validator(provider)
+    return await validator(api_key)

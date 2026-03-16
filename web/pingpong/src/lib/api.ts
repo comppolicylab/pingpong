@@ -260,6 +260,51 @@ const _fetchJSON = async <R extends BaseData>(
 	return { $status: res.status, ...data } as (R | Error) & BaseResponse;
 };
 
+export const readErrorDetail = async (response: Response) => {
+	const fallbackMessage = `Request failed with status ${response.status}.`;
+	let textDetail: string | null = null;
+
+	try {
+		const payload = await response.clone().json();
+		if (typeof payload?.detail === 'string') {
+			return payload.detail;
+		}
+		if (
+			Array.isArray(payload?.detail) &&
+			payload.detail.every(
+				(error: unknown) =>
+					typeof error === 'object' &&
+					error !== null &&
+					Array.isArray((error as { loc?: unknown }).loc) &&
+					typeof (error as { msg?: unknown }).msg === 'string'
+			)
+		) {
+			return payload.detail
+				.map(
+					(error: { loc: Array<string | number>; msg: string }) =>
+						`${error.loc.join(' -> ')}: ${error.msg}`
+				)
+				.join('\n');
+		}
+		if (payload?.detail && typeof payload.detail === 'object') {
+			return JSON.stringify(payload.detail);
+		}
+	} catch {
+		// Fall back to plain text if the response is not JSON.
+	}
+
+	try {
+		const bodyText = await response.text();
+		if (bodyText.trim()) {
+			textDetail = bodyText;
+		}
+	} catch {
+		// Ignore body read failures and use the fallback below.
+	}
+
+	return textDetail ?? fallbackMessage;
+};
+
 /**
  * Method that passes data in the query string.
  */
@@ -1383,7 +1428,11 @@ export type ApiKey = {
 };
 
 export type ApiKeyResponse = {
-	api_key?: ApiKey;
+	ai_provider?: string | null;
+	has_gemini_credential?: boolean;
+	has_elevenlabs_credential?: boolean;
+	api_key?: ApiKey | null;
+	credentials?: ClassCredentialSlot[] | null;
 };
 
 export type UpdateApiKeyRequest = {
@@ -1416,6 +1465,58 @@ export type ClassCredentialsResponse = {
 
 export type ClassCredentialResponse = {
 	credential: ClassCredentialSlot;
+};
+
+export type LectureVideoStatus = 'uploaded' | 'processing' | 'ready' | 'failed';
+
+export type LectureVideoSummary = {
+	id: number;
+	filename: string;
+	size: number;
+	content_type: string;
+	status: LectureVideoStatus;
+	error_message?: string | null;
+};
+
+export type LectureVideoQuestionType = 'single_select';
+
+export type LectureVideoManifestOption = {
+	option_text: string;
+	post_answer_text: string;
+	continue_offset_ms: number;
+	correct: boolean;
+};
+
+export type LectureVideoManifestQuestion = {
+	type: LectureVideoQuestionType;
+	question_text: string;
+	intro_text: string;
+	stop_offset_ms: number;
+	options: LectureVideoManifestOption[];
+};
+
+export type LectureVideoManifest = {
+	version: 1;
+	questions: LectureVideoManifestQuestion[];
+};
+
+export type LectureVideoConfigResponse = {
+	lecture_video: LectureVideoSummary;
+	lecture_video_manifest: LectureVideoManifest;
+	voice_id: string;
+};
+
+export type LectureVideoEditorPolicyResponse = LectureVideoAssistantEditorPolicy;
+
+export type ValidateLectureVideoVoiceRequest = {
+	voice_id: string;
+};
+
+export type ValidateLectureVideoVoiceResponse = {
+	$status: number;
+	sample_text: string;
+	audio_blob: Blob;
+	content_type: string;
 };
 
 export type DefaultAPIKey = {
@@ -1473,6 +1574,112 @@ export const getClassCredentials = async (f: Fetcher, classId: number) => {
 };
 
 /**
+ * Upload a lecture-video draft for a new assistant.
+ */
+export const uploadLectureVideo = (
+	_f: Fetcher,
+	classId: number,
+	file: File,
+	opts?: UploadOptions
+) => {
+	const url = fullPath(`class/${classId}/lecture-video`);
+	return _doUpload<LectureVideoSummary>(url, file, opts);
+};
+
+/**
+ * Upload a lecture-video draft while editing an assistant.
+ */
+export const uploadAssistantLectureVideo = (
+	_f: Fetcher,
+	classId: number,
+	assistantId: number,
+	file: File,
+	opts?: UploadOptions
+) => {
+	const url = fullPath(`class/${classId}/assistant/${assistantId}/lecture-video/upload`);
+	return _doUpload<LectureVideoSummary>(url, file, opts);
+};
+
+/**
+ * Delete an unused lecture-video draft for a create flow.
+ */
+export const deleteLectureVideo = async (f: Fetcher, classId: number, lectureVideoId: number) => {
+	const url = `class/${classId}/lecture-video/${lectureVideoId}`;
+	return await DELETE<never, GenericStatus>(f, url);
+};
+
+/**
+ * Delete an unused lecture-video draft for an assistant edit flow.
+ */
+export const deleteAssistantLectureVideo = async (
+	f: Fetcher,
+	classId: number,
+	assistantId: number,
+	lectureVideoId: number
+) => {
+	const url = `class/${classId}/assistant/${assistantId}/lecture-video/${lectureVideoId}`;
+	return await DELETE<never, GenericStatus>(f, url);
+};
+
+/**
+ * Load the persisted lecture-video config for an assistant.
+ */
+export const getAssistantLectureVideoConfig = async (
+	f: Fetcher,
+	classId: number,
+	assistantId: number
+) => {
+	const url = `class/${classId}/assistant/${assistantId}/lecture-video/config`;
+	return await GET<never, LectureVideoConfigResponse>(f, url);
+};
+
+/**
+ * Load the lecture-video editor policy for a class.
+ */
+export const getLectureVideoEditorPolicy = async (f: Fetcher, classId: number) => {
+	const url = `class/${classId}/lecture-video/editor-policy`;
+	return await GET<never, LectureVideoEditorPolicyResponse>(f, url);
+};
+
+const VOICE_SAMPLE_TEXT_HEADER = 'X-PingPong-Voice-Sample-Text';
+
+/**
+ * Validate a voice id for lecture-video narration and return binary preview audio.
+ */
+export const validateLectureVideoVoice = async (
+	f: Fetcher,
+	classId: number,
+	data: ValidateLectureVideoVoiceRequest,
+	assistantId?: number
+): Promise<ValidateLectureVideoVoiceResponse | ErrorResponse> => {
+	const url =
+		assistantId === undefined
+			? `class/${classId}/lecture-video/voice/validate`
+			: `class/${classId}/assistant/${assistantId}/lecture-video/voice/validate`;
+	const response = await _fetch(
+		f,
+		'POST',
+		url,
+		{ 'Content-Type': 'application/json' },
+		JSON.stringify(data)
+	);
+
+	if (!response.ok) {
+		return {
+			$status: response.status,
+			detail: await readErrorDetail(response)
+		};
+	}
+
+	return {
+		$status: response.status,
+		sample_text: response.headers.get(VOICE_SAMPLE_TEXT_HEADER) || '',
+		audio_blob: await response.blob(),
+		content_type: response.headers.get('content-type') || 'audio/ogg'
+	};
+};
+
+/**
  * Create a purpose-scoped credential for a class.
  */
 export const createClassCredential = async (
@@ -1496,6 +1703,7 @@ export const createClassCredential = async (
 
 export type ApiKeyCheck = {
 	has_api_key: boolean;
+	has_lecture_video_providers: boolean;
 };
 
 export const hasAPIKey = async (f: Fetcher, classId: number) => {
@@ -1550,6 +1758,12 @@ export type AssistantModelOptions = {
 export type AssistantDefaultPrompt = {
 	id: string;
 	prompt: string;
+};
+
+export type LectureVideoAssistantEditorPolicy = {
+	show_mode_in_assistant_editor: boolean;
+	can_select_mode_in_assistant_editor: boolean;
+	message?: string | null;
 };
 
 /**
@@ -1736,7 +1950,7 @@ export type Assistant = {
 	hide_web_search_actions: boolean | null;
 	hide_mcp_server_call_details: boolean | null;
 	endorsed: boolean | null;
-	lecture_video_key: string | null;
+	lecture_video?: LectureVideoSummary | null;
 	created: string;
 	updated: string | null;
 	share_links: AnonymousLink[] | null;
@@ -1836,7 +2050,9 @@ export type CreateAssistantRequest = {
 	notes: string;
 	model: string;
 	interaction_mode: 'chat' | 'voice' | 'lecture_video';
-	lecture_video_key?: string;
+	lecture_video_id?: number | null;
+	lecture_video_manifest?: LectureVideoManifest | null;
+	voice_id?: string | null;
 	create_classic_assistant?: boolean;
 	temperature: number | null;
 	reasoning_effort: number | null;
@@ -1878,7 +2094,9 @@ export type UpdateAssistantRequest = {
 	notes?: string;
 	model?: string;
 	interaction_mode?: 'chat' | 'voice' | 'lecture_video';
-	lecture_video_key?: string;
+	lecture_video_id?: number | null;
+	lecture_video_manifest?: LectureVideoManifest | null;
+	voice_id?: string | null;
 	create_classic_assistant?: boolean;
 	temperature?: number | null;
 	reasoning_effort?: number | null;
@@ -2093,16 +2311,16 @@ export interface FileUploadFailure {
 /**
  * Result of a file upload.
  */
-export type FileUploadResult = ServerFile | FileUploadFailure;
+export type FileUploadResult<T = ServerFile> = T | FileUploadFailure;
 
 /**
  * Info about the file upload.
  */
-export interface FileUploadInfo {
+export interface FileUploadInfo<T = ServerFile> {
 	file: File;
-	promise: Promise<FileUploadResult>;
+	promise: Promise<FileUploadResult<T>>;
 	state: 'pending' | 'success' | 'error' | 'deleting';
-	response: FileUploadResult | null;
+	response: FileUploadResult<T> | null;
 	progress: number;
 }
 
@@ -2128,20 +2346,20 @@ export type FileRemover = (fileId: number) => Promise<void>;
 /**
  * Upload a file to the given endpoint.
  */
-const _doUpload = (
+const _doUpload = <T extends BaseData = ServerFile>(
 	url: string,
 	file: File,
 	opts?: UploadOptions,
 	purpose: FileUploadPurpose = 'assistants',
 	useImageDescriptions: boolean = false
-): FileUploadInfo => {
+): FileUploadInfo<T> => {
 	if (!browser) {
 		throw new Error('File uploads are not supported in this environment.');
 	}
 
 	const xhr = new XMLHttpRequest();
 
-	const info: Omit<FileUploadInfo, 'promise'> = {
+	const info: Omit<FileUploadInfo<T>, 'promise'> = {
 		file,
 		state: 'pending',
 		response: null,
@@ -2161,7 +2379,7 @@ const _doUpload = (
 
 	// Don't use the normal fetch because this only works with xhr, and we want
 	// to be able to track progress.
-	const promise = new Promise<FileUploadResult>((resolve, reject) => {
+	const promise = new Promise<FileUploadResult<T>>((resolve, reject) => {
 		xhr.open('POST', url, true);
 		xhr.setRequestHeader('Accept', 'application/json');
 		const anonymousSessionToken = getAnonymousSessionToken();
@@ -2182,7 +2400,7 @@ const _doUpload = (
 			if (xhr.readyState === 4) {
 				if (xhr.status < 300) {
 					info.state = 'success';
-					info.response = JSON.parse(xhr.responseText) as ServerFile;
+					info.response = JSON.parse(xhr.responseText) as T;
 					resolve(info.response);
 				} else {
 					info.state = 'error';
