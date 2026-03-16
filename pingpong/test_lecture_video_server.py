@@ -5396,6 +5396,7 @@ async def test_update_assistant_handles_lecture_video_unique_conflict(
         )
         session.add_all([class_, first_video, second_video])
         await session.flush()
+        await create_lecture_video_copy_credentials(session, class_.id)
         session.add(
             models.Assistant(
                 id=1,

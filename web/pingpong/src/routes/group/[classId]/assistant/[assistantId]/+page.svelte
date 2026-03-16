@@ -158,6 +158,11 @@
 	$: isLectureMode = interactionMode === 'lecture_video';
 	$: isEditingLectureAssistant =
 		!data.isCreating && (assistant?.interaction_mode || null) === 'lecture_video';
+	$: lectureVideoConfigLoadError = isEditingLectureAssistant
+		? (data.lectureVideoConfigLoadError ?? null)
+		: null;
+	$: lectureVideoConfigLoadErrorMessage =
+		lectureVideoConfigLoadError?.detail || 'Could not load lecture video configuration.';
 	const defaultLectureVideoPolicy: LectureVideoEditorPolicy = {
 		show_mode_in_assistant_editor: false,
 		can_select_mode_in_assistant_editor: false,
@@ -377,7 +382,7 @@
 		};
 	};
 
-	$: if (!hasSetLectureVideoManifest) {
+	$: if (!hasSetLectureVideoManifest && !lectureVideoConfigLoadError) {
 		lectureVideoManifestJson = stringifyLectureVideoManifest(
 			data.lectureVideoConfig?.lecture_video_manifest
 		);
@@ -386,7 +391,7 @@
 	$: currentLectureVideoManifestNormalized = normalizeLectureVideoManifestForCompare(
 		stringifyLectureVideoManifest(data.lectureVideoConfig?.lecture_video_manifest)
 	);
-	$: if (!hasSetVoiceId) {
+	$: if (!hasSetVoiceId && !lectureVideoConfigLoadError) {
 		voiceId = currentVoiceId;
 		hasSetVoiceId = true;
 	}
@@ -1759,6 +1764,15 @@
 		}
 
 		if (params.interaction_mode === 'lecture_video') {
+			if (lectureVideoConfigLoadError) {
+				sadToast(
+					`Could not load the lecture video configuration:\n${lectureVideoConfigLoadErrorMessage}`
+				);
+				$loading = false;
+				$loadingMessage = '';
+				return;
+			}
+
 			if (uploadingLectureVideo) {
 				sadToast('Please wait for the lecture video upload to finish before saving.');
 				$loading = false;
@@ -1988,6 +2002,26 @@
 				can still publish or unpublish this assistant if you have the necessary permissions. For
 				more information, contact your Group's administrator.
 			</span>
+		</div>
+	{/if}
+	{#if lectureVideoConfigLoadError}
+		<div class="col-span-2 mb-4 rounded-lg border border-red-300 bg-red-50 p-4 text-red-900">
+			<div class="flex items-start gap-3">
+				<ExclamationCircleOutline class="mt-0.5 h-6 w-6 shrink-0 text-red-600" />
+				<div>
+					<div class="text-sm font-semibold">Lecture video configuration could not be loaded</div>
+					<div class="mt-1 text-sm">
+						PingPong could not load this assistant&apos;s lecture video settings, so saving is
+						disabled until the configuration loads cleanly.
+					</div>
+					<div class="mt-2 text-sm">{lectureVideoConfigLoadErrorMessage}</div>
+					{#if lectureVideoConfigLoadError.$status}
+						<div class="mt-1 text-xs text-red-700">
+							HTTP {lectureVideoConfigLoadError.$status}
+						</div>
+					{/if}
+				</div>
+			</div>
 		</div>
 	{/if}
 	<Modal
@@ -3564,8 +3598,11 @@
 				pill
 				class="border border-orange bg-orange text-white hover:bg-orange-dark"
 				type="submit"
-				disabled={$loading || uploadingFSPrivate || uploadingCIPrivate || uploadingLectureVideo}
-				>Save</Button
+				disabled={$loading ||
+					uploadingFSPrivate ||
+					uploadingCIPrivate ||
+					uploadingLectureVideo ||
+					!!lectureVideoConfigLoadError}>Save</Button
 			>
 			<Button
 				disabled={$loading || uploadingFSPrivate || uploadingCIPrivate || uploadingLectureVideo}

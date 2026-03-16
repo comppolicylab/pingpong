@@ -6,7 +6,8 @@ import type {
 	AssistantDefaultPrompt,
 	MCPServerToolInput,
 	LectureVideoAssistantEditorPolicy as LectureVideoEditorPolicy,
-	LectureVideoConfigResponse
+	LectureVideoConfigResponse,
+	Error as ApiError
 } from '$lib/api';
 import {
 	getAssistantFiles,
@@ -90,11 +91,25 @@ async function loadAssistantLectureVideoConfig(
 	fetchFn: typeof fetch,
 	classId: number,
 	assistantId: number
-): Promise<LectureVideoConfigResponse | null> {
+): Promise<{
+	lectureVideoConfig: LectureVideoConfigResponse | null;
+	lectureVideoConfigLoadError: (ApiError & { $status: number }) | null;
+}> {
 	const response = await getAssistantLectureVideoConfig(fetchFn, classId, assistantId).then(
 		expandResponse
 	);
-	return response.error ? null : response.data;
+	return response.error
+		? {
+				lectureVideoConfig: null,
+				lectureVideoConfigLoadError: {
+					$status: response.$status,
+					...response.error
+				}
+			}
+		: {
+				lectureVideoConfig: response.data,
+				lectureVideoConfigLoadError: null
+			};
 }
 
 async function loadLectureVideoEditorPolicy(
@@ -119,6 +134,7 @@ export const load: PageLoad = async ({ params, fetch, parent }) => {
 	let assistantFiles: AssistantFiles | null = null;
 	let mcpServers: MCPServerToolInput[] = [];
 	let lectureVideoConfig: LectureVideoConfigResponse | null = null;
+	let lectureVideoConfigLoadError: (ApiError & { $status: number }) | null = null;
 
 	if (!isCreating) {
 		const assistants = parentData.assistants ?? [];
@@ -133,7 +149,13 @@ export const load: PageLoad = async ({ params, fetch, parent }) => {
 			assistantFiles = files;
 			mcpServers = servers;
 			if (assistant.interaction_mode === 'lecture_video') {
-				lectureVideoConfig = await loadAssistantLectureVideoConfig(fetch, classId, assistant.id);
+				const lectureVideoConfigResult = await loadAssistantLectureVideoConfig(
+					fetch,
+					classId,
+					assistant.id
+				);
+				lectureVideoConfig = lectureVideoConfigResult.lectureVideoConfig;
+				lectureVideoConfigLoadError = lectureVideoConfigResult.lectureVideoConfigLoadError;
 			}
 		}
 	}
@@ -158,6 +180,7 @@ export const load: PageLoad = async ({ params, fetch, parent }) => {
 		enforceClassicAssistants,
 		lectureVideoPolicy: effectiveLectureVideoPolicy,
 		lectureVideoConfig,
+		lectureVideoConfigLoadError,
 		statusComponents: parentData.statusComponents ?? {}
 	};
 };
