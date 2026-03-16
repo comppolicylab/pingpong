@@ -64,13 +64,16 @@ export const load = async ({ fetch, params }: Parameters<PageLoad>[0]) => {
 	let apiKey: api.ApiKey | undefined;
 	let classCredentials: api.ClassCredentialSlot[] | undefined;
 	let apiKeyReadError: string | undefined;
-	let aiProvider: string | null = null;
-	let hasGeminiCredential = false;
-	let hasElevenlabsCredential = false;
+	let aiProvider: string | null | undefined = null;
+	let hasGeminiCredential: boolean | undefined = false;
+	let hasElevenlabsCredential: boolean | undefined = false;
 	if (grants.canViewApiKey || grants.canEditInfo) {
 		const apiKeyResponse = await api.getApiKey(fetch, classId).then(api.expandResponse);
 		if (apiKeyResponse.error) {
 			apiKeyReadError = apiKeyResponse.error.detail || 'Error fetching group credential details.';
+			aiProvider = undefined;
+			hasGeminiCredential = undefined;
+			hasElevenlabsCredential = undefined;
 			console.error('Error fetching group credential details.');
 		} else {
 			apiKey = apiKeyResponse.data.api_key ?? undefined;

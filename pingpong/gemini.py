@@ -23,8 +23,18 @@ async def validate_gemini_api_key(api_key: str) -> bool:
         async with genai.Client(api_key=api_key).aio as aclient:
             await asyncio.wait_for(aclient.models.list(config={"page_size": 1}), 10)
         return True
-    except genai.errors.ClientError:
-        return False
+    except genai.errors.ClientError as exc:
+        if exc.code in {401, 403}:
+            return False
+        logger.warning(
+            "Failed to validate %s class credential due to provider client error.",
+            safe_provider,
+            exc_info=exc,
+        )
+        raise ClassCredentialValidationUnavailableError(
+            provider=schemas.ClassCredentialProvider.GEMINI,
+            message="Unable to validate the Gemini API key right now.",
+        ) from exc
     except asyncio.TimeoutError as exc:
         logger.warning(
             "Timed out validating %s class credential.",

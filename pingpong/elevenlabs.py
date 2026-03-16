@@ -63,9 +63,9 @@ async def synthesize_elevenlabs_voice_sample(
     api_key: str,
     voice_id: str,
 ) -> tuple[str, str, bytes]:
-    client = get_elevenlabs_client(api_key)
     safe_voice_id = sanitize_for_log(voice_id)
     try:
+        client = get_elevenlabs_client(api_key)
         audio = await asyncio.wait_for(
             _collect_audio_chunks(
                 client.text_to_speech.convert(
@@ -152,7 +152,18 @@ async def synthesize_elevenlabs_voice_sample(
             provider=schemas.ClassCredentialProvider.ELEVENLABS,
             message="Unable to validate the ElevenLabs voice right now.",
         ) from exc
+    except ValueError as exc:
+        logger.warning(
+            "ElevenLabs voice validation failed due to credential error. voice_id=%s",
+            safe_voice_id,
+            exc_info=exc,
+        )
+        raise ClassCredentialValidationUnavailableError(
+            provider=schemas.ClassCredentialProvider.ELEVENLABS,
+            message="Unable to validate the ElevenLabs voice right now.",
+        ) from exc
     except ClassCredentialValidationUnavailableError:
+        # Preserve the original unavailable error instead of wrapping it again below.
         raise
     except Exception as exc:
         logger.warning(
@@ -167,11 +178,15 @@ async def synthesize_elevenlabs_voice_sample(
 
 
 async def validate_elevenlabs_api_key(api_key: str) -> bool:
-    client = get_elevenlabs_client(api_key)
-    safe_provider = sanitize_for_log(schemas.ClassCredentialProvider.ELEVENLABS.value)
     try:
+        client = get_elevenlabs_client(api_key)
+        safe_provider = sanitize_for_log(
+            schemas.ClassCredentialProvider.ELEVENLABS.value
+        )
         await asyncio.wait_for(client.voices.settings.get_default(), 10)
         return True
+    except ValueError:
+        return False
     except ElevenLabsUnauthorizedError:
         return False
     except asyncio.TimeoutError as exc:

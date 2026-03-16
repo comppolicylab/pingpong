@@ -32,7 +32,6 @@ async function ensureModels(
 	models: AssistantModel[];
 	defaultPrompts: AssistantDefaultPrompt[];
 	enforceClassicAssistants: boolean;
-	lectureVideoPolicy: LectureVideoEditorPolicy;
 }> {
 	const cache = get(modelsPromptsStore)[classId];
 
@@ -40,8 +39,7 @@ async function ensureModels(
 		return {
 			models: cache.models,
 			defaultPrompts: cache.default_prompts ?? [],
-			enforceClassicAssistants: cache.enforce_classic_assistants ?? false,
-			lectureVideoPolicy: DEFAULT_LECTURE_VIDEO_EDITOR_POLICY
+			enforceClassicAssistants: cache.enforce_classic_assistants ?? false
 		};
 	}
 
@@ -64,8 +62,7 @@ async function ensureModels(
 	return {
 		models,
 		defaultPrompts,
-		enforceClassicAssistants,
-		lectureVideoPolicy: DEFAULT_LECTURE_VIDEO_EDITOR_POLICY
+		enforceClassicAssistants
 	};
 }
 

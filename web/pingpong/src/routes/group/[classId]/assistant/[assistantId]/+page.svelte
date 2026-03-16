@@ -1547,21 +1547,56 @@
 	const uploadLectureVideoDraft = async (file: File) => {
 		uploadingLectureVideo = true;
 		try {
-			if (selectedLectureVideo && lectureVideoDraftIds.has(selectedLectureVideo.id)) {
-				await deleteLectureVideoDraftById(selectedLectureVideo.id);
-			}
+			const previousDraftId =
+				selectedLectureVideo && lectureVideoDraftIds.has(selectedLectureVideo.id)
+					? selectedLectureVideo.id
+					: null;
 
-			const response =
+			const uploadInfo =
 				data.isCreating || !data.assistantId
-					? await api.uploadLectureVideo(fetch, data.class.id, file)
-					: await api.uploadAssistantLectureVideo(fetch, data.class.id, data.assistantId, file);
-			const expanded = api.expandResponse(response);
-			if (expanded.error) {
-				sadToast(`Could not upload lecture video:\n${expanded.error.detail || 'Unknown error'}`);
+					? api.uploadLectureVideo(fetch, data.class.id, file)
+					: api.uploadAssistantLectureVideo(fetch, data.class.id, data.assistantId, file);
+			let uploadedLectureVideo;
+			try {
+				uploadedLectureVideo = await uploadInfo.promise;
+			} catch (error) {
+				const detail =
+					typeof error === 'object' &&
+					error !== null &&
+					'error' in error &&
+					typeof error.error === 'object' &&
+					error.error !== null &&
+					'detail' in error.error &&
+					typeof error.error.detail === 'string'
+						? error.error.detail
+						: error instanceof Error
+							? error.message
+							: 'Unknown error';
+				sadToast(
+					`Could not upload lecture video:\n${detail}`
+				);
 				return;
 			}
-			selectedLectureVideo = expanded.data;
-			lectureVideoDraftIds.add(expanded.data.id);
+			if ('error' in uploadedLectureVideo) {
+				sadToast(
+					`Could not upload lecture video:\n${uploadedLectureVideo.error.detail || 'Unknown error'}`
+				);
+				return;
+			}
+			lectureVideoDraftIds.add(uploadedLectureVideo.id);
+			selectedLectureVideo = uploadedLectureVideo;
+
+			if (previousDraftId !== null && previousDraftId !== uploadedLectureVideo.id) {
+				try {
+					await deleteLectureVideoDraftById(previousDraftId);
+				} catch (error) {
+					console.error('Could not delete previous lecture video draft', {
+						lectureVideoId: previousDraftId,
+						error
+					});
+				}
+			}
+
 			happyToast('Lecture video uploaded');
 		} catch (error) {
 			sadToast(
@@ -1726,6 +1761,13 @@
 		}
 
 		if (params.interaction_mode === 'lecture_video') {
+			if (uploadingLectureVideo) {
+				sadToast('Please wait for the lecture video upload to finish before saving.');
+				$loading = false;
+				$loadingMessage = '';
+				return;
+			}
+
 			const selectedLectureVideoId = selectedLectureVideo?.id ?? null;
 			if (!selectedLectureVideoId) {
 				sadToast('Please upload a lecture video before saving.');
@@ -3524,10 +3566,16 @@
 				pill
 				class="border border-orange bg-orange text-white hover:bg-orange-dark"
 				type="submit"
-				disabled={$loading || uploadingFSPrivate || uploadingCIPrivate}>Save</Button
+				disabled={$loading ||
+					uploadingFSPrivate ||
+					uploadingCIPrivate ||
+					uploadingLectureVideo}>Save</Button
 			>
 			<Button
-				disabled={$loading || uploadingFSPrivate || uploadingCIPrivate}
+				disabled={$loading ||
+					uploadingFSPrivate ||
+					uploadingCIPrivate ||
+					uploadingLectureVideo}
 				href={`/group/${data.class.id}/assistant`}
 				color="red"
 				pill

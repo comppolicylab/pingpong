@@ -43,7 +43,7 @@ from openai.types.responses.response_function_web_search import (
     ActionSearchSource,
 )
 from openai.types.responses.response_output_text import AnnotationURLCitation
-from pydantic import PositiveInt
+from pydantic import PositiveInt, ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import delete, func, update
@@ -2879,6 +2879,27 @@ async def _get_class_lecture_video_provider_flags(
     }
 
 
+def _get_lecture_video_provider_prerequisite_message(
+    class_context: dict[str, bool],
+) -> str:
+    if (
+        not class_context["has_gemini_credential"]
+        and not class_context["has_elevenlabs_credential"]
+    ):
+        return (
+            "Configure Gemini and ElevenLabs credentials in Manage Group to enable "
+            "Lecture Video mode."
+        )
+    if not class_context["has_gemini_credential"]:
+        return "Configure a Gemini credential in Manage Group to enable Lecture Video mode."
+    if not class_context["has_elevenlabs_credential"]:
+        return (
+            "Configure an ElevenLabs credential in Manage Group to enable Lecture "
+            "Video mode."
+        )
+    return "Lecture Video mode is in active development."
+
+
 async def _get_lecture_video_editor_policy(
     request: StateRequest,
     class_id: int,
@@ -2901,23 +2922,7 @@ async def _get_lecture_video_editor_policy(
     class_context = await _get_class_lecture_video_provider_flags(
         request.state["db"], class_id
     )
-    if (
-        not class_context["has_gemini_credential"]
-        and not class_context["has_elevenlabs_credential"]
-    ):
-        message = (
-            "Configure Gemini and ElevenLabs credentials in Manage Group to enable "
-            "Lecture Video mode."
-        )
-    elif not class_context["has_gemini_credential"]:
-        message = "Configure a Gemini credential in Manage Group to enable Lecture Video mode."
-    elif not class_context["has_elevenlabs_credential"]:
-        message = (
-            "Configure an ElevenLabs credential in Manage Group to enable Lecture "
-            "Video mode."
-        )
-    else:
-        message = "Lecture Video mode is in active development."
+    message = _get_lecture_video_provider_prerequisite_message(class_context)
 
     return schemas.LectureVideoAssistantEditorPolicy(
         show_mode_in_assistant_editor=show_mode_in_assistant_editor,
@@ -8210,33 +8215,47 @@ async def delete_assistant_lecture_video(
     return {"status": "ok"}
 
 
-async def _validate_lecture_video_voice_id(
+class LectureVideoVoiceValidationError(ValueError):
+    pass
+
+
+async def _get_lecture_video_voice_sample_or_raise(
     class_id: int,
     request: StateRequest,
     voice_id: str,
-) -> Response:
+) -> tuple[str, str, bytes]:
     credential = await models.ClassCredential.get_by_class_id_and_purpose(
         request.state["db"],
         class_id,
         schemas.ClassCredentialPurpose.LECTURE_VIDEO_NARRATION_TTS,
     )
     if credential is None or credential.api_key_obj is None:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "An ElevenLabs credential is required before validating a lecture "
-                "video voice."
-            ),
+        raise LectureVideoVoiceValidationError(
+            "An ElevenLabs credential is required before validating a lecture "
+            "video voice."
         )
 
     try:
-        sample_text, content_type, audio = await synthesize_elevenlabs_voice_sample(
+        return await synthesize_elevenlabs_voice_sample(
             credential.api_key_obj.api_key,
             voice_id,
         )
     except ClassCredentialVoiceValidationError as exc:
+        raise LectureVideoVoiceValidationError(str(exc)) from exc
+
+
+async def validate_lecture_video_voice_id_or_raise(
+    class_id: int,
+    request: StateRequest,
+    voice_id: str,
+) -> None:
+    await _get_lecture_video_voice_sample_or_raise(class_id, request, voice_id)
+
+
+def _raise_http_for_lecture_video_voice_validation_error(exc: Exception) -> NoReturn:
+    if isinstance(exc, LectureVideoVoiceValidationError):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except ClassCredentialValidationSSLError as exc:
+    if isinstance(exc, ClassCredentialValidationSSLError):
         raise HTTPException(
             status_code=503,
             detail=(
@@ -8244,7 +8263,7 @@ async def _validate_lecture_video_voice_id(
                 "unavailable due to an SSL error. Please try again later."
             ),
         ) from exc
-    except ClassCredentialValidationUnavailableError as exc:
+    if isinstance(exc, ClassCredentialValidationUnavailableError):
         raise HTTPException(
             status_code=503,
             detail=(
@@ -8252,6 +8271,26 @@ async def _validate_lecture_video_voice_id(
                 "unavailable. Please try again later."
             ),
         ) from exc
+    raise exc
+
+
+async def _validate_lecture_video_voice_id(
+    class_id: int,
+    request: StateRequest,
+    voice_id: str,
+) -> Response:
+    try:
+        (
+            sample_text,
+            content_type,
+            audio,
+        ) = await _get_lecture_video_voice_sample_or_raise(class_id, request, voice_id)
+    except (
+        LectureVideoVoiceValidationError,
+        ClassCredentialValidationSSLError,
+        ClassCredentialValidationUnavailableError,
+    ) as exc:
+        _raise_http_for_lecture_video_voice_validation_error(exc)
 
     return Response(
         content=audio,
@@ -8294,20 +8333,34 @@ async def get_assistant_lecture_video_config(
     if lecture_video is None:
         raise HTTPException(404, "Lecture video not found.")
 
+    try:
+        lecture_video_manifest = (
+            lecture_video_service.lecture_video_manifest_from_model(lecture_video)
+        )
+    except (ValidationError, ValueError) as e:
+        logger.warning(
+            "Stored lecture video manifest is invalid. assistant_id=%s lecture_video_id=%s",
+            assistant.id,
+            lecture_video.id,
+            exc_info=True,
+        )
+        raise HTTPException(409, "Stored lecture video manifest is invalid.") from e
+
     return {
         "lecture_video": await lecture_video_service.lecture_video_summary_from_model(
             request.state["db"], lecture_video
         ),
-        "lecture_video_manifest": lecture_video_service.lecture_video_manifest_from_model(
-            lecture_video
-        ),
+        "lecture_video_manifest": lecture_video_manifest,
         "voice_id": lecture_video.voice_id or "",
     }
 
 
 @v1.post(
     "/class/{class_id}/lecture-video/voice/validate",
-    dependencies=[Depends(Authz("can_create_assistants", "class:{class_id}"))],
+    dependencies=[
+        Depends(Authz("can_create_assistants", "class:{class_id}")),
+        Depends(Authz("admin", "class:{class_id}")),
+    ],
     responses={
         200: {
             "content": {"audio/ogg": {}},
@@ -8681,6 +8734,17 @@ async def create_assistant(
             status_code=400,
             detail="Assistants in Lecture video mode do not support Azure OpenAI. Please select a different interaction mode or use another group.",
         )
+    if req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
+        lecture_video_context = await _get_class_lecture_video_provider_flags(
+            request.state["db"], class_id_int
+        )
+        if not lecture_video_context["lecture_video_enabled"]:
+            raise HTTPException(
+                status_code=400,
+                detail=_get_lecture_video_provider_prerequisite_message(
+                    lecture_video_context
+                ),
+            )
 
     if req.interaction_mode == schemas.InteractionMode.VOICE:
         # Voice mode assistants are only supported in version 2
@@ -8772,6 +8836,7 @@ async def create_assistant(
     lecture_video_object_id = None
     lecture_video_manifest = None
     lecture_video_voice_id = None
+    lecture_video_voice_id_validated = False
 
     if is_video:
         if req.lecture_video_id is None:
@@ -8783,6 +8848,11 @@ async def create_assistant(
             raise HTTPException(
                 status_code=400,
                 detail="Specifying a lecture_video_manifest is required for lecture video assistants.",
+            )
+        if req.voice_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Specifying a voice_id is required for lecture video assistants.",
             )
 
         lecture_video = await models.LectureVideo.get_by_id_for_class(
@@ -8799,6 +8869,19 @@ async def create_assistant(
         lecture_video_object_id = lecture_video.id
         lecture_video_manifest = req.lecture_video_manifest
         lecture_video_voice_id = req.voice_id
+        try:
+            await validate_lecture_video_voice_id_or_raise(
+                class_id_int,
+                request,
+                lecture_video_voice_id,
+            )
+        except (
+            LectureVideoVoiceValidationError,
+            ClassCredentialValidationSSLError,
+            ClassCredentialValidationUnavailableError,
+        ) as exc:
+            _raise_http_for_lecture_video_voice_validation_error(exc)
+        lecture_video_voice_id_validated = True
     elif (
         req.lecture_video_id is not None
         or req.lecture_video_manifest is not None
@@ -8931,6 +9014,21 @@ async def create_assistant(
 
         if is_video and lecture_video_manifest is not None:
             assert lecture_video is not None  # for mypy
+            if lecture_video_voice_id is None:
+                raise HTTPException(400, "Lecture video voice is required.")
+            if not lecture_video_voice_id_validated:
+                try:
+                    await validate_lecture_video_voice_id_or_raise(
+                        class_id_int,
+                        request,
+                        lecture_video_voice_id,
+                    )
+                except (
+                    LectureVideoVoiceValidationError,
+                    ClassCredentialValidationSSLError,
+                    ClassCredentialValidationUnavailableError,
+                ) as exc:
+                    _raise_http_for_lecture_video_voice_validation_error(exc)
             await lecture_video_service.persist_manifest(
                 request.state["db"],
                 lecture_video,
@@ -9516,6 +9614,7 @@ async def update_assistant(
     lecture_video = asst.lecture_video
     lecture_video_manifest = None
     lecture_video_voice_id = None
+    lecture_video_voice_id_validated = False
     lecture_video_fields_present = (
         "lecture_video_id" in req.model_fields_set
         or "lecture_video_manifest" in req.model_fields_set
@@ -9552,6 +9651,11 @@ async def update_assistant(
                 status_code=400,
                 detail="Specifying a lecture_video_manifest is required when updating lecture video data.",
             )
+        if req.voice_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Specifying a voice_id is required when updating lecture video data.",
+            )
         lecture_video = await models.LectureVideo.get_by_id_for_class(
             request.state["db"], req.lecture_video_id, int(class_id)
         )
@@ -9565,6 +9669,19 @@ async def update_assistant(
         )
         lecture_video_manifest = req.lecture_video_manifest
         lecture_video_voice_id = req.voice_id
+        try:
+            await validate_lecture_video_voice_id_or_raise(
+                int(class_id),
+                request,
+                lecture_video_voice_id,
+            )
+        except (
+            LectureVideoVoiceValidationError,
+            ClassCredentialValidationSSLError,
+            ClassCredentialValidationUnavailableError,
+        ) as exc:
+            _raise_http_for_lecture_video_voice_validation_error(exc)
+        lecture_video_voice_id_validated = True
     convert_to_next_gen_requested = (
         "convert_to_next_gen" in req.model_fields_set
         and req.convert_to_next_gen is not None
@@ -10396,8 +10513,21 @@ async def update_assistant(
         if lecture_video_fields_present and lecture_video is not None:
             if lecture_video_manifest is None:
                 raise HTTPException(400, "Lecture video manifest is required.")
-            if not lecture_video_voice_id:
-                raise HTTPException(400, "Lecture video voice_id is required.")
+            if lecture_video_voice_id is None:
+                raise HTTPException(400, "Lecture video voice is required.")
+            if not lecture_video_voice_id_validated:
+                try:
+                    await validate_lecture_video_voice_id_or_raise(
+                        int(class_id),
+                        request,
+                        lecture_video_voice_id,
+                    )
+                except (
+                    LectureVideoVoiceValidationError,
+                    ClassCredentialValidationSSLError,
+                    ClassCredentialValidationUnavailableError,
+                ) as exc:
+                    _raise_http_for_lecture_video_voice_validation_error(exc)
 
             current_lecture_video = None
             if asst.lecture_video_id is not None:

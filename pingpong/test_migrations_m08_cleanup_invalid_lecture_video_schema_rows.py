@@ -121,6 +121,8 @@ async def test_disabled_class_removes_lv_rows_and_revokes_permissions(
         member = models.User(id=102, email="member@example.com")
         anonymous_user = models.User(id=103, email="anonymous-user@example.com")
         class_ = models.Class(id=1, name="Disabled LV Class", institution_id=1)
+        session.add_all([institution, creator, member, anonymous_user, class_])
+        await session.flush()
         lecture_video = await create_lecture_video(
             session,
             class_id=class_.id,
@@ -155,18 +157,7 @@ async def test_disabled_class_removes_lv_rows_and_revokes_permissions(
             user=anonymous_user,
         )
 
-        session.add_all(
-            [
-                institution,
-                creator,
-                member,
-                anonymous_user,
-                class_,
-                assistant,
-                thread,
-                anonymous_session,
-            ]
-        )
+        session.add_all([assistant, thread, anonymous_session])
         await session.commit()
 
     await grant_relations(
@@ -530,6 +521,99 @@ async def test_non_lecture_rows_with_lecture_video_id_are_removed(authz, db, con
         assert await session.get(models.LectureVideo, lecture_video.id) is None
 
 
+async def test_cross_class_lecture_video_links_are_removed(db, config, authz):
+    async with db.async_session() as session:
+        institution = models.Institution(id=35, name="Test Institution")
+        creator = models.User(id=135, email="creator@example.com")
+        class_one = models.Class(id=35, name="Enabled LV Class One", institution_id=35)
+        class_two = models.Class(id=36, name="Enabled LV Class Two", institution_id=35)
+        session.add_all([institution, creator, class_one, class_two])
+        await session.flush()
+        await add_lv_credentials(session, class_one.id)
+        await add_lv_credentials(session, class_two.id)
+
+        class_one_video = await create_lecture_video(
+            session,
+            class_id=class_one.id,
+            uploader_id=creator.id,
+            key="class-one.mp4",
+        )
+        class_two_video = await create_lecture_video(
+            session,
+            class_id=class_two.id,
+            uploader_id=creator.id,
+            key="class-two.mp4",
+        )
+
+        cross_class_assistant = models.Assistant(
+            id=235,
+            name="Cross Class Assistant",
+            class_id=class_one.id,
+            creator_id=creator.id,
+            interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+            lecture_video_id=class_two_video.id,
+            version=3,
+        )
+        cross_class_thread = models.Thread(
+            id=335,
+            name="Cross Class Thread",
+            class_id=class_one.id,
+            assistant_id=235,
+            interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+            lecture_video_id=class_two_video.id,
+            version=3,
+            private=True,
+            tools_available="[]",
+        )
+        valid_assistant = models.Assistant(
+            id=236,
+            name="Valid Assistant",
+            class_id=class_one.id,
+            creator_id=creator.id,
+            interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+            lecture_video_id=class_one_video.id,
+            version=3,
+        )
+        valid_thread = models.Thread(
+            id=336,
+            name="Valid Thread",
+            class_id=class_one.id,
+            assistant_id=236,
+            interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+            lecture_video_id=class_one_video.id,
+            version=3,
+            private=True,
+            tools_available="[]",
+        )
+
+        session.add_all(
+            [
+                cross_class_assistant,
+                cross_class_thread,
+                valid_assistant,
+                valid_thread,
+            ]
+        )
+        await session.commit()
+
+    result = await run_migration(db, config)
+
+    assert result.invalid_lecture_videos == 0
+    assert result.invalid_assistants == 1
+    assert result.invalid_threads == 1
+    assert result.lecture_videos_deleted == 1
+    assert result.assistants_deleted == 1
+    assert result.threads_deleted == 1
+
+    async with db.async_session() as session:
+        assert await session.get(models.Assistant, 235) is None
+        assert await session.get(models.Thread, 335) is None
+        assert await session.get(models.LectureVideo, class_two_video.id) is None
+        assert await session.get(models.Assistant, 236) is not None
+        assert await session.get(models.Thread, 336) is not None
+        assert await session.get(models.LectureVideo, class_one_video.id) is not None
+
+
 async def test_migration_is_db_only_and_does_not_delete_store_objects(
     authz, db, config, monkeypatch
 ):
@@ -550,6 +634,8 @@ async def test_migration_is_db_only_and_does_not_delete_store_objects(
         institution = models.Institution(id=41, name="Test Institution")
         creator = models.User(id=141, email="creator@example.com")
         class_ = models.Class(id=41, name="Disabled LV Class", institution_id=41)
+        session.add_all([institution, creator, class_])
+        await session.flush()
         lecture_video = await create_lecture_video(
             session,
             class_id=class_.id,
@@ -576,7 +662,7 @@ async def test_migration_is_db_only_and_does_not_delete_store_objects(
             private=True,
             tools_available="[]",
         )
-        session.add_all([institution, creator, class_, assistant, thread])
+        session.add_all([assistant, thread])
         await session.commit()
 
     await run_migration(db, config)

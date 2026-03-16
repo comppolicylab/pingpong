@@ -283,19 +283,29 @@
 	let loadedApiKey = data.apiKey || null;
 	let loadedHasApiKey = !!data?.hasAPIKey;
 	let loadedApiKeyClassId = data.class.id;
+	$: hasApiKeyReadError = !!data.apiKeyReadError;
 	$: classCredentialsLoaded = canViewApiKey && data.classCredentials !== undefined;
 	$: classCredentials = data.classCredentials ?? [];
 	$: hasGeminiCredential =
 		classCredentials.some(
 			(cc) => cc.purpose === 'lecture_video_manifest_generation' && !!cc.credential
-		) || !!data?.hasGeminiCredential;
+		)
+			? true
+			: hasApiKeyReadError
+				? undefined
+				: (data?.hasGeminiCredential ?? false);
 	$: hasElevenlabsCredential =
 		classCredentials.some(
 			(cc) => cc.purpose === 'lecture_video_narration_tts' && !!cc.credential
-		) || !!data?.hasElevenlabsCredential;
-	$: allFeatureCredentialsConfigured = hasGeminiCredential && hasElevenlabsCredential;
+		)
+			? true
+			: hasApiKeyReadError
+				? undefined
+				: (data?.hasElevenlabsCredential ?? false);
+	$: allFeatureCredentialsConfigured =
+		hasGeminiCredential === true && hasElevenlabsCredential === true;
 	let apiProvider = data.apiKey?.provider || data.aiProvider || 'openai';
-	$: configuredAiProvider = data.aiProvider || apiKey?.provider || null;
+	$: configuredAiProvider = data.aiProvider ?? apiKey?.provider ?? null;
 	let updatingClassCredentialPurpose: api.ClassCredentialPurpose | null = null;
 
 	$: subscriptionInfo = data.subscription || null;
@@ -1673,13 +1683,21 @@
 						{/if}
 					{:else}
 						<Label class="mb-1 text-sm">Provider</Label>
-						<div class="mb-1 flex flex-row items-center gap-1">
-							<ExclamationCircleOutline class="h-4 w-4 text-amber-600" />
-							<span class="text-sm font-normal text-amber-600">Not configured</span>
-						</div>
-						<Helper
-							>Contact a group admin to configure your AI Provider and start using PingPong.</Helper
-						>
+						{#if hasApiKeyReadError}
+							<div class="mb-1 flex flex-row items-center gap-1">
+								<ExclamationCircleOutline class="h-4 w-4 text-red-600" />
+								<span class="text-sm font-normal text-red-600">Unknown</span>
+							</div>
+							<Helper>Unable to load the AI provider status right now.</Helper>
+						{:else}
+							<div class="mb-1 flex flex-row items-center gap-1">
+								<ExclamationCircleOutline class="h-4 w-4 text-amber-600" />
+								<span class="text-sm font-normal text-amber-600">Not configured</span>
+							</div>
+							<Helper
+								>Contact a group admin to configure your AI Provider and start using PingPong.</Helper
+							>
+						{/if}
 					{/if}
 				</div>
 			{/if}
@@ -1867,10 +1885,15 @@
 							(featureCredential.provider === 'elevenlabs' && hasElevenlabsCredential)}
 						<div class="mb-1 flex flex-row items-center gap-4">
 							<Label class="text-sm">API Key</Label>
-							{#if isConfigured}
+							{#if isConfigured === true}
 								<div class="flex items-center gap-1">
 									<CheckCircleOutline class="h-4 w-4 text-green-600" />
 									<span class="text-sm font-normal text-green-600">Configured</span>
+								</div>
+							{:else if hasApiKeyReadError}
+								<div class="flex items-center gap-1">
+									<ExclamationCircleOutline class="h-4 w-4 text-red-600" />
+									<span class="text-sm font-normal text-red-600">Unknown</span>
 								</div>
 							{:else}
 								<div class="flex items-center gap-1">
@@ -1879,8 +1902,10 @@
 								</div>
 							{/if}
 						</div>
-						{#if !isConfigured}
+						{#if isConfigured === false}
 							<Helper>Contact a group admin to set the API key.</Helper>
+						{:else if hasApiKeyReadError}
+							<Helper>Unable to load this provider credential status right now.</Helper>
 						{/if}
 					{/each}
 				{/if}

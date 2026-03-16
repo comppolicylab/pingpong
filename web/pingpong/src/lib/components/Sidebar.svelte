@@ -88,6 +88,7 @@
 	);
 	$: currentClassId = parseInt($page.params.classId ?? '', 10);
 	$: currentAssistantIdQuery = parseInt($page.url.searchParams.get('assistant') || '0', 10);
+	$: routeAssistantId = parseInt($page.params.assistantId ?? '', 10);
 	$: assistants = [...(($page.data.assistants || []) as api.Assistant[])]
 		.filter(
 			(assistant: api.Assistant) =>
@@ -106,11 +107,14 @@
 	$: fallbackAssistantId = assistants[0]?.id || 0;
 	$: currentAssistantIdQueryVisible = assistants.some((a) => a.id === currentAssistantIdQuery)
 		? currentAssistantIdQuery
-		: fallbackAssistantId;
+		: 0;
 	$: threadAssistantId = $page.data.threadData?.thread?.assistant_id || 0;
-	$: currentAssistantId = assistants.some((a) => a.id === threadAssistantId)
-		? threadAssistantId
-		: currentAssistantIdQueryVisible;
+	$: currentAssistantId = assistants.some((a) => a.id === routeAssistantId)
+		? routeAssistantId
+		: assistants.some((a) => a.id === threadAssistantId)
+			? threadAssistantId
+			: currentAssistantIdQueryVisible;
+	$: newChatAssistantId = currentAssistantId || fallbackAssistantId;
 	let assistantsToShow: api.Assistant[] = [];
 	// Offer the top 4 assistants. If the current assistant is not in the top 4, add it to the top and remove the 4th one.
 	$: if (assistants.length > 4) {
@@ -360,9 +364,9 @@
 					target={openAllLinksInNewTab ? '_blank' : undefined}
 					href={nonAuthed
 						? isSharedAssistantPage
-							? `/login?forward=${pathName}%3Fshare_token=${shareToken}`
+								? `/login?forward=${pathName}%3Fshare_token=${shareToken}`
 							: isSharedThreadPage
-								? `/group/${currentClassId}/shared/assistant/${currentAssistantId}?share_token=${$anonymousShareToken}`
+								? `/group/${currentClassId}/shared/assistant/${newChatAssistantId}?share_token=${$anonymousShareToken}`
 								: '/login'
 						: onNewChatPage || hasNoClasses
 							? undefined
@@ -370,7 +374,7 @@
 								? `/`
 								: currentClassId
 									? `/group/${currentClassId}${
-											currentAssistantId ? `?assistant=${currentAssistantId}` : ''
+											newChatAssistantId ? `?assistant=${newChatAssistantId}` : ''
 										}`
 									: '/'}
 					label={nonAuthed

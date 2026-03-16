@@ -261,18 +261,48 @@ const _fetchJSON = async <R extends BaseData>(
 };
 
 export const readErrorDetail = async (response: Response) => {
+	const fallbackMessage = `Request failed with status ${response.status}.`;
+	let textDetail: string | null = null;
+
 	try {
-		const payload = await response.json();
+		const payload = await response.clone().json();
 		if (typeof payload?.detail === 'string') {
 			return payload.detail;
 		}
-		if (payload?.detail) {
+		if (
+			Array.isArray(payload?.detail) &&
+			payload.detail.every(
+				(error: unknown) =>
+					typeof error === 'object' &&
+					error !== null &&
+					Array.isArray((error as { loc?: unknown }).loc) &&
+					typeof (error as { msg?: unknown }).msg === 'string'
+			)
+		) {
+			return payload.detail
+				.map(
+					(error: { loc: Array<string | number>; msg: string }) =>
+						`${error.loc.join(' -> ')}: ${error.msg}`
+				)
+				.join('\n');
+		}
+		if (payload?.detail && typeof payload.detail === 'object') {
 			return JSON.stringify(payload.detail);
 		}
 	} catch {
-		return `Request failed with status ${response.status}.`;
+		// Fall back to plain text if the response is not JSON.
 	}
-	return `Request failed with status ${response.status}.`;
+
+	try {
+		const bodyText = await response.text();
+		if (bodyText.trim()) {
+			textDetail = bodyText;
+		}
+	} catch {
+		// Ignore body read failures and use the fallback below.
+	}
+
+	return textDetail ?? fallbackMessage;
 };
 
 /**
@@ -1546,26 +1576,28 @@ export const getClassCredentials = async (f: Fetcher, classId: number) => {
 /**
  * Upload a lecture-video draft for a new assistant.
  */
-export const uploadLectureVideo = async (f: Fetcher, classId: number, file: File) => {
-	const url = `class/${classId}/lecture-video`;
-	const formData = new FormData();
-	formData.append('upload', file);
-	return await _fetchJSON<LectureVideoSummary>(f, 'POST', url, undefined, formData);
+export const uploadLectureVideo = (
+	_f: Fetcher,
+	classId: number,
+	file: File,
+	opts?: UploadOptions
+) => {
+	const url = fullPath(`class/${classId}/lecture-video`);
+	return _doUpload<LectureVideoSummary>(url, file, opts);
 };
 
 /**
  * Upload a lecture-video draft while editing an assistant.
  */
-export const uploadAssistantLectureVideo = async (
-	f: Fetcher,
+export const uploadAssistantLectureVideo = (
+	_f: Fetcher,
 	classId: number,
 	assistantId: number,
-	file: File
+	file: File,
+	opts?: UploadOptions
 ) => {
-	const url = `class/${classId}/assistant/${assistantId}/lecture-video/upload`;
-	const formData = new FormData();
-	formData.append('upload', file);
-	return await _fetchJSON<LectureVideoSummary>(f, 'POST', url, undefined, formData);
+	const url = fullPath(`class/${classId}/assistant/${assistantId}/lecture-video/upload`);
+	return _doUpload<LectureVideoSummary>(url, file, opts);
 };
 
 /**
@@ -2279,16 +2311,16 @@ export interface FileUploadFailure {
 /**
  * Result of a file upload.
  */
-export type FileUploadResult = ServerFile | FileUploadFailure;
+export type FileUploadResult<T = ServerFile> = T | FileUploadFailure;
 
 /**
  * Info about the file upload.
  */
-export interface FileUploadInfo {
+export interface FileUploadInfo<T = ServerFile> {
 	file: File;
-	promise: Promise<FileUploadResult>;
+	promise: Promise<FileUploadResult<T>>;
 	state: 'pending' | 'success' | 'error' | 'deleting';
-	response: FileUploadResult | null;
+	response: FileUploadResult<T> | null;
 	progress: number;
 }
 
@@ -2314,20 +2346,20 @@ export type FileRemover = (fileId: number) => Promise<void>;
 /**
  * Upload a file to the given endpoint.
  */
-const _doUpload = (
+const _doUpload = <T extends BaseData = ServerFile>(
 	url: string,
 	file: File,
 	opts?: UploadOptions,
 	purpose: FileUploadPurpose = 'assistants',
 	useImageDescriptions: boolean = false
-): FileUploadInfo => {
+): FileUploadInfo<T> => {
 	if (!browser) {
 		throw new Error('File uploads are not supported in this environment.');
 	}
 
 	const xhr = new XMLHttpRequest();
 
-	const info: Omit<FileUploadInfo, 'promise'> = {
+	const info: Omit<FileUploadInfo<T>, 'promise'> = {
 		file,
 		state: 'pending',
 		response: null,
@@ -2347,7 +2379,7 @@ const _doUpload = (
 
 	// Don't use the normal fetch because this only works with xhr, and we want
 	// to be able to track progress.
-	const promise = new Promise<FileUploadResult>((resolve, reject) => {
+	const promise = new Promise<FileUploadResult<T>>((resolve, reject) => {
 		xhr.open('POST', url, true);
 		xhr.setRequestHeader('Accept', 'application/json');
 		const anonymousSessionToken = getAnonymousSessionToken();
@@ -2368,7 +2400,7 @@ const _doUpload = (
 			if (xhr.readyState === 4) {
 				if (xhr.status < 300) {
 					info.state = 'success';
-					info.response = JSON.parse(xhr.responseText) as ServerFile;
+					info.response = JSON.parse(xhr.responseText) as T;
 					resolve(info.response);
 				} else {
 					info.state = 'error';

@@ -2199,6 +2199,9 @@ class LectureVideo(Base):
             stored_object_id=lecture_video.stored_object_id,
             user_id=lecture_video.uploader_id,
             display_name=lecture_video.display_name,
+            # Cross-class lecture video copies are only allowed when the source and
+            # target classes share the same AI provider and additional provider
+            # credentials, including ElevenLabs.
             voice_id=lecture_video.voice_id,
             status=lecture_video.status,
             error_message=lecture_video.error_message,
@@ -4528,7 +4531,9 @@ class Class(Base):
     @classmethod
     async def has_any_api_key(cls, session: AsyncSession, id_: int) -> bool:
         stmt = select(Class.api_key_id, Class.api_key).where(Class.id == int(id_))
-        row = (await session.execute(stmt)).one()
+        row = (await session.execute(stmt)).one_or_none()
+        if row is None:
+            return False
         return bool(row.api_key_id or row.api_key)
 
     @classmethod
@@ -4541,9 +4546,14 @@ class Class(Base):
             .outerjoin(APIKey, Class.api_key_id == APIKey.id)
             .where(Class.id == int(id_))
         )
-        row = (await session.execute(stmt)).one()
-        if row.provider:
-            return cast(schemas.AIProvider, row.provider)
+        row = (await session.execute(stmt)).one_or_none()
+        if row is None:
+            return None
+        if row.provider is not None:
+            try:
+                return schemas.AIProvider(row.provider)
+            except ValueError:
+                return None
         if row.api_key:
             return schemas.AIProvider.OPENAI
         return None

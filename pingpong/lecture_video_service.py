@@ -285,6 +285,13 @@ def lecture_video_config_matches(
     try:
         current_manifest = lecture_video_manifest_from_model(current_lecture_video)
     except (ValidationError, ValueError):
+        logger.warning(
+            "Failed to serialize current lecture video manifest for comparison. "
+            "current_lecture_video_id=%s requested_lecture_video_id=%s",
+            current_lecture_video.id,
+            requested_lecture_video.id,
+            exc_info=True,
+        )
         return False
     return (
         current_lecture_video.stored_object_id

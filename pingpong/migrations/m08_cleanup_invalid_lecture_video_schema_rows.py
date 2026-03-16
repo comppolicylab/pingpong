@@ -440,28 +440,38 @@ async def cleanup_invalid_lecture_video_schema_rows(
         )
         if class_id not in enabled_class_ids
     }
-    invalid_lecture_video_ids = {
+    valid_lecture_video_ids = {
         lecture_video.id
         for lecture_video in lecture_videos_by_id.values()
         if (
-            lecture_video.class_id in disabled_class_ids
-            or not _is_valid_lecture_video(lecture_video, correct_option_counts)
+            lecture_video.class_id not in disabled_class_ids
+            and _is_valid_lecture_video(lecture_video, correct_option_counts)
         )
     }
-    valid_lecture_video_ids = set(lecture_videos_by_id) - invalid_lecture_video_ids
+    invalid_lecture_video_ids = set(lecture_videos_by_id) - valid_lecture_video_ids
 
+    valid_assistant_ids: set[int] = set()
     invalid_assistant_ids: set[int] = set()
     for assistant in assistant_rows:
         if assistant.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
+            lecture_video = (
+                lecture_videos_by_id.get(assistant.lecture_video_id)
+                if assistant.lecture_video_id is not None
+                else None
+            )
             if (
-                assistant.class_id in disabled_class_ids
-                or assistant.lecture_video_id is None
-                or assistant.lecture_video_id not in valid_lecture_video_ids
+                assistant.class_id not in disabled_class_ids
+                and lecture_video is not None
+                and lecture_video.id in valid_lecture_video_ids
+                and lecture_video.class_id == assistant.class_id
             ):
+                valid_assistant_ids.add(assistant.id)
+            else:
                 invalid_assistant_ids.add(assistant.id)
         elif assistant.lecture_video_id is not None:
             invalid_assistant_ids.add(assistant.id)
 
+    valid_thread_ids: set[int] = set()
     invalid_thread_ids: set[int] = set()
     for thread in thread_rows:
         if thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
@@ -470,15 +480,31 @@ async def cleanup_invalid_lecture_video_schema_rows(
                 if thread.assistant_id is not None
                 else None
             )
+            lecture_video = (
+                lecture_videos_by_id.get(thread.lecture_video_id)
+                if thread.lecture_video_id is not None
+                else None
+            )
+            assistant_lecture_video = (
+                lecture_videos_by_id.get(assistant.lecture_video_id)
+                if assistant is not None and assistant.lecture_video_id is not None
+                else None
+            )
             if (
-                thread.class_id in disabled_class_ids
-                or assistant is None
-                or assistant.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO
-                or thread.lecture_video_id is None
-                or assistant.lecture_video_id is None
-                or thread.lecture_video_id != assistant.lecture_video_id
-                or thread.lecture_video_id not in valid_lecture_video_ids
+                thread.class_id not in disabled_class_ids
+                and assistant is not None
+                and assistant.id in valid_assistant_ids
+                and assistant.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
+                and assistant.class_id == thread.class_id
+                and lecture_video is not None
+                and lecture_video.id in valid_lecture_video_ids
+                and lecture_video.class_id == thread.class_id
+                and assistant_lecture_video is not None
+                and assistant_lecture_video.id == lecture_video.id
+                and assistant_lecture_video.class_id == assistant.class_id
             ):
+                valid_thread_ids.add(thread.id)
+            else:
                 invalid_thread_ids.add(thread.id)
         elif thread.lecture_video_id is not None:
             invalid_thread_ids.add(thread.id)
@@ -487,6 +513,7 @@ async def cleanup_invalid_lecture_video_schema_rows(
         thread.id
         for thread in thread_rows
         if thread.assistant_id is not None
+        and thread.id not in valid_thread_ids
         and thread.assistant_id in invalid_assistant_ids
     )
     lecture_video_ids_to_delete: set[int] = set(invalid_lecture_video_ids)
@@ -610,6 +637,8 @@ async def cleanup_invalid_lecture_video_schema_rows(
             .all()
         )
         for lecture_video in batch_lecture_videos:
+            if lecture_video is None:
+                continue
             result.revokes_attempted += await _delete_lecture_video_db_only(
                 session, authz, lecture_video
             )
