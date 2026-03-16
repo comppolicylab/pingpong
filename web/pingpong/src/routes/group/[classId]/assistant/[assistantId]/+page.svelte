@@ -1274,6 +1274,9 @@
 						? false
 						: (preventEdits ? !!assistant?.hide_prompt : newValue) !== oldValue;
 				break;
+			case 'disable_prompt_randomization':
+				dirty = newValue === undefined ? false : newValue !== !!oldValue;
+				break;
 			case 'tools':
 				dirty = !setsEqual(
 					new Set((newValue as api.Tool[]).map((t) => t.type)),
