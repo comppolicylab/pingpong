@@ -108,14 +108,14 @@ jobs:
           echo "WEB_VERSION=${unique_tag}" >> "$GITHUB_ENV"
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@2e454faab91acfe1250b33b97d80ed198a8ce8f6
+        uses: aws-actions/configure-aws-credentials@2ab6fc87e42bf5c70a86921a8ac88dfabce098c7
         with:
           aws-access-key-id: ${{ secrets.PINGPONG_AWS_ACCESS_KEY }}
           aws-secret-access-key: ${{ secrets.PINGPONG_AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ vars.AWS_REGION }}
 
       - name: Login to Amazon ECR
-        uses: aws-actions/amazon-ecr-login@fe725d47d3009d901b44f3df285a6dc9d438e63a
+        uses: aws-actions/amazon-ecr-login@cc05f4a4db45f6b446eee901ef3620a08754cbcf
 
       - name: Check if this SHA is already deployed
         id: dedupe
