@@ -5166,11 +5166,13 @@ class ClassCredential(Base):
         class_id: int,
         purposes: Sequence[schemas.ClassCredentialPurpose],
     ) -> set[schemas.ClassCredentialPurpose]:
+        if not purposes:
+            return set()
         stmt = select(ClassCredential.purpose).where(
             ClassCredential.class_id == int(class_id),
             ClassCredential.purpose.in_(list(purposes)),
         )
-        return set(await session.scalars(stmt))
+        return set((await session.scalars(stmt)).all())
 
     @classmethod
     async def get_by_class_id_and_purpose(

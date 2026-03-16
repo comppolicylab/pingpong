@@ -286,20 +286,29 @@
 	$: hasApiKeyReadError = !!data.apiKeyReadError;
 	$: classCredentialsLoaded = canViewApiKey && data.classCredentials !== undefined;
 	$: classCredentials = data.classCredentials ?? [];
-	$: hasGeminiCredential = classCredentials.some(
-		(cc) => cc.purpose === 'lecture_video_manifest_generation' && !!cc.credential
-	)
-		? true
-		: hasApiKeyReadError
-			? undefined
-			: (data?.hasGeminiCredential ?? false);
-	$: hasElevenlabsCredential = classCredentials.some(
-		(cc) => cc.purpose === 'lecture_video_narration_tts' && !!cc.credential
-	)
-		? true
-		: hasApiKeyReadError
-			? undefined
-			: (data?.hasElevenlabsCredential ?? false);
+	const deriveCredentialState = (
+		credentials: typeof classCredentials,
+		purpose: string,
+		fallbackFlag: boolean | undefined
+	): boolean | undefined => {
+		if (credentials.some((cc) => cc.purpose === purpose && !!cc.credential)) {
+			return true;
+		}
+		if (hasApiKeyReadError) {
+			return undefined;
+		}
+		return fallbackFlag ?? false;
+	};
+	$: hasGeminiCredential = deriveCredentialState(
+		classCredentials,
+		'lecture_video_manifest_generation',
+		data?.hasGeminiCredential
+	);
+	$: hasElevenlabsCredential = deriveCredentialState(
+		classCredentials,
+		'lecture_video_narration_tts',
+		data?.hasElevenlabsCredential
+	);
 	$: allFeatureCredentialsConfigured =
 		hasGeminiCredential === true && hasElevenlabsCredential === true;
 	let apiProvider = data.apiKey?.provider || data.aiProvider || 'openai';

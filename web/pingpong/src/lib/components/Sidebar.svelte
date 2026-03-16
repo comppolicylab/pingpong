@@ -82,7 +82,7 @@
 		},
 		{}
 	);
-	$: lectureVideoEnabled = $page.data.lectureVideoEnabled ?? true;
+	$: lectureVideoEnabled = $page.data.lectureVideoEnabled ?? false;
 	$: threads = (($page.data.threads || []) as api.Thread[]).filter(
 		(thread: api.Thread) => lectureVideoEnabled || thread.interaction_mode !== 'lecture_video'
 	);

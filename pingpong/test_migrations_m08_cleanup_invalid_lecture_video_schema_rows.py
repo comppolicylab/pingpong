@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -97,13 +97,15 @@ async def create_lecture_video(
 
 async def run_migration(session_factory, config):
     await config.authz.driver.init()
-    async with session_factory.async_session() as session:
-        async with config.authz.driver.get_client() as authz_client:
-            result = await migration.cleanup_invalid_lecture_video_schema_rows(
-                session, authz_client
-            )
-            await session.commit()
-            return result
+    async with (
+        session_factory.async_session() as session,
+        config.authz.driver.get_client() as authz_client,
+    ):
+        result = await migration.cleanup_invalid_lecture_video_schema_rows(
+            session, authz_client
+        )
+        await session.commit()
+        return result
 
 
 async def grant_relations(config, grants):
@@ -137,7 +139,7 @@ async def test_disabled_class_removes_lv_rows_and_revokes_permissions(
             interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
             lecture_video_id=lecture_video.id,
             version=3,
-            published=datetime.utcnow(),
+            published=datetime.now(timezone.utc),
         )
         thread = models.Thread(
             id=301,

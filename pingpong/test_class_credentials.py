@@ -843,7 +843,7 @@ async def test_validate_class_credential_for_gemini_raises_unavailable_for_non_a
 
     with pytest.raises(
         ClassCredentialValidationUnavailableError,
-        match="Unable to validate the Gemini API key right now.",
+        match=r"Unable to validate the Gemini API key right now\.",
     ):
         await validate_class_credential(
             api_key="gemini-key",
@@ -875,7 +875,7 @@ async def test_synthesize_elevenlabs_voice_sample_maps_generic_voice_not_found_a
 
     with pytest.raises(
         elevenlabs_module.ClassCredentialVoiceValidationError,
-        match="Invalid voice ID provided. Please choose a different voice.",
+        match=r"Invalid voice ID provided. Please choose a different voice\.",
     ):
         await elevenlabs_module.synthesize_elevenlabs_voice_sample(
             api_key="elevenlabs-key",

@@ -113,7 +113,7 @@ async def synthesize_elevenlabs_voice_sample(
             provider=schemas.ClassCredentialProvider.ELEVENLABS,
             message="Unable to validate the ElevenLabs voice right now.",
         ) from exc
-    except asyncio.TimeoutError as exc:
+    except TimeoutError as exc:
         logger.warning(
             "Timed out validating ElevenLabs voice_id=%s.",
             safe_voice_id,
@@ -187,7 +187,7 @@ async def validate_elevenlabs_api_key(api_key: str) -> bool:
         return False
     except ElevenLabsUnauthorizedError:
         return False
-    except asyncio.TimeoutError as exc:
+    except TimeoutError as exc:
         logger.warning(
             "Timed out validating %s class credential.",
             safe_provider,

@@ -35,7 +35,7 @@ async def validate_gemini_api_key(api_key: str) -> bool:
             provider=schemas.ClassCredentialProvider.GEMINI,
             message="Unable to validate the Gemini API key right now.",
         ) from exc
-    except asyncio.TimeoutError as exc:
+    except TimeoutError as exc:
         logger.warning(
             "Timed out validating %s class credential.",
             safe_provider,
