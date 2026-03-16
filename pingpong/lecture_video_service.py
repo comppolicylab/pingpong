@@ -242,6 +242,72 @@ async def lecture_video_summary_from_model(
     )
 
 
+def lecture_video_manifest_from_model(
+    lecture_video: models.LectureVideo,
+) -> schemas.LectureVideoManifestV1:
+    questions: list[schemas.LectureVideoManifestQuestionV1] = []
+    for question in sorted(lecture_video.questions, key=lambda item: item.position):
+        correct_option_id = (
+            question.correct_option.id if question.correct_option else None
+        )
+        if correct_option_id is None:
+            raise ValueError(
+                "Lecture video question must have a correct option before serialization."
+            )
+        options = [
+            schemas.LectureVideoManifestOptionV1(
+                option_text=option.option_text,
+                post_answer_text=option.post_answer_text or "",
+                continue_offset_ms=option.continue_offset_ms,
+                correct=option.id == correct_option_id,
+            )
+            for option in sorted(question.options, key=lambda item: item.position)
+        ]
+        questions.append(
+            schemas.LectureVideoManifestQuestionV1(
+                type=question.question_type,
+                question_text=question.question_text,
+                intro_text=question.intro_text or "",
+                stop_offset_ms=question.stop_offset_ms,
+                options=options,
+            )
+        )
+    return schemas.LectureVideoManifestV1(questions=questions)
+
+
+def lecture_video_config_matches(
+    current_lecture_video: models.LectureVideo,
+    requested_lecture_video: models.LectureVideo,
+    requested_manifest: schemas.LectureVideoManifestV1,
+    requested_voice_id: str,
+) -> bool:
+    current_manifest = lecture_video_manifest_from_model(current_lecture_video)
+    return (
+        current_lecture_video.stored_object_id
+        == requested_lecture_video.stored_object_id
+        and (current_lecture_video.voice_id or "").strip() == requested_voice_id.strip()
+        and current_manifest.model_dump() == requested_manifest.model_dump()
+    )
+
+
+async def clone_lecture_video_snapshot(
+    session: AsyncSession,
+    lecture_video: models.LectureVideo,
+) -> models.LectureVideo:
+    cloned_lecture_video = await models.LectureVideo.create(
+        session,
+        class_id=lecture_video.class_id,
+        stored_object_id=lecture_video.stored_object_id,
+        user_id=lecture_video.uploader_id,
+        display_name=lecture_video.display_name,
+        voice_id=lecture_video.voice_id,
+        status=lecture_video.status,
+        error_message=lecture_video.error_message,
+    )
+    cloned_lecture_video.stored_object = lecture_video.stored_object
+    return cloned_lecture_video
+
+
 async def ensure_lecture_video_is_unassigned(
     session: AsyncSession,
     lecture_video_id: int,
@@ -507,8 +573,13 @@ async def persist_manifest(
     session: AsyncSession,
     lecture_video: models.LectureVideo,
     lecture_video_manifest: schemas.LectureVideoManifestV1,
+    *,
+    voice_id: str | None = None,
+    create_narration_placeholders: bool = False,
 ) -> None:
     await clear_normalized_content(session, lecture_video.id)
+    if voice_id is not None:
+        lecture_video.voice_id = voice_id
 
     for question_position, question in enumerate(lecture_video_manifest.questions):
         question_row = models.LectureVideoQuestion(
@@ -522,7 +593,7 @@ async def persist_manifest(
         session.add(question_row)
         await session.flush()
 
-        if text_needs_audio(question.intro_text):
+        if create_narration_placeholders and text_needs_audio(question.intro_text):
             intro_narration = models.LectureVideoNarration(
                 status=schemas.LectureVideoNarrationStatus.PENDING,
             )
@@ -558,12 +629,13 @@ async def persist_manifest(
                     )
                 )
             if text_needs_audio(option.post_answer_text):
-                post_narration = models.LectureVideoNarration(
-                    status=schemas.LectureVideoNarrationStatus.PENDING,
-                )
-                session.add(post_narration)
-                await session.flush()
-                option_row.post_narration_id = post_narration.id
+                if create_narration_placeholders:
+                    post_narration = models.LectureVideoNarration(
+                        status=schemas.LectureVideoNarrationStatus.PENDING,
+                    )
+                    session.add(post_narration)
+                    await session.flush()
+                    option_row.post_narration_id = post_narration.id
 
     lecture_video.status = schemas.LectureVideoStatus.READY
     lecture_video.error_message = None

@@ -10,6 +10,7 @@ from typing import (
     List,
     Literal,
     Optional,
+    Sequence,
     Union,
     Callable,
     Coroutine,
@@ -2027,6 +2028,7 @@ class LectureVideo(Base):
         order_by="LectureVideoQuestion.position",
     )
     display_name = Column(String)
+    voice_id = Column(String, nullable=True)
     status = Column(
         SQLEnum(schemas.LectureVideoStatus),
         nullable=False,
@@ -2046,6 +2048,7 @@ class LectureVideo(Base):
         stored_object_id: int,
         user_id: int | None,
         display_name: str | None = None,
+        voice_id: str | None = None,
         status: schemas.LectureVideoStatus = schemas.LectureVideoStatus.UPLOADED,
         error_message: str | None = None,
     ) -> "LectureVideo":
@@ -2053,6 +2056,7 @@ class LectureVideo(Base):
             class_id=class_id,
             stored_object_id=stored_object_id,
             display_name=display_name,
+            voice_id=voice_id,
             status=status,
             error_message=error_message,
             uploader_id=user_id,
@@ -2195,6 +2199,7 @@ class LectureVideo(Base):
             stored_object_id=lecture_video.stored_object_id,
             user_id=lecture_video.uploader_id,
             display_name=lecture_video.display_name,
+            voice_id=lecture_video.voice_id,
             status=lecture_video.status,
             error_message=lecture_video.error_message,
         )
@@ -3780,6 +3785,7 @@ class Assistant(Base):
         code_interpreter_file_ids = params.pop("code_interpreter_file_ids", [])
         params.pop("lecture_video_id", None)
         params.pop("lecture_video_manifest", None)
+        params.pop("voice_id", None)
         params["tools"] = json.dumps(params["tools"])
         params["class_id"] = int(class_id)
         params["creator_id"] = int(user_id)
@@ -4503,6 +4509,29 @@ class Class(Base):
         return await session.scalar(stmt)
 
     @classmethod
+    async def has_any_api_key(cls, session: AsyncSession, id_: int) -> bool:
+        stmt = select(Class.api_key_id, Class.api_key).where(Class.id == int(id_))
+        row = (await session.execute(stmt)).one()
+        return bool(row.api_key_id or row.api_key)
+
+    @classmethod
+    async def get_ai_provider(
+        cls, session: AsyncSession, id_: int
+    ) -> schemas.AIProvider | None:
+        stmt = (
+            select(APIKey.provider, Class.api_key)
+            .select_from(Class)
+            .outerjoin(APIKey, Class.api_key_id == APIKey.id)
+            .where(Class.id == int(id_))
+        )
+        row = (await session.execute(stmt)).one()
+        if row.provider:
+            return cast(schemas.AIProvider, row.provider)
+        if row.api_key:
+            return schemas.AIProvider.OPENAI
+        return None
+
+    @classmethod
     async def update_api_key(
         cls,
         session: AsyncSession,
@@ -5102,6 +5131,19 @@ class ClassCredential(Base):
         )
         result = await session.execute(stmt)
         return [row.ClassCredential for row in result]
+
+    @classmethod
+    async def get_configured_purposes_by_class_id(
+        cls,
+        session: AsyncSession,
+        class_id: int,
+        purposes: Sequence[schemas.ClassCredentialPurpose],
+    ) -> set[schemas.ClassCredentialPurpose]:
+        stmt = select(ClassCredential.purpose).where(
+            ClassCredential.class_id == int(class_id),
+            ClassCredential.purpose.in_(list(purposes)),
+        )
+        return set(await session.scalars(stmt))
 
     @classmethod
     async def get_by_class_id_and_purpose(

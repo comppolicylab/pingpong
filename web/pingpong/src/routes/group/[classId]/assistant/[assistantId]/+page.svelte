@@ -46,7 +46,9 @@
 		ArchiveOutline,
 		FileVideoOutline,
 		ClapperboardPlaySolid,
-		ClapperboardPlayOutline
+		ClapperboardPlayOutline,
+		CheckCircleOutline,
+		ExclamationCircleOutline
 	} from 'flowbite-svelte-icons';
 	import MultiSelectWithUpload from '$lib/components/MultiSelectWithUpload.svelte';
 	import { writable, type Writable } from 'svelte/store';
@@ -61,10 +63,62 @@
 	import { page } from '$app/stores';
 	import { computeLatestIncidentTimestamps, filterLatestIncidentUpdates } from '$lib/statusUpdates';
 	import { tick } from 'svelte';
+	import { onDestroy } from 'svelte';
 	import WebSourceChip from '$lib/components/WebSourceChip.svelte';
 	import MCPServerModal from '$lib/components/MCPServerModal.svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 	export let data;
 	const LECTURE_VIDEO_DEFAULT_INSTRUCTIONS = 'You are a lecture video assistant.';
+	const SUPPORTED_LECTURE_VIDEO_QUESTION_TYPES = new Set(['single_select']);
+	const DEFAULT_LECTURE_VIDEO_MANIFEST = {
+		questions: [
+			{
+				type: 'single_select',
+				question_text: '',
+				intro_text: '',
+				stop_offset_ms: 0,
+				options: [
+					{
+						option_text: '',
+						post_answer_text: '',
+						continue_offset_ms: 0,
+						correct: true
+					},
+					{
+						option_text: '',
+						post_answer_text: '',
+						continue_offset_ms: 0,
+						correct: false
+					}
+				]
+			}
+		]
+	};
+
+	type LectureVideoEditorPolicy = {
+		show_mode_in_assistant_editor: boolean;
+		can_select_mode_in_assistant_editor: boolean;
+		message: string | null;
+	};
+
+	type LectureVideoOptionInput = {
+		option_text: string;
+		post_answer_text: string;
+		continue_offset_ms: number;
+		correct: boolean;
+	};
+
+	type LectureVideoQuestionInput = {
+		type: string;
+		question_text: string;
+		intro_text: string;
+		stop_offset_ms: number;
+		options: LectureVideoOptionInput[];
+	};
+
+	type LectureVideoManifestInput = {
+		questions: LectureVideoQuestionInput[];
+	};
 
 	// Flag indicating whether we should check for changes before navigating away.
 	let checkForChanges = true;
@@ -101,8 +155,21 @@
 	$: isLectureMode = interactionMode === 'lecture_video';
 	$: isEditingLectureAssistant =
 		!data.isCreating && (assistant?.interaction_mode || null) === 'lecture_video';
+	const defaultLectureVideoPolicy: LectureVideoEditorPolicy = {
+		show_mode_in_assistant_editor: false,
+		can_select_mode_in_assistant_editor: false,
+		message: null
+	};
+	let lectureVideoPolicy: LectureVideoEditorPolicy = defaultLectureVideoPolicy;
+	$: lectureVideoPolicy = (data.lectureVideoPolicy ||
+		defaultLectureVideoPolicy) as LectureVideoEditorPolicy;
 	$: showLectureModeOption =
-		(data.isCreating && data.isInstitutionAdmin) || isEditingLectureAssistant;
+		lectureVideoPolicy.show_mode_in_assistant_editor || isEditingLectureAssistant;
+	$: lectureModeSelectionDisabled = preventEdits || !data.isCreating;
+	$: lectureModeTooltipText =
+		lectureVideoPolicy.message || 'Lecture Video mode is not available for this class yet.';
+	$: canUploadLectureVideo =
+		!preventEdits && isLectureMode && (data.isCreating || !!data.assistantId);
 	$: modelInteractionMode = isLectureMode ? 'chat' : interactionMode;
 	let description = '';
 	let hasSetDescription = false;
@@ -130,10 +197,41 @@
 		notes = assistant.notes;
 		hasSetNotes = true;
 	}
-	let currentLectureVideoKey = '';
-	$: currentLectureVideoKey = assistant?.lecture_video_key || '';
-	let lectureVideoKey = '';
-	let hasSetLectureVideoKey = false;
+	let currentLectureVideo: api.LectureVideoSummary | null =
+		data.lectureVideoConfig?.lecture_video || null;
+	let selectedLectureVideo: api.LectureVideoSummary | null = currentLectureVideo;
+	let lectureVideoDraftIds = new SvelteSet<number>();
+	let uploadingLectureVideo = false;
+	let lectureVideoManifestJson = '';
+	let hasSetLectureVideoManifest = false;
+	let currentVoiceId = data.lectureVideoConfig?.voice_id || '';
+	let voiceId = '';
+	let hasSetVoiceId = false;
+	let validatingVoiceId = false;
+	let voiceSampleText = '';
+	let voiceSampleAudioSrc = '';
+	let voiceValidationError = '';
+	let lastValidatedVoiceId = '';
+	let voiceRequiresValidation = false;
+	let voiceSampleCache: Record<string, { text: string; audioSrc: string }> = {};
+	const revokeVoiceSampleAudioSrc = (audioSrc: string) => {
+		if (audioSrc.startsWith('blob:')) {
+			URL.revokeObjectURL(audioSrc);
+		}
+	};
+	const setVoiceSampleCacheEntry = (voiceId: string, text: string, audioSrc: string) => {
+		const existing = voiceSampleCache[voiceId];
+		if (existing && existing.audioSrc !== audioSrc) {
+			revokeVoiceSampleAudioSrc(existing.audioSrc);
+		}
+		voiceSampleCache[voiceId] = { text, audioSrc };
+	};
+	onDestroy(() => {
+		for (const sample of Object.values(voiceSampleCache)) {
+			revokeVoiceSampleAudioSrc(sample.audioSrc);
+		}
+	});
+	let currentLectureVideoManifestNormalized = '';
 	const decodeHtmlEntities = (value: string) => {
 		if (!browser) {
 			return value;
@@ -146,14 +244,148 @@
 		});
 	};
 
-	$: if (!hasSetLectureVideoKey) {
-		if (!data.isCreating && assistant?.lecture_video_key) {
-			lectureVideoKey = assistant.lecture_video_key;
-		} else {
-			lectureVideoKey = $page.url.searchParams.get('lecture_video_key') || '';
+	const editorLectureVideoManifest = (manifest: Record<string, unknown> | null | undefined) => {
+		const source = {
+			...((manifest || DEFAULT_LECTURE_VIDEO_MANIFEST) as Record<string, unknown>)
+		};
+		delete source.version;
+		return source;
+	};
+
+	const stringifyLectureVideoManifest = (manifest: Record<string, unknown> | null | undefined) =>
+		JSON.stringify(editorLectureVideoManifest(manifest), null, 2);
+
+	const normalizeLectureVideoManifestForCompare = (value: string) => {
+		try {
+			return JSON.stringify(JSON.parse(value));
+		} catch {
+			return value.trim();
 		}
-		hasSetLectureVideoKey = true;
+	};
+
+	const parseLectureVideoManifest = (
+		raw: string
+	): { manifest: api.LectureVideoManifest | null; error: string | null } => {
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(raw);
+		} catch {
+			return { manifest: null, error: 'Lecture video manifest must be valid JSON.' };
+		}
+
+		if (!parsed || typeof parsed !== 'object') {
+			return { manifest: null, error: 'Lecture video manifest must be a JSON object.' };
+		}
+
+		const candidate = parsed as Partial<LectureVideoManifestInput>;
+		if (!Array.isArray(candidate.questions) || candidate.questions.length < 1) {
+			return {
+				manifest: null,
+				error: 'Lecture video manifest must include at least one question.'
+			};
+		}
+
+		for (let index = 0; index < candidate.questions.length; index += 1) {
+			const question = candidate.questions[index];
+			if (!question || typeof question !== 'object') {
+				return { manifest: null, error: `Question ${index + 1} is invalid.` };
+			}
+			if (
+				typeof question.type !== 'string' ||
+				!SUPPORTED_LECTURE_VIDEO_QUESTION_TYPES.has(question.type)
+			) {
+				return {
+					manifest: null,
+					error: `Question ${index + 1} must use a supported type (single_select).`
+				};
+			}
+			if (
+				typeof question.stop_offset_ms !== 'number' ||
+				!Number.isFinite(question.stop_offset_ms) ||
+				question.stop_offset_ms < 0
+			) {
+				return {
+					manifest: null,
+					error: `Question ${index + 1} must have a non-negative stop_offset_ms.`
+				};
+			}
+			if (!Array.isArray(question.options) || question.options.length < 2) {
+				return {
+					manifest: null,
+					error: `Question ${index + 1} must include at least two options.`
+				};
+			}
+
+			let correctCount = 0;
+			for (let optionIndex = 0; optionIndex < question.options.length; optionIndex += 1) {
+				const option = question.options[optionIndex];
+				if (!option || typeof option !== 'object') {
+					return {
+						manifest: null,
+						error: `Question ${index + 1}, option ${optionIndex + 1} is invalid.`
+					};
+				}
+				if (
+					typeof option.continue_offset_ms !== 'number' ||
+					!Number.isFinite(option.continue_offset_ms) ||
+					option.continue_offset_ms < 0
+				) {
+					return {
+						manifest: null,
+						error: `Question ${index + 1}, option ${optionIndex + 1} must have a non-negative continue_offset_ms.`
+					};
+				}
+				if (option.correct === true) {
+					correctCount += 1;
+				}
+			}
+			if (question.type === 'single_select' && correctCount !== 1) {
+				return {
+					manifest: null,
+					error: `Question ${index + 1} must have exactly one correct option.`
+				};
+			}
+		}
+
+		return {
+			manifest: {
+				questions: candidate.questions
+			} as unknown as api.LectureVideoManifest,
+			error: null
+		};
+	};
+
+	$: if (!hasSetLectureVideoManifest) {
+		lectureVideoManifestJson = stringifyLectureVideoManifest(
+			data.lectureVideoConfig?.lecture_video_manifest
+		);
+		hasSetLectureVideoManifest = true;
 	}
+	$: currentLectureVideoManifestNormalized = normalizeLectureVideoManifestForCompare(
+		stringifyLectureVideoManifest(data.lectureVideoConfig?.lecture_video_manifest)
+	);
+	$: if (!hasSetVoiceId) {
+		voiceId = currentVoiceId;
+		hasSetVoiceId = true;
+	}
+	$: {
+		const trimmed = voiceId.trim();
+		const cached = voiceSampleCache[trimmed];
+		if (cached) {
+			voiceSampleAudioSrc = cached.audioSrc;
+			voiceSampleText = cached.text;
+			voiceValidationError = '';
+		} else {
+			voiceSampleAudioSrc = '';
+			voiceSampleText = '';
+			voiceValidationError = '';
+		}
+	}
+	$: voiceRequiresValidation =
+		isLectureMode &&
+		voiceId.trim().length > 0 &&
+		voiceId.trim() !== currentVoiceId.trim() &&
+		voiceId.trim() !== lastValidatedVoiceId;
 	let hidePrompt = data.isCreating;
 	let hasSetHidePrompt = false;
 	$: if (
@@ -1078,24 +1310,38 @@
 		if (convertToNextGen !== null) {
 			modifiedFields.push('assistant version');
 		}
-		const newLectureVideoKey = lectureVideoKey.trim();
-		if (newLectureVideoKey !== currentLectureVideoKey.trim()) {
-			modifiedFields.push('lecture video key');
+		const selectedLectureVideoId = selectedLectureVideo?.id ?? null;
+		const currentLectureVideoId = currentLectureVideo?.id ?? null;
+		if (selectedLectureVideoId !== currentLectureVideoId) {
+			modifiedFields.push('lecture video');
+		}
+		if (
+			normalizeLectureVideoManifestForCompare(lectureVideoManifestJson) !==
+			currentLectureVideoManifestNormalized
+		) {
+			modifiedFields.push('lecture video manifest');
+		}
+		if (voiceId.trim() !== currentVoiceId.trim()) {
+			modifiedFields.push('voice id');
 		}
 
 		return modifiedFields;
 	};
 
+	type AssistantFormRequest = api.CreateAssistantRequest &
+		api.UpdateAssistantRequest & {
+			lecture_video_id?: number;
+			lecture_video_manifest?: api.LectureVideoManifest;
+			voice_id?: string;
+		};
+
 	/**
 	 * Parse data from the assistants form into API request params.
 	 */
-	const parseFormData = (
-		form: HTMLFormElement
-	): api.CreateAssistantRequest & { convert_to_next_gen?: boolean } => {
+	const parseFormData = (form: HTMLFormElement): AssistantFormRequest => {
 		const formData = new FormData(form);
 		const body = Object.fromEntries(formData.entries());
 		const includeTooling = !isLectureMode;
-		const lectureVideoKeyValue = lectureVideoKey.trim();
 		const lectureModeInstructions = normalizeNewlines(
 			(assistant?.instructions || LECTURE_VIDEO_DEFAULT_INSTRUCTIONS).trim()
 		);
@@ -1189,12 +1435,8 @@
 				: supportsVerbosity
 					? verbosityValue
 					: null,
-			lecture_video_key:
-				isLectureMode &&
-				(data.isCreating ||
-					(lectureVideoKeyValue.length > 0 && lectureVideoKeyValue !== currentLectureVideoKey))
-					? lectureVideoKeyValue
-					: undefined,
+			lecture_video_id: isLectureMode ? (selectedLectureVideo?.id ?? undefined) : undefined,
+			voice_id: isLectureMode ? voiceId.trim() : undefined,
 			published: body.published?.toString() === 'on',
 			use_latex: isLectureMode
 				? (assistant?.use_latex ?? false)
@@ -1241,6 +1483,147 @@
 		});
 		if (errorMessage) {
 			sadToast(errorMessage);
+		}
+	};
+
+	const readErrorDetail = async (response: Response) => {
+		try {
+			const payload = await response.json();
+			if (typeof payload?.detail === 'string') {
+				return payload.detail;
+			}
+			if (payload?.detail) {
+				return JSON.stringify(payload.detail);
+			}
+		} catch {
+			return `Request failed with status ${response.status}.`;
+		}
+		return `Request failed with status ${response.status}.`;
+	};
+
+	const lectureVideoDeletePath = (lectureVideoId: number) =>
+		data.isCreating
+			? `/api/v1/class/${data.class.id}/lecture-video/${lectureVideoId}`
+			: `/api/v1/class/${data.class.id}/assistant/${data.assistantId}/lecture-video/${lectureVideoId}`;
+
+	const deleteLectureVideoDraftById = async (lectureVideoId: number) => {
+		const response = await fetch(lectureVideoDeletePath(lectureVideoId), {
+			method: 'DELETE'
+		});
+		if (!response.ok) {
+			const detail = await readErrorDetail(response);
+			throw new Error(detail);
+		}
+		lectureVideoDraftIds.delete(lectureVideoId);
+	};
+
+	const cleanupLectureVideoDrafts = async () => {
+		const ids = [...lectureVideoDraftIds.values()];
+		if (ids.length === 0) {
+			return;
+		}
+		await Promise.all(
+			ids.map(async (lectureVideoId) => {
+				try {
+					await deleteLectureVideoDraftById(lectureVideoId);
+				} catch (error) {
+					sadToast(
+						`Could not clean up lecture video draft ${lectureVideoId}:\n${
+							error instanceof Error ? error.message : 'Unknown error'
+						}`
+					);
+				}
+			})
+		);
+	};
+
+	const uploadLectureVideoDraft = async (file: File) => {
+		uploadingLectureVideo = true;
+		try {
+			if (selectedLectureVideo && lectureVideoDraftIds.has(selectedLectureVideo.id)) {
+				await deleteLectureVideoDraftById(selectedLectureVideo.id);
+			}
+
+			const formData = new FormData();
+			formData.append('upload', file);
+
+			const uploadPath =
+				data.isCreating || !data.assistantId
+					? `/api/v1/class/${data.class.id}/lecture-video`
+					: `/api/v1/class/${data.class.id}/assistant/${data.assistantId}/lecture-video/upload`;
+			const response = await fetch(uploadPath, {
+				method: 'POST',
+				body: formData
+			});
+			if (!response.ok) {
+				const detail = await readErrorDetail(response);
+				sadToast(`Could not upload lecture video:\n${detail}`);
+				return;
+			}
+			const lectureVideo = (await response.json()) as api.LectureVideoSummary;
+			selectedLectureVideo = lectureVideo;
+			lectureVideoDraftIds.add(lectureVideo.id);
+			happyToast('Lecture video uploaded');
+		} catch (error) {
+			sadToast(
+				`Could not upload lecture video:\n${
+					error instanceof Error ? error.message : 'Unknown error'
+				}`
+			);
+		} finally {
+			uploadingLectureVideo = false;
+		}
+	};
+
+	const handleLectureVideoFileChange = async (event: Event) => {
+		const target = event.target as HTMLInputElement;
+		const file = target.files?.[0];
+		if (!file) {
+			return;
+		}
+		await uploadLectureVideoDraft(file);
+		target.value = '';
+	};
+
+	const validateLectureVideoVoice = async () => {
+		const trimmedVoiceId = voiceId.trim();
+		if (!trimmedVoiceId) {
+			sadToast('Please provide a voice ID before validating.');
+			return;
+		}
+
+		validatingVoiceId = true;
+		voiceValidationError = '';
+		voiceSampleAudioSrc = '';
+		voiceSampleText = '';
+		try {
+			const response = await api.validateLectureVideoVoice(
+				fetch,
+				data.class.id,
+				{
+					voice_id: trimmedVoiceId
+				},
+				data.isCreating ? undefined : (data.assistantId ?? undefined)
+			);
+			if (api.isErrorResponse(response)) {
+				const detail = response.detail || 'Unknown error';
+				voiceValidationError = detail;
+				sadToast(`Voice validation failed:\n${detail}`);
+				return;
+			}
+
+			const audioSrc = URL.createObjectURL(response.audio_blob);
+			voiceSampleText = response.sample_text;
+			voiceSampleAudioSrc = audioSrc;
+			setVoiceSampleCacheEntry(trimmedVoiceId, voiceSampleText, voiceSampleAudioSrc);
+			lastValidatedVoiceId = trimmedVoiceId;
+			happyToast('Voice validated');
+		} catch (error) {
+			const detail = error instanceof Error ? error.message : 'Unknown error';
+			voiceValidationError = detail;
+			sadToast(`Voice validation failed:\n${detail}`);
+		} finally {
+			validatingVoiceId = false;
 		}
 	};
 
@@ -1343,11 +1726,54 @@
 			}
 		}
 
-		if (params.interaction_mode === 'lecture_video' && lectureVideoKey.trim().length === 0) {
-			sadToast('Please provide a lecture video key for Lecture video mode assistants.');
-			$loading = false;
-			$loadingMessage = '';
-			return;
+		if (params.interaction_mode === 'lecture_video') {
+			const selectedLectureVideoId = selectedLectureVideo?.id ?? null;
+			if (!selectedLectureVideoId) {
+				sadToast('Please upload a lecture video before saving.');
+				$loading = false;
+				$loadingMessage = '';
+				return;
+			}
+
+			const parsedManifest = parseLectureVideoManifest(lectureVideoManifestJson);
+			if (!parsedManifest.manifest || parsedManifest.error) {
+				sadToast(parsedManifest.error || 'Lecture video manifest is invalid.');
+				$loading = false;
+				$loadingMessage = '';
+				return;
+			}
+
+			const trimmedVoiceId = voiceId.trim();
+			if (!trimmedVoiceId) {
+				sadToast('Please provide a voice ID before saving.');
+				$loading = false;
+				$loadingMessage = '';
+				return;
+			}
+			if (trimmedVoiceId !== currentVoiceId.trim() && trimmedVoiceId !== lastValidatedVoiceId) {
+				sadToast('Please validate the changed voice ID before saving.');
+				$loading = false;
+				$loadingMessage = '';
+				return;
+			}
+
+			const lectureVideoManifestChanged =
+				normalizeLectureVideoManifestForCompare(lectureVideoManifestJson) !==
+				currentLectureVideoManifestNormalized;
+			const lectureVideoIdChanged = selectedLectureVideoId !== (currentLectureVideo?.id ?? null);
+			const lectureVideoVoiceChanged = trimmedVoiceId !== currentVoiceId.trim();
+			const lectureVideoFieldsChanged =
+				lectureVideoManifestChanged || lectureVideoIdChanged || lectureVideoVoiceChanged;
+
+			if (data.isCreating || lectureVideoFieldsChanged) {
+				params.lecture_video_id = selectedLectureVideoId;
+				params.lecture_video_manifest = parsedManifest.manifest;
+				params.voice_id = trimmedVoiceId;
+			} else {
+				delete params.lecture_video_id;
+				delete params.lecture_video_manifest;
+				delete params.voice_id;
+			}
 		}
 
 		if (params.file_search_file_ids.length > fileSearchMetadata.max_count) {
@@ -1376,6 +1802,10 @@
 			$loadingMessage = '';
 			sadToast(`Could not save your response:\n${expanded.error.detail || 'Unknown error'}`);
 		} else {
+			if (params.interaction_mode !== 'lecture_video' && lectureVideoDraftIds.size > 0) {
+				await cleanupLectureVideoDrafts();
+				selectedLectureVideo = data.isCreating ? null : currentLectureVideo;
+			}
 			$loading = false;
 			$loadingMessage = '';
 			happyToast('Assistant saved');
@@ -1444,6 +1874,13 @@
 				$loadingMessage = 'Cleaning up files you uploaded...';
 				$loading = true;
 				await deletePrivateFiles(filesToDelete.map((f) => f.id));
+				$loading = false;
+				$loadingMessage = '';
+			}
+			if (lectureVideoDraftIds.size > 0) {
+				$loadingMessage = 'Cleaning up lecture video drafts...';
+				$loading = true;
+				await cleanupLectureVideoDrafts();
 				$loading = false;
 				$loadingMessage = '';
 			}
@@ -1552,7 +1989,7 @@
 						bind:group={interactionMode}
 						disabled={preventEdits}
 						onchange={changeInteractionMode}
-						class={`${preventEdits ? 'hover:bg-transparent' : ''} select-none`}
+						class={`${preventEdits ? 'hover:bg-transparent' : ''} ${interactionMode === 'chat' ? '!border-blue-300 !bg-blue-100 font-semibold !text-blue-800 !shadow-blue-200' : ''} select-none`}
 						><div class="flex flex-row items-center gap-2">
 							{#if interactionMode === 'chat'}<MessageDotsSolid
 									class="h-6 w-6"
@@ -1566,7 +2003,7 @@
 						bind:group={interactionMode}
 						disabled={preventEdits}
 						onchange={changeInteractionMode}
-						class={`${preventEdits ? 'hover:bg-transparent' : ''} select-none`}
+						class={`${preventEdits ? 'hover:bg-transparent' : ''} ${interactionMode === 'voice' ? '!border-blue-300 !bg-blue-100 font-semibold !text-blue-800 !shadow-blue-200' : ''} select-none`}
 						><div class="flex flex-row items-center gap-2">
 							{#if interactionMode === 'voice'}<MicrophoneSolid
 									class="h-5 w-5"
@@ -1575,30 +2012,36 @@
 					>
 				{/if}
 				{#if showLectureModeOption && chatModelCount !== 0}
+					{@const lectureDisabled =
+						lectureModeSelectionDisabled || !lectureVideoPolicy.can_select_mode_in_assistant_editor}
 					<RadioButton
 						value="lecture_video"
 						bind:group={interactionMode}
-						disabled={preventEdits || !data.isCreating}
+						disabled={lectureDisabled}
 						onchange={changeInteractionMode}
-						class={`${preventEdits || !data.isCreating ? 'hover:bg-transparent' : ''} select-none`}
-						><div id="lecture-video-admin-tooltip" class="flex flex-row items-center gap-2">
+						class={`${lectureDisabled ? 'cursor-not-allowed !bg-gray-100 !text-gray-400 shadow-inner hover:bg-transparent' : ''} ${interactionMode === 'lecture_video' ? '!border-blue-300 !bg-blue-100 font-semibold !text-blue-800 !shadow-blue-200' : ''} select-none`}
+						><div
+							id="lecture-video-admin-tooltip"
+							class="-mx-3 -my-2 flex flex-row items-center gap-2 px-3 py-2"
+						>
 							{#if interactionMode === 'lecture_video'}<ClapperboardPlaySolid
 									class="h-5 w-5"
 								/>{:else}<ClapperboardPlayOutline class="h-5 w-5" />{/if}Lecture Video mode
 							<DropdownBadge
-								extraClasses="border-red-400 from-red-100 to-red-200 text-red-800 py-0 px-1"
+								extraClasses="border-amber-400 from-amber-100 to-amber-200 text-amber-800 rounded-full py-0.5 px-2"
 								><span slot="name">In Development</span></DropdownBadge
 							>
 						</div></RadioButton
 					>
-					<Tooltip
-						triggeredBy="#lecture-video-admin-tooltip"
-						class="z-100 text-sm font-light"
-						hidden={!data.isCreating}
-						arrow={false}>Only admins can see and select this option</Tooltip
-					>
 				{/if}
 			</ButtonGroup>
+			{#if showLectureModeOption && chatModelCount !== 0 && lectureVideoPolicy.message}
+				<Tooltip
+					triggeredBy="#lecture-video-admin-tooltip"
+					class="z-100 text-sm font-light"
+					arrow={false}>{lectureModeTooltipText}</Tooltip
+				>
+			{/if}
 		</div>
 		{#if !isLectureMode}
 			<div class="mb-4">
@@ -1751,27 +2194,136 @@
 		</div>
 		{#if isLectureMode}
 			<div class="col-span-2 mb-4">
-				<Label for="lecture_video_key">Lecture Video Key</Label>
+				<Label for="lecture_video_upload">Lecture Video</Label>
 				<Helper class="pb-1"
-					>{#if data.isCreating}Provide the key for the lecture video this assistant should use.{:else}Edit
-						this key to replace the current lecture video.{/if}</Helper
+					>Upload the video that students will watch and answer questions about.</Helper
 				>
-				<div class="relative w-full pt-2 pb-2">
-					<ButtonGroup class="w-full">
+				{#if selectedLectureVideo && !uploadingLectureVideo}
+					<div
+						class="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-4 py-3"
+					>
+						<div class="flex items-center gap-3">
+							<div
+								class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-100"
+							>
+								<FileVideoOutline class="h-5 w-5 text-blue-600" />
+							</div>
+							<div>
+								<div class="text-sm font-medium text-gray-900">
+									{selectedLectureVideo.filename}
+								</div>
+								{#if selectedLectureVideo.error_message}
+									<div class="text-xs text-red-600">{selectedLectureVideo.error_message}</div>
+								{:else}
+									<div class="text-xs text-gray-500">
+										{selectedLectureVideo.status.charAt(0).toUpperCase() +
+											selectedLectureVideo.status.slice(1)}
+									</div>
+								{/if}
+							</div>
+						</div>
+						{#if canUploadLectureVideo}
+							<label
+								class="cursor-pointer rounded-lg px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-200"
+							>
+								Replace
+								<input
+									type="file"
+									accept="video/*"
+									class="hidden"
+									onchange={handleLectureVideoFileChange}
+								/>
+							</label>
+						{/if}
+					</div>
+				{:else}
+					<ButtonGroup class="w-full md:w-auto">
 						<InputAddon>
 							<FileVideoOutline class="h-6 w-6" />
 						</InputAddon>
 						<Input
-							id="lecture_video_key"
-							name="lecture_video_key"
+							id="lecture_video_upload"
+							type="file"
+							accept="video/*"
+							disabled={!canUploadLectureVideo || uploadingLectureVideo}
+							onchange={handleLectureVideoFileChange}
+							defaultClass="block w-full disabled:cursor-not-allowed disabled:opacity-50 rtl:text-right"
+						/>
+					</ButtonGroup>
+					{#if uploadingLectureVideo}
+						<Helper class="pt-1">Uploading...</Helper>
+					{/if}
+				{/if}
+			</div>
+			<div class="col-span-2 mb-4">
+				<div class="flex items-center justify-between">
+					<Label for="lecture_video_manifest" class="mb-0">Lecture Video Manifest (JSON)</Label>
+				</div>
+				<Helper class="pb-1"
+					>Provide valid JSON with at least one question, supported question types, non-negative
+					offsets, at least two options per question, and exactly one correct option for
+					single-select questions.</Helper
+				>
+				<Textarea
+					id="lecture_video_manifest"
+					name="lecture_video_manifest"
+					rows={14}
+					bind:value={lectureVideoManifestJson}
+					disabled={preventEdits}
+					class="font-mono text-xs"
+				/>
+			</div>
+			<div class="col-span-2 mb-4">
+				<div class="flex items-center gap-2">
+					<Label for="voice_id">Voice ID</Label>
+					{#if voiceId.trim().length > 0 && (voiceId.trim() === lastValidatedVoiceId || voiceId.trim() === currentVoiceId.trim())}
+						<div class="flex items-center gap-1">
+							<CheckCircleOutline class="h-4 w-4 text-green-600" />
+							<span class="text-sm font-normal text-green-600">Validated</span>
+						</div>
+					{:else if voiceRequiresValidation}
+						<div class="flex items-center gap-1">
+							<ExclamationCircleOutline class="h-4 w-4 text-amber-600" />
+							<span class="text-sm font-normal text-amber-600">Validate before saving</span>
+						</div>
+					{/if}
+				</div>
+				<Helper class="pb-1"
+					>Enter the ElevenLabs <span class="font-mono">voice_id</span> used for narration, then validate
+					to hear a short sample.</Helper
+				>
+				<div class="flex flex-col gap-2 sm:flex-row sm:items-start">
+					<div class="w-full">
+						<Input
+							id="voice_id"
+							name="voice_id"
 							autocomplete="off"
-							placeholder="video_name.mp4"
-							bind:value={lectureVideoKey}
+							placeholder="voice_id"
+							bind:value={voiceId}
 							disabled={preventEdits}
 							defaultClass="block w-full disabled:cursor-not-allowed disabled:opacity-50 rtl:text-right font-mono"
 						/>
-					</ButtonGroup>
+					</div>
+					<Button
+						type="button"
+						color="light"
+						class="w-full shrink-0 sm:w-auto"
+						disabled={preventEdits || validatingVoiceId || voiceId.trim().length === 0}
+						onclick={validateLectureVideoVoice}>Validate Voice</Button
+					>
 				</div>
+				{#if validatingVoiceId}
+					<Helper class="pt-2">Validating voice and generating sample...</Helper>
+				{/if}
+				{#if voiceValidationError}
+					<div class="pt-2 text-sm text-red-700">{voiceValidationError}</div>
+				{/if}
+				{#if voiceSampleAudioSrc}
+					<div class="pt-2">
+						<div class="mb-1 text-sm text-gray-700">Sample phrase: "{voiceSampleText}"</div>
+						<audio controls preload="auto" src={voiceSampleAudioSrc} class="w-full"></audio>
+					</div>
+				{/if}
 			</div>
 		{/if}
 		{#if !isLectureMode}

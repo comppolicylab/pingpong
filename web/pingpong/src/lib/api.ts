@@ -260,6 +260,21 @@ const _fetchJSON = async <R extends BaseData>(
 	return { $status: res.status, ...data } as (R | Error) & BaseResponse;
 };
 
+const readErrorDetail = async (response: Response) => {
+	try {
+		const payload = await response.json();
+		if (typeof payload?.detail === 'string') {
+			return payload.detail;
+		}
+		if (payload?.detail) {
+			return JSON.stringify(payload.detail);
+		}
+	} catch {
+		return `Request failed with status ${response.status}.`;
+	}
+	return `Request failed with status ${response.status}.`;
+};
+
 /**
  * Method that passes data in the query string.
  */
@@ -1383,7 +1398,11 @@ export type ApiKey = {
 };
 
 export type ApiKeyResponse = {
-	api_key?: ApiKey;
+	ai_provider?: string | null;
+	has_gemini_credential?: boolean;
+	has_elevenlabs_credential?: boolean;
+	api_key?: ApiKey | null;
+	credentials?: ClassCredentialSlot[] | null;
 };
 
 export type UpdateApiKeyRequest = {
@@ -1416,6 +1435,55 @@ export type ClassCredentialsResponse = {
 
 export type ClassCredentialResponse = {
 	credential: ClassCredentialSlot;
+};
+
+export type LectureVideoStatus = 'uploaded' | 'processing' | 'ready' | 'failed';
+
+export type LectureVideoSummary = {
+	id: number;
+	filename: string;
+	size: number;
+	content_type: string;
+	status: LectureVideoStatus;
+	error_message?: string | null;
+};
+
+export type LectureVideoQuestionType = 'single_select';
+
+export type LectureVideoManifestOption = {
+	option_text: string;
+	post_answer_text: string;
+	continue_offset_ms: number;
+	correct: boolean;
+};
+
+export type LectureVideoManifestQuestion = {
+	type: LectureVideoQuestionType;
+	question_text: string;
+	intro_text: string;
+	stop_offset_ms: number;
+	options: LectureVideoManifestOption[];
+};
+
+export type LectureVideoManifest = {
+	questions: LectureVideoManifestQuestion[];
+};
+
+export type LectureVideoConfigResponse = {
+	lecture_video: LectureVideoSummary;
+	lecture_video_manifest: LectureVideoManifest;
+	voice_id: string;
+};
+
+export type ValidateLectureVideoVoiceRequest = {
+	voice_id: string;
+};
+
+export type ValidateLectureVideoVoiceResponse = {
+	$status: number;
+	sample_text: string;
+	audio_blob: Blob;
+	content_type: string;
 };
 
 export type DefaultAPIKey = {
@@ -1473,6 +1541,102 @@ export const getClassCredentials = async (f: Fetcher, classId: number) => {
 };
 
 /**
+ * Upload a lecture-video draft for a new assistant.
+ */
+export const uploadLectureVideo = async (f: Fetcher, classId: number, file: File) => {
+	const url = `class/${classId}/lecture-video`;
+	const formData = new FormData();
+	formData.append('upload', file);
+	return await _fetchJSON<LectureVideoSummary>(f, 'POST', url, undefined, formData);
+};
+
+/**
+ * Upload a lecture-video draft while editing an assistant.
+ */
+export const uploadAssistantLectureVideo = async (
+	f: Fetcher,
+	classId: number,
+	assistantId: number,
+	file: File
+) => {
+	const url = `class/${classId}/assistant/${assistantId}/lecture-video/upload`;
+	const formData = new FormData();
+	formData.append('upload', file);
+	return await _fetchJSON<LectureVideoSummary>(f, 'POST', url, undefined, formData);
+};
+
+/**
+ * Delete an unused lecture-video draft for a create flow.
+ */
+export const deleteLectureVideo = async (f: Fetcher, classId: number, lectureVideoId: number) => {
+	const url = `class/${classId}/lecture-video/${lectureVideoId}`;
+	return await DELETE<never, GenericStatus>(f, url);
+};
+
+/**
+ * Delete an unused lecture-video draft for an assistant edit flow.
+ */
+export const deleteAssistantLectureVideo = async (
+	f: Fetcher,
+	classId: number,
+	assistantId: number,
+	lectureVideoId: number
+) => {
+	const url = `class/${classId}/assistant/${assistantId}/lecture-video/${lectureVideoId}`;
+	return await DELETE<never, GenericStatus>(f, url);
+};
+
+/**
+ * Load the persisted lecture-video config for an assistant.
+ */
+export const getAssistantLectureVideoConfig = async (
+	f: Fetcher,
+	classId: number,
+	assistantId: number
+) => {
+	const url = `class/${classId}/assistant/${assistantId}/lecture-video/config`;
+	return await GET<never, LectureVideoConfigResponse>(f, url);
+};
+
+const VOICE_SAMPLE_TEXT_HEADER = 'X-PingPong-Voice-Sample-Text';
+
+/**
+ * Validate a voice id for lecture-video narration and return binary preview audio.
+ */
+export const validateLectureVideoVoice = async (
+	f: Fetcher,
+	classId: number,
+	data: ValidateLectureVideoVoiceRequest,
+	assistantId?: number
+): Promise<ValidateLectureVideoVoiceResponse | ErrorResponse> => {
+	const url =
+		assistantId === undefined
+			? `class/${classId}/lecture-video/voice/validate`
+			: `class/${classId}/assistant/${assistantId}/lecture-video/voice/validate`;
+	const response = await _fetch(
+		f,
+		'POST',
+		url,
+		{ 'Content-Type': 'application/json' },
+		JSON.stringify(data)
+	);
+
+	if (!response.ok) {
+		return {
+			$status: response.status,
+			detail: await readErrorDetail(response)
+		};
+	}
+
+	return {
+		$status: response.status,
+		sample_text: response.headers.get(VOICE_SAMPLE_TEXT_HEADER) || '',
+		audio_blob: await response.blob(),
+		content_type: response.headers.get('content-type') || 'audio/ogg'
+	};
+};
+
+/**
  * Create a purpose-scoped credential for a class.
  */
 export const createClassCredential = async (
@@ -1496,6 +1660,7 @@ export const createClassCredential = async (
 
 export type ApiKeyCheck = {
 	has_api_key: boolean;
+	has_lecture_video_providers: boolean;
 };
 
 export const hasAPIKey = async (f: Fetcher, classId: number) => {
@@ -1552,6 +1717,12 @@ export type AssistantDefaultPrompt = {
 	prompt: string;
 };
 
+export type LectureVideoAssistantEditorPolicy = {
+	show_mode_in_assistant_editor: boolean;
+	can_select_mode_in_assistant_editor: boolean;
+	message?: string | null;
+};
+
 /**
  * List of language models.
  */
@@ -1559,6 +1730,7 @@ export type AssistantModels = {
 	models: AssistantModel[];
 	default_prompts?: AssistantDefaultPrompt[];
 	enforce_classic_assistants?: boolean;
+	lecture_video?: LectureVideoAssistantEditorPolicy;
 };
 
 export type AssistantModelLite = {
@@ -1736,7 +1908,7 @@ export type Assistant = {
 	hide_web_search_actions: boolean | null;
 	hide_mcp_server_call_details: boolean | null;
 	endorsed: boolean | null;
-	lecture_video_key: string | null;
+	lecture_video?: LectureVideoSummary | null;
 	created: string;
 	updated: string | null;
 	share_links: AnonymousLink[] | null;
@@ -1836,7 +2008,9 @@ export type CreateAssistantRequest = {
 	notes: string;
 	model: string;
 	interaction_mode: 'chat' | 'voice' | 'lecture_video';
-	lecture_video_key?: string;
+	lecture_video_id?: number | null;
+	lecture_video_manifest?: LectureVideoManifest | null;
+	voice_id?: string | null;
 	create_classic_assistant?: boolean;
 	temperature: number | null;
 	reasoning_effort: number | null;
@@ -1878,7 +2052,9 @@ export type UpdateAssistantRequest = {
 	notes?: string;
 	model?: string;
 	interaction_mode?: 'chat' | 'voice' | 'lecture_video';
-	lecture_video_key?: string;
+	lecture_video_id?: number | null;
+	lecture_video_manifest?: LectureVideoManifest | null;
+	voice_id?: string | null;
 	create_classic_assistant?: boolean;
 	temperature?: number | null;
 	reasoning_effort?: number | null;

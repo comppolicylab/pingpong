@@ -61,25 +61,23 @@ export const load = async ({ fetch, params }: Parameters<PageLoad>[0]) => {
 	if (ltiClasses.error) {
 		error(ltiClasses.$status, ltiClasses.error.detail || 'Error loading LTI classes');
 	}
-	let api_key: api.ApiKey | undefined;
+	let apiKey: api.ApiKey | undefined;
 	let classCredentials: api.ClassCredentialSlot[] | undefined;
-	let classCredentialsError: string | undefined;
-	if (grants.canViewApiKey) {
-		const [apiKeyResponse, classCredentialsResponse] = await Promise.all([
-			api.getApiKey(fetch, classId).then(api.expandResponse),
-			api.getClassCredentials(fetch, classId).then(api.expandResponse)
-		]);
+	let apiKeyReadError: string | undefined;
+	let aiProvider: string | null = null;
+	let hasGeminiCredential = false;
+	let hasElevenlabsCredential = false;
+	if (grants.canViewApiKey || grants.canEditInfo) {
+		const apiKeyResponse = await api.getApiKey(fetch, classId).then(api.expandResponse);
 		if (apiKeyResponse.error) {
-			api_key = { redacted_api_key: 'error fetching API key!' };
+			apiKeyReadError = apiKeyResponse.error.detail || 'Error fetching group credential details.';
+			console.error('Error fetching group credential details.');
 		} else {
-			api_key = apiKeyResponse.data.api_key;
-		}
-		if (!classCredentialsResponse.error) {
-			classCredentials = classCredentialsResponse.data.credentials;
-		} else {
-			classCredentialsError =
-				classCredentialsResponse.error.detail || 'Error fetching class credentials.';
-			console.error('Error fetching class credentials:', classCredentialsResponse.error);
+			apiKey = apiKeyResponse.data.api_key ?? undefined;
+			classCredentials = apiKeyResponse.data.credentials ?? undefined;
+			aiProvider = apiKeyResponse.data.ai_provider ?? null;
+			hasGeminiCredential = apiKeyResponse.data.has_gemini_credential ?? false;
+			hasElevenlabsCredential = apiKeyResponse.data.has_elevenlabs_credential ?? false;
 		}
 	}
 
@@ -96,9 +94,12 @@ export const load = async ({ fetch, params }: Parameters<PageLoad>[0]) => {
 	}
 
 	return {
-		apiKey: api_key,
+		apiKey,
 		classCredentials,
-		classCredentialsError,
+		apiKeyReadError,
+		aiProvider,
+		hasGeminiCredential,
+		hasElevenlabsCredential,
 		grants,
 		class: classDataResponse.data,
 		subscription: subscription,

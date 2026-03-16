@@ -82,26 +82,44 @@
 		},
 		{}
 	);
-	$: threads = ($page.data.threads || []) as api.Thread[];
+	$: lectureVideoEnabled = $page.data.lectureVideoEnabled ?? true;
+	$: threads = (($page.data.threads || []) as api.Thread[]).filter(
+		(thread: api.Thread) => lectureVideoEnabled || thread.interaction_mode !== 'lecture_video'
+	);
 	$: currentClassId = parseInt($page.params.classId ?? '', 10);
 	$: currentAssistantIdQuery = parseInt($page.url.searchParams.get('assistant') || '0', 10);
-	$: currentAssistantId = $page.data.threadData?.thread?.assistant_id || currentAssistantIdQuery;
-	$: assistants = [...(($page.data.assistants || []) as api.Assistant[])].sort((a, b) => {
-		// First sort by endorsement.
-		if (a.endorsed && !b.endorsed) return -1;
-		if (!a.endorsed && b.endorsed) return 1;
-		// Then sort by whether the assistant was created by the current user.
-		if (a.creator_id === data.me.user!.id && b.creator_id !== data.me.user!.id) return -1;
-		if (a.creator_id !== data.me.user!.id && b.creator_id === data.me.user!.id) return 1;
-		// Finally, sort alphabetically by name.
-		return a.name.localeCompare(b.name);
-	});
+	$: assistants = [...(($page.data.assistants || []) as api.Assistant[])]
+		.sort((a, b) => {
+			// Hide Lecture Video assistants when the class runtime gate is disabled.
+			if (!lectureVideoEnabled && a.interaction_mode === 'lecture_video') return 1;
+			if (!lectureVideoEnabled && b.interaction_mode === 'lecture_video') return -1;
+			// First sort by endorsement.
+			if (a.endorsed && !b.endorsed) return -1;
+			if (!a.endorsed && b.endorsed) return 1;
+			// Then sort by whether the assistant was created by the current user.
+			if (a.creator_id === data.me.user!.id && b.creator_id !== data.me.user!.id) return -1;
+			if (a.creator_id !== data.me.user!.id && b.creator_id === data.me.user!.id) return 1;
+			// Finally, sort alphabetically by name.
+			return a.name.localeCompare(b.name);
+		})
+		.filter(
+			(assistant: api.Assistant) =>
+				lectureVideoEnabled || assistant.interaction_mode !== 'lecture_video'
+		);
+	$: fallbackAssistantId = assistants[0]?.id || 0;
+	$: currentAssistantIdQueryVisible = assistants.some((a) => a.id === currentAssistantIdQuery)
+		? currentAssistantIdQuery
+		: fallbackAssistantId;
+	$: threadAssistantId = $page.data.threadData?.thread?.assistant_id || 0;
+	$: currentAssistantId = assistants.some((a) => a.id === threadAssistantId)
+		? threadAssistantId
+		: currentAssistantIdQueryVisible;
 	let assistantsToShow: api.Assistant[] = [];
 	// Offer the top 4 assistants. If the current assistant is not in the top 4, add it to the top and remove the 4th one.
 	$: if (assistants.length > 4) {
 		assistantsToShow = assistants.slice(0, 4);
 		if (currentAssistantId && !assistantsToShow.some((a) => a.id === currentAssistantId)) {
-			const foundAssistant = assistants.find((a) => a.id === currentAssistantIdQuery);
+			const foundAssistant = assistants.find((a) => a.id === currentAssistantId);
 			if (foundAssistant) {
 				assistantsToShow.unshift(foundAssistant);
 				assistantsToShow.pop();
@@ -427,7 +445,7 @@
 							{#each assistantsToShow as assistant (assistant.id)}
 								<SidebarItem
 									class={'flex flex-wrap gap-2 truncate rounded-lg p-2 text-sm text-white ' +
-										(currentAssistantIdQuery === assistant.id
+										(currentAssistantId === assistant.id
 											? 'bg-orange-dark hover:bg-orange'
 											: 'hover:bg-blue-dark-30')}
 									spanClass="flex-1 truncate"
