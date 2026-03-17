@@ -470,35 +470,35 @@ async def _get_elevenlabs_api_key(class_id: int) -> str:
         return credential.api_key_obj.api_key
 
 
+def _claimable_narration_run_condition(now) -> Any:
+    return or_(
+        models.LectureVideoProcessingRun.status
+        == schemas.LectureVideoProcessingRunStatus.QUEUED,
+        and_(
+            models.LectureVideoProcessingRun.status
+            == schemas.LectureVideoProcessingRunStatus.RUNNING,
+            or_(
+                models.LectureVideoProcessingRun.lease_expires_at.is_(None),
+                models.LectureVideoProcessingRun.lease_expires_at < now,
+            ),
+        ),
+    )
+
+
 async def _claim_next_narration_run(
     *,
     leased_by: str | None = None,
 ) -> tuple[int, str] | None:
     async with config.db.driver.async_session() as session:
         now = utcnow()
+        claimable_run_condition = _claimable_narration_run_condition(now)
         effective_leased_by = leased_by or build_runner_id()
         candidate_ids = list(
             (
                 await session.scalars(
                     select(models.LectureVideoProcessingRun.id)
                     .where(models.LectureVideoProcessingRun.stage == NARRATION_STAGE)
-                    .where(
-                        or_(
-                            models.LectureVideoProcessingRun.status
-                            == schemas.LectureVideoProcessingRunStatus.QUEUED,
-                            and_(
-                                models.LectureVideoProcessingRun.status
-                                == schemas.LectureVideoProcessingRunStatus.RUNNING,
-                                or_(
-                                    models.LectureVideoProcessingRun.lease_expires_at.is_(
-                                        None
-                                    ),
-                                    models.LectureVideoProcessingRun.lease_expires_at
-                                    < now,
-                                ),
-                            ),
-                        )
-                    )
+                    .where(claimable_run_condition)
                     .order_by(
                         models.LectureVideoProcessingRun.created.asc(),
                         models.LectureVideoProcessingRun.id.asc(),
@@ -513,22 +513,7 @@ async def _claim_next_narration_run(
                 update(models.LectureVideoProcessingRun)
                 .where(models.LectureVideoProcessingRun.id == candidate_id)
                 .where(models.LectureVideoProcessingRun.stage == NARRATION_STAGE)
-                .where(
-                    or_(
-                        models.LectureVideoProcessingRun.status
-                        == schemas.LectureVideoProcessingRunStatus.QUEUED,
-                        and_(
-                            models.LectureVideoProcessingRun.status
-                            == schemas.LectureVideoProcessingRunStatus.RUNNING,
-                            or_(
-                                models.LectureVideoProcessingRun.lease_expires_at.is_(
-                                    None
-                                ),
-                                models.LectureVideoProcessingRun.lease_expires_at < now,
-                            ),
-                        ),
-                    )
-                )
+                .where(claimable_run_condition)
                 .values(
                     status=schemas.LectureVideoProcessingRunStatus.RUNNING,
                     lease_token=lease_token,
@@ -919,7 +904,10 @@ async def _mark_run_failed(
         run = await models.LectureVideoProcessingRun.get_by_id(session, run_id)
         if run is None:
             return
-        if run.status == schemas.LectureVideoProcessingRunStatus.CANCELLED:
+        if (
+            run.status != schemas.LectureVideoProcessingRunStatus.RUNNING
+            or run.lease_token != lease_token
+        ):
             return
 
         narration = (

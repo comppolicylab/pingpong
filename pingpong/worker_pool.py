@@ -189,6 +189,10 @@ class WorkerPoolManager:
             if getattr(process, "exitcode", None) is None and hasattr(
                 process, "terminate"
             ):
+                self._recover_slot_assignment(
+                    slot,
+                    error_message=self.unexpected_exit_error_message,
+                )
                 process.terminate()
                 if hasattr(process, "join"):
                     process.join(timeout=0.1)

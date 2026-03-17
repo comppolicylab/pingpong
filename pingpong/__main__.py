@@ -1486,7 +1486,7 @@ def run_dynamic_tasks_with_args(host: str, port: int, tasks: list[str]) -> None:
         await asyncio.gather(*task_coroutines)
 
     # Run the Uvicorn server in the background
-    with sentry(), server.run_in_thread():
+    with server.run_in_thread():
         asyncio.run(_parse_tasks())
 
 

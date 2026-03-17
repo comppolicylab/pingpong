@@ -3927,6 +3927,46 @@ def test_narration_worker_pool_manager_shutdown_terminates_only_stuck_workers():
     assert second_slot.process.terminate_called is True
 
 
+def test_narration_worker_pool_manager_shutdown_recovers_busy_assignments_before_terminate():
+    fake_context = FakeProcessContext()
+    recoveries: list[tuple[int, str, str]] = []
+    claims = iter([(41, "lease-41"), None])
+    manager = lecture_video_processing.NarrationWorkerPoolManager(
+        workers=1,
+        poll_interval_seconds=0.25,
+        process_context=fake_context,
+        claim_run_fn=lambda _runner_id: next(claims),
+        recover_run_fn=lambda run_id, lease_token, error_message: recoveries.append(
+            (run_id, lease_token, error_message)
+        )
+        or True,
+        shutdown_grace_seconds=1.0,
+    )
+
+    manager.start()
+    progress = manager.run_one_iteration()
+    slot = manager.worker_slots[0]
+
+    manager.shutdown()
+
+    assert progress is True
+    assert isinstance(
+        slot.assignment_queue.puts[0], lecture_video_processing.RunAssignment
+    )
+    assert slot.assignment_queue.puts[-1] is None
+    assert slot.process.terminate_called is True
+    assert slot.idle is True
+    assert slot.run_id is None
+    assert slot.lease_token is None
+    assert recoveries == [
+        (
+            41,
+            "lease-41",
+            lecture_video_processing.UNEXPECTED_WORKER_EXIT_ERROR_MESSAGE,
+        )
+    ]
+
+
 def test_run_lecture_video_worker_cli_starts_health_server_and_passes_pool_settings(
     monkeypatch,
 ):
@@ -4090,6 +4130,76 @@ async def test_recover_failed_narration_run_ignores_stale_lease_token(db, instit
     assert refreshed_run is not None
     assert refreshed_run.status == schemas.LectureVideoProcessingRunStatus.RUNNING
     assert refreshed_run.lease_token == lease_token
+
+
+@with_institution(11, "Test Institution")
+async def test_mark_run_failed_ignores_stale_lease_token(db, institution):
+    async with db.async_session() as session:
+        (
+            _class_,
+            lecture_video,
+            _assistant,
+            run,
+        ) = await create_processing_lecture_video_assistant(session, institution)
+        assert run is not None
+        loaded_lecture_video = await models.LectureVideo.get_by_id_with_copy_context(
+            session, lecture_video.id
+        )
+        assert loaded_lecture_video is not None
+        intro_narration = loaded_lecture_video.questions[0].intro_narration
+        assert intro_narration is not None
+        narration_id = intro_narration.id
+
+    first_claim = await lecture_video_processing._claim_next_narration_run(
+        leased_by="test-runner-1"
+    )
+    assert first_claim is not None
+    run_id, original_lease_token = first_claim
+
+    async with db.async_session() as session:
+        refreshed_run = await models.LectureVideoProcessingRun.get_by_id(
+            session, run.id
+        )
+        assert refreshed_run is not None
+        refreshed_run.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        session.add(refreshed_run)
+        await session.commit()
+
+    second_claim = await lecture_video_processing._claim_next_narration_run(
+        leased_by="test-runner-2"
+    )
+    assert second_claim is not None
+    reclaimed_run_id, reclaimed_lease_token = second_claim
+    assert reclaimed_run_id == run_id
+    assert reclaimed_lease_token != original_lease_token
+
+    await lecture_video_processing._mark_run_failed(
+        run_id,
+        original_lease_token,
+        narration_id,
+        "stale failure",
+    )
+
+    async with db.async_session() as session:
+        refreshed_run = await models.LectureVideoProcessingRun.get_by_id(
+            session, run.id
+        )
+        refreshed_lecture_video = await models.LectureVideo.get_by_id(
+            session, lecture_video.id
+        )
+        refreshed_narration = await models.LectureVideoNarration.get_by_id(
+            session, narration_id
+        )
+
+    assert refreshed_run is not None
+    assert refreshed_run.status == schemas.LectureVideoProcessingRunStatus.RUNNING
+    assert refreshed_run.lease_token == reclaimed_lease_token
+    assert refreshed_lecture_video is not None
+    assert refreshed_lecture_video.status == schemas.LectureVideoStatus.PROCESSING
+    assert refreshed_lecture_video.error_message is None
+    assert refreshed_narration is not None
+    assert refreshed_narration.status == schemas.LectureVideoNarrationStatus.PENDING
+    assert refreshed_narration.error_message is None
 
 
 @with_institution(11, "Test Institution")
