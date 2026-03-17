@@ -6413,6 +6413,14 @@ async def create_lecture_thread(
             detail="This assistant does not have a lecture video attached. Unable to create Lecture Presentation",
         )
     if assistant.lecture_video.status != schemas.LectureVideoStatus.READY:
+        if assistant.lecture_video.status == schemas.LectureVideoStatus.FAILED:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "This assistant's lecture video narration processing failed. "
+                    "Edit the assistant and retry."
+                ),
+            )
         raise HTTPException(
             status_code=409,
             detail="This assistant's lecture video is not ready yet.",
@@ -9171,6 +9179,14 @@ async def _ensure_lecture_video_assistant_copy_allowed(
 ) -> None:
     if assistant.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
         return
+    if (
+        assistant.lecture_video is None
+        or assistant.lecture_video.status != schemas.LectureVideoStatus.READY
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Lecture video assistants can only be copied after narration processing is ready.",
+        )
 
     try:
         await ensure_lecture_video_copy_credentials(
@@ -9306,7 +9322,9 @@ async def copy_assistant_check(
     request: StateRequest,
     copy_options: schemas.CopyAssistantRequest,
 ):
-    assistant = await models.Assistant.get_by_id(request.state["db"], int(assistant_id))
+    assistant = await models.Assistant.get_by_id_with_lecture_video(
+        request.state["db"], int(assistant_id)
+    )
     class_id_int = int(class_id)
     if not assistant or assistant.class_id != class_id_int:
         raise HTTPException(
