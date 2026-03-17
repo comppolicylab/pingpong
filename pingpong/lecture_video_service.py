@@ -4,7 +4,7 @@ from pathlib import Path
 import humanize
 from fastapi import HTTPException, UploadFile
 from pydantic import ValidationError
-from sqlalchemy import delete, select, union
+from sqlalchemy import delete, select, union, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 import uuid_utils as uuid
@@ -312,6 +312,7 @@ async def clone_lecture_video_snapshot(
         user_id=lecture_video.uploader_id,
         display_name=lecture_video.display_name,
         voice_id=lecture_video.voice_id,
+        source_lecture_video_id_snapshot=lecture_video.id,
         status=lecture_video.status,
         error_message=lecture_video.error_message,
     )
@@ -487,6 +488,14 @@ async def delete_lecture_video(
     lecture_video_id: int,
     authz: AuthzClient | None = None,
 ) -> None:
+    from pingpong import lecture_video_processing
+
+    await lecture_video_processing.cancel_narration_processing_runs(
+        session,
+        lecture_video_id,
+        schemas.LectureVideoProcessingCancelReason.LECTURE_VIDEO_DELETED,
+    )
+
     lecture_video = await models.LectureVideo.get_by_id(session, lecture_video_id)
     if lecture_video is None:
         return
@@ -508,6 +517,14 @@ async def delete_lecture_video(
     )
     await session.execute(
         delete(models.LectureVideo).where(models.LectureVideo.id == lecture_video_id)
+    )
+    await session.execute(
+        update(models.LectureVideoProcessingRun)
+        .where(
+            models.LectureVideoProcessingRun.lecture_video_id_snapshot
+            == lecture_video_id
+        )
+        .values(lecture_video_id=None)
     )
 
     if is_orphaned_after_delete and stored_object_id is not None:
@@ -646,12 +663,12 @@ async def persist_manifest(
                 text_needs_audio(option.post_answer_text)
                 and create_narration_placeholders
             ):
-                    post_narration = models.LectureVideoNarration(
-                        status=schemas.LectureVideoNarrationStatus.PENDING,
-                    )
-                    session.add(post_narration)
-                    await session.flush()
-                    option_row.post_narration_id = post_narration.id
+                post_narration = models.LectureVideoNarration(
+                    status=schemas.LectureVideoNarrationStatus.PENDING,
+                )
+                session.add(post_narration)
+                await session.flush()
+                option_row.post_narration_id = post_narration.id
                 narration_placeholders_created = True
 
     lecture_video.status = (
