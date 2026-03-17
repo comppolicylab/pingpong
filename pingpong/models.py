@@ -45,6 +45,7 @@ from sqlalchemy import (
     and_,
     delete,
     select,
+    text,
     tuple_,
     update,
 )
@@ -2019,8 +2020,16 @@ class LectureVideo(Base):
     stored_object = relationship(
         "LectureVideoStoredObject", back_populates="lecture_videos", uselist=False
     )
+    # Immutable provenance pointer to the immediate source snapshot when this
+    # lecture video was cloned. This is intentionally not a live FK because
+    # obsolete source snapshots are routinely hard-deleted after updates.
+    source_lecture_video_id_snapshot = Column(Integer, nullable=True, index=True)
     assistants = relationship("Assistant", back_populates="lecture_video")
     threads = relationship("Thread", back_populates="lecture_video")
+    processing_runs = relationship(
+        "LectureVideoProcessingRun",
+        back_populates="lecture_video",
+    )
     questions = relationship(
         "LectureVideoQuestion",
         back_populates="lecture_video",
@@ -2049,6 +2058,7 @@ class LectureVideo(Base):
         user_id: int | None,
         display_name: str | None = None,
         voice_id: str | None = None,
+        source_lecture_video_id_snapshot: int | None = None,
         status: schemas.LectureVideoStatus = schemas.LectureVideoStatus.UPLOADED,
         error_message: str | None = None,
     ) -> "LectureVideo":
@@ -2057,6 +2067,7 @@ class LectureVideo(Base):
             stored_object_id=stored_object_id,
             display_name=display_name,
             voice_id=voice_id,
+            source_lecture_video_id_snapshot=source_lecture_video_id_snapshot,
             status=status,
             error_message=error_message,
             uploader_id=user_id,
@@ -2203,6 +2214,7 @@ class LectureVideo(Base):
             # target classes share the same AI provider and additional provider
             # credentials, including ElevenLabs.
             voice_id=lecture_video.voice_id,
+            source_lecture_video_id_snapshot=lecture_video.id,
             status=lecture_video.status,
             error_message=lecture_video.error_message,
         )
@@ -2266,6 +2278,161 @@ class LectureVideo(Base):
         await session.flush()
         await session.refresh(new_lecture_video)
         return new_lecture_video
+
+
+class LectureVideoProcessingRun(Base):
+    __tablename__ = "lecture_video_processing_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    lecture_video_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("lecture_videos.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    lecture_video: Mapped[Optional["LectureVideo"]] = relationship(
+        "LectureVideo", back_populates="processing_runs"
+    )
+    lecture_video_id_snapshot: Mapped[int] = mapped_column(
+        Integer, nullable=False, index=True
+    )
+    class_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    assistant_id_at_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    stage: Mapped[schemas.LectureVideoProcessingStage] = mapped_column(
+        SQLEnum(schemas.LectureVideoProcessingStage),
+        nullable=False,
+    )
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[schemas.LectureVideoProcessingRunStatus] = mapped_column(
+        SQLEnum(schemas.LectureVideoProcessingRunStatus),
+        nullable=False,
+        server_default=schemas.LectureVideoProcessingRunStatus.QUEUED.name,
+    )
+    error_message: Mapped[str | None] = mapped_column(String, nullable=True)
+    cancel_reason: Mapped[schemas.LectureVideoProcessingCancelReason | None] = (
+        mapped_column(
+            SQLEnum(schemas.LectureVideoProcessingCancelReason),
+            nullable=True,
+        )
+    )
+    lease_token: Mapped[str | None] = mapped_column(String, nullable=True)
+    leased_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True, onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index(
+            "lecture_video_processing_runs_active_stage_idx",
+            "lecture_video_id_snapshot",
+            "stage",
+            unique=True,
+            sqlite_where=text("status IN ('QUEUED', 'RUNNING')"),
+            postgresql_where=text("status IN ('QUEUED', 'RUNNING')"),
+        ),
+        Index(
+            "lecture_video_processing_runs_status_stage_lease_idx",
+            "status",
+            "stage",
+            "lease_expires_at",
+        ),
+        Index(
+            "lecture_video_processing_runs_snapshot_stage_attempt_idx",
+            "lecture_video_id_snapshot",
+            "stage",
+            "attempt_number",
+            unique=True,
+        ),
+    )
+
+    @classmethod
+    async def create(
+        cls,
+        session: AsyncSession,
+        *,
+        lecture_video_id: int | None,
+        lecture_video_id_snapshot: int,
+        class_id: int,
+        assistant_id_at_start: int | None,
+        stage: schemas.LectureVideoProcessingStage,
+        attempt_number: int,
+        status: schemas.LectureVideoProcessingRunStatus = (
+            schemas.LectureVideoProcessingRunStatus.QUEUED
+        ),
+    ) -> "LectureVideoProcessingRun":
+        run = LectureVideoProcessingRun(
+            lecture_video_id=lecture_video_id,
+            lecture_video_id_snapshot=lecture_video_id_snapshot,
+            class_id=class_id,
+            assistant_id_at_start=assistant_id_at_start,
+            stage=stage,
+            attempt_number=attempt_number,
+            status=status,
+        )
+        session.add(run)
+        await session.flush()
+        await session.refresh(run)
+        return run
+
+    @classmethod
+    async def get_by_id(
+        cls, session: AsyncSession, id_: int
+    ) -> "LectureVideoProcessingRun | None":
+        stmt = select(LectureVideoProcessingRun).where(
+            LectureVideoProcessingRun.id == int(id_)
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_latest_attempt_number(
+        cls,
+        session: AsyncSession,
+        lecture_video_id_snapshot: int,
+        stage: schemas.LectureVideoProcessingStage,
+    ) -> int:
+        stmt = select(func.max(LectureVideoProcessingRun.attempt_number)).where(
+            LectureVideoProcessingRun.lecture_video_id_snapshot
+            == lecture_video_id_snapshot,
+            LectureVideoProcessingRun.stage == stage,
+        )
+        value = await session.scalar(stmt)
+        return int(value or 0)
+
+    @classmethod
+    async def get_non_terminal_by_snapshot_stage(
+        cls,
+        session: AsyncSession,
+        lecture_video_id_snapshot: int,
+        stage: schemas.LectureVideoProcessingStage,
+    ) -> "LectureVideoProcessingRun | None":
+        stmt = (
+            select(LectureVideoProcessingRun)
+            .where(
+                LectureVideoProcessingRun.lecture_video_id_snapshot
+                == lecture_video_id_snapshot,
+                LectureVideoProcessingRun.stage == stage,
+                LectureVideoProcessingRun.status.in_(
+                    [
+                        schemas.LectureVideoProcessingRunStatus.QUEUED,
+                        schemas.LectureVideoProcessingRunStatus.RUNNING,
+                    ]
+                ),
+            )
+            .order_by(LectureVideoProcessingRun.created.asc())
+        )
+        return (await session.scalars(stmt)).one_or_none()
 
 
 class LectureVideoQuestion(Base):
@@ -3555,7 +3722,9 @@ class Assistant(Base):
     verbosity = Column(Integer, nullable=True)
     assistant_should_message_first = Column(Boolean, server_default="false")
     should_record_user_information = Column(Boolean, server_default="false")
-    disable_prompt_randomization = Column(Boolean, server_default="false")
+    disable_prompt_randomization = Column(
+        Boolean, nullable=False, server_default="false"
+    )
     allow_user_file_uploads = Column(Boolean, server_default="true")
     allow_user_image_uploads = Column(Boolean, server_default="true")
     hide_reasoning_summaries = Column(Boolean, server_default="true")
