@@ -1,6 +1,11 @@
 from logging.config import fileConfig
+import json
+from pathlib import Path
+import re
+import subprocess
 
 from sqlalchemy import engine_from_config, pool
+from sqlalchemy.engine import make_url
 
 from alembic import context
 from pingpong.models import Base
@@ -25,6 +30,69 @@ target_metadata = Base.metadata
 # can be acquired:
 # my_important_option = config.get_main_option("my_important_option")
 # ... etc.
+
+
+def _sanitize_db_suffix(raw: str) -> str:
+    cleaned = re.sub(r"[^a-z0-9_]+", "_", raw.lower()).strip("_")
+    if not cleaned:
+        cleaned = "branch"
+    if cleaned[0].isdigit():
+        cleaned = f"b_{cleaned}"
+    cleaned = cleaned[:40].rstrip("_")
+    return cleaned or "branch"
+
+
+def _resolve_worktree_branch_name() -> str | None:
+    try:
+        git_common_dir = Path(
+            subprocess.check_output(
+                ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                text=True,
+            ).strip()
+        )
+        repo_root = Path(
+            subprocess.check_output(
+                ["git", "rev-parse", "--show-toplevel"],
+                text=True,
+            ).strip()
+        )
+    except Exception:
+        return None
+
+    main_repo_root = git_common_dir.parent
+    worktree_root = main_repo_root.parent / f"{main_repo_root.name}-worktrees"
+    if worktree_root not in repo_root.parents:
+        return None
+
+    ports_file = worktree_root / ".worktree-ports.json"
+    worktree_name = repo_root.name
+
+    if ports_file.is_file():
+        try:
+            ports_data = json.loads(ports_file.read_text())
+            branch_name = ports_data.get(worktree_name, {}).get("branch")
+            if isinstance(branch_name, str) and branch_name:
+                return branch_name
+        except Exception:
+            pass
+    return None
+
+
+def _configure_worktree_database_url() -> None:
+    branch_name = _resolve_worktree_branch_name()
+    if not branch_name:
+        return
+
+    url = make_url(config.get_main_option("sqlalchemy.url"))
+    if url.drivername.startswith("postgresql"):
+        db_name = f"pingpong_{_sanitize_db_suffix(branch_name)}"
+        config.set_main_option(
+            "sqlalchemy.url",
+            str(url.set(database=db_name).render_as_string(hide_password=False)),
+        )
+
+
+_configure_worktree_database_url()
 
 
 def run_migrations_offline() -> None:
