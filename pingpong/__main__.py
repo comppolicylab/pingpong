@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import logging
 import sys
 from typing import Callable, Dict, Optional
@@ -70,6 +71,8 @@ from .auth import encode_auth_token
 from .bg import get_server
 from .canvas import canvas_sync_all
 from .config import config
+from .errors import sentry
+from . import lecture_video_processing
 from .models import (
     APIKey,
     Assistant,
@@ -113,6 +116,11 @@ def lti() -> None:
 
 @cli.group("export")
 def export() -> None:
+    pass
+
+
+@cli.group("lecture-video")
+def lecture_video() -> None:
     pass
 
 
@@ -1380,6 +1388,37 @@ FUNCTIONS_MAP: Dict[str, Callable] = {
     "sync_pingpong_with_lms": lambda _, **kwargs: _lms_sync_all(**kwargs),
     "sync_pingpong_with_lti": lambda _, **kwargs: _lti_sync_all(**kwargs),
 }
+
+
+@lecture_video.command("run-worker")
+@click.option("--host", default="localhost")
+@click.option("--port", default=8001)
+@click.option(
+    "--poll-interval",
+    default=lecture_video_processing.DEFAULT_WORKER_POLL_INTERVAL_SECONDS,
+    type=click.FloatRange(min=0, min_open=True),
+    show_default=True,
+)
+@click.option(
+    "--workers",
+    default=1,
+    type=click.IntRange(min=1),
+    show_default=True,
+)
+def run_lecture_video_worker(
+    host: str,
+    port: int,
+    poll_interval: float,
+    workers: int,
+) -> None:
+    server = get_server(host=host, port=port)
+
+    with sentry(), server.run_in_thread():
+        with contextlib.suppress(KeyboardInterrupt):
+            lecture_video_processing.run_narration_processing_worker_pool(
+                poll_interval_seconds=poll_interval,
+                workers=workers,
+            )
 
 
 @schedule.command("schedule_tasks")

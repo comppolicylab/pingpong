@@ -1,0 +1,1349 @@
+import asyncio
+import io
+import logging
+import multiprocessing
+import os
+import queue as queue_module
+import secrets
+import signal
+import socket
+import time
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import timedelta
+from typing import Any
+
+import sentry_sdk
+import uuid_utils as uuid
+from sqlalchemy import and_, delete, func, or_, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+
+import pingpong.models as models
+import pingpong.schemas as schemas
+from pingpong.audio_store import AudioStoreError
+from pingpong.class_credential_validation import (
+    ClassCredentialValidationSSLError,
+    ClassCredentialValidationUnavailableError,
+    ClassCredentialVoiceValidationError,
+)
+from pingpong.config import config
+from pingpong.errors import sentry
+from pingpong.elevenlabs import (
+    synthesize_elevenlabs_speech,
+)
+from pingpong.now import utcnow
+
+logger = logging.getLogger(__name__)
+
+NARRATION_STAGE = schemas.LectureVideoProcessingStage.NARRATION
+RUN_LEASE_DURATION = timedelta(minutes=10)
+_ACTIVE_RUN_STATUSES = (
+    schemas.LectureVideoProcessingRunStatus.QUEUED,
+    schemas.LectureVideoProcessingRunStatus.RUNNING,
+)
+DEFAULT_WORKER_POLL_INTERVAL_SECONDS = 5.0
+DEFAULT_WORKER_SHUTDOWN_GRACE_SECONDS = 5.0
+UNEXPECTED_WORKER_EXIT_ERROR_MESSAGE = "Lecture video worker exited unexpectedly."
+
+
+@dataclass(frozen=True)
+class NarrationWorkItem:
+    class_id: int
+    lecture_video_id: int
+    voice_id: str
+    narration_id: int
+    text: str
+
+
+@dataclass(frozen=True)
+class RunAssignment:
+    run_id: int
+    lease_token: str
+
+
+@dataclass(frozen=True)
+class WorkerReady:
+    worker_slot: int
+    pid: int
+
+
+@dataclass(frozen=True)
+class WorkerStarted:
+    worker_slot: int
+    run_id: int
+    lease_token: str
+
+
+@dataclass(frozen=True)
+class WorkerCompleted:
+    worker_slot: int
+    run_id: int
+    lease_token: str
+
+
+@dataclass(frozen=True)
+class WorkerJobException:
+    worker_slot: int
+    run_id: int
+    lease_token: str
+    error_message: str
+
+
+@dataclass
+class WorkerSlotState:
+    worker_slot: int
+    process: Any
+    assignment_queue: Any
+    runner_id: str
+    pid: int | None
+    idle: bool = True
+    run_id: int | None = None
+    lease_token: str | None = None
+    last_event_at: float | None = None
+
+
+def build_runner_id(worker_slot: int | None = None, pid: int | None = None) -> str:
+    effective_pid = pid if pid is not None else os.getpid()
+    if worker_slot is None:
+        return f"lecture-video:{socket.gethostname()}:{effective_pid}"
+    return f"lecture-video:{socket.gethostname()}:{effective_pid}:worker-{worker_slot}"
+
+
+def get_forkserver_context() -> multiprocessing.context.BaseContext:
+    if "forkserver" not in multiprocessing.get_all_start_methods():
+        raise RuntimeError(
+            "The lecture video worker pool requires the 'forkserver' start method."
+        )
+    return multiprocessing.get_context("forkserver")
+
+
+def _capture_exception_to_sentry(exc: Exception, **tags: object) -> None:
+    if not config.sentry.dsn:
+        return
+
+    with sentry_sdk.push_scope() as scope:
+        for key, value in tags.items():
+            if value is not None:
+                scope.set_tag(key, str(value))
+        sentry_sdk.capture_exception(exc)
+        sentry_sdk.flush(timeout=2.0)
+
+
+def _worker_process_main(
+    worker_slot: int,
+    assignment_queue,
+    result_queue,
+) -> None:
+    with sentry():
+        result_queue.put(WorkerReady(worker_slot=worker_slot, pid=os.getpid()))
+        with asyncio.Runner() as runner:
+            while True:
+                assignment = assignment_queue.get()
+                if assignment is None:
+                    logger.info(
+                        "Lecture video worker shutting down. slot=%s pid=%s",
+                        worker_slot,
+                        os.getpid(),
+                    )
+                    return
+
+                assert isinstance(assignment, RunAssignment)
+                logger.info(
+                    "Lecture video worker picked up run. slot=%s pid=%s run_id=%s",
+                    worker_slot,
+                    os.getpid(),
+                    assignment.run_id,
+                )
+                result_queue.put(
+                    WorkerStarted(
+                        worker_slot=worker_slot,
+                        run_id=assignment.run_id,
+                        lease_token=assignment.lease_token,
+                    )
+                )
+                try:
+                    runner.run(
+                        _process_claimed_narration_run(
+                            assignment.run_id,
+                            assignment.lease_token,
+                        )
+                    )
+                except Exception as exc:
+                    logger.exception(
+                        "Lecture video worker process failed while handling run_id=%s. slot=%s pid=%s",
+                        assignment.run_id,
+                        worker_slot,
+                        os.getpid(),
+                    )
+                    _capture_exception_to_sentry(
+                        exc,
+                        source="lecture-video-worker-child",
+                        worker_slot=worker_slot,
+                        pid=os.getpid(),
+                        run_id=assignment.run_id,
+                    )
+                    result_queue.put(
+                        WorkerJobException(
+                            worker_slot=worker_slot,
+                            run_id=assignment.run_id,
+                            lease_token=assignment.lease_token,
+                            error_message=str(exc)
+                            or UNEXPECTED_WORKER_EXIT_ERROR_MESSAGE,
+                        )
+                    )
+                else:
+                    logger.info(
+                        "Lecture video worker completed run. slot=%s pid=%s run_id=%s",
+                        worker_slot,
+                        os.getpid(),
+                        assignment.run_id,
+                    )
+                    result_queue.put(
+                        WorkerCompleted(
+                            worker_slot=worker_slot,
+                            run_id=assignment.run_id,
+                            lease_token=assignment.lease_token,
+                        )
+                    )
+
+
+class NarrationWorkerPoolManager:
+    def __init__(
+        self,
+        *,
+        workers: int,
+        poll_interval_seconds: float = DEFAULT_WORKER_POLL_INTERVAL_SECONDS,
+        shutdown_grace_seconds: float = DEFAULT_WORKER_SHUTDOWN_GRACE_SECONDS,
+        process_context: Any | None = None,
+        claim_run_fn: Callable[[str], tuple[int, str] | None] | None = None,
+        recover_run_fn: Callable[[int, str, str], bool] | None = None,
+        sleep_fn: Callable[[float], None] = time.sleep,
+        time_fn: Callable[[], float] = time.monotonic,
+    ) -> None:
+        if workers <= 0:
+            raise ValueError("workers must be greater than 0.")
+        if poll_interval_seconds <= 0:
+            raise ValueError("poll_interval_seconds must be greater than 0.")
+        if shutdown_grace_seconds <= 0:
+            raise ValueError("shutdown_grace_seconds must be greater than 0.")
+
+        self.workers = workers
+        self.poll_interval_seconds = poll_interval_seconds
+        self.shutdown_grace_seconds = shutdown_grace_seconds
+        self.process_context: Any = process_context or get_forkserver_context()
+        self.async_runner: asyncio.Runner | None = None
+        self.claim_run_fn = claim_run_fn or self._claim_next_narration_run_sync
+        self.recover_run_fn = recover_run_fn or self._recover_failed_narration_run_sync
+        self.sleep_fn = sleep_fn
+        self.time_fn = time_fn
+        self.results_queue = self.process_context.Queue()
+        self.stop_requested = False
+        self.worker_slots: dict[int, WorkerSlotState] = {}
+
+    def request_stop(self) -> None:
+        logger.info("Lecture video worker pool stop requested.")
+        self.stop_requested = True
+
+    def start(self) -> None:
+        for worker_slot in range(self.workers):
+            self._spawn_worker(worker_slot)
+
+    def run(self) -> None:
+        self.start()
+        previous_sigterm_handler = signal.getsignal(signal.SIGTERM)
+
+        def _handle_sigterm(_signum, _frame) -> None:
+            self.request_stop()
+
+        signal.signal(signal.SIGTERM, _handle_sigterm)
+        try:
+            while not self.stop_requested:
+                progress = self.run_one_iteration()
+                if self.stop_requested:
+                    break
+                if not progress:
+                    self.sleep_fn(self.poll_interval_seconds)
+        except KeyboardInterrupt:
+            self.request_stop()
+        except Exception as exc:
+            logger.exception("Lecture video worker pool manager failed.")
+            _capture_exception_to_sentry(
+                exc,
+                source="lecture-video-worker-parent",
+                workers=self.workers,
+            )
+            raise
+        finally:
+            signal.signal(signal.SIGTERM, previous_sigterm_handler)
+            self.shutdown()
+
+    def run_one_iteration(self) -> bool:
+        progress = False
+        progress |= self._drain_results_queue()
+        progress |= self._handle_dead_workers()
+        if not self.stop_requested:
+            progress |= self._assign_runs_to_idle_workers()
+        return progress
+
+    def shutdown(self) -> None:
+        deadline = self.time_fn() + self.shutdown_grace_seconds
+
+        for slot in self.worker_slots.values():
+            process = slot.process
+            if getattr(process, "exitcode", None) is None:
+                slot.assignment_queue.put(None)
+
+        for slot in self.worker_slots.values():
+            process = slot.process
+            remaining = max(0.0, deadline - self.time_fn())
+            if hasattr(process, "join"):
+                process.join(timeout=remaining)
+
+        for slot in self.worker_slots.values():
+            process = slot.process
+            if getattr(process, "exitcode", None) is None and hasattr(
+                process, "terminate"
+            ):
+                process.terminate()
+                if hasattr(process, "join"):
+                    process.join(timeout=0.1)
+
+        for slot in self.worker_slots.values():
+            self._close_queue(slot.assignment_queue)
+        self._close_queue(self.results_queue)
+        if self.async_runner is not None:
+            self.async_runner.close()
+            self.async_runner = None
+
+    def _spawn_worker(self, worker_slot: int) -> WorkerSlotState:
+        assignment_queue = self.process_context.Queue()
+        process = self.process_context.Process(
+            target=_worker_process_main,
+            args=(worker_slot, assignment_queue, self.results_queue),
+            daemon=True,
+        )
+        process.start()
+        runner_id = build_runner_id(worker_slot, process.pid)
+        logger.info(
+            "Started lecture video worker process. slot=%s pid=%s runner_id=%s",
+            worker_slot,
+            process.pid,
+            runner_id,
+        )
+        slot = WorkerSlotState(
+            worker_slot=worker_slot,
+            process=process,
+            assignment_queue=assignment_queue,
+            runner_id=runner_id,
+            pid=process.pid,
+            last_event_at=self.time_fn(),
+        )
+        self.worker_slots[worker_slot] = slot
+        return slot
+
+    def _drain_results_queue(self) -> bool:
+        progress = False
+        while True:
+            try:
+                event = self.results_queue.get_nowait()
+            except queue_module.Empty:
+                return progress
+
+            progress = True
+            if isinstance(event, WorkerReady):
+                self._handle_worker_ready(event)
+            elif isinstance(event, WorkerStarted):
+                self._handle_worker_started(event)
+            elif isinstance(event, WorkerCompleted):
+                self._handle_worker_completed(event)
+            elif isinstance(event, WorkerJobException):
+                self._handle_worker_job_exception(event)
+
+    def _handle_worker_ready(self, event: WorkerReady) -> None:
+        slot = self.worker_slots.get(event.worker_slot)
+        if slot is None:
+            return
+        slot.pid = event.pid
+        slot.runner_id = build_runner_id(event.worker_slot, event.pid)
+        slot.last_event_at = self.time_fn()
+        logger.info(
+            "Lecture video worker ready. slot=%s pid=%s runner_id=%s",
+            event.worker_slot,
+            event.pid,
+            slot.runner_id,
+        )
+
+    def _handle_worker_started(self, event: WorkerStarted) -> None:
+        slot = self.worker_slots.get(event.worker_slot)
+        if slot is None:
+            return
+        slot.last_event_at = self.time_fn()
+        logger.info(
+            "Lecture video worker acknowledged run. slot=%s pid=%s run_id=%s",
+            event.worker_slot,
+            slot.pid,
+            event.run_id,
+        )
+
+    def _handle_worker_completed(self, event: WorkerCompleted) -> None:
+        slot = self.worker_slots.get(event.worker_slot)
+        if slot is None:
+            return
+        if slot.run_id != event.run_id or slot.lease_token != event.lease_token:
+            return
+        logger.info(
+            "Lecture video worker finished assigned run. slot=%s pid=%s run_id=%s",
+            event.worker_slot,
+            slot.pid,
+            event.run_id,
+        )
+        self._clear_assignment(slot)
+        slot.last_event_at = self.time_fn()
+
+    def _handle_worker_job_exception(self, event: WorkerJobException) -> None:
+        slot = self.worker_slots.get(event.worker_slot)
+        if slot is None:
+            return
+        if slot.run_id != event.run_id or slot.lease_token != event.lease_token:
+            return
+        logger.error(
+            "Lecture video worker reported job exception. slot=%s pid=%s run_id=%s error=%s",
+            event.worker_slot,
+            slot.pid,
+            event.run_id,
+            event.error_message,
+        )
+        self.recover_run_fn(
+            event.run_id,
+            event.lease_token,
+            event.error_message or UNEXPECTED_WORKER_EXIT_ERROR_MESSAGE,
+        )
+        self._clear_assignment(slot)
+        slot.last_event_at = self.time_fn()
+
+    def _handle_dead_workers(self) -> bool:
+        progress = False
+        for worker_slot, slot in list(self.worker_slots.items()):
+            process = slot.process
+            if getattr(process, "exitcode", None) is None:
+                continue
+
+            progress = True
+            logger.warning(
+                "Lecture video worker exited unexpectedly. slot=%s pid=%s exitcode=%s run_id=%s",
+                worker_slot,
+                slot.pid,
+                process.exitcode,
+                slot.run_id,
+            )
+            self._recover_slot_assignment(
+                slot,
+                error_message=UNEXPECTED_WORKER_EXIT_ERROR_MESSAGE,
+            )
+            self._close_queue(slot.assignment_queue)
+            if hasattr(process, "join"):
+                process.join(timeout=0)
+            if self.stop_requested:
+                continue
+            self._spawn_worker(worker_slot)
+        return progress
+
+    def _assign_runs_to_idle_workers(self) -> bool:
+        progress = False
+        for worker_slot in sorted(self.worker_slots):
+            slot = self.worker_slots[worker_slot]
+            if not slot.idle or getattr(slot.process, "exitcode", None) is not None:
+                continue
+
+            claim = self.claim_run_fn(slot.runner_id)
+            if claim is None:
+                break
+
+            run_id, lease_token = claim
+            logger.info(
+                "Assigning lecture video run to worker. slot=%s pid=%s runner_id=%s run_id=%s",
+                worker_slot,
+                slot.pid,
+                slot.runner_id,
+                run_id,
+            )
+            slot.run_id = run_id
+            slot.lease_token = lease_token
+            slot.idle = False
+            slot.last_event_at = self.time_fn()
+            slot.assignment_queue.put(
+                RunAssignment(run_id=run_id, lease_token=lease_token)
+            )
+            progress = True
+
+        return progress
+
+    def _recover_slot_assignment(
+        self,
+        slot: WorkerSlotState,
+        *,
+        error_message: str,
+    ) -> None:
+        if slot.run_id is None or slot.lease_token is None:
+            return
+        self.recover_run_fn(slot.run_id, slot.lease_token, error_message)
+        self._clear_assignment(slot)
+
+    def _clear_assignment(self, slot: WorkerSlotState) -> None:
+        slot.idle = True
+        slot.run_id = None
+        slot.lease_token = None
+
+    def _ensure_async_runner(self) -> asyncio.Runner:
+        if self.async_runner is None:
+            self.async_runner = asyncio.Runner()
+        return self.async_runner
+
+    def _claim_next_narration_run_sync(self, runner_id: str) -> tuple[int, str] | None:
+        return self._ensure_async_runner().run(
+            _claim_next_narration_run(leased_by=runner_id)
+        )
+
+    def _recover_failed_narration_run_sync(
+        self,
+        run_id: int,
+        lease_token: str,
+        error_message: str,
+    ) -> bool:
+        return self._ensure_async_runner().run(
+            recover_failed_narration_run(
+                run_id,
+                lease_token,
+                error_message=error_message,
+            )
+        )
+
+    def _close_queue(self, queue_obj: object) -> None:
+        close_fn = getattr(queue_obj, "close", None)
+        if callable(close_fn):
+            close_fn()
+        join_thread_fn = getattr(queue_obj, "join_thread", None)
+        if callable(join_thread_fn):
+            join_thread_fn()
+
+
+def run_narration_processing_worker_pool(
+    *,
+    workers: int = 1,
+    poll_interval_seconds: float = DEFAULT_WORKER_POLL_INTERVAL_SECONDS,
+    shutdown_grace_seconds: float = DEFAULT_WORKER_SHUTDOWN_GRACE_SECONDS,
+    process_context: Any | None = None,
+    claim_run_fn: Callable[[str], tuple[int, str] | None] | None = None,
+    recover_run_fn: Callable[[int, str, str], bool] | None = None,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    time_fn: Callable[[], float] = time.monotonic,
+) -> None:
+    manager = NarrationWorkerPoolManager(
+        workers=workers,
+        poll_interval_seconds=poll_interval_seconds,
+        shutdown_grace_seconds=shutdown_grace_seconds,
+        process_context=process_context,
+        claim_run_fn=claim_run_fn,
+        recover_run_fn=recover_run_fn,
+        sleep_fn=sleep_fn,
+        time_fn=time_fn,
+    )
+    manager.run()
+
+
+def generate_narration_store_key() -> str:
+    return f"lv_narration_{uuid.uuid7()}.ogg"
+
+
+async def queue_narration_processing_run(
+    session: AsyncSession,
+    lecture_video: models.LectureVideo,
+    *,
+    assistant_id_at_start: int,
+) -> models.LectureVideoProcessingRun | None:
+    if lecture_video.status != schemas.LectureVideoStatus.PROCESSING:
+        return None
+
+    attached_assistant = await models.Assistant.get_by_lecture_video_id(
+        session, lecture_video.id
+    )
+    if attached_assistant is None:
+        return None
+    if attached_assistant.id != assistant_id_at_start:
+        return None
+
+    existing_run = (
+        await models.LectureVideoProcessingRun.get_non_terminal_by_snapshot_stage(
+            session,
+            lecture_video.id,
+            NARRATION_STAGE,
+        )
+    )
+    if existing_run is not None:
+        return existing_run
+
+    attempt_number = (
+        await models.LectureVideoProcessingRun.get_latest_attempt_number(
+            session,
+            lecture_video.id,
+            NARRATION_STAGE,
+        )
+        + 1
+    )
+    return await models.LectureVideoProcessingRun.create(
+        session,
+        lecture_video_id=lecture_video.id,
+        lecture_video_id_snapshot=lecture_video.id,
+        class_id=lecture_video.class_id,
+        assistant_id_at_start=assistant_id_at_start,
+        stage=NARRATION_STAGE,
+        attempt_number=attempt_number,
+        status=schemas.LectureVideoProcessingRunStatus.QUEUED,
+    )
+
+
+async def cancel_narration_processing_runs(
+    session: AsyncSession,
+    lecture_video_id_snapshot: int,
+    cancel_reason: schemas.LectureVideoProcessingCancelReason,
+) -> bool:
+    now = utcnow()
+    result = await session.execute(
+        update(models.LectureVideoProcessingRun)
+        .where(
+            models.LectureVideoProcessingRun.lecture_video_id_snapshot
+            == lecture_video_id_snapshot,
+            models.LectureVideoProcessingRun.stage == NARRATION_STAGE,
+            models.LectureVideoProcessingRun.status.in_(_ACTIVE_RUN_STATUSES),
+        )
+        .values(
+            status=schemas.LectureVideoProcessingRunStatus.CANCELLED,
+            cancel_reason=cancel_reason,
+            finished_at=now,
+            lease_token=None,
+            leased_by=None,
+            lease_expires_at=None,
+        )
+    )
+    await session.flush()
+    return bool(result.rowcount)
+
+
+async def reset_failed_narrations_for_retry(
+    session: AsyncSession,
+    lecture_video_id: int,
+) -> None:
+    lecture_video = await models.LectureVideo.get_by_id_with_copy_context(
+        session, lecture_video_id
+    )
+    if lecture_video is None:
+        raise ValueError(f"Lecture video {lecture_video_id} not found.")
+
+    audio_keys_to_delete: list[str] = []
+    stored_object_ids_to_delete: list[int] = []
+    narrations_to_reset: list[models.LectureVideoNarration] = []
+
+    for question in sorted(lecture_video.questions, key=lambda item: item.position):
+        if (
+            question.intro_narration is not None
+            and question.intro_narration.status
+            != schemas.LectureVideoNarrationStatus.READY
+        ):
+            narrations_to_reset.append(question.intro_narration)
+        for option in sorted(question.options, key=lambda item: item.position):
+            if (
+                option.post_narration is not None
+                and option.post_narration.status
+                != schemas.LectureVideoNarrationStatus.READY
+            ):
+                narrations_to_reset.append(option.post_narration)
+
+    for narration in narrations_to_reset:
+        if narration.stored_object is not None:
+            stored_object_ids_to_delete.append(narration.stored_object.id)
+            audio_keys_to_delete.append(narration.stored_object.key)
+        narration.stored_object_id = None
+        narration.stored_object = None
+        narration.status = schemas.LectureVideoNarrationStatus.PENDING
+        narration.error_message = None
+        session.add(narration)
+
+    await session.flush()
+
+    if stored_object_ids_to_delete:
+        await session.execute(
+            delete(models.LectureVideoNarrationStoredObject).where(
+                models.LectureVideoNarrationStoredObject.id.in_(
+                    stored_object_ids_to_delete
+                )
+            )
+        )
+
+    if audio_keys_to_delete and config.lecture_video_audio_store:
+        for key in audio_keys_to_delete:
+            await _delete_audio_key_quietly(key)
+
+
+async def claim_failed_lecture_video_for_retry(
+    session: AsyncSession,
+    lecture_video_id: int,
+) -> bool:
+    result = await session.execute(
+        update(models.LectureVideo)
+        .where(models.LectureVideo.id == lecture_video_id)
+        .where(models.LectureVideo.status == schemas.LectureVideoStatus.FAILED)
+        .values(
+            status=schemas.LectureVideoStatus.PROCESSING,
+            error_message=None,
+        )
+    )
+    await session.flush()
+    return bool(result.rowcount)
+
+
+async def _process_claimed_narration_run(run_id: int, lease_token: str) -> None:
+    while True:
+        state, payload = await _prepare_next_work_item(run_id, lease_token)
+        if state in {"cancelled", "missing"}:
+            return
+        if state == "completed":
+            await _mark_run_completed(run_id, lease_token)
+            return
+        if state == "failed":
+            assert isinstance(payload, tuple)
+            narration_id, error_message = payload
+            await _mark_run_failed(run_id, lease_token, narration_id, error_message)
+            return
+
+        work_item = payload
+        assert isinstance(work_item, NarrationWorkItem)
+
+        try:
+            content_type, audio = await synthesize_elevenlabs_speech(
+                await _get_elevenlabs_api_key(work_item.class_id),
+                work_item.voice_id,
+                work_item.text,
+            )
+        except Exception as exc:
+            await _mark_run_failed(
+                run_id,
+                lease_token,
+                work_item.narration_id,
+                _user_safe_processing_error_message(exc),
+            )
+            return
+
+        if not await _ensure_run_can_continue(run_id, lease_token):
+            return
+
+        try:
+            store_key, content_length = await _store_narration_audio(
+                content_type,
+                audio,
+            )
+        except Exception as exc:
+            await _mark_run_failed(
+                run_id,
+                lease_token,
+                work_item.narration_id,
+                _user_safe_processing_error_message(exc),
+            )
+            return
+
+        try:
+            attached = await _attach_stored_audio_to_narration(
+                run_id,
+                lease_token,
+                work_item.narration_id,
+                content_type,
+                content_length,
+                store_key,
+            )
+        except Exception:
+            await _delete_audio_key_quietly(store_key)
+            raise
+
+        if not attached:
+            await _delete_audio_key_quietly(store_key)
+            return
+
+
+async def _get_elevenlabs_api_key(class_id: int) -> str:
+    async with config.db.driver.async_session() as session:
+        credential = await models.ClassCredential.get_by_class_id_and_purpose(
+            session,
+            class_id,
+            schemas.ClassCredentialPurpose.LECTURE_VIDEO_NARRATION_TTS,
+        )
+        if credential is None or credential.api_key_obj is None:
+            raise RuntimeError(
+                "An ElevenLabs credential is required before lecture video narration can be generated."
+            )
+        return credential.api_key_obj.api_key
+
+
+async def _claim_next_narration_run(
+    *,
+    leased_by: str | None = None,
+) -> tuple[int, str] | None:
+    async with config.db.driver.async_session() as session:
+        now = utcnow()
+        effective_leased_by = leased_by or build_runner_id()
+        candidate_ids = list(
+            (
+                await session.scalars(
+                    select(models.LectureVideoProcessingRun.id)
+                    .where(models.LectureVideoProcessingRun.stage == NARRATION_STAGE)
+                    .where(
+                        or_(
+                            models.LectureVideoProcessingRun.status
+                            == schemas.LectureVideoProcessingRunStatus.QUEUED,
+                            and_(
+                                models.LectureVideoProcessingRun.status
+                                == schemas.LectureVideoProcessingRunStatus.RUNNING,
+                                or_(
+                                    models.LectureVideoProcessingRun.lease_expires_at.is_(
+                                        None
+                                    ),
+                                    models.LectureVideoProcessingRun.lease_expires_at
+                                    < now,
+                                ),
+                            ),
+                        )
+                    )
+                    .order_by(
+                        models.LectureVideoProcessingRun.created.asc(),
+                        models.LectureVideoProcessingRun.id.asc(),
+                    )
+                    .limit(25)
+                )
+            ).all()
+        )
+        for candidate_id in candidate_ids:
+            lease_token = secrets.token_urlsafe(24)
+            result = await session.execute(
+                update(models.LectureVideoProcessingRun)
+                .where(models.LectureVideoProcessingRun.id == candidate_id)
+                .where(models.LectureVideoProcessingRun.stage == NARRATION_STAGE)
+                .where(
+                    or_(
+                        models.LectureVideoProcessingRun.status
+                        == schemas.LectureVideoProcessingRunStatus.QUEUED,
+                        and_(
+                            models.LectureVideoProcessingRun.status
+                            == schemas.LectureVideoProcessingRunStatus.RUNNING,
+                            or_(
+                                models.LectureVideoProcessingRun.lease_expires_at.is_(
+                                    None
+                                ),
+                                models.LectureVideoProcessingRun.lease_expires_at < now,
+                            ),
+                        ),
+                    )
+                )
+                .values(
+                    status=schemas.LectureVideoProcessingRunStatus.RUNNING,
+                    lease_token=lease_token,
+                    leased_by=effective_leased_by,
+                    lease_expires_at=now + RUN_LEASE_DURATION,
+                    started_at=func.coalesce(
+                        models.LectureVideoProcessingRun.started_at, now
+                    ),
+                    cancel_reason=None,
+                    finished_at=None,
+                )
+            )
+            if result.rowcount:
+                await session.commit()
+                return candidate_id, lease_token
+
+        await session.rollback()
+    return None
+
+
+async def recover_failed_narration_run(
+    run_id: int,
+    lease_token: str,
+    *,
+    error_message: str = UNEXPECTED_WORKER_EXIT_ERROR_MESSAGE,
+) -> bool:
+    async with config.db.driver.async_session() as session:
+        run = await models.LectureVideoProcessingRun.get_by_id(session, run_id)
+        if run is None:
+            return False
+        if (
+            run.status != schemas.LectureVideoProcessingRunStatus.RUNNING
+            or run.lease_token != lease_token
+        ):
+            return False
+
+        lecture_video = None
+        if run.lecture_video_id is not None:
+            lecture_video = await models.LectureVideo.get_by_id_with_copy_context(
+                session, run.lecture_video_id
+            )
+            if lecture_video is not None:
+                lecture_video.status = schemas.LectureVideoStatus.FAILED
+                lecture_video.error_message = error_message
+                session.add(lecture_video)
+                _mark_processing_narrations_failed_for_video(
+                    lecture_video,
+                    error_message=error_message,
+                )
+
+        run.status = schemas.LectureVideoProcessingRunStatus.FAILED
+        run.error_message = error_message
+        run.finished_at = utcnow()
+        run.cancel_reason = None
+        run.lease_token = None
+        run.leased_by = None
+        run.lease_expires_at = None
+        session.add(run)
+        await session.commit()
+        return True
+
+
+async def _prepare_next_work_item(
+    run_id: int,
+    lease_token: str,
+) -> tuple[
+    str,
+    NarrationWorkItem | tuple[int, str] | None,
+]:
+    async with config.db.driver.async_session() as session:
+        run = await models.LectureVideoProcessingRun.get_by_id(session, run_id)
+        if run is None:
+            return "missing", None
+
+        if (
+            run.status != schemas.LectureVideoProcessingRunStatus.RUNNING
+            or run.lease_token != lease_token
+        ):
+            return "cancelled", None
+
+        if run.lecture_video_id is None:
+            await _mark_run_cancelled(
+                session,
+                run,
+                run.cancel_reason
+                or schemas.LectureVideoProcessingCancelReason.LECTURE_VIDEO_DELETED,
+            )
+            await session.commit()
+            return "cancelled", None
+
+        lecture_video = await models.LectureVideo.get_by_id_with_copy_context(
+            session, run.lecture_video_id
+        )
+        if lecture_video is None:
+            await _mark_run_cancelled(
+                session,
+                run,
+                run.cancel_reason
+                or schemas.LectureVideoProcessingCancelReason.LECTURE_VIDEO_DELETED,
+            )
+            await session.commit()
+            return "cancelled", None
+
+        if not await _lecture_video_has_attached_assistant(session, lecture_video.id):
+            await _mark_run_cancelled(
+                session,
+                run,
+                run.cancel_reason
+                or schemas.LectureVideoProcessingCancelReason.ASSISTANT_DETACHED,
+            )
+            await session.commit()
+            return "cancelled", None
+
+        voice_id = (lecture_video.voice_id or "").strip()
+        if not voice_id:
+            return "failed", (0, "Lecture video voice configuration is missing.")
+
+        work_item = _first_pending_narration_work(lecture_video)
+        if work_item is None:
+            return "completed", None
+
+        narration = await models.LectureVideoNarration.get_by_id(
+            session, work_item.narration_id
+        )
+        if narration is None:
+            await _mark_run_cancelled(
+                session,
+                run,
+                schemas.LectureVideoProcessingCancelReason.LECTURE_VIDEO_DELETED,
+            )
+            await session.commit()
+            return "cancelled", None
+
+        narration.status = schemas.LectureVideoNarrationStatus.PROCESSING
+        narration.error_message = None
+        run.lease_expires_at = utcnow() + RUN_LEASE_DURATION
+        session.add(narration)
+        session.add(run)
+        await session.commit()
+        return "work", work_item
+
+
+def _first_pending_narration_work(
+    lecture_video: models.LectureVideo,
+) -> NarrationWorkItem | None:
+    voice_id = (lecture_video.voice_id or "").strip()
+    for question in sorted(lecture_video.questions, key=lambda item: item.position):
+        if (
+            question.intro_narration is not None
+            and question.intro_narration.status
+            != schemas.LectureVideoNarrationStatus.READY
+            and question.intro_text.strip()
+        ):
+            return NarrationWorkItem(
+                class_id=lecture_video.class_id,
+                lecture_video_id=lecture_video.id,
+                voice_id=voice_id,
+                narration_id=question.intro_narration.id,
+                text=question.intro_text,
+            )
+
+        for option in sorted(question.options, key=lambda item: item.position):
+            if (
+                option.post_narration is not None
+                and option.post_narration.status
+                != schemas.LectureVideoNarrationStatus.READY
+                and option.post_answer_text.strip()
+            ):
+                return NarrationWorkItem(
+                    class_id=lecture_video.class_id,
+                    lecture_video_id=lecture_video.id,
+                    voice_id=voice_id,
+                    narration_id=option.post_narration.id,
+                    text=option.post_answer_text,
+                )
+    return None
+
+
+async def _ensure_run_can_continue(run_id: int, lease_token: str) -> bool:
+    async with config.db.driver.async_session() as session:
+        run = await models.LectureVideoProcessingRun.get_by_id(session, run_id)
+        if run is None:
+            return False
+        if (
+            run.status != schemas.LectureVideoProcessingRunStatus.RUNNING
+            or run.lease_token != lease_token
+        ):
+            return False
+
+        if run.lecture_video_id is None:
+            await _mark_run_cancelled(
+                session,
+                run,
+                run.cancel_reason
+                or schemas.LectureVideoProcessingCancelReason.LECTURE_VIDEO_DELETED,
+            )
+            await session.commit()
+            return False
+
+        lecture_video_exists = (
+            await session.scalar(
+                select(models.LectureVideo.id).where(
+                    models.LectureVideo.id == run.lecture_video_id
+                )
+            )
+            is not None
+        )
+        if not lecture_video_exists:
+            await _mark_run_cancelled(
+                session,
+                run,
+                run.cancel_reason
+                or schemas.LectureVideoProcessingCancelReason.LECTURE_VIDEO_DELETED,
+            )
+            await session.commit()
+            return False
+
+        if not await _lecture_video_has_attached_assistant(
+            session, run.lecture_video_id
+        ):
+            await _mark_run_cancelled(
+                session,
+                run,
+                run.cancel_reason
+                or schemas.LectureVideoProcessingCancelReason.ASSISTANT_DETACHED,
+            )
+            await session.commit()
+            return False
+
+        run.lease_expires_at = utcnow() + RUN_LEASE_DURATION
+        session.add(run)
+        await session.commit()
+        return True
+
+
+async def _store_narration_audio(
+    content_type: str,
+    audio: bytes,
+) -> tuple[str, int]:
+    if not config.lecture_video_audio_store:
+        raise RuntimeError("Lecture video audio store is not configured.")
+
+    store_key = generate_narration_store_key()
+    upload = await config.lecture_video_audio_store.store.create_upload(
+        name=store_key,
+        content_type=content_type,
+    )
+    try:
+        await upload.upload_part(io.BytesIO(audio))
+        await upload.complete_upload()
+    except Exception:
+        try:
+            await upload.delete_file()
+        except Exception:
+            logger.exception(
+                "Failed to clean up lecture video narration upload after error. key=%s",
+                store_key,
+            )
+        raise
+    return store_key, len(audio)
+
+
+async def _attach_stored_audio_to_narration(
+    run_id: int,
+    lease_token: str,
+    narration_id: int,
+    content_type: str,
+    content_length: int,
+    store_key: str,
+) -> bool:
+    async with config.db.driver.async_session() as session:
+        run = await models.LectureVideoProcessingRun.get_by_id(session, run_id)
+        if run is None:
+            return False
+        if (
+            run.status != schemas.LectureVideoProcessingRunStatus.RUNNING
+            or run.lease_token != lease_token
+        ):
+            return False
+        if run.lecture_video_id is None:
+            await _mark_run_cancelled(
+                session,
+                run,
+                run.cancel_reason
+                or schemas.LectureVideoProcessingCancelReason.LECTURE_VIDEO_DELETED,
+            )
+            await session.commit()
+            return False
+        if not await _lecture_video_has_attached_assistant(
+            session, run.lecture_video_id
+        ):
+            await _mark_run_cancelled(
+                session,
+                run,
+                run.cancel_reason
+                or schemas.LectureVideoProcessingCancelReason.ASSISTANT_DETACHED,
+            )
+            await session.commit()
+            return False
+
+        narration = await models.LectureVideoNarration.get_by_id(session, narration_id)
+        if narration is None:
+            return False
+
+        stored_object = models.LectureVideoNarrationStoredObject(
+            key=store_key,
+            content_type=content_type,
+            content_length=content_length,
+        )
+        session.add(stored_object)
+        await session.flush()
+
+        narration.stored_object_id = stored_object.id
+        narration.stored_object = stored_object
+        narration.status = schemas.LectureVideoNarrationStatus.READY
+        narration.error_message = None
+        run.lease_expires_at = utcnow() + RUN_LEASE_DURATION
+        session.add(narration)
+        session.add(run)
+        await session.commit()
+        return True
+
+
+async def _mark_run_completed(run_id: int, lease_token: str) -> None:
+    async with config.db.driver.async_session() as session:
+        run = await models.LectureVideoProcessingRun.get_by_id(session, run_id)
+        if run is None:
+            return
+        if (
+            run.status != schemas.LectureVideoProcessingRunStatus.RUNNING
+            or run.lease_token != lease_token
+        ):
+            return
+        if run.lecture_video_id is None:
+            await _mark_run_cancelled(
+                session,
+                run,
+                run.cancel_reason
+                or schemas.LectureVideoProcessingCancelReason.LECTURE_VIDEO_DELETED,
+            )
+            await session.commit()
+            return
+        if not await _lecture_video_has_attached_assistant(
+            session, run.lecture_video_id
+        ):
+            await _mark_run_cancelled(
+                session,
+                run,
+                run.cancel_reason
+                or schemas.LectureVideoProcessingCancelReason.ASSISTANT_DETACHED,
+            )
+            await session.commit()
+            return
+
+        lecture_video = await models.LectureVideo.get_by_id(
+            session, run.lecture_video_id
+        )
+        if lecture_video is None:
+            await _mark_run_cancelled(
+                session,
+                run,
+                run.cancel_reason
+                or schemas.LectureVideoProcessingCancelReason.LECTURE_VIDEO_DELETED,
+            )
+            await session.commit()
+            return
+
+        lecture_video.status = schemas.LectureVideoStatus.READY
+        lecture_video.error_message = None
+        run.status = schemas.LectureVideoProcessingRunStatus.COMPLETED
+        run.finished_at = utcnow()
+        run.error_message = None
+        run.lease_token = None
+        run.leased_by = None
+        run.lease_expires_at = None
+        session.add(lecture_video)
+        session.add(run)
+        await session.commit()
+
+
+async def _mark_run_failed(
+    run_id: int,
+    lease_token: str,
+    narration_id: int,
+    error_message: str,
+) -> None:
+    async with config.db.driver.async_session() as session:
+        run = await models.LectureVideoProcessingRun.get_by_id(session, run_id)
+        if run is None:
+            return
+        if run.status == schemas.LectureVideoProcessingRunStatus.CANCELLED:
+            return
+
+        narration = (
+            await models.LectureVideoNarration.get_by_id(session, narration_id)
+            if narration_id
+            else None
+        )
+        if narration is not None:
+            narration.status = schemas.LectureVideoNarrationStatus.FAILED
+            narration.error_message = error_message
+            session.add(narration)
+
+        run.status = schemas.LectureVideoProcessingRunStatus.FAILED
+        run.error_message = error_message
+        run.finished_at = utcnow()
+        run.lease_token = None
+        run.leased_by = None
+        run.lease_expires_at = None
+        session.add(run)
+
+        if run.lecture_video_id is not None:
+            lecture_video = await models.LectureVideo.get_by_id(
+                session, run.lecture_video_id
+            )
+            if lecture_video is not None:
+                lecture_video.status = schemas.LectureVideoStatus.FAILED
+                lecture_video.error_message = error_message
+                session.add(lecture_video)
+
+        await session.commit()
+
+
+async def _mark_run_cancelled(
+    session: AsyncSession,
+    run: models.LectureVideoProcessingRun,
+    cancel_reason: schemas.LectureVideoProcessingCancelReason,
+) -> None:
+    run.status = schemas.LectureVideoProcessingRunStatus.CANCELLED
+    run.cancel_reason = cancel_reason
+    run.finished_at = utcnow()
+    run.lease_token = None
+    run.leased_by = None
+    run.lease_expires_at = None
+    session.add(run)
+    await session.flush()
+
+
+async def _lecture_video_has_attached_assistant(
+    session: AsyncSession, lecture_video_id: int
+) -> bool:
+    return (
+        await session.scalar(
+            select(models.Assistant.id).where(
+                models.Assistant.lecture_video_id == lecture_video_id
+            )
+        )
+        is not None
+    )
+
+
+def _mark_processing_narrations_failed_for_video(
+    lecture_video: models.LectureVideo,
+    *,
+    error_message: str,
+) -> None:
+    for question in sorted(lecture_video.questions, key=lambda item: item.position):
+        if (
+            question.intro_narration is not None
+            and question.intro_narration.status
+            == schemas.LectureVideoNarrationStatus.PROCESSING
+        ):
+            question.intro_narration.status = schemas.LectureVideoNarrationStatus.FAILED
+            question.intro_narration.error_message = error_message
+        for option in sorted(question.options, key=lambda item: item.position):
+            if (
+                option.post_narration is not None
+                and option.post_narration.status
+                == schemas.LectureVideoNarrationStatus.PROCESSING
+            ):
+                option.post_narration.status = (
+                    schemas.LectureVideoNarrationStatus.FAILED
+                )
+                option.post_narration.error_message = error_message
+
+
+def _user_safe_processing_error_message(exc: Exception) -> str:
+    if isinstance(exc, ClassCredentialVoiceValidationError):
+        return str(exc)
+    if isinstance(exc, ClassCredentialValidationSSLError):
+        return (
+            "Unable to generate the lecture video narration right now because ElevenLabs "
+            "is unavailable due to an SSL error. Please retry."
+        )
+    if isinstance(exc, ClassCredentialValidationUnavailableError):
+        return str(exc)
+    if isinstance(exc, AudioStoreError):
+        return "Unable to save lecture video narration audio right now. Please retry."
+    if isinstance(exc, RuntimeError):
+        return str(exc)
+    logger.exception(
+        "Unexpected lecture video narration processing failure", exc_info=exc
+    )
+    return "Unable to generate the lecture video narration right now. Please retry."
+
+
+async def _delete_audio_key_quietly(store_key: str) -> None:
+    if not config.lecture_video_audio_store:
+        return
+    try:
+        await config.lecture_video_audio_store.store.delete_file(store_key)
+    except Exception:
+        logger.exception(
+            "Failed to delete lecture video narration audio during cleanup. key=%s",
+            store_key,
+        )
