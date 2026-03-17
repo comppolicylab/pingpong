@@ -586,11 +586,13 @@ async def persist_manifest(
     lecture_video_manifest: schemas.LectureVideoManifestV1,
     *,
     voice_id: str | None = None,
-    create_narration_placeholders: bool = False,
+    create_narration_placeholders: bool = True,
 ) -> None:
     await clear_normalized_content(session, lecture_video.id)
     if voice_id is not None:
         lecture_video.voice_id = voice_id
+
+    narration_placeholders_created = False
 
     for question_position, question in enumerate(lecture_video_manifest.questions):
         question_row = models.LectureVideoQuestion(
@@ -611,6 +613,7 @@ async def persist_manifest(
             session.add(intro_narration)
             await session.flush()
             question_row.intro_narration_id = intro_narration.id
+            narration_placeholders_created = True
 
         option_rows: list[
             tuple[
@@ -639,15 +642,22 @@ async def persist_manifest(
                         option_id=option_row.id,
                     )
                 )
-            if text_needs_audio(option.post_answer_text):
-                if create_narration_placeholders:
+            if (
+                text_needs_audio(option.post_answer_text)
+                and create_narration_placeholders
+            ):
                     post_narration = models.LectureVideoNarration(
                         status=schemas.LectureVideoNarrationStatus.PENDING,
                     )
                     session.add(post_narration)
                     await session.flush()
                     option_row.post_narration_id = post_narration.id
+                narration_placeholders_created = True
 
-    lecture_video.status = schemas.LectureVideoStatus.READY
+    lecture_video.status = (
+        schemas.LectureVideoStatus.PROCESSING
+        if narration_placeholders_created and create_narration_placeholders
+        else schemas.LectureVideoStatus.READY
+    )
     lecture_video.error_message = None
     await session.flush()
