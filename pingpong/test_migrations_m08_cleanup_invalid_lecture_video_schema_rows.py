@@ -91,6 +91,7 @@ async def create_lecture_video(
             lecture_video,
             lecture_video_manifest(),
             voice_id=voice_id,
+            create_narration_placeholders=False,
         )
     return lecture_video
 
