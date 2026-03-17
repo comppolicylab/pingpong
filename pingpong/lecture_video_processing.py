@@ -3,9 +3,7 @@ import io
 import logging
 import multiprocessing
 import os
-import queue as queue_module
 import secrets
-import signal
 import socket
 import time
 from collections.abc import Callable
@@ -13,7 +11,6 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
 
-import sentry_sdk
 import uuid_utils as uuid
 from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,6 +29,18 @@ from pingpong.elevenlabs import (
     synthesize_elevenlabs_speech,
 )
 from pingpong.now import utcnow
+from pingpong.worker_pool import (
+    DEFAULT_WORKER_POLL_INTERVAL_SECONDS,
+    DEFAULT_WORKER_SHUTDOWN_GRACE_SECONDS,
+    RunAssignment,
+    WorkerCompleted,
+    WorkerJobException,
+    WorkerPoolManager,
+    WorkerReady,
+    WorkerStarted,
+    capture_exception_to_sentry,
+    ignore_sigint_in_worker,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +50,6 @@ _ACTIVE_RUN_STATUSES = (
     schemas.LectureVideoProcessingRunStatus.QUEUED,
     schemas.LectureVideoProcessingRunStatus.RUNNING,
 )
-DEFAULT_WORKER_POLL_INTERVAL_SECONDS = 5.0
-DEFAULT_WORKER_SHUTDOWN_GRACE_SECONDS = 5.0
 UNEXPECTED_WORKER_EXIT_ERROR_MESSAGE = "Lecture video worker exited unexpectedly."
 
 
@@ -55,51 +62,63 @@ class NarrationWorkItem:
     text: str
 
 
-@dataclass(frozen=True)
-class RunAssignment:
-    run_id: int
-    lease_token: str
+class NarrationWorkerPoolManager(WorkerPoolManager):
+    def __init__(
+        self,
+        *,
+        workers: int,
+        poll_interval_seconds: float = DEFAULT_WORKER_POLL_INTERVAL_SECONDS,
+        shutdown_grace_seconds: float = DEFAULT_WORKER_SHUTDOWN_GRACE_SECONDS,
+        process_context: Any | None = None,
+        claim_run_fn: Callable[[str], tuple[int, str] | None] | None = None,
+        recover_run_fn: Callable[[int, str, str], bool] | None = None,
+        sleep_fn: Callable[[float], None] = time.sleep,
+        time_fn: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self.async_runner: asyncio.Runner | None = None
+        super().__init__(
+            workers=workers,
+            worker_target=_worker_process_main,
+            process_context=process_context or get_forkserver_context(),
+            claim_run_fn=claim_run_fn or self._claim_next_narration_run_sync,
+            recover_run_fn=recover_run_fn or self._recover_failed_narration_run_sync,
+            build_runner_id_fn=build_runner_id,
+            worker_label="lecture video worker",
+            unexpected_exit_error_message=UNEXPECTED_WORKER_EXIT_ERROR_MESSAGE,
+            poll_interval_seconds=poll_interval_seconds,
+            shutdown_grace_seconds=shutdown_grace_seconds,
+            sleep_fn=sleep_fn,
+            time_fn=time_fn,
+        )
 
+    def _ensure_async_runner(self) -> asyncio.Runner:
+        if self.async_runner is None:
+            self.async_runner = asyncio.Runner()
+        return self.async_runner
 
-@dataclass(frozen=True)
-class WorkerReady:
-    worker_slot: int
-    pid: int
+    def _claim_next_narration_run_sync(self, runner_id: str) -> tuple[int, str] | None:
+        return self._ensure_async_runner().run(
+            _claim_next_narration_run(leased_by=runner_id)
+        )
 
+    def _recover_failed_narration_run_sync(
+        self,
+        run_id: int,
+        lease_token: str,
+        error_message: str,
+    ) -> bool:
+        return self._ensure_async_runner().run(
+            recover_failed_narration_run(
+                run_id,
+                lease_token,
+                error_message=error_message,
+            )
+        )
 
-@dataclass(frozen=True)
-class WorkerStarted:
-    worker_slot: int
-    run_id: int
-    lease_token: str
-
-
-@dataclass(frozen=True)
-class WorkerCompleted:
-    worker_slot: int
-    run_id: int
-    lease_token: str
-
-
-@dataclass(frozen=True)
-class WorkerJobException:
-    worker_slot: int
-    run_id: int
-    lease_token: str
-    error_message: str
-
-
-@dataclass
-class WorkerSlotState:
-    worker_slot: int
-    process: Any
-    assignment_queue: Any
-    runner_id: str
-    pid: int | None
-    idle: bool = True
-    run_id: int | None = None
-    lease_token: str | None = None
-    last_event_at: float | None = None
+    def _shutdown_resources(self) -> None:
+        if self.async_runner is not None:
+            self.async_runner.close()
+            self.async_runner = None
 
 
 def build_runner_id(worker_slot: int | None = None, pid: int | None = None) -> str:
@@ -117,24 +136,13 @@ def get_forkserver_context() -> multiprocessing.context.BaseContext:
     return multiprocessing.get_context("forkserver")
 
 
-def _capture_exception_to_sentry(exc: Exception, **tags: object) -> None:
-    if not config.sentry.dsn:
-        return
-
-    with sentry_sdk.push_scope() as scope:
-        for key, value in tags.items():
-            if value is not None:
-                scope.set_tag(key, str(value))
-        sentry_sdk.capture_exception(exc)
-        sentry_sdk.flush(timeout=2.0)
-
-
 def _worker_process_main(
     worker_slot: int,
     assignment_queue,
     result_queue,
 ) -> None:
     with sentry():
+        ignore_sigint_in_worker()
         result_queue.put(WorkerReady(worker_slot=worker_slot, pid=os.getpid()))
         with asyncio.Runner() as runner:
             while True:
@@ -175,7 +183,7 @@ def _worker_process_main(
                         worker_slot,
                         os.getpid(),
                     )
-                    _capture_exception_to_sentry(
+                    capture_exception_to_sentry(
                         exc,
                         source="lecture-video-worker-child",
                         worker_slot=worker_slot,
@@ -205,326 +213,6 @@ def _worker_process_main(
                             lease_token=assignment.lease_token,
                         )
                     )
-
-
-class NarrationWorkerPoolManager:
-    def __init__(
-        self,
-        *,
-        workers: int,
-        poll_interval_seconds: float = DEFAULT_WORKER_POLL_INTERVAL_SECONDS,
-        shutdown_grace_seconds: float = DEFAULT_WORKER_SHUTDOWN_GRACE_SECONDS,
-        process_context: Any | None = None,
-        claim_run_fn: Callable[[str], tuple[int, str] | None] | None = None,
-        recover_run_fn: Callable[[int, str, str], bool] | None = None,
-        sleep_fn: Callable[[float], None] = time.sleep,
-        time_fn: Callable[[], float] = time.monotonic,
-    ) -> None:
-        if workers <= 0:
-            raise ValueError("workers must be greater than 0.")
-        if poll_interval_seconds <= 0:
-            raise ValueError("poll_interval_seconds must be greater than 0.")
-        if shutdown_grace_seconds <= 0:
-            raise ValueError("shutdown_grace_seconds must be greater than 0.")
-
-        self.workers = workers
-        self.poll_interval_seconds = poll_interval_seconds
-        self.shutdown_grace_seconds = shutdown_grace_seconds
-        self.process_context: Any = process_context or get_forkserver_context()
-        self.async_runner: asyncio.Runner | None = None
-        self.claim_run_fn = claim_run_fn or self._claim_next_narration_run_sync
-        self.recover_run_fn = recover_run_fn or self._recover_failed_narration_run_sync
-        self.sleep_fn = sleep_fn
-        self.time_fn = time_fn
-        self.results_queue = self.process_context.Queue()
-        self.stop_requested = False
-        self.worker_slots: dict[int, WorkerSlotState] = {}
-
-    def request_stop(self) -> None:
-        logger.info("Lecture video worker pool stop requested.")
-        self.stop_requested = True
-
-    def start(self) -> None:
-        for worker_slot in range(self.workers):
-            self._spawn_worker(worker_slot)
-
-    def run(self) -> None:
-        self.start()
-        previous_sigterm_handler = signal.getsignal(signal.SIGTERM)
-
-        def _handle_sigterm(_signum, _frame) -> None:
-            self.request_stop()
-
-        signal.signal(signal.SIGTERM, _handle_sigterm)
-        try:
-            while not self.stop_requested:
-                progress = self.run_one_iteration()
-                if self.stop_requested:
-                    break
-                if not progress:
-                    self.sleep_fn(self.poll_interval_seconds)
-        except KeyboardInterrupt:
-            self.request_stop()
-        except Exception as exc:
-            logger.exception("Lecture video worker pool manager failed.")
-            _capture_exception_to_sentry(
-                exc,
-                source="lecture-video-worker-parent",
-                workers=self.workers,
-            )
-            raise
-        finally:
-            signal.signal(signal.SIGTERM, previous_sigterm_handler)
-            self.shutdown()
-
-    def run_one_iteration(self) -> bool:
-        progress = False
-        progress |= self._drain_results_queue()
-        progress |= self._handle_dead_workers()
-        if not self.stop_requested:
-            progress |= self._assign_runs_to_idle_workers()
-        return progress
-
-    def shutdown(self) -> None:
-        deadline = self.time_fn() + self.shutdown_grace_seconds
-
-        for slot in self.worker_slots.values():
-            process = slot.process
-            if getattr(process, "exitcode", None) is None:
-                slot.assignment_queue.put(None)
-
-        for slot in self.worker_slots.values():
-            process = slot.process
-            remaining = max(0.0, deadline - self.time_fn())
-            if hasattr(process, "join"):
-                process.join(timeout=remaining)
-
-        for slot in self.worker_slots.values():
-            process = slot.process
-            if getattr(process, "exitcode", None) is None and hasattr(
-                process, "terminate"
-            ):
-                process.terminate()
-                if hasattr(process, "join"):
-                    process.join(timeout=0.1)
-
-        for slot in self.worker_slots.values():
-            self._close_queue(slot.assignment_queue)
-        self._close_queue(self.results_queue)
-        if self.async_runner is not None:
-            self.async_runner.close()
-            self.async_runner = None
-
-    def _spawn_worker(self, worker_slot: int) -> WorkerSlotState:
-        assignment_queue = self.process_context.Queue()
-        process = self.process_context.Process(
-            target=_worker_process_main,
-            args=(worker_slot, assignment_queue, self.results_queue),
-            daemon=True,
-        )
-        process.start()
-        runner_id = build_runner_id(worker_slot, process.pid)
-        logger.info(
-            "Started lecture video worker process. slot=%s pid=%s runner_id=%s",
-            worker_slot,
-            process.pid,
-            runner_id,
-        )
-        slot = WorkerSlotState(
-            worker_slot=worker_slot,
-            process=process,
-            assignment_queue=assignment_queue,
-            runner_id=runner_id,
-            pid=process.pid,
-            last_event_at=self.time_fn(),
-        )
-        self.worker_slots[worker_slot] = slot
-        return slot
-
-    def _drain_results_queue(self) -> bool:
-        progress = False
-        while True:
-            try:
-                event = self.results_queue.get_nowait()
-            except queue_module.Empty:
-                return progress
-
-            progress = True
-            if isinstance(event, WorkerReady):
-                self._handle_worker_ready(event)
-            elif isinstance(event, WorkerStarted):
-                self._handle_worker_started(event)
-            elif isinstance(event, WorkerCompleted):
-                self._handle_worker_completed(event)
-            elif isinstance(event, WorkerJobException):
-                self._handle_worker_job_exception(event)
-
-    def _handle_worker_ready(self, event: WorkerReady) -> None:
-        slot = self.worker_slots.get(event.worker_slot)
-        if slot is None:
-            return
-        slot.pid = event.pid
-        slot.runner_id = build_runner_id(event.worker_slot, event.pid)
-        slot.last_event_at = self.time_fn()
-        logger.info(
-            "Lecture video worker ready. slot=%s pid=%s runner_id=%s",
-            event.worker_slot,
-            event.pid,
-            slot.runner_id,
-        )
-
-    def _handle_worker_started(self, event: WorkerStarted) -> None:
-        slot = self.worker_slots.get(event.worker_slot)
-        if slot is None:
-            return
-        slot.last_event_at = self.time_fn()
-        logger.info(
-            "Lecture video worker acknowledged run. slot=%s pid=%s run_id=%s",
-            event.worker_slot,
-            slot.pid,
-            event.run_id,
-        )
-
-    def _handle_worker_completed(self, event: WorkerCompleted) -> None:
-        slot = self.worker_slots.get(event.worker_slot)
-        if slot is None:
-            return
-        if slot.run_id != event.run_id or slot.lease_token != event.lease_token:
-            return
-        logger.info(
-            "Lecture video worker finished assigned run. slot=%s pid=%s run_id=%s",
-            event.worker_slot,
-            slot.pid,
-            event.run_id,
-        )
-        self._clear_assignment(slot)
-        slot.last_event_at = self.time_fn()
-
-    def _handle_worker_job_exception(self, event: WorkerJobException) -> None:
-        slot = self.worker_slots.get(event.worker_slot)
-        if slot is None:
-            return
-        if slot.run_id != event.run_id or slot.lease_token != event.lease_token:
-            return
-        logger.error(
-            "Lecture video worker reported job exception. slot=%s pid=%s run_id=%s error=%s",
-            event.worker_slot,
-            slot.pid,
-            event.run_id,
-            event.error_message,
-        )
-        self.recover_run_fn(
-            event.run_id,
-            event.lease_token,
-            event.error_message or UNEXPECTED_WORKER_EXIT_ERROR_MESSAGE,
-        )
-        self._clear_assignment(slot)
-        slot.last_event_at = self.time_fn()
-
-    def _handle_dead_workers(self) -> bool:
-        progress = False
-        for worker_slot, slot in list(self.worker_slots.items()):
-            process = slot.process
-            if getattr(process, "exitcode", None) is None:
-                continue
-
-            progress = True
-            logger.warning(
-                "Lecture video worker exited unexpectedly. slot=%s pid=%s exitcode=%s run_id=%s",
-                worker_slot,
-                slot.pid,
-                process.exitcode,
-                slot.run_id,
-            )
-            self._recover_slot_assignment(
-                slot,
-                error_message=UNEXPECTED_WORKER_EXIT_ERROR_MESSAGE,
-            )
-            self._close_queue(slot.assignment_queue)
-            if hasattr(process, "join"):
-                process.join(timeout=0)
-            if self.stop_requested:
-                continue
-            self._spawn_worker(worker_slot)
-        return progress
-
-    def _assign_runs_to_idle_workers(self) -> bool:
-        progress = False
-        for worker_slot in sorted(self.worker_slots):
-            slot = self.worker_slots[worker_slot]
-            if not slot.idle or getattr(slot.process, "exitcode", None) is not None:
-                continue
-
-            claim = self.claim_run_fn(slot.runner_id)
-            if claim is None:
-                break
-
-            run_id, lease_token = claim
-            logger.info(
-                "Assigning lecture video run to worker. slot=%s pid=%s runner_id=%s run_id=%s",
-                worker_slot,
-                slot.pid,
-                slot.runner_id,
-                run_id,
-            )
-            slot.run_id = run_id
-            slot.lease_token = lease_token
-            slot.idle = False
-            slot.last_event_at = self.time_fn()
-            slot.assignment_queue.put(
-                RunAssignment(run_id=run_id, lease_token=lease_token)
-            )
-            progress = True
-
-        return progress
-
-    def _recover_slot_assignment(
-        self,
-        slot: WorkerSlotState,
-        *,
-        error_message: str,
-    ) -> None:
-        if slot.run_id is None or slot.lease_token is None:
-            return
-        self.recover_run_fn(slot.run_id, slot.lease_token, error_message)
-        self._clear_assignment(slot)
-
-    def _clear_assignment(self, slot: WorkerSlotState) -> None:
-        slot.idle = True
-        slot.run_id = None
-        slot.lease_token = None
-
-    def _ensure_async_runner(self) -> asyncio.Runner:
-        if self.async_runner is None:
-            self.async_runner = asyncio.Runner()
-        return self.async_runner
-
-    def _claim_next_narration_run_sync(self, runner_id: str) -> tuple[int, str] | None:
-        return self._ensure_async_runner().run(
-            _claim_next_narration_run(leased_by=runner_id)
-        )
-
-    def _recover_failed_narration_run_sync(
-        self,
-        run_id: int,
-        lease_token: str,
-        error_message: str,
-    ) -> bool:
-        return self._ensure_async_runner().run(
-            recover_failed_narration_run(
-                run_id,
-                lease_token,
-                error_message=error_message,
-            )
-        )
-
-    def _close_queue(self, queue_obj: object) -> None:
-        close_fn = getattr(queue_obj, "close", None)
-        if callable(close_fn):
-            close_fn()
-        join_thread_fn = getattr(queue_obj, "join_thread", None)
-        if callable(join_thread_fn):
-            join_thread_fn()
 
 
 def run_narration_processing_worker_pool(

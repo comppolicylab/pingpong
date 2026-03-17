@@ -1,5 +1,6 @@
 import importlib
 import io
+import logging
 import queue as queue_module
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
@@ -3722,6 +3723,86 @@ def test_build_runner_id_uses_worker_slot_and_pid():
     assert runner_id.endswith(":4242:worker-3")
     assert fallback_runner_id.endswith(":7:worker-4")
     assert runner_id != fallback_runner_id
+
+
+def test_worker_process_main_ignores_sigint_before_waiting_for_assignments(
+    monkeypatch,
+):
+    fake_assignment_queue = FakeQueue()
+    fake_result_queue = FakeQueue()
+    fake_assignment_queue.put(None)
+    seen: dict[str, bool] = {}
+
+    @contextmanager
+    def fake_sentry():
+        yield
+
+    monkeypatch.setattr(lecture_video_processing, "sentry", fake_sentry)
+    monkeypatch.setattr(
+        lecture_video_processing,
+        "ignore_sigint_in_worker",
+        lambda: seen.setdefault("ignored", True),
+    )
+    monkeypatch.setattr(lecture_video_processing.os, "getpid", lambda: 4242)
+
+    lecture_video_processing._worker_process_main(
+        2,
+        fake_assignment_queue,
+        fake_result_queue,
+    )
+
+    assert seen == {"ignored": True}
+    assert fake_result_queue.puts == [
+        lecture_video_processing.WorkerReady(worker_slot=2, pid=4242)
+    ]
+
+
+def test_worker_pool_manager_uses_generic_labels_and_recovery(caplog):
+    fake_context = FakeProcessContext()
+    recoveries: list[tuple[int, str, str]] = []
+    claims = iter([(41, "lease-41"), None])
+
+    manager = lecture_video_processing.WorkerPoolManager(
+        workers=1,
+        worker_target=lambda *_args: None,
+        process_context=fake_context,
+        claim_run_fn=lambda _runner_id: next(claims),
+        recover_run_fn=lambda run_id, lease_token, error_message: recoveries.append(
+            (run_id, lease_token, error_message)
+        )
+        or True,
+        build_runner_id_fn=lambda worker_slot, pid: f"custom:{worker_slot}:{pid}",
+        worker_label="custom worker",
+        unexpected_exit_error_message="custom exit",
+        poll_interval_seconds=0.25,
+    )
+
+    with caplog.at_level(logging.INFO):
+        manager.start()
+        progress = manager.run_one_iteration()
+        manager.results_queue.put(
+            lecture_video_processing.WorkerJobException(
+                worker_slot=0,
+                run_id=41,
+                lease_token="lease-41",
+                error_message="",
+            )
+        )
+        recovery_progress = manager.run_one_iteration()
+
+    assert progress is True
+    assert recovery_progress is True
+    assert isinstance(
+        manager.worker_slots[0].assignment_queue.puts[0],
+        lecture_video_processing.RunAssignment,
+    )
+    assert recoveries == [(41, "lease-41", "custom exit")]
+    assert manager.worker_slots[0].idle is True
+    assert manager.worker_slots[0].run_id is None
+    assert manager.worker_slots[0].lease_token is None
+    assert "Started custom worker process." in caplog.text
+    assert "Custom worker reported job exception." in caplog.text
+    assert "Lecture video worker" not in caplog.text
 
 
 def test_narration_worker_pool_manager_assigns_runs_to_idle_workers():
