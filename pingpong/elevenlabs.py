@@ -1,9 +1,10 @@
-import asyncio
 import logging
 import ssl
 
+import httpx
 from elevenlabs.client import AsyncElevenLabs
 from elevenlabs.core.api_error import ApiError as ElevenLabsApiError
+from elevenlabs.core.request_options import RequestOptions
 from elevenlabs.errors import (
     BadRequestError as ElevenLabsBadRequestError,
     NotFoundError as ElevenLabsNotFoundError,
@@ -63,32 +64,52 @@ async def synthesize_elevenlabs_voice_sample(
     api_key: str,
     voice_id: str,
 ) -> tuple[str, str, bytes]:
+    try:
+        content_type, audio = await synthesize_elevenlabs_speech(
+            api_key,
+            voice_id,
+            ELEVENLABS_VOICE_VALIDATION_SAMPLE_TEXT,
+            timeout_seconds=15,
+        )
+    except ClassCredentialValidationSSLError as exc:
+        raise ClassCredentialValidationSSLError(
+            provider=schemas.ClassCredentialProvider.ELEVENLABS,
+            message="Unable to validate the ElevenLabs voice due to an SSL error.",
+        ) from exc
+    except ClassCredentialValidationUnavailableError as exc:
+        raise ClassCredentialValidationUnavailableError(
+            provider=schemas.ClassCredentialProvider.ELEVENLABS,
+            message="Unable to validate the ElevenLabs voice right now.",
+        ) from exc
+    return (
+        ELEVENLABS_VOICE_VALIDATION_SAMPLE_TEXT,
+        content_type,
+        audio,
+    )
+
+
+async def synthesize_elevenlabs_speech(
+    api_key: str,
+    voice_id: str,
+    text: str,
+    *,
+    timeout_seconds: int | None = None,
+) -> tuple[str, bytes]:
     safe_voice_id = sanitize_for_log(voice_id)
     try:
         client = get_elevenlabs_client(api_key)
-        audio = await asyncio.wait_for(
-            _collect_audio_chunks(
-                client.text_to_speech.convert(
-                    voice_id=voice_id,
-                    text=ELEVENLABS_VOICE_VALIDATION_SAMPLE_TEXT,
-                    output_format=ELEVENLABS_VOICE_VALIDATION_OUTPUT_FORMAT,
-                )
-            ),
-            15,
+        request_options = (
+            RequestOptions(timeout_in_seconds=timeout_seconds)
+            if timeout_seconds is not None
+            else None
         )
-        if not audio:
-            logger.warning(
-                "ElevenLabs voice validation returned empty audio. voice_id=%s",
-                safe_voice_id,
-            )
-            raise ClassCredentialValidationUnavailableError(
-                provider=schemas.ClassCredentialProvider.ELEVENLABS,
-                message="Unable to validate the ElevenLabs voice right now.",
-            )
-        return (
-            ELEVENLABS_VOICE_VALIDATION_SAMPLE_TEXT,
-            ELEVENLABS_VOICE_VALIDATION_CONTENT_TYPE,
-            audio,
+        audio = await _collect_audio_chunks(
+            client.text_to_speech.convert(
+                voice_id=voice_id,
+                text=text,
+                output_format=ELEVENLABS_VOICE_VALIDATION_OUTPUT_FORMAT,
+                request_options=request_options,
+            ),
         )
     except (
         ElevenLabsBadRequestError,
@@ -105,38 +126,38 @@ async def synthesize_elevenlabs_voice_sample(
         ) from exc
     except ElevenLabsUnauthorizedError as exc:
         logger.warning(
-            "ElevenLabs voice validation failed due to credential error. voice_id=%s",
+            "ElevenLabs speech synthesis failed due to credential error. voice_id=%s",
             safe_voice_id,
             exc_info=exc,
         )
         raise ClassCredentialValidationUnavailableError(
             provider=schemas.ClassCredentialProvider.ELEVENLABS,
-            message="Unable to validate the ElevenLabs voice right now.",
+            message="Unable to generate the ElevenLabs audio right now.",
         ) from exc
-    except TimeoutError as exc:
+    except (httpx.TimeoutException, TimeoutError) as exc:
         logger.warning(
-            "Timed out validating ElevenLabs voice_id=%s.",
+            "Timed out generating ElevenLabs audio for voice_id=%s.",
             safe_voice_id,
             exc_info=exc,
         )
         raise ClassCredentialValidationUnavailableError(
             provider=schemas.ClassCredentialProvider.ELEVENLABS,
-            message="Unable to validate the ElevenLabs voice right now.",
+            message="Unable to generate the ElevenLabs audio right now.",
         ) from exc
     except ssl.SSLError as exc:
         logger.warning(
-            "SSL error validating ElevenLabs voice_id=%s.",
+            "SSL error generating ElevenLabs audio for voice_id=%s.",
             safe_voice_id,
             exc_info=exc,
         )
         raise ClassCredentialValidationSSLError(
             provider=schemas.ClassCredentialProvider.ELEVENLABS,
-            message="Unable to validate the ElevenLabs voice due to an SSL error.",
+            message="Unable to generate the ElevenLabs audio due to an SSL error.",
         ) from exc
     except ElevenLabsApiError as exc:
         if _is_invalid_elevenlabs_voice_error(exc):
             logger.info(
-                "ElevenLabs voice validation rejected voice_id=%s",
+                "ElevenLabs speech synthesis rejected voice_id=%s",
                 safe_voice_id,
                 exc_info=exc,
             )
@@ -144,50 +165,61 @@ async def synthesize_elevenlabs_voice_sample(
                 "Invalid voice ID provided. Please choose a different voice."
             ) from exc
         logger.warning(
-            "Failed to validate ElevenLabs voice_id=%s due to provider API error.",
+            "Failed to generate ElevenLabs audio for voice_id=%s due to provider API error.",
             safe_voice_id,
             exc_info=exc,
         )
         raise ClassCredentialValidationUnavailableError(
             provider=schemas.ClassCredentialProvider.ELEVENLABS,
-            message="Unable to validate the ElevenLabs voice right now.",
+            message="Unable to generate the ElevenLabs audio right now.",
         ) from exc
     except ValueError as exc:
         logger.warning(
-            "ElevenLabs voice validation failed due to credential error. voice_id=%s",
+            "ElevenLabs speech synthesis failed due to credential error. voice_id=%s",
             safe_voice_id,
             exc_info=exc,
         )
         raise ClassCredentialValidationUnavailableError(
             provider=schemas.ClassCredentialProvider.ELEVENLABS,
-            message="Unable to validate the ElevenLabs voice right now.",
+            message="Unable to generate the ElevenLabs audio right now.",
         ) from exc
-    except ClassCredentialValidationUnavailableError:
-        # Preserve the original unavailable error instead of wrapping it again below.
-        raise
     except Exception as exc:
         logger.warning(
-            "Failed to validate ElevenLabs voice_id=%s due to provider error.",
+            "Failed to generate ElevenLabs audio for voice_id=%s due to provider error.",
             safe_voice_id,
             exc_info=exc,
         )
         raise ClassCredentialValidationUnavailableError(
             provider=schemas.ClassCredentialProvider.ELEVENLABS,
-            message="Unable to validate the ElevenLabs voice right now.",
+            message="Unable to generate the ElevenLabs audio right now.",
         ) from exc
+
+    if not audio:
+        logger.warning(
+            "ElevenLabs speech synthesis returned empty audio. voice_id=%s",
+            safe_voice_id,
+        )
+        raise ClassCredentialValidationUnavailableError(
+            provider=schemas.ClassCredentialProvider.ELEVENLABS,
+            message="Unable to generate the ElevenLabs audio right now.",
+        )
+
+    return (ELEVENLABS_VOICE_VALIDATION_CONTENT_TYPE, audio)
 
 
 async def validate_elevenlabs_api_key(api_key: str) -> bool:
     safe_provider = sanitize_for_log(schemas.ClassCredentialProvider.ELEVENLABS.value)
     try:
         client = get_elevenlabs_client(api_key)
-        await asyncio.wait_for(client.voices.settings.get_default(), 10)
+        await client.voices.settings.get_default(
+            request_options=RequestOptions(timeout_in_seconds=10)
+        )
         return True
     except ValueError:
         return False
     except ElevenLabsUnauthorizedError:
         return False
-    except TimeoutError as exc:
+    except (httpx.TimeoutException, TimeoutError) as exc:
         logger.warning(
             "Timed out validating %s class credential.",
             safe_provider,

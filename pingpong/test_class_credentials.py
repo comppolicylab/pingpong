@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock
 
+import httpx
 from elevenlabs.core.api_error import ApiError as ElevenLabsApiError
 import pytest
 from sqlalchemy import func, select
@@ -854,7 +855,7 @@ async def test_validate_class_credential_for_gemini_raises_unavailable_for_non_a
 async def test_synthesize_elevenlabs_voice_sample_maps_generic_voice_not_found_api_error(
     monkeypatch,
 ):
-    def fake_convert(*, voice_id, text, output_format):
+    def fake_convert(*, voice_id, text, output_format, request_options=None):
         raise ElevenLabsApiError(
             status_code=404,
             body={
@@ -889,10 +890,11 @@ async def test_synthesize_elevenlabs_voice_sample_requests_direct_ogg_opus(monke
     async def fake_collect_audio_chunks(_audio_stream) -> bytes:
         return b"ogg-audio"
 
-    def fake_convert(*, voice_id, text, output_format):
+    def fake_convert(*, voice_id, text, output_format, request_options=None):
         seen["voice_id"] = voice_id
         seen["text"] = text
         seen["output_format"] = output_format
+        seen["request_options"] = request_options
         return object()
 
     class FakeClient:
@@ -919,8 +921,76 @@ async def test_synthesize_elevenlabs_voice_sample_requests_direct_ogg_opus(monke
         "voice_id": "voice-123",
         "text": elevenlabs_module.ELEVENLABS_VOICE_VALIDATION_SAMPLE_TEXT,
         "output_format": "opus_48000_32",
+        "request_options": {"timeout_in_seconds": 15},
     }
     assert sample_text == elevenlabs_module.ELEVENLABS_VOICE_VALIDATION_SAMPLE_TEXT
+    assert content_type == "audio/ogg"
+    assert audio == b"ogg-audio"
+
+
+async def test_synthesize_elevenlabs_voice_sample_maps_httpx_timeout_to_unavailable(
+    monkeypatch,
+):
+    def fake_convert(*, voice_id, text, output_format, request_options=None):
+        assert request_options == {"timeout_in_seconds": 15}
+        raise httpx.ReadTimeout("timed out")
+
+    class FakeClient:
+        def __init__(self, *, api_key):
+            self.text_to_speech = SimpleNamespace(convert=fake_convert)
+
+    monkeypatch.setattr(elevenlabs_module, "AsyncElevenLabs", FakeClient)
+
+    with pytest.raises(
+        ClassCredentialValidationUnavailableError,
+        match="Unable to validate the ElevenLabs voice right now.",
+    ) as exc_info:
+        await elevenlabs_module.synthesize_elevenlabs_voice_sample(
+            api_key="elevenlabs-key",
+            voice_id="voice-123",
+        )
+
+    assert exc_info.value.provider == schemas.ClassCredentialProvider.ELEVENLABS
+
+
+async def test_synthesize_elevenlabs_speech_omits_request_options_without_timeout(
+    monkeypatch,
+):
+    seen: dict[str, object] = {}
+
+    async def fake_collect_audio_chunks(_audio_stream) -> bytes:
+        return b"ogg-audio"
+
+    def fake_convert(*, voice_id, text, output_format, request_options=None):
+        seen["voice_id"] = voice_id
+        seen["text"] = text
+        seen["output_format"] = output_format
+        seen["request_options"] = request_options
+        return object()
+
+    class FakeClient:
+        def __init__(self, *, api_key):
+            seen["api_key"] = api_key
+            self.text_to_speech = SimpleNamespace(convert=fake_convert)
+
+    monkeypatch.setattr(elevenlabs_module, "AsyncElevenLabs", FakeClient)
+    monkeypatch.setattr(
+        elevenlabs_module, "_collect_audio_chunks", fake_collect_audio_chunks
+    )
+
+    content_type, audio = await elevenlabs_module.synthesize_elevenlabs_speech(
+        api_key="elevenlabs-key",
+        voice_id="voice-123",
+        text="Narration text",
+    )
+
+    assert seen == {
+        "api_key": "elevenlabs-key",
+        "voice_id": "voice-123",
+        "text": "Narration text",
+        "output_format": "opus_48000_32",
+        "request_options": None,
+    }
     assert content_type == "audio/ogg"
     assert audio == b"ogg-audio"
 
