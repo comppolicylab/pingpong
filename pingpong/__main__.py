@@ -26,6 +26,7 @@ from pingpong.api_keys import (
     set_as_default_oai_api_key,
     transfer_api_keys,
 )
+from pingpong.errors import sentry
 from pingpong.merge import (
     get_merged_user_tuples,
     list_all_permissions,
@@ -1446,7 +1447,7 @@ def run_dynamic_tasks_with_args(host: str, port: int, tasks: list[str]) -> None:
         await asyncio.gather(*task_coroutines)
 
     # Run the Uvicorn server in the background
-    with server.run_in_thread():
+    with sentry(), server.run_in_thread():
         asyncio.run(_parse_tasks())
 
 
