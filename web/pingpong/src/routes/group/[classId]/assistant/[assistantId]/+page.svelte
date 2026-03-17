@@ -16,7 +16,8 @@
 		ButtonGroup,
 		RadioButton,
 		InputAddon,
-		Tooltip
+		Tooltip,
+		Spinner
 	} from 'flowbite-svelte';
 	import type {
 		Tool,
@@ -207,8 +208,10 @@
 	let currentLectureVideo: api.LectureVideoSummary | null =
 		data.lectureVideoConfig?.lecture_video || null;
 	let selectedLectureVideo: api.LectureVideoSummary | null = currentLectureVideo;
+	let lectureVideoStatusPollTimer: ReturnType<typeof setInterval> | null = null;
 	let lectureVideoDraftIds = new SvelteSet<number>();
 	let uploadingLectureVideo = false;
+	let refreshingLectureVideoStatus = false;
 	let lectureVideoManifestJson = '';
 	let hasSetLectureVideoManifest = false;
 	let currentVoiceId = data.lectureVideoConfig?.voice_id || '';
@@ -236,6 +239,9 @@
 	onDestroy(() => {
 		for (const sample of Object.values(voiceSampleCache)) {
 			revokeVoiceSampleAudioSrc(sample.audioSrc);
+		}
+		if (lectureVideoStatusPollTimer !== null) {
+			clearInterval(lectureVideoStatusPollTimer);
 		}
 	});
 	let currentLectureVideoManifestNormalized = '';
@@ -1638,6 +1644,59 @@
 		target.value = '';
 	};
 
+	const syncLectureVideoSummary = (summary: api.LectureVideoSummary) => {
+		currentLectureVideo = { ...(currentLectureVideo || summary), ...summary };
+		if (selectedLectureVideo?.id === summary.id) {
+			selectedLectureVideo = { ...selectedLectureVideo, ...summary };
+		}
+	};
+
+	const refreshAssistantLectureVideoStatus = async () => {
+		if (
+			data.isCreating ||
+			!data.assistantId ||
+			!currentLectureVideo ||
+			refreshingLectureVideoStatus
+		) {
+			return;
+		}
+
+		refreshingLectureVideoStatus = true;
+		try {
+			const response = await api.getAssistantLectureVideoConfig(
+				fetch,
+				data.class.id,
+				data.assistantId
+			);
+			const expanded = api.expandResponse(response);
+			if (expanded.error || !expanded.data?.lecture_video) {
+				return;
+			}
+
+			syncLectureVideoSummary(expanded.data.lecture_video);
+		} finally {
+			refreshingLectureVideoStatus = false;
+		}
+	};
+
+	const retryLectureVideoProcessing = async () => {
+		if (data.isCreating || !data.assistantId || !currentLectureVideo) {
+			return;
+		}
+
+		const response = await api.retryAssistantLectureVideo(fetch, data.class.id, data.assistantId);
+		const expanded = api.expandResponse(response);
+		if (expanded.error || !expanded.data) {
+			sadToast(
+				`Could not retry lecture video processing:\n${expanded.error?.detail || 'Unknown error'}`
+			);
+			return;
+		}
+
+		syncLectureVideoSummary(expanded.data);
+		happyToast('Lecture video processing retried');
+	};
+
 	const validateLectureVideoVoice = async () => {
 		const trimmedVoiceId = voiceId.trim();
 		if (!trimmedVoiceId) {
@@ -1679,6 +1738,30 @@
 			validatingVoiceId = false;
 		}
 	};
+
+	$: shouldPollCurrentLectureVideoStatus =
+		!data.isCreating &&
+		!!data.assistantId &&
+		currentLectureVideo?.status === 'processing' &&
+		selectedLectureVideo?.id === currentLectureVideo.id;
+	$: {
+		if (
+			typeof window !== 'undefined' &&
+			shouldPollCurrentLectureVideoStatus &&
+			lectureVideoStatusPollTimer === null
+		) {
+			lectureVideoStatusPollTimer = setInterval(() => {
+				void refreshAssistantLectureVideoStatus();
+			}, 5000);
+		} else if (
+			typeof window !== 'undefined' &&
+			!shouldPollCurrentLectureVideoStatus &&
+			lectureVideoStatusPollTimer !== null
+		) {
+			clearInterval(lectureVideoStatusPollTimer);
+			lectureVideoStatusPollTimer = null;
+		}
+	}
 
 	let showAssistantInstructionsPreview = false;
 	let instructionsPreview = '';
@@ -2305,25 +2388,37 @@
 								{#if selectedLectureVideo.error_message}
 									<div class="text-xs text-red-600">{selectedLectureVideo.error_message}</div>
 								{:else}
-									<div class="text-xs text-gray-500">
+									<div class="inline-flex items-center gap-1 text-xs text-gray-500">
 										{selectedLectureVideo.status.charAt(0).toUpperCase() +
 											selectedLectureVideo.status.slice(1)}
+										{#if refreshingLectureVideoStatus && selectedLectureVideo.status === 'processing'}
+											<Spinner color="gray" class="h-3 w-3" />
+										{/if}
 									</div>
 								{/if}
 							</div>
 						</div>
-						{#if canUploadLectureVideo}
-							<label
-								class="cursor-pointer rounded-lg px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-200"
-							>
-								Replace
-								<input
-									type="file"
-									accept="video/*"
-									class="hidden"
-									onchange={handleLectureVideoFileChange}
-								/>
-							</label>
+						{#if canUploadLectureVideo || (!data.isCreating && data.assistantId && currentLectureVideo && selectedLectureVideo?.id === currentLectureVideo.id && currentLectureVideo.status === 'failed')}
+							<div class="flex items-center gap-2">
+								{#if !data.isCreating && data.assistantId && currentLectureVideo && selectedLectureVideo?.id === currentLectureVideo.id && currentLectureVideo.status === 'failed'}
+									<Button color="light" size="xs" onclick={retryLectureVideoProcessing}>
+										Retry
+									</Button>
+								{/if}
+								{#if canUploadLectureVideo}
+									<label
+										class="cursor-pointer rounded-lg px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-200"
+									>
+										Replace
+										<input
+											type="file"
+											accept="video/*"
+											class="hidden"
+											onchange={handleLectureVideoFileChange}
+										/>
+									</label>
+								{/if}
+							</div>
 						{/if}
 					</div>
 				{:else}
