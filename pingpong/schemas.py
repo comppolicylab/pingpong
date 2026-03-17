@@ -441,6 +441,24 @@ class LectureVideoNarrationStatus(StrEnum):
     FAILED = "failed"
 
 
+class LectureVideoProcessingStage(StrEnum):
+    NARRATION = "narration"
+
+
+class LectureVideoProcessingRunStatus(StrEnum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class LectureVideoProcessingCancelReason(StrEnum):
+    ASSISTANT_DETACHED = "assistant_detached"
+    ASSISTANT_DELETED = "assistant_deleted"
+    LECTURE_VIDEO_DELETED = "lecture_video_deleted"
+
+
 class LectureVideoSessionState(StrEnum):
     PLAYING = "playing"
     AWAITING_ANSWER = "awaiting_answer"
