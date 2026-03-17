@@ -56,7 +56,8 @@
 		ClapperboardPlaySolid,
 		ClapperboardPlayOutline,
 		CheckCircleOutline,
-		ExclamationCircleOutline
+		ExclamationCircleOutline,
+		RefreshOutline
 	} from 'flowbite-svelte-icons';
 	import MultiSelectWithUpload from '$lib/components/MultiSelectWithUpload.svelte';
 	import { writable, type Writable } from 'svelte/store';
@@ -208,10 +209,10 @@
 	let currentLectureVideo: api.LectureVideoSummary | null =
 		data.lectureVideoConfig?.lecture_video || null;
 	let selectedLectureVideo: api.LectureVideoSummary | null = currentLectureVideo;
-	let lectureVideoStatusPollTimer: ReturnType<typeof setInterval> | null = null;
 	let lectureVideoDraftIds = new SvelteSet<number>();
 	let uploadingLectureVideo = false;
 	let refreshingLectureVideoStatus = false;
+	let canRefreshCurrentLectureVideoStatus = false;
 	let lectureVideoManifestJson = '';
 	let hasSetLectureVideoManifest = false;
 	let currentVoiceId = data.lectureVideoConfig?.voice_id || '';
@@ -239,9 +240,6 @@
 	onDestroy(() => {
 		for (const sample of Object.values(voiceSampleCache)) {
 			revokeVoiceSampleAudioSrc(sample.audioSrc);
-		}
-		if (lectureVideoStatusPollTimer !== null) {
-			clearInterval(lectureVideoStatusPollTimer);
 		}
 	});
 	let currentLectureVideoManifestNormalized = '';
@@ -1650,6 +1648,11 @@
 			selectedLectureVideo = { ...selectedLectureVideo, ...summary };
 		}
 	};
+	$: canRefreshCurrentLectureVideoStatus =
+		!data.isCreating &&
+		!!data.assistantId &&
+		!!currentLectureVideo &&
+		selectedLectureVideo?.id === currentLectureVideo.id;
 
 	const refreshAssistantLectureVideoStatus = async () => {
 		if (
@@ -1670,6 +1673,9 @@
 			);
 			const expanded = api.expandResponse(response);
 			if (expanded.error || !expanded.data?.lecture_video) {
+				sadToast(
+					`Could not refresh lecture video status:\n${expanded.error?.detail || 'Unknown error'}`
+				);
 				return;
 			}
 
@@ -1738,30 +1744,6 @@
 			validatingVoiceId = false;
 		}
 	};
-
-	$: shouldPollCurrentLectureVideoStatus =
-		!data.isCreating &&
-		!!data.assistantId &&
-		currentLectureVideo?.status === 'processing' &&
-		selectedLectureVideo?.id === currentLectureVideo.id;
-	$: {
-		if (
-			typeof window !== 'undefined' &&
-			shouldPollCurrentLectureVideoStatus &&
-			lectureVideoStatusPollTimer === null
-		) {
-			lectureVideoStatusPollTimer = setInterval(() => {
-				void refreshAssistantLectureVideoStatus();
-			}, 5000);
-		} else if (
-			typeof window !== 'undefined' &&
-			!shouldPollCurrentLectureVideoStatus &&
-			lectureVideoStatusPollTimer !== null
-		) {
-			clearInterval(lectureVideoStatusPollTimer);
-			lectureVideoStatusPollTimer = null;
-		}
-	}
 
 	let showAssistantInstructionsPreview = false;
 	let instructionsPreview = '';
@@ -2391,8 +2373,21 @@
 									<div class="inline-flex items-center gap-1 text-xs text-gray-500">
 										{selectedLectureVideo.status.charAt(0).toUpperCase() +
 											selectedLectureVideo.status.slice(1)}
-										{#if refreshingLectureVideoStatus && selectedLectureVideo.status === 'processing'}
-											<Spinner color="gray" class="h-3 w-3" />
+										{#if canRefreshCurrentLectureVideoStatus}
+											<button
+												type="button"
+												class="rounded-full p-0.5 text-gray-500 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+												onclick={() => void refreshAssistantLectureVideoStatus()}
+												disabled={refreshingLectureVideoStatus}
+												aria-label="Refresh lecture video status"
+												title="Refresh lecture video status"
+											>
+												{#if refreshingLectureVideoStatus}
+													<Spinner color="gray" class="h-3 w-3" />
+												{:else}
+													<RefreshOutline class="h-3 w-3" />
+												{/if}
+											</button>
 										{/if}
 									</div>
 								{/if}

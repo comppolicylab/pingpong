@@ -3683,6 +3683,29 @@ async def test_process_claimed_narration_run_marks_failed_on_provider_error(
     assert narrations[2].status == schemas.LectureVideoNarrationStatus.PENDING
 
 
+async def test_process_claimed_narration_run_raises_type_error_for_unexpected_work_item(
+    monkeypatch,
+):
+    prepare_next_work_item = AsyncMock(return_value=("work", object()))
+    synthesize = AsyncMock()
+
+    monkeypatch.setattr(
+        lecture_video_processing,
+        "_prepare_next_work_item",
+        prepare_next_work_item,
+    )
+    monkeypatch.setattr(
+        lecture_video_processing,
+        "synthesize_elevenlabs_speech",
+        synthesize,
+    )
+
+    with pytest.raises(TypeError, match="Expected NarrationWorkItem, got object"):
+        await lecture_video_processing._process_claimed_narration_run(1, "lease-token")
+
+    synthesize.assert_not_awaited()
+
+
 def test_get_forkserver_context_requires_forkserver(monkeypatch):
     monkeypatch.setattr(
         lecture_video_processing.multiprocessing,
@@ -3755,6 +3778,33 @@ def test_worker_process_main_ignores_sigint_before_waiting_for_assignments(
     assert fake_result_queue.puts == [
         lecture_video_processing.WorkerReady(worker_slot=2, pid=4242)
     ]
+
+
+def test_worker_process_main_raises_type_error_for_unexpected_assignment(
+    monkeypatch,
+):
+    fake_assignment_queue = FakeQueue()
+    fake_result_queue = FakeQueue()
+    fake_assignment_queue.put(object())
+
+    @contextmanager
+    def fake_sentry():
+        yield
+
+    monkeypatch.setattr(lecture_video_processing, "sentry", fake_sentry)
+    monkeypatch.setattr(
+        lecture_video_processing,
+        "ignore_sigint_in_worker",
+        lambda: None,
+    )
+    monkeypatch.setattr(lecture_video_processing.os, "getpid", lambda: 4242)
+
+    with pytest.raises(TypeError, match="Expected RunAssignment, got object"):
+        lecture_video_processing._worker_process_main(
+            2,
+            fake_assignment_queue,
+            fake_result_queue,
+        )
 
 
 def test_worker_pool_manager_uses_generic_labels_and_recovery(caplog):

@@ -673,7 +673,7 @@ async def persist_manifest(
 
     lecture_video.status = (
         schemas.LectureVideoStatus.PROCESSING
-        if narration_placeholders_created and create_narration_placeholders
+        if narration_placeholders_created
         else schemas.LectureVideoStatus.READY
     )
     lecture_video.error_message = None

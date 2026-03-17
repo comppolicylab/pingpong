@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
+	import * as api from '$lib/api';
 	import type { Assistant } from '$lib/api';
 	import ViewAssistant from '$lib/components/ViewAssistant.svelte';
 	import {
@@ -31,7 +32,6 @@
 	import { happyToast, sadToast } from '$lib/toast';
 	import { copy } from 'svelte-copy';
 	import { loading, loadingMessage } from '$lib/stores/general';
-	import * as api from '$lib/api';
 	import { invalidateAll } from '$app/navigation';
 	import {
 		checkCopyPermission as sharedCheckCopyPermission,
@@ -40,11 +40,11 @@
 		performCopyAssistant,
 		performDeleteAssistant
 	} from '$lib/assistantHelpers';
-	import { onDestroy } from 'svelte';
 
 	export let data;
 
 	$: hasApiKey = !!data?.hasAPIKey;
+	let creators: api.AssistantCreators = {};
 	$: creators = data?.assistantCreators || {};
 	$: moderators = data?.supervisors || [];
 	// "Course" assistants are endorsed by the class. Right now this means
@@ -65,10 +65,8 @@
 	let copyPermissionAllowed: Record<number, boolean> = {};
 	let copyPermissionLoading: Record<number, boolean> = {};
 	let copyPermissionError: Record<number, string> = {};
-	let lectureVideoStatusPollTimer: ReturnType<typeof setInterval> | null = null;
-	let assistants: Assistant[] = data?.assistants || [];
-	let lectureVideoRefreshingIds = new Set<number>();
-	let refreshingLectureVideoAssistants = false;
+	let assistants: Assistant[] = [];
+	let lectureVideoRefreshingIds: number[] = [];
 	const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
 	const classOptions = (data.classes || []).map((c) => ({
 		id: c.id,
@@ -203,32 +201,34 @@
 		updateCopyTarget(assistantId, value);
 		void checkCopyPermission(assistantId, value);
 	};
-	const refreshLectureVideoAssistants = async () => {
-		if (refreshingLectureVideoAssistants) {
+	const sortAssistantsByName = (items: Assistant[]) =>
+		[...items].sort((a, b) => a.name.localeCompare(b.name));
+
+	const refreshLectureVideoAssistant = async (assistantId: number) => {
+		if (lectureVideoRefreshingIds.includes(assistantId)) {
 			return;
 		}
 
-		const processingAssistantIds = assistants
-			.filter((assistant: Assistant) => assistant.lecture_video?.status === 'processing')
-			.map((assistant: Assistant) => assistant.id);
-
-		if (processingAssistantIds.length === 0) {
-			lectureVideoRefreshingIds = new Set();
+		const assistant = assistants.find((candidate) => candidate.id === assistantId);
+		if (!assistant?.lecture_video) {
 			return;
 		}
 
-		lectureVideoRefreshingIds = new Set(processingAssistantIds);
-		refreshingLectureVideoAssistants = true;
+		lectureVideoRefreshingIds = [...lectureVideoRefreshingIds, assistantId];
 		try {
 			const response = await api.getAssistants(fetch, data.class.id);
 			const expanded = api.expandResponse(response);
-			if (expanded.error) {
+			if (expanded.error || !expanded.data) {
+				sadToast(
+					`Could not refresh lecture video status:\n${expanded.error?.detail || 'Unknown error'}`
+				);
 				return;
 			}
-			assistants = expanded.data.assistants.sort((a, b) => a.name.localeCompare(b.name));
+
+			assistants = sortAssistantsByName(expanded.data.assistants);
+			creators = expanded.data.creators;
 		} finally {
-			refreshingLectureVideoAssistants = false;
-			lectureVideoRefreshingIds = new Set();
+			lectureVideoRefreshingIds = lectureVideoRefreshingIds.filter((id) => id !== assistantId);
 		}
 	};
 	$: assistants = data?.assistants || [];
@@ -243,32 +243,6 @@
 			(assistant) => assistant.creator_id !== data.me.user!.id && !assistant.endorsed
 		);
 	}
-	$: hasProcessingLectureVideoAssistant = (assistants || []).some(
-		(assistant: Assistant) => assistant.lecture_video?.status === 'processing'
-	);
-	$: {
-		if (
-			typeof window !== 'undefined' &&
-			hasProcessingLectureVideoAssistant &&
-			lectureVideoStatusPollTimer === null
-		) {
-			lectureVideoStatusPollTimer = setInterval(() => {
-				void refreshLectureVideoAssistants();
-			}, 5000);
-		} else if (
-			typeof window !== 'undefined' &&
-			!hasProcessingLectureVideoAssistant &&
-			lectureVideoStatusPollTimer !== null
-		) {
-			clearInterval(lectureVideoStatusPollTimer);
-			lectureVideoStatusPollTimer = null;
-		}
-	}
-	onDestroy(() => {
-		if (lectureVideoStatusPollTimer !== null) {
-			clearInterval(lectureVideoStatusPollTimer);
-		}
-	});
 </script>
 
 <div class="w-full p-12 pt-6">
@@ -307,7 +281,8 @@
 					creator={creators[assistant.creator_id]}
 					editable={data.editableAssistants.has(assistant.id)}
 					currentClassId={data.class.id}
-					lectureVideoRefreshing={lectureVideoRefreshingIds.has(assistant.id)}
+					lectureVideoRefreshing={lectureVideoRefreshingIds.includes(assistant.id)}
+					onRefreshLectureVideo={() => void refreshLectureVideoAssistant(assistant.id)}
 					{classOptions}
 				/>
 			{:else}
@@ -326,7 +301,8 @@
 					editable={data.editableAssistants.has(assistant.id)}
 					shareable={data.grants.canShareAssistants && !!assistant.published}
 					currentClassId={data.class.id}
-					lectureVideoRefreshing={lectureVideoRefreshingIds.has(assistant.id)}
+					lectureVideoRefreshing={lectureVideoRefreshingIds.includes(assistant.id)}
+					onRefreshLectureVideo={() => void refreshLectureVideoAssistant(assistant.id)}
 					{classOptions}
 				/>
 			{:else}

@@ -29,7 +29,8 @@
 		TrashBinOutline,
 		CheckCircleOutline,
 		ExclamationCircleOutline,
-		InfoCircleOutline
+		InfoCircleOutline,
+		RefreshOutline
 	} from 'flowbite-svelte-icons';
 	import ConfirmationModal from '$lib/components/ConfirmationModal.svelte';
 	import type { Assistant, AppUser } from '$lib/api';
@@ -54,6 +55,7 @@
 	export let classOptions: { id: number; name: string; term: string }[] = [];
 	export let currentClassId: number;
 	export let lectureVideoRefreshing = false;
+	export let onRefreshLectureVideo: (() => void) | null = null;
 
 	let sharedAssistantModalOpen = false;
 	let qualtricsCodeModalOpen = false;
@@ -545,8 +547,21 @@
 				>
 					{assistant.lecture_video.status.charAt(0).toUpperCase() +
 						assistant.lecture_video.status.slice(1)}
-					{#if lectureVideoRefreshing}
-						<Spinner color="custom" customColor="fill-blue-800" class="h-3 w-3" />
+					{#if onRefreshLectureVideo}
+						<button
+							type="button"
+							class="rounded-full p-0.5 text-blue-dark-30 hover:text-blue-dark-50 disabled:cursor-not-allowed disabled:opacity-50"
+							onclick={() => onRefreshLectureVideo?.()}
+							disabled={lectureVideoRefreshing}
+							aria-label="Refresh lecture video status"
+							title="Refresh lecture video status"
+						>
+							{#if lectureVideoRefreshing}
+								<Spinner color="custom" customColor="fill-blue-800" class="h-3 w-3" />
+							{:else}
+								<RefreshOutline class="h-3 w-3" />
+							{/if}
+						</button>
 					{/if}
 				</span>
 			</div>

@@ -155,7 +155,10 @@ def _worker_process_main(
                     )
                     return
 
-                assert isinstance(assignment, RunAssignment)
+                if not isinstance(assignment, RunAssignment):
+                    raise TypeError(
+                        f"Expected RunAssignment, got {type(assignment).__name__}"
+                    )
                 logger.info(
                     "Lecture video worker picked up run. slot=%s pid=%s run_id=%s",
                     worker_slot,
@@ -404,7 +407,10 @@ async def _process_claimed_narration_run(run_id: int, lease_token: str) -> None:
             return
 
         work_item = payload
-        assert isinstance(work_item, NarrationWorkItem)
+        if not isinstance(work_item, NarrationWorkItem):
+            raise TypeError(
+                f"Expected NarrationWorkItem, got {type(work_item).__name__}"
+            )
 
         try:
             content_type, audio = await synthesize_elevenlabs_speech(
@@ -661,6 +667,8 @@ def _first_pending_narration_work(
 ) -> NarrationWorkItem | None:
     voice_id = (lecture_video.voice_id or "").strip()
     for question in sorted(lecture_video.questions, key=lambda item: item.position):
+        # Any non-READY narration still needs audio. This intentionally includes
+        # PROCESSING so a reclaimed run can resume work after a stale lease.
         if (
             question.intro_narration is not None
             and question.intro_narration.status
@@ -676,6 +684,8 @@ def _first_pending_narration_work(
             )
 
         for option in sorted(question.options, key=lambda item: item.position):
+            # Treat all non-READY states as unfinished work for the same lease
+            # recovery reason as intro narrations.
             if (
                 option.post_narration is not None
                 and option.post_narration.status
