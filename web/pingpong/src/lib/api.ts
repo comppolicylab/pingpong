@@ -1633,6 +1633,15 @@ export const getAssistantLectureVideoConfig = async (
 	return await GET<never, LectureVideoConfigResponse>(f, url);
 };
 
+export const retryAssistantLectureVideo = async (
+	f: Fetcher,
+	classId: number,
+	assistantId: number
+) => {
+	const url = `class/${classId}/assistant/${assistantId}/lecture-video/retry`;
+	return await POST<never, LectureVideoSummary>(f, url);
+};
+
 /**
  * Load the lecture-video editor policy for a class.
  */
