@@ -5,6 +5,10 @@ from unittest.mock import AsyncMock
 
 import httpx
 from elevenlabs.core.api_error import ApiError as ElevenLabsApiError
+from elevenlabs.errors import (
+    UnprocessableEntityError as ElevenLabsUnprocessableEntityError,
+)
+from elevenlabs.types.http_validation_error import HttpValidationError
 import pytest
 from sqlalchemy import func, select
 
@@ -882,6 +886,74 @@ async def test_synthesize_elevenlabs_voice_sample_maps_generic_voice_not_found_a
             api_key="elevenlabs-key",
             voice_id="4hMvr6P1cLNnRExeqE1d",
         )
+
+
+async def test_synthesize_elevenlabs_speech_maps_invalid_voice_id_api_error(
+    monkeypatch,
+):
+    def fake_convert(*, voice_id, text, output_format, request_options=None):
+        raise ElevenLabsApiError(
+            status_code=400,
+            body={
+                "detail": {
+                    "type": "validation_error",
+                    "code": "invalid_voice_id",
+                    "message": "The voice ID format is invalid.",
+                    "param": "voice_id",
+                }
+            },
+        )
+
+    class FakeClient:
+        def __init__(self, *, api_key):
+            self.text_to_speech = SimpleNamespace(convert=fake_convert)
+
+    monkeypatch.setattr(elevenlabs_module, "AsyncElevenLabs", FakeClient)
+
+    with pytest.raises(
+        elevenlabs_module.ClassCredentialVoiceValidationError,
+        match=r"Invalid voice ID provided. Please choose a different voice\.",
+    ):
+        await elevenlabs_module.synthesize_elevenlabs_speech(
+            api_key="elevenlabs-key",
+            voice_id="bad-voice",
+            text="Narration text",
+        )
+
+
+async def test_synthesize_elevenlabs_speech_maps_non_voice_unprocessable_entity_to_unavailable(
+    monkeypatch,
+):
+    def fake_convert(*, voice_id, text, output_format, request_options=None):
+        raise ElevenLabsUnprocessableEntityError(
+            body=HttpValidationError(
+                detail=[
+                    {
+                        "loc": ["body", "text"],
+                        "msg": "The provided text exceeds the maximum allowed length.",
+                        "type": "value_error",
+                    }
+                ]
+            )
+        )
+
+    class FakeClient:
+        def __init__(self, *, api_key):
+            self.text_to_speech = SimpleNamespace(convert=fake_convert)
+
+    monkeypatch.setattr(elevenlabs_module, "AsyncElevenLabs", FakeClient)
+
+    with pytest.raises(
+        ClassCredentialValidationUnavailableError,
+        match="Unable to generate the ElevenLabs audio right now.",
+    ) as exc_info:
+        await elevenlabs_module.synthesize_elevenlabs_speech(
+            api_key="elevenlabs-key",
+            voice_id="voice-123",
+            text="Narration text",
+        )
+
+    assert exc_info.value.provider == schemas.ClassCredentialProvider.ELEVENLABS
 
 
 async def test_synthesize_elevenlabs_voice_sample_requests_direct_ogg_opus(monkeypatch):

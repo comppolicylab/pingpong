@@ -1,15 +1,13 @@
 import logging
 import ssl
+from typing import Any
 
 import httpx
 from elevenlabs.client import AsyncElevenLabs
 from elevenlabs.core.api_error import ApiError as ElevenLabsApiError
 from elevenlabs.core.request_options import RequestOptions
 from elevenlabs.errors import (
-    BadRequestError as ElevenLabsBadRequestError,
-    NotFoundError as ElevenLabsNotFoundError,
     UnauthorizedError as ElevenLabsUnauthorizedError,
-    UnprocessableEntityError as ElevenLabsUnprocessableEntityError,
 )
 
 from pingpong import schemas
@@ -44,20 +42,41 @@ async def _collect_audio_chunks(audio_stream) -> bytes:
     return b"".join(chunks)
 
 
+def _normalize_elevenlabs_error_body(body: Any) -> dict[str, Any] | None:
+    if hasattr(body, "model_dump"):
+        body = body.model_dump()
+    elif hasattr(body, "dict"):
+        body = body.dict()
+
+    return body if isinstance(body, dict) else None
+
+
 def _is_invalid_elevenlabs_voice_error(exc: ElevenLabsApiError) -> bool:
-    detail = exc.body.get("detail") if isinstance(exc.body, dict) else None
+    body = _normalize_elevenlabs_error_body(exc.body)
+    if body is None:
+        return False
+
+    detail = body.get("detail", body)
     if not isinstance(detail, dict):
         return False
 
     identifier = str(
         detail.get("code") or detail.get("status") or detail.get("type") or ""
     ).lower()
-    message = str(detail.get("message") or "").lower()
+    param = str(detail.get("param") or "").lower()
+    message = str(detail.get("message") or detail.get("error") or "").lower()
 
-    if identifier == "voice_not_found":
+    if identifier in {"voice_not_found", "invalid_voice_id"}:
         return True
 
-    return exc.status_code in {400, 404, 422} and "voice" in message
+    if param == "voice_id":
+        return True
+
+    return (
+        exc.status_code in {400, 404, 422}
+        and "voice" in message
+        and ("not found" in message or "invalid" in message)
+    )
 
 
 async def synthesize_elevenlabs_voice_sample(
@@ -111,19 +130,6 @@ async def synthesize_elevenlabs_speech(
                 request_options=request_options,
             ),
         )
-    except (
-        ElevenLabsBadRequestError,
-        ElevenLabsNotFoundError,
-        ElevenLabsUnprocessableEntityError,
-    ) as exc:
-        logger.info(
-            "ElevenLabs voice validation rejected voice_id=%s",
-            safe_voice_id,
-            exc_info=exc,
-        )
-        raise ClassCredentialVoiceValidationError(
-            "Invalid voice ID provided. Please choose a different voice."
-        ) from exc
     except ElevenLabsUnauthorizedError as exc:
         logger.warning(
             "ElevenLabs speech synthesis failed due to credential error. voice_id=%s",

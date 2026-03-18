@@ -1,3 +1,4 @@
+import asyncio
 import importlib
 import io
 import logging
@@ -4017,6 +4018,45 @@ def test_narration_worker_pool_manager_shutdown_recovers_busy_assignments_before
     ]
 
 
+def test_narration_worker_pool_manager_shutdown_drains_queued_worker_job_exception():
+    fake_context = FakeProcessContext()
+    recoveries: list[tuple[int, str, str]] = []
+    claims = iter([(51, "lease-51"), None])
+    manager = lecture_video_processing.NarrationWorkerPoolManager(
+        workers=1,
+        poll_interval_seconds=0.25,
+        process_context=fake_context,
+        claim_run_fn=lambda _runner_id: next(claims),
+        recover_run_fn=lambda run_id, lease_token, error_message: recoveries.append(
+            (run_id, lease_token, error_message)
+        )
+        or True,
+        shutdown_grace_seconds=1.0,
+    )
+
+    manager.start()
+    progress = manager.run_one_iteration()
+    slot = manager.worker_slots[0]
+    slot.process.exit_after_join = 0
+    manager.results_queue.put(
+        lecture_video_processing.WorkerJobException(
+            worker_slot=0,
+            run_id=51,
+            lease_token="lease-51",
+            error_message="boom",
+        )
+    )
+
+    manager.shutdown()
+
+    assert progress is True
+    assert slot.process.terminate_called is False
+    assert slot.idle is True
+    assert slot.run_id is None
+    assert slot.lease_token is None
+    assert recoveries == [(51, "lease-51", "boom")]
+
+
 def test_run_lecture_video_worker_cli_starts_health_server_and_passes_pool_settings(
     monkeypatch,
 ):
@@ -4250,6 +4290,138 @@ async def test_mark_run_failed_ignores_stale_lease_token(db, institution):
     assert refreshed_narration is not None
     assert refreshed_narration.status == schemas.LectureVideoNarrationStatus.PENDING
     assert refreshed_narration.error_message is None
+
+
+@with_institution(11, "Test Institution")
+async def test_process_claimed_narration_run_renews_lease_during_synthesis(
+    db, institution, config, monkeypatch, tmp_path
+):
+    narration_dir = tmp_path / "narration-audio"
+    monkeypatch.setattr(
+        config,
+        "lecture_video_audio_store",
+        LocalAudioStoreSettings(save_target=str(narration_dir)),
+    )
+    monkeypatch.setattr(
+        lecture_video_processing,
+        "RUN_LEASE_HEARTBEAT_INTERVAL",
+        timedelta(milliseconds=10),
+    )
+
+    synthesis_started = asyncio.Event()
+    release_synthesis = asyncio.Event()
+
+    async def slow_synthesis(*_args, **_kwargs):
+        synthesis_started.set()
+        await release_synthesis.wait()
+        return ("audio/ogg", b"fake-opus-audio")
+
+    monkeypatch.setattr(
+        lecture_video_processing,
+        "synthesize_elevenlabs_speech",
+        slow_synthesis,
+    )
+
+    async with db.async_session() as session:
+        (
+            _class_,
+            lecture_video,
+            _assistant,
+            run,
+        ) = await create_processing_lecture_video_assistant(session, institution)
+        assert run is not None
+
+    claim = await lecture_video_processing._claim_next_narration_run(
+        leased_by="test-runner-1"
+    )
+    assert claim is not None
+    run_id, lease_token = claim
+
+    process_task = asyncio.create_task(
+        lecture_video_processing._process_claimed_narration_run(run_id, lease_token)
+    )
+    try:
+        await synthesis_started.wait()
+
+        async with db.async_session() as session:
+            refreshed_run = await models.LectureVideoProcessingRun.get_by_id(
+                session, run.id
+            )
+            assert refreshed_run is not None
+            refreshed_run.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+            session.add(refreshed_run)
+            await session.commit()
+
+        for _ in range(20):
+            await asyncio.sleep(0.01)
+            async with db.async_session() as session:
+                refreshed_run = await models.LectureVideoProcessingRun.get_by_id(
+                    session, run.id
+                )
+            lease_expires_at = (
+                refreshed_run.lease_expires_at if refreshed_run is not None else None
+            )
+            if lease_expires_at is not None and lease_expires_at.tzinfo is None:
+                lease_expires_at = lease_expires_at.replace(tzinfo=UTC)
+            if (
+                refreshed_run is not None
+                and refreshed_run.lease_token == lease_token
+                and lease_expires_at is not None
+                and lease_expires_at > datetime.now(UTC)
+            ):
+                break
+        else:
+            pytest.fail("Expected the in-flight synthesis to renew the run lease.")
+
+        second_claim = await lecture_video_processing._claim_next_narration_run(
+            leased_by="test-runner-2"
+        )
+        assert second_claim is None
+    finally:
+        release_synthesis.set()
+        await asyncio.wait_for(process_task, timeout=1)
+
+    async with db.async_session() as session:
+        refreshed_run = await models.LectureVideoProcessingRun.get_by_id(
+            session, run.id
+        )
+        refreshed_video = await models.LectureVideo.get_by_id(session, lecture_video.id)
+
+    assert refreshed_run is not None
+    assert refreshed_run.status == schemas.LectureVideoProcessingRunStatus.COMPLETED
+    assert refreshed_video is not None
+    assert refreshed_video.status == schemas.LectureVideoStatus.READY
+
+
+@with_institution(11, "Test Institution")
+async def test_prepare_next_work_item_returns_none_narration_id_when_voice_configuration_missing(
+    db, institution
+):
+    async with db.async_session() as session:
+        (
+            _class_,
+            lecture_video,
+            _assistant,
+            run,
+        ) = await create_processing_lecture_video_assistant(session, institution)
+        assert run is not None
+        lecture_video.voice_id = None
+        session.add(lecture_video)
+        await session.commit()
+
+    claim = await lecture_video_processing._claim_next_narration_run(
+        leased_by="test-runner"
+    )
+    assert claim is not None
+    run_id, lease_token = claim
+
+    state, payload = await lecture_video_processing._prepare_next_work_item(
+        run_id,
+        lease_token,
+    )
+
+    assert state == "failed"
+    assert payload == (None, "Lecture video voice configuration is missing.")
 
 
 @with_institution(11, "Test Institution")

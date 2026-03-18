@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import io
 import logging
 import multiprocessing
@@ -6,7 +7,7 @@ import os
 import secrets
 import socket
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
@@ -24,7 +25,7 @@ from pingpong.class_credential_validation import (
     ClassCredentialVoiceValidationError,
 )
 from pingpong.config import config
-from pingpong.errors import sentry
+from pingpong.errors import capture_exception_to_sentry, sentry
 from pingpong.elevenlabs import (
     synthesize_elevenlabs_speech,
 )
@@ -38,7 +39,6 @@ from pingpong.worker_pool import (
     WorkerPoolManager,
     WorkerReady,
     WorkerStarted,
-    capture_exception_to_sentry,
     ignore_sigint_in_worker,
 )
 
@@ -46,6 +46,7 @@ logger = logging.getLogger(__name__)
 
 NARRATION_STAGE = schemas.LectureVideoProcessingStage.NARRATION
 RUN_LEASE_DURATION = timedelta(minutes=10)
+RUN_LEASE_HEARTBEAT_INTERVAL = min(timedelta(minutes=1), RUN_LEASE_DURATION / 2)
 _ACTIVE_RUN_STATUSES = (
     schemas.LectureVideoProcessingRunStatus.QUEUED,
     schemas.LectureVideoProcessingRunStatus.RUNNING,
@@ -392,6 +393,34 @@ async def claim_failed_lecture_video_for_retry(
     return bool(result.rowcount)
 
 
+async def _await_with_run_lease_heartbeat(
+    run_id: int,
+    lease_token: str,
+    operation: Coroutine[Any, Any, Any],
+) -> Any | None:
+    task: asyncio.Task[Any] = asyncio.create_task(operation)
+    try:
+        while True:
+            done, _ = await asyncio.wait(
+                {task},
+                timeout=RUN_LEASE_HEARTBEAT_INTERVAL.total_seconds(),
+            )
+            if task in done:
+                return await task
+
+            if not await _ensure_run_can_continue(run_id, lease_token):
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+                return None
+    except Exception:
+        if not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        raise
+
+
 async def _process_claimed_narration_run(run_id: int, lease_token: str) -> None:
     while True:
         state, payload = await _prepare_next_work_item(run_id, lease_token)
@@ -413,10 +442,14 @@ async def _process_claimed_narration_run(run_id: int, lease_token: str) -> None:
             )
 
         try:
-            content_type, audio = await synthesize_elevenlabs_speech(
-                await _get_elevenlabs_api_key(work_item.class_id),
-                work_item.voice_id,
-                work_item.text,
+            synthesis_result = await _await_with_run_lease_heartbeat(
+                run_id,
+                lease_token,
+                synthesize_elevenlabs_speech(
+                    await _get_elevenlabs_api_key(work_item.class_id),
+                    work_item.voice_id,
+                    work_item.text,
+                ),
             )
         except Exception as exc:
             await _mark_run_failed(
@@ -426,14 +459,22 @@ async def _process_claimed_narration_run(run_id: int, lease_token: str) -> None:
                 _user_safe_processing_error_message(exc),
             )
             return
+
+        if synthesis_result is None:
+            return
+        content_type, audio = synthesis_result
 
         if not await _ensure_run_can_continue(run_id, lease_token):
             return
 
         try:
-            store_key, content_length = await _store_narration_audio(
-                content_type,
-                audio,
+            store_result = await _await_with_run_lease_heartbeat(
+                run_id,
+                lease_token,
+                _store_narration_audio(
+                    content_type,
+                    audio,
+                ),
             )
         except Exception as exc:
             await _mark_run_failed(
@@ -443,6 +484,10 @@ async def _process_claimed_narration_run(run_id: int, lease_token: str) -> None:
                 _user_safe_processing_error_message(exc),
             )
             return
+
+        if store_result is None:
+            return
+        store_key, content_length = store_result
 
         try:
             attached = await _attach_stored_audio_to_narration(
@@ -535,8 +580,6 @@ async def _claim_next_narration_run(
             if result.rowcount:
                 await session.commit()
                 return candidate_id, lease_token
-
-        await session.rollback()
     return None
 
 
@@ -587,7 +630,7 @@ async def _prepare_next_work_item(
     lease_token: str,
 ) -> tuple[
     str,
-    NarrationWorkItem | tuple[int, str] | None,
+    NarrationWorkItem | tuple[int | None, str] | None,
 ]:
     async with config.db.driver.async_session() as session:
         run = await models.LectureVideoProcessingRun.get_by_id(session, run_id)
@@ -635,7 +678,7 @@ async def _prepare_next_work_item(
 
         voice_id = (lecture_video.voice_id or "").strip()
         if not voice_id:
-            return "failed", (0, "Lecture video voice configuration is missing.")
+            return "failed", (None, "Lecture video voice configuration is missing.")
 
         work_item = _first_pending_narration_work(lecture_video)
         if work_item is None:
@@ -907,7 +950,7 @@ async def _mark_run_completed(run_id: int, lease_token: str) -> None:
 async def _mark_run_failed(
     run_id: int,
     lease_token: str,
-    narration_id: int,
+    narration_id: int | None,
     error_message: str,
 ) -> None:
     async with config.db.driver.async_session() as session:
@@ -922,7 +965,7 @@ async def _mark_run_failed(
 
         narration = (
             await models.LectureVideoNarration.get_by_id(session, narration_id)
-            if narration_id
+            if narration_id is not None
             else None
         )
         if narration is not None:

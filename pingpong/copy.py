@@ -21,6 +21,7 @@ from pingpong.schemas import (
     CopyClassRequest,
     CreateClass,
     InteractionMode,
+    LectureVideoStatus,
     VectorStoreType,
 )
 from pingpong.vector_stores import create_vector_store
@@ -219,6 +220,21 @@ async def ensure_lecture_video_copy_credentials(
     )
 
 
+def ensure_lecture_video_assistant_copy_ready(
+    assistant: models.Assistant,
+) -> None:
+    if assistant.interaction_mode != InteractionMode.LECTURE_VIDEO:
+        return
+
+    if (
+        assistant.lecture_video is None
+        or assistant.lecture_video.status != LectureVideoStatus.READY
+    ):
+        raise ValueError(
+            "Lecture video assistants can only be copied after narration processing is ready."
+        )
+
+
 async def copy_supervisors(
     session: AsyncSession,
     client: OpenFgaAuthzClient,
@@ -361,6 +377,8 @@ async def copy_assistant(
     """
     if require_published and not assistant.published:
         return None
+
+    ensure_lecture_video_assistant_copy_ready(assistant)
 
     if assistant.interaction_mode == InteractionMode.LECTURE_VIDEO:
         await ensure_lecture_video_copy_credentials(

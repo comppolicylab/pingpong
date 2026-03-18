@@ -64,6 +64,7 @@ from pingpong.artifacts import ArtifactStoreError
 from pingpong.audio_store import AudioStoreError
 from pingpong.bg_tasks import safe_task
 from pingpong.copy import copy_assistant as copy_assistant_to_class
+from pingpong.copy import ensure_lecture_video_assistant_copy_ready
 from pingpong.copy import ensure_lecture_video_copy_credentials
 from pingpong.copy import copy_group
 from pingpong.class_credentials import (
@@ -9246,16 +9247,16 @@ async def _ensure_lecture_video_assistant_copy_allowed(
     assistant: models.Assistant,
     target_class_id: int,
 ) -> None:
-    if assistant.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
-        return
-    if (
-        assistant.lecture_video is None
-        or assistant.lecture_video.status != schemas.LectureVideoStatus.READY
-    ):
+    try:
+        ensure_lecture_video_assistant_copy_ready(assistant)
+    except ValueError as e:
         raise HTTPException(
             status_code=409,
-            detail="Lecture video assistants can only be copied after narration processing is ready.",
-        )
+            detail=str(e),
+        ) from e
+
+    if assistant.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
+        return
 
     try:
         await ensure_lecture_video_copy_credentials(
@@ -10795,6 +10796,7 @@ async def update_assistant(
     await request.state["authz"].write_safe(grant=grants, revoke=revokes)
     if lecture_video_id_to_delete is not None:
         try:
+            # Cancel first in case the old lecture video is still kept alive by threads.
             await lecture_video_processing.cancel_narration_processing_runs(
                 request.state["db"],
                 lecture_video_id_to_delete,
@@ -11005,6 +11007,7 @@ async def delete_assistant(
     await request.state["authz"].write_safe(revoke=revokes)
     if lecture_video_id_to_delete is not None:
         try:
+            # Cancel first in case the lecture video is still kept alive by threads.
             await lecture_video_processing.cancel_narration_processing_runs(
                 request.state["db"],
                 lecture_video_id_to_delete,

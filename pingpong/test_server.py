@@ -1563,6 +1563,62 @@ async def test_copy_assistant_within_class(
     ]
 
 
+@with_institution(99, "Test Institution")
+async def test_copy_assistant_service_rejects_non_ready_lecture_video(db, institution):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=99, name="Source", institution_id=institution.id, api_key="test-key"
+        )
+        lecture_video = models.LectureVideo(
+            class_id=class_.id,
+            stored_object=models.LectureVideoStoredObject(
+                key="pending.mp4",
+                original_filename="pending.mp4",
+                content_type="video/mp4",
+            ),
+            status=schemas.LectureVideoStatus.PROCESSING.value,
+            uploader_id=123,
+        )
+        session.add_all([class_, lecture_video])
+        await session.flush()
+
+        assistant = models.Assistant(
+            id=99,
+            name="Lecture Assistant",
+            instructions="Be helpful",
+            interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+            model="gpt-4o-mini",
+            class_id=class_.id,
+            lecture_video_id=lecture_video.id,
+            tools="[]",
+            creator_id=123,
+            version=3,
+        )
+        session.add(assistant)
+        await session.commit()
+
+        loaded_assistant = await models.Assistant.get_by_id_with_copy_context(
+            session, assistant.id
+        )
+        assert loaded_assistant is not None
+
+        with pytest.raises(
+            ValueError,
+            match=(
+                "Lecture video assistants can only be copied after narration "
+                "processing is ready."
+            ),
+        ):
+            await copy_module.copy_assistant(
+                session,
+                AsyncMock(),
+                AsyncMock(),
+                class_.id,
+                loaded_assistant,
+                require_published=False,
+            )
+
+
 @with_user(123)
 @with_institution(1, "Test Institution")
 @with_authz(grants=[("user:123", "can_create_assistants", "class:1")])

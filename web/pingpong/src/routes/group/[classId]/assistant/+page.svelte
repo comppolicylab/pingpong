@@ -40,6 +40,7 @@
 		performCopyAssistant,
 		performDeleteAssistant
 	} from '$lib/assistantHelpers';
+	import { SvelteSet } from 'svelte/reactivity';
 
 	export let data;
 
@@ -66,7 +67,7 @@
 	let copyPermissionLoading: Record<number, boolean> = {};
 	let copyPermissionError: Record<number, string> = {};
 	let assistants: Assistant[] = [];
-	let lectureVideoRefreshingIds: number[] = [];
+	let lectureVideoRefreshingIds = new Set<number>();
 	const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
 	const classOptions = (data.classes || []).map((c) => ({
 		id: c.id,
@@ -205,7 +206,7 @@
 		[...items].sort((a, b) => a.name.localeCompare(b.name));
 
 	const refreshLectureVideoAssistant = async (assistantId: number) => {
-		if (lectureVideoRefreshingIds.includes(assistantId)) {
+		if (lectureVideoRefreshingIds.has(assistantId)) {
 			return;
 		}
 
@@ -214,7 +215,7 @@
 			return;
 		}
 
-		lectureVideoRefreshingIds = [...lectureVideoRefreshingIds, assistantId];
+		lectureVideoRefreshingIds = new Set([...lectureVideoRefreshingIds, assistantId]);
 		try {
 			const response = await api.getAssistants(fetch, data.class.id);
 			const expanded = api.expandResponse(response);
@@ -228,7 +229,9 @@
 			assistants = sortAssistantsByName(expanded.data.assistants);
 			creators = expanded.data.creators;
 		} finally {
-			lectureVideoRefreshingIds = lectureVideoRefreshingIds.filter((id) => id !== assistantId);
+			const nextRefreshingIds = new SvelteSet(lectureVideoRefreshingIds);
+			nextRefreshingIds.delete(assistantId);
+			lectureVideoRefreshingIds = nextRefreshingIds;
 		}
 	};
 	$: assistants = data?.assistants || [];
@@ -281,7 +284,7 @@
 					creator={creators[assistant.creator_id]}
 					editable={data.editableAssistants.has(assistant.id)}
 					currentClassId={data.class.id}
-					lectureVideoRefreshing={lectureVideoRefreshingIds.includes(assistant.id)}
+					lectureVideoRefreshing={lectureVideoRefreshingIds.has(assistant.id)}
 					onRefreshLectureVideo={() => void refreshLectureVideoAssistant(assistant.id)}
 					{classOptions}
 				/>
@@ -301,7 +304,7 @@
 					editable={data.editableAssistants.has(assistant.id)}
 					shareable={data.grants.canShareAssistants && !!assistant.published}
 					currentClassId={data.class.id}
-					lectureVideoRefreshing={lectureVideoRefreshingIds.includes(assistant.id)}
+					lectureVideoRefreshing={lectureVideoRefreshingIds.has(assistant.id)}
 					onRefreshLectureVideo={() => void refreshLectureVideoAssistant(assistant.id)}
 					{classOptions}
 				/>

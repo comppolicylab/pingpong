@@ -6,14 +6,18 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-import sentry_sdk
-
-from pingpong.config import config
+from pingpong.errors import capture_exception_to_sentry
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_WORKER_POLL_INTERVAL_SECONDS = 5.0
 DEFAULT_WORKER_SHUTDOWN_GRACE_SECONDS = 5.0
+
+
+def _sentence_case(value: str) -> str:
+    if not value:
+        return value
+    return f"{value[0].upper()}{value[1:]}"
 
 
 def ignore_sigint_in_worker() -> None:
@@ -64,19 +68,6 @@ class WorkerSlotState:
     idle: bool = True
     run_id: int | None = None
     lease_token: str | None = None
-    last_event_at: float | None = None
-
-
-def capture_exception_to_sentry(exc: Exception, **tags: object) -> None:
-    if not config.sentry.dsn:
-        return
-
-    with sentry_sdk.push_scope() as scope:
-        for key, value in tags.items():
-            if value is not None:
-                scope.set_tag(key, str(value))
-        sentry_sdk.capture_exception(exc)
-        sentry_sdk.flush(timeout=2.0)
 
 
 class WorkerPoolManager:
@@ -110,9 +101,9 @@ class WorkerPoolManager:
         self.recover_run_fn = recover_run_fn
         self.build_runner_id_fn = build_runner_id_fn
         self.worker_label = worker_label
-        self.worker_label_display = self._sentence_case(worker_label)
+        self.worker_label_display = _sentence_case(worker_label)
         self.worker_pool_label = f"{worker_label} pool"
-        self.worker_pool_label_display = self._sentence_case(self.worker_pool_label)
+        self.worker_pool_label_display = _sentence_case(self.worker_pool_label)
         self.unexpected_exit_error_message = unexpected_exit_error_message
         self.poll_interval_seconds = poll_interval_seconds
         self.shutdown_grace_seconds = shutdown_grace_seconds
@@ -173,6 +164,10 @@ class WorkerPoolManager:
     def shutdown(self) -> None:
         deadline = self.time_fn() + self.shutdown_grace_seconds
 
+        # Drain any events that arrived before shutdown so we don't lose a
+        # worker completion or failure signal while waiting for processes to exit.
+        self._drain_results_queue()
+
         for slot in self.worker_slots.values():
             process = slot.process
             if getattr(process, "exitcode", None) is None:
@@ -183,6 +178,8 @@ class WorkerPoolManager:
             remaining = max(0.0, deadline - self.time_fn())
             if hasattr(process, "join"):
                 process.join(timeout=remaining)
+
+        self._drain_results_queue()
 
         for slot in self.worker_slots.values():
             process = slot.process
@@ -196,6 +193,8 @@ class WorkerPoolManager:
                 process.terminate()
                 if hasattr(process, "join"):
                     process.join(timeout=0.1)
+
+        self._drain_results_queue()
 
         for slot in self.worker_slots.values():
             self._close_queue(slot.assignment_queue)
@@ -224,7 +223,6 @@ class WorkerPoolManager:
             assignment_queue=assignment_queue,
             runner_id=runner_id,
             pid=process.pid,
-            last_event_at=self.time_fn(),
         )
         self.worker_slots[worker_slot] = slot
         return slot
@@ -253,7 +251,6 @@ class WorkerPoolManager:
             return
         slot.pid = event.pid
         slot.runner_id = self.build_runner_id_fn(event.worker_slot, event.pid)
-        slot.last_event_at = self.time_fn()
         logger.info(
             "%s ready. slot=%s pid=%s runner_id=%s",
             self.worker_label_display,
@@ -266,7 +263,6 @@ class WorkerPoolManager:
         slot = self.worker_slots.get(event.worker_slot)
         if slot is None:
             return
-        slot.last_event_at = self.time_fn()
         logger.info(
             "%s acknowledged run. slot=%s pid=%s run_id=%s",
             self.worker_label_display,
@@ -289,7 +285,6 @@ class WorkerPoolManager:
             event.run_id,
         )
         self._clear_assignment(slot)
-        slot.last_event_at = self.time_fn()
 
     def _handle_worker_job_exception(self, event: WorkerJobException) -> None:
         slot = self.worker_slots.get(event.worker_slot)
@@ -312,7 +307,6 @@ class WorkerPoolManager:
             error_message,
         )
         self._clear_assignment(slot)
-        slot.last_event_at = self.time_fn()
 
     def _handle_dead_workers(self) -> bool:
         progress = False
@@ -351,6 +345,9 @@ class WorkerPoolManager:
 
             claim = self.claim_run_fn(slot.runner_id)
             if claim is None:
+                # claim_run_fn is expected to claim from a shared global queue.
+                # Once one idle worker sees no claimable work, later idle workers
+                # in this pass should see the same empty queue as well.
                 break
 
             run_id, lease_token = claim
@@ -365,7 +362,6 @@ class WorkerPoolManager:
             slot.run_id = run_id
             slot.lease_token = lease_token
             slot.idle = False
-            slot.last_event_at = self.time_fn()
             slot.assignment_queue.put(
                 RunAssignment(run_id=run_id, lease_token=lease_token)
             )
@@ -402,8 +398,3 @@ class WorkerPoolManager:
         join_thread_fn = getattr(queue_obj, "join_thread", None)
         if callable(join_thread_fn):
             join_thread_fn()
-
-    def _sentence_case(self, value: str) -> str:
-        if not value:
-            return value
-        return f"{value[0].upper()}{value[1:]}"
