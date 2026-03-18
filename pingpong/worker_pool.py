@@ -170,12 +170,7 @@ class WorkerPoolManager:
         return progress
 
     def shutdown(self) -> None:
-        self._drain_results_queue()
         deadline = self.time_fn() + self.shutdown_grace_seconds
-
-        # Drain any events that arrived before shutdown so we don't lose a
-        # worker completion or failure signal while waiting for processes to exit.
-        self._drain_results_queue()
 
         for slot in self.worker_slots.values():
             process = slot.process
@@ -202,15 +197,9 @@ class WorkerPoolManager:
             if getattr(process, "exitcode", None) is None and hasattr(
                 process, "terminate"
             ):
-                self._recover_slot_assignment(
-                    slot,
-                    error_message=self.unexpected_exit_error_message,
-                )
                 process.terminate()
                 if hasattr(process, "join"):
                     process.join(timeout=0.1)
-
-        self._drain_results_queue()
 
         for slot in self.worker_slots.values():
             self._close_queue(slot.assignment_queue)
