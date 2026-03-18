@@ -1,5 +1,4 @@
 import asyncio
-import contextlib
 import io
 import logging
 import multiprocessing
@@ -14,6 +13,7 @@ from typing import Any
 
 import uuid_utils as uuid
 from sqlalchemy import and_, delete, func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import pingpong.models as models
@@ -52,6 +52,7 @@ _ACTIVE_RUN_STATUSES = (
     schemas.LectureVideoProcessingRunStatus.RUNNING,
 )
 UNEXPECTED_WORKER_EXIT_ERROR_MESSAGE = "Lecture video worker exited unexpectedly."
+MAX_RUN_CREATE_RETRIES = 3
 
 
 @dataclass(frozen=True)
@@ -274,24 +275,55 @@ async def queue_narration_processing_run(
     if existing_run is not None:
         return existing_run
 
+    lecture_video_id = lecture_video.id
+    class_id = lecture_video.class_id
     attempt_number = (
         await models.LectureVideoProcessingRun.get_latest_attempt_number(
             session,
-            lecture_video.id,
+            lecture_video_id,
             NARRATION_STAGE,
         )
         + 1
     )
-    return await models.LectureVideoProcessingRun.create(
-        session,
-        lecture_video_id=lecture_video.id,
-        lecture_video_id_snapshot=lecture_video.id,
-        class_id=lecture_video.class_id,
-        assistant_id_at_start=assistant_id_at_start,
-        stage=NARRATION_STAGE,
-        attempt_number=attempt_number,
-        status=schemas.LectureVideoProcessingRunStatus.QUEUED,
-    )
+    last_error: IntegrityError | None = None
+    for _ in range(MAX_RUN_CREATE_RETRIES):
+        async with session.begin_nested() as savepoint:
+            try:
+                return await models.LectureVideoProcessingRun.create(
+                    session,
+                    lecture_video_id=lecture_video_id,
+                    lecture_video_id_snapshot=lecture_video_id,
+                    class_id=class_id,
+                    assistant_id_at_start=assistant_id_at_start,
+                    stage=NARRATION_STAGE,
+                    attempt_number=attempt_number,
+                    status=schemas.LectureVideoProcessingRunStatus.QUEUED,
+                )
+            except IntegrityError as exc:
+                last_error = exc
+                await savepoint.rollback()
+
+        existing_run = (
+            await models.LectureVideoProcessingRun.get_non_terminal_by_snapshot_stage(
+                session,
+                lecture_video_id,
+                NARRATION_STAGE,
+            )
+        )
+        if existing_run is not None:
+            return existing_run
+
+        attempt_number = (
+            await models.LectureVideoProcessingRun.get_latest_attempt_number(
+                session,
+                lecture_video_id,
+                NARRATION_STAGE,
+            )
+            + 1
+        )
+
+    assert last_error is not None
+    raise last_error
 
 
 async def cancel_narration_processing_runs(
@@ -410,14 +442,18 @@ async def _await_with_run_lease_heartbeat(
 
             if not await _ensure_run_can_continue(run_id, lease_token):
                 task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
+                try:
                     await task
+                except asyncio.CancelledError:
+                    pass
                 return None
     except Exception:
         if not task.done():
             task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
+            try:
                 await task
+            except asyncio.CancelledError:
+                pass
         raise
 
 
@@ -605,16 +641,28 @@ async def recover_failed_narration_run(
                 session, run.lecture_video_id
             )
             if lecture_video is not None:
-                lecture_video.status = schemas.LectureVideoStatus.FAILED
-                lecture_video.error_message = error_message
+                if _first_pending_narration_work(lecture_video) is None:
+                    lecture_video.status = schemas.LectureVideoStatus.READY
+                    lecture_video.error_message = None
+                    run.status = schemas.LectureVideoProcessingRunStatus.COMPLETED
+                    run.error_message = None
+                else:
+                    lecture_video.status = schemas.LectureVideoStatus.FAILED
+                    lecture_video.error_message = error_message
+                    run.status = schemas.LectureVideoProcessingRunStatus.FAILED
+                    run.error_message = error_message
+                    _mark_processing_narrations_failed_for_video(
+                        lecture_video,
+                        error_message=error_message,
+                    )
                 session.add(lecture_video)
-                _mark_processing_narrations_failed_for_video(
-                    lecture_video,
-                    error_message=error_message,
-                )
+            else:
+                run.status = schemas.LectureVideoProcessingRunStatus.FAILED
+                run.error_message = error_message
+        else:
+            run.status = schemas.LectureVideoProcessingRunStatus.FAILED
+            run.error_message = error_message
 
-        run.status = schemas.LectureVideoProcessingRunStatus.FAILED
-        run.error_message = error_message
         run.finished_at = utcnow()
         run.cancel_reason = None
         run.lease_token = None

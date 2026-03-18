@@ -8423,11 +8423,16 @@ async def retry_assistant_lecture_video_processing(
     )
     if refreshed_lecture_video is None:
         raise HTTPException(404, "Lecture video not found.")
-    await lecture_video_processing.queue_narration_processing_run(
+    narration_run = await lecture_video_processing.queue_narration_processing_run(
         request.state["db"],
         refreshed_lecture_video,
         assistant_id_at_start=assistant.id,
     )
+    if narration_run is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Lecture video retry is no longer available because the assistant or lecture video configuration changed.",
+        )
     refreshed_lecture_video_summary = await models.LectureVideo.get_by_id(
         request.state["db"], lecture_video.id
     )

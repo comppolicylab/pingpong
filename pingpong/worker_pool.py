@@ -122,16 +122,18 @@ class WorkerPoolManager:
             self._spawn_worker(worker_slot)
 
     def run(self) -> None:
-        self.start()
-        previous_sigint_handler = signal.getsignal(signal.SIGINT)
-        previous_sigterm_handler = signal.getsignal(signal.SIGTERM)
+        previous_sigint_handler: Any | None = None
+        previous_sigterm_handler: Any | None = None
 
         def _handle_stop_signal(_signum, _frame) -> None:
             self.request_stop()
 
-        signal.signal(signal.SIGINT, _handle_stop_signal)
-        signal.signal(signal.SIGTERM, _handle_stop_signal)
         try:
+            self.start()
+            previous_sigint_handler = signal.getsignal(signal.SIGINT)
+            previous_sigterm_handler = signal.getsignal(signal.SIGTERM)
+            signal.signal(signal.SIGINT, _handle_stop_signal)
+            signal.signal(signal.SIGTERM, _handle_stop_signal)
             while not self.stop_requested:
                 progress = self.run_one_iteration()
                 if self.stop_requested:
@@ -149,9 +151,15 @@ class WorkerPoolManager:
             )
             raise
         finally:
-            signal.signal(signal.SIGINT, previous_sigint_handler)
-            signal.signal(signal.SIGTERM, previous_sigterm_handler)
-            self.shutdown()
+            try:
+                if previous_sigint_handler is not None:
+                    signal.signal(signal.SIGINT, previous_sigint_handler)
+            finally:
+                try:
+                    if previous_sigterm_handler is not None:
+                        signal.signal(signal.SIGTERM, previous_sigterm_handler)
+                finally:
+                    self.shutdown()
 
     def run_one_iteration(self) -> bool:
         progress = False
@@ -162,6 +170,7 @@ class WorkerPoolManager:
         return progress
 
     def shutdown(self) -> None:
+        self._drain_results_queue()
         deadline = self.time_fn() + self.shutdown_grace_seconds
 
         # Drain any events that arrived before shutdown so we don't lose a
@@ -180,6 +189,13 @@ class WorkerPoolManager:
                 process.join(timeout=remaining)
 
         self._drain_results_queue()
+
+        for slot in self.worker_slots.values():
+            if slot.run_id is not None and slot.lease_token is not None:
+                self._recover_slot_assignment(
+                    slot,
+                    error_message=self.unexpected_exit_error_message,
+                )
 
         for slot in self.worker_slots.values():
             process = slot.process
@@ -301,12 +317,12 @@ class WorkerPoolManager:
             event.run_id,
             error_message,
         )
-        self.recover_run_fn(
-            event.run_id,
-            event.lease_token,
-            error_message,
+        self._recover_assignment(
+            slot,
+            run_id=event.run_id,
+            lease_token=event.lease_token,
+            error_message=error_message,
         )
-        self._clear_assignment(slot)
 
     def _handle_dead_workers(self) -> bool:
         progress = False
@@ -377,8 +393,26 @@ class WorkerPoolManager:
     ) -> None:
         if slot.run_id is None or slot.lease_token is None:
             return
-        self.recover_run_fn(slot.run_id, slot.lease_token, error_message)
-        self._clear_assignment(slot)
+        self._recover_assignment(
+            slot,
+            run_id=slot.run_id,
+            lease_token=slot.lease_token,
+            error_message=error_message,
+        )
+
+    def _recover_assignment(
+        self,
+        slot: WorkerSlotState,
+        *,
+        run_id: int,
+        lease_token: str,
+        error_message: str,
+    ) -> None:
+        try:
+            self.recover_run_fn(run_id, lease_token, error_message)
+        finally:
+            if slot.run_id == run_id and slot.lease_token == lease_token:
+                self._clear_assignment(slot)
 
     def _clear_assignment(self, slot: WorkerSlotState) -> None:
         slot.idle = True

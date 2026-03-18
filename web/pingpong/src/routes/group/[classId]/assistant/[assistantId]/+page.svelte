@@ -1666,11 +1666,17 @@
 
 		refreshingLectureVideoStatus = true;
 		try {
-			const response = await api.getAssistantLectureVideoConfig(
-				fetch,
-				data.class.id,
-				data.assistantId
-			);
+			let response;
+			try {
+				response = await api.getAssistantLectureVideoConfig(fetch, data.class.id, data.assistantId);
+			} catch (error) {
+				sadToast(
+					`Could not refresh lecture video status:\n${
+						error instanceof Error ? error.message : error?.toString() || 'Unknown error'
+					}`
+				);
+				return;
+			}
 			const expanded = api.expandResponse(response);
 			if (expanded.error || !expanded.data?.lecture_video) {
 				sadToast(
@@ -1690,7 +1696,17 @@
 			return;
 		}
 
-		const response = await api.retryAssistantLectureVideo(fetch, data.class.id, data.assistantId);
+		let response;
+		try {
+			response = await api.retryAssistantLectureVideo(fetch, data.class.id, data.assistantId);
+		} catch (error) {
+			sadToast(
+				`Could not retry lecture video processing:\n${
+					error instanceof Error ? error.message : error?.toString() || 'Unknown error'
+				}`
+			);
+			return;
+		}
 		const expanded = api.expandResponse(response);
 		if (expanded.error || !expanded.data) {
 			sadToast(
@@ -2367,29 +2383,28 @@
 								<div class="text-sm font-medium text-gray-900">
 									{selectedLectureVideo.filename}
 								</div>
+								<div class="inline-flex items-center gap-1 text-xs text-gray-500">
+									{selectedLectureVideo.status.charAt(0).toUpperCase() +
+										selectedLectureVideo.status.slice(1)}
+									{#if canRefreshCurrentLectureVideoStatus}
+										<button
+											type="button"
+											class="rounded-full p-0.5 text-gray-500 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+											onclick={() => void refreshAssistantLectureVideoStatus()}
+											disabled={refreshingLectureVideoStatus}
+											aria-label="Refresh lecture video status"
+											title="Refresh lecture video status"
+										>
+											{#if refreshingLectureVideoStatus}
+												<Spinner color="gray" class="h-3 w-3" />
+											{:else}
+												<RefreshOutline class="h-3 w-3" />
+											{/if}
+										</button>
+									{/if}
+								</div>
 								{#if selectedLectureVideo.error_message}
 									<div class="text-xs text-red-600">{selectedLectureVideo.error_message}</div>
-								{:else}
-									<div class="inline-flex items-center gap-1 text-xs text-gray-500">
-										{selectedLectureVideo.status.charAt(0).toUpperCase() +
-											selectedLectureVideo.status.slice(1)}
-										{#if canRefreshCurrentLectureVideoStatus}
-											<button
-												type="button"
-												class="rounded-full p-0.5 text-gray-500 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
-												onclick={() => void refreshAssistantLectureVideoStatus()}
-												disabled={refreshingLectureVideoStatus}
-												aria-label="Refresh lecture video status"
-												title="Refresh lecture video status"
-											>
-												{#if refreshingLectureVideoStatus}
-													<Spinner color="gray" class="h-3 w-3" />
-												{:else}
-													<RefreshOutline class="h-3 w-3" />
-												{/if}
-											</button>
-										{/if}
-									</div>
 								{/if}
 							</div>
 						</div>

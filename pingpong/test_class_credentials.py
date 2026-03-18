@@ -1000,6 +1000,7 @@ async def test_synthesize_elevenlabs_voice_sample_requests_direct_ogg_opus(monke
     assert audio == b"ogg-audio"
 
 
+@pytest.mark.asyncio
 async def test_synthesize_elevenlabs_voice_sample_maps_httpx_timeout_to_unavailable(
     monkeypatch,
 ):
@@ -1025,6 +1026,7 @@ async def test_synthesize_elevenlabs_voice_sample_maps_httpx_timeout_to_unavaila
     assert exc_info.value.provider == schemas.ClassCredentialProvider.ELEVENLABS
 
 
+@pytest.mark.asyncio
 async def test_synthesize_elevenlabs_speech_omits_request_options_without_timeout(
     monkeypatch,
 ):
