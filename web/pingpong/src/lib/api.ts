@@ -4225,6 +4225,64 @@ export type StatusComponentUpdate = {
 	impact: string | null;
 };
 
+// --- Panopto Integration ---
+
+export type PanoptoTenant = {
+	tenant: string;
+	tenant_friendly_name: string;
+};
+
+export type PanoptoFolder = {
+	id: string;
+	name: string;
+	description: string | null;
+};
+
+export type PanoptoStatus = {
+	status: string;
+	tenant: string | null;
+	folder_id: string | null;
+	folder_name: string | null;
+	mcp_server_tool_id: number | null;
+};
+
+export type PanoptoTenants = {
+	tenants: PanoptoTenant[];
+};
+
+export type PanoptoFolders = {
+	folders: PanoptoFolder[];
+};
+
+export const getPanoptoTenants = async (f: Fetcher, classId: number) => {
+	return await GET<never, PanoptoTenants>(f, `class/${classId}/panopto/tenants`);
+};
+
+export const searchPanoptoFolders = async (f: Fetcher, classId: number, query: string) => {
+	return await GET<never, PanoptoFolders>(f, `class/${classId}/panopto/folders?query=${encodeURIComponent(query)}`);
+};
+
+export const linkPanoptoFolder = async (
+	f: Fetcher,
+	classId: number,
+	folderId: string,
+	folderName: string
+) => {
+	return await POST<{ folder_id: string; folder_name: string }, GenericStatus>(
+		f,
+		`class/${classId}/panopto/link`,
+		{ folder_id: folderId, folder_name: folderName }
+	);
+};
+
+export const getPanoptoStatus = async (f: Fetcher, classId: number) => {
+	return await GET<never, PanoptoStatus>(f, `class/${classId}/panopto/status`);
+};
+
+export const disconnectPanopto = async (f: Fetcher, classId: number) => {
+	return await DELETE<never, GenericStatus>(f, `class/${classId}/panopto`);
+};
+
 export const STATUS_COMPONENT_IDS = {
 	classic: '2f2dmn0q4ntj',
 	nextGen: 'glp8y01h0srn'

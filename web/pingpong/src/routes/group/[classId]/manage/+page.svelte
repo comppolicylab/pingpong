@@ -359,6 +359,61 @@
 	$: canManageClassUsers = !!data?.grants?.canManageUsers;
 	$: canUploadClassFiles = !!data?.grants?.canUploadClassFiles;
 	$: canViewApiKey = !!data?.grants?.canViewApiKey;
+
+	// Panopto state
+	$: panoptoStatus = data.panoptoStatus?.status || 'none';
+	$: panoptoTenants = [] as api.PanoptoTenant[];
+	let panoptoFolderQuery = '';
+	let panoptoFolderResults: api.PanoptoFolder[] = [];
+	let searchingPanoptoFolders = false;
+
+	async function searchPanoptoFolders() {
+		if (!panoptoFolderQuery) return;
+		searchingPanoptoFolders = true;
+		try {
+			const resp = await api.searchPanoptoFolders(fetch, data.class.id, panoptoFolderQuery);
+			const expanded = api.expandResponse(resp);
+			if (expanded.data?.folders) {
+				panoptoFolderResults = expanded.data.folders;
+			} else {
+				sadToast('Failed to search Panopto folders.');
+			}
+		} catch {
+			sadToast('Failed to search Panopto folders.');
+		} finally {
+			searchingPanoptoFolders = false;
+		}
+	}
+
+	async function linkPanoptoFolder(folderId: string, folderName: string) {
+		try {
+			const resp = await api.linkPanoptoFolder(fetch, data.class.id, folderId, folderName);
+			const expanded = api.expandResponse(resp);
+			if (expanded.data) {
+				happyToast(`Connected to Panopto folder: ${folderName}`);
+				await invalidateAll();
+			} else {
+				sadToast('Failed to link Panopto folder.');
+			}
+		} catch {
+			sadToast('Failed to link Panopto folder.');
+		}
+	}
+
+	async function handleDisconnectPanopto() {
+		try {
+			const resp = await api.disconnectPanopto(fetch, data.class.id);
+			const expanded = api.expandResponse(resp);
+			if (expanded.data) {
+				happyToast('Panopto disconnected.');
+				await invalidateAll();
+			} else {
+				sadToast('Failed to disconnect Panopto.');
+			}
+		} catch {
+			sadToast('Failed to disconnect Panopto.');
+		}
+	}
 	let currentUserRole: api.Role | null;
 	$: currentUserRole = data.grants?.isAdmin
 		? 'admin'
@@ -2668,6 +2723,152 @@
 							role="student"
 						/>
 					</Modal>
+				{/if}
+			</div>
+		</div>
+	{/if}
+
+	{#if canEditClassInfo}
+		<div class="grid gap-x-6 gap-y-8 pt-6 md:grid-cols-3">
+			<div>
+				<Heading tag="h3" customSize="text-xl font-bold"
+					><Secondary class="text-3xl font-normal text-black">Panopto</Secondary></Heading
+				>
+				<Info>Connect Panopto to let assistants search and cite lecture recordings.</Info>
+			</div>
+			<div class="col-span-2">
+				{#if panoptoStatus === 'none'}
+					<Accordion flush class="mb-2 rounded-lg border-2 border-purple-200 bg-purple-50">
+						<AccordionItem paddingFlush="p-5" borderBottomClass="">
+							<div slot="header" class="mr-3 flex grow items-center gap-3">
+								<span class="text-lg font-medium">Connect Panopto recordings</span>
+							</div>
+							<div class="-mt-4 mb-4 flex flex-col gap-2 text-sm text-purple-900">
+								<p>
+									Connect your Panopto account to give assistants in this group access to lecture
+									recordings and transcripts. Students can ask questions about lecture content
+									and get answers with references to specific recordings.
+								</p>
+							</div>
+							<div class="flex grow-0 gap-1">
+								<Button
+									pill
+									size="xs"
+									class="border border-purple-900 bg-gradient-to-t from-purple-900 to-purple-800 text-white hover:from-purple-800 hover:to-purple-700"
+									onclick={() => {
+										window.location.href = `/api/v1/auth/panopto?class_id=${data.class.id}&tenant=${data.panoptoStatus?.tenant || panoptoTenants[0]?.tenant || 'harvard'}`;
+									}}
+								>
+									<LinkOutline class="me-2 h-4 w-4" />Connect Panopto
+								</Button>
+							</div>
+						</AccordionItem>
+					</Accordion>
+				{:else if panoptoStatus === 'authorized'}
+					<Accordion flush class="mb-2 rounded-lg border-2 border-yellow-300 bg-yellow-50">
+						<AccordionItem paddingFlush="p-5" borderBottomClass="">
+							<div slot="header" class="mr-3 flex grow items-center gap-3">
+								<span class="text-lg font-medium">Select a Panopto folder</span>
+							</div>
+							<div class="-mt-4 mb-4 text-sm text-yellow-800">
+								<p>Your Panopto account is connected. Search for a course folder to link:</p>
+								<div class="mt-3 flex flex-row gap-2">
+									<Input
+										size="sm"
+										placeholder="Search folders (e.g., API 201)"
+										bind:value={panoptoFolderQuery}
+										class="max-w-xs"
+										on:keydown={(e) => { if (e.key === 'Enter') searchPanoptoFolders(); }}
+									/>
+									<Button
+										pill
+										size="xs"
+										class="border border-yellow-900 bg-gradient-to-t from-yellow-800 to-yellow-700 text-white hover:from-yellow-700 hover:to-yellow-600"
+										onclick={searchPanoptoFolders}
+										disabled={searchingPanoptoFolders || !panoptoFolderQuery}
+									>
+										{#if searchingPanoptoFolders}<Spinner class="me-1 h-4 w-4" />{/if}
+										Search
+									</Button>
+								</div>
+								{#if panoptoFolderResults.length > 0}
+									<div class="mt-3 flex flex-col gap-1">
+										{#each panoptoFolderResults as folder}
+											<button
+												class="flex items-center justify-between rounded-md border border-yellow-300 bg-white px-3 py-2 text-left text-sm hover:bg-yellow-100"
+												onclick={() => linkPanoptoFolder(folder.id, folder.name)}
+											>
+												<span class="font-medium">{folder.name}</span>
+												<LinkOutline class="h-4 w-4 text-yellow-800" />
+											</button>
+										{/each}
+									</div>
+								{/if}
+							</div>
+						</AccordionItem>
+					</Accordion>
+				{:else if panoptoStatus === 'linked'}
+					<Accordion flush class="mb-2 rounded-lg border-2 border-green-300 bg-green-50">
+						<AccordionItem paddingFlush="p-5" borderBottomClass="">
+							<div slot="header" class="mr-3 flex grow items-center justify-between gap-3">
+								<div class="flex items-center gap-3">
+									<span class="text-lg font-medium">Panopto is connected</span>
+								</div>
+								<span
+									class="items-center justify-center rounded-full border border-green-700 bg-white px-2.5 py-0.5 text-xs text-green-800"
+								>
+									{data.panoptoStatus?.folder_name || 'Linked'}
+								</span>
+							</div>
+							<div class="-mt-4 mb-4 text-sm text-green-800">
+								<p>
+									This group is linked to <span class="font-semibold">{data.panoptoStatus?.folder_name}</span> on Panopto.
+									Assistants with MCP tools enabled can search recordings and retrieve transcripts.
+								</p>
+							</div>
+							<div class="flex flex-row items-center justify-between">
+								<Button
+									pill
+									size="xs"
+									class="border border-red-700 text-red-700 hover:bg-red-700 hover:text-white"
+									onclick={handleDisconnectPanopto}
+								>
+									<LinkBreakOutline class="me-2 h-4 w-4" />Disconnect
+								</Button>
+							</div>
+						</AccordionItem>
+					</Accordion>
+				{:else if panoptoStatus === 'error'}
+					<Alert color="red" class="border-2 p-4 text-sm">
+						<div class="p-1.5">
+							<div class="flex items-center gap-3">
+								<span class="text-lg font-medium">Reconnect Panopto</span>
+							</div>
+							<p class="mt-2 text-sm">
+								Your Panopto connection needs to be refreshed. Please reconnect your account.
+							</p>
+							<div class="mt-3 flex flex-row items-center gap-2">
+								<Button
+									pill
+									size="xs"
+									class="border border-red-900 bg-gradient-to-t from-red-800 to-red-700 text-white hover:from-red-700 hover:to-red-600"
+									onclick={() => {
+										window.location.href = `/api/v1/auth/panopto?class_id=${data.class.id}&tenant=${data.panoptoStatus?.tenant || 'harvard'}`;
+									}}
+								>
+									<RefreshOutline class="me-2 h-4 w-4" />Reconnect Panopto
+								</Button>
+								<Button
+									pill
+									size="xs"
+									class="border border-red-900 text-red-900 hover:bg-red-900 hover:text-white"
+									onclick={handleDisconnectPanopto}
+								>
+									<LinkBreakOutline class="me-2 h-4 w-4" />Disconnect
+								</Button>
+							</div>
+						</div>
+					</Alert>
 				{/if}
 			</div>
 		</div>

@@ -204,7 +204,52 @@ class CanvasSettings(BaseSettings):
         )
 
 
+class PanoptoSettings(BaseSettings):
+    """Connection settings to a Panopto instance."""
+
+    tenant: str
+    tenant_friendly_name: str
+    base_url: str
+    client_id: str
+    client_secret: str
+    auth_token_expiry: int = Field(60 * 60)  # 1 hour
+
+    def url(self, path: str) -> str:
+        """Return a URL relative to the Panopto Base URL."""
+        return f"{self.base_url.rstrip('/')}/{path.lstrip('/')}"
+
+    def api_url(self, path: str) -> str:
+        """Return a URL relative to the Panopto REST API."""
+        return self.url(f"/Panopto/api/v1/{path.lstrip('/')}")
+
+    def auth_link(self, state: str, redirect_uri: str) -> str:
+        """Return the OAuth2 authorization URL for Panopto."""
+        from urllib.parse import urlencode
+
+        params = urlencode(
+            {
+                "client_id": self.client_id,
+                "response_type": "code",
+                "redirect_uri": redirect_uri,
+                "scope": "api openid offline_access",
+                "response_mode": "query",
+                "state": state,
+            }
+        )
+        return self.url(f"/Panopto/oauth2/connect/authorize?{params}")
+
+    def token_url(self) -> str:
+        """Return the OAuth2 token endpoint URL."""
+        return self.url("/Panopto/oauth2/connect/token")
+
+
 LMSInstance = Union[CanvasSettings]
+
+
+class PanoptoIntegrationSettings(BaseSettings):
+    """Panopto integration settings."""
+
+    instances: list[PanoptoSettings] = Field(default_factory=list)
 
 
 class LMSSettings(BaseSettings):
@@ -670,6 +715,7 @@ class Config(BaseSettings):
     authz: AuthzSettings
     email: EmailSettings
     lms: LMSSettings
+    panopto: PanoptoIntegrationSettings = Field(PanoptoIntegrationSettings())
     lti: LTISettings | None = Field(None)
     sentry: SentrySettings = Field(SentrySettings())
     metrics: MetricsSettings = Field(MetricsSettings())

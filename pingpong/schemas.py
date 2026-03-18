@@ -1354,6 +1354,19 @@ class LMSType(Enum):
     CANVAS = "canvas"
 
 
+# NONE: No Panopto connection.
+# AUTHORIZED: OAuth tokens obtained.
+# LINKED: Panopto folder linked.
+# ERROR: Token expired or invalid — re-auth needed.
+# DISMISSED: User dismissed the Panopto prompt.
+class PanoptoStatus(StrEnum):
+    NONE = auto()
+    AUTHORIZED = auto()
+    LINKED = auto()
+    ERROR = auto()
+    DISMISSED = auto()
+
+
 class CreateUserResult(BaseModel):
     email: str
     display_name: str | None = None

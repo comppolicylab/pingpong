@@ -7,7 +7,7 @@ import type { PageLoad } from './$types';
  */
 export const load = async ({ fetch, params }: Parameters<PageLoad>[0]) => {
 	const classId = parseInt(params.classId, 10);
-	const [classDataResponse, grants, canvasInstances, ltiClasses] = await Promise.all([
+	const [classDataResponse, grants, canvasInstances, ltiClasses, panoptoStatusResponse] = await Promise.all([
 		// Even though we `getClass` at the parent layout, we need to do it again here since we might have an updated lastRateLimitedAt value.
 		api.getClass(fetch, classId).then(api.expandResponse),
 		api.grants(fetch, {
@@ -48,7 +48,8 @@ export const load = async ({ fetch, params }: Parameters<PageLoad>[0]) => {
 			}
 		}),
 		api.loadLMSInstances(fetch, classId, 'canvas').then(api.expandResponse),
-		api.loadLTIClasses(fetch, classId).then(api.expandResponse)
+		api.loadLTIClasses(fetch, classId).then(api.expandResponse),
+		api.getPanoptoStatus(fetch, classId).then(api.expandResponse).catch(() => ({ data: { status: 'none', tenant: null, folder_id: null, folder_name: null, mcp_server_tool_id: null }, error: null, $status: 200 }))
 	]);
 
 	if (classDataResponse.error) {
@@ -107,6 +108,7 @@ export const load = async ({ fetch, params }: Parameters<PageLoad>[0]) => {
 		class: classDataResponse.data,
 		subscription: subscription,
 		canvasInstances: canvasInstances.data.instances,
-		ltiClasses: ltiClasses.data.classes
+		ltiClasses: ltiClasses.data.classes,
+		panoptoStatus: panoptoStatusResponse.data ?? { status: 'none', tenant: null, folder_id: null, folder_name: null, mcp_server_tool_id: null }
 	};
 };

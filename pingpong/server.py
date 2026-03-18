@@ -929,6 +929,335 @@ async def auth_canvas(request: StateRequest):
         return await client.complete_initial_auth(code)
 
 
+# --- Panopto Integration Endpoints ---
+
+
+@v1.get("/auth/panopto")
+async def auth_panopto_redirect(request: StateRequest):
+    """Generate Panopto OAuth2 redirect URL."""
+    from pingpong.panopto import get_panopto_auth_link, get_panopto_tenants
+
+    class_id = request.query_params.get("class_id")
+    tenant = request.query_params.get("tenant")
+    user_id = request.state["session"].user.id
+
+    if not class_id or not tenant:
+        raise HTTPException(status_code=400, detail="class_id and tenant are required")
+
+    link = get_panopto_auth_link(int(class_id), user_id, tenant)
+    return RedirectResponse(link, status_code=303)
+
+
+@v1.get("/auth/panopto/callback")
+async def auth_panopto_callback(request: StateRequest):
+    """Panopto OAuth2 callback. Exchanges code for tokens and stores them."""
+    from pingpong.panopto import (
+        decode_panopto_state,
+        exchange_panopto_code,
+        PanoptoException,
+    )
+
+    code = request.query_params.get("code")
+    state = request.query_params.get("state")
+    error = request.query_params.get("error")
+
+    try:
+        state_data = decode_panopto_state(state, nowfn=get_now_fn(request))
+        user_id = int(state_data["user_id"])
+        class_id = int(state_data["class_id"])
+        tenant = state_data["panopto_tenant"]
+    except Exception:
+        return RedirectResponse(
+            config.url("/?error_code=1"), status_code=303
+        )
+
+    if error:
+        return RedirectResponse(
+            config.url(f"/group/{class_id}/manage?panopto_error=1"),
+            status_code=303,
+        )
+
+    if not code or user_id != request.state["session"].user.id:
+        return RedirectResponse(
+            config.url(f"/group/{class_id}/manage?panopto_error=1"),
+            status_code=303,
+        )
+
+    try:
+        tokens = await exchange_panopto_code(code, tenant)
+        await models.Class.update_panopto_token(
+            request.state["db"],
+            class_id,
+            tokens["access_token"],
+            tokens["expires_in"],
+            refresh_token=tokens.get("refresh_token"),
+            user_id=user_id,
+            panopto_tenant=tenant,
+        )
+    except PanoptoException:
+        return RedirectResponse(
+            config.url(f"/group/{class_id}/manage?panopto_error=1"),
+            status_code=303,
+        )
+
+    return RedirectResponse(
+        config.url(f"/group/{class_id}/manage?panopto=connected"),
+        status_code=303,
+    )
+
+
+@v1.get("/class/{class_id}/panopto/tenants")
+async def get_panopto_tenants_endpoint(request: StateRequest, class_id: int):
+    """Get available Panopto tenants for this institution."""
+    from pingpong.panopto import get_panopto_tenants
+
+    return {"tenants": get_panopto_tenants()}
+
+
+@v1.get("/class/{class_id}/panopto/folders")
+async def search_panopto_folders_endpoint(request: StateRequest, class_id: int):
+    """Search Panopto folders. Requires AUTHORIZED or LINKED status."""
+    from pingpong.panopto import get_panopto_access_token, search_panopto_folders
+
+    query = request.query_params.get("query", "")
+    if not query:
+        raise HTTPException(status_code=400, detail="query parameter is required")
+
+    access_token, tenant = await get_panopto_access_token(
+        request.state["db"], class_id
+    )
+    folders = await search_panopto_folders(access_token, tenant, query)
+    return {
+        "folders": [
+            {"id": f.get("Id"), "name": f.get("Name"), "description": f.get("Description")}
+            for f in folders
+        ]
+    }
+
+
+@v1.post("/class/{class_id}/panopto/link")
+async def link_panopto_folder(request: StateRequest, class_id: int):
+    """Link a Panopto folder to this class and auto-create MCP server tool."""
+    from pingpong.panopto import get_panopto_access_token, get_panopto_config
+
+    body = await request.json()
+    folder_id = body.get("folder_id")
+    folder_name = body.get("folder_name")
+
+    if not folder_id or not folder_name:
+        raise HTTPException(status_code=400, detail="folder_id and folder_name are required")
+
+    access_token, tenant = await get_panopto_access_token(
+        request.state["db"], class_id
+    )
+
+    # Create an MCPServerTool pointing to PingPong's own MCP endpoint
+    from pingpong.auth import encode_auth_token
+    import json
+
+    mcp_auth_token = encode_auth_token(
+        sub=json.dumps({"class_id": class_id, "type": "panopto_mcp"}),
+        expiry=60 * 60 * 24 * 365 * 10,  # 10 years — effectively permanent
+    )
+
+    mcp_tool = await models.MCPServerTool.create(
+        request.state["db"],
+        {
+            "display_name": f"Panopto: {folder_name}",
+            "server_url": config.url("/api/v1/mcp/panopto"),
+            "authorization_token": mcp_auth_token,
+            "description": f"Search and retrieve transcripts from Panopto lecture recordings in {folder_name}.",
+            "enabled": True,
+            "created_by_user_id": request.state["session"].user.id,
+            "updated_by_user_id": request.state["session"].user.id,
+        },
+    )
+
+    await models.Class.link_panopto_folder(
+        request.state["db"],
+        class_id,
+        folder_id,
+        folder_name,
+        mcp_tool.id,
+    )
+
+    return {"status": "linked", "folder_id": folder_id, "folder_name": folder_name}
+
+
+@v1.get("/class/{class_id}/panopto/status")
+async def get_panopto_status(request: StateRequest, class_id: int):
+    """Get Panopto connection status for a class."""
+    from sqlalchemy import select
+
+    stmt = select(
+        models.Class.panopto_status,
+        models.Class.panopto_tenant,
+        models.Class.panopto_folder_id,
+        models.Class.panopto_folder_name,
+        models.Class.panopto_mcp_server_tool_id,
+    ).where(models.Class.id == class_id)
+    result = await request.state["db"].execute(stmt)
+    row = result.first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Class not found")
+
+    return {
+        "status": row[0].value if row[0] else "none",
+        "tenant": row[1],
+        "folder_id": row[2],
+        "folder_name": row[3],
+        "mcp_server_tool_id": row[4],
+    }
+
+
+@v1.delete("/class/{class_id}/panopto")
+async def disconnect_panopto(request: StateRequest, class_id: int):
+    """Disconnect Panopto from this class."""
+    # Get the MCP tool ID to clean up
+    from sqlalchemy import select
+
+    stmt = select(models.Class.panopto_mcp_server_tool_id).where(
+        models.Class.id == class_id
+    )
+    result = await request.state["db"].execute(stmt)
+    mcp_tool_id = result.scalar_one_or_none()
+
+    await models.Class.disconnect_panopto(request.state["db"], class_id)
+
+    # Disable the MCP server tool (don't delete — may be referenced by past runs)
+    if mcp_tool_id:
+        from sqlalchemy import update
+
+        await request.state["db"].execute(
+            update(models.MCPServerTool)
+            .where(models.MCPServerTool.id == mcp_tool_id)
+            .values(enabled=False)
+        )
+
+    return {"status": "disconnected"}
+
+
+@v1.post("/mcp/panopto")
+async def panopto_mcp_endpoint(request: StateRequest):
+    """MCP Streamable HTTP endpoint for Panopto.
+
+    This implements the JSON-RPC MCP protocol. OpenAI calls this endpoint
+    during assistant runs to search recordings and retrieve transcripts.
+    """
+    from pingpong.panopto import (
+        get_panopto_access_token,
+        handle_mcp_tool_call,
+        MCP_TOOLS,
+        MCP_SERVER_INFO,
+        PanoptoException,
+    )
+    from starlette.responses import Response
+    import json as json_mod
+
+    body = await request.json()
+    method = body.get("method")
+    request_id = body.get("id")
+    params = body.get("params", {})
+
+    # Authenticate: extract class_id from the authorization token
+    auth_header = request.headers.get("authorization", "")
+    bearer_token = auth_header.replace("Bearer ", "") if auth_header.startswith("Bearer ") else ""
+
+    class_id = None
+    if bearer_token:
+        try:
+            from pingpong.auth import decode_auth_token
+
+            auth_data = decode_auth_token(bearer_token)
+            sub = json_mod.loads(auth_data.sub)
+            if sub.get("type") == "panopto_mcp":
+                class_id = int(sub["class_id"])
+        except Exception:
+            pass
+
+    def jsonrpc_response(result):
+        data = {"jsonrpc": "2.0", "id": request_id, "result": result}
+        content = f"event: message\ndata: {json_mod.dumps(data)}\n\n"
+        return Response(
+            content=content,
+            media_type="text/event-stream",
+            headers={"Mcp-Session-Id": f"panopto-{class_id or 'anon'}"},
+        )
+
+    def jsonrpc_error(code, message):
+        data = {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
+        content = f"event: message\ndata: {json_mod.dumps(data)}\n\n"
+        return Response(
+            content=content,
+            media_type="text/event-stream",
+            headers={"Mcp-Session-Id": f"panopto-{class_id or 'anon'}"},
+        )
+
+    if method == "initialize":
+        return jsonrpc_response(
+            {
+                "protocolVersion": "2025-03-26",
+                "capabilities": {
+                    "tools": {"listChanged": False},
+                },
+                "serverInfo": MCP_SERVER_INFO,
+                "instructions": "Search and retrieve transcripts from Panopto lecture recordings.",
+            }
+        )
+
+    elif method == "notifications/initialized":
+        return Response(status_code=204)
+
+    elif method == "tools/list":
+        return jsonrpc_response({"tools": MCP_TOOLS})
+
+    elif method == "tools/call":
+        if not class_id:
+            return jsonrpc_error(-32600, "Unauthorized: invalid or missing token")
+
+        tool_name = params.get("name")
+        arguments = params.get("arguments", {})
+
+        try:
+            # Get access token and class folder
+            access_token, tenant = await get_panopto_access_token(
+                request.state["db"], class_id
+            )
+
+            # Get linked folder ID
+            from sqlalchemy import select
+
+            stmt = select(models.Class.panopto_folder_id).where(
+                models.Class.id == class_id
+            )
+            result_row = await request.state["db"].execute(stmt)
+            class_folder_id = result_row.scalar_one_or_none()
+
+            result_text = await handle_mcp_tool_call(
+                tool_name, arguments, access_token, tenant, class_folder_id
+            )
+            return jsonrpc_response(
+                {"content": [{"type": "text", "text": result_text}]}
+            )
+        except PanoptoException as e:
+            return jsonrpc_response(
+                {
+                    "content": [{"type": "text", "text": f"Error: {e.detail}"}],
+                    "isError": True,
+                }
+            )
+        except Exception as e:
+            return jsonrpc_response(
+                {
+                    "content": [{"type": "text", "text": f"Internal error: {str(e)}"}],
+                    "isError": True,
+                }
+            )
+
+    else:
+        return jsonrpc_error(-32601, f"Method not found: {method}")
+
+
 @v1.get("/auth")
 async def auth(request: StateRequest):
     """Continue the auth flow based on a JWT in the query params.

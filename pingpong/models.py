@@ -1314,7 +1314,9 @@ class User(Base):
         "ExternalLogin", back_populates="user"
     )
     # Maps to classes in which the user has connected their LMS account
-    lms_syncs: Mapped[List["Class"]] = relationship("Class", back_populates="lms_user")
+    lms_syncs: Mapped[List["Class"]] = relationship(
+        "Class", back_populates="lms_user", foreign_keys="[Class.lms_user_id]"
+    )
     lti_syncs: Mapped[List["LTIClass"]] = relationship(
         "LTIClass", back_populates="setup_user"
     )
@@ -4605,13 +4607,28 @@ class Class(Base):
     lms_class = relationship("LMSClass", back_populates="classes")
     lti_classes = relationship("LTIClass", back_populates="class_")
     lms_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    lms_user = relationship("User", back_populates="lms_syncs")
+    lms_user = relationship("User", back_populates="lms_syncs", foreign_keys="[Class.lms_user_id]")
     lms_course_id = Column(Integer, nullable=True)
     lms_access_token = Column(String, nullable=True)
     lms_refresh_token = Column(String, nullable=True)
     lms_expires_in = Column(Integer, nullable=True)
     lms_token_added_at = Column(DateTime(timezone=True), nullable=True)
     lms_last_synced = Column(DateTime(timezone=True), nullable=True)
+    # Panopto integration fields
+    panopto_status = Column(
+        SQLEnum(schemas.PanoptoStatus), default=schemas.PanoptoStatus.NONE
+    )
+    panopto_tenant = Column(String, nullable=True)
+    panopto_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    panopto_folder_id = Column(String, nullable=True)
+    panopto_folder_name = Column(String, nullable=True)
+    panopto_access_token = Column(String, nullable=True)
+    panopto_refresh_token = Column(String, nullable=True)
+    panopto_expires_in = Column(Integer, nullable=True)
+    panopto_token_added_at = Column(DateTime(timezone=True), nullable=True)
+    panopto_mcp_server_tool_id = Column(
+        Integer, ForeignKey("mcp_server_tools.id"), nullable=True
+    )
     any_can_create_assistant = Column(Boolean, default=False)
     any_can_publish_assistant = Column(Boolean, default=False)
     any_can_share_assistant = Column(Boolean, default=False)
@@ -4977,6 +4994,121 @@ class Class(Base):
             token_added_at=result[4],
             now=result[5],
         )
+
+    @classmethod
+    async def update_panopto_token(
+        cls,
+        session: AsyncSession,
+        class_id: int,
+        access_token: str,
+        expires_in: int,
+        refresh_token: str | None = None,
+        user_id: int | None = None,
+        refresh: bool = False,
+        panopto_tenant: str | None = None,
+    ) -> None:
+        """Update Panopto OAuth2 token. On refresh, reuses existing refresh_token."""
+        stmt = (
+            update(Class)
+            .where(Class.id == class_id)
+            .values(
+                panopto_access_token=access_token,
+                panopto_refresh_token=refresh_token
+                if not refresh
+                else Class.panopto_refresh_token,
+                panopto_user_id=user_id if not refresh else Class.panopto_user_id,
+                panopto_expires_in=expires_in,
+                panopto_status=schemas.PanoptoStatus.AUTHORIZED
+                if not refresh
+                else Class.panopto_status,
+                panopto_token_added_at=func.now(),
+                panopto_tenant=panopto_tenant
+                if panopto_tenant is not None
+                else Class.panopto_tenant,
+            )
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def get_panopto_token(
+        cls, session: AsyncSession, class_id: int
+    ) -> dict:
+        """Return Panopto token info with DB time."""
+        stmt = select(
+            Class.panopto_user_id,
+            Class.panopto_access_token,
+            Class.panopto_refresh_token,
+            Class.panopto_expires_in,
+            Class.panopto_token_added_at,
+            func.now(),
+        ).where(Class.id == class_id)
+        response = await session.execute(stmt)
+        result = response.first()
+        return {
+            "user_id": result[0],
+            "access_token": result[1],
+            "refresh_token": result[2],
+            "expires_in": result[3],
+            "token_added_at": result[4],
+            "now": result[5],
+        }
+
+    @classmethod
+    async def mark_panopto_error(
+        cls, session: AsyncSession, class_id: int
+    ) -> None:
+        """Mark Panopto connection as errored."""
+        stmt = (
+            update(Class)
+            .where(Class.id == class_id)
+            .values(panopto_status=schemas.PanoptoStatus.ERROR)
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def link_panopto_folder(
+        cls,
+        session: AsyncSession,
+        class_id: int,
+        folder_id: str,
+        folder_name: str,
+        mcp_server_tool_id: int,
+    ) -> None:
+        """Link a Panopto folder to this class."""
+        stmt = (
+            update(Class)
+            .where(Class.id == class_id)
+            .values(
+                panopto_folder_id=folder_id,
+                panopto_folder_name=folder_name,
+                panopto_status=schemas.PanoptoStatus.LINKED,
+                panopto_mcp_server_tool_id=mcp_server_tool_id,
+            )
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def disconnect_panopto(
+        cls, session: AsyncSession, class_id: int
+    ) -> None:
+        """Remove Panopto connection from this class."""
+        stmt = (
+            update(Class)
+            .where(Class.id == class_id)
+            .values(
+                panopto_status=schemas.PanoptoStatus.NONE,
+                panopto_tenant=None,
+                panopto_user_id=None,
+                panopto_folder_id=None,
+                panopto_folder_name=None,
+                panopto_access_token=None,
+                panopto_refresh_token=None,
+                panopto_expires_in=None,
+                panopto_token_added_at=None,
+                panopto_mcp_server_tool_id=None,
+            )
+        )
+        await session.execute(stmt)
 
     @classmethod
     async def get_lms_course_id(
