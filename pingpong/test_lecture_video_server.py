@@ -6509,7 +6509,7 @@ async def test_retry_lecture_video_endpoint_returns_conflict_when_requeue_fails(
     assert response.status_code == 409
     assert (
         response.json()["detail"]
-        == "Lecture video retry is only available after narration processing fails."
+        == "Lecture video retry is no longer available because the assistant or lecture video configuration changed."
     )
 
     async with db.async_session() as session:
