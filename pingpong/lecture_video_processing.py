@@ -356,7 +356,7 @@ async def cancel_narration_processing_runs(
 async def reset_failed_narrations_for_retry(
     session: AsyncSession,
     lecture_video_id: int,
-) -> None:
+) -> list[str]:
     lecture_video = await models.LectureVideo.get_by_id_with_copy_context(
         session, lecture_video_id
     )
@@ -403,9 +403,7 @@ async def reset_failed_narrations_for_retry(
             )
         )
 
-    if audio_keys_to_delete and config.lecture_video_audio_store:
-        for key in audio_keys_to_delete:
-            await _delete_audio_key_quietly(key)
+    return audio_keys_to_delete
 
 
 async def claim_failed_lecture_video_for_retry(

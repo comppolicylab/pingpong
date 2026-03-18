@@ -1862,15 +1862,6 @@
 		}
 
 		if (params.interaction_mode === 'lecture_video') {
-			if (lectureVideoConfigLoadError) {
-				sadToast(
-					`Could not load the lecture video configuration:\n${lectureVideoConfigLoadErrorMessage}`
-				);
-				$loading = false;
-				$loadingMessage = '';
-				return;
-			}
-
 			if (uploadingLectureVideo) {
 				sadToast('Please wait for the lecture video upload to finish before saving.');
 				$loading = false;
@@ -2109,8 +2100,9 @@
 				<div>
 					<div class="text-sm font-semibold">Lecture video configuration could not be loaded</div>
 					<div class="mt-1 text-sm">
-						PingPong could not load this assistant&apos;s lecture video settings, so saving is
-						disabled until the configuration loads cleanly.
+						PingPong could not load this assistant&apos;s current lecture video settings. To repair
+						this assistant, upload a replacement lecture video, enter a valid manifest and voice ID,
+						then save.
 					</div>
 					<div class="mt-2 text-sm">{lectureVideoConfigLoadErrorMessage}</div>
 					{#if lectureVideoConfigLoadError.$status}
@@ -3738,11 +3730,8 @@
 				pill
 				class="border border-orange bg-orange text-white hover:bg-orange-dark"
 				type="submit"
-				disabled={$loading ||
-					uploadingFSPrivate ||
-					uploadingCIPrivate ||
-					uploadingLectureVideo ||
-					!!lectureVideoConfigLoadError}>Save</Button
+				disabled={$loading || uploadingFSPrivate || uploadingCIPrivate || uploadingLectureVideo}
+				>Save</Button
 			>
 			<Button
 				disabled={$loading || uploadingFSPrivate || uploadingCIPrivate || uploadingLectureVideo}

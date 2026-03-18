@@ -8415,8 +8415,10 @@ async def retry_assistant_lecture_video_processing(
             detail="Lecture video retry is only available after narration processing fails.",
         )
 
-    await lecture_video_processing.reset_failed_narrations_for_retry(
-        request.state["db"], lecture_video.id
+    audio_keys_to_delete = (
+        await lecture_video_processing.reset_failed_narrations_for_retry(
+            request.state["db"], lecture_video.id
+        )
     )
     refreshed_lecture_video = await models.LectureVideo.get_by_id_with_copy_context(
         request.state["db"], lecture_video.id
@@ -8433,6 +8435,9 @@ async def retry_assistant_lecture_video_processing(
             status_code=409,
             detail="Lecture video retry is no longer available because the assistant or lecture video configuration changed.",
         )
+    if audio_keys_to_delete and config.lecture_video_audio_store:
+        for key in audio_keys_to_delete:
+            await lecture_video_processing._delete_audio_key_quietly(key)
     refreshed_lecture_video_summary = await models.LectureVideo.get_by_id(
         request.state["db"], lecture_video.id
     )
