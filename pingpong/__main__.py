@@ -27,7 +27,6 @@ from pingpong.api_keys import (
     set_as_default_oai_api_key,
     transfer_api_keys,
 )
-from pingpong.errors import sentry
 from pingpong.merge import (
     get_merged_user_tuples,
     list_all_permissions,
