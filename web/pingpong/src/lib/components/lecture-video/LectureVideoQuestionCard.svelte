@@ -33,8 +33,11 @@
 		postAnswerText = null,
 		expanded = false,
 		answeringDisabled = false,
+		showContinue = false,
+		continueDisabled = false,
 		onselectOption,
-		ontoggleExpand
+		ontoggleExpand,
+		oncontinue
 	}: {
 		position: number;
 		questionText: string;
@@ -45,8 +48,11 @@
 		postAnswerText: string | null;
 		expanded: boolean;
 		answeringDisabled?: boolean;
+		showContinue?: boolean;
+		continueDisabled?: boolean;
 		onselectOption: (optionId: number) => void;
 		ontoggleExpand: () => void;
+		oncontinue?: () => void;
 	} = $props();
 
 	let pendingOptionId: number | null = $state(null);
@@ -280,6 +286,18 @@
 					</div>
 				{/each}
 			</div>
+			{#if showContinue}
+				<button
+					type="button"
+					class="{actionButtonClass} {continueDisabled
+						? 'cursor-not-allowed bg-slate-300 text-slate-500'
+						: 'cursor-pointer bg-blue-600 text-white hover:bg-blue-700'}"
+					disabled={continueDisabled}
+					onclick={oncontinue}
+				>
+					Continue
+				</button>
+			{/if}
 		</div>
 	{:else if cardState === 'answered' && !expanded}
 		{@const currentPillStyle = pillStyle(isCorrect)}

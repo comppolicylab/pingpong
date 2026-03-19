@@ -103,7 +103,13 @@
 	let currentNarrationAudio: HTMLAudioElement | null = null;
 	let pendingVideoRetryCleanup: (() => void) | null = null;
 	let manualPlaybackTarget: 'video' | 'narration' | null = $state(null);
-	let autoContinueInFlight = false;
+	let autoContinueInFlight = $state(false);
+	let autoContinueFailed = $state(false);
+	let continuePromptProps = $derived({
+		showContinue: autoContinueFailed,
+		continueDisabled: !canParticipate || postAnswerNarrationPending || autoContinueInFlight,
+		oncontinue: requestContinue
+	});
 
 	function hasVisibleQuestionPrompt(state: LectureVideoSessionState): boolean {
 		return state === 'awaiting_answer' || state === 'awaiting_post_answer_resume';
@@ -325,6 +331,8 @@
 		ignorePauseEventUntilMs = 0;
 		revokeNarrationResources();
 		clearPendingVideoRetry();
+		autoContinueInFlight = false;
+		autoContinueFailed = false;
 	}
 
 	function revokeNarrationResources() {
@@ -341,7 +349,6 @@
 		pendingVideoRetryCleanup?.();
 		pendingVideoRetryCleanup = null;
 		manualPlaybackTarget = null;
-		autoContinueInFlight = false;
 	}
 
 	function queueVideoRetry() {
@@ -359,7 +366,9 @@
 		}
 
 		clearPendingVideoRetry();
+		resumeOffsetOnCanPlay = null;
 		stopNarrationPlayback();
+		autoContinueInFlight = false;
 
 		if (videoElement && !videoElement.paused) {
 			suppressPauseInteraction = true;
@@ -609,15 +618,15 @@
 			void playNarration(currentContinuation.post_answer_narration_id, {
 				onEnded: () => {
 					postAnswerNarrationPending = false;
-					void triggerAutoContinue();
+					void requestContinue();
 				},
 				onError: () => {
 					postAnswerNarrationPending = false;
-					void triggerAutoContinue();
+					void requestContinue();
 				}
 			});
 		} else if (sessionState === 'awaiting_post_answer_resume') {
-			void triggerAutoContinue();
+			void requestContinue();
 		}
 
 		applyPendingResumeOffset();
@@ -738,6 +747,9 @@
 		stateVersion = session.state_version;
 		currentQuestion = session.current_question;
 		currentContinuation = session.current_continuation;
+		if (session.state !== 'awaiting_post_answer_resume') {
+			autoContinueFailed = false;
+		}
 		furthestOffsetMs = session.furthest_offset_ms ?? 0;
 		questionPlaybackLocked =
 			session.state === 'awaiting_answer' || session.state === 'awaiting_post_answer_resume';
@@ -1104,6 +1116,7 @@
 	async function handleSelectOption(optionId: number) {
 		if (!controllerSessionId || !currentQuestion || introNarrationPending) return;
 		const questionAtAnswer = currentQuestion;
+		autoContinueFailed = false;
 
 		const response = await api.postLectureVideoInteraction(fetch, classId, threadId, {
 			type: 'answer_submitted',
@@ -1140,15 +1153,15 @@
 				void playNarration(currentContinuation.post_answer_narration_id, {
 					onEnded: () => {
 						postAnswerNarrationPending = false;
-						void triggerAutoContinue();
+						void requestContinue();
 					},
 					onError: () => {
 						postAnswerNarrationPending = false;
-						void triggerAutoContinue();
+						void requestContinue();
 					}
 				});
 			} else {
-				void triggerAutoContinue();
+				void requestContinue();
 			}
 
 			// Clear subtitle
@@ -1156,36 +1169,27 @@
 		}
 	}
 
-	async function triggerAutoContinue() {
+	async function requestContinue() {
 		if (autoContinueInFlight) {
 			return;
 		}
 
-		const continueControllerSessionId = controllerSessionId;
 		autoContinueInFlight = true;
 		try {
-			await handleContinue();
-			if (
-				continueControllerSessionId &&
-				controllerSessionId === continueControllerSessionId &&
-				sessionState === 'awaiting_post_answer_resume' &&
-				!postAnswerNarrationPending
-			) {
-				failClosedControl('Failed to resume lecture video playback. Please refresh to continue.');
-			}
+			autoContinueFailed = !(await handleContinue());
 		} finally {
 			autoContinueInFlight = false;
 		}
 	}
 
-	async function handleContinue() {
+	async function handleContinue(): Promise<boolean> {
 		if (
 			!controllerSessionId ||
 			!currentContinuation ||
 			!currentQuestion ||
 			postAnswerNarrationPending
 		) {
-			return;
+			return false;
 		}
 
 		// Save values before applySession clears them
@@ -1193,10 +1197,14 @@
 		const previousOffsetMs = currentTimeMs;
 		const previousQuestionPlaybackLocked = questionPlaybackLocked;
 		let optimisticPlayPromise: Promise<boolean> | null = null;
-		resumeOffsetOnCanPlay = resumeOffsetMs;
+		const canSeekNow =
+			videoElement != null && videoElement.readyState >= HTMLMediaElement.HAVE_METADATA;
+		resumeOffsetOnCanPlay = canSeekNow ? null : resumeOffsetMs;
 		if (videoElement) {
 			questionPlaybackLocked = false;
-			setVideoPosition(resumeOffsetMs);
+			if (canSeekNow) {
+				setVideoPosition(resumeOffsetMs);
+			}
 			optimisticPlayPromise = tryPlayVideo('continue-click-optimistic', {
 				suppressInteractionPost: true,
 				queueRetryOnFailure: true
@@ -1226,6 +1234,7 @@
 			optimisticPlayStarted = optimisticPlayPromise ? await optimisticPlayPromise : false;
 		} catch {
 			clearPendingVideoRetry();
+			resumeOffsetOnCanPlay = null;
 			questionPlaybackLocked = previousQuestionPlaybackLocked;
 			if (videoElement) {
 				if (!videoElement.paused) {
@@ -1234,11 +1243,12 @@
 				}
 				setVideoPosition(previousOffsetMs);
 			}
-			return;
+			return false;
 		}
 
 		if (failClosedOnConflict('continue-conflict', expanded)) {
-			return;
+			resumeOffsetOnCanPlay = null;
+			return false;
 		}
 		if (!expanded.error) {
 			applySession(expanded.data.lecture_video_session);
@@ -1247,16 +1257,21 @@
 
 			// Resume video at the continue offset
 			if (videoElement && !optimisticPlayStarted) {
-				setVideoPosition(resumeOffsetMs);
+				const canSeekNow = videoElement.readyState >= HTMLMediaElement.HAVE_METADATA;
+				resumeOffsetOnCanPlay = canSeekNow ? null : resumeOffsetMs;
+				if (canSeekNow) {
+					setVideoPosition(resumeOffsetMs);
+				}
 				void tryPlayVideo('continue-post-response', {
 					suppressInteractionPost: true,
 					queueRetryOnFailure: true
 				});
 			}
-			return;
+			return true;
 		}
 
 		clearPendingVideoRetry();
+		resumeOffsetOnCanPlay = null;
 		questionPlaybackLocked = previousQuestionPlaybackLocked;
 		if (videoElement) {
 			if (!videoElement.paused) {
@@ -1265,6 +1280,7 @@
 			}
 			setVideoPosition(previousOffsetMs);
 		}
+		return false;
 	}
 
 	function handleQuestionClick(markerId: number) {
@@ -1372,6 +1388,7 @@
 						answeringDisabled={!canParticipate || introNarrationPending}
 						{scrollToQuestionId}
 						onselectOption={handleSelectOption}
+						{...continuePromptProps}
 						onscrollcomplete={clearQuestionScrollTarget}
 					/>
 				</div>
@@ -1387,6 +1404,7 @@
 						answeringDisabled={!canParticipate || introNarrationPending}
 						{scrollToQuestionId}
 						onselectOption={handleSelectOption}
+						{...continuePromptProps}
 						onscrollcomplete={clearQuestionScrollTarget}
 					/>
 				</div>

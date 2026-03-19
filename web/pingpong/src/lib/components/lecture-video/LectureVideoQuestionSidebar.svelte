@@ -35,9 +35,12 @@
 		sessionState = 'playing',
 		answeredQuestions = new Map(),
 		answeringDisabled = false,
+		showContinue = false,
+		continueDisabled = false,
 		scrollToQuestionId = null,
 		active = true,
 		onselectOption,
+		oncontinue,
 		onscrollcomplete
 	}: {
 		allQuestions: SidebarQuestion[];
@@ -47,9 +50,12 @@
 		sessionState: 'playing' | 'awaiting_answer' | 'awaiting_post_answer_resume' | 'completed';
 		answeredQuestions: Map<number, AnsweredQuestion>;
 		answeringDisabled?: boolean;
+		showContinue?: boolean;
+		continueDisabled?: boolean;
 		scrollToQuestionId: number | null;
 		active?: boolean;
 		onselectOption: (optionId: number) => void;
+		oncontinue?: () => void;
 		onscrollcomplete: () => void;
 	} = $props();
 
@@ -57,6 +63,7 @@
 	let isAwaitingAnswer = $derived(sessionState === 'awaiting_answer');
 	let isAwaitingPostAnswerResume = $derived(sessionState === 'awaiting_post_answer_resume');
 	const noop = () => {};
+	let continueCardProps = $derived({ showContinue, continueDisabled, oncontinue });
 
 	function questionCardId(questionId: number): string {
 		return `question-card-${questionId}`;
@@ -141,6 +148,7 @@
 						expanded={false}
 						onselectOption={noop}
 						ontoggleExpand={noop}
+						{...continueCardProps}
 					/>
 				{/if}
 			</div>

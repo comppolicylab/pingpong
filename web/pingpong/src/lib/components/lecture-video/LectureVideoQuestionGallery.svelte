@@ -18,9 +18,12 @@
 		sessionState = 'playing',
 		answeredQuestions = new Map(),
 		answeringDisabled = false,
+		showContinue = false,
+		continueDisabled = false,
 		scrollToQuestionId = null,
 		active = true,
 		onselectOption,
+		oncontinue,
 		onscrollcomplete
 	}: {
 		allQuestions: GalleryQuestion[];
@@ -46,9 +49,12 @@
 		sessionState: 'playing' | 'awaiting_answer' | 'awaiting_post_answer_resume' | 'completed';
 		answeredQuestions: Map<number, AnsweredQuestion>;
 		answeringDisabled?: boolean;
+		showContinue?: boolean;
+		continueDisabled?: boolean;
 		scrollToQuestionId: number | null;
 		active?: boolean;
 		onselectOption: (optionId: number) => void;
+		oncontinue?: () => void;
 		onscrollcomplete: () => void;
 	} = $props();
 
@@ -59,6 +65,7 @@
 	const dotBaseClass =
 		'size-2.5 rounded-full transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-300';
 	const noop = () => {};
+	let continueCardProps = $derived({ showContinue, continueDisabled, oncontinue });
 
 	let hasCurrentPendingQuestion = $derived(
 		sessionState === 'awaiting_answer' || sessionState === 'awaiting_post_answer_resume'
@@ -201,6 +208,7 @@
 							expanded={false}
 							onselectOption={noop}
 							ontoggleExpand={noop}
+							{...continueCardProps}
 						/>
 					{/if}
 				{/if}
