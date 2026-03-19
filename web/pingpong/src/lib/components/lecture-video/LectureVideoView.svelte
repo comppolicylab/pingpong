@@ -1136,28 +1136,29 @@
 			return;
 		}
 		if (!expanded.error) {
+			const continuationAtAnswer = expanded.data.lecture_video_session.current_continuation;
 			appendAnswerToHistory(
 				questionAtAnswer,
 				optionId,
-				expanded.data.lecture_video_session.current_continuation?.correct_option_id ?? null,
-				expanded.data.lecture_video_session.current_continuation?.post_answer_text ?? null
+				continuationAtAnswer?.correct_option_id ?? null,
+				continuationAtAnswer?.post_answer_text ?? null
 			);
 			applySession(expanded.data.lecture_video_session);
 
 			// Record answer immediately so the marker updates
-			if (currentQuestion && currentContinuation) {
-				answeredQuestions.set(currentQuestion.id, {
-					selectedOptionId: currentContinuation.option_id,
-					correctOptionId: currentContinuation.correct_option_id,
-					options: currentQuestion.options,
-					postAnswerText: currentContinuation.post_answer_text
+			if (continuationAtAnswer) {
+				answeredQuestions.set(questionAtAnswer.id, {
+					selectedOptionId: continuationAtAnswer.option_id,
+					correctOptionId: continuationAtAnswer.correct_option_id,
+					options: questionAtAnswer.options,
+					postAnswerText: continuationAtAnswer.post_answer_text
 				});
 			}
 
 			// Play post-answer narration if available
-			if (currentContinuation?.post_answer_narration_id) {
+			if (continuationAtAnswer?.post_answer_narration_id) {
 				postAnswerNarrationPending = true;
-				void playNarration(currentContinuation.post_answer_narration_id, {
+				void playNarration(continuationAtAnswer.post_answer_narration_id, {
 					onEnded: () => {
 						postAnswerNarrationPending = false;
 					},
