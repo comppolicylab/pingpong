@@ -5095,8 +5095,34 @@ class Class(Base):
         await session.execute(stmt)
 
     @classmethod
+    async def cleanup_panopto_mcp_tool(
+        cls, session: AsyncSession, class_id: int
+    ) -> None:
+        """Remove and disable the Panopto MCP tool for a class.
+
+        Removes the tool from all assistant associations and disables it.
+        Does not delete the tool itself as it may be referenced by past runs.
+        """
+        stmt = select(Class.panopto_mcp_server_tool_id).where(Class.id == class_id)
+        result = await session.execute(stmt)
+        mcp_tool_id = result.scalar_one_or_none()
+        if mcp_tool_id:
+            await session.execute(
+                delete(mcp_server_tool_assistant_association).where(
+                    mcp_server_tool_assistant_association.c.mcp_server_tool_id
+                    == mcp_tool_id
+                )
+            )
+            await session.execute(
+                update(MCPServerTool)
+                .where(MCPServerTool.id == mcp_tool_id)
+                .values(enabled=False)
+            )
+
+    @classmethod
     async def disconnect_panopto(cls, session: AsyncSession, class_id: int) -> None:
         """Remove Panopto connection from this class."""
+        await cls.cleanup_panopto_mcp_tool(session, class_id)
         stmt = (
             update(Class)
             .where(Class.id == class_id)
@@ -5114,6 +5140,20 @@ class Class(Base):
             )
         )
         await session.execute(stmt)
+
+    @classmethod
+    async def get_panopto_mcp_server_tool(
+        cls, session: AsyncSession, class_id: int
+    ) -> "MCPServerTool | None":
+        """Get the Panopto MCP server tool for a class, if any."""
+        stmt = select(Class.panopto_mcp_server_tool_id).where(Class.id == class_id)
+        result = await session.execute(stmt)
+        mcp_tool_id = result.scalar_one_or_none()
+        if not mcp_tool_id:
+            return None
+        tool_stmt = select(MCPServerTool).where(MCPServerTool.id == mcp_tool_id)
+        tool_result = await session.execute(tool_stmt)
+        return tool_result.scalar_one_or_none()
 
     @classmethod
     async def get_lms_course_id(

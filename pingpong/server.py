@@ -1062,25 +1062,7 @@ async def link_panopto_folder(request: StateRequest, class_id: int):
     access_token, tenant = await get_panopto_access_token(request.state["db"], class_id)
 
     # Clean up any existing MCP tool from a previous link
-    from sqlalchemy import delete, select, update as sql_update
-
-    existing_tool_stmt = select(models.Class.panopto_mcp_server_tool_id).where(
-        models.Class.id == class_id
-    )
-    existing_tool_result = await request.state["db"].execute(existing_tool_stmt)
-    existing_tool_id = existing_tool_result.scalar_one_or_none()
-    if existing_tool_id:
-        await request.state["db"].execute(
-            delete(models.mcp_server_tool_assistant_association).where(
-                models.mcp_server_tool_assistant_association.c.mcp_server_tool_id
-                == existing_tool_id
-            )
-        )
-        await request.state["db"].execute(
-            sql_update(models.MCPServerTool)
-            .where(models.MCPServerTool.id == existing_tool_id)
-            .values(enabled=False)
-        )
+    await models.Class.cleanup_panopto_mcp_tool(request.state["db"], class_id)
 
     # Create an MCPServerTool pointing to PingPong's own MCP endpoint
     from pingpong.auth import encode_auth_token
@@ -1150,35 +1132,8 @@ async def get_panopto_status(request: StateRequest, class_id: int):
 )
 async def disconnect_panopto(request: StateRequest, class_id: int):
     """Disconnect Panopto from this class."""
-    # Get the MCP tool ID to clean up
-    from sqlalchemy import select
-
-    stmt = select(models.Class.panopto_mcp_server_tool_id).where(
-        models.Class.id == class_id
-    )
-    result = await request.state["db"].execute(stmt)
-    mcp_tool_id = result.scalar_one_or_none()
-
     await models.Class.disconnect_panopto(request.state["db"], class_id)
-
-    # Remove the MCP tool from all assistants and disable it
-    # (don't delete the tool itself — may be referenced by past runs)
-    if mcp_tool_id:
-        from sqlalchemy import delete, update
-
-        await request.state["db"].execute(
-            delete(models.mcp_server_tool_assistant_association).where(
-                models.mcp_server_tool_assistant_association.c.mcp_server_tool_id
-                == mcp_tool_id
-            )
-        )
-        await request.state["db"].execute(
-            update(models.MCPServerTool)
-            .where(models.MCPServerTool.id == mcp_tool_id)
-            .values(enabled=False)
-        )
-
-    return {"status": "disconnected"}
+    return schemas.GenericStatus(status="disconnected")
 
 
 @v1.get(
@@ -1188,23 +1143,10 @@ async def disconnect_panopto(request: StateRequest, class_id: int):
 )
 async def get_class_mcp_servers(request: StateRequest, class_id: int):
     """Get class-level MCP servers (e.g. Panopto) that can be added to assistants."""
-    from sqlalchemy import select
-
-    stmt = select(models.Class.panopto_mcp_server_tool_id).where(
-        models.Class.id == class_id
-    )
-    result = await request.state["db"].execute(stmt)
-    mcp_tool_id = result.scalar_one_or_none()
-
     mcp_servers = []
-    if mcp_tool_id:
-        stmt = select(models.MCPServerTool).where(
-            models.MCPServerTool.id == mcp_tool_id
-        )
-        tool_result = await request.state["db"].execute(stmt)
-        tool = tool_result.scalar_one_or_none()
-        if tool:
-            mcp_servers.append(mcp_server_to_response(tool))
+    tool = await models.Class.get_panopto_mcp_server_tool(request.state["db"], class_id)
+    if tool:
+        mcp_servers.append(mcp_server_to_response(tool))
 
     return {"mcp_servers": mcp_servers}
 
