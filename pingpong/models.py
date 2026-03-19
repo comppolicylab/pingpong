@@ -2842,15 +2842,19 @@ class LectureVideoInteraction(Base):
         return list((await session.scalars(stmt)).all())
 
     @classmethod
-    async def list_answer_submissions_by_thread_id(
+    async def list_question_history_by_thread_id(
         cls, session: AsyncSession, thread_id: int
     ) -> list["LectureVideoInteraction"]:
         stmt = (
             select(LectureVideoInteraction)
             .where(
                 LectureVideoInteraction.thread_id == thread_id,
-                LectureVideoInteraction.event_type
-                == schemas.LectureVideoInteractionEventType.ANSWER_SUBMITTED,
+                LectureVideoInteraction.event_type.in_(
+                    [
+                        schemas.LectureVideoInteractionEventType.QUESTION_PRESENTED,
+                        schemas.LectureVideoInteractionEventType.ANSWER_SUBMITTED,
+                    ]
+                ),
             )
             .options(
                 selectinload(LectureVideoInteraction.question).options(

@@ -1109,13 +1109,21 @@ async def test_lecture_video_interactions_derive_continuation_and_history(
     )
     assert history_response.status_code == 200
     history = history_response.json()["interactions"]
-    assert [item["event_index"] for item in history] == [3]
-    assert [item["event_type"] for item in history] == ["answer_submitted"]
+    assert [item["event_index"] for item in history] == [2, 3]
+    assert [item["event_type"] for item in history] == [
+        "question_presented",
+        "answer_submitted",
+    ]
     assert history[0]["actor_name"] == "Me"
     assert history[0]["question_text"] == questions[0].question_text
-    assert history[0]["option_text"] == options[questions[0].id][0].option_text
-    assert history[0]["question_options"][0]["post_answer_text"] == "Correct answer"
+    assert history[0]["offset_ms"] == questions[0].stop_offset_ms
+    assert history[0]["question_options"][0]["post_answer_text"] is None
     assert history[0]["question_options"][1]["post_answer_text"] is None
+    assert history[1]["actor_name"] == "Me"
+    assert history[1]["question_text"] == questions[0].question_text
+    assert history[1]["option_text"] == options[questions[0].id][0].option_text
+    assert history[1]["question_options"][0]["post_answer_text"] == "Correct answer"
+    assert history[1]["question_options"][1]["post_answer_text"] is None
 
 
 @with_user(123)
@@ -1302,6 +1310,7 @@ async def test_lecture_video_interactions_reject_post_completion_playback_events
     )
     assert history_response.status_code == 200
     assert [item["event_type"] for item in history_response.json()["interactions"]] == [
+        "question_presented",
         "answer_submitted"
     ]
 
@@ -1847,15 +1856,23 @@ async def test_lecture_video_history_uses_pseudonyms_for_other_participants(
 
     history = history_response.json()["interactions"]
     assert [item["event_type"] for item in history] == [
+        "question_presented",
         "answer_submitted",
+        "question_presented",
         "answer_submitted",
     ]
     assert history[0]["actor_name"] == "Me"
     assert history[0]["question_id"] == questions[0].id
-    assert history[0]["option_id"] == options[questions[0].id][0].id
-    assert history[1]["actor_name"] == pseudonym(thread, users[456])
-    assert history[1]["question_id"] == questions[1].id
-    assert history[1]["option_id"] == options[questions[1].id][0].id
+    assert history[0]["offset_ms"] == questions[0].stop_offset_ms
+    assert history[1]["actor_name"] == "Me"
+    assert history[1]["question_id"] == questions[0].id
+    assert history[1]["option_id"] == options[questions[0].id][0].id
+    assert history[2]["actor_name"] == pseudonym(thread, users[456])
+    assert history[2]["question_id"] == questions[1].id
+    assert history[2]["offset_ms"] == questions[1].stop_offset_ms
+    assert history[3]["actor_name"] == pseudonym(thread, users[456])
+    assert history[3]["question_id"] == questions[1].id
+    assert history[3]["option_id"] == options[questions[1].id][0].id
 
 
 @with_user(123)
