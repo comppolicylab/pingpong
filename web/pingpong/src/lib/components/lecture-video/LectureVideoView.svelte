@@ -109,11 +109,17 @@
 		return (continuation?.post_answer_text?.trim().length ?? 0) > 0;
 	}
 
+	function hasTextOnlyPostAnswerFeedback(continuation: LectureVideoContinuation | null): boolean {
+		return (
+			hasTextPostAnswerFeedback(continuation) && continuation?.post_answer_narration_id == null
+		);
+	}
+
 	function shouldShowContinuePrompt(): boolean {
 		return (
 			(sessionState === 'awaiting_post_answer_resume' &&
 				!postAnswerNarrationPending &&
-				hasTextPostAnswerFeedback(currentContinuation)) ||
+				hasTextOnlyPostAnswerFeedback(currentContinuation)) ||
 			autoContinueFailed
 		);
 	}
@@ -640,7 +646,7 @@
 			});
 		} else if (
 			sessionState === 'awaiting_post_answer_resume' &&
-			!hasTextPostAnswerFeedback(currentContinuation)
+			!hasTextOnlyPostAnswerFeedback(currentContinuation)
 		) {
 			void requestContinue();
 		}
@@ -1176,7 +1182,7 @@
 						void requestContinue();
 					}
 				});
-			} else if (!hasTextPostAnswerFeedback(currentContinuation)) {
+			} else if (!hasTextOnlyPostAnswerFeedback(currentContinuation)) {
 				void requestContinue();
 			}
 
