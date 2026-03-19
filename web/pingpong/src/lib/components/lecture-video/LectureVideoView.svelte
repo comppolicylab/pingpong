@@ -112,6 +112,7 @@
 		return (
 			(sessionState === 'awaiting_post_answer_resume' &&
 				!postAnswerNarrationPending &&
+				!autoContinueInFlight &&
 				hasVisiblePostAnswerFeedback(currentContinuation)) ||
 			autoContinueFailed
 		);
