@@ -552,6 +552,7 @@
 
 	function hideSeekPreview() {
 		seekPreviewVisible = false;
+		previewVideoActivated = false;
 	}
 
 	function updateSeekPreviewFromClientX(clientX: number, track: HTMLDivElement) {
