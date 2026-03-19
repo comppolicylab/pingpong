@@ -2,6 +2,7 @@
 	import { getLectureVideoHistory, expandResponse } from '$lib/api';
 	import { loading as globalLoading } from '$lib/stores/general';
 	import type { LectureVideoInteractionHistoryItem } from '$lib/api';
+	import { mergeQuestionOptions } from '$lib/utils/lecture-video';
 	import { Spinner } from 'flowbite-svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 	import LectureVideoQuestionCard from './LectureVideoQuestionCard.svelte';
@@ -13,6 +14,7 @@
 		options: { id: number; option_text: string; post_answer_text?: string | null }[];
 		selectedOptionId: number | null;
 		correctOptionId: number | null;
+		postAnswerText: string | null;
 	};
 
 	let {
@@ -40,26 +42,31 @@
 				questionText: item.question_text ?? '',
 				options: [],
 				selectedOptionId: null,
-				correctOptionId: null
+				correctOptionId: null,
+				postAnswerText: null
 			};
 
 			if (item.question_text) {
 				question.questionText = item.question_text;
 			}
 			if (item.question_options && item.question_options.length > 0) {
-				question.options = item.question_options;
+				question.options = mergeQuestionOptions(question.options, item.question_options);
 			}
 			if (item.correct_option_id != null) {
 				question.correctOptionId = item.correct_option_id;
 			}
 			if (item.event_type === 'answer_submitted' && item.option_id != null) {
 				question.selectedOptionId = item.option_id;
-				if (
-					question.options.length === 0 &&
-					item.option_text &&
-					!question.options.some((option) => option.id === item.option_id)
-				) {
-					question.options = [{ id: item.option_id, option_text: item.option_text }];
+				question.postAnswerText =
+					question.options.find((option) => option.id === item.option_id)?.post_answer_text ?? null;
+				if (question.options.length === 0 && item.option_text) {
+					question.options = [
+						{
+							id: item.option_id,
+							option_text: item.option_text,
+							post_answer_text: question.postAnswerText
+						}
+					];
 				}
 			}
 
@@ -143,7 +150,7 @@
 					state="answered"
 					selectedOptionId={question.selectedOptionId}
 					correctOptionId={question.correctOptionId}
-					postAnswerText={null}
+					postAnswerText={question.postAnswerText}
 					expanded={true}
 					ontoggleExpand={() => {}}
 					onselectOption={() => {}}

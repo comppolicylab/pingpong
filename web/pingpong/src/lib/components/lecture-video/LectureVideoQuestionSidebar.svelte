@@ -25,6 +25,7 @@
 		selectedOptionId: number;
 		correctOptionId: number | null;
 		options: QuestionOption[];
+		postAnswerText: string | null;
 	};
 
 	let {
@@ -117,7 +118,7 @@
 						state="answered"
 						selectedOptionId={answered.selectedOptionId}
 						correctOptionId={answered.correctOptionId}
-						postAnswerText={null}
+						postAnswerText={answered.postAnswerText}
 						expanded={expandedAnsweredId === question.id}
 						ontoggleExpand={() => toggleExpandedAnswered(question.id)}
 						onselectOption={noop}
