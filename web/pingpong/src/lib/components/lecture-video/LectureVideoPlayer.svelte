@@ -25,6 +25,8 @@
 	type KeyboardActionIndicator = 'play' | 'pause' | 'mute' | 'unmute';
 
 	const PREVIEW_WIDTH = 224;
+	const PREVIEW_VIDEO_IDLE_DEACTIVATE_MS = 3000;
+	const PREVIEW_VIDEO_SEEK_TOLERANCE_S = 0.15;
 	const VOLUME_SLIDER_PADDING_PX = 5;
 	const VOLUME_SLIDER_TRACK_WIDTH_PX = 54;
 	const VOLUME_SLIDER_EXPANDED_WIDTH_PX = 76;
@@ -126,6 +128,7 @@
 	let seekPreviewX = $state(0);
 	let trackWidth = $state(0);
 	let previewVideoReady = $state(false);
+	let previewVideoFrameReady = $state(false);
 	let lastPreviewVideoSrc: string | undefined = undefined;
 	let lastMainVideoSrc: string | undefined = undefined;
 	let keyboardActionIndicator: KeyboardActionIndicator | null = $state(null);
@@ -136,6 +139,8 @@
 	let keyboardActionOverlayFreshTimeout: ReturnType<typeof setTimeout> | null = $state(null);
 	let keyboardActionOverlayUnmountTimeout: ReturnType<typeof setTimeout> | null = $state(null);
 	let mediaSessionRefreshTimeout: ReturnType<typeof setTimeout> | null = $state(null);
+	let previewVideoDeactivateTimeout: ReturnType<typeof setTimeout> | null = $state(null);
+	let snapshotCanvasElement: HTMLCanvasElement | null = $state(null);
 	let playerContainerElement: HTMLDivElement | null = $state(null);
 
 	let effectiveOffsetMs = $derived(
@@ -257,8 +262,10 @@
 
 	$effect(() => {
 		if (src !== lastMainVideoSrc) {
+			clearPreviewVideoDeactivateTimeout();
 			previewVideoActivated = false;
 			previewVideoReady = false;
+			previewVideoFrameReady = false;
 			lastPreviewVideoSrc = undefined;
 			lastMainVideoSrc = src;
 		}
@@ -267,6 +274,7 @@
 	$effect(() => {
 		if (previewVideoSrc !== lastPreviewVideoSrc) {
 			previewVideoReady = false;
+			previewVideoFrameReady = false;
 			lastPreviewVideoSrc = previewVideoSrc;
 		}
 	});
@@ -414,6 +422,14 @@
 		syncPreviewVideo();
 	}
 
+	function handlePreviewVideoLoadedData() {
+		markPreviewFrameReadyIfSynced();
+	}
+
+	function handlePreviewVideoSeeked() {
+		markPreviewFrameReadyIfSynced();
+	}
+
 	function togglePlayPause() {
 		if (disabled || questionPendingControls || !videoElement) return;
 		if (videoElement.paused) {
@@ -532,18 +548,82 @@
 		if (!previewVideoElement || !previewVideoReady) return;
 
 		const nextPreviewTime = previewDisplayOffsetMs / 1000;
-		if (Math.abs(previewVideoElement.currentTime - nextPreviewTime) < 0.15) return;
+		if (
+			Math.abs(previewVideoElement.currentTime - nextPreviewTime) < PREVIEW_VIDEO_SEEK_TOLERANCE_S
+		) {
+			markPreviewFrameReadyIfSynced();
+			return;
+		}
 
+		previewVideoFrameReady = false;
 		previewVideoElement.currentTime = nextPreviewTime;
 	}
 
 	function activatePreviewVideo() {
-		if (!src || previewVideoActivated) return;
+		if (!src) return;
+		clearPreviewVideoDeactivateTimeout();
+		if (previewVideoActivated) return;
 		previewVideoActivated = true;
+	}
+
+	function clearPreviewVideoDeactivateTimeout() {
+		if (!previewVideoDeactivateTimeout) return;
+		clearTimeout(previewVideoDeactivateTimeout);
+		previewVideoDeactivateTimeout = null;
+	}
+
+	function deactivatePreviewVideo() {
+		clearPreviewVideoDeactivateTimeout();
+		previewVideoActivated = false;
+		previewVideoReady = false;
+		previewVideoFrameReady = false;
+	}
+
+	function schedulePreviewVideoDeactivate(delayMs: number = PREVIEW_VIDEO_IDLE_DEACTIVATE_MS) {
+		if (!previewVideoActivated) return;
+		clearPreviewVideoDeactivateTimeout();
+		previewVideoDeactivateTimeout = setTimeout(() => {
+			if (seekPreviewVisible || draggingSeek) {
+				schedulePreviewVideoDeactivate(delayMs);
+				return;
+			}
+
+			deactivatePreviewVideo();
+		}, delayMs);
+	}
+
+	function markPreviewFrameReadyIfSynced() {
+		if (!previewVideoElement || !previewVideoReady) return;
+		if (previewVideoElement.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+
+		const nextPreviewTime = previewDisplayOffsetMs / 1000;
+		if (
+			Math.abs(previewVideoElement.currentTime - nextPreviewTime) >= PREVIEW_VIDEO_SEEK_TOLERANCE_S
+		) {
+			return;
+		}
+
+		previewVideoFrameReady = true;
+	}
+
+	function captureMainVideoSnapshot() {
+		if (!snapshotCanvasElement || !videoElement) return;
+		if (videoElement.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+		const ctx = snapshotCanvasElement.getContext('2d');
+		if (!ctx) return;
+		const w = videoElement.videoWidth;
+		const h = videoElement.videoHeight;
+		if (w === 0 || h === 0) return;
+		snapshotCanvasElement.width = w;
+		snapshotCanvasElement.height = h;
+		ctx.drawImage(videoElement, 0, 0, w, h);
 	}
 
 	function showSeekPreview(pointerOffsetPx: number, offsetMs: number) {
 		activatePreviewVideo();
+		if (!seekPreviewVisible) {
+			captureMainVideoSnapshot();
+		}
 		seekPreviewVisible = true;
 		seekPreviewX = pointerOffsetPx;
 		seekPreviewOffsetMs = offsetMs;
@@ -552,7 +632,7 @@
 
 	function hideSeekPreview() {
 		seekPreviewVisible = false;
-		previewVideoActivated = false;
+		schedulePreviewVideoDeactivate();
 	}
 
 	function updateSeekPreviewFromClientX(clientX: number, track: HTMLDivElement) {
@@ -1009,15 +1089,22 @@
 							<div
 								class="w-full overflow-hidden rounded-lg border border-slate-200/90 bg-slate-950 bg-clip-border shadow-xl"
 							>
-								<div class="aspect-video bg-slate-900">
+								<div class="relative aspect-video overflow-hidden bg-slate-900">
+									<canvas
+										bind:this={snapshotCanvasElement}
+										class="absolute inset-0 h-full w-full object-cover"
+									></canvas>
 									<video
 										bind:this={previewVideoElement}
 										src={previewVideoSrc}
 										playsinline
 										muted
 										preload={previewVideoPreload}
-										class="h-full w-full object-cover"
+										class="absolute inset-0 h-full w-full object-cover"
+										style="opacity: {previewVideoFrameReady ? 1 : 0};"
 										onloadedmetadata={handlePreviewVideoLoadedMetadata}
+										onloadeddata={handlePreviewVideoLoadedData}
+										onseeked={handlePreviewVideoSeeked}
 									></video>
 								</div>
 							</div>
