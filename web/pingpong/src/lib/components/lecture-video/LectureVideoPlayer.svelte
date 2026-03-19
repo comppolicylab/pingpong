@@ -27,6 +27,7 @@
 	const PREVIEW_WIDTH = 224;
 	const PREVIEW_VIDEO_IDLE_DEACTIVATE_MS = 3000;
 	const PREVIEW_VIDEO_SEEK_TOLERANCE_S = 0.15;
+	const PREVIEW_FRAME_REDRAW_EPSILON_S = 0.001;
 	const VOLUME_SLIDER_PADDING_PX = 5;
 	const VOLUME_SLIDER_TRACK_WIDTH_PX = 54;
 	const VOLUME_SLIDER_EXPANDED_WIDTH_PX = 76;
@@ -129,6 +130,7 @@
 	let trackWidth = $state(0);
 	let previewVideoReady = $state(false);
 	let previewVideoFrameReady = $state(false);
+	let lastCapturedPreviewFrameTimeS: number | null = $state(null);
 	let lastPreviewVideoSrc: string | undefined = undefined;
 	let lastMainVideoSrc: string | undefined = undefined;
 	let keyboardActionIndicator: KeyboardActionIndicator | null = $state(null);
@@ -266,6 +268,7 @@
 			previewVideoActivated = false;
 			previewVideoReady = false;
 			previewVideoFrameReady = false;
+			lastCapturedPreviewFrameTimeS = null;
 			clearSnapshotCanvas();
 			lastPreviewVideoSrc = undefined;
 			lastMainVideoSrc = src;
@@ -276,6 +279,7 @@
 		if (previewVideoSrc !== lastPreviewVideoSrc) {
 			previewVideoReady = false;
 			previewVideoFrameReady = false;
+			lastCapturedPreviewFrameTimeS = null;
 			lastPreviewVideoSrc = previewVideoSrc;
 		}
 	});
@@ -570,6 +574,7 @@
 		previewVideoActivated = false;
 		previewVideoReady = false;
 		previewVideoFrameReady = false;
+		lastCapturedPreviewFrameTimeS = null;
 	}
 
 	function schedulePreviewVideoDeactivate(delayMs: number = PREVIEW_VIDEO_IDLE_DEACTIVATE_MS) {
@@ -594,7 +599,16 @@
 		}
 
 		previewVideoFrameReady = true;
+		if (
+			lastCapturedPreviewFrameTimeS != null &&
+			Math.abs(lastCapturedPreviewFrameTimeS - previewVideoElement.currentTime) <
+				PREVIEW_FRAME_REDRAW_EPSILON_S
+		) {
+			return;
+		}
+
 		captureSnapshotFromVideo(previewVideoElement);
+		lastCapturedPreviewFrameTimeS = previewVideoElement.currentTime;
 	}
 
 	function clearSnapshotCanvas() {
