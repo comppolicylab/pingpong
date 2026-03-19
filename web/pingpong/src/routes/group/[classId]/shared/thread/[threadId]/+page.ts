@@ -28,6 +28,7 @@ export const load: PageLoad = async ({ fetch, params }) => {
 	let threadRecording: api.VoiceModeRecordingInfo | null = null;
 	let threadDisplayUserInfo = false;
 	let threadLectureVideoMismatch = false;
+	let threadLectureVideoCompleted = false;
 	let assistantGrants = { canViewAssistant: false };
 	threadTools = expanded.data.tools_available || '';
 	threadModel = expanded.data.model || '';
@@ -37,6 +38,10 @@ export const load: PageLoad = async ({ fetch, params }) => {
 	threadLectureVideoMismatch =
 		expanded.data.lecture_video_matches_assistant === false &&
 		threadInteractionMode === 'lecture_video';
+	threadLectureVideoCompleted =
+		threadInteractionMode === 'lecture_video' &&
+		!threadLectureVideoMismatch &&
+		expanded.data.lecture_video_session?.state === 'completed';
 	if (expanded.data.thread.assistant_id) {
 		assistantGrants = await api.grants(fetch, {
 			canViewAssistant: {
@@ -57,6 +62,7 @@ export const load: PageLoad = async ({ fetch, params }) => {
 		canViewAssistant: assistantGrants.canViewAssistant,
 		threadRecording,
 		threadDisplayUserInfo,
-		threadLectureVideoMismatch
+		threadLectureVideoMismatch,
+		threadLectureVideoCompleted,
 	};
 };
