@@ -11,6 +11,7 @@
 		LectureVideoContinuation,
 		LectureVideoInteractionHistoryItem
 	} from '$lib/api';
+	import { hasVisiblePostAnswerFeedback } from '$lib/lectureVideoFeedback';
 	import LectureVideoPlayer from './LectureVideoPlayer.svelte';
 	import LectureVideoQuestionSidebar from './LectureVideoQuestionSidebar.svelte';
 	import LectureVideoQuestionGallery from './LectureVideoQuestionGallery.svelte';
@@ -105,21 +106,11 @@
 	let manualPlaybackTarget: 'video' | 'narration' | null = $state(null);
 	let autoContinueInFlight = $state(false);
 	let autoContinueFailed = $state(false);
-	function hasTextPostAnswerFeedback(continuation: LectureVideoContinuation | null): boolean {
-		return (continuation?.post_answer_text?.trim().length ?? 0) > 0;
-	}
-
-	function hasTextOnlyPostAnswerFeedback(continuation: LectureVideoContinuation | null): boolean {
-		return (
-			hasTextPostAnswerFeedback(continuation) && continuation?.post_answer_narration_id == null
-		);
-	}
-
 	function shouldShowContinuePrompt(): boolean {
 		return (
 			(sessionState === 'awaiting_post_answer_resume' &&
 				!postAnswerNarrationPending &&
-				hasTextOnlyPostAnswerFeedback(currentContinuation)) ||
+				hasVisiblePostAnswerFeedback(currentContinuation)) ||
 			autoContinueFailed
 		);
 	}
@@ -646,7 +637,7 @@
 			});
 		} else if (
 			sessionState === 'awaiting_post_answer_resume' &&
-			!hasTextOnlyPostAnswerFeedback(currentContinuation)
+			!hasVisiblePostAnswerFeedback(currentContinuation)
 		) {
 			void requestContinue();
 		}
@@ -1182,7 +1173,7 @@
 						void requestContinue();
 					}
 				});
-			} else if (!hasTextOnlyPostAnswerFeedback(currentContinuation)) {
+			} else if (!hasVisiblePostAnswerFeedback(currentContinuation)) {
 				void requestContinue();
 			}
 
