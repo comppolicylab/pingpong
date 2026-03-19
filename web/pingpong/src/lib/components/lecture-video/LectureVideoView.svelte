@@ -103,6 +103,7 @@
 	let currentNarrationAudio: HTMLAudioElement | null = null;
 	let pendingVideoRetryCleanup: (() => void) | null = null;
 	let manualPlaybackTarget: 'video' | 'narration' | null = $state(null);
+	let autoContinueInFlight = false;
 
 	function hasVisibleQuestionPrompt(state: LectureVideoSessionState): boolean {
 		return state === 'awaiting_answer' || state === 'awaiting_post_answer_resume';
@@ -340,6 +341,7 @@
 		pendingVideoRetryCleanup?.();
 		pendingVideoRetryCleanup = null;
 		manualPlaybackTarget = null;
+		autoContinueInFlight = false;
 	}
 
 	function queueVideoRetry() {
@@ -607,11 +609,15 @@
 			void playNarration(currentContinuation.post_answer_narration_id, {
 				onEnded: () => {
 					postAnswerNarrationPending = false;
+					void triggerAutoContinue();
 				},
 				onError: () => {
 					postAnswerNarrationPending = false;
+					void triggerAutoContinue();
 				}
 			});
+		} else if (sessionState === 'awaiting_post_answer_resume') {
+			void triggerAutoContinue();
 		}
 
 		applyPendingResumeOffset();
@@ -1134,15 +1140,41 @@
 				void playNarration(currentContinuation.post_answer_narration_id, {
 					onEnded: () => {
 						postAnswerNarrationPending = false;
+						void triggerAutoContinue();
 					},
 					onError: () => {
 						postAnswerNarrationPending = false;
+						void triggerAutoContinue();
 					}
 				});
+			} else {
+				void triggerAutoContinue();
 			}
 
 			// Clear subtitle
 			subtitleText = null;
+		}
+	}
+
+	async function triggerAutoContinue() {
+		if (autoContinueInFlight) {
+			return;
+		}
+
+		const continueControllerSessionId = controllerSessionId;
+		autoContinueInFlight = true;
+		try {
+			await handleContinue();
+			if (
+				continueControllerSessionId &&
+				controllerSessionId === continueControllerSessionId &&
+				sessionState === 'awaiting_post_answer_resume' &&
+				!postAnswerNarrationPending
+			) {
+				failClosedControl('Failed to resume lecture video playback. Please refresh to continue.');
+			}
+		} finally {
+			autoContinueInFlight = false;
 		}
 	}
 
@@ -1161,6 +1193,7 @@
 		const previousOffsetMs = currentTimeMs;
 		const previousQuestionPlaybackLocked = questionPlaybackLocked;
 		let optimisticPlayPromise: Promise<boolean> | null = null;
+		resumeOffsetOnCanPlay = resumeOffsetMs;
 		if (videoElement) {
 			questionPlaybackLocked = false;
 			setVideoPosition(resumeOffsetMs);
@@ -1337,10 +1370,8 @@
 						{sessionState}
 						{answeredQuestions}
 						answeringDisabled={!canParticipate || introNarrationPending}
-						continueDisabled={!canParticipate || postAnswerNarrationPending}
 						{scrollToQuestionId}
 						onselectOption={handleSelectOption}
-						oncontinue={handleContinue}
 						onscrollcomplete={clearQuestionScrollTarget}
 					/>
 				</div>
@@ -1354,10 +1385,8 @@
 						{sessionState}
 						{answeredQuestions}
 						answeringDisabled={!canParticipate || introNarrationPending}
-						continueDisabled={!canParticipate || postAnswerNarrationPending}
 						{scrollToQuestionId}
 						onselectOption={handleSelectOption}
-						oncontinue={handleContinue}
 						onscrollcomplete={clearQuestionScrollTarget}
 					/>
 				</div>

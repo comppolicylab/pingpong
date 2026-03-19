@@ -35,11 +35,9 @@
 		sessionState = 'playing',
 		answeredQuestions = new Map(),
 		answeringDisabled = false,
-		continueDisabled = false,
 		scrollToQuestionId = null,
 		active = true,
 		onselectOption,
-		oncontinue,
 		onscrollcomplete
 	}: {
 		allQuestions: SidebarQuestion[];
@@ -49,11 +47,9 @@
 		sessionState: 'playing' | 'awaiting_answer' | 'awaiting_post_answer_resume' | 'completed';
 		answeredQuestions: Map<number, AnsweredQuestion>;
 		answeringDisabled?: boolean;
-		continueDisabled?: boolean;
 		scrollToQuestionId: number | null;
 		active?: boolean;
 		onselectOption: (optionId: number) => void;
-		oncontinue: () => void;
 		onscrollcomplete: () => void;
 	} = $props();
 
@@ -143,9 +139,6 @@
 						correctOptionId={currentContinuation.correct_option_id}
 						postAnswerText={currentContinuation.post_answer_text}
 						expanded={false}
-						showContinue={true}
-						{continueDisabled}
-						{oncontinue}
 						onselectOption={noop}
 						ontoggleExpand={noop}
 					/>
