@@ -105,8 +105,21 @@
 	let manualPlaybackTarget: 'video' | 'narration' | null = $state(null);
 	let autoContinueInFlight = $state(false);
 	let autoContinueFailed = $state(false);
+	function hasTextPostAnswerFeedback(continuation: LectureVideoContinuation | null): boolean {
+		return (continuation?.post_answer_text?.trim().length ?? 0) > 0;
+	}
+
+	function shouldShowContinuePrompt(): boolean {
+		return (
+			(sessionState === 'awaiting_post_answer_resume' &&
+				!postAnswerNarrationPending &&
+				hasTextPostAnswerFeedback(currentContinuation)) ||
+			autoContinueFailed
+		);
+	}
+
 	let continuePromptProps = $derived({
-		showContinue: autoContinueFailed,
+		showContinue: shouldShowContinuePrompt(),
 		continueDisabled: !canParticipate || postAnswerNarrationPending || autoContinueInFlight,
 		oncontinue: requestContinue
 	});
@@ -625,7 +638,10 @@
 					void requestContinue();
 				}
 			});
-		} else if (sessionState === 'awaiting_post_answer_resume') {
+		} else if (
+			sessionState === 'awaiting_post_answer_resume' &&
+			!hasTextPostAnswerFeedback(currentContinuation)
+		) {
 			void requestContinue();
 		}
 
@@ -1160,7 +1176,7 @@
 						void requestContinue();
 					}
 				});
-			} else {
+			} else if (!hasTextPostAnswerFeedback(currentContinuation)) {
 				void requestContinue();
 			}
 
