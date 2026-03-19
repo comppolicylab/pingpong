@@ -22,12 +22,16 @@
 		classId,
 		threadId,
 		lectureVideoSrc,
-		title = 'Lecture Video'
+		title = 'Lecture Video',
+		canParticipate = true,
+		initialSession = null
 	}: {
 		classId: number;
 		threadId: number;
 		lectureVideoSrc: string;
 		title?: string;
+		canParticipate?: boolean;
+		initialSession?: LectureVideoSession | null;
 	} = $props();
 
 	// --- Session state ---
@@ -140,12 +144,13 @@
 		getActiveQuestionIds(questionPlaybackLocked, currentQuestion, currentContinuation)
 	);
 	let playbackRequiresManualStart = $derived(
-		manualPlaybackTarget != null ||
-			(!controllerSessionId &&
-				videoReadyForPlayback &&
-				paused &&
-				sessionState === 'playing' &&
-				!playbackLocked)
+		canParticipate &&
+			(manualPlaybackTarget != null ||
+				(!controllerSessionId &&
+					videoReadyForPlayback &&
+					paused &&
+					sessionState === 'playing' &&
+					!playbackLocked))
 	);
 
 	function appendAnswerToHistory(
@@ -536,9 +541,15 @@
 		const interactions = await reconstructFromHistory();
 		historyInteractions = interactions;
 		historyLoaded = true;
-
-		if (interactions.some((item) => item.event_type === 'session_completed')) {
-			sessionState = 'completed';
+		if (!canParticipate) {
+			if (initialSession) {
+				applySession(initialSession);
+				initialStartOffsetMs = initialSession.last_known_offset_ms ?? 0;
+				if (sessionState === 'awaiting_answer' && currentQuestion) {
+					questionPresentedForId = currentQuestion.id;
+					subtitleText = currentQuestion.intro_text || null;
+				}
+			}
 			return;
 		}
 
@@ -818,12 +829,13 @@
 	}
 
 	async function handleSeek(toOffsetMs: number, fromOffsetMs: number) {
-		if (!controllerSessionId || !videoElement || playbackLocked) return;
+		const seekControllerSessionId = controllerSessionId;
+		if (!seekControllerSessionId || !videoElement || playbackLocked) return;
 		if (toOffsetMs === fromOffsetMs) return;
 
 		const payload = {
 			type: 'video_seeked' as const,
-			controller_session_id: controllerSessionId,
+			controller_session_id: seekControllerSessionId,
 			expected_state_version: stateVersion,
 			idempotency_key: crypto.randomUUID(),
 			from_offset_ms: fromOffsetMs,
@@ -835,34 +847,66 @@
 				toOffsetMs < currentQuestion.stop_offset_ms ? null : questionPresentedForId;
 		}
 
-		const response = await api.postLectureVideoInteraction(fetch, classId, threadId, payload);
-		const expanded = api.expandResponse(response);
-		if (failClosedOnConflict('video-seeked-conflict', expanded)) {
-			return;
-		}
-		if (!expanded.error) {
-			applySession(expanded.data.lecture_video_session);
-			return;
-		}
+		try {
+			const response = await api.postLectureVideoInteraction(fetch, classId, threadId, payload);
+			if (controllerSessionId !== seekControllerSessionId) {
+				return;
+			}
+			const expanded = api.expandResponse(response);
+			if (failClosedOnConflict('video-seeked-conflict', expanded)) {
+				return;
+			}
+			if (!expanded.error) {
+				applySession(expanded.data.lecture_video_session);
+				return;
+			}
 
-		setVideoPosition(fromOffsetMs);
+			setVideoPosition(fromOffsetMs);
+			failClosedControl(
+				expanded.error.detail ||
+					'Failed to sync lecture video seek position. Please refresh to continue.'
+			);
+		} catch (error) {
+			if (controllerSessionId !== seekControllerSessionId) {
+				return;
+			}
+			setVideoPosition(fromOffsetMs);
+			failClosedControl(error instanceof Error ? error.message : String(error));
+		}
 	}
 
 	async function handleVideoEnded() {
-		if (!controllerSessionId) return;
-		const response = await api.postLectureVideoInteraction(fetch, classId, threadId, {
-			type: 'video_ended',
-			controller_session_id: controllerSessionId,
-			expected_state_version: stateVersion,
-			idempotency_key: crypto.randomUUID(),
-			offset_ms: Math.round(currentTimeMs)
-		});
-		const expanded = api.expandResponse(response);
-		if (failClosedOnConflict('video-ended-conflict', expanded)) {
-			return;
-		}
-		if (!expanded.error) {
-			applySession(expanded.data.lecture_video_session);
+		const endedControllerSessionId = controllerSessionId;
+		if (!endedControllerSessionId) return;
+		try {
+			const response = await api.postLectureVideoInteraction(fetch, classId, threadId, {
+				type: 'video_ended',
+				controller_session_id: endedControllerSessionId,
+				expected_state_version: stateVersion,
+				idempotency_key: crypto.randomUUID(),
+				offset_ms: Math.round(currentTimeMs)
+			});
+			if (controllerSessionId !== endedControllerSessionId) {
+				return;
+			}
+			const expanded = api.expandResponse(response);
+			if (failClosedOnConflict('video-ended-conflict', expanded)) {
+				return;
+			}
+			if (!expanded.error) {
+				applySession(expanded.data.lecture_video_session);
+				return;
+			}
+
+			failClosedControl(
+				expanded.error.detail ||
+					'Failed to complete lecture video session. Please refresh to continue.'
+			);
+		} catch (error) {
+			if (controllerSessionId !== endedControllerSessionId) {
+				return;
+			}
+			failClosedControl(error instanceof Error ? error.message : String(error));
 		}
 	}
 
@@ -1122,10 +1166,6 @@
 		}
 	}
 
-	// =========================================================================
-	// Page unload
-	// =========================================================================
-
 	function handleQuestionClick(markerId: number) {
 		scrollToQuestionId = markerId;
 	}
@@ -1153,6 +1193,10 @@
 		}
 	}
 
+	// =========================================================================
+	// Page unload
+	// =========================================================================
+
 	function handleBeforeUnload() {
 		void cleanupLectureVideoSession({ postPause: true, releaseControl: true });
 	}
@@ -1176,6 +1220,14 @@
 			class="mx-auto flex w-full max-w-screen-2xl flex-col gap-6 px-4 py-4 lg:px-6 xl:grid xl:grid-cols-[minmax(0,1fr)_20rem] xl:items-start xl:gap-8 xl:py-6"
 		>
 			<div class="min-w-0 space-y-4">
+				{#if !canParticipate}
+					<div
+						class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700"
+					>
+						You can view this lecture thread, but playback control and question responses are
+						available only to participants.
+					</div>
+				{/if}
 				<div class="overflow-hidden rounded-3xl border border-slate-200 bg-white p-3 shadow-xl">
 					<LectureVideoPlayer
 						src={lectureVideoSrc}
@@ -1185,7 +1237,7 @@
 						startOffsetMs={initialStartOffsetMs}
 						{questionMarkers}
 						{subtitleText}
-						disabled={playbackLocked}
+						disabled={!canParticipate || playbackLocked}
 						{activeQuestionIds}
 						{furthestOffsetMs}
 						manualPlaybackPrompt={playbackRequiresManualStart}
@@ -1197,6 +1249,10 @@
 						onseek={handleSeek}
 						onended={handleVideoEnded}
 						oncanplay={handleCanPlay}
+						onerror={() =>
+							failClosedControl(
+								'The lecture video could not be loaded. Please refresh to try again.'
+							)}
 						onplay={handlePlay}
 						onpause={handlePause}
 						onquestionclick={handleQuestionClick}
@@ -1213,8 +1269,8 @@
 						{currentContinuation}
 						{sessionState}
 						{answeredQuestions}
-						answeringDisabled={introNarrationPending}
-						continueDisabled={postAnswerNarrationPending}
+						answeringDisabled={!canParticipate || introNarrationPending}
+						continueDisabled={!canParticipate || postAnswerNarrationPending}
 						{scrollToQuestionId}
 						onselectOption={handleSelectOption}
 						oncontinue={handleContinue}
@@ -1230,8 +1286,8 @@
 						{currentContinuation}
 						{sessionState}
 						{answeredQuestions}
-						answeringDisabled={introNarrationPending}
-						continueDisabled={postAnswerNarrationPending}
+						answeringDisabled={!canParticipate || introNarrationPending}
+						continueDisabled={!canParticipate || postAnswerNarrationPending}
 						{scrollToQuestionId}
 						onselectOption={handleSelectOption}
 						oncontinue={handleContinue}

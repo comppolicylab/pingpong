@@ -4662,6 +4662,18 @@ async def get_lecture_video_history(
             request.state["db"], thread.id
         )
     )
+    reveal_all_correct_options = (
+        thread.lecture_video_state is not None
+        and thread.lecture_video_state.state
+        == schemas.LectureVideoSessionState.COMPLETED
+    )
+    answered_question_ids = {
+        interaction.question_id
+        for interaction in interactions
+        if interaction.event_type
+        == schemas.LectureVideoInteractionEventType.ANSWER_SUBMITTED
+        and interaction.question_id is not None
+    }
     user_id = request.state["session"].user.id
     current_user_ids = [user_id] + await models.User.get_previous_ids_by_id(
         request.state["db"], user_id
@@ -4709,7 +4721,12 @@ async def get_lecture_video_history(
                 ),
                 correct_option_id=(
                     interaction.question.correct_option.id
-                    if interaction.question and interaction.question.correct_option
+                    if interaction.question
+                    and interaction.question.correct_option
+                    and (
+                        reveal_all_correct_options
+                        or interaction.question_id in answered_question_ids
+                    )
                     else None
                 ),
                 option_id=interaction.option_id,

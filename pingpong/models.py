@@ -27,7 +27,6 @@ from sqlalchemy import (
     Float,
     UniqueConstraint,
     asc,
-    case,
     desc,
     distinct,
     literal,
@@ -2882,30 +2881,6 @@ class LectureVideoInteraction(Base):
             .limit(1)
         )
         return await session.scalar(stmt)
-
-    @classmethod
-    async def get_furthest_offset_by_thread_id(
-        cls, session: AsyncSession, thread_id: int
-    ) -> int:
-        offset_ms = func.coalesce(LectureVideoInteraction.offset_ms, 0)
-        from_offset_ms = func.coalesce(LectureVideoInteraction.from_offset_ms, 0)
-        to_offset_ms = func.coalesce(LectureVideoInteraction.to_offset_ms, 0)
-        row_furthest_offset = case(
-            (
-                and_(
-                    offset_ms >= from_offset_ms,
-                    offset_ms >= to_offset_ms,
-                ),
-                offset_ms,
-            ),
-            (from_offset_ms >= to_offset_ms, from_offset_ms),
-            else_=to_offset_ms,
-        )
-        stmt = select(func.coalesce(func.max(row_furthest_offset), 0)).where(
-            LectureVideoInteraction.thread_id == thread_id
-        )
-        result = await session.scalar(stmt)
-        return int(result or 0)
 
 
 class S3File(Base):

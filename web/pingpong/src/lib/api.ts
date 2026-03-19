@@ -1585,6 +1585,53 @@ export type LectureVideoInteractionResponse = {
 	lecture_video_session: LectureVideoSession;
 };
 
+export type LectureVideoInteractionRequestBase = {
+	controller_session_id: string;
+	expected_state_version: number;
+	idempotency_key: string;
+};
+
+export type LectureVideoQuestionPresentedRequest = LectureVideoInteractionRequestBase & {
+	type: 'question_presented';
+	question_id: number;
+	offset_ms: number;
+};
+
+export type LectureVideoAnswerSubmittedRequest = LectureVideoInteractionRequestBase & {
+	type: 'answer_submitted';
+	question_id: number;
+	option_id: number;
+};
+
+export type LectureVideoResumedRequest = LectureVideoInteractionRequestBase & {
+	type: 'video_resumed';
+	offset_ms: number;
+};
+
+export type LectureVideoPausedRequest = LectureVideoInteractionRequestBase & {
+	type: 'video_paused';
+	offset_ms: number;
+};
+
+export type LectureVideoSeekedRequest = LectureVideoInteractionRequestBase & {
+	type: 'video_seeked';
+	from_offset_ms: number;
+	to_offset_ms: number;
+};
+
+export type LectureVideoEndedRequest = LectureVideoInteractionRequestBase & {
+	type: 'video_ended';
+	offset_ms: number;
+};
+
+export type LectureVideoInteractionRequest =
+	| LectureVideoQuestionPresentedRequest
+	| LectureVideoAnswerSubmittedRequest
+	| LectureVideoResumedRequest
+	| LectureVideoPausedRequest
+	| LectureVideoSeekedRequest
+	| LectureVideoEndedRequest;
+
 export type LectureVideoInteractionEventType =
 	| 'session_initialized'
 	| 'question_presented'
@@ -1831,10 +1878,10 @@ export const postLectureVideoInteraction = async (
 	f: Fetcher,
 	classId: number,
 	threadId: number,
-	body: Record<string, unknown>
+	body: LectureVideoInteractionRequest
 ) => {
 	const url = `class/${classId}/thread/${threadId}/lecture-video/interactions`;
-	return await POST<Record<string, unknown>, LectureVideoInteractionResponse>(f, url, body);
+	return await POST<LectureVideoInteractionRequest, LectureVideoInteractionResponse>(f, url, body);
 };
 
 /**

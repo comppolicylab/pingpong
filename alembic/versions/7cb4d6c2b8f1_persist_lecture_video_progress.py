@@ -48,6 +48,9 @@ def upgrade() -> None:
     offset_ms = sa.func.coalesce(lecture_video_interactions.c.offset_ms, 0)
     from_offset_ms = sa.func.coalesce(lecture_video_interactions.c.from_offset_ms, 0)
     to_offset_ms = sa.func.coalesce(lecture_video_interactions.c.to_offset_ms, 0)
+    last_known_offset_ms = sa.func.coalesce(
+        lecture_video_thread_states.c.last_known_offset_ms, 0
+    )
     row_furthest_offset = sa.case(
         (
             sa.and_(
@@ -59,38 +62,25 @@ def upgrade() -> None:
         (from_offset_ms >= to_offset_ms, from_offset_ms),
         else_=to_offset_ms,
     )
-    existing_rows = bind.execute(
-        sa.select(
-            lecture_video_thread_states.c.thread_id,
-            lecture_video_thread_states.c.last_known_offset_ms,
-            sa.func.coalesce(sa.func.max(row_furthest_offset), 0).label(
-                "interaction_furthest_offset_ms"
-            ),
-        )
-        .select_from(
-            lecture_video_thread_states.outerjoin(
-                lecture_video_interactions,
-                lecture_video_interactions.c.thread_id
-                == lecture_video_thread_states.c.thread_id,
-            )
-        )
-        .group_by(
-            lecture_video_thread_states.c.thread_id,
-            lecture_video_thread_states.c.last_known_offset_ms,
-        )
-    ).mappings()
+    interaction_furthest_offset_ms = sa.select(
+        sa.func.coalesce(sa.func.max(row_furthest_offset), 0)
+    ).where(
+        lecture_video_interactions.c.thread_id
+        == lecture_video_thread_states.c.thread_id
+    )
 
-    for row in existing_rows:
-        bind.execute(
-            lecture_video_thread_states.update()
-            .where(lecture_video_thread_states.c.thread_id == row["thread_id"])
-            .values(
-                furthest_offset_ms=max(
-                    row["last_known_offset_ms"] or 0,
-                    row["interaction_furthest_offset_ms"] or 0,
-                )
+    bind.execute(
+        lecture_video_thread_states.update().values(
+            furthest_offset_ms=sa.case(
+                (
+                    last_known_offset_ms
+                    >= interaction_furthest_offset_ms.scalar_subquery(),
+                    last_known_offset_ms,
+                ),
+                else_=interaction_furthest_offset_ms.scalar_subquery(),
             )
         )
+    )
 
 
 def downgrade() -> None:

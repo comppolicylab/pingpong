@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { getLectureVideoHistory, expandResponse } from '$lib/api';
+	import { loading as globalLoading } from '$lib/stores/general';
 	import type { LectureVideoInteractionHistoryItem } from '$lib/api';
+	import { Spinner } from 'flowbite-svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 	import LectureVideoQuestionCard from './LectureVideoQuestionCard.svelte';
 
@@ -123,6 +125,13 @@
 	{#if errorMsg}
 		<div class="flex h-full items-center justify-center">
 			<p class="text-sm text-red-600">{errorMsg}</p>
+		</div>
+	{:else if loading && !$globalLoading}
+		<div class="flex h-full min-h-48 items-center justify-center">
+			<div class="flex items-center gap-3 text-sm text-slate-500">
+				<Spinner color="gray" class="h-4 w-4" />
+				<span>Loading completed lecture review...</span>
+			</div>
 		</div>
 	{:else if !loading}
 		<div class="flex flex-col gap-4">

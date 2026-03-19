@@ -255,9 +255,7 @@ def _set_seek_offset_ms(
     state: models.LectureVideoThreadState, *, from_offset_ms: int, to_offset_ms: int
 ) -> None:
     state.last_known_offset_ms = to_offset_ms
-    state.furthest_offset_ms = max(
-        state.furthest_offset_ms, from_offset_ms, to_offset_ms
-    )
+    state.furthest_offset_ms = max(state.furthest_offset_ms, to_offset_ms)
 
 
 def _normalize_interaction_time(timestamp: datetime | None) -> datetime | None:

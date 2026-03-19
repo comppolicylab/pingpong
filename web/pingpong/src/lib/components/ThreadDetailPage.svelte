@@ -144,6 +144,9 @@
 	$: displayUserInfo = data.threadDisplayUserInfo;
 	$: threadLectureVideoMismatch = data.threadLectureVideoMismatch === true;
 	$: threadLectureVideoCompleted = data.threadLectureVideoCompleted === true;
+	$: threadIsCurrentUserParticipant =
+		expandedThreadData.data?.thread?.is_current_user_participant === true;
+	$: lectureVideoSession = expandedThreadData.data?.lecture_video_session ?? null;
 	$: effectiveLectureVideoMismatch = threadLectureVideoMismatch;
 	$: effectiveLectureVideoAssistantMismatch = threadLectureVideoMismatch;
 	let trashThreadFiles = writable<string[]>([]);
@@ -1573,7 +1576,14 @@
 			{:else if threadLectureVideoCompleted}
 				<LectureVideoCompletedView {classId} {threadId} />
 			{:else}
-				<LectureVideoView {classId} {threadId} {lectureVideoSrc} title={lectureVideoDisplayTitle} />
+				<LectureVideoView
+					{classId}
+					{threadId}
+					{lectureVideoSrc}
+					title={lectureVideoDisplayTitle}
+					canParticipate={threadIsCurrentUserParticipant}
+					initialSession={lectureVideoSession}
+				/>
 			{/if}
 		{/key}
 	{:else}

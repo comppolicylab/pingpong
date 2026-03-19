@@ -226,7 +226,7 @@
 			{#each sortedQuestions as question, index (question.id)}
 				<button
 					type="button"
-					onclick={() => (activeIndex = index)}
+					onclick={() => (requestedActiveIndex = index)}
 					class="{dotBaseClass} {dotClass(question.id, index)}"
 					aria-label="Go to question {question.position}"
 				></button>
