@@ -27,6 +27,7 @@ from sqlalchemy import (
     Float,
     UniqueConstraint,
     asc,
+    case,
     desc,
     distinct,
     literal,
@@ -2707,7 +2708,7 @@ class LectureVideoThreadState(Base):
             select(LectureVideoThreadState)
             .where(LectureVideoThreadState.thread_id == thread_id)
             .options(
-                joinedload(LectureVideoThreadState.thread).options(
+                selectinload(LectureVideoThreadState.thread).options(
                     *_thread_lecture_video_base_loaders()
                 ),
                 selectinload(LectureVideoThreadState.current_question).options(
@@ -2829,7 +2830,33 @@ class LectureVideoInteraction(Base):
             select(LectureVideoInteraction)
             .where(LectureVideoInteraction.thread_id == thread_id)
             .options(
-                selectinload(LectureVideoInteraction.question),
+                selectinload(LectureVideoInteraction.question).options(
+                    selectinload(LectureVideoQuestion.options),
+                    selectinload(LectureVideoQuestion.correct_option),
+                ),
+                selectinload(LectureVideoInteraction.option),
+                selectinload(LectureVideoInteraction.actor),
+            )
+            .order_by(asc(LectureVideoInteraction.event_index))
+        )
+        return list((await session.scalars(stmt)).all())
+
+    @classmethod
+    async def list_answer_submissions_by_thread_id(
+        cls, session: AsyncSession, thread_id: int
+    ) -> list["LectureVideoInteraction"]:
+        stmt = (
+            select(LectureVideoInteraction)
+            .where(
+                LectureVideoInteraction.thread_id == thread_id,
+                LectureVideoInteraction.event_type
+                == schemas.LectureVideoInteractionEventType.ANSWER_SUBMITTED,
+            )
+            .options(
+                selectinload(LectureVideoInteraction.question).options(
+                    selectinload(LectureVideoQuestion.options),
+                    selectinload(LectureVideoQuestion.correct_option),
+                ),
                 selectinload(LectureVideoInteraction.option),
                 selectinload(LectureVideoInteraction.actor),
             )
@@ -2848,6 +2875,30 @@ class LectureVideoInteraction(Base):
             .limit(1)
         )
         return await session.scalar(stmt)
+
+    @classmethod
+    async def get_furthest_offset_by_thread_id(
+        cls, session: AsyncSession, thread_id: int
+    ) -> int:
+        offset_ms = func.coalesce(LectureVideoInteraction.offset_ms, 0)
+        from_offset_ms = func.coalesce(LectureVideoInteraction.from_offset_ms, 0)
+        to_offset_ms = func.coalesce(LectureVideoInteraction.to_offset_ms, 0)
+        row_furthest_offset = case(
+            (
+                and_(
+                    offset_ms >= from_offset_ms,
+                    offset_ms >= to_offset_ms,
+                ),
+                offset_ms,
+            ),
+            (from_offset_ms >= to_offset_ms, from_offset_ms),
+            else_=to_offset_ms,
+        )
+        stmt = select(func.coalesce(func.max(row_furthest_offset), 0)).where(
+            LectureVideoInteraction.thread_id == thread_id
+        )
+        result = await session.scalar(stmt)
+        return int(result or 0)
 
 
 class S3File(Base):

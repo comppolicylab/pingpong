@@ -583,6 +583,7 @@ class ValidateLectureVideoVoiceRequest(BaseModel):
 class LectureVideoOptionPrompt(BaseModel):
     id: int
     option_text: str
+    post_answer_text: str | None = None
 
 
 class LectureVideoQuestionPrompt(BaseModel):
@@ -597,6 +598,7 @@ class LectureVideoQuestionPrompt(BaseModel):
 
 class LectureVideoContinuation(BaseModel):
     option_id: int
+    correct_option_id: int | None = None
     post_answer_text: str | None = None
     post_answer_narration_id: int | None = None
     resume_offset_ms: int
@@ -632,6 +634,7 @@ class LectureVideoSessionController(BaseModel):
 class LectureVideoSession(BaseModel):
     state: LectureVideoSessionState
     last_known_offset_ms: int | None = None
+    furthest_offset_ms: int | None = None
     latest_interaction_at: datetime | None = None
     current_question: LectureVideoQuestionPrompt | None = None
     current_continuation: LectureVideoContinuation | None = None
@@ -730,6 +733,8 @@ class LectureVideoInteractionHistoryItem(BaseModel):
     actor_name: str | None = None
     question_id: int | None = None
     question_text: str | None = None
+    question_options: list[LectureVideoOptionPrompt] | None = None
+    correct_option_id: int | None = None
     option_id: int | None = None
     option_text: str | None = None
     offset_ms: int | None = None

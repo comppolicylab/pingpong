@@ -1002,6 +1002,11 @@ async def test_lecture_video_interactions_derive_continuation_and_history(
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert present_response.status_code == 200
+    current_question = present_response.json()["lecture_video_session"][
+        "current_question"
+    ]
+    assert current_question["options"][0]["post_answer_text"] is None
+    assert current_question["options"][1]["post_answer_text"] is None
 
     answer_response = api.post(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
@@ -1104,16 +1109,13 @@ async def test_lecture_video_interactions_derive_continuation_and_history(
     )
     assert history_response.status_code == 200
     history = history_response.json()["interactions"]
-    assert [item["event_index"] for item in history] == [1, 2, 3, 4]
-    assert [item["event_type"] for item in history] == [
-        "session_initialized",
-        "question_presented",
-        "answer_submitted",
-        "video_resumed",
-    ]
-    assert history[1]["actor_name"] == "Me"
-    assert history[2]["question_text"] == questions[0].question_text
-    assert history[2]["option_text"] == options[questions[0].id][0].option_text
+    assert [item["event_index"] for item in history] == [3]
+    assert [item["event_type"] for item in history] == ["answer_submitted"]
+    assert history[0]["actor_name"] == "Me"
+    assert history[0]["question_text"] == questions[0].question_text
+    assert history[0]["option_text"] == options[questions[0].id][0].option_text
+    assert history[0]["question_options"][0]["post_answer_text"] == "Correct answer"
+    assert history[0]["question_options"][1]["post_answer_text"] is None
 
 
 @with_user(123)
@@ -1198,7 +1200,23 @@ async def test_lecture_video_interactions_reject_post_completion_playback_events
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert resume_response.status_code == 200
-    completed_session = resume_response.json()["lecture_video_session"]
+    playing_session = resume_response.json()["lecture_video_session"]
+    assert playing_session["state"] == "playing"
+
+    # Video must play to end before session completes
+    ended_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "video_ended",
+            "controller_session_id": controller_session_id,
+            "expected_state_version": playing_session["state_version"],
+            "idempotency_key": "video-ended",
+            "offset_ms": option.continue_offset_ms + 1000,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert ended_response.status_code == 200
+    completed_session = ended_response.json()["lecture_video_session"]
     assert completed_session["state"] == "completed"
 
     invalid_pause = api.post(
@@ -1284,11 +1302,7 @@ async def test_lecture_video_interactions_reject_post_completion_playback_events
     )
     assert history_response.status_code == 200
     assert [item["event_type"] for item in history_response.json()["interactions"]] == [
-        "session_initialized",
-        "question_presented",
-        "answer_submitted",
-        "video_resumed",
-        "session_completed",
+        "answer_submitted"
     ]
 
 
@@ -1326,20 +1340,35 @@ async def test_lecture_video_interactions_record_seek_and_end_events(
     controller_session_id = acquire.json()["controller_session_id"]
     state_version = acquire.json()["lecture_video_session"]["state_version"]
 
+    progress_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "video_resumed",
+            "controller_session_id": controller_session_id,
+            "expected_state_version": state_version,
+            "idempotency_key": "resume-progress",
+            "offset_ms": 1250,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert progress_response.status_code == 200
+
     seek_response = api.post(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
         json={
             "type": "video_seeked",
             "controller_session_id": controller_session_id,
-            "expected_state_version": state_version,
+            "expected_state_version": progress_response.json()["lecture_video_session"][
+                "state_version"
+            ],
             "idempotency_key": "seek-forward",
-            "from_offset_ms": 250,
-            "to_offset_ms": 1250,
+            "from_offset_ms": 1250,
+            "to_offset_ms": 250,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert seek_response.status_code == 200
-    assert seek_response.json()["lecture_video_session"]["last_known_offset_ms"] == 1250
+    assert seek_response.json()["lecture_video_session"]["last_known_offset_ms"] == 250
 
     end_response = api.post(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
@@ -1364,15 +1393,22 @@ async def test_lecture_video_interactions_record_seek_and_end_events(
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert history_response.status_code == 200
-    history = history_response.json()["interactions"]
-    assert [item["event_type"] for item in history] == [
-        "session_initialized",
-        "video_seeked",
-        "video_ended",
+    assert history_response.json()["interactions"] == []
+
+    async with db.async_session() as session:
+        interactions = await models.LectureVideoInteraction.list_by_thread_id(
+            session, thread_id
+        )
+
+    assert [interaction.event_type for interaction in interactions] == [
+        schemas.LectureVideoInteractionEventType.SESSION_INITIALIZED,
+        schemas.LectureVideoInteractionEventType.VIDEO_RESUMED,
+        schemas.LectureVideoInteractionEventType.VIDEO_SEEKED,
+        schemas.LectureVideoInteractionEventType.VIDEO_ENDED,
     ]
-    assert history[1]["from_offset_ms"] == 250
-    assert history[1]["to_offset_ms"] == 1250
-    assert history[2]["offset_ms"] == 9000
+    assert interactions[2].from_offset_ms == 1250
+    assert interactions[2].to_offset_ms == 250
+    assert interactions[3].offset_ms == 9000
 
 
 @with_user(123)
@@ -1708,13 +1744,7 @@ async def test_lecture_video_history_uses_pseudonyms_for_other_participants(
         users = {user.id: user for user in thread.users}
 
     history = history_response.json()["interactions"]
-    assert [item["event_type"] for item in history] == [
-        "session_initialized",
-        "video_paused",
-        "video_paused",
-    ]
-    assert history[1]["actor_name"] == "Me"
-    assert history[2]["actor_name"] == pseudonym(thread, users[456])
+    assert history == []
 
 
 @with_user(123)

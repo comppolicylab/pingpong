@@ -4657,7 +4657,7 @@ async def get_lecture_video_history(
     if thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
         raise HTTPException(status_code=404, detail="Lecture video thread not found.")
 
-    interactions = await models.LectureVideoInteraction.list_by_thread_id(
+    interactions = await models.LectureVideoInteraction.list_answer_submissions_by_thread_id(
         request.state["db"], thread.id
     )
     user_id = request.state["session"].user.id
@@ -4687,6 +4687,33 @@ async def get_lecture_video_history(
                 question_text=interaction.question.question_text
                 if interaction.question
                 else None,
+                question_options=(
+                    [
+                        schemas.LectureVideoOptionPrompt(
+                            id=option.id,
+                            option_text=option.option_text,
+                            post_answer_text=(
+                                option.post_answer_text or None
+                                if option.id == interaction.option_id
+                                else None
+                            ),
+                        )
+                        for option in sorted(
+                            interaction.question.options, key=lambda item: item.position
+                        )
+                    ]
+                    if (
+                        interaction.question
+                        and interaction.event_type
+                        == schemas.LectureVideoInteractionEventType.ANSWER_SUBMITTED
+                    )
+                    else None
+                ),
+                correct_option_id=(
+                    interaction.question.correct_option.id
+                    if interaction.question and interaction.question.correct_option
+                    else None
+                ),
                 option_id=interaction.option_id,
                 option_text=interaction.option.option_text
                 if interaction.option
