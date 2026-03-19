@@ -99,8 +99,10 @@
 		if (!active) return;
 		if (scrollToQuestionId == null) return;
 		const idx = findQuestionIndex(scrollToQuestionId);
-		if (idx !== -1) requestedActiveIndex = idx;
-		onscrollcomplete();
+		if (idx !== -1) {
+			requestedActiveIndex = idx;
+			onscrollcomplete();
+		}
 	});
 
 	function isCurrentQuestion(questionId: number): boolean {

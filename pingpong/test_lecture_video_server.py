@@ -481,6 +481,18 @@ def test_lecture_video_question_prompt_requires_options_for_single_select():
     assert "options" in str(exc_info.value)
 
 
+def test_lecture_video_session_rejects_negative_furthest_offset_ms():
+    with pytest.raises(ValidationError) as exc_info:
+        schemas.LectureVideoSession(
+            state=schemas.LectureVideoSessionState.PLAYING,
+            furthest_offset_ms=-1,
+            state_version=1,
+            controller=schemas.LectureVideoSessionController(),
+        )
+
+    assert "furthest_offset_ms" in str(exc_info.value)
+
+
 @with_user(123)
 @with_institution(11, "Test Institution")
 @with_authz(
@@ -1158,6 +1170,113 @@ async def test_lecture_video_interactions_derive_continuation_and_history(
         ("user:123", "student", "class:1"),
     ]
 )
+async def test_lecture_video_playback_events_are_rejected_while_awaiting_answer(
+    api, authz, config, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_, lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+        lecture_video = await models.LectureVideo.get_by_id_with_copy_context(
+            session, lecture_video.id
+        )
+        question = lecture_video.questions[0]
+
+    create_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/lecture",
+        json={"assistant_id": 1, "parties": [123]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+    thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
+
+    acquire = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert acquire.status_code == 200
+    controller_session_id = acquire.json()["controller_session_id"]
+
+    question_presented = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "question_presented",
+            "controller_session_id": controller_session_id,
+            "expected_state_version": acquire.json()["lecture_video_session"][
+                "state_version"
+            ],
+            "idempotency_key": "question-presented",
+            "question_id": question.id,
+            "offset_ms": question.stop_offset_ms,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert question_presented.status_code == 200
+    awaiting_answer_session = question_presented.json()["lecture_video_session"]
+    assert awaiting_answer_session["state"] == "awaiting_answer"
+
+    for payload in [
+        {
+            "type": "video_paused",
+            "controller_session_id": controller_session_id,
+            "expected_state_version": awaiting_answer_session["state_version"],
+            "idempotency_key": "pause-during-question",
+            "offset_ms": question.stop_offset_ms,
+        },
+        {
+            "type": "video_seeked",
+            "controller_session_id": controller_session_id,
+            "expected_state_version": awaiting_answer_session["state_version"],
+            "idempotency_key": "seek-during-question",
+            "from_offset_ms": question.stop_offset_ms,
+            "to_offset_ms": question.stop_offset_ms,
+        },
+        {
+            "type": "video_ended",
+            "controller_session_id": controller_session_id,
+            "expected_state_version": awaiting_answer_session["state_version"],
+            "idempotency_key": "end-during-question",
+            "offset_ms": question.stop_offset_ms,
+        },
+    ]:
+        response = api.post(
+            f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+            json=payload,
+            headers={"Authorization": f"Bearer {valid_user_token}"},
+        )
+        assert response.status_code == 409
+        assert (
+            response.json()["detail"]
+            == "The lecture video cannot process playback events right now."
+        )
+
+    async with db.async_session() as session:
+        state = await models.LectureVideoThreadState.get_by_thread_id_with_context(
+            session, thread_id
+        )
+        assert state is not None
+        assert state.state == schemas.LectureVideoSessionState.AWAITING_ANSWER
+        assert state.last_known_offset_ms == question.stop_offset_ms
+        assert state.furthest_offset_ms == question.stop_offset_ms
+        interactions = await models.LectureVideoInteraction.list_by_thread_id(
+            session, thread_id
+        )
+        assert [interaction.event_type for interaction in interactions] == [
+            schemas.LectureVideoInteractionEventType.SESSION_INITIALIZED,
+            schemas.LectureVideoInteractionEventType.QUESTION_PRESENTED,
+        ]
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
+    ]
+)
 async def test_lecture_video_interactions_reject_post_completion_playback_events(
     api, authz, config, db, institution, valid_user_token
 ):
@@ -1505,6 +1624,67 @@ async def test_lecture_video_interactions_reject_resume_past_unlocked_progress(
     assert (
         response.json()["detail"]
         == "Resuming past your unlocked progress is not allowed in this lecture video."
+    )
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
+    ]
+)
+async def test_lecture_video_interactions_reject_question_presented_past_unlocked_progress(
+    api, authz, config, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_, lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+            manifest=lecture_video_manifest(
+                stop_offset_ms=5_000,
+                continue_offset_ms=5_500,
+            ),
+        )
+        lecture_video = await models.LectureVideo.get_by_id_with_copy_context(
+            session, lecture_video.id
+        )
+        question = lecture_video.questions[0]
+
+    create_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/lecture",
+        json={"assistant_id": 1, "parties": [123]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+    thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
+
+    acquire = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert acquire.status_code == 200
+
+    response = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "question_presented",
+            "controller_session_id": acquire.json()["controller_session_id"],
+            "expected_state_version": acquire.json()["lecture_video_session"][
+                "state_version"
+            ],
+            "idempotency_key": "forged-question-presented",
+            "question_id": question.id,
+            "offset_ms": question.stop_offset_ms,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert response.status_code == 422
+    assert (
+        response.json()["detail"]
+        == "Presenting a question past your unlocked progress is not allowed in this lecture video."
     )
 
 
@@ -1901,6 +2081,76 @@ async def test_initialize_thread_state_completes_when_lecture_video_has_no_quest
     assert [interaction.event_type for interaction in interactions] == [
         schemas.LectureVideoInteractionEventType.SESSION_INITIALIZED
     ]
+
+
+@pytest.mark.parametrize(
+    ("session_state", "expected_offset_ms"),
+    [
+        (
+            schemas.LectureVideoSessionState.PLAYING,
+            1000 + 120000 + lecture_video_runtime.PLAYBACK_PROGRESS_TOLERANCE_MS,
+        ),
+        (schemas.LectureVideoSessionState.AWAITING_ANSWER, 1000),
+        (schemas.LectureVideoSessionState.AWAITING_POST_ANSWER_RESUME, 1000),
+    ],
+)
+@with_institution(11, "Test Institution")
+async def test_get_plausible_playback_offset_ms_only_advances_while_playing(
+    db, institution, session_state, expected_offset_ms
+):
+    base_time = datetime(2024, 1, 1, tzinfo=UTC)
+    current_time = base_time + timedelta(minutes=2)
+
+    async with db.async_session() as session:
+        class_, lecture_video, assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+
+        thread = models.Thread(
+            id=1,
+            name="Lecture Presentation",
+            version=3,
+            thread_id=f"thread-plausible-offset-{session_state.value}",
+            class_id=class_.id,
+            assistant_id=assistant.id,
+            interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+            lecture_video_id=lecture_video.id,
+            private=False,
+            display_user_info=False,
+            tools_available="[]",
+        )
+        session.add(thread)
+        await session.flush()
+
+        state = models.LectureVideoThreadState(
+            thread_id=thread.id,
+            state=session_state,
+            last_known_offset_ms=1000,
+            furthest_offset_ms=1000,
+            version=1,
+        )
+        session.add(state)
+        session.add(
+            models.LectureVideoInteraction(
+                thread_id=thread.id,
+                event_index=1,
+                event_type=schemas.LectureVideoInteractionEventType.VIDEO_PAUSED,
+                offset_ms=1000,
+                created=base_time,
+            )
+        )
+        await session.flush()
+
+        plausible_offset_ms = (
+            await lecture_video_runtime._get_plausible_playback_offset_ms(
+                session,
+                state,
+                current_time=current_time,
+            )
+        )
+
+    assert plausible_offset_ms == expected_offset_ms
 
 
 @with_institution(11, "Test Institution")

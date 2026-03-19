@@ -17,6 +17,13 @@
 	import LectureVideoCompletedView from './LectureVideoCompletedView.svelte';
 
 	type QuestionMarkerState = 'upcoming' | 'correct' | 'incorrect';
+	type QuestionPresentationRollbackState = {
+		questionId: number;
+		sessionState: LectureVideoSessionState;
+		subtitleText: string | null;
+		offsetMs: number;
+		shouldResumePlayback: boolean;
+	};
 
 	let {
 		classId,
@@ -751,6 +758,34 @@
 		videoElement.currentTime = offsetMs / 1000;
 	}
 
+	async function rollbackQuestionPresentedFailure(
+		rollbackState: QuestionPresentationRollbackState
+	) {
+		if (questionPresentedForId !== rollbackState.questionId) {
+			return;
+		}
+
+		questionPresentedForId = null;
+		questionPlaybackLocked = false;
+		suppressPauseInteraction = false;
+		playerDisabled = false;
+		introNarrationPending = false;
+		sessionState = rollbackState.sessionState;
+		subtitleText = rollbackState.subtitleText;
+
+		if (!videoElement) {
+			return;
+		}
+
+		setVideoPosition(rollbackState.offsetMs);
+		if (rollbackState.shouldResumePlayback) {
+			await tryPlayVideo('question-presented-rollback', {
+				suppressInteractionPost: true,
+				queueRetryOnFailure: true
+			});
+		}
+	}
+
 	function attemptInitialAutoplay() {
 		if (
 			initialAutoplayAttempted ||
@@ -783,13 +818,21 @@
 			currentTimeMs >= currentQuestion.stop_offset_ms &&
 			questionPresentedForId !== currentQuestion.id
 		) {
+			const rollbackState: QuestionPresentationRollbackState = {
+				questionId: currentQuestion.id,
+				sessionState,
+				subtitleText,
+				offsetMs: currentQuestion.stop_offset_ms,
+				shouldResumePlayback: !videoElement?.paused
+			};
+
 			// Auto-pause at question timestamp (suppress the pause interaction)
 			questionPlaybackLocked = true;
 			suppressPauseInteraction = true;
 			setVideoPosition(currentQuestion.stop_offset_ms);
 			videoElement?.pause();
 			questionPresentedForId = currentQuestion.id;
-			void beginIntroFlow();
+			void beginIntroFlow(rollbackState);
 		}
 	}
 
@@ -991,7 +1034,7 @@
 		}
 	}
 
-	async function beginIntroFlow() {
+	async function beginIntroFlow(rollbackState?: QuestionPresentationRollbackState) {
 		if (!currentQuestion) return;
 
 		// Show intro text as subtitle
@@ -1007,16 +1050,16 @@
 				onEnded: () => {
 					playerDisabled = false;
 					introNarrationPending = false;
-					void postQuestionPresented();
+					void postQuestionPresented(rollbackState);
 				},
 				onError: () => {
 					playerDisabled = false;
 					introNarrationPending = false;
-					void postQuestionPresented();
+					void postQuestionPresented(rollbackState);
 				}
 			});
 		} else {
-			void postQuestionPresented();
+			void postQuestionPresented(rollbackState);
 		}
 	}
 
@@ -1024,22 +1067,31 @@
 	// Interaction posts
 	// =========================================================================
 
-	async function postQuestionPresented() {
+	async function postQuestionPresented(rollbackState?: QuestionPresentationRollbackState) {
 		if (!controllerSessionId || !currentQuestion) return;
-		const response = await api.postLectureVideoInteraction(fetch, classId, threadId, {
-			type: 'question_presented',
-			controller_session_id: controllerSessionId,
-			expected_state_version: stateVersion,
-			idempotency_key: crypto.randomUUID(),
-			question_id: currentQuestion.id,
-			offset_ms: currentQuestion.stop_offset_ms
-		});
-		const expanded = api.expandResponse(response);
-		if (failClosedOnConflict('question-presented-conflict', expanded)) {
-			return;
+		try {
+			const response = await api.postLectureVideoInteraction(fetch, classId, threadId, {
+				type: 'question_presented',
+				controller_session_id: controllerSessionId,
+				expected_state_version: stateVersion,
+				idempotency_key: crypto.randomUUID(),
+				question_id: currentQuestion.id,
+				offset_ms: currentQuestion.stop_offset_ms
+			});
+			const expanded = api.expandResponse(response);
+			if (failClosedOnConflict('question-presented-conflict', expanded)) {
+				return;
+			}
+			if (!expanded.error) {
+				applySession(expanded.data.lecture_video_session);
+				return;
+			}
+		} catch {
+			// Roll back optimistic question-presentation UI on non-conflict failures.
 		}
-		if (!expanded.error) {
-			applySession(expanded.data.lecture_video_session);
+
+		if (rollbackState) {
+			await rollbackQuestionPresentedFailure(rollbackState);
 		}
 	}
 
@@ -1127,15 +1179,31 @@
 			});
 		}
 
-		const response = await api.postLectureVideoInteraction(fetch, classId, threadId, {
-			type: 'video_resumed',
-			controller_session_id: controllerSessionId,
-			expected_state_version: stateVersion,
-			idempotency_key: crypto.randomUUID(),
-			offset_ms: resumeOffsetMs
-		});
-		const expanded = api.expandResponse(response);
-		const optimisticPlayStarted = optimisticPlayPromise ? await optimisticPlayPromise : false;
+		let expanded;
+		let optimisticPlayStarted = false;
+		try {
+			const response = await api.postLectureVideoInteraction(fetch, classId, threadId, {
+				type: 'video_resumed',
+				controller_session_id: controllerSessionId,
+				expected_state_version: stateVersion,
+				idempotency_key: crypto.randomUUID(),
+				offset_ms: resumeOffsetMs
+			});
+			expanded = api.expandResponse(response);
+			optimisticPlayStarted = optimisticPlayPromise ? await optimisticPlayPromise : false;
+		} catch {
+			clearPendingVideoRetry();
+			questionPlaybackLocked = previousQuestionPlaybackLocked;
+			if (videoElement) {
+				if (!videoElement.paused) {
+					suppressPauseInteraction = true;
+					videoElement.pause();
+				}
+				setVideoPosition(previousOffsetMs);
+			}
+			return;
+		}
+
 		if (failClosedOnConflict('continue-conflict', expanded)) {
 			return;
 		}
@@ -1182,15 +1250,14 @@
 		}
 
 		const reacquireControlPromise = controllerSessionId ? null : ensureControllerSession();
+		if (reacquireControlPromise && !(await reacquireControlPromise)) {
+			return;
+		}
 
 		await tryPlayVideo('manual-play-button', {
 			suppressInteractionPost: true,
 			queueRetryOnFailure: true
 		});
-
-		if (reacquireControlPromise) {
-			await reacquireControlPromise;
-		}
 	}
 
 	// =========================================================================

@@ -634,7 +634,7 @@ class LectureVideoSessionController(BaseModel):
 class LectureVideoSession(BaseModel):
     state: LectureVideoSessionState
     last_known_offset_ms: int | None = None
-    furthest_offset_ms: int | None = None
+    furthest_offset_ms: int | None = Field(None, ge=0)
     latest_interaction_at: datetime | None = None
     current_question: LectureVideoQuestionPrompt | None = None
     current_continuation: LectureVideoContinuation | None = None

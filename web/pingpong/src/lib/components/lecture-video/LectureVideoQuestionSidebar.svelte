@@ -90,8 +90,8 @@
 		const el = document.getElementById(questionCardId(scrollToQuestionId));
 		if (el) {
 			el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+			onscrollcomplete();
 		}
-		onscrollcomplete();
 	});
 </script>
 

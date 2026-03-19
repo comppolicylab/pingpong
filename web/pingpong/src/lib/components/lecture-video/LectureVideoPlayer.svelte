@@ -133,6 +133,7 @@
 	let keyboardActionOverlayFreshTimeout: ReturnType<typeof setTimeout> | null = $state(null);
 	let keyboardActionOverlayUnmountTimeout: ReturnType<typeof setTimeout> | null = $state(null);
 	let mediaSessionRefreshTimeout: ReturnType<typeof setTimeout> | null = $state(null);
+	let playerContainerElement: HTMLDivElement | null = $state(null);
 
 	let effectiveOffsetMs = $derived(
 		draggingSeek ? (dragPreviewOffsetMs ?? currentTimeMs) : currentTimeMs
@@ -154,6 +155,7 @@
 	);
 	let seekBarActive = $derived(seekPreviewVisible || draggingSeek);
 	let knowledgeChecksVisible = $derived(!manualPlaybackPrompt && !seekBarActive);
+	let previewVideoSrc = $derived(seekPreviewVisible ? src : undefined);
 	let previewDisplayOffsetMs = $derived(dragPreviewOffsetMs ?? seekPreviewOffsetMs);
 	let previewTimeText = $derived(formatTime(previewDisplayOffsetMs));
 	let hoverPercent = $derived(durationMs > 0 ? (previewDisplayOffsetMs / durationMs) * 100 : 0);
@@ -245,6 +247,12 @@
 	$effect(() => {
 		if (!seekPreviewVisible) return;
 		syncPreviewVideo();
+	});
+
+	$effect(() => {
+		if (!previewVideoSrc) {
+			previewVideoReady = false;
+		}
 	});
 
 	$effect(() => {
@@ -391,7 +399,7 @@
 	}
 
 	function togglePlayPause() {
-		if (disabled || !videoElement) return;
+		if (disabled || questionPendingControls || !videoElement) return;
 		if (videoElement.paused) {
 			void videoElement.play().catch(() => {});
 			return;
@@ -487,7 +495,7 @@
 	}
 
 	function getSeekDetails(clientX: number, track: HTMLDivElement) {
-		if (disabled || !videoElement || durationMs <= 0) return;
+		if (disabled || questionPendingControls || !videoElement || durationMs <= 0) return;
 
 		const rect = track.getBoundingClientRect();
 		const pointerOffsetPx = clamp(clientX - rect.left, 0, rect.width);
@@ -555,6 +563,7 @@
 	}
 
 	function previewSeek(offsetMs: number) {
+		if (disabled || questionPendingControls) return;
 		dragPreviewOffsetMs = offsetMs;
 	}
 
@@ -579,13 +588,13 @@
 	}
 
 	function commitSeek(offsetMs: number, fromOffsetMs: number) {
-		if (!videoElement) return;
+		if (disabled || questionPendingControls || !videoElement) return;
 		setMainVideoCurrentTime(offsetMs);
 		onseek?.(offsetMs, fromOffsetMs);
 	}
 
 	function handleSeekPointerDown(event: PointerEvent) {
-		if (event.button !== 0) return;
+		if (event.button !== 0 || disabled || questionPendingControls) return;
 
 		const track = event.currentTarget;
 		if (!(track instanceof HTMLDivElement) || !videoElement) return;
@@ -611,6 +620,12 @@
 	function handleSeekPointerMove(event: PointerEvent) {
 		const track = event.currentTarget;
 		if (!(track instanceof HTMLDivElement)) return;
+		if (disabled || questionPendingControls) {
+			if (draggingSeek) {
+				cancelSeekInteraction(track, event.pointerId, { syncToPlayback: true });
+			}
+			return;
+		}
 
 		if (!draggingSeek) {
 			if (event.buttons !== 0) return;
@@ -631,10 +646,13 @@
 	}
 
 	function finishSeekDrag(event: PointerEvent) {
-		if (!draggingSeek) return;
-
 		const track = event.currentTarget;
 		if (!(track instanceof HTMLDivElement)) return;
+		if (disabled || questionPendingControls) {
+			cancelSeekInteraction(track, event.pointerId, { syncToPlayback: true });
+			return;
+		}
+		if (!draggingSeek) return;
 
 		const details = getSeekDetails(event.clientX, track);
 		const fromOffsetMs = dragStartOffsetMs ?? Math.round(videoElement?.currentTime ?? 0) * 1000;
@@ -651,10 +669,13 @@
 	}
 
 	function cancelSeekDrag(event: PointerEvent) {
-		if (!draggingSeek) return;
-
 		const track = event.currentTarget;
 		if (!(track instanceof HTMLDivElement)) return;
+		if (disabled || questionPendingControls) {
+			cancelSeekInteraction(track, event.pointerId, { syncToPlayback: true });
+			return;
+		}
+		if (!draggingSeek) return;
 		cancelSeekInteraction(track, event.pointerId, { syncToPlayback: true });
 	}
 
@@ -757,7 +778,23 @@
 		toggleMute();
 	}
 
+	function isKeyboardEventWithinPlayer(event: KeyboardEvent): boolean {
+		if (!playerContainerElement) return false;
+
+		const eventTarget = event.target;
+		const targetInsidePlayer =
+			eventTarget instanceof Node && playerContainerElement.contains(eventTarget);
+		const activeElementInsidePlayer =
+			typeof document !== 'undefined' &&
+			document.activeElement instanceof Node &&
+			playerContainerElement.contains(document.activeElement);
+
+		return targetInsidePlayer || activeElementInsidePlayer;
+	}
+
 	function handleKeydown(event: KeyboardEvent) {
+		if (!isKeyboardEventWithinPlayer(event)) return;
+
 		if (event.key === ' ' || event.key === 'k' || event.key === 'K') {
 			event.preventDefault();
 			handleKeyboardPlayPause();
@@ -768,12 +805,12 @@
 	}
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
-
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
+	bind:this={playerContainerElement}
 	class="relative overflow-hidden rounded-3xl border border-slate-800/80 bg-black"
+	onkeydown={handleKeydown}
 	onmousemove={handleMouseMove}
 	onmouseenter={handleMouseEnter}
 	onmouseleave={handleMouseLeave}
@@ -808,6 +845,7 @@
 		{src}
 		playsinline
 		preload="auto"
+		tabindex={0}
 		class="h-full w-full object-contain {disabled ? 'pointer-events-none' : ''}"
 		onclick={handleContainerClick}
 		ontimeupdate={handleTimeUpdate}
@@ -946,10 +984,10 @@
 								<div class="aspect-video bg-slate-900">
 									<video
 										bind:this={previewVideoElement}
-										{src}
+										src={previewVideoSrc}
 										playsinline
 										muted
-										preload="auto"
+										preload="metadata"
 										class="h-full w-full object-cover"
 										oncanplay={handlePreviewVideoCanPlay}
 									></video>

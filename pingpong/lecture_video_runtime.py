@@ -273,6 +273,9 @@ async def _get_plausible_playback_offset_ms(
     current_time: datetime,
 ) -> int:
     unlocked_offset_ms = _get_unlocked_offset_ms(state)
+    if state.state != schemas.LectureVideoSessionState.PLAYING:
+        return unlocked_offset_ms
+
     latest_interaction_at = _normalize_interaction_time(
         await models.LectureVideoInteraction.get_latest_created_by_thread_id(
             session, state.thread_id
@@ -658,6 +661,19 @@ async def _handle_question_presented(
             detail="This question is no longer active.",
         )
 
+    if request.offset_ms != current_question.stop_offset_ms:
+        raise LectureVideoValidationError(
+            "Question presentation must occur at the configured stop offset."
+        )
+
+    plausible_offset_ms = await _get_plausible_playback_offset_ms(
+        session, state, current_time=current_time
+    )
+    if request.offset_ms > plausible_offset_ms:
+        raise LectureVideoValidationError(
+            "Presenting a question past your unlocked progress is not allowed in this lecture video."
+        )
+
     state.state = schemas.LectureVideoSessionState.AWAITING_ANSWER
     _set_last_known_offset_ms(state, request.offset_ms)
     await _append_interaction(
@@ -770,6 +786,19 @@ async def _handle_resumed(
     )
 
 
+def _require_playing_state_for_playback_event(
+    state: models.LectureVideoThreadState,
+) -> None:
+    if state.state == schemas.LectureVideoSessionState.COMPLETED:
+        raise _conflict(
+            detail="Session is already completed.",
+        )
+    if state.state != schemas.LectureVideoSessionState.PLAYING:
+        raise _conflict(
+            detail="The lecture video cannot process playback events right now.",
+        )
+
+
 async def _handle_paused(
     session: AsyncSession,
     state: models.LectureVideoThreadState,
@@ -779,10 +808,7 @@ async def _handle_paused(
     event_type: schemas.LectureVideoInteractionEventType,
     current_time: datetime,
 ) -> None:
-    if state.state == schemas.LectureVideoSessionState.COMPLETED:
-        raise _conflict(
-            detail="Session is already completed.",
-        )
+    _require_playing_state_for_playback_event(state)
     plausible_offset_ms = await _get_plausible_playback_offset_ms(
         session, state, current_time=current_time
     )
@@ -811,10 +837,7 @@ async def _handle_seeked(
     event_type: schemas.LectureVideoInteractionEventType,
     current_time: datetime,
 ) -> None:
-    if state.state == schemas.LectureVideoSessionState.COMPLETED:
-        raise _conflict(
-            detail="Session is already completed.",
-        )
+    _require_playing_state_for_playback_event(state)
     plausible_offset_ms = await _get_plausible_playback_offset_ms(
         session, state, current_time=current_time
     )
@@ -848,10 +871,7 @@ async def _handle_ended(
     event_type: schemas.LectureVideoInteractionEventType,
     current_time: datetime,
 ) -> None:
-    if state.state == schemas.LectureVideoSessionState.COMPLETED:
-        raise _conflict(
-            detail="Session is already completed.",
-        )
+    _require_playing_state_for_playback_event(state)
     plausible_offset_ms = await _get_plausible_playback_offset_ms(
         session, state, current_time=current_time
     )
