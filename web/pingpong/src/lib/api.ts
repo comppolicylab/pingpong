@@ -1519,6 +1519,102 @@ export type ValidateLectureVideoVoiceResponse = {
 	content_type: string;
 };
 
+export type LectureVideoSessionState =
+	| 'playing'
+	| 'awaiting_answer'
+	| 'awaiting_post_answer_resume'
+	| 'completed';
+
+export type LectureVideoOptionPrompt = {
+	id: number;
+	option_text: string;
+	post_answer_text?: string | null;
+};
+
+export type LectureVideoQuestionPrompt = {
+	id: number;
+	type: LectureVideoQuestionType;
+	question_text: string;
+	intro_text: string;
+	stop_offset_ms: number;
+	intro_narration_id: number | null;
+	options: LectureVideoOptionPrompt[];
+};
+
+export type LectureVideoContinuation = {
+	option_id: number;
+	correct_option_id: number | null;
+	post_answer_text: string | null;
+	post_answer_narration_id: number | null;
+	resume_offset_ms: number;
+	next_question: LectureVideoQuestionPrompt | null;
+	complete: boolean;
+};
+
+export type LectureVideoSessionController = {
+	has_control: boolean;
+	has_active_controller: boolean;
+	lease_expires_at: string | null;
+};
+
+export type LectureVideoSession = {
+	state: LectureVideoSessionState;
+	last_known_offset_ms: number | null;
+	furthest_offset_ms: number | null;
+	latest_interaction_at: string | null;
+	current_question: LectureVideoQuestionPrompt | null;
+	current_continuation: LectureVideoContinuation | null;
+	state_version: number;
+	controller: LectureVideoSessionController;
+};
+
+export type LectureVideoControlAcquireResponse = {
+	controller_session_id: string;
+	lecture_video_session: LectureVideoSession;
+};
+
+export type LectureVideoControlReleaseResponse = {
+	lecture_video_session: LectureVideoSession;
+};
+
+export type LectureVideoControlRenewResponse = {
+	lease_expires_at: string;
+};
+
+export type LectureVideoInteractionResponse = {
+	lecture_video_session: LectureVideoSession;
+};
+
+export type LectureVideoInteractionEventType =
+	| 'session_initialized'
+	| 'question_presented'
+	| 'answer_submitted'
+	| 'video_resumed'
+	| 'video_paused'
+	| 'video_seeked'
+	| 'video_ended'
+	| 'session_completed';
+
+export type LectureVideoInteractionHistoryItem = {
+	event_index: number;
+	event_type: LectureVideoInteractionEventType;
+	actor_name: string | null;
+	question_id: number | null;
+	question_text: string | null;
+	question_options: LectureVideoOptionPrompt[] | null;
+	correct_option_id: number | null;
+	option_id: number | null;
+	option_text: string | null;
+	offset_ms: number | null;
+	from_offset_ms: number | null;
+	to_offset_ms: number | null;
+	created: string;
+};
+
+export type LectureVideoInteractionHistory = {
+	interactions: LectureVideoInteractionHistoryItem[];
+};
+
 export type DefaultAPIKey = {
 	id: number;
 	redacted_key: string;
@@ -1686,6 +1782,94 @@ export const validateLectureVideoVoice = async (
 		audio_blob: await response.blob(),
 		content_type: response.headers.get('content-type') || 'audio/ogg'
 	};
+};
+
+// Lecture video session runtime API functions
+
+/**
+ * Acquire control of a lecture video playback session.
+ */
+export const acquireLectureVideoControl = async (f: Fetcher, classId: number, threadId: number) => {
+	const url = `class/${classId}/thread/${threadId}/lecture-video/control/acquire`;
+	return await POST<never, LectureVideoControlAcquireResponse>(f, url);
+};
+
+/**
+ * Release control of a lecture video playback session.
+ */
+export const releaseLectureVideoControl = async (
+	f: Fetcher,
+	classId: number,
+	threadId: number,
+	controllerSessionId: string
+) => {
+	const url = `class/${classId}/thread/${threadId}/lecture-video/control/release`;
+	return await POST<{ controller_session_id: string }, LectureVideoControlReleaseResponse>(f, url, {
+		controller_session_id: controllerSessionId
+	});
+};
+
+/**
+ * Renew the control lease for a lecture video playback session.
+ */
+export const renewLectureVideoControl = async (
+	f: Fetcher,
+	classId: number,
+	threadId: number,
+	controllerSessionId: string
+) => {
+	const url = `class/${classId}/thread/${threadId}/lecture-video/control/renew`;
+	return await POST<{ controller_session_id: string }, LectureVideoControlRenewResponse>(f, url, {
+		controller_session_id: controllerSessionId
+	});
+};
+
+/**
+ * Post a lecture video interaction event.
+ */
+export const postLectureVideoInteraction = async (
+	f: Fetcher,
+	classId: number,
+	threadId: number,
+	body: Record<string, unknown>
+) => {
+	const url = `class/${classId}/thread/${threadId}/lecture-video/interactions`;
+	return await POST<Record<string, unknown>, LectureVideoInteractionResponse>(f, url, body);
+};
+
+/**
+ * Get the interaction history for a lecture video session.
+ */
+export const getLectureVideoHistory = async (f: Fetcher, classId: number, threadId: number) => {
+	const url = `class/${classId}/thread/${threadId}/lecture-video/history`;
+	return await GET<never, LectureVideoInteractionHistory>(f, url);
+};
+
+/**
+ * Build the URL for a lecture video narration audio file.
+ */
+export const lectureVideoNarrationUrl = (
+	classId: number,
+	threadId: number,
+	narrationId: number
+): string => {
+	const base = fullPath(
+		`class/${classId}/thread/${threadId}/lecture-video/narration/${narrationId}`
+	);
+	const queryParts: string[] = [];
+	const anonymousSessionToken = getAnonymousSessionToken();
+	const anonymousShareToken = getAnonymousShareToken();
+	if (anonymousSessionToken) {
+		queryParts.push(`anonymous_session_token=${encodeURIComponent(anonymousSessionToken)}`);
+	}
+	if (anonymousShareToken) {
+		queryParts.push(`anonymous_share_token=${encodeURIComponent(anonymousShareToken)}`);
+	}
+	const ltiSessionToken = getLTISessionToken();
+	if (ltiSessionToken) {
+		queryParts.push(`lti_session=${encodeURIComponent(ltiSessionToken)}`);
+	}
+	return queryParts.length > 0 ? `${base}?${queryParts.join('&')}` : base;
 };
 
 /**
@@ -3116,6 +3300,7 @@ export type ThreadWithMeta = {
 	instructions: string | null;
 	lecture_video_id?: number | null;
 	lecture_video_matches_assistant?: boolean | null;
+	lecture_video_session?: LectureVideoSession | null;
 	recording: VoiceModeRecordingInfo | null;
 	has_more: boolean;
 };
