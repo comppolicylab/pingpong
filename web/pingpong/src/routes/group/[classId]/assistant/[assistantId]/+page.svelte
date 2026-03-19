@@ -2190,10 +2190,11 @@
 							{#if interactionMode === 'lecture_video'}<ClapperboardPlaySolid
 									class="h-5 w-5"
 								/>{:else}<ClapperboardPlayOutline class="h-5 w-5" />{/if}Lecture Video mode
-							<DropdownBadge
-								extraClasses="border-amber-400 from-amber-100 to-amber-200 text-amber-800 rounded-full py-0.5 px-2"
-								><span slot="name">In Development</span></DropdownBadge
+							<div
+								class="flex flex-row items-center rounded-full border border-gray-300 px-3 py-1 text-xs font-normal text-gray-600"
 							>
+								Research Preview
+							</div>
 						</div></RadioButton
 					>
 				{/if}

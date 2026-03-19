@@ -2653,6 +2653,9 @@ class LectureVideoThreadState(Base):
     last_known_offset_ms: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default="0"
     )
+    furthest_offset_ms: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     controller_session_id: Mapped[str | None] = mapped_column(String, nullable=True)
     controller_user_id: Mapped[int | None] = mapped_column(

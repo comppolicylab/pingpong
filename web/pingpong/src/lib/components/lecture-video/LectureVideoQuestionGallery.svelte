@@ -146,7 +146,7 @@
 <div class="flex flex-col gap-4 pt-5">
 	<!-- Header -->
 	<div>
-		<h2 class="text-base font-semibold text-slate-950">Comprehension Check</h2>
+		<h2 class="text-base font-semibold text-slate-950">Comprehension Checks</h2>
 	</div>
 
 	<!-- Gallery area -->

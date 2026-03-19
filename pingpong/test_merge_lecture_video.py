@@ -55,6 +55,7 @@ async def test_merge_preserves_lecture_video_user_references(db):
                 thread_id=thread.id,
                 state=schemas.LectureVideoSessionState.PLAYING,
                 last_known_offset_ms=4567,
+                furthest_offset_ms=4567,
                 version=2,
                 controller_session_id="controller-session",
                 controller_user_id=old_user.id,

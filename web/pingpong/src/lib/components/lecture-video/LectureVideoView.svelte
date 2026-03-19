@@ -369,6 +369,48 @@
 		return true;
 	}
 
+	async function postPlaybackInteraction(type: 'video_paused' | 'video_resumed') {
+		const interactionControllerSessionId = controllerSessionId;
+		if (!interactionControllerSessionId || sessionState !== 'playing') {
+			return;
+		}
+
+		const expectedStateVersion = stateVersion;
+		const offsetMs = Math.round(currentTimeMs);
+
+		try {
+			const response = await api.postLectureVideoInteraction(fetch, classId, threadId, {
+				type,
+				controller_session_id: interactionControllerSessionId,
+				expected_state_version: expectedStateVersion,
+				idempotency_key: crypto.randomUUID(),
+				offset_ms: offsetMs
+			});
+			if (controllerSessionId !== interactionControllerSessionId) {
+				return;
+			}
+
+			const expanded = api.expandResponse(response);
+			if (failClosedOnConflict(`${type}-conflict`, expanded)) {
+				return;
+			}
+			if (expanded.error) {
+				failClosedControl(
+					expanded.error.detail ||
+						'Failed to sync lecture video playback. Please refresh to continue.'
+				);
+				return;
+			}
+
+			applySession(expanded.data.lecture_video_session);
+		} catch (error) {
+			if (controllerSessionId !== interactionControllerSessionId) {
+				return;
+			}
+			failClosedControl(error instanceof Error ? error.message : String(error));
+		}
+	}
+
 	async function tryPlayVideo(
 		reason: string,
 		{
@@ -756,23 +798,7 @@
 		}
 		if (playbackLocked) return;
 		if (!controllerSessionId || sessionState !== 'playing') return;
-		api
-			.postLectureVideoInteraction(fetch, classId, threadId, {
-				type: 'video_paused',
-				controller_session_id: controllerSessionId,
-				expected_state_version: stateVersion,
-				idempotency_key: crypto.randomUUID(),
-				offset_ms: Math.round(currentTimeMs)
-			})
-			.then((response) => {
-				const expanded = api.expandResponse(response);
-				if (failClosedOnConflict('video-paused-conflict', expanded)) {
-					return;
-				}
-				if (!expanded.error) {
-					applySession(expanded.data.lecture_video_session);
-				}
-			});
+		void postPlaybackInteraction('video_paused');
 	}
 
 	function handlePlay() {
@@ -788,23 +814,7 @@
 			return;
 		}
 		if (!controllerSessionId || sessionState !== 'playing') return;
-		api
-			.postLectureVideoInteraction(fetch, classId, threadId, {
-				type: 'video_resumed',
-				controller_session_id: controllerSessionId,
-				expected_state_version: stateVersion,
-				idempotency_key: crypto.randomUUID(),
-				offset_ms: Math.round(currentTimeMs)
-			})
-			.then((response) => {
-				const expanded = api.expandResponse(response);
-				if (failClosedOnConflict('video-resumed-conflict', expanded)) {
-					return;
-				}
-				if (!expanded.error) {
-					applySession(expanded.data.lecture_video_session);
-				}
-			});
+		void postPlaybackInteraction('video_resumed');
 	}
 
 	async function handleSeek(toOffsetMs: number, fromOffsetMs: number) {

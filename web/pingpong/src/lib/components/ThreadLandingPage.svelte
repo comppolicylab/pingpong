@@ -26,8 +26,7 @@
 		CheckCircleSolid,
 		UserOutline,
 		PaperPlaneOutline,
-		UsersSolid,
-		QuestionCircleOutline
+		UsersSolid
 	} from 'flowbite-svelte-icons';
 	import { sadToast } from '$lib/toast';
 	import * as api from '$lib/api';
@@ -36,7 +35,6 @@
 	import { computeLatestIncidentTimestamps, filterLatestIncidentUpdates } from '$lib/statusUpdates';
 	import type { Assistant, FileUploadPurpose } from '$lib/api';
 	import { loading, isFirefox } from '$lib/stores/general';
-	import DropdownBadge from '$lib/components/DropdownBadge.svelte';
 	import ModeratorsTable from '$lib/components/ModeratorsTable.svelte';
 	import StatusErrors from './StatusErrors.svelte';
 
@@ -768,21 +766,12 @@
 						<p class="text-center text-sm font-semibold text-blue-dark-40 sm:text-xl">
 							Lecture Video mode
 						</p>
-						<div class="my-2 flex items-center gap-2">
-							<DropdownBadge
-								extraClasses="border-red-400 from-red-100 to-red-200 px-2 py-0.5 text-base text-red-800"
-								><span slot="name">In Development</span></DropdownBadge
+						<div class="my-2 flex items-center">
+							<div
+								class="flex flex-row items-center rounded-full border border-gray-300 px-3 py-1 text-xs font-normal text-gray-600"
 							>
-							<QuestionCircleOutline
-								id="lecture-video-dev-tooltip-landing"
-								class="h-5 w-5 cursor-help text-gray-600"
-							/>
-							<Tooltip
-								triggeredBy="#lecture-video-dev-tooltip-landing"
-								class="font-light"
-								arrow={false}
-								>Lecture Video mode is in active development and not fully functional.</Tooltip
-							>
+								Research Preview
+							</div>
 						</div>
 						<p class="font-base text-center text-xs text-gray-600 sm:text-base">
 							Review a lecture video with comprehension questions.<br />Create a new session to

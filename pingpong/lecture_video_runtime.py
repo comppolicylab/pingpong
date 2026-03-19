@@ -1,5 +1,5 @@
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import uuid_utils as uuid
 from sqlalchemy.exc import IntegrityError
@@ -11,6 +11,7 @@ from pingpong.now import NowFn, utcnow
 
 CONTROLLER_SESSION_HEADER = "x-lecture-video-controller-session"
 CONTROLLER_LEASE_DURATION = timedelta(seconds=30)
+PLAYBACK_PROGRESS_TOLERANCE_MS = 2_000
 
 
 class LectureVideoRuntimeError(Exception):
@@ -220,7 +221,6 @@ def build_lecture_video_session(
 
 
 async def _build_lecture_video_session_for_state(
-    session: AsyncSession,
     state: models.LectureVideoThreadState,
     *,
     latest_interaction_at: datetime | None = None,
@@ -228,12 +228,7 @@ async def _build_lecture_video_session_for_state(
     request_actor_user_id: int | None = None,
     now: datetime | None = None,
 ) -> schemas.LectureVideoSession:
-    furthest_offset_ms = max(
-        state.last_known_offset_ms,
-        await models.LectureVideoInteraction.get_furthest_offset_by_thread_id(
-            session, state.thread_id
-        ),
-    )
+    furthest_offset_ms = _get_unlocked_offset_ms(state)
     return build_lecture_video_session(
         state.thread,
         state,
@@ -242,6 +237,59 @@ async def _build_lecture_video_session_for_state(
         request_controller_session_id=request_controller_session_id,
         request_actor_user_id=request_actor_user_id,
         now=now,
+    )
+
+
+def _get_unlocked_offset_ms(state: models.LectureVideoThreadState) -> int:
+    return max(state.last_known_offset_ms, state.furthest_offset_ms)
+
+
+def _set_last_known_offset_ms(
+    state: models.LectureVideoThreadState, offset_ms: int
+) -> None:
+    state.last_known_offset_ms = offset_ms
+    state.furthest_offset_ms = max(state.furthest_offset_ms, offset_ms)
+
+
+def _set_seek_offset_ms(
+    state: models.LectureVideoThreadState, *, from_offset_ms: int, to_offset_ms: int
+) -> None:
+    state.last_known_offset_ms = to_offset_ms
+    state.furthest_offset_ms = max(
+        state.furthest_offset_ms, from_offset_ms, to_offset_ms
+    )
+
+
+def _normalize_interaction_time(timestamp: datetime | None) -> datetime | None:
+    if timestamp is None:
+        return None
+    if timestamp.tzinfo is None:
+        return timestamp.replace(tzinfo=timezone.utc)
+    return timestamp
+
+
+async def _get_plausible_playback_offset_ms(
+    session: AsyncSession,
+    state: models.LectureVideoThreadState,
+    *,
+    current_time: datetime,
+) -> int:
+    unlocked_offset_ms = _get_unlocked_offset_ms(state)
+    latest_interaction_at = _normalize_interaction_time(
+        await models.LectureVideoInteraction.get_latest_created_by_thread_id(
+            session, state.thread_id
+        )
+    )
+    if latest_interaction_at is None:
+        return unlocked_offset_ms
+
+    elapsed_ms = max(
+        int((current_time - latest_interaction_at).total_seconds() * 1000),
+        0,
+    )
+    return max(
+        unlocked_offset_ms,
+        state.last_known_offset_ms + elapsed_ms + PLAYBACK_PROGRESS_TOLERANCE_MS,
     )
 
 
@@ -271,7 +319,6 @@ async def get_thread_session(
         )
     )
     return await _build_lecture_video_session_for_state(
-        session,
         state,
         latest_interaction_at=latest_interaction_at,
         request_controller_session_id=request_controller_session_id,
@@ -311,6 +358,7 @@ async def initialize_thread_state(
             if first_question is not None
             else None,
             "last_known_offset_ms": 0,
+            "furthest_offset_ms": 0,
             "version": 1,
         },
     )
@@ -505,7 +553,6 @@ async def acquire_control(
     return (
         controller_session_id,
         await _build_lecture_video_session_for_state(
-            session,
             state,
             latest_interaction_at=latest_interaction_at,
             request_controller_session_id=controller_session_id,
@@ -542,7 +589,6 @@ async def release_control(
         )
     )
     return await _build_lecture_video_session_for_state(
-        session,
         state,
         latest_interaction_at=latest_interaction_at,
         request_actor_user_id=actor_user_id,
@@ -615,7 +661,7 @@ async def _handle_question_presented(
         )
 
     state.state = schemas.LectureVideoSessionState.AWAITING_ANSWER
-    state.last_known_offset_ms = request.offset_ms
+    _set_last_known_offset_ms(state, request.offset_ms)
     await _append_interaction(
         session,
         state,
@@ -675,7 +721,14 @@ async def _handle_resumed(
     current_time: datetime,
 ) -> None:
     if state.state == schemas.LectureVideoSessionState.PLAYING:
-        state.last_known_offset_ms = request.offset_ms
+        plausible_offset_ms = await _get_plausible_playback_offset_ms(
+            session, state, current_time=current_time
+        )
+        if request.offset_ms > plausible_offset_ms:
+            raise LectureVideoValidationError(
+                "Resuming past your unlocked progress is not allowed in this lecture video."
+            )
+        _set_last_known_offset_ms(state, request.offset_ms)
         await _append_interaction(
             session,
             state,
@@ -698,7 +751,7 @@ async def _handle_resumed(
         )
 
     next_question = _get_next_question(state.thread, current_question)
-    state.last_known_offset_ms = request.offset_ms
+    _set_last_known_offset_ms(state, request.offset_ms)
     state.active_option_id = None
     state.active_option = None
     if next_question is None:
@@ -732,8 +785,15 @@ async def _handle_paused(
         raise _conflict(
             detail="Session is already completed.",
         )
+    plausible_offset_ms = await _get_plausible_playback_offset_ms(
+        session, state, current_time=current_time
+    )
+    if request.offset_ms > plausible_offset_ms:
+        raise LectureVideoValidationError(
+            "Pausing past your unlocked progress is not allowed in this lecture video."
+        )
 
-    state.last_known_offset_ms = request.offset_ms
+    _set_last_known_offset_ms(state, request.offset_ms)
     await _append_interaction(
         session,
         state,
@@ -757,19 +817,19 @@ async def _handle_seeked(
         raise _conflict(
             detail="Session is already completed.",
         )
-    furthest_offset_ms = max(
-        state.last_known_offset_ms,
-        request.from_offset_ms,
-        await models.LectureVideoInteraction.get_furthest_offset_by_thread_id(
-            session, state.thread_id
-        ),
+    plausible_offset_ms = await _get_plausible_playback_offset_ms(
+        session, state, current_time=current_time
     )
-    if request.to_offset_ms > furthest_offset_ms:
+    if request.to_offset_ms > plausible_offset_ms:
         raise LectureVideoValidationError(
             "Seeking past your unlocked progress is not allowed in this lecture video."
         )
 
-    state.last_known_offset_ms = request.to_offset_ms
+    _set_seek_offset_ms(
+        state,
+        from_offset_ms=request.from_offset_ms,
+        to_offset_ms=request.to_offset_ms,
+    )
     await _append_interaction(
         session,
         state,
@@ -794,8 +854,15 @@ async def _handle_ended(
         raise _conflict(
             detail="Session is already completed.",
         )
+    plausible_offset_ms = await _get_plausible_playback_offset_ms(
+        session, state, current_time=current_time
+    )
+    if request.offset_ms > plausible_offset_ms:
+        raise LectureVideoValidationError(
+            "Ending past your unlocked progress is not allowed in this lecture video."
+        )
 
-    state.last_known_offset_ms = request.offset_ms
+    _set_last_known_offset_ms(state, request.offset_ms)
     await _append_interaction(
         session,
         state,
@@ -859,7 +926,6 @@ async def process_interaction(
             )
         )
         return await _build_lecture_video_session_for_state(
-            session,
             state,
             latest_interaction_at=latest_interaction_at,
             request_controller_session_id=request.controller_session_id,
@@ -867,15 +933,7 @@ async def process_interaction(
             now=current_time,
         )
 
-    allow_stale_playing_resume = (
-        isinstance(request, schemas.LectureVideoResumedRequest)
-        and state.state == schemas.LectureVideoSessionState.PLAYING
-        and request.expected_state_version < state.version
-    )
-    if (
-        request.expected_state_version != state.version
-        and not allow_stale_playing_resume
-    ):
+    if request.expected_state_version != state.version:
         raise _conflict(
             detail="Lecture video state is out of date. Refresh and try again.",
         )
@@ -910,7 +968,6 @@ async def process_interaction(
     )
 
     return await _build_lecture_video_session_for_state(
-        session,
         state,
         latest_interaction_at=latest_interaction_at,
         request_controller_session_id=request.controller_session_id,

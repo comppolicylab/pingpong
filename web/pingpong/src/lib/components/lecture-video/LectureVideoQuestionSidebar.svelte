@@ -97,7 +97,7 @@
 
 <div class="flex max-h-[calc(100dvh-3rem)] flex-col gap-4 border-s border-slate-200 ps-6">
 	<div>
-		<h2 class="text-base font-semibold text-slate-950">Comprehension Check</h2>
+		<h2 class="text-base font-semibold text-slate-950">Comprehension Checks</h2>
 	</div>
 
 	<div class="flex min-h-0 flex-col gap-3 overflow-y-auto pr-1">
