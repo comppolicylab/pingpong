@@ -32,7 +32,6 @@
 	import Logo from '$lib/components/Logo.svelte';
 	import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
 	import ChatDropOverlay from '$lib/components/ChatDropOverlay.svelte';
-	import DropdownBadge from '$lib/components/DropdownBadge.svelte';
 	import AssistantVersionBadge from '$lib/components/AssistantVersionBadge.svelte';
 	import {
 		RefreshOutline,
@@ -51,8 +50,7 @@
 		MicrophoneSlashOutline,
 		UsersSolid,
 		LinkOutline,
-		TerminalOutline,
-		QuestionCircleOutline
+		TerminalOutline
 	} from 'flowbite-svelte-icons';
 	import { parseTextContent } from '$lib/content';
 	import { ThreadManager, type Message } from '$lib/stores/thread';
@@ -79,6 +77,17 @@
 	import MCPServerCallItem from './MCPServerCallItem.svelte';
 	import ReasoningCallItem from './ReasoningCallItem.svelte';
 	import WebSearchCallItem from './WebSearchCallItem.svelte';
+	import LectureVideoView from '$lib/components/lecture-video/LectureVideoView.svelte';
+	import LectureVideoCompletedView from '$lib/components/lecture-video/LectureVideoCompletedView.svelte';
+
+	function formatLectureVideoTitle(filename: string | null | undefined): string | null {
+		if (!filename) return null;
+
+		const withoutExtension = filename.replace(/\.[^/.]+$/, '');
+		const normalized = withoutExtension.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+		return normalized || null;
+	}
+
 	export let data;
 
 	let userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -134,24 +143,9 @@
 	$: threadRecording = data.threadRecording;
 	$: displayUserInfo = data.threadDisplayUserInfo;
 	$: threadLectureVideoMismatch = data.threadLectureVideoMismatch === true;
-	let lectureVideoRuntimeMismatch = false;
-	let lectureVideoRuntimeAssistantMismatch = false;
-	let lectureVideoElement: HTMLVideoElement | null = null;
-	let lectureVideoAvailabilityCheckPending = false;
-	let lectureVideoLastAvailabilityCheck = 0;
-	let lectureVideoStateThreadId: number | null = null;
-	$: {
-		if (lectureVideoStateThreadId !== threadId) {
-			lectureVideoStateThreadId = threadId;
-			lectureVideoRuntimeMismatch = false;
-			lectureVideoRuntimeAssistantMismatch = false;
-			lectureVideoAvailabilityCheckPending = false;
-			lectureVideoLastAvailabilityCheck = 0;
-		}
-	}
-	$: effectiveLectureVideoMismatch = threadLectureVideoMismatch || lectureVideoRuntimeMismatch;
-	$: effectiveLectureVideoAssistantMismatch =
-		threadLectureVideoMismatch || lectureVideoRuntimeAssistantMismatch;
+	$: threadLectureVideoCompleted = data.threadLectureVideoCompleted === true;
+	$: effectiveLectureVideoMismatch = threadLectureVideoMismatch;
+	$: effectiveLectureVideoAssistantMismatch = threadLectureVideoMismatch;
 	let trashThreadFiles = writable<string[]>([]);
 	let allFiles: Record<string, api.FileUploadInfo> = {};
 	$: threadAttachments = threadMgr.attachments;
@@ -243,6 +237,7 @@
 	let assistantInteractionMode: 'voice' | 'chat' | 'lecture_video' | null = null;
 	let allowUserFileUploads = true;
 	let allowUserImageUploads = true;
+	let lectureVideoDisplayTitle = 'Lecture Video';
 	$: chatVisionAcceptedFiles = allowUserImageUploads ? visionAcceptedFiles : null;
 	$: effectiveChatVisionAcceptedFiles =
 		visionSupportOverride === false && !useImageDescriptions ? null : chatVisionAcceptedFiles;
@@ -276,6 +271,10 @@
 			assistantVersion = assistant.version ?? null;
 			allowUserFileUploads = assistant.allow_user_file_uploads ?? true;
 			allowUserImageUploads = assistant.allow_user_image_uploads ?? true;
+			lectureVideoDisplayTitle =
+				formatLectureVideoTitle(assistant.lecture_video?.filename) ||
+				threadMgr.thread?.name ||
+				'Lecture Video';
 		} else {
 			useLatex = false;
 			useImageDescriptions = false;
@@ -283,6 +282,7 @@
 			assistantVersion = null;
 			allowUserFileUploads = true;
 			allowUserImageUploads = true;
+			lectureVideoDisplayTitle = threadMgr.thread?.name || 'Lecture Video';
 			if (data.threadData.anonymous_session) {
 				console.warn(`Definition for assistant ${$assistantId} not found.`);
 			}
@@ -1514,107 +1514,6 @@
 		}
 	};
 
-	const logLectureVideoEvent = (eventName: string, details?: Record<string, unknown>) => {
-		const mediaError = lectureVideoElement?.error;
-		const mediaState = lectureVideoElement
-			? {
-					readyState: lectureVideoElement.readyState,
-					networkState: lectureVideoElement.networkState,
-					currentTime: lectureVideoElement.currentTime,
-					paused: lectureVideoElement.paused,
-					errorCode: mediaError?.code ?? null,
-					errorMessage: mediaError?.message ?? null
-				}
-			: null;
-
-		console.info('[lecture-video]', eventName, {
-			threadId,
-			classId,
-			src: lectureVideoSrc,
-			timestamp: new Date().toISOString(),
-			...mediaState,
-			...details
-		});
-	};
-
-	const markLectureVideoUnavailable = (reason: 'generic' | 'assistant_mismatch') => {
-		if (effectiveLectureVideoMismatch) {
-			logLectureVideoEvent('mark-unavailable:skipped', {
-				reason: 'already-mismatch',
-				unavailableReason: reason
-			});
-			return;
-		}
-
-		logLectureVideoEvent('mark-unavailable:start', { unavailableReason: reason });
-
-		// Detach the source immediately so the browser stops retrying failed segment requests.
-		if (lectureVideoElement) {
-			lectureVideoElement.pause();
-			lectureVideoElement.removeAttribute('src');
-			lectureVideoElement.load();
-		}
-
-		// Stop retries by unmounting the video player immediately.
-		lectureVideoRuntimeAssistantMismatch = reason === 'assistant_mismatch';
-		lectureVideoRuntimeMismatch = true;
-		logLectureVideoEvent('mark-unavailable:done', { unavailableReason: reason });
-	};
-
-	const checkLectureVideoAvailability = async () => {
-		if (
-			effectiveLectureVideoMismatch ||
-			lectureVideoAvailabilityCheckPending ||
-			Date.now() - lectureVideoLastAvailabilityCheck < 2000
-		) {
-			logLectureVideoEvent('availability-check:skipped', {
-				effectiveLectureVideoMismatch,
-				lectureVideoAvailabilityCheckPending,
-				withinThrottleWindow: Date.now() - lectureVideoLastAvailabilityCheck < 2000
-			});
-			return;
-		}
-
-		lectureVideoAvailabilityCheckPending = true;
-		lectureVideoLastAvailabilityCheck = Date.now();
-		logLectureVideoEvent('availability-check:start');
-		try {
-			const response = await fetch(lectureVideoSrc, {
-				headers: { Range: 'bytes=0-0' }
-			});
-			logLectureVideoEvent('availability-check:response', {
-				status: response.status,
-				ok: response.ok
-			});
-			if (response.status !== 200 && response.status !== 206) {
-				const isAssistantMismatch = response.status === 409;
-				markLectureVideoUnavailable(isAssistantMismatch ? 'assistant_mismatch' : 'generic');
-			}
-		} catch (e) {
-			logLectureVideoEvent('availability-check:error', {
-				error: errorMessage(e, 'unknown error')
-			});
-			markLectureVideoUnavailable('generic');
-		} finally {
-			lectureVideoAvailabilityCheckPending = false;
-			logLectureVideoEvent('availability-check:done');
-		}
-	};
-
-	const handleLectureVideoError = () => {
-		logLectureVideoEvent('video:error');
-		markLectureVideoUnavailable('generic');
-	};
-
-	const handleLectureVideoBuffering = () => {
-		logLectureVideoEvent('video:buffering');
-		void checkLectureVideoAvailability();
-	};
-
-	const handleLectureVideoLifecycle = (name: string) => {
-		logLectureVideoEvent(`video:${name}`);
-	};
-
 	afterNavigate(async () => {
 		await resetAudioSession();
 	});
@@ -1656,7 +1555,7 @@
 	ondrop={handleThreadDrop}
 >
 	{#if data.threadInteractionMode === 'lecture_video'}
-		<div class="flex h-full w-full flex-col items-center justify-center">
+		{#key `${classId}:${threadId}:${lectureVideoSrc}:${threadLectureVideoCompleted}:${effectiveLectureVideoMismatch}`}
 			{#if effectiveLectureVideoMismatch}
 				<div class="flex h-full w-full items-center justify-center p-4">
 					<div
@@ -1671,51 +1570,12 @@
 						{/if}
 					</div>
 				</div>
+			{:else if threadLectureVideoCompleted}
+				<LectureVideoCompletedView {classId} {threadId} />
 			{:else}
-				<div class="flex h-full w-full flex-col items-center justify-center rounded-lg p-4">
-					<div class="mb-2 flex items-center gap-2">
-						<DropdownBadge
-							extraClasses="border-red-400 from-red-100 to-red-200 px-2 py-0.5 text-base text-red-800"
-							><span slot="name">In Development</span></DropdownBadge
-						>
-						<QuestionCircleOutline
-							id="lecture-video-dev-tooltip-detail"
-							class="h-5 w-5 cursor-help text-gray-600"
-						/>
-						<Tooltip
-							triggeredBy="#lecture-video-dev-tooltip-detail"
-							class="font-light"
-							arrow={false}
-							>Lecture Video mode is in active development and not fully functional.</Tooltip
-						>
-					</div>
-
-					<!-- svelte-ignore a11y_media_has_caption -->
-					<video
-						class="h-auto max-h-full w-full max-w-6xl rounded-lg shadow-lg"
-						bind:this={lectureVideoElement}
-						controls
-						playsinline
-						preload="metadata"
-						src={lectureVideoSrc}
-						onerror={handleLectureVideoError}
-						onstalled={handleLectureVideoBuffering}
-						onwaiting={handleLectureVideoBuffering}
-						onloadstart={() => handleLectureVideoLifecycle('loadstart')}
-						onloadedmetadata={() => handleLectureVideoLifecycle('loadedmetadata')}
-						oncanplay={() => handleLectureVideoLifecycle('canplay')}
-						onplaying={() => handleLectureVideoLifecycle('playing')}
-						onpause={() => handleLectureVideoLifecycle('pause')}
-						onprogress={() => handleLectureVideoLifecycle('progress')}
-						onseeking={() => handleLectureVideoLifecycle('seeking')}
-						onseeked={() => handleLectureVideoLifecycle('seeked')}
-						onended={() => handleLectureVideoLifecycle('ended')}
-					>
-						Your browser does not support HTML5 video.
-					</video>
-				</div>
+				<LectureVideoView {classId} {threadId} {lectureVideoSrc} title={lectureVideoDisplayTitle} />
 			{/if}
-		</div>
+		{/key}
 	{:else}
 		<div
 			class={`messages-container min-h-0 grow overflow-y-auto py-2 ${

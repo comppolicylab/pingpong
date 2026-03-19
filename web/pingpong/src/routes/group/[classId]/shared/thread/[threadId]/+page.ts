@@ -63,6 +63,6 @@ export const load: PageLoad = async ({ fetch, params }) => {
 		threadRecording,
 		threadDisplayUserInfo,
 		threadLectureVideoMismatch,
-		threadLectureVideoCompleted,
+		threadLectureVideoCompleted
 	};
 };

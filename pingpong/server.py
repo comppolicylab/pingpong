@@ -4657,8 +4657,10 @@ async def get_lecture_video_history(
     if thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
         raise HTTPException(status_code=404, detail="Lecture video thread not found.")
 
-    interactions = await models.LectureVideoInteraction.list_question_history_by_thread_id(
-        request.state["db"], thread.id
+    interactions = (
+        await models.LectureVideoInteraction.list_question_history_by_thread_id(
+            request.state["db"], thread.id
+        )
     )
     user_id = request.state["session"].user.id
     current_user_ids = [user_id] + await models.User.get_previous_ids_by_id(
@@ -4702,9 +4704,7 @@ async def get_lecture_video_history(
                             interaction.question.options, key=lambda item: item.position
                         )
                     ]
-                    if (
-                        interaction.question
-                    )
+                    if (interaction.question)
                     else None
                 ),
                 correct_option_id=(

@@ -1311,7 +1311,7 @@ async def test_lecture_video_interactions_reject_post_completion_playback_events
     assert history_response.status_code == 200
     assert [item["event_type"] for item in history_response.json()["interactions"]] == [
         "question_presented",
-        "answer_submitted"
+        "answer_submitted",
     ]
 
 
