@@ -121,10 +121,13 @@
 	let dragStartOffsetMs: number | null = $state(null);
 	let dragPreviewOffsetMs: number | null = $state(null);
 	let seekPreviewVisible = $state(false);
+	let previewVideoActivated = $state(false);
 	let seekPreviewOffsetMs = $state(0);
 	let seekPreviewX = $state(0);
 	let trackWidth = $state(0);
 	let previewVideoReady = $state(false);
+	let lastPreviewVideoSrc: string | undefined = undefined;
+	let lastMainVideoSrc: string | undefined = undefined;
 	let keyboardActionIndicator: KeyboardActionIndicator | null = $state(null);
 	let keyboardActionIndicatorTimeout: ReturnType<typeof setTimeout> | null = $state(null);
 	let keyboardActionOverlayMounted = $state(false);
@@ -155,7 +158,10 @@
 	);
 	let seekBarActive = $derived(seekPreviewVisible || draggingSeek);
 	let knowledgeChecksVisible = $derived(!manualPlaybackPrompt && !seekBarActive);
-	let previewVideoSrc = $derived(seekPreviewVisible ? src : undefined);
+	let previewVideoSrc = $derived(previewVideoActivated ? src : undefined);
+	let previewVideoPreload: 'auto' | 'metadata' = $derived(
+		previewVideoActivated ? 'auto' : 'metadata'
+	);
 	let previewDisplayOffsetMs = $derived(dragPreviewOffsetMs ?? seekPreviewOffsetMs);
 	let previewTimeText = $derived(formatTime(previewDisplayOffsetMs));
 	let hoverPercent = $derived(durationMs > 0 ? (previewDisplayOffsetMs / durationMs) * 100 : 0);
@@ -250,8 +256,18 @@
 	});
 
 	$effect(() => {
-		if (!previewVideoSrc) {
+		if (src !== lastMainVideoSrc) {
+			previewVideoActivated = false;
 			previewVideoReady = false;
+			lastPreviewVideoSrc = undefined;
+			lastMainVideoSrc = src;
+		}
+	});
+
+	$effect(() => {
+		if (previewVideoSrc !== lastPreviewVideoSrc) {
+			previewVideoReady = false;
+			lastPreviewVideoSrc = previewVideoSrc;
 		}
 	});
 
@@ -393,7 +409,7 @@
 		syncMediaSessionPositionState();
 	}
 
-	function handlePreviewVideoCanPlay() {
+	function handlePreviewVideoLoadedMetadata() {
 		previewVideoReady = true;
 		syncPreviewVideo();
 	}
@@ -521,7 +537,13 @@
 		previewVideoElement.currentTime = nextPreviewTime;
 	}
 
+	function activatePreviewVideo() {
+		if (!src || previewVideoActivated) return;
+		previewVideoActivated = true;
+	}
+
 	function showSeekPreview(pointerOffsetPx: number, offsetMs: number) {
+		activatePreviewVideo();
 		seekPreviewVisible = true;
 		seekPreviewX = pointerOffsetPx;
 		seekPreviewOffsetMs = offsetMs;
@@ -530,6 +552,7 @@
 
 	function hideSeekPreview() {
 		seekPreviewVisible = false;
+		previewVideoActivated = false;
 	}
 
 	function updateSeekPreviewFromClientX(clientX: number, track: HTMLDivElement) {
@@ -560,6 +583,10 @@
 		}
 
 		updateSeekPreviewFromClientX(event.clientX, track);
+	}
+
+	function handleSeekMouseEnter(event: MouseEvent) {
+		handleSeekHover(event);
 	}
 
 	function previewSeek(offsetMs: number) {
@@ -966,6 +993,7 @@
 						onpointermove={handleSeekPointerMove}
 						onpointerup={finishSeekDrag}
 						onpointercancel={cancelSeekDrag}
+						onmouseenter={handleSeekMouseEnter}
 						onmousemove={handleSeekHover}
 						onmouseleave={() => {
 							hoveringLockedSeek = false;
@@ -987,9 +1015,9 @@
 										src={previewVideoSrc}
 										playsinline
 										muted
-										preload="metadata"
+										preload={previewVideoPreload}
 										class="h-full w-full object-cover"
-										oncanplay={handlePreviewVideoCanPlay}
+										onloadedmetadata={handlePreviewVideoLoadedMetadata}
 									></video>
 								</div>
 							</div>
