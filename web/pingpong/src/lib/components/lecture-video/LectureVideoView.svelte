@@ -11,6 +11,7 @@
 		LectureVideoContinuation,
 		LectureVideoInteractionHistoryItem
 	} from '$lib/api';
+	import { mergeQuestionOptions } from '$lib/utils/lecture-video';
 	import LectureVideoPlayer from './LectureVideoPlayer.svelte';
 	import LectureVideoQuestionSidebar from './LectureVideoQuestionSidebar.svelte';
 	import LectureVideoQuestionGallery from './LectureVideoQuestionGallery.svelte';
@@ -53,6 +54,7 @@
 			selectedOptionId: number;
 			correctOptionId: number | null;
 			options: { id: number; option_text: string; post_answer_text?: string | null }[];
+			postAnswerText: string | null;
 		}
 	>();
 	let allQuestions: { id: number; position: number; questionText: string; stopOffsetMs: number }[] =
@@ -163,7 +165,8 @@
 	function appendAnswerToHistory(
 		question: NonNullable<typeof currentQuestion>,
 		selectedOptionId: number,
-		correctOptionId: number | null
+		correctOptionId: number | null,
+		postAnswerText: string | null
 	) {
 		const eventIndex = (historyInteractions.at(-1)?.event_index ?? 0) + 1;
 		historyInteractions = [
@@ -178,7 +181,9 @@
 					id: option.id,
 					option_text: option.option_text,
 					post_answer_text:
-						option.id === selectedOptionId ? (option.post_answer_text ?? null) : null
+						option.id === selectedOptionId
+							? (option.post_answer_text ?? postAnswerText ?? null)
+							: null
 				})),
 				correct_option_id: correctOptionId,
 				option_id: selectedOptionId,
@@ -666,7 +671,10 @@
 				correctOptionId: number | null;
 			}
 		>();
-		const answerInfo = new SvelteMap<number, { optionId: number; optionText: string }>();
+		const answerInfo = new SvelteMap<
+			number,
+			{ optionId: number; optionText: string; postAnswerText: string | null }
+		>();
 
 		for (const item of interactions) {
 			if (item.question_id != null) {
@@ -677,7 +685,10 @@
 						item.event_type === 'question_presented'
 							? (item.offset_ms ?? existingQuestion?.stopOffsetMs ?? 0)
 							: (existingQuestion?.stopOffsetMs ?? 0),
-					options: item.question_options ?? existingQuestion?.options ?? [],
+					options:
+						item.question_options && item.question_options.length > 0
+							? mergeQuestionOptions(existingQuestion?.options ?? [], item.question_options)
+							: (existingQuestion?.options ?? []),
 					correctOptionId: item.correct_option_id ?? existingQuestion?.correctOptionId ?? null
 				});
 			}
@@ -686,9 +697,15 @@
 				item.question_id != null &&
 				item.option_id != null
 			) {
+				const postAnswerText =
+					item.question_options?.find((option) => option.id === item.option_id)?.post_answer_text ??
+					questionInfo.get(item.question_id)?.options.find((option) => option.id === item.option_id)
+						?.post_answer_text ??
+					null;
 				answerInfo.set(item.question_id, {
 					optionId: item.option_id,
-					optionText: item.option_text ?? ''
+					optionText: item.option_text ?? '',
+					postAnswerText
 				});
 			}
 		}
@@ -719,7 +736,14 @@
 					correctOptionId: question?.correctOptionId ?? null,
 					options: question?.options.length
 						? question.options
-						: [{ id: answer.optionId, option_text: answer.optionText }]
+						: [
+								{
+									id: answer.optionId,
+									option_text: answer.optionText,
+									post_answer_text: answer.postAnswerText
+								}
+							],
+					postAnswerText: answer.postAnswerText
 				});
 			}
 		}
@@ -1112,26 +1136,29 @@
 			return;
 		}
 		if (!expanded.error) {
+			const continuationAtAnswer = expanded.data.lecture_video_session.current_continuation;
 			appendAnswerToHistory(
 				questionAtAnswer,
 				optionId,
-				expanded.data.lecture_video_session.current_continuation?.correct_option_id ?? null
+				continuationAtAnswer?.correct_option_id ?? null,
+				continuationAtAnswer?.post_answer_text ?? null
 			);
 			applySession(expanded.data.lecture_video_session);
 
 			// Record answer immediately so the marker updates
-			if (currentQuestion && currentContinuation) {
-				answeredQuestions.set(currentQuestion.id, {
-					selectedOptionId: currentContinuation.option_id,
-					correctOptionId: currentContinuation.correct_option_id,
-					options: currentQuestion.options
+			if (continuationAtAnswer) {
+				answeredQuestions.set(questionAtAnswer.id, {
+					selectedOptionId: continuationAtAnswer.option_id,
+					correctOptionId: continuationAtAnswer.correct_option_id,
+					options: questionAtAnswer.options,
+					postAnswerText: continuationAtAnswer.post_answer_text
 				});
 			}
 
 			// Play post-answer narration if available
-			if (currentContinuation?.post_answer_narration_id) {
+			if (continuationAtAnswer?.post_answer_narration_id) {
 				postAnswerNarrationPending = true;
-				void playNarration(currentContinuation.post_answer_narration_id, {
+				void playNarration(continuationAtAnswer.post_answer_narration_id, {
 					onEnded: () => {
 						postAnswerNarrationPending = false;
 					},
@@ -1175,7 +1202,8 @@
 			answeredQuestions.set(currentQuestion.id, {
 				selectedOptionId: currentContinuation.option_id,
 				correctOptionId: currentContinuation.correct_option_id,
-				options: currentQuestion.options
+				options: currentQuestion.options,
+				postAnswerText: currentContinuation.post_answer_text
 			});
 		}
 
