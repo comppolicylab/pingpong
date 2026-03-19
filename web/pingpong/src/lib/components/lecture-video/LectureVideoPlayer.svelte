@@ -576,6 +576,7 @@
 		previewVideoReady = false;
 		previewVideoFrameReady = false;
 		lastCapturedPreviewFrameTimeS = null;
+		snapshotCanvasHasFrame = false;
 	}
 
 	function schedulePreviewVideoDeactivate(delayMs: number = PREVIEW_VIDEO_IDLE_DEACTIVATE_MS) {
