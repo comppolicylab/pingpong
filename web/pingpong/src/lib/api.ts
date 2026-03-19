@@ -4248,7 +4248,6 @@ export type PanoptoStatus = {
 	tenant: string | null;
 	folder_id: string | null;
 	folder_name: string | null;
-	mcp_server_tool_id: number | null;
 };
 
 export type PanoptoTenants = {

@@ -921,6 +921,7 @@ class MCPServerToolResponse(BaseModel):
     headers: dict[str, str] | None = None
     description: str | None = None
     enabled: bool
+    is_internal: bool = False
 
     model_config = ConfigDict(
         from_attributes=True,

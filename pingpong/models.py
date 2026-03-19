@@ -3698,6 +3698,19 @@ mcp_server_tool_assistant_association = Table(
     ),
 )
 
+mcp_server_tool_class_association = Table(
+    "mcp_server_tool_class_associations",
+    Base.metadata,
+    Column("mcp_server_tool_id", Integer, ForeignKey("mcp_server_tools.id")),
+    Column("class_id", Integer, ForeignKey("classes.id")),
+    Index(
+        "mcp_server_tool_class_idx",
+        "mcp_server_tool_id",
+        "class_id",
+        unique=True,
+    ),
+)
+
 
 class Assistant(Base):
     __tablename__ = "assistants"
@@ -4628,8 +4641,8 @@ class Class(Base):
     panopto_refresh_token = Column(String, nullable=True)
     panopto_expires_in = Column(Integer, nullable=True)
     panopto_token_added_at = Column(DateTime(timezone=True), nullable=True)
-    panopto_mcp_server_tool_id = Column(
-        Integer, ForeignKey("mcp_server_tools.id"), nullable=True
+    class_mcp_server_tools = relationship(
+        "MCPServerTool", secondary=mcp_server_tool_class_association
     )
     any_can_create_assistant = Column(Boolean, default=False)
     any_can_publish_assistant = Column(Boolean, default=False)
@@ -5081,7 +5094,7 @@ class Class(Base):
         folder_name: str,
         mcp_server_tool_id: int,
     ) -> None:
-        """Link a Panopto folder to this class."""
+        """Link a Panopto folder to this class and associate the MCP tool."""
         stmt = (
             update(Class)
             .where(Class.id == class_id)
@@ -5089,33 +5102,59 @@ class Class(Base):
                 panopto_folder_id=folder_id,
                 panopto_folder_name=folder_name,
                 panopto_status=schemas.PanoptoStatus.LINKED,
-                panopto_mcp_server_tool_id=mcp_server_tool_id,
             )
         )
         await session.execute(stmt)
+        # Associate the MCP tool with the class
+        await session.execute(
+            _get_upsert_stmt(session)(mcp_server_tool_class_association)
+            .values([(mcp_server_tool_id, class_id)])
+            .on_conflict_do_nothing(
+                index_elements=["mcp_server_tool_id", "class_id"],
+            )
+        )
 
     @classmethod
     async def cleanup_panopto_mcp_tool(
         cls, session: AsyncSession, class_id: int
     ) -> None:
-        """Remove and disable the Panopto MCP tool for a class.
+        """Remove and disable internal MCP tools for a class.
 
-        Removes the tool from all assistant associations and disables it.
-        Does not delete the tool itself as it may be referenced by past runs.
+        Removes the tools from both class and assistant associations and
+        disables them. Does not delete the tools as they may be referenced
+        by past runs.
         """
-        stmt = select(Class.panopto_mcp_server_tool_id).where(Class.id == class_id)
+        # Find internal MCP tools for this class
+        assoc = mcp_server_tool_class_association
+        stmt = (
+            select(assoc.c.mcp_server_tool_id)
+            .join(MCPServerTool, MCPServerTool.id == assoc.c.mcp_server_tool_id)
+            .where(assoc.c.class_id == class_id)
+            .where(MCPServerTool.is_internal.is_(True))
+        )
         result = await session.execute(stmt)
-        mcp_tool_id = result.scalar_one_or_none()
-        if mcp_tool_id:
+        tool_ids = [row[0] for row in result]
+
+        if tool_ids:
+            # Remove from assistant associations
             await session.execute(
                 delete(mcp_server_tool_assistant_association).where(
-                    mcp_server_tool_assistant_association.c.mcp_server_tool_id
-                    == mcp_tool_id
+                    mcp_server_tool_assistant_association.c.mcp_server_tool_id.in_(
+                        tool_ids
+                    )
                 )
             )
+            # Remove from class associations
+            await session.execute(
+                delete(assoc).where(
+                    assoc.c.mcp_server_tool_id.in_(tool_ids),
+                    assoc.c.class_id == class_id,
+                )
+            )
+            # Disable the tools
             await session.execute(
                 update(MCPServerTool)
-                .where(MCPServerTool.id == mcp_tool_id)
+                .where(MCPServerTool.id.in_(tool_ids))
                 .values(enabled=False)
             )
 
@@ -5136,24 +5175,39 @@ class Class(Base):
                 panopto_refresh_token=None,
                 panopto_expires_in=None,
                 panopto_token_added_at=None,
-                panopto_mcp_server_tool_id=None,
             )
         )
         await session.execute(stmt)
 
     @classmethod
-    async def get_panopto_mcp_server_tool(
+    async def get_class_mcp_server_tools(
         cls, session: AsyncSession, class_id: int
-    ) -> "MCPServerTool | None":
-        """Get the Panopto MCP server tool for a class, if any."""
-        stmt = select(Class.panopto_mcp_server_tool_id).where(Class.id == class_id)
+    ) -> list["MCPServerTool"]:
+        """Get all class-level MCP server tools."""
+        assoc = mcp_server_tool_class_association
+        stmt = (
+            select(MCPServerTool)
+            .join(assoc, assoc.c.mcp_server_tool_id == MCPServerTool.id)
+            .where(assoc.c.class_id == class_id)
+            .where(MCPServerTool.enabled.is_(True))
+        )
         result = await session.execute(stmt)
-        mcp_tool_id = result.scalar_one_or_none()
-        if not mcp_tool_id:
-            return None
-        tool_stmt = select(MCPServerTool).where(MCPServerTool.id == mcp_tool_id)
-        tool_result = await session.execute(tool_stmt)
-        return tool_result.scalar_one_or_none()
+        return list(result.scalars().all())
+
+    @classmethod
+    async def get_internal_mcp_tool_ids(
+        cls, session: AsyncSession, class_id: int
+    ) -> list[int]:
+        """Get IDs of internal MCP tools for this class."""
+        assoc = mcp_server_tool_class_association
+        stmt = (
+            select(MCPServerTool.id)
+            .join(assoc, assoc.c.mcp_server_tool_id == MCPServerTool.id)
+            .where(assoc.c.class_id == class_id)
+            .where(MCPServerTool.is_internal.is_(True))
+        )
+        result = await session.execute(stmt)
+        return [row[0] for row in result]
 
     @classmethod
     async def get_lms_course_id(
@@ -5758,6 +5812,7 @@ class MCPServerTool(Base):
     authorization_token = Column(String, nullable=True)
     description = Column(String, nullable=True)
     enabled = Column(Boolean, server_default="true", nullable=False)
+    is_internal = Column(Boolean, server_default="false", nullable=False)
     created_by_user_id = Column(
         Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )

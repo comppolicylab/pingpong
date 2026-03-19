@@ -58,8 +58,7 @@ export const load = async ({ fetch, params }: Parameters<PageLoad>[0]) => {
 						status: 'none',
 						tenant: null,
 						folder_id: null,
-						folder_name: null,
-						mcp_server_tool_id: null
+						folder_name: null
 					},
 					error: null,
 					$status: 200

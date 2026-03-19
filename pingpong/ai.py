@@ -3552,6 +3552,23 @@ async def run_response(
                         server_label,
                         mcp_tool,
                     ) in mcp_server_tools_by_server_label.items():
+                        # For internal tools, generate a short-lived token
+                        # at run time instead of using a stored token
+                        if mcp_tool.is_internal:
+                            from pingpong.auth import encode_auth_token
+
+                            authorization = encode_auth_token(
+                                sub=json.dumps(
+                                    {
+                                        "class_id": int(class_id),
+                                        "type": "panopto_mcp",
+                                    }
+                                ),
+                                expiry=60 * 60 * 4,  # 4 hours
+                            )
+                        else:
+                            authorization = mcp_tool.authorization_token
+
                         tools.append(
                             Mcp(
                                 server_url=mcp_tool.server_url,
@@ -3560,7 +3577,7 @@ async def run_response(
                                 headers=json.loads(mcp_tool.headers)
                                 if mcp_tool.headers
                                 else {},
-                                authorization=mcp_tool.authorization_token,
+                                authorization=authorization,
                                 require_approval="never",
                                 server_description=mcp_tool.description
                                 or ("MCP server: " + mcp_tool.display_name),
