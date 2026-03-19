@@ -266,6 +266,7 @@
 			previewVideoActivated = false;
 			previewVideoReady = false;
 			previewVideoFrameReady = false;
+			clearSnapshotCanvas();
 			lastPreviewVideoSrc = undefined;
 			lastMainVideoSrc = src;
 		}
@@ -422,14 +423,6 @@
 		syncPreviewVideo();
 	}
 
-	function handlePreviewVideoLoadedData() {
-		markPreviewFrameReadyIfSynced();
-	}
-
-	function handlePreviewVideoSeeked() {
-		markPreviewFrameReadyIfSynced();
-	}
-
 	function togglePlayPause() {
 		if (disabled || questionPendingControls || !videoElement) return;
 		if (videoElement.paused) {
@@ -583,10 +576,7 @@
 		if (!previewVideoActivated) return;
 		clearPreviewVideoDeactivateTimeout();
 		previewVideoDeactivateTimeout = setTimeout(() => {
-			if (seekPreviewVisible || draggingSeek) {
-				schedulePreviewVideoDeactivate(delayMs);
-				return;
-			}
+			if (seekPreviewVisible || draggingSeek) return;
 
 			deactivatePreviewVideo();
 		}, delayMs);
@@ -604,19 +594,40 @@
 		}
 
 		previewVideoFrameReady = true;
+		captureSnapshotFromVideo(previewVideoElement);
+	}
+
+	function clearSnapshotCanvas() {
+		if (!snapshotCanvasElement) return;
+		const ctx = snapshotCanvasElement.getContext('2d');
+		if (!ctx) return;
+		ctx.clearRect(0, 0, snapshotCanvasElement.width, snapshotCanvasElement.height);
+	}
+
+	function captureSnapshotFromVideo(sourceVideo: HTMLVideoElement | null) {
+		if (!snapshotCanvasElement || !sourceVideo) return;
+		if (sourceVideo.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+		const ctx = snapshotCanvasElement.getContext('2d');
+		if (!ctx) return;
+		const sourceWidth = sourceVideo.videoWidth;
+		const sourceHeight = sourceVideo.videoHeight;
+		if (sourceWidth === 0 || sourceHeight === 0) return;
+
+		if (
+			snapshotCanvasElement.width !== sourceWidth ||
+			snapshotCanvasElement.height !== sourceHeight
+		) {
+			snapshotCanvasElement.width = sourceWidth;
+			snapshotCanvasElement.height = sourceHeight;
+		} else {
+			ctx.clearRect(0, 0, sourceWidth, sourceHeight);
+		}
+
+		ctx.drawImage(sourceVideo, 0, 0, sourceWidth, sourceHeight);
 	}
 
 	function captureMainVideoSnapshot() {
-		if (!snapshotCanvasElement || !videoElement) return;
-		if (videoElement.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
-		const ctx = snapshotCanvasElement.getContext('2d');
-		if (!ctx) return;
-		const w = videoElement.videoWidth;
-		const h = videoElement.videoHeight;
-		if (w === 0 || h === 0) return;
-		snapshotCanvasElement.width = w;
-		snapshotCanvasElement.height = h;
-		ctx.drawImage(videoElement, 0, 0, w, h);
+		captureSnapshotFromVideo(videoElement);
 	}
 
 	function showSeekPreview(pointerOffsetPx: number, offsetMs: number) {
@@ -1103,8 +1114,8 @@
 										class="absolute inset-0 h-full w-full object-cover"
 										style="opacity: {previewVideoFrameReady ? 1 : 0};"
 										onloadedmetadata={handlePreviewVideoLoadedMetadata}
-										onloadeddata={handlePreviewVideoLoadedData}
-										onseeked={handlePreviewVideoSeeked}
+										onloadeddata={markPreviewFrameReadyIfSynced}
+										onseeked={markPreviewFrameReadyIfSynced}
 									></video>
 								</div>
 							</div>
