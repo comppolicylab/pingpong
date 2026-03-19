@@ -2,6 +2,7 @@
 	import { getLectureVideoHistory, expandResponse } from '$lib/api';
 	import { loading as globalLoading } from '$lib/stores/general';
 	import type { LectureVideoInteractionHistoryItem } from '$lib/api';
+	import { mergeQuestionOptions } from '$lib/utils/lecture-video';
 	import { Spinner } from 'flowbite-svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 	import LectureVideoQuestionCard from './LectureVideoQuestionCard.svelte';
@@ -29,18 +30,6 @@
 	let loading: boolean = $state(true);
 	let interactions: LectureVideoInteractionHistoryItem[] = $state([]);
 	let errorMsg: string | null = $state(null);
-
-	function mergeQuestionOptions(
-		existingOptions: { id: number; option_text: string; post_answer_text?: string | null }[],
-		incomingOptions: { id: number; option_text: string; post_answer_text?: string | null }[]
-	) {
-		const existingById = new Map(existingOptions.map((option) => [option.id, option]));
-		return incomingOptions.map((option) => ({
-			...option,
-			post_answer_text:
-				option.post_answer_text ?? existingById.get(option.id)?.post_answer_text ?? null
-		}));
-	}
 
 	function buildReviewQuestions(items: LectureVideoInteractionHistoryItem[]): ReviewQuestion[] {
 		const questionMap = new SvelteMap<number, Omit<ReviewQuestion, 'position'>>();
@@ -70,11 +59,7 @@
 				question.selectedOptionId = item.option_id;
 				question.postAnswerText =
 					question.options.find((option) => option.id === item.option_id)?.post_answer_text ?? null;
-				if (
-					question.options.length === 0 &&
-					item.option_text &&
-					!question.options.some((option) => option.id === item.option_id)
-				) {
+				if (question.options.length === 0 && item.option_text) {
 					question.options = [
 						{
 							id: item.option_id,

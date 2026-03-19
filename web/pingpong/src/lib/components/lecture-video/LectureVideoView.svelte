@@ -11,6 +11,7 @@
 		LectureVideoContinuation,
 		LectureVideoInteractionHistoryItem
 	} from '$lib/api';
+	import { mergeQuestionOptions } from '$lib/utils/lecture-video';
 	import LectureVideoPlayer from './LectureVideoPlayer.svelte';
 	import LectureVideoQuestionSidebar from './LectureVideoQuestionSidebar.svelte';
 	import LectureVideoQuestionGallery from './LectureVideoQuestionGallery.svelte';
@@ -194,18 +195,6 @@
 				created: new Date().toISOString()
 			}
 		];
-	}
-
-	function mergeQuestionOptions(
-		existingOptions: { id: number; option_text: string; post_answer_text?: string | null }[],
-		incomingOptions: { id: number; option_text: string; post_answer_text?: string | null }[]
-	) {
-		const existingById = new Map(existingOptions.map((option) => [option.id, option]));
-		return incomingOptions.map((option) => ({
-			...option,
-			post_answer_text:
-				option.post_answer_text ?? existingById.get(option.id)?.post_answer_text ?? null
-		}));
 	}
 
 	function isVideoAtEnd(media: HTMLVideoElement | null = videoElement): boolean {
@@ -710,6 +699,8 @@
 			) {
 				const postAnswerText =
 					item.question_options?.find((option) => option.id === item.option_id)?.post_answer_text ??
+					questionInfo.get(item.question_id)?.options.find((option) => option.id === item.option_id)
+						?.post_answer_text ??
 					null;
 				answerInfo.set(item.question_id, {
 					optionId: item.option_id,
