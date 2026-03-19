@@ -1650,11 +1650,64 @@ async def test_lecture_video_history_uses_pseudonyms_for_other_participants(
 ):
     from pingpong.auth import encode_session_token
 
+    manifest = {
+        "version": 1,
+        "questions": [
+            lecture_video_manifest()["questions"][0],
+            {
+                "type": "single_select",
+                "question_text": "What comes next?",
+                "intro_text": "Second intro",
+                "stop_offset_ms": 2500,
+                "options": [
+                    {
+                        "option_text": "Continue",
+                        "post_answer_text": "Nice work",
+                        "continue_offset_ms": 3000,
+                        "correct": True,
+                    },
+                    {
+                        "option_text": "Stop",
+                        "post_answer_text": "Not this one",
+                        "continue_offset_ms": 3200,
+                        "correct": False,
+                    },
+                ],
+            },
+        ],
+    }
+
     async with db.async_session() as session:
-        class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
+        class_, lecture_video, _assistant = await create_ready_lecture_video_assistant(
             session,
             institution,
+            manifest=manifest,
         )
+        questions = list(
+            (
+                await session.scalars(
+                    select(models.LectureVideoQuestion)
+                    .where(
+                        models.LectureVideoQuestion.lecture_video_id == lecture_video.id
+                    )
+                    .order_by(models.LectureVideoQuestion.position)
+                )
+            ).all()
+        )
+        options = {
+            question.id: list(
+                (
+                    await session.scalars(
+                        select(models.LectureVideoQuestionOption)
+                        .where(
+                            models.LectureVideoQuestionOption.question_id == question.id
+                        )
+                        .order_by(models.LectureVideoQuestionOption.position)
+                    )
+                ).all()
+            )
+            for question in questions
+        }
         other_user = models.User(
             id=456,
             email="other-user@test.org",
@@ -1689,18 +1742,50 @@ async def test_lecture_video_history_uses_pseudonyms_for_other_participants(
     my_controller_session_id = acquire_me.json()["controller_session_id"]
     my_state_version = acquire_me.json()["lecture_video_session"]["state_version"]
 
-    my_pause = api.post(
+    my_present = api.post(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
         json={
-            "type": "video_paused",
+            "type": "question_presented",
             "controller_session_id": my_controller_session_id,
             "expected_state_version": my_state_version,
-            "idempotency_key": "my-pause",
-            "offset_ms": 500,
+            "idempotency_key": "my-question-presented",
+            "question_id": questions[0].id,
+            "offset_ms": questions[0].stop_offset_ms,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
-    assert my_pause.status_code == 200
+    assert my_present.status_code == 200
+
+    my_answer = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "answer_submitted",
+            "controller_session_id": my_controller_session_id,
+            "expected_state_version": my_present.json()["lecture_video_session"][
+                "state_version"
+            ],
+            "idempotency_key": "my-answer",
+            "question_id": questions[0].id,
+            "option_id": options[questions[0].id][0].id,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert my_answer.status_code == 200
+
+    my_resume = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "video_resumed",
+            "controller_session_id": my_controller_session_id,
+            "expected_state_version": my_answer.json()["lecture_video_session"][
+                "state_version"
+            ],
+            "idempotency_key": "my-resume",
+            "offset_ms": options[questions[0].id][0].continue_offset_ms,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert my_resume.status_code == 200
 
     release = api.post(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/release",
@@ -1717,18 +1802,35 @@ async def test_lecture_video_history_uses_pseudonyms_for_other_participants(
     other_controller_session_id = acquire_other.json()["controller_session_id"]
     other_state_version = acquire_other.json()["lecture_video_session"]["state_version"]
 
-    other_pause = api.post(
+    other_present = api.post(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
         json={
-            "type": "video_paused",
+            "type": "question_presented",
             "controller_session_id": other_controller_session_id,
             "expected_state_version": other_state_version,
-            "idempotency_key": "other-pause",
-            "offset_ms": 750,
+            "idempotency_key": "other-question-presented",
+            "question_id": questions[1].id,
+            "offset_ms": questions[1].stop_offset_ms,
         },
         headers={"Authorization": f"Bearer {other_user_token}"},
     )
-    assert other_pause.status_code == 200
+    assert other_present.status_code == 200
+
+    other_answer = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "answer_submitted",
+            "controller_session_id": other_controller_session_id,
+            "expected_state_version": other_present.json()["lecture_video_session"][
+                "state_version"
+            ],
+            "idempotency_key": "other-answer",
+            "question_id": questions[1].id,
+            "option_id": options[questions[1].id][0].id,
+        },
+        headers={"Authorization": f"Bearer {other_user_token}"},
+    )
+    assert other_answer.status_code == 200
 
     history_response = api.get(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/history",
@@ -1744,7 +1846,16 @@ async def test_lecture_video_history_uses_pseudonyms_for_other_participants(
         users = {user.id: user for user in thread.users}
 
     history = history_response.json()["interactions"]
-    assert history == []
+    assert [item["event_type"] for item in history] == [
+        "answer_submitted",
+        "answer_submitted",
+    ]
+    assert history[0]["actor_name"] == "Me"
+    assert history[0]["question_id"] == questions[0].id
+    assert history[0]["option_id"] == options[questions[0].id][0].id
+    assert history[1]["actor_name"] == pseudonym(thread, users[456])
+    assert history[1]["question_id"] == questions[1].id
+    assert history[1]["option_id"] == options[questions[1].id][0].id
 
 
 @with_user(123)
