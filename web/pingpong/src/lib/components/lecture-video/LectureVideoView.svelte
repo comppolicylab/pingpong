@@ -53,6 +53,7 @@
 			selectedOptionId: number;
 			correctOptionId: number | null;
 			options: { id: number; option_text: string; post_answer_text?: string | null }[];
+			postAnswerText: string | null;
 		}
 	>();
 	let allQuestions: { id: number; position: number; questionText: string; stopOffsetMs: number }[] =
@@ -163,7 +164,8 @@
 	function appendAnswerToHistory(
 		question: NonNullable<typeof currentQuestion>,
 		selectedOptionId: number,
-		correctOptionId: number | null
+		correctOptionId: number | null,
+		postAnswerText: string | null
 	) {
 		const eventIndex = (historyInteractions.at(-1)?.event_index ?? 0) + 1;
 		historyInteractions = [
@@ -178,7 +180,9 @@
 					id: option.id,
 					option_text: option.option_text,
 					post_answer_text:
-						option.id === selectedOptionId ? (option.post_answer_text ?? null) : null
+						option.id === selectedOptionId
+							? (option.post_answer_text ?? postAnswerText ?? null)
+							: null
 				})),
 				correct_option_id: correctOptionId,
 				option_id: selectedOptionId,
@@ -190,6 +194,18 @@
 				created: new Date().toISOString()
 			}
 		];
+	}
+
+	function mergeQuestionOptions(
+		existingOptions: { id: number; option_text: string; post_answer_text?: string | null }[],
+		incomingOptions: { id: number; option_text: string; post_answer_text?: string | null }[]
+	) {
+		const existingById = new Map(existingOptions.map((option) => [option.id, option]));
+		return incomingOptions.map((option) => ({
+			...option,
+			post_answer_text:
+				option.post_answer_text ?? existingById.get(option.id)?.post_answer_text ?? null
+		}));
 	}
 
 	function isVideoAtEnd(media: HTMLVideoElement | null = videoElement): boolean {
@@ -666,7 +682,10 @@
 				correctOptionId: number | null;
 			}
 		>();
-		const answerInfo = new SvelteMap<number, { optionId: number; optionText: string }>();
+		const answerInfo = new SvelteMap<
+			number,
+			{ optionId: number; optionText: string; postAnswerText: string | null }
+		>();
 
 		for (const item of interactions) {
 			if (item.question_id != null) {
@@ -677,7 +696,10 @@
 						item.event_type === 'question_presented'
 							? (item.offset_ms ?? existingQuestion?.stopOffsetMs ?? 0)
 							: (existingQuestion?.stopOffsetMs ?? 0),
-					options: item.question_options ?? existingQuestion?.options ?? [],
+					options:
+						item.question_options && item.question_options.length > 0
+							? mergeQuestionOptions(existingQuestion?.options ?? [], item.question_options)
+							: (existingQuestion?.options ?? []),
 					correctOptionId: item.correct_option_id ?? existingQuestion?.correctOptionId ?? null
 				});
 			}
@@ -686,9 +708,13 @@
 				item.question_id != null &&
 				item.option_id != null
 			) {
+				const postAnswerText =
+					item.question_options?.find((option) => option.id === item.option_id)?.post_answer_text ??
+					null;
 				answerInfo.set(item.question_id, {
 					optionId: item.option_id,
-					optionText: item.option_text ?? ''
+					optionText: item.option_text ?? '',
+					postAnswerText
 				});
 			}
 		}
@@ -719,7 +745,14 @@
 					correctOptionId: question?.correctOptionId ?? null,
 					options: question?.options.length
 						? question.options
-						: [{ id: answer.optionId, option_text: answer.optionText }]
+						: [
+								{
+									id: answer.optionId,
+									option_text: answer.optionText,
+									post_answer_text: answer.postAnswerText
+								}
+							],
+					postAnswerText: answer.postAnswerText
 				});
 			}
 		}
@@ -1115,7 +1148,8 @@
 			appendAnswerToHistory(
 				questionAtAnswer,
 				optionId,
-				expanded.data.lecture_video_session.current_continuation?.correct_option_id ?? null
+				expanded.data.lecture_video_session.current_continuation?.correct_option_id ?? null,
+				expanded.data.lecture_video_session.current_continuation?.post_answer_text ?? null
 			);
 			applySession(expanded.data.lecture_video_session);
 
@@ -1124,7 +1158,8 @@
 				answeredQuestions.set(currentQuestion.id, {
 					selectedOptionId: currentContinuation.option_id,
 					correctOptionId: currentContinuation.correct_option_id,
-					options: currentQuestion.options
+					options: currentQuestion.options,
+					postAnswerText: currentContinuation.post_answer_text
 				});
 			}
 
@@ -1175,7 +1210,8 @@
 			answeredQuestions.set(currentQuestion.id, {
 				selectedOptionId: currentContinuation.option_id,
 				correctOptionId: currentContinuation.correct_option_id,
-				options: currentQuestion.options
+				options: currentQuestion.options,
+				postAnswerText: currentContinuation.post_answer_text
 			});
 		}
 
