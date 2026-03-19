@@ -126,7 +126,8 @@
 	let seekPreviewX = $state(0);
 	let trackWidth = $state(0);
 	let previewVideoReady = $state(false);
-	let lastPreviewVideoSrc: string | undefined = $state(undefined);
+	let lastPreviewVideoSrc: string | undefined = undefined;
+	let lastMainVideoSrc: string | undefined = undefined;
 	let keyboardActionIndicator: KeyboardActionIndicator | null = $state(null);
 	let keyboardActionIndicatorTimeout: ReturnType<typeof setTimeout> | null = $state(null);
 	let keyboardActionOverlayMounted = $state(false);
@@ -252,6 +253,15 @@
 	$effect(() => {
 		if (!seekPreviewVisible) return;
 		syncPreviewVideo();
+	});
+
+	$effect(() => {
+		if (src !== lastMainVideoSrc) {
+			previewVideoActivated = false;
+			previewVideoReady = false;
+			lastPreviewVideoSrc = undefined;
+			lastMainVideoSrc = src;
+		}
 	});
 
 	$effect(() => {
@@ -574,6 +584,10 @@
 		updateSeekPreviewFromClientX(event.clientX, track);
 	}
 
+	function handleSeekMouseEnter(event: MouseEvent) {
+		handleSeekHover(event);
+	}
+
 	function previewSeek(offsetMs: number) {
 		if (disabled || questionPendingControls) return;
 		dragPreviewOffsetMs = offsetMs;
@@ -718,7 +732,6 @@
 
 	function handleMouseEnter() {
 		if (disabled) return;
-		activatePreviewVideo();
 		pointerInsidePlayer = true;
 		showControls = true;
 		scheduleHide();
@@ -979,6 +992,7 @@
 						onpointermove={handleSeekPointerMove}
 						onpointerup={finishSeekDrag}
 						onpointercancel={cancelSeekDrag}
+						onmouseenter={handleSeekMouseEnter}
 						onmousemove={handleSeekHover}
 						onmouseleave={() => {
 							hoveringLockedSeek = false;
