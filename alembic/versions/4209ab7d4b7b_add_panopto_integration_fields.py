@@ -1,4 +1,4 @@
-"""Add Panopto integration fields to classes
+"""Add Panopto integration fields and internal MCP tool support
 
 Revision ID: 4209ab7d4b7b
 Revises: 4d7f7f5c1c12
@@ -32,6 +32,7 @@ def upgrade() -> None:
     )
     panopto_status_enum.create(op.get_bind(), checkfirst=True)
 
+    # Panopto fields on classes
     op.add_column(
         "classes",
         sa.Column(
@@ -62,21 +63,54 @@ def upgrade() -> None:
         "classes",
         sa.Column("panopto_token_added_at", sa.DateTime(timezone=True), nullable=True),
     )
+
+    # is_internal flag on mcp_server_tools
     op.add_column(
-        "classes",
+        "mcp_server_tools",
         sa.Column(
-            "panopto_mcp_server_tool_id",
-            sa.Integer(),
-            sa.ForeignKey("mcp_server_tools.id"),
-            nullable=True,
+            "is_internal",
+            sa.Boolean(),
+            server_default="false",
+            nullable=False,
         ),
+    )
+
+    # Class-level MCP tool associations
+    op.create_table(
+        "mcp_server_tool_class_associations",
+        sa.Column("mcp_server_tool_id", sa.Integer(), nullable=False),
+        sa.Column("class_id", sa.Integer(), nullable=False),
+        sa.ForeignKeyConstraint(
+            ["class_id"],
+            ["classes.id"],
+        ),
+        sa.ForeignKeyConstraint(
+            ["mcp_server_tool_id"],
+            ["mcp_server_tools.id"],
+        ),
+    )
+    op.create_index(
+        "mcp_server_tool_class_idx",
+        "mcp_server_tool_class_associations",
+        ["mcp_server_tool_id", "class_id"],
+        unique=True,
     )
 
 
 def downgrade() -> None:
     _ = revision, down_revision, branch_labels, depends_on
 
-    op.drop_column("classes", "panopto_mcp_server_tool_id")
+    # Drop class association table
+    op.drop_index(
+        "mcp_server_tool_class_idx",
+        table_name="mcp_server_tool_class_associations",
+    )
+    op.drop_table("mcp_server_tool_class_associations")
+
+    # Drop is_internal column
+    op.drop_column("mcp_server_tools", "is_internal")
+
+    # Drop Panopto columns
     op.drop_column("classes", "panopto_token_added_at")
     op.drop_column("classes", "panopto_expires_in")
     op.drop_column("classes", "panopto_refresh_token")

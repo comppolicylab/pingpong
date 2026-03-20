@@ -737,7 +737,10 @@ class Config(BaseSettings):
         falls back to public_url. Use this for URLs that external services
         (like OpenAI) need to reach.
         """
-        base = self.external_url or self.public_url
+        if self.development:
+            base = self.external_url or self.public_url
+        else:
+            base = self.public_url
         return f"{base.rstrip('/')}/{path.lstrip('/')}"
 
 
