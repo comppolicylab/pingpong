@@ -785,6 +785,43 @@ async def test_set_institution_lecture_video_default_api_keys_success(
 
 
 @with_user(123)
+@with_institution(1, "Test Institution")
+@with_authz(grants=[("user:123", "admin", "root:0")])
+async def test_set_institution_lecture_video_default_api_keys_ignores_unchanged_legacy_billing_key(
+    api, db, valid_user_token, institution
+):
+    async with db.async_session() as session:
+        legacy_billing_key = models.APIKey(
+            api_key="test-legacy-gemini-billing-key",
+            provider="gemini",
+            available_as_default=True,
+        )
+        narration_key = models.APIKey(
+            api_key="test-default-elevenlabs-key",
+            provider="elevenlabs",
+            available_as_default=True,
+        )
+        session.add_all([legacy_billing_key, narration_key])
+        await session.commit()
+        await session.refresh(legacy_billing_key)
+        await session.refresh(narration_key)
+
+        institution.default_api_key_id = legacy_billing_key.id
+        session.add(institution)
+        await session.commit()
+
+    response = api.patch(
+        f"/api/v1/admin/institutions/{institution.id}/default_api_key",
+        json={"default_lv_narration_tts_api_key_id": narration_key.id},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["default_api_key_id"] == legacy_billing_key.id
+    assert data["default_lv_narration_tts_api_key_id"] == narration_key.id
+
+
+@with_user(123)
 @with_authz(grants=[("user:123", "admin", "root:0")])
 async def test_set_institution_default_api_key_institution_not_found(
     api, valid_user_token

@@ -17,6 +17,7 @@
 	import { ArrowRightOutline, PlusOutline, TrashBinOutline } from 'flowbite-svelte-icons';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import * as api from '$lib/api';
+	import { buildInstitutionDefaultApiKeyUpdate } from '$lib/institutionDefaultApiKeys';
 	import { happyToast, sadToast } from '$lib/toast';
 	import { loading } from '$lib/stores/general';
 	import { resolve } from '$app/paths';
@@ -187,18 +188,17 @@
 
 	const saveDefaultApiKey = async () => {
 		if ($loading || savingDefaultKey) return;
+		const payload = buildInstitutionDefaultApiKeyUpdate(
+			institution,
+			selectedDefaultKeyId,
+			selectedDefaultNarrationKeyId,
+			selectedDefaultManifestKeyId
+		);
+		if (Object.keys(payload).length === 0) return;
 		savingDefaultKey = true;
 		try {
 			const response = api.expandResponse(
-				await api.setInstitutionDefaultApiKey(fetch, institution.id, {
-					default_api_key_id: selectedDefaultKeyId ? Number(selectedDefaultKeyId) : null,
-					default_lv_narration_tts_api_key_id: selectedDefaultNarrationKeyId
-						? Number(selectedDefaultNarrationKeyId)
-						: null,
-					default_lv_manifest_generation_api_key_id: selectedDefaultManifestKeyId
-						? Number(selectedDefaultManifestKeyId)
-						: null
-				})
+				await api.setInstitutionDefaultApiKey(fetch, institution.id, payload)
 			);
 			if (response.error) {
 				sadToast(response.error.detail || 'Could not update default API keys');
