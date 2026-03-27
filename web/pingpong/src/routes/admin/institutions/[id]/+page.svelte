@@ -55,9 +55,9 @@
 		});
 	}
 
-	const makeDefaultKeyOptions = (providers: string[]) => [
+	const makeDefaultKeyOptions = (keys: api.DefaultAPIKey[], providers: string[]) => [
 		{ value: '', name: 'None' },
-		...defaultKeys
+		...keys
 			.filter((key) => providers.includes(key.provider))
 			.slice()
 			.sort((a, b) =>
@@ -69,9 +69,9 @@
 			}))
 	];
 
-	const defaultBillingKeyOptions = makeDefaultKeyOptions(['openai', 'azure']);
-	const defaultNarrationKeyOptions = makeDefaultKeyOptions(['elevenlabs']);
-	const defaultManifestKeyOptions = makeDefaultKeyOptions(['gemini']);
+	$: defaultBillingKeyOptions = makeDefaultKeyOptions(defaultKeys, ['openai', 'azure']);
+	$: defaultNarrationKeyOptions = makeDefaultKeyOptions(defaultKeys, ['elevenlabs']);
+	$: defaultManifestKeyOptions = makeDefaultKeyOptions(defaultKeys, ['gemini']);
 
 	const sortAdmins = (admins: api.InstitutionAdmin[]) =>
 		[...admins].sort((a, b) =>

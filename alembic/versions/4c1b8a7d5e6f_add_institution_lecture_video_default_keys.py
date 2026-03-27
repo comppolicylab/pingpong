@@ -46,11 +46,29 @@ def upgrade() -> None:
         ["default_lv_manifest_generation_api_key_id"],
         ["id"],
     )
+    op.create_index(
+        "ix_institutions_default_lv_narration_tts_api_key_id",
+        "institutions",
+        ["default_lv_narration_tts_api_key_id"],
+    )
+    op.create_index(
+        "ix_institutions_default_lv_manifest_generation_api_key_id",
+        "institutions",
+        ["default_lv_manifest_generation_api_key_id"],
+    )
 
 
 def downgrade() -> None:
     _ = revision, down_revision, branch_labels, depends_on
 
+    op.drop_index(
+        "ix_institutions_default_lv_manifest_generation_api_key_id",
+        table_name="institutions",
+    )
+    op.drop_index(
+        "ix_institutions_default_lv_narration_tts_api_key_id",
+        table_name="institutions",
+    )
     op.drop_constraint(
         "institutions_default_lv_manifest_generation_api_key_id_fkey",
         "institutions",

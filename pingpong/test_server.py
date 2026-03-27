@@ -865,6 +865,33 @@ async def test_set_institution_lecture_video_default_api_key_wrong_provider(
     }
 
 
+@with_user(123)
+@with_institution(1, "Test Institution")
+@with_authz(grants=[("user:123", "admin", "root:0")])
+async def test_set_institution_manifest_generation_default_api_key_wrong_provider(
+    api, db, valid_user_token, institution
+):
+    async with db.async_session() as session:
+        api_key = models.APIKey(
+            api_key="test-default-openai-key",
+            provider="openai",
+            available_as_default=True,
+        )
+        session.add(api_key)
+        await session.commit()
+        await session.refresh(api_key)
+
+    response = api.patch(
+        f"/api/v1/admin/institutions/{institution.id}/default_api_key",
+        json={"default_lv_manifest_generation_api_key_id": api_key.id},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": "Lecture video manifest generation default API key must use the Gemini provider"
+    }
+
+
 async def test_auth_with_invalid_token(api):
     invalid_token = (
         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
@@ -1438,11 +1465,8 @@ async def test_create_class(api, now, institution, valid_user_token, authz):
             "description": None,
             "logo": None,
             "default_api_key_id": None,
-            "default_api_key_obj": None,
             "default_lv_narration_tts_api_key_id": None,
-            "default_lv_narration_tts_api_key_obj": None,
             "default_lv_manifest_generation_api_key_id": None,
-            "default_lv_manifest_generation_api_key_obj": None,
             "updated": None,
             "created": response_data["institution"]["created"],
         },
@@ -1502,11 +1526,8 @@ async def test_create_class_private(api, now, institution, valid_user_token, aut
             "description": None,
             "logo": None,
             "default_api_key_id": None,
-            "default_api_key_obj": None,
             "default_lv_narration_tts_api_key_id": None,
-            "default_lv_narration_tts_api_key_obj": None,
             "default_lv_manifest_generation_api_key_id": None,
-            "default_lv_manifest_generation_api_key_obj": None,
             "updated": None,
             "created": response_data["institution"]["created"],
         },

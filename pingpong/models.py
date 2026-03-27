@@ -72,6 +72,11 @@ from pingpong.log_utils import sanitize_for_log
 
 logger = logging.getLogger(__name__)
 
+_BILLING_DEFAULT_API_KEY_PROVIDERS = [
+    schemas.AIProvider.OPENAI.value,
+    schemas.AIProvider.AZURE.value,
+]
+
 
 def generate_lecture_video_interaction_idempotency_key() -> str:
     return f"server-{uuid.uuid7()}"
@@ -1828,10 +1833,6 @@ class Institution(Base):
         """Check if all institutions with the given IDs have a default API key configured."""
         if not ids:
             return True
-        allowed_providers = [
-            schemas.AIProvider.OPENAI.value,
-            schemas.AIProvider.AZURE.value,
-        ]
         stmt = (
             select(func.count())
             .select_from(Institution)
@@ -1840,7 +1841,7 @@ class Institution(Base):
                 Institution.id.in_(ids),
                 Institution.default_api_key_id.is_not(None),
                 APIKey.available_as_default.is_(True),
-                APIKey.provider.in_(allowed_providers),
+                APIKey.provider.in_(_BILLING_DEFAULT_API_KEY_PROVIDERS),
             )
         )
         count = await session.scalar(stmt)
@@ -1861,16 +1862,12 @@ class Institution(Base):
     async def get_all_with_default_api_key(
         cls, session: AsyncSession
     ) -> List["Institution"]:
-        allowed_providers = [
-            schemas.AIProvider.OPENAI.value,
-            schemas.AIProvider.AZURE.value,
-        ]
         stmt = (
             select(Institution)
             .join(APIKey, Institution.default_api_key_id == APIKey.id)
             .where(Institution.default_api_key_id.is_not(None))
             .where(APIKey.available_as_default.is_(True))
-            .where(APIKey.provider.in_(allowed_providers))
+            .where(APIKey.provider.in_(_BILLING_DEFAULT_API_KEY_PROVIDERS))
             .order_by(Institution.name.asc())
         )
         result = await session.execute(stmt)
