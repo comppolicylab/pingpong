@@ -1112,6 +1112,32 @@ async def get_institution_with_admins(institution_id: int, request: StateRequest
     )
 
 
+def _institution_default_api_key_field_rules() -> dict[str, dict[str, Any]]:
+    return {
+        "default_api_key_id": {
+            "allowed_providers": {
+                schemas.AIProvider.OPENAI.value,
+                schemas.AIProvider.AZURE.value,
+            },
+            "invalid_provider_detail": (
+                "Institution default API key must use the OpenAI or Azure provider"
+            ),
+        },
+        "default_lv_narration_tts_api_key_id": {
+            "allowed_providers": {schemas.ClassCredentialProvider.ELEVENLABS.value},
+            "invalid_provider_detail": (
+                "Lecture video narration default API key must use the ElevenLabs provider"
+            ),
+        },
+        "default_lv_manifest_generation_api_key_id": {
+            "allowed_providers": {schemas.ClassCredentialProvider.GEMINI.value},
+            "invalid_provider_detail": (
+                "Lecture video manifest generation default API key must use the Gemini provider"
+            ),
+        },
+    }
+
+
 @v1.patch(
     "/admin/institutions/{institution_id}/default_api_key",
     dependencies=[Depends(Authz("admin"))],
@@ -1128,24 +1154,34 @@ async def set_institution_default_api_key(
     if not institution:
         raise HTTPException(status_code=404, detail="Institution not found")
 
-    default_api_key_id = None
-    if body.default_api_key_id is not None:
-        api_key = await models.APIKey.get_by_id(
-            request.state["db"], body.default_api_key_id
-        )
+    update_values: dict[str, int | None] = {}
+    field_rules = _institution_default_api_key_field_rules()
+    for field_name, value in body.model_dump(exclude_unset=True).items():
+        if value is None:
+            update_values[field_name] = None
+            continue
+
+        api_key = await models.APIKey.get_by_id(request.state["db"], value)
         if not api_key:
             raise HTTPException(status_code=404, detail="API key not found")
         if not api_key.available_as_default:
             raise HTTPException(
                 status_code=400, detail="API key is not available as default"
             )
-        default_api_key_id = api_key.id
-    stmt = (
-        update(models.Institution)
-        .where(models.Institution.id == int(institution_id))
-        .values(default_api_key_id=default_api_key_id)
-    )
-    await request.state["db"].execute(stmt)
+        if api_key.provider not in field_rules[field_name]["allowed_providers"]:
+            raise HTTPException(
+                status_code=400,
+                detail=field_rules[field_name]["invalid_provider_detail"],
+            )
+        update_values[field_name] = api_key.id
+
+    if update_values:
+        stmt = (
+            update(models.Institution)
+            .where(models.Institution.id == int(institution_id))
+            .values(**update_values)
+        )
+        await request.state["db"].execute(stmt)
     return await models.Institution.get_by_id(request.state["db"], institution_id)
 
 
@@ -1169,6 +1205,15 @@ async def copy_institution(
     # Create the new institution.
     new_inst = await models.Institution.create(
         request.state["db"], schemas.CreateInstitution(name=body.name)
+    )
+    await request.state["db"].execute(
+        update(models.Institution)
+        .where(models.Institution.id == new_inst.id)
+        .values(
+            default_api_key_id=source.default_api_key_id,
+            default_lv_narration_tts_api_key_id=source.default_lv_narration_tts_api_key_id,
+            default_lv_manifest_generation_api_key_id=source.default_lv_manifest_generation_api_key_id,
+        )
     )
     await request.state["authz"].grant(
         request.state["authz"].root,

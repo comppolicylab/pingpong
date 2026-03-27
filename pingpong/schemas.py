@@ -1511,6 +1511,8 @@ class Institution(BaseModel):
     description: str | None
     logo: str | None
     default_api_key_id: int | None = None
+    default_lv_narration_tts_api_key_id: int | None = None
+    default_lv_manifest_generation_api_key_id: int | None = None
     created: datetime
     updated: datetime | None
 
@@ -1674,6 +1676,8 @@ class InstitutionsWithDefaultAPIKey(BaseModel):
 
 class SetInstitutionDefaultAPIKeyRequest(BaseModel):
     default_api_key_id: int | None = None
+    default_lv_narration_tts_api_key_id: int | None = None
+    default_lv_manifest_generation_api_key_id: int | None = None
 
 
 # Status documenting the state of the LMS sync.

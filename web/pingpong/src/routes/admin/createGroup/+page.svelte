@@ -15,6 +15,9 @@
 	let selectedInst = '';
 	let selectedBilling = '0';
 	$: defaultKeys = data.defaultKeys || [];
+	$: billingKeys = defaultKeys.filter(
+		(key) => key.provider === 'openai' || key.provider === 'azure'
+	);
 
 	/**
 	 * Create a new class.
@@ -130,7 +133,7 @@
 						<div class="w-full text-base">Set up access later from the Manage Group page.</div>
 					</div>
 				</Radio>
-				{#each defaultKeys as key (key.id)}
+				{#each billingKeys as key (key.id)}
 					<Radio name="provider" value={key.id} bind:group={selectedBilling} custom>
 						<div
 							class="inline-flex w-full cursor-pointer items-center gap-4 rounded-lg border border-gray-200 bg-white px-5 py-3 font-normal text-gray-900 peer-checked:border-red-600 peer-checked:font-medium peer-checked:text-red-600 hover:bg-gray-100 hover:text-gray-600 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700"

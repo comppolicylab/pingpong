@@ -403,6 +403,8 @@ export type Institution = {
 	description: string | null;
 	logo: string | null;
 	default_api_key_id: number | null;
+	default_lv_narration_tts_api_key_id: number | null;
+	default_lv_manifest_generation_api_key_id: number | null;
 	created: string;
 	updated: string | null;
 };
@@ -836,6 +838,8 @@ export const updateInstitution = async (f: Fetcher, id: number, data: UpdateInst
 
 export type SetInstitutionDefaultApiKeyRequest = {
 	default_api_key_id: number | null;
+	default_lv_narration_tts_api_key_id?: number | null;
+	default_lv_manifest_generation_api_key_id?: number | null;
 };
 
 export const setInstitutionDefaultApiKey = async (

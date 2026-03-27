@@ -749,6 +749,42 @@ async def test_clear_institution_default_api_key_success(
 
 
 @with_user(123)
+@with_institution(1, "Test Institution")
+@with_authz(grants=[("user:123", "admin", "root:0")])
+async def test_set_institution_lecture_video_default_api_keys_success(
+    api, db, valid_user_token, institution
+):
+    async with db.async_session() as session:
+        narration_key = models.APIKey(
+            api_key="test-default-elevenlabs-key",
+            provider="elevenlabs",
+            available_as_default=True,
+        )
+        manifest_key = models.APIKey(
+            api_key="test-default-gemini-key",
+            provider="gemini",
+            available_as_default=True,
+        )
+        session.add_all([narration_key, manifest_key])
+        await session.commit()
+        await session.refresh(narration_key)
+        await session.refresh(manifest_key)
+
+    response = api.patch(
+        f"/api/v1/admin/institutions/{institution.id}/default_api_key",
+        json={
+            "default_lv_narration_tts_api_key_id": narration_key.id,
+            "default_lv_manifest_generation_api_key_id": manifest_key.id,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["default_lv_narration_tts_api_key_id"] == narration_key.id
+    assert data["default_lv_manifest_generation_api_key_id"] == manifest_key.id
+
+
+@with_user(123)
 @with_authz(grants=[("user:123", "admin", "root:0")])
 async def test_set_institution_default_api_key_institution_not_found(
     api, valid_user_token
@@ -800,6 +836,33 @@ async def test_set_institution_default_api_key_key_not_available_as_default(
     )
     assert response.status_code == 400
     assert response.json() == {"detail": "API key is not available as default"}
+
+
+@with_user(123)
+@with_institution(1, "Test Institution")
+@with_authz(grants=[("user:123", "admin", "root:0")])
+async def test_set_institution_lecture_video_default_api_key_wrong_provider(
+    api, db, valid_user_token, institution
+):
+    async with db.async_session() as session:
+        api_key = models.APIKey(
+            api_key="test-default-openai-key",
+            provider="openai",
+            available_as_default=True,
+        )
+        session.add(api_key)
+        await session.commit()
+        await session.refresh(api_key)
+
+    response = api.patch(
+        f"/api/v1/admin/institutions/{institution.id}/default_api_key",
+        json={"default_lv_narration_tts_api_key_id": api_key.id},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": "Lecture video narration default API key must use the ElevenLabs provider"
+    }
 
 
 async def test_auth_with_invalid_token(api):
@@ -1375,6 +1438,11 @@ async def test_create_class(api, now, institution, valid_user_token, authz):
             "description": None,
             "logo": None,
             "default_api_key_id": None,
+            "default_api_key_obj": None,
+            "default_lv_narration_tts_api_key_id": None,
+            "default_lv_narration_tts_api_key_obj": None,
+            "default_lv_manifest_generation_api_key_id": None,
+            "default_lv_manifest_generation_api_key_obj": None,
             "updated": None,
             "created": response_data["institution"]["created"],
         },
@@ -1434,6 +1502,11 @@ async def test_create_class_private(api, now, institution, valid_user_token, aut
             "description": None,
             "logo": None,
             "default_api_key_id": None,
+            "default_api_key_obj": None,
+            "default_lv_narration_tts_api_key_id": None,
+            "default_lv_narration_tts_api_key_obj": None,
+            "default_lv_manifest_generation_api_key_id": None,
+            "default_lv_manifest_generation_api_key_obj": None,
             "updated": None,
             "created": response_data["institution"]["created"],
         },
