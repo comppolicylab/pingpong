@@ -1,11 +1,12 @@
+import json
 import asyncio
 import contextlib
 import logging
 import sys
-from typing import Callable, Dict, Optional
 import webbrowser
+from typing import Callable, Dict, Optional, cast
+
 import click
-import json
 import alembic
 import alembic.command
 import alembic.config
@@ -22,9 +23,9 @@ from pingpong.ai import (
 )
 from pingpong.ai_models import DEFAULT_PROMPTS, KNOWN_MODELS
 from pingpong.api_keys import (
+    DefaultAPIKeyProvider,
     get_process_redacted_project_api_keys,
-    set_as_default_azure_api_key,
-    set_as_default_oai_api_key,
+    set_as_default_api_key,
     transfer_api_keys,
 )
 from pingpong.merge import (
@@ -461,8 +462,9 @@ def migrate_oai_keys(admin_key: str, project_id: str, new_api_key: str) -> None:
 @click.argument("key_name", type=str)
 @click.option(
     "--provider",
-    type=click.Choice(["openai", "azure"]),
+    type=click.Choice(["openai", "azure", "gemini", "elevenlabs"]),
     default="openai",
+    show_default=True,
 )
 @click.option(
     "--endpoint",
@@ -475,12 +477,13 @@ def set_key_as_default(
     async def _set_key_as_default() -> None:
         async with config.db.driver.async_session() as session:
             logger.info(f"Setting {key_name} as default API key...")
-            if provider == "openai":
-                await set_as_default_oai_api_key(session, api_key, key_name)
-            elif provider == "azure":
-                if not endpoint:
-                    raise ValueError("Azure endpoint required for Azure API key")
-                await set_as_default_azure_api_key(session, api_key, key_name, endpoint)
+            await set_as_default_api_key(
+                session=session,
+                redacted_key=api_key,
+                key_name=key_name,
+                provider=cast(DefaultAPIKeyProvider, provider),
+                endpoint=endpoint,
+            )
 
         logger.info("Done!")
 
