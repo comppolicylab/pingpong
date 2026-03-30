@@ -169,7 +169,9 @@ async def set_as_default_api_key(
     provider: DefaultAPIKeyProvider,
     endpoint: str | None = None,
 ) -> None:
-    if provider == "azure" and endpoint is None:
+    use_endpoint_scope = provider == "azure"
+
+    if use_endpoint_scope and endpoint is None:
         raise ValueError("Azure endpoint required for Azure API key")
     if "*" not in redacted_key:
         raise ValueError("Redacted API key must include at least one '*' character")
@@ -182,7 +184,7 @@ async def set_as_default_api_key(
         models.APIKey.api_key.like(f"%{suffix}"),
         models.APIKey.provider == provider,
     ]
-    if endpoint is not None:
+    if use_endpoint_scope:
         conditions.append(models.APIKey.endpoint == endpoint)
 
     stmt = select(models.APIKey).where(and_(*conditions))

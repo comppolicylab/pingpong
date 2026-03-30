@@ -51,6 +51,30 @@ async def test_set_as_default_api_key_supports_elevenlabs(db):
 
 
 @pytest.mark.asyncio
+async def test_set_as_default_api_key_ignores_endpoint_for_non_azure_providers(db):
+    async with db.async_session() as session:
+        api_key = models.APIKey(
+            api_key="gemini-secret-key-1234",
+            provider="gemini",
+        )
+        session.add(api_key)
+        await session.commit()
+
+        await set_as_default_api_key(
+            session,
+            redacted_key="gemini-s**********1234",
+            key_name="Gemini Default",
+            provider="gemini",
+            endpoint="https://unused-endpoint.example.com",
+        )
+
+        refreshed = await models.APIKey.get_by_id(session, api_key.id)
+        assert refreshed is not None
+        assert refreshed.available_as_default is True
+        assert refreshed.name == "Gemini Default"
+
+
+@pytest.mark.asyncio
 async def test_set_as_default_api_key_filters_azure_by_endpoint(db):
     async with db.async_session() as session:
         matching_key = models.APIKey(
