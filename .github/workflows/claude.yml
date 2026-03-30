@@ -18,7 +18,7 @@ jobs:
     outputs:
       run_claude: ${{ steps.check.outputs.run_claude }}
     steps:
-      - name: Skip exact @claude review command
+      - name: Skip comments with @claude review on its own line
         id: check
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -28,13 +28,18 @@ jobs:
             echo "run_claude=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          body="$(python - <<'PY'
+          has_review_command="$(python - <<'PY'
           import os
+
           body = os.environ.get("COMMENT_BODY", "")
-          print(" ".join(body.split()))
+          print(
+              "true"
+              if any(line.strip() == "@claude review" for line in body.splitlines())
+              else "false"
+          )
           PY
           )"
-          if [ "$body" = "@claude review" ]; then
+          if [ "$has_review_command" = "true" ]; then
             echo "run_claude=false" >> "$GITHUB_OUTPUT"
           else
             echo "run_claude=true" >> "$GITHUB_OUTPUT"

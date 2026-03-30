@@ -1,0 +1,77 @@
+{
+  "labels": [],
+  "comment": "",
+  "enabled": true,
+  "fixWithAI": false,
+  "hideFooter": true,
+  "strictness": 2,
+  "statusCheck": true,
+  "commentTypes": [
+    "logic",
+    "syntax",
+    "style"
+  ],
+  "instructions": "",
+  "disabledLabels": ["skip-ai-review", "dependencies", "chore"],
+  "excludeAuthors": [
+    "dependabot[bot]"
+  ],
+  "ignoreKeywords": "",
+  "ignorePatterns": ".greptile/\n",
+  "includeAuthors": [],
+  "summarySection": {
+    "included": true,
+    "collapsible": true,
+    "defaultOpen": false
+  },
+  "excludeBranches": [],
+  "fileChangeLimit": 100,
+  "includeBranches": [],
+  "includeKeywords": "",
+  "triggerOnDrafts": false,
+  "triggerOnUpdates": false,
+  "updateSummaryOnly": false,
+  "issuesTableSection": {
+    "included": true,
+    "collapsible": true,
+    "defaultOpen": false
+  },
+  "statusCommentsEnabled": true,
+  "confidenceScoreSection": {
+    "included": true,
+    "collapsible": false,
+    "defaultOpen": false
+  },
+  "sequenceDiagramSection": {
+    "included": true,
+    "collapsible": true,
+    "defaultOpen": false
+  },
+  "shouldUpdateDescription": false,
+  "commentsOutsideDiffSection": {
+    "included": true,
+    "collapsible": true,
+    "defaultOpen": false
+  },
+  "customContext": {
+    "other": [
+      {
+        "scope": [],
+        "content": ""
+      }
+    ],
+    "rules": [
+      {
+        "scope": [],
+        "rule": ""
+      }
+    ],
+    "files": [
+      {
+        "scope": [],
+        "path": "",
+        "description": ""
+      }
+    ]
+  }
+}

@@ -201,3 +201,5 @@ saml/**/*.crt
 
 # CodeQL
 .codeql/
+
+!.greptile/config.json
