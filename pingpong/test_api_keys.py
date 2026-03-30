@@ -103,3 +103,47 @@ async def test_set_as_default_api_key_requires_endpoint_for_azure(db):
                 key_name="Azure Default",
                 provider="azure",
             )
+
+
+@pytest.mark.asyncio
+async def test_set_as_default_api_key_raises_for_missing_non_azure_key(db):
+    async with db.async_session() as session:
+        api_key = models.APIKey(
+            api_key="gemini-secret-key-1234",
+            provider="gemini",
+        )
+        session.add(api_key)
+        await session.commit()
+
+        with pytest.raises(
+            ValueError,
+            match="No API key entry found.*provider=gemini",
+        ):
+            await set_as_default_api_key(
+                session,
+                redacted_key="gemini-s**********9999",
+                key_name="Gemini Default",
+                provider="gemini",
+            )
+
+
+@pytest.mark.asyncio
+async def test_set_as_default_api_key_requires_redacted_key(db):
+    async with db.async_session() as session:
+        api_key = models.APIKey(
+            api_key="gemini-secret-key-1234",
+            provider="gemini",
+        )
+        session.add(api_key)
+        await session.commit()
+
+        with pytest.raises(
+            ValueError,
+            match="Redacted API key must include at least one '\\*' character",
+        ):
+            await set_as_default_api_key(
+                session,
+                redacted_key="gemini-secret-key-1234",
+                key_name="Gemini Default",
+                provider="gemini",
+            )

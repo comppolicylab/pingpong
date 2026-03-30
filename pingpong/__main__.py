@@ -461,7 +461,8 @@ def migrate_oai_keys(admin_key: str, project_id: str, new_api_key: str) -> None:
 @click.option(
     "--provider",
     type=click.Choice(["openai", "azure", "gemini", "elevenlabs"]),
-    required=True,
+    default="openai",
+    show_default=True,
 )
 @click.option(
     "--endpoint",

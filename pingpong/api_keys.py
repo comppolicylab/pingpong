@@ -1,10 +1,20 @@
+import logging
+from typing import Literal, TypeAlias
+
 import aiohttp
 from sqlalchemy import and_, select
-import pingpong.models as models
 from sqlalchemy.ext.asyncio import AsyncSession
-import logging
+
+import pingpong.models as models
 
 logger = logging.getLogger(__name__)
+
+DefaultAPIKeyProvider: TypeAlias = Literal[
+    "openai",
+    "azure",
+    "gemini",
+    "elevenlabs",
+]
 
 
 async def transfer_api_keys(
@@ -152,26 +162,17 @@ async def get_process_redacted_project_api_keys(
     await db_session.commit()
 
 
-async def set_as_default_oai_api_key(
-    session: AsyncSession, redacted_key: str, name: str
-) -> None:
-    await set_as_default_api_key(
-        session=session,
-        redacted_key=redacted_key,
-        key_name=name,
-        provider="openai",
-    )
-
-
 async def set_as_default_api_key(
     session: AsyncSession,
     redacted_key: str,
     key_name: str,
-    provider: str,
+    provider: DefaultAPIKeyProvider,
     endpoint: str | None = None,
 ) -> None:
     if provider == "azure" and endpoint is None:
         raise ValueError("Azure endpoint required for Azure API key")
+    if "*" not in redacted_key:
+        raise ValueError("Redacted API key must include at least one '*' character")
 
     prefix = redacted_key.split("*", 1)[0]
     suffix = redacted_key.rstrip("*").rsplit("*", 1)[-1]
@@ -205,18 +206,3 @@ async def set_as_default_api_key(
     matched_api_key_object.available_as_default = True
     matched_api_key_object.name = key_name
     await session.commit()
-
-
-async def set_as_default_azure_api_key(
-    session: AsyncSession,
-    redacted_key: str,
-    key_name: str,
-    endpoint: str,
-) -> None:
-    await set_as_default_api_key(
-        session=session,
-        redacted_key=redacted_key,
-        key_name=key_name,
-        provider="azure",
-        endpoint=endpoint,
-    )
