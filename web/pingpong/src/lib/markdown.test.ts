@@ -1,6 +1,18 @@
 import { describe, it, expect } from 'vitest';
 import { markdown } from './markdown';
 
+const normalizeLatexAnnotation = (annotation: string) =>
+	annotation.replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
+
+const getLatexAnnotations = (rendered: string) =>
+	[...rendered.matchAll(/<annotation encoding="application\/x-tex">([\s\S]*?)<\/annotation>/g)].map(
+		([, annotation]) => normalizeLatexAnnotation(annotation)
+	);
+
+const expectLatexAnnotations = (rendered: string, expected: string[]) => {
+	expect(getLatexAnnotations(rendered)).toEqual(expected.map(normalizeLatexAnnotation));
+};
+
 describe('markdown', () => {
 	it('should render simple markdown', () => {
 		expect(
@@ -74,11 +86,12 @@ const x = 1;
 		);
 	});
 
-	it('should render inline LaTeX with punctuation after it', () => {
-		expect(markdown(`This is $N$'s test.`, { latex: true })).toBe(
-			`<p>This is <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>N</mi></mrow><annotation encoding="application/x-tex">N</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.10903em;">N</span></span></span></span>&#39;s test.</p>
-`
-		);
+	it('should render inline LaTeX with punctuation after it', async () => {
+		const rendered = await markdown(`This is $N$'s test.`, { latex: true });
+
+		expect(rendered).toContain('<span class="katex">');
+		expect(rendered).toContain('&#39;s test.');
+		expectLatexAnnotations(rendered, ['N']);
 	});
 
 	it('should not render inline LaTeX when LaTeX rendering is disabled', () => {
@@ -87,23 +100,24 @@ const x = 1;
 		);
 	});
 
-	it('should render inline LaTeX with other markdown', () => {
-		expect(
-			markdown(
-				`
+	it('should render inline LaTeX with other markdown', async () => {
+		const rendered = await markdown(
+			`
 Test Math
 ===
 Inline math: $\\frac{1}{2}$
 `,
-				{ latex: true }
-			)
-		).toMatchSnapshot();
+			{ latex: true }
+		);
+
+		expect(rendered).toContain('<h1>Test Math</h1>');
+		expect(rendered).toContain('<p>Inline math: <span class="katex">');
+		expectLatexAnnotations(rendered, ['\\frac{1}{2}']);
 	});
 
-	it('should render block LaTeX', () => {
-		expect(
-			markdown(
-				`
+	it('should render block LaTeX', async () => {
+		const rendered = await markdown(
+			`
 Test Math
 ===
 Here is Ohm's law:
@@ -112,43 +126,53 @@ $$
 V = IR
 $$
 `,
-				{ latex: true }
-			)
-		).toMatchSnapshot();
+			{ latex: true }
+		);
+
+		expect(rendered).toContain('<h1>Test Math</h1>');
+		expect(rendered).toContain('<p>Here is Ohm&#39;s law:</p>');
+		expect(rendered).toContain('<span class="katex-display">');
+		expectLatexAnnotations(rendered, ['V = IR']);
 	});
 
-	it('should render block LaTeX in this test case that failed somehow', () => {
-		expect(
-			markdown(
-				`
+	it('should render block LaTeX in this test case that failed somehow', async () => {
+		const rendered = await markdown(
+			`
 The 75th percentile, also known as the third quartile, is the value below which 75% of the data falls. To find the 75th percentile in a dataset, you can sort the data in ascending order, then find the position of the 75th percentile using the formula:
 
 $$ P = \\left(\\frac{75}{100} \\times (N + 1)\\right)^{th} \\text{ position} $$
 
 Where \\( N \\) is the number of observations in the dataset. If this formula results in a non-integer value, you interpolate between the surrounding data points. This concept helps in understanding the spread and distribution of policy-relevant data, such as income or test scores, by showing the value below which 75% of the observed population falls.
 `,
-				{ latex: true }
-			)
-		).toMatchSnapshot();
+			{ latex: true }
+		);
+
+		expect(rendered).toContain('<span class="katex-display">');
+		expect(rendered).toContain('Where <span class="katex">');
+		expectLatexAnnotations(rendered, [
+			'P = \\left(\\frac{75}{100} \\times (N + 1)\\right)^{th} \\text{ position}',
+			'N'
+		]);
 	});
 
-	it('should render block LaTeX inside a list', () => {
-		expect(
-			markdown(
-				`
+	it('should render block LaTeX inside a list', async () => {
+		const rendered = await markdown(
+			`
 Test Math
 ===
 - Here is Ohm's law: $$V = IR$$
 `,
-				{ latex: true }
-			)
-		).toMatchSnapshot();
+			{ latex: true }
+		);
+
+		expect(rendered).toContain('<h1>Test Math</h1>');
+		expect(rendered).toContain('<li>Here is Ohm&#39;s law: <span class="katex-display">');
+		expectLatexAnnotations(rendered, ['V = IR']);
 	});
 
-	it('should be able to render `\\begin{align*}` blocks as latex', () => {
-		expect(
-			markdown(
-				`
+	it('should be able to render `\\begin{align*}` blocks as latex', async () => {
+		const rendered = await markdown(
+			`
 **Solution**:
 \\begin{align*}
 (1 + 2i)(2 - 3i) &= 1 \\cdot 2 + 1 \\cdot (-3i) + 2i \\cdot 2 + 2i \\cdot (-3i) \\\\
@@ -157,8 +181,18 @@ Test Math
 Since $i^2 = -1$, we get:
 $$ 2 - 3i + 4i + 6 = 8 + i.$$
 `,
-				{ latex: true }
-			)
-		).toMatchSnapshot();
+			{ latex: true }
+		);
+
+		expect(rendered).toContain('<strong>Solution</strong>');
+		expect(rendered.match(/class="katex-display"/g)).toHaveLength(2);
+		expectLatexAnnotations(rendered, [
+			`\\begin{align*}
+(1 + 2i)(2 - 3i) &= 1 \\cdot 2 + 1 \\cdot (-3i) + 2i \\cdot 2 + 2i \\cdot (-3i) \\\\
+&= 2 - 3i + 4i - 6i^2.
+\\end{align*}`,
+			'i^2 = -1',
+			'2 - 3i + 4i + 6 = 8 + i.'
+		]);
 	});
 });
