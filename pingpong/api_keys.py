@@ -155,32 +155,55 @@ async def get_process_redacted_project_api_keys(
 async def set_as_default_oai_api_key(
     session: AsyncSession, redacted_key: str, name: str
 ) -> None:
+    await set_as_default_api_key(
+        session=session,
+        redacted_key=redacted_key,
+        key_name=name,
+        provider="openai",
+    )
+
+
+async def set_as_default_api_key(
+    session: AsyncSession,
+    redacted_key: str,
+    key_name: str,
+    provider: str,
+    endpoint: str | None = None,
+) -> None:
+    if provider == "azure" and endpoint is None:
+        raise ValueError("Azure endpoint required for Azure API key")
+
     prefix = redacted_key.split("*", 1)[0]
     suffix = redacted_key.rstrip("*").rsplit("*", 1)[-1]
 
-    stmt = select(models.APIKey).where(
-        and_(
-            models.APIKey.api_key.like(f"{prefix}%"),
-            models.APIKey.api_key.like(f"%{suffix}"),
-            models.APIKey.provider == "openai",
-        )
-    )
+    conditions = [
+        models.APIKey.api_key.like(f"{prefix}%"),
+        models.APIKey.api_key.like(f"%{suffix}"),
+        models.APIKey.provider == provider,
+    ]
+    if endpoint is not None:
+        conditions.append(models.APIKey.endpoint == endpoint)
+
+    stmt = select(models.APIKey).where(and_(*conditions))
 
     result = await session.execute(stmt)
     api_key_object = result.scalars().all()
 
     if not api_key_object:
         raise ValueError(
-            f"set_as_default_oai_api_key: No API key entry found for the provided redacted API key: {prefix}...{suffix}."
+            "set_as_default_api_key: No API key entry found for the provided redacted "
+            f"API key and provider={provider}: {prefix}...{suffix}."
         )
     if len(api_key_object) > 1:
         raise ValueError(
-            f"set_as_default_oai_api_key: Multiple API key entries found for the given provided API key: {prefix}...{suffix}. No updates performed."
+            "set_as_default_api_key: Multiple API key entries found for the given "
+            "provided API key and "
+            f"provider={provider}: {prefix}...{suffix}. No updates performed."
         )
 
     matched_api_key_object = api_key_object[0]
     matched_api_key_object.available_as_default = True
-    matched_api_key_object.name = name
+    matched_api_key_object.name = key_name
     await session.commit()
 
 
@@ -190,31 +213,10 @@ async def set_as_default_azure_api_key(
     key_name: str,
     endpoint: str,
 ) -> None:
-    prefix = redacted_key.split("*", 1)[0]
-    suffix = redacted_key.rstrip("*").rsplit("*", 1)[-1]
-
-    stmt = select(models.APIKey).where(
-        and_(
-            models.APIKey.api_key.like(f"{prefix}%"),
-            models.APIKey.api_key.like(f"%{suffix}"),
-            models.APIKey.provider == "azure",
-            models.APIKey.endpoint == endpoint,
-        )
+    await set_as_default_api_key(
+        session=session,
+        redacted_key=redacted_key,
+        key_name=key_name,
+        provider="azure",
+        endpoint=endpoint,
     )
-
-    result = await session.execute(stmt)
-    api_key_object = result.scalars().all()
-
-    if not api_key_object:
-        raise ValueError(
-            f"set_as_default_azure_api_key: No API key entry found for the provided redacted API key: {prefix}...{suffix}."
-        )
-    if len(api_key_object) > 1:
-        raise ValueError(
-            f"set_as_default_azure_api_key: Multiple API key entries found for the given provided API key: {prefix}...{suffix}. No updates performed."
-        )
-
-    matched_api_key_object = api_key_object[0]
-    matched_api_key_object.available_as_default = True
-    matched_api_key_object.name = key_name
-    await session.commit()
