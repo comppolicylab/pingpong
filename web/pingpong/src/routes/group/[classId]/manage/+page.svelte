@@ -23,6 +23,7 @@
 		Alert,
 		Spinner,
 		Dropdown,
+		DropdownDivider,
 		DropdownItem,
 		Radio,
 		Accordion,
@@ -58,7 +59,8 @@
 		FileCopyOutline,
 		ChevronSortOutline,
 		QuestionCircleOutline,
-		LinkBreakOutline
+		LinkBreakOutline,
+		CloseOutline
 	} from 'flowbite-svelte-icons';
 	import { sadToast, happyToast } from '$lib/toast';
 	import { humanSize } from '$lib/size';
@@ -279,6 +281,88 @@
 			providerLabel: 'ElevenLabs'
 		}
 	];
+	const providerDisplayName = (provider: string) =>
+		provider === 'openai'
+			? 'OpenAI'
+			: provider === 'azure'
+				? 'Azure'
+				: provider === 'gemini'
+					? 'Google Gemini'
+					: provider === 'elevenlabs'
+						? 'ElevenLabs'
+						: provider;
+	const parseDefaultKeyId = (value: string) => {
+		const parsed = Number(value);
+		return Number.isNaN(parsed) || !value ? null : parsed;
+	};
+	const formatDefaultKeyLabel = (key: api.DefaultAPIKey) =>
+		`${key.name || providerDisplayName(key.provider)} (${key.redacted_key})`;
+	const matchesProviders = (key: api.DefaultAPIKey, providers: string[]) =>
+		providers.includes(key.provider);
+	$: defaultKeys = data.defaultKeys || [];
+	$: hasDefaultKeyReadError = !!data.defaultKeyReadError;
+	$: institutionDefaultKeyIds = new Set(
+		[
+			data.class.institution?.default_api_key_id,
+			data.class.institution?.default_lv_narration_tts_api_key_id,
+			data.class.institution?.default_lv_manifest_generation_api_key_id
+		].filter((id): id is number => !!id)
+	);
+	const getGroupedDefaultKeys = (providers: string[]) => {
+		const filtered = defaultKeys.filter((key) => matchesProviders(key, providers));
+		const institution = filtered.filter((key) => institutionDefaultKeyIds.has(key.id));
+		const general = filtered.filter((key) => !institutionDefaultKeyIds.has(key.id));
+		return { institution, general };
+	};
+	$: billingDefaultKeys = getGroupedDefaultKeys(['openai', 'azure']);
+	$: hasBillingDefaultKeys =
+		billingDefaultKeys.institution.length > 0 || billingDefaultKeys.general.length > 0;
+	$: narrationDefaultKeys = getGroupedDefaultKeys(['elevenlabs']);
+	$: manifestDefaultKeys = getGroupedDefaultKeys(['gemini']);
+	let selectedBillingDefaultKeyId = '';
+	let billingDefaultKeyDropdownOpen = false;
+	const selectBillingDefaultKey = (keyId: string) => {
+		selectedBillingDefaultKeyId = keyId;
+		billingDefaultKeyDropdownOpen = false;
+		const key = defaultKeys.find((k) => k.id === Number(keyId));
+		if (key) {
+			apiProvider = key.provider;
+		}
+	};
+	const clearBillingDefaultKey = () => {
+		selectedBillingDefaultKeyId = '';
+	};
+	let selectedFeatureDefaultKeyIds: Record<api.ClassCredentialPurpose, string> = {
+		lecture_video_manifest_generation: '',
+		lecture_video_narration_tts: ''
+	};
+	const getSelectedDefaultKey = (selectedId: string) => {
+		const parsedId = parseDefaultKeyId(selectedId);
+		if (parsedId === null) {
+			return null;
+		}
+		return defaultKeys.find((key) => key.id === parsedId) || null;
+	};
+	$: selectedBillingDefaultKey = getSelectedDefaultKey(selectedBillingDefaultKeyId);
+	const getSelectedFeatureDefaultKey = (purpose: api.ClassCredentialPurpose) =>
+		getSelectedDefaultKey(selectedFeatureDefaultKeyIds[purpose] || '');
+	let featureDefaultKeyDropdownOpen: Record<string, boolean> = {};
+	const selectFeatureDefaultKey = (purpose: api.ClassCredentialPurpose, keyId: string) => {
+		selectedFeatureDefaultKeyIds = {
+			...selectedFeatureDefaultKeyIds,
+			[purpose]: keyId
+		};
+		featureDefaultKeyDropdownOpen = {
+			...featureDefaultKeyDropdownOpen,
+			[purpose]: false
+		};
+	};
+	const clearFeatureDefaultKey = (purpose: api.ClassCredentialPurpose) => {
+		selectedFeatureDefaultKeyIds = {
+			...selectedFeatureDefaultKeyIds,
+			[purpose]: ''
+		};
+	};
 	let apiKey = data.apiKey || null;
 	let loadedApiKey = data.apiKey || null;
 	let loadedHasApiKey = !!data?.hasAPIKey;
@@ -559,6 +643,32 @@
 		const form = evt.target as HTMLFormElement;
 		const formData = new FormData(form);
 		const d = Object.fromEntries(formData.entries());
+		const selectedDefaultKeyId = parseDefaultKeyId(selectedBillingDefaultKeyId);
+
+		if (selectedDefaultKeyId !== null) {
+			const result = await api.updateApiKey(
+				fetch,
+				data.class.id,
+				undefined,
+				undefined,
+				undefined,
+				selectedDefaultKeyId
+			);
+
+			if (api.isErrorResponse(result)) {
+				$updatingApiKey = false;
+				sadToast(result.detail || 'An unknown error occurred');
+				return;
+			}
+
+			const response = result as api.ApiKeyResponse;
+			apiKey = response.api_key || null;
+			hasApiKey = !!response.api_key;
+			apiProvider = response.api_key?.provider || apiProvider;
+			$updatingApiKey = false;
+			happyToast('Saved API key!');
+			return;
+		}
 
 		if (!d.apiKey) {
 			$updatingApiKey = false;
@@ -602,6 +712,33 @@
 		const form = evt.target as HTMLFormElement;
 		const formData = new FormData(form);
 		const apiKeyValue = formData.get('apiKey')?.toString().trim() || '';
+		const selectedDefaultKeyId = parseDefaultKeyId(selectedFeatureDefaultKeyIds[purpose] || '');
+
+		if (selectedDefaultKeyId !== null) {
+			try {
+				const result = await api.createClassCredential(
+					fetch,
+					data.class.id,
+					purpose,
+					undefined,
+					undefined,
+					selectedDefaultKeyId
+				);
+				if (api.isErrorResponse(result)) {
+					sadToast(result.detail || 'An unknown error occurred');
+					return;
+				}
+
+				await invalidateAll();
+				happyToast('Saved feature credential!');
+			} catch (error) {
+				sadToast('An unknown error occurred');
+				throw error;
+			} finally {
+				updatingClassCredentialPurpose = null;
+			}
+			return;
+		}
 
 		if (!apiKeyValue) {
 			updatingClassCredentialPurpose = null;
@@ -1535,7 +1672,73 @@
 				<div class="col-span-2">
 					{#if !hasApiKey}
 						<form onsubmit={submitUpdateApiKey}>
-							<Label for="provider">Choose your AI provider:</Label>
+							{#if hasDefaultKeyReadError}
+								<Helper class="mb-3 text-red-600"
+									>Unable to load default keys right now. You can still enter credentials manually.</Helper
+								>
+							{/if}
+							<div class="flex flex-row items-center justify-between">
+								<Label for="provider">Choose your AI provider:</Label>
+								{#if !hasDefaultKeyReadError && hasBillingDefaultKeys}
+									<Button
+										size="xs"
+										color="light"
+										class="px-2 py-1 text-xs font-normal"
+										id="billing-default-key-btn"
+									>
+										Use pre-configured... <ChevronDownOutline class="ms-1 h-3 w-3" />
+									</Button>
+									<Dropdown
+										triggeredBy="#billing-default-key-btn"
+										bind:open={billingDefaultKeyDropdownOpen}
+										class="w-80"
+									>
+										{#if billingDefaultKeys.institution.length > 0}
+											<div
+												class="px-3 py-1.5 text-xs font-semibold tracking-wide text-gray-500 uppercase"
+											>
+												Institution
+											</div>
+											{#each billingDefaultKeys.institution as key (key.id)}
+												<DropdownItem
+													class="flex items-center gap-2 text-sm"
+													onclick={() => selectBillingDefaultKey(String(key.id))}
+												>
+													{#if key.provider === 'openai'}
+														<OpenAILogo size="4" extraClass="shrink-0" />
+													{:else if key.provider === 'azure'}
+														<AzureLogo size="4" />
+													{/if}
+													{formatDefaultKeyLabel(key)}
+												</DropdownItem>
+											{/each}
+										{/if}
+										{#if billingDefaultKeys.general.length > 0}
+											{#if billingDefaultKeys.institution.length > 0}
+												<DropdownDivider />
+											{/if}
+											<div
+												class="px-3 py-1.5 text-xs font-semibold tracking-wide text-gray-500 uppercase"
+											>
+												General
+											</div>
+											{#each billingDefaultKeys.general as key (key.id)}
+												<DropdownItem
+													class="flex items-center gap-2 text-sm"
+													onclick={() => selectBillingDefaultKey(String(key.id))}
+												>
+													{#if key.provider === 'openai'}
+														<OpenAILogo size="4" extraClass="shrink-0" />
+													{:else if key.provider === 'azure'}
+														<AzureLogo size="4" />
+													{/if}
+													{formatDefaultKeyLabel(key)}
+												</DropdownItem>
+											{/each}
+										{/if}
+									</Dropdown>
+								{/if}
+							</div>
 							<Helper class="mb-3"
 								>Choose the AI provider you'd like to use for your group. You'll need an API key and
 								potentially additional details to set up the connection. <b
@@ -1547,65 +1750,109 @@
 									name="provider"
 									value="openai"
 									bind:group={apiProvider}
+									disabled={!!selectedBillingDefaultKey}
 									custom
 									class="hidden-radio"
 								>
 									<div
-										class="inline-flex w-full min-w-fit cursor-pointer items-center gap-4 rounded-lg border border-gray-200 bg-white px-5 py-3 font-normal text-gray-900 peer-checked:border-red-600 peer-checked:font-medium peer-checked:text-red-600 hover:bg-gray-100 hover:text-gray-600 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700"
+										class="inline-flex w-full min-w-fit items-center gap-4 rounded-lg border border-gray-200 bg-white px-5 py-3 font-normal text-gray-900 peer-checked:border-red-600 peer-checked:font-medium peer-checked:text-red-600 {selectedBillingDefaultKey
+											? 'cursor-not-allowed opacity-60'
+											: 'cursor-pointer hover:bg-gray-100 hover:text-gray-600'} dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700"
 									>
 										<OpenAILogo size="8" extraClass="shrink-0" />
 										<div class="w-full text-base">OpenAI</div>
+										{#if selectedBillingDefaultKey?.provider === 'openai'}
+											<LockSolid class="h-4 w-4 shrink-0 text-gray-400" />
+										{/if}
 									</div>
 								</Radio>
 								<Radio
 									name="provider"
 									value="azure"
 									bind:group={apiProvider}
+									disabled={!!selectedBillingDefaultKey}
 									custom
 									class="hidden-radio"
 								>
 									<div
-										class="inline-flex w-full cursor-pointer items-center gap-4 rounded-lg border border-gray-200 bg-white px-5 py-3 font-normal text-gray-900 peer-checked:border-red-600 peer-checked:font-medium peer-checked:text-red-600 hover:bg-gray-100 hover:text-gray-600 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700"
+										class="inline-flex w-full items-center gap-4 rounded-lg border border-gray-200 bg-white px-5 py-3 font-normal text-gray-900 peer-checked:border-red-600 peer-checked:font-medium peer-checked:text-red-600 {selectedBillingDefaultKey
+											? 'cursor-not-allowed opacity-60'
+											: 'cursor-pointer hover:bg-gray-100 hover:text-gray-600'} dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700"
 									>
 										<AzureLogo size="8" />
 										<div class="w-full text-base">Azure</div>
+										{#if selectedBillingDefaultKey?.provider === 'azure'}
+											<LockSolid class="h-4 w-4 shrink-0 text-gray-400" />
+										{/if}
 									</div>
 								</Radio>
 							</div>
-							{#if apiProvider == 'azure'}
-								<Label for="endpoint">Deployment Endpoint</Label>
-								<div class="relative mb-4 w-full pt-2 pb-2">
+							{#if selectedBillingDefaultKey}
+								{#if selectedBillingDefaultKey.endpoint}
+									<Label for="endpoint" class="text-sm text-gray-500">Deployment Endpoint</Label>
+									<div class="relative mb-4 w-full text-sm text-gray-700">
+										{selectedBillingDefaultKey.endpoint}
+									</div>
+								{/if}
+								<Label for="apiKey">API Key</Label>
+								<div class="relative w-full pt-2 pb-2">
 									<ButtonGroup class="w-full">
 										<InputAddon>
-											<GlobeOutline class="h-6 w-6" />
+											<LockSolid class="h-5 w-5 text-gray-400" />
 										</InputAddon>
 										<Input
-											id="endpoint"
-											name="endpoint"
+											id="apiKey"
+											name="apiKey"
+											disabled
+											value={formatDefaultKeyLabel(selectedBillingDefaultKey)}
+											defaultClass="block w-full disabled:cursor-not-allowed disabled:opacity-50 rtl:text-right font-mono bg-gray-50"
+										/>
+										<Button
+											outline
+											color="none"
+											class="rounded-l-none border border-gray-300 bg-white px-3 text-gray-600 hover:bg-red-50 hover:text-red-500"
+											on:click={clearBillingDefaultKey}
+										>
+											<CloseOutline class="h-4 w-4" />
+										</Button>
+									</ButtonGroup>
+								</div>
+							{:else}
+								{#if apiProvider == 'azure'}
+									<Label for="endpoint">Deployment Endpoint</Label>
+									<div class="relative mb-4 w-full pt-2 pb-2">
+										<ButtonGroup class="w-full">
+											<InputAddon>
+												<GlobeOutline class="h-6 w-6" />
+											</InputAddon>
+											<Input
+												id="endpoint"
+												name="endpoint"
+												autocomplete="off"
+												value={apiKey}
+												placeholder="Your deployment endpoint here"
+												defaultClass="block w-full disabled:cursor-not-allowed disabled:opacity-50 rtl:text-right"
+											/>
+										</ButtonGroup>
+									</div>
+								{/if}
+								<Label for="apiKey">API Key</Label>
+								<div class="relative w-full pt-2 pb-2">
+									<ButtonGroup class="w-full">
+										<InputAddon>
+											<PenOutline class="h-6 w-6" />
+										</InputAddon>
+										<Input
+											id="apiKey"
+											name="apiKey"
 											autocomplete="off"
 											value={apiKey}
-											placeholder="Your deployment endpoint here"
-											defaultClass="block w-full disabled:cursor-not-allowed disabled:opacity-50 rtl:text-right"
+											placeholder="Your API key here"
+											defaultClass="block w-full disabled:cursor-not-allowed disabled:opacity-50 rtl:text-right font-mono"
 										/>
 									</ButtonGroup>
 								</div>
 							{/if}
-							<Label for="apiKey">API Key</Label>
-							<div class="relative w-full pt-2 pb-2">
-								<ButtonGroup class="w-full">
-									<InputAddon>
-										<PenOutline class="h-6 w-6" />
-									</InputAddon>
-									<Input
-										id="apiKey"
-										name="apiKey"
-										autocomplete="off"
-										value={apiKey}
-										placeholder="Your API key here"
-										defaultClass="block w-full disabled:cursor-not-allowed disabled:opacity-50 rtl:text-right font-mono"
-									/>
-								</ButtonGroup>
-							</div>
 							<div class="flex flex-row justify-center">
 								<Button
 									pill
@@ -1808,39 +2055,162 @@
 										featureCredential.provider
 									)}
 							>
-								<Label for={`feature-api-key-${featureCredential.purpose}`} class="text-sm"
-									>{featureCredential.providerLabel}: {featureCredential.title}</Label
-								>
+								{#if hasDefaultKeyReadError}
+									<Helper class="mb-3 text-red-600"
+										>Unable to load default keys right now. You can still enter credentials
+										manually.</Helper
+									>
+								{/if}
+								{#if !hasDefaultKeyReadError}
+									{@const groupedDefaultKeys =
+										featureCredential.provider === 'elevenlabs'
+											? narrationDefaultKeys
+											: manifestDefaultKeys}
+									{@const hasFeatureDefaultKeys =
+										groupedDefaultKeys.institution.length > 0 ||
+										groupedDefaultKeys.general.length > 0}
+									<div class="flex flex-row items-center justify-between">
+										<Label for={`feature-api-key-${featureCredential.purpose}`} class="text-sm"
+											>{featureCredential.providerLabel}: {featureCredential.title}</Label
+										>
+										{#if hasFeatureDefaultKeys}
+											<Button
+												size="xs"
+												color="light"
+												class="px-2 py-1 text-xs font-normal"
+												id={`feature-default-key-btn-${featureCredential.purpose}`}
+											>
+												Use pre-configured... <ChevronDownOutline class="ms-1 h-3 w-3" />
+											</Button>
+											<Dropdown
+												triggeredBy={`#feature-default-key-btn-${featureCredential.purpose}`}
+												bind:open={featureDefaultKeyDropdownOpen[featureCredential.purpose]}
+												class="w-80"
+											>
+												{#if groupedDefaultKeys.institution.length > 0}
+													<div
+														class="px-3 py-1.5 text-xs font-semibold tracking-wide text-gray-500 uppercase"
+													>
+														Institution
+													</div>
+													{#each groupedDefaultKeys.institution as key (key.id)}
+														<DropdownItem
+															class="flex items-center gap-2 text-sm"
+															onclick={() =>
+																selectFeatureDefaultKey(featureCredential.purpose, String(key.id))}
+														>
+															{#if key.provider === 'elevenlabs'}
+																<ElevenLabsLogo size="4" />
+															{:else if key.provider === 'gemini'}
+																<GeminiLogo size="4" />
+															{/if}
+															{formatDefaultKeyLabel(key)}
+														</DropdownItem>
+													{/each}
+												{/if}
+												{#if groupedDefaultKeys.general.length > 0}
+													{#if groupedDefaultKeys.institution.length > 0}
+														<DropdownDivider />
+													{/if}
+													<div
+														class="px-3 py-1.5 text-xs font-semibold tracking-wide text-gray-500 uppercase"
+													>
+														General
+													</div>
+													{#each groupedDefaultKeys.general as key (key.id)}
+														<DropdownItem
+															class="flex items-center gap-2 text-sm"
+															onclick={() =>
+																selectFeatureDefaultKey(featureCredential.purpose, String(key.id))}
+														>
+															{#if key.provider === 'elevenlabs'}
+																<ElevenLabsLogo size="4" />
+															{:else if key.provider === 'gemini'}
+																<GeminiLogo size="4" />
+															{/if}
+															{formatDefaultKeyLabel(key)}
+														</DropdownItem>
+													{/each}
+												{/if}
+											</Dropdown>
+										{/if}
+									</div>
+								{:else}
+									<Label for={`feature-api-key-${featureCredential.purpose}`} class="text-sm"
+										>{featureCredential.providerLabel}: {featureCredential.title}</Label
+									>
+								{/if}
 								<Helper class="mb-3"
 									>{featureCredential.description}
 									<b>You can't change the API key later.</b></Helper
 								>
-								<div class="relative w-full pt-2 pb-2">
-									<ButtonGroup class="w-full">
-										<InputAddon>
-											{#if featureCredential.provider === 'elevenlabs'}
-												<ElevenLabsLogo size="6" />
-											{:else if featureCredential.provider === 'gemini'}
-												<GeminiLogo size="6" />
-											{/if}
-										</InputAddon>
-										<Input
-											id={`feature-api-key-${featureCredential.purpose}`}
-											name="apiKey"
-											autocomplete="off"
-											placeholder="{featureCredential.providerLabel} API key"
-											defaultClass="block w-full disabled:cursor-not-allowed disabled:opacity-50 rtl:text-right font-mono"
-										/>
+								{#if getSelectedDefaultKey(selectedFeatureDefaultKeyIds[featureCredential.purpose] || '')}
+									{@const selectedDefaultKey = getSelectedDefaultKey(
+										selectedFeatureDefaultKeyIds[featureCredential.purpose] || ''
+									)}
+									<Label for={`feature-api-key-${featureCredential.purpose}`} class="text-sm"
+										>API Key</Label
+									>
+									<div class="relative w-full pt-2 pb-2">
+										<ButtonGroup class="w-full">
+											<InputAddon>
+												<LockSolid class="h-5 w-5 text-gray-400" />
+											</InputAddon>
+											<Input
+												id={`feature-api-key-${featureCredential.purpose}`}
+												name="apiKey"
+												disabled
+												value={selectedDefaultKey ? formatDefaultKeyLabel(selectedDefaultKey) : ''}
+												defaultClass="block w-full disabled:cursor-not-allowed disabled:opacity-50 rtl:text-right font-mono bg-gray-50"
+											/>
+											<Button
+												outline
+												color="none"
+												class="rounded-l-none border border-gray-300 bg-white px-3 text-gray-600 hover:bg-red-50 hover:text-red-500"
+												on:click={() => clearFeatureDefaultKey(featureCredential.purpose)}
+											>
+												<CloseOutline class="h-4 w-4" />
+											</Button>
+										</ButtonGroup>
+									</div>
+									<div class="flex justify-end">
 										<Button
 											type="submit"
 											disabled={updatingClassCredentialPurpose !== null}
-											class="rounded-l-none bg-orange text-white hover:bg-orange-dark"
+											class="bg-orange text-white hover:bg-orange-dark"
 											>{updatingClassCredentialPurpose === featureCredential.purpose
 												? 'Saving...'
 												: 'Save'}</Button
 										>
-									</ButtonGroup>
-								</div>
+									</div>
+								{:else}
+									<div class="relative w-full pt-2 pb-2">
+										<ButtonGroup class="w-full">
+											<InputAddon>
+												{#if featureCredential.provider === 'elevenlabs'}
+													<ElevenLabsLogo size="6" />
+												{:else if featureCredential.provider === 'gemini'}
+													<GeminiLogo size="6" />
+												{/if}
+											</InputAddon>
+											<Input
+												id={`feature-api-key-${featureCredential.purpose}`}
+												name="apiKey"
+												autocomplete="off"
+												placeholder="{featureCredential.providerLabel} API key"
+												defaultClass="block w-full disabled:cursor-not-allowed disabled:opacity-50 rtl:text-right font-mono"
+											/>
+											<Button
+												type="submit"
+												disabled={updatingClassCredentialPurpose !== null}
+												class="rounded-l-none bg-orange text-white hover:bg-orange-dark"
+												>{updatingClassCredentialPurpose === featureCredential.purpose
+													? 'Saving...'
+													: 'Save'}</Button
+											>
+										</ButtonGroup>
+									</div>
+								{/if}
 							</form>
 						{:else}
 							<Label for={`feature-provider-${featureCredential.purpose}`} class="mb-1 text-sm"

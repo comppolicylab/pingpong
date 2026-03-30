@@ -4813,6 +4813,22 @@ class Class(Base):
         return api_key_obj
 
     @classmethod
+    async def update_api_key_by_id(
+        cls,
+        session: AsyncSession,
+        id_: int,
+        api_key_id: int,
+    ) -> "APIKey | None":
+        api_key_obj = await APIKey.get_by_id(session, api_key_id)
+        if api_key_obj is None:
+            return None
+        stmt = (
+            update(Class).where(Class.id == int(id_)).values(api_key_id=api_key_obj.id)
+        )
+        await session.execute(stmt)
+        return api_key_obj
+
+    @classmethod
     async def create(
         cls, session: AsyncSession, inst_id: int, data: schemas.CreateClass
     ) -> "Class":
@@ -5432,6 +5448,39 @@ class ClassCredential(Base):
                 api_key=api_key,
                 provider=provider.value,
             )
+            stmt = (
+                _get_upsert_stmt(session)(ClassCredential)
+                .values(
+                    class_id=int(class_id),
+                    purpose=purpose,
+                    api_key_id=api_key_obj.id,
+                )
+                .on_conflict_do_nothing(
+                    index_elements=[ClassCredential.class_id, ClassCredential.purpose],
+                )
+                .returning(ClassCredential)
+            )
+            credential = await session.scalar(stmt)
+            if credential is None:
+                raise ClassCredentialAlreadyExistsError(
+                    "Credential already exists for this purpose and cannot be changed."
+                )
+        await session.refresh(credential)
+        await credential.awaitable_attrs.api_key_obj
+        return credential
+
+    @classmethod
+    async def create_from_api_key_id(
+        cls,
+        session: AsyncSession,
+        class_id: int,
+        purpose: schemas.ClassCredentialPurpose,
+        api_key_id: int,
+    ) -> "ClassCredential | None":
+        api_key_obj = await APIKey.get_by_id(session, api_key_id)
+        if api_key_obj is None:
+            return None
+        async with session.begin_nested():
             stmt = (
                 _get_upsert_stmt(session)(ClassCredential)
                 .values(

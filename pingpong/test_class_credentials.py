@@ -87,6 +87,48 @@ async def test_list_class_credentials_requires_view_permission(
 @with_user(123)
 @with_institution(11, "Test Institution")
 @with_authz(grants=[("user:123", "admin", "class:1")])
+async def test_list_class_default_api_keys_for_class_admin(
+    api, db, institution, valid_user_token
+):
+    await _create_class(db, institution.id, 1)
+    async with db.async_session() as session:
+        default_key = models.APIKey(
+            api_key="default-openai-key-1234",
+            provider="openai",
+            name="Shared OpenAI",
+            available_as_default=True,
+        )
+        non_default_key = models.APIKey(
+            api_key="non-default-openai-key-1234",
+            provider="openai",
+            available_as_default=False,
+        )
+        session.add_all([default_key, non_default_key])
+        await session.commit()
+        await session.refresh(default_key)
+
+    response = api.get(
+        "/api/v1/class/1/api_keys/default",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "default_keys": [
+            {
+                "id": default_key.id,
+                "redacted_key": "default-**********1234",
+                "name": "Shared OpenAI",
+                "provider": "openai",
+                "endpoint": None,
+            }
+        ]
+    }
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(grants=[("user:123", "admin", "class:1")])
 async def test_create_class_credential_grants_view_permission(
     api, db, institution, valid_user_token, monkeypatch
 ):
@@ -337,6 +379,49 @@ async def test_create_class_credential_returns_400_when_model_create_raises_conf
 
 @with_user(123)
 @with_institution(11, "Test Institution")
+@with_authz(grants=[("user:123", "admin", "class:1")])
+async def test_create_class_credential_from_default_api_key_id(
+    api, db, institution, valid_user_token, monkeypatch
+):
+    await _create_class(db, institution.id, 1)
+    monkeypatch.setattr(server_module, "validate_class_credential", AsyncMock())
+    async with db.async_session() as session:
+        default_key = models.APIKey(
+            api_key="default-gemini-key-1234",
+            provider="gemini",
+            available_as_default=True,
+        )
+        session.add(default_key)
+        await session.commit()
+        await session.refresh(default_key)
+
+    response = api.post(
+        "/api/v1/class/1/credentials",
+        json={
+            "api_key_id": default_key.id,
+            "purpose": "lecture_video_manifest_generation",
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "credential": {
+            "purpose": "lecture_video_manifest_generation",
+            "credential": {
+                "redacted_api_key": _masked("default-gemini-key-1234"),
+                "provider": "gemini",
+                "endpoint": None,
+                "api_version": None,
+                "available_as_default": True,
+            },
+        }
+    }
+    server_module.validate_class_credential.assert_not_called()
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
 @with_authz(
     grants=[
         ("user:123", "admin", "class:1"),
@@ -506,6 +591,55 @@ async def test_class_api_key_responses_are_redacted_even_when_returning_models(
             },
         ],
     }
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "admin", "class:1"),
+        ("user:123", "can_view_api_key", "class:1"),
+    ]
+)
+async def test_class_api_key_can_be_set_from_default_api_key_id(
+    api, db, institution, valid_user_token, monkeypatch
+):
+    await _create_class(db, institution.id, 1)
+    monkeypatch.setattr(server_module, "validate_api_key", AsyncMock())
+    async with db.async_session() as session:
+        default_key = models.APIKey(
+            api_key="default-openai-key-5678",
+            provider="openai",
+            available_as_default=True,
+        )
+        session.add(default_key)
+        await session.commit()
+        await session.refresh(default_key)
+
+    response = api.put(
+        "/api/v1/class/1/api_key",
+        json={"api_key_id": default_key.id},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "api_key": {
+            "redacted_api_key": _masked("default-openai-key-5678"),
+            "provider": "openai",
+            "endpoint": None,
+            "api_version": None,
+            "available_as_default": True,
+        }
+    }
+    server_module.validate_api_key.assert_not_called()
+
+    get_response = api.get(
+        "/api/v1/class/1/api_key",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert get_response.status_code == 200
+    assert get_response.json()["api_key"]["provider"] == "openai"
 
 
 @with_user(123)

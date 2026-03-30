@@ -1440,8 +1440,9 @@ export type ApiKeyResponse = {
 };
 
 export type UpdateApiKeyRequest = {
-	api_key: string;
-	provider: string;
+	api_key?: string;
+	api_key_id?: number | null;
+	provider?: string;
 	endpoint?: string;
 	api_version?: string;
 };
@@ -1453,8 +1454,9 @@ export type ClassCredentialPurpose =
 	| 'lecture_video_manifest_generation';
 
 export type CreateClassCredentialRequest = {
-	api_key: string;
-	provider: ClassCredentialProvider;
+	api_key?: string;
+	api_key_id?: number | null;
+	provider?: ClassCredentialProvider;
 	purpose: ClassCredentialPurpose;
 };
 
@@ -1687,18 +1689,28 @@ export const getDefaultAPIKeys = async (f: Fetcher) => {
 };
 
 /**
+ * Get the default API keys available for a class admin.
+ */
+export const getClassDefaultAPIKeys = async (f: Fetcher, classId: number) => {
+	const url = `class/${classId}/api_keys/default`;
+	return await GET<never, DefaultAPIKeys>(f, url);
+};
+
+/**
  * Update the API key for a class.
  */
 export const updateApiKey = async (
 	f: Fetcher,
 	classId: number,
-	provider: string,
-	apiKey: string,
-	endpoint?: string
+	provider?: string,
+	apiKey?: string,
+	endpoint?: string,
+	apiKeyId?: number | null
 ) => {
 	const url = `class/${classId}/api_key`;
 	return await PUT<UpdateApiKeyRequest, ApiKeyResponse>(f, url, {
 		api_key: apiKey,
+		api_key_id: apiKeyId,
 		provider: provider,
 		endpoint: endpoint
 	});
@@ -1930,12 +1942,14 @@ export const createClassCredential = async (
 	f: Fetcher,
 	classId: number,
 	purpose: ClassCredentialPurpose,
-	provider: ClassCredentialProvider,
-	apiKey: string
+	provider?: ClassCredentialProvider,
+	apiKey?: string,
+	apiKeyId?: number | null
 ) => {
 	const url = `class/${classId}/credentials`;
 	return await POST<CreateClassCredentialRequest, ClassCredentialResponse>(f, url, {
 		api_key: apiKey,
+		api_key_id: apiKeyId,
 		provider,
 		purpose
 	});
