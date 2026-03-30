@@ -1,11 +1,12 @@
+import json
 import asyncio
 import contextlib
 import logging
 import sys
-from typing import Callable, Dict, Optional
 import webbrowser
+from typing import Callable, Dict, Optional, cast
+
 import click
-import json
 import alembic
 import alembic.command
 import alembic.config
@@ -22,6 +23,7 @@ from pingpong.ai import (
 )
 from pingpong.ai_models import DEFAULT_PROMPTS, KNOWN_MODELS
 from pingpong.api_keys import (
+    DefaultAPIKeyProvider,
     get_process_redacted_project_api_keys,
     set_as_default_api_key,
     transfer_api_keys,
@@ -479,7 +481,7 @@ def set_key_as_default(
                 session=session,
                 redacted_key=api_key,
                 key_name=key_name,
-                provider=provider,
+                provider=cast(DefaultAPIKeyProvider, provider),
                 endpoint=endpoint,
             )
 
