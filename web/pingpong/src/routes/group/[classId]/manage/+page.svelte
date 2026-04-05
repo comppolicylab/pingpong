@@ -655,22 +655,24 @@
 		const selectedDefaultKeyId = parseDefaultKeyId(selectedBillingDefaultKeyId);
 
 		if (selectedDefaultKeyId !== null) {
-			const result = await api.updateApiKey(
-				fetch,
-				data.class.id,
-				undefined,
-				undefined,
-				undefined,
-				selectedDefaultKeyId
+			const result = api.expandResponse(
+				await api.updateApiKey(
+					fetch,
+					data.class.id,
+					undefined,
+					undefined,
+					undefined,
+					selectedDefaultKeyId
+				)
 			);
 
-			if (api.isErrorResponse(result)) {
+			if (result.error) {
 				$updatingApiKey = false;
-				sadToast(result.detail || 'An unknown error occurred');
+				sadToast(result.error.detail || 'An unknown error occurred');
 				return;
 			}
 
-			const response = result as api.ApiKeyResponse;
+			const response = result.data;
 			apiKey = response.api_key || null;
 			hasApiKey = !!response.api_key;
 			apiProvider = response.api_key?.provider || apiProvider;
@@ -694,14 +696,16 @@
 		const _apiKey = (d.apiKey as string | undefined) || '';
 		const _endpoint = d.endpoint as string | undefined;
 		const _provider = (d.provider as string | undefined) || 'openai';
-		const result = await api.updateApiKey(fetch, data.class.id, _provider, _apiKey, _endpoint);
+		const result = api.expandResponse(
+			await api.updateApiKey(fetch, data.class.id, _provider, _apiKey, _endpoint)
+		);
 
-		if (api.isErrorResponse(result)) {
+		if (result.error) {
 			$updatingApiKey = false;
-			let msg = result.detail || 'An unknown error occurred';
+			let msg = result.error.detail || 'An unknown error occurred';
 			sadToast(msg);
 		} else {
-			const response = result as api.ApiKeyResponse;
+			const response = result.data;
 			apiKey = response.api_key || null;
 			hasApiKey = !!response.api_key;
 			apiProvider = response.api_key?.provider || apiProvider;
@@ -2054,6 +2058,9 @@
 									: manifestDefaultKeys}
 							{@const hasFeatureDefaultKeys =
 								groupedDefaultKeys.institution.length > 0 || groupedDefaultKeys.general.length > 0}
+							{@const selectedDefaultKey = getSelectedDefaultKey(
+								selectedFeatureDefaultKeyIds[featureCredential.purpose] || ''
+							)}
 							<form
 								onsubmit={(event) =>
 									submitCreateClassCredential(
@@ -2131,10 +2138,7 @@
 									>{featureCredential.description}
 									<b>You can't change the API key later.</b></Helper
 								>
-								{#if getSelectedDefaultKey(selectedFeatureDefaultKeyIds[featureCredential.purpose] || '')}
-									{@const selectedDefaultKey = getSelectedDefaultKey(
-										selectedFeatureDefaultKeyIds[featureCredential.purpose] || ''
-									)}
+								{#if selectedDefaultKey}
 									<Label for={`feature-api-key-${featureCredential.purpose}`} class="text-sm"
 										>API Key</Label
 									>

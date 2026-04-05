@@ -3064,7 +3064,7 @@ async def create_class_credential(
     provider = update.provider
     api_key_obj: models.APIKey | None = None
     if update.api_key_id is not None:
-        if not await Authz("admin").test(request):
+        if not await (Authz("admin") | ClassInstitutionAdmin()).test(request):
             raise HTTPException(status_code=404, detail="API key not found")
         api_key_obj = await _get_default_api_key_or_404(
             request.state["db"], update.api_key_id
@@ -3172,6 +3172,9 @@ async def update_class_api_key(
     if not class_:
         raise HTTPException(status_code=404, detail="Class not found")
     if update.api_key_id is not None:
+        if not await (Authz("admin") | ClassInstitutionAdmin()).test(request):
+            raise HTTPException(status_code=404, detail="API key not found")
+
         api_key_obj = await _get_default_api_key_or_404(
             request.state["db"], update.api_key_id
         )

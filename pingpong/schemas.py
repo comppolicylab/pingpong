@@ -1969,6 +1969,19 @@ class APIKeyCheck(BaseModel):
     has_lecture_video_providers: bool = False
 
 
+TKeySourceModel = TypeVar("TKeySourceModel", bound=BaseModel)
+
+
+def _validate_key_source(model: TKeySourceModel) -> TKeySourceModel:
+    if model.api_key_id is not None:
+        return model
+    if not model.api_key:
+        raise ValueError("api_key or api_key_id must be provided")
+    if model.provider is None:
+        raise ValueError("provider must be provided when api_key is used")
+    return model
+
+
 class UpdateApiKey(BaseModel):
     api_key: str | None = None
     api_key_id: int | None = Field(None, gt=0)
@@ -1985,13 +1998,7 @@ class UpdateApiKey(BaseModel):
 
     @model_validator(mode="after")
     def validate_key_source(self) -> "UpdateApiKey":
-        if self.api_key_id is not None:
-            return self
-        if not self.api_key:
-            raise ValueError("api_key or api_key_id must be provided")
-        if self.provider is None:
-            raise ValueError("provider must be provided when api_key is used")
-        return self
+        return _validate_key_source(self)
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -2016,13 +2023,7 @@ class CreateClassCredential(BaseModel):
 
     @model_validator(mode="after")
     def validate_key_source(self) -> "CreateClassCredential":
-        if self.api_key_id is not None:
-            return self
-        if not self.api_key:
-            raise ValueError("api_key or api_key_id must be provided")
-        if self.provider is None:
-            raise ValueError("provider must be provided when api_key is used")
-        return self
+        return _validate_key_source(self)
 
     model_config = ConfigDict(
         from_attributes=True,

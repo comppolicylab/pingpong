@@ -510,6 +510,163 @@ async def test_class_api_key_responses_are_redacted_even_when_returning_models(
 
 @with_user(123)
 @with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "admin", "class:1"),
+        ("user:123", "admin", "institution:11"),
+    ]
+)
+async def test_update_class_api_key_allows_default_key_for_class_institution_admin(
+    api, db, institution, valid_user_token
+):
+    await _create_class(db, institution.id, 1)
+
+    async with db.async_session() as session:
+        api_key = models.APIKey(
+            api_key="default-openai-key",
+            provider="openai",
+            available_as_default=True,
+        )
+        session.add(api_key)
+        await session.commit()
+        await session.refresh(api_key)
+
+    response = api.put(
+        "/api/v1/class/1/api_key",
+        json={"api_key_id": api_key.id},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "api_key": {
+            "redacted_api_key": _masked("default-openai-key"),
+            "provider": "openai",
+            "endpoint": None,
+            "api_version": None,
+            "available_as_default": True,
+        }
+    }
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "admin", "class:1"),
+        ("user:123", "admin", "institution:99"),
+    ]
+)
+async def test_update_class_api_key_rejects_default_key_for_other_institution_admin(
+    api, db, institution, valid_user_token
+):
+    await _create_class(db, institution.id, 1)
+
+    async with db.async_session() as session:
+        api_key = models.APIKey(
+            api_key="default-openai-key",
+            provider="openai",
+            available_as_default=True,
+        )
+        session.add(api_key)
+        await session.commit()
+        await session.refresh(api_key)
+
+    response = api.put(
+        "/api/v1/class/1/api_key",
+        json={"api_key_id": api_key.id},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "API key not found"}
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "admin", "class:1"),
+        ("user:123", "admin", "root:0"),
+    ]
+)
+async def test_create_class_credential_allows_default_key_for_root_admin(
+    api, db, institution, valid_user_token
+):
+    await _create_class(db, institution.id, 1)
+
+    async with db.async_session() as session:
+        api_key = models.APIKey(
+            api_key="default-gemini-key",
+            provider="gemini",
+            available_as_default=True,
+        )
+        session.add(api_key)
+        await session.commit()
+        await session.refresh(api_key)
+
+    response = api.post(
+        "/api/v1/class/1/credentials",
+        json={
+            "api_key_id": api_key.id,
+            "purpose": "lecture_video_manifest_generation",
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "credential": {
+            "purpose": "lecture_video_manifest_generation",
+            "credential": {
+                "redacted_api_key": _masked("default-gemini-key"),
+                "provider": "gemini",
+                "endpoint": None,
+                "api_version": None,
+                "available_as_default": True,
+            },
+        }
+    }
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "admin", "class:1"),
+        ("user:123", "admin", "institution:99"),
+    ]
+)
+async def test_create_class_credential_rejects_default_key_for_other_institution_admin(
+    api, db, institution, valid_user_token
+):
+    await _create_class(db, institution.id, 1)
+
+    async with db.async_session() as session:
+        api_key = models.APIKey(
+            api_key="default-gemini-key",
+            provider="gemini",
+            available_as_default=True,
+        )
+        session.add(api_key)
+        await session.commit()
+        await session.refresh(api_key)
+
+    response = api.post(
+        "/api/v1/class/1/credentials",
+        json={
+            "api_key_id": api_key.id,
+            "purpose": "lecture_video_manifest_generation",
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "API key not found"}
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
 @with_authz(grants=[("user:123", "can_edit_info", "class:1")])
 async def test_get_class_api_key_returns_summary_without_key_material_for_can_edit_info(
     api, db, institution, valid_user_token
@@ -688,6 +845,68 @@ async def test_api_key_create_or_update_preserves_region_when_upsert_region_is_n
 
     assert created.id == updated.id
     assert updated.region == "eastus"
+
+
+async def test_update_class_api_key_by_id_rejects_non_default_key(db):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            name="Billing key class",
+            term="Fall 2026",
+        )
+        api_key = models.APIKey(
+            api_key="non-default-openai-key",
+            provider="openai",
+            available_as_default=False,
+        )
+        session.add_all([class_, api_key])
+        await session.commit()
+        await session.refresh(class_)
+        await session.refresh(api_key)
+
+        updated = await models.Class.update_api_key_by_id(
+            session=session,
+            id_=class_.id,
+            api_key_id=api_key.id,
+        )
+        await session.commit()
+        refreshed_class = await models.Class.get_by_id(session, class_.id)
+
+    assert updated is None
+    assert refreshed_class is not None
+    assert refreshed_class.api_key_id is None
+
+
+async def test_create_class_credential_from_api_key_id_rejects_non_default_key(db):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            name="Credential key class",
+            term="Fall 2026",
+        )
+        api_key = models.APIKey(
+            api_key="non-default-gemini-key",
+            provider="gemini",
+            available_as_default=False,
+        )
+        session.add_all([class_, api_key])
+        await session.commit()
+        await session.refresh(class_)
+        await session.refresh(api_key)
+
+        credential = await models.ClassCredential.create_from_api_key_id(
+            session=session,
+            class_id=class_.id,
+            purpose=schemas.ClassCredentialPurpose.LECTURE_VIDEO_MANIFEST_GENERATION,
+            api_key_id=api_key.id,
+        )
+        await session.commit()
+        credentials = await session.scalars(
+            select(models.ClassCredential).where(
+                models.ClassCredential.class_id == class_.id
+            )
+        )
+
+    assert credential is None
+    assert credentials.all() == []
 
 
 async def test_class_credential_create_raises_on_duplicate_insert(db):

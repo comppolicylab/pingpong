@@ -4820,7 +4820,7 @@ class Class(Base):
         api_key_id: int,
     ) -> "APIKey | None":
         api_key_obj = await APIKey.get_by_id(session, api_key_id)
-        if api_key_obj is None:
+        if api_key_obj is None or not api_key_obj.available_as_default:
             return None
         stmt = (
             update(Class).where(Class.id == int(id_)).values(api_key_id=api_key_obj.id)
@@ -5478,7 +5478,7 @@ class ClassCredential(Base):
         api_key_id: int,
     ) -> "ClassCredential | None":
         api_key_obj = await APIKey.get_by_id(session, api_key_id)
-        if api_key_obj is None:
+        if api_key_obj is None or not api_key_obj.available_as_default:
             return None
         async with session.begin_nested():
             stmt = (

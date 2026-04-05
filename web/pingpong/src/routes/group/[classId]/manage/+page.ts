@@ -45,6 +45,11 @@ export const load = async ({ fetch, params }: Parameters<PageLoad>[0]) => {
 				target_type: 'class',
 				target_id: classId,
 				relation: 'can_receive_summaries'
+			},
+			isRootAdmin: {
+				target_type: 'root',
+				target_id: 0,
+				relation: 'admin'
 			}
 		}),
 		api.loadLMSInstances(fetch, classId, 'canvas').then(api.expandResponse),
@@ -84,7 +89,24 @@ export const load = async ({ fetch, params }: Parameters<PageLoad>[0]) => {
 			hasElevenlabsCredential = apiKeyResponse.data.has_elevenlabs_credential ?? false;
 		}
 	}
+	let canReadDefaultApiKeys = false;
 	if (grants.canViewApiKey) {
+		if (grants.isRootAdmin) {
+			canReadDefaultApiKeys = true;
+		} else {
+			const institutionAdminResponse = classDataResponse.data.institution_id
+				? await api.grants(fetch, {
+						isInstitutionAdmin: {
+							target_type: 'institution',
+							target_id: classDataResponse.data.institution_id,
+							relation: 'admin'
+						}
+					})
+				: { isInstitutionAdmin: false };
+			canReadDefaultApiKeys = institutionAdminResponse.isInstitutionAdmin;
+		}
+	}
+	if (canReadDefaultApiKeys) {
 		const defaultKeysResponse = await api.getDefaultAPIKeys(fetch).then(api.expandResponse);
 		if (!defaultKeysResponse.error) {
 			defaultKeys = defaultKeysResponse.data.default_keys;
