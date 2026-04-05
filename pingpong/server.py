@@ -2870,8 +2870,8 @@ def _class_ai_provider(class_: models.Class) -> schemas.AIProvider | None:
     return None
 
 
-def _lecture_video_allow_elevenlabs_without_gemini() -> bool:
-    return config.feature_flags.lecture_video_allow_elevenlabs_without_gemini
+def _lecture_video_elevenlabs_only_mode() -> bool:
+    return config.feature_flags.lecture_video_elevenlabs_only_mode
 
 
 def _lecture_video_providers_ready(
@@ -2879,7 +2879,7 @@ def _lecture_video_providers_ready(
     has_gemini_credential: bool,
     has_elevenlabs_credential: bool,
 ) -> bool:
-    if _lecture_video_allow_elevenlabs_without_gemini():
+    if _lecture_video_elevenlabs_only_mode():
         return has_elevenlabs_credential
     return has_gemini_credential and has_elevenlabs_credential
 
@@ -2966,7 +2966,7 @@ async def _get_class_lecture_video_provider_flags(
 def _get_lecture_video_provider_prerequisite_message(
     class_context: dict[str, bool],
 ) -> str:
-    if _lecture_video_allow_elevenlabs_without_gemini():
+    if _lecture_video_elevenlabs_only_mode():
         if not class_context["has_elevenlabs_credential"]:
             return (
                 "Configure an ElevenLabs credential in Manage Group to enable Lecture "
@@ -3351,8 +3351,8 @@ async def get_class_api_key(class_id: str, request: StateRequest):
             "has_elevenlabs_credential": lecture_video_context[
                 "has_elevenlabs_credential"
             ],
-            "hide_gemini_endpoint_in_manage_group": (
-                _lecture_video_allow_elevenlabs_without_gemini()
+            "lecture_video_elevenlabs_only_mode": (
+                _lecture_video_elevenlabs_only_mode()
             ),
         }
 
@@ -3363,9 +3363,7 @@ async def get_class_api_key(class_id: str, request: StateRequest):
         "ai_provider": class_context["ai_provider"],
         "has_gemini_credential": class_context["has_gemini_credential"],
         "has_elevenlabs_credential": class_context["has_elevenlabs_credential"],
-        "hide_gemini_endpoint_in_manage_group": (
-            _lecture_video_allow_elevenlabs_without_gemini()
-        ),
+        "lecture_video_elevenlabs_only_mode": (_lecture_video_elevenlabs_only_mode()),
     }
 
     redacted_api_key = None

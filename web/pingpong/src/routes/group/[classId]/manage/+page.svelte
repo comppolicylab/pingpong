@@ -420,8 +420,8 @@
 		'lecture_video_narration_tts',
 		data?.hasElevenlabsCredential
 	);
-	$: hideGeminiEndpointInManageGroup = !!data?.hideGeminiEndpointInManageGroup;
-	$: visibleFeatureCredentialConfigs = hideGeminiEndpointInManageGroup
+	$: lectureVideoElevenlabsOnlyMode = !!data?.lectureVideoElevenlabsOnlyMode;
+	$: visibleFeatureCredentialConfigs = lectureVideoElevenlabsOnlyMode
 		? featureCredentialConfigs.filter(
 				(featureCredential) => featureCredential.provider !== 'gemini'
 			)
