@@ -332,6 +332,7 @@
 	$: manifestDefaultKeys = getGroupedDefaultKeys(['gemini'], defaultKeys, institutionDefaultKeyIds);
 	let selectedBillingDefaultKeyId = '';
 	let billingDefaultKeyDropdownOpen = false;
+	let selectedDefaultKeysClassId = data.class.id;
 	const selectBillingDefaultKey = (keyId: string) => {
 		selectedBillingDefaultKeyId = keyId;
 		billingDefaultKeyDropdownOpen = false;
@@ -356,6 +357,18 @@
 	};
 	$: selectedBillingDefaultKey = getSelectedDefaultKey(selectedBillingDefaultKeyId);
 	let featureDefaultKeyDropdownOpen: Record<string, boolean> = {};
+	$: {
+		if (data.class.id !== selectedDefaultKeysClassId) {
+			selectedDefaultKeysClassId = data.class.id;
+			selectedBillingDefaultKeyId = '';
+			billingDefaultKeyDropdownOpen = false;
+			selectedFeatureDefaultKeyIds = {
+				lecture_video_manifest_generation: '',
+				lecture_video_narration_tts: ''
+			};
+			featureDefaultKeyDropdownOpen = {};
+		}
+	}
 	const selectFeatureDefaultKey = (purpose: api.ClassCredentialPurpose, keyId: string) => {
 		selectedFeatureDefaultKeyIds = {
 			...selectedFeatureDefaultKeyIds,
@@ -1834,7 +1847,6 @@
 												id="endpoint"
 												name="endpoint"
 												autocomplete="off"
-												value={apiKey}
 												placeholder="Your deployment endpoint here"
 												defaultClass="block w-full disabled:cursor-not-allowed disabled:opacity-50 rtl:text-right"
 											/>
@@ -1851,7 +1863,6 @@
 											id="apiKey"
 											name="apiKey"
 											autocomplete="off"
-											value={apiKey}
 											placeholder="Your API key here"
 											defaultClass="block w-full disabled:cursor-not-allowed disabled:opacity-50 rtl:text-right font-mono"
 										/>
