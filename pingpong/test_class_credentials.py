@@ -488,6 +488,7 @@ async def test_class_api_key_responses_are_redacted_even_when_returning_models(
         "ai_provider": "openai",
         "has_gemini_credential": False,
         "has_elevenlabs_credential": False,
+        "lecture_video_elevenlabs_only_mode": False,
         "api_key": {
             "redacted_api_key": _masked(api_key),
             "provider": "openai",
@@ -703,6 +704,7 @@ async def test_get_class_api_key_returns_summary_without_key_material_for_can_ed
         "ai_provider": "openai",
         "has_gemini_credential": True,
         "has_elevenlabs_credential": False,
+        "lecture_video_elevenlabs_only_mode": False,
         "api_key": None,
         "credentials": None,
     }
@@ -775,6 +777,63 @@ async def test_api_key_check_returns_has_api_key_and_lecture_video_enabled(
         "has_api_key": True,
         "has_lecture_video_providers": True,
     }
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(grants=[("user:123", "can_view", "class:1")])
+async def test_api_key_check_allows_lecture_video_with_only_elevenlabs_when_flag_enabled(
+    api, db, institution, valid_user_token, monkeypatch
+):
+    await _create_class(db, institution.id, 1)
+    monkeypatch.setattr(
+        server_module.config.feature_flags,
+        "lecture_video_elevenlabs_only_mode",
+        True,
+    )
+
+    async with db.async_session() as session:
+        await models.ClassCredential.create(
+            session,
+            1,
+            schemas.ClassCredentialPurpose.LECTURE_VIDEO_NARRATION_TTS,
+            "elevenlabs-key-1234",
+            schemas.ClassCredentialProvider.ELEVENLABS,
+        )
+        await session.commit()
+
+    response = api.get(
+        "/api/v1/class/1/api_key/check",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "has_api_key": False,
+        "has_lecture_video_providers": True,
+    }
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(grants=[("user:123", "can_view_api_key", "class:1")])
+async def test_get_class_api_key_includes_manage_group_gemini_endpoint_flag(
+    api, db, institution, valid_user_token, monkeypatch
+):
+    await _create_class(db, institution.id, 1)
+    monkeypatch.setattr(
+        server_module.config.feature_flags,
+        "lecture_video_elevenlabs_only_mode",
+        True,
+    )
+
+    response = api.get(
+        "/api/v1/class/1/api_key",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["lecture_video_elevenlabs_only_mode"] is True
 
 
 async def test_api_key_create_or_update_promotes_available_as_default_on_conflict(db):

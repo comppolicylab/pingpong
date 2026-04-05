@@ -2117,6 +2117,7 @@ class ClassAPIKeyResponse(BaseModel):
     ai_provider: AIProvider | None = None
     has_gemini_credential: bool = False
     has_elevenlabs_credential: bool = False
+    lecture_video_elevenlabs_only_mode: bool = False
     api_key: RedactedApiKey | None = None
     credentials: list[ClassCredentialSlot] | None = None
 

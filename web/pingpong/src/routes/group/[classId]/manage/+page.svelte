@@ -281,6 +281,20 @@
 			providerLabel: 'ElevenLabs'
 		}
 	];
+	const isFeatureCredentialConfigured = (
+		provider: api.ClassCredentialProvider,
+		hasGeminiCredential: boolean | undefined,
+		hasElevenlabsCredential: boolean | undefined
+	) => {
+		switch (provider) {
+			case 'gemini':
+				return hasGeminiCredential === true;
+			case 'elevenlabs':
+				return hasElevenlabsCredential === true;
+			default:
+				return false;
+		}
+	};
 	const providerDisplayName = (provider: string) =>
 		provider === 'openai'
 			? 'OpenAI'
@@ -415,8 +429,19 @@
 		'lecture_video_narration_tts',
 		data?.hasElevenlabsCredential
 	);
-	$: allFeatureCredentialsConfigured =
-		hasGeminiCredential === true && hasElevenlabsCredential === true;
+	$: lectureVideoElevenlabsOnlyMode = !!data?.lectureVideoElevenlabsOnlyMode;
+	$: visibleFeatureCredentialConfigs = lectureVideoElevenlabsOnlyMode
+		? featureCredentialConfigs.filter(
+				(featureCredential) => featureCredential.provider !== 'gemini'
+			)
+		: featureCredentialConfigs;
+	$: allFeatureCredentialsConfigured = visibleFeatureCredentialConfigs.every((featureCredential) =>
+		isFeatureCredentialConfigured(
+			featureCredential.provider,
+			hasGeminiCredential,
+			hasElevenlabsCredential
+		)
+	);
 	let apiProvider = data.apiKey?.provider || data.aiProvider || 'openai';
 	$: configuredAiProvider = data.aiProvider ?? apiKey?.provider ?? null;
 	let updatingClassCredentialPurpose: api.ClassCredentialPurpose | null = null;
@@ -2052,7 +2077,7 @@
 						Refresh the page and try again.
 					</Alert>
 				{:else if canViewApiKey}
-					{#each featureCredentialConfigs as featureCredential, i (featureCredential.purpose)}
+					{#each visibleFeatureCredentialConfigs as featureCredential, i (featureCredential.purpose)}
 						{@const slot = classCredentials.find(
 							(c) => c.purpose === featureCredential.purpose
 						) || {
@@ -2240,7 +2265,7 @@
 						{/if}
 					{/each}
 				{:else}
-					{#each featureCredentialConfigs as featureCredential, i (featureCredential.purpose)}
+					{#each visibleFeatureCredentialConfigs as featureCredential, i (featureCredential.purpose)}
 						{#if i > 0}
 							<hr class="my-5 border-gray-200" />
 						{/if}
@@ -2259,9 +2284,11 @@
 							{/if}
 							<span class="text-sm font-normal">{featureCredential.providerLabel}</span>
 						</div>
-						{@const isConfigured =
-							(featureCredential.provider === 'gemini' && hasGeminiCredential) ||
-							(featureCredential.provider === 'elevenlabs' && hasElevenlabsCredential)}
+						{@const isConfigured = isFeatureCredentialConfigured(
+							featureCredential.provider,
+							hasGeminiCredential,
+							hasElevenlabsCredential
+						)}
 						<div class="mb-1 flex flex-row items-center gap-4">
 							<Label class="text-sm">API Key</Label>
 							{#if isConfigured === true}

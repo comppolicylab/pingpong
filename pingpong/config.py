@@ -633,6 +633,7 @@ class FeatureFlags(BaseSettings):
     """Feature flags for the application."""
 
     # Feature flags
+    lecture_video_elevenlabs_only_mode: bool = Field(False)
 
 
 class Config(BaseSettings):

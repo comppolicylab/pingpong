@@ -22,6 +22,7 @@ from sqlalchemy.orm import selectinload
 import pingpong.schemas as schemas
 from pingpong import (
     class_credentials as class_credentials_module,
+    copy as copy_module,
     elevenlabs as elevenlabs_module,
     lecture_video_processing,
     lecture_video_runtime,
@@ -194,21 +195,25 @@ async def create_lecture_video_copy_credentials(
     *,
     gemini_key: str = "shared-gemini-key",
     elevenlabs_key: str = "shared-elevenlabs-key",
+    include_gemini: bool = True,
+    include_elevenlabs: bool = True,
 ) -> None:
-    await models.ClassCredential.create(
-        session,
-        class_id,
-        schemas.ClassCredentialPurpose.LECTURE_VIDEO_MANIFEST_GENERATION,
-        gemini_key,
-        schemas.ClassCredentialProvider.GEMINI,
-    )
-    await models.ClassCredential.create(
-        session,
-        class_id,
-        schemas.ClassCredentialPurpose.LECTURE_VIDEO_NARRATION_TTS,
-        elevenlabs_key,
-        schemas.ClassCredentialProvider.ELEVENLABS,
-    )
+    if include_gemini:
+        await models.ClassCredential.create(
+            session,
+            class_id,
+            schemas.ClassCredentialPurpose.LECTURE_VIDEO_MANIFEST_GENERATION,
+            gemini_key,
+            schemas.ClassCredentialProvider.GEMINI,
+        )
+    if include_elevenlabs:
+        await models.ClassCredential.create(
+            session,
+            class_id,
+            schemas.ClassCredentialPurpose.LECTURE_VIDEO_NARRATION_TTS,
+            elevenlabs_key,
+            schemas.ClassCredentialProvider.ELEVENLABS,
+        )
 
 
 def fake_class_models_response(model_id: str = "gpt-4o-mini") -> dict:
@@ -7701,6 +7706,88 @@ async def test_copy_lecture_video_assistant_check_requires_matching_class_creden
             "credentials to copy lecture video assistants."
         )
     }
+
+
+@pytest.mark.parametrize(
+    ("path", "expected_status"),
+    [
+        ("/api/v1/class/1/assistant/1/copy", 200),
+        ("/api/v1/class/1/assistant/1/copy/check", 200),
+    ],
+)
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_edit", "assistant:1"),
+        ("user:123", "can_create_assistants", "class:2"),
+    ]
+)
+async def test_copy_lecture_video_assistant_allows_matching_elevenlabs_only_credentials(
+    api, db, institution, valid_user_token, monkeypatch, path, expected_status
+):
+    monkeypatch.setattr(
+        copy_module.config.feature_flags,
+        "lecture_video_elevenlabs_only_mode",
+        True,
+    )
+
+    async with db.async_session() as session:
+        source_class = models.Class(
+            id=1,
+            name="Source Class",
+            institution_id=institution.id,
+            api_key="shared-key",
+        )
+        target_class = models.Class(
+            id=2,
+            name="Target Class",
+            institution_id=institution.id,
+            api_key="shared-key",
+        )
+        lecture_video = make_lecture_video(
+            source_class.id,
+            "copy-source.mp4",
+            filename="copy-source.mp4",
+            status=schemas.LectureVideoStatus.READY.value,
+            uploader_id=123,
+        )
+        session.add_all([source_class, target_class, lecture_video])
+        await session.flush()
+        await create_lecture_video_copy_credentials(
+            session,
+            source_class.id,
+            include_gemini=False,
+        )
+        await create_lecture_video_copy_credentials(
+            session,
+            target_class.id,
+            include_gemini=False,
+        )
+
+        session.add(
+            models.Assistant(
+                id=1,
+                name="Lecture Assistant",
+                class_id=source_class.id,
+                creator_id=123,
+                interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+                version=3,
+                model="gpt-4o-mini",
+                lecture_video_id=lecture_video.id,
+                instructions="Teach the lecture.",
+                tools="[]",
+            )
+        )
+        await session.commit()
+
+    response = api.post(
+        path,
+        json={"target_class_id": 2},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == expected_status
 
 
 @with_user(123)
