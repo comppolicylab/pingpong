@@ -1689,14 +1689,6 @@ export const getDefaultAPIKeys = async (f: Fetcher) => {
 };
 
 /**
- * Get the default API keys available for a class admin.
- */
-export const getClassDefaultAPIKeys = async (f: Fetcher, classId: number) => {
-	const url = `class/${classId}/api_keys/default`;
-	return await GET<never, DefaultAPIKeys>(f, url);
-};
-
-/**
  * Update the API key for a class.
  */
 export const updateApiKey = async (

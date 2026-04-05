@@ -68,7 +68,6 @@ export const load = async ({ fetch, params }: Parameters<PageLoad>[0]) => {
 	let hasGeminiCredential: boolean | undefined = false;
 	let hasElevenlabsCredential: boolean | undefined = false;
 	let defaultKeys: api.DefaultAPIKey[] | undefined;
-	let defaultKeyReadError: string | undefined;
 	if (grants.canViewApiKey || grants.canEditInfo) {
 		const apiKeyResponse = await api.getApiKey(fetch, classId).then(api.expandResponse);
 		if (apiKeyResponse.error) {
@@ -86,13 +85,8 @@ export const load = async ({ fetch, params }: Parameters<PageLoad>[0]) => {
 		}
 	}
 	if (grants.canViewApiKey) {
-		const defaultKeysResponse = await api
-			.getClassDefaultAPIKeys(fetch, classId)
-			.then(api.expandResponse);
-		if (defaultKeysResponse.error) {
-			defaultKeyReadError = defaultKeysResponse.error.detail || 'Error fetching default API keys.';
-			console.error('Error fetching default API keys.');
-		} else {
+		const defaultKeysResponse = await api.getDefaultAPIKeys(fetch).then(api.expandResponse);
+		if (!defaultKeysResponse.error) {
 			defaultKeys = defaultKeysResponse.data.default_keys;
 		}
 	}
@@ -117,7 +111,6 @@ export const load = async ({ fetch, params }: Parameters<PageLoad>[0]) => {
 		hasGeminiCredential,
 		hasElevenlabsCredential,
 		defaultKeys,
-		defaultKeyReadError,
 		grants,
 		class: classDataResponse.data,
 		subscription: subscription,

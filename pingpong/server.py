@@ -1026,18 +1026,6 @@ async def list_default_api_keys(request: StateRequest):
 
 
 @v1.get(
-    "/class/{class_id}/api_keys/default",
-    dependencies=[Depends(Authz("admin", "class:{class_id}"))],
-    response_model=schemas.DefaultAPIKeys,
-)
-async def list_default_api_keys_for_class(class_id: str, request: StateRequest):
-    class_ = await models.Class.get_by_id(request.state["db"], int(class_id))
-    if class_ is None:
-        raise HTTPException(status_code=404, detail="Class not found")
-    return await list_default_api_keys(request)
-
-
-@v1.get(
     "/institutions",
     dependencies=[Depends(LoggedIn())],
     response_model=schemas.Institutions,
@@ -3076,6 +3064,8 @@ async def create_class_credential(
     provider = update.provider
     api_key_obj: models.APIKey | None = None
     if update.api_key_id is not None:
+        if not await Authz("admin").test(request):
+            raise HTTPException(status_code=404, detail="API key not found")
         api_key_obj = await _get_default_api_key_or_404(
             request.state["db"], update.api_key_id
         )
@@ -3178,7 +3168,9 @@ async def create_class_credential(
 async def update_class_api_key(
     class_id: str, update: schemas.UpdateApiKey, request: StateRequest
 ):
-    existing_key = await models.Class.get_api_key(request.state["db"], int(class_id))
+    class_ = await models.Class.get_api_key(request.state["db"], int(class_id))
+    if not class_:
+        raise HTTPException(status_code=404, detail="Class not found")
     if update.api_key_id is not None:
         api_key_obj = await _get_default_api_key_or_404(
             request.state["db"], update.api_key_id
@@ -3194,17 +3186,17 @@ async def update_class_api_key(
                 ),
             ) from exc
 
-        if existing_key.api_key_obj and existing_key.api_key_obj.id == api_key_obj.id:
+        if class_.api_key_obj and class_.api_key_obj.id == api_key_obj.id:
             return {
                 "api_key": schemas.RedactedApiKey.from_raw(
-                    existing_key.api_key_obj.api_key,
-                    existing_key.api_key_obj.provider,
-                    existing_key.api_key_obj.endpoint,
-                    existing_key.api_key_obj.api_version,
-                    existing_key.api_key_obj.available_as_default,
+                    class_.api_key_obj.api_key,
+                    class_.api_key_obj.provider,
+                    class_.api_key_obj.endpoint,
+                    class_.api_key_obj.api_version,
+                    class_.api_key_obj.available_as_default,
                 )
             }
-        if existing_key.api_key_obj or existing_key.api_key:
+        if class_.api_key_obj or class_.api_key:
             raise HTTPException(
                 status_code=400,
                 detail="API key already exists. Delete it first to create a new one.",
@@ -3236,29 +3228,29 @@ async def update_class_api_key(
             detail="Provider must be provided to update the class API key.",
         )
     if (
-        existing_key.api_key_obj
-        and existing_key.api_key_obj.api_key == update.api_key
-        and existing_key.api_key_obj.provider == update.provider
-        and existing_key.api_key_obj.endpoint == update.endpoint
-        and existing_key.api_key_obj.api_version == update.api_version
+        class_.api_key_obj
+        and class_.api_key_obj.api_key == update.api_key
+        and class_.api_key_obj.provider == update.provider
+        and class_.api_key_obj.endpoint == update.endpoint
+        and class_.api_key_obj.api_version == update.api_version
     ):
         return {
             "api_key": schemas.RedactedApiKey.from_raw(
-                existing_key.api_key_obj.api_key,
-                existing_key.api_key_obj.provider,
-                existing_key.api_key_obj.endpoint,
-                existing_key.api_key_obj.api_version,
-                existing_key.api_key_obj.available_as_default,
+                class_.api_key_obj.api_key,
+                class_.api_key_obj.provider,
+                class_.api_key_obj.endpoint,
+                class_.api_key_obj.api_version,
+                class_.api_key_obj.available_as_default,
             )
         }
-    if existing_key.api_key == update.api_key:
+    if class_.api_key == update.api_key:
         return {
             "api_key": schemas.RedactedApiKey.from_raw(
-                existing_key.api_key,
+                class_.api_key,
                 "openai",
             )
         }
-    elif not existing_key.api_key_obj and not existing_key.api_key:
+    elif not class_.api_key_obj and not class_.api_key:
         response = await validate_api_key(
             update.api_key,
             update.provider.value,

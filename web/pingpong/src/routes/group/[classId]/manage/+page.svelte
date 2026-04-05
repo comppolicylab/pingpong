@@ -300,7 +300,6 @@
 	const matchesProviders = (key: api.DefaultAPIKey, providers: string[]) =>
 		providers.includes(key.provider);
 	$: defaultKeys = data.defaultKeys || [];
-	$: hasDefaultKeyReadError = !!data.defaultKeyReadError;
 	$: institutionDefaultKeyIds = new Set(
 		[
 			data.class.institution?.default_api_key_id,
@@ -741,9 +740,8 @@
 
 				await invalidateAll();
 				happyToast('Saved feature credential!');
-			} catch (error) {
+			} catch {
 				sadToast('An unknown error occurred');
-				throw error;
 			} finally {
 				updatingClassCredentialPurpose = null;
 			}
@@ -771,9 +769,8 @@
 
 			await invalidateAll();
 			happyToast('Saved feature credential!');
-		} catch (error) {
+		} catch {
 			sadToast('An unknown error occurred');
-			throw error;
 		} finally {
 			updatingClassCredentialPurpose = null;
 		}
@@ -1682,14 +1679,9 @@
 				<div class="col-span-2">
 					{#if !hasApiKey}
 						<form onsubmit={submitUpdateApiKey}>
-							{#if hasDefaultKeyReadError}
-								<Helper class="mb-3 text-red-600"
-									>Unable to load default keys right now. You can still enter credentials manually.</Helper
-								>
-							{/if}
 							<div class="flex flex-row items-center justify-between">
 								<Label for="provider">Choose your AI provider:</Label>
-								{#if !hasDefaultKeyReadError && hasBillingDefaultKeys}
+								{#if hasBillingDefaultKeys}
 									<button
 										type="button"
 										id="billing-default-key-btn"
@@ -2056,6 +2048,12 @@
 							<hr class="my-5 border-gray-200" />
 						{/if}
 						{#if !slot.credential}
+							{@const groupedDefaultKeys =
+								featureCredential.provider === 'elevenlabs'
+									? narrationDefaultKeys
+									: manifestDefaultKeys}
+							{@const hasFeatureDefaultKeys =
+								groupedDefaultKeys.institution.length > 0 || groupedDefaultKeys.general.length > 0}
 							<form
 								onsubmit={(event) =>
 									submitCreateClassCredential(
@@ -2064,90 +2062,71 @@
 										featureCredential.provider
 									)}
 							>
-								{#if hasDefaultKeyReadError}
-									<Helper class="mb-3 text-red-600"
-										>Unable to load default keys right now. You can still enter credentials
-										manually.</Helper
-									>
-								{/if}
-								{#if !hasDefaultKeyReadError}
-									{@const groupedDefaultKeys =
-										featureCredential.provider === 'elevenlabs'
-											? narrationDefaultKeys
-											: manifestDefaultKeys}
-									{@const hasFeatureDefaultKeys =
-										groupedDefaultKeys.institution.length > 0 ||
-										groupedDefaultKeys.general.length > 0}
-									<div class="flex flex-row items-center justify-between">
-										<Label for={`feature-api-key-${featureCredential.purpose}`} class="text-sm"
-											>{featureCredential.providerLabel}: {featureCredential.title}</Label
-										>
-										{#if hasFeatureDefaultKeys}
-											<button
-												type="button"
-												id={`feature-default-key-btn-${featureCredential.purpose}`}
-												class="cursor-pointer text-xs font-medium underline select-none"
-											>
-												Use pre-configured...
-											</button>
-											<Dropdown
-												triggeredBy={`#feature-default-key-btn-${featureCredential.purpose}`}
-												bind:open={featureDefaultKeyDropdownOpen[featureCredential.purpose]}
-												class="w-80"
-											>
-												{#if groupedDefaultKeys.institution.length > 0}
-													<div
-														class="px-3 py-1.5 text-xs font-semibold tracking-wide text-gray-500 uppercase"
-													>
-														Institution
-													</div>
-													{#each groupedDefaultKeys.institution as key (key.id)}
-														<DropdownItem
-															class="flex items-center gap-2 text-sm"
-															onclick={() =>
-																selectFeatureDefaultKey(featureCredential.purpose, String(key.id))}
-														>
-															{#if key.provider === 'elevenlabs'}
-																<ElevenLabsLogo size="4" />
-															{:else if key.provider === 'gemini'}
-																<GeminiLogo size="4" />
-															{/if}
-															{formatDefaultKeyLabel(key)}
-														</DropdownItem>
-													{/each}
-												{/if}
-												{#if groupedDefaultKeys.general.length > 0}
-													{#if groupedDefaultKeys.institution.length > 0}
-														<DropdownDivider />
-													{/if}
-													<div
-														class="px-3 py-1.5 text-xs font-semibold tracking-wide text-gray-500 uppercase"
-													>
-														General
-													</div>
-													{#each groupedDefaultKeys.general as key (key.id)}
-														<DropdownItem
-															class="flex items-center gap-2 text-sm"
-															onclick={() =>
-																selectFeatureDefaultKey(featureCredential.purpose, String(key.id))}
-														>
-															{#if key.provider === 'elevenlabs'}
-																<ElevenLabsLogo size="4" />
-															{:else if key.provider === 'gemini'}
-																<GeminiLogo size="4" />
-															{/if}
-															{formatDefaultKeyLabel(key)}
-														</DropdownItem>
-													{/each}
-												{/if}
-											</Dropdown>
-										{/if}
-									</div>
-								{:else}
+								<div class="flex flex-row items-center justify-between">
 									<Label for={`feature-api-key-${featureCredential.purpose}`} class="text-sm"
 										>{featureCredential.providerLabel}: {featureCredential.title}</Label
 									>
-								{/if}
+									{#if hasFeatureDefaultKeys}
+										<button
+											type="button"
+											id={`feature-default-key-btn-${featureCredential.purpose}`}
+											class="cursor-pointer text-xs font-medium underline select-none"
+										>
+											Use pre-configured...
+										</button>
+										<Dropdown
+											triggeredBy={`#feature-default-key-btn-${featureCredential.purpose}`}
+											bind:open={featureDefaultKeyDropdownOpen[featureCredential.purpose]}
+											class="w-80"
+										>
+											{#if groupedDefaultKeys.institution.length > 0}
+												<div
+													class="px-3 py-1.5 text-xs font-semibold tracking-wide text-gray-500 uppercase"
+												>
+													Institution
+												</div>
+												{#each groupedDefaultKeys.institution as key (key.id)}
+													<DropdownItem
+														class="flex items-center gap-2 text-sm"
+														onclick={() =>
+															selectFeatureDefaultKey(featureCredential.purpose, String(key.id))}
+													>
+														{#if key.provider === 'elevenlabs'}
+															<ElevenLabsLogo size="4" />
+														{:else if key.provider === 'gemini'}
+															<GeminiLogo size="4" />
+														{/if}
+														{formatDefaultKeyLabel(key)}
+													</DropdownItem>
+												{/each}
+											{/if}
+											{#if groupedDefaultKeys.general.length > 0}
+												{#if groupedDefaultKeys.institution.length > 0}
+													<DropdownDivider />
+												{/if}
+												<div
+													class="px-3 py-1.5 text-xs font-semibold tracking-wide text-gray-500 uppercase"
+												>
+													General
+												</div>
+												{#each groupedDefaultKeys.general as key (key.id)}
+													<DropdownItem
+														class="flex items-center gap-2 text-sm"
+														onclick={() =>
+															selectFeatureDefaultKey(featureCredential.purpose, String(key.id))}
+													>
+														{#if key.provider === 'elevenlabs'}
+															<ElevenLabsLogo size="4" />
+														{:else if key.provider === 'gemini'}
+															<GeminiLogo size="4" />
+														{/if}
+														{formatDefaultKeyLabel(key)}
+													</DropdownItem>
+												{/each}
+											{/if}
+										</Dropdown>
+									{/if}
+								</div>
 								<Helper class="mb-3"
 									>{featureCredential.description}
 									<b>You can't change the API key later.</b></Helper
