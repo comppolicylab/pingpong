@@ -285,7 +285,16 @@
 		provider: api.ClassCredentialProvider,
 		hasGeminiCredential: boolean | undefined,
 		hasElevenlabsCredential: boolean | undefined
-	) => (provider === 'gemini' ? hasGeminiCredential === true : hasElevenlabsCredential === true);
+	) => {
+		switch (provider) {
+			case 'gemini':
+				return hasGeminiCredential === true;
+			case 'elevenlabs':
+				return hasElevenlabsCredential === true;
+			default:
+				return false;
+		}
+	};
 	const providerDisplayName = (provider: string) =>
 		provider === 'openai'
 			? 'OpenAI'

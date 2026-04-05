@@ -36,6 +36,24 @@ LECTURE_VIDEO_COPY_REQUIRED_PURPOSES = (
 )
 
 
+def _lecture_video_copy_required_purposes() -> tuple[ClassCredentialPurpose, ...]:
+    if config.feature_flags.lecture_video_elevenlabs_only_mode:
+        return (ClassCredentialPurpose.LECTURE_VIDEO_NARRATION_TTS,)
+    return LECTURE_VIDEO_COPY_REQUIRED_PURPOSES
+
+
+def _lecture_video_copy_credentials_error_message() -> str:
+    if config.feature_flags.lecture_video_elevenlabs_only_mode:
+        return (
+            "Source and target classes must both have matching ElevenLabs "
+            "credentials to copy lecture video assistants."
+        )
+    return (
+        "Source and target classes must both have matching Gemini and ElevenLabs "
+        "credentials to copy lecture video assistants."
+    )
+
+
 async def create_new_class_object(
     session: AsyncSession, institution_id: int, create: CreateClass
 ) -> models.Class:
@@ -193,7 +211,7 @@ async def lecture_video_copy_credentials_match(
         )
     }
 
-    for purpose in LECTURE_VIDEO_COPY_REQUIRED_PURPOSES:
+    for purpose in _lecture_video_copy_required_purposes():
         source_credential = source_credentials.get(purpose)
         target_credential = target_credentials.get(purpose)
         if source_credential is None or target_credential is None:
@@ -214,10 +232,7 @@ async def ensure_lecture_video_copy_credentials(
     ):
         return
 
-    raise ValueError(
-        "Source and target classes must both have matching Gemini and ElevenLabs "
-        "credentials to copy lecture video assistants."
-    )
+    raise ValueError(_lecture_video_copy_credentials_error_message())
 
 
 def ensure_lecture_video_assistant_copy_ready(
