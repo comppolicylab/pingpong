@@ -308,17 +308,29 @@
 			data.class.institution?.default_lv_manifest_generation_api_key_id
 		].filter((id): id is number => !!id)
 	);
-	const getGroupedDefaultKeys = (providers: string[]) => {
-		const filtered = defaultKeys.filter((key) => matchesProviders(key, providers));
-		const institution = filtered.filter((key) => institutionDefaultKeyIds.has(key.id));
-		const general = filtered.filter((key) => !institutionDefaultKeyIds.has(key.id));
+	const getGroupedDefaultKeys = (
+		providers: string[],
+		keys: api.DefaultAPIKey[],
+		institutionIds: Set<number>
+	) => {
+		const filtered = keys.filter((key) => matchesProviders(key, providers));
+		const institution = filtered.filter((key) => institutionIds.has(key.id));
+		const general = filtered.filter((key) => !institutionIds.has(key.id));
 		return { institution, general };
 	};
-	$: billingDefaultKeys = getGroupedDefaultKeys(['openai', 'azure']);
+	$: billingDefaultKeys = getGroupedDefaultKeys(
+		['openai', 'azure'],
+		defaultKeys,
+		institutionDefaultKeyIds
+	);
 	$: hasBillingDefaultKeys =
 		billingDefaultKeys.institution.length > 0 || billingDefaultKeys.general.length > 0;
-	$: narrationDefaultKeys = getGroupedDefaultKeys(['elevenlabs']);
-	$: manifestDefaultKeys = getGroupedDefaultKeys(['gemini']);
+	$: narrationDefaultKeys = getGroupedDefaultKeys(
+		['elevenlabs'],
+		defaultKeys,
+		institutionDefaultKeyIds
+	);
+	$: manifestDefaultKeys = getGroupedDefaultKeys(['gemini'], defaultKeys, institutionDefaultKeyIds);
 	let selectedBillingDefaultKeyId = '';
 	let billingDefaultKeyDropdownOpen = false;
 	const selectBillingDefaultKey = (keyId: string) => {
@@ -344,8 +356,6 @@
 		return defaultKeys.find((key) => key.id === parsedId) || null;
 	};
 	$: selectedBillingDefaultKey = getSelectedDefaultKey(selectedBillingDefaultKeyId);
-	const getSelectedFeatureDefaultKey = (purpose: api.ClassCredentialPurpose) =>
-		getSelectedDefaultKey(selectedFeatureDefaultKeyIds[purpose] || '');
 	let featureDefaultKeyDropdownOpen: Record<string, boolean> = {};
 	const selectFeatureDefaultKey = (purpose: api.ClassCredentialPurpose, keyId: string) => {
 		selectedFeatureDefaultKeyIds = {
@@ -1680,14 +1690,13 @@
 							<div class="flex flex-row items-center justify-between">
 								<Label for="provider">Choose your AI provider:</Label>
 								{#if !hasDefaultKeyReadError && hasBillingDefaultKeys}
-									<Button
-										size="xs"
-										color="light"
-										class="px-2 py-1 text-xs font-normal"
+									<button
+										type="button"
 										id="billing-default-key-btn"
+										class="cursor-pointer text-xs font-medium underline select-none"
 									>
-										Use pre-configured... <ChevronDownOutline class="ms-1 h-3 w-3" />
-									</Button>
+										Use pre-configured...
+									</button>
 									<Dropdown
 										triggeredBy="#billing-default-key-btn"
 										bind:open={billingDefaultKeyDropdownOpen}
@@ -2074,14 +2083,13 @@
 											>{featureCredential.providerLabel}: {featureCredential.title}</Label
 										>
 										{#if hasFeatureDefaultKeys}
-											<Button
-												size="xs"
-												color="light"
-												class="px-2 py-1 text-xs font-normal"
+											<button
+												type="button"
 												id={`feature-default-key-btn-${featureCredential.purpose}`}
+												class="cursor-pointer text-xs font-medium underline select-none"
 											>
-												Use pre-configured... <ChevronDownOutline class="ms-1 h-3 w-3" />
-											</Button>
+												Use pre-configured...
+											</button>
 											<Dropdown
 												triggeredBy={`#feature-default-key-btn-${featureCredential.purpose}`}
 												bind:open={featureDefaultKeyDropdownOpen[featureCredential.purpose]}
