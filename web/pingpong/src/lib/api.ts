@@ -1435,6 +1435,7 @@ export type ApiKeyResponse = {
 	ai_provider?: string | null;
 	has_gemini_credential?: boolean;
 	has_elevenlabs_credential?: boolean;
+	hide_gemini_endpoint_in_manage_group?: boolean;
 	api_key?: ApiKey | null;
 	credentials?: ClassCredentialSlot[] | null;
 };

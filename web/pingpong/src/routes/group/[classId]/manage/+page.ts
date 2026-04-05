@@ -73,6 +73,7 @@ export const load = async ({ fetch, params }: Parameters<PageLoad>[0]) => {
 	let hasGeminiCredential: boolean | undefined = false;
 	let hasElevenlabsCredential: boolean | undefined = false;
 	let defaultKeys: api.DefaultAPIKey[] | undefined;
+	let hideGeminiEndpointInManageGroup = false;
 	if (grants.canViewApiKey || grants.canEditInfo) {
 		const apiKeyResponse = await api.getApiKey(fetch, classId).then(api.expandResponse);
 		if (apiKeyResponse.error) {
@@ -82,6 +83,8 @@ export const load = async ({ fetch, params }: Parameters<PageLoad>[0]) => {
 			hasElevenlabsCredential = undefined;
 			console.error('Error fetching group credential details.');
 		} else {
+			hideGeminiEndpointInManageGroup =
+				apiKeyResponse.data.hide_gemini_endpoint_in_manage_group ?? false;
 			apiKey = apiKeyResponse.data.api_key ?? undefined;
 			classCredentials = apiKeyResponse.data.credentials ?? undefined;
 			aiProvider = apiKeyResponse.data.ai_provider ?? null;
@@ -132,6 +135,7 @@ export const load = async ({ fetch, params }: Parameters<PageLoad>[0]) => {
 		aiProvider,
 		hasGeminiCredential,
 		hasElevenlabsCredential,
+		hideGeminiEndpointInManageGroup,
 		defaultKeys,
 		grants,
 		class: classDataResponse.data,
