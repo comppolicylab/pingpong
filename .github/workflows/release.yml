@@ -93,7 +93,7 @@ jobs:
           echo "Computed RELEASE_VERSION=$RELEASE_VERSION"
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@84e497037868db1737eb2907599d3f61e8899373
+        uses: aws-actions/configure-aws-credentials@dc64d283718fb89ace3839da443b41ded26d2612
         with:
           aws-access-key-id: ${{ secrets.PINGPONG_AWS_ACCESS_KEY }}
           aws-secret-access-key: ${{ secrets.PINGPONG_AWS_SECRET_ACCESS_KEY }}
@@ -101,7 +101,7 @@ jobs:
 
       - name: Login to Amazon ECR
         id: login-ecr
-        uses: aws-actions/amazon-ecr-login@a080f59b057d681bf221f98cbdcd9f0defa1a1a9
+        uses: aws-actions/amazon-ecr-login@f2e9fc6c2b355c1890b65e6f6f0e2ac3e6e22f78
 
       - name: Check if Server image exists
         env:
@@ -247,7 +247,7 @@ jobs:
             $SLACK_WEBHOOK
 
       - name: Create Sentry release
-        uses: getsentry/action-release@dab6548b3c03c4717878099e43782cf5be654289
+        uses: getsentry/action-release@5657c9e888b4e2cc85f4d29143ea4131fde4a73a
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: ${{ vars.SENTRY_ORG }}
