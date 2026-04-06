@@ -396,7 +396,11 @@ async def test_list_messages_tool_calls_excludes_hidden_messages_by_default(db):
         system_message_id = system_message.id
 
     async with db.async_session() as session:
-        messages, tool_calls, reasoning_steps = await models.Thread.list_messages_tool_calls(
+        (
+            messages,
+            tool_calls,
+            reasoning_steps,
+        ) = await models.Thread.list_messages_tool_calls(
             session,
             thread_id,
             run_ids=[run_id],
