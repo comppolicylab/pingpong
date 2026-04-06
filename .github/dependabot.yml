@@ -1,6 +1,7 @@
 version: 2
 updates:
-  - package-ecosystem: "pip"
+  - package-ecosystem: "uv"
+    versioning-strategy: increase
     directory: "/"
     schedule:
       interval: "cron"
@@ -32,6 +33,7 @@ updates:
         patterns:
           - "*"
   - package-ecosystem: "npm"
+    versioning-strategy: increase
     directory: "web/pingpong/"
     schedule:
       interval: "cron"
