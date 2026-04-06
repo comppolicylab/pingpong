@@ -21,8 +21,8 @@ dependencies = [
     "azure-communication-email ~= 1.1.0",
     "beautifulsoup4 ~= 4.14.3",
     "cryptography ~= 46.0.5",
-    "discord-py ~= 2.6.4",
-    "elevenlabs ~= 2.39.0",
+    "discord-py~=2.7.1",
+    "elevenlabs~=2.41.0",
     "email-validator ~= 2.3.0",
     "fastapi [standard] ~= 0.129.0",
     "google-genai [aiohttp] ~= 1.67.0",
@@ -44,12 +44,12 @@ dependencies = [
     "python3-saml ~= 1.16.0",
     "pytz ~= 2025.2",
     "requests ~= 2.33.1",
-    "sentry-sdk ~= 2.53.0",
+    "sentry-sdk~=2.57.0",
     "sqlalchemy [asyncio] ~= 2.0.46",
     "starlette ~= 0.52.1",
     "tqdm ~= 4.67.3",
     "uuid-utils ~= 0.14.0",
-    "uvicorn ~= 0.41.0",
+    "uvicorn~=0.43.0",
 ]
 
 [project.urls]
