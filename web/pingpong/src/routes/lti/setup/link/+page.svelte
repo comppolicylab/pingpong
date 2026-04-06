@@ -11,6 +11,9 @@
 	export let data;
 
 	const { context, groups, ltiClassId, supportInfo } = data;
+	const sortedGroups = [...groups].sort((a, b) =>
+		a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+	);
 
 	// Build display name for the course
 	// Previously, we used "Course Code: Course Name", but in many cases the
@@ -73,7 +76,7 @@
 					Link <span class="font-semibold">{courseName}</span> to one of your existing PingPong groups.
 				</div>
 
-				{#if groups.length === 0}
+				{#if sortedGroups.length === 0}
 					<div class="flex flex-col items-center gap-4 py-8 text-center">
 						<InfoCircleSolid class="h-12 w-12 text-gray-400" />
 						<div class="text-gray-600">
@@ -96,7 +99,7 @@
 				{:else}
 					<form onsubmit={handleSubmit} class="flex flex-col gap-4">
 						<div class="flex max-h-64 flex-col gap-2 overflow-y-scroll">
-							{#each groups as group (group.id)}
+							{#each sortedGroups as group (group.id)}
 								<label
 									for="group-{group.id}"
 									class="flex cursor-pointer items-center rounded-xl border p-4 transition-colors hover:bg-gray-50 {selectedGroupId ===
