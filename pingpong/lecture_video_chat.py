@@ -20,8 +20,10 @@ from pingpong.lecture_video_service import (
 
 logger = logging.getLogger(__name__)
 
+# Include a short future transcript window and a slight frame rewind so chat context stays aligned.
 LOOKAHEAD_WINDOW_MS = 30_000
 FRAME_LOOKBACK_MS = 1_000
+TRANSCRIPT_CONTEXT_WINDOW_MS = 120_000
 
 
 @dataclass
@@ -43,24 +45,43 @@ def _apply_lecture_video_chat_metadata(thread: models.Thread) -> None:
     )
 
 
-def _normalize_timestamp_ms(value: int | float) -> int:
-    numeric_value = float(value)
-    if not numeric_value.is_integer():
-        return max(0, int(round(numeric_value * 1000)))
+def _transcript_timestamp_scale(
+    words: list[schemas.LectureVideoManifestWordV2],
+) -> int:
+    numeric_bounds = [(float(word.start), float(word.end)) for word in words]
+    if any(
+        not start.is_integer() or not end.is_integer() for start, end in numeric_bounds
+    ):
+        return 1000
 
-    int_value = int(numeric_value)
-    if int_value >= 10_000:
-        return int_value
-    return max(0, int_value * 1000)
+    positive_deltas = [end - start for start, end in numeric_bounds if end > start] + [
+        next_start - start
+        for (start, _), (next_start, _) in zip(numeric_bounds, numeric_bounds[1:])
+        if next_start > start
+    ]
+
+    # Decide the unit once for the whole transcript. Whole-second manifests tend
+    # to have very small positive deltas between words; millisecond manifests do
+    # not. This avoids mixing units based on the magnitude of individual values.
+    smallest_positive_delta = min(positive_deltas, default=None)
+    if smallest_positive_delta is not None and smallest_positive_delta <= 10:
+        return 1000
+
+    return 1
+
+
+def _normalize_timestamp_ms(value: int | float, *, scale: int) -> int:
+    return max(0, int(round(float(value) * scale)))
 
 
 def _serialize_transcript_words(
     words: list[schemas.LectureVideoManifestWordV2],
 ) -> list[tuple[int, int, str]]:
+    scale = _transcript_timestamp_scale(words)
     return [
         (
-            _normalize_timestamp_ms(word.start),
-            _normalize_timestamp_ms(word.end),
+            _normalize_timestamp_ms(word.start, scale=scale),
+            _normalize_timestamp_ms(word.end, scale=scale),
             word.word,
         )
         for word in words
@@ -82,6 +103,9 @@ def _join_words(words: list[str]) -> str:
     if not words:
         return ""
 
+    # This is a deliberately small punctuation heuristic; it covers common
+    # transcript tokens well enough for now but will miss edge cases such as
+    # em dashes or ellipses.
     no_leading_space = {".", ",", "!", "?", ":", ";", ")", "]", "}", "%"}
     no_trailing_space = {"(", "[", "{", "$"}
 
@@ -195,14 +219,22 @@ def _build_context_text(
     current_offset_ms = max(0, state.last_known_offset_ms)
     transcript_words = _serialize_transcript_words(manifest.word_level_transcription)
 
-    transcript_label = (
-        "Transcript so far"
-        if state.last_chat_context_end_ms <= 0
-        else "New transcript since last lecture chat"
+    uncapped_transcript_start_ms = (
+        0 if state.last_chat_context_end_ms <= 0 else state.last_chat_context_end_ms
     )
+    transcript_start_ms = max(
+        uncapped_transcript_start_ms,
+        current_offset_ms - TRANSCRIPT_CONTEXT_WINDOW_MS,
+    )
+    transcript_label = "Recent transcript context"
+    if state.last_chat_context_end_ms > 0:
+        transcript_label = "Recent transcript since last lecture chat"
+    if transcript_start_ms > uncapped_transcript_start_ms:
+        transcript_label += " (older transcript omitted)"
+
     transcript_text = _transcript_slice_text(
         transcript_words,
-        0 if state.last_chat_context_end_ms <= 0 else state.last_chat_context_end_ms,
+        transcript_start_ms,
         current_offset_ms,
     )
 
@@ -370,8 +402,8 @@ async def _build_frame_message_parts(
             await models.Thread.add_image_files(
                 session, thread_id, created_thread_image_file_ids
             )
-    except Exception:
-        logger.warning(
+    except (OSError, RuntimeError):
+        logger.error(
             "Failed to build lecture video frame context. lecture_video_id=%s",
             lecture_video.id,
             exc_info=True,

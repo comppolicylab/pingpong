@@ -309,7 +309,7 @@ async def create_ready_lecture_video_assistant(
     session.add(lecture_video)
     await session.flush()
 
-    validated_manifest = schemas._validate_lecture_video_manifest(
+    validated_manifest = schemas.validate_lecture_video_manifest(
         manifest or lecture_video_manifest()
     )
     assert validated_manifest is not None
@@ -750,6 +750,90 @@ async def test_send_message_creates_lecture_chat_run_with_hidden_context(
         "user"
     ]
     assert thread_response.json()["thread"]["is_current_user_participant"] is True
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
+        ("user:123", "can_view", "assistant:1"),
+    ]
+)
+async def test_list_thread_messages_hides_lecture_chat_context_messages(
+    api, config, db, institution, monkeypatch, valid_user_token
+):
+    async with db.async_session() as session:
+        class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+            manifest=lecture_video_manifest_v2(),
+        )
+
+    create_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/lecture",
+        json={"assistant_id": 1, "parties": [123]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+    thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
+
+    async def fake_build_context(*args, **kwargs):
+        return server_module.lecture_video_chat.LectureChatContextBuildResult(
+            text_message_parts=[
+                models.MessagePart(
+                    part_index=0,
+                    type=schemas.MessagePartType.INPUT_TEXT,
+                    text="Lecture chat context\nCurrent offset: 4321ms",
+                )
+            ],
+            frame_message_parts=[
+                models.MessagePart(
+                    part_index=0,
+                    type=schemas.MessagePartType.INPUT_IMAGE,
+                    input_image_file_id="frame-file-id",
+                )
+            ],
+            current_offset_ms=4321,
+        )
+
+    def fake_run_response(*args, **kwargs):
+        async def stream():
+            yield b"event: done\ndata: [DONE]\n\n"
+
+        return stream()
+
+    monkeypatch.setattr(
+        server_module.lecture_video_chat,
+        "build_lecture_chat_context_message_parts",
+        fake_build_context,
+    )
+    monkeypatch.setattr(server_module, "run_response", fake_run_response)
+
+    response = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}",
+        json={"message": "Why does latency matter more here?"},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+
+    messages_response = api.get(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/messages",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert messages_response.status_code == 200
+    assert [message["role"] for message in messages_response.json()["messages"]] == [
+        "user"
+    ]
+    assert [
+        message["content"][0]["text"]["value"]
+        for message in messages_response.json()["messages"]
+    ] == ["Why does latency matter more here?"]
+    assert messages_response.json()["has_more"] is False
 
 
 @with_user(123)

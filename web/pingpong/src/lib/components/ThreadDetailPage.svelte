@@ -11,6 +11,7 @@
 	} from '$lib/stores/anonymous';
 	import { happyToast, sadToast } from '$lib/toast';
 	import { errorMessage } from '$lib/errors';
+	import { scroll } from '$lib/actions/scroll';
 	import { computeLatestIncidentTimestamps, filterLatestIncidentUpdates } from '$lib/statusUpdates';
 	import { blur } from 'svelte/transition';
 	import {
@@ -77,7 +78,9 @@
 	import MCPServerCallItem from './MCPServerCallItem.svelte';
 	import ReasoningCallItem from './ReasoningCallItem.svelte';
 	import WebSearchCallItem from './WebSearchCallItem.svelte';
-	import LectureVideoView from '$lib/components/lecture-video/LectureVideoView.svelte';
+	import LectureVideoView, {
+		type LectureVideoViewHandle
+	} from '$lib/components/lecture-video/LectureVideoView.svelte';
 	import LectureVideoChatPanel from '$lib/components/lecture-video/LectureVideoChatPanel.svelte';
 
 	function formatLectureVideoTitle(filename: string | null | undefined): string | null {
@@ -150,7 +153,6 @@
 	$: threadLectureChatAvailable = lectureVideoSession?.lecture_video_chat_available === true;
 	$: effectiveLectureVideoMismatch = threadLectureVideoMismatch;
 	$: effectiveLectureVideoAssistantMismatch = threadLectureVideoMismatch;
-	type LectureVideoViewHandle = { pauseForChatInput: () => Promise<void> };
 	let lectureVideoViewRef: LectureVideoViewHandle | null = null;
 	let lectureChatHasDraft = false;
 	let liveLectureVideoSession: api.LectureVideoSession | null = null;
@@ -581,163 +583,6 @@
 
 		return '';
 	};
-
-	// Scroll to the bottom of the chat thread.
-	type ScrollParams = { messages: Message[]; threadId: number; streaming: boolean };
-
-	const scroll = (el: HTMLDivElement, params: ScrollParams) => {
-		const scrollEl = el;
-		let lastScrollTop = scrollEl.scrollTop;
-		let userPausedAutoScroll = false;
-		let isProgrammaticScroll = false;
-		let settleFrame: number | null = null;
-		let settlePassesRemaining = 0;
-		let lastKnownScrollHeight = scrollEl.scrollHeight;
-		let lastMessageId: string | null = params.messages[params.messages.length - 1]?.data.id ?? null;
-		let currentThreadId = params.threadId;
-		let isStreaming = params.streaming;
-
-		const scrollToBottom = () => {
-			isProgrammaticScroll = true;
-			scrollEl.scrollTo({
-				top: scrollEl.scrollHeight,
-				behavior: 'smooth'
-			});
-			requestAnimationFrame(() => {
-				lastScrollTop = scrollEl.scrollTop;
-				lastKnownScrollHeight = scrollEl.scrollHeight;
-				isProgrammaticScroll = false;
-			});
-		};
-
-		const cancelSettledScroll = () => {
-			if (settleFrame !== null) {
-				cancelAnimationFrame(settleFrame);
-				settleFrame = null;
-			}
-			settlePassesRemaining = 0;
-		};
-
-		const scheduleScrollToBottom = (passes = 6) => {
-			if (userPausedAutoScroll) {
-				return;
-			}
-
-			settlePassesRemaining = Math.max(settlePassesRemaining, passes);
-			if (settleFrame !== null) {
-				return;
-			}
-
-			const run = () => {
-				settleFrame = null;
-				if (userPausedAutoScroll) {
-					settlePassesRemaining = 0;
-					return;
-				}
-
-				const scrollHeightChanged = scrollEl.scrollHeight !== lastKnownScrollHeight;
-				scrollToBottom();
-				lastKnownScrollHeight = scrollEl.scrollHeight;
-				settlePassesRemaining -= 1;
-				if (scrollHeightChanged) {
-					settlePassesRemaining = Math.max(settlePassesRemaining, 2);
-				}
-				if (settlePassesRemaining > 0) {
-					settleFrame = requestAnimationFrame(run);
-				}
-			};
-
-			settleFrame = requestAnimationFrame(run);
-		};
-
-		const onScroll = () => {
-			if (isProgrammaticScroll) {
-				lastScrollTop = scrollEl.scrollTop;
-				return;
-			}
-			const isScrollingUp = scrollEl.scrollTop < lastScrollTop - 5;
-
-			// Pause auto-scroll on upward scroll
-			if (isScrollingUp) {
-				userPausedAutoScroll = true;
-			}
-			// Resume auto-scroll only when streaming, scrolling down, and near the bottom
-			if (isStreaming) {
-				const isScrollingDown = scrollEl.scrollTop > lastScrollTop;
-				const distanceFromBottom =
-					scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
-				if (userPausedAutoScroll && isScrollingDown && distanceFromBottom < 50) {
-					userPausedAutoScroll = false;
-				}
-			}
-			lastScrollTop = scrollEl.scrollTop;
-		};
-
-		const mutationObserver = new MutationObserver(() => {
-			if (isStreaming) scheduleScrollToBottom(4);
-		});
-		const onDescendantLoad = () => {
-			if (isStreaming) scheduleScrollToBottom(4);
-		};
-
-		scrollEl.addEventListener('scroll', onScroll, { passive: true });
-		scrollEl.addEventListener('load', onDescendantLoad, true);
-		mutationObserver.observe(scrollEl, {
-			childList: true,
-			subtree: true,
-			characterData: true
-		});
-		scheduleScrollToBottom();
-
-		return {
-			update: (nextParams: ScrollParams) => {
-				const wasStreaming = isStreaming;
-				isStreaming = nextParams.streaming;
-
-				// Reset scroll state when navigating to a different thread
-				if (nextParams.threadId !== currentThreadId) {
-					currentThreadId = nextParams.threadId;
-					userPausedAutoScroll = false;
-					lastMessageId = null;
-					lastScrollTop = 0;
-					lastKnownScrollHeight = scrollEl.scrollHeight;
-					scheduleScrollToBottom();
-					return;
-				}
-
-				const nextMessages = nextParams.messages;
-				const nextLastMessage = nextMessages[nextMessages.length - 1];
-				const nextLastMessageId = nextLastMessage?.data.id ?? null;
-				const hasNewTailMessage = nextLastMessageId && nextLastMessageId !== lastMessageId;
-				const isCurrentUserTail =
-					nextLastMessage?.data.role === 'user' &&
-					nextLastMessage?.data.metadata?.is_current_user === true;
-				lastMessageId = nextLastMessageId;
-
-				// Reset pause when streaming starts so new responses auto-scroll
-				if (isStreaming && !wasStreaming) {
-					userPausedAutoScroll = false;
-				}
-
-				requestAnimationFrame(() => {
-					// Force scroll when user sends a new message
-					if (hasNewTailMessage && isCurrentUserTail) {
-						userPausedAutoScroll = false;
-					}
-					if (!userPausedAutoScroll && (hasNewTailMessage || isStreaming)) {
-						scheduleScrollToBottom();
-					}
-				});
-			},
-			destroy: () => {
-				cancelSettledScroll();
-				mutationObserver.disconnect();
-				scrollEl.removeEventListener('load', onDescendantLoad, true);
-				scrollEl.removeEventListener('scroll', onScroll);
-			}
-		};
-	};
-
 	// Fetch an earlier page of messages
 	const fetchMoreMessages = async () => {
 		await threadMgr.fetchMore();
@@ -853,13 +698,17 @@
 		await postMessage(e.detail);
 	};
 
+	const handleLectureChatSubmit = async (message: ChatInputMessage) => {
+		await postMessage(message);
+	};
+
 	const handleLectureSessionChange = (e: CustomEvent<api.LectureVideoSession>) => {
 		liveLectureVideoSession = e.detail;
 	};
 
-	const handleLectureChatInputStart = (e: CustomEvent<{ hasText: boolean }>) => {
-		lectureChatHasDraft = e.detail.hasText;
-		if (e.detail.hasText) {
+	const handleLectureChatDraftChange = ({ hasText }: { hasText: boolean }) => {
+		lectureChatHasDraft = hasText;
+		if (hasText) {
 			void lectureVideoViewRef?.pauseForChatInput();
 		}
 	};
@@ -891,6 +740,10 @@
 	};
 
 	const handleDismissError = () => {
+		threadMgr.dismissError();
+	};
+
+	const handleLectureChatDismissError = () => {
 		threadMgr.dismissError();
 	};
 
@@ -1632,7 +1485,7 @@
 					deferAutoContinueForChatDraft={lectureChatHasDraft}
 					on:sessionchange={handleLectureSessionChange}
 				>
-					{#snippet desktopChat()}
+					{#snippet chat()}
 						{#if threadLectureChatAvailable}
 							<LectureVideoChatPanel
 								{classId}
@@ -1655,40 +1508,10 @@
 								participants={$participants}
 								mimeType={data.uploadInfo.mimeType}
 								{fetchMoreMessages}
-								on:submit={handleSubmit}
-								on:dismissError={handleDismissError}
-								on:textinput={handleLectureChatInputStart}
-								on:textpaste={handleLectureChatInputStart}
-							/>
-						{/if}
-					{/snippet}
-					{#snippet mobileChat()}
-						{#if threadLectureChatAvailable}
-							<LectureVideoChatPanel
-								{classId}
-								{threadId}
-								messages={$messages}
-								canFetchMore={$canFetchMore}
-								canSubmit={lectureChatCanSubmit}
-								disabled={lectureChatInputDisabled}
-								waiting={$waiting}
-								submitting={$submitting}
-								{threadManagerError}
-								{assistantDeleted}
-								{canViewAssistant}
-								{resolvedAssistantVersion}
-								version={$version}
-								{useLatex}
-								meName={data?.me?.user?.name || data?.me?.user?.email || 'Me'}
-								meImage={data?.me?.profile?.image_url || ''}
-								assistantId={$assistantId}
-								participants={$participants}
-								mimeType={data.uploadInfo.mimeType}
-								{fetchMoreMessages}
-								on:submit={handleSubmit}
-								on:dismissError={handleDismissError}
-								on:textinput={handleLectureChatInputStart}
-								on:textpaste={handleLectureChatInputStart}
+								onsubmit={handleLectureChatSubmit}
+								ondismisserror={handleLectureChatDismissError}
+								ontextinput={handleLectureChatDraftChange}
+								ontextpaste={handleLectureChatDraftChange}
 							/>
 						{/if}
 					{/snippet}

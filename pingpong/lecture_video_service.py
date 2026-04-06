@@ -282,7 +282,7 @@ def lecture_video_manifest_from_model(
     if not lecture_video.manifest_data:
         return base_manifest
 
-    stored_manifest = schemas._validate_lecture_video_manifest(
+    stored_manifest = schemas.validate_lecture_video_manifest(
         lecture_video.manifest_data
     )
     if stored_manifest is None or stored_manifest.version == 1:

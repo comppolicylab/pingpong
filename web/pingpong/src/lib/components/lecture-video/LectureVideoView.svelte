@@ -1,3 +1,9 @@
+<script module lang="ts">
+	export type LectureVideoViewHandle = {
+		pauseForChatInput: () => Promise<void>;
+	};
+</script>
+
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import { beforeNavigate } from '$app/navigation';
@@ -37,8 +43,7 @@
 		canParticipate = true,
 		initialSession = null,
 		deferAutoContinueForChatDraft = false,
-		desktopChat = undefined,
-		mobileChat = undefined
+		chat = undefined
 	}: {
 		classId: number;
 		threadId: number;
@@ -47,8 +52,7 @@
 		canParticipate?: boolean;
 		initialSession?: LectureVideoSession | null;
 		deferAutoContinueForChatDraft?: boolean;
-		desktopChat?: Snippet;
-		mobileChat?: Snippet;
+		chat?: Snippet;
 	} = $props();
 	const dispatch = createEventDispatcher<{
 		sessionchange: LectureVideoSession;
@@ -185,7 +189,7 @@
 	let hasQuestionPrompt = $derived(hasVisibleQuestionPrompt(sessionState));
 	let visibleCurrentQuestion = $derived(hasQuestionPrompt ? currentQuestion : null);
 	let hasMobileChecksPanel = $derived(!isCompletedSession(sessionState));
-	let hasMobileChatPanel = $derived(!!mobileChat);
+	let hasMobileChatPanel = $derived(!!chat);
 	let activeQuestionIds = $derived(
 		getActiveQuestionIds(questionPlaybackLocked, currentQuestion, currentContinuation)
 	);
@@ -1451,7 +1455,7 @@
 		<div
 			class="mx-auto flex h-full w-full max-w-screen-2xl flex-col gap-6 px-4 py-4 lg:px-6 xl:grid xl:grid-cols-[minmax(0,1fr)_24rem] xl:items-stretch xl:gap-8 xl:py-6"
 		>
-			<div class="min-w-0 shrink-0 space-y-4 xl:shrink xl:overflow-y-auto">
+			<div class="min-h-0 min-w-0 space-y-4 overflow-y-auto">
 				{#if !canParticipate}
 					<div
 						class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700"
@@ -1518,7 +1522,7 @@
 						/>
 					{/if}
 					<div class="min-h-0 flex-1">
-						{@render desktopChat?.()}
+						{@render chat?.()}
 					</div>
 				</div>
 			{:else}
@@ -1567,7 +1571,7 @@
 					{/if}
 					{#if hasMobileChatPanel && (!hasMobileChecksPanel || activeMobilePanel === 'chat')}
 						<div class="min-h-0 flex-1">
-							{@render mobileChat?.()}
+							{@render chat?.()}
 						</div>
 					{/if}
 				</div>

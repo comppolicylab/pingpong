@@ -8143,15 +8143,6 @@ async def delete_thread(
     if vector_store_obj_id:
         await delete_vector_store_oai(openai_client, vector_store_obj_id)
 
-    if file_ids_to_delete:
-        await handle_delete_files(
-            request.state["db"],
-            request.state["authz"],
-            openai_client,
-            list(dict.fromkeys(file_ids_to_delete)),
-            int(class_id),
-        )
-
     if thread_version <= 2:
         try:
             await openai_client.beta.threads.delete(thread_obj_id)

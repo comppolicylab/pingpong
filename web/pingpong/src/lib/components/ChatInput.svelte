@@ -542,7 +542,7 @@
 	const handlePaste = (e: ClipboardEvent) => {
 		const target = e.target as HTMLTextAreaElement | null;
 		queueMicrotask(() => {
-			dispatcher('textpaste', { hasText: target?.value.trim().length ? true : false });
+			dispatcher('textpaste', { hasText: !!target?.value.trim().length });
 		});
 		if (!upload || !fileUploadRef) {
 			return;

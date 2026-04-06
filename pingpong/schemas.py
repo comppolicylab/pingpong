@@ -1,8 +1,6 @@
-from __future__ import annotations
-
 from datetime import date, datetime
 from enum import Enum, StrEnum, auto
-from typing import Any, Generic, Literal, NotRequired, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Generic, Literal, NotRequired, TypeVar, Union
 from typing_extensions import TypedDict, Annotated, TypeAlias
 
 from openai._utils import PropertyInfo
@@ -37,9 +35,6 @@ from pydantic import (
 
 from pingpong.authz.base import Relation
 from .gravatar import get_email_hash, get_gravatar_image
-
-if TYPE_CHECKING:
-    pass
 
 
 class Statistics(BaseModel):
@@ -562,7 +557,7 @@ def _lecture_video_manifest_error_detail(exc: ValidationError) -> str:
     return "; ".join(errors)
 
 
-def _validate_lecture_video_manifest(
+def validate_lecture_video_manifest(
     lecture_video_manifest: LectureVideoManifest | Any | None,
 ) -> LectureVideoManifest | None:
     if lecture_video_manifest is None or isinstance(
@@ -583,6 +578,12 @@ def _validate_lecture_video_manifest(
             "Invalid lecture video manifest. "
             f"{_lecture_video_manifest_error_detail(exc)}"
         ) from exc
+
+
+def _validate_lecture_video_manifest(
+    lecture_video_manifest: LectureVideoManifest | Any | None,
+) -> LectureVideoManifest | None:
+    return validate_lecture_video_manifest(lecture_video_manifest)
 
 
 class LectureVideoSummary(BaseModel):
@@ -1022,7 +1023,7 @@ class CreateAssistant(BaseModel):
     @field_validator("lecture_video_manifest", mode="before")
     @classmethod
     def validate_lecture_video_manifest(cls, value):
-        return _validate_lecture_video_manifest(value)
+        return validate_lecture_video_manifest(value)
 
     @field_validator("voice_id")
     @classmethod
@@ -1104,7 +1105,7 @@ class UpdateAssistant(BaseModel):
     @field_validator("lecture_video_manifest", mode="before")
     @classmethod
     def validate_lecture_video_manifest(cls, value):
-        return _validate_lecture_video_manifest(value)
+        return validate_lecture_video_manifest(value)
 
     @field_validator("voice_id")
     @classmethod
