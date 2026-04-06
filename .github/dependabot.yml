@@ -1,7 +1,6 @@
 version: 2
 updates:
   - package-ecosystem: "uv"
-    versioning-strategy: increase
     directory: "/"
     schedule:
       interval: "cron"
@@ -16,6 +15,11 @@ updates:
       semver-minor-days: 3
       semver-patch-days: 1
     groups:
+      opentelemetry-pair:
+        dependency-type: "production"
+        patterns:
+          - "opentelemetry-api"
+          - "opentelemetry-sdk"
       uv-prod-minor-patch:
         dependency-type: "production"
         patterns:
@@ -30,6 +34,7 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    versioning-strategy: increase
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -43,7 +48,6 @@ updates:
         patterns:
           - "*"
   - package-ecosystem: "npm"
-    versioning-strategy: increase
     directory: "web/pingpong/"
     schedule:
       interval: "cron"
@@ -77,3 +81,4 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    versioning-strategy: increase
