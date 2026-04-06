@@ -33,6 +33,16 @@ def test_parse_addresses_with_crlf_and_names():
     assert all(result.valid for result in results)
 
 
+def test_parse_addresses_with_standalone_cr():
+    results = parse_addresses("first@example.com\rsecond@example.com")
+
+    assert [result.email for result in results] == [
+        "first@example.com",
+        "second@example.com",
+    ]
+    assert all(result.valid for result in results)
+
+
 def test_parse_addresses_with_mixed_separators():
     results = parse_addresses("first@example.com,\nsecond@example.com")
 
