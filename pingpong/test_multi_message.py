@@ -1567,3 +1567,80 @@ async def test_create_run_locks_thread_before_checking_latest_run(
 
     assert response.status_code == 200
     assert any(lock_calls)
+
+
+@with_user(889)
+@with_authz(grants=[("user:889", "can_participate", "thread:8111")])
+async def test_create_run_includes_assistant_code_interpreter_files_on_first_run(
+    api, db, valid_user_token, monkeypatch
+):
+    base_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+    async with db.async_session() as session:
+        class_ = models.Class(id=8011, name="Initial Run CI Class", api_key="sk-test")
+        assistant_file = models.File(
+            id=8112,
+            file_id="file-assistant-8112",
+            name="starter.csv",
+            content_type="text/csv",
+            class_id=class_.id,
+        )
+        assistant = models.Assistant(
+            id=8012,
+            name="Initial Run CI Assistant",
+            class_id=class_.id,
+            assistant_id="asst-initial-run-ci",
+            model="gpt-4o-mini",
+            creator_id=889,
+            hide_file_search_document_names=False,
+            hide_file_search_queries=False,
+            hide_file_search_result_quotes=False,
+            hide_reasoning_summaries=False,
+            hide_web_search_sources=False,
+            hide_web_search_actions=False,
+            hide_mcp_server_call_details=False,
+            code_interpreter_files=[assistant_file],
+        )
+        thread = models.Thread(
+            id=8111,
+            thread_id="thread-initial-run-ci",
+            class_id=class_.id,
+            assistant_id=assistant.id,
+            version=3,
+            tools_available='["code_interpreter"]',
+            private=False,
+            instructions="Existing instructions",
+        )
+        run = models.Run(
+            id=8211,
+            run_id="run-initial-run-ci",
+            status=schemas.RunStatus.PENDING,
+            thread_id=thread.id,
+            assistant_id=assistant.id,
+            creator_id=889,
+            created=base_time,
+            updated=base_time,
+            instructions="Existing instructions",
+        )
+        session.add_all([class_, assistant_file, assistant, thread, run])
+        await session.commit()
+
+    captured_kwargs: dict[str, object] = {}
+
+    def fake_run_response(*args, **kwargs):
+        captured_kwargs.update(kwargs)
+
+        async def stream():
+            yield b"event: done\ndata: [DONE]\n\n"
+
+        return stream()
+
+    monkeypatch.setattr(server_module, "run_response", fake_run_response)
+
+    response = api.post(
+        "/api/v1/class/8011/thread/8111/run",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    assert captured_kwargs["code_interpreter_file_ids"] == ["file-assistant-8112"]

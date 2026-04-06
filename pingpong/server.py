@@ -7357,6 +7357,7 @@ async def create_run(
                 file_names,
                 thread_vector_store_id,
                 assistant_vector_store_id,
+                code_interpreter_file_ids,
                 is_supervisor_check,
             ] = await asyncio.gather(
                 models.Thread.get_file_search_files(request.state["db"], thread.id),
@@ -7365,6 +7366,9 @@ async def create_run(
                 ),
                 get_vector_store_id_by_id_or_none(
                     request.state["db"], asst.vector_store_id
+                ),
+                models.Thread.get_code_interpreter_file_obj_ids_including_assistant(
+                    request.state["db"], thread.id, asst.id
                 ),
                 request.state["authz"].check(
                     [
@@ -7401,9 +7405,7 @@ async def create_run(
                 assistant_vector_store_id=assistant_vector_store_id,
                 thread_vector_store_id=thread_vector_store_id,
                 attached_file_search_file_ids=file_search_file_ids,
-                code_interpreter_file_ids=[
-                    file.file_id for file in thread.code_interpreter_files
-                ],
+                code_interpreter_file_ids=code_interpreter_file_ids,
                 mcp_server_tools_by_server_label=mcp_server_tools_by_server_label,
                 user_auth=request.state["auth_user"],
                 anonymous_user_auth=request.state["anonymous_session_token_auth"],
