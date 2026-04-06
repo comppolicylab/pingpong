@@ -28,6 +28,7 @@
 		threadId,
 		messages,
 		canFetchMore,
+		showInput = true,
 		canSubmit,
 		disabled,
 		waiting,
@@ -53,6 +54,7 @@
 		threadId: number;
 		messages: Message[];
 		canFetchMore: boolean;
+		showInput?: boolean;
 		canSubmit: boolean;
 		disabled: boolean;
 		waiting: boolean;
@@ -404,40 +406,42 @@
 			</div>
 		{/each}
 	</div>
-	<div class="border-t border-slate-200 px-4 py-3">
-		<div class="relative mx-auto flex w-full max-w-4xl flex-col">
-			{#if waiting || submitting}
-				<div class="absolute -top-10 flex w-full justify-center" transition:blur={{ amount: 10 }}>
-					<DoubleBounce color="#0ea5e9" size="30" />
-				</div>
-			{/if}
-			<ChatInput
-				{mimeType}
-				maxSize={0}
-				attachments={[]}
-				{threadManagerError}
-				visionAcceptedFiles={null}
-				fileSearchAcceptedFiles={null}
-				codeInterpreterAcceptedFiles={null}
-				visionSupportOverride={undefined}
-				useImageDescriptions={false}
-				{assistantDeleted}
-				{canViewAssistant}
-				{canSubmit}
-				{disabled}
-				loading={submitting || waiting}
-				fileSearchAttachmentCount={0}
-				codeInterpreterAttachmentCount={0}
-				upload={null}
-				remove={null}
-				threadVersion={version}
-				assistantVersion={resolvedAssistantVersion}
-				bypassedSettingsSections={[]}
-				on:submit={(e) => onsubmit?.(e.detail)}
-				on:dismissError={() => ondismisserror?.()}
-				on:textinput={(e) => ontextinput?.(e.detail)}
-				on:textpaste={(e) => ontextpaste?.(e.detail)}
-			/>
+	{#if showInput}
+		<div class="border-t border-slate-200 px-4 py-3">
+			<div class="relative mx-auto flex w-full max-w-4xl flex-col">
+				{#if waiting || submitting}
+					<div class="absolute -top-10 flex w-full justify-center" transition:blur={{ amount: 10 }}>
+						<DoubleBounce color="#0ea5e9" size="30" />
+					</div>
+				{/if}
+				<ChatInput
+					{mimeType}
+					maxSize={0}
+					attachments={[]}
+					{threadManagerError}
+					visionAcceptedFiles={null}
+					fileSearchAcceptedFiles={null}
+					codeInterpreterAcceptedFiles={null}
+					visionSupportOverride={undefined}
+					useImageDescriptions={false}
+					{assistantDeleted}
+					{canViewAssistant}
+					{canSubmit}
+					{disabled}
+					loading={submitting || waiting}
+					fileSearchAttachmentCount={0}
+					codeInterpreterAttachmentCount={0}
+					upload={null}
+					remove={null}
+					threadVersion={version}
+					assistantVersion={resolvedAssistantVersion}
+					bypassedSettingsSections={[]}
+					on:submit={(e) => onsubmit?.(e.detail)}
+					on:dismissError={() => ondismisserror?.()}
+					on:textinput={(e) => ontextinput?.(e.detail)}
+					on:textpaste={(e) => ontextpaste?.(e.detail)}
+				/>
+			</div>
 		</div>
-	</div>
+	{/if}
 </div>

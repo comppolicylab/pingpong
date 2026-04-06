@@ -187,8 +187,9 @@
 	);
 	let playbackLocked = $derived(playerDisabled || questionPlaybackLocked);
 	let hasQuestionPrompt = $derived(hasVisibleQuestionPrompt(sessionState));
+	let isCompleted = $derived(isCompletedSession(sessionState));
 	let visibleCurrentQuestion = $derived(hasQuestionPrompt ? currentQuestion : null);
-	let hasMobileChecksPanel = $derived(!isCompletedSession(sessionState));
+	let hasMobileChecksPanel = $derived(true);
 	let hasMobileChatPanel = $derived(!!chat);
 	let activeQuestionIds = $derived(
 		getActiveQuestionIds(questionPlaybackLocked, currentQuestion, currentContinuation)
@@ -1464,13 +1465,13 @@
 						available only to participants.
 					</div>
 				{/if}
-				{#if sessionState === 'completed'}
+				{#if isCompleted && isDesktopLayout}
 					<LectureVideoCompletedView
 						{classId}
 						{threadId}
 						initialInteractions={historyInteractions}
 					/>
-				{:else}
+				{:else if !isCompleted}
 					<div class="overflow-hidden rounded-3xl border border-slate-200 bg-white p-3 shadow-xl">
 						<LectureVideoPlayer
 							src={lectureVideoSrc}
@@ -1553,20 +1554,28 @@
 					{/if}
 					{#if hasMobileChecksPanel && (!hasMobileChatPanel || activeMobilePanel === 'checks')}
 						<div class="min-h-0 flex-1 overflow-y-auto">
-							<LectureVideoQuestionGallery
-								{allQuestions}
-								currentQuestionId={currentQuestion?.id ?? null}
-								currentQuestion={visibleCurrentQuestion}
-								{currentContinuation}
-								{sessionState}
-								{answeredQuestions}
-								answeringDisabled={!canParticipate || introNarrationPending}
-								showHeading={!hasMobileChatPanel}
-								{scrollToQuestionId}
-								onselectOption={handleSelectOption}
-								{...continuePromptProps}
-								onscrollcomplete={clearQuestionScrollTarget}
-							/>
+							{#if isCompleted}
+								<LectureVideoCompletedView
+									{classId}
+									{threadId}
+									initialInteractions={historyInteractions}
+								/>
+							{:else}
+								<LectureVideoQuestionGallery
+									{allQuestions}
+									currentQuestionId={currentQuestion?.id ?? null}
+									currentQuestion={visibleCurrentQuestion}
+									{currentContinuation}
+									{sessionState}
+									{answeredQuestions}
+									answeringDisabled={!canParticipate || introNarrationPending}
+									showHeading={!hasMobileChatPanel}
+									{scrollToQuestionId}
+									onselectOption={handleSelectOption}
+									{...continuePromptProps}
+									onscrollcomplete={clearQuestionScrollTarget}
+								/>
+							{/if}
 						</div>
 					{/if}
 					{#if hasMobileChatPanel && (!hasMobileChecksPanel || activeMobilePanel === 'chat')}

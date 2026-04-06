@@ -1492,6 +1492,7 @@
 								{threadId}
 								messages={$messages}
 								canFetchMore={$canFetchMore}
+								showInput={effectiveLectureVideoSession?.state !== 'completed'}
 								canSubmit={lectureChatCanSubmit}
 								disabled={lectureChatInputDisabled}
 								waiting={$waiting}
