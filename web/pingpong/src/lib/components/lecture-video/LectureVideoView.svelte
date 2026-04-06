@@ -94,7 +94,7 @@
 	// --- UI state ---
 	let scrollToQuestionId: number | null = $state(null);
 	let isDesktopLayout: boolean = $state(false);
-	let activeMobilePanel: 'checks' | 'chat' = $state('checks');
+	let activeMobilePanel: 'checks' | 'chat' | null = $state('checks');
 	let historyLoaded: boolean = $state(false);
 	let historyInteractions: LectureVideoInteractionHistoryItem[] = $state([]);
 	let initError: string | null = $state(null);
@@ -342,13 +342,11 @@
 			activeMobilePanel = 'checks';
 			return;
 		}
-		if (!hasMobileChecksPanel && hasMobileChatPanel) {
+		if (hasMobileChatPanel) {
 			activeMobilePanel = 'chat';
 			return;
 		}
-		if (!hasMobileChatPanel && hasMobileChecksPanel) {
-			activeMobilePanel = 'checks';
-		}
+		activeMobilePanel = hasMobileChecksPanel ? 'checks' : hasMobileChatPanel ? 'chat' : null;
 	});
 
 	function mobileSegmentClass(panel: 'checks' | 'chat'): string {
@@ -872,8 +870,6 @@
 			videoElement.pause();
 			return;
 		}
-
-		await postPlaybackInteraction('video_paused');
 	}
 
 	// =========================================================================

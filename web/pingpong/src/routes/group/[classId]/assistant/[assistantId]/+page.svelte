@@ -215,6 +215,7 @@
 	let refreshingLectureVideoStatus = false;
 	let canRefreshCurrentLectureVideoStatus = false;
 	let lectureVideoManifestJson = '';
+	let lectureVideoChatUnavailable = false;
 	let hasSetLectureVideoManifest = false;
 	let currentVoiceId = data.lectureVideoConfig?.voice_id || '';
 	let voiceId = '';
@@ -272,6 +273,29 @@
 		} catch {
 			return value.trim();
 		}
+	};
+
+	const lectureVideoChatUnavailableForManifest = (manifest: unknown) => {
+		if (!manifest || typeof manifest !== 'object') {
+			return null;
+		}
+
+		const candidate = manifest as Partial<LectureVideoManifestInput>;
+		const hasWordLevelTranscription =
+			Array.isArray(candidate.word_level_transcription) &&
+			candidate.word_level_transcription.length > 0;
+
+		if (candidate.version === 1) {
+			return true;
+		}
+		if (candidate.version === 2) {
+			return !hasWordLevelTranscription;
+		}
+		if (candidate.word_level_transcription !== undefined) {
+			return !hasWordLevelTranscription;
+		}
+
+		return null;
 	};
 
 	// Keep this client-side validation aligned with pingpong/schemas.py:
@@ -378,7 +402,10 @@
 			}
 		}
 
-		if (candidate.version === 2) {
+		const hasWordLevelTranscription = candidate.word_level_transcription !== undefined;
+		const shouldUseV2Manifest = candidate.version === 2 || hasWordLevelTranscription;
+
+		if (shouldUseV2Manifest) {
 			if (
 				!Array.isArray(candidate.word_level_transcription) ||
 				candidate.word_level_transcription.length < 1
@@ -441,6 +468,20 @@
 	$: currentLectureVideoManifestNormalized = normalizeLectureVideoManifestForCompare(
 		stringifyLectureVideoManifest(data.lectureVideoConfig?.lecture_video_manifest)
 	);
+	$: lectureVideoChatUnavailable = (() => {
+		try {
+			const manifestState = lectureVideoChatUnavailableForManifest(
+				JSON.parse(lectureVideoManifestJson)
+			);
+			if (manifestState !== null) {
+				return manifestState;
+			}
+		} catch {
+			// Fall back to persisted availability when the draft is not valid JSON yet.
+		}
+
+		return data.lectureVideoConfig?.lecture_video_chat_available === false;
+	})();
 	$: if (!hasSetVoiceId && !lectureVideoConfigLoadError) {
 		voiceId = currentVoiceId;
 		hasSetVoiceId = true;
@@ -2498,7 +2539,7 @@
 					offsets, at least two options per question, and exactly one correct option for
 					single-select questions.</Helper
 				>
-				{#if data.lectureVideoConfig?.lecture_video_chat_available === false}
+				{#if lectureVideoChatUnavailable}
 					<Helper class="pb-2 text-amber-700">
 						Lecture chat is only available for lecture videos with a version 2 manifest that
 						includes word-level transcription.

@@ -7,28 +7,58 @@ export type ScrollParams = {
 };
 
 export const scroll = (el: HTMLDivElement, params: ScrollParams) => {
-	const scrollEl = el;
-	let lastScrollTop = scrollEl.scrollTop;
+	const scrollEndSupported = 'onscrollend' in el;
+	const programmaticScrollEpsilon = 2;
+	const programmaticScrollTimeoutMs = 1500;
+	let lastScrollTop = el.scrollTop;
 	let userPausedAutoScroll = false;
 	let isProgrammaticScroll = false;
+	let targetScrollTop: number | null = null;
 	let settleFrame: number | null = null;
 	let settlePassesRemaining = 0;
-	let lastKnownScrollHeight = scrollEl.scrollHeight;
+	let programmaticScrollTimeout: ReturnType<typeof setTimeout> | null = null;
+	let lastKnownScrollHeight = el.scrollHeight;
 	let lastMessageId: string | null = params.messages[params.messages.length - 1]?.data.id ?? null;
 	let currentThreadId = params.threadId;
 	let isStreaming = params.streaming;
 
+	const clearProgrammaticScrollTimeout = () => {
+		if (programmaticScrollTimeout !== null) {
+			clearTimeout(programmaticScrollTimeout);
+			programmaticScrollTimeout = null;
+		}
+	};
+
+	const completeProgrammaticScroll = () => {
+		clearProgrammaticScrollTimeout();
+		isProgrammaticScroll = false;
+		targetScrollTop = null;
+		lastScrollTop = el.scrollTop;
+		lastKnownScrollHeight = el.scrollHeight;
+	};
+
+	const hasReachedProgrammaticTarget = () => {
+		if (targetScrollTop === null) {
+			return true;
+		}
+		return Math.abs(el.scrollTop - targetScrollTop) <= programmaticScrollEpsilon;
+	};
+
 	const scrollToBottom = () => {
+		clearProgrammaticScrollTimeout();
 		isProgrammaticScroll = true;
-		scrollEl.scrollTo({
-			top: scrollEl.scrollHeight,
+		targetScrollTop = el.scrollHeight;
+		el.scrollTo({
+			top: targetScrollTop,
 			behavior: 'smooth'
 		});
-		requestAnimationFrame(() => {
-			lastScrollTop = scrollEl.scrollTop;
-			lastKnownScrollHeight = scrollEl.scrollHeight;
-			isProgrammaticScroll = false;
-		});
+		if (!scrollEndSupported && hasReachedProgrammaticTarget()) {
+			completeProgrammaticScroll();
+			return;
+		}
+		programmaticScrollTimeout = setTimeout(() => {
+			completeProgrammaticScroll();
+		}, programmaticScrollTimeoutMs);
 	};
 
 	const cancelSettledScroll = () => {
@@ -56,9 +86,9 @@ export const scroll = (el: HTMLDivElement, params: ScrollParams) => {
 				return;
 			}
 
-			const scrollHeightChanged = scrollEl.scrollHeight !== lastKnownScrollHeight;
+			const scrollHeightChanged = el.scrollHeight !== lastKnownScrollHeight;
 			scrollToBottom();
-			lastKnownScrollHeight = scrollEl.scrollHeight;
+			lastKnownScrollHeight = el.scrollHeight;
 			settlePassesRemaining -= 1;
 			if (scrollHeightChanged) {
 				settlePassesRemaining = Math.max(settlePassesRemaining, 2);
@@ -73,22 +103,40 @@ export const scroll = (el: HTMLDivElement, params: ScrollParams) => {
 
 	const onScroll = () => {
 		if (isProgrammaticScroll) {
-			lastScrollTop = scrollEl.scrollTop;
+			if (hasReachedProgrammaticTarget()) {
+				completeProgrammaticScroll();
+				return;
+			}
+			const isScrollingUp = el.scrollTop < lastScrollTop - 5;
+			if (
+				isScrollingUp &&
+				targetScrollTop !== null &&
+				el.scrollTop < targetScrollTop - programmaticScrollEpsilon
+			) {
+				userPausedAutoScroll = true;
+				clearProgrammaticScrollTimeout();
+				isProgrammaticScroll = false;
+				targetScrollTop = null;
+				lastScrollTop = el.scrollTop;
+				lastKnownScrollHeight = el.scrollHeight;
+				cancelSettledScroll();
+				return;
+			}
 			return;
 		}
-		const isScrollingUp = scrollEl.scrollTop < lastScrollTop - 5;
+		const isScrollingUp = el.scrollTop < lastScrollTop - 5;
 
 		if (isScrollingUp) {
 			userPausedAutoScroll = true;
 		}
 		if (isStreaming) {
-			const isScrollingDown = scrollEl.scrollTop > lastScrollTop;
-			const distanceFromBottom = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
+			const isScrollingDown = el.scrollTop > lastScrollTop;
+			const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
 			if (userPausedAutoScroll && isScrollingDown && distanceFromBottom < 50) {
 				userPausedAutoScroll = false;
 			}
 		}
-		lastScrollTop = scrollEl.scrollTop;
+		lastScrollTop = el.scrollTop;
 	};
 
 	const mutationObserver = new MutationObserver(() => {
@@ -97,10 +145,18 @@ export const scroll = (el: HTMLDivElement, params: ScrollParams) => {
 	const onDescendantLoad = () => {
 		if (isStreaming) scheduleScrollToBottom(4);
 	};
+	const onScrollEnd = () => {
+		if (isProgrammaticScroll) {
+			completeProgrammaticScroll();
+		}
+	};
 
-	scrollEl.addEventListener('scroll', onScroll, { passive: true });
-	scrollEl.addEventListener('load', onDescendantLoad, true);
-	mutationObserver.observe(scrollEl, {
+	el.addEventListener('scroll', onScroll, { passive: true });
+	if (scrollEndSupported) {
+		el.addEventListener('scrollend', onScrollEnd);
+	}
+	el.addEventListener('load', onDescendantLoad, true);
+	mutationObserver.observe(el, {
 		childList: true,
 		subtree: true,
 		characterData: true
@@ -117,7 +173,7 @@ export const scroll = (el: HTMLDivElement, params: ScrollParams) => {
 				userPausedAutoScroll = false;
 				lastMessageId = null;
 				lastScrollTop = 0;
-				lastKnownScrollHeight = scrollEl.scrollHeight;
+				lastKnownScrollHeight = el.scrollHeight;
 				scheduleScrollToBottom();
 				return;
 			}
@@ -146,9 +202,13 @@ export const scroll = (el: HTMLDivElement, params: ScrollParams) => {
 		},
 		destroy: () => {
 			cancelSettledScroll();
+			clearProgrammaticScrollTimeout();
 			mutationObserver.disconnect();
-			scrollEl.removeEventListener('load', onDescendantLoad, true);
-			scrollEl.removeEventListener('scroll', onScroll);
+			el.removeEventListener('load', onDescendantLoad, true);
+			el.removeEventListener('scroll', onScroll);
+			if (scrollEndSupported) {
+				el.removeEventListener('scrollend', onScrollEnd);
+			}
 		}
 	};
 };

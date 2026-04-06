@@ -8,6 +8,7 @@ from botocore.exceptions import ClientError
 from pingpong.video_store import (
     LocalVideoStore,
     S3VideoStore,
+    VideoInputSource,
     VideoStoreError,
 )
 
@@ -186,6 +187,114 @@ async def test_s3_authenticated_invalid_content_type(monkeypatch):
 
     assert "Unsupported video format" in str(excinfo.value)
     assert "application/pdf" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_s3_get_ffmpeg_input_source_uses_presigned_get_url(monkeypatch):
+    mock_client = AsyncMock()
+    mock_session = AsyncMock()
+
+    def mock_client_context(*args, **kwargs):
+        return AsyncContextManager(mock_client)
+
+    mock_session.client = mock_client_context
+
+    mock_session_class = Mock(return_value=mock_session)
+    monkeypatch.setattr("pingpong.video_store.aioboto3.Session", mock_session_class)
+
+    mock_client.generate_presigned_url = AsyncMock(
+        return_value="https://example.com/test.mp4?sig=123"
+    )
+
+    store = S3VideoStore(bucket="test-bucket", allow_unsigned=False)
+    source = await store.get_ffmpeg_input_source("nested/test.mp4")
+
+    mock_client.generate_presigned_url.assert_awaited_once_with(
+        "get_object",
+        Params={"Bucket": "test-bucket", "Key": "nested/test.mp4"},
+        ExpiresIn=300,
+        HttpMethod="GET",
+    )
+    assert source == VideoInputSource(
+        url="https://example.com/test.mp4?sig=123",
+        ffmpeg_input_args=[
+            "-method",
+            "GET",
+            "-seekable",
+            "1",
+            "-multiple_requests",
+            "1",
+            "-initial_request_size",
+            "8388608",
+            "-request_size",
+            "8388608",
+            "-short_seek_size",
+            "8388608",
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_s3_unsigned_get_ffmpeg_input_source_uses_direct_endpoint_url(
+    monkeypatch,
+):
+    mock_client = AsyncMock()
+    mock_client.meta = Mock(endpoint_url="https://s3.amazonaws.com")
+    mock_session = AsyncMock()
+
+    def mock_client_context(*args, **kwargs):
+        return AsyncContextManager(mock_client)
+
+    mock_session.client = mock_client_context
+
+    mock_session_class = Mock(return_value=mock_session)
+    monkeypatch.setattr("pingpong.video_store.aioboto3.Session", mock_session_class)
+
+    store = S3VideoStore(bucket="test-bucket", allow_unsigned=True)
+    source = await store.get_ffmpeg_input_source("nested/test video.mp4")
+
+    assert source == VideoInputSource(
+        url="https://s3.amazonaws.com/test-bucket/nested/test%20video.mp4",
+        ffmpeg_input_args=[
+            "-method",
+            "GET",
+            "-seekable",
+            "1",
+            "-multiple_requests",
+            "1",
+            "-initial_request_size",
+            "8388608",
+            "-request_size",
+            "8388608",
+            "-short_seek_size",
+            "8388608",
+        ],
+    )
+    mock_client.generate_presigned_url.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_local_get_ffmpeg_input_source_returns_scoped_file_url(tmp_path):
+    store = LocalVideoStore(str(tmp_path))
+    target = tmp_path / "nested" / "lecture video.mp4"
+    target.parent.mkdir()
+    target.write_bytes(b"video")
+
+    source = await store.get_ffmpeg_input_source("nested/lecture video.mp4")
+
+    assert source == VideoInputSource(
+        url=target.resolve().as_uri(), ffmpeg_input_args=[]
+    )
+
+
+@pytest.mark.asyncio
+async def test_local_get_ffmpeg_input_source_rejects_path_traversal(tmp_path):
+    store = LocalVideoStore(str(tmp_path))
+
+    with pytest.raises(VideoStoreError) as excinfo:
+        await store.get_ffmpeg_input_source("../outside.mp4")
+
+    assert "invalid key path" in excinfo.value.detail.lower()
 
 
 @pytest.mark.asyncio

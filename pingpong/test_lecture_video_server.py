@@ -17,7 +17,7 @@ from pydantic import ValidationError
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import object_session, selectinload
 
 import pingpong.schemas as schemas
 from pingpong import (
@@ -39,6 +39,7 @@ from pingpong.config import LocalAudioStoreSettings, LocalVideoStoreSettings
 from .testutil import with_authz, with_institution, with_user
 
 DEFAULT_LECTURE_VIDEO_VOICE_ID = "voice-test-id"
+VISIBLE_ASSISTANT_REPLY_TEXT = "visible reply"
 server_module = importlib.import_module("pingpong.server")
 cli_module = importlib.import_module("pingpong.__main__")
 
@@ -110,6 +111,41 @@ class FakeProcessContext:
         process = FakeProcess(target=target, args=args, daemon=daemon)
         self.processes.append(process)
         return process
+
+
+def fake_visible_reply_run_response(*args, **kwargs):
+    run = kwargs["run"]
+    message = models.Message(
+        run_id=run.id,
+        thread_id=run.thread_id,
+        assistant_id=run.assistant_id,
+        output_index=999_999,
+        message_status=schemas.MessageStatus.COMPLETED,
+        role=schemas.MessageRole.ASSISTANT,
+        is_hidden=False,
+        completed=datetime.now(UTC),
+        content=[
+            models.MessagePart(
+                part_index=0,
+                type=schemas.MessagePartType.OUTPUT_TEXT,
+                text=VISIBLE_ASSISTANT_REPLY_TEXT,
+            )
+        ],
+    )
+    session = object_session(run)
+    assert session is not None
+    session.add(message)
+    run.status = schemas.RunStatus.COMPLETED
+
+    async def stream():
+        yield (
+            b'event: message\ndata: {"role":"assistant","content":"'
+            + VISIBLE_ASSISTANT_REPLY_TEXT.encode()
+            + b'"}\n\n'
+        )
+        yield b"event: done\ndata: [DONE]\n\n"
+
+    return stream()
 
 
 @pytest.fixture(autouse=True)
@@ -576,6 +612,7 @@ async def test_get_thread_returns_lecture_video_session(
         class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
             session,
             institution,
+            manifest=lecture_video_manifest_v2(),
         )
 
     create_response = api.post(
@@ -688,18 +725,12 @@ async def test_send_message_creates_lecture_chat_run_with_hidden_context(
             current_offset_ms=4321,
         )
 
-    def fake_run_response(*args, **kwargs):
-        async def stream():
-            yield b"event: done\ndata: [DONE]\n\n"
-
-        return stream()
-
     monkeypatch.setattr(
         server_module.lecture_video_chat,
         "build_lecture_chat_context_message_parts",
         fake_build_context,
     )
-    monkeypatch.setattr(server_module, "run_response", fake_run_response)
+    monkeypatch.setattr(server_module, "run_response", fake_visible_reply_run_response)
 
     response = api.post(
         f"/api/v1/class/{class_.id}/thread/{thread_id}",
@@ -734,11 +765,19 @@ async def test_send_message_creates_lecture_chat_run_with_hidden_context(
         schemas.MessageRole.DEVELOPER,
         schemas.MessageRole.USER,
         schemas.MessageRole.USER,
+        schemas.MessageRole.ASSISTANT,
     ]
-    assert [message.is_hidden for message in ordered_messages] == [True, True, False]
+    assert [message.is_hidden for message in ordered_messages] == [
+        True,
+        True,
+        False,
+        False,
+    ]
     assert ordered_messages[0].content[0].text.startswith("Lecture chat context")
     assert ordered_messages[1].content[0].type == schemas.MessagePartType.INPUT_IMAGE
     assert ordered_messages[2].content[0].text == "Why does latency matter more here?"
+    assert ordered_messages[3].content[0].type == schemas.MessagePartType.OUTPUT_TEXT
+    assert ordered_messages[3].content[0].text == VISIBLE_ASSISTANT_REPLY_TEXT
     assert state.last_chat_context_end_ms == 4321
 
     thread_response = api.get(
@@ -747,8 +786,13 @@ async def test_send_message_creates_lecture_chat_run_with_hidden_context(
     )
     assert thread_response.status_code == 200
     assert [message["role"] for message in thread_response.json()["messages"]] == [
-        "user"
+        "user",
+        "assistant",
     ]
+    assert [
+        message["content"][0]["text"]["value"]
+        for message in thread_response.json()["messages"]
+    ] == ["Why does latency matter more here?", VISIBLE_ASSISTANT_REPLY_TEXT]
     assert thread_response.json()["thread"]["is_current_user_participant"] is True
 
 
@@ -799,18 +843,12 @@ async def test_list_thread_messages_hides_lecture_chat_context_messages(
             current_offset_ms=4321,
         )
 
-    def fake_run_response(*args, **kwargs):
-        async def stream():
-            yield b"event: done\ndata: [DONE]\n\n"
-
-        return stream()
-
     monkeypatch.setattr(
         server_module.lecture_video_chat,
         "build_lecture_chat_context_message_parts",
         fake_build_context,
     )
-    monkeypatch.setattr(server_module, "run_response", fake_run_response)
+    monkeypatch.setattr(server_module, "run_response", fake_visible_reply_run_response)
 
     response = api.post(
         f"/api/v1/class/{class_.id}/thread/{thread_id}",
@@ -827,12 +865,13 @@ async def test_list_thread_messages_hides_lecture_chat_context_messages(
 
     assert messages_response.status_code == 200
     assert [message["role"] for message in messages_response.json()["messages"]] == [
-        "user"
+        "user",
+        "assistant",
     ]
     assert [
         message["content"][0]["text"]["value"]
         for message in messages_response.json()["messages"]
-    ] == ["Why does latency matter more here?"]
+    ] == ["Why does latency matter more here?", VISIBLE_ASSISTANT_REPLY_TEXT]
     assert messages_response.json()["has_more"] is False
 
 
@@ -908,6 +947,74 @@ async def test_get_thread_skips_lecture_video_checks_for_chat_threads(
     assert response.status_code == 200
     assert response.json()["lecture_video_session"] is None
     assert response.json()["thread"]["is_current_user_participant"] is False
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
+        ("user:123", "can_view", "assistant:1"),
+    ]
+)
+async def test_send_message_locks_lecture_video_thread_before_first_run(
+    api, authz, config, db, institution, valid_user_token, monkeypatch
+):
+    async with db.async_session() as session:
+        class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+            manifest=lecture_video_manifest_v2(),
+        )
+
+    create_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/lecture",
+        json={"assistant_id": 1, "parties": [123]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+    thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
+
+    async def fake_build_context(*args, **kwargs):
+        return server_module.lecture_video_chat.LectureChatContextBuildResult(
+            text_message_parts=[
+                models.MessagePart(
+                    part_index=0,
+                    type=schemas.MessagePartType.INPUT_TEXT,
+                    text="Lecture chat context\nCurrent offset: 4321ms",
+                )
+            ],
+            frame_message_parts=[],
+            current_offset_ms=4321,
+        )
+
+    lock_calls: list[bool] = []
+    original_get_by_id = models.Thread.get_by_id
+
+    async def tracking_get_by_id(cls, session, id_, *, for_update=False):
+        lock_calls.append(for_update)
+        return await original_get_by_id.__func__(
+            cls, session, id_, for_update=for_update
+        )
+
+    monkeypatch.setattr(
+        server_module.lecture_video_chat,
+        "build_lecture_chat_context_message_parts",
+        fake_build_context,
+    )
+    monkeypatch.setattr(server_module, "run_response", fake_visible_reply_run_response)
+    monkeypatch.setattr(models.Thread, "get_by_id", classmethod(tracking_get_by_id))
+
+    response = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}",
+        json={"message": "Why does latency matter more here?"},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    assert any(lock_calls)
 
 
 @with_user(123)
@@ -1518,15 +1625,17 @@ async def test_lecture_video_playback_events_are_rejected_while_awaiting_answer(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
         ("user:123", "student", "class:1"),
+        ("user:123", "can_view", "assistant:1"),
     ]
 )
 async def test_lecture_video_interactions_reject_post_completion_playback_events(
-    api, authz, config, db, institution, valid_user_token
+    api, authz, config, db, institution, valid_user_token, monkeypatch
 ):
     async with db.async_session() as session:
         class_, lecture_video, _assistant = await create_ready_lecture_video_assistant(
             session,
             institution,
+            manifest=lecture_video_manifest_v2(),
         )
         lecture_video = await models.LectureVideo.get_by_id_with_copy_context(
             session, lecture_video.id
@@ -1541,6 +1650,33 @@ async def test_lecture_video_interactions_reject_post_completion_playback_events
     )
     thread_id = create_response.json()["thread"]["id"]
     await grant_thread_permissions(config, thread_id, 123)
+
+    async def fake_build_context(*args, **kwargs):
+        return server_module.lecture_video_chat.LectureChatContextBuildResult(
+            text_message_parts=[
+                models.MessagePart(
+                    part_index=0,
+                    type=schemas.MessagePartType.INPUT_TEXT,
+                    text="Lecture chat context\nCurrent offset: 4321ms",
+                )
+            ],
+            frame_message_parts=[],
+            current_offset_ms=4321,
+        )
+
+    monkeypatch.setattr(
+        server_module.lecture_video_chat,
+        "build_lecture_chat_context_message_parts",
+        fake_build_context,
+    )
+    monkeypatch.setattr(server_module, "run_response", fake_visible_reply_run_response)
+
+    chat_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}",
+        json={"message": "Summarize the first concept again."},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert chat_response.status_code == 200
 
     acquire = api.post(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
@@ -1689,6 +1825,10 @@ async def test_lecture_video_interactions_reject_post_completion_playback_events
         refreshed_session["last_known_offset_ms"]
         == completed_session["last_known_offset_ms"]
     )
+    assert [
+        message["content"][0]["text"]["value"]
+        for message in refreshed_thread.json()["messages"]
+    ] == ["Summarize the first concept again.", VISIBLE_ASSISTANT_REPLY_TEXT]
 
     history_response = api.get(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/history",

@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import dataclass
 import logging
 import os
 import re
@@ -10,9 +11,11 @@ from pathlib import Path
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from typing import IO, AsyncGenerator
-from botocore.exceptions import ClientError
+from urllib.parse import quote
+
 from botocore import UNSIGNED
 from botocore.client import Config
+from botocore.exceptions import ClientError
 from boto3.s3.transfer import TransferConfig
 
 from .schemas import VideoMetadata
@@ -23,6 +26,12 @@ logger = logging.getLogger(__name__)
 class VideoStoreError(Exception):
     def __init__(self, detail: str = ""):
         self.detail = detail
+
+
+@dataclass(frozen=True)
+class VideoInputSource:
+    url: str
+    ffmpeg_input_args: list[str]
 
 
 class BaseVideoStore(ABC):
@@ -59,10 +68,30 @@ class BaseVideoStore(ABC):
         """Stream a video file with byte range support for seeking"""
         yield b""
 
+    @abstractmethod
+    async def get_ffmpeg_input_source(self, key: str) -> VideoInputSource:
+        """Return a store-backed source that ffmpeg can consume directly."""
+        raise NotImplementedError()
+
 
 class S3VideoStore(BaseVideoStore):
     """S3 video store for production use."""
 
+    _FFMPEG_HTTP_INPUT_ARGS = [
+        "-method",
+        "GET",
+        "-seekable",
+        "1",
+        "-multiple_requests",
+        "1",
+        "-initial_request_size",
+        "8388608",
+        "-request_size",
+        "8388608",
+        "-short_seek_size",
+        "8388608",
+    ]
+    _PRESIGNED_URL_EXPIRATION_SECONDS = 300
     _UPLOAD_CONFIG = TransferConfig(
         multipart_threshold=8 * 1024 * 1024,
         multipart_chunksize=8 * 1024 * 1024,
@@ -71,6 +100,9 @@ class S3VideoStore(BaseVideoStore):
     def __init__(self, bucket: str, allow_unsigned: bool = False):
         self.__bucket = bucket
         self._allow_unsigned = allow_unsigned
+
+    def _client_config(self) -> Config | None:
+        return Config(signature_version=UNSIGNED) if self._allow_unsigned else None
 
     async def put(self, key: str, content: IO, content_type: str):
         content.seek(0)
@@ -105,8 +137,9 @@ class S3VideoStore(BaseVideoStore):
 
     async def get_video_metadata(self, key: str) -> VideoMetadata:
         """Get metadata about a video file from S3."""
-        config = Config(signature_version=UNSIGNED) if self._allow_unsigned else None
-        async with aioboto3.Session().client("s3", config=config) as s3_client:
+        async with aioboto3.Session().client(
+            "s3", config=self._client_config()
+        ) as s3_client:
             try:
                 response = await s3_client.head_object(Bucket=self.__bucket, Key=key)
 
@@ -140,6 +173,50 @@ class S3VideoStore(BaseVideoStore):
                     f"Failed to get video metadata from S3: {str(e)}"
                 ) from e
 
+    async def get_ffmpeg_input_source(self, key: str) -> VideoInputSource:
+        async with aioboto3.Session().client(
+            "s3", config=self._client_config()
+        ) as s3_client:
+            try:
+                if self._allow_unsigned:
+                    endpoint_url = str(s3_client.meta.endpoint_url).rstrip("/")
+                    encoded_key = quote(key.lstrip("/"), safe="/")
+                    return VideoInputSource(
+                        url=f"{endpoint_url}/{self.__bucket}/{encoded_key}",
+                        ffmpeg_input_args=list(self._FFMPEG_HTTP_INPUT_ARGS),
+                    )
+
+                presigned_url = s3_client.generate_presigned_url(
+                    "get_object",
+                    Params={"Bucket": self.__bucket, "Key": key},
+                    ExpiresIn=self._PRESIGNED_URL_EXPIRATION_SECONDS,
+                    HttpMethod="GET",
+                )
+                if inspect.isawaitable(presigned_url):
+                    presigned_url = await presigned_url
+                return VideoInputSource(
+                    url=presigned_url,
+                    ffmpeg_input_args=list(self._FFMPEG_HTTP_INPUT_ARGS),
+                )
+            except ClientError as e:
+                error_code = e.response.get("Error", {}).get("Code", "")
+                if error_code == "AccessDenied":
+                    raise VideoStoreError(
+                        "You don't have the permissions to view the resource",
+                    )
+                if error_code == "NoSuchKey":
+                    raise VideoStoreError("The specified key does not exist")
+
+                logger.exception("Error generating lecture video URL for key %s", key)
+                raise VideoStoreError(
+                    f"Failed to generate lecture video URL: {str(e)}"
+                ) from e
+            except Exception as e:
+                logger.exception("Error generating lecture video URL for key %s", key)
+                raise VideoStoreError(
+                    f"Failed to generate lecture video URL: {str(e)}"
+                ) from e
+
     async def stream_video_range(
         self,
         key: str,
@@ -147,9 +224,9 @@ class S3VideoStore(BaseVideoStore):
         end: int | None = None,
         chunk_size: int = 1024 * 1024,
     ) -> AsyncGenerator[bytes, None]:
-        config = Config(signature_version=UNSIGNED) if self._allow_unsigned else None
-
-        async with aioboto3.Session().client("s3", config=config) as s3_client:
+        async with aioboto3.Session().client(
+            "s3", config=self._client_config()
+        ) as s3_client:
             try:
                 params = {
                     "Bucket": self.__bucket,
@@ -225,6 +302,10 @@ class LocalVideoStore(BaseVideoStore):
         except ValueError as e:
             raise VideoStoreError("Invalid key path") from e
         return file_path
+
+    async def get_ffmpeg_input_source(self, key: str) -> VideoInputSource:
+        file_path = self._resolve_key_path(key)
+        return VideoInputSource(url=file_path.as_uri(), ffmpeg_input_args=[])
 
     def _write_file_in_chunks(self, file_path: Path, content: IO) -> None:
         with open(file_path, "wb") as handle:

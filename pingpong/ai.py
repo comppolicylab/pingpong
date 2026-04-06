@@ -694,13 +694,13 @@ async def build_response_input_item_list(
             MessageRole.SYSTEM,
             MessageRole.DEVELOPER,
         }:
-            user_response_message: EasyInputMessageParam = {
+            input_message: EasyInputMessageParam = {
                 "role": message.role,
                 "content": content_list,
                 "type": "message",
                 "id": message.message_id,
             }
-            response_item = user_response_message
+            response_item = input_message
         else:
             assistant_response_message: ResponseOutputMessageParam = {
                 "role": message.role,

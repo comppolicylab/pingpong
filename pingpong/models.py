@@ -61,11 +61,13 @@ from sqlalchemy.orm import (
     Load,
     joinedload,
     contains_eager,
+    deferred,
     load_only,
     selectinload,
     mapped_column,
     relationship,
     defer,
+    undefer,
 )
 from sqlalchemy.sql import func
 import pingpong.schemas as schemas
@@ -2063,7 +2065,9 @@ class LectureVideo(Base):
     )
     display_name = Column(String)
     voice_id = Column(String, nullable=True)
-    manifest_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    manifest_data: Mapped[dict[str, Any] | None] = deferred(
+        mapped_column(JSON, nullable=True)
+    )
     manifest_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     lecture_video_chat_available: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default="false"
@@ -2142,6 +2146,7 @@ class LectureVideo(Base):
         stmt = (
             select(LectureVideo)
             .where(LectureVideo.id == id_)
+            .options(undefer(LectureVideo.manifest_data))
             .options(selectinload(LectureVideo.stored_object))
             .options(
                 selectinload(LectureVideo.questions).selectinload(
@@ -2639,6 +2644,7 @@ def _thread_lecture_video_base_loaders() -> tuple[Load, ...]:
             Assistant.id, Assistant.name, Assistant.lecture_video_id
         ),
         selectinload(Thread.lecture_video).options(
+            undefer(LectureVideo.manifest_data),
             selectinload(LectureVideo.stored_object),
             selectinload(LectureVideo.questions).options(
                 *_lecture_video_question_context_loaders()
@@ -3856,8 +3862,9 @@ class Assistant(Base):
         return (
             selectinload(Assistant.code_interpreter_files),
             selectinload(Assistant.mcp_server_tools),
-            selectinload(Assistant.lecture_video).selectinload(
-                LectureVideo.stored_object
+            selectinload(Assistant.lecture_video).options(
+                undefer(LectureVideo.manifest_data),
+                selectinload(LectureVideo.stored_object),
             ),
             selectinload(Assistant.lecture_video).selectinload(LectureVideo.questions),
             selectinload(Assistant.lecture_video)
@@ -7120,8 +7127,12 @@ class Thread(Base):
         return thread
 
     @classmethod
-    async def get_by_id(cls, session: AsyncSession, id_: int) -> "Thread":
+    async def get_by_id(
+        cls, session: AsyncSession, id_: int, *, for_update: bool = False
+    ) -> "Thread":
         stmt = select(Thread).where(Thread.id == int(id_))
+        if for_update:
+            stmt = stmt.with_for_update()
         return await session.scalar(stmt)
 
     @classmethod
@@ -8066,7 +8077,7 @@ class Thread(Base):
         thread_id: int,
         run_ids: Collection[int],
         order: Literal["asc", "desc"] = "desc",
-        include_hidden_messages: bool = True,
+        include_hidden_messages: bool = False,
     ) -> tuple[list["Message"], list["ToolCall"], list["ReasoningStep"]]:
         if not run_ids:
             return [], [], []

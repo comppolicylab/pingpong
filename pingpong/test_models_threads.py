@@ -337,3 +337,88 @@ async def test_get_thread_by_class_id_preloads_export_user_fields(db):
     assert "email" not in unloaded
     assert loaded_user.display_name == "Export User"
     assert loaded_user.email == "export-user@example.com"
+
+
+@pytest.mark.asyncio
+async def test_list_messages_tool_calls_excludes_hidden_messages_by_default(db):
+    async with db.async_session() as session:
+        thread = models.Thread(thread_id="thread_hidden_messages_default", version=3)
+        session.add(thread)
+        await session.flush()
+
+        run = models.Run(
+            status=schemas.RunStatus.COMPLETED,
+            thread_id=thread.id,
+        )
+        session.add(run)
+        await session.flush()
+
+        visible_message = models.Message(
+            message_status=schemas.MessageStatus.COMPLETED,
+            run_id=run.id,
+            thread_id=thread.id,
+            output_index=1,
+            role=schemas.MessageRole.USER,
+        )
+        hidden_message = models.Message(
+            message_status=schemas.MessageStatus.COMPLETED,
+            run_id=run.id,
+            thread_id=thread.id,
+            output_index=2,
+            role=schemas.MessageRole.ASSISTANT,
+            is_hidden=True,
+        )
+        developer_message = models.Message(
+            message_status=schemas.MessageStatus.COMPLETED,
+            run_id=run.id,
+            thread_id=thread.id,
+            output_index=3,
+            role=schemas.MessageRole.DEVELOPER,
+        )
+        system_message = models.Message(
+            message_status=schemas.MessageStatus.COMPLETED,
+            run_id=run.id,
+            thread_id=thread.id,
+            output_index=4,
+            role=schemas.MessageRole.SYSTEM,
+        )
+
+        session.add_all(
+            [visible_message, hidden_message, developer_message, system_message]
+        )
+        await session.commit()
+
+        thread_id = thread.id
+        run_id = run.id
+        visible_message_id = visible_message.id
+        hidden_message_id = hidden_message.id
+        developer_message_id = developer_message.id
+        system_message_id = system_message.id
+
+    async with db.async_session() as session:
+        messages, tool_calls, reasoning_steps = await models.Thread.list_messages_tool_calls(
+            session,
+            thread_id,
+            run_ids=[run_id],
+            order="asc",
+        )
+
+    assert [message.id for message in messages] == [visible_message_id]
+    assert tool_calls == []
+    assert reasoning_steps == []
+
+    async with db.async_session() as session:
+        messages, _, _ = await models.Thread.list_messages_tool_calls(
+            session,
+            thread_id,
+            run_ids=[run_id],
+            order="asc",
+            include_hidden_messages=True,
+        )
+
+    assert [message.id for message in messages] == [
+        visible_message_id,
+        hidden_message_id,
+        developer_message_id,
+        system_message_id,
+    ]

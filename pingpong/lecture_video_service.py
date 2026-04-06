@@ -300,43 +300,10 @@ def lecture_video_chat_metadata(
     if lecture_video is None:
         return False
 
-    if lecture_video.manifest_version is not None:
-        return lecture_video.lecture_video_chat_available
-
-    if lecture_video.manifest_data:
-        try:
-            manifest_data = lecture_video.manifest_data
-            if (
-                isinstance(manifest_data, dict)
-                and manifest_data.get("version") == 2
-                and isinstance(manifest_data.get("word_level_transcription"), list)
-                and len(manifest_data["word_level_transcription"]) > 0
-            ):
-                return True
-        except TypeError:
-            logger.warning(
-                "Stored lecture video manifest_data is invalid while computing chat availability. lecture_video_id=%s",
-                lecture_video.id,
-                exc_info=True,
-            )
-            return False
-
-    try:
-        manifest = lecture_video_manifest_from_model(lecture_video)
-    except (ValidationError, ValueError, TypeError):
-        logger.warning(
-            "Stored lecture video manifest is invalid while computing chat availability. lecture_video_id=%s",
-            lecture_video.id,
-            exc_info=True,
-        )
+    if lecture_video.manifest_version != 2:
         return False
 
-    if (
-        isinstance(manifest, schemas.LectureVideoManifestV2)
-        and manifest.word_level_transcription
-    ):
-        return True
-    return False
+    return lecture_video.lecture_video_chat_available
 
 
 def lecture_video_config_matches(

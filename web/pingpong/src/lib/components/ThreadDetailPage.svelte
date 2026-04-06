@@ -1503,6 +1503,7 @@
 								{resolvedAssistantVersion}
 								version={$version}
 								{useLatex}
+								{userTimezone}
 								meName={data?.me?.user?.name || data?.me?.user?.email || 'Me'}
 								meImage={data?.me?.profile?.image_url || ''}
 								assistantId={$assistantId}

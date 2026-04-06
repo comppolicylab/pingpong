@@ -39,6 +39,7 @@
 		resolvedAssistantVersion,
 		version,
 		useLatex,
+		userTimezone,
 		meName,
 		meImage,
 		assistantId,
@@ -65,6 +66,7 @@
 		resolvedAssistantVersion: number;
 		version: number;
 		useLatex: boolean;
+		userTimezone: string;
 		meName: string;
 		meImage: string;
 		assistantId: number | null;
@@ -182,7 +184,8 @@
 		return new Intl.DateTimeFormat('en-US', {
 			hour: 'numeric',
 			minute: 'numeric',
-			hour12: true
+			hour12: true,
+			timeZone: userTimezone
 		}).format(new Date(timestamp * 1000));
 	};
 
@@ -195,7 +198,8 @@
 			month: 'long',
 			year: 'numeric',
 			hour12: true,
-			timeZoneName: 'short'
+			timeZoneName: 'short',
+			timeZone: userTimezone
 		}).format(new Date(timestamp * 1000));
 	};
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import importlib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -12,6 +13,7 @@ from pingpong.ai import BufferedResponseStreamHandler
 from pingpong.testutil import with_authz, with_user
 
 pytestmark = pytest.mark.asyncio
+server_module = importlib.import_module("pingpong.server")
 
 
 async def _create_handler_context(
@@ -1497,3 +1499,71 @@ async def test_list_thread_messages_includes_reasoning_messages(
         expected["summary_parts"], key=lambda part: part["part_index"]
     )
     assert actual_summary == expected_summary
+
+
+@with_user(888)
+@with_authz(grants=[("user:888", "can_participate", "thread:8101")])
+async def test_create_run_locks_thread_before_checking_latest_run(
+    api, db, valid_user_token, monkeypatch
+):
+    base_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+    async with db.async_session() as session:
+        class_ = models.Class(id=8001, name="Run Lock Class", api_key="sk-test")
+        assistant = models.Assistant(
+            id=8002,
+            name="Run Lock Assistant",
+            class_id=class_.id,
+            assistant_id="asst-run-lock",
+            model="gpt-4o-mini",
+            creator_id=888,
+        )
+        thread = models.Thread(
+            id=8101,
+            thread_id="thread-run-lock",
+            class_id=class_.id,
+            assistant_id=assistant.id,
+            version=3,
+            tools_available="",
+            private=False,
+            instructions="Existing instructions",
+        )
+        run = models.Run(
+            id=8201,
+            run_id="run-run-lock",
+            status=schemas.RunStatus.COMPLETED,
+            thread_id=thread.id,
+            assistant_id=assistant.id,
+            creator_id=888,
+            created=base_time,
+            updated=base_time,
+            instructions="Existing instructions",
+        )
+        session.add_all([class_, assistant, thread, run])
+        await session.commit()
+
+    def fake_run_response(*args, **kwargs):
+        async def stream():
+            yield b"event: done\ndata: [DONE]\n\n"
+
+        return stream()
+
+    lock_calls: list[bool] = []
+    original_get_by_id = models.Thread.get_by_id
+
+    async def tracking_get_by_id(cls, session, id_, *, for_update=False):
+        lock_calls.append(for_update)
+        return await original_get_by_id.__func__(
+            cls, session, id_, for_update=for_update
+        )
+
+    monkeypatch.setattr(server_module, "run_response", fake_run_response)
+    monkeypatch.setattr(models.Thread, "get_by_id", classmethod(tracking_get_by_id))
+
+    response = api.post(
+        "/api/v1/class/8001/thread/8101/run",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    assert any(lock_calls)

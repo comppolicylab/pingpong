@@ -325,11 +325,27 @@ async def test_build_response_input_item_list_replays_developer_and_system_messa
             ],
             created=utcnow() - timedelta(minutes=3),
         )
-        hidden_image_message = models.Message(
+        system_message = models.Message(
             message_status=schemas.MessageStatus.COMPLETED,
             run_id=run.id,
             thread_id=thread.id,
             output_index=2,
+            role=schemas.MessageRole.SYSTEM,
+            is_hidden=True,
+            content=[
+                models.MessagePart(
+                    part_index=0,
+                    type=schemas.MessagePartType.INPUT_TEXT,
+                    text="Prioritize lecture transcript grounding.",
+                )
+            ],
+            created=utcnow() - timedelta(minutes=2, seconds=45),
+        )
+        hidden_image_message = models.Message(
+            message_status=schemas.MessageStatus.COMPLETED,
+            run_id=run.id,
+            thread_id=thread.id,
+            output_index=3,
             role=schemas.MessageRole.USER,
             is_hidden=True,
             content=[
@@ -345,7 +361,7 @@ async def test_build_response_input_item_list_replays_developer_and_system_messa
             message_status=schemas.MessageStatus.COMPLETED,
             run_id=run.id,
             thread_id=thread.id,
-            output_index=3,
+            output_index=4,
             role=schemas.MessageRole.USER,
             content=[
                 models.MessagePart(
@@ -360,7 +376,7 @@ async def test_build_response_input_item_list_replays_developer_and_system_messa
             message_status=schemas.MessageStatus.COMPLETED,
             run_id=run.id,
             thread_id=thread.id,
-            output_index=4,
+            output_index=5,
             role=schemas.MessageRole.ASSISTANT,
             content=[
                 models.MessagePart(
@@ -373,7 +389,13 @@ async def test_build_response_input_item_list_replays_developer_and_system_messa
         )
 
         session.add_all(
-            [developer_message, hidden_image_message, user_message, assistant_message]
+            [
+                developer_message,
+                system_message,
+                hidden_image_message,
+                user_message,
+                assistant_message,
+            ]
         )
         await session.commit()
 
@@ -384,14 +406,16 @@ async def test_build_response_input_item_list_replays_developer_and_system_messa
 
     assert [item["role"] for item in items] == [
         "developer",
+        "system",
         "user",
         "user",
         "assistant",
     ]
     assert items[0]["content"][0]["type"] == "input_text"
-    assert items[1]["content"][0]["type"] == "input_image"
-    assert items[2]["content"][0]["type"] == "input_text"
-    assert items[3]["content"][0]["type"] == "output_text"
+    assert items[1]["content"][0]["type"] == "input_text"
+    assert items[2]["content"][0]["type"] == "input_image"
+    assert items[3]["content"][0]["type"] == "input_text"
+    assert items[4]["content"][0]["type"] == "output_text"
 
 
 def test_get_known_response_message_phase_returns_known_phase_only():

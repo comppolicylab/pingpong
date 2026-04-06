@@ -7138,6 +7138,15 @@ async def create_run(
 
     if thread.version == 3:
         try:
+            thread = await models.Thread.get_by_id(
+                request.state["db"], int(thread_id), for_update=True
+            )
+            if not thread:
+                raise HTTPException(
+                    status_code=404,
+                    detail="We could not find the thread or assistant you specified. Please try again.",
+                )
+
             last_run = await models.Thread.get_latest_run_by_thread_id(
                 request.state["db"], thread.id
             )
@@ -7414,6 +7423,15 @@ async def send_message(
                     detail="OpenAI is still processing your last request. We're fetching the latest status...",
                 )
         elif thread.version == 3:
+            thread = await models.Thread.get_by_id(
+                request.state["db"], int(thread_id), for_update=True
+            )
+            if not thread:
+                raise HTTPException(
+                    status_code=404,
+                    detail="We could not find the thread or assistant you specified. Please try again.",
+                )
+
             last_run = await models.Thread.get_latest_run_by_thread_id(
                 request.state["db"], thread.id
             )

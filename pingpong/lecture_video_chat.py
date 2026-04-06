@@ -17,6 +17,7 @@ from pingpong.lecture_video_service import (
     lecture_video_chat_metadata,
     lecture_video_manifest_from_model,
 )
+from pingpong.video_store import VideoInputSource, VideoStoreError
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,10 @@ logger = logging.getLogger(__name__)
 LOOKAHEAD_WINDOW_MS = 30_000
 FRAME_LOOKBACK_MS = 1_000
 TRANSCRIPT_CONTEXT_WINDOW_MS = 120_000
+
+
+class LectureVideoFrameContextError(Exception):
+    """Raised for expected failures while assembling lecture video frame context."""
 
 
 @dataclass
@@ -219,15 +224,20 @@ def _build_context_text(
     current_offset_ms = max(0, state.last_known_offset_ms)
     transcript_words = _serialize_transcript_words(manifest.word_level_transcription)
 
+    clamped_last_chat_context_end_ms = min(
+        max(state.last_chat_context_end_ms, 0), current_offset_ms
+    )
     uncapped_transcript_start_ms = (
-        0 if state.last_chat_context_end_ms <= 0 else state.last_chat_context_end_ms
+        clamped_last_chat_context_end_ms
+        if state.last_chat_context_end_ms == clamped_last_chat_context_end_ms
+        else 0
     )
     transcript_start_ms = max(
         uncapped_transcript_start_ms,
         current_offset_ms - TRANSCRIPT_CONTEXT_WINDOW_MS,
     )
     transcript_label = "Recent transcript context"
-    if state.last_chat_context_end_ms > 0:
+    if uncapped_transcript_start_ms > 0:
         transcript_label = "Recent transcript since last lecture chat"
     if transcript_start_ms > uncapped_transcript_start_ms:
         transcript_label += " (older transcript omitted)"
@@ -278,22 +288,27 @@ def _build_context_text(
     return "\n".join(context_lines), current_offset_ms
 
 
-async def _copy_video_to_tempfile(
-    lecture_video: models.LectureVideo, destination: Path
-) -> None:
+async def _get_video_input_source(
+    lecture_video: models.LectureVideo,
+) -> VideoInputSource:
     if not config.video_store:
-        raise RuntimeError("Video store not configured.")
+        raise LectureVideoFrameContextError("Video store not configured.")
     if lecture_video.stored_object is None:
-        raise RuntimeError("Lecture video stored object not loaded.")
+        raise LectureVideoFrameContextError("Lecture video stored object not loaded.")
 
-    with destination.open("wb") as output_file:
-        async for chunk in config.video_store.store.stream_video(
+    try:
+        return await config.video_store.store.get_ffmpeg_input_source(
             lecture_video.stored_object.key
-        ):
-            output_file.write(chunk)
+        )
+    except VideoStoreError as e:
+        raise LectureVideoFrameContextError(
+            e.detail or "Unable to open lecture video input source."
+        ) from e
 
 
-async def _extract_frame(video_path: Path, output_path: Path, offset_ms: int) -> bool:
+async def _extract_frame(
+    video_source: VideoInputSource, output_path: Path, offset_ms: int
+) -> bool:
     try:
         process = await asyncio.create_subprocess_exec(
             "ffmpeg",
@@ -302,8 +317,9 @@ async def _extract_frame(video_path: Path, output_path: Path, offset_ms: int) ->
             "-y",
             "-ss",
             f"{offset_ms / 1000:.3f}",
+            *video_source.ffmpeg_input_args,
             "-i",
-            str(video_path),
+            video_source.url,
             "-frames:v",
             "1",
             str(output_path),
@@ -314,7 +330,18 @@ async def _extract_frame(video_path: Path, output_path: Path, offset_ms: int) ->
         logger.warning("ffmpeg is unavailable; skipping lecture video frame extraction")
         return False
 
-    _, stderr = await process.communicate()
+    try:
+        _, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
+    except asyncio.TimeoutError:
+        process.kill()
+        _, stderr = await process.communicate()
+        logger.warning(
+            "Timed out extracting lecture video frame. offset_ms=%s stderr=%s",
+            offset_ms,
+            stderr.decode("utf-8", errors="ignore").strip(),
+        )
+        return False
+
     if process.returncode != 0 or not output_path.exists():
         logger.warning(
             "Failed to extract lecture video frame. offset_ms=%s stderr=%s",
@@ -349,19 +376,18 @@ async def _build_frame_message_parts(
     try:
         with tempfile.TemporaryDirectory(prefix="lecture-chat-frames-") as tmp_dir:
             tmp_path = Path(tmp_dir)
-            video_path = (
-                tmp_path
-                / f"lecture-video{Path(lecture_video.stored_object.key).suffix or '.mp4'}"
+            video_source = await _get_video_input_source(lecture_video)
+            frame_offsets = list(
+                dict.fromkeys(
+                    [
+                        max(current_offset_ms, 0),
+                        max(current_offset_ms - FRAME_LOOKBACK_MS, 0),
+                    ]
+                )
             )
-            await _copy_video_to_tempfile(lecture_video, video_path)
-
-            frame_offsets = [
-                max(current_offset_ms, 0),
-                max(current_offset_ms - FRAME_LOOKBACK_MS, 0),
-            ]
             for part_index, frame_offset_ms in enumerate(frame_offsets, start=1):
                 frame_path = tmp_path / f"frame-{part_index}.png"
-                if not await _extract_frame(video_path, frame_path, frame_offset_ms):
+                if not await _extract_frame(video_source, frame_path, frame_offset_ms):
                     continue
 
                 with frame_path.open("rb") as frame_file:
@@ -370,39 +396,56 @@ async def _build_frame_message_parts(
                         filename=frame_path.name,
                         headers={"content-type": "image/png"},
                     )
-                    created_file = await handle_create_file(
-                        session,
-                        authz,
-                        openai_client,
-                        upload=upload,
-                        class_id=class_id,
-                        uploader_id=uploader_id,
-                        private=True,
-                        purpose="vision",
-                        user_auth=user_auth,
-                        anonymous_link_auth=anonymous_link_auth,
-                        anonymous_user_auth=anonymous_user_auth,
-                        anonymous_session_id=anonymous_session_id,
-                        anonymous_link_id=anonymous_link_id,
-                    )
-                    created_thread_image_file_ids.append(
-                        created_file.vision_file_id or created_file.file_id
-                    )
+                    try:
+                        created_file = await handle_create_file(
+                            session,
+                            authz,
+                            openai_client,
+                            upload=upload,
+                            class_id=class_id,
+                            uploader_id=uploader_id,
+                            private=True,
+                            purpose="vision",
+                            user_auth=user_auth,
+                            anonymous_link_auth=anonymous_link_auth,
+                            anonymous_user_auth=anonymous_user_auth,
+                            anonymous_session_id=anonymous_session_id,
+                            anonymous_link_id=anonymous_link_id,
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Failed to upload lecture video frame context. lecture_video_id=%s frame_offset_ms=%s",
+                            lecture_video.id,
+                            frame_offset_ms,
+                            exc_info=True,
+                        )
+                        continue
 
+                created_thread_image_file_id = (
+                    created_file.vision_file_id or created_file.file_id
+                )
+                created_thread_image_file_ids.append(created_thread_image_file_id)
                 frame_parts.append(
                     models.MessagePart(
                         part_index=part_index,
                         type=schemas.MessagePartType.INPUT_IMAGE,
-                        input_image_file_id=created_file.vision_file_id
-                        or created_file.file_id,
+                        input_image_file_id=created_thread_image_file_id,
                         input_image_file_object_id=created_file.id,
                     )
                 )
         if created_thread_image_file_ids:
-            await models.Thread.add_image_files(
-                session, thread_id, created_thread_image_file_ids
-            )
-    except (OSError, RuntimeError):
+            try:
+                await models.Thread.add_image_files(
+                    session, thread_id, created_thread_image_file_ids
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to attach lecture video frame context files to thread. lecture_video_id=%s thread_id=%s",
+                    lecture_video.id,
+                    thread_id,
+                    exc_info=True,
+                )
+    except (OSError, LectureVideoFrameContextError):
         logger.error(
             "Failed to build lecture video frame context. lecture_video_id=%s",
             lecture_video.id,

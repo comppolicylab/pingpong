@@ -1,5 +1,5 @@
 import pytest
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 
 from pingpong import models, schemas
 import pingpong.merge as merge_module
@@ -95,28 +95,87 @@ async def test_merge_preserves_lecture_video_user_references(db):
         assert interaction is not None
         assert interaction.actor_user_id == new_user.id
 
-        await merge_module.merge_users(session, new_user.id, old_user.id)
+
+async def test_lecture_video_manifest_is_deferred_for_generic_loads(db):
+    async with db.async_session() as session:
+        class_ = models.Class(name="Deferred Lecture Video Class", private=False)
+        session.add(class_)
         await session.flush()
 
-        assert await models.User.get_by_id(session, old_user.id) is None
+        stored_object = await models.LectureVideoStoredObject.create(
+            session,
+            key="deferred-lv.mp4",
+            original_filename="deferred-lv.mp4",
+            content_type="video/mp4",
+            content_length=321,
+        )
+        lecture_video = await models.LectureVideo.create(
+            session,
+            class_id=class_.id,
+            stored_object_id=stored_object.id,
+            user_id=None,
+            manifest_data={"version": 2, "word_level_transcription": [{"word": "hi"}]},
+            manifest_version=2,
+            lecture_video_chat_available=True,
+        )
+        lecture_video_id = lecture_video.id
+        await session.commit()
 
-        lecture_video = await models.LectureVideo.get_by_id(session, lecture_video.id)
-        assert lecture_video is not None
-        assert lecture_video.uploader_id == new_user.id
+    async with db.async_session() as session:
+        generic_loaded = await models.LectureVideo.get_by_id(session, lecture_video_id)
+        assert generic_loaded is not None
+        assert "manifest_data" in inspect(generic_loaded).unloaded
 
-        thread_state = (
-            await models.LectureVideoThreadState.get_by_thread_id_with_context(
-                session, thread.id
+        copy_context_loaded = await models.LectureVideo.get_by_id_with_copy_context(
+            session, lecture_video_id
+        )
+        assert copy_context_loaded is not None
+        assert "manifest_data" not in inspect(copy_context_loaded).unloaded
+        assert copy_context_loaded.manifest_data is not None
+
+
+async def test_thread_lecture_video_context_preloads_manifest_data(db):
+    async with db.async_session() as session:
+        class_ = models.Class(name="Thread Lecture Video Class", private=False)
+        session.add(class_)
+        await session.flush()
+
+        stored_object = await models.LectureVideoStoredObject.create(
+            session,
+            key="thread-lv.mp4",
+            original_filename="thread-lv.mp4",
+            content_type="video/mp4",
+            content_length=654,
+        )
+        lecture_video = await models.LectureVideo.create(
+            session,
+            class_id=class_.id,
+            stored_object_id=stored_object.id,
+            user_id=None,
+            manifest_data={"version": 2, "word_level_transcription": [{"word": "hi"}]},
+            manifest_version=2,
+            lecture_video_chat_available=True,
+        )
+        thread = models.Thread(
+            class_id=class_.id,
+            thread_id="thread_with_manifest_context",
+            version=3,
+            interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+            lecture_video_id=lecture_video.id,
+            private=False,
+        )
+        session.add(thread)
+        await session.commit()
+        thread_id = thread.id
+        class_id = class_.id
+
+    async with db.async_session() as session:
+        loaded_thread = (
+            await models.Thread.get_by_id_for_class_with_lecture_video_context(
+                session, class_id, thread_id
             )
         )
-        assert thread_state is not None
-        assert thread_state.controller_user_id == new_user.id
-
-        interaction = await session.scalar(
-            select(models.LectureVideoInteraction).where(
-                models.LectureVideoInteraction.thread_id == thread.id,
-                models.LectureVideoInteraction.event_index == 1,
-            )
-        )
-        assert interaction is not None
-        assert interaction.actor_user_id == new_user.id
+        assert loaded_thread is not None
+        assert loaded_thread.lecture_video is not None
+        assert "manifest_data" not in inspect(loaded_thread.lecture_video).unloaded
+        assert loaded_thread.lecture_video.manifest_data is not None
