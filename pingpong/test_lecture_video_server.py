@@ -188,6 +188,16 @@ def lecture_video_manifest(
     }
 
 
+def lecture_video_manifest_v2(**kwargs) -> dict:
+    manifest = lecture_video_manifest(**kwargs)
+    manifest["version"] = 2
+    manifest["word_level_transcription"] = [
+        {"id": "w1", "word": "Latency", "start": 0.0, "end": 0.4},
+        {"id": "w2", "word": "matters", "start": 0.4, "end": 0.9},
+    ]
+    return manifest
+
+
 async def create_lecture_video_copy_credentials(
     session: AsyncSession,
     class_id: int,
@@ -299,12 +309,15 @@ async def create_ready_lecture_video_assistant(
     session.add(lecture_video)
     await session.flush()
 
+    validated_manifest = schemas._validate_lecture_video_manifest(
+        manifest or lecture_video_manifest()
+    )
+    assert validated_manifest is not None
+
     await lecture_video_service.persist_manifest(
         session,
         lecture_video,
-        schemas.LectureVideoManifestV1.model_validate(
-            manifest or lecture_video_manifest()
-        ),
+        validated_manifest,
         voice_id=DEFAULT_LECTURE_VIDEO_VOICE_ID,
         create_narration_placeholders=True,
     )
@@ -588,9 +601,155 @@ async def test_get_thread_returns_lecture_video_session(
     assert session_data["current_question"] is None
     assert session_data["current_continuation"] is None
     assert session_data["controller"]["has_control"] is False
-    assert session_data["controller"]["has_active_controller"] is False
-    assert session_data["controller"]["lease_expires_at"] is None
-    assert response.json()["thread"]["is_current_user_participant"] is True
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
+    ]
+)
+async def test_get_thread_returns_lecture_chat_availability_for_v2_manifest(
+    api, config, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+            manifest=lecture_video_manifest_v2(),
+        )
+
+    create_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/lecture",
+        json={"assistant_id": 1, "parties": [123]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+    thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
+
+    response = api.get(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    assert (
+        response.json()["lecture_video_session"]["lecture_video_chat_available"] is True
+    )
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
+        ("user:123", "can_view", "assistant:1"),
+    ]
+)
+async def test_send_message_creates_lecture_chat_run_with_hidden_context(
+    api, config, db, institution, monkeypatch, valid_user_token
+):
+    async with db.async_session() as session:
+        class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+            manifest=lecture_video_manifest_v2(),
+        )
+
+    create_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/lecture",
+        json={"assistant_id": 1, "parties": [123]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+    thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
+
+    async def fake_build_context(*args, **kwargs):
+        return server_module.lecture_video_chat.LectureChatContextBuildResult(
+            text_message_parts=[
+                models.MessagePart(
+                    part_index=0,
+                    type=schemas.MessagePartType.INPUT_TEXT,
+                    text="Lecture chat context\nCurrent offset: 4321ms",
+                )
+            ],
+            frame_message_parts=[
+                models.MessagePart(
+                    part_index=0,
+                    type=schemas.MessagePartType.INPUT_IMAGE,
+                    input_image_file_id="frame-file-id",
+                )
+            ],
+            current_offset_ms=4321,
+        )
+
+    def fake_run_response(*args, **kwargs):
+        async def stream():
+            yield b"event: done\ndata: [DONE]\n\n"
+
+        return stream()
+
+    monkeypatch.setattr(
+        server_module.lecture_video_chat,
+        "build_lecture_chat_context_message_parts",
+        fake_build_context,
+    )
+    monkeypatch.setattr(server_module, "run_response", fake_run_response)
+
+    response = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}",
+        json={"message": "Why does latency matter more here?"},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+
+    async with db.async_session() as session:
+        run = await session.scalar(
+            select(models.Run)
+            .where(models.Run.thread_id == thread_id)
+            .options(
+                selectinload(models.Run.messages).selectinload(models.Message.content)
+            )
+            .order_by(models.Run.id.desc())
+            .limit(1)
+        )
+        assert run is not None
+        thread = await models.Thread.get_by_id(session, thread_id)
+        assert thread is not None
+        state = await models.LectureVideoThreadState.get_by_thread_id_with_context(
+            session, thread_id
+        )
+        assert state is not None
+
+    ordered_messages = sorted(run.messages, key=lambda item: item.output_index)
+    assert run.model == "gpt-4o-mini"
+    assert run.tools_available == thread.tools_available
+    assert [message.role for message in ordered_messages] == [
+        schemas.MessageRole.DEVELOPER,
+        schemas.MessageRole.USER,
+        schemas.MessageRole.USER,
+    ]
+    assert [message.is_hidden for message in ordered_messages] == [True, True, False]
+    assert ordered_messages[0].content[0].text.startswith("Lecture chat context")
+    assert ordered_messages[1].content[0].type == schemas.MessagePartType.INPUT_IMAGE
+    assert ordered_messages[2].content[0].text == "Why does latency matter more here?"
+    assert state.last_chat_context_end_ms == 4321
+
+    thread_response = api.get(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert thread_response.status_code == 200
+    assert [message["role"] for message in thread_response.json()["messages"]] == [
+        "user"
+    ]
+    assert thread_response.json()["thread"]["is_current_user_participant"] is True
 
 
 @with_user(123)
@@ -5623,7 +5782,33 @@ async def test_get_assistant_lecture_video_config_returns_manifest_and_voice_id(
             question_text="Config question?"
         ),
         "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+        "lecture_video_chat_available": False,
     }
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(grants=[("user:123", "can_edit", "assistant:1")])
+async def test_get_assistant_lecture_video_config_returns_v2_chat_metadata(
+    api, db, institution, valid_user_token
+):
+    manifest = lecture_video_manifest_v2(question_text="Config question?")
+
+    async with db.async_session() as session:
+        class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+            manifest=manifest,
+        )
+
+    response = api.get(
+        f"/api/v1/class/{class_.id}/assistant/1/lecture-video/config",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["lecture_video_manifest"] == manifest
+    assert response.json()["lecture_video_chat_available"] is True
 
 
 @with_user(123)

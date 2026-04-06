@@ -194,6 +194,9 @@ def build_lecture_video_session(
 
     return schemas.LectureVideoSession(
         state=state.state,
+        lecture_video_chat_available=bool(
+            thread.lecture_video and thread.lecture_video.lecture_video_chat_available
+        ),
         last_known_offset_ms=state.last_known_offset_ms,
         furthest_offset_ms=furthest_offset_ms,
         latest_interaction_at=latest_interaction_at,
@@ -360,6 +363,7 @@ async def initialize_thread_state(
             else None,
             "last_known_offset_ms": 0,
             "furthest_offset_ms": 0,
+            "last_chat_context_end_ms": 0,
             "version": 1,
         },
     )

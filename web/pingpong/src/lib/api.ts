@@ -1499,15 +1499,31 @@ export type LectureVideoManifestQuestion = {
 	options: LectureVideoManifestOption[];
 };
 
-export type LectureVideoManifest = {
+export type LectureVideoManifestV1 = {
 	version: 1;
 	questions: LectureVideoManifestQuestion[];
 };
+
+export type LectureVideoManifestWordV2 = {
+	id: string;
+	word: string;
+	start: number;
+	end: number;
+};
+
+export type LectureVideoManifestV2 = {
+	version: 2;
+	questions: LectureVideoManifestQuestion[];
+	word_level_transcription: LectureVideoManifestWordV2[];
+};
+
+export type LectureVideoManifest = LectureVideoManifestV1 | LectureVideoManifestV2;
 
 export type LectureVideoConfigResponse = {
 	lecture_video: LectureVideoSummary;
 	lecture_video_manifest: LectureVideoManifest;
 	voice_id: string;
+	lecture_video_chat_available: boolean;
 };
 
 export type LectureVideoEditorPolicyResponse = LectureVideoAssistantEditorPolicy;
@@ -1563,6 +1579,7 @@ export type LectureVideoSessionController = {
 
 export type LectureVideoSession = {
 	state: LectureVideoSessionState;
+	lecture_video_chat_available: boolean;
 	last_known_offset_ms: number | null;
 	furthest_offset_ms: number | null;
 	latest_interaction_at: string | null;

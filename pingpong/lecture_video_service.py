@@ -21,6 +21,10 @@ LECTURE_VIDEO_ALREADY_ASSIGNED_DETAIL = (
     "This lecture video is already attached to another assistant. "
     "Upload a new lecture video or copy the assistant instead."
 )
+LECTURE_VIDEO_CHAT_UNAVAILABLE_NOTE = (
+    "Lecture chat is only available for lecture videos with a version 2 manifest "
+    "that includes word-level transcription."
+)
 
 
 def get_upload_size(upload: UploadFile) -> int:
@@ -245,7 +249,7 @@ async def lecture_video_summary_from_model(
 
 def lecture_video_manifest_from_model(
     lecture_video: models.LectureVideo,
-) -> schemas.LectureVideoManifestV1:
+) -> schemas.LectureVideoManifest:
     questions: list[schemas.LectureVideoManifestQuestionV1] = []
     for question in sorted(lecture_video.questions, key=lambda item: item.position):
         correct_option_id = (
@@ -273,13 +277,72 @@ def lecture_video_manifest_from_model(
                 options=options,
             )
         )
-    return schemas.LectureVideoManifestV1(questions=questions)
+    base_manifest = schemas.LectureVideoManifestV1(questions=questions)
+
+    if not lecture_video.manifest_data:
+        return base_manifest
+
+    stored_manifest = schemas._validate_lecture_video_manifest(
+        lecture_video.manifest_data
+    )
+    if stored_manifest is None or stored_manifest.version == 1:
+        return base_manifest
+
+    return schemas.LectureVideoManifestV2(
+        questions=base_manifest.questions,
+        word_level_transcription=stored_manifest.word_level_transcription,
+    )
+
+
+def lecture_video_chat_metadata(
+    lecture_video: models.LectureVideo | None,
+) -> bool:
+    if lecture_video is None:
+        return False
+
+    if lecture_video.manifest_version is not None:
+        return lecture_video.lecture_video_chat_available
+
+    if lecture_video.manifest_data:
+        try:
+            manifest_data = lecture_video.manifest_data
+            if (
+                isinstance(manifest_data, dict)
+                and manifest_data.get("version") == 2
+                and isinstance(manifest_data.get("word_level_transcription"), list)
+                and len(manifest_data["word_level_transcription"]) > 0
+            ):
+                return True
+        except TypeError:
+            logger.warning(
+                "Stored lecture video manifest_data is invalid while computing chat availability. lecture_video_id=%s",
+                lecture_video.id,
+                exc_info=True,
+            )
+            return False
+
+    try:
+        manifest = lecture_video_manifest_from_model(lecture_video)
+    except (ValidationError, ValueError, TypeError):
+        logger.warning(
+            "Stored lecture video manifest is invalid while computing chat availability. lecture_video_id=%s",
+            lecture_video.id,
+            exc_info=True,
+        )
+        return False
+
+    if (
+        isinstance(manifest, schemas.LectureVideoManifestV2)
+        and manifest.word_level_transcription
+    ):
+        return True
+    return False
 
 
 def lecture_video_config_matches(
     current_lecture_video: models.LectureVideo,
     requested_lecture_video: models.LectureVideo,
-    requested_manifest: schemas.LectureVideoManifestV1,
+    requested_manifest: schemas.LectureVideoManifest,
     requested_voice_id: str,
 ) -> bool:
     try:
@@ -312,6 +375,9 @@ async def clone_lecture_video_snapshot(
         user_id=lecture_video.uploader_id,
         display_name=lecture_video.display_name,
         voice_id=lecture_video.voice_id,
+        manifest_data=lecture_video.manifest_data,
+        manifest_version=lecture_video.manifest_version,
+        lecture_video_chat_available=lecture_video.lecture_video_chat_available,
         source_lecture_video_id_snapshot=lecture_video.id,
         status=lecture_video.status,
         error_message=lecture_video.error_message,
@@ -600,7 +666,7 @@ async def delete_lecture_video_if_unused(
 async def persist_manifest(
     session: AsyncSession,
     lecture_video: models.LectureVideo,
-    lecture_video_manifest: schemas.LectureVideoManifestV1,
+    lecture_video_manifest: schemas.LectureVideoManifest,
     *,
     voice_id: str | None = None,
     create_narration_placeholders: bool = True,
@@ -608,6 +674,12 @@ async def persist_manifest(
     await clear_normalized_content(session, lecture_video.id)
     if voice_id is not None:
         lecture_video.voice_id = voice_id
+    lecture_video.manifest_data = lecture_video_manifest.model_dump(mode="json")
+    lecture_video.manifest_version = lecture_video_manifest.version
+    lecture_video.lecture_video_chat_available = (
+        isinstance(lecture_video_manifest, schemas.LectureVideoManifestV2)
+        and len(lecture_video_manifest.word_level_transcription) > 0
+    )
 
     narration_placeholders_created = False
 

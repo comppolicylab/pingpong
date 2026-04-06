@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 from datetime import date, datetime
 from enum import Enum, StrEnum, auto
-from typing import Any, Generic, Literal, NotRequired, TypeVar, Union
+from typing import Any, Generic, Literal, NotRequired, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import TypedDict, Annotated, TypeAlias
 
 from openai._utils import PropertyInfo
@@ -35,6 +37,9 @@ from pydantic import (
 
 from pingpong.authz.base import Relation
 from .gravatar import get_email_hash, get_gravatar_image
+
+if TYPE_CHECKING:
+    pass
 
 
 class Statistics(BaseModel):
@@ -518,9 +523,35 @@ class LectureVideoManifestQuestionV1(BaseModel):
         return self
 
 
-class LectureVideoManifestV1(BaseModel):
-    version: Literal[1] = 1
+class LectureVideoManifestBase(BaseModel):
     questions: list[LectureVideoManifestQuestionV1] = Field(..., min_length=1)
+
+
+class LectureVideoManifestV1(LectureVideoManifestBase):
+    version: Literal[1] = 1
+
+
+class LectureVideoManifestWordV2(BaseModel):
+    id: str = Field(..., min_length=1)
+    word: str = Field(..., min_length=1)
+    start: int | float = Field(..., ge=0)
+    end: int | float = Field(..., ge=0)
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "LectureVideoManifestWordV2":
+        if self.end < self.start:
+            raise ValueError("end must be greater than or equal to start")
+        return self
+
+
+class LectureVideoManifestV2(LectureVideoManifestBase):
+    version: Literal[2] = 2
+    word_level_transcription: list[LectureVideoManifestWordV2] = Field(
+        ..., min_length=1
+    )
+
+
+LectureVideoManifest: TypeAlias = LectureVideoManifestV1 | LectureVideoManifestV2
 
 
 def _lecture_video_manifest_error_detail(exc: ValidationError) -> str:
@@ -532,13 +563,20 @@ def _lecture_video_manifest_error_detail(exc: ValidationError) -> str:
 
 
 def _validate_lecture_video_manifest(
-    lecture_video_manifest: LectureVideoManifestV1 | Any | None,
-) -> LectureVideoManifestV1 | None:
+    lecture_video_manifest: LectureVideoManifest | Any | None,
+) -> LectureVideoManifest | None:
     if lecture_video_manifest is None or isinstance(
-        lecture_video_manifest, LectureVideoManifestV1
+        lecture_video_manifest, (LectureVideoManifestV1, LectureVideoManifestV2)
     ):
         return lecture_video_manifest
     try:
+        version = (
+            lecture_video_manifest.get("version")
+            if isinstance(lecture_video_manifest, dict)
+            else None
+        )
+        if version == 2:
+            return LectureVideoManifestV2.model_validate(lecture_video_manifest)
         return LectureVideoManifestV1.model_validate(lecture_video_manifest)
     except ValidationError as exc:
         raise ValueError(
@@ -564,8 +602,9 @@ class LectureVideoAssistantEditorPolicy(BaseModel):
 
 class LectureVideoConfigResponse(BaseModel):
     lecture_video: LectureVideoSummary
-    lecture_video_manifest: LectureVideoManifestV1
+    lecture_video_manifest: LectureVideoManifest
     voice_id: str
+    lecture_video_chat_available: bool = False
 
 
 class ValidateLectureVideoVoiceRequest(BaseModel):
@@ -633,6 +672,7 @@ class LectureVideoSessionController(BaseModel):
 
 class LectureVideoSession(BaseModel):
     state: LectureVideoSessionState
+    lecture_video_chat_available: bool = False
     last_known_offset_ms: int | None = None
     furthest_offset_ms: int | None = Field(None, ge=0)
     latest_interaction_at: datetime | None = None
@@ -957,7 +997,7 @@ class CreateAssistant(BaseModel):
     verbosity: int | None = Field(None, ge=0, le=2)
     tools: list[ToolOption] = Field(default_factory=list)
     lecture_video_id: int | None = None
-    lecture_video_manifest: LectureVideoManifestV1 | None = None
+    lecture_video_manifest: LectureVideoManifest | None = None
     voice_id: str | None = None
     published: bool = False
     use_latex: bool = False
@@ -1034,7 +1074,7 @@ class UpdateAssistant(BaseModel):
     notes: str | None = None
     interaction_mode: InteractionMode | None = None
     lecture_video_id: int | None = None
-    lecture_video_manifest: LectureVideoManifestV1 | None = None
+    lecture_video_manifest: LectureVideoManifest | None = None
     voice_id: str | None = None
     model: str | None = Field(None, min_length=2)
     temperature: float | None = Field(None, ge=0.0, le=2.0)

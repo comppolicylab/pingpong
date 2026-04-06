@@ -689,7 +689,11 @@ async def build_response_input_item_list(
                         )
                     )
 
-        if message.role == MessageRole.USER:
+        if message.role in {
+            MessageRole.USER,
+            MessageRole.SYSTEM,
+            MessageRole.DEVELOPER,
+        }:
             user_response_message: EasyInputMessageParam = {
                 "role": message.role,
                 "content": content_list,

@@ -107,6 +107,7 @@ from pingpong.summary import send_class_summary_to_user_task
 from pingpong.video_store import VideoStoreError
 
 from . import (
+    lecture_video_chat,
     assistant_service,
     lecture_video_processing,
     lecture_video_runtime,
@@ -3664,6 +3665,7 @@ async def get_thread(
                 thread.id,
                 run_ids=run_ids,
                 order="desc",
+                include_hidden_messages=False,
             ),
             models.Thread.get_latest_run_by_thread_id(request.state["db"], thread.id),
             models.Thread.get_thread_components(request.state["db"], thread.id),
@@ -5342,6 +5344,7 @@ async def list_thread_messages(
                 thread.id,
                 run_ids=run_ids,
                 order="asc",
+                include_hidden_messages=False,
             ),
             get_assistant(request.state["db"], thread.assistant_id),
             models.Thread.get_file_search_files(request.state["db"], thread.id),
@@ -7415,13 +7418,16 @@ async def send_message(
                 request.state["db"], thread.id
             )
 
-            if not last_run:
+            if (
+                not last_run
+                and thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO
+            ):
                 raise HTTPException(
                     status_code=500,
                     detail="We're having trouble fetching information about this conversation. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
                 )
 
-            if last_run.status in {
+            if last_run and last_run.status in {
                 schemas.RunStatus.QUEUED,
                 schemas.RunStatus.PENDING,
                 schemas.RunStatus.IN_PROGRESS,
@@ -7469,6 +7475,7 @@ async def send_message(
                 status_code=403,
                 detail="You can't upload photos with this assistant. Remove the photos and try again.",
             )
+        lecture_chat_prep: lecture_video_chat.LectureChatTurnPreparation | None = None
 
         # When we reach 3 user messages, or if we failed to generate a title before, generate a new one. Only use the first 100 words of each user and assistant message to maintain a low token count.
         if thread.user_message_ct == 3 or thread.name is None:
@@ -7578,7 +7585,7 @@ async def send_message(
                 asst.use_latex,
                 asst.use_image_descriptions,
                 disable_prompt_randomization=asst.disable_prompt_randomization,
-                thread_id=thread.thread_id,
+                thread_id=thread.thread_id or str(thread.id),
                 user_id=request.state["session"].user.id,
             )
             request.state["db"].add(thread)
@@ -7591,7 +7598,7 @@ async def send_message(
             app=config.public_url,
             class_=int(class_id),
             user=request.state["session"].user.id,
-            thread=thread.thread_id,
+            thread=thread.thread_id or str(thread.id),
         )
 
         file_names = await models.Thread.get_file_search_files(
@@ -7683,6 +7690,16 @@ async def send_message(
 
             is_supervisor = is_supervisor_check[0]
 
+            if thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
+                lecture_chat_prep = await lecture_video_chat.prepare_lecture_chat_turn(
+                    request=request,
+                    openai_client=openai_client,
+                    class_id=class_id,
+                    thread=thread,
+                    user_id=request.state["session"].user.id,
+                    prev_output_sequence=prev_output_sequence,
+                )
+
             show_reasoning_summaries = is_supervisor or (
                 asst and not asst.hide_reasoning_summaries
             )
@@ -7725,6 +7742,27 @@ async def send_message(
                         )
                     )
                 part_index += 1
+            user_output_index = (
+                lecture_chat_prep.user_output_index
+                if lecture_chat_prep is not None
+                else prev_output_sequence + 1
+            )
+
+            run_messages = [
+                *(lecture_chat_prep.prepended_messages if lecture_chat_prep else []),
+                models.Message(
+                    thread_id=thread.id,
+                    output_index=user_output_index,
+                    message_status=schemas.MessageStatus.COMPLETED,
+                    role=schemas.MessageRole.USER,
+                    is_hidden=False,
+                    user_id=request.state["session"].user.id,
+                    content=messageContentParts,
+                    file_search_attachments=file_search_files,
+                    code_interpreter_attachments=code_interpreter_files,
+                ),
+            ]
+
             run_to_complete = models.Run(
                 status=schemas.RunStatus.PENDING,
                 thread_id=thread.id,
@@ -7739,18 +7777,7 @@ async def send_message(
                     data.timezone if data.timezone else thread.timezone,
                 ),
                 verbosity=asst.verbosity,
-                messages=[
-                    models.Message(
-                        thread_id=thread.id,
-                        output_index=prev_output_sequence + 1,
-                        message_status=schemas.MessageStatus.COMPLETED,
-                        role=schemas.MessageRole.USER,
-                        user_id=request.state["session"].user.id,
-                        content=messageContentParts,
-                        file_search_attachments=file_search_files,
-                        code_interpreter_attachments=code_interpreter_files,
-                    )
-                ],
+                messages=run_messages,
             )
 
             mcp_server_tools_by_server_label: dict[str, models.MCPServerTool] = {}
@@ -8116,6 +8143,15 @@ async def delete_thread(
     if vector_store_obj_id:
         await delete_vector_store_oai(openai_client, vector_store_obj_id)
 
+    if file_ids_to_delete:
+        await handle_delete_files(
+            request.state["db"],
+            request.state["authz"],
+            openai_client,
+            list(dict.fromkeys(file_ids_to_delete)),
+            int(class_id),
+        )
+
     if thread_version <= 2:
         try:
             await openai_client.beta.threads.delete(thread_obj_id)
@@ -8455,12 +8491,17 @@ async def get_assistant_lecture_video_config(
         )
         raise HTTPException(409, "Stored lecture video manifest is invalid.") from e
 
+    lecture_video_chat_available = lecture_video_service.lecture_video_chat_metadata(
+        lecture_video
+    )
+
     return {
         "lecture_video": await lecture_video_service.lecture_video_summary_from_model(
             request.state["db"], lecture_video
         ),
         "lecture_video_manifest": lecture_video_manifest,
         "voice_id": lecture_video.voice_id or "",
+        "lecture_video_chat_available": lecture_video_chat_available,
     }
 
 

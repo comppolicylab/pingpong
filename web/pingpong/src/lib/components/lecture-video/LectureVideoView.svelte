@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import { beforeNavigate } from '$app/navigation';
+	import type { Snippet } from 'svelte';
+	import { createEventDispatcher } from 'svelte';
 	import { onMount } from 'svelte';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import * as api from '$lib/api';
@@ -33,7 +35,10 @@
 		lectureVideoSrc,
 		title = 'Lecture Video',
 		canParticipate = true,
-		initialSession = null
+		initialSession = null,
+		deferAutoContinueForChatDraft = false,
+		desktopChat = undefined,
+		mobileChat = undefined
 	}: {
 		classId: number;
 		threadId: number;
@@ -41,7 +46,13 @@
 		title?: string;
 		canParticipate?: boolean;
 		initialSession?: LectureVideoSession | null;
+		deferAutoContinueForChatDraft?: boolean;
+		desktopChat?: Snippet;
+		mobileChat?: Snippet;
 	} = $props();
+	const dispatch = createEventDispatcher<{
+		sessionchange: LectureVideoSession;
+	}>();
 
 	// --- Session state ---
 	let controllerSessionId: string | null = $state(null);
@@ -79,6 +90,7 @@
 	// --- UI state ---
 	let scrollToQuestionId: number | null = $state(null);
 	let isDesktopLayout: boolean = $state(false);
+	let activeMobilePanel: 'checks' | 'chat' = $state('checks');
 	let historyLoaded: boolean = $state(false);
 	let historyInteractions: LectureVideoInteractionHistoryItem[] = $state([]);
 	let initError: string | null = $state(null);
@@ -108,12 +120,13 @@
 	let manualPlaybackTarget: 'video' | 'narration' | null = $state(null);
 	let autoContinueInFlight = $state(false);
 	let autoContinueFailed = $state(false);
+	let autoContinueDeferredForChatDraft = $state(false);
 	function shouldShowContinuePrompt(): boolean {
 		return (
 			(sessionState === 'awaiting_post_answer_resume' &&
 				!postAnswerNarrationPending &&
 				!autoContinueInFlight &&
-				hasVisiblePostAnswerFeedback(currentContinuation)) ||
+				(hasVisiblePostAnswerFeedback(currentContinuation) || autoContinueDeferredForChatDraft)) ||
 			autoContinueFailed
 		);
 	}
@@ -126,6 +139,10 @@
 
 	function hasVisibleQuestionPrompt(state: LectureVideoSessionState): boolean {
 		return state === 'awaiting_answer' || state === 'awaiting_post_answer_resume';
+	}
+
+	function isCompletedSession(state: LectureVideoSessionState): boolean {
+		return state === 'completed';
 	}
 
 	function isDefinedNumber(id: number | null | undefined): id is number {
@@ -167,6 +184,8 @@
 	let playbackLocked = $derived(playerDisabled || questionPlaybackLocked);
 	let hasQuestionPrompt = $derived(hasVisibleQuestionPrompt(sessionState));
 	let visibleCurrentQuestion = $derived(hasQuestionPrompt ? currentQuestion : null);
+	let hasMobileChecksPanel = $derived(!isCompletedSession(sessionState));
+	let hasMobileChatPanel = $derived(!!mobileChat);
 	let activeQuestionIds = $derived(
 		getActiveQuestionIds(questionPlaybackLocked, currentQuestion, currentContinuation)
 	);
@@ -313,6 +332,28 @@
 		};
 	});
 
+	$effect(() => {
+		if (hasQuestionPrompt && hasMobileChecksPanel) {
+			activeMobilePanel = 'checks';
+			return;
+		}
+		if (!hasMobileChecksPanel && hasMobileChatPanel) {
+			activeMobilePanel = 'chat';
+			return;
+		}
+		if (!hasMobileChatPanel && hasMobileChecksPanel) {
+			activeMobilePanel = 'checks';
+		}
+	});
+
+	function mobileSegmentClass(panel: 'checks' | 'chat'): string {
+		return `rounded-xl px-4 py-2 text-sm font-medium transition-colors ${
+			activeMobilePanel === panel
+				? 'bg-white text-slate-950 shadow-sm'
+				: 'text-slate-600 hover:text-slate-900'
+		}`;
+	}
+
 	// =========================================================================
 	// Session helpers
 	// =========================================================================
@@ -349,6 +390,7 @@
 		clearPendingVideoRetry();
 		autoContinueInFlight = false;
 		autoContinueFailed = false;
+		autoContinueDeferredForChatDraft = false;
 	}
 
 	function revokeNarrationResources() {
@@ -365,6 +407,16 @@
 		pendingVideoRetryCleanup?.();
 		pendingVideoRetryCleanup = null;
 		manualPlaybackTarget = null;
+	}
+
+	function maybeAutoContinueAfterPostAnswer() {
+		if (deferAutoContinueForChatDraft) {
+			autoContinueDeferredForChatDraft = true;
+			return;
+		}
+
+		autoContinueDeferredForChatDraft = false;
+		void requestContinue();
 	}
 
 	function queueVideoRetry() {
@@ -634,18 +686,18 @@
 			void playNarration(currentContinuation.post_answer_narration_id, {
 				onEnded: () => {
 					postAnswerNarrationPending = false;
-					void requestContinue();
+					maybeAutoContinueAfterPostAnswer();
 				},
 				onError: () => {
 					postAnswerNarrationPending = false;
-					void requestContinue();
+					maybeAutoContinueAfterPostAnswer();
 				}
 			});
 		} else if (
 			sessionState === 'awaiting_post_answer_resume' &&
 			!hasVisiblePostAnswerFeedback(currentContinuation)
 		) {
-			void requestContinue();
+			maybeAutoContinueAfterPostAnswer();
 		}
 
 		applyPendingResumeOffset();
@@ -787,6 +839,7 @@
 		currentContinuation = session.current_continuation;
 		if (session.state !== 'awaiting_post_answer_resume') {
 			autoContinueFailed = false;
+			autoContinueDeferredForChatDraft = false;
 		}
 		furthestOffsetMs = session.furthest_offset_ms ?? 0;
 		questionPlaybackLocked =
@@ -794,6 +847,28 @@
 
 		trackQuestion(session.current_question);
 		trackQuestion(session.current_continuation?.next_question ?? null);
+		dispatch('sessionchange', session);
+	}
+
+	export async function pauseForChatInput() {
+		if (!canParticipate || playbackLocked || sessionState !== 'playing') {
+			return;
+		}
+
+		if (paused || videoElement?.paused) {
+			return;
+		}
+
+		if (!(await ensureControllerSession())) {
+			return;
+		}
+
+		if (videoElement && !videoElement.paused) {
+			videoElement.pause();
+			return;
+		}
+
+		await postPlaybackInteraction('video_paused');
 	}
 
 	// =========================================================================
@@ -1194,15 +1269,15 @@
 				void playNarration(continuationAtAnswer.post_answer_narration_id, {
 					onEnded: () => {
 						postAnswerNarrationPending = false;
-						void requestContinue();
+						maybeAutoContinueAfterPostAnswer();
 					},
 					onError: () => {
 						postAnswerNarrationPending = false;
-						void requestContinue();
+						maybeAutoContinueAfterPostAnswer();
 					}
 				});
 			} else if (!hasVisiblePostAnswerFeedback(currentContinuation)) {
-				void requestContinue();
+				maybeAutoContinueAfterPostAnswer();
 			}
 
 			// Clear subtitle
@@ -1215,6 +1290,7 @@
 			return;
 		}
 
+		autoContinueDeferredForChatDraft = false;
 		autoContinueInFlight = true;
 		try {
 			autoContinueFailed = !(await handleContinue());
@@ -1370,14 +1446,12 @@
 			{initError}
 		</div>
 	</div>
-{:else if sessionState === 'completed'}
-	<LectureVideoCompletedView {classId} {threadId} initialInteractions={historyInteractions} />
 {:else}
-	<div class="h-full w-full overflow-y-auto">
+	<div class="h-full w-full overflow-hidden">
 		<div
-			class="mx-auto flex w-full max-w-screen-2xl flex-col gap-6 px-4 py-4 lg:px-6 xl:grid xl:grid-cols-[minmax(0,1fr)_20rem] xl:items-start xl:gap-8 xl:py-6"
+			class="mx-auto flex h-full w-full max-w-screen-2xl flex-col gap-6 px-4 py-4 lg:px-6 xl:grid xl:grid-cols-[minmax(0,1fr)_24rem] xl:items-stretch xl:gap-8 xl:py-6"
 		>
-			<div class="min-w-0 space-y-4">
+			<div class="min-w-0 shrink-0 space-y-4 xl:shrink xl:overflow-y-auto">
 				{#if !canParticipate}
 					<div
 						class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700"
@@ -1386,69 +1460,116 @@
 						available only to participants.
 					</div>
 				{/if}
-				<div class="overflow-hidden rounded-3xl border border-slate-200 bg-white p-3 shadow-xl">
-					<LectureVideoPlayer
-						src={lectureVideoSrc}
-						displayTitle={sessionState === 'awaiting_answer'
-							? 'Answer the comprehension check to continue'
-							: title}
-						startOffsetMs={initialStartOffsetMs}
-						{questionMarkers}
-						{subtitleText}
-						disabled={!canParticipate || playbackLocked}
-						{activeQuestionIds}
-						{furthestOffsetMs}
-						manualPlaybackPrompt={playbackRequiresManualStart}
-						bind:videoElement
-						bind:currentTimeMs
-						bind:paused
-						bind:effectiveVolume={playerVolume}
-						ontimeupdate={handleTimeUpdate}
-						onseek={handleSeek}
-						onended={handleVideoEnded}
-						oncanplay={handleCanPlay}
-						onerror={() =>
-							failClosedControl(
-								'The lecture video could not be loaded. Please refresh to try again.'
-							)}
-						onplay={handlePlay}
-						onpause={handlePause}
-						onquestionclick={handleQuestionClick}
-						onmanualplayrequest={handleManualPlaybackRequest}
+				{#if sessionState === 'completed'}
+					<LectureVideoCompletedView
+						{classId}
+						{threadId}
+						initialInteractions={historyInteractions}
 					/>
-				</div>
+				{:else}
+					<div class="overflow-hidden rounded-3xl border border-slate-200 bg-white p-3 shadow-xl">
+						<LectureVideoPlayer
+							src={lectureVideoSrc}
+							displayTitle={sessionState === 'awaiting_answer'
+								? 'Answer the comprehension check to continue'
+								: title}
+							startOffsetMs={initialStartOffsetMs}
+							{questionMarkers}
+							{subtitleText}
+							disabled={!canParticipate || playbackLocked}
+							{activeQuestionIds}
+							{furthestOffsetMs}
+							manualPlaybackPrompt={playbackRequiresManualStart}
+							bind:videoElement
+							bind:currentTimeMs
+							bind:paused
+							bind:effectiveVolume={playerVolume}
+							ontimeupdate={handleTimeUpdate}
+							onseek={handleSeek}
+							onended={handleVideoEnded}
+							oncanplay={handleCanPlay}
+							onerror={() =>
+								failClosedControl(
+									'The lecture video could not be loaded. Please refresh to try again.'
+								)}
+							onplay={handlePlay}
+							onpause={handlePause}
+							onquestionclick={handleQuestionClick}
+							onmanualplayrequest={handleManualPlaybackRequest}
+						/>
+					</div>
+				{/if}
 			</div>
 			{#if isDesktopLayout}
-				<div class="min-w-0 pt-3">
-					<LectureVideoQuestionSidebar
-						{allQuestions}
-						currentQuestionId={currentQuestion?.id ?? null}
-						currentQuestion={visibleCurrentQuestion}
-						{currentContinuation}
-						{sessionState}
-						{answeredQuestions}
-						answeringDisabled={!canParticipate || introNarrationPending}
-						{scrollToQuestionId}
-						onselectOption={handleSelectOption}
-						{...continuePromptProps}
-						onscrollcomplete={clearQuestionScrollTarget}
-					/>
+				<div class="flex min-h-0 min-w-0 flex-col gap-4 pt-3">
+					{#if sessionState !== 'completed'}
+						<LectureVideoQuestionSidebar
+							{allQuestions}
+							currentQuestionId={currentQuestion?.id ?? null}
+							currentQuestion={visibleCurrentQuestion}
+							{currentContinuation}
+							{sessionState}
+							{answeredQuestions}
+							answeringDisabled={!canParticipate || introNarrationPending}
+							{scrollToQuestionId}
+							onselectOption={handleSelectOption}
+							{...continuePromptProps}
+							onscrollcomplete={clearQuestionScrollTarget}
+						/>
+					{/if}
+					<div class="min-h-0 flex-1">
+						{@render desktopChat?.()}
+					</div>
 				</div>
 			{:else}
-				<div>
-					<LectureVideoQuestionGallery
-						{allQuestions}
-						currentQuestionId={currentQuestion?.id ?? null}
-						currentQuestion={visibleCurrentQuestion}
-						{currentContinuation}
-						{sessionState}
-						{answeredQuestions}
-						answeringDisabled={!canParticipate || introNarrationPending}
-						{scrollToQuestionId}
-						onselectOption={handleSelectOption}
-						{...continuePromptProps}
-						onscrollcomplete={clearQuestionScrollTarget}
-					/>
+				<div class="flex min-h-0 flex-1 flex-col gap-4">
+					{#if hasMobileChecksPanel && hasMobileChatPanel}
+						<div class="shrink-0 rounded-2xl border border-slate-200 bg-slate-50 p-1">
+							<div class="grid grid-cols-2 gap-1" role="tablist" aria-label="Lecture panels">
+								<button
+									type="button"
+									role="tab"
+									class={mobileSegmentClass('checks')}
+									aria-selected={activeMobilePanel === 'checks'}
+									onclick={() => (activeMobilePanel = 'checks')}
+								>
+									Comprehension Checks
+								</button>
+								<button
+									type="button"
+									role="tab"
+									class={mobileSegmentClass('chat')}
+									aria-selected={activeMobilePanel === 'chat'}
+									onclick={() => (activeMobilePanel = 'chat')}
+								>
+									Chat
+								</button>
+							</div>
+						</div>
+					{/if}
+					{#if hasMobileChecksPanel && (!hasMobileChatPanel || activeMobilePanel === 'checks')}
+						<div class="min-h-0 flex-1 overflow-y-auto">
+							<LectureVideoQuestionGallery
+								{allQuestions}
+								currentQuestionId={currentQuestion?.id ?? null}
+								currentQuestion={visibleCurrentQuestion}
+								{currentContinuation}
+								{sessionState}
+								{answeredQuestions}
+								answeringDisabled={!canParticipate || introNarrationPending}
+								showHeading={!hasMobileChatPanel}
+								{scrollToQuestionId}
+								onselectOption={handleSelectOption}
+								{...continuePromptProps}
+								onscrollcomplete={clearQuestionScrollTarget}
+							/>
+						</div>
+					{/if}
+					{#if hasMobileChatPanel && (!hasMobileChecksPanel || activeMobilePanel === 'chat')}
+						<div class="min-h-0 flex-1">
+							{@render mobileChat?.()}
+						</div>
+					{/if}
 				</div>
 			{/if}
 		</div>

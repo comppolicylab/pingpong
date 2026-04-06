@@ -49,7 +49,13 @@
 	import DropdownBadge from './DropdownBadge.svelte';
 	import type { Action } from 'svelte/action';
 
-	const dispatcher = createEventDispatcher();
+	const dispatcher = createEventDispatcher<{
+		submit: ChatInputMessage;
+		dismissError: void;
+		startNewChat: void;
+		textinput: { hasText: boolean };
+		textpaste: { hasText: boolean };
+	}>();
 
 	/**
 	 * Whether to allow sending.
@@ -421,6 +427,7 @@
 		ref.value = '';
 		realRef.value = '';
 		fixHeight(realRef);
+		dispatcher('textinput', { hasText: false });
 
 		dispatcher('submit', {
 			file_search_file_ids,
@@ -442,6 +449,7 @@
 					ref.value = message;
 					realRef.value = realMessage;
 					fixHeight(realRef);
+					dispatcher('textinput', { hasText: message.trim().length > 0 });
 				}
 				errorMessage =
 					params.errorMessage ||
@@ -528,9 +536,14 @@
 	const handleTextAreaInput = (e: Event) => {
 		const target = e.target as HTMLTextAreaElement;
 		fixHeight(target);
+		dispatcher('textinput', { hasText: target.value.trim().length > 0 });
 	};
 
 	const handlePaste = (e: ClipboardEvent) => {
+		const target = e.target as HTMLTextAreaElement | null;
+		queueMicrotask(() => {
+			dispatcher('textpaste', { hasText: target?.value.trim().length ? true : false });
+		});
 		if (!upload || !fileUploadRef) {
 			return;
 		}
