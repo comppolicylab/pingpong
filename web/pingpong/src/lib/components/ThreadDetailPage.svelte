@@ -1483,6 +1483,7 @@
 					canParticipate={threadIsCurrentUserParticipant}
 					initialSession={lectureVideoSession}
 					deferAutoContinueForChatDraft={lectureChatHasDraft}
+					chatAvailable={threadLectureChatAvailable}
 					on:sessionchange={handleLectureSessionChange}
 				>
 					{#snippet chat()}

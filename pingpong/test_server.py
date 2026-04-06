@@ -1694,8 +1694,11 @@ async def test_copy_assistant_within_class(
     ]
 
 
+@with_user(123)
 @with_institution(99, "Test Institution")
-async def test_copy_assistant_service_rejects_non_ready_lecture_video(db, institution):
+async def test_copy_assistant_service_rejects_non_ready_lecture_video(
+    db, institution, user
+):
     async with db.async_session() as session:
         class_ = models.Class(
             id=99, name="Source", institution_id=institution.id, api_key="test-key"

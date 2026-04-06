@@ -43,6 +43,7 @@
 		canParticipate = true,
 		initialSession = null,
 		deferAutoContinueForChatDraft = false,
+		chatAvailable = false,
 		chat = undefined
 	}: {
 		classId: number;
@@ -52,6 +53,7 @@
 		canParticipate?: boolean;
 		initialSession?: LectureVideoSession | null;
 		deferAutoContinueForChatDraft?: boolean;
+		chatAvailable?: boolean;
 		chat?: Snippet;
 	} = $props();
 	const dispatch = createEventDispatcher<{
@@ -190,7 +192,7 @@
 	let isCompleted = $derived(isCompletedSession(sessionState));
 	let visibleCurrentQuestion = $derived(hasQuestionPrompt ? currentQuestion : null);
 	let hasMobileChecksPanel = $derived(true);
-	let hasMobileChatPanel = $derived(!!chat);
+	let hasMobileChatPanel = $derived(chatAvailable);
 	let activeQuestionIds = $derived(
 		getActiveQuestionIds(questionPlaybackLocked, currentQuestion, currentContinuation)
 	);
