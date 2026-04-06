@@ -16,10 +16,20 @@ updates:
       semver-minor-days: 3
       semver-patch-days: 1
     groups:
-      production-dependencies:
+      production-minor-and-patch:
         dependency-type: "production"
-      development-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+      development-minor-and-patch:
         dependency-type: "development"
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -53,7 +63,17 @@ updates:
       semver-minor-days: 3
       semver-patch-days: 1
     groups:
-      production-dependencies:
+      production-minor-and-patch:
         dependency-type: "production"
-      development-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+      development-minor-and-patch:
         dependency-type: "development"
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
