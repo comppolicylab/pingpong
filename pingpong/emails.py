@@ -6,7 +6,8 @@ from pingpong.schemas import EmailValidationResult, EmailValidationResults
 
 
 def parse_addresses(input: str) -> list[EmailValidationResult]:
-    emails = getaddresses([input])
+    normalized_input = input.replace("\r\n", "\n").replace("\r", "\n")
+    emails = getaddresses([normalized_input.replace("\n", ",")])
     return [parse_single_address(email) for email in emails if email[1]]
 
 
