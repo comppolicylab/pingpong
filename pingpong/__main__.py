@@ -168,6 +168,29 @@ def make_root(email: str) -> None:
     asyncio.run(_make_root())
 
 
+@auth.command("remove_root")
+@click.argument("email")
+def remove_root(email: str) -> None:
+    async def _remove_root() -> None:
+        await config.authz.driver.init()
+        async with config.db.driver.async_session() as session:
+            user = await User.get_by_email(session, email)
+            if not user:
+                raise click.ClickException(f"User with email {email} not found")
+
+            user.super_admin = False
+            session.add(user)
+            await session.commit()
+
+            async with config.authz.driver.get_client() as c:
+                await c.write_safe(revoke=[(f"user:{user.id}", "admin", c.root)])
+
+            logger.info(f"User {user.id} demoted from root")
+            logger.info("Done!")
+
+    asyncio.run(_remove_root())
+
+
 @auth.command("update_model")
 def update_model() -> None:
     async def _update_model() -> None:
