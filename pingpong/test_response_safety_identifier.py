@@ -1,66 +1,89 @@
-import hashlib
-import hmac
+import pytest
 
-from pingpong.ai import get_response_safety_identifier
-
-
-TEST_SECRET = "test-response-safety-identifier-secret"
+from pingpong import models, schemas
+from pingpong.session import _ensure_safety_identifier_uuid
 
 
-def _expected(raw_identifier: str, *, secret: str = TEST_SECRET) -> str:
-    return hmac.new(
-        secret.encode("utf-8"),
-        f"pp:v1:{raw_identifier}".encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
+class _DummyRequest:
+    def __init__(self, db_session):
+        self.state = {"db": db_session}
 
 
-def test_response_safety_identifier_uses_user_auth_for_logged_in_user():
-    assert get_response_safety_identifier(
-        user_auth="user:42",
-        response_safety_identifier_secret=TEST_SECRET,
-    ) == _expected("user:42")
-
-
-def test_response_safety_identifier_prefers_user_auth_over_anonymous_session_id():
-    assert get_response_safety_identifier(
-        user_auth="user:42",
-        anonymous_session_id=77,
-        response_safety_identifier_secret=TEST_SECRET,
-    ) == _expected("user:42")
-
-
-def test_response_safety_identifier_uses_anonymous_link_id_as_fallback():
-    assert get_response_safety_identifier(
-        user_auth=None,
-        anonymous_link_id=9,
-        response_safety_identifier_secret=TEST_SECRET,
-    ) == _expected("anonymous_link:9")
-
-
-def test_response_safety_identifier_prefers_user_auth_over_anonymous_link():
-    assert get_response_safety_identifier(
-        user_auth="user:5",
-        anonymous_link_id=9,
-        response_safety_identifier_secret=TEST_SECRET,
-    ) == _expected("user:5")
-
-
-def test_response_safety_identifier_returns_none_when_no_identifiers_present():
-    assert (
-        get_response_safety_identifier(
-            user_auth=None,
-            response_safety_identifier_secret=TEST_SECRET,
+@pytest.mark.asyncio
+async def test_response_safety_identifier_preserves_existing_user_uuid(db):
+    async with db.async_session() as session:
+        user = models.User(
+            email="existing-user-uuid@example.com",
+            state=schemas.UserState.VERIFIED,
+            safety_identifier_uuid="existing-user-uuid",
         )
-        is None
-    )
+        session.add(user)
+        await session.flush()
+
+        request = _DummyRequest(session)
+        safety_identifier = await _ensure_safety_identifier_uuid(request, user)
+
+        assert safety_identifier == "existing-user-uuid"
+        assert user.safety_identifier_uuid == "existing-user-uuid"
 
 
-def test_response_safety_identifier_returns_none_when_secret_not_configured():
-    assert (
-        get_response_safety_identifier(
-            user_auth="user:42",
-            response_safety_identifier_secret="",
+@pytest.mark.asyncio
+async def test_response_safety_identifier_generates_missing_user_uuid(db):
+    async with db.async_session() as session:
+        user = models.User(
+            email="missing-user-uuid@example.com",
+            state=schemas.UserState.VERIFIED,
+            safety_identifier_uuid=None,
         )
-        is None
-    )
+        session.add(user)
+        await session.flush()
+
+        request = _DummyRequest(session)
+        safety_identifier = await _ensure_safety_identifier_uuid(request, user)
+
+        assert safety_identifier is not None
+        assert user.safety_identifier_uuid == safety_identifier
+
+
+@pytest.mark.asyncio
+async def test_response_safety_identifier_generates_missing_anonymous_session_uuid(db):
+    async with db.async_session() as session:
+        user = models.User(
+            email="anon-session-owner@example.com",
+            state=schemas.UserState.VERIFIED,
+        )
+        session.add(user)
+        await session.flush()
+
+        anonymous_session = models.AnonymousSession(
+            session_token="anon-session-token",
+            user_id=user.id,
+            safety_identifier_uuid=None,
+        )
+        session.add(anonymous_session)
+        await session.flush()
+
+        request = _DummyRequest(session)
+        safety_identifier = await _ensure_safety_identifier_uuid(
+            request, anonymous_session
+        )
+
+        assert safety_identifier is not None
+        assert anonymous_session.safety_identifier_uuid == safety_identifier
+
+
+@pytest.mark.asyncio
+async def test_response_safety_identifier_generates_missing_anonymous_link_uuid(db):
+    async with db.async_session() as session:
+        link = models.AnonymousLink(
+            share_token="anon-link-token",
+            safety_identifier_uuid=None,
+        )
+        session.add(link)
+        await session.flush()
+
+        request = _DummyRequest(session)
+        safety_identifier = await _ensure_safety_identifier_uuid(request, link)
+
+        assert safety_identifier is not None
+        assert link.safety_identifier_uuid == safety_identifier

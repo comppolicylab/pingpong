@@ -7413,6 +7413,7 @@ async def create_run(
                 anonymous_link_auth=request.state["anonymous_share_token_auth"],
                 anonymous_session_id=request.state["anonymous_session_id"],
                 anonymous_link_id=request.state["anonymous_link_id"],
+                response_safety_identifier=request.state["response_safety_identifier"],
                 show_file_search_document_names=is_supervisor
                 or not asst.hide_file_search_document_names,
                 show_file_search_queries=is_supervisor
@@ -7984,6 +7985,7 @@ async def send_message(
                 anonymous_link_auth=request.state["anonymous_share_token_auth"],
                 anonymous_session_id=request.state["anonymous_session_id"],
                 anonymous_link_id=request.state["anonymous_link_id"],
+                response_safety_identifier=request.state["response_safety_identifier"],
             )
         else:
             raise HTTPException(
