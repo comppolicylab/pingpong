@@ -3490,6 +3490,7 @@ async def run_response(
     anonymous_user_auth: str | None = None,
     anonymous_session_id: int | None = None,
     anonymous_link_id: int | None = None,
+    response_safety_identifier: str | None = None,
 ):
     is_canceled = False
     await config.authz.driver.init()
@@ -3604,6 +3605,12 @@ async def run_response(
                 )
                 include_with.append("code_interpreter_call.outputs")
 
+            safety_identifier_setting: str | openai.NotGiven = (
+                f"pp:v1:{response_safety_identifier}"
+                if response_safety_identifier
+                else openai.NOT_GIVEN
+            )
+
             try:
                 stream: AsyncStream[ResponseStreamEvent] = await cli.responses.create(
                     include=include_with,
@@ -3612,6 +3619,7 @@ async def run_response(
                     model=run.model,
                     parallel_tool_calls=True,
                     reasoning=reasoning_settings,
+                    safety_identifier=safety_identifier_setting,
                     tools=tools,
                     store=True,
                     stream=True,

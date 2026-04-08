@@ -1301,6 +1301,9 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    safety_identifier_uuid = Column(
+        String, nullable=True, default=lambda: str(uuid.uuid4())
+    )
     # Name column is deprecated - use first_name and last_name instead
     _name = Column("name", String, nullable=True)
     first_name = Column(String, nullable=True)
@@ -1647,7 +1650,11 @@ class User(Base):
                 display_name=display_name,
             )
         else:
-            user = User(email=email, state=initial_state, display_name=display_name)
+            user = User(
+                email=email,
+                state=initial_state,
+                display_name=display_name,
+            )
         session.add(user)
         await session.flush()
         await session.refresh(user)
@@ -3691,6 +3698,9 @@ class AnonymousLink(Base):
     __tablename__ = "anonymous_links"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    safety_identifier_uuid = Column(
+        String, nullable=True, default=lambda: str(uuid.uuid4())
+    )
     name = Column(String, nullable=True)
     share_token = Column(String, unique=True, nullable=False)
     assistant = relationship(
@@ -3718,7 +3728,9 @@ class AnonymousLink(Base):
         assistant_id: int,
     ) -> "AnonymousLink":
         link = AnonymousLink(
-            share_token=share_token, active=True, activated_at=func.now()
+            share_token=share_token,
+            active=True,
+            activated_at=func.now(),
         )
         session.add(link)
         await session.flush()
@@ -5665,6 +5677,9 @@ class AnonymousSession(Base):
     __tablename__ = "anonymous_sessions"
 
     id = Column(Integer, primary_key=True)
+    safety_identifier_uuid = Column(
+        String, nullable=True, default=lambda: str(uuid.uuid4())
+    )
     session_token = Column(String, unique=True, nullable=False)
     thread_id = Column(
         Integer, ForeignKey("threads.id", ondelete="cascade"), nullable=True

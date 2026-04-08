@@ -4,6 +4,7 @@ from typing import cast
 
 from fastapi import Request
 from jwt import PyJWTError
+import uuid_utils as uuid
 from pingpong import models, schemas
 from pingpong.auth import TimeException, decode_session_token
 from pingpong.state_types import AppState, StateRequest, StateWebSocket
@@ -45,6 +46,22 @@ def _initialize_shared_state(request: StateRequest | StateWebSocket) -> None:
         request.state["anonymous_session_token"] = None
     request.state["anonymous_session_id"] = None
     request.state["anonymous_link_id"] = None
+    request.state["response_safety_identifier"] = None
+
+
+async def _ensure_safety_identifier_uuid(
+    request: StateRequest | StateWebSocket,
+    entity: models.User | models.AnonymousSession | models.AnonymousLink | None,
+) -> str | None:
+    if entity is None:
+        return None
+    if entity.safety_identifier_uuid:
+        return entity.safety_identifier_uuid
+
+    entity.safety_identifier_uuid = str(uuid.uuid4())
+    request.state["db"].add(entity)
+    await request.state["db"].flush()
+    return entity.safety_identifier_uuid
 
 
 async def populate_anonymous_tokens(
@@ -52,6 +69,7 @@ async def populate_anonymous_tokens(
 ) -> StateRequest | StateWebSocket:
     is_http_request = isinstance(request, Request)
     user: models.User | None = None
+    anonymous_session: models.AnonymousSession | None = None
 
     if is_http_request:
         req = cast(Request, request)
@@ -116,6 +134,14 @@ async def populate_anonymous_tokens(
             status=schemas.SessionStatus.ANONYMOUS,
             user=user,
         )
+        if anonymous_session is not None:
+            request.state[
+                "response_safety_identifier"
+            ] = await _ensure_safety_identifier_uuid(request, anonymous_session)
+        else:
+            request.state[
+                "response_safety_identifier"
+            ] = await _ensure_safety_identifier_uuid(request, user.anonymous_link)
 
     return request
 
@@ -198,6 +224,9 @@ async def populate_request(
                 agreement_id=agreement_id,
             )
             request.state["auth_user"] = f"user:{user_id}"
+            request.state[
+                "response_safety_identifier"
+            ] = await _ensure_safety_identifier_uuid(request, user)
         except Exception as e:
             if (
                 request.state["is_anonymous"]

@@ -37,6 +37,7 @@ class BaseConnectionState(TypedDict):
     anonymous_session_token: str | None
     anonymous_session_id: int | None
     anonymous_link_id: int | None
+    response_safety_identifier: str | None
     permissions: dict[str, bool]
 
 

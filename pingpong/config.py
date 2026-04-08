@@ -648,6 +648,7 @@ class Config(BaseSettings):
     )
     prompt_randomizer_log_level: str | None = Field(None)
     responses_api_log_level: str | None = Field(None)
+    response_safety_identifier_secret: str | None = Field(None)
     feature_flags: FeatureFlags = Field(FeatureFlags())
 
     reload: int = Field(0)
