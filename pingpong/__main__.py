@@ -178,14 +178,34 @@ def remove_root(email: str) -> None:
             if not user:
                 raise click.ClickException(f"User with email {email} not found")
 
-            user.super_admin = False
-            session.add(user)
-            await session.commit()
+            user_id = user.id
+            was_super_admin = bool(user.super_admin)
+            had_root_tuple = False
 
             async with config.authz.driver.get_client() as c:
-                await c.write_safe(revoke=[(f"user:{user.id}", "admin", c.root)])
+                tuples = await c.read_tuples(
+                    "admin",
+                    c.root,
+                    user=f"user:{user_id}",
+                )
+                had_root_tuple = bool(tuples)
 
-            logger.info(f"User {user.id} demoted from root")
+                if not was_super_admin and not had_root_tuple:
+                    raise click.ClickException(f"User {user_id} is not a root admin")
+
+                await c.write_safe(revoke=[(f"user:{user_id}", "admin", c.root)])
+
+            if was_super_admin:
+                user.super_admin = False
+                session.add(user)
+                await session.commit()
+
+            if had_root_tuple:
+                logger.info(f"User {user_id} demoted from root")
+            else:
+                logger.info(
+                    f"User {user_id} demoted from root (DB flag only; no root authz tuple found)"
+                )
             logger.info("Done!")
 
     asyncio.run(_remove_root())
