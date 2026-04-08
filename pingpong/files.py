@@ -102,17 +102,36 @@ async def validate_private_file_delete_permissions(
         session, class_id, unique_file_ids
     )
 
-    invalid_ids = [
+    forbidden_ids = [
         file_id
         for file_id in unique_file_ids
-        if file_id not in file_map
-        or file_id not in class_file_ids
-        or not file_map[file_id].private
+        if file_id not in file_map or file_id not in class_file_ids
     ]
-    if invalid_ids:
+    if forbidden_ids:
+        # Keep this generic to avoid leaking file existence across classes.
+        logger.warning(
+            "Rejected private file deletion request. class_id=%s forbidden_file_ids=%s",
+            sanitize_for_log(str(class_id)),
+            sanitize_for_log(",".join(str(file_id) for file_id in forbidden_ids)),
+        )
         raise HTTPException(
             status_code=403,
             detail="You do not have permission to delete one or more private files.",
+        )
+
+    non_private_ids = [
+        file_id for file_id in unique_file_ids if not file_map[file_id].private
+    ]
+    if non_private_ids:
+        logger.warning(
+            "Rejected non-private file id in deleted_private_files. class_id=%s file_ids=%s",
+            sanitize_for_log(str(class_id)),
+            sanitize_for_log(",".join(str(file_id) for file_id in non_private_ids)),
+        )
+        file_id = non_private_ids[0]
+        raise HTTPException(
+            status_code=400,
+            detail=f"File {file_id} is not a private file and cannot be deleted via this field.",
         )
 
 

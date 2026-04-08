@@ -9095,6 +9095,10 @@ async def create_assistant(
             status_code=404,
             detail=f"Associated class {class_id} not found.",
         )
+    deleted_private_files = req.deleted_private_files or []
+    await validate_private_file_delete_permissions(
+        request.state["db"], class_id_int, deleted_private_files
+    )
 
     # Check Azure compatibility for lecture video mode
     if req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO and (
@@ -9359,10 +9363,6 @@ async def create_assistant(
         raise HTTPException(400, "Invalid assistant version")
 
     try:
-        deleted_private_files = req.deleted_private_files or []
-        await validate_private_file_delete_permissions(
-            request.state["db"], class_id_int, deleted_private_files
-        )
         del req.deleted_private_files
         mcp_servers_input = req.mcp_servers or []
         del req.mcp_servers
@@ -9492,6 +9492,12 @@ async def create_assistant(
         return await assistant_service.assistant_response_from_model(
             request.state["db"], loaded_assistant or asst
         )
+    except HTTPException:
+        if vector_store_object_id:
+            await openai_client.vector_stores.delete(vector_store_id)
+        if new_asst and new_asst.id:
+            await openai_client.beta.assistants.delete(new_asst.id)
+        raise
     except Exception as e:
         if vector_store_object_id:
             await openai_client.vector_stores.delete(vector_store_id)
@@ -9982,6 +9988,13 @@ async def update_assistant(
         raise HTTPException(
             status_code=404,
             detail=f"Associated class {class_id} not found.",
+        )
+    if (
+        "deleted_private_files" in req.model_fields_set
+        and req.deleted_private_files != []
+    ):
+        await validate_private_file_delete_permissions(
+            request.state["db"], int(class_id), req.deleted_private_files
         )
 
     # Check that the class is not private if user information should be recorded
@@ -11067,9 +11080,6 @@ async def update_assistant(
         and req.deleted_private_files != []
     ):
         try:
-            await validate_private_file_delete_permissions(
-                request.state["db"], int(class_id), req.deleted_private_files
-            )
             files_to_delete = await models.File.get_files_not_used_by_assistant(
                 request.state["db"],
                 asst.id,
