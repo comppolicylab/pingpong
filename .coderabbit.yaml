@@ -5,6 +5,7 @@ reviews:
   profile: "chill"
   request_changes_workflow: false
   high_level_summary: true
+  high_level_summary_in_walkthrough: true
   poem: false
   in_progress_fortune: false
   review_status: true
@@ -17,3 +18,9 @@ reviews:
       - '!skip-ai-review'
       - '!dependencies'
       - '!chore'
+      - feature
+      - feat
+      - fix
+      - hotfix
+      - bug
+      - change
