@@ -89,6 +89,33 @@ class FileNotFoundException(Exception):
     pass
 
 
+async def validate_private_file_delete_permissions(
+    session: AsyncSession, class_id: int, file_ids: list[int]
+) -> None:
+    if not file_ids:
+        return
+
+    unique_file_ids = list(set(file_ids))
+    files = await File.get_all_by_id(session, unique_file_ids)
+    file_map = {file.id: file for file in files}
+    class_file_ids = await File.get_file_ids_for_class(
+        session, class_id, unique_file_ids
+    )
+
+    invalid_ids = [
+        file_id
+        for file_id in unique_file_ids
+        if file_id not in file_map
+        or file_id not in class_file_ids
+        or not file_map[file_id].private
+    ]
+    if invalid_ids:
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have permission to delete one or more private files.",
+        )
+
+
 async def handle_delete_file(
     session: AsyncSession,
     authz: AuthzClient,

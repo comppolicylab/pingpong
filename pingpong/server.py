@@ -46,7 +46,7 @@ from openai.types.responses.response_output_text import AnnotationURLCitation
 from pydantic import PositiveInt, ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql import delete, func, select, update
+from sqlalchemy.sql import delete, func, update
 
 import pingpong.metrics as metrics
 import pingpong.models as models
@@ -165,6 +165,7 @@ from .files import (
     handle_create_file,
     handle_delete_file,
     handle_delete_files,
+    validate_private_file_delete_permissions,
 )
 from .log_utils import sanitize_for_log
 from .lti.canvas_connect import (
@@ -370,37 +371,6 @@ async def get_openai_client_for_class(request: StateRequest) -> OpenAIClientType
         return await get_openai_client_by_class_id(request.state["db"], int(class_id))
     except GetOpenAIClientException as e:
         raise HTTPException(status_code=e.code, detail=e.detail)
-
-
-async def _validate_private_file_delete_permissions(
-    request: StateRequest, class_id: int, file_ids: list[int]
-) -> None:
-    if not file_ids:
-        return
-
-    unique_file_ids = list(set(file_ids))
-    files = await models.File.get_all_by_id(request.state["db"], unique_file_ids)
-    file_map = {file.id: file for file in files}
-    class_file_rows = await request.state["db"].execute(
-        select(models.file_class_association.c.file_id).where(
-            models.file_class_association.c.class_id == class_id,
-            models.file_class_association.c.file_id.in_(unique_file_ids),
-        )
-    )
-    class_file_ids = {row[0] for row in class_file_rows}
-
-    invalid_ids = [
-        file_id
-        for file_id in unique_file_ids
-        if file_id not in file_map
-        or file_id not in class_file_ids
-        or not file_map[file_id].private
-    ]
-    if invalid_ids:
-        raise HTTPException(
-            status_code=403,
-            detail="You do not have permission to delete one or more private files.",
-        )
 
 
 OpenAIClientDependency = Depends(get_openai_client_for_class)
@@ -9390,8 +9360,8 @@ async def create_assistant(
 
     try:
         deleted_private_files = req.deleted_private_files or []
-        await _validate_private_file_delete_permissions(
-            request, class_id_int, deleted_private_files
+        await validate_private_file_delete_permissions(
+            request.state["db"], class_id_int, deleted_private_files
         )
         del req.deleted_private_files
         mcp_servers_input = req.mcp_servers or []
@@ -11097,8 +11067,8 @@ async def update_assistant(
         and req.deleted_private_files != []
     ):
         try:
-            await _validate_private_file_delete_permissions(
-                request, int(class_id), req.deleted_private_files
+            await validate_private_file_delete_permissions(
+                request.state["db"], int(class_id), req.deleted_private_files
             )
             files_to_delete = await models.File.get_files_not_used_by_assistant(
                 request.state["db"],
