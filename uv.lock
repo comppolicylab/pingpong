@@ -2341,7 +2341,7 @@ requires-dist = [
     { name = "audioop-lts", marker = "python_full_version >= '3.13'", specifier = "~=0.2.2" },
     { name = "azure-communication-email", specifier = "~=1.1.0" },
     { name = "beautifulsoup4", specifier = "~=4.14.3" },
-    { name = "cryptography", specifier = "~=46.0.5" },
+    { name = "cryptography", specifier = "~=46.0.7" },
     { name = "discord-py", specifier = "~=2.7.1" },
     { name = "elevenlabs", specifier = "~=2.41.0" },
     { name = "email-validator", specifier = "~=2.3.0" },
