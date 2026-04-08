@@ -84,10 +84,6 @@ class S3VideoStore(BaseVideoStore):
         "1",
         "-multiple_requests",
         "1",
-        "-initial_request_size",
-        "8388608",
-        "-request_size",
-        "8388608",
         "-short_seek_size",
         "8388608",
     ]
