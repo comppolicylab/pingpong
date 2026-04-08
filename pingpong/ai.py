@@ -2,6 +2,7 @@ import asyncio
 import csv
 import functools
 import hashlib
+import hmac
 import io
 import json
 import logging
@@ -3604,6 +3605,15 @@ async def run_response(
                 )
                 include_with.append("code_interpreter_call.outputs")
 
+            safety_identifier = get_response_safety_identifier(
+                user_auth=user_auth,
+                anonymous_session_id=anonymous_session_id,
+                anonymous_link_id=anonymous_link_id,
+            )
+            safety_identifier_setting: str | openai.NotGiven = (
+                safety_identifier if safety_identifier else openai.NOT_GIVEN
+            )
+
             try:
                 stream: AsyncStream[ResponseStreamEvent] = await cli.responses.create(
                     include=include_with,
@@ -3612,6 +3622,7 @@ async def run_response(
                     model=run.model,
                     parallel_tool_calls=True,
                     reasoning=reasoning_settings,
+                    safety_identifier=safety_identifier_setting,
                     tools=tools,
                     store=True,
                     stream=True,
@@ -4289,6 +4300,40 @@ def generate_user_hash(class_: models.Class, user: models.User) -> str:
     hash_object = hashlib.sha256()
     hash_object.update(combined_input.encode("utf-8"))
     return hash_object.hexdigest().rstrip("=")[0:10]
+
+
+def get_response_safety_identifier(
+    *,
+    user_auth: str | None,
+    anonymous_session_id: int | None = None,
+    anonymous_link_id: int | None = None,
+    response_safety_identifier_secret: str | None = None,
+) -> str | None:
+    """Return a hashed, stable per-user identifier for Responses API safety checks."""
+    raw_identifier: str | None = None
+    if user_auth:
+        raw_identifier = user_auth
+    elif anonymous_session_id is not None:
+        raw_identifier = f"anonymous_session:{anonymous_session_id}"
+    elif anonymous_link_id is not None:
+        raw_identifier = f"anonymous_link:{anonymous_link_id}"
+
+    if raw_identifier is None:
+        return None
+
+    secret = (
+        response_safety_identifier_secret
+        if response_safety_identifier_secret is not None
+        else config.response_safety_identifier_secret
+    )
+    if not secret:
+        return None
+
+    return hmac.new(
+        secret.encode("utf-8"),
+        f"pp:v1:{raw_identifier}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
 
 
 def export_user_identifier(thread: models.Thread, class_: models.Class) -> str:

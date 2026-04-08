@@ -16,6 +16,11 @@ realtime_log_level = "INFO"
 # Prompt randomizer features logging level.
 prompt_randomizer_log_level = "INFO"
 
+# Secret used to derive per-user `safety_identifier` values sent to OpenAI.
+# If unset, PingPong will omit `safety_identifier` from Responses API requests.
+# Use a long random string in production.
+# response_safety_identifier_secret = "replace-with-long-random-secret"
+
 # The URL where the application can be accessed. This is used to generate
 # absolute URLs in emails and other places.
 # In development, this is the UI dev server (`pnpm dev`). In production it
