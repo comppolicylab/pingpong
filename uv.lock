@@ -803,7 +803,7 @@ wheels = [
 
 [[package]]
 name = "elevenlabs"
-version = "2.41.0"
+version = "2.42.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -813,9 +813,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/64/1e/0f0c8e489d0909e0a474e4d5a0f480daae452c0cbc09a2fb65c66dc50b07/elevenlabs-2.41.0.tar.gz", hash = "sha256:70af75aae931b55c4810f912f01825b0e8316566b419e4838dfa22f6a806de1d", size = 531070, upload-time = "2026-04-01T12:18:38.44Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f5/df/1774d90a3a6db0f990dc25e2830ce1edb7a9951e05b7a357db1ea314e227/elevenlabs-2.42.0.tar.gz", hash = "sha256:eeee74c51724429c06950bad4c4798b66641ac6b220811b05a7ce1c5dfb03026", size = 537572, upload-time = "2026-04-07T17:42:40.645Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6b/e9/55925cdbfc32b64cadc7da60042d6a96e3c22272589c343db007eb2ee7f4/elevenlabs-2.41.0-py3-none-any.whl", hash = "sha256:cc107f07eebabd7a807fe59c37e618b10f90bea2a1a861b40fab01d2a66e9c9b", size = 1446391, upload-time = "2026-04-01T12:18:36.789Z" },
+    { url = "https://files.pythonhosted.org/packages/86/27/4fa9ee48d0e9f2ec7efd4d59b0a6ded7807e395e56be57330482a51d7bd7/elevenlabs-2.42.0-py3-none-any.whl", hash = "sha256:d255e64ef406375db8b59264babc944cb295eeffc0786b4f8f82485ac62c49ae", size = 1470209, upload-time = "2026-04-07T17:42:38.876Z" },
 ]
 
 [[package]]
@@ -2343,7 +2343,7 @@ requires-dist = [
     { name = "beautifulsoup4", specifier = "~=4.14.3" },
     { name = "cryptography", specifier = "~=46.0.7" },
     { name = "discord-py", specifier = "~=2.7.1" },
-    { name = "elevenlabs", specifier = "~=2.41.0" },
+    { name = "elevenlabs", specifier = "~=2.42.0" },
     { name = "email-validator", specifier = "~=2.3.0" },
     { name = "fastapi", extras = ["standard"], specifier = "~=0.129.0" },
     { name = "google-genai", extras = ["aiohttp"], specifier = "~=1.67.0" },
@@ -2370,7 +2370,7 @@ requires-dist = [
     { name = "starlette", specifier = "~=0.52.1" },
     { name = "tqdm", specifier = "~=4.67.3" },
     { name = "uuid-utils", specifier = "~=0.14.0" },
-    { name = "uvicorn", specifier = "~=0.43.0" },
+    { name = "uvicorn", specifier = "~=0.44.0" },
 ]
 
 [package.metadata.requires-dev]
@@ -3585,15 +3585,15 @@ wheels = [
 
 [[package]]
 name = "uvicorn"
-version = "0.43.0"
+version = "0.44.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
     { name = "h11" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/62/f2/368268300fb8af33743508d738ef7bb4d56afdb46c6d9c0fa3dd515df171/uvicorn-0.43.0.tar.gz", hash = "sha256:ab1652d2fb23abf124f36ccc399828558880def222c3cb3d98d24021520dc6e8", size = 85686, upload-time = "2026-04-03T18:37:48.984Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/5e/da/6eee1ff8b6cbeed47eeb5229749168e81eb4b7b999a1a15a7176e51410c9/uvicorn-0.44.0.tar.gz", hash = "sha256:6c942071b68f07e178264b9152f1f16dfac5da85880c4ce06366a96d70d4f31e", size = 86947, upload-time = "2026-04-06T09:23:22.826Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/55/df/0cf5b0c451602748fdc7a702d4667f6e209bf96aa6e3160d754234445f2a/uvicorn-0.43.0-py3-none-any.whl", hash = "sha256:46fac64f487fd968cd999e5e49efbbe64bd231b5bd8b4a0b482a23ebce499620", size = 68591, upload-time = "2026-04-03T18:37:47.64Z" },
+    { url = "https://files.pythonhosted.org/packages/b7/23/a5bbd9600dd607411fa644c06ff4951bec3a4d82c4b852374024359c19c0/uvicorn-0.44.0-py3-none-any.whl", hash = "sha256:ce937c99a2cc70279556967274414c087888e8cec9f9c94644dfca11bd3ced89", size = 69425, upload-time = "2026-04-06T09:23:21.524Z" },
 ]
 
 [package.optional-dependencies]
