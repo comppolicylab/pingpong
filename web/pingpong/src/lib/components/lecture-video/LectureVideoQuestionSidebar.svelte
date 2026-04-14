@@ -77,6 +77,10 @@
 		);
 	}
 
+	function isCurrentFeedback(questionId: number): boolean {
+		return questionId === currentQuestionId && isAwaitingPostAnswerResume;
+	}
+
 	function toggleExpandedAnswered(questionId: number) {
 		expandedAnsweredId = expandedAnsweredId === questionId ? null : questionId;
 	}
@@ -85,6 +89,23 @@
 		[...allQuestions]
 			.filter(({ id }) => isVisibleQuestion(id))
 			.sort((a, b) => a.position - b.position)
+	);
+
+	let pillQuestions = $derived(
+		sortedQuestions.filter((question) => {
+			const answered = answeredQuestions.get(question.id);
+			return answered && !isCurrentFeedback(question.id) && expandedAnsweredId !== question.id;
+		})
+	);
+
+	let fullCardQuestions = $derived(
+		sortedQuestions.filter((question) => {
+			const answered = answeredQuestions.get(question.id);
+			if (answered && !isCurrentFeedback(question.id) && expandedAnsweredId !== question.id) {
+				return false;
+			}
+			return true;
+		})
 	);
 
 	$effect(() => {
@@ -105,12 +126,36 @@
 	</div>
 
 	<div class="flex min-h-0 flex-col gap-3 overflow-y-auto pr-1">
-		{#each sortedQuestions as question (question.id)}
+		{#if pillQuestions.length > 0}
+			<div class="flex flex-wrap gap-2">
+				{#each pillQuestions as question (question.id)}
+					{@const answered = answeredQuestions.get(question.id)}
+					{#if answered}
+						<div id={questionCardId(question.id)}>
+							<LectureVideoQuestionCard
+								position={question.position}
+								questionText={question.questionText}
+								options={answered.options}
+								state="answered"
+								selectedOptionId={answered.selectedOptionId}
+								correctOptionId={answered.correctOptionId}
+								postAnswerText={answered.postAnswerText}
+								expanded={false}
+								ontoggleExpand={() => toggleExpandedAnswered(question.id)}
+								onselectOption={noop}
+							/>
+						</div>
+					{/if}
+				{/each}
+			</div>
+		{/if}
+
+		{#each fullCardQuestions as question (question.id)}
 			{@const answered = answeredQuestions.get(question.id)}
 			{@const isCurrentAnswering = question.id === currentQuestionId && isAwaitingAnswer}
-			{@const isCurrentFeedback = question.id === currentQuestionId && isAwaitingPostAnswerResume}
+			{@const isFeedback = isCurrentFeedback(question.id)}
 			<div id={questionCardId(question.id)}>
-				{#if answered && !isCurrentFeedback}
+				{#if answered && !isFeedback}
 					<LectureVideoQuestionCard
 						position={question.position}
 						questionText={question.questionText}
@@ -119,7 +164,7 @@
 						selectedOptionId={answered.selectedOptionId}
 						correctOptionId={answered.correctOptionId}
 						postAnswerText={answered.postAnswerText}
-						expanded={expandedAnsweredId === question.id}
+						expanded={true}
 						ontoggleExpand={() => toggleExpandedAnswered(question.id)}
 						onselectOption={noop}
 					/>
@@ -137,7 +182,7 @@
 						{onselectOption}
 						ontoggleExpand={noop}
 					/>
-				{:else if isCurrentFeedback && currentQuestion && currentContinuation}
+				{:else if isFeedback && currentQuestion && currentContinuation}
 					<LectureVideoQuestionCard
 						position={question.position}
 						questionText={question.questionText}
