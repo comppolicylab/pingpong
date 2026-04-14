@@ -994,14 +994,6 @@
 		onloadedmetadata={handleLoadedMetadata}
 	></video>
 
-	{#if subtitleText != null}
-		<div class="pointer-events-none absolute inset-x-0 top-4 flex justify-center px-4">
-			<span class="rounded bg-black/70 px-3 py-1 text-center text-sm text-white">
-				{subtitleText}
-			</span>
-		</div>
-	{/if}
-
 	{#if manualPlaybackPrompt}
 		<div class="absolute inset-0 z-10 flex items-center justify-center px-6">
 			<button
@@ -1014,6 +1006,29 @@
 			>
 				<PlaySolid class="size-11 translate-x-0.5 text-white" />
 			</button>
+		</div>
+	{/if}
+
+	{#if visibleControls && subtitleText == null}
+		<div
+			class="pointer-events-none absolute inset-x-0 top-4 z-[11] hidden justify-center px-4 sm:flex"
+		>
+			<div class="pointer-events-auto rounded-full bg-black/30 p-1">
+				<div
+					class="flex h-8 items-center rounded-full px-3 text-sm font-medium text-white"
+					style={OVERLAY_TEXT_SHADOW}
+				>
+					<span class="max-w-[32rem] truncate">{titleText}</span>
+				</div>
+			</div>
+		</div>
+	{/if}
+
+	{#if subtitleText != null}
+		<div class="pointer-events-none absolute inset-x-0 top-4 z-[11] flex justify-center px-4">
+			<span class="rounded bg-black/70 px-3 py-1 text-center text-sm text-white">
+				{subtitleText}
+			</span>
 		</div>
 	{/if}
 
@@ -1302,16 +1317,6 @@
 							>
 								{timeReadoutText}
 							</button>
-						</div>
-						<div class="pointer-events-none absolute inset-x-0 hidden justify-center sm:flex">
-							<div class="pointer-events-auto rounded-full bg-black/30 p-1">
-								<div
-									class="flex h-8 items-center rounded-full px-3 text-sm font-medium text-white"
-									style={OVERLAY_TEXT_SHADOW}
-								>
-									<span class="truncate">{titleText}</span>
-								</div>
-							</div>
 						</div>
 					</div>
 				</div>
