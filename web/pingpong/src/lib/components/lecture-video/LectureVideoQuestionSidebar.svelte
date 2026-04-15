@@ -187,13 +187,15 @@
 	}
 
 	$effect(() => {
-		answeredPillQuestions;
+		const pillQuestionCount = answeredPillQuestions.length;
 		isPillRailMeasured = false;
+		void pillQuestionCount;
 		void measureCollapsedPillRail();
 	});
 
 	$effect(() => {
-		expandedAnsweredId;
+		const expandedQuestionId = expandedAnsweredId;
+		void expandedQuestionId;
 		void measureCollapsedPillRail();
 	});
 
