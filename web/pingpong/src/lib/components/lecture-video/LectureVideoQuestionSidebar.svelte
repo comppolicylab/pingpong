@@ -64,6 +64,7 @@
 
 	let expandedAnsweredId: number | null = $state(null);
 	let isPillRailExpanded = $state(false);
+	let isPillRailMeasured = $state(false);
 	let collapsedVisiblePillIds: number[] = $state([]);
 	let hiddenPillCount = $state(0);
 	let isAwaitingAnswer = $derived(sessionState === 'awaiting_answer');
@@ -109,7 +110,15 @@
 	);
 
 	let visiblePillQuestions = $derived.by(() => {
-		if (isPillRailExpanded || hiddenPillCount === 0) {
+		if (isPillRailExpanded) {
+			return answeredPillQuestions;
+		}
+
+		if (!isPillRailMeasured) {
+			return [];
+		}
+
+		if (hiddenPillCount === 0) {
 			return answeredPillQuestions;
 		}
 
@@ -130,17 +139,13 @@
 		})
 	);
 
-	async function measureCollapsedPillRail(
-		_pillCount = answeredPillQuestions.length,
-		_expandedAnsweredId = expandedAnsweredId
-	) {
-		void _pillCount;
-		void _expandedAnsweredId;
+	async function measureCollapsedPillRail() {
 		await tick();
 
 		if (!pillMeasurementContainer || answeredPillQuestions.length === 0) {
 			collapsedVisiblePillIds = [];
 			hiddenPillCount = 0;
+			isPillRailMeasured = true;
 			isPillRailExpanded = false;
 			return;
 		}
@@ -152,6 +157,7 @@
 		if (pillNodes.length === 0) {
 			collapsedVisiblePillIds = [];
 			hiddenPillCount = 0;
+			isPillRailMeasured = true;
 			return;
 		}
 
@@ -173,6 +179,7 @@
 
 		collapsedVisiblePillIds = visibleIds;
 		hiddenPillCount = Math.max(answeredPillQuestions.length - visibleIds.length, 0);
+		isPillRailMeasured = true;
 
 		if (hiddenPillCount === 0) {
 			isPillRailExpanded = false;
@@ -180,7 +187,14 @@
 	}
 
 	$effect(() => {
-		void measureCollapsedPillRail(answeredPillQuestions.length, expandedAnsweredId);
+		answeredPillQuestions;
+		isPillRailMeasured = false;
+		void measureCollapsedPillRail();
+	});
+
+	$effect(() => {
+		expandedAnsweredId;
+		void measureCollapsedPillRail();
 	});
 
 	$effect(() => {
@@ -200,12 +214,16 @@
 	$effect(() => {
 		if (!active) return;
 		if (scrollToQuestionId == null) return;
-		expandedAnsweredId = scrollToQuestionId;
-		const el = document.getElementById(questionCardId(scrollToQuestionId));
-		if (el) {
-			el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+		const questionId = scrollToQuestionId;
+
+		void (async () => {
+			expandedAnsweredId = questionId;
+			await tick();
+			document
+				.getElementById(questionCardId(questionId))
+				?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 			onscrollcomplete();
-		}
+		})();
 	});
 </script>
 
@@ -221,6 +239,7 @@
 					bind:this={pillMeasurementContainer}
 					class="pointer-events-none invisible absolute inset-x-0 top-0"
 					aria-hidden="true"
+					inert
 				>
 					<div class="flex flex-wrap gap-2">
 						{#each answeredPillQuestions as question (question.id)}
@@ -246,7 +265,7 @@
 					</div>
 				</div>
 
-				<div class="flex flex-wrap gap-2">
+				<div id="answered-question-pill-rail" class="flex flex-wrap gap-2">
 					{#each visiblePillQuestions as question (question.id)}
 						{@const answered = answeredQuestions.get(question.id)}
 						{#if answered}
@@ -273,6 +292,8 @@
 					<div class="mt-2">
 						<button
 							type="button"
+							aria-controls="answered-question-pill-rail"
+							aria-expanded={isPillRailExpanded}
 							class="inline-flex cursor-pointer items-center rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-200"
 							onclick={togglePillRailExpanded}
 						>

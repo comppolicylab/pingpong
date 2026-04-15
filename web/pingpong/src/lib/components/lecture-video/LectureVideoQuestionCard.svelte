@@ -320,6 +320,9 @@
 			type="button"
 			class={answeredPillButtonClass(currentPillStyle.button, active)}
 			aria-pressed={active}
+			aria-label={active
+				? `Collapse question ${position} details`
+				: `Expand question ${position} details`}
 			title={active ? 'Collapse question details' : 'Expand question details'}
 			onclick={ontoggleExpand}
 		>
