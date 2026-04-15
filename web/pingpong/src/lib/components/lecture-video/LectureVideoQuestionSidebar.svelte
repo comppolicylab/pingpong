@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { tick } from 'svelte';
+
 	import LectureVideoQuestionCard from './LectureVideoQuestionCard.svelte';
 
 	type SidebarQuestion = { id: number; position: number; questionText: string };
@@ -61,10 +63,14 @@
 	} = $props();
 
 	let expandedAnsweredId: number | null = $state(null);
+	let isPillRailExpanded = $state(false);
+	let collapsedVisiblePillIds: number[] = $state([]);
+	let hiddenPillCount = $state(0);
 	let isAwaitingAnswer = $derived(sessionState === 'awaiting_answer');
 	let isAwaitingPostAnswerResume = $derived(sessionState === 'awaiting_post_answer_resume');
 	const noop = () => {};
 	let continueCardProps = $derived({ showContinue, continueDisabled, oncontinue });
+	let pillMeasurementContainer: HTMLDivElement | null = $state(null);
 
 	function questionCardId(questionId: number): string {
 		return `question-card-${questionId}`;
@@ -85,28 +91,111 @@
 		expandedAnsweredId = expandedAnsweredId === questionId ? null : questionId;
 	}
 
+	function togglePillRailExpanded() {
+		isPillRailExpanded = !isPillRailExpanded;
+	}
+
 	let sortedQuestions = $derived(
 		[...allQuestions]
 			.filter(({ id }) => isVisibleQuestion(id))
 			.sort((a, b) => a.position - b.position)
 	);
 
-	let pillQuestions = $derived(
+	let answeredPillQuestions = $derived(
 		sortedQuestions.filter((question) => {
 			const answered = answeredQuestions.get(question.id);
-			return answered && !isCurrentFeedback(question.id) && expandedAnsweredId !== question.id;
+			return answered && !isCurrentFeedback(question.id);
 		})
 	);
+
+	let visiblePillQuestions = $derived.by(() => {
+		if (isPillRailExpanded || hiddenPillCount === 0) {
+			return answeredPillQuestions;
+		}
+
+		const visibleIds = new Set(collapsedVisiblePillIds);
+		return answeredPillQuestions.filter((question) => visibleIds.has(question.id));
+	});
 
 	let fullCardQuestions = $derived(
 		sortedQuestions.filter((question) => {
 			const answered = answeredQuestions.get(question.id);
-			if (answered && !isCurrentFeedback(question.id) && expandedAnsweredId !== question.id) {
+			if (answered && !isCurrentFeedback(question.id)) {
+				return expandedAnsweredId === question.id;
+			}
+			if (!answered && !isCurrentFeedback(question.id)) {
 				return false;
 			}
 			return true;
 		})
 	);
+
+	async function measureCollapsedPillRail(
+		_pillCount = answeredPillQuestions.length,
+		_expandedAnsweredId = expandedAnsweredId
+	) {
+		void _pillCount;
+		void _expandedAnsweredId;
+		await tick();
+
+		if (!pillMeasurementContainer || answeredPillQuestions.length === 0) {
+			collapsedVisiblePillIds = [];
+			hiddenPillCount = 0;
+			isPillRailExpanded = false;
+			return;
+		}
+
+		const pillNodes = Array.from(
+			pillMeasurementContainer.querySelectorAll<HTMLElement>('[data-pill-measure-id]')
+		);
+
+		if (pillNodes.length === 0) {
+			collapsedVisiblePillIds = [];
+			hiddenPillCount = 0;
+			return;
+		}
+
+		const firstRowTop = pillNodes[0].offsetTop;
+		let visibleIds = pillNodes
+			.filter((node) => node.offsetTop === firstRowTop)
+			.map((node) => Number(node.dataset.pillMeasureId));
+
+		if (
+			expandedAnsweredId !== null &&
+			!visibleIds.includes(expandedAnsweredId) &&
+			answeredPillQuestions.some((question) => question.id === expandedAnsweredId)
+		) {
+			visibleIds =
+				visibleIds.length > 0
+					? [...visibleIds.slice(0, visibleIds.length - 1), expandedAnsweredId]
+					: [expandedAnsweredId];
+		}
+
+		collapsedVisiblePillIds = visibleIds;
+		hiddenPillCount = Math.max(answeredPillQuestions.length - visibleIds.length, 0);
+
+		if (hiddenPillCount === 0) {
+			isPillRailExpanded = false;
+		}
+	}
+
+	$effect(() => {
+		void measureCollapsedPillRail(answeredPillQuestions.length, expandedAnsweredId);
+	});
+
+	$effect(() => {
+		if (!pillMeasurementContainer) return;
+
+		const observer = new ResizeObserver(() => {
+			void measureCollapsedPillRail();
+		});
+
+		observer.observe(pillMeasurementContainer);
+
+		return () => {
+			observer.disconnect();
+		};
+	});
 
 	$effect(() => {
 		if (!active) return;
@@ -126,27 +215,75 @@
 	</div>
 
 	<div class="flex min-h-0 flex-col gap-3 overflow-y-auto pr-1">
-		{#if pillQuestions.length > 0}
-			<div class="flex flex-wrap gap-2">
-				{#each pillQuestions as question (question.id)}
-					{@const answered = answeredQuestions.get(question.id)}
-					{#if answered}
-						<div id={questionCardId(question.id)}>
-							<LectureVideoQuestionCard
-								position={question.position}
-								questionText={question.questionText}
-								options={answered.options}
-								state="answered"
-								selectedOptionId={answered.selectedOptionId}
-								correctOptionId={answered.correctOptionId}
-								postAnswerText={answered.postAnswerText}
-								expanded={false}
-								ontoggleExpand={() => toggleExpandedAnswered(question.id)}
-								onselectOption={noop}
-							/>
-						</div>
-					{/if}
-				{/each}
+		{#if answeredPillQuestions.length > 0}
+			<div class="relative">
+				<div
+					bind:this={pillMeasurementContainer}
+					class="pointer-events-none invisible absolute inset-x-0 top-0"
+					aria-hidden="true"
+				>
+					<div class="flex flex-wrap gap-2">
+						{#each answeredPillQuestions as question (question.id)}
+							{@const answered = answeredQuestions.get(question.id)}
+							{#if answered}
+								<div data-pill-measure-id={question.id}>
+									<LectureVideoQuestionCard
+										position={question.position}
+										questionText={question.questionText}
+										options={answered.options}
+										state="answered"
+										selectedOptionId={answered.selectedOptionId}
+										correctOptionId={answered.correctOptionId}
+										postAnswerText={answered.postAnswerText}
+										expanded={false}
+										active={expandedAnsweredId === question.id}
+										ontoggleExpand={noop}
+										onselectOption={noop}
+									/>
+								</div>
+							{/if}
+						{/each}
+					</div>
+				</div>
+
+				<div class="flex flex-wrap gap-2">
+					{#each visiblePillQuestions as question (question.id)}
+						{@const answered = answeredQuestions.get(question.id)}
+						{#if answered}
+							<div>
+								<LectureVideoQuestionCard
+									position={question.position}
+									questionText={question.questionText}
+									options={answered.options}
+									state="answered"
+									selectedOptionId={answered.selectedOptionId}
+									correctOptionId={answered.correctOptionId}
+									postAnswerText={answered.postAnswerText}
+									expanded={false}
+									active={expandedAnsweredId === question.id}
+									ontoggleExpand={() => toggleExpandedAnswered(question.id)}
+									onselectOption={noop}
+								/>
+							</div>
+						{/if}
+					{/each}
+				</div>
+
+				{#if hiddenPillCount > 0}
+					<div class="mt-2">
+						<button
+							type="button"
+							class="inline-flex cursor-pointer items-center rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-200"
+							onclick={togglePillRailExpanded}
+						>
+							{#if isPillRailExpanded}
+								Show less
+							{:else}
+								+{hiddenPillCount} more
+							{/if}
+						</button>
+					</div>
+				{/if}
 			</div>
 		{/if}
 

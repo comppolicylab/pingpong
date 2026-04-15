@@ -1,5 +1,10 @@
 <script lang="ts">
-	import { CheckOutline, CloseOutline, MinusOutline } from 'flowbite-svelte-icons';
+	import {
+		CheckOutline,
+		ChevronDownOutline,
+		CloseOutline,
+		MinusOutline
+	} from 'flowbite-svelte-icons';
 
 	type QuestionOption = {
 		id: number;
@@ -32,6 +37,7 @@
 		correctOptionId = null,
 		postAnswerText = null,
 		expanded = false,
+		active = false,
 		answeringDisabled = false,
 		showContinue = false,
 		continueDisabled = false,
@@ -47,6 +53,7 @@
 		correctOptionId: number | null;
 		postAnswerText: string | null;
 		expanded: boolean;
+		active?: boolean;
 		answeringDisabled?: boolean;
 		showContinue?: boolean;
 		continueDisabled?: boolean;
@@ -182,6 +189,14 @@
 		if (isAnswerCorrect === false) return pillStyles.wrong;
 		return pillStyles.neutral;
 	}
+
+	function answeredPillButtonClass(buttonClass: string, isActive: boolean): string {
+		return [
+			'inline-flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1 text-sm font-medium transition-[box-shadow,background-color,color]',
+			buttonClass,
+			isActive ? 'ring-2 ring-blue-200 ring-offset-1' : ''
+		].join(' ');
+	}
 </script>
 
 <div class={rendersAsPill ? 'shrink-0' : 'w-full'}>
@@ -303,7 +318,9 @@
 		{@const currentPillStyle = pillStyle(isCorrect)}
 		<button
 			type="button"
-			class="inline-flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1 text-sm font-medium transition-colors {currentPillStyle.button}"
+			class={answeredPillButtonClass(currentPillStyle.button, active)}
+			aria-pressed={active}
+			title={active ? 'Collapse question details' : 'Expand question details'}
 			onclick={ontoggleExpand}
 		>
 			Q{position}
@@ -313,6 +330,9 @@
 				<CloseOutline class="h-4 w-4 {currentPillStyle.icon}" strokeWidth="3" />
 			{:else}
 				<MinusOutline class="h-4 w-4 {currentPillStyle.icon}" strokeWidth="3" />
+			{/if}
+			{#if active}
+				<ChevronDownOutline class="h-3.5 w-3.5 text-blue-700" strokeWidth="2.5" />
 			{/if}
 		</button>
 	{/if}
