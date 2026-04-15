@@ -88,6 +88,10 @@
 		return questionId === currentQuestionId && isAwaitingPostAnswerResume;
 	}
 
+	function isCurrentAnswering(questionId: number): boolean {
+		return questionId === currentQuestionId && isAwaitingAnswer;
+	}
+
 	function toggleExpandedAnswered(questionId: number) {
 		expandedAnsweredId = expandedAnsweredId === questionId ? null : questionId;
 	}
@@ -129,13 +133,16 @@
 	let fullCardQuestions = $derived(
 		sortedQuestions.filter((question) => {
 			const answered = answeredQuestions.get(question.id);
+			if (isCurrentAnswering(question.id) || isCurrentFeedback(question.id)) {
+				return true;
+			}
 			if (answered && !isCurrentFeedback(question.id)) {
 				return expandedAnsweredId === question.id;
 			}
-			if (!answered && !isCurrentFeedback(question.id)) {
+			if (!answered) {
 				return false;
 			}
-			return true;
+			return expandedAnsweredId === question.id;
 		})
 	);
 
