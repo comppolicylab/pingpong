@@ -132,15 +132,8 @@
 
 	let fullCardQuestions = $derived(
 		sortedQuestions.filter((question) => {
-			const answered = answeredQuestions.get(question.id);
 			if (isCurrentAnswering(question.id) || isCurrentFeedback(question.id)) {
 				return true;
-			}
-			if (answered && !isCurrentFeedback(question.id)) {
-				return expandedAnsweredId === question.id;
-			}
-			if (!answered) {
-				return false;
 			}
 			return expandedAnsweredId === question.id;
 		})
@@ -319,7 +312,7 @@
 
 		{#each fullCardQuestions as question (question.id)}
 			{@const answered = answeredQuestions.get(question.id)}
-			{@const isCurrentAnswering = question.id === currentQuestionId && isAwaitingAnswer}
+			{@const isAnswering = isCurrentAnswering(question.id)}
 			{@const isFeedback = isCurrentFeedback(question.id)}
 			<div id={questionCardId(question.id)}>
 				{#if answered && !isFeedback}
@@ -335,7 +328,7 @@
 						ontoggleExpand={() => toggleExpandedAnswered(question.id)}
 						onselectOption={noop}
 					/>
-				{:else if isCurrentAnswering && currentQuestion}
+				{:else if isAnswering && currentQuestion}
 					<LectureVideoQuestionCard
 						position={question.position}
 						questionText={question.questionText}
