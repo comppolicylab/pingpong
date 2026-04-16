@@ -151,6 +151,7 @@
 		expandedThreadData.data?.thread?.is_current_user_participant === true;
 	$: lectureVideoSession = expandedThreadData.data?.lecture_video_session ?? null;
 	$: threadLectureChatAvailable = lectureVideoSession?.lecture_video_chat_available === true;
+	$: lectureVideoTtsAvailable = expandedThreadData.data?.lecture_video_tts_available === true;
 	$: effectiveLectureVideoMismatch = threadLectureVideoMismatch;
 	$: effectiveLectureVideoAssistantMismatch = threadLectureVideoMismatch;
 	let lectureVideoViewRef: LectureVideoViewHandle | null = null;
@@ -1514,6 +1515,7 @@
 								submitting={$submitting}
 								ttsMuted={$ttsMuted}
 								ttsPlaying={$ttsPlaying}
+								ttsAvailable={lectureVideoTtsAvailable}
 								{threadManagerError}
 								{assistantDeleted}
 								{canViewAssistant}

@@ -3376,6 +3376,7 @@ export type ThreadWithMeta = {
 	lecture_video_id?: number | null;
 	lecture_video_matches_assistant?: boolean | null;
 	lecture_video_session?: LectureVideoSession | null;
+	lecture_video_tts_available?: boolean;
 	recording: VoiceModeRecordingInfo | null;
 	has_more: boolean;
 };

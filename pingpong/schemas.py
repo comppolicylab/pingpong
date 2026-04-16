@@ -2602,6 +2602,7 @@ class ThreadWithMeta(BaseModel):
     lecture_video_id: int | None = None
     lecture_video_matches_assistant: bool | None = None
     lecture_video_session: LectureVideoSession | None = None
+    lecture_video_tts_available: bool = False
     recording: VoiceModeRecording | None = None
     has_more: bool
 

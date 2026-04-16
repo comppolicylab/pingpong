@@ -4,6 +4,7 @@ from collections.abc import AsyncGenerator
 from html import unescape
 import re
 from typing import Any
+from urllib.parse import quote, urlencode
 
 import aiohttp
 import httpx
@@ -31,6 +32,10 @@ ELEVENLABS_VOICE_VALIDATION_SAMPLE_TEXT = (
 ELEVENLABS_VOICE_VALIDATION_OUTPUT_FORMAT = "opus_48000_32"
 ELEVENLABS_VOICE_VALIDATION_CONTENT_TYPE = "audio/ogg"
 ELEVENLABS_VOICE_SAMPLE_TEXT_HEADER = "X-PingPong-Voice-Sample-Text"
+ELEVENLABS_STREAMING_TTS_CONNECT_TIMEOUT = aiohttp.ClientWSTimeout(
+    ws_receive=30.0,
+    ws_close=10.0,
+)
 
 
 def get_elevenlabs_client(api_key: str) -> AsyncElevenLabs:
@@ -500,24 +505,35 @@ class ElevenLabsStreamingTTS:
 
     async def connect(self) -> None:
         """Open a WebSocket connection and send the initialization frame."""
-        url = (
-            f"wss://api.elevenlabs.io/v1/text-to-speech/"
-            f"{self._voice_id}/stream-input"
-            f"?model_id={self._model_id}"
-            f"&output_format={self._output_format}"
-        )
-        self._session = aiohttp.ClientSession(headers={"xi-api-key": self._api_key})
-        self._ws = await self._session.ws_connect(url)
-        # Send initializeConnection message.
-        await self._ws.send_json(
+        encoded_voice_id = quote(self._voice_id, safe="")
+        query = urlencode(
             {
-                "text": " ",
-                "voice_settings": {
-                    "stability": 0.5,
-                    "similarity_boost": 0.8,
-                },
+                "model_id": self._model_id,
+                "output_format": self._output_format,
             }
         )
+        url = (
+            f"wss://api.elevenlabs.io/v1/text-to-speech/"
+            f"{encoded_voice_id}/stream-input?{query}"
+        )
+        self._session = aiohttp.ClientSession(headers={"xi-api-key": self._api_key})
+        try:
+            self._ws = await self._session.ws_connect(
+                url, timeout=ELEVENLABS_STREAMING_TTS_CONNECT_TIMEOUT
+            )
+            # Send initializeConnection message.
+            await self._ws.send_json(
+                {
+                    "text": " ",
+                    "voice_settings": {
+                        "stability": 0.5,
+                        "similarity_boost": 0.8,
+                    },
+                }
+            )
+        except Exception:
+            await self.cleanup()
+            raise
 
     async def send_text(self, text: str, *, flush: bool = False) -> None:
         """Send a text chunk to be synthesized.

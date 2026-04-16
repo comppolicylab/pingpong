@@ -3628,6 +3628,37 @@ async def run_response(
                 else openai.NOT_GIVEN
             )
 
+            # Make cleanup safe even when the OpenAI stream fails before TTS setup runs.
+            _tts_enabled = bool(tts_voice_id and tts_api_key)
+            _tts_client: ElevenLabsStreamingTTS | None = None
+            _tts_sanitizer = StreamingMarkdownSanitizer() if _tts_enabled else None
+            _tts_audio_task: asyncio.Task | None = None
+            _tts_audio_done = asyncio.Event()
+            _tts_audio_ready = asyncio.Event()
+            _tts_audio_chunk_idx = 0
+
+            async def _tts_cleanup() -> None:
+                nonlocal _tts_client, _tts_audio_task
+                if _tts_audio_task and not _tts_audio_task.done():
+                    _tts_audio_task.cancel()
+                    try:
+                        await _tts_audio_task
+                    except asyncio.CancelledError:
+                        # Expected after explicitly canceling the receiver task.
+                        pass
+                    except Exception:
+                        logger.warning(
+                            "TTS audio receiver cleanup failed", exc_info=True
+                        )
+                _tts_audio_task = None
+                if _tts_client:
+                    try:
+                        await _tts_client.cleanup()
+                    except Exception:
+                        logger.warning("TTS client cleanup failed", exc_info=True)
+                    finally:
+                        _tts_client = None
+
             try:
                 stream: AsyncStream[ResponseStreamEvent] = await cli.responses.create(
                     include=include_with,
@@ -3671,15 +3702,6 @@ async def run_response(
                     anonymous_link_id=anonymous_link_id,
                 )
 
-                # -- TTS streaming state (no-op when tts_voice_id is None) --
-                _tts_enabled = bool(tts_voice_id and tts_api_key)
-                _tts_client: ElevenLabsStreamingTTS | None = None
-                _tts_sanitizer = StreamingMarkdownSanitizer() if _tts_enabled else None
-                _tts_audio_task: asyncio.Task | None = None
-                _tts_audio_done = asyncio.Event()
-                _tts_audio_ready = asyncio.Event()
-                _tts_audio_chunk_idx = 0
-
                 async def _tts_receive_audio(
                     tts_client: ElevenLabsStreamingTTS,
                 ) -> None:
@@ -3698,21 +3720,6 @@ async def run_response(
                         _tts_audio_ready.set()
                     finally:
                         _tts_audio_done.set()
-
-                async def _tts_cleanup() -> None:
-                    nonlocal _tts_client, _tts_audio_task
-                    if _tts_audio_task and not _tts_audio_task.done():
-                        _tts_audio_task.cancel()
-                        try:
-                            await _tts_audio_task
-                        except (asyncio.CancelledError, Exception):
-                            pass
-                    if _tts_client:
-                        try:
-                            await _tts_client.cleanup()
-                        except Exception:
-                            pass
-                        _tts_client = None
 
                 stream_iter = stream.__aiter__()
                 openai_event_task = asyncio.create_task(stream_iter.__anext__())
@@ -3797,13 +3804,8 @@ async def run_response(
                                         # Start TTS connection on first text part
                                         if _tts_enabled and not _tts_client:
                                             try:
-                                                if (
-                                                    tts_api_key is None
-                                                    or tts_voice_id is None
-                                                ):
-                                                    raise ValueError(
-                                                        "TTS streaming requires both API key and voice ID"
-                                                    )
+                                                assert tts_api_key is not None
+                                                assert tts_voice_id is not None
                                                 _tts_client = ElevenLabsStreamingTTS(
                                                     tts_api_key, tts_voice_id
                                                 )
@@ -3817,6 +3819,14 @@ async def run_response(
                                                     "Failed to start TTS streaming",
                                                     exc_info=True,
                                                 )
+                                                if _tts_client is not None:
+                                                    try:
+                                                        await _tts_client.cleanup()
+                                                    except Exception:
+                                                        logger.warning(
+                                                            "TTS cleanup after connect failure failed",
+                                                            exc_info=True,
+                                                        )
                                                 _tts_client = None
                                     case _:
                                         pass
@@ -3980,18 +3990,21 @@ async def run_response(
                         try:
                             await openai_event_task
                         except (asyncio.CancelledError, StopAsyncIteration):
+                            # Cancellation and iterator exhaustion are expected during teardown.
                             pass
                     if tts_audio_ready_task and not tts_audio_ready_task.done():
                         tts_audio_ready_task.cancel()
                         try:
                             await tts_audio_ready_task
                         except asyncio.CancelledError:
+                            # Expected after canceling the waiter task.
                             pass
 
                 # Drain remaining TTS audio after OpenAI stream ends
                 if _tts_audio_task and not _tts_audio_done.is_set():
                     try:
                         drain_timeouts = 0
+                        last_drained_audio_chunk_idx = _tts_audio_chunk_idx
                         while not _tts_audio_done.is_set():
                             try:
                                 await asyncio.wait_for(
@@ -4005,6 +4018,9 @@ async def run_response(
                                     )
                                     handler.enqueue_audio_error()
                                     break
+                            if _tts_audio_chunk_idx > last_drained_audio_chunk_idx:
+                                drain_timeouts = 0
+                                last_drained_audio_chunk_idx = _tts_audio_chunk_idx
                             data = handler.flush()
                             if data:
                                 yield data

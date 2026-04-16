@@ -643,6 +643,50 @@ async def test_get_thread_returns_lecture_video_session(
     assert session_data["current_question"] is None
     assert session_data["current_continuation"] is None
     assert session_data["controller"]["has_control"] is False
+    assert response.json()["lecture_video_tts_available"] is False
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
+    ]
+)
+async def test_get_thread_returns_lecture_video_tts_availability_when_configured(
+    api, config, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+            manifest=lecture_video_manifest_v2(),
+        )
+        await create_lecture_video_copy_credentials(
+            session,
+            class_.id,
+            include_gemini=False,
+            include_elevenlabs=True,
+        )
+        await session.commit()
+
+    create_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/lecture",
+        json={"assistant_id": 1, "parties": [123]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+    thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
+
+    response = api.get(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["lecture_video_tts_available"] is True
 
 
 @with_user(123)

@@ -815,7 +815,9 @@ export class ThreadManager {
 			vision_file_ids,
 			vision_image_descriptions,
 			timezone: this.timezone,
-			generate_speech: !get(this.#ttsMuted)
+			...(currentState?.data?.thread?.interaction_mode === 'lecture_video'
+				? { generate_speech: !get(this.#ttsMuted) }
+				: {})
 		});
 
 		this.attachments = derived(this.#data, ($data) => {

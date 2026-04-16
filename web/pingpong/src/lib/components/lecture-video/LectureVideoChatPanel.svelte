@@ -52,6 +52,7 @@
 		ondismisserror,
 		ttsMuted = false,
 		ttsPlaying = false,
+		ttsAvailable = false,
 		onmutettstoggle,
 		ontextinput,
 		ontextpaste
@@ -82,6 +83,7 @@
 		ondismisserror?: () => void;
 		ttsMuted?: boolean;
 		ttsPlaying?: boolean;
+		ttsAvailable?: boolean;
 		onmutettstoggle?: () => void;
 		ontextinput?: (detail: { hasText: boolean }) => void;
 		ontextpaste?: (detail: { hasText: boolean }) => void;
@@ -426,25 +428,27 @@
 						<DoubleBounce color="#0ea5e9" size="30" />
 					</div>
 				{/if}
-				<div class="flex items-center justify-end gap-2 px-1 pb-1">
-					<button
-						class="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs transition-colors {ttsMuted
-							? 'bg-gray-100 text-gray-500'
-							: 'bg-sky-50 text-sky-600'}"
-						onclick={() => {
-							onmutettstoggle?.();
-						}}
-						title={ttsMuted ? 'Unmute voice' : 'Mute voice'}
-					>
-						{#if ttsMuted}
-							<VolumeMuteSolid class="h-3.5 w-3.5" />
-							<span>Muted</span>
-						{:else}
-							<VolumeUpSolid class="h-3.5 w-3.5" />
-							<span>{ttsPlaying ? 'Speaking' : 'Voice on'}</span>
-						{/if}
-					</button>
-				</div>
+				{#if ttsAvailable}
+					<div class="flex items-center justify-end gap-2 px-1 pb-1">
+						<button
+							class="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs transition-colors {ttsMuted
+								? 'bg-gray-100 text-gray-500'
+								: 'bg-sky-50 text-sky-600'}"
+							onclick={() => {
+								onmutettstoggle?.();
+							}}
+							title={ttsMuted ? 'Unmute voice' : 'Mute voice'}
+						>
+							{#if ttsMuted}
+								<VolumeMuteSolid class="h-3.5 w-3.5" />
+								<span>Muted</span>
+							{:else}
+								<VolumeUpSolid class="h-3.5 w-3.5" />
+								<span>{ttsPlaying ? 'Speaking' : 'Voice on'}</span>
+							{/if}
+						</button>
+					</div>
+				{/if}
 				<ChatInput
 					{mimeType}
 					maxSize={0}
