@@ -3721,6 +3721,25 @@ async def run_response(
                     finally:
                         _tts_audio_done.set()
 
+                async def _tts_finish_input() -> None:
+                    if _tts_sanitizer and _tts_client:
+                        remaining = _tts_sanitizer.flush()
+                        if remaining:
+                            try:
+                                await _tts_client.send_text(remaining, flush=True)
+                            except Exception:
+                                logger.warning(
+                                    "TTS final flush failed",
+                                    exc_info=True,
+                                )
+                        try:
+                            await _tts_client.close_input()
+                        except Exception:
+                            logger.warning(
+                                "TTS close_input failed",
+                                exc_info=True,
+                            )
+
                 stream_iter = stream.__aiter__()
                 openai_event_task = asyncio.create_task(stream_iter.__anext__())
                 tts_audio_ready_task: asyncio.Task | None = None
@@ -3770,6 +3789,7 @@ async def run_response(
                                             event.item
                                         )
                                         if handler.force_stopped:
+                                            await _tts_finish_input()
                                             break
                                     case "code_interpreter_call":
                                         await handler.on_code_interpreter_tool_call_created(
@@ -3870,25 +3890,7 @@ async def run_response(
                                             event.part
                                         )
                                         # Flush remaining text to TTS and close input
-                                        if _tts_sanitizer and _tts_client:
-                                            remaining = _tts_sanitizer.flush()
-                                            if remaining:
-                                                try:
-                                                    await _tts_client.send_text(
-                                                        remaining, flush=True
-                                                    )
-                                                except Exception:
-                                                    logger.warning(
-                                                        "TTS final flush failed",
-                                                        exc_info=True,
-                                                    )
-                                            try:
-                                                await _tts_client.close_input()
-                                            except Exception:
-                                                logger.warning(
-                                                    "TTS close_input failed",
-                                                    exc_info=True,
-                                                )
+                                        await _tts_finish_input()
                                     case _:
                                         pass
                             case "response.code_interpreter_call.in_progress":
