@@ -7,7 +7,9 @@
 		RefreshOutline,
 		CodeOutline,
 		ServerOutline,
-		TerminalOutline
+		TerminalOutline,
+		VolumeUpSolid,
+		VolumeMuteSolid
 	} from 'flowbite-svelte-icons';
 	import { DoubleBounce } from 'svelte-loading-spinners';
 	import Logo from '$lib/components/Logo.svelte';
@@ -48,6 +50,9 @@
 		fetchMoreMessages,
 		onsubmit,
 		ondismisserror,
+		ttsMuted = false,
+		ttsPlaying = false,
+		onmutettstoggle,
 		ontextinput,
 		ontextpaste
 	}: {
@@ -75,6 +80,9 @@
 		fetchMoreMessages: () => Promise<void>;
 		onsubmit?: (message: ChatInputMessage) => void;
 		ondismisserror?: () => void;
+		ttsMuted?: boolean;
+		ttsPlaying?: boolean;
+		onmutettstoggle?: () => void;
 		ontextinput?: (detail: { hasText: boolean }) => void;
 		ontextpaste?: (detail: { hasText: boolean }) => void;
 	} = $props();
@@ -411,13 +419,32 @@
 		{/each}
 	</div>
 	{#if showInput}
-		<div class="border-t border-slate-200 px-4 py-3">
+		<div class="border-t border-slate-200 px-4 pt-1 pb-3">
 			<div class="relative mx-auto flex w-full max-w-4xl flex-col">
 				{#if waiting || submitting}
 					<div class="absolute -top-10 flex w-full justify-center" transition:blur={{ amount: 10 }}>
 						<DoubleBounce color="#0ea5e9" size="30" />
 					</div>
 				{/if}
+				<div class="flex items-center justify-end gap-2 px-1 pb-1">
+					<button
+						class="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs transition-colors {ttsMuted
+							? 'bg-gray-100 text-gray-500'
+							: 'bg-sky-50 text-sky-600'}"
+						onclick={() => {
+							onmutettstoggle?.();
+						}}
+						title={ttsMuted ? 'Unmute voice' : 'Mute voice'}
+					>
+						{#if ttsMuted}
+							<VolumeMuteSolid class="h-3.5 w-3.5" />
+							<span>Muted</span>
+						{:else}
+							<VolumeUpSolid class="h-3.5 w-3.5" />
+							<span>{ttsPlaying ? 'Speaking' : 'Voice on'}</span>
+						{/if}
+					</button>
+				</div>
 				<ChatInput
 					{mimeType}
 					maxSize={0}

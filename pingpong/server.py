@@ -7861,6 +7861,30 @@ async def send_message(
                     prev_output_sequence=prev_output_sequence,
                 )
 
+            # Resolve TTS credentials for lecture-video chat audio streaming.
+            # Skip entirely when the client explicitly opted out of speech.
+            tts_voice_id: str | None = None
+            tts_api_key: str | None = None
+            if (
+                data.generate_speech is not False
+                and thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
+                and thread.lecture_video_id
+            ):
+                lecture_video = await models.LectureVideo.get_by_id(
+                    request.state["db"], thread.lecture_video_id
+                )
+                if lecture_video and (lecture_video.voice_id or "").strip():
+                    credential = (
+                        await models.ClassCredential.get_by_class_id_and_purpose(
+                            request.state["db"],
+                            int(class_id),
+                            schemas.ClassCredentialPurpose.LECTURE_VIDEO_NARRATION_TTS,
+                        )
+                    )
+                    if credential and credential.api_key_obj:
+                        tts_voice_id = lecture_video.voice_id.strip()
+                        tts_api_key = credential.api_key_obj.api_key
+
             show_reasoning_summaries = is_supervisor or (
                 asst and not asst.hide_reasoning_summaries
             )
@@ -7986,6 +8010,8 @@ async def send_message(
                 anonymous_session_id=request.state["anonymous_session_id"],
                 anonymous_link_id=request.state["anonymous_link_id"],
                 response_safety_identifier=request.state["response_safety_identifier"],
+                tts_voice_id=tts_voice_id,
+                tts_api_key=tts_api_key,
             )
         else:
             raise HTTPException(

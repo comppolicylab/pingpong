@@ -3502,6 +3502,7 @@ export type NewThreadMessageRequest = {
 	vision_file_ids?: string[];
 	vision_image_descriptions?: ImageProxy[];
 	timezone?: string;
+	generate_speech?: boolean;
 };
 
 /**
@@ -3710,6 +3711,24 @@ export type ThreadStreamDoneChunk = {
 	type: 'done';
 };
 
+export type ThreadStreamAudioStartedChunk = {
+	type: 'audio_started';
+};
+
+export type ThreadStreamAudioDeltaChunk = {
+	type: 'audio_delta';
+	audio: string;
+	index: number;
+};
+
+export type ThreadStreamAudioDoneChunk = {
+	type: 'audio_done';
+};
+
+export type ThreadStreamAudioErrorChunk = {
+	type: 'audio_error';
+};
+
 export type ThreadHTTPErrorChunk = {
 	detail: string;
 };
@@ -3737,7 +3756,11 @@ export type ThreadStreamChunk =
 	| ThreadStreamReasoningStepCreatedChunk
 	| ThreadStreamReasoningSummaryPartAddedChunk
 	| ThreadStreamReasoningSummaryDeltaChunk
-	| ThreadStreamReasoningStepCompletedChunk;
+	| ThreadStreamReasoningStepCompletedChunk
+	| ThreadStreamAudioStartedChunk
+	| ThreadStreamAudioDeltaChunk
+	| ThreadStreamAudioDoneChunk
+	| ThreadStreamAudioErrorChunk;
 
 /**
  * Stream chunks from a thread.

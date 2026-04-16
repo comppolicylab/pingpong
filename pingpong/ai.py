@@ -44,6 +44,7 @@ from pingpong.schemas import (
     ToolCallType,
     WebSearchActionType,
 )
+from pingpong.elevenlabs import ElevenLabsStreamingTTS, StreamingMarkdownSanitizer
 from starlette.requests import ClientDisconnect
 from datetime import datetime, timezone
 from openai.types.beta.assistant_stream_event import (
@@ -1157,6 +1158,20 @@ class BufferedResponseStreamHandler:
         self.__buffer.truncate(0)
         self.__buffer.seek(0)
         return value
+
+    # -- TTS audio chunk helpers ------------------------------------------
+
+    def enqueue_audio_started(self) -> None:
+        self.enqueue({"type": "audio_started"})
+
+    def enqueue_audio_delta(self, audio_b64: str, index: int) -> None:
+        self.enqueue({"type": "audio_delta", "audio": audio_b64, "index": index})
+
+    def enqueue_audio_done(self) -> None:
+        self.enqueue({"type": "audio_done"})
+
+    def enqueue_audio_error(self) -> None:
+        self.enqueue({"type": "audio_error"})
 
     async def on_response_created(self, data: ResponseCreatedEvent):
         if not self.run_id:
@@ -3491,6 +3506,8 @@ async def run_response(
     anonymous_session_id: int | None = None,
     anonymous_link_id: int | None = None,
     response_safety_identifier: str | None = None,
+    tts_voice_id: str | None = None,
+    tts_api_key: str | None = None,
 ):
     is_canceled = False
     await config.authz.driver.init()
@@ -3654,149 +3671,349 @@ async def run_response(
                     anonymous_link_id=anonymous_link_id,
                 )
 
-                async for event in stream:
-                    match event.type:
-                        case "response.created":
-                            await handler.on_response_created(event)
-                        case "response.in_progress":
-                            await handler.on_response_in_progress(event)
-                        case "response.output_item.added":
-                            match event.item.type:
-                                case "message":
-                                    await handler.on_output_message_created(event.item)
-                                    if handler.force_stopped:
-                                        break
-                                case "code_interpreter_call":
-                                    await handler.on_code_interpreter_tool_call_created(
-                                        event.item
-                                    )
-                                case "file_search_call":
-                                    await handler.on_file_search_call_created(
-                                        event.item
-                                    )
-                                case "web_search_call":
-                                    await handler.on_web_search_call_created(event.item)
-                                case "reasoning":
-                                    await handler.on_reasoning_created(event.item)
-                                case "mcp_call":
-                                    await handler.on_mcp_tool_call_created(event.item)
-                                case "mcp_list_tools":
-                                    await handler.on_mcp_list_tools_call_created(
-                                        event.item
-                                    )
-                                case _:
-                                    pass
-                        case "response.content_part.added":
-                            match event.part.type:
-                                case "output_text":
-                                    await handler.on_output_text_part_created(
-                                        event.part
-                                    )
-                                case _:
-                                    pass
-                        case "response.output_text.delta":
-                            await handler.on_output_text_delta(event)
-                        case "response.output_text.annotation.added":
-                            match event.annotation["type"]:
-                                case "container_file_citation":
-                                    await handler.on_output_text_container_file_citation_added(
-                                        event.annotation, event.annotation_index
-                                    )
-                                case "file_citation":
-                                    await handler.on_output_text_file_citation_added(
-                                        event.annotation, event.annotation_index
-                                    )
-                                case "url_citation":
-                                    await handler.on_output_text_url_citation_added(
-                                        event.annotation, event.annotation_index
-                                    )
-                                case _:
-                                    pass
-                        case "response.content_part.done":
-                            match event.part.type:
-                                case "output_text":
-                                    await handler.on_output_text_part_done(event.part)
-                                case _:
-                                    pass
-                        case "response.code_interpreter_call.in_progress":
-                            await handler.on_code_interpreter_tool_call_in_progress(
-                                event
-                            )
-                        case "response.code_interpreter_call_code.delta":
-                            await handler.on_code_interpreter_tool_call_code_delta(
-                                event
-                            )
-                        case "response.code_interpreter_call.interpreting":
-                            await handler.on_code_interpreter_tool_call_interpreting(
-                                event
-                            )
-                        case "response.code_interpreter_call.completed":
-                            await handler.on_code_interpreter_tool_call_completed(event)
-                        case "response.file_search_call.completed":
-                            await handler.on_file_search_call_completed(event)
-                        case "response.file_search_call.in_progress":
-                            await handler.on_file_search_call_in_progress(event)
-                        case "response.file_search_call.searching":
-                            await handler.on_file_search_call_searching(event)
-                        case "response.web_search_call.in_progress":
-                            await handler.on_web_search_call_in_progress(event)
-                        case "response.web_search_call.searching":
-                            await handler.on_web_search_call_searching(event)
-                        case "response.web_search_call.completed":
-                            await handler.on_web_search_call_completed(event)
-                        case "response.mcp_call.in_progress":
-                            await handler.on_mcp_tool_call_in_progress(event)
-                        case "response.mcp_call_arguments.delta":
-                            await handler.on_mcp_tool_call_arguments_delta(event)
-                        case "response.mcp_call.completed":
-                            await handler.on_mcp_tool_call_completed(event)
-                        case "response.mcp_call.failed":
-                            await handler.on_mcp_tool_call_failed(event)
-                        case "response.mcp_list_tools.in_progress":
-                            await handler.on_mcp_list_tools_call_in_progress(event)
-                        case "response.mcp_list_tools.completed":
-                            await handler.on_mcp_list_tools_call_completed(event)
-                        case "response.mcp_list_tools.failed":
-                            await handler.on_mcp_list_tools_call_failed(event)
-                        case "response.reasoning_summary_part.added":
-                            await handler.on_reasoning_summary_part_added(event)
-                        case "response.reasoning_summary_text.delta":
-                            await handler.on_reasoning_summary_text_delta(event)
-                        case "response.reasoning_summary_part.done":
-                            await handler.on_reasoning_summary_part_done(event)
-                        case "response.output_item.done":
-                            match event.item.type:
-                                case "message":
-                                    await handler.on_output_message_done(event.item)
-                                case "code_interpreter_call":
-                                    await handler.on_code_interpreter_tool_call_done(
-                                        event.item
-                                    )
-                                case "file_search_call":
-                                    await handler.on_file_search_call_done(event.item)
-                                case "web_search_call":
-                                    await handler.on_web_search_call_done(event.item)
-                                case "reasoning":
-                                    await handler.on_reasoning_completed(event.item)
-                                case "mcp_call":
-                                    await handler.on_mcp_tool_call_done(event.item)
-                                case "mcp_list_tools":
-                                    await handler.on_mcp_list_tools_call_done(
-                                        event.item
-                                    )
-                                case _:
-                                    pass
-                        case "response.completed":
-                            await handler.on_response_completed(event)
-                        case "response.incomplete":
-                            await handler.on_response_completed(event)
-                        case "response.failed":
-                            await handler.on_response_completed(event)
-                        case "error":
-                            await handler.on_response_error(event)
-                        case _:
+                # -- TTS streaming state (no-op when tts_voice_id is None) --
+                _tts_enabled = bool(tts_voice_id and tts_api_key)
+                _tts_client: ElevenLabsStreamingTTS | None = None
+                _tts_sanitizer = StreamingMarkdownSanitizer() if _tts_enabled else None
+                _tts_audio_task: asyncio.Task | None = None
+                _tts_audio_done = asyncio.Event()
+                _tts_audio_ready = asyncio.Event()
+                _tts_audio_chunk_idx = 0
+
+                async def _tts_receive_audio(
+                    tts_client: ElevenLabsStreamingTTS,
+                ) -> None:
+                    """Background task: receive audio from ElevenLabs and enqueue chunks."""
+                    nonlocal _tts_audio_chunk_idx
+                    try:
+                        async for audio_b64 in tts_client.receive_audio():
+                            handler.enqueue_audio_delta(audio_b64, _tts_audio_chunk_idx)
+                            _tts_audio_chunk_idx += 1
+                            _tts_audio_ready.set()
+                        handler.enqueue_audio_done()
+                        _tts_audio_ready.set()
+                    except Exception:
+                        logger.warning("TTS audio receiver failed", exc_info=True)
+                        handler.enqueue_audio_error()
+                        _tts_audio_ready.set()
+                    finally:
+                        _tts_audio_done.set()
+
+                async def _tts_cleanup() -> None:
+                    nonlocal _tts_client, _tts_audio_task
+                    if _tts_audio_task and not _tts_audio_task.done():
+                        _tts_audio_task.cancel()
+                        try:
+                            await _tts_audio_task
+                        except (asyncio.CancelledError, Exception):
                             pass
+                    if _tts_client:
+                        try:
+                            await _tts_client.cleanup()
+                        except Exception:
+                            pass
+                        _tts_client = None
+
+                stream_iter = stream.__aiter__()
+                openai_event_task = asyncio.create_task(stream_iter.__anext__())
+                tts_audio_ready_task: asyncio.Task | None = None
+
+                try:
+                    while True:
+                        wait_tasks = [openai_event_task]
+                        if _tts_audio_task and not _tts_audio_done.is_set():
+                            if (
+                                tts_audio_ready_task is None
+                                or tts_audio_ready_task.done()
+                            ):
+                                tts_audio_ready_task = asyncio.create_task(
+                                    _tts_audio_ready.wait()
+                                )
+                            wait_tasks.append(tts_audio_ready_task)
+
+                        done, _ = await asyncio.wait(
+                            wait_tasks, return_when=asyncio.FIRST_COMPLETED
+                        )
+
+                        if tts_audio_ready_task and tts_audio_ready_task in done:
+                            _tts_audio_ready.clear()
+                            data = handler.flush()
+                            if data:
+                                yield data
+                            tts_audio_ready_task = None
+                            continue
+
+                        if openai_event_task not in done:
+                            continue
+
+                        try:
+                            event = openai_event_task.result()
+                        except StopAsyncIteration:
+                            break
+
+                        match event.type:
+                            case "response.created":
+                                await handler.on_response_created(event)
+                            case "response.in_progress":
+                                await handler.on_response_in_progress(event)
+                            case "response.output_item.added":
+                                match event.item.type:
+                                    case "message":
+                                        await handler.on_output_message_created(
+                                            event.item
+                                        )
+                                        if handler.force_stopped:
+                                            break
+                                    case "code_interpreter_call":
+                                        await handler.on_code_interpreter_tool_call_created(
+                                            event.item
+                                        )
+                                    case "file_search_call":
+                                        await handler.on_file_search_call_created(
+                                            event.item
+                                        )
+                                    case "web_search_call":
+                                        await handler.on_web_search_call_created(
+                                            event.item
+                                        )
+                                    case "reasoning":
+                                        await handler.on_reasoning_created(event.item)
+                                    case "mcp_call":
+                                        await handler.on_mcp_tool_call_created(
+                                            event.item
+                                        )
+                                    case "mcp_list_tools":
+                                        await handler.on_mcp_list_tools_call_created(
+                                            event.item
+                                        )
+                                    case _:
+                                        pass
+                            case "response.content_part.added":
+                                match event.part.type:
+                                    case "output_text":
+                                        await handler.on_output_text_part_created(
+                                            event.part
+                                        )
+                                        # Start TTS connection on first text part
+                                        if _tts_enabled and not _tts_client:
+                                            try:
+                                                if (
+                                                    tts_api_key is None
+                                                    or tts_voice_id is None
+                                                ):
+                                                    raise ValueError(
+                                                        "TTS streaming requires both API key and voice ID"
+                                                    )
+                                                _tts_client = ElevenLabsStreamingTTS(
+                                                    tts_api_key, tts_voice_id
+                                                )
+                                                await _tts_client.connect()
+                                                handler.enqueue_audio_started()
+                                                _tts_audio_task = asyncio.create_task(
+                                                    _tts_receive_audio(_tts_client)
+                                                )
+                                            except Exception:
+                                                logger.warning(
+                                                    "Failed to start TTS streaming",
+                                                    exc_info=True,
+                                                )
+                                                _tts_client = None
+                                    case _:
+                                        pass
+                            case "response.output_text.delta":
+                                await handler.on_output_text_delta(event)
+                                # Feed text to TTS accumulator
+                                if _tts_sanitizer and _tts_client:
+                                    for chunk in _tts_sanitizer.add(event.delta):
+                                        try:
+                                            await _tts_client.send_text(chunk)
+                                        except Exception:
+                                            logger.warning(
+                                                "TTS send_text failed",
+                                                exc_info=True,
+                                            )
+                            case "response.output_text.annotation.added":
+                                match event.annotation["type"]:
+                                    case "container_file_citation":
+                                        await handler.on_output_text_container_file_citation_added(
+                                            event.annotation,
+                                            event.annotation_index,
+                                        )
+                                    case "file_citation":
+                                        await (
+                                            handler.on_output_text_file_citation_added(
+                                                event.annotation,
+                                                event.annotation_index,
+                                            )
+                                        )
+                                    case "url_citation":
+                                        await handler.on_output_text_url_citation_added(
+                                            event.annotation,
+                                            event.annotation_index,
+                                        )
+                                    case _:
+                                        pass
+                            case "response.content_part.done":
+                                match event.part.type:
+                                    case "output_text":
+                                        await handler.on_output_text_part_done(
+                                            event.part
+                                        )
+                                        # Flush remaining text to TTS and close input
+                                        if _tts_sanitizer and _tts_client:
+                                            remaining = _tts_sanitizer.flush()
+                                            if remaining:
+                                                try:
+                                                    await _tts_client.send_text(
+                                                        remaining, flush=True
+                                                    )
+                                                except Exception:
+                                                    logger.warning(
+                                                        "TTS final flush failed",
+                                                        exc_info=True,
+                                                    )
+                                            try:
+                                                await _tts_client.close_input()
+                                            except Exception:
+                                                logger.warning(
+                                                    "TTS close_input failed",
+                                                    exc_info=True,
+                                                )
+                                    case _:
+                                        pass
+                            case "response.code_interpreter_call.in_progress":
+                                await handler.on_code_interpreter_tool_call_in_progress(
+                                    event
+                                )
+                            case "response.code_interpreter_call_code.delta":
+                                await handler.on_code_interpreter_tool_call_code_delta(
+                                    event
+                                )
+                            case "response.code_interpreter_call.interpreting":
+                                await (
+                                    handler.on_code_interpreter_tool_call_interpreting(
+                                        event
+                                    )
+                                )
+                            case "response.code_interpreter_call.completed":
+                                await handler.on_code_interpreter_tool_call_completed(
+                                    event
+                                )
+                            case "response.file_search_call.completed":
+                                await handler.on_file_search_call_completed(event)
+                            case "response.file_search_call.in_progress":
+                                await handler.on_file_search_call_in_progress(event)
+                            case "response.file_search_call.searching":
+                                await handler.on_file_search_call_searching(event)
+                            case "response.web_search_call.in_progress":
+                                await handler.on_web_search_call_in_progress(event)
+                            case "response.web_search_call.searching":
+                                await handler.on_web_search_call_searching(event)
+                            case "response.web_search_call.completed":
+                                await handler.on_web_search_call_completed(event)
+                            case "response.mcp_call.in_progress":
+                                await handler.on_mcp_tool_call_in_progress(event)
+                            case "response.mcp_call_arguments.delta":
+                                await handler.on_mcp_tool_call_arguments_delta(event)
+                            case "response.mcp_call.completed":
+                                await handler.on_mcp_tool_call_completed(event)
+                            case "response.mcp_call.failed":
+                                await handler.on_mcp_tool_call_failed(event)
+                            case "response.mcp_list_tools.in_progress":
+                                await handler.on_mcp_list_tools_call_in_progress(event)
+                            case "response.mcp_list_tools.completed":
+                                await handler.on_mcp_list_tools_call_completed(event)
+                            case "response.mcp_list_tools.failed":
+                                await handler.on_mcp_list_tools_call_failed(event)
+                            case "response.reasoning_summary_part.added":
+                                await handler.on_reasoning_summary_part_added(event)
+                            case "response.reasoning_summary_text.delta":
+                                await handler.on_reasoning_summary_text_delta(event)
+                            case "response.reasoning_summary_part.done":
+                                await handler.on_reasoning_summary_part_done(event)
+                            case "response.output_item.done":
+                                match event.item.type:
+                                    case "message":
+                                        await handler.on_output_message_done(event.item)
+                                    case "code_interpreter_call":
+                                        await (
+                                            handler.on_code_interpreter_tool_call_done(
+                                                event.item
+                                            )
+                                        )
+                                    case "file_search_call":
+                                        await handler.on_file_search_call_done(
+                                            event.item
+                                        )
+                                    case "web_search_call":
+                                        await handler.on_web_search_call_done(
+                                            event.item
+                                        )
+                                    case "reasoning":
+                                        await handler.on_reasoning_completed(event.item)
+                                    case "mcp_call":
+                                        await handler.on_mcp_tool_call_done(event.item)
+                                    case "mcp_list_tools":
+                                        await handler.on_mcp_list_tools_call_done(
+                                            event.item
+                                        )
+                                    case _:
+                                        pass
+                            case "response.completed":
+                                await handler.on_response_completed(event)
+                            case "response.incomplete":
+                                await handler.on_response_completed(event)
+                            case "response.failed":
+                                await handler.on_response_completed(event)
+                            case "error":
+                                await handler.on_response_error(event)
+                            case _:
+                                pass
+                        data = handler.flush()
+                        if data:
+                            yield data
+
+                        openai_event_task = asyncio.create_task(stream_iter.__anext__())
+                finally:
+                    if not openai_event_task.done():
+                        openai_event_task.cancel()
+                        try:
+                            await openai_event_task
+                        except (asyncio.CancelledError, StopAsyncIteration):
+                            pass
+                    if tts_audio_ready_task and not tts_audio_ready_task.done():
+                        tts_audio_ready_task.cancel()
+                        try:
+                            await tts_audio_ready_task
+                        except asyncio.CancelledError:
+                            pass
+
+                # Drain remaining TTS audio after OpenAI stream ends
+                if _tts_audio_task and not _tts_audio_done.is_set():
+                    try:
+                        drain_timeouts = 0
+                        while not _tts_audio_done.is_set():
+                            try:
+                                await asyncio.wait_for(
+                                    _tts_audio_done.wait(), timeout=0.5
+                                )
+                            except asyncio.TimeoutError:
+                                drain_timeouts += 1
+                                if drain_timeouts >= 10:
+                                    logger.warning(
+                                        "Timed out waiting for TTS audio drain"
+                                    )
+                                    handler.enqueue_audio_error()
+                                    break
+                            data = handler.flush()
+                            if data:
+                                yield data
+                    except Exception:
+                        logger.warning("Error draining TTS audio", exc_info=True)
+                        handler.enqueue_audio_error()
                     yield handler.flush()
+                await _tts_cleanup()
+
             except (
                 BrokenPipeError,
                 ConnectionResetError,
@@ -3805,6 +4022,7 @@ async def run_response(
                 ClientDisconnect,
             ) as stream_cancel_error:
                 is_canceled = True
+                await _tts_cleanup()
                 cancellation_cause = type(stream_cancel_error).__name__
                 logger.warning(
                     "Response stream interrupted before completion "
@@ -3821,6 +4039,7 @@ async def run_response(
                     )
                 return
             except openai.APIError as openai_error:
+                await _tts_cleanup()
                 if openai_error.type == "server_error":
                     try:
                         logger.exception(
@@ -3897,6 +4116,7 @@ async def run_response(
                     except Exception as e:
                         logger.exception(f"Error writing to stream: {e}")
             except (ValueError, Exception) as e:
+                await _tts_cleanup()
                 try:
                     logger.exception(f"Error in response stream: {e}")
                     if handler:

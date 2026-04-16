@@ -3,6 +3,7 @@ import type { Writable, Readable } from 'svelte/store';
 import * as api from '$lib/api';
 import type { ThreadWithMeta, Error as ApiError, BaseResponse } from '$lib/api';
 import { errorMessage } from '$lib/errors';
+import { WavStreamPlayer, base64ToArrayBuffer } from '$lib/wavtools/index';
 
 /**
  * State for the thread manager.
@@ -193,6 +194,23 @@ export class ThreadManager {
 	#data: Writable<ThreadManagerState>;
 	#fetcher: api.Fetcher;
 
+	// -- TTS audio playback state --
+	#ttsPlayer: WavStreamPlayer | null = null;
+	#ttsTrackId: string | null = null;
+	#ttsVolume = 1;
+	#ttsMuted: Writable<boolean> = writable(false);
+	#ttsPlaying: Writable<boolean> = writable(false);
+
+	/**
+	 * Whether TTS audio is currently playing/streaming.
+	 */
+	ttsPlaying: Readable<boolean>;
+
+	/**
+	 * Whether TTS audio is muted.
+	 */
+	ttsMuted: Readable<boolean>;
+
 	/**
 	 * Create a new thread manager.
 	 */
@@ -224,6 +242,9 @@ export class ThreadManager {
 			attachments: expanded.data?.attachments || {},
 			instructions: expanded.data?.instructions || null
 		});
+
+		this.ttsMuted = derived(this.#ttsMuted, ($v) => $v);
+		this.ttsPlaying = derived(this.#ttsPlaying, ($v) => $v);
 
 		if (interactionMode === 'chat') {
 			this.#ensureRun(threadData);
@@ -773,6 +794,9 @@ export class ThreadManager {
 			attachments: (attachments || []).map((file) => ({ file_id: file.file_id, tools: [] }))
 		};
 
+		// Interrupt any active TTS playback from a previous response
+		await this.interruptTts();
+
 		this.#data.update((d) => ({
 			...d,
 			error: null,
@@ -790,7 +814,8 @@ export class ThreadManager {
 			code_interpreter_file_ids,
 			vision_file_ids,
 			vision_image_descriptions,
-			timezone: this.timezone
+			timezone: this.timezone,
+			generate_speech: !get(this.#ttsMuted)
 		});
 
 		this.attachments = derived(this.#data, ($data) => {
@@ -846,10 +871,12 @@ export class ThreadManager {
 
 		try {
 			for await (const chunk of chunks) {
-				this.#handleStreamChunk(chunk, callback);
+				await this.#handleStreamChunk(chunk, callback);
 			}
 		} catch (e) {
 			console.error('Error handling stream chunks', e);
+			// If stream was interrupted, stop any active TTS
+			this.interruptTts().catch(() => {});
 			this.#data.update((d) => ({
 				...d,
 				waiting: false
@@ -905,7 +932,7 @@ export class ThreadManager {
 	/**
 	 * Handle a new chunk of data from a streaming response.
 	 */
-	#handleStreamChunk(
+	async #handleStreamChunk(
 		chunk: api.ThreadStreamChunk,
 		callback: ({ success, errorMessage, message_sent }: CallbackParams) => void = () => {}
 	) {
@@ -981,10 +1008,124 @@ export class ThreadManager {
 			case 'reasoning_step_completed':
 				this.#completeReasoningStep(chunk);
 				break;
+			case 'audio_started':
+				await this.#handleTtsStarted();
+				break;
+			case 'audio_delta':
+				this.#handleTtsDelta(chunk);
+				break;
+			case 'audio_done':
+				this.#handleTtsDone();
+				break;
+			case 'audio_error':
+				this.#handleTtsError();
+				break;
 			default:
 				console.warn('Unhandled chunk', chunk);
 				break;
 		}
+	}
+
+	// -- TTS audio playback handlers --
+
+	async #disposeTtsPlayer(player: WavStreamPlayer | null) {
+		if (!player) return;
+		try {
+			await player.close();
+		} catch (err) {
+			console.warn('TTS: player close failed', err);
+		}
+	}
+
+	async #handleTtsStarted() {
+		try {
+			const player = new WavStreamPlayer({
+				sampleRate: 24000,
+				onPlaybackStopped: () => {
+					if (this.#ttsPlayer !== player) {
+						return;
+					}
+					this.#ttsPlayer = null;
+					this.#ttsTrackId = null;
+					this.#ttsPlaying.set(false);
+					this.#disposeTtsPlayer(player).catch(() => {});
+				}
+			});
+			await player.connect();
+			player.setVolume(get(this.#ttsMuted) ? 0 : this.#ttsVolume);
+			this.#ttsPlayer = player;
+			this.#ttsTrackId = crypto.randomUUID();
+			this.#ttsPlaying.set(true);
+		} catch (err) {
+			console.warn('TTS: AudioWorklet connect failed', err);
+			this.#ttsPlayer = null;
+			this.#ttsTrackId = null;
+		}
+	}
+
+	#handleTtsDelta(chunk: api.ThreadStreamAudioDeltaChunk) {
+		if (!this.#ttsPlayer || !this.#ttsTrackId) return;
+		try {
+			this.#ttsPlayer.add16BitPCM(base64ToArrayBuffer(chunk.audio), this.#ttsTrackId);
+		} catch (err) {
+			console.warn('TTS: add16BitPCM failed', err);
+		}
+	}
+
+	#handleTtsDone() {
+		// Keep the speaker control visible until buffered audio fully drains.
+		this.#ttsTrackId = null;
+	}
+
+	#handleTtsError() {
+		const player = this.#ttsPlayer;
+		this.#ttsPlayer = null;
+		this.#ttsTrackId = null;
+		this.#ttsPlaying.set(false);
+		if (player) {
+			player.interrupt().catch(() => {});
+			this.#disposeTtsPlayer(player).catch(() => {});
+		}
+	}
+
+	/**
+	 * Interrupt any active TTS playback.
+	 */
+	async interruptTts() {
+		const player = this.#ttsPlayer;
+		if (player) {
+			this.#ttsPlayer = null;
+			this.#ttsTrackId = null;
+			this.#ttsPlaying.set(false);
+			try {
+				await player.interrupt();
+			} finally {
+				await this.#disposeTtsPlayer(player);
+			}
+		}
+	}
+
+	/**
+	 * Set whether TTS playback is muted.
+	 */
+	setTtsMuted(muted: boolean) {
+		this.#ttsMuted.set(muted);
+		this.#ttsPlayer?.setVolume(muted ? 0 : this.#ttsVolume);
+	}
+
+	/**
+	 * Set the TTS playback volume (0.0 – 1.0).
+	 */
+	setTtsVolume(volume: number) {
+		this.#ttsVolume = Math.max(0, Math.min(1, volume));
+		this.#ttsPlayer?.setVolume(get(this.#ttsMuted) ? 0 : this.#ttsVolume);
+	}
+
+	/**
+	 * Get the TTS player instance for frequency analysis, or null if inactive.
+	 */
+	getTtsPlayer(): WavStreamPlayer | null {
+		return this.#ttsPlayer;
 	}
 
 	#createReasoningStep(call: api.ThreadStreamReasoningStepCreatedChunk['reasoning_step']) {

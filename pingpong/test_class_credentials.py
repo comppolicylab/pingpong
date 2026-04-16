@@ -1364,6 +1364,53 @@ async def test_validate_elevenlabs_api_key_returns_false_for_empty_api_key():
     assert await elevenlabs_module.validate_elevenlabs_api_key("") is False
 
 
+def test_strip_markdown_for_tts_removes_common_markdown_formatting():
+    assert (
+        elevenlabs_module.strip_markdown_for_tts(
+            "# Title\n"
+            "> quoted\n"
+            "- **Bold** item with [link](https://example.com)\n"
+            "Inline `code` and ![diagram](https://example.com/image.png)\n"
+            "~~struck~~ text"
+        )
+        == "Title\nquoted\nBold item with link\nInline code and diagram\nstruck text"
+    )
+
+
+def test_streaming_markdown_sanitizer_sanitizes_markdown_across_streamed_deltas():
+    sanitizer = elevenlabs_module.StreamingMarkdownSanitizer()
+
+    assert sanitizer.add("Here is **bold** and [a") == ["Here is bold and"]
+
+    flushed = sanitizer.add(" link](https://example.com).")
+
+    assert flushed == ["a link."]
+
+
+def test_streaming_markdown_sanitizer_streams_plain_prose_immediately():
+    sanitizer = elevenlabs_module.StreamingMarkdownSanitizer()
+
+    assert sanitizer.add("Hello, world.") == ["Hello, world."]
+
+
+def test_streaming_markdown_sanitizer_strips_fenced_code_blocks_before_tts():
+    sanitizer = elevenlabs_module.StreamingMarkdownSanitizer()
+
+    assert sanitizer.add("Example:\n```python\nprint('hello')\n") == ["Example:"]
+
+    flushed = sanitizer.add("```.")
+
+    assert flushed == ["print('hello')."]
+
+
+def test_streaming_markdown_sanitizer_flushes_incomplete_markdown_best_effort():
+    sanitizer = elevenlabs_module.StreamingMarkdownSanitizer()
+
+    assert sanitizer.add("Here is [an unfinished link") == ["Here is"]
+
+    assert sanitizer.flush() == "an unfinished link"
+
+
 async def test_validate_elevenlabs_api_key_maps_client_construction_errors_to_unavailable(
     monkeypatch,
 ):

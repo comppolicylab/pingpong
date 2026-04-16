@@ -1,8 +1,13 @@
 import logging
 import ssl
+from collections.abc import AsyncGenerator
+from html import unescape
+import re
 from typing import Any
 
+import aiohttp
 import httpx
+import orjson
 from elevenlabs.client import AsyncElevenLabs
 from elevenlabs.core.api_error import ApiError as ElevenLabsApiError
 from elevenlabs.core.request_options import RequestOptions
@@ -255,3 +260,309 @@ async def validate_elevenlabs_api_key(api_key: str) -> bool:
             provider=schemas.ClassCredentialProvider.ELEVENLABS,
             message="Unable to validate the ElevenLabs API key right now.",
         ) from exc
+
+
+# ---------------------------------------------------------------------------
+# Streaming TTS via ElevenLabs WebSocket API
+# ---------------------------------------------------------------------------
+
+ELEVENLABS_STREAMING_TTS_MODEL = "eleven_turbo_v2_5"
+ELEVENLABS_STREAMING_TTS_OUTPUT_FORMAT = "pcm_24000"
+
+_MARKDOWN_FENCE_RE = re.compile(r"```(?:[\w+-]+)?\s*([\s\S]*?)```")
+_MARKDOWN_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\([^)]+\)")
+_MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]+\)")
+_MARKDOWN_AUTOLINK_RE = re.compile(r"<((?:https?|mailto):[^>]+)>")
+_MARKDOWN_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+", re.MULTILINE)
+_MARKDOWN_BLOCKQUOTE_RE = re.compile(r"^\s{0,3}>\s?", re.MULTILINE)
+_MARKDOWN_LIST_RE = re.compile(r"^\s{0,3}(?:[-*+]\s+|\d+\.\s+)", re.MULTILINE)
+_MARKDOWN_CODE_RE = re.compile(r"`([^`]+)`")
+_MARKDOWN_STRIKE_RE = re.compile(r"~~(.*?)~~")
+_MARKDOWN_STRONG_RE = re.compile(r"(\*\*|__)(.*?)\1")
+_MARKDOWN_EMPHASIS_RE = re.compile(r"(?<!\w)(\*|_)([^*_]+?)\1(?!\w)")
+_MARKDOWN_AUTOLINK_START_RE = re.compile(r"<(?:https?|mailto):", re.IGNORECASE)
+_MARKDOWN_WHITESPACE_RE = re.compile(r"[ \t]+")
+_MARKDOWN_BLANK_LINES_RE = re.compile(r"\n{3,}")
+
+
+def strip_markdown_for_tts(text: str) -> str:
+    """Reduce common Markdown formatting to cleaner spoken text."""
+    if not text:
+        return ""
+
+    plain_text = text
+    plain_text = _MARKDOWN_FENCE_RE.sub(
+        lambda match: match.group(1).strip(), plain_text
+    )
+    plain_text = _MARKDOWN_IMAGE_RE.sub(
+        lambda match: match.group(1).strip(), plain_text
+    )
+    plain_text = _MARKDOWN_LINK_RE.sub(lambda match: match.group(1).strip(), plain_text)
+    plain_text = _MARKDOWN_AUTOLINK_RE.sub(
+        lambda match: match.group(1).strip(), plain_text
+    )
+    plain_text = _MARKDOWN_HEADING_RE.sub("", plain_text)
+    plain_text = _MARKDOWN_BLOCKQUOTE_RE.sub("", plain_text)
+    plain_text = _MARKDOWN_LIST_RE.sub("", plain_text)
+    plain_text = _MARKDOWN_CODE_RE.sub(lambda match: match.group(1).strip(), plain_text)
+    plain_text = _MARKDOWN_STRIKE_RE.sub(
+        lambda match: match.group(1).strip(), plain_text
+    )
+    plain_text = _MARKDOWN_STRONG_RE.sub(lambda match: match.group(2), plain_text)
+    plain_text = _MARKDOWN_EMPHASIS_RE.sub(lambda match: match.group(2), plain_text)
+    plain_text = plain_text.replace("```", "")
+    plain_text = plain_text.replace("`", "")
+    plain_text = plain_text.replace("![", "")
+    plain_text = plain_text.replace("[", "").replace("]", "")
+    plain_text = plain_text.replace("\\*", "*").replace("\\_", "_").replace("\\`", "`")
+    plain_text = plain_text.replace("\\[", "[").replace("\\]", "]")
+    plain_text = plain_text.replace("\\(", "(").replace("\\)", ")")
+    plain_text = unescape(plain_text)
+    plain_text = _MARKDOWN_WHITESPACE_RE.sub(" ", plain_text)
+    plain_text = _MARKDOWN_BLANK_LINES_RE.sub("\n\n", plain_text)
+    return plain_text.strip()
+
+
+class StreamingMarkdownSanitizer:
+    """Emit speakable snippets immediately while holding incomplete markdown.
+
+    The sanitizer keeps only enough state to avoid streaming half-finished
+    markdown constructs such as links, code spans, code fences, and autolinks.
+    Plain prose is passed through as soon as it is safe to speak.
+    """
+
+    def __init__(self) -> None:
+        self._pending = ""
+
+    def add(self, text: str) -> list[str]:
+        """Append streamed text and return any snippets safe for TTS."""
+        if not text:
+            return []
+        self._pending += text
+        return self._drain_ready()
+
+    def flush(self) -> str | None:
+        """Return any remaining text after best-effort markdown cleanup."""
+        if not self._pending:
+            return None
+        chunk = strip_markdown_for_tts(self._pending)
+        self._pending = ""
+        return chunk or None
+
+    def _drain_ready(self) -> list[str]:
+        snippets: list[str] = []
+        while self._pending:
+            safe_end = self._find_safe_prefix_end(self._pending)
+            if safe_end <= 0:
+                break
+            chunk = strip_markdown_for_tts(self._pending[:safe_end])
+            self._pending = self._pending[safe_end:]
+            if chunk:
+                snippets.append(chunk)
+        return snippets
+
+    @classmethod
+    def _find_safe_prefix_end(cls, text: str) -> int:
+        in_fence = False
+        fence_start: int | None = None
+        in_inline_code = False
+        inline_code_start: int | None = None
+        link_starts: list[int] = []
+        pending_link_start: int | None = None
+        in_link_destination = False
+        link_destination_start: int | None = None
+        link_destination_depth = 0
+        in_autolink = False
+        autolink_start: int | None = None
+
+        i = 0
+        while i < len(text):
+            if in_fence:
+                if text.startswith("```", i):
+                    in_fence = False
+                    fence_start = None
+                    i += 3
+                else:
+                    i += 1
+                continue
+
+            if in_inline_code:
+                if text[i] == "`":
+                    in_inline_code = False
+                    inline_code_start = None
+                i += 1
+                continue
+
+            if in_link_destination:
+                if text[i] == "(":
+                    link_destination_depth += 1
+                elif text[i] == ")":
+                    link_destination_depth -= 1
+                    if link_destination_depth == 0:
+                        in_link_destination = False
+                        link_destination_start = None
+                i += 1
+                continue
+
+            if in_autolink:
+                if text[i] == ">":
+                    in_autolink = False
+                    autolink_start = None
+                i += 1
+                continue
+
+            if pending_link_start is not None:
+                if text[i].isspace():
+                    pending_link_start = None
+                elif text[i] == "(":
+                    in_link_destination = True
+                    link_destination_start = pending_link_start
+                    link_destination_depth = 1
+                    pending_link_start = None
+                    i += 1
+                    continue
+                else:
+                    pending_link_start = None
+                    continue
+
+            if text.startswith("```", i):
+                in_fence = True
+                fence_start = i
+                i += 3
+                continue
+
+            if text[i] == "`":
+                in_inline_code = True
+                inline_code_start = i
+                i += 1
+                continue
+
+            if text[i] == "!" and i + 1 < len(text) and text[i + 1] == "[":
+                link_starts.append(i)
+                i += 2
+                continue
+
+            if text[i] == "[":
+                link_starts.append(i)
+                i += 1
+                continue
+
+            if text[i] == "]" and link_starts:
+                pending_link_start = link_starts.pop()
+                i += 1
+                continue
+
+            if _MARKDOWN_AUTOLINK_START_RE.match(text, i):
+                in_autolink = True
+                autolink_start = i
+                i += 1
+                continue
+
+            i += 1
+
+        unresolved_starts = link_starts
+        if pending_link_start is not None:
+            unresolved_starts.append(pending_link_start)
+        if fence_start is not None:
+            unresolved_starts.append(fence_start)
+        if inline_code_start is not None:
+            unresolved_starts.append(inline_code_start)
+        if link_destination_start is not None:
+            unresolved_starts.append(link_destination_start)
+        if autolink_start is not None:
+            unresolved_starts.append(autolink_start)
+
+        return min(unresolved_starts) if unresolved_starts else len(text)
+
+
+class ElevenLabsStreamingTTS:
+    """WebSocket client for ElevenLabs streaming-input text-to-speech.
+
+    Uses the ``/v1/text-to-speech/{voice_id}/stream-input`` WebSocket
+    endpoint which accepts text chunks in real time and returns base64-
+    encoded audio chunks.
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        voice_id: str,
+        *,
+        model_id: str = ELEVENLABS_STREAMING_TTS_MODEL,
+        output_format: str = ELEVENLABS_STREAMING_TTS_OUTPUT_FORMAT,
+    ) -> None:
+        self._api_key = api_key
+        self._voice_id = voice_id
+        self._model_id = model_id
+        self._output_format = output_format
+        self._session: aiohttp.ClientSession | None = None
+        self._ws: aiohttp.ClientWebSocketResponse | None = None
+
+    async def connect(self) -> None:
+        """Open a WebSocket connection and send the initialization frame."""
+        url = (
+            f"wss://api.elevenlabs.io/v1/text-to-speech/"
+            f"{self._voice_id}/stream-input"
+            f"?model_id={self._model_id}"
+            f"&output_format={self._output_format}"
+        )
+        self._session = aiohttp.ClientSession(headers={"xi-api-key": self._api_key})
+        self._ws = await self._session.ws_connect(url)
+        # Send initializeConnection message.
+        await self._ws.send_json(
+            {
+                "text": " ",
+                "voice_settings": {
+                    "stability": 0.5,
+                    "similarity_boost": 0.8,
+                },
+            }
+        )
+
+    async def send_text(self, text: str, *, flush: bool = False) -> None:
+        """Send a text chunk to be synthesized.
+
+        *text* should ideally end with a space for optimal latency.
+        When *flush* is ``True``, ElevenLabs will immediately synthesize
+        any buffered text rather than waiting for more input.
+        """
+        if not self._ws:
+            raise RuntimeError("Not connected – call connect() first")
+        msg: dict[str, Any] = {"text": text}
+        if flush:
+            msg["flush"] = True
+        await self._ws.send_json(msg)
+
+    async def close_input(self) -> None:
+        """Signal end of text input (EOS)."""
+        if not self._ws:
+            return
+        await self._ws.send_json({"text": ""})
+
+    async def receive_audio(self) -> AsyncGenerator[str, None]:
+        """Yield base64-encoded audio strings until ``isFinal`` is received."""
+        if not self._ws:
+            raise RuntimeError("Not connected – call connect() first")
+        async for msg in self._ws:
+            if msg.type == aiohttp.WSMsgType.TEXT:
+                data = orjson.loads(msg.data)
+                if data.get("isFinal"):
+                    return
+                audio = data.get("audio")
+                if audio:
+                    yield audio
+            elif msg.type in (
+                aiohttp.WSMsgType.ERROR,
+                aiohttp.WSMsgType.CLOSED,
+                aiohttp.WSMsgType.CLOSING,
+            ):
+                return
+
+    async def cleanup(self) -> None:
+        """Close the WebSocket and the underlying HTTP session."""
+        if self._ws and not self._ws.closed:
+            await self._ws.close()
+        self._ws = None
+        if self._session and not self._session.closed:
+            await self._session.close()
+        self._session = None
