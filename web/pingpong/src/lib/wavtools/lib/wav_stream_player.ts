@@ -49,6 +49,8 @@ interface TrackSampleOffset {
 	currentTime: number;
 }
 
+const TRACK_SAMPLE_OFFSET_TIMEOUT_MS = 250;
+
 /**
  * Plays audio streams received in raw PCM16 chunks from the browser
  * @class
@@ -236,19 +238,31 @@ export class WavStreamPlayer {
 	 * @returns {{trackId: string|null, offset: number, currentTime: number}}
 	 */
 	async getTrackSampleOffset(interrupt = false): Promise<TrackSampleOffset | null> {
-		if (!this.stream) {
+		const stream = this.stream;
+		if (!stream) {
 			return null;
 		}
 		const requestId = crypto.randomUUID();
-		this.stream.port.postMessage({
+		stream.port.postMessage({
 			event: interrupt ? 'interrupt' : 'offset',
 			requestId
 		});
+		const timeoutAt = Date.now() + TRACK_SAMPLE_OFFSET_TIMEOUT_MS;
 		let trackSampleOffset: TrackSampleOffset | null = null;
 		while (!trackSampleOffset) {
 			trackSampleOffset = this.trackSampleOffsets[requestId];
+			if (trackSampleOffset) {
+				break;
+			}
+			if (this.stream !== stream) {
+				return null;
+			}
+			if (Date.now() >= timeoutAt) {
+				return null;
+			}
 			await new Promise<void>((r) => setTimeout(() => r(), 1));
 		}
+		delete this.trackSampleOffsets[requestId];
 		const { trackId } = trackSampleOffset;
 		if (interrupt && trackId) {
 			this.interruptedTrackIds[trackId] = true;
