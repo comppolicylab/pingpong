@@ -60,6 +60,7 @@
 	} = $props();
 	const dispatch = createEventDispatcher<{
 		sessionchange: LectureVideoSession;
+		playbackresumed: void;
 	}>();
 
 	// --- Session state ---
@@ -992,6 +993,7 @@
 
 	function handlePlay() {
 		clearPendingVideoRetry();
+		dispatch('playbackresumed');
 		if (!videoElement) return;
 		if (playbackLocked) {
 			suppressPauseInteraction = true;

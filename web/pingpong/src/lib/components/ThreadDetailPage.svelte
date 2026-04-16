@@ -712,6 +712,10 @@
 		liveLectureVideoSession = e.detail;
 	};
 
+	const handleLecturePlaybackResumed = () => {
+		threadMgr.interruptTts().catch(() => {});
+	};
+
 	const handleLectureChatDraftChange = ({ hasText }: { hasText: boolean }) => {
 		lectureChatHasDraft = hasText;
 		if (hasText) {
@@ -1494,6 +1498,7 @@
 					deferAutoContinueForChatDraft={lectureChatHasDraft}
 					chatAvailable={threadLectureChatAvailable}
 					on:sessionchange={handleLectureSessionChange}
+					on:playbackresumed={handleLecturePlaybackResumed}
 				>
 					{#snippet chat()}
 						{#if threadLectureChatAvailable}
