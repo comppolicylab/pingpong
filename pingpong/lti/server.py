@@ -1075,12 +1075,7 @@ async def lti_launch(
                 await request.state["db"].flush()
             else:
                 # Create new pending LTIClass to store context
-                (
-                    course_code,
-                    course_name,
-                    course_term,
-                    context_memberships_url,
-                ) = handler.extract_course_metadata(claims, launch_custom_params)
+                metadata = handler.extract_course_metadata(claims, launch_custom_params)
 
                 pending_lti_class = LTIClass(
                     registration_id=registration.id,
@@ -1088,12 +1083,12 @@ async def lti_launch(
                     lti_platform=registration.lms_platform,
                     course_id=course_id,
                     resource_link_id=resource_link_id,
-                    course_code=course_code,
-                    course_name=course_name,
-                    course_term=course_term,
+                    course_code=metadata.course_code,
+                    course_name=metadata.course_name,
+                    course_term=metadata.course_term,
                     class_id=None,
                     setup_user_id=user.id,
-                    context_memberships_url=context_memberships_url,
+                    context_memberships_url=metadata.context_memberships_url,
                 )
                 request.state["db"].add(pending_lti_class)
                 await request.state["db"].flush()
@@ -1195,24 +1190,19 @@ async def lti_launch(
                 )
 
             if is_instructor or is_admin_supervisor:
-                (
-                    course_code,
-                    course_name,
-                    course_term,
-                    context_memberships_url,
-                ) = handler.extract_course_metadata(claims, launch_custom_params)
+                metadata = handler.extract_course_metadata(claims, launch_custom_params)
                 second_lti_class = LTIClass(
                     registration_id=registration.id,
                     lti_status=LTIStatus.LINKED,
                     lti_platform=registration.lms_platform,
                     course_id=course_id,
                     resource_link_id=resource_link_id,
-                    course_code=course_code,
-                    course_name=course_name,
-                    course_term=course_term,
+                    course_code=metadata.course_code,
+                    course_name=metadata.course_name,
+                    course_term=metadata.course_term,
                     class_id=pp_class.id,
                     setup_user_id=user.id,
-                    context_memberships_url=context_memberships_url,
+                    context_memberships_url=metadata.context_memberships_url,
                 )
                 request.state["db"].add(second_lti_class)
                 await request.state["db"].flush()
@@ -1293,24 +1283,19 @@ async def lti_launch(
                 )
 
             if is_instructor or is_admin_supervisor:
-                (
-                    course_code,
-                    course_name,
-                    course_term,
-                    context_memberships_url,
-                ) = handler.extract_course_metadata(claims, launch_custom_params)
+                metadata = handler.extract_course_metadata(claims, launch_custom_params)
                 new_lti_class = LTIClass(
                     registration_id=registration.id,
                     lti_status=LTIStatus.LINKED,
                     lti_platform=registration.lms_platform,
                     course_id=course_id,
                     resource_link_id=resource_link_id,
-                    course_code=course_code,
-                    course_name=course_name,
-                    course_term=course_term,
+                    course_code=metadata.course_code,
+                    course_name=metadata.course_name,
+                    course_term=metadata.course_term,
                     class_id=class_.id,
                     setup_user_id=user.id,
-                    context_memberships_url=context_memberships_url,
+                    context_memberships_url=metadata.context_memberships_url,
                 )
                 request.state["db"].add(new_lti_class)
                 await request.state["db"].flush()

@@ -4244,8 +4244,12 @@ async def test_lti_launch_admin_supervisor_creates_second_lti_class(monkeypatch)
     # Should create second LTI class and redirect to group
     assert response.status_code == 302
     assert response.headers["location"].endswith("/group/77?lti_session=token")
-    # Check that a new LTI class was added
-    assert any(isinstance(obj, FakeLTIClass) for obj in db.added)
+    created = [obj for obj in db.added if isinstance(obj, FakeLTIClass)]
+    assert len(created) == 1
+    assert created[0].course_code == "CS1"
+    assert created[0].course_name == "Intro"
+    assert created[0].course_term is None
+    assert created[0].context_memberships_url is None
     # Verify supervisor check was called (this determines LTI class creation)
     assert any(call[1] == "supervisor" for call in authz.test_calls)
 
@@ -4708,8 +4712,12 @@ async def test_lti_launch_admin_supervisor_creates_new_lti_class_for_non_lti_cla
     # Should create new LTI class and redirect to group
     assert response.status_code == 302
     assert response.headers["location"].endswith("/group/321?lti_session=token")
-    # Check that a new LTI class was added
-    assert any(isinstance(obj, FakeLTIClass) for obj in db.added)
+    created = [obj for obj in db.added if isinstance(obj, FakeLTIClass)]
+    assert len(created) == 1
+    assert created[0].course_code == "CS1"
+    assert created[0].course_name == "Intro"
+    assert created[0].course_term is None
+    assert created[0].context_memberships_url is None
     # Verify supervisor check was called (this determines LTI class creation)
     assert any(call[1] == "supervisor" for call in authz.test_calls)
 
