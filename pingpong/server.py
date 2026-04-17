@@ -2127,7 +2127,7 @@ async def delete_lti_class(
         request.state["db"],
         lti_class.id,
         class_id_int,
-        schemas.LMSType(lti_class.lti_platform),
+        schemas.LMSType.from_lti_platform(lti_class.lti_platform),
         keep_users=keep_users,
     )
 

@@ -4,7 +4,10 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import pingpong.models as models
-from pingpong.lti.server import CANVAS_ACCOUNT_LTI_GUID_KEY, PLATFORM_CONFIGURATION_KEY
+from pingpong.lti.constants import (
+    CANVAS_ACCOUNT_LTI_GUID_KEY,
+    PLATFORM_CONFIGURATION_KEY,
+)
 
 logger = logging.getLogger(__name__)
 

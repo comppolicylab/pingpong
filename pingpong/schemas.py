@@ -1399,6 +1399,11 @@ class CreateUserClassRole(BaseModel):
 
 class LMSType(Enum):
     CANVAS = "canvas"
+    HARVARD_LXP = "harvard_lxp"
+
+    @classmethod
+    def from_lti_platform(cls, platform: "LMSPlatform") -> "LMSType":
+        return cls(platform.value)
 
 
 class CreateUserResult(BaseModel):
@@ -1601,6 +1606,7 @@ class InstitutionAdminResponse(BaseModel):
 
 class LMSPlatform(StrEnum):
     CANVAS = "canvas"
+    HARVARD_LXP = "harvard_lxp"
 
 
 class LTIRegistrationReviewStatus(StrEnum):

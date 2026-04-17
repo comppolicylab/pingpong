@@ -6,6 +6,7 @@ import pytest
 from yarl import URL
 
 import pingpong.config as config_module
+import pingpong.schemas as schemas
 from pingpong.lti import canvas_connect as canvas_connect_module
 
 
@@ -1303,6 +1304,7 @@ async def test_get_nrps_create_user_class_roles_maps_members_and_pages(monkeypat
     lti_class = SimpleNamespace(
         id=21,
         registration=registration,
+        lti_platform=schemas.LMSPlatform.CANVAS,
         context_memberships_url=context_memberships_url,
         resource_link_id="resource-link-id",
         course_id="1",
@@ -1483,6 +1485,7 @@ async def test_get_nrps_create_user_class_roles_allows_missing_members(monkeypat
     lti_class = SimpleNamespace(
         id=22,
         registration=registration,
+        lti_platform=schemas.LMSPlatform.CANVAS,
         context_memberships_url=context_memberships_url,
         resource_link_id=None,
         course_id="1",
@@ -1535,12 +1538,83 @@ async def test_get_nrps_create_user_class_roles_allows_missing_members(monkeypat
         create_roles = await client.get_nrps_create_user_class_roles()
 
     assert create_roles.roles == []
+    assert create_roles.lms_type == schemas.LMSType.CANVAS
     assert len(fake_session.requests) == 3
     assert fake_session.requests[1]["url"] == context_memberships_url
     assert (
         fake_session.requests[2]["url"]
         == f"{context_memberships_url}?rlid=fallback-context-id"
     )
+
+
+@pytest.mark.asyncio
+async def test_get_nrps_create_user_class_roles_uses_lti_platform_lms_type(
+    monkeypatch,
+):
+    token_endpoint = "https://platform.example.com/token"
+    context_memberships_url = "https://platform.example.com/api/lti/names_and_roles"
+    registration = SimpleNamespace(
+        client_id="client-123",
+        issuer="https://platform.example.com",
+        openid_configuration=f'{{"token_endpoint":"{token_endpoint}"}}',
+        auth_token_url="https://platform.example.com/fallback-token",
+    )
+    lti_class = SimpleNamespace(
+        id=2201,
+        registration=registration,
+        lti_platform=schemas.LMSPlatform.HARVARD_LXP,
+        context_memberships_url=context_memberships_url,
+        resource_link_id="resource-link-id",
+        course_id="1",
+    )
+
+    async def _get_by_id_with_registration(cls, db, id_):
+        return lti_class
+
+    monkeypatch.setattr(
+        canvas_connect_module.LTIClass,
+        "get_by_id_with_registration",
+        classmethod(_get_by_id_with_registration),
+    )
+    monkeypatch.setattr(
+        canvas_connect_module.ExternalLoginProvider,
+        "get_by_id",
+        classmethod(lambda cls, db, id_: _async_return(None)),
+    )
+    monkeypatch.setattr(
+        canvas_connect_module.jwt,
+        "encode",
+        lambda *args, **kwargs: "signed-client-assertion",
+    )
+    monkeypatch.setattr(canvas_connect_module.uuid, "uuid7", lambda: "uuid7-test")
+
+    fake_session = FakeClientSession(
+        [
+            FakeTokenResponse(
+                payload={
+                    "access_token": "short-lived-token",
+                    "expires_in": 3600,
+                }
+            ),
+            FakeTokenResponse(payload={"members": []}),
+        ]
+    )
+    monkeypatch.setattr(
+        canvas_connect_module.aiohttp,
+        "ClientSession",
+        _client_session_factory(fake_session),
+    )
+
+    async with canvas_connect_module.CanvasConnectClient(
+        db=SimpleNamespace(),
+        lti_class_id=2201,
+        key_manager=FakeKeyManager(),
+        nowfn=lambda: datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc),
+    ) as client:
+        create_roles = await client.get_nrps_create_user_class_roles()
+
+    assert create_roles.roles == []
+    assert create_roles.lms_type == schemas.LMSType.HARVARD_LXP
 
 
 @pytest.mark.asyncio
@@ -1652,6 +1726,7 @@ async def test_get_nrps_create_user_class_roles_no_sso_when_provider_id_zero(
     lti_class = SimpleNamespace(
         id=23,
         registration=registration,
+        lti_platform=schemas.LMSPlatform.CANVAS,
         context_memberships_url=context_memberships_url,
         resource_link_id="resource-link-id",
         course_id="1",
@@ -1748,6 +1823,7 @@ async def test_get_nrps_create_user_class_roles_ignores_sso_provider_ids_from_sk
     lti_class = SimpleNamespace(
         id=2301,
         registration=registration,
+        lti_platform=schemas.LMSPlatform.CANVAS,
         context_memberships_url=context_memberships_url,
         resource_link_id="resource-link-id",
         course_id="1",
