@@ -507,10 +507,7 @@ export type LTIRegisterSetup = {
 	show_course_navigation_control: boolean;
 };
 
-export const getLTIRegisterSetup = async (
-	f: Fetcher,
-	data: LTIRegisterSetupRequest
-) => {
+export const getLTIRegisterSetup = async (f: Fetcher, data: LTIRegisterSetupRequest) => {
 	return await POST<LTIRegisterSetupRequest, LTIRegisterSetup>(f, 'lti/register/setup', data);
 };
 

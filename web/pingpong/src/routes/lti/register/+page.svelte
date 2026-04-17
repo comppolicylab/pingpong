@@ -136,7 +136,8 @@
 		{#if showCourseNavigationControl}
 			<div>
 				<Label for="show_in_course_navigation" class="mb-1">Show in Course Navigation</Label>
-				<Helper class="mb-2">By default, PingPong will be shown in the course navigation menu.</Helper
+				<Helper class="mb-2"
+					>By default, PingPong will be shown in the course navigation menu.</Helper
 				>
 				<Checkbox
 					id="show_in_course_navigation"
