@@ -14,6 +14,8 @@ from pingpong.lti.constants import (
     LTI_CLAIM_NRPS_KEY,
     LTI_TOOL_CONFIGURATION_KEY,
     MESSAGE_TYPE,
+    NO_SSO_PROVIDER_ID,
+    NO_SSO_PROVIDER_ID_STR,
 )
 from pingpong.lti.platforms import get_handler
 from pingpong.lti.platforms.canvas import CanvasPlatformHandler
@@ -71,7 +73,7 @@ LXP_SAMPLE_CLAIMS = {
 }
 
 
-def _lxp_register_request(provider_id: int = 0) -> LTIRegisterRequest:
+def _lxp_register_request(provider_id: int = NO_SSO_PROVIDER_ID) -> LTIRegisterRequest:
     return LTIRegisterRequest(
         name="PingPong",
         admin_name="Admin",
@@ -152,7 +154,7 @@ def test_canvas_build_tool_registration_payload_includes_vendor_extensions():
         name="PingPong",
         admin_name="Admin",
         admin_email="admin@example.com",
-        provider_id=0,
+        provider_id=NO_SSO_PROVIDER_ID,
         sso_field=None,
         openid_configuration="https://platform.example.com/.well-known/openid",
         registration_token="token",
@@ -166,7 +168,7 @@ def test_canvas_build_tool_registration_payload_includes_vendor_extensions():
     )
     tool = payload[LTI_TOOL_CONFIGURATION_KEY]
     assert tool["custom_parameters"]["platform"] == "canvas"
-    assert tool["custom_parameters"]["sso_provider_id"] == "0"
+    assert tool["custom_parameters"]["sso_provider_id"] == NO_SSO_PROVIDER_ID_STR
     assert tool["custom_parameters"]["sso_value"] == ""
     assert tool["https://canvas.instructure.com/lti/vendor"] == (
         "Computational Policy Lab"
@@ -196,13 +198,13 @@ def test_canvas_extract_course_metadata_reads_all_fields():
         LTI_CLAIM_CONTEXT_KEY: {"label": "CS50", "title": "Intro to CS"},
         LTI_CLAIM_NRPS_KEY: {"context_memberships_url": "https://example.com/nrps"},
     }
-    code, name, term, url = handler.extract_course_metadata(
+    metadata = handler.extract_course_metadata(
         claims, {"canvas_term_name": "Fall 2026"}
     )
-    assert code == "CS50"
-    assert name == "Intro to CS"
-    assert term == "Fall 2026"
-    assert url == "https://example.com/nrps"
+    assert metadata.course_code == "CS50"
+    assert metadata.course_name == "Intro to CS"
+    assert metadata.course_term == "Fall 2026"
+    assert metadata.context_memberships_url == "https://example.com/nrps"
 
 
 # --- HarvardLxpPlatformHandler ---
@@ -225,7 +227,9 @@ def test_lxp_validate_registration_request_rejects_sso():
 
 def test_lxp_validate_registration_request_allows_no_sso():
     handler = HarvardLxpPlatformHandler()
-    handler.validate_registration_request(_lxp_register_request(provider_id=0))
+    handler.validate_registration_request(
+        _lxp_register_request(provider_id=NO_SSO_PROVIDER_ID)
+    )
 
 
 def test_lxp_extract_registration_fields_is_empty():
@@ -271,8 +275,10 @@ def test_lxp_extract_course_id_rejects_missing_context_id():
 
 def test_lxp_extract_course_metadata_omits_code_and_term():
     handler = HarvardLxpPlatformHandler()
-    code, name, term, url = handler.extract_course_metadata(LXP_SAMPLE_CLAIMS, {})
-    assert code is None
-    assert name == "Learning Experience Showcase"
-    assert term is None
-    assert url.endswith("/memberships/39b59151-4bcb-4b17-a4f1-c4c8669a6a80?page=1")
+    metadata = handler.extract_course_metadata(LXP_SAMPLE_CLAIMS, {})
+    assert metadata.course_code is None
+    assert metadata.course_name == "Learning Experience Showcase"
+    assert metadata.course_term is None
+    assert metadata.context_memberships_url.endswith(
+        "/memberships/39b59151-4bcb-4b17-a4f1-c4c8669a6a80?page=1"
+    )

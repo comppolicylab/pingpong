@@ -43,6 +43,8 @@ from pingpong.lti.constants import (
     LTI_TOOL_CONFIGURATION_KEY,
     MESSAGE_TYPES_KEY,
     MESSAGE_TYPE,
+    NO_SSO_PROVIDER_ID,
+    NO_SSO_PROVIDER_ID_STR,
     PLATFORM_CONFIGURATION_KEY,
     REGISTRATION_ENDPOINT_KEY,
     REQUIRED_SCOPES,
@@ -273,7 +275,9 @@ async def _resolve_platform(
 
     product_family_code = platform_config.get("product_family_code")
     if product_family_code not in {p.value for p in LMSPlatform}:
-        raise HTTPException(status_code=400, detail="Invalid product family")
+        raise HTTPException(
+            status_code=400, detail="Missing or unsupported product_family_code"
+        )
 
     return LMSPlatform(product_family_code), response_data
 
@@ -410,7 +414,7 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
             status_code=400, detail="At least one institution must be selected"
         )
 
-    if data.provider_id == 0:
+    if data.provider_id == NO_SSO_PROVIDER_ID:
         if data.sso_field is not None:
             raise HTTPException(
                 status_code=400, detail="SSO field must be null when no SSO is selected"
@@ -906,7 +910,9 @@ async def lti_launch(
             sanitize_for_log(user_email),
         )
 
-    sso_provider_id_str = launch_custom_params.get(LTI_CUSTOM_SSO_PROVIDER_ID_KEY, "0")
+    sso_provider_id_str = launch_custom_params.get(
+        LTI_CUSTOM_SSO_PROVIDER_ID_KEY, NO_SSO_PROVIDER_ID_STR
+    )
     user: User | None = None
     sso_provider: ExternalLoginProvider | None = None
     sso_value: str | None = None
@@ -919,7 +925,7 @@ async def lti_launch(
             )
         )
 
-    if int(sso_provider_id_str) != 0:
+    if int(sso_provider_id_str) != NO_SSO_PROVIDER_ID:
         sso_provider = await ExternalLoginProvider.get_by_id(
             request.state["db"], int(sso_provider_id_str)
         )

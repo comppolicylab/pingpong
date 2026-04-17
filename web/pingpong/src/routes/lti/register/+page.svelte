@@ -8,6 +8,7 @@
 
 	export let data;
 	$: registrationSetup = data.registrationSetup;
+	$: registrationSetupError = data.registrationSetupError?.detail ?? null;
 	$: externalLoginProviders = registrationSetup?.providers ?? [];
 	$: institutions = registrationSetup?.institutions ?? [];
 	$: showCourseNavigationControl = registrationSetup?.show_course_navigation_control ?? false;
@@ -17,7 +18,7 @@
 	let missing_params = false;
 	let showModal = false;
 
-	let ssoProviderId = '0';
+	let ssoProviderId = api.NO_SSO_PROVIDER_ID_VALUE;
 	let institutionIds: number[] = [];
 	let showInCourseNavigation = true;
 
@@ -40,6 +41,11 @@
 		evt.preventDefault();
 		$loading = true;
 
+		if (!registrationSetup) {
+			$loading = false;
+			return sadToast(registrationSetupError || 'Unable to load registration setup');
+		}
+
 		const form = evt.target as HTMLFormElement;
 		const formData = new FormData(form);
 		const name = formData.get('name')?.toString();
@@ -48,7 +54,10 @@
 			return sadToast('Name is required');
 		}
 
-		const ssoId = formData.get('sso_id')?.toString();
+		const ssoId =
+			externalLoginProviders.length > 0
+				? (formData.get('sso_id')?.toString() ?? api.NO_SSO_PROVIDER_ID_VALUE)
+				: api.NO_SSO_PROVIDER_ID_VALUE;
 		if (!ssoId) {
 			$loading = false;
 			return sadToast('SSO identifier is required');
@@ -56,7 +65,7 @@
 		const providerId = parseInt(ssoId, 10);
 
 		let ssoField: api.LTISSOField | null = null;
-		if (providerId !== 0) {
+		if (providerId !== api.NO_SSO_PROVIDER_ID) {
 			const rawSsoField = formData.get('sso_field')?.toString()?.trim() ?? '';
 			if (!rawSsoField) {
 				$loading = false;
@@ -115,6 +124,11 @@
 <div class="flex w-full flex-col items-center gap-8 p-8">
 	<Heading tag="h2" class="serif">Set up your LTI instance with PingPong</Heading>
 	<form class="flex max-w-lg flex-col gap-4 sm:min-w-[32rem]" onsubmit={handleSubmit}>
+		{#if registrationSetupError}
+			<div class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+				{registrationSetupError}
+			</div>
+		{/if}
 		<div>
 			<Label for="name" class="mb-1">Instance name</Label>
 			<Helper class="mb-2"
@@ -160,11 +174,11 @@
 						<option value={provider.id}>{provider.display_name || provider.name}</option>
 					{/each}
 					<option disabled>──────────</option>
-					<option value="0">No SSO</option>
+					<option value={api.NO_SSO_PROVIDER_ID_VALUE}>No SSO</option>
 				</Select>
 			</div>
 		{/if}
-		{#if externalLoginProviders.length > 0 && parseInt(ssoProviderId, 10) !== 0}
+		{#if externalLoginProviders.length > 0 && parseInt(ssoProviderId, 10) !== api.NO_SSO_PROVIDER_ID}
 			<div>
 				<Label for="sso_field" class="mb-1">SSO Field</Label>
 				<Helper class="mb-2"
@@ -221,7 +235,7 @@
 				pill
 				class="bg-orange text-white hover:bg-orange-dark"
 				type="submit"
-				disabled={$loading}>Submit</Button
+				disabled={$loading || !!registrationSetupError}>Submit</Button
 			>
 		</div>
 	</form>

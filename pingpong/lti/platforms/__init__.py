@@ -28,9 +28,9 @@ def get_handler(platform: LMSPlatform) -> LTIPlatformHandler:
 
 
 __all__ = [
-    "LTIPlatformHandler",
     "CanvasPlatformHandler",
     "HarvardLxpPlatformHandler",
+    "LTIPlatformHandler",
     "get_handler",
     "parse_context_memberships_url",
 ]

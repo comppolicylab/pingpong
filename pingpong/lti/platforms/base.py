@@ -18,7 +18,7 @@ from pingpong.lti.constants import (
     LTI_CLAIM_NRPS_KEY,
 )
 from pingpong.lti.endpoints import generate_names_and_role_api_url
-from pingpong.lti.schemas import LTIRegisterRequest
+from pingpong.lti.schemas import LTILaunchCourseMetadata, LTIRegisterRequest
 from pingpong.models import Class, ExternalLoginProvider, LTIClass, LTIRegistration
 from pingpong.schemas import LMSPlatform
 
@@ -118,7 +118,7 @@ class LTIPlatformHandler(ABC):
         self,
         claims: dict[str, Any],
         launch_custom_params: dict[str, Any],
-    ) -> tuple[str | None, str | None, str | None, str | None]:
+    ) -> LTILaunchCourseMetadata:
         """Return (course_code, course_name, course_term, context_memberships_url)
         for persistence on LTIClass. Any field may be None.
         """
@@ -139,5 +139,4 @@ class LTIPlatformHandler(ABC):
 __all__ = [
     "LTIPlatformHandler",
     "parse_context_memberships_url",
-    "get_claim_object",
 ]

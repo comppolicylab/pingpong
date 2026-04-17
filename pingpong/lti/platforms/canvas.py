@@ -24,7 +24,7 @@ from pingpong.lti.platforms.base import (
     LTIPlatformHandler,
     parse_context_memberships_url,
 )
-from pingpong.lti.schemas import LTIRegisterRequest
+from pingpong.lti.schemas import LTILaunchCourseMetadata, LTIRegisterRequest
 from pingpong.models import Class, LTIClass, LTIRegistration
 from pingpong.schemas import LMSPlatform
 
@@ -133,7 +133,7 @@ class CanvasPlatformHandler(LTIPlatformHandler):
         self,
         claims: dict[str, Any],
         launch_custom_params: dict[str, Any],
-    ) -> tuple[str | None, str | None, str | None, str | None]:
+    ) -> LTILaunchCourseMetadata:
         context = get_claim_object(claims, LTI_CLAIM_CONTEXT_KEY)
 
         course_code_value = context.get("label")
@@ -151,7 +151,12 @@ class CanvasPlatformHandler(LTIPlatformHandler):
             course_term = None
 
         context_memberships_url = parse_context_memberships_url(claims)
-        return course_code, course_name, course_term, context_memberships_url
+        return LTILaunchCourseMetadata(
+            course_code=course_code,
+            course_name=course_name,
+            course_term=course_term,
+            context_memberships_url=context_memberships_url,
+        )
 
     async def find_class_for_course(
         self,

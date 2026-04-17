@@ -1,5 +1,8 @@
 """Shared constants for LTI launch and Canvas Connect NRPS sync."""
 
+NO_SSO_PROVIDER_ID = 0
+NO_SSO_PROVIDER_ID_STR = str(NO_SSO_PROVIDER_ID)
+
 SSO_FIELD_FULL_NAME: dict[str, str] = {
     "canvas.sisIntegrationId": "Canvas.user.sisIntegrationId",
     "canvas.sisSourceId": "Canvas.user.sisSourceId",
@@ -38,7 +41,7 @@ LTI_CUSTOM_SSO_PROVIDER_ID_KEY = "sso_provider_id"
 LTI_CUSTOM_SSO_VALUE_KEY = "sso_value"
 
 LTI_CUSTOM_PARAM_DEFAULT_VALUES = {
-    LTI_CUSTOM_SSO_PROVIDER_ID_KEY: ["0"],
+    LTI_CUSTOM_SSO_PROVIDER_ID_KEY: [NO_SSO_PROVIDER_ID_STR],
     LTI_CUSTOM_SSO_VALUE_KEY: [""]
     + [f"${field}" for field in SSO_FIELD_FULL_NAME.values()],
 }

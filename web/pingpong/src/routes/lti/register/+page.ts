@@ -18,6 +18,7 @@ export const load: PageLoad = async ({ fetch, url }) => {
 		registrationSetup:
 			registrationSetupResult && !registrationSetupResult.error
 				? registrationSetupResult.data
-				: null
+				: null,
+		registrationSetupError: registrationSetupResult?.error ?? null
 	};
 };

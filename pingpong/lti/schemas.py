@@ -87,3 +87,10 @@ class LTISetupLinkRequest(BaseModel):
 
 class LTISetupLinkResponse(BaseModel):
     class_id: int
+
+
+class LTILaunchCourseMetadata(BaseModel):
+    course_code: str | None
+    course_name: str | None
+    course_term: str | None
+    context_memberships_url: str | None

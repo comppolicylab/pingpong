@@ -18,13 +18,14 @@ from pingpong.lti.constants import (
     LTI_CLAIM_CONTEXT_KEY,
     LTI_TOOL_CONFIGURATION_KEY,
     MESSAGE_TYPE,
+    NO_SSO_PROVIDER_ID,
 )
 from pingpong.lti.lti_course import find_class_by_course_id
 from pingpong.lti.platforms.base import (
     LTIPlatformHandler,
     parse_context_memberships_url,
 )
-from pingpong.lti.schemas import LTIRegisterRequest
+from pingpong.lti.schemas import LTILaunchCourseMetadata, LTIRegisterRequest
 from pingpong.models import Class, ExternalLoginProvider, LTIClass, LTIRegistration
 from pingpong.schemas import LMSPlatform
 
@@ -45,7 +46,7 @@ class HarvardLxpPlatformHandler(LTIPlatformHandler):
         # Harvard LXP does not support variable substitution, so an SSO field
         # would be sent to the tool as a literal string (e.g. "$Person.sourcedId")
         # rather than the resolved identifier — never usable. Reject up front.
-        if data.provider_id != 0:
+        if data.provider_id != NO_SSO_PROVIDER_ID:
             raise HTTPException(
                 status_code=400,
                 detail=(
@@ -108,16 +109,19 @@ class HarvardLxpPlatformHandler(LTIPlatformHandler):
         self,
         claims: dict[str, Any],
         launch_custom_params: dict[str, Any],
-    ) -> tuple[str | None, str | None, str | None, str | None]:
+    ) -> LTILaunchCourseMetadata:
         context = get_claim_object(claims, LTI_CLAIM_CONTEXT_KEY)
 
         course_name_value = context.get("title")
         course_name = course_name_value if isinstance(course_name_value, str) else None
 
         context_memberships_url = parse_context_memberships_url(claims)
-        # LXP does not provide a meaningful course_code (label is a synthetic
-        # "LES-<uuid>" prefix + UUID) or a course term.
-        return None, course_name, None, context_memberships_url
+        return LTILaunchCourseMetadata(
+            course_code=None,
+            course_name=course_name,
+            course_term=None,
+            context_memberships_url=context_memberships_url,
+        )
 
     async def find_class_for_course(
         self,

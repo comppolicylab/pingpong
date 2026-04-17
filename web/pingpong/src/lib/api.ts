@@ -495,6 +495,9 @@ export type LTIPublicSSOProvider = {
 	display_name: string | null;
 };
 
+export const NO_SSO_PROVIDER_ID = 0;
+export const NO_SSO_PROVIDER_ID_VALUE = `${NO_SSO_PROVIDER_ID}`;
+
 export type LTIRegisterSetupRequest = {
 	openid_configuration: string;
 	registration_token: string;
