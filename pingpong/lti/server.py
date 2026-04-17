@@ -17,6 +17,7 @@ from pingpong.authz.openfga import OpenFgaAuthzClient
 from pingpong.config import config
 from pingpong.invite import send_lti_registration_submitted
 from pingpong.log_utils import sanitize_for_log
+from pingpong.lti.claims import get_claim_object as _get_claim_object
 from pingpong.lti.endpoints import (
     allow_redirects,
     generate_authorization_endpoint_url,
@@ -317,13 +318,6 @@ async def _verify_lti_id_token(
     if not isinstance(claims, dict):
         raise HTTPException(status_code=400, detail="Invalid id_token claims")
     return cast(dict[str, Any], claims)
-
-
-def _get_claim_object(claims: dict[str, Any], claim_key: str) -> dict[str, Any]:
-    claim_value = claims.get(claim_key)
-    if isinstance(claim_value, dict):
-        return claim_value
-    return {}
 
 
 def get_lti_key_manager() -> LTIKeyManager:

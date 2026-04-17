@@ -5,12 +5,12 @@ from typing import Any
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from pingpong.lti.claims import get_claim_object
 from pingpong.lti.constants import (
     CANVAS_ACCOUNT_LTI_GUID_KEY,
     CANVAS_ACCOUNT_NAME_KEY,
     CANVAS_MESSAGE_PLACEMENT,
     LTI_CLAIM_CONTEXT_KEY,
-    LTI_CUSTOM_PARAM_DEFAULT_VALUES,
     LTI_CUSTOM_SSO_PROVIDER_ID_KEY,
     LTI_CUSTOM_SSO_VALUE_KEY,
     LTI_TOOL_CONFIGURATION_KEY,
@@ -22,12 +22,18 @@ from pingpong.lti.lti_course import (
 )
 from pingpong.lti.platforms.base import (
     LTIPlatformHandler,
-    _get_claim_object,
     parse_context_memberships_url,
 )
 from pingpong.lti.schemas import LTIRegisterRequest
 from pingpong.models import Class, LTIClass, LTIRegistration
 from pingpong.schemas import LMSPlatform
+
+CANVAS_COURSE_ID_KEY = "canvas_course_id"
+CANVAS_TERM_NAME_KEY = "canvas_term_name"
+CANVAS_CUSTOM_PARAM_DEFAULT_VALUES = {
+    CANVAS_COURSE_ID_KEY: ["$Canvas.course.id"],
+    CANVAS_TERM_NAME_KEY: ["$Canvas.term.name"],
+}
 
 
 class CanvasPlatformHandler(LTIPlatformHandler):
@@ -90,8 +96,12 @@ class CanvasPlatformHandler(LTIPlatformHandler):
                 "placements": ["course_navigation"],
                 "custom_parameters": {
                     "placement": "course_navigation",
-                    "canvas_course_id": "$Canvas.course.id",
-                    "canvas_term_name": "$Canvas.term.name",
+                    CANVAS_COURSE_ID_KEY: CANVAS_CUSTOM_PARAM_DEFAULT_VALUES[
+                        CANVAS_COURSE_ID_KEY
+                    ][0],
+                    CANVAS_TERM_NAME_KEY: CANVAS_CUSTOM_PARAM_DEFAULT_VALUES[
+                        CANVAS_TERM_NAME_KEY
+                    ][0],
                 },
                 "https://canvas.instructure.com/lti/display_type": "full_width_in_context",
                 "https://canvas.instructure.com/lti/course_navigation/default_enabled": data.show_in_course_navigation,
@@ -107,11 +117,11 @@ class CanvasPlatformHandler(LTIPlatformHandler):
         claims: dict[str, Any],
         launch_custom_params: dict[str, Any],
     ) -> str:
-        course_id = launch_custom_params.get("canvas_course_id")
+        course_id = launch_custom_params.get(CANVAS_COURSE_ID_KEY)
         if (
             not isinstance(course_id, str)
             or not course_id
-            or course_id in LTI_CUSTOM_PARAM_DEFAULT_VALUES["canvas_course_id"]
+            or course_id in CANVAS_CUSTOM_PARAM_DEFAULT_VALUES[CANVAS_COURSE_ID_KEY]
         ):
             raise HTTPException(status_code=400, detail="Missing or invalid course_id")
         return course_id
@@ -121,7 +131,7 @@ class CanvasPlatformHandler(LTIPlatformHandler):
         claims: dict[str, Any],
         launch_custom_params: dict[str, Any],
     ) -> tuple[str | None, str | None, str | None, str | None]:
-        context = _get_claim_object(claims, LTI_CLAIM_CONTEXT_KEY)
+        context = get_claim_object(claims, LTI_CLAIM_CONTEXT_KEY)
 
         course_code_value = context.get("label")
         course_code = course_code_value if isinstance(course_code_value, str) else None
@@ -129,11 +139,11 @@ class CanvasPlatformHandler(LTIPlatformHandler):
         course_name_value = context.get("title")
         course_name = course_name_value if isinstance(course_name_value, str) else None
 
-        course_term_value = launch_custom_params.get("canvas_term_name")
+        course_term_value = launch_custom_params.get(CANVAS_TERM_NAME_KEY)
         course_term = course_term_value if isinstance(course_term_value, str) else None
         if (
             not course_term
-            or course_term in LTI_CUSTOM_PARAM_DEFAULT_VALUES["canvas_term_name"]
+            or course_term in CANVAS_CUSTOM_PARAM_DEFAULT_VALUES[CANVAS_TERM_NAME_KEY]
         ):
             course_term = None
 

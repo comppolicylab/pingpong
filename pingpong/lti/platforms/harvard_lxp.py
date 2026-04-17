@@ -13,6 +13,7 @@ from typing import Any
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from pingpong.lti.claims import get_claim_object
 from pingpong.lti.constants import (
     LTI_CLAIM_CONTEXT_KEY,
     LTI_TOOL_CONFIGURATION_KEY,
@@ -21,7 +22,6 @@ from pingpong.lti.constants import (
 from pingpong.lti.lti_course import find_class_by_course_id
 from pingpong.lti.platforms.base import (
     LTIPlatformHandler,
-    _get_claim_object,
     parse_context_memberships_url,
 )
 from pingpong.lti.schemas import LTIRegisterRequest
@@ -91,7 +91,7 @@ class HarvardLxpPlatformHandler(LTIPlatformHandler):
         claims: dict[str, Any],
         launch_custom_params: dict[str, Any],
     ) -> str:
-        context = _get_claim_object(claims, LTI_CLAIM_CONTEXT_KEY)
+        context = get_claim_object(claims, LTI_CLAIM_CONTEXT_KEY)
         course_id = context.get("id")
         if not isinstance(course_id, str) or not course_id:
             raise HTTPException(status_code=400, detail="Missing or invalid course_id")
@@ -102,7 +102,7 @@ class HarvardLxpPlatformHandler(LTIPlatformHandler):
         claims: dict[str, Any],
         launch_custom_params: dict[str, Any],
     ) -> tuple[str | None, str | None, str | None, str | None]:
-        context = _get_claim_object(claims, LTI_CLAIM_CONTEXT_KEY)
+        context = get_claim_object(claims, LTI_CLAIM_CONTEXT_KEY)
 
         course_name_value = context.get("title")
         course_name = course_name_value if isinstance(course_name_value, str) else None

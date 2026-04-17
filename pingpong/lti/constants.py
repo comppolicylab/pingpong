@@ -41,8 +41,6 @@ LTI_CUSTOM_PARAM_DEFAULT_VALUES = {
     LTI_CUSTOM_SSO_PROVIDER_ID_KEY: ["0"],
     LTI_CUSTOM_SSO_VALUE_KEY: [""]
     + [f"${field}" for field in SSO_FIELD_FULL_NAME.values()],
-    "canvas_course_id": ["$Canvas.course.id"],
-    "canvas_term_name": ["$Canvas.term.name"],
 }
 
 NRPS_CONTEXT_MEMBERSHIP_SCOPE = (

@@ -13,6 +13,7 @@ from typing import Any
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from pingpong.lti.claims import get_claim_object
 from pingpong.lti.constants import (
     LTI_CLAIM_NRPS_KEY,
 )
@@ -22,19 +23,12 @@ from pingpong.models import Class, LTIClass, LTIRegistration
 from pingpong.schemas import LMSPlatform
 
 
-def _get_claim_object(claims: dict[str, Any], claim_key: str) -> dict[str, Any]:
-    claim_value = claims.get(claim_key)
-    if isinstance(claim_value, dict):
-        return claim_value
-    return {}
-
-
 def parse_context_memberships_url(claims: dict[str, Any]) -> str | None:
     """Extract and validate the NRPS context_memberships_url from an LTI launch
     claim dict. Returns None if the claim is missing or empty; raises
     HTTPException(400) if the URL is present but fails URL-security validation.
     """
-    nrps_claim = _get_claim_object(claims, LTI_CLAIM_NRPS_KEY)
+    nrps_claim = get_claim_object(claims, LTI_CLAIM_NRPS_KEY)
     url_value = nrps_claim.get("context_memberships_url")
     if not isinstance(url_value, str) or not url_value.strip():
         return None
@@ -130,5 +124,5 @@ class LTIPlatformHandler(ABC):
 __all__ = [
     "LTIPlatformHandler",
     "parse_context_memberships_url",
-    "_get_claim_object",
+    "get_claim_object",
 ]
