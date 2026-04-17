@@ -1397,9 +1397,6 @@ class CreateUserClassRole(BaseModel):
     roles: ClassUserRoles
 
 
-_LTI_PLATFORM_TO_LMS_TYPE: dict["LMSPlatform", "LMSType"] = {}
-
-
 class LMSType(Enum):
     CANVAS = "canvas"
     HARVARD_LXP = "harvard_lxp"
@@ -1407,8 +1404,8 @@ class LMSType(Enum):
     @classmethod
     def from_lti_platform(cls, platform: "LMSPlatform") -> "LMSType":
         try:
-            return _LTI_PLATFORM_TO_LMS_TYPE[platform]
-        except KeyError:
+            return cls(platform.value)
+        except ValueError:
             raise ValueError(
                 f"No LMSType mapping for LMSPlatform {platform!r}"
             ) from None

@@ -21,7 +21,7 @@ from pingpong.lti.platforms import get_handler
 from pingpong.lti.platforms.canvas import CanvasPlatformHandler
 from pingpong.lti.platforms.harvard_lxp import HarvardLxpPlatformHandler
 from pingpong.lti.schemas import LTIRegisterRequest
-from pingpong.schemas import LMSPlatform
+from pingpong.schemas import LMSPlatform, LMSType
 
 
 @pytest.fixture(autouse=True)
@@ -112,6 +112,11 @@ def test_get_handler_returns_harvard_lxp_handler():
     h = get_handler(LMSPlatform.HARVARD_LXP)
     assert isinstance(h, HarvardLxpPlatformHandler)
     assert h.platform == LMSPlatform.HARVARD_LXP
+
+
+def test_lms_type_from_lti_platform_maps_current_platform_values():
+    assert LMSType.from_lti_platform(LMSPlatform.CANVAS) == LMSType.CANVAS
+    assert LMSType.from_lti_platform(LMSPlatform.HARVARD_LXP) == LMSType.HARVARD_LXP
 
 
 # --- CanvasPlatformHandler ---
