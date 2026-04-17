@@ -685,20 +685,15 @@ def test_canvas_extract_course_metadata_filters_non_string_values():
         },
     }
 
-    (
-        course_code,
-        course_name,
-        course_term,
-        context_memberships_url,
-    ) = CanvasPlatformHandler().extract_course_metadata(
+    metadata = CanvasPlatformHandler().extract_course_metadata(
         claims,
         {"canvas_term_name": {"name": "Fall"}},
     )
 
-    assert course_code is None
-    assert course_name is None
-    assert course_term is None
-    assert context_memberships_url == "https://example.com/nrps"
+    assert metadata.course_code is None
+    assert metadata.course_name is None
+    assert metadata.course_term is None
+    assert metadata.context_memberships_url == "https://example.com/nrps"
 
 
 def test_canvas_extract_course_metadata_rejects_invalid_context_memberships_url():
@@ -725,11 +720,9 @@ def test_canvas_extract_course_metadata_treats_blank_context_memberships_url_as_
         },
     }
 
-    _, _, _, context_memberships_url = CanvasPlatformHandler().extract_course_metadata(
-        claims, {}
-    )
+    metadata = CanvasPlatformHandler().extract_course_metadata(claims, {})
 
-    assert context_memberships_url is None
+    assert metadata.context_memberships_url is None
 
 
 def test_get_lti_key_manager_missing_config(monkeypatch):
