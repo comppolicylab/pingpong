@@ -19,7 +19,7 @@ from pingpong.lti.constants import (
 )
 from pingpong.lti.endpoints import generate_names_and_role_api_url
 from pingpong.lti.schemas import LTIRegisterRequest
-from pingpong.models import Class, LTIClass, LTIRegistration
+from pingpong.models import Class, ExternalLoginProvider, LTIClass, LTIRegistration
 from pingpong.schemas import LMSPlatform
 
 
@@ -62,6 +62,17 @@ class LTIPlatformHandler(ABC):
         """Raise HTTPException(400) if the admin's registration form input is
         incompatible with this platform (e.g., SSO selection on a platform that
         does not support variable substitution)."""
+
+    def filter_sso_providers(
+        self, providers: list[ExternalLoginProvider]
+    ) -> list[ExternalLoginProvider]:
+        """Return the subset of public SSO providers selectable for this
+        platform's registration form. Default: all. Platforms that do not
+        support SSO-linked identifiers (e.g. no LTI variable substitution)
+        should override this to return an empty list so the UI can hide the
+        provider dropdown entirely.
+        """
+        return providers
 
     @abstractmethod
     def extract_registration_fields(

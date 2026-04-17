@@ -25,7 +25,7 @@ from pingpong.lti.platforms.base import (
     parse_context_memberships_url,
 )
 from pingpong.lti.schemas import LTIRegisterRequest
-from pingpong.models import Class, LTIClass, LTIRegistration
+from pingpong.models import Class, ExternalLoginProvider, LTIClass, LTIRegistration
 from pingpong.schemas import LMSPlatform
 
 
@@ -53,6 +53,13 @@ class HarvardLxpPlatformHandler(LTIPlatformHandler):
                     "(no LTI variable substitution)."
                 ),
             )
+
+    def filter_sso_providers(
+        self, providers: list[ExternalLoginProvider]
+    ) -> list[ExternalLoginProvider]:
+        # Mirrors validate_registration_request: SSO-linked identifiers are
+        # never usable on LXP, so hide the provider dropdown entirely.
+        return []
 
     def extract_registration_fields(
         self, platform_config: dict[str, Any]

@@ -66,6 +66,7 @@ from pingpong.lti.schemas import (
     LTIRegisterRequest,
     LTIPublicInstitutions,
     LTIPublicSSOProviders,
+    LTIPublicSSOProvidersRequest,
     LTISetupContext,
     LTISetupInstitution,
     LTILinkableGroup,
@@ -250,6 +251,34 @@ async def _fetch_openid_configuration(
             ) from e
 
 
+async def _resolve_platform(
+    openid_configuration: str, registration_token: str
+) -> tuple[LMSPlatform, dict[str, Any]]:
+    """Fetch the platform's openid configuration and return (platform, response).
+    Raises HTTPException(400) if the product_family_code is missing or unknown.
+    The full response is returned so callers that will also register can reuse
+    it without a second fetch.
+    """
+    headers = {"Authorization": f"Bearer {registration_token}"}
+    response_data = await _fetch_openid_configuration(openid_configuration, headers)
+    if not response_data:
+        raise HTTPException(
+            status_code=500, detail="Failed to fetch OpenID configuration"
+        )
+
+    platform_config = response_data.get(PLATFORM_CONFIGURATION_KEY)
+    if not isinstance(platform_config, dict):
+        raise HTTPException(
+            status_code=400, detail="Missing platform configuration in OpenID response"
+        )
+
+    product_family_code = platform_config.get("product_family_code")
+    if product_family_code not in {p.value for p in LMSPlatform}:
+        raise HTTPException(status_code=400, detail="Invalid product family")
+
+    return LMSPlatform(product_family_code), response_data
+
+
 def _select_jwk(jwks: dict[str, Any], kid: str | None) -> dict[str, Any]:
     keys = jwks.get("keys")
     if not isinstance(keys, list) or not keys:
@@ -345,14 +374,22 @@ async def get_jwks(key_manager: LTIKeyManager = Depends(get_lti_key_manager)):
         raise HTTPException(status_code=500, detail="Error retrieving public keys")
 
 
-@lti_router.get("/public/sso/providers", response_model=LTIPublicSSOProviders)
-async def get_public_sso_providers(request: StateRequest):
-    providers = await ExternalLoginProvider.get_all(request.state["db"])
+@lti_router.post("/public/sso/providers", response_model=LTIPublicSSOProviders)
+async def get_public_sso_providers(
+    request: StateRequest, data: LTIPublicSSOProvidersRequest
+):
+    platform, _ = await _resolve_platform(
+        data.openid_configuration, data.registration_token
+    )
+    handler = get_handler(platform)
+
+    all_providers = await ExternalLoginProvider.get_all(request.state["db"])
+    public_providers = [p for p in all_providers if _is_public_sso_provider(p)]
+    allowed = handler.filter_sso_providers(public_providers)
     return {
         "providers": [
             {"id": p.id, "name": p.name, "display_name": p.display_name}
-            for p in providers
-            if _is_public_sso_provider(p)
+            for p in allowed
         ]
     }
 
@@ -403,15 +440,11 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
         None if data.sso_field is None else SSO_FIELD_FULL_NAME[data.sso_field]
     )
 
-    headers = {"Authorization": f"Bearer {data.registration_token}"}
-    response_data = await _fetch_openid_configuration(
-        data.openid_configuration, headers
+    platform, response_data = await _resolve_platform(
+        data.openid_configuration, data.registration_token
     )
-
-    if not response_data:
-        raise HTTPException(
-            status_code=500, detail="Failed to fetch OpenID configuration"
-        )
+    handler = get_handler(platform)
+    handler.validate_registration_request(data)
 
     issuer = response_data.get(ISSUER_KEY)
     authorization_endpoint = response_data.get(AUTHORIZATION_ENDPOINT_KEY)
@@ -421,22 +454,7 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
     scopes_supported = response_data.get(SCOPES_SUPPORTED_KEY, [])
     token_algorithms = response_data.get(TOKEN_ALG_KEY, [])
     subject_types = response_data.get(SUBJECT_TYPES_KEY, [])
-
-    platform_config = response_data.get(PLATFORM_CONFIGURATION_KEY)
-    if not isinstance(platform_config, dict):
-        raise HTTPException(
-            status_code=400, detail="Missing platform configuration in OpenID response"
-        )
-
-    product_family_code = platform_config.get("product_family_code")
-
-    # Check that the product family code exists in schema.LMSPlatform
-    if product_family_code not in {platform.value for platform in LMSPlatform}:
-        raise HTTPException(status_code=400, detail="Invalid product family")
-
-    platform = LMSPlatform(product_family_code)
-    handler = get_handler(platform)
-    handler.validate_registration_request(data)
+    platform_config = response_data[PLATFORM_CONFIGURATION_KEY]
 
     missing_required_fields_detail = "Missing required OpenID configuration fields"
     issuer = _require_non_empty_string(issuer, missing_required_fields_detail)

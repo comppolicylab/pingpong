@@ -503,8 +503,20 @@ export type LTIPublicSSOProviders = {
 	providers: LTIPublicSSOProvider[];
 };
 
-export const getPublicExternalLoginProvidersForLTI = async (f: Fetcher) => {
-	return await GET<never, LTIPublicSSOProviders>(f, 'lti/public/sso/providers');
+export type LTIPublicSSOProvidersRequest = {
+	openid_configuration: string;
+	registration_token: string;
+};
+
+export const getPublicExternalLoginProvidersForLTI = async (
+	f: Fetcher,
+	data: LTIPublicSSOProvidersRequest
+) => {
+	return await POST<LTIPublicSSOProvidersRequest, LTIPublicSSOProviders>(
+		f,
+		'lti/public/sso/providers',
+		data
+	);
 };
 
 export const LTI_SSO_FIELDS = [

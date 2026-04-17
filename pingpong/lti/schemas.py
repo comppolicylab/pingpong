@@ -12,6 +12,11 @@ class LTIPublicSSOProviders(BaseModel):
     providers: list[LTIPublicSSOProvider]
 
 
+class LTIPublicSSOProvidersRequest(BaseModel):
+    openid_configuration: str
+    registration_token: str
+
+
 class LTIPublicInstitution(BaseModel):
     id: int
     name: str
