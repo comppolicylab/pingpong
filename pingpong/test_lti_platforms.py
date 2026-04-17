@@ -243,7 +243,7 @@ def test_lxp_build_tool_registration_payload_omits_canvas_extensions():
     tool = payload[LTI_TOOL_CONFIGURATION_KEY]
     assert tool["custom_parameters"] == {
         "platform": "harvard_lxp",
-        "pingpong_lti_tool_version": "1.0",
+        "pingpong_lti_tool_version": "2.0",
     }
     assert "https://canvas.instructure.com/lti/vendor" not in tool
     as_json = str(payload)

@@ -72,7 +72,7 @@ class HarvardLxpPlatformHandler(LTIPlatformHandler):
 
         tool_config["custom_parameters"] = {
             "platform": self.platform.value,
-            "pingpong_lti_tool_version": "1.0",
+            "pingpong_lti_tool_version": "2.0",
         }
         target_link_uri = tool_config["target_link_uri"]
         tool_config["messages"] = [
