@@ -1,6 +1,8 @@
 from typing import Literal
 from pydantic import BaseModel, Field
 
+from pingpong.schemas import LMSPlatform
+
 
 class LTIPublicSSOProvider(BaseModel):
     id: int
@@ -8,11 +10,7 @@ class LTIPublicSSOProvider(BaseModel):
     display_name: str | None
 
 
-class LTIPublicSSOProviders(BaseModel):
-    providers: list[LTIPublicSSOProvider]
-
-
-class LTIPublicSSOProvidersRequest(BaseModel):
+class LTIRegisterSetupRequest(BaseModel):
     openid_configuration: str
     registration_token: str
 
@@ -22,8 +20,11 @@ class LTIPublicInstitution(BaseModel):
     name: str
 
 
-class LTIPublicInstitutions(BaseModel):
+class LTIRegisterSetupResponse(BaseModel):
+    platform: LMSPlatform
+    providers: list[LTIPublicSSOProvider]
     institutions: list[LTIPublicInstitution]
+    show_course_navigation_control: bool
 
 
 LTISSOField = Literal[

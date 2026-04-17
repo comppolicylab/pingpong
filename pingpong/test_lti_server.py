@@ -767,34 +767,82 @@ async def test_get_jwks_error():
 
 
 @pytest.mark.asyncio
-async def test_get_public_sso_providers(monkeypatch):
+async def test_get_lti_register_setup_canvas(monkeypatch):
     providers = [
         SimpleNamespace(id=1, name="email", display_name="Email"),
         SimpleNamespace(id=2, name="saml", display_name="SAML"),
+        SimpleNamespace(id=3, name="okta", display_name="Okta", internal_only=True),
     ]
+    institutions = [
+        SimpleNamespace(id=2, name="B", default_api_key_id=5),
+    ]
+    monkeypatch.setattr(
+        server_module,
+        "_resolve_platform",
+        lambda openid_configuration, registration_token: _async_return(
+            (LMSPlatform.CANVAS, {})
+        ),
+    )
     monkeypatch.setattr(
         server_module.ExternalLoginProvider,
         "get_all",
         lambda db: _async_return(providers),
     )
-    request = FakeRequest(state=SimpleNamespace(db="db"))
-    result = await server_module.get_public_sso_providers(request)
-    assert result["providers"] == [{"id": 2, "name": "saml", "display_name": "SAML"}]
-
-
-@pytest.mark.asyncio
-async def test_get_public_institutions(monkeypatch):
-    institutions = [
-        SimpleNamespace(id=2, name="B", default_api_key_id=5),
-    ]
     monkeypatch.setattr(
         server_module.Institution,
         "get_all_with_default_api_key",
         lambda db: _async_return(institutions),
     )
     request = FakeRequest(state=SimpleNamespace(db="db"))
-    result = await server_module.get_public_institutions(request)
+    result = await server_module.get_lti_register_setup(
+        request,
+        SimpleNamespace(
+            openid_configuration="https://platform.example.com/openid",
+            registration_token="token",
+        ),
+    )
+    assert result["providers"] == [{"id": 2, "name": "saml", "display_name": "SAML"}]
     assert result["institutions"] == [{"id": 2, "name": "B"}]
+    assert result["show_course_navigation_control"] is True
+
+
+@pytest.mark.asyncio
+async def test_get_lti_register_setup_harvard_lxp(monkeypatch):
+    providers = [
+        SimpleNamespace(id=1, name="email", display_name="Email"),
+        SimpleNamespace(id=2, name="saml", display_name="SAML"),
+    ]
+    institutions = [
+        SimpleNamespace(id=2, name="B", default_api_key_id=5),
+    ]
+    monkeypatch.setattr(
+        server_module,
+        "_resolve_platform",
+        lambda openid_configuration, registration_token: _async_return(
+            (LMSPlatform.HARVARD_LXP, {})
+        ),
+    )
+    monkeypatch.setattr(
+        server_module.ExternalLoginProvider,
+        "get_all",
+        lambda db: _async_return(providers),
+    )
+    monkeypatch.setattr(
+        server_module.Institution,
+        "get_all_with_default_api_key",
+        lambda db: _async_return(institutions),
+    )
+    request = FakeRequest(state=SimpleNamespace(db="db"))
+    result = await server_module.get_lti_register_setup(
+        request,
+        SimpleNamespace(
+            openid_configuration="https://platform.example.com/openid",
+            registration_token="token",
+        ),
+    )
+    assert result["providers"] == []
+    assert result["institutions"] == [{"id": 2, "name": "B"}]
+    assert result["show_course_navigation_control"] is False
 
 
 @pytest.mark.asyncio

@@ -64,9 +64,8 @@ from pingpong.lti.roles import (
 )
 from pingpong.lti.schemas import (
     LTIRegisterRequest,
-    LTIPublicInstitutions,
-    LTIPublicSSOProviders,
-    LTIPublicSSOProvidersRequest,
+    LTIRegisterSetupRequest,
+    LTIRegisterSetupResponse,
     LTISetupContext,
     LTISetupInstitution,
     LTILinkableGroup,
@@ -374,10 +373,8 @@ async def get_jwks(key_manager: LTIKeyManager = Depends(get_lti_key_manager)):
         raise HTTPException(status_code=500, detail="Error retrieving public keys")
 
 
-@lti_router.post("/public/sso/providers", response_model=LTIPublicSSOProviders)
-async def get_public_sso_providers(
-    request: StateRequest, data: LTIPublicSSOProvidersRequest
-):
+@lti_router.post("/register/setup", response_model=LTIRegisterSetupResponse)
+async def get_lti_register_setup(request: StateRequest, data: LTIRegisterSetupRequest):
     platform, _ = await _resolve_platform(
         data.openid_configuration, data.registration_token
     )
@@ -386,19 +383,15 @@ async def get_public_sso_providers(
     all_providers = await ExternalLoginProvider.get_all(request.state["db"])
     public_providers = [p for p in all_providers if _is_public_sso_provider(p)]
     allowed = handler.filter_sso_providers(public_providers)
+    institutions = await Institution.get_all_with_default_api_key(request.state["db"])
     return {
+        "platform": platform,
         "providers": [
             {"id": p.id, "name": p.name, "display_name": p.display_name}
             for p in allowed
-        ]
-    }
-
-
-@lti_router.get("/public/institutions", response_model=LTIPublicInstitutions)
-async def get_public_institutions(request: StateRequest):
-    institutions = await Institution.get_all_with_default_api_key(request.state["db"])
-    return {
-        "institutions": [{"id": inst.id, "name": inst.name} for inst in institutions]
+        ],
+        "institutions": [{"id": inst.id, "name": inst.name} for inst in institutions],
+        "show_course_navigation_control": handler.show_course_navigation_control(),
     }
 
 

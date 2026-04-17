@@ -39,6 +39,9 @@ CANVAS_CUSTOM_PARAM_DEFAULT_VALUES = {
 class CanvasPlatformHandler(LTIPlatformHandler):
     platform = LMSPlatform.CANVAS
 
+    def show_course_navigation_control(self) -> bool:
+        return True
+
     def validate_platform_config(
         self,
         platform_config: dict[str, Any],

@@ -74,6 +74,10 @@ class LTIPlatformHandler(ABC):
         """
         return providers
 
+    def show_course_navigation_control(self) -> bool:
+        """Whether the registration UI should show the course-navigation toggle."""
+        return False
+
     @abstractmethod
     def extract_registration_fields(
         self, platform_config: dict[str, Any]
