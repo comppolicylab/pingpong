@@ -80,7 +80,7 @@
 	import GeminiLogo from '$lib/components/GeminiLogo.svelte';
 	import DropdownBadge from '$lib/components/DropdownBadge.svelte';
 	import CloneClassModal from '$lib/components/CloneClassModal.svelte';
-	import CanvasConnectSyncBadge from '$lib/components/CanvasConnectSyncBadge.svelte';
+	import CourseBridgeSyncBadge from '$lib/components/CourseBridgeSyncBadge.svelte';
 
 	/**
 	 * Application data.
@@ -831,22 +831,22 @@
 	$: canvasLinkedClass = data.class.lms_class;
 	$: canvasInstances = data.canvasInstances || [];
 	$: ltiLinkedClasses = data.ltiClasses || [];
-	let syncingCanvasConnectRoster = false;
-	let canvasConnectAccordionOpen = false;
+	let syncingCourseBridgeRoster = false;
+	let courseBridgeAccordionOpen = false;
 	let canvasSyncOwnAccordionOpen = false;
 	let canvasSyncOtherAccordionOpen = false;
 
-	const syncCanvasConnectRosterFromHeader = (event: MouseEvent | TouchEvent) => {
+	const syncCourseBridgeRosterFromHeader = (event: MouseEvent | TouchEvent) => {
 		event.stopPropagation();
-		void syncCanvasConnectRoster();
+		void syncCourseBridgeRoster();
 	};
 
-	const syncCanvasConnectRoster = async () => {
+	const syncCourseBridgeRoster = async () => {
 		if (!ltiLinkedClasses.length) {
-			sadToast('No Canvas Connect classes linked to this group.');
+			sadToast('No CourseBridge courses linked to this group.');
 			return;
 		}
-		syncingCanvasConnectRoster = true;
+		syncingCourseBridgeRoster = true;
 		const failedCourses: string[] = [];
 		let syncedClasses = 0;
 		try {
@@ -871,19 +871,19 @@
 				sadToast(failedCourses[0], 6000);
 				if (syncedClasses > 0) {
 					happyToast(
-						`Synced ${syncedClasses} Canvas Connect ${syncedClasses === 1 ? 'class' : 'classes'}.`
+						`Synced ${syncedClasses} CourseBridge ${syncedClasses === 1 ? 'course' : 'courses'}.`
 					);
 				}
 				return;
 			}
 
 			happyToast(
-				`Synced roster for ${syncedClasses} Canvas Connect ${syncedClasses === 1 ? 'class' : 'classes'}!`
+				`Synced roster for ${syncedClasses} CourseBridge ${syncedClasses === 1 ? 'course' : 'courses'}!`
 			);
 		} catch {
-			sadToast('Failed to sync Canvas Connect roster. Please try again.');
+			sadToast('Failed to sync CourseBridge roster. Please try again.');
 		} finally {
-			syncingCanvasConnectRoster = false;
+			syncingCourseBridgeRoster = false;
 		}
 	};
 
@@ -2331,7 +2331,7 @@
 				{#if ltiLinkedClasses.length > 0}
 					<Accordion flush class="mb-2 rounded-lg border-2 border-gray-300 bg-gray-50">
 						<AccordionItem
-							bind:open={canvasConnectAccordionOpen}
+							bind:open={courseBridgeAccordionOpen}
 							paddingFlush="px-5.5 py-3.5"
 							class="text-gray-800"
 							borderBottomClass=""
@@ -2339,21 +2339,21 @@
 							<div slot="header" class="mr-3 flex grow items-center justify-between gap-3">
 								<div class="flex flex-row items-center gap-3">
 									<CanvasLogo size="5" />
-									<span class="text-lg font-medium">Canvas Connect is active</span>
+									<span class="text-lg font-medium">CourseBridge is active</span>
 								</div>
 								<div class="flex flex-row items-center gap-2">
-									{#if !canvasConnectAccordionOpen}
+									{#if !courseBridgeAccordionOpen}
 										<div transition:fade={{ duration: 100 }}>
 											<Button
 												pill
 												size="xs"
 												class="border border-gray-700 bg-gradient-to-t from-gray-700 to-gray-600 !px-2.5 !py-1 text-white hover:from-gray-600 hover:to-gray-500"
-												onclick={syncCanvasConnectRosterFromHeader}
-												disabled={syncingCanvasConnectRoster ||
+												onclick={syncCourseBridgeRosterFromHeader}
+												disabled={syncingCourseBridgeRoster ||
 													removingLTIConnection ||
 													$updatingApiKey}
 											>
-												{#if syncingCanvasConnectRoster}<Spinner
+												{#if syncingCourseBridgeRoster}<Spinner
 														class="me-1 h-4 w-4"
 													/>{:else}<RefreshOutline class="me-1 h-4 w-4" />{/if}<span
 													class="hidden sm:inline">Sync</span
@@ -2361,19 +2361,19 @@
 											>
 										</div>
 									{/if}
-									<CanvasConnectSyncBadge
+									<CourseBridgeSyncBadge
 										type="default"
-										label={`${ltiLinkedClasses.length} linked ${ltiLinkedClasses.length === 1 ? 'class' : 'classes'}`}
+										label={`${ltiLinkedClasses.length} linked ${ltiLinkedClasses.length === 1 ? 'course' : 'courses'}`}
 									/>
 								</div>
 							</div>
 							<div class="-mt-4 text-sm text-gray-800">
 								<p>
-									This PingPong group is linked to the following courses through our Canvas Connect
+									This PingPong group is linked to the following courses through our CourseBridge
 									LTI 1.3 integration. Course rosters are automatically synced with this group's
 									user list about once every hour. Use the Sync button below to request an immediate
-									sync. Users are not notified when they get added to this group through Canvas
-									Connect.
+									sync. Users are not notified when they get added to this group through Course
+									Bridge.
 								</p>
 								<p class="mt-2">
 									Course members can also access your PingPong group by clicking the PingPong link
@@ -2384,12 +2384,10 @@
 										pill
 										size="xs"
 										class="border border-gray-700 bg-gradient-to-t from-gray-700 to-gray-600 text-white hover:from-gray-600 hover:to-gray-500"
-										onclick={syncCanvasConnectRoster}
-										disabled={syncingCanvasConnectRoster ||
-											removingLTIConnection ||
-											$updatingApiKey}
+										onclick={syncCourseBridgeRoster}
+										disabled={syncingCourseBridgeRoster || removingLTIConnection || $updatingApiKey}
 									>
-										{#if syncingCanvasConnectRoster}<Spinner
+										{#if syncingCourseBridgeRoster}<Spinner
 												class="me-2 h-4 w-4"
 											/>{:else}<RefreshOutline class="me-2 h-4 w-4" />{/if}Sync roster</Button
 									>
@@ -2450,7 +2448,7 @@
 													>
 														<CanvasDisconnectModal
 															canvasCourseCode={linkedClass.course_name || ''}
-															introPhrase="While Canvas Connect was active, your Canvas users were imported when they launched PingPong from your Canvas course."
+															introPhrase="While CourseBridge was enabled, your course users were imported when they launched PingPong or the course roster was synced."
 															on:keep={() => removeLTIClassLink(linkedClass.id, true)}
 															on:remove={() => removeLTIClassLink(linkedClass.id, false)}
 														/>
@@ -2486,9 +2484,9 @@
 										with your Canvas course to automatically sync your course roster with PingPong.
 									</p>
 									<p class="italic">
-										Canvas Sync is being phased out in favor of our new Canvas Connect LTI 1.3
-										integration. If your institution supports Canvas Connect, we recommend using
-										that instead. We will stop supporting Canvas Sync later this year.
+										Canvas Sync is being phased out in favor of our new CourseBridge LTI 1.3
+										integration. If your institution supports CourseBridge, we recommend using that
+										instead. We will stop supporting Canvas Sync later this year.
 									</p>
 								</div>
 								<div class="flex grow-0 justify-between gap-1">
@@ -2731,7 +2729,7 @@
 													class="hidden sm:inline">Sync</span
 												></Button
 											>
-											<CanvasConnectSyncBadge
+											<CourseBridgeSyncBadge
 												type="success"
 												label={`Last sync: ${
 													data.class.lms_last_synced
@@ -2851,7 +2849,7 @@
 													class="hidden sm:inline">Sync</span
 												></Button
 											>
-											<CanvasConnectSyncBadge
+											<CourseBridgeSyncBadge
 												type="success"
 												label={`Last sync: ${
 													data.class.lms_last_synced

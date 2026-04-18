@@ -2650,7 +2650,7 @@ class CanvasRedirect(BaseModel):
     url: str
 
 
-class CanvasConnectAccessToken(BaseModel):
+class CourseBridgeAccessToken(BaseModel):
     access_token: str
     expires_in: int | None = None
     token_type: str | None = None

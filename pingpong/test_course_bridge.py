@@ -7,7 +7,7 @@ from yarl import URL
 
 import pingpong.config as config_module
 import pingpong.schemas as schemas
-from pingpong.lti import canvas_connect as canvas_connect_module
+from pingpong.lti import course_bridge as course_bridge_module
 
 
 class FakeTokenResponse:
@@ -220,7 +220,7 @@ def _patch_lti_security_config(monkeypatch):
     )
     cfg = SimpleNamespace(lti=lti, development=False)
     monkeypatch.setattr(config_module, "config", cfg)
-    monkeypatch.setattr(canvas_connect_module, "config", cfg)
+    monkeypatch.setattr(course_bridge_module, "config", cfg)
 
 
 @pytest.mark.asyncio
@@ -240,7 +240,7 @@ async def test_get_nrps_access_token_uses_oidc_token_endpoint_and_signed_asserti
         return lti_class
 
     monkeypatch.setattr(
-        canvas_connect_module.LTIClass,
+        course_bridge_module.LTIClass,
         "get_by_id_with_registration",
         classmethod(_get_by_id_with_registration),
     )
@@ -254,26 +254,26 @@ async def test_get_nrps_access_token_uses_oidc_token_endpoint_and_signed_asserti
         jwt_calls["headers"] = headers
         return "signed-client-assertion"
 
-    monkeypatch.setattr(canvas_connect_module.jwt, "encode", _encode)
-    monkeypatch.setattr(canvas_connect_module.uuid, "uuid7", lambda: "uuid7-test")
+    monkeypatch.setattr(course_bridge_module.jwt, "encode", _encode)
+    monkeypatch.setattr(course_bridge_module.uuid, "uuid7", lambda: "uuid7-test")
 
     fake_response = FakeTokenResponse(
         payload={
             "access_token": "short-lived-token",
             "expires_in": 3600,
             "token_type": "Bearer",
-            "scope": canvas_connect_module.NRPS_CONTEXT_MEMBERSHIP_SCOPE,
+            "scope": course_bridge_module.NRPS_CONTEXT_MEMBERSHIP_SCOPE,
         }
     )
     fake_session = FakeClientSession(fake_response)
     monkeypatch.setattr(
-        canvas_connect_module.aiohttp,
+        course_bridge_module.aiohttp,
         "ClientSession",
         _client_session_factory(fake_session),
     )
 
     fixed_now = datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc)
-    async with canvas_connect_module.CanvasConnectClient(
+    async with course_bridge_module.CourseBridgeClient(
         db=SimpleNamespace(),
         lti_class_id=11,
         key_manager=FakeKeyManager(),
@@ -284,28 +284,28 @@ async def test_get_nrps_access_token_uses_oidc_token_endpoint_and_signed_asserti
     assert token.access_token == "short-lived-token"
     assert token.expires_in == 3600
     assert token.token_type == "Bearer"
-    assert token.scope == canvas_connect_module.NRPS_CONTEXT_MEMBERSHIP_SCOPE
+    assert token.scope == course_bridge_module.NRPS_CONTEXT_MEMBERSHIP_SCOPE
     assert fake_session.closed is True
 
     assert len(fake_session.requests) == 1
     req = fake_session.requests[0]
     assert req["url"] == token_endpoint
     assert req["headers"] == {
-        "Content-Type": canvas_connect_module.TOKEN_REQUEST_CONTENT_TYPE
+        "Content-Type": course_bridge_module.TOKEN_REQUEST_CONTENT_TYPE
     }
     assert req["data"] == {
         "client_id": "client-123",
-        "client_assertion_type": canvas_connect_module.CLIENT_ASSERTION_TYPE,
-        "grant_type": canvas_connect_module.CLIENT_CREDENTIALS_GRANT_TYPE,
+        "client_assertion_type": course_bridge_module.CLIENT_ASSERTION_TYPE,
+        "grant_type": course_bridge_module.CLIENT_CREDENTIALS_GRANT_TYPE,
         "client_assertion": "signed-client-assertion",
-        "scope": canvas_connect_module.NRPS_CONTEXT_MEMBERSHIP_SCOPE,
+        "scope": course_bridge_module.NRPS_CONTEXT_MEMBERSHIP_SCOPE,
     }
 
     expected_iat = int(fixed_now.timestamp())
     expected_exp = int(
         (
             fixed_now
-            + timedelta(seconds=canvas_connect_module.CLIENT_ASSERTION_EXPIRY_SECONDS)
+            + timedelta(seconds=course_bridge_module.CLIENT_ASSERTION_EXPIRY_SECONDS)
         ).timestamp()
     )
     assert jwt_calls["payload"] == {
@@ -341,27 +341,27 @@ async def test_get_nrps_access_token_falls_back_to_registration_auth_token_url(
         return lti_class
 
     monkeypatch.setattr(
-        canvas_connect_module.LTIClass,
+        course_bridge_module.LTIClass,
         "get_by_id_with_registration",
         classmethod(_get_by_id_with_registration),
     )
     monkeypatch.setattr(
-        canvas_connect_module.jwt,
+        course_bridge_module.jwt,
         "encode",
         lambda *args, **kwargs: "signed-client-assertion",
     )
-    monkeypatch.setattr(canvas_connect_module.uuid, "uuid7", lambda: "uuid7-test")
+    monkeypatch.setattr(course_bridge_module.uuid, "uuid7", lambda: "uuid7-test")
 
     fake_session = FakeClientSession(
         FakeTokenResponse(payload={"access_token": "short-lived-token"})
     )
     monkeypatch.setattr(
-        canvas_connect_module.aiohttp,
+        course_bridge_module.aiohttp,
         "ClientSession",
         _client_session_factory(fake_session),
     )
 
-    async with canvas_connect_module.CanvasConnectClient(
+    async with course_bridge_module.CourseBridgeClient(
         db=SimpleNamespace(),
         lti_class_id=12,
         key_manager=FakeKeyManager(),
@@ -386,16 +386,16 @@ async def test_get_nrps_access_token_raises_on_token_endpoint_error(monkeypatch)
         return lti_class
 
     monkeypatch.setattr(
-        canvas_connect_module.LTIClass,
+        course_bridge_module.LTIClass,
         "get_by_id_with_registration",
         classmethod(_get_by_id_with_registration),
     )
     monkeypatch.setattr(
-        canvas_connect_module.jwt,
+        course_bridge_module.jwt,
         "encode",
         lambda *args, **kwargs: "signed-client-assertion",
     )
-    monkeypatch.setattr(canvas_connect_module.uuid, "uuid7", lambda: "uuid7-test")
+    monkeypatch.setattr(course_bridge_module.uuid, "uuid7", lambda: "uuid7-test")
 
     fake_session = FakeClientSession(
         FakeTokenResponse(
@@ -404,18 +404,18 @@ async def test_get_nrps_access_token_raises_on_token_endpoint_error(monkeypatch)
         )
     )
     monkeypatch.setattr(
-        canvas_connect_module.aiohttp,
+        course_bridge_module.aiohttp,
         "ClientSession",
         _client_session_factory(fake_session),
     )
 
-    async with canvas_connect_module.CanvasConnectClient(
+    async with course_bridge_module.CourseBridgeClient(
         db=SimpleNamespace(),
         lti_class_id=13,
         key_manager=FakeKeyManager(),
         nowfn=lambda: datetime.now(timezone.utc),
     ) as client:
-        with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+        with pytest.raises(course_bridge_module.CourseBridgeException) as excinfo:
             await client.get_nrps_access_token()
 
     assert excinfo.value.detail == "invalid client assertion"
@@ -438,7 +438,7 @@ async def test_get_nrps_access_token_rejects_insecure_oidc_token_endpoint(
         return lti_class
 
     monkeypatch.setattr(
-        canvas_connect_module.LTIClass,
+        course_bridge_module.LTIClass,
         "get_by_id_with_registration",
         classmethod(_get_by_id_with_registration),
     )
@@ -447,18 +447,18 @@ async def test_get_nrps_access_token_rejects_insecure_oidc_token_endpoint(
         FakeTokenResponse(payload={"access_token": "ignored", "expires_in": 3600})
     )
     monkeypatch.setattr(
-        canvas_connect_module.aiohttp,
+        course_bridge_module.aiohttp,
         "ClientSession",
         _client_session_factory(fake_session),
     )
 
-    async with canvas_connect_module.CanvasConnectClient(
+    async with course_bridge_module.CourseBridgeClient(
         db=SimpleNamespace(),
         lti_class_id=11,
         key_manager=FakeKeyManager(),
         nowfn=lambda: datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc),
     ) as client:
-        with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+        with pytest.raises(course_bridge_module.CourseBridgeException) as excinfo:
             await client.get_nrps_access_token()
 
     assert (
@@ -486,16 +486,16 @@ async def test_get_nrps_access_token_converts_post_302_redirect_to_get(
         return lti_class
 
     monkeypatch.setattr(
-        canvas_connect_module.LTIClass,
+        course_bridge_module.LTIClass,
         "get_by_id_with_registration",
         classmethod(_get_by_id_with_registration),
     )
     monkeypatch.setattr(
-        canvas_connect_module.jwt,
+        course_bridge_module.jwt,
         "encode",
         lambda *args, **kwargs: "signed-client-assertion",
     )
-    monkeypatch.setattr(canvas_connect_module.uuid, "uuid7", lambda: "uuid7-test")
+    monkeypatch.setattr(course_bridge_module.uuid, "uuid7", lambda: "uuid7-test")
 
     fake_session = FakeClientSession(
         [
@@ -508,18 +508,18 @@ async def test_get_nrps_access_token_converts_post_302_redirect_to_get(
                     "access_token": "short-lived-token",
                     "expires_in": 3600,
                     "token_type": "Bearer",
-                    "scope": canvas_connect_module.NRPS_CONTEXT_MEMBERSHIP_SCOPE,
+                    "scope": course_bridge_module.NRPS_CONTEXT_MEMBERSHIP_SCOPE,
                 }
             ),
         ]
     )
     monkeypatch.setattr(
-        canvas_connect_module.aiohttp,
+        course_bridge_module.aiohttp,
         "ClientSession",
         _client_session_factory(fake_session),
     )
 
-    async with canvas_connect_module.CanvasConnectClient(
+    async with course_bridge_module.CourseBridgeClient(
         db=SimpleNamespace(),
         lti_class_id=14,
         key_manager=FakeKeyManager(),
@@ -571,7 +571,7 @@ async def test_get_nrps_access_token_rejects_redirect_that_requires_rewriting(
         development=False,
     )
     monkeypatch.setattr(config_module, "config", restricted_config)
-    monkeypatch.setattr(canvas_connect_module, "config", restricted_config)
+    monkeypatch.setattr(course_bridge_module, "config", restricted_config)
 
     registration = SimpleNamespace(
         client_id="client-123",
@@ -584,16 +584,16 @@ async def test_get_nrps_access_token_rejects_redirect_that_requires_rewriting(
         return lti_class
 
     monkeypatch.setattr(
-        canvas_connect_module.LTIClass,
+        course_bridge_module.LTIClass,
         "get_by_id_with_registration",
         classmethod(_get_by_id_with_registration),
     )
     monkeypatch.setattr(
-        canvas_connect_module.jwt,
+        course_bridge_module.jwt,
         "encode",
         lambda *args, **kwargs: "signed-client-assertion",
     )
-    monkeypatch.setattr(canvas_connect_module.uuid, "uuid7", lambda: "uuid7-test")
+    monkeypatch.setattr(course_bridge_module.uuid, "uuid7", lambda: "uuid7-test")
 
     fake_session = FakeClientSession(
         FakeTokenResponse(
@@ -602,18 +602,18 @@ async def test_get_nrps_access_token_rejects_redirect_that_requires_rewriting(
         )
     )
     monkeypatch.setattr(
-        canvas_connect_module.aiohttp,
+        course_bridge_module.aiohttp,
         "ClientSession",
         _client_session_factory(fake_session),
     )
 
-    async with canvas_connect_module.CanvasConnectClient(
+    async with course_bridge_module.CourseBridgeClient(
         db=SimpleNamespace(),
         lti_class_id=15,
         key_manager=FakeKeyManager(),
         nowfn=lambda: datetime.now(timezone.utc),
     ) as client:
-        with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+        with pytest.raises(course_bridge_module.CourseBridgeException) as excinfo:
             await client.get_nrps_access_token()
 
     assert (
@@ -655,7 +655,7 @@ async def test_get_nrps_access_token_rejects_redirect_to_unallowlisted_host(
         development=False,
     )
     monkeypatch.setattr(config_module, "config", restricted_config)
-    monkeypatch.setattr(canvas_connect_module, "config", restricted_config)
+    monkeypatch.setattr(course_bridge_module, "config", restricted_config)
 
     registration = SimpleNamespace(
         client_id="client-123",
@@ -668,16 +668,16 @@ async def test_get_nrps_access_token_rejects_redirect_to_unallowlisted_host(
         return lti_class
 
     monkeypatch.setattr(
-        canvas_connect_module.LTIClass,
+        course_bridge_module.LTIClass,
         "get_by_id_with_registration",
         classmethod(_get_by_id_with_registration),
     )
     monkeypatch.setattr(
-        canvas_connect_module.jwt,
+        course_bridge_module.jwt,
         "encode",
         lambda *args, **kwargs: "signed-client-assertion",
     )
-    monkeypatch.setattr(canvas_connect_module.uuid, "uuid7", lambda: "uuid7-test")
+    monkeypatch.setattr(course_bridge_module.uuid, "uuid7", lambda: "uuid7-test")
 
     fake_session = FakeClientSession(
         FakeTokenResponse(
@@ -686,18 +686,18 @@ async def test_get_nrps_access_token_rejects_redirect_to_unallowlisted_host(
         )
     )
     monkeypatch.setattr(
-        canvas_connect_module.aiohttp,
+        course_bridge_module.aiohttp,
         "ClientSession",
         _client_session_factory(fake_session),
     )
 
-    async with canvas_connect_module.CanvasConnectClient(
+    async with course_bridge_module.CourseBridgeClient(
         db=SimpleNamespace(),
         lti_class_id=15,
         key_manager=FakeKeyManager(),
         nowfn=lambda: datetime.now(timezone.utc),
     ) as client:
-        with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+        with pytest.raises(course_bridge_module.CourseBridgeException) as excinfo:
             await client.get_nrps_access_token()
 
     assert (
@@ -739,7 +739,7 @@ async def test_make_authed_nrps_get_rejects_redirect_to_unallowlisted_host(
         development=False,
     )
     monkeypatch.setattr(config_module, "config", restricted_config)
-    monkeypatch.setattr(canvas_connect_module, "config", restricted_config)
+    monkeypatch.setattr(course_bridge_module, "config", restricted_config)
 
     fake_session = FakeClientSession(
         FakeTokenResponse(
@@ -748,18 +748,18 @@ async def test_make_authed_nrps_get_rejects_redirect_to_unallowlisted_host(
         )
     )
     monkeypatch.setattr(
-        canvas_connect_module.aiohttp,
+        course_bridge_module.aiohttp,
         "ClientSession",
         _client_session_factory(fake_session),
     )
 
-    async with canvas_connect_module.CanvasConnectClient(
+    async with course_bridge_module.CourseBridgeClient(
         db=SimpleNamespace(),
         lti_class_id=11,
         key_manager=FakeKeyManager(),
     ) as client:
         client.get_short_lived_auth_token = lambda: _async_return("short-lived-token")
-        with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+        with pytest.raises(course_bridge_module.CourseBridgeException) as excinfo:
             await client._make_authed_nrps_get(
                 "https://canvas.example.com/api/lti/memberships"
             )
@@ -778,7 +778,7 @@ async def test_get_nrps_access_token_raises_when_lti_class_missing(monkeypatch):
         return None
 
     monkeypatch.setattr(
-        canvas_connect_module.LTIClass,
+        course_bridge_module.LTIClass,
         "get_by_id_with_registration",
         classmethod(_get_by_id_with_registration),
     )
@@ -787,17 +787,17 @@ async def test_get_nrps_access_token_raises_when_lti_class_missing(monkeypatch):
         FakeTokenResponse(payload={"access_token": "unused"})
     )
     monkeypatch.setattr(
-        canvas_connect_module.aiohttp,
+        course_bridge_module.aiohttp,
         "ClientSession",
         _client_session_factory(fake_session),
     )
 
-    async with canvas_connect_module.CanvasConnectClient(
+    async with course_bridge_module.CourseBridgeClient(
         db=SimpleNamespace(),
         lti_class_id=404,
         key_manager=FakeKeyManager(),
     ) as client:
-        with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+        with pytest.raises(course_bridge_module.CourseBridgeException) as excinfo:
             await client.get_nrps_access_token()
 
     assert excinfo.value.detail == "LTI class not found"
@@ -806,9 +806,9 @@ async def test_get_nrps_access_token_raises_when_lti_class_missing(monkeypatch):
 @pytest.mark.asyncio
 async def test_make_authed_nrps_get_raises_when_lti_config_missing(monkeypatch):
     monkeypatch.setattr(config_module, "config", SimpleNamespace(lti=None))
-    monkeypatch.setattr(canvas_connect_module, "config", SimpleNamespace(lti=None))
+    monkeypatch.setattr(course_bridge_module, "config", SimpleNamespace(lti=None))
     monkeypatch.setattr(
-        canvas_connect_module,
+        course_bridge_module,
         "generate_names_and_role_api_url",
         lambda url: (_ for _ in ()).throw(
             AssertionError("generate_names_and_role_api_url should not be called")
@@ -817,18 +817,18 @@ async def test_make_authed_nrps_get_raises_when_lti_config_missing(monkeypatch):
 
     fake_session = FakeClientSession(FakeTokenResponse(payload={"members": []}))
     monkeypatch.setattr(
-        canvas_connect_module.aiohttp,
+        course_bridge_module.aiohttp,
         "ClientSession",
         _client_session_factory(fake_session),
     )
 
-    async with canvas_connect_module.CanvasConnectClient(
+    async with course_bridge_module.CourseBridgeClient(
         db=SimpleNamespace(),
         lti_class_id=11,
         key_manager=FakeKeyManager(),
     ) as client:
         client.get_short_lived_auth_token = lambda: _async_return("short-lived-token")
-        with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+        with pytest.raises(course_bridge_module.CourseBridgeException) as excinfo:
             await client._make_authed_nrps_get(
                 "https://canvas.example.com/api/lti/memberships"
             )
@@ -837,7 +837,7 @@ async def test_make_authed_nrps_get_raises_when_lti_config_missing(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_get_nrps_access_token_raises_canvas_connect_exception_when_lti_config_missing(
+async def test_get_nrps_access_token_raises_course_bridge_exception_when_lti_config_missing(
     monkeypatch,
 ):
     registration = SimpleNamespace(
@@ -851,41 +851,41 @@ async def test_get_nrps_access_token_raises_canvas_connect_exception_when_lti_co
         return lti_class
 
     monkeypatch.setattr(
-        canvas_connect_module.LTIClass,
+        course_bridge_module.LTIClass,
         "get_by_id_with_registration",
         classmethod(_get_by_id_with_registration),
     )
     monkeypatch.setattr(
-        canvas_connect_module.jwt,
+        course_bridge_module.jwt,
         "encode",
         lambda *args, **kwargs: "signed-client-assertion",
     )
-    monkeypatch.setattr(canvas_connect_module.uuid, "uuid7", lambda: "uuid7-test")
+    monkeypatch.setattr(course_bridge_module.uuid, "uuid7", lambda: "uuid7-test")
     monkeypatch.setattr(
-        canvas_connect_module,
+        course_bridge_module,
         "generate_token_endpoint_url",
         lambda url: (_ for _ in ()).throw(
             AssertionError("generate_token_endpoint_url should not be called")
         ),
     )
     monkeypatch.setattr(config_module, "config", SimpleNamespace(lti=None))
-    monkeypatch.setattr(canvas_connect_module, "config", SimpleNamespace(lti=None))
+    monkeypatch.setattr(course_bridge_module, "config", SimpleNamespace(lti=None))
 
     fake_session = FakeClientSession(
         FakeTokenResponse(payload={"access_token": "short-lived-token"})
     )
     monkeypatch.setattr(
-        canvas_connect_module.aiohttp,
+        course_bridge_module.aiohttp,
         "ClientSession",
         _client_session_factory(fake_session),
     )
 
-    async with canvas_connect_module.CanvasConnectClient(
+    async with course_bridge_module.CourseBridgeClient(
         db=SimpleNamespace(),
         lti_class_id=11,
         key_manager=FakeKeyManager(),
     ) as client:
-        with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+        with pytest.raises(course_bridge_module.CourseBridgeException) as excinfo:
             await client.get_nrps_access_token()
 
     assert excinfo.value.detail == "LTI service is not configured"
@@ -905,16 +905,16 @@ async def test_get_nrps_access_token_reuses_cached_token_until_expiry(monkeypatc
         return lti_class
 
     monkeypatch.setattr(
-        canvas_connect_module.LTIClass,
+        course_bridge_module.LTIClass,
         "get_by_id_with_registration",
         classmethod(_get_by_id_with_registration),
     )
     monkeypatch.setattr(
-        canvas_connect_module.jwt,
+        course_bridge_module.jwt,
         "encode",
         lambda *args, **kwargs: "signed-client-assertion",
     )
-    monkeypatch.setattr(canvas_connect_module.uuid, "uuid7", lambda: "uuid7-test")
+    monkeypatch.setattr(course_bridge_module.uuid, "uuid7", lambda: "uuid7-test")
 
     fake_session = FakeClientSession(
         FakeTokenResponse(
@@ -925,13 +925,13 @@ async def test_get_nrps_access_token_reuses_cached_token_until_expiry(monkeypatc
         )
     )
     monkeypatch.setattr(
-        canvas_connect_module.aiohttp,
+        course_bridge_module.aiohttp,
         "ClientSession",
         _client_session_factory(fake_session),
     )
 
     fixed_now = datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc)
-    async with canvas_connect_module.CanvasConnectClient(
+    async with course_bridge_module.CourseBridgeClient(
         db=SimpleNamespace(),
         lti_class_id=14,
         key_manager=FakeKeyManager(),
@@ -959,16 +959,16 @@ async def test_get_nrps_access_token_refreshes_when_cached_token_expired(monkeyp
         return lti_class
 
     monkeypatch.setattr(
-        canvas_connect_module.LTIClass,
+        course_bridge_module.LTIClass,
         "get_by_id_with_registration",
         classmethod(_get_by_id_with_registration),
     )
     monkeypatch.setattr(
-        canvas_connect_module.jwt,
+        course_bridge_module.jwt,
         "encode",
         lambda *args, **kwargs: "signed-client-assertion",
     )
-    monkeypatch.setattr(canvas_connect_module.uuid, "uuid7", lambda: "uuid7-test")
+    monkeypatch.setattr(course_bridge_module.uuid, "uuid7", lambda: "uuid7-test")
 
     fake_session = FakeClientSession(
         [
@@ -987,14 +987,14 @@ async def test_get_nrps_access_token_refreshes_when_cached_token_expired(monkeyp
         ]
     )
     monkeypatch.setattr(
-        canvas_connect_module.aiohttp,
+        course_bridge_module.aiohttp,
         "ClientSession",
         _client_session_factory(fake_session),
     )
 
     now_holder = {"value": datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc)}
 
-    async with canvas_connect_module.CanvasConnectClient(
+    async with course_bridge_module.CourseBridgeClient(
         db=SimpleNamespace(),
         lti_class_id=15,
         key_manager=FakeKeyManager(),
@@ -1028,12 +1028,12 @@ async def test_get_context_memberships_url_returns_saved_value(monkeypatch):
         return lti_class
 
     monkeypatch.setattr(
-        canvas_connect_module.LTIClass,
+        course_bridge_module.LTIClass,
         "get_by_id_with_registration",
         classmethod(_get_by_id_with_registration),
     )
 
-    client = canvas_connect_module.CanvasConnectClient(
+    client = course_bridge_module.CourseBridgeClient(
         db=SimpleNamespace(),
         lti_class_id=16,
         key_manager=FakeKeyManager(),
@@ -1062,17 +1062,17 @@ async def test_get_context_memberships_url_raises_when_missing(monkeypatch):
         return lti_class
 
     monkeypatch.setattr(
-        canvas_connect_module.LTIClass,
+        course_bridge_module.LTIClass,
         "get_by_id_with_registration",
         classmethod(_get_by_id_with_registration),
     )
 
-    client = canvas_connect_module.CanvasConnectClient(
+    client = course_bridge_module.CourseBridgeClient(
         db=SimpleNamespace(),
         lti_class_id=17,
         key_manager=FakeKeyManager(),
     )
-    with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+    with pytest.raises(course_bridge_module.CourseBridgeException) as excinfo:
         await client.get_context_memberships_url()
 
     assert excinfo.value.detail == "LTI class is missing context_memberships_url"
@@ -1099,12 +1099,12 @@ async def test_get_lti_class_is_cached_per_client_instance(monkeypatch):
         return lti_class
 
     monkeypatch.setattr(
-        canvas_connect_module.LTIClass,
+        course_bridge_module.LTIClass,
         "get_by_id_with_registration",
         classmethod(_get_by_id_with_registration),
     )
 
-    client = canvas_connect_module.CanvasConnectClient(
+    client = course_bridge_module.CourseBridgeClient(
         db=SimpleNamespace(),
         lti_class_id=18,
         key_manager=FakeKeyManager(),
@@ -1137,18 +1137,18 @@ async def test_get_resource_link_id_returns_existing_without_fetch(monkeypatch):
         return lti_class
 
     monkeypatch.setattr(
-        canvas_connect_module.LTIClass,
+        course_bridge_module.LTIClass,
         "get_by_id_with_registration",
         classmethod(_get_by_id_with_registration),
     )
     fake_session = FakeClientSession([])
     monkeypatch.setattr(
-        canvas_connect_module.aiohttp,
+        course_bridge_module.aiohttp,
         "ClientSession",
         _client_session_factory(fake_session),
     )
 
-    async with canvas_connect_module.CanvasConnectClient(
+    async with course_bridge_module.CourseBridgeClient(
         db=SimpleNamespace(),
         lti_class_id=19,
         key_manager=FakeKeyManager(),
@@ -1182,19 +1182,19 @@ async def test_get_resource_link_id_returns_none_when_missing(monkeypatch):
         return lti_class
 
     monkeypatch.setattr(
-        canvas_connect_module.LTIClass,
+        course_bridge_module.LTIClass,
         "get_by_id_with_registration",
         classmethod(_get_by_id_with_registration),
     )
     fake_session = FakeClientSession([])
     monkeypatch.setattr(
-        canvas_connect_module.aiohttp,
+        course_bridge_module.aiohttp,
         "ClientSession",
         _client_session_factory(fake_session),
     )
 
     db = FakeWriteDB()
-    async with canvas_connect_module.CanvasConnectClient(
+    async with course_bridge_module.CourseBridgeClient(
         db=db,
         lti_class_id=20,
         key_manager=FakeKeyManager(),
@@ -1235,16 +1235,16 @@ async def test_get_resource_link_id_uses_nrps_context_id_as_transient_fallback(
         return lti_class
 
     monkeypatch.setattr(
-        canvas_connect_module.LTIClass,
+        course_bridge_module.LTIClass,
         "get_by_id_with_registration",
         classmethod(_get_by_id_with_registration),
     )
     monkeypatch.setattr(
-        canvas_connect_module.jwt,
+        course_bridge_module.jwt,
         "encode",
         lambda *args, **kwargs: "signed-client-assertion",
     )
-    monkeypatch.setattr(canvas_connect_module.uuid, "uuid7", lambda: "uuid7-test")
+    monkeypatch.setattr(course_bridge_module.uuid, "uuid7", lambda: "uuid7-test")
 
     fake_session = FakeClientSession(
         [
@@ -1264,13 +1264,13 @@ async def test_get_resource_link_id_uses_nrps_context_id_as_transient_fallback(
         ]
     )
     monkeypatch.setattr(
-        canvas_connect_module.aiohttp,
+        course_bridge_module.aiohttp,
         "ClientSession",
         _client_session_factory(fake_session),
     )
 
     db = FakeWriteDB()
-    async with canvas_connect_module.CanvasConnectClient(
+    async with course_bridge_module.CourseBridgeClient(
         db=db,
         lti_class_id=2001,
         key_manager=FakeKeyManager(),
@@ -1314,21 +1314,21 @@ async def test_get_nrps_create_user_class_roles_maps_members_and_pages(monkeypat
         return lti_class
 
     monkeypatch.setattr(
-        canvas_connect_module.LTIClass,
+        course_bridge_module.LTIClass,
         "get_by_id_with_registration",
         classmethod(_get_by_id_with_registration),
     )
     monkeypatch.setattr(
-        canvas_connect_module.ExternalLoginProvider,
+        course_bridge_module.ExternalLoginProvider,
         "get_by_id",
         classmethod(lambda cls, db, id_: _async_return(FakeSSOProvider("my-sso"))),
     )
     monkeypatch.setattr(
-        canvas_connect_module.jwt,
+        course_bridge_module.jwt,
         "encode",
         lambda *args, **kwargs: "signed-client-assertion",
     )
-    monkeypatch.setattr(canvas_connect_module.uuid, "uuid7", lambda: "uuid7-test")
+    monkeypatch.setattr(course_bridge_module.uuid, "uuid7", lambda: "uuid7-test")
 
     fake_session = FakeClientSession(
         [
@@ -1418,12 +1418,12 @@ async def test_get_nrps_create_user_class_roles_maps_members_and_pages(monkeypat
         ]
     )
     monkeypatch.setattr(
-        canvas_connect_module.aiohttp,
+        course_bridge_module.aiohttp,
         "ClientSession",
         _client_session_factory(fake_session),
     )
 
-    async with canvas_connect_module.CanvasConnectClient(
+    async with course_bridge_module.CourseBridgeClient(
         db=SimpleNamespace(),
         lti_class_id=21,
         key_manager=FakeKeyManager(),
@@ -1433,7 +1433,7 @@ async def test_get_nrps_create_user_class_roles_maps_members_and_pages(monkeypat
 
     assert create_roles.silent is True
     assert create_roles.lti_class_id == 21
-    assert create_roles.lms_type == canvas_connect_module.LMSType.CANVAS
+    assert create_roles.lms_type == course_bridge_module.LMSType.CANVAS
     assert create_roles.sso_tenant == "my-sso"
     assert len(create_roles.roles) == 3
 
@@ -1445,17 +1445,15 @@ async def test_get_nrps_create_user_class_roles_maps_members_and_pages(monkeypat
     }
     assert by_email[
         "instructor@example.com"
-    ].roles == canvas_connect_module.ClassUserRoles(
+    ].roles == course_bridge_module.ClassUserRoles(
         admin=False, teacher=True, student=False
     )
     assert by_email["instructor@example.com"].sso_id == "111"
-    assert by_email[
-        "student@example.com"
-    ].roles == canvas_connect_module.ClassUserRoles(
+    assert by_email["student@example.com"].roles == course_bridge_module.ClassUserRoles(
         admin=False, teacher=True, student=False
     )
     assert by_email["student@example.com"].sso_id == "222"
-    assert by_email["admin@example.com"].roles == canvas_connect_module.ClassUserRoles(
+    assert by_email["admin@example.com"].roles == course_bridge_module.ClassUserRoles(
         admin=True, teacher=False, student=False
     )
     assert by_email["admin@example.com"].sso_id is None
@@ -1495,21 +1493,21 @@ async def test_get_nrps_create_user_class_roles_allows_missing_members(monkeypat
         return lti_class
 
     monkeypatch.setattr(
-        canvas_connect_module.LTIClass,
+        course_bridge_module.LTIClass,
         "get_by_id_with_registration",
         classmethod(_get_by_id_with_registration),
     )
     monkeypatch.setattr(
-        canvas_connect_module.ExternalLoginProvider,
+        course_bridge_module.ExternalLoginProvider,
         "get_by_id",
         classmethod(lambda cls, db, id_: _async_return(None)),
     )
     monkeypatch.setattr(
-        canvas_connect_module.jwt,
+        course_bridge_module.jwt,
         "encode",
         lambda *args, **kwargs: "signed-client-assertion",
     )
-    monkeypatch.setattr(canvas_connect_module.uuid, "uuid7", lambda: "uuid7-test")
+    monkeypatch.setattr(course_bridge_module.uuid, "uuid7", lambda: "uuid7-test")
 
     fake_session = FakeClientSession(
         [
@@ -1524,12 +1522,12 @@ async def test_get_nrps_create_user_class_roles_allows_missing_members(monkeypat
         ]
     )
     monkeypatch.setattr(
-        canvas_connect_module.aiohttp,
+        course_bridge_module.aiohttp,
         "ClientSession",
         _client_session_factory(fake_session),
     )
 
-    async with canvas_connect_module.CanvasConnectClient(
+    async with course_bridge_module.CourseBridgeClient(
         db=SimpleNamespace(),
         lti_class_id=22,
         key_manager=FakeKeyManager(),
@@ -1572,21 +1570,21 @@ async def test_get_nrps_create_user_class_roles_uses_lti_platform_lms_type(
         return lti_class
 
     monkeypatch.setattr(
-        canvas_connect_module.LTIClass,
+        course_bridge_module.LTIClass,
         "get_by_id_with_registration",
         classmethod(_get_by_id_with_registration),
     )
     monkeypatch.setattr(
-        canvas_connect_module.ExternalLoginProvider,
+        course_bridge_module.ExternalLoginProvider,
         "get_by_id",
         classmethod(lambda cls, db, id_: _async_return(None)),
     )
     monkeypatch.setattr(
-        canvas_connect_module.jwt,
+        course_bridge_module.jwt,
         "encode",
         lambda *args, **kwargs: "signed-client-assertion",
     )
-    monkeypatch.setattr(canvas_connect_module.uuid, "uuid7", lambda: "uuid7-test")
+    monkeypatch.setattr(course_bridge_module.uuid, "uuid7", lambda: "uuid7-test")
 
     fake_session = FakeClientSession(
         [
@@ -1600,12 +1598,12 @@ async def test_get_nrps_create_user_class_roles_uses_lti_platform_lms_type(
         ]
     )
     monkeypatch.setattr(
-        canvas_connect_module.aiohttp,
+        course_bridge_module.aiohttp,
         "ClientSession",
         _client_session_factory(fake_session),
     )
 
-    async with canvas_connect_module.CanvasConnectClient(
+    async with course_bridge_module.CourseBridgeClient(
         db=SimpleNamespace(),
         lti_class_id=2201,
         key_manager=FakeKeyManager(),
@@ -1643,16 +1641,16 @@ async def test_request_all_nrps_pages_detects_loop_for_canonicalized_next_page(
         return lti_class
 
     monkeypatch.setattr(
-        canvas_connect_module.LTIClass,
+        course_bridge_module.LTIClass,
         "get_by_id_with_registration",
         classmethod(_get_by_id_with_registration),
     )
     monkeypatch.setattr(
-        canvas_connect_module.jwt,
+        course_bridge_module.jwt,
         "encode",
         lambda *args, **kwargs: "signed-client-assertion",
     )
-    monkeypatch.setattr(canvas_connect_module.uuid, "uuid7", lambda: "uuid7-test")
+    monkeypatch.setattr(course_bridge_module.uuid, "uuid7", lambda: "uuid7-test")
 
     fake_session = FakeClientSession(
         [
@@ -1671,19 +1669,19 @@ async def test_request_all_nrps_pages_detects_loop_for_canonicalized_next_page(
         ]
     )
     monkeypatch.setattr(
-        canvas_connect_module.aiohttp,
+        course_bridge_module.aiohttp,
         "ClientSession",
         _client_session_factory(fake_session),
     )
 
-    async with canvas_connect_module.CanvasConnectClient(
+    async with course_bridge_module.CourseBridgeClient(
         db=SimpleNamespace(),
         lti_class_id=23,
         key_manager=FakeKeyManager(),
         nowfn=lambda: datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc),
     ) as client:
         pages = []
-        with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+        with pytest.raises(course_bridge_module.CourseBridgeException) as excinfo:
             async for response_payload in client._request_all_nrps_pages(
                 context_memberships_url
             ):
@@ -1736,23 +1734,23 @@ async def test_get_nrps_create_user_class_roles_no_sso_when_provider_id_zero(
         return lti_class
 
     monkeypatch.setattr(
-        canvas_connect_module.LTIClass,
+        course_bridge_module.LTIClass,
         "get_by_id_with_registration",
         classmethod(_get_by_id_with_registration),
     )
     monkeypatch.setattr(
-        canvas_connect_module.ExternalLoginProvider,
+        course_bridge_module.ExternalLoginProvider,
         "get_by_id",
         classmethod(
             lambda cls, db, id_: _async_return(FakeSSOProvider("should-not-be-used"))
         ),
     )
     monkeypatch.setattr(
-        canvas_connect_module.jwt,
+        course_bridge_module.jwt,
         "encode",
         lambda *args, **kwargs: "signed-client-assertion",
     )
-    monkeypatch.setattr(canvas_connect_module.uuid, "uuid7", lambda: "uuid7-test")
+    monkeypatch.setattr(course_bridge_module.uuid, "uuid7", lambda: "uuid7-test")
 
     fake_session = FakeClientSession(
         [
@@ -1787,12 +1785,12 @@ async def test_get_nrps_create_user_class_roles_no_sso_when_provider_id_zero(
         ]
     )
     monkeypatch.setattr(
-        canvas_connect_module.aiohttp,
+        course_bridge_module.aiohttp,
         "ClientSession",
         _client_session_factory(fake_session),
     )
 
-    async with canvas_connect_module.CanvasConnectClient(
+    async with course_bridge_module.CourseBridgeClient(
         db=SimpleNamespace(),
         lti_class_id=23,
         key_manager=FakeKeyManager(),
@@ -1833,12 +1831,12 @@ async def test_get_nrps_create_user_class_roles_ignores_sso_provider_ids_from_sk
         return lti_class
 
     monkeypatch.setattr(
-        canvas_connect_module.LTIClass,
+        course_bridge_module.LTIClass,
         "get_by_id_with_registration",
         classmethod(_get_by_id_with_registration),
     )
     monkeypatch.setattr(
-        canvas_connect_module.ExternalLoginProvider,
+        course_bridge_module.ExternalLoginProvider,
         "get_by_id",
         classmethod(
             lambda cls, db, id_: _async_return(
@@ -1847,11 +1845,11 @@ async def test_get_nrps_create_user_class_roles_ignores_sso_provider_ids_from_sk
         ),
     )
     monkeypatch.setattr(
-        canvas_connect_module.jwt,
+        course_bridge_module.jwt,
         "encode",
         lambda *args, **kwargs: "signed-client-assertion",
     )
-    monkeypatch.setattr(canvas_connect_module.uuid, "uuid7", lambda: "uuid7-test")
+    monkeypatch.setattr(course_bridge_module.uuid, "uuid7", lambda: "uuid7-test")
 
     fake_session = FakeClientSession(
         [
@@ -1902,12 +1900,12 @@ async def test_get_nrps_create_user_class_roles_ignores_sso_provider_ids_from_sk
         ]
     )
     monkeypatch.setattr(
-        canvas_connect_module.aiohttp,
+        course_bridge_module.aiohttp,
         "ClientSession",
         _client_session_factory(fake_session),
     )
 
-    async with canvas_connect_module.CanvasConnectClient(
+    async with course_bridge_module.CourseBridgeClient(
         db=SimpleNamespace(),
         lti_class_id=2301,
         key_manager=FakeKeyManager(),
@@ -1934,7 +1932,7 @@ async def test_sync_calls_add_new_users_script_with_lti_class_context(monkeypatc
         registration=registration,
         class_id=321,
         setup_user_id=42,
-        lti_status=canvas_connect_module.LTIStatus.ERROR,
+        lti_status=course_bridge_module.LTIStatus.ERROR,
         last_sync_error="old-error",
         last_synced=None,
     )
@@ -1943,15 +1941,15 @@ async def test_sync_calls_add_new_users_script_with_lti_class_context(monkeypatc
         return lti_class
 
     monkeypatch.setattr(
-        canvas_connect_module.LTIClass,
+        course_bridge_module.LTIClass,
         "get_by_id_with_registration",
         classmethod(_get_by_id_with_registration),
     )
 
-    expected_ucr = canvas_connect_module.CreateUserClassRoles(
+    expected_ucr = course_bridge_module.CreateUserClassRoles(
         roles=[],
         silent=True,
-        lms_type=canvas_connect_module.LMSType.CANVAS,
+        lms_type=course_bridge_module.LMSType.CANVAS,
         lti_class_id=24,
     )
 
@@ -1959,7 +1957,7 @@ async def test_sync_calls_add_new_users_script_with_lti_class_context(monkeypatc
         return expected_ucr
 
     monkeypatch.setattr(
-        canvas_connect_module.CanvasConnectClient,
+        course_bridge_module.CourseBridgeClient,
         "get_nrps_create_user_class_roles",
         _get_nrps_create_user_class_roles,
     )
@@ -1975,12 +1973,12 @@ async def test_sync_calls_add_new_users_script_with_lti_class_context(monkeypatc
             captured["new_ucr"] = new_ucr
 
         async def add_new_users(self):
-            return canvas_connect_module.CreateUserResults(
+            return course_bridge_module.CreateUserResults(
                 results=[{"email": "synced@example.com"}]
             )
 
     monkeypatch.setattr(
-        canvas_connect_module,
+        course_bridge_module,
         "AddNewUsersScript",
         FakeAddNewUsersScript,
     )
@@ -1988,7 +1986,7 @@ async def test_sync_calls_add_new_users_script_with_lti_class_context(monkeypatc
     fixed_now = datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc)
     db = FakeWriteDB()
     authz_client = SimpleNamespace()
-    client = canvas_connect_module.ScriptCanvasConnectClient(
+    client = course_bridge_module.ScriptCourseBridgeClient(
         db=db,
         client=authz_client,
         lti_class_id=24,
@@ -1997,7 +1995,7 @@ async def test_sync_calls_add_new_users_script_with_lti_class_context(monkeypatc
     )
     result = await client.sync_roster()
 
-    assert result == canvas_connect_module.CreateUserResults(
+    assert result == course_bridge_module.CreateUserResults(
         results=[{"email": "synced@example.com"}]
     )
     assert captured["class_id"] == "321"
@@ -2005,7 +2003,7 @@ async def test_sync_calls_add_new_users_script_with_lti_class_context(monkeypatc
     assert captured["session"] is db
     assert captured["client"] is authz_client
     assert captured["new_ucr"] is expected_ucr
-    assert lti_class.lti_status == canvas_connect_module.LTIStatus.LINKED
+    assert lti_class.lti_status == course_bridge_module.LTIStatus.LINKED
     assert lti_class.last_sync_error is None
     assert lti_class.last_synced == fixed_now
     assert db.added == [lti_class]
@@ -2031,19 +2029,19 @@ async def test_sync_raises_when_lti_class_not_linked(monkeypatch):
         return lti_class
 
     monkeypatch.setattr(
-        canvas_connect_module.LTIClass,
+        course_bridge_module.LTIClass,
         "get_by_id_with_registration",
         classmethod(_get_by_id_with_registration),
     )
 
-    client = canvas_connect_module.ScriptCanvasConnectClient(
+    client = course_bridge_module.ScriptCourseBridgeClient(
         db=SimpleNamespace(),
         client=SimpleNamespace(),
         lti_class_id=25,
         key_manager=FakeKeyManager(),
     )
 
-    with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+    with pytest.raises(course_bridge_module.CourseBridgeException) as excinfo:
         await client.sync_roster()
 
     assert excinfo.value.detail == "LTI class is not linked to a PingPong class"
@@ -2068,26 +2066,26 @@ async def test_sync_raises_when_lti_class_missing_setup_user_id(monkeypatch):
         return lti_class
 
     monkeypatch.setattr(
-        canvas_connect_module.LTIClass,
+        course_bridge_module.LTIClass,
         "get_by_id_with_registration",
         classmethod(_get_by_id_with_registration),
     )
 
-    client = canvas_connect_module.ScriptCanvasConnectClient(
+    client = course_bridge_module.ScriptCourseBridgeClient(
         db=SimpleNamespace(),
         client=SimpleNamespace(),
         lti_class_id=26,
         key_manager=FakeKeyManager(),
     )
 
-    with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+    with pytest.raises(course_bridge_module.CourseBridgeException) as excinfo:
         await client.sync_roster()
 
     assert excinfo.value.detail == "LTI class is missing setup_user_id"
 
 
 @pytest.mark.asyncio
-async def test_manual_canvas_connect_sync_roster_enforces_cooldown(monkeypatch):
+async def test_manual_course_bridge_sync_roster_enforces_cooldown(monkeypatch):
     registration = SimpleNamespace(
         client_id="client-123",
         issuer="https://canvas.example.com",
@@ -2101,7 +2099,7 @@ async def test_manual_canvas_connect_sync_roster_enforces_cooldown(monkeypatch):
         class_id=321,
         setup_user_id=42,
         last_synced=fixed_now - timedelta(minutes=5),
-        lti_status=canvas_connect_module.LTIStatus.LINKED,
+        lti_status=course_bridge_module.LTIStatus.LINKED,
         last_sync_error=None,
     )
 
@@ -2109,14 +2107,14 @@ async def test_manual_canvas_connect_sync_roster_enforces_cooldown(monkeypatch):
         return lti_class
 
     monkeypatch.setattr(
-        canvas_connect_module.LTIClass,
+        course_bridge_module.LTIClass,
         "get_by_id_with_registration",
         classmethod(_get_by_id_with_registration),
     )
 
     request = SimpleNamespace(state={"db": FakeWriteDB()})
     tasks = SimpleNamespace()
-    client = canvas_connect_module.ManualCanvasConnectClient(
+    client = course_bridge_module.ManualCourseBridgeClient(
         lti_class_id=27,
         request=request,
         tasks=tasks,
@@ -2124,7 +2122,7 @@ async def test_manual_canvas_connect_sync_roster_enforces_cooldown(monkeypatch):
         nowfn=lambda: fixed_now,
     )
 
-    with pytest.raises(canvas_connect_module.CanvasConnectWarning) as excinfo:
+    with pytest.raises(course_bridge_module.CourseBridgeWarning) as excinfo:
         await client.sync_roster()
 
     assert "recently completed" in excinfo.value.detail
@@ -2137,11 +2135,11 @@ async def test_manual_canvas_connect_sync_roster_enforces_cooldown(monkeypatch):
 
 def test_manual_sync_uses_lti_config_sync_wait(monkeypatch):
     monkeypatch.setattr(
-        canvas_connect_module.config,
+        course_bridge_module.config,
         "lti",
         SimpleNamespace(sync_wait=321),
     )
-    client = canvas_connect_module.ManualCanvasConnectClient(
+    client = course_bridge_module.ManualCourseBridgeClient(
         lti_class_id=1,
         request=SimpleNamespace(state={"db": FakeWriteDB()}),
         tasks=SimpleNamespace(),
@@ -2149,17 +2147,17 @@ def test_manual_sync_uses_lti_config_sync_wait(monkeypatch):
     )
     now = datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc)
 
-    with pytest.raises(canvas_connect_module.CanvasConnectWarning):
+    with pytest.raises(course_bridge_module.CourseBridgeWarning):
         client._sync_allowed(now - timedelta(seconds=200), now)
 
 
 def test_manual_sync_defaults_when_lti_config_missing(monkeypatch):
     monkeypatch.setattr(
-        canvas_connect_module.config,
+        course_bridge_module.config,
         "lti",
         None,
     )
-    client = canvas_connect_module.ManualCanvasConnectClient(
+    client = course_bridge_module.ManualCourseBridgeClient(
         lti_class_id=1,
         request=SimpleNamespace(state={"db": FakeWriteDB()}),
         tasks=SimpleNamespace(),
@@ -2167,12 +2165,12 @@ def test_manual_sync_defaults_when_lti_config_missing(monkeypatch):
     )
     now = datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc)
 
-    with pytest.raises(canvas_connect_module.CanvasConnectWarning):
+    with pytest.raises(course_bridge_module.CourseBridgeWarning):
         client._sync_allowed(now - timedelta(seconds=500), now)
 
 
 @pytest.mark.asyncio
-async def test_manual_canvas_connect_sync_roster_calls_add_new_users_manual(
+async def test_manual_course_bridge_sync_roster_calls_add_new_users_manual(
     monkeypatch,
 ):
     registration = SimpleNamespace(
@@ -2188,7 +2186,7 @@ async def test_manual_canvas_connect_sync_roster_calls_add_new_users_manual(
         class_id=321,
         setup_user_id=42,
         last_synced=fixed_now - timedelta(minutes=30),
-        lti_status=canvas_connect_module.LTIStatus.ERROR,
+        lti_status=course_bridge_module.LTIStatus.ERROR,
         last_sync_error="old-error",
     )
 
@@ -2196,15 +2194,15 @@ async def test_manual_canvas_connect_sync_roster_calls_add_new_users_manual(
         return lti_class
 
     monkeypatch.setattr(
-        canvas_connect_module.LTIClass,
+        course_bridge_module.LTIClass,
         "get_by_id_with_registration",
         classmethod(_get_by_id_with_registration),
     )
 
-    expected_ucr = canvas_connect_module.CreateUserClassRoles(
+    expected_ucr = course_bridge_module.CreateUserClassRoles(
         roles=[],
         silent=True,
-        lms_type=canvas_connect_module.LMSType.CANVAS,
+        lms_type=course_bridge_module.LMSType.CANVAS,
         lti_class_id=28,
     )
 
@@ -2212,7 +2210,7 @@ async def test_manual_canvas_connect_sync_roster_calls_add_new_users_manual(
         return expected_ucr
 
     monkeypatch.setattr(
-        canvas_connect_module.CanvasConnectClient,
+        course_bridge_module.CourseBridgeClient,
         "get_nrps_create_user_class_roles",
         _get_nrps_create_user_class_roles,
     )
@@ -2228,12 +2226,12 @@ async def test_manual_canvas_connect_sync_roster_calls_add_new_users_manual(
             captured["user_id"] = user_id
 
         async def add_new_users(self):
-            return canvas_connect_module.CreateUserResults(
+            return course_bridge_module.CreateUserResults(
                 results=[{"email": "synced@example.com"}]
             )
 
     monkeypatch.setattr(
-        canvas_connect_module,
+        course_bridge_module,
         "AddNewUsersManual",
         FakeAddNewUsersManual,
     )
@@ -2241,7 +2239,7 @@ async def test_manual_canvas_connect_sync_roster_calls_add_new_users_manual(
     db = FakeWriteDB()
     request = SimpleNamespace(state={"db": db})
     tasks = SimpleNamespace()
-    client = canvas_connect_module.ManualCanvasConnectClient(
+    client = course_bridge_module.ManualCourseBridgeClient(
         lti_class_id=28,
         request=request,
         tasks=tasks,
@@ -2250,7 +2248,7 @@ async def test_manual_canvas_connect_sync_roster_calls_add_new_users_manual(
     )
     result = await client.sync_roster()
 
-    assert result == canvas_connect_module.CreateUserResults(
+    assert result == course_bridge_module.CreateUserResults(
         results=[{"email": "synced@example.com"}]
     )
     assert captured["class_id"] == "321"
@@ -2258,7 +2256,7 @@ async def test_manual_canvas_connect_sync_roster_calls_add_new_users_manual(
     assert captured["request"] is request
     assert captured["tasks"] is tasks
     assert captured["user_id"] == 42
-    assert lti_class.lti_status == canvas_connect_module.LTIStatus.LINKED
+    assert lti_class.lti_status == course_bridge_module.LTIStatus.LINKED
     assert lti_class.last_sync_error is None
     assert lti_class.last_synced == fixed_now
     assert db.added == [lti_class]
@@ -2266,7 +2264,7 @@ async def test_manual_canvas_connect_sync_roster_calls_add_new_users_manual(
 
 
 @pytest.mark.asyncio
-async def test_manual_canvas_connect_sync_roster_raises_manual_error_on_failure(
+async def test_manual_course_bridge_sync_roster_raises_manual_error_on_failure(
     monkeypatch,
 ):
     registration = SimpleNamespace(
@@ -2282,7 +2280,7 @@ async def test_manual_canvas_connect_sync_roster_raises_manual_error_on_failure(
         class_id=321,
         setup_user_id=42,
         last_synced=fixed_now - timedelta(minutes=30),
-        lti_status=canvas_connect_module.LTIStatus.LINKED,
+        lti_status=course_bridge_module.LTIStatus.LINKED,
         last_sync_error=None,
     )
 
@@ -2290,15 +2288,15 @@ async def test_manual_canvas_connect_sync_roster_raises_manual_error_on_failure(
         return lti_class
 
     monkeypatch.setattr(
-        canvas_connect_module.LTIClass,
+        course_bridge_module.LTIClass,
         "get_by_id_with_registration",
         classmethod(_get_by_id_with_registration),
     )
 
-    expected_ucr = canvas_connect_module.CreateUserClassRoles(
+    expected_ucr = course_bridge_module.CreateUserClassRoles(
         roles=[],
         silent=True,
-        lms_type=canvas_connect_module.LMSType.CANVAS,
+        lms_type=course_bridge_module.LMSType.CANVAS,
         lti_class_id=281,
     )
 
@@ -2306,7 +2304,7 @@ async def test_manual_canvas_connect_sync_roster_raises_manual_error_on_failure(
         return expected_ucr
 
     monkeypatch.setattr(
-        canvas_connect_module.CanvasConnectClient,
+        course_bridge_module.CourseBridgeClient,
         "get_nrps_create_user_class_roles",
         _get_nrps_create_user_class_roles,
     )
@@ -2319,7 +2317,7 @@ async def test_manual_canvas_connect_sync_roster_raises_manual_error_on_failure(
             raise RuntimeError("downstream-add-users-failure")
 
     monkeypatch.setattr(
-        canvas_connect_module,
+        course_bridge_module,
         "AddNewUsersManual",
         FakeAddNewUsersManual,
     )
@@ -2327,7 +2325,7 @@ async def test_manual_canvas_connect_sync_roster_raises_manual_error_on_failure(
     db = FakeWriteDB()
     request = SimpleNamespace(state={"db": db})
     tasks = SimpleNamespace()
-    client = canvas_connect_module.ManualCanvasConnectClient(
+    client = course_bridge_module.ManualCourseBridgeClient(
         lti_class_id=281,
         request=request,
         tasks=tasks,
@@ -2335,24 +2333,24 @@ async def test_manual_canvas_connect_sync_roster_raises_manual_error_on_failure(
         nowfn=lambda: fixed_now,
     )
 
-    with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+    with pytest.raises(course_bridge_module.CourseBridgeException) as excinfo:
         await client.sync_roster()
 
-    assert "Canvas Connect" in excinfo.value.detail
-    assert lti_class.lti_status == canvas_connect_module.LTIStatus.ERROR
+    assert "CourseBridge" in excinfo.value.detail
+    assert lti_class.lti_status == course_bridge_module.LTIStatus.ERROR
     assert lti_class.last_sync_error == "downstream-add-users-failure"
     assert db.added == [lti_class]
     assert db.flush_count == 1
 
 
 @pytest.mark.asyncio
-async def test_script_canvas_connect_sync_roster_uses_script_client(monkeypatch):
+async def test_script_course_bridge_sync_roster_uses_script_client(monkeypatch):
     captured: dict[str, object] = {}
     fake_lti_class = SimpleNamespace(
         id=29,
         class_id=321,
         setup_user_id=42,
-        lti_status=canvas_connect_module.LTIStatus.LINKED,
+        lti_status=course_bridge_module.LTIStatus.LINKED,
         last_sync_error=None,
         last_synced=None,
     )
@@ -2361,10 +2359,10 @@ async def test_script_canvas_connect_sync_roster_uses_script_client(monkeypatch)
         return fake_lti_class, 321, 42
 
     async def _get_nrps_create_user_class_roles(self):
-        return canvas_connect_module.CreateUserClassRoles(
+        return course_bridge_module.CreateUserClassRoles(
             roles=[],
             silent=True,
-            lms_type=canvas_connect_module.LMSType.CANVAS,
+            lms_type=course_bridge_module.LMSType.CANVAS,
             lti_class_id=29,
         )
 
@@ -2377,29 +2375,29 @@ async def test_script_canvas_connect_sync_roster_uses_script_client(monkeypatch)
             captured["new_ucr"] = new_ucr
 
         async def add_new_users(self):
-            return canvas_connect_module.CreateUserResults(
+            return course_bridge_module.CreateUserResults(
                 results=[{"email": "synced@example.com"}]
             )
 
     monkeypatch.setattr(
-        canvas_connect_module.CanvasConnectClient,
+        course_bridge_module.CourseBridgeClient,
         "_get_sync_context",
         _get_sync_context,
     )
     monkeypatch.setattr(
-        canvas_connect_module.CanvasConnectClient,
+        course_bridge_module.CourseBridgeClient,
         "get_nrps_create_user_class_roles",
         _get_nrps_create_user_class_roles,
     )
     monkeypatch.setattr(
-        canvas_connect_module,
+        course_bridge_module,
         "AddNewUsersScript",
         FakeAddNewUsersScript,
     )
 
     db = FakeWriteDB()
     authz_client = SimpleNamespace()
-    client = canvas_connect_module.ScriptCanvasConnectClient(
+    client = course_bridge_module.ScriptCourseBridgeClient(
         db=db,
         client=authz_client,
         lti_class_id=29,
@@ -2408,7 +2406,7 @@ async def test_script_canvas_connect_sync_roster_uses_script_client(monkeypatch)
     )
     result = await client.sync_roster()
 
-    assert result == canvas_connect_module.CreateUserResults(
+    assert result == course_bridge_module.CreateUserResults(
         results=[{"email": "synced@example.com"}]
     )
     assert captured["class_id"] == "321"
@@ -2418,7 +2416,7 @@ async def test_script_canvas_connect_sync_roster_uses_script_client(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_script_canvas_connect_sync_roster_marks_error_on_row_failures(
+async def test_script_course_bridge_sync_roster_marks_error_on_row_failures(
     monkeypatch,
 ):
     fixed_now = datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc)
@@ -2427,7 +2425,7 @@ async def test_script_canvas_connect_sync_roster_marks_error_on_row_failures(
         id=290,
         class_id=321,
         setup_user_id=42,
-        lti_status=canvas_connect_module.LTIStatus.LINKED,
+        lti_status=course_bridge_module.LTIStatus.LINKED,
         last_sync_error=None,
         last_synced=previous_sync,
     )
@@ -2436,10 +2434,10 @@ async def test_script_canvas_connect_sync_roster_marks_error_on_row_failures(
         return fake_lti_class, 321, 42
 
     async def _get_nrps_create_user_class_roles(self):
-        return canvas_connect_module.CreateUserClassRoles(
+        return course_bridge_module.CreateUserClassRoles(
             roles=[],
             silent=True,
-            lms_type=canvas_connect_module.LMSType.CANVAS,
+            lms_type=course_bridge_module.LMSType.CANVAS,
             lti_class_id=290,
         )
 
@@ -2448,7 +2446,7 @@ async def test_script_canvas_connect_sync_roster_marks_error_on_row_failures(
             pass
 
         async def add_new_users(self):
-            return canvas_connect_module.CreateUserResults(
+            return course_bridge_module.CreateUserResults(
                 results=[
                     {"email": "ok@example.com", "display_name": "OK User"},
                     {
@@ -2460,24 +2458,24 @@ async def test_script_canvas_connect_sync_roster_marks_error_on_row_failures(
             )
 
     monkeypatch.setattr(
-        canvas_connect_module.CanvasConnectClient,
+        course_bridge_module.CourseBridgeClient,
         "_get_sync_context",
         _get_sync_context,
     )
     monkeypatch.setattr(
-        canvas_connect_module.CanvasConnectClient,
+        course_bridge_module.CourseBridgeClient,
         "get_nrps_create_user_class_roles",
         _get_nrps_create_user_class_roles,
     )
     monkeypatch.setattr(
-        canvas_connect_module,
+        course_bridge_module,
         "AddNewUsersScript",
         FakeAddNewUsersScript,
     )
 
     db = FakeWriteDB()
     authz_client = SimpleNamespace()
-    client = canvas_connect_module.ScriptCanvasConnectClient(
+    client = course_bridge_module.ScriptCourseBridgeClient(
         db=db,
         client=authz_client,
         lti_class_id=290,
@@ -2485,12 +2483,12 @@ async def test_script_canvas_connect_sync_roster_marks_error_on_row_failures(
         nowfn=lambda: fixed_now,
     )
 
-    with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+    with pytest.raises(course_bridge_module.CourseBridgeException) as excinfo:
         await client.sync_roster()
 
     assert "failed roster updates" in excinfo.value.detail
     assert "bad@example.com: role update rejected" in excinfo.value.detail
-    assert fake_lti_class.lti_status == canvas_connect_module.LTIStatus.ERROR
+    assert fake_lti_class.lti_status == course_bridge_module.LTIStatus.ERROR
     assert fake_lti_class.last_sync_error == excinfo.value.detail
     assert fake_lti_class.last_synced == previous_sync
     assert db.added == [fake_lti_class]
@@ -2498,7 +2496,7 @@ async def test_script_canvas_connect_sync_roster_marks_error_on_row_failures(
 
 
 @pytest.mark.asyncio
-async def test_script_canvas_connect_sync_roster_skips_class_error_for_global_failure(
+async def test_script_course_bridge_sync_roster_skips_class_error_for_global_failure(
     monkeypatch,
 ):
     fixed_now = datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc)
@@ -2507,7 +2505,7 @@ async def test_script_canvas_connect_sync_roster_skips_class_error_for_global_fa
         id=292,
         class_id=321,
         setup_user_id=42,
-        lti_status=canvas_connect_module.LTIStatus.LINKED,
+        lti_status=course_bridge_module.LTIStatus.LINKED,
         last_sync_error="old-error",
         last_synced=previous_sync,
     )
@@ -2516,24 +2514,24 @@ async def test_script_canvas_connect_sync_roster_skips_class_error_for_global_fa
         return fake_lti_class, 321, 42
 
     async def _get_nrps_create_user_class_roles(self):
-        raise canvas_connect_module.CanvasConnectGlobalException(
+        raise course_bridge_module.CourseBridgeGlobalException(
             detail="LTI service is not configured"
         )
 
     monkeypatch.setattr(
-        canvas_connect_module.CanvasConnectClient,
+        course_bridge_module.CourseBridgeClient,
         "_get_sync_context",
         _get_sync_context,
     )
     monkeypatch.setattr(
-        canvas_connect_module.CanvasConnectClient,
+        course_bridge_module.CourseBridgeClient,
         "get_nrps_create_user_class_roles",
         _get_nrps_create_user_class_roles,
     )
 
     db = FakeWriteDB()
     authz_client = SimpleNamespace()
-    client = canvas_connect_module.ScriptCanvasConnectClient(
+    client = course_bridge_module.ScriptCourseBridgeClient(
         db=db,
         client=authz_client,
         lti_class_id=292,
@@ -2541,11 +2539,11 @@ async def test_script_canvas_connect_sync_roster_skips_class_error_for_global_fa
         nowfn=lambda: fixed_now,
     )
 
-    with pytest.raises(canvas_connect_module.CanvasConnectGlobalException) as excinfo:
+    with pytest.raises(course_bridge_module.CourseBridgeGlobalException) as excinfo:
         await client.sync_roster()
 
     assert excinfo.value.detail == "LTI service is not configured"
-    assert fake_lti_class.lti_status == canvas_connect_module.LTIStatus.LINKED
+    assert fake_lti_class.lti_status == course_bridge_module.LTIStatus.LINKED
     assert fake_lti_class.last_sync_error == "old-error"
     assert fake_lti_class.last_synced == previous_sync
     assert db.added == []
@@ -2553,7 +2551,7 @@ async def test_script_canvas_connect_sync_roster_skips_class_error_for_global_fa
 
 
 @pytest.mark.asyncio
-async def test_manual_canvas_connect_sync_roster_marks_error_on_row_failures(
+async def test_manual_course_bridge_sync_roster_marks_error_on_row_failures(
     monkeypatch,
 ):
     fixed_now = datetime(2026, 2, 10, 10, 0, tzinfo=timezone.utc)
@@ -2562,7 +2560,7 @@ async def test_manual_canvas_connect_sync_roster_marks_error_on_row_failures(
         id=291,
         class_id=321,
         setup_user_id=42,
-        lti_status=canvas_connect_module.LTIStatus.LINKED,
+        lti_status=course_bridge_module.LTIStatus.LINKED,
         last_sync_error=None,
         last_synced=previous_sync,
     )
@@ -2571,10 +2569,10 @@ async def test_manual_canvas_connect_sync_roster_marks_error_on_row_failures(
         return fake_lti_class, 321, 42
 
     async def _get_nrps_create_user_class_roles(self):
-        return canvas_connect_module.CreateUserClassRoles(
+        return course_bridge_module.CreateUserClassRoles(
             roles=[],
             silent=True,
-            lms_type=canvas_connect_module.LMSType.CANVAS,
+            lms_type=course_bridge_module.LMSType.CANVAS,
             lti_class_id=291,
         )
 
@@ -2583,7 +2581,7 @@ async def test_manual_canvas_connect_sync_roster_marks_error_on_row_failures(
             pass
 
         async def add_new_users(self):
-            return canvas_connect_module.CreateUserResults(
+            return course_bridge_module.CreateUserResults(
                 results=[
                     {
                         "email": "broken@example.com",
@@ -2594,17 +2592,17 @@ async def test_manual_canvas_connect_sync_roster_marks_error_on_row_failures(
             )
 
     monkeypatch.setattr(
-        canvas_connect_module.CanvasConnectClient,
+        course_bridge_module.CourseBridgeClient,
         "_get_sync_context",
         _get_sync_context,
     )
     monkeypatch.setattr(
-        canvas_connect_module.CanvasConnectClient,
+        course_bridge_module.CourseBridgeClient,
         "get_nrps_create_user_class_roles",
         _get_nrps_create_user_class_roles,
     )
     monkeypatch.setattr(
-        canvas_connect_module,
+        course_bridge_module,
         "AddNewUsersManual",
         FakeAddNewUsersManual,
     )
@@ -2612,7 +2610,7 @@ async def test_manual_canvas_connect_sync_roster_marks_error_on_row_failures(
     db = FakeWriteDB()
     request = SimpleNamespace(state={"db": db})
     tasks = SimpleNamespace()
-    client = canvas_connect_module.ManualCanvasConnectClient(
+    client = course_bridge_module.ManualCourseBridgeClient(
         lti_class_id=291,
         request=request,
         tasks=tasks,
@@ -2620,14 +2618,14 @@ async def test_manual_canvas_connect_sync_roster_marks_error_on_row_failures(
         nowfn=lambda: fixed_now,
     )
 
-    with pytest.raises(canvas_connect_module.CanvasConnectException) as excinfo:
+    with pytest.raises(course_bridge_module.CourseBridgeException) as excinfo:
         await client.sync_roster()
 
-    assert "Syncing your roster through Canvas Connect failed" in excinfo.value.detail
-    assert fake_lti_class.lti_status == canvas_connect_module.LTIStatus.ERROR
+    assert "Syncing your roster through CourseBridge failed" in excinfo.value.detail
+    assert fake_lti_class.lti_status == course_bridge_module.LTIStatus.ERROR
     assert (
         fake_lti_class.last_sync_error
-        == "Canvas Connect sync had 1 failed roster updates: "
+        == "CourseBridge sync had 1 failed roster updates: "
         "broken@example.com: role update rejected"
     )
     assert fake_lti_class.last_synced == previous_sync
@@ -2636,19 +2634,19 @@ async def test_manual_canvas_connect_sync_roster_marks_error_on_row_failures(
 
 
 @pytest.mark.asyncio
-async def test_canvas_connect_sync_all_skips_class_error_for_global_failure(
+async def test_course_bridge_sync_all_skips_class_error_for_global_failure(
     monkeypatch,
 ):
     lti_class = SimpleNamespace(
         id=301,
-        lti_status=canvas_connect_module.LTIStatus.LINKED,
+        lti_status=course_bridge_module.LTIStatus.LINKED,
         last_sync_error="old-error",
     )
 
     async def _get_all_to_sync(cls, session, sync_classes_with_error_status=False):
         yield lti_class
 
-    class FakeScriptCanvasConnectClient:
+    class FakeScriptCourseBridgeClient:
         def __init__(self, *, db, client, lti_class_id):
             assert db is session
             assert client is authz_client
@@ -2661,29 +2659,29 @@ async def test_canvas_connect_sync_all_skips_class_error_for_global_failure(
             return False
 
         async def sync_roster(self):
-            raise canvas_connect_module.CanvasConnectGlobalException(
+            raise course_bridge_module.CourseBridgeGlobalException(
                 detail="LTI service is not configured"
             )
 
     monkeypatch.setattr(
-        canvas_connect_module.LTIClass,
+        course_bridge_module.LTIClass,
         "get_all_to_sync",
         classmethod(_get_all_to_sync),
     )
     monkeypatch.setattr(
-        canvas_connect_module,
-        "ScriptCanvasConnectClient",
-        FakeScriptCanvasConnectClient,
+        course_bridge_module,
+        "ScriptCourseBridgeClient",
+        FakeScriptCourseBridgeClient,
     )
 
     session = FakeSyncSession()
     authz_client = SimpleNamespace()
 
-    await canvas_connect_module.canvas_connect_sync_all(session, authz_client)
+    await course_bridge_module.course_bridge_sync_all(session, authz_client)
 
     assert len(session.savepoints) == 1
     assert session.savepoints[0].rollback_count == 1
-    assert lti_class.lti_status == canvas_connect_module.LTIStatus.LINKED
+    assert lti_class.lti_status == course_bridge_module.LTIStatus.LINKED
     assert lti_class.last_sync_error == "old-error"
     assert session.added == []
     assert session.commit_count == 1

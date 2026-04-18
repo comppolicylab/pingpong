@@ -64,7 +64,7 @@ from pingpong.migrations.m08_cleanup_invalid_lecture_video_schema_rows import (
 )
 from pingpong.now import _get_next_run_time, croner, utcnow
 from pingpong.schemas import LMSType, RunStatus
-from pingpong.lti.canvas_connect import canvas_connect_sync_all
+from pingpong.lti.course_bridge import course_bridge_sync_all
 from pingpong.summary import send_class_summary_for_class
 
 from .auth import encode_auth_token
@@ -1106,7 +1106,7 @@ async def _lti_sync_all(sync_classes_with_error_status: bool = False) -> None:
     await config.authz.driver.init()
     async with config.db.driver.async_session() as session:
         async with config.authz.driver.get_client() as c:
-            await canvas_connect_sync_all(
+            await course_bridge_sync_all(
                 session=session,
                 authz_client=c,
                 sync_classes_with_error_status=sync_classes_with_error_status,
@@ -1156,7 +1156,7 @@ def sync_pingpong_with_lms(crontime: str, host: str, port: int) -> None:
 @click.option("--sync-with-error", default=False, is_flag=True)
 def sync_lti_all(sync_with_error: bool) -> None:
     """
-    Sync all classes linked through Canvas Connect.
+    Sync all classes linked through CourseBridge.
     """
     asyncio.run(
         _lti_sync_all(

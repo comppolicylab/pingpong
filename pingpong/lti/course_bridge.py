@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pingpong.authz.openfga import OpenFgaAuthzClient
 from pingpong.config import LTISecuritySettings, LTIUrlSecuritySettings, config
 from pingpong.lti.constants import (
-    CANVAS_CONNECT_SYNC_WAIT_DEFAULT_SECONDS,
+    COURSE_BRIDGE_SYNC_WAIT_DEFAULT_SECONDS,
     CLIENT_ASSERTION_EXPIRY_SECONDS,
     CLIENT_ASSERTION_TYPE,
     CLIENT_CREDENTIALS_GRANT_TYPE,
@@ -59,7 +59,7 @@ from pingpong.models import (
 from pingpong.now import NowFn, utcnow
 from pingpong.schemas import (
     ClassUserRoles,
-    CanvasConnectAccessToken,
+    CourseBridgeAccessToken,
     CreateUserClassRole,
     CreateUserClassRoles,
     CreateUserResults,
@@ -125,7 +125,7 @@ def _extract_sync_row_errors(results: CreateUserResults) -> list[str]:
 def _require_lti_security() -> LTISecuritySettings:
     lti_settings = config.lti
     if lti_settings is None:
-        raise CanvasConnectGlobalException(detail="LTI service is not configured")
+        raise CourseBridgeGlobalException(detail="LTI service is not configured")
     return lti_settings.security
 
 
@@ -133,26 +133,26 @@ def _allow_redirects_or_raise(security_config: LTIUrlSecuritySettings) -> bool:
     try:
         return allow_redirects(security_config)
     except ValueError as e:
-        raise CanvasConnectException(detail=str(e)) from e
+        raise CourseBridgeException(detail=str(e)) from e
 
 
-class CanvasConnectException(Exception):
+class CourseBridgeException(Exception):
     def __init__(self, detail: str = ""):
         self.detail = detail
         super().__init__(detail)
 
 
-class CanvasConnectGlobalException(CanvasConnectException):
+class CourseBridgeGlobalException(CourseBridgeException):
     """Raised for deployment-wide failures that should not mutate class state."""
 
 
-class CanvasConnectWarning(Exception):
+class CourseBridgeWarning(Exception):
     def __init__(self, detail: str = ""):
         self.detail = detail
         super().__init__(detail)
 
 
-class CanvasConnectClient:
+class CourseBridgeClient:
     def __init__(
         self,
         db: AsyncSession,
@@ -165,14 +165,14 @@ class CanvasConnectClient:
         self.nowfn = nowfn
         if key_manager is None:
             if config.lti is None:
-                raise CanvasConnectGlobalException(
+                raise CourseBridgeGlobalException(
                     detail="LTI service is not configured",
                 )
             key_manager = config.lti.key_store.key_manager
         self.key_manager = key_manager
         self.http_session: aiohttp.ClientSession | None = None
         self._cached_lti_class: LTIClass | None = None
-        self._cached_nrps_access_token: CanvasConnectAccessToken | None = None
+        self._cached_nrps_access_token: CourseBridgeAccessToken | None = None
         self._cached_nrps_access_token_valid_until: int | None = None
 
     async def __aenter__(self):
@@ -189,7 +189,7 @@ class CanvasConnectClient:
     def _require_http_session(self) -> aiohttp.ClientSession:
         if self.http_session is None:
             raise RuntimeError(
-                "CanvasConnectClient must be used as an async context manager"
+                "CourseBridgeClient must be used as an async context manager"
             )
         return self.http_session
 
@@ -199,7 +199,7 @@ class CanvasConnectClient:
             try:
                 openid_configuration = json.loads(registration.openid_configuration)
             except json.JSONDecodeError as e:
-                raise CanvasConnectException(
+                raise CourseBridgeException(
                     detail="Invalid OpenID configuration for LTI registration",
                 ) from e
 
@@ -212,7 +212,7 @@ class CanvasConnectClient:
         if isinstance(registration.auth_token_url, str) and registration.auth_token_url:
             return registration.auth_token_url
 
-        raise CanvasConnectException(
+        raise CourseBridgeException(
             detail="LTI registration is missing a token endpoint",
         )
 
@@ -224,9 +224,9 @@ class CanvasConnectClient:
             self.db, self.lti_class_id
         )
         if not lti_class:
-            raise CanvasConnectException(detail="LTI class not found")
+            raise CourseBridgeException(detail="LTI class not found")
         if lti_class.registration is None:
-            raise CanvasConnectException(
+            raise CourseBridgeException(
                 detail="LTI registration not found for class",
             )
 
@@ -236,11 +236,11 @@ class CanvasConnectClient:
     async def _build_client_assertion(self, client_id: str, token_endpoint: str) -> str:
         key = await self.key_manager.get_current_key()
         if key is None:
-            raise CanvasConnectException(
+            raise CourseBridgeException(
                 detail="No LTI signing key is available",
             )
         if key.algorithm != "RS256":
-            raise CanvasConnectException(
+            raise CourseBridgeException(
                 detail="LTI signing key algorithm must be RS256",
             )
 
@@ -279,7 +279,7 @@ class CanvasConnectClient:
         ):
             return existing_context_memberships_url
 
-        raise CanvasConnectException(
+        raise CourseBridgeException(
             detail="LTI class is missing context_memberships_url",
         )
 
@@ -331,7 +331,7 @@ class CanvasConnectClient:
         try:
             generated_url = generate_names_and_role_api_url(url)
         except ValueError as e:
-            raise CanvasConnectException(
+            raise CourseBridgeException(
                 detail=f"Invalid NRPS URL: {e!s}",
             ) from e
         access_token = await self.get_short_lived_auth_token()
@@ -367,13 +367,13 @@ class CanvasConnectClient:
                     detail = _extract_error_detail(response_payload)
                     if not detail:
                         detail = (await response.text()).strip()
-                    raise CanvasConnectException(
+                    raise CourseBridgeException(
                         detail=detail or "Failed to fetch NRPS page",
                     )
 
                 response_payload_dict = _as_dict(response_payload)
                 if response_payload_dict is None:
-                    raise CanvasConnectException(
+                    raise CourseBridgeException(
                         detail="Invalid NRPS response payload",
                     )
 
@@ -382,9 +382,9 @@ class CanvasConnectClient:
                 )
                 return response_payload_dict, next_page_url
         except ValueError as e:
-            raise CanvasConnectException(detail=f"Invalid NRPS URL: {e!s}") from e
+            raise CourseBridgeException(detail=f"Invalid NRPS URL: {e!s}") from e
         except aiohttp.TooManyRedirects as e:
-            raise CanvasConnectException(
+            raise CourseBridgeException(
                 detail="Too many redirects for NRPS endpoint",
             ) from e
 
@@ -397,7 +397,7 @@ class CanvasConnectClient:
             try:
                 normalized_next_page = generate_names_and_role_api_url(next_page)
             except ValueError as e:
-                raise CanvasConnectException(
+                raise CourseBridgeException(
                     detail=f"Invalid NRPS URL: {e!s}",
                 ) from e
 
@@ -407,7 +407,7 @@ class CanvasConnectClient:
                     self.lti_class_id,
                     normalized_next_page,
                 )
-                raise CanvasConnectException(
+                raise CourseBridgeException(
                     detail="NRPS pagination loop detected while fetching memberships",
                 )
             seen_pages.add(normalized_next_page)
@@ -568,7 +568,7 @@ class CanvasConnectClient:
             if members is None:
                 members = []
             if not isinstance(members, list):
-                raise CanvasConnectException(detail="NRPS response has invalid members")
+                raise CourseBridgeException(detail="NRPS response has invalid members")
 
             for member in members:
                 member_dict = _as_dict(member)
@@ -603,14 +603,14 @@ class CanvasConnectClient:
         sso_tenant = None
         if sso_provider_ids:
             if len(sso_provider_ids) > 1:
-                raise CanvasConnectException(
+                raise CourseBridgeException(
                     detail="NRPS response contains multiple sso_provider_id values",
                 )
 
             sso_provider_id = next(iter(sso_provider_ids))
             provider = await ExternalLoginProvider.get_by_id(self.db, sso_provider_id)
             if provider is None:
-                raise CanvasConnectException(
+                raise CourseBridgeException(
                     detail=f"Unknown SSO provider id in NRPS response: {sso_provider_id}",
                 )
             sso_tenant = provider.name
@@ -628,13 +628,13 @@ class CanvasConnectClient:
 
         class_id = lti_class.class_id
         if not isinstance(class_id, int):
-            raise CanvasConnectException(
+            raise CourseBridgeException(
                 detail="LTI class is not linked to a PingPong class",
             )
 
         setup_user_id = lti_class.setup_user_id
         if not isinstance(setup_user_id, int):
-            raise CanvasConnectException(
+            raise CourseBridgeException(
                 detail="LTI class is missing setup_user_id",
             )
 
@@ -650,7 +650,7 @@ class CanvasConnectClient:
     async def _mark_sync_error(
         self, lti_class: LTIClass, detail: str | None = None
     ) -> None:
-        lti_class.last_sync_error = detail or "Canvas Connect sync failed"
+        lti_class.last_sync_error = detail or "CourseBridge sync failed"
         lti_class.lti_status = LTIStatus.ERROR
         self.db.add(lti_class)
         await self.db.flush()
@@ -658,11 +658,11 @@ class CanvasConnectClient:
     def _sync_allowed(self, last_synced: datetime | None, now: datetime) -> None:
         """Guard whether sync should proceed.
 
-        Implementations should raise an exception (typically CanvasConnectWarning)
+        Implementations should raise an exception (typically CourseBridgeWarning)
         when sync must be blocked; otherwise they should simply return.
         """
         raise NotImplementedError(
-            "CanvasConnectClient subclasses must implement _sync_allowed"
+            "CourseBridgeClient subclasses must implement _sync_allowed"
         )
 
     async def _update_user_roles(
@@ -672,12 +672,12 @@ class CanvasConnectClient:
         new_ucr: CreateUserClassRoles,
     ) -> CreateUserResults:
         raise NotImplementedError(
-            "CanvasConnectClient subclasses must implement _update_user_roles"
+            "CourseBridgeClient subclasses must implement _update_user_roles"
         )
 
     def _raise_sync_error_if_manual(self) -> None:
         raise NotImplementedError(
-            "CanvasConnectClient subclasses must implement _raise_sync_error_if_manual"
+            "CourseBridgeClient subclasses must implement _raise_sync_error_if_manual"
         )
 
     async def sync_roster(self) -> CreateUserResults:
@@ -698,13 +698,13 @@ class CanvasConnectClient:
                     if overflow_count > 0
                     else ""
                 )
-                raise CanvasConnectException(
+                raise CourseBridgeException(
                     detail=(
-                        f"Canvas Connect sync had {len(row_errors)} failed roster updates: "
+                        f"CourseBridge sync had {len(row_errors)} failed roster updates: "
                         f"{displayed_row_errors}{overflow_suffix}"
                     )
                 )
-        except (CanvasConnectWarning, CanvasConnectGlobalException):
+        except (CourseBridgeWarning, CourseBridgeGlobalException):
             raise
         except Exception as e:
             await self._mark_sync_error(lti_class, exception_detail(e))
@@ -723,7 +723,7 @@ class CanvasConnectClient:
             int(self.nowfn().timestamp()) < self._cached_nrps_access_token_valid_until
         )
 
-    def _cache_nrps_access_token(self, token: CanvasConnectAccessToken) -> None:
+    def _cache_nrps_access_token(self, token: CourseBridgeAccessToken) -> None:
         now_ts = int(self.nowfn().timestamp())
         expires_in = token.expires_in
         if expires_in is None:
@@ -734,7 +734,7 @@ class CanvasConnectClient:
         self._cached_nrps_access_token = token
         self._cached_nrps_access_token_valid_until = now_ts + valid_for
 
-    async def _request_nrps_access_token(self) -> CanvasConnectAccessToken:
+    async def _request_nrps_access_token(self) -> CourseBridgeAccessToken:
         http_session = self._require_http_session()
         security_settings = _require_lti_security()
 
@@ -742,7 +742,7 @@ class CanvasConnectClient:
         registration = lti_class.registration
         client_id = registration.client_id
         if not isinstance(client_id, str) or not client_id:
-            raise CanvasConnectException(
+            raise CourseBridgeException(
                 detail="LTI registration is missing a client_id",
             )
 
@@ -750,7 +750,7 @@ class CanvasConnectClient:
         try:
             generated_token_endpoint = generate_token_endpoint_url(token_endpoint)
         except ValueError as e:
-            raise CanvasConnectException(
+            raise CourseBridgeException(
                 detail=f"Invalid token endpoint URL: {e!s}",
             ) from e
         client_assertion = await self._build_client_assertion(
@@ -787,41 +787,41 @@ class CanvasConnectClient:
                     detail = _extract_error_detail(response_payload)
                     if not detail:
                         detail = (await response.text()).strip()
-                    raise CanvasConnectException(
+                    raise CourseBridgeException(
                         detail=detail or "Failed to request NRPS access token",
                     )
         except ValueError as e:
-            raise CanvasConnectException(
+            raise CourseBridgeException(
                 detail=f"Invalid token endpoint URL: {e!s}",
             ) from e
         except aiohttp.TooManyRedirects as e:
-            raise CanvasConnectException(
+            raise CourseBridgeException(
                 detail="Too many redirects for token endpoint",
             ) from e
 
         response_payload_dict = _as_dict(response_payload)
         if response_payload_dict is None:
-            raise CanvasConnectException(
+            raise CourseBridgeException(
                 detail="Invalid token response payload",
             )
 
         access_token = response_payload_dict.get("access_token")
         if not isinstance(access_token, str) or not access_token:
-            raise CanvasConnectException(
+            raise CourseBridgeException(
                 detail="Token endpoint response is missing access_token",
             )
 
         token_type = response_payload_dict.get("token_type")
         scope = response_payload_dict.get("scope")
 
-        return CanvasConnectAccessToken(
+        return CourseBridgeAccessToken(
             access_token=access_token,
             expires_in=_as_optional_int(response_payload_dict.get("expires_in")),
             token_type=token_type if isinstance(token_type, str) else None,
             scope=scope if isinstance(scope, str) else None,
         )
 
-    async def get_nrps_access_token(self) -> CanvasConnectAccessToken:
+    async def get_nrps_access_token(self) -> CourseBridgeAccessToken:
         if self._has_valid_cached_nrps_access_token():
             cached_token = self._cached_nrps_access_token
             if cached_token is not None:
@@ -836,7 +836,7 @@ class CanvasConnectClient:
         return token.access_token
 
 
-class ManualCanvasConnectClient(CanvasConnectClient):
+class ManualCourseBridgeClient(CourseBridgeClient):
     def __init__(
         self,
         lti_class_id: int,
@@ -859,15 +859,15 @@ class ManualCanvasConnectClient(CanvasConnectClient):
         sync_wait_seconds = (
             lti_settings.sync_wait
             if lti_settings is not None
-            else CANVAS_CONNECT_SYNC_WAIT_DEFAULT_SECONDS
+            else COURSE_BRIDGE_SYNC_WAIT_DEFAULT_SECONDS
         )
         if last_synced and last_synced + timedelta(seconds=sync_wait_seconds) > now:
             time_remaining = (
                 last_synced + timedelta(seconds=sync_wait_seconds) - now
             ).total_seconds() + 1
-            raise CanvasConnectWarning(
+            raise CourseBridgeWarning(
                 detail=(
-                    "A roster sync through Canvas Connect was recently completed. "
+                    "A roster sync through CourseBridge was recently completed. "
                     "Please wait before trying again. You can request a manual sync in "
                     f"{convert_seconds(int(time_remaining)) if int(time_remaining) > 60 else 'a minute'}."
                 ),
@@ -888,12 +888,12 @@ class ManualCanvasConnectClient(CanvasConnectClient):
         ).add_new_users()
 
     def _raise_sync_error_if_manual(self) -> None:
-        raise CanvasConnectException(
-            detail="Syncing your roster through Canvas Connect failed. Please try again later.",
+        raise CourseBridgeException(
+            detail="Syncing your roster through CourseBridge failed. Please try again later.",
         )
 
 
-class ScriptCanvasConnectClient(CanvasConnectClient):
+class ScriptCourseBridgeClient(CourseBridgeClient):
     def __init__(
         self,
         db: AsyncSession,
@@ -932,7 +932,7 @@ class ScriptCanvasConnectClient(CanvasConnectClient):
         return None
 
 
-async def canvas_connect_sync_all(
+async def course_bridge_sync_all(
     session: AsyncSession,
     authz_client: OpenFgaAuthzClient,
     sync_classes_with_error_status: bool = False,
@@ -943,7 +943,7 @@ async def canvas_connect_sync_all(
         logger.info(f"Syncing LTI class {lti_class.id}...")
         async with session.begin_nested() as savepoint:
             try:
-                async with ScriptCanvasConnectClient(
+                async with ScriptCourseBridgeClient(
                     db=session,
                     client=authz_client,
                     lti_class_id=lti_class.id,
@@ -953,7 +953,7 @@ async def canvas_connect_sync_all(
                 logger.exception(f"Error syncing LTI class {lti_class.id}: {e}")
                 await savepoint.rollback()
 
-                if isinstance(e, CanvasConnectGlobalException):
+                if isinstance(e, CourseBridgeGlobalException):
                     continue
 
                 # sync_roster() already marks the class as errored, but that write is part

@@ -168,10 +168,10 @@ from .files import (
     validate_private_file_delete_permissions,
 )
 from .log_utils import sanitize_for_log
-from .lti.canvas_connect import (
-    CanvasConnectException,
-    CanvasConnectWarning,
-    ManualCanvasConnectClient,
+from .lti.course_bridge import (
+    CourseBridgeException,
+    CourseBridgeWarning,
+    ManualCourseBridgeClient,
 )
 from .merge import list_all_permissions, merge
 from .now import NowFn, utcnow
@@ -2078,28 +2078,28 @@ async def sync_lti_class_roster(
             status_code=400, detail="LTI class does not belong to the specified class"
         )
 
-    async with ManualCanvasConnectClient(
+    async with ManualCourseBridgeClient(
         lti_class_id=lti_class.id, request=request, tasks=tasks
     ) as client:
         try:
             await client.sync_roster()
-        except CanvasConnectWarning as e:
+        except CourseBridgeWarning as e:
             raise HTTPException(
                 status_code=400,
                 detail=e.detail
-                or "A roster sync through Canvas Connect was recently completed.",
+                or "A roster sync through CourseBridge was recently completed.",
             ) from e
-        except CanvasConnectException as e:
+        except CourseBridgeException as e:
             raise HTTPException(
                 status_code=500,
                 detail=e.detail
-                or "Syncing your roster through Canvas Connect failed. Please try again later.",
+                or "Syncing your roster through CourseBridge failed. Please try again later.",
             ) from e
         except Exception as e:
             logger.exception("sync_lti_class_roster: Exception occurred")
             raise HTTPException(
                 status_code=500,
-                detail="We faced an internal error while syncing with Canvas Connect.",
+                detail="We faced an internal error while syncing with CourseBridge.",
             ) from e
 
     return {"status": "ok"}
@@ -12476,10 +12476,10 @@ try:
         from pingpong.lti.server import lti_router
 
         v1.include_router(lti_router, prefix="/lti")
-        logger.info("Mounted Canvas Connect routes")
+        logger.info("Mounted CourseBridge routes")
 except Exception:
     # If LTI is not configured or import fails, skip mounting
-    logger.exception("Failed to mount Canvas Connect routes.")
+    logger.exception("Failed to mount CourseBridge routes.")
 
 
 @app.get("/health")

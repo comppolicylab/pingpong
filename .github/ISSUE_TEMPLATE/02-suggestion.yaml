@@ -19,7 +19,7 @@ body:
       label: Which area are you seeing an issue with?
       options:
         - Assistants
-        - Canvas Integration
+        - CourseBridge & Canvas Sync integrations
         - Data & Sharing (Activity Summaries, Anonymous Sessions, Thread Exports)
         - Files
         - Groups
