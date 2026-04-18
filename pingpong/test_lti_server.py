@@ -10,12 +10,20 @@ from yarl import URL
 
 import pingpong.config as config_module
 from pingpong.lti import server as server_module
+from pingpong.lti.constants import CANVAS_MESSAGE_PLACEMENT
+from pingpong.lti.platforms import canvas as canvas_module
+from pingpong.lti.platforms.canvas import CanvasPlatformHandler
 from pingpong.lti.schemas import (
     LTIRegisterRequest,
     LTISetupCreateRequest,
     LTISetupLinkRequest,
 )
-from pingpong.schemas import LMSPlatform, LTIRegistrationReviewStatus, LTIStatus
+from pingpong.schemas import (
+    LMSType,
+    LMSPlatform,
+    LTIRegistrationReviewStatus,
+    LTIStatus,
+)
 
 
 class FakeResponse:
@@ -666,7 +674,7 @@ def test_get_claim_object_returns_dict_for_dict_claim():
     )
 
 
-def test_parse_lti_context_and_nrps_filters_non_string_values():
+def test_canvas_extract_course_metadata_filters_non_string_values():
     claims = {
         server_module.LTI_CLAIM_CONTEXT_KEY: {
             "label": 123,
@@ -677,23 +685,18 @@ def test_parse_lti_context_and_nrps_filters_non_string_values():
         },
     }
 
-    (
-        course_code,
-        course_name,
-        course_term,
-        context_memberships_url,
-    ) = server_module.parse_lti_context_and_nrps(
+    metadata = CanvasPlatformHandler().extract_course_metadata(
         claims,
         {"canvas_term_name": {"name": "Fall"}},
     )
 
-    assert course_code is None
-    assert course_name is None
-    assert course_term is None
-    assert context_memberships_url == "https://example.com/nrps"
+    assert metadata.course_code is None
+    assert metadata.course_name is None
+    assert metadata.course_term is None
+    assert metadata.context_memberships_url == "https://example.com/nrps"
 
 
-def test_parse_lti_context_and_nrps_rejects_invalid_context_memberships_url():
+def test_canvas_extract_course_metadata_rejects_invalid_context_memberships_url():
     claims = {
         server_module.LTI_CLAIM_NRPS_KEY: {
             "context_memberships_url": "not-a-url",
@@ -701,14 +704,14 @@ def test_parse_lti_context_and_nrps_rejects_invalid_context_memberships_url():
     }
 
     with pytest.raises(HTTPException) as excinfo:
-        server_module.parse_lti_context_and_nrps(claims, {})
+        CanvasPlatformHandler().extract_course_metadata(claims, {})
 
     assert excinfo.value.status_code == 400
     assert excinfo.value.detail == "Invalid context_memberships_url"
 
 
 @pytest.mark.parametrize("claim_value", ["", "   "])
-def test_parse_lti_context_and_nrps_treats_blank_context_memberships_url_as_missing(
+def test_canvas_extract_course_metadata_treats_blank_context_memberships_url_as_missing(
     claim_value,
 ):
     claims = {
@@ -717,11 +720,9 @@ def test_parse_lti_context_and_nrps_treats_blank_context_memberships_url_as_miss
         },
     }
 
-    _, _, _, context_memberships_url = server_module.parse_lti_context_and_nrps(
-        claims, {}
-    )
+    metadata = CanvasPlatformHandler().extract_course_metadata(claims, {})
 
-    assert context_memberships_url is None
+    assert metadata.context_memberships_url is None
 
 
 def test_get_lti_key_manager_missing_config(monkeypatch):
@@ -759,34 +760,82 @@ async def test_get_jwks_error():
 
 
 @pytest.mark.asyncio
-async def test_get_public_sso_providers(monkeypatch):
+async def test_get_lti_register_setup_canvas(monkeypatch):
     providers = [
         SimpleNamespace(id=1, name="email", display_name="Email"),
         SimpleNamespace(id=2, name="saml", display_name="SAML"),
+        SimpleNamespace(id=3, name="okta", display_name="Okta", internal_only=True),
     ]
+    institutions = [
+        SimpleNamespace(id=2, name="B", default_api_key_id=5),
+    ]
+    monkeypatch.setattr(
+        server_module,
+        "_resolve_platform",
+        lambda openid_configuration, registration_token: _async_return(
+            (LMSPlatform.CANVAS, {})
+        ),
+    )
     monkeypatch.setattr(
         server_module.ExternalLoginProvider,
         "get_all",
         lambda db: _async_return(providers),
     )
-    request = FakeRequest(state=SimpleNamespace(db="db"))
-    result = await server_module.get_public_sso_providers(request)
-    assert result["providers"] == [{"id": 2, "name": "saml", "display_name": "SAML"}]
-
-
-@pytest.mark.asyncio
-async def test_get_public_institutions(monkeypatch):
-    institutions = [
-        SimpleNamespace(id=2, name="B", default_api_key_id=5),
-    ]
     monkeypatch.setattr(
         server_module.Institution,
         "get_all_with_default_api_key",
         lambda db: _async_return(institutions),
     )
     request = FakeRequest(state=SimpleNamespace(db="db"))
-    result = await server_module.get_public_institutions(request)
+    result = await server_module.get_lti_register_setup(
+        request,
+        SimpleNamespace(
+            openid_configuration="https://platform.example.com/openid",
+            registration_token="token",
+        ),
+    )
+    assert result["providers"] == [{"id": 2, "name": "saml", "display_name": "SAML"}]
     assert result["institutions"] == [{"id": 2, "name": "B"}]
+    assert result["show_course_navigation_control"] is True
+
+
+@pytest.mark.asyncio
+async def test_get_lti_register_setup_harvard_lxp(monkeypatch):
+    providers = [
+        SimpleNamespace(id=1, name="email", display_name="Email"),
+        SimpleNamespace(id=2, name="saml", display_name="SAML"),
+    ]
+    institutions = [
+        SimpleNamespace(id=2, name="B", default_api_key_id=5),
+    ]
+    monkeypatch.setattr(
+        server_module,
+        "_resolve_platform",
+        lambda openid_configuration, registration_token: _async_return(
+            (LMSPlatform.HARVARD_LXP, {})
+        ),
+    )
+    monkeypatch.setattr(
+        server_module.ExternalLoginProvider,
+        "get_all",
+        lambda db: _async_return(providers),
+    )
+    monkeypatch.setattr(
+        server_module.Institution,
+        "get_all_with_default_api_key",
+        lambda db: _async_return(institutions),
+    )
+    request = FakeRequest(state=SimpleNamespace(db="db"))
+    result = await server_module.get_lti_register_setup(
+        request,
+        SimpleNamespace(
+            openid_configuration="https://platform.example.com/openid",
+            registration_token="token",
+        ),
+    )
+    assert result["providers"] == []
+    assert result["institutions"] == [{"id": 2, "name": "B"}]
+    assert result["show_course_navigation_control"] is False
 
 
 @pytest.mark.asyncio
@@ -796,7 +845,7 @@ async def test_register_lti_instance_success(monkeypatch):
         "messages_supported": [
             {
                 "type": "LtiResourceLinkRequest",
-                "placements": [server_module.CANVAS_MESSAGE_PLACEMENT],
+                "placements": [CANVAS_MESSAGE_PLACEMENT],
             }
         ],
     }
@@ -876,7 +925,7 @@ async def test_register_lti_instance_rejects_non_string_registration_endpoint(
         "messages_supported": [
             {
                 "type": "LtiResourceLinkRequest",
-                "placements": [server_module.CANVAS_MESSAGE_PLACEMENT],
+                "placements": [CANVAS_MESSAGE_PLACEMENT],
             }
         ],
     }
@@ -1046,7 +1095,7 @@ async def test_register_lti_instance_rejects_invalid_authorization_endpoint(
         "messages_supported": [
             {
                 "type": "LtiResourceLinkRequest",
-                "placements": [server_module.CANVAS_MESSAGE_PLACEMENT],
+                "placements": [CANVAS_MESSAGE_PLACEMENT],
             }
         ],
     }
@@ -1101,7 +1150,7 @@ async def test_register_lti_instance_does_not_forward_auth_to_openid_redirect(
         "messages_supported": [
             {
                 "type": "LtiResourceLinkRequest",
-                "placements": [server_module.CANVAS_MESSAGE_PLACEMENT],
+                "placements": [CANVAS_MESSAGE_PLACEMENT],
             }
         ],
     }
@@ -1194,7 +1243,7 @@ async def test_register_lti_instance_preserves_auth_on_same_origin_openid_redire
         "messages_supported": [
             {
                 "type": "LtiResourceLinkRequest",
-                "placements": [server_module.CANVAS_MESSAGE_PLACEMENT],
+                "placements": [CANVAS_MESSAGE_PLACEMENT],
             }
         ],
     }
@@ -1289,7 +1338,7 @@ async def test_register_lti_instance_returns_bad_gateway_for_invalid_registratio
         "messages_supported": [
             {
                 "type": "LtiResourceLinkRequest",
-                "placements": [server_module.CANVAS_MESSAGE_PLACEMENT],
+                "placements": [CANVAS_MESSAGE_PLACEMENT],
             }
         ],
     }
@@ -1347,7 +1396,7 @@ async def test_register_lti_instance_converts_post_302_redirect_to_get(
         "messages_supported": [
             {
                 "type": "LtiResourceLinkRequest",
-                "placements": [server_module.CANVAS_MESSAGE_PLACEMENT],
+                "placements": [CANVAS_MESSAGE_PLACEMENT],
             }
         ],
     }
@@ -1498,7 +1547,7 @@ async def test_register_lti_instance_rejects_registration_redirect_to_unallowlis
                     "messages_supported": [
                         {
                             "type": "LtiResourceLinkRequest",
-                            "placements": [server_module.CANVAS_MESSAGE_PLACEMENT],
+                            "placements": [CANVAS_MESSAGE_PLACEMENT],
                         }
                     ],
                 },
@@ -2361,7 +2410,7 @@ async def test_lti_launch_rejects_invalid_context_memberships_url(monkeypatch):
         lambda *args, **kwargs: _async_return(True),
     )
     monkeypatch.setattr(
-        server_module,
+        canvas_module,
         "find_class_by_course_id",
         lambda *args, **kwargs: _async_return(None),
     )
@@ -2430,7 +2479,7 @@ async def test_lti_launch_no_recognized_roles(monkeypatch):
         lambda *args, **kwargs: _async_return(True),
     )
     monkeypatch.setattr(
-        server_module,
+        canvas_module,
         "find_class_by_course_id",
         lambda *args, **kwargs: _async_return(None),
     )
@@ -2485,7 +2534,7 @@ async def test_lti_launch_missing_email(monkeypatch):
         lambda *args, **kwargs: _async_return(True),
     )
     monkeypatch.setattr(
-        server_module,
+        canvas_module,
         "find_class_by_course_id",
         lambda *args, **kwargs: _async_return(None),
     )
@@ -2541,7 +2590,7 @@ async def test_lti_launch_unknown_sso_provider(monkeypatch):
         lambda *args, **kwargs: _async_return(True),
     )
     monkeypatch.setattr(
-        server_module,
+        canvas_module,
         "find_class_by_course_id",
         lambda *args, **kwargs: _async_return(None),
     )
@@ -2608,7 +2657,7 @@ async def test_lti_launch_instructor_pending_class_redirect(monkeypatch):
         lambda *args, **kwargs: _async_return(True),
     )
     monkeypatch.setattr(
-        server_module,
+        canvas_module,
         "find_class_by_course_id",
         lambda *args, **kwargs: _async_return(None),
     )
@@ -2682,7 +2731,7 @@ async def test_lti_launch_admin_and_instructor_pending_class_redirect(monkeypatc
         lambda *args, **kwargs: _async_return(True),
     )
     monkeypatch.setattr(
-        server_module,
+        canvas_module,
         "find_class_by_course_id",
         lambda *args, **kwargs: _async_return(None),
     )
@@ -2746,7 +2795,7 @@ async def test_lti_launch_admin_only_no_user_redirect(monkeypatch):
         lambda *args, **kwargs: _async_return(True),
     )
     monkeypatch.setattr(
-        server_module,
+        canvas_module,
         "find_class_by_course_id",
         lambda *args, **kwargs: _async_return(None),
     )
@@ -2806,7 +2855,7 @@ async def test_lti_launch_student_no_group_redirect(monkeypatch):
         lambda *args, **kwargs: _async_return(True),
     )
     monkeypatch.setattr(
-        server_module,
+        canvas_module,
         "find_class_by_course_id",
         lambda *args, **kwargs: _async_return(None),
     )
@@ -2874,7 +2923,7 @@ async def test_lti_launch_existing_lti_class_setup_user(monkeypatch):
         lambda *args, **kwargs: _async_return(True),
     )
     monkeypatch.setattr(
-        server_module,
+        canvas_module,
         "find_class_by_course_id",
         lambda *args, **kwargs: _async_return(lti_class),
     )
@@ -2896,6 +2945,91 @@ async def test_lti_launch_existing_lti_class_setup_user(monkeypatch):
 
     assert response.status_code == 302
     assert response.headers["location"].endswith("/group/99?lti_session=token")
+
+
+@pytest.mark.asyncio
+async def test_lti_launch_harvard_lxp_existing_lti_class_add_user(monkeypatch):
+    from pingpong.lti.platforms import harvard_lxp as lxp_module
+
+    oidc_session = _make_oidc_session(
+        redirect_uri=server_module.config.url("/api/v1/lti/launch")
+    )
+    registration = _make_registration(
+        review_status=LTIRegistrationReviewStatus.APPROVED, enabled=True
+    )
+    registration.lms_platform = LMSPlatform.HARVARD_LXP
+    linked_class = SimpleNamespace(
+        id=99,
+        lms_user_id=10,
+        lms_course_id="course-1",
+        lms_tenant=None,
+        lms_type=None,
+    )
+    claims = {
+        "nonce": "nonce",
+        "email": "user@example.com",
+        server_module.LTI_CLAIM_CUSTOM_KEY: {"sso_provider_id": "0"},
+        server_module.LTI_CLAIM_CONTEXT_KEY: {
+            "id": "course-1",
+            "title": "Learning Experience Showcase",
+        },
+        server_module.LTI_CLAIM_ROLES_KEY: [
+            "http://purl.imsglobal.org/vocab/lis/v2/membership#Instructor"
+        ],
+    }
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "get_by_state",
+        lambda db, state: _async_return(oidc_session),
+    )
+    monkeypatch.setattr(
+        server_module.LTIRegistration,
+        "get_by_client_id",
+        lambda db, client_id: _async_return(registration),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "_verify_lti_id_token",
+        lambda **kwargs: _async_return(claims),
+    )
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "validate_and_consume",
+        lambda *args, **kwargs: _async_return(True),
+    )
+    monkeypatch.setattr(
+        lxp_module,
+        "find_class_by_course_id",
+        lambda *args, **kwargs: _async_return(linked_class),
+    )
+
+    captured: dict[str, object] = {}
+
+    class FakeAddUsers:
+        def __init__(self, *args, **kwargs):
+            captured["new_ucr"] = args[1]
+
+        async def add_new_users(self):
+            return None
+
+    monkeypatch.setattr(server_module, "User", FakeUserModel)
+    monkeypatch.setattr(server_module, "AddNewUsersManual", FakeAddUsers)
+    monkeypatch.setattr(
+        server_module, "encode_session_token", lambda user_id, nowfn: "token"
+    )
+    monkeypatch.setattr(
+        server_module, "get_now_fn", lambda request: lambda: datetime.now(timezone.utc)
+    )
+
+    request = FakeRequest(
+        payload={"state": "state", "id_token": "token"}, state=_make_request_state()
+    )
+
+    response = await server_module.lti_launch(request, tasks=SimpleNamespace())
+
+    assert response.status_code == 302
+    assert response.headers["location"].endswith("/group/99?lti_session=token")
+    assert captured["new_ucr"].lms_type == LMSType.HARVARD_LXP
 
 
 @pytest.mark.asyncio
@@ -2945,7 +3079,7 @@ async def test_lti_launch_existing_class_add_user(monkeypatch):
         lambda *args, **kwargs: _async_return(True),
     )
     monkeypatch.setattr(
-        server_module,
+        canvas_module,
         "find_class_by_course_id",
         lambda *args, **kwargs: _async_return(class_),
     )
@@ -3017,7 +3151,7 @@ async def test_lti_launch_resume_pending_lti_class(monkeypatch):
         lambda *args, **kwargs: _async_return(True),
     )
     monkeypatch.setattr(
-        server_module,
+        canvas_module,
         "find_class_by_course_id",
         lambda *args, **kwargs: _async_return(pending_class),
     )
@@ -3086,7 +3220,7 @@ async def test_lti_launch_resume_unlinked_linked_lti_class(monkeypatch):
         lambda *args, **kwargs: _async_return(True),
     )
     monkeypatch.setattr(
-        server_module,
+        canvas_module,
         "find_class_by_course_id",
         lambda *args, **kwargs: _async_return(unlinked_class),
     )
@@ -3170,12 +3304,12 @@ async def test_lti_launch_unlinked_class_from_other_registration_creates_new_pen
         lambda *args, **kwargs: _async_return(True),
     )
     monkeypatch.setattr(
-        server_module,
+        canvas_module,
         "find_class_by_course_id_search_by_canvas_account_lti_guid",
         lambda *args, **kwargs: _async_return(stale_other_registration_class),
     )
     monkeypatch.setattr(
-        server_module,
+        canvas_module,
         "find_class_by_course_id",
         lambda *args, **kwargs: _async_return(None),
     )
@@ -3253,7 +3387,7 @@ async def test_lti_launch_sso_user_update(monkeypatch):
         lambda *args, **kwargs: _async_return(True),
     )
     monkeypatch.setattr(
-        server_module,
+        canvas_module,
         "find_class_by_course_id",
         lambda *args, **kwargs: _async_return(None),
     )
@@ -3377,7 +3511,7 @@ async def test_lti_launch_ambiguous_lookup_returns_conflict(monkeypatch):
         lambda *args, **kwargs: _async_return(True),
     )
     monkeypatch.setattr(
-        server_module,
+        canvas_module,
         "find_class_by_course_id",
         lambda *args, **kwargs: _async_return(None),
     )
@@ -3470,7 +3604,7 @@ async def test_lti_launch_updates_email_after_merge(monkeypatch):
         lambda *args, **kwargs: _async_return(True),
     )
     monkeypatch.setattr(
-        server_module,
+        canvas_module,
         "find_class_by_course_id",
         lambda *args, **kwargs: _async_return(None),
     )
@@ -3567,7 +3701,7 @@ async def test_lti_launch_non_lti_class_redirect_when_owner(monkeypatch):
         lambda *args, **kwargs: _async_return(True),
     )
     monkeypatch.setattr(
-        server_module,
+        canvas_module,
         "find_class_by_course_id",
         lambda *args, **kwargs: _async_return(class_),
     )
@@ -3637,7 +3771,7 @@ async def test_lti_launch_non_lti_class_add_user_same_course(monkeypatch):
         lambda *args, **kwargs: _async_return(True),
     )
     monkeypatch.setattr(
-        server_module,
+        canvas_module,
         "find_class_by_course_id",
         lambda *args, **kwargs: _async_return(class_),
     )
@@ -3715,7 +3849,7 @@ async def test_lti_launch_non_lti_class_add_user_other_course(monkeypatch):
         lambda *args, **kwargs: _async_return(True),
     )
     monkeypatch.setattr(
-        server_module,
+        canvas_module,
         "find_class_by_course_id",
         lambda *args, **kwargs: _async_return(class_),
     )
@@ -3791,7 +3925,7 @@ async def test_lti_launch_add_user_exception(monkeypatch):
         lambda *args, **kwargs: _async_return(True),
     )
     monkeypatch.setattr(
-        server_module,
+        canvas_module,
         "find_class_by_course_id",
         lambda *args, **kwargs: _async_return(lti_class),
     )
@@ -3902,7 +4036,7 @@ async def test_lti_launch_admin_with_can_view_on_lti_class_redirects_to_group(
         lambda *args, **kwargs: _async_return(True),
     )
     monkeypatch.setattr(
-        server_module,
+        canvas_module,
         "find_class_by_course_id",
         lambda *args, **kwargs: _async_return(lti_class),
     )
@@ -3982,7 +4116,7 @@ async def test_lti_launch_admin_without_can_view_on_lti_class_redirects_to_no_ro
         lambda *args, **kwargs: _async_return(True),
     )
     monkeypatch.setattr(
-        server_module,
+        canvas_module,
         "find_class_by_course_id",
         lambda *args, **kwargs: _async_return(lti_class),
     )
@@ -4066,7 +4200,7 @@ async def test_lti_launch_admin_supervisor_creates_second_lti_class(monkeypatch)
         lambda *args, **kwargs: _async_return(True),
     )
     monkeypatch.setattr(
-        server_module,
+        canvas_module,
         "find_class_by_course_id",
         lambda *args, **kwargs: _async_return(lti_class),
     )
@@ -4103,8 +4237,12 @@ async def test_lti_launch_admin_supervisor_creates_second_lti_class(monkeypatch)
     # Should create second LTI class and redirect to group
     assert response.status_code == 302
     assert response.headers["location"].endswith("/group/77?lti_session=token")
-    # Check that a new LTI class was added
-    assert any(isinstance(obj, FakeLTIClass) for obj in db.added)
+    created = [obj for obj in db.added if isinstance(obj, FakeLTIClass)]
+    assert len(created) == 1
+    assert created[0].course_code == "CS1"
+    assert created[0].course_name == "Intro"
+    assert created[0].course_term is None
+    assert created[0].context_memberships_url is None
     # Verify supervisor check was called (this determines LTI class creation)
     assert any(call[1] == "supervisor" for call in authz.test_calls)
 
@@ -4164,7 +4302,7 @@ async def test_lti_launch_admin_non_supervisor_does_not_create_second_lti_class(
         lambda *args, **kwargs: _async_return(True),
     )
     monkeypatch.setattr(
-        server_module,
+        canvas_module,
         "find_class_by_course_id",
         lambda *args, **kwargs: _async_return(lti_class),
     )
@@ -4266,7 +4404,7 @@ async def test_lti_launch_admin_non_supervisor_does_not_create_lti_class_for_non
         lambda *args, **kwargs: _async_return(True),
     )
     monkeypatch.setattr(
-        server_module,
+        canvas_module,
         "find_class_by_course_id",
         lambda *args, **kwargs: _async_return(class_),
     )
@@ -4358,7 +4496,7 @@ async def test_lti_launch_admin_with_can_view_on_second_lti_class_redirects_to_g
         lambda *args, **kwargs: _async_return(True),
     )
     monkeypatch.setattr(
-        server_module,
+        canvas_module,
         "find_class_by_course_id",
         lambda *args, **kwargs: _async_return(lti_class),
     )
@@ -4444,7 +4582,7 @@ async def test_lti_launch_admin_without_can_view_on_second_lti_class_redirects_t
         lambda *args, **kwargs: _async_return(True),
     )
     monkeypatch.setattr(
-        server_module,
+        canvas_module,
         "find_class_by_course_id",
         lambda *args, **kwargs: _async_return(lti_class),
     )
@@ -4535,7 +4673,7 @@ async def test_lti_launch_admin_supervisor_creates_new_lti_class_for_non_lti_cla
         lambda *args, **kwargs: _async_return(True),
     )
     monkeypatch.setattr(
-        server_module,
+        canvas_module,
         "find_class_by_course_id",
         lambda *args, **kwargs: _async_return(class_),
     )
@@ -4567,8 +4705,12 @@ async def test_lti_launch_admin_supervisor_creates_new_lti_class_for_non_lti_cla
     # Should create new LTI class and redirect to group
     assert response.status_code == 302
     assert response.headers["location"].endswith("/group/321?lti_session=token")
-    # Check that a new LTI class was added
-    assert any(isinstance(obj, FakeLTIClass) for obj in db.added)
+    created = [obj for obj in db.added if isinstance(obj, FakeLTIClass)]
+    assert len(created) == 1
+    assert created[0].course_code == "CS1"
+    assert created[0].course_name == "Intro"
+    assert created[0].course_term is None
+    assert created[0].context_memberships_url is None
     # Verify supervisor check was called (this determines LTI class creation)
     assert any(call[1] == "supervisor" for call in authz.test_calls)
 
@@ -4623,7 +4765,7 @@ async def test_lti_launch_admin_with_can_view_on_non_lti_class_redirects_to_grou
         lambda *args, **kwargs: _async_return(True),
     )
     monkeypatch.setattr(
-        server_module,
+        canvas_module,
         "find_class_by_course_id",
         lambda *args, **kwargs: _async_return(class_),
     )
@@ -4703,7 +4845,7 @@ async def test_lti_launch_admin_without_can_view_on_non_lti_class_redirects_to_n
         lambda *args, **kwargs: _async_return(True),
     )
     monkeypatch.setattr(
-        server_module,
+        canvas_module,
         "find_class_by_course_id",
         lambda *args, **kwargs: _async_return(class_),
     )
@@ -4731,3 +4873,287 @@ async def test_lti_launch_admin_without_can_view_on_non_lti_class_redirects_to_n
 
     assert response.status_code == 302
     assert response.headers["location"].endswith("/lti/no-role")
+
+
+# --------------------------------------------------------------------------- #
+# Harvard LXP platform-specific tests                                         #
+# --------------------------------------------------------------------------- #
+
+
+def _lxp_openid_payload():
+    return {
+        "issuer": "issuer",
+        "authorization_endpoint": "https://platform.example.com/auth",
+        "registration_endpoint": "https://platform.example.com/reg",
+        "jwks_uri": "https://platform.example.com/jwks",
+        "token_endpoint": "https://platform.example.com/token",
+        "scopes_supported": server_module.REQUIRED_SCOPES,
+        "id_token_signing_alg_values_supported": ["RS256"],
+        "subject_types_supported": ["public"],
+        server_module.PLATFORM_CONFIGURATION_KEY: {
+            "product_family_code": "harvard_lxp",
+            "messages_supported": [{"type": "LtiResourceLinkRequest"}],
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_register_lti_instance_harvard_lxp_success(monkeypatch):
+    openid_payload = _lxp_openid_payload()
+    registration_payload = {"client_id": "client"}
+
+    fake_factory = _fake_session_factory(
+        get_payload=openid_payload, post_payload=registration_payload
+    )
+    sessions: list = []
+
+    def _factory(*args, **kwargs):
+        session = fake_factory(*args, **kwargs)
+        sessions.append(session)
+        return session
+
+    monkeypatch.setattr(server_module.aiohttp, "ClientSession", _factory)
+    monkeypatch.setattr(
+        server_module.Institution,
+        "all_have_default_api_key",
+        lambda db, ids: _async_return(True),
+    )
+    created = {}
+
+    async def _create(db, data, institution_ids):
+        created["data"] = data
+        created["institution_ids"] = institution_ids
+
+    monkeypatch.setattr(server_module.LTIRegistration, "create", _create)
+    monkeypatch.setattr(
+        server_module,
+        "send_lti_registration_submitted",
+        lambda *args, **kwargs: _async_return(None),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "config",
+        SimpleNamespace(
+            url=lambda path: f"https://tool.example.com{path}",
+            public_url="https://tool.example.com",
+            email=SimpleNamespace(sender="sender"),
+            lti=config_module.config.lti,
+        ),
+    )
+
+    data = LTIRegisterRequest(
+        name="PingPong",
+        admin_name="Admin",
+        admin_email="admin@example.com",
+        provider_id=0,
+        sso_field=None,
+        openid_configuration="https://platform.example.com/.well-known/openid",
+        registration_token="token",
+        institution_ids=[1],
+    )
+    request = FakeRequest(state=SimpleNamespace(db="db"))
+
+    result = await server_module.register_lti_instance(request, data)
+
+    assert result == {"status": "ok"}
+    assert created["data"]["client_id"] == "client"
+    assert created["data"]["lms_platform"] == LMSPlatform.HARVARD_LXP
+    assert "canvas_account_name" not in created["data"]
+    assert "canvas_account_lti_guid" not in created["data"]
+
+    post_calls = [call for session in sessions for call in session.post_calls]
+    assert post_calls, "expected POST to registration_endpoint"
+    posted_payload = post_calls[0][1]["json"]
+    serialized = json.dumps(posted_payload)
+    assert "$Canvas" not in serialized
+    assert "canvas_course_id" not in serialized
+    assert "canvas_term_name" not in serialized
+    assert "https://canvas.instructure.com/lti/vendor" not in serialized
+    tool_config = posted_payload[
+        "https://purl.imsglobal.org/spec/lti-tool-configuration"
+    ]
+    assert tool_config["custom_parameters"]["platform"] == "harvard_lxp"
+    assert "sso_provider_id" not in tool_config["custom_parameters"]
+
+
+@pytest.mark.asyncio
+async def test_register_lti_instance_harvard_lxp_rejects_sso(monkeypatch):
+    openid_payload = _lxp_openid_payload()
+
+    monkeypatch.setattr(
+        server_module.aiohttp,
+        "ClientSession",
+        _fake_session_factory(get_payload=openid_payload),
+    )
+    monkeypatch.setattr(
+        server_module.Institution,
+        "all_have_default_api_key",
+        lambda db, ids: _async_return(True),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "config",
+        SimpleNamespace(
+            url=lambda path: f"https://tool.example.com{path}",
+            public_url="https://tool.example.com",
+            email=SimpleNamespace(sender="sender"),
+            lti=config_module.config.lti,
+        ),
+    )
+
+    data = LTIRegisterRequest(
+        name="PingPong",
+        admin_name="Admin",
+        admin_email="admin@example.com",
+        provider_id=5,
+        sso_field="person.sourcedId",
+        openid_configuration="https://platform.example.com/.well-known/openid",
+        registration_token="token",
+        institution_ids=[1],
+    )
+    request = FakeRequest(state=SimpleNamespace(db="db"))
+
+    with pytest.raises(HTTPException) as excinfo:
+        await server_module.register_lti_instance(request, data)
+
+    assert excinfo.value.status_code == 400
+    assert "SSO-linked" in excinfo.value.detail
+
+
+@pytest.mark.asyncio
+async def test_lti_launch_harvard_lxp_missing_context_id(monkeypatch):
+    oidc_session = _make_oidc_session(
+        redirect_uri=server_module.config.url("/api/v1/lti/launch")
+    )
+    registration = _make_registration(
+        review_status=LTIRegistrationReviewStatus.APPROVED, enabled=True
+    )
+    registration.lms_platform = LMSPlatform.HARVARD_LXP
+    claims = {
+        "nonce": "nonce",
+        "email": "user@example.com",
+        server_module.LTI_CLAIM_CUSTOM_KEY: {},
+        server_module.LTI_CLAIM_CONTEXT_KEY: {"title": "Some Course"},
+        server_module.LTI_CLAIM_ROLES_KEY: [
+            "http://purl.imsglobal.org/vocab/lis/v2/membership#Instructor"
+        ],
+    }
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "get_by_state",
+        lambda db, state: _async_return(oidc_session),
+    )
+    monkeypatch.setattr(
+        server_module.LTIRegistration,
+        "get_by_client_id",
+        lambda db, client_id: _async_return(registration),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "_verify_lti_id_token",
+        lambda **kwargs: _async_return(claims),
+    )
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "validate_and_consume",
+        lambda *args, **kwargs: _async_return(True),
+    )
+    monkeypatch.setattr(
+        server_module, "get_now_fn", lambda request: lambda: datetime.now(timezone.utc)
+    )
+
+    request = FakeRequest(
+        payload={"state": "state", "id_token": "token"}, state=_make_request_state()
+    )
+    with pytest.raises(HTTPException) as excinfo:
+        await server_module.lti_launch(request, tasks=SimpleNamespace())
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail == "Missing or invalid course_id"
+
+
+@pytest.mark.asyncio
+async def test_lti_launch_harvard_lxp_pending_setup(monkeypatch):
+    from pingpong.lti.platforms import harvard_lxp as lxp_module
+
+    oidc_session = _make_oidc_session(
+        redirect_uri=server_module.config.url("/api/v1/lti/launch")
+    )
+    registration = _make_registration(
+        review_status=LTIRegistrationReviewStatus.APPROVED, enabled=True
+    )
+    registration.lms_platform = LMSPlatform.HARVARD_LXP
+    course_section_id = "39b59151-4bcb-4b17-a4f1-c4c8669a6a80"
+    claims = {
+        "nonce": "nonce",
+        "email": "user@example.com",
+        "given_name": "Evangelos",
+        "family_name": "Kassos",
+        server_module.LTI_CLAIM_CUSTOM_KEY: {},
+        server_module.LTI_CLAIM_CONTEXT_KEY: {
+            "id": course_section_id,
+            "title": "Learning Experience Showcase",
+            "label": "LES-" + course_section_id,
+        },
+        server_module.LTI_CLAIM_ROLES_KEY: [
+            "http://purl.imsglobal.org/vocab/lis/v2/membership#Instructor"
+        ],
+    }
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "get_by_state",
+        lambda db, state: _async_return(oidc_session),
+    )
+    monkeypatch.setattr(
+        server_module.LTIRegistration,
+        "get_by_client_id",
+        lambda db, client_id: _async_return(registration),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "_verify_lti_id_token",
+        lambda **kwargs: _async_return(claims),
+    )
+    monkeypatch.setattr(
+        server_module.LTIOIDCSession,
+        "validate_and_consume",
+        lambda *args, **kwargs: _async_return(True),
+    )
+    monkeypatch.setattr(
+        lxp_module,
+        "find_class_by_course_id",
+        lambda *args, **kwargs: _async_return(None),
+    )
+    monkeypatch.setattr(server_module, "User", FakeUserModel)
+    monkeypatch.setattr(
+        server_module.User,
+        "get_by_email",
+        lambda db, email: _async_return(FakeUserModel(email)),
+    )
+    monkeypatch.setattr(server_module, "LTIClass", FakeLTIClass)
+    monkeypatch.setattr(
+        server_module, "encode_session_token", lambda user_id, nowfn: "token"
+    )
+    monkeypatch.setattr(
+        server_module, "get_now_fn", lambda request: lambda: datetime.now(timezone.utc)
+    )
+
+    state = _make_request_state()
+    request = FakeRequest(
+        payload={"state": "state", "id_token": "token"},
+        state=state,
+    )
+
+    response = await server_module.lti_launch(request, tasks=SimpleNamespace())
+
+    assert response.status_code == 302
+    assert "/lti/setup" in response.headers["location"]
+
+    created = [obj for obj in state.db.added if isinstance(obj, FakeLTIClass)]
+    assert len(created) == 1
+    pending = created[0]
+    assert pending.lti_platform == LMSPlatform.HARVARD_LXP
+    assert pending.course_id == course_section_id
+    assert pending.course_name == "Learning Experience Showcase"
+    assert pending.course_code is None
+    assert pending.course_term is None
+    assert pending.lti_status == LTIStatus.PENDING

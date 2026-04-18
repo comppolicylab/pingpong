@@ -1,5 +1,6 @@
 import importlib
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -13,6 +14,11 @@ from .now import offset
 from .testutil import with_authz, with_authz_series, with_user, with_institution
 
 copy_module = importlib.import_module("pingpong.copy")
+server_module = importlib.import_module("pingpong.server")
+
+
+async def _async_return(value):
+    return value
 
 
 @with_user(123)
@@ -130,6 +136,60 @@ async def test_copy_class_allows_institution_admin(
     )
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+@pytest.mark.asyncio
+async def test_delete_lti_class_accepts_harvard_lxp_lms_type(monkeypatch):
+    lti_class = SimpleNamespace(
+        id=55,
+        class_id=321,
+        lti_platform=schemas.LMSPlatform.HARVARD_LXP,
+    )
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        server_module.models.LTIClass,
+        "get_by_id",
+        classmethod(lambda cls, db, id_: _async_return(lti_class)),
+    )
+
+    async def _remove_lti_sync(
+        cls, session, lti_class_id, class_id, lms_type, keep_users
+    ):
+        captured["lti_class_id"] = lti_class_id
+        captured["class_id"] = class_id
+        captured["lms_type"] = lms_type
+        captured["keep_users"] = keep_users
+        return []
+
+    monkeypatch.setattr(
+        server_module.models.LTIClass,
+        "remove_lti_sync",
+        classmethod(_remove_lti_sync),
+    )
+    monkeypatch.setattr(
+        server_module.models.LTIClass,
+        "delete",
+        classmethod(lambda cls, db, id_: _async_return(None)),
+    )
+
+    request = SimpleNamespace(
+        state={
+            "db": object(),
+            "authz": object(),
+            "session": SimpleNamespace(user=SimpleNamespace(id=123)),
+        }
+    )
+
+    result = await server_module.delete_lti_class(
+        "321", "55", request=request, keep_users=True
+    )
+
+    assert result == {"status": "ok"}
+    assert captured["lti_class_id"] == 55
+    assert captured["class_id"] == 321
+    assert captured["lms_type"] == schemas.LMSType.HARVARD_LXP
+    assert captured["keep_users"] is True
 
 
 @with_user(123)

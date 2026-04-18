@@ -414,10 +414,6 @@ export type LTIPublicInstitution = {
 	name: string;
 };
 
-export type LTIPublicInstitutions = {
-	institutions: LTIPublicInstitution[];
-};
-
 export type InstitutionAdmin = {
 	id: number;
 	email: string | null;
@@ -499,12 +495,23 @@ export type LTIPublicSSOProvider = {
 	display_name: string | null;
 };
 
-export type LTIPublicSSOProviders = {
-	providers: LTIPublicSSOProvider[];
+export const NO_SSO_PROVIDER_ID = 0;
+export const NO_SSO_PROVIDER_ID_VALUE = `${NO_SSO_PROVIDER_ID}`;
+
+export type LTIRegisterSetupRequest = {
+	openid_configuration: string;
+	registration_token: string;
 };
 
-export const getPublicExternalLoginProvidersForLTI = async (f: Fetcher) => {
-	return await GET<never, LTIPublicSSOProviders>(f, 'lti/public/sso/providers');
+export type LTIRegisterSetup = {
+	platform: LMSPlatform;
+	providers: LTIPublicSSOProvider[];
+	institutions: LTIPublicInstitution[];
+	show_course_navigation_control: boolean;
+};
+
+export const getLTIRegisterSetup = async (f: Fetcher, data: LTIRegisterSetupRequest) => {
+	return await POST<LTIRegisterSetupRequest, LTIRegisterSetup>(f, 'lti/register/setup', data);
 };
 
 export const LTI_SSO_FIELDS = [
@@ -807,10 +814,6 @@ export const getInstitutions = async (f: Fetcher, role?: string) => {
 		q.role = role;
 	}
 	return await GET<GetInstitutionsRequest, Institutions>(f, 'institutions', q);
-};
-
-export const getPublicInstitutionsForLTI = async (f: Fetcher) => {
-	return await GET<never, LTIPublicInstitutions>(f, 'lti/public/institutions');
 };
 
 /**
@@ -3978,7 +3981,7 @@ export const loginWithMagicLink = async (f: Fetcher, email: string, forward: str
 	return response;
 };
 
-export type LMSPlatform = 'canvas';
+export type LMSPlatform = 'canvas' | 'harvard_lxp';
 
 export type LTIStatus = 'pending' | 'linked' | 'error';
 

@@ -618,7 +618,7 @@ class CanvasConnectClient:
         return CreateUserClassRoles(
             roles=list(unique_users.values()),
             silent=True,
-            lms_type=LMSType.CANVAS,
+            lms_type=LMSType.from_lti_platform(lti_class.lti_platform),
             lti_class_id=lti_class.id,
             sso_tenant=sso_tenant,
         )

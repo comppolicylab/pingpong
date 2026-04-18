@@ -7,15 +7,18 @@
 	import { ExclamationCircleOutline } from 'flowbite-svelte-icons';
 
 	export let data;
-	$: externalLoginProviders = data.externalLoginProviders;
-	$: institutions = data.institutions || [];
+	$: registrationSetup = data.registrationSetup;
+	$: registrationSetupError = data.registrationSetupError?.detail ?? null;
+	$: externalLoginProviders = registrationSetup?.providers ?? [];
+	$: institutions = registrationSetup?.institutions ?? [];
+	$: showCourseNavigationControl = registrationSetup?.show_course_navigation_control ?? false;
 
 	let openid_configuration: string | null = null;
 	let registration_token: string | null = null;
 	let missing_params = false;
 	let showModal = false;
 
-	let ssoProviderId = '0';
+	let ssoProviderId = api.NO_SSO_PROVIDER_ID_VALUE;
 	let institutionIds: number[] = [];
 	let showInCourseNavigation = true;
 
@@ -38,6 +41,11 @@
 		evt.preventDefault();
 		$loading = true;
 
+		if (!registrationSetup) {
+			$loading = false;
+			return sadToast(registrationSetupError || 'Unable to load registration setup');
+		}
+
 		const form = evt.target as HTMLFormElement;
 		const formData = new FormData(form);
 		const name = formData.get('name')?.toString();
@@ -46,7 +54,10 @@
 			return sadToast('Name is required');
 		}
 
-		const ssoId = formData.get('sso_id')?.toString();
+		const ssoId =
+			externalLoginProviders.length > 0
+				? (formData.get('sso_id')?.toString() ?? api.NO_SSO_PROVIDER_ID_VALUE)
+				: api.NO_SSO_PROVIDER_ID_VALUE;
 		if (!ssoId) {
 			$loading = false;
 			return sadToast('SSO identifier is required');
@@ -54,7 +65,7 @@
 		const providerId = parseInt(ssoId, 10);
 
 		let ssoField: api.LTISSOField | null = null;
-		if (providerId !== 0) {
+		if (providerId !== api.NO_SSO_PROVIDER_ID) {
 			const rawSsoField = formData.get('sso_field')?.toString()?.trim() ?? '';
 			if (!rawSsoField) {
 				$loading = false;
@@ -79,7 +90,8 @@
 			return sadToast('Administrator email is required');
 		}
 
-		const showInCourseNav = formData.get('show_in_course_navigation') === 'on';
+		const showInCourseNav =
+			showCourseNavigationControl && formData.get('show_in_course_navigation') === 'on';
 
 		if (!institutionIds.length) {
 			$loading = false;
@@ -112,6 +124,11 @@
 <div class="flex w-full flex-col items-center gap-8 p-8">
 	<Heading tag="h2" class="serif">Set up your LTI instance with PingPong</Heading>
 	<form class="flex max-w-lg flex-col gap-4 sm:min-w-[32rem]" onsubmit={handleSubmit}>
+		{#if registrationSetupError}
+			<div class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+				{registrationSetupError}
+			</div>
+		{/if}
 		<div>
 			<Label for="name" class="mb-1">Instance name</Label>
 			<Helper class="mb-2"
@@ -130,33 +147,38 @@
 			<Label for="admin_email" class="mb-1">Administrator Email</Label>
 			<Input id="admin_email" name="admin_email" placeholder="john.doe@example.com" type="email" />
 		</div>
-		<div>
-			<Label for="show_in_course_navigation" class="mb-1">Show in Course Navigation</Label>
-			<Helper class="mb-2">By default, PingPong will be shown in the course navigation menu.</Helper
-			>
-			<Checkbox
-				id="show_in_course_navigation"
-				name="show_in_course_navigation"
-				color="blue"
-				bind:checked={showInCourseNavigation}>Show PingPong app in Course Navigation</Checkbox
-			>
-		</div>
-		<div>
-			<Label for="sso_id" class="mb-1">SSO Provider</Label>
-			<Helper class="mb-2"
-				>Choose the SSO identifier your LTI instance will provide to PingPong. If PingPong doesn’t
-				support your SSO identifier, select "No SSO." PingPong will use SSO identifiers and fall
-				back to email addresses to identify users.</Helper
-			>
-			<Select name="sso_id" id="sso_id" disabled={$loading} bind:value={ssoProviderId}>
-				{#each externalLoginProviders as provider (provider.id)}
-					<option value={provider.id}>{provider.display_name || provider.name}</option>
-				{/each}
-				<option disabled>──────────</option>
-				<option value="0">No SSO</option>
-			</Select>
-		</div>
-		{#if parseInt(ssoProviderId, 10) !== 0}
+		{#if showCourseNavigationControl}
+			<div>
+				<Label for="show_in_course_navigation" class="mb-1">Show in Course Navigation</Label>
+				<Helper class="mb-2"
+					>By default, PingPong will be shown in the course navigation menu.</Helper
+				>
+				<Checkbox
+					id="show_in_course_navigation"
+					name="show_in_course_navigation"
+					color="blue"
+					bind:checked={showInCourseNavigation}>Show PingPong app in Course Navigation</Checkbox
+				>
+			</div>
+		{/if}
+		{#if externalLoginProviders.length > 0}
+			<div>
+				<Label for="sso_id" class="mb-1">SSO Provider</Label>
+				<Helper class="mb-2"
+					>Choose the SSO identifier your LTI instance will provide to PingPong. If PingPong doesn’t
+					support your SSO identifier, select "No SSO." PingPong will use SSO identifiers and fall
+					back to email addresses to identify users.</Helper
+				>
+				<Select name="sso_id" id="sso_id" disabled={$loading} bind:value={ssoProviderId}>
+					{#each externalLoginProviders as provider (provider.id)}
+						<option value={provider.id}>{provider.display_name || provider.name}</option>
+					{/each}
+					<option disabled>──────────</option>
+					<option value={api.NO_SSO_PROVIDER_ID_VALUE}>No SSO</option>
+				</Select>
+			</div>
+		{/if}
+		{#if externalLoginProviders.length > 0 && parseInt(ssoProviderId, 10) !== api.NO_SSO_PROVIDER_ID}
 			<div>
 				<Label for="sso_field" class="mb-1">SSO Field</Label>
 				<Helper class="mb-2"
@@ -213,7 +235,7 @@
 				pill
 				class="bg-orange text-white hover:bg-orange-dark"
 				type="submit"
-				disabled={$loading}>Submit</Button
+				disabled={$loading || !!registrationSetupError}>Submit</Button
 			>
 		</div>
 	</form>

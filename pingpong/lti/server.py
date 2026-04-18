@@ -17,20 +17,17 @@ from pingpong.authz.openfga import OpenFgaAuthzClient
 from pingpong.config import config
 from pingpong.invite import send_lti_registration_submitted
 from pingpong.log_utils import sanitize_for_log
+from pingpong.lti.claims import get_claim_object as _get_claim_object
 from pingpong.lti.endpoints import (
     allow_redirects,
     generate_authorization_endpoint_url,
     generate_jwks_uri_url,
-    generate_names_and_role_api_url,
     generate_openid_configuration_url,
     generate_registration_endpoint_url,
     generate_token_endpoint_url,
 )
 from pingpong.lti.constants import (
     AUTHORIZATION_ENDPOINT_KEY,
-    CANVAS_ACCOUNT_LTI_GUID_KEY,
-    CANVAS_ACCOUNT_NAME_KEY,
-    CANVAS_MESSAGE_PLACEMENT,
     ISSUER_KEY,
     KEYS_ENDPOINT_KEY,
     LTI_CLAIM_CONTEXT_KEY,
@@ -46,6 +43,8 @@ from pingpong.lti.constants import (
     LTI_TOOL_CONFIGURATION_KEY,
     MESSAGE_TYPES_KEY,
     MESSAGE_TYPE,
+    NO_SSO_PROVIDER_ID,
+    NO_SSO_PROVIDER_ID_STR,
     PLATFORM_CONFIGURATION_KEY,
     REGISTRATION_ENDPOINT_KEY,
     REQUIRED_SCOPES,
@@ -59,10 +58,7 @@ from pingpong.lti.http import (
     create_lti_redirect_trace_config,
     request_with_validated_redirects,
 )
-from pingpong.lti.lti_course import (
-    find_class_by_course_id,
-    find_class_by_course_id_search_by_canvas_account_lti_guid,
-)
+from pingpong.lti.platforms import get_handler
 from pingpong.lti.roles import (
     is_admin as is_lti_admin,
     is_instructor as is_lti_instructor,
@@ -70,8 +66,8 @@ from pingpong.lti.roles import (
 )
 from pingpong.lti.schemas import (
     LTIRegisterRequest,
-    LTIPublicInstitutions,
-    LTIPublicSSOProviders,
+    LTIRegisterSetupRequest,
+    LTIRegisterSetupResponse,
     LTISetupContext,
     LTISetupInstitution,
     LTILinkableGroup,
@@ -105,6 +101,7 @@ from pingpong.schemas import (
     CreateUserClassRoles,
     ExternalLoginLookupItem,
     LMSPlatform,
+    LMSType,
     LTIRegistrationReviewStatus,
     LTIStatus,
     UserState,
@@ -255,6 +252,36 @@ async def _fetch_openid_configuration(
             ) from e
 
 
+async def _resolve_platform(
+    openid_configuration: str, registration_token: str
+) -> tuple[LMSPlatform, dict[str, Any]]:
+    """Fetch the platform's openid configuration and return (platform, response).
+    Raises HTTPException(400) if the product_family_code is missing or unknown.
+    The full response is returned so callers that will also register can reuse
+    it without a second fetch.
+    """
+    headers = {"Authorization": f"Bearer {registration_token}"}
+    response_data = await _fetch_openid_configuration(openid_configuration, headers)
+    if not response_data:
+        raise HTTPException(
+            status_code=500, detail="Failed to fetch OpenID configuration"
+        )
+
+    platform_config = response_data.get(PLATFORM_CONFIGURATION_KEY)
+    if not isinstance(platform_config, dict):
+        raise HTTPException(
+            status_code=400, detail="Missing platform configuration in OpenID response"
+        )
+
+    product_family_code = platform_config.get("product_family_code")
+    if product_family_code not in {p.value for p in LMSPlatform}:
+        raise HTTPException(
+            status_code=400, detail="Missing or unsupported product_family_code"
+        )
+
+    return LMSPlatform(product_family_code), response_data
+
+
 def _select_jwk(jwks: dict[str, Any], kid: str | None) -> dict[str, Any]:
     keys = jwks.get("keys")
     if not isinstance(keys, list) or not keys:
@@ -325,52 +352,6 @@ async def _verify_lti_id_token(
     return cast(dict[str, Any], claims)
 
 
-def _get_claim_object(claims: dict[str, Any], claim_key: str) -> dict[str, Any]:
-    claim_value = claims.get(claim_key)
-    if isinstance(claim_value, dict):
-        return claim_value
-    return {}
-
-
-def parse_lti_context_and_nrps(
-    claims: dict[str, Any], launch_custom_params: dict[str, Any]
-) -> tuple[str | None, str | None, str | None, str | None]:
-    context = _get_claim_object(claims, LTI_CLAIM_CONTEXT_KEY)
-    nrps_claim = _get_claim_object(claims, LTI_CLAIM_NRPS_KEY)
-
-    course_code_value = context.get("label")
-    course_code = course_code_value if isinstance(course_code_value, str) else None
-
-    course_name_value = context.get("title")
-    course_name = course_name_value if isinstance(course_name_value, str) else None
-
-    course_term_value = launch_custom_params.get("canvas_term_name")
-    course_term = course_term_value if isinstance(course_term_value, str) else None
-    if (
-        not course_term
-        or course_term in LTI_CUSTOM_PARAM_DEFAULT_VALUES["canvas_term_name"]
-    ):
-        course_term = None
-
-    context_memberships_url_value = nrps_claim.get("context_memberships_url")
-    context_memberships_url = None
-    if (
-        isinstance(context_memberships_url_value, str)
-        and context_memberships_url_value.strip()
-    ):
-        try:
-            context_memberships_url = generate_names_and_role_api_url(
-                context_memberships_url_value
-            )
-        except ValueError as e:
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid context_memberships_url",
-            ) from e
-
-    return course_code, course_name, course_term, context_memberships_url
-
-
 def get_lti_key_manager() -> LTIKeyManager:
     """Get the LTI key manager from config."""
     lti_settings = config.lti
@@ -396,23 +377,25 @@ async def get_jwks(key_manager: LTIKeyManager = Depends(get_lti_key_manager)):
         raise HTTPException(status_code=500, detail="Error retrieving public keys")
 
 
-@lti_router.get("/public/sso/providers", response_model=LTIPublicSSOProviders)
-async def get_public_sso_providers(request: StateRequest):
-    providers = await ExternalLoginProvider.get_all(request.state["db"])
-    return {
-        "providers": [
-            {"id": p.id, "name": p.name, "display_name": p.display_name}
-            for p in providers
-            if _is_public_sso_provider(p)
-        ]
-    }
+@lti_router.post("/register/setup", response_model=LTIRegisterSetupResponse)
+async def get_lti_register_setup(request: StateRequest, data: LTIRegisterSetupRequest):
+    platform, _ = await _resolve_platform(
+        data.openid_configuration, data.registration_token
+    )
+    handler = get_handler(platform)
 
-
-@lti_router.get("/public/institutions", response_model=LTIPublicInstitutions)
-async def get_public_institutions(request: StateRequest):
+    all_providers = await ExternalLoginProvider.get_all(request.state["db"])
+    public_providers = [p for p in all_providers if _is_public_sso_provider(p)]
+    allowed = handler.filter_sso_providers(public_providers)
     institutions = await Institution.get_all_with_default_api_key(request.state["db"])
     return {
-        "institutions": [{"id": inst.id, "name": inst.name} for inst in institutions]
+        "platform": platform,
+        "providers": [
+            {"id": p.id, "name": p.name, "display_name": p.display_name}
+            for p in allowed
+        ],
+        "institutions": [{"id": inst.id, "name": inst.name} for inst in institutions],
+        "show_course_navigation_control": handler.show_course_navigation_control(),
     }
 
 
@@ -431,7 +414,7 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
             status_code=400, detail="At least one institution must be selected"
         )
 
-    if data.provider_id == 0:
+    if data.provider_id == NO_SSO_PROVIDER_ID:
         if data.sso_field is not None:
             raise HTTPException(
                 status_code=400, detail="SSO field must be null when no SSO is selected"
@@ -454,15 +437,11 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
         None if data.sso_field is None else SSO_FIELD_FULL_NAME[data.sso_field]
     )
 
-    headers = {"Authorization": f"Bearer {data.registration_token}"}
-    response_data = await _fetch_openid_configuration(
-        data.openid_configuration, headers
+    platform, response_data = await _resolve_platform(
+        data.openid_configuration, data.registration_token
     )
-
-    if not response_data:
-        raise HTTPException(
-            status_code=500, detail="Failed to fetch OpenID configuration"
-        )
+    handler = get_handler(platform)
+    handler.validate_registration_request(data)
 
     issuer = response_data.get(ISSUER_KEY)
     authorization_endpoint = response_data.get(AUTHORIZATION_ENDPOINT_KEY)
@@ -472,20 +451,7 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
     scopes_supported = response_data.get(SCOPES_SUPPORTED_KEY, [])
     token_algorithms = response_data.get(TOKEN_ALG_KEY, [])
     subject_types = response_data.get(SUBJECT_TYPES_KEY, [])
-
-    platform_config = response_data.get(PLATFORM_CONFIGURATION_KEY)
-    if not isinstance(platform_config, dict):
-        raise HTTPException(
-            status_code=400, detail="Missing platform configuration in OpenID response"
-        )
-
-    product_family_code = platform_config.get("product_family_code")
-
-    # Check that the product family code exists in schema.LMSPlatform
-    if product_family_code not in {platform.value for platform in LMSPlatform}:
-        raise HTTPException(status_code=400, detail="Invalid product family")
-
-    platform = LMSPlatform(product_family_code)
+    platform_config = response_data[PLATFORM_CONFIGURATION_KEY]
 
     missing_required_fields_detail = "Missing required OpenID configuration fields"
     issuer = _require_non_empty_string(issuer, missing_required_fields_detail)
@@ -521,15 +487,7 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
             status_code=400, detail="LtiResourceLinkRequest not supported by platform"
         )
 
-    if not any(
-        CANVAS_MESSAGE_PLACEMENT in msg.get("placements", [])
-        for msg in message_types_supported
-        if msg.get("type") == MESSAGE_TYPE
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail="Canvas course navigation placement not supported by platform",
-        )
+    handler.validate_platform_config(platform_config, message_types_supported)
 
     if "RS256" not in token_algorithms:
         raise HTTPException(
@@ -539,10 +497,9 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
     if "public" not in subject_types:
         raise HTTPException(status_code=400, detail="public subject type not supported")
 
-    canvas_account_name = platform_config.get(CANVAS_ACCOUNT_NAME_KEY)
-    canvas_account_lti_guid = platform_config.get(CANVAS_ACCOUNT_LTI_GUID_KEY)
+    platform_registration_fields = handler.extract_registration_fields(platform_config)
 
-    tool_registration_data = {
+    base_tool_config = {
         "application_type": "web",
         "grant_types": ["client_credentials", "implicit"],
         "initiate_login_uri": config.url("/api/v1/lti/login"),
@@ -559,14 +516,6 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
             .replace("/", ""),
             "target_link_uri": config.url("/api/v1/lti/launch"),
             "description": "A platform carefully designed for AI-driven learning.",
-            "custom_parameters": {
-                "platform": platform.value,
-                "pingpong_lti_tool_version": "1.0",
-                LTI_CUSTOM_SSO_PROVIDER_ID_KEY: str(data.provider_id),
-                LTI_CUSTOM_SSO_VALUE_KEY: (
-                    f"${sso_field_full_name}" if sso_field_full_name else ""
-                ),
-            },
             "claims": [
                 "sub",
                 "iss",
@@ -579,25 +528,13 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
                 LTI_CLAIM_TOOL_PLATFORM_KEY,
                 LTI_CLAIM_NRPS_KEY,
             ],
-            "https://canvas.instructure.com/lti/vendor": "Computational Policy Lab",
-            "messages": [
-                {
-                    "type": MESSAGE_TYPE,
-                    "target_link_uri": config.url("/api/v1/lti/launch"),
-                    "label": "PingPong",
-                    "placements": ["course_navigation"],
-                    "custom_parameters": {
-                        "placement": "course_navigation",
-                        "canvas_course_id": "$Canvas.course.id",
-                        "canvas_term_name": "$Canvas.term.name",
-                    },
-                    "https://canvas.instructure.com/lti/display_type": "full_width_in_context",
-                    "https://canvas.instructure.com/lti/course_navigation/default_enabled": data.show_in_course_navigation,
-                    "https://canvas.instructure.com/lti/visibility": "members",
-                }
-            ],
         },
     }
+    tool_registration_data = handler.build_tool_registration_payload(
+        base_tool_config=base_tool_config,
+        data=data,
+        sso_field_full_name=sso_field_full_name,
+    )
 
     registration_response_data: dict[str, Any] | None = None
     try:
@@ -687,11 +624,10 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
         "key_set_url": keys_endpoint,
         "lms_platform": platform,
         "token_algorithm": "RS256",
-        "canvas_account_name": canvas_account_name,
-        "canvas_account_lti_guid": canvas_account_lti_guid,
         "admin_name": data.admin_name,
         "admin_email": data.admin_email,
         "friendly_name": data.name,
+        **platform_registration_fields,
     }
 
     await LTIRegistration.create(
@@ -930,27 +866,11 @@ async def lti_launch(
     ):
         return RedirectResponse(url=config.url("/lti/inactive"), status_code=302)
 
-    course_id = launch_custom_params.get("canvas_course_id")
-    if (
-        not isinstance(course_id, str)
-        or not course_id
-        or course_id in LTI_CUSTOM_PARAM_DEFAULT_VALUES["canvas_course_id"]
-    ):
-        raise HTTPException(status_code=400, detail="Missing or invalid course_id")
-
-    if registration.canvas_account_lti_guid:
-        class_ = await find_class_by_course_id_search_by_canvas_account_lti_guid(
-            request.state["db"],
-            registration_id=registration.id,
-            canvas_account_lti_guid=registration.canvas_account_lti_guid,
-            course_id=course_id,
-        )
-    else:
-        class_ = await find_class_by_course_id(
-            request.state["db"],
-            registration.id,
-            course_id,
-        )
+    handler = get_handler(registration.lms_platform)
+    course_id = handler.extract_course_id(claims, launch_custom_params)
+    class_ = await handler.find_class_for_course(
+        request.state["db"], registration, course_id
+    )
 
     user_roles = claims.get(LTI_CLAIM_ROLES_KEY, [])
     is_instructor = _is_instructor(user_roles)
@@ -990,7 +910,9 @@ async def lti_launch(
             sanitize_for_log(user_email),
         )
 
-    sso_provider_id_str = launch_custom_params.get(LTI_CUSTOM_SSO_PROVIDER_ID_KEY, "0")
+    sso_provider_id_str = launch_custom_params.get(
+        LTI_CUSTOM_SSO_PROVIDER_ID_KEY, NO_SSO_PROVIDER_ID_STR
+    )
     user: User | None = None
     sso_provider: ExternalLoginProvider | None = None
     sso_value: str | None = None
@@ -1003,7 +925,7 @@ async def lti_launch(
             )
         )
 
-    if int(sso_provider_id_str) != 0:
+    if int(sso_provider_id_str) != NO_SSO_PROVIDER_ID:
         sso_provider = await ExternalLoginProvider.get_by_id(
             request.state["db"], int(sso_provider_id_str)
         )
@@ -1153,15 +1075,7 @@ async def lti_launch(
                 await request.state["db"].flush()
             else:
                 # Create new pending LTIClass to store context
-                (
-                    course_code,
-                    course_name,
-                    course_term,
-                    context_memberships_url,
-                ) = parse_lti_context_and_nrps(
-                    claims,
-                    launch_custom_params,
-                )
+                metadata = handler.extract_course_metadata(claims, launch_custom_params)
 
                 pending_lti_class = LTIClass(
                     registration_id=registration.id,
@@ -1169,12 +1083,12 @@ async def lti_launch(
                     lti_platform=registration.lms_platform,
                     course_id=course_id,
                     resource_link_id=resource_link_id,
-                    course_code=course_code,
-                    course_name=course_name,
-                    course_term=course_term,
+                    course_code=metadata.course_code,
+                    course_name=metadata.course_name,
+                    course_term=metadata.course_term,
                     class_id=None,
                     setup_user_id=user.id,
-                    context_memberships_url=context_memberships_url,
+                    context_memberships_url=metadata.context_memberships_url,
                 )
                 request.state["db"].add(pending_lti_class)
                 await request.state["db"].flush()
@@ -1236,7 +1150,7 @@ async def lti_launch(
                     ],
                     silent=True,
                     lms_tenant=None,
-                    lms_type=registration.lms_platform,
+                    lms_type=LMSType.from_lti_platform(registration.lms_platform),
                     lti_class_id=class_.id,
                     is_lti_launch=True,
                 )
@@ -1276,27 +1190,19 @@ async def lti_launch(
                 )
 
             if is_instructor or is_admin_supervisor:
-                (
-                    course_code,
-                    course_name,
-                    course_term,
-                    context_memberships_url,
-                ) = parse_lti_context_and_nrps(
-                    claims,
-                    launch_custom_params,
-                )
+                metadata = handler.extract_course_metadata(claims, launch_custom_params)
                 second_lti_class = LTIClass(
                     registration_id=registration.id,
                     lti_status=LTIStatus.LINKED,
                     lti_platform=registration.lms_platform,
                     course_id=course_id,
                     resource_link_id=resource_link_id,
-                    course_code=course_code,
-                    course_name=course_name,
-                    course_term=course_term,
+                    course_code=metadata.course_code,
+                    course_name=metadata.course_name,
+                    course_term=metadata.course_term,
                     class_id=pp_class.id,
                     setup_user_id=user.id,
-                    context_memberships_url=context_memberships_url,
+                    context_memberships_url=metadata.context_memberships_url,
                 )
                 request.state["db"].add(second_lti_class)
                 await request.state["db"].flush()
@@ -1338,7 +1244,11 @@ async def lti_launch(
                         )
                     ],
                     silent=True,
-                    lms_type=class_.lti_platform if not second_lti_class else None,
+                    lms_type=(
+                        LMSType.from_lti_platform(class_.lti_platform)
+                        if not second_lti_class
+                        else None
+                    ),
                     lti_class_id=second_lti_class.id if second_lti_class else class_.id,
                     is_lti_launch=True,
                 )
@@ -1373,27 +1283,19 @@ async def lti_launch(
                 )
 
             if is_instructor or is_admin_supervisor:
-                (
-                    course_code,
-                    course_name,
-                    course_term,
-                    context_memberships_url,
-                ) = parse_lti_context_and_nrps(
-                    claims,
-                    launch_custom_params,
-                )
+                metadata = handler.extract_course_metadata(claims, launch_custom_params)
                 new_lti_class = LTIClass(
                     registration_id=registration.id,
                     lti_status=LTIStatus.LINKED,
                     lti_platform=registration.lms_platform,
                     course_id=course_id,
                     resource_link_id=resource_link_id,
-                    course_code=course_code,
-                    course_name=course_name,
-                    course_term=course_term,
+                    course_code=metadata.course_code,
+                    course_name=metadata.course_name,
+                    course_term=metadata.course_term,
                     class_id=class_.id,
                     setup_user_id=user.id,
-                    context_memberships_url=context_memberships_url,
+                    context_memberships_url=metadata.context_memberships_url,
                 )
                 request.state["db"].add(new_lti_class)
                 await request.state["db"].flush()
@@ -1436,7 +1338,7 @@ async def lti_launch(
                     lms_tenant=class_.lms_tenant if not new_lti_class else None,
                     lms_type=class_.lms_type
                     if not new_lti_class
-                    else new_lti_class.lti_platform,
+                    else LMSType.from_lti_platform(new_lti_class.lti_platform),
                     lti_class_id=new_lti_class.id if new_lti_class else None,
                     is_lti_launch=True,
                 )
