@@ -110,4 +110,4 @@ jobs:
 
           # Tools based on CLAUDE.md development commands
           # Includes: uv (pytest, alembic, python), pnpm (check, lint, test), and gh CLI
-          claude_args: '--plugin-dir "${{ github.workspace }}/claude-plugins-src/plugins/code-review" --allowed-tools "mcp__github_inline_comment__create_inline_comment,Bash(uv run pytest:*),Bash(uv run alembic:*),Bash(uv run python:*),Bash(uv sync:*),Bash(pnpm install:*),Bash(pnpm check:*),Bash(pnpm lint:*),Bash(pnpm format:*),Bash(pnpm test:*),Bash(pnpm build:*),Bash(gh issue:*),Bash(gh pr:*),Bash(gh search:*)" --model claude-opus-4-6'
+          claude_args: '--plugin-dir "${{ github.workspace }}/claude-plugins-src/plugins/code-review" --allowed-tools "mcp__github_inline_comment__create_inline_comment,Bash(uv run pytest:*),Bash(uv run alembic:*),Bash(uv run python:*),Bash(uv sync:*),Bash(pnpm install:*),Bash(pnpm check:*),Bash(pnpm lint:*),Bash(pnpm format:*),Bash(pnpm test:*),Bash(pnpm build:*),Bash(gh issue:*),Bash(gh pr:*),Bash(gh search:*)" --model claude-opus-4-7'
