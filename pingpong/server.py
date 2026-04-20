@@ -6289,11 +6289,21 @@ async def list_all_threads(
     #
     # For high cardinality users, it's much faster to pull all threads from the database
     # and filter out the relative few they can't see.
-    expect_high_cardinality = await request.state["authz"].test(
-        f"user:{request.state['session'].user.id}",
+    user_ref = f"user:{request.state['session'].user.id}"
+    is_root_admin_coro = request.state["authz"].test(
+        user_ref,
         "admin",
         request.state["authz"].root,
     )
+    institution_admins_coro = request.state["authz"].list(
+        user_ref,
+        "admin",
+        "institution",
+    )
+    is_root_admin, institution_admin_ids = await asyncio.gather(
+        is_root_admin_coro, institution_admins_coro
+    )
+    expect_high_cardinality = is_root_admin or bool(institution_admin_ids)
 
     if expect_high_cardinality:
         logger.info("Using high-cardinality strategy for all_threads query")
@@ -6304,7 +6314,7 @@ async def list_all_threads(
             allows = await request.state["authz"].check(
                 [
                     (
-                        f"user:{request.state['session'].user.id}",
+                        user_ref,
                         "can_view",
                         f"thread:{t.id}",
                     )
@@ -6324,7 +6334,7 @@ async def list_all_threads(
     else:
         logger.info("Using low-cardinality strategy for all_threads query")
         thread_ids = await request.state["authz"].list(
-            f"user:{request.state['session'].user.id}",
+            user_ref,
             "can_view",
             "thread",
         )
@@ -6346,7 +6356,7 @@ async def list_all_threads(
     is_supervisor_in_class_check = await request.state["authz"].check(
         [
             (
-                f"user:{request.state['session'].user.id}",
+                user_ref,
                 "supervisor",
                 f"class:{class_id}",
             )

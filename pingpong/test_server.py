@@ -192,6 +192,38 @@ async def test_delete_lti_class_accepts_harvard_lxp_lms_type(monkeypatch):
     assert captured["keep_users"] is True
 
 
+@pytest.mark.asyncio
+async def test_list_all_threads_uses_high_cardinality_strategy_for_institution_admin(
+    monkeypatch,
+):
+    authz = SimpleNamespace(
+        root="root:0",
+        test=AsyncMock(return_value=False),
+        list=AsyncMock(side_effect=[["11"]]),
+        check=AsyncMock(),
+    )
+    request = SimpleNamespace(
+        state={
+            "authz": authz,
+            "db": object(),
+            "session": SimpleNamespace(user=SimpleNamespace(id=123)),
+        }
+    )
+
+    get_n = AsyncMock(return_value=[])
+    get_n_by_id = AsyncMock(return_value=[])
+    monkeypatch.setattr(server_module.models.Thread, "get_n", get_n)
+    monkeypatch.setattr(server_module.models.Thread, "get_n_by_id", get_n_by_id)
+
+    response = await server_module.list_all_threads(request, limit=20)
+
+    assert response == {"threads": []}
+    authz.test.assert_awaited_once_with("user:123", "admin", "root:0")
+    authz.list.assert_awaited_once_with("user:123", "admin", "institution")
+    get_n.assert_awaited_once()
+    get_n_by_id.assert_not_awaited()
+
+
 @with_user(123)
 @with_institution(11, "Test Institution")
 @with_authz(grants=[("user:123", "can_create_class", "institution:99")])
