@@ -62,9 +62,7 @@ def _decrypt_verifier(blob: str) -> str:
     # jwt signature verification iterates below.
     for secret in config.auth.secret_keys:
         try:
-            return (
-                _fernet_for(secret).decrypt(blob.encode("ascii")).decode("utf-8")
-            )
+            return _fernet_for(secret).decrypt(blob.encode("ascii")).decode("utf-8")
         except InvalidToken:
             continue
     raise OAuthStateError("OAuth state PKCE payload invalid")

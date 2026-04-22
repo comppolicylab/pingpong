@@ -189,7 +189,9 @@ async def test_refresh_wraps_http_errors_as_token_refresh_error(monkeypatch):
     connector = _StubConnector()
 
     async def post(url, data=None, headers=None):
-        return _make_httpx_response(status_code=401, json_body={"error": "unauthorized"})
+        return _make_httpx_response(
+            status_code=401, json_body={"error": "unauthorized"}
+        )
 
     _patch_async_client(monkeypatch, post=post)
     row = UserConnector(

@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -279,9 +279,7 @@ async def test_callback_rejects_bad_state(api, valid_user_token, authz):
 
 
 @with_user(509)
-async def test_callback_rejects_service_mismatch(
-    api, valid_user_token, user, authz
-):
+async def test_callback_rejects_service_mismatch(api, valid_user_token, user, authz):
     state = connectors_pkg.encode_state(
         user_id=user.id,
         service="some-other",

@@ -95,7 +95,9 @@ async def test_revoke_endpoint_returns_none_when_absent(monkeypatch):
             httpx.Response(
                 200,
                 json={
-                    "authorization_endpoint": DISCOVERY_PAYLOAD["authorization_endpoint"],
+                    "authorization_endpoint": DISCOVERY_PAYLOAD[
+                        "authorization_endpoint"
+                    ],
                     "token_endpoint": DISCOVERY_PAYLOAD["token_endpoint"],
                 },
             )

@@ -5,18 +5,18 @@ import hashlib
 import logging
 import secrets
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, ClassVar
 from urllib.parse import urlencode
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
-logger = logging.getLogger(__name__)
-
 from pingpong.now import NowFn, utcnow
 
 from .exceptions import ConnectorError, TokenRefreshError
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from pingpong.models import UserConnector

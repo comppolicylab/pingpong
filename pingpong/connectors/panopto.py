@@ -38,9 +38,7 @@ class PanoptoConnector(OAuth2Connector):
             raise ConnectorNotConfigured("Panopto connector requires a tenant")
         resolved = config.connectors.panopto.tenant(tenant)
         if resolved is None:
-            raise ConnectorNotConfigured(
-                f"Panopto tenant '{tenant}' is not configured"
-            )
+            raise ConnectorNotConfigured(f"Panopto tenant '{tenant}' is not configured")
         return resolved
 
     def client_credentials(self, tenant: str | None) -> tuple[str, str]:
@@ -81,8 +79,7 @@ class PanoptoConnector(OAuth2Connector):
                 ) from e
             if response.status_code >= 400:
                 raise ConnectorError(
-                    f"Panopto OIDC discovery for {host} returned "
-                    f"{response.status_code}"
+                    f"Panopto OIDC discovery for {host} returned {response.status_code}"
                 )
             try:
                 payload = response.json()
