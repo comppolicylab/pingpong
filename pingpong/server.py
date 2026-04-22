@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from math import ceil
 from typing import Annotated, Any, Literal, NoReturn, Union, cast
+from urllib.parse import urlencode
 
 import humanize
 import jwt
@@ -11937,8 +11938,8 @@ async def connect_connector(
     """Build the provider's authorize URL and return it for the frontend redirect."""
     try:
         connector = connectors_pkg.get(service)
-    except connectors_pkg.ConnectorNotRegistered:
-        raise HTTPException(status_code=404, detail="Unknown connector")
+    except connectors_pkg.ConnectorNotRegistered as e:
+        raise HTTPException(status_code=404, detail="Unknown connector") from e
 
     if connector.requires_tenant and not body.tenant:
         raise HTTPException(status_code=400, detail="tenant is required")
@@ -11948,7 +11949,7 @@ async def connect_connector(
         # unknown tenants, which we return as a 400 rather than a 500.
         connector.client_credentials(body.tenant)
     except connectors_pkg.ConnectorNotConfigured as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     pkce = connectors_pkg.generate_pkce_pair() if connector.use_pkce else None
     state = connectors_pkg.encode_state(
@@ -11966,8 +11967,17 @@ async def connect_connector(
             pkce=pkce,
         )
     except connectors_pkg.ConnectorError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail=str(e)) from e
     return schemas.ConnectorConnectResponse(url=url)
+
+
+def _connector_error_redirect(code: str) -> RedirectResponse:
+    # URL-encode the error code so a provider-supplied value like
+    # `access_denied&injected=1` can't inject extra query parameters.
+    return RedirectResponse(
+        config.url(f"/profile?{urlencode({'connector_error': code})}"),
+        status_code=303,
+    )
 
 
 @v1.get("/connectors/{service}/callback")
@@ -11978,39 +11988,35 @@ async def connector_callback(request: StateRequest, service: str):
     error = request.query_params.get("error")
 
     if error:
-        return RedirectResponse(
-            config.url(f"/profile?connector_error={error}"),
-            status_code=303,
-        )
+        return _connector_error_redirect(error)
     if not code or not state:
-        return RedirectResponse(
-            config.url("/profile?connector_error=missing_params"),
-            status_code=303,
-        )
+        return _connector_error_redirect("missing_params")
 
     try:
         decoded = connectors_pkg.decode_state(state, nowfn=get_now_fn(request))
     except connectors_pkg.OAuthStateError:
-        return RedirectResponse(
-            config.url("/profile?connector_error=bad_state"),
-            status_code=303,
-        )
+        return _connector_error_redirect("bad_state")
 
     if decoded.get("service") != service:
-        return RedirectResponse(
-            config.url("/profile?connector_error=service_mismatch"),
-            status_code=303,
-        )
+        return _connector_error_redirect("service_mismatch")
+
+    # Bind the callback to the current browser session.  Without this check,
+    # a user who follows an authorize URL generated for a *different* PingPong
+    # account would get the provider tokens linked to whichever account they
+    # are currently logged in as.
+    session = request.state["session"]
+    session_user = session.user if session is not None else None
+    if session_user is None:
+        return _connector_error_redirect("not_logged_in")
+    user_id = int(decoded["sub"])
+    if user_id != session_user.id:
+        return _connector_error_redirect("user_mismatch")
 
     try:
         connector = connectors_pkg.get(service)
     except connectors_pkg.ConnectorNotRegistered:
-        return RedirectResponse(
-            config.url("/profile?connector_error=unknown_service"),
-            status_code=303,
-        )
+        return _connector_error_redirect("unknown_service")
 
-    user_id = int(decoded["sub"])
     tenant = decoded.get("tenant")
     pkce_verifier = decoded.get("pkce_verifier")
 
@@ -12023,10 +12029,7 @@ async def connector_callback(request: StateRequest, service: str):
         )
     except connectors_pkg.ConnectorError:
         logger.exception("Connector code exchange failed for %s", service)
-        return RedirectResponse(
-            config.url("/profile?connector_error=exchange_failed"),
-            status_code=303,
-        )
+        return _connector_error_redirect("exchange_failed")
 
     db = request.state["db"]
     existing = await models.UserConnector.get_for_user_service_tenant(

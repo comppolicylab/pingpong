@@ -8,7 +8,7 @@ import httpx
 from pingpong.config import PanoptoTenantSettings, config
 from pingpong.now import NowFn, utcnow
 
-from .base import OAuth2Connector
+from .base import HTTP_TIMEOUT_SECONDS, OAuth2Connector
 from .exceptions import ConnectorError, ConnectorNotConfigured
 
 DISCOVERY_PATH = "/Panopto/oauth2/.well-known/openid-configuration"
@@ -73,7 +73,7 @@ class PanoptoConnector(OAuth2Connector):
                 return self._discovery_cache[host]
             url = f"https://{host}{DISCOVERY_PATH}"
             try:
-                async with httpx.AsyncClient() as client:
+                async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS) as client:
                     response = await client.get(url)
             except httpx.HTTPError as e:
                 raise ConnectorError(

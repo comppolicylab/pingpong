@@ -24,6 +24,13 @@ if TYPE_CHECKING:
 
 REFRESH_THRESHOLD_SECONDS = 60
 
+# Any call that runs inline with an HTTP request (authorize/callback/refresh)
+# should hard-cap provider latency so a hung connection doesn't tie up a
+# worker or propagate to end users as a blank screen.  httpx's implicit
+# default is 5s but being explicit (and a touch more generous) makes the
+# behavior predictable across connectors.
+HTTP_TIMEOUT_SECONDS = 10.0
+
 
 @dataclass
 class ConnectorTokens:
@@ -192,7 +199,7 @@ class OAuth2Connector:
             data["token"] = connector.access_token
             data["token_type_hint"] = "access_token"
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS) as client:
                 response = await client.post(url, data=data)
             if response.is_error:
                 logger.warning(
@@ -272,7 +279,7 @@ class OAuth2Connector:
         self, url: str, data: dict[str, str]
     ) -> dict[str, Any]:
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS) as client:
                 response = await client.post(
                     url,
                     data=data,

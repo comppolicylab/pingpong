@@ -69,12 +69,12 @@ def _make_httpx_mock(
 
     monkeypatch.setattr(
         "pingpong.connectors.panopto.httpx.AsyncClient",
-        MagicMock(side_effect=lambda: make_client()),
+        MagicMock(side_effect=lambda *args, **kwargs: make_client()),
         raising=True,
     )
     monkeypatch.setattr(
         "pingpong.connectors.base.httpx.AsyncClient",
-        MagicMock(side_effect=lambda: make_client()),
+        MagicMock(side_effect=lambda *args, **kwargs: make_client()),
         raising=True,
     )
     return calls
@@ -196,8 +196,8 @@ async def test_connect_returns_authorize_url_with_signed_state(
     assert decoded["tenant"] == "demo"
     # Panopto's server-side flow opts out of PKCE (authenticates via
     # client_secret instead); the authorize URL should not include PKCE
-    # params and the state should not carry a verifier.
-    assert decoded["pkce_verifier"] is None
+    # params and the state should not carry a verifier payload.
+    assert "pkce_v" not in decoded
     assert "code_challenge=" not in url
 
 
@@ -380,3 +380,61 @@ async def test_disconnect_returns_404_for_missing_id(api, valid_user_token, auth
 async def test_list_connectors_unauthenticated_is_403(api):
     response = api.get("/api/v1/me/connectors")
     assert response.status_code == 403
+
+
+@with_user(515)
+async def test_callback_rejects_state_for_different_user(
+    api, db, valid_user_token, user, authz
+):
+    """A state token minted for user A must not link tokens to logged-in user B."""
+    # State claims sub=user.id+1 but the session is user.id.
+    state = connectors_pkg.encode_state(
+        user_id=user.id + 1,
+        service="panopto",
+        tenant="demo",
+        pkce_verifier=None,
+    )
+    response = api.get(
+        f"/api/v1/connectors/panopto/callback?code=auth-code&state={state}",
+        follow_redirects=False,
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert response.status_code == 303
+    assert "connector_error=user_mismatch" in response.headers["location"]
+
+    async with db.async_session() as session:
+        assert await UserConnector.get_for_user(session, user.id) == []
+
+
+@with_user(516)
+async def test_callback_rejects_when_no_session(api, db, user):
+    state = connectors_pkg.encode_state(
+        user_id=user.id,
+        service="panopto",
+        tenant="demo",
+        pkce_verifier=None,
+    )
+    response = api.get(
+        f"/api/v1/connectors/panopto/callback?code=auth-code&state={state}",
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert "connector_error=not_logged_in" in response.headers["location"]
+
+
+@with_user(517)
+async def test_callback_url_encodes_provider_error(api, valid_user_token, authz):
+    from urllib.parse import parse_qs, urlparse
+
+    response = api.get(
+        "/api/v1/connectors/panopto/callback?error=access_denied%26injected%3D1",
+        follow_redirects=False,
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert response.status_code == 303
+    # The provider-supplied '&' must be URL-encoded so a crafted error
+    # value like "access_denied&injected=1" can't smuggle an extra query
+    # parameter into our /profile redirect.
+    qs = parse_qs(urlparse(response.headers["location"]).query)
+    assert list(qs.keys()) == ["connector_error"]
+    assert qs["connector_error"] == ["access_denied&injected=1"]
