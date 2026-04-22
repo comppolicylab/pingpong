@@ -436,3 +436,76 @@ async def test_callback_url_encodes_provider_error(api, valid_user_token, authz)
     qs = parse_qs(urlparse(response.headers["location"]).query)
     assert list(qs.keys()) == ["connector_error"]
     assert qs["connector_error"] == ["access_denied&injected=1"]
+
+
+@with_user(518)
+async def test_user_connector_uniqueness_partial_indexes(db, user, authz):
+    """Partial unique indexes must hold on both PG and SQLite.
+
+    The indexes use ``postgresql_where`` + ``sqlite_where`` so dev/test (SQLite)
+    has the same dialect-parity as prod: (1) two rows for the same
+    (user, service) with *different* tenants are allowed, and (2) two rows
+    with the same non-NULL tenant (or both NULL) are rejected.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    # Different tenants for the same (user, service) — allowed by the
+    # `tenant IS NOT NULL` partial unique index.
+    async with db.async_session() as session:
+        session.add(
+            UserConnector(
+                user_id=user.id,
+                service="panopto",
+                tenant="demo",
+                access_token="at",
+            )
+        )
+        session.add(
+            UserConnector(
+                user_id=user.id,
+                service="panopto",
+                tenant="other",
+                access_token="at",
+            )
+        )
+        await session.commit()
+        rows = await UserConnector.get_for_user(session, user.id)
+        assert {r.tenant for r in rows} == {"demo", "other"}
+
+    # Duplicate (user, service, tenant) — rejected.
+    async with db.async_session() as session:
+        session.add(
+            UserConnector(
+                user_id=user.id,
+                service="panopto",
+                tenant="demo",
+                access_token="at",
+            )
+        )
+        with pytest.raises(IntegrityError):
+            await session.commit()
+
+    # Duplicate (user, service, NULL) — rejected by the `tenant IS NULL`
+    # partial unique index.
+    async with db.async_session() as session:
+        session.add(
+            UserConnector(
+                user_id=user.id,
+                service="other-service",
+                tenant=None,
+                access_token="at",
+            )
+        )
+        await session.commit()
+
+    async with db.async_session() as session:
+        session.add(
+            UserConnector(
+                user_id=user.id,
+                service="other-service",
+                tenant=None,
+                access_token="at",
+            )
+        )
+        with pytest.raises(IntegrityError):
+            await session.commit()

@@ -11863,19 +11863,6 @@ def _connector_callback_url(service: str) -> str:
     return config.url(f"/api/v1/connectors/{service}/callback")
 
 
-def _connector_tenant_options(
-    connector: connectors_pkg.OAuth2Connector,
-) -> list[schemas.ConnectorTenantOption]:
-    if isinstance(connector, connectors_pkg.PanoptoConnector):
-        return [
-            schemas.ConnectorTenantOption(
-                tenant=t.tenant, tenant_friendly_name=t.tenant_friendly_name
-            )
-            for t in config.connectors.panopto.tenants
-        ]
-    return []
-
-
 def _connector_definition(
     connector: connectors_pkg.OAuth2Connector,
 ) -> schemas.ConnectorDefinition:
@@ -11884,7 +11871,10 @@ def _connector_definition(
         display_name=connector.display_name,
         icon=connector.icon,
         requires_tenant=connector.requires_tenant,
-        tenants=_connector_tenant_options(connector),
+        tenants=[
+            schemas.ConnectorTenantOption(tenant=t, tenant_friendly_name=name)
+            for t, name in connector.tenant_options()
+        ],
     )
 
 
@@ -11919,6 +11909,17 @@ async def get_my_connectors(request: StateRequest):
         try:
             connector = connectors_pkg.get(row.service)
         except connectors_pkg.ConnectorNotRegistered:
+            # Row exists for a service the current deployment doesn't ship,
+            # e.g. a connector that was removed. Surface it in logs so
+            # operators can clean up or restore the registration rather
+            # than silently dropping the row from the user's view.
+            logger.warning(
+                "Skipping UserConnector row for unregistered service "
+                "(user_id=%s, connector_id=%s, service=%s)",
+                row.user_id,
+                row.id,
+                row.service,
+            )
             continue
         summaries.append(_connector_summary(row, connector))
     available = [_connector_definition(c) for c in connectors_pkg.all_connectors()]

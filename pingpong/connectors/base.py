@@ -102,6 +102,15 @@ class OAuth2Connector:
         """Return a human-readable name for the tenant (for UI display)."""
         return None
 
+    def tenant_options(self) -> list[tuple[str, str]]:
+        """Return (tenant, friendly_name) pairs shown on the connect UI.
+
+        Default is empty — single-tenant and tenant-less connectors don't
+        need to populate this. Multi-tenant connectors override to expose
+        their configured tenants to the frontend.
+        """
+        return []
+
     # ---- authorize URL ---------------------------------------------------
 
     async def build_authorize_url(
@@ -148,8 +157,11 @@ class OAuth2Connector:
             "code": code,
             "redirect_uri": redirect_uri,
             "client_id": client_id,
-            "client_secret": client_secret,
         }
+        # PKCE public clients don't have a secret; skip the field entirely
+        # rather than sending an empty value that some providers reject.
+        if client_secret:
+            data["client_secret"] = client_secret
         if pkce_verifier is not None:
             data["code_verifier"] = pkce_verifier
         payload = await self._post_token_request(token_url, data)
@@ -164,12 +176,13 @@ class OAuth2Connector:
             )
         client_id, client_secret = self.client_credentials(connector.tenant)
         token_url = await self.token_endpoint(connector.tenant)
-        data = {
+        data: dict[str, str] = {
             "grant_type": "refresh_token",
             "refresh_token": connector.refresh_token,
             "client_id": client_id,
-            "client_secret": client_secret,
         }
+        if client_secret:
+            data["client_secret"] = client_secret
         try:
             payload = await self._post_token_request(token_url, data)
         except ConnectorError as e:
@@ -191,7 +204,9 @@ class OAuth2Connector:
             # is the only hand we have to play.
             return
         client_id, client_secret = self.client_credentials(connector.tenant)
-        data: dict[str, str] = {"client_id": client_id, "client_secret": client_secret}
+        data: dict[str, str] = {"client_id": client_id}
+        if client_secret:
+            data["client_secret"] = client_secret
         if connector.refresh_token:
             data["token"] = connector.refresh_token
             data["token_type_hint"] = "refresh_token"
@@ -238,10 +253,15 @@ class OAuth2Connector:
     def _token_expired(self, connector: "UserConnector") -> bool:
         if connector.expires_at is None:
             return False
-        now = self._nowfn()
-        if connector.expires_at.tzinfo is None:
-            now = now.replace(tzinfo=None)
-        return connector.expires_at - now <= timedelta(
+        # We write `expires_at` as tz-aware UTC (see `_apply_tokens`) but
+        # SQLite round-trips tz-aware datetimes as naive regardless of column
+        # type. Attach UTC on read so we can compare against a tz-aware `now`
+        # unambiguously, rather than stripping tzinfo off `now` and silently
+        # comparing naive datetimes in different zones.
+        expires_at = connector.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        return expires_at - self._nowfn() <= timedelta(
             seconds=REFRESH_THRESHOLD_SECONDS
         )
 
@@ -251,7 +271,13 @@ class OAuth2Connector:
         connector.access_token = tokens.access_token
         if tokens.refresh_token is not None:
             connector.refresh_token = tokens.refresh_token
-        connector.expires_at = tokens.expires_at
+        # Always persist a tz-aware UTC datetime so reads can assume UTC
+        # (or attach UTC for SQLite's naive round-trip). `_nowfn` is tz-aware
+        # so new rows hit this branch already, but we normalize defensively.
+        expires_at = tokens.expires_at
+        if expires_at is not None and expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        connector.expires_at = expires_at
         if tokens.scopes is not None:
             connector.scopes = tokens.scopes
         if tokens.external_user_id is not None:

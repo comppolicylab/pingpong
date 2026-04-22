@@ -60,13 +60,16 @@ def upgrade() -> None:
     # NULL-tenant connectors are correctly deduplicated.  PostgreSQL treats
     # each NULL as distinct in a standard unique index, so a plain
     # UniqueConstraint("user_id", "service", "tenant") would allow duplicate
-    # (user_id, service, NULL) rows.
+    # (user_id, service, NULL) rows.  ``sqlite_where`` mirrors the predicate
+    # for dev/test parity — without it the partial index degenerates into a
+    # plain unique on (user_id, service[, tenant]) on SQLite.
     op.create_index(
         "uq_user_service_no_tenant",
         "user_connectors",
         ["user_id", "service"],
         unique=True,
         postgresql_where=sa.text("tenant IS NULL"),
+        sqlite_where=sa.text("tenant IS NULL"),
     )
     op.create_index(
         "uq_user_service_tenant",
@@ -74,6 +77,7 @@ def upgrade() -> None:
         ["user_id", "service", "tenant"],
         unique=True,
         postgresql_where=sa.text("tenant IS NOT NULL"),
+        sqlite_where=sa.text("tenant IS NOT NULL"),
     )
 
 
