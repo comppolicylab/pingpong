@@ -4,6 +4,7 @@
 	import type { LectureVideoInteractionHistoryItem } from '$lib/api';
 	import { mergeQuestionOptions } from '$lib/utils/lecture-video';
 	import { Spinner } from 'flowbite-svelte';
+	import { ClipboardListOutline } from 'flowbite-svelte-icons';
 	import { SvelteMap } from 'svelte/reactivity';
 	import LectureVideoQuestionCard from './LectureVideoQuestionCard.svelte';
 
@@ -141,18 +142,34 @@
 			</div>
 		</div>
 	{:else if !loading}
-		<div class="flex flex-col gap-4">
-			{#each reviewQuestions as question (question.id)}
-				<LectureVideoQuestionCard
-					position={question.position}
-					questionText={question.questionText}
-					options={question.options}
-					state="answered"
-					selectedOptionId={question.selectedOptionId}
-					correctOptionId={question.correctOptionId}
-					postAnswerText={question.postAnswerText}
-				/>
-			{/each}
-		</div>
+		{#if reviewQuestions.length > 0}
+			<div class="flex flex-col gap-4">
+				{#each reviewQuestions as question (question.id)}
+					<LectureVideoQuestionCard
+						position={question.position}
+						questionText={question.questionText}
+						options={question.options}
+						state="answered"
+						selectedOptionId={question.selectedOptionId}
+						correctOptionId={question.correctOptionId}
+						postAnswerText={question.postAnswerText}
+					/>
+				{/each}
+			</div>
+		{:else}
+			<div class="flex h-full min-h-48 items-center justify-center px-4 py-8">
+				<div class="flex max-w-sm flex-col items-center text-center">
+					<div
+						class="mb-3 flex size-12 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-slate-400"
+					>
+						<ClipboardListOutline class="size-6" />
+					</div>
+					<h2 class="text-sm font-semibold text-slate-900">No comprehension checks</h2>
+					<p class="mt-1 max-w-72 text-sm text-slate-500">
+						There are no completed comprehension checks to review for this lecture.
+					</p>
+				</div>
+			</div>
+		{/if}
 	{/if}
 </div>
