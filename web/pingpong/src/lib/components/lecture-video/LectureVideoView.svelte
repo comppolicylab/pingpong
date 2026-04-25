@@ -855,12 +855,9 @@
 			return;
 		}
 
-		if (!(await ensureControllerSession())) {
-			return;
-		}
+		videoElement?.pause();
 
-		if (videoElement && !videoElement.paused) {
-			videoElement.pause();
+		if (!(await ensureControllerSession())) {
 			return;
 		}
 	}

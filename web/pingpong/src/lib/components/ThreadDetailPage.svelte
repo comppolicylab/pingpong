@@ -705,7 +705,7 @@
 	};
 
 	const handleLectureChatSubmit = async (message: ChatInputMessage) => {
-		await lectureVideoViewRef?.pauseForChatSubmit();
+		void lectureVideoViewRef?.pauseForChatSubmit();
 		await postMessage(message);
 	};
 

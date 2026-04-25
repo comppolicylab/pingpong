@@ -53,9 +53,7 @@
 		ttsMuted = false,
 		ttsPlaying = false,
 		ttsAvailable = false,
-		onmutettstoggle,
-		ontextinput,
-		ontextpaste
+		onmutettstoggle
 	}: {
 		classId: number;
 		threadId: number;
@@ -85,8 +83,6 @@
 		ttsPlaying?: boolean;
 		ttsAvailable?: boolean;
 		onmutettstoggle?: () => void;
-		ontextinput?: (detail: { hasText: boolean }) => void;
-		ontextpaste?: (detail: { hasText: boolean }) => void;
 	} = $props();
 
 	let messagesContainer: HTMLDivElement | null = null;
@@ -473,8 +469,6 @@
 					bypassedSettingsSections={[]}
 					on:submit={(e) => onsubmit?.(e.detail)}
 					on:dismissError={() => ondismisserror?.()}
-					on:textinput={(e) => ontextinput?.(e.detail)}
-					on:textpaste={(e) => ontextpaste?.(e.detail)}
 				/>
 			</div>
 		</div>
