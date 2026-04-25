@@ -1101,6 +1101,79 @@ async def test_send_message_locks_lecture_video_thread_before_first_run(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
         ("user:123", "student", "class:1"),
+        ("user:123", "can_view", "assistant:1"),
+    ]
+)
+async def test_send_message_does_not_generate_lecture_video_thread_name(
+    api, authz, config, db, institution, valid_user_token, monkeypatch
+):
+    async with db.async_session() as session:
+        class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+            manifest=lecture_video_manifest_v2(),
+        )
+
+    create_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/lecture",
+        json={"assistant_id": 1, "parties": [123]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+    thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
+
+    async with db.async_session() as session:
+        thread = await session.get(models.Thread, thread_id)
+        assert thread is not None
+        thread.user_message_ct = 3
+        await session.commit()
+
+    async def fail_generate_thread_name(*args, **kwargs):
+        raise AssertionError(
+            "get_thread_conversation_name should not be called for lecture video threads"
+        )
+
+    async def fake_build_context(*args, **kwargs):
+        return server_module.lecture_video_chat.LectureChatContextBuildResult(
+            text_message_parts=[
+                models.MessagePart(
+                    part_index=0,
+                    type=schemas.MessagePartType.INPUT_TEXT,
+                    text="Lecture chat context\nCurrent offset: 4321ms",
+                )
+            ],
+            frame_message_parts=[],
+            current_offset_ms=4321,
+        )
+
+    monkeypatch.setattr(
+        server_module,
+        "get_thread_conversation_name",
+        fail_generate_thread_name,
+    )
+    monkeypatch.setattr(
+        server_module.lecture_video_chat,
+        "build_lecture_chat_context_message_parts",
+        fake_build_context,
+    )
+    monkeypatch.setattr(server_module, "run_response", fake_visible_reply_run_response)
+
+    response = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}",
+        json={"message": "Why does latency matter more here?"},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
     ]
 )
 async def test_get_thread_lazily_initializes_legacy_lecture_video_runtime_state(
