@@ -528,6 +528,7 @@ class ElevenLabsStreamingTTS:
                     "voice_settings": {
                         "stability": 0.5,
                         "similarity_boost": 0.8,
+                        "speed": 0.8,
                     },
                 }
             )
