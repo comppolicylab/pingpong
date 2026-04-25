@@ -10,6 +10,7 @@ from pingpong.lecture_video_chat import (
     build_lecture_chat_context_message_parts,
     _build_frame_message_parts,
     _build_context_text,
+    _build_context_text_v3,
     _extract_frame,
     _serialize_transcript_words,
 )
@@ -114,6 +115,53 @@ def test_validate_lecture_video_manifest_accepts_explicit_version_v3():
     assert manifest.version == 3
 
 
+def test_validate_lecture_video_manifest_infers_versionless_v2_with_partial_v3_word_field():
+    payload = {
+        "questions": [_build_manifest_question().model_dump(mode="json")],
+        "word_level_transcription": [
+            {
+                "id": "w1",
+                "word": "Before",
+                "start": 0,
+                "end": 400,
+                "end_offset_ms": 400,
+            }
+        ],
+    }
+
+    manifest = schemas.validate_lecture_video_manifest(payload)
+
+    assert isinstance(manifest, schemas.LectureVideoManifestV2)
+    assert manifest.version == 2
+
+
+def test_validate_lecture_video_manifest_orders_v3_video_descriptions():
+    payload = {
+        "version": 3,
+        **_build_manifest_v3_dict(),
+        "video_descriptions": [
+            {
+                "start_offset_ms": 8_000,
+                "end_offset_ms": 9_000,
+                "description": "Later slide.",
+            },
+            {
+                "start_offset_ms": 2_000,
+                "end_offset_ms": 3_000,
+                "description": "Earlier slide.",
+            },
+        ],
+    }
+
+    manifest = schemas.validate_lecture_video_manifest(payload)
+
+    assert isinstance(manifest, schemas.LectureVideoManifestV3)
+    assert [description.description for description in manifest.video_descriptions] == [
+        "Earlier slide.",
+        "Later slide.",
+    ]
+
+
 @pytest.mark.parametrize(
     "payload_update",
     [
@@ -152,6 +200,13 @@ def test_validate_lecture_video_manifest_rejects_invalid_v3_ranges(payload_updat
     payload = {"version": 3, **_build_manifest_v3_dict(), **payload_update}
 
     with pytest.raises(ValueError, match="Invalid lecture video manifest"):
+        schemas.validate_lecture_video_manifest(payload)
+
+
+def test_validate_lecture_video_manifest_rejects_empty_v3_video_descriptions():
+    payload = {"version": 3, **_build_manifest_v3_dict(), "video_descriptions": []}
+
+    with pytest.raises(ValueError, match="video_descriptions"):
         schemas.validate_lecture_video_manifest(payload)
 
 
@@ -326,6 +381,111 @@ def test_build_context_text_clamps_last_chat_context_after_backward_seek():
     assert "(older transcript omitted)" not in context_text
     assert "earlier context" in context_text
     assert "future" not in context_text
+
+
+def test_build_context_text_v3_watching_status_and_filters_descriptions():
+    thread = SimpleNamespace(lecture_video=SimpleNamespace(questions=[]))
+    state = SimpleNamespace(
+        last_known_offset_ms=5_000,
+        last_chat_context_end_ms=0,
+        current_question=None,
+        current_question_id=None,
+        state=schemas.LectureVideoSessionState.PLAYING,
+    )
+    manifest = schemas.LectureVideoManifestV3(
+        version=3,
+        word_level_transcription=[
+            schemas.LectureVideoManifestWordV3(
+                id="w1",
+                word="Current",
+                start_offset_ms=4_700,
+                end_offset_ms=5_000,
+            ),
+            schemas.LectureVideoManifestWordV3(
+                id="w2",
+                word="future",
+                start_offset_ms=5_100,
+                end_offset_ms=5_500,
+            ),
+        ],
+        video_descriptions=[
+            schemas.LectureVideoManifestVideoDescriptionV3(
+                start_offset_ms=120_000,
+                end_offset_ms=121_000,
+                description="A much later slide appears.",
+            )
+        ],
+        questions=[_build_manifest_question()],
+    )
+
+    context_text, current_offset_ms = _build_context_text_v3(
+        thread,
+        state,
+        manifest,
+        answered_knowledge_checks="None",
+    )
+
+    assert current_offset_ms == 5_000
+    assert "Status: Watching the lecture video" in context_text
+    assert "### Relevant Video Descriptions\n\nNone" in context_text
+    assert "A much later slide appears." not in context_text
+
+
+def test_build_context_text_v3_marks_omitted_transcript_since_last_chat():
+    thread = SimpleNamespace(lecture_video=SimpleNamespace(questions=[]))
+    state = SimpleNamespace(
+        last_known_offset_ms=300_000,
+        last_chat_context_end_ms=30_000,
+        current_question=None,
+        current_question_id=None,
+        state=schemas.LectureVideoSessionState.PLAYING,
+    )
+    manifest = schemas.LectureVideoManifestV3(
+        version=3,
+        word_level_transcription=[
+            schemas.LectureVideoManifestWordV3(
+                id="w1",
+                word="stale",
+                start_offset_ms=40_000,
+                end_offset_ms=41_000,
+            ),
+            schemas.LectureVideoManifestWordV3(
+                id="w2",
+                word="fresh",
+                start_offset_ms=300_000 - TRANSCRIPT_CONTEXT_WINDOW_MS,
+                end_offset_ms=300_000 - TRANSCRIPT_CONTEXT_WINDOW_MS + 1_000,
+            ),
+            schemas.LectureVideoManifestWordV3(
+                id="w3",
+                word="context",
+                start_offset_ms=299_000,
+                end_offset_ms=300_000,
+            ),
+        ],
+        video_descriptions=[
+            schemas.LectureVideoManifestVideoDescriptionV3(
+                start_offset_ms=1_000,
+                end_offset_ms=2_000,
+                description="The opening title card is visible.",
+            )
+        ],
+        questions=[_build_manifest_question()],
+    )
+
+    context_text, current_offset_ms = _build_context_text_v3(
+        thread,
+        state,
+        manifest,
+        answered_knowledge_checks="None",
+    )
+
+    assert current_offset_ms == 300_000
+    assert (
+        "### Recent Transcript Since Last Lecture Chat (older transcript omitted)"
+        in context_text
+    )
+    assert "stale" not in context_text
+    assert "fresh context" in context_text
 
 
 @pytest.mark.asyncio

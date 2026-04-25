@@ -580,7 +580,17 @@ class LectureVideoManifestV3(LectureVideoManifestBase):
     word_level_transcription: list[LectureVideoManifestWordV3] = Field(
         ..., min_length=1
     )
-    video_descriptions: list[LectureVideoManifestVideoDescriptionV3]
+    video_descriptions: list[LectureVideoManifestVideoDescriptionV3] = Field(
+        ..., min_length=1
+    )
+
+    @model_validator(mode="after")
+    def order_video_descriptions(self) -> "LectureVideoManifestV3":
+        self.video_descriptions = sorted(
+            self.video_descriptions,
+            key=lambda item: (item.start_offset_ms, item.end_offset_ms),
+        )
+        return self
 
 
 LectureVideoManifest: TypeAlias = (
@@ -589,6 +599,8 @@ LectureVideoManifest: TypeAlias = (
 
 
 def _looks_like_lecture_video_manifest_v3(value: dict[str, Any]) -> bool:
+    # video_descriptions is V3-only, so prefer that explicit marker before
+    # checking transcript word shape.
     if "video_descriptions" in value:
         return True
     words = value.get("word_level_transcription")
@@ -596,7 +608,7 @@ def _looks_like_lecture_video_manifest_v3(value: dict[str, Any]) -> bool:
         return False
     return any(
         isinstance(word, dict)
-        and ("start_offset_ms" in word or "end_offset_ms" in word)
+        and ("start_offset_ms" in word and "end_offset_ms" in word)
         for word in words
     )
 
@@ -625,11 +637,17 @@ def validate_lecture_video_manifest(
         )
         if version == 3 or (
             version is None
+            # Only infer V3 for legacy manifests without an explicit version;
+            # explicit versioned payloads should validate against that contract.
             and isinstance(lecture_video_manifest, dict)
             and _looks_like_lecture_video_manifest_v3(lecture_video_manifest)
         ):
             return LectureVideoManifestV3.model_validate(lecture_video_manifest)
-        if version == 2:
+        if version == 2 or (
+            version is None
+            and isinstance(lecture_video_manifest, dict)
+            and "word_level_transcription" in lecture_video_manifest
+        ):
             return LectureVideoManifestV2.model_validate(lecture_video_manifest)
         return LectureVideoManifestV1.model_validate(lecture_video_manifest)
     except ValidationError as exc:
