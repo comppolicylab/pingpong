@@ -219,14 +219,16 @@
 </div>
 
 {#snippet dots()}
-	<div class="flex shrink-0 items-center gap-1.5 pt-1">
-		{#each sortedQuestions as question, index (question.id)}
-			<button
-				type="button"
-				onclick={() => (requestedActiveIndex = index)}
-				class="{dotBaseClass} {dotClass(question.id, index)}"
-				aria-label="Go to question {question.position}"
-			></button>
-		{/each}
-	</div>
+	{#if sortedQuestions.length > 1}
+		<div class="flex shrink-0 items-center gap-1.5 pt-1">
+			{#each sortedQuestions as question, index (question.id)}
+				<button
+					type="button"
+					onclick={() => (requestedActiveIndex = index)}
+					class="{dotBaseClass} {dotClass(question.id, index)}"
+					aria-label="Go to question {question.position}"
+				></button>
+			{/each}
+		</div>
+	{/if}
 {/snippet}
