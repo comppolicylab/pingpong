@@ -155,6 +155,12 @@
 	 */
 	export let mimeType: MimeTypeLookupFn;
 
+	/**
+	 * Placeholder message for the input.
+	 * Defaults to "Ask me anything".
+	 */
+	export let placeholderMessage = 'Ask me anything';
+
 	// Input container
 	let containerRef: HTMLDivElement;
 	// Text area reference for fixing height.
@@ -705,7 +711,7 @@
 				name="message"
 				class="mt-1 w-full resize-none border-none bg-transparent p-0 !outline-hidden focus:ring-0"
 				placeholder={canSubmit
-					? 'Ask me anything'
+					? placeholderMessage
 					: assistantDeleted
 						? 'Read-only thread: the assistant associated with this thread is deleted.'
 						: canViewAssistant

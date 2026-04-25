@@ -8,6 +8,7 @@
 		CodeOutline,
 		ServerOutline,
 		TerminalOutline,
+		MessageDotsOutline,
 		VolumeUpSolid,
 		VolumeMuteSolid
 	} from 'flowbite-svelte-icons';
@@ -261,6 +262,19 @@
 				</Button>
 			</div>
 		{/if}
+		{#if !canFetchMore && messages.length === 0}
+			<div class="flex h-full min-h-48 items-center justify-center px-4 py-8">
+				<div class="flex max-w-sm flex-col items-center text-center">
+					<div
+						class="mb-3 flex size-12 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-slate-400"
+					>
+						<MessageDotsOutline class="size-6" />
+					</div>
+					<h2 class="text-sm font-semibold text-slate-900">No messages yet</h2>
+					<p class="mt-1 text-sm text-slate-500">Ask a question to get started</p>
+				</div>
+			</div>
+		{/if}
 		{#each messages as message (message.data.id)}
 			<div class="mx-auto flex max-w-4xl gap-x-3 px-2 py-4">
 				<div class="shrink-0">
@@ -467,6 +481,7 @@
 					threadVersion={version}
 					assistantVersion={resolvedAssistantVersion}
 					bypassedSettingsSections={[]}
+					placeholderMessage="Ask about the lecture"
 					on:submit={(e) => onsubmit?.(e.detail)}
 					on:dismissError={() => ondismisserror?.()}
 				/>
