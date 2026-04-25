@@ -117,7 +117,10 @@
 	let suppressPlayInteraction = false;
 	let ignorePauseEventUntilMs = 0;
 	let playbackInteractionInFlight = false;
-	let queuedPlaybackInteraction: {
+	let playbackSessionRefreshController: AbortController | null = null;
+	// Playback pause/resume is latest-state telemetry, not a lossless event log.
+	// While a sync is in flight, keep only the newest desired browser playback state.
+	let latestPlaybackInteraction: {
 		type: 'video_paused' | 'video_resumed';
 		offsetMs: number;
 	} | null = null;
@@ -399,7 +402,9 @@
 		suppressPlayInteraction = false;
 		ignorePauseEventUntilMs = 0;
 		playbackInteractionInFlight = false;
-		queuedPlaybackInteraction = null;
+		playbackSessionRefreshController?.abort();
+		playbackSessionRefreshController = null;
+		latestPlaybackInteraction = null;
 		revokeNarrationResources();
 		clearPendingVideoRetry();
 		autoContinueInFlight = false;
@@ -451,7 +456,9 @@
 		resumeOffsetOnCanPlay = null;
 		stopNarrationPlayback();
 		autoContinueInFlight = false;
-		queuedPlaybackInteraction = null;
+		playbackSessionRefreshController?.abort();
+		playbackSessionRefreshController = null;
+		latestPlaybackInteraction = null;
 
 		if (videoElement && !videoElement.paused) {
 			suppressPauseInteraction = true;
@@ -478,9 +485,21 @@
 	async function refreshLectureVideoSession(
 		controllerSessionIdForRequest: string
 	): Promise<boolean> {
+		playbackSessionRefreshController?.abort();
+		const refreshController = new AbortController();
+		playbackSessionRefreshController = refreshController;
 		try {
-			const response = await api.getThread(fetch, classId, threadId, controllerSessionIdForRequest);
-			if (controllerSessionId !== controllerSessionIdForRequest) {
+			const response = await api.getThread(
+				fetch,
+				classId,
+				threadId,
+				controllerSessionIdForRequest,
+				refreshController.signal
+			);
+			if (
+				refreshController.signal.aborted ||
+				controllerSessionId !== controllerSessionIdForRequest
+			) {
 				return false;
 			}
 
@@ -496,8 +515,15 @@
 
 			applySession(refreshedSession);
 			return true;
-		} catch {
+		} catch (error) {
+			if (error instanceof DOMException && error.name === 'AbortError') {
+				return false;
+			}
 			return false;
+		} finally {
+			if (playbackSessionRefreshController === refreshController) {
+				playbackSessionRefreshController = null;
+			}
 		}
 	}
 
@@ -506,7 +532,7 @@
 			return;
 		}
 
-		queuedPlaybackInteraction = {
+		latestPlaybackInteraction = {
 			type,
 			offsetMs: Math.round(currentTimeMs)
 		};
@@ -523,12 +549,14 @@
 
 		playbackInteractionInFlight = true;
 		try {
-			while (queuedPlaybackInteraction) {
-				const interaction = queuedPlaybackInteraction;
-				queuedPlaybackInteraction = null;
+			while (latestPlaybackInteraction) {
+				const interaction = latestPlaybackInteraction;
+				latestPlaybackInteraction = null;
 
 				const interactionControllerSessionId = controllerSessionId;
 				if (!interactionControllerSessionId || sessionState !== 'playing') {
+					// Playback telemetry is only meaningful while video playback is active.
+					// If the session moved into a question/completion state, drop the stale desired state.
 					return;
 				}
 
@@ -546,7 +574,16 @@
 
 					const expanded = api.expandResponse(response);
 					if (expanded.$status === 409) {
-						await refreshLectureVideoSession(interactionControllerSessionId);
+						const refreshed = await refreshLectureVideoSession(interactionControllerSessionId);
+						if (!refreshed) {
+							if (controllerSessionId !== interactionControllerSessionId) {
+								return;
+							}
+							failClosedControl(
+								'Lecture video state changed and could not be refreshed. Please refresh to continue.'
+							);
+							return;
+						}
 						continue;
 					}
 					if (expanded.error) {
@@ -568,7 +605,9 @@
 			}
 		} finally {
 			playbackInteractionInFlight = false;
-			if (queuedPlaybackInteraction) {
+			if (latestPlaybackInteraction) {
+				// A new desired playback state may arrive while an earlier attempt exits early.
+				// Restart once after releasing the in-flight guard so that latest state is not stranded.
 				void drainPlaybackInteractionQueue();
 			}
 		}

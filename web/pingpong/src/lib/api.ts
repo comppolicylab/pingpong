@@ -200,7 +200,8 @@ const _fetch = async (
 	method: Method,
 	path: string,
 	headers?: Record<string, string>,
-	body?: string | FormData
+	body?: string | FormData,
+	signal?: AbortSignal
 ) => {
 	const full = fullPath(path);
 	const anonymousSessionToken = getAnonymousSessionToken();
@@ -225,7 +226,8 @@ const _fetch = async (
 		headers,
 		body,
 		credentials: 'include',
-		mode: 'cors'
+		mode: 'cors',
+		signal
 	});
 };
 
@@ -237,7 +239,8 @@ const _fetchJSON = async <R extends BaseData>(
 	method: Method,
 	path: string,
 	headers?: Record<string, string>,
-	body?: string | FormData
+	body?: string | FormData,
+	signal?: AbortSignal
 ): Promise<(R | Error | ValidationError) & BaseResponse> => {
 	const anonymousSessionToken = getAnonymousSessionToken();
 	if (anonymousSessionToken) {
@@ -247,7 +250,7 @@ const _fetchJSON = async <R extends BaseData>(
 			'X-Anonymous-Thread-Session': anonymousSessionToken
 		};
 	}
-	const res = await _fetch(f, method, path, headers, body);
+	const res = await _fetch(f, method, path, headers, body, signal);
 
 	let data: BaseData = {};
 
@@ -3409,12 +3412,15 @@ export type ThreadWithMeta = {
 
 /**
  * Get a thread by ID.
+ * Pass controllerSessionId from lecture-video playback control refreshes so the
+ * returned lecture_video_session reflects that this client still has control.
  */
 export const getThread = async (
 	f: Fetcher,
 	classId: number,
 	threadId: number,
-	controllerSessionId?: string
+	controllerSessionId?: string,
+	signal?: AbortSignal
 ) => {
 	const url = `class/${classId}/thread/${threadId}`;
 	const headers: Record<string, string> = {};
@@ -3429,7 +3435,9 @@ export const getThread = async (
 		f,
 		'GET',
 		url,
-		Object.keys(headers).length ? headers : undefined
+		Object.keys(headers).length ? headers : undefined,
+		undefined,
+		signal
 	);
 };
 
