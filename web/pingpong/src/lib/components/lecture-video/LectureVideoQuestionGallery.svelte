@@ -1,5 +1,9 @@
 <script lang="ts">
-	import { ChevronLeftOutline, ChevronRightOutline } from 'flowbite-svelte-icons';
+	import {
+		ChevronLeftOutline,
+		ChevronRightOutline,
+		QuestionCircleOutline
+	} from 'flowbite-svelte-icons';
 	import LectureVideoQuestionCard from './LectureVideoQuestionCard.svelte';
 
 	type GalleryQuestion = { id: number; position: number; questionText: string };
@@ -214,6 +218,20 @@
 			>
 				<ChevronRightOutline class="size-5" />
 			</button>
+		</div>
+	{:else}
+		<div class="flex min-h-48 flex-1 items-center justify-center px-4 py-8 xl:min-h-0">
+			<div class="flex max-w-sm flex-col items-center text-center">
+				<div
+					class="mb-3 flex size-12 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-slate-400"
+				>
+					<QuestionCircleOutline class="size-6" />
+				</div>
+				<h2 class="text-sm font-semibold text-slate-900">No comprehension checks yet</h2>
+				<p class="mt-1 max-w-72 text-sm text-slate-500">
+					Comprehension checks will appear here as you reach them in the lecture
+				</p>
+			</div>
 		</div>
 	{/if}
 </div>
