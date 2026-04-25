@@ -1523,7 +1523,30 @@ export type LectureVideoManifestV2 = {
 	word_level_transcription: LectureVideoManifestWordV2[];
 };
 
-export type LectureVideoManifest = LectureVideoManifestV1 | LectureVideoManifestV2;
+export type LectureVideoManifestWordV3 = {
+	id: string;
+	word: string;
+	start_offset_ms: number;
+	end_offset_ms: number;
+};
+
+export type LectureVideoManifestVideoDescriptionV3 = {
+	start_offset_ms: number;
+	end_offset_ms: number;
+	description: string;
+};
+
+export type LectureVideoManifestV3 = {
+	version: 3;
+	questions: LectureVideoManifestQuestion[];
+	word_level_transcription: LectureVideoManifestWordV3[];
+	video_descriptions: LectureVideoManifestVideoDescriptionV3[];
+};
+
+export type LectureVideoManifest =
+	| LectureVideoManifestV1
+	| LectureVideoManifestV2
+	| LectureVideoManifestV3;
 
 export type LectureVideoConfigResponse = {
 	lecture_video: LectureVideoSummary;

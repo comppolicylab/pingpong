@@ -93,6 +93,12 @@ def _serialize_transcript_words(
     ]
 
 
+def _serialize_transcript_words_v3(
+    words: list[schemas.LectureVideoManifestWordV3],
+) -> list[tuple[int, int, str]]:
+    return [(word.start_offset_ms, word.end_offset_ms, word.word) for word in words]
+
+
 def _word_in_range(
     start_ms: int,
     end_ms: int,
@@ -183,6 +189,10 @@ def _get_next_future_question(
     return None
 
 
+def _knowledge_check_number(question: models.LectureVideoQuestion) -> int:
+    return question.position + 1
+
+
 async def _build_answered_knowledge_checks_text(
     session: AsyncSession, thread_id: int
 ) -> str:
@@ -212,6 +222,40 @@ async def _build_answered_knowledge_checks_text(
         question_label = question.question_text.strip() or f"Question {question.id}"
         answer_lines.append(
             f"- {question_label}: selected {option.option_text}, {correctness}, feedback: {feedback}"
+        )
+    return "\n".join(answer_lines) if answer_lines else "None"
+
+
+async def _build_answered_knowledge_checks_markdown(
+    session: AsyncSession, thread_id: int
+) -> str:
+    interactions = (
+        await models.LectureVideoInteraction.list_question_history_by_thread_id(
+            session, thread_id
+        )
+    )
+    answer_lines: list[str] = []
+    for interaction in interactions:
+        if (
+            interaction.event_type
+            != schemas.LectureVideoInteractionEventType.ANSWER_SUBMITTED
+        ):
+            continue
+        question = interaction.question
+        option = interaction.option
+        if question is None or option is None:
+            continue
+        correct_option = question.correct_option
+        correctness = (
+            "correct"
+            if correct_option is not None and correct_option.id == option.id
+            else "incorrect"
+        )
+        feedback = (option.post_answer_text or "").strip() or "None"
+        question_text = question.question_text.strip() or f"Question {question.id}"
+        answer_lines.append(
+            f"- Knowledge Check #{_knowledge_check_number(question)}: {question_text}\n"
+            f"  Selected `{option.option_text}`; {correctness}. Feedback: {feedback}"
         )
     return "\n".join(answer_lines) if answer_lines else "None"
 
@@ -285,6 +329,140 @@ def _build_context_text(
         f"Lookahead: {lookahead_text or 'None'}",
     ]
 
+    return "\n".join(context_lines), current_offset_ms
+
+
+def _transcript_context_window(
+    state: models.LectureVideoThreadState, current_offset_ms: int
+) -> tuple[int, bool]:
+    clamped_last_chat_context_end_ms = min(
+        max(state.last_chat_context_end_ms, 0), current_offset_ms
+    )
+    uncapped_transcript_start_ms = (
+        clamped_last_chat_context_end_ms
+        if state.last_chat_context_end_ms == clamped_last_chat_context_end_ms
+        else 0
+    )
+    transcript_start_ms = max(
+        uncapped_transcript_start_ms,
+        current_offset_ms - TRANSCRIPT_CONTEXT_WINDOW_MS,
+    )
+    return transcript_start_ms, uncapped_transcript_start_ms > 0
+
+
+def _format_upcoming_knowledge_check(
+    question: models.LectureVideoQuestion | None,
+) -> str:
+    if question is None:
+        return "None"
+
+    option_lines = "\n".join(
+        f"- {option.option_text}"
+        for option in sorted(question.options, key=lambda item: item.position)
+    )
+    question_text = question.question_text.strip() or f"Question {question.id}"
+    return (
+        f"At {question.stop_offset_ms}ms, the learner will be asked:\n\n"
+        f"{question_text}\n\n"
+        f"Options:\n{option_lines}"
+    )
+
+
+def _format_video_descriptions(
+    descriptions: list[schemas.LectureVideoManifestVideoDescriptionV3],
+    range_start_ms: int,
+    range_end_ms: int,
+) -> str:
+    lines = [
+        f"- {description.start_offset_ms}-{description.end_offset_ms}ms: "
+        f"{description.description}"
+        for description in sorted(
+            descriptions, key=lambda item: (item.start_offset_ms, item.end_offset_ms)
+        )
+        if _word_in_range(
+            description.start_offset_ms,
+            description.end_offset_ms,
+            range_start_ms,
+            range_end_ms,
+        )
+    ]
+    return "\n".join(lines) if lines else "None"
+
+
+def _build_context_text_v3(
+    thread: models.Thread,
+    state: models.LectureVideoThreadState,
+    manifest: schemas.LectureVideoManifestV3,
+    answered_knowledge_checks: str,
+) -> tuple[str, int]:
+    current_offset_ms = max(0, state.last_known_offset_ms)
+    transcript_words = _serialize_transcript_words_v3(manifest.word_level_transcription)
+    transcript_start_ms, since_last_chat = _transcript_context_window(
+        state, current_offset_ms
+    )
+    transcript_heading = "### Recent Transcript"
+    if since_last_chat:
+        transcript_heading += " Since Last Lecture Chat"
+
+    transcript_text = _transcript_slice_text(
+        transcript_words,
+        transcript_start_ms,
+        current_offset_ms,
+    )
+
+    next_future_question = _get_next_future_question(thread, current_offset_ms)
+    lookahead_end_ms = min(
+        next_future_question.stop_offset_ms
+        if next_future_question
+        else current_offset_ms + LOOKAHEAD_WINDOW_MS,
+        current_offset_ms + LOOKAHEAD_WINDOW_MS,
+    )
+    lookahead_text = _transcript_slice_text(
+        transcript_words,
+        current_offset_ms,
+        lookahead_end_ms,
+    )
+    descriptions_text = _format_video_descriptions(
+        manifest.video_descriptions,
+        transcript_start_ms,
+        lookahead_end_ms,
+    )
+
+    current_question = _get_current_question(thread, state)
+    if (
+        state.state == schemas.LectureVideoSessionState.AWAITING_POST_ANSWER_RESUME
+        and current_question is not None
+    ):
+        status = f"Just answered Knowledge Check #{_knowledge_check_number(current_question)}"
+    else:
+        status = "Watching the lecture video"
+
+    context_lines = [
+        "## Lecture Context",
+        "",
+        f"Status: {status}",
+        f"Current offset: {current_offset_ms}ms",
+        "",
+        transcript_heading,
+        "",
+        transcript_text or "None",
+        "",
+        "### Lookahead Transcript",
+        "",
+        lookahead_text or "None",
+        "",
+        "### Relevant Video Descriptions",
+        "",
+        descriptions_text,
+        "",
+        "### Upcoming Knowledge Check",
+        "",
+        _format_upcoming_knowledge_check(next_future_question),
+        "",
+        "### Knowledge Checks Answered",
+        "",
+        answered_knowledge_checks,
+    ]
     return "\n".join(context_lines), current_offset_ms
 
 
@@ -478,8 +656,30 @@ async def build_lecture_chat_context_message_parts(
         )
 
     manifest = lecture_video_manifest_from_model(lecture_video)
-    if not isinstance(manifest, schemas.LectureVideoManifestV2):
-        raise ValueError("Lecture chat requires a version 2 lecture video manifest.")
+    if not isinstance(
+        manifest, (schemas.LectureVideoManifestV2, schemas.LectureVideoManifestV3)
+    ):
+        raise ValueError(
+            "Lecture chat requires a version 2 or 3 lecture video manifest."
+        )
+
+    if isinstance(manifest, schemas.LectureVideoManifestV3):
+        answered_knowledge_checks = await _build_answered_knowledge_checks_markdown(
+            session, thread.id
+        )
+        context_text, current_offset_ms = _build_context_text_v3(
+            thread, state, manifest, answered_knowledge_checks
+        )
+        text_part = models.MessagePart(
+            part_index=0,
+            type=schemas.MessagePartType.INPUT_TEXT,
+            text=context_text,
+        )
+        return LectureChatContextBuildResult(
+            text_message_parts=[text_part],
+            frame_message_parts=[],
+            current_offset_ms=current_offset_ms,
+        )
 
     context_text, current_offset_ms = _build_context_text(thread, state, manifest)
     answered_knowledge_checks = await _build_answered_knowledge_checks_text(

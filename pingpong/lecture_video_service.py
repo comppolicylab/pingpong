@@ -22,7 +22,7 @@ LECTURE_VIDEO_ALREADY_ASSIGNED_DETAIL = (
     "Upload a new lecture video or copy the assistant instead."
 )
 LECTURE_VIDEO_CHAT_UNAVAILABLE_NOTE = (
-    "Lecture chat is only available for lecture videos with a version 2 manifest "
+    "Lecture chat is only available for lecture videos with a version 2 or 3 manifest "
     "that includes word-level transcription."
 )
 
@@ -288,6 +288,13 @@ def lecture_video_manifest_from_model(
     if stored_manifest is None or stored_manifest.version == 1:
         return base_manifest
 
+    if isinstance(stored_manifest, schemas.LectureVideoManifestV3):
+        return schemas.LectureVideoManifestV3(
+            questions=base_manifest.questions,
+            word_level_transcription=stored_manifest.word_level_transcription,
+            video_descriptions=stored_manifest.video_descriptions,
+        )
+
     return schemas.LectureVideoManifestV2(
         questions=base_manifest.questions,
         word_level_transcription=stored_manifest.word_level_transcription,
@@ -300,7 +307,7 @@ def lecture_video_chat_metadata(
     if lecture_video is None:
         return False
 
-    if lecture_video.manifest_version != 2:
+    if lecture_video.manifest_version not in {2, 3}:
         return False
 
     return lecture_video.lecture_video_chat_available
@@ -644,7 +651,10 @@ async def persist_manifest(
     lecture_video.manifest_data = lecture_video_manifest.model_dump(mode="json")
     lecture_video.manifest_version = lecture_video_manifest.version
     lecture_video.lecture_video_chat_available = (
-        isinstance(lecture_video_manifest, schemas.LectureVideoManifestV2)
+        isinstance(
+            lecture_video_manifest,
+            (schemas.LectureVideoManifestV2, schemas.LectureVideoManifestV3),
+        )
         and len(lecture_video_manifest.word_level_transcription) > 0
     )
 

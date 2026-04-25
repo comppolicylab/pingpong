@@ -235,6 +235,33 @@ def lecture_video_manifest_v2(**kwargs) -> dict:
     return manifest
 
 
+def lecture_video_manifest_v3(**kwargs) -> dict:
+    manifest = lecture_video_manifest(**kwargs)
+    manifest.pop("version", None)
+    manifest["word_level_transcription"] = [
+        {
+            "id": "w1",
+            "word": "Latency",
+            "start_offset_ms": 0,
+            "end_offset_ms": 400,
+        },
+        {
+            "id": "w2",
+            "word": "matters",
+            "start_offset_ms": 400,
+            "end_offset_ms": 900,
+        },
+    ]
+    manifest["video_descriptions"] = [
+        {
+            "start_offset_ms": 0,
+            "end_offset_ms": 900,
+            "description": "The slide shows the word latency.",
+        }
+    ]
+    return manifest
+
+
 async def create_lecture_video_copy_credentials(
     session: AsyncSession,
     class_id: int,
@@ -6081,6 +6108,37 @@ async def test_get_assistant_lecture_video_config_returns_v2_chat_metadata(
 
     assert response.status_code == 200
     assert response.json()["lecture_video_manifest"] == manifest
+    assert response.json()["lecture_video_chat_available"] is True
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(grants=[("user:123", "can_edit", "assistant:1")])
+async def test_get_assistant_lecture_video_config_returns_v3_manifest_and_chat_metadata(
+    api, db, institution, valid_user_token
+):
+    manifest = lecture_video_manifest_v3(question_text="Config question?")
+    expected_manifest = {"version": 3, **manifest}
+
+    async with db.async_session() as session:
+        class_, lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+            manifest=manifest,
+        )
+        loaded_lecture_video = await models.LectureVideo.get_by_id_with_copy_context(
+            session, lecture_video.id
+        )
+        assert loaded_lecture_video is not None
+        assert loaded_lecture_video.manifest_version == 3
+
+    response = api.get(
+        f"/api/v1/class/{class_.id}/assistant/1/lecture-video/config",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["lecture_video_manifest"] == expected_manifest
     assert response.json()["lecture_video_chat_available"] is True
 
 

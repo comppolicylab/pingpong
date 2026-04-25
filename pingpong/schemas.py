@@ -546,7 +546,59 @@ class LectureVideoManifestV2(LectureVideoManifestBase):
     )
 
 
-LectureVideoManifest: TypeAlias = LectureVideoManifestV1 | LectureVideoManifestV2
+class LectureVideoManifestWordV3(BaseModel):
+    id: str = Field(..., min_length=1)
+    word: str = Field(..., min_length=1)
+    start_offset_ms: int = Field(..., ge=0)
+    end_offset_ms: int = Field(..., ge=0)
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "LectureVideoManifestWordV3":
+        if self.end_offset_ms < self.start_offset_ms:
+            raise ValueError(
+                "end_offset_ms must be greater than or equal to start_offset_ms"
+            )
+        return self
+
+
+class LectureVideoManifestVideoDescriptionV3(BaseModel):
+    start_offset_ms: int = Field(..., ge=0)
+    end_offset_ms: int = Field(..., ge=0)
+    description: str = Field(..., min_length=1)
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "LectureVideoManifestVideoDescriptionV3":
+        if self.end_offset_ms < self.start_offset_ms:
+            raise ValueError(
+                "end_offset_ms must be greater than or equal to start_offset_ms"
+            )
+        return self
+
+
+class LectureVideoManifestV3(LectureVideoManifestBase):
+    version: Literal[3] = 3
+    word_level_transcription: list[LectureVideoManifestWordV3] = Field(
+        ..., min_length=1
+    )
+    video_descriptions: list[LectureVideoManifestVideoDescriptionV3]
+
+
+LectureVideoManifest: TypeAlias = (
+    LectureVideoManifestV1 | LectureVideoManifestV2 | LectureVideoManifestV3
+)
+
+
+def _looks_like_lecture_video_manifest_v3(value: dict[str, Any]) -> bool:
+    if "video_descriptions" in value:
+        return True
+    words = value.get("word_level_transcription")
+    if not isinstance(words, list):
+        return False
+    return any(
+        isinstance(word, dict)
+        and ("start_offset_ms" in word or "end_offset_ms" in word)
+        for word in words
+    )
 
 
 def _lecture_video_manifest_error_detail(exc: ValidationError) -> str:
@@ -561,7 +613,8 @@ def validate_lecture_video_manifest(
     lecture_video_manifest: LectureVideoManifest | Any | None,
 ) -> LectureVideoManifest | None:
     if lecture_video_manifest is None or isinstance(
-        lecture_video_manifest, (LectureVideoManifestV1, LectureVideoManifestV2)
+        lecture_video_manifest,
+        (LectureVideoManifestV1, LectureVideoManifestV2, LectureVideoManifestV3),
     ):
         return lecture_video_manifest
     try:
@@ -570,6 +623,12 @@ def validate_lecture_video_manifest(
             if isinstance(lecture_video_manifest, dict)
             else None
         )
+        if version == 3 or (
+            version is None
+            and isinstance(lecture_video_manifest, dict)
+            and _looks_like_lecture_video_manifest_v3(lecture_video_manifest)
+        ):
+            return LectureVideoManifestV3.model_validate(lecture_video_manifest)
         if version == 2:
             return LectureVideoManifestV2.model_validate(lecture_video_manifest)
         return LectureVideoManifestV1.model_validate(lecture_video_manifest)
