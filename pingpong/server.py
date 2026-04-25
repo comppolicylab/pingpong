@@ -8001,9 +8001,13 @@ async def send_message(
                 reasoning_effort=asst.reasoning_effort,
                 temperature=asst.temperature,
                 tools_available=thread.tools_available,
-                instructions=inject_timestamp_to_instructions(
-                    thread.instructions,
-                    data.timezone if data.timezone else thread.timezone,
+                instructions=(
+                    thread.instructions
+                    if thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
+                    else inject_timestamp_to_instructions(
+                        thread.instructions,
+                        data.timezone if data.timezone else thread.timezone,
+                    )
                 ),
                 verbosity=asst.verbosity,
                 messages=run_messages,

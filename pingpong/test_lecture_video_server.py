@@ -837,6 +837,8 @@ async def test_send_message_creates_lecture_chat_run_with_hidden_context(
     ordered_messages = sorted(run.messages, key=lambda item: item.output_index)
     assert run.model == "gpt-4o-mini"
     assert run.tools_available == thread.tools_available
+    assert run.instructions == thread.instructions
+    assert "The current date and time is" not in run.instructions
     assert [message.role for message in ordered_messages] == [
         schemas.MessageRole.DEVELOPER,
         schemas.MessageRole.USER,
