@@ -3410,9 +3410,27 @@ export type ThreadWithMeta = {
 /**
  * Get a thread by ID.
  */
-export const getThread = async (f: Fetcher, classId: number, threadId: number) => {
+export const getThread = async (
+	f: Fetcher,
+	classId: number,
+	threadId: number,
+	controllerSessionId?: string
+) => {
 	const url = `class/${classId}/thread/${threadId}`;
-	return await GET<never, ThreadWithMeta>(f, url);
+	const headers: Record<string, string> = {};
+	const anonymousShareToken = getAnonymousShareToken();
+	if (anonymousShareToken) {
+		headers['X-Anonymous-Link-Share'] = anonymousShareToken;
+	}
+	if (controllerSessionId) {
+		headers['X-Lecture-Video-Controller-Session'] = controllerSessionId;
+	}
+	return await _fetchJSON<ThreadWithMeta>(
+		f,
+		'GET',
+		url,
+		Object.keys(headers).length ? headers : undefined
+	);
 };
 
 export type CodeInterpreterMessages = {
