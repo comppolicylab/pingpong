@@ -1209,6 +1209,9 @@
 		) {
 			instructions = assistant.instructions;
 			hasSetInstructions = true;
+		} else if (mode === 'lecture_video' && data.isCreating) {
+			instructions = LECTURE_VIDEO_DEFAULT_INSTRUCTIONS;
+			hasSetInstructions = true;
 		} else {
 			await tick();
 			setDefaultModelPrompt(selectedModel);
@@ -1409,9 +1412,7 @@
 					'temperature',
 					'reasoning_effort'
 				]
-			: isLectureMode
-				? ['name', 'description']
-				: ['name', 'description', 'instructions'];
+			: ['name', 'description', 'instructions'];
 
 		const modifiedFields: string[] = [];
 		for (const field of fields) {
@@ -1475,9 +1476,6 @@
 		const formData = new FormData(form);
 		const body = Object.fromEntries(formData.entries());
 		const includeTooling = !isLectureMode;
-		const lectureModeInstructions = normalizeNewlines(
-			(assistant?.instructions || LECTURE_VIDEO_DEFAULT_INSTRUCTIONS).trim()
-		);
 
 		const tools: api.Tool[] = [];
 		const fileSearchCodeInterpreterUnusedFiles: number[] = [];
@@ -1529,9 +1527,7 @@
 				: normalizeNewlines(body.description.toString()),
 			instructions: preventEdits
 				? assistant?.instructions || ''
-				: isLectureMode
-					? lectureModeInstructions || LECTURE_VIDEO_DEFAULT_INSTRUCTIONS
-					: normalizeNewlines(body.instructions?.toString() || ''),
+				: normalizeNewlines(body.instructions?.toString() || ''),
 			notes: preventEdits ? assistant?.notes || '' : normalizeNewlines(notes),
 			model: isLectureMode
 				? data.isCreating
@@ -1578,7 +1574,7 @@
 				? (assistant?.use_image_descriptions ?? false)
 				: body.use_image_descriptions?.toString() === 'on',
 			hide_prompt: isLectureMode
-				? (assistant?.hide_prompt ?? false)
+				? (assistant?.hide_prompt ?? true)
 				: body.hide_prompt?.toString() === 'on',
 			assistant_should_message_first: assistantShouldMessageFirst,
 			create_classic_assistant: createClassicAssistant,
@@ -1858,7 +1854,7 @@
 
 		const result = await api.previewAssistantInstructions(fetch, data.class.id, {
 			instructions,
-			use_latex: useLatex,
+			use_latex: interactionMode === 'lecture_video' ? (assistant?.use_latex ?? false) : useLatex,
 			disable_prompt_randomization: disablePromptRandomization
 		});
 		const expanded = api.expandResponse(result);
@@ -2607,32 +2603,32 @@
 				{/if}
 			</div>
 		{/if}
-		{#if !isLectureMode}
-			<div class="col-span-2 mb-4">
-				<div class="flex flex-row items-end justify-between">
-					<div>
-						<Label for="instructions">Instructions</Label>
-						<Helper class="pb-1"
-							>This is the prompt the language model will use to generate responses.</Helper
-						>
-					</div>
-					<Button
-						class="mb-1 flex max-h-fit max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
-						onclick={previewInstructions}
-						type="button"
-						disabled={$loading || uploadingFSPrivate || uploadingCIPrivate}
+		<div class="col-span-2 mb-4">
+			<div class="flex flex-row items-end justify-between">
+				<div>
+					<Label for="instructions">Instructions</Label>
+					<Helper class="pb-1"
+						>This is the prompt the language model will use to generate responses.</Helper
 					>
-						Preview
-					</Button>
 				</div>
-				<Textarea
-					id="instructions"
-					name="instructions"
-					rows={6}
-					bind:value={instructions}
-					disabled={preventEdits}
-				/>
+				<Button
+					class="mb-1 flex max-h-fit max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
+					onclick={previewInstructions}
+					type="button"
+					disabled={$loading || uploadingFSPrivate || uploadingCIPrivate}
+				>
+					Preview
+				</Button>
 			</div>
+			<Textarea
+				id="instructions"
+				name="instructions"
+				rows={6}
+				bind:value={instructions}
+				disabled={preventEdits}
+			/>
+		</div>
+		{#if !isLectureMode}
 			<div class="col-span-2 mb-4">
 				<Checkbox id="hide_prompt" name="hide_prompt" disabled={preventEdits} checked={hidePrompt}
 					>Hide Prompt</Checkbox
