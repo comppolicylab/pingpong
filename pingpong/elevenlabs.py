@@ -271,7 +271,7 @@ async def validate_elevenlabs_api_key(api_key: str) -> bool:
 # Streaming TTS via ElevenLabs WebSocket API
 # ---------------------------------------------------------------------------
 
-ELEVENLABS_STREAMING_TTS_MODEL = "eleven_turbo_v2_5"
+ELEVENLABS_STREAMING_TTS_MODEL = "eleven_flash_v2_5"
 ELEVENLABS_STREAMING_TTS_OUTPUT_FORMAT = "pcm_24000"
 
 _MARKDOWN_FENCE_RE = re.compile(r"```(?:[\w+-]+)?\s*([\s\S]*?)```")
