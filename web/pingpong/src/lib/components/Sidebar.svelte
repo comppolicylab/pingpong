@@ -83,9 +83,7 @@
 		{}
 	);
 	$: lectureVideoEnabled = $page.data.lectureVideoEnabled ?? false;
-	$: threads = (($page.data.threads || []) as api.Thread[]).filter(
-		(thread: api.Thread) => lectureVideoEnabled || thread.interaction_mode !== 'lecture_video'
-	);
+	$: threads = ($page.data.threads || []) as api.Thread[];
 	$: currentClassId = parseInt($page.params.classId ?? '', 10);
 	$: currentAssistantIdQuery = parseInt($page.url.searchParams.get('assistant') || '0', 10);
 	$: routeAssistantId = parseInt($page.params.assistantId ?? '', 10);
