@@ -1412,9 +1412,7 @@
 					'temperature',
 					'reasoning_effort'
 				]
-			: isLectureMode
-				? ['name', 'description']
-				: ['name', 'description', 'instructions'];
+			: ['name', 'description', 'instructions'];
 
 		const modifiedFields: string[] = [];
 		for (const field of fields) {
