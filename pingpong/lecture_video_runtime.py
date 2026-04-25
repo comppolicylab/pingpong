@@ -387,6 +387,21 @@ async def get_or_initialize_thread_state(
     *,
     for_update: bool = False,
 ) -> models.LectureVideoThreadState:
+    thread = None
+    if for_update:
+        # Keep runtime writes in the same lock order as message sends: threads
+        # first, then lecture_video_thread_states. Interaction inserts take a
+        # FK lock on threads, so taking the state lock first can deadlock with a
+        # concurrent message send that already holds the thread row lock and then
+        # updates lecture video chat context on the state row.
+        thread = await models.Thread.get_by_id(session, thread_id, for_update=True)
+        if (
+            thread is None
+            or thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO
+            or thread.lecture_video_id is None
+        ):
+            raise LectureVideoNotFoundError("Lecture video thread not found.")
+
     state = await models.LectureVideoThreadState.get_by_thread_id_with_context(
         session, thread_id, for_update=for_update
     )
@@ -394,9 +409,10 @@ async def get_or_initialize_thread_state(
         state.thread.lecture_video_state = state
         return _require_state(state)
 
-    thread = await models.Thread.get_by_id_with_lecture_video_context(
-        session, thread_id
-    )
+    if thread is None:
+        thread = await models.Thread.get_by_id_with_lecture_video_context(
+            session, thread_id
+        )
     if (
         thread is None
         or thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO

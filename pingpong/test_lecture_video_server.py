@@ -2654,6 +2654,65 @@ async def test_append_interaction_requires_for_update_locked_state(db, instituti
             )
 
 
+@with_institution(11, "Test Institution")
+async def test_locked_lecture_video_state_load_locks_thread_first(
+    db, institution, monkeypatch
+):
+    async with db.async_session() as session:
+        class_, lecture_video, assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+
+        thread = models.Thread(
+            id=1,
+            name="Lecture Presentation",
+            version=3,
+            thread_id="thread-state-lock-order",
+            class_id=class_.id,
+            assistant_id=assistant.id,
+            interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+            lecture_video_id=lecture_video.id,
+            private=False,
+            display_user_info=False,
+            tools_available="[]",
+        )
+        session.add(thread)
+        await session.flush()
+        await lecture_video_runtime.initialize_thread_state(session, thread.id)
+
+        calls: list[tuple[str, bool]] = []
+        original_get_thread = models.Thread.get_by_id
+        original_get_state = (
+            models.LectureVideoThreadState.get_by_thread_id_with_context
+        )
+
+        async def tracking_get_thread(cls, session_, id_, *, for_update=False):
+            calls.append(("thread", for_update))
+            return await original_get_thread(session_, id_, for_update=for_update)
+
+        async def tracking_get_state(cls, session_, thread_id, *, for_update=False):
+            calls.append(("state", for_update))
+            return await original_get_state(session_, thread_id, for_update=for_update)
+
+        monkeypatch.setattr(
+            models.Thread, "get_by_id", classmethod(tracking_get_thread)
+        )
+        monkeypatch.setattr(
+            models.LectureVideoThreadState,
+            "get_by_thread_id_with_context",
+            classmethod(tracking_get_state),
+        )
+
+        await lecture_video_runtime.get_or_initialize_thread_state(
+            session,
+            thread.id,
+            for_update=True,
+        )
+
+        assert calls[:2] == [("thread", True), ("state", True)]
+
+
 @with_user(123)
 @with_institution(11, "Test Institution")
 @with_authz(
