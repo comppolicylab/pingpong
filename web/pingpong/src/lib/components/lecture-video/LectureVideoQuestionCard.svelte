@@ -1,10 +1,6 @@
 <script lang="ts">
-	import {
-		CheckOutline,
-		ChevronDownOutline,
-		CloseOutline,
-		MinusOutline
-	} from 'flowbite-svelte-icons';
+	import { CheckOutline } from 'flowbite-svelte-icons';
+	import { tick, type Snippet } from 'svelte';
 
 	type QuestionOption = {
 		id: number;
@@ -23,10 +19,28 @@
 		showCheck: boolean;
 	};
 
-	type PillStyle = {
-		button: string;
-		icon: string;
+	type BaseProps = {
+		position: number;
+		questionText: string;
+		options: QuestionOption[];
+		selectedOptionId: number | null;
+		correctOptionId: number | null;
+		postAnswerText: string | null;
+		answeringDisabled?: boolean;
+		showContinue?: boolean;
+		continueDisabled?: boolean;
+		oncontinue?: () => void;
+		headerTrailing?: Snippet;
 	};
+	type Props =
+		| (BaseProps & {
+				state: 'answering';
+				onselectOption: (optionId: number) => void;
+		  })
+		| (BaseProps & {
+				state: 'feedback' | 'answered';
+				onselectOption?: never;
+		  });
 
 	let {
 		position,
@@ -36,41 +50,16 @@
 		selectedOptionId = null,
 		correctOptionId = null,
 		postAnswerText = null,
-		expanded = false,
-		active = false,
 		answeringDisabled = false,
 		showContinue = false,
 		continueDisabled = false,
 		onselectOption,
-		ontoggleExpand,
-		oncontinue
-	}: {
-		position: number;
-		questionText: string;
-		options: QuestionOption[];
-		state: 'upcoming' | 'answering' | 'feedback' | 'answered';
-		selectedOptionId: number | null;
-		correctOptionId: number | null;
-		postAnswerText: string | null;
-		expanded: boolean;
-		active?: boolean;
-		answeringDisabled?: boolean;
-		showContinue?: boolean;
-		continueDisabled?: boolean;
-		onselectOption: (optionId: number) => void;
-		ontoggleExpand: () => void;
-		oncontinue?: () => void;
-	} = $props();
+		oncontinue,
+		headerTrailing
+	}: Props = $props();
 
 	let pendingOptionId: number | null = $state(null);
-
-	let isCorrect: boolean | null = $derived(
-		correctOptionId == null ? null : selectedOptionId === correctOptionId
-	);
-	let rendersAsPill = $derived(cardState === 'upcoming' || (cardState === 'answered' && !expanded));
-	let rendersAsReviewCard = $derived(
-		cardState === 'feedback' || (cardState === 'answered' && expanded)
-	);
+	let checkButton: HTMLButtonElement | null = $state(null);
 
 	const cardClass = 'rounded-lg border border-slate-200 bg-white p-4';
 	const questionLabelClass = 'text-xs font-semibold uppercase tracking-widest text-slate-400';
@@ -115,31 +104,22 @@
 			showCheck: false
 		}
 	};
-	const pillStyles: Record<'correct' | 'wrong' | 'neutral', PillStyle> = {
-		correct: {
-			button: 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200',
-			icon: 'text-emerald-700'
-		},
-		wrong: {
-			button: 'bg-red-100 text-red-800 hover:bg-red-200',
-			icon: 'text-red-700'
-		},
-		neutral: {
-			button: 'bg-slate-100 text-slate-700 hover:bg-slate-200',
-			icon: 'text-slate-400'
-		}
-	};
 
 	function optionLabel(index: number): string {
 		return String.fromCharCode(65 + index);
 	}
 
-	function selectPendingOption(optionId: number) {
+	async function selectPendingOption(optionId: number) {
 		pendingOptionId = optionId;
+		await tick();
+		checkButton?.scrollIntoView({ block: 'end', behavior: 'smooth' });
 	}
 
 	function handleCheck() {
-		if (pendingOptionId !== null) {
+		if (cardState === 'answering' && pendingOptionId !== null) {
+			if (!onselectOption) {
+				throw new Error('LectureVideoQuestionCard requires onselectOption when answering');
+			}
 			onselectOption(pendingOptionId);
 			pendingOptionId = null;
 		}
@@ -183,29 +163,12 @@
 		}
 		return 'border-slate-500 bg-white text-slate-600 group-hover/option-row:outline-2 group-hover/option-row:outline-offset-2 group-hover/option-row:outline-blue-500';
 	}
-
-	function pillStyle(isAnswerCorrect: boolean | null): PillStyle {
-		if (isAnswerCorrect === true) return pillStyles.correct;
-		if (isAnswerCorrect === false) return pillStyles.wrong;
-		return pillStyles.neutral;
-	}
-
-	function answeredPillButtonClass(buttonClass: string, isActive: boolean): string {
-		return [
-			'inline-flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1 text-sm font-medium transition-[box-shadow,background-color,color]',
-			buttonClass,
-			isActive ? 'ring-2 ring-blue-200 ring-offset-1' : ''
-		].join(' ');
-	}
 </script>
 
-<div class={rendersAsPill ? 'shrink-0' : 'w-full'}>
+<div class="w-full">
 	{#if cardState === 'answering'}
 		<div class={cardClass}>
-			<div class="mb-4">
-				<div class={questionLabelClass}>Question {position}</div>
-				<div class={questionTextClass}>{questionText}</div>
-			</div>
+			{@render questionHeader('mb-4')}
 			<div class="border-b border-slate-200">
 				{#each options as option, index (option.id)}
 					{@const isSelected = pendingOptionId === option.id}
@@ -240,6 +203,7 @@
 			</div>
 			{#if pendingOptionId !== null}
 				<button
+					bind:this={checkButton}
 					type="button"
 					class="{actionButtonClass} cursor-pointer bg-blue-600 text-white hover:bg-blue-700"
 					onclick={handleCheck}
@@ -248,19 +212,9 @@
 				</button>
 			{/if}
 		</div>
-	{:else if rendersAsReviewCard}
+	{:else}
 		<div class={cardClass}>
-			{#if cardState === 'answered'}
-				<button type="button" class="mb-3 w-full cursor-pointer text-left" onclick={ontoggleExpand}>
-					<div class={questionLabelClass}>Question {position}</div>
-					<div class={questionTextClass}>{questionText}</div>
-				</button>
-			{:else}
-				<div class="mb-3">
-					<div class={questionLabelClass}>Question {position}</div>
-					<div class={questionTextClass}>{questionText}</div>
-				</div>
-			{/if}
+			{@render questionHeader('mb-3')}
 			<div class="flex flex-col divide-y divide-slate-200 border-y border-slate-200">
 				{#each options as option, index (option.id)}
 					{@const reviewState = optionReviewState(option.id)}
@@ -314,29 +268,15 @@
 				</button>
 			{/if}
 		</div>
-	{:else if cardState === 'answered' && !expanded}
-		{@const currentPillStyle = pillStyle(isCorrect)}
-		<button
-			type="button"
-			class={answeredPillButtonClass(currentPillStyle.button, active)}
-			aria-pressed={active}
-			aria-label={active
-				? `Collapse question ${position} details`
-				: `Expand question ${position} details`}
-			title={active ? 'Collapse question details' : 'Expand question details'}
-			onclick={ontoggleExpand}
-		>
-			Q{position}
-			{#if isCorrect === true}
-				<CheckOutline class="h-4 w-4 {currentPillStyle.icon}" strokeWidth="3" />
-			{:else if isCorrect === false}
-				<CloseOutline class="h-4 w-4 {currentPillStyle.icon}" strokeWidth="3" />
-			{:else}
-				<MinusOutline class="h-4 w-4 {currentPillStyle.icon}" strokeWidth="3" />
-			{/if}
-			{#if active}
-				<ChevronDownOutline class="h-3.5 w-3.5 text-blue-700" strokeWidth="2.5" />
-			{/if}
-		</button>
 	{/if}
 </div>
+
+{#snippet questionHeader(marginClass: string)}
+	<div class="{marginClass} flex items-start justify-between gap-3">
+		<div class="min-w-0 flex-1">
+			<div class={questionLabelClass}>Question {position}</div>
+			<div class={questionTextClass}>{questionText}</div>
+		</div>
+		{@render headerTrailing?.()}
+	</div>
+{/snippet}
