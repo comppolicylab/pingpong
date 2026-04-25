@@ -1543,10 +1543,10 @@
 {:else}
 	<div class="h-full w-full overflow-hidden">
 		<div
-			class="mx-auto flex h-full w-full max-w-screen-2xl flex-col gap-6 px-4 py-4 lg:px-6 xl:grid xl:grid-cols-[minmax(0,60%)_minmax(0,1fr)] xl:items-stretch xl:gap-8 xl:py-6"
+			class="mx-auto flex h-full w-full max-w-screen-2xl flex-col gap-6 px-4 py-4 lg:px-6 xl:grid xl:grid-cols-5 xl:items-stretch xl:justify-center xl:gap-8 xl:py-6"
 		>
 			<div
-				class="flex max-h-[40%] min-h-0 min-w-0 shrink-0 flex-col gap-4 xl:h-full xl:max-h-none xl:shrink xl:gap-4"
+				class="col-span-3 flex max-h-[40%] min-h-0 min-w-0 shrink-0 flex-col gap-4 xl:h-full xl:max-h-none xl:shrink"
 			>
 				{#if !canParticipate}
 					<div
@@ -1564,7 +1564,7 @@
 					/>
 				{:else if !isCompleted}
 					<div
-						class="mx-auto min-h-0 w-full max-w-[calc((40dvh-4rem)*16/9)] shrink-0 overflow-hidden rounded-3xl border border-slate-200 bg-white p-3 shadow-xl xl:mx-0 xl:max-w-none xl:flex-none xl:shrink-0"
+						class="mx-auto min-h-0 w-full max-w-[calc((40dvh-4rem)*16/9)] shrink-0 overflow-hidden rounded-3xl border border-slate-200 bg-white p-3 shadow-xl xl:max-h-[50%] xl:w-fit xl:max-w-none"
 					>
 						<LectureVideoPlayer
 							src={lectureVideoSrc}
@@ -1606,7 +1606,6 @@
 								{sessionState}
 								{answeredQuestions}
 								answeringDisabled={!canParticipate || introNarrationPending}
-								showHeading={false}
 								{scrollToQuestionId}
 								onselectOption={handleSelectOption}
 								{...continuePromptProps}
@@ -1617,7 +1616,7 @@
 				{/if}
 			</div>
 			{#if isDesktopLayout}
-				<div class="h-full min-h-0 min-w-0">
+				<div class="col-span-2 h-full min-h-0 min-w-0">
 					{@render chat?.()}
 				</div>
 			{:else}
@@ -1663,7 +1662,6 @@
 									{sessionState}
 									{answeredQuestions}
 									answeringDisabled={!canParticipate || introNarrationPending}
-									showHeading={!hasMobileChatPanel}
 									{scrollToQuestionId}
 									onselectOption={handleSelectOption}
 									{...continuePromptProps}

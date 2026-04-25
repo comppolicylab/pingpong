@@ -19,21 +19,28 @@
 		showCheck: boolean;
 	};
 
-	type Props = {
+	type BaseProps = {
 		position: number;
 		questionText: string;
 		options: QuestionOption[];
-		state: 'answering' | 'feedback' | 'answered';
 		selectedOptionId: number | null;
 		correctOptionId: number | null;
 		postAnswerText: string | null;
 		answeringDisabled?: boolean;
 		showContinue?: boolean;
 		continueDisabled?: boolean;
-		onselectOption?: (optionId: number) => void;
 		oncontinue?: () => void;
 		headerTrailing?: Snippet;
 	};
+	type Props =
+		| (BaseProps & {
+				state: 'answering';
+				onselectOption: (optionId: number) => void;
+		  })
+		| (BaseProps & {
+				state: 'feedback' | 'answered';
+				onselectOption?: never;
+		  });
 
 	let {
 		position,
@@ -109,7 +116,10 @@
 	}
 
 	function handleCheck() {
-		if (pendingOptionId !== null && onselectOption) {
+		if (cardState === 'answering' && pendingOptionId !== null) {
+			if (!onselectOption) {
+				throw new Error('LectureVideoQuestionCard requires onselectOption when answering');
+			}
 			onselectOption(pendingOptionId);
 			pendingOptionId = null;
 		}

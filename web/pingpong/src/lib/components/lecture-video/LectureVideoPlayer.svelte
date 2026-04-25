@@ -1054,7 +1054,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
 	bind:this={playerContainerElement}
-	class="relative overflow-hidden rounded-3xl border border-slate-800/80 bg-black"
+	class="relative aspect-video overflow-hidden rounded-3xl border border-slate-800/80 bg-black xl:h-full xl:w-full"
 	onkeydown={handleKeydown}
 	onmousemove={handleMouseMove}
 	onmouseenter={handleMouseEnter}
@@ -1334,7 +1334,7 @@
 							<div
 								class="w-full overflow-hidden rounded-lg border border-slate-200/90 bg-slate-950 bg-clip-border shadow-xl"
 							>
-								<div class="relative aspect-video overflow-hidden bg-slate-900">
+								<div class="relative overflow-hidden bg-slate-900">
 									<canvas
 										bind:this={snapshotCanvasElement}
 										class="absolute inset-0 h-full w-full object-cover"

@@ -21,7 +21,6 @@
 		answeringDisabled = false,
 		showContinue = false,
 		continueDisabled = false,
-		showHeading = true,
 		scrollToQuestionId = null,
 		onselectOption,
 		oncontinue,
@@ -52,7 +51,6 @@
 		answeringDisabled?: boolean;
 		showContinue?: boolean;
 		continueDisabled?: boolean;
-		showHeading?: boolean;
 		scrollToQuestionId: number | null;
 		onselectOption: (optionId: number) => void;
 		oncontinue?: () => void;
@@ -148,12 +146,6 @@
 </script>
 
 <div class="flex flex-col gap-4 pt-5 xl:h-full xl:min-h-0 xl:gap-0 xl:pt-0">
-	{#if showHeading}
-		<div>
-			<h2 class="text-base font-semibold text-slate-950">Comprehension Checks</h2>
-		</div>
-	{/if}
-
 	<!-- Gallery area -->
 	{#if sortedQuestions.length > 0}
 		<div class="flex items-start gap-2 sm:gap-3 xl:min-h-0 xl:flex-1">
@@ -168,7 +160,7 @@
 			</button>
 
 			<div
-				class="min-w-0 flex-1 xl:-mt-4 xl:min-h-0 xl:self-stretch xl:overflow-y-auto xl:[scrollbar-width:none] xl:[&::-webkit-scrollbar]:hidden"
+				class="min-w-0 flex-1 xl:-mt-4 xl:min-h-0 xl:self-stretch xl:overflow-y-auto xl:[scrollbar-width:thin]"
 			>
 				<div class="xl:pt-12">
 					{#if activeQuestion}
