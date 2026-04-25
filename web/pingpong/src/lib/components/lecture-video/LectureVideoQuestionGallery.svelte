@@ -23,7 +23,6 @@
 		continueDisabled = false,
 		showHeading = true,
 		scrollToQuestionId = null,
-		active = true,
 		onselectOption,
 		oncontinue,
 		onscrollcomplete
@@ -55,7 +54,6 @@
 		continueDisabled?: boolean;
 		showHeading?: boolean;
 		scrollToQuestionId: number | null;
-		active?: boolean;
 		onselectOption: (optionId: number) => void;
 		oncontinue?: () => void;
 		onscrollcomplete: () => void;
@@ -64,10 +62,9 @@
 	let requestedActiveIndex: number = $state(0);
 
 	const navigationButtonClass =
-		'mt-4 inline-flex shrink-0 items-center justify-center rounded-full p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-300 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400';
+		'mt-12 inline-flex shrink-0 items-center justify-center rounded-full p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-300 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400';
 	const dotBaseClass =
 		'size-2.5 rounded-full transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-300';
-	const noop = () => {};
 	let continueCardProps = $derived({ showContinue, continueDisabled, oncontinue });
 
 	let hasCurrentPendingQuestion = $derived(
@@ -102,7 +99,6 @@
 
 	// Navigate to question from video marker click
 	$effect(() => {
-		if (!active) return;
 		if (scrollToQuestionId == null) return;
 		const idx = findQuestionIndex(scrollToQuestionId);
 		if (idx !== -1) {
@@ -151,7 +147,7 @@
 	}
 </script>
 
-<div class="flex flex-col gap-4 pt-5">
+<div class="flex flex-col gap-4 pt-5 xl:h-full xl:min-h-0 xl:gap-0 xl:pt-0">
 	{#if showHeading}
 		<div>
 			<h2 class="text-base font-semibold text-slate-950">Comprehension Checks</h2>
@@ -160,7 +156,7 @@
 
 	<!-- Gallery area -->
 	{#if sortedQuestions.length > 0}
-		<div class="flex items-start gap-2 sm:gap-3">
+		<div class="flex items-start gap-2 sm:gap-3 xl:min-h-0 xl:flex-1">
 			<button
 				type="button"
 				disabled={atFirstQuestion}
@@ -171,51 +167,50 @@
 				<ChevronLeftOutline class="size-5" />
 			</button>
 
-			<div class="min-w-0 flex-1">
-				{#if activeQuestion}
-					{#if activeAnsweredQuestion && !isCurrentFeedback}
-						<LectureVideoQuestionCard
-							position={activeQuestion.position}
-							questionText={activeQuestion.questionText}
-							options={activeAnsweredQuestion.options}
-							state="answered"
-							selectedOptionId={activeAnsweredQuestion.selectedOptionId}
-							correctOptionId={activeAnsweredQuestion.correctOptionId}
-							postAnswerText={activeAnsweredQuestion.postAnswerText}
-							expanded={true}
-							ontoggleExpand={noop}
-							onselectOption={noop}
-						/>
-					{:else if isCurrentAnswering && currentQuestion}
-						<LectureVideoQuestionCard
-							position={activeQuestion.position}
-							questionText={activeQuestion.questionText}
-							options={currentQuestion.options}
-							state="answering"
-							selectedOptionId={null}
-							correctOptionId={null}
-							postAnswerText={null}
-							expanded={false}
-							{answeringDisabled}
-							{onselectOption}
-							ontoggleExpand={noop}
-						/>
-					{:else if isCurrentFeedback && currentQuestion && currentContinuation}
-						<LectureVideoQuestionCard
-							position={activeQuestion.position}
-							questionText={activeQuestion.questionText}
-							options={currentQuestion.options}
-							state="feedback"
-							selectedOptionId={currentContinuation.option_id}
-							correctOptionId={currentContinuation.correct_option_id}
-							postAnswerText={currentContinuation.post_answer_text}
-							expanded={false}
-							onselectOption={noop}
-							ontoggleExpand={noop}
-							{...continueCardProps}
-						/>
+			<div
+				class="min-w-0 flex-1 xl:-mt-4 xl:min-h-0 xl:self-stretch xl:overflow-y-auto xl:[scrollbar-width:none] xl:[&::-webkit-scrollbar]:hidden"
+			>
+				<div class="xl:pt-12">
+					{#if activeQuestion}
+						{#if activeAnsweredQuestion && !isCurrentFeedback}
+							<LectureVideoQuestionCard
+								position={activeQuestion.position}
+								questionText={activeQuestion.questionText}
+								options={activeAnsweredQuestion.options}
+								state="answered"
+								selectedOptionId={activeAnsweredQuestion.selectedOptionId}
+								correctOptionId={activeAnsweredQuestion.correctOptionId}
+								postAnswerText={activeAnsweredQuestion.postAnswerText}
+								headerTrailing={dots}
+							/>
+						{:else if isCurrentAnswering && currentQuestion}
+							<LectureVideoQuestionCard
+								position={activeQuestion.position}
+								questionText={activeQuestion.questionText}
+								options={currentQuestion.options}
+								state="answering"
+								selectedOptionId={null}
+								correctOptionId={null}
+								postAnswerText={null}
+								{answeringDisabled}
+								{onselectOption}
+								headerTrailing={dots}
+							/>
+						{:else if isCurrentFeedback && currentQuestion && currentContinuation}
+							<LectureVideoQuestionCard
+								position={activeQuestion.position}
+								questionText={activeQuestion.questionText}
+								options={currentQuestion.options}
+								state="feedback"
+								selectedOptionId={currentContinuation.option_id}
+								correctOptionId={currentContinuation.correct_option_id}
+								postAnswerText={currentContinuation.post_answer_text}
+								{...continueCardProps}
+								headerTrailing={dots}
+							/>
+						{/if}
 					{/if}
-				{/if}
+				</div>
 			</div>
 
 			<button
@@ -228,16 +223,18 @@
 				<ChevronRightOutline class="size-5" />
 			</button>
 		</div>
-
-		<div class="flex items-center justify-center gap-1.5">
-			{#each sortedQuestions as question, index (question.id)}
-				<button
-					type="button"
-					onclick={() => (requestedActiveIndex = index)}
-					class="{dotBaseClass} {dotClass(question.id, index)}"
-					aria-label="Go to question {question.position}"
-				></button>
-			{/each}
-		</div>
 	{/if}
 </div>
+
+{#snippet dots()}
+	<div class="flex shrink-0 items-center gap-1.5 pt-1">
+		{#each sortedQuestions as question, index (question.id)}
+			<button
+				type="button"
+				onclick={() => (requestedActiveIndex = index)}
+				class="{dotBaseClass} {dotClass(question.id, index)}"
+				aria-label="Go to question {question.position}"
+			></button>
+		{/each}
+	</div>
+{/snippet}

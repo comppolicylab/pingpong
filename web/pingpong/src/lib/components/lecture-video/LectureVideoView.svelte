@@ -22,7 +22,6 @@
 	import { hasVisiblePostAnswerFeedback } from '$lib/lectureVideoFeedback';
 	import { mergeQuestionOptions } from '$lib/utils/lecture-video';
 	import LectureVideoPlayer from './LectureVideoPlayer.svelte';
-	import LectureVideoQuestionSidebar from './LectureVideoQuestionSidebar.svelte';
 	import LectureVideoQuestionGallery from './LectureVideoQuestionGallery.svelte';
 	import LectureVideoCompletedView from './LectureVideoCompletedView.svelte';
 
@@ -359,7 +358,7 @@
 	});
 
 	function mobileSegmentClass(panel: 'checks' | 'chat'): string {
-		return `rounded-xl px-4 py-2 text-sm font-medium transition-colors ${
+		return `rounded-xl px-4 py-1 text-sm font-medium transition-colors ${
 			activeMobilePanel === panel
 				? 'bg-white text-slate-950 shadow-sm'
 				: 'text-slate-600 hover:text-slate-900'
@@ -1544,12 +1543,14 @@
 {:else}
 	<div class="h-full w-full overflow-hidden">
 		<div
-			class="mx-auto flex h-full w-full max-w-screen-2xl flex-col gap-6 px-4 py-4 lg:px-6 xl:grid xl:grid-cols-[minmax(0,1fr)_24rem] xl:items-stretch xl:gap-8 xl:py-6"
+			class="mx-auto flex h-full w-full max-w-screen-2xl flex-col gap-6 px-4 py-4 lg:px-6 xl:grid xl:grid-cols-[minmax(0,60%)_minmax(0,1fr)] xl:items-stretch xl:gap-8 xl:py-6"
 		>
-			<div class="min-h-0 min-w-0 space-y-4 overflow-y-auto">
+			<div
+				class="flex max-h-[40%] min-h-0 min-w-0 shrink-0 flex-col gap-4 xl:h-full xl:max-h-none xl:shrink xl:gap-4"
+			>
 				{#if !canParticipate}
 					<div
-						class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700"
+						class="shrink-0 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700"
 					>
 						You can view this lecture thread, but playback control and question responses are
 						available only to participants.
@@ -1562,7 +1563,9 @@
 						initialInteractions={historyInteractions}
 					/>
 				{:else if !isCompleted}
-					<div class="overflow-hidden rounded-3xl border border-slate-200 bg-white p-3 shadow-xl">
+					<div
+						class="mx-auto min-h-0 w-full max-w-[calc((40dvh-4rem)*16/9)] shrink-0 overflow-hidden rounded-3xl border border-slate-200 bg-white p-3 shadow-xl xl:mx-0 xl:max-w-none xl:flex-none xl:shrink-0"
+					>
 						<LectureVideoPlayer
 							src={lectureVideoSrc}
 							displayTitle={sessionState === 'awaiting_answer'
@@ -1593,28 +1596,29 @@
 							onmanualplayrequest={handleManualPlaybackRequest}
 						/>
 					</div>
+					{#if isDesktopLayout}
+						<div class="min-h-0 flex-1">
+							<LectureVideoQuestionGallery
+								{allQuestions}
+								currentQuestionId={currentQuestion?.id ?? null}
+								currentQuestion={visibleCurrentQuestion}
+								{currentContinuation}
+								{sessionState}
+								{answeredQuestions}
+								answeringDisabled={!canParticipate || introNarrationPending}
+								showHeading={false}
+								{scrollToQuestionId}
+								onselectOption={handleSelectOption}
+								{...continuePromptProps}
+								onscrollcomplete={clearQuestionScrollTarget}
+							/>
+						</div>
+					{/if}
 				{/if}
 			</div>
 			{#if isDesktopLayout}
-				<div class="flex min-h-0 min-w-0 flex-col gap-4 pt-3">
-					{#if sessionState !== 'completed'}
-						<LectureVideoQuestionSidebar
-							{allQuestions}
-							currentQuestionId={currentQuestion?.id ?? null}
-							currentQuestion={visibleCurrentQuestion}
-							{currentContinuation}
-							{sessionState}
-							{answeredQuestions}
-							answeringDisabled={!canParticipate || introNarrationPending}
-							{scrollToQuestionId}
-							onselectOption={handleSelectOption}
-							{...continuePromptProps}
-							onscrollcomplete={clearQuestionScrollTarget}
-						/>
-					{/if}
-					<div class="min-h-0 flex-1">
-						{@render chat?.()}
-					</div>
+				<div class="h-full min-h-0 min-w-0">
+					{@render chat?.()}
 				</div>
 			{:else}
 				<div class="flex min-h-0 flex-1 flex-col gap-4">

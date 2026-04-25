@@ -151,9 +151,6 @@
 					selectedOptionId={question.selectedOptionId}
 					correctOptionId={question.correctOptionId}
 					postAnswerText={question.postAnswerText}
-					expanded={true}
-					ontoggleExpand={() => {}}
-					onselectOption={() => {}}
 				/>
 			{/each}
 		</div>
