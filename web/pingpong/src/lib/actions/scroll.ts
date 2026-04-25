@@ -102,6 +102,19 @@ export const scroll = (el: HTMLDivElement, params: ScrollParams) => {
 	};
 
 	const onScroll = () => {
+		const scrollHeightDecreased = el.scrollHeight < lastKnownScrollHeight;
+		const wasNearBottom = lastKnownScrollHeight - lastScrollTop - el.clientHeight < 80;
+		if (isStreaming && scrollHeightDecreased && wasNearBottom) {
+			userPausedAutoScroll = false;
+			clearProgrammaticScrollTimeout();
+			isProgrammaticScroll = false;
+			targetScrollTop = null;
+			lastScrollTop = el.scrollTop;
+			lastKnownScrollHeight = el.scrollHeight;
+			scheduleScrollToBottom(4);
+			return;
+		}
+
 		if (isProgrammaticScroll) {
 			if (hasReachedProgrammaticTarget()) {
 				completeProgrammaticScroll();

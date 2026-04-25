@@ -1,7 +1,6 @@
 <script lang="ts">
 	import * as api from '$lib/api';
 	import { parseTextContent } from '$lib/content';
-	import { blur } from 'svelte/transition';
 	import { Button, Tooltip, Avatar, Accordion, AccordionItem } from 'flowbite-svelte';
 	import {
 		RefreshOutline,
@@ -12,7 +11,6 @@
 		VolumeUpSolid,
 		VolumeMuteSolid
 	} from 'flowbite-svelte-icons';
-	import { DoubleBounce } from 'svelte-loading-spinners';
 	import Logo from '$lib/components/Logo.svelte';
 	import Markdown from '$lib/components/Markdown.svelte';
 	import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
@@ -230,6 +228,9 @@
 		return '';
 	};
 
+	const isLectureContextPending = (message: api.OpenAIMessage) =>
+		message.role === 'assistant' && message.metadata?.lecture_context_pending === true;
+
 	const getThreadImageUrl = (fileId: string) =>
 		api.fullPath(`/class/${classId}/thread/${threadId}/image/${fileId}`);
 
@@ -296,6 +297,9 @@
 					<Tooltip triggeredBy={`#short-timestamp-${message.data.id}`}>
 						{getMessageTimestamp(message.data.created_at)}
 					</Tooltip>
+					{#if isLectureContextPending(message.data)}
+						<p class="shimmer text-sm">Analyzing lecture context</p>
+					{/if}
 					{#each groupMessageContent(message.data.content) as block (block.key)}
 						{#if block.type === 'mcp_group'}
 							<div class="my-3">
@@ -433,11 +437,6 @@
 	{#if showInput}
 		<div class="border-t border-slate-200 px-4 pt-1 pb-3">
 			<div class="relative mx-auto flex w-full max-w-4xl flex-col">
-				{#if waiting || submitting}
-					<div class="absolute -top-10 flex w-full justify-center" transition:blur={{ amount: 10 }}>
-						<DoubleBounce color="#0ea5e9" size="30" />
-					</div>
-				{/if}
 				{#if ttsAvailable}
 					<div class="flex items-center justify-end gap-2 px-1 pb-1">
 						<button
@@ -489,3 +488,51 @@
 		</div>
 	{/if}
 </div>
+
+<style lang="css">
+	.shimmer {
+		color: transparent;
+		-webkit-text-fill-color: transparent;
+		animation-delay: 0s;
+		animation-duration: 2s;
+		animation-iteration-count: infinite;
+		animation-name: shimmer;
+		background: #4b5563 -webkit-gradient(
+				linear,
+				100% 0,
+				0 0,
+				from(#5d5d5d),
+				color-stop(0.4, #ffffffbf),
+				to(#4b5563),
+				color-stop(0.6, #ffffffbf),
+				to(#4b5563)
+			);
+		-webkit-background-clip: text;
+		background-clip: text;
+		background-position: -100% 0;
+		background-position: unset top;
+		background-repeat: no-repeat;
+		background-size: 50% 200%;
+	}
+
+	@keyframes shimmer {
+		0% {
+			background-position: -100% 0;
+		}
+		100% {
+			background-position: 250% 0;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.shimmer {
+			animation: none;
+		}
+	}
+
+	.shimmer:hover {
+		-webkit-text-fill-color: #374151;
+		color: #374151;
+		background: 0 0;
+	}
+</style>
