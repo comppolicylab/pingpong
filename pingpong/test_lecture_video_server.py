@@ -2679,7 +2679,6 @@ async def test_locked_lecture_video_state_load_locks_thread_first(
         )
         session.add(thread)
         await session.flush()
-        await lecture_video_runtime.initialize_thread_state(session, thread.id)
 
         calls: list[tuple[str, bool]] = []
         original_get_thread = models.Thread.get_by_id
