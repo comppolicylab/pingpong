@@ -155,7 +155,6 @@
 	$: effectiveLectureVideoMismatch = threadLectureVideoMismatch;
 	$: effectiveLectureVideoAssistantMismatch = threadLectureVideoMismatch;
 	let lectureVideoViewRef: LectureVideoViewHandle | null = null;
-	let lectureChatHasDraft = false;
 	let lecturePlayerVolume = 1;
 	let liveLectureVideoSession: api.LectureVideoSession | null = null;
 	let lectureVideoSessionKey: string | null = null;
@@ -706,6 +705,7 @@
 	};
 
 	const handleLectureChatSubmit = async (message: ChatInputMessage) => {
+		await lectureVideoViewRef?.pauseForChatSubmit();
 		await postMessage(message);
 	};
 
@@ -715,13 +715,6 @@
 
 	const handleLecturePlaybackResumed = () => {
 		threadMgr.interruptTts().catch(() => {});
-	};
-
-	const handleLectureChatDraftChange = ({ hasText }: { hasText: boolean }) => {
-		lectureChatHasDraft = hasText;
-		if (hasText) {
-			void lectureVideoViewRef?.pauseForChatInput();
-		}
 	};
 
 	// Handle file upload
@@ -1496,7 +1489,6 @@
 					canParticipate={threadIsCurrentUserParticipant}
 					initialSession={lectureVideoSession}
 					bind:playerVolume={lecturePlayerVolume}
-					deferAutoContinueForChatDraft={lectureChatHasDraft}
 					chatAvailable={threadLectureChatAvailable}
 					on:sessionchange={handleLectureSessionChange}
 					on:playbackresumed={handleLecturePlaybackResumed}
@@ -1531,8 +1523,6 @@
 								{fetchMoreMessages}
 								onsubmit={handleLectureChatSubmit}
 								ondismisserror={handleLectureChatDismissError}
-								ontextinput={handleLectureChatDraftChange}
-								ontextpaste={handleLectureChatDraftChange}
 								onmutettstoggle={() => {
 									threadMgr.setTtsMuted(!$ttsMuted);
 								}}

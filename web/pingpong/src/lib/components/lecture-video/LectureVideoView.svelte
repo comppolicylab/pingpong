@@ -1,6 +1,6 @@
 <script module lang="ts">
 	export type LectureVideoViewHandle = {
-		pauseForChatInput: () => Promise<void>;
+		pauseForChatSubmit: () => Promise<void>;
 	};
 </script>
 
@@ -42,7 +42,6 @@
 		title = 'Lecture Video',
 		canParticipate = true,
 		initialSession = null,
-		deferAutoContinueForChatDraft = false,
 		chatAvailable = false,
 		playerVolume = $bindable(1),
 		chat = undefined
@@ -53,7 +52,6 @@
 		title?: string;
 		canParticipate?: boolean;
 		initialSession?: LectureVideoSession | null;
-		deferAutoContinueForChatDraft?: boolean;
 		chatAvailable?: boolean;
 		playerVolume?: number;
 		chat?: Snippet;
@@ -128,13 +126,12 @@
 	let manualPlaybackTarget: 'video' | 'narration' | null = $state(null);
 	let autoContinueInFlight = $state(false);
 	let autoContinueFailed = $state(false);
-	let autoContinueDeferredForChatDraft = $state(false);
 	function shouldShowContinuePrompt(): boolean {
 		return (
 			(sessionState === 'awaiting_post_answer_resume' &&
 				!postAnswerNarrationPending &&
 				!autoContinueInFlight &&
-				(hasVisiblePostAnswerFeedback(currentContinuation) || autoContinueDeferredForChatDraft)) ||
+				hasVisiblePostAnswerFeedback(currentContinuation)) ||
 			autoContinueFailed
 		);
 	}
@@ -397,7 +394,6 @@
 		clearPendingVideoRetry();
 		autoContinueInFlight = false;
 		autoContinueFailed = false;
-		autoContinueDeferredForChatDraft = false;
 	}
 
 	function revokeNarrationResources() {
@@ -417,12 +413,6 @@
 	}
 
 	function maybeAutoContinueAfterPostAnswer() {
-		if (deferAutoContinueForChatDraft) {
-			autoContinueDeferredForChatDraft = true;
-			return;
-		}
-
-		autoContinueDeferredForChatDraft = false;
 		void requestContinue();
 	}
 
@@ -846,7 +836,6 @@
 		currentContinuation = session.current_continuation;
 		if (session.state !== 'awaiting_post_answer_resume') {
 			autoContinueFailed = false;
-			autoContinueDeferredForChatDraft = false;
 		}
 		furthestOffsetMs = session.furthest_offset_ms ?? 0;
 		questionPlaybackLocked =
@@ -857,7 +846,7 @@
 		dispatch('sessionchange', session);
 	}
 
-	export async function pauseForChatInput() {
+	export async function pauseForChatSubmit() {
 		if (!canParticipate || playbackLocked || sessionState !== 'playing') {
 			return;
 		}
@@ -1296,7 +1285,6 @@
 			return;
 		}
 
-		autoContinueDeferredForChatDraft = false;
 		autoContinueInFlight = true;
 		try {
 			autoContinueFailed = !(await handleContinue());
