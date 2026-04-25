@@ -7683,7 +7683,9 @@ async def send_message(
         lecture_chat_prep: lecture_video_chat.LectureChatTurnPreparation | None = None
 
         # When we reach 3 user messages, or if we failed to generate a title before, generate a new one. Only use the first 100 words of each user and assistant message to maintain a low token count.
-        if thread.user_message_ct == 3 or thread.name is None:
+        if thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO and (
+            thread.user_message_ct == 3 or thread.name is None
+        ):
             thread.name = await get_thread_conversation_name(
                 openai_client,
                 request.state["db"],
