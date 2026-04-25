@@ -1856,7 +1856,7 @@
 
 		const result = await api.previewAssistantInstructions(fetch, data.class.id, {
 			instructions,
-			use_latex: useLatex,
+			use_latex: interactionMode === 'lecture_video' ? (assistant?.use_latex ?? false) : useLatex,
 			disable_prompt_randomization: disablePromptRandomization
 		});
 		const expanded = api.expandResponse(result);
