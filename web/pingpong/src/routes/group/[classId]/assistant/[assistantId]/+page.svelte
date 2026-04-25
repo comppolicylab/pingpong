@@ -1514,7 +1514,7 @@
 		// Check if the new params are different from the loaded assistant.
 		// If the assistant is brand new, ignore simple checkboxes and dropdowns,
 		// and only check text entry fields.
-		const fields: Array<keyof api.CreateAssistantRequest & keyof api.Assistant> = data.assistantId
+		let fields: Array<keyof api.CreateAssistantRequest & keyof api.Assistant> = data.assistantId
 			? [
 					'name',
 					'description',
@@ -1532,6 +1532,14 @@
 					'reasoning_effort'
 				]
 			: ['name', 'description', 'instructions'];
+		if (
+			data.isCreating &&
+			isLectureMode &&
+			normalizeNewlines(params.instructions || '') ===
+				normalizeNewlines(LECTURE_VIDEO_DEFAULT_INSTRUCTIONS)
+		) {
+			fields = fields.filter((field) => field !== 'instructions');
+		}
 
 		const modifiedFields: string[] = [];
 		for (const field of fields) {
