@@ -4,6 +4,7 @@ import ssl
 from typing import TypeVar
 
 from google import genai
+from google.genai.client import AsyncClient
 from google.genai import types
 from pydantic import BaseModel
 
@@ -20,32 +21,30 @@ _ResponseModelT = TypeVar("_ResponseModelT", bound=BaseModel)
 
 
 async def generate_manifest_quiz(
-    api_key: str,
+    client: AsyncClient,
     *,
     model: str,
     prompt: str,
     contents: types.ContentListUnion,
     response_model: type[_ResponseModelT],
 ) -> _ResponseModelT:
-    async with genai.Client(api_key=api_key).aio as aclient:
-        response = await aclient.models.generate_content(
-            model=model,
-            config=types.GenerateContentConfig(
-                system_instruction=prompt,
-                response_mime_type="application/json",
-                response_json_schema=response_model.model_json_schema(),
-                media_resolution=types.MediaResolution.MEDIA_RESOLUTION_HIGH,
-            ),
-            contents=contents,
-        )
+    response = await client.models.generate_content(
+        model=model,
+        config=types.GenerateContentConfig(
+            system_instruction=prompt,
+            response_mime_type="application/json",
+            response_json_schema=response_model.model_json_schema(),
+            media_resolution=types.MediaResolution.MEDIA_RESOLUTION_HIGH,
+        ),
+        contents=contents,
+    )
     if not response.text:
         raise ValueError("Gemini returned an empty response.")
     return response_model.model_validate_json(response.text)
 
 
-async def delete_file(api_key: str, name: str) -> None:
-    async with genai.Client(api_key=api_key).aio as aclient:
-        await aclient.files.delete(name=name)
+async def delete_file(client: AsyncClient, name: str) -> None:
+    await client.files.delete(name=name)
 
 
 async def validate_gemini_api_key(api_key: str) -> bool:
