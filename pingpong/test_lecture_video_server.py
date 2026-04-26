@@ -624,7 +624,7 @@ async def test_create_lecture_thread_success(api, db, institution, valid_user_to
     assert data["thread"]["assistant_id"] == 1
     assert data["thread"]["interaction_mode"] == "lecture_video"
     assert data["thread"]["lecture_video_id"] == lecture_video.id
-    assert data["thread"]["name"] == "Lecture Presentation"
+    assert data["thread"]["name"] == "Lecture Lesson"
     assert data["thread"]["private"] is True
     assert data["session_token"] is None
 
@@ -2589,7 +2589,7 @@ async def test_initialize_thread_state_completes_when_lecture_video_has_no_quest
 
         thread = models.Thread(
             id=1,
-            name="Lecture Presentation",
+            name="Lecture Lesson",
             version=3,
             thread_id="thread-no-questions",
             class_id=class_.id,
@@ -2643,7 +2643,7 @@ async def test_get_plausible_playback_offset_ms_only_advances_while_playing(
 
         thread = models.Thread(
             id=1,
-            name="Lecture Presentation",
+            name="Lecture Lesson",
             version=3,
             thread_id=f"thread-plausible-offset-{session_state.value}",
             class_id=class_.id,
@@ -2697,7 +2697,7 @@ async def test_append_interaction_requires_for_update_locked_state(db, instituti
 
         thread = models.Thread(
             id=1,
-            name="Lecture Presentation",
+            name="Lecture Lesson",
             version=3,
             thread_id="thread-append-lock",
             class_id=class_.id,
@@ -2739,7 +2739,7 @@ async def test_locked_lecture_video_state_load_locks_thread_first(
 
         thread = models.Thread(
             id=1,
-            name="Lecture Presentation",
+            name="Lecture Lesson",
             version=3,
             thread_id="thread-state-lock-order",
             class_id=class_.id,
@@ -3596,7 +3596,7 @@ async def test_lecture_thread_rejected_without_attached_video(
     assert response.status_code == 400
     assert (
         response.json()["detail"]
-        == "This assistant does not have a lecture video attached. Unable to create Lecture Presentation"
+        == "This assistant does not have a lecture video attached. Unable to create Lecture Lesson"
     )
 
 
@@ -9365,7 +9365,7 @@ async def test_get_thread_video_stream_and_range(
 
         thread = models.Thread(
             id=109,
-            name="Lecture Presentation",
+            name="Lecture Lesson",
             version=3,
             thread_id="thread-video-109",
             class_id=class_.id,
@@ -9449,7 +9449,7 @@ async def test_get_thread_video_invalid_range_returns_416(
 
         thread = models.Thread(
             id=109,
-            name="Lecture Presentation",
+            name="Lecture Lesson",
             version=3,
             thread_id="thread-video-109",
             class_id=class_.id,
@@ -9830,7 +9830,7 @@ async def test_get_thread_video_with_anonymous_query_token(
 
         thread = models.Thread(
             id=109,
-            name="Lecture Presentation",
+            name="Lecture Lesson",
             version=3,
             thread_id="thread-video-109",
             class_id=class_.id,
@@ -9911,7 +9911,7 @@ async def test_get_thread_lecture_video_narration_with_anonymous_query_token(
 
         thread = models.Thread(
             id=109,
-            name="Lecture Presentation",
+            name="Lecture Lesson",
             version=assistant.version,
             thread_id="thread-video-109",
             class_id=class_.id,
@@ -10005,7 +10005,7 @@ async def test_get_thread_video_with_lti_session_query_token(
 
         thread = models.Thread(
             id=109,
-            name="Lecture Presentation",
+            name="Lecture Lesson",
             version=3,
             thread_id="thread-video-109",
             class_id=class_.id,
@@ -10063,7 +10063,7 @@ async def test_get_thread_lecture_video_narration_with_lti_session_query_token(
 
         thread = models.Thread(
             id=109,
-            name="Lecture Presentation",
+            name="Lecture Lesson",
             version=assistant.version,
             thread_id="thread-video-109",
             class_id=class_.id,
@@ -10139,7 +10139,7 @@ async def test_get_thread_video_rejects_assistant_mismatch(
 
         thread = models.Thread(
             id=109,
-            name="Lecture Presentation",
+            name="Lecture Lesson",
             version=3,
             thread_id="thread-video-109",
             class_id=class_.id,

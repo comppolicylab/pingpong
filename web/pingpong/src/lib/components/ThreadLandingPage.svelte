@@ -764,18 +764,10 @@
 					</div>
 					<div class="flex min-w-2/5 flex-col items-center">
 						<p class="text-center text-sm font-semibold text-blue-dark-40 sm:text-xl">
-							Lecture Video mode
+							Learn with Interactive Videos
 						</p>
-						<div class="my-2 flex items-center">
-							<div
-								class="flex flex-row items-center rounded-full border border-gray-300 px-3 py-1 text-xs font-normal text-gray-600"
-							>
-								Research Preview
-							</div>
-						</div>
-						<p class="font-base text-center text-xs text-gray-600 sm:text-base">
-							Review a lecture video with comprehension questions.<br />Create a new session to
-							begin.
+						<p class="font-base max-w-65 text-center text-xs text-gray-600 sm:text-base">
+							Watch a video and ask and answer questions as you go.
 						</p>
 					</div>
 					<div class="flex flex-row p-1.5">
@@ -785,7 +777,7 @@
 							type="button"
 						>
 							<CirclePlusSolid size="sm" />
-							<span class="text-center text-sm font-normal"> Create session </span>
+							<span class="text-center text-sm font-normal"> Start a Lesson </span>
 						</Button>
 					</div>
 				{:else if assistant.interaction_mode === 'chat' && !(assistant.assistant_should_message_first ?? false)}
