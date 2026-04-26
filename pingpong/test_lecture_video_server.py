@@ -7607,6 +7607,100 @@ async def test_retry_lecture_video_endpoint_resets_non_ready_narrations_and_queu
     assert not (narration_dir / failed_audio_key).exists()
 
 
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "admin", "class:1"),
+        ("user:123", "can_create_assistants", "class:1"),
+        ("user:123", "can_edit", "assistant:1"),
+    ]
+)
+async def test_retry_lecture_video_endpoint_queues_manifest_generation_after_manifest_failure(
+    api, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_, lecture_video, assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+        lecture_video = await models.LectureVideo.get_by_id_with_copy_context(
+            session, lecture_video.id
+        )
+        assert lecture_video is not None
+        ready_narration = lecture_video.questions[0].intro_narration
+        assert ready_narration is not None
+        assert ready_narration.stored_object is not None
+        preserved_ready_stored_object_id = ready_narration.stored_object.id
+
+        lecture_video.manual_manifest = False
+        lecture_video.status = schemas.LectureVideoStatus.FAILED
+        lecture_video.error_message = "Gemini failed"
+        session.add(lecture_video)
+        await models.LectureVideoProcessingRun.create(
+            session,
+            lecture_video_id=lecture_video.id,
+            lecture_video_id_snapshot=lecture_video.id,
+            class_id=class_.id,
+            assistant_id_at_start=assistant.id,
+            stage=schemas.LectureVideoProcessingStage.MANIFEST_GENERATION,
+            attempt_number=1,
+            status=schemas.LectureVideoProcessingRunStatus.FAILED,
+        )
+        await session.commit()
+
+    response = api.post(
+        "/api/v1/class/1/assistant/1/lecture-video/retry",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == schemas.LectureVideoStatus.PROCESSING.value
+    assert response.json()["error_message"] is None
+
+    async with db.async_session() as session:
+        refreshed_video = await models.LectureVideo.get_by_id_with_copy_context(
+            session, lecture_video.id
+        )
+        refreshed_runs = list(
+            (
+                await session.scalars(
+                    select(models.LectureVideoProcessingRun)
+                    .where(
+                        models.LectureVideoProcessingRun.lecture_video_id_snapshot
+                        == lecture_video.id
+                    )
+                    .order_by(
+                        models.LectureVideoProcessingRun.stage.asc(),
+                        models.LectureVideoProcessingRun.attempt_number.asc(),
+                    )
+                )
+            ).all()
+        )
+
+    assert refreshed_video is not None
+    assert refreshed_video.status == schemas.LectureVideoStatus.PROCESSING
+    assert refreshed_video.error_message is None
+    assert refreshed_video.questions[0].intro_narration is not None
+    assert (
+        refreshed_video.questions[0].intro_narration.stored_object_id
+        == preserved_ready_stored_object_id
+    )
+    assert len(refreshed_runs) == 2
+    assert (
+        refreshed_runs[0].stage
+        == schemas.LectureVideoProcessingStage.MANIFEST_GENERATION
+    )
+    assert refreshed_runs[0].status == schemas.LectureVideoProcessingRunStatus.FAILED
+    assert refreshed_runs[0].attempt_number == 1
+    assert (
+        refreshed_runs[1].stage
+        == schemas.LectureVideoProcessingStage.MANIFEST_GENERATION
+    )
+    assert refreshed_runs[1].status == schemas.LectureVideoProcessingRunStatus.QUEUED
+    assert refreshed_runs[1].attempt_number == 2
+
+
 @with_institution(11, "Test Institution")
 async def test_queue_narration_processing_run_retries_integrity_error_with_new_attempt_number(
     db, institution, monkeypatch
