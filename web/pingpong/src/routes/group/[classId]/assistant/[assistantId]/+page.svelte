@@ -1940,6 +1940,15 @@
 			selectedLectureVideo = { ...selectedLectureVideo, ...summary };
 		}
 	};
+	const syncManifestGenerationStatus = (status: api.LectureVideoProcessingRunSummary) => {
+		if (!data.lectureVideoConfig) {
+			return;
+		}
+		data.lectureVideoConfig = {
+			...data.lectureVideoConfig,
+			manifest_generation_status: status
+		};
+	};
 	$: canRefreshCurrentLectureVideoStatus =
 		!data.isCreating &&
 		!!data.assistantId &&
@@ -2014,6 +2023,10 @@
 		}
 
 		syncLectureVideoSummary(expanded.data);
+		if (lastManifestRunFailed) {
+			syncManifestGenerationStatus({ state: 'queued' });
+			void refreshAssistantLectureVideoStatus();
+		}
 		happyToast('Lecture video processing retried');
 	};
 
@@ -3435,7 +3448,7 @@
 										custom manifest will be replaced.
 									</Helper>
 								{/if}
-								<div class="mb-2 flex flex-wrap items-center gap-3 text-sm text-gray-600">
+								<div class="mb-2 text-sm">
 									{#if manifestGenerationInFlight}
 										<span>Generating...</span>
 									{:else if lastManifestRunFailed}
@@ -3450,6 +3463,8 @@
 											).toLocaleString()}</span
 										>
 									{/if}
+								</div>
+								<div class="mb-2 flex flex-wrap items-center gap-3 text-sm text-gray-600">
 									<button
 										type="button"
 										class={`${lectureVideoRegenerateButtonPressed ? 'border-blue-300 bg-blue-100 font-semibold text-blue-800 shadow-inner shadow-blue-200' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'} rounded-lg border px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-70`}
