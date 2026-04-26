@@ -6690,7 +6690,7 @@ async def create_lecture_thread(
     if not assistant.lecture_video:
         raise HTTPException(
             status_code=400,
-            detail="This assistant does not have a lecture video attached. Unable to create Lecture Presentation",
+            detail="This assistant does not have a lecture video attached. Unable to create Lecture Lesson",
         )
     if assistant.lecture_video.status != schemas.LectureVideoStatus.READY:
         if assistant.lecture_video.status == schemas.LectureVideoStatus.FAILED:
@@ -6728,7 +6728,7 @@ async def create_lecture_thread(
     if anonymous_user:
         all_parties.append(anonymous_user)
     new_thread = {
-        "name": "Lecture Presentation",
+        "name": "Lecture Lesson",
         "class_id": int(class_id),
         "private": True if all_parties else False,
         "interaction_mode": "lecture_video",
