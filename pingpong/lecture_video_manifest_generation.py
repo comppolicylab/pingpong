@@ -125,7 +125,7 @@ GUIDELINES FOR QUESTIONS:
   (b) Skip the question entirely and wait for the next genuine conceptual breakpoint.
   A question that any attentive student can answer without thinking is worse than no question at all."""
 
-_GEMINI_MODEL = "gemini-3.1-pro"
+_GEMINI_MODEL = "gemini-3.1-pro-preview"
 
 
 @dataclass(frozen=True)
@@ -619,7 +619,7 @@ def _question_to_manifest_question(
         is_correct = choice_text == correct_answer
         correct_count += 1 if is_correct else 0
         options.append(
-            schemas.LectureVideoManifestQuestionV1(
+            schemas.LectureVideoManifestOptionV1(
                 option_text=choice_text,
                 post_answer_text=feedback.voice_over,
                 continue_offset_ms=_timestamp_to_ms(feedback.resume_at),
@@ -650,13 +650,26 @@ def _fallback_video_descriptions(
     ]
 
 
+def _video_descriptions_to_manifest_video_descriptions(
+    video_descriptions: list[GeneratedVideoDescription],
+) -> list[schemas.LectureVideoManifestVideoDescriptionV3]:
+    return [
+        schemas.LectureVideoManifestVideoDescriptionV3.model_validate(
+            description.model_dump()
+        )
+        for description in video_descriptions
+    ]
+
+
 def _quiz_to_manifest(
     quiz: GeneratedQuizWithVideo,
     transcript: list[schemas.LectureVideoManifestWordV3],
     *,
     video_duration_ms: int | None,
 ) -> schemas.LectureVideoManifestV3:
-    video_descriptions = quiz.video_descriptions
+    video_descriptions = _video_descriptions_to_manifest_video_descriptions(
+        quiz.video_descriptions
+    )
     if len(video_descriptions) == 0:
         video_descriptions = _fallback_video_descriptions(video_duration_ms)
     return schemas.LectureVideoManifestV3(
