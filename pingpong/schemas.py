@@ -699,6 +699,7 @@ class LectureVideoConfigResponse(BaseModel):
 class LectureVideoDefaults(BaseModel):
     instructions: str
     generation_prompt: str
+    can_generate_manifest: bool = False
 
 
 class ValidateLectureVideoVoiceRequest(BaseModel):
@@ -958,7 +959,6 @@ def lecture_video_validator_create_assistant(self):
         or self.lecture_video_manifest is not None
         or self.voice_id is not None
         or self.generation_prompt is not None
-        or self.regenerate_requested is not None
         or self.overwrite_manifest is not None
     ):
         raise ValueError(
@@ -1115,7 +1115,6 @@ class CreateAssistant(BaseModel):
     lecture_video_manifest: LectureVideoManifest | None = None
     voice_id: str | None = None
     generation_prompt: str | None = None
-    regenerate_requested: bool | None = None
     overwrite_manifest: bool | None = None
     published: bool = False
     use_latex: bool = False

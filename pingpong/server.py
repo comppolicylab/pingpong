@@ -24,6 +24,7 @@ from fastapi import (
     Response,
     UploadFile,
 )
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from openai.types.beta.assistant_create_params import ToolResources
 from openai.types.beta.threads import MessageContentPartParam
@@ -3019,6 +3020,20 @@ def _get_lecture_video_provider_prerequisite_message(
     return "Lecture Video mode is in active development."
 
 
+async def _ensure_lecture_video_manifest_generation_configured(
+    session: AsyncSession,
+    class_id: int,
+) -> None:
+    lecture_video_context = await _get_class_lecture_video_provider_flags(
+        session, class_id
+    )
+    if not lecture_video_context["has_gemini_credential"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Configure a Gemini credential in Manage Group before generating a lecture video manifest.",
+        )
+
+
 async def _get_lecture_video_editor_policy(
     request: StateRequest,
     class_id: int,
@@ -3627,6 +3642,7 @@ async def list_class_models(
         schemas.LectureVideoDefaults(
             instructions=lecture_video_manifest_generation.DEFAULT_LECTURE_VIDEO_INSTRUCTIONS,
             generation_prompt=lecture_video_manifest_generation.DEFAULT_GENERATION_PROMPT_CONTENT,
+            can_generate_manifest=lecture_video_context["has_gemini_credential"],
         )
         if lecture_video_context["lecture_video_enabled"]
         else None
@@ -8759,7 +8775,7 @@ async def get_assistant_lecture_video_config(
         response["generation_prompt"] = lecture_video.generation_prompt
     if manifest_generation_status is not None:
         response["manifest_generation_status"] = manifest_generation_status
-    return response
+    return JSONResponse(jsonable_encoder(response))
 
 
 @v1.post(
@@ -8830,6 +8846,9 @@ async def retry_assistant_lecture_video_processing(
     )
     audio_keys_to_delete: list[str] = []
     if needs_manifest_generation:
+        await _ensure_lecture_video_manifest_generation_configured(
+            request.state["db"], int(class_id)
+        )
         retry_run = (
             await lecture_video_processing.queue_manifest_generation_processing_run(
                 request.state["db"],
@@ -9373,6 +9392,10 @@ async def create_assistant(
                 status_code=400,
                 detail="Specifying a voice_id is required for lecture video assistants.",
             )
+        if not overwrite_lecture_video_manifest:
+            await _ensure_lecture_video_manifest_generation_configured(
+                request.state["db"], class_id_int
+            )
 
         lecture_video = await models.LectureVideo.get_by_id_for_class(
             request.state["db"], req.lecture_video_id, class_id_int
@@ -9407,7 +9430,6 @@ async def create_assistant(
         or req.lecture_video_manifest is not None
         or req.voice_id is not None
         or req.generation_prompt is not None
-        or req.regenerate_requested is not None
         or req.overwrite_manifest is not None
     ):
         raise HTTPException(
@@ -9519,7 +9541,6 @@ async def create_assistant(
         del req.lecture_video_manifest
         del req.voice_id
         del req.generation_prompt
-        del req.regenerate_requested
         del req.overwrite_manifest
 
         try:
@@ -11130,6 +11151,10 @@ async def update_assistant(
                     generation_prompt_present=prompt_present,
                 )
             )
+            if needs_manifest_generation:
+                await _ensure_lecture_video_manifest_generation_configured(
+                    request.state["db"], int(class_id)
+                )
             voice_changed = (
                 current_lecture_video is None
                 or (current_lecture_video.voice_id or "").strip()

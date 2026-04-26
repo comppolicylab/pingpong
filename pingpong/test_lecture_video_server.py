@@ -6216,6 +6216,7 @@ async def test_get_assistant_lecture_video_config_returns_manifest_and_voice_id(
         ),
         "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
         "lecture_video_chat_available": False,
+        "overwrite_manifest": True,
     }
 
 
@@ -6609,6 +6610,62 @@ async def test_create_lecture_video_assistant_rejects_invalid_voice_id(
 @with_authz(
     grants=[
         ("user:123", "can_create_assistants", "class:1"),
+        ("user:123", "admin", "class:1"),
+    ]
+)
+async def test_create_lecture_video_assistant_requires_gemini_for_generation(
+    api, db, institution, valid_user_token, monkeypatch
+):
+    patch_lecture_video_model_list(monkeypatch)
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        lecture_video = make_lecture_video(
+            class_.id,
+            "generate-without-gemini.mp4",
+            filename="generate-without-gemini.mp4",
+            status=schemas.LectureVideoStatus.UPLOADED.value,
+        )
+        session.add_all([class_, lecture_video])
+        await session.flush()
+        await create_lecture_video_copy_credentials(
+            session, class_.id, include_gemini=False
+        )
+        await session.commit()
+        await session.refresh(lecture_video)
+
+    response = api.post(
+        "/api/v1/class/1/assistant",
+        json={
+            "name": "Lecture Assistant",
+            "instructions": "Guide the learner through the lecture.",
+            "description": "Lecture presentation assistant",
+            "interaction_mode": "lecture_video",
+            "model": "gpt-4o-mini",
+            "tools": [],
+            "lecture_video_id": lecture_video.id,
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "overwrite_manifest": False,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": "Configure a Gemini credential in Manage Group before generating a lecture video manifest."
+    }
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_assistants", "class:1"),
         ("user:123", "can_edit", "assistant:1"),
         ("user:123", "admin", "class:1"),
     ]
@@ -6865,6 +6922,77 @@ async def test_update_assistant_with_new_lecture_video_id_without_manifest_retur
         "Specifying a lecture_video_manifest is required"
         in response.json()["detail"][0]["msg"]
     )
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_assistants", "class:1"),
+        ("user:123", "can_edit", "assistant:1"),
+        ("user:123", "admin", "class:1"),
+    ]
+)
+async def test_update_lecture_video_assistant_requires_gemini_for_generation(
+    api, db, institution, valid_user_token, monkeypatch
+):
+    patch_lecture_video_model_list(monkeypatch)
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        lecture_video = make_lecture_video(
+            class_.id,
+            "manual-without-gemini.mp4",
+            filename="manual-without-gemini.mp4",
+            status=schemas.LectureVideoStatus.UPLOADED.value,
+        )
+        session.add_all([class_, lecture_video])
+        await session.flush()
+        await create_lecture_video_copy_credentials(
+            session, class_.id, include_gemini=False
+        )
+        await session.commit()
+        await session.refresh(lecture_video)
+
+    create_response = api.post(
+        "/api/v1/class/1/assistant",
+        json={
+            "name": "Lecture Assistant",
+            "instructions": "Guide the learner through the lecture.",
+            "description": "Lecture presentation assistant",
+            "interaction_mode": "lecture_video",
+            "model": "gpt-4o-mini",
+            "tools": [],
+            "lecture_video_id": lecture_video.id,
+            "lecture_video_manifest": lecture_video_manifest(
+                question_text="Manual question?"
+            ),
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "overwrite_manifest": True,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+
+    response = api.put(
+        "/api/v1/class/1/assistant/1",
+        json={
+            "lecture_video_id": lecture_video.id,
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "overwrite_manifest": False,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": "Configure a Gemini credential in Manage Group before generating a lecture video manifest."
+    }
 
 
 @with_user(123)

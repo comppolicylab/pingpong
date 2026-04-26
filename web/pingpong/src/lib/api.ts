@@ -2083,6 +2083,7 @@ export type AssistantModels = {
 	lecture_video_defaults?: {
 		instructions: string;
 		generation_prompt: string;
+		can_generate_manifest: boolean;
 	} | null;
 };
 
@@ -2366,7 +2367,6 @@ export type CreateAssistantRequest = {
 	lecture_video_manifest?: LectureVideoManifest | null;
 	voice_id?: string | null;
 	generation_prompt?: string | null;
-	regenerate_requested?: boolean;
 	overwrite_manifest?: boolean;
 	create_classic_assistant?: boolean;
 	temperature: number | null;

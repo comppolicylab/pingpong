@@ -234,7 +234,10 @@
 	let hasSetLectureVideoManifest = false;
 	let generationPrompt = '';
 	let hasSetGenerationPrompt = false;
-	let overwriteManifest = data.lectureVideoConfig?.overwrite_manifest ?? false;
+	$: canGenerateLectureVideoManifest = data.lectureVideoDefaults?.can_generate_manifest ?? false;
+	const effectiveOverwriteManifest = (storedOverwriteManifest?: boolean | null) =>
+		canGenerateLectureVideoManifest ? (storedOverwriteManifest ?? false) : true;
+	let overwriteManifest = effectiveOverwriteManifest(data.lectureVideoConfig?.overwrite_manifest);
 	let hasSetOverwriteManifest = false;
 	let regenerateRequested = false;
 	let currentVoiceId = data.lectureVideoConfig?.voice_id || '';
@@ -596,7 +599,7 @@
 		hasSetGenerationPrompt = true;
 	}
 	$: if (!hasSetOverwriteManifest && !lectureVideoConfigLoadError) {
-		overwriteManifest = data.lectureVideoConfig?.overwrite_manifest ?? false;
+		overwriteManifest = effectiveOverwriteManifest(data.lectureVideoConfig?.overwrite_manifest);
 		hasSetOverwriteManifest = true;
 	}
 	$: currentLectureVideoManifestNormalized = normalizeLectureVideoManifestForCompare(
@@ -604,10 +607,13 @@
 	);
 	$: originalGenerationPrompt =
 		data.lectureVideoConfig?.generation_prompt || lectureVideoDefaultGenerationPrompt;
-	$: generationPromptEdited = generationPrompt !== lectureVideoDefaultGenerationPrompt;
+	$: generationPromptEdited =
+		canGenerateLectureVideoManifest && generationPrompt !== lectureVideoDefaultGenerationPrompt;
 	$: generationPromptForSave = generationPromptEdited ? generationPrompt : null;
 	$: manifestGenerationStatus = data.lectureVideoConfig?.manifest_generation_status ?? null;
-	$: originalOverwriteManifest = data.lectureVideoConfig?.overwrite_manifest ?? false;
+	$: originalOverwriteManifest = effectiveOverwriteManifest(
+		data.lectureVideoConfig?.overwrite_manifest
+	);
 	$: manifestGenerationInFlight =
 		manifestGenerationStatus?.state === 'queued' || manifestGenerationStatus?.state === 'running';
 	$: lastManifestRunFailed = manifestGenerationStatus?.state === 'failed';
@@ -618,9 +624,11 @@
 	$: lectureVideoIdChanged =
 		(selectedLectureVideo?.id ?? null) !== (currentLectureVideo?.id ?? null);
 	$: lectureVideoVoiceChanged = voiceId.trim() !== currentVoiceId.trim();
-	$: generationPromptChanged = generationPrompt !== originalGenerationPrompt;
+	$: generationPromptChanged =
+		canGenerateLectureVideoManifest && generationPrompt !== originalGenerationPrompt;
 	$: lectureVideoGenerationTriggeredByFormChanges =
 		isLectureMode &&
+		canGenerateLectureVideoManifest &&
 		!overwriteManifest &&
 		(originalOverwriteManifest ||
 			lectureVideoIdChanged ||
@@ -635,6 +643,10 @@
 			overwriteManifest !== originalOverwriteManifest);
 	$: lectureVideoRegenerationImpliedByFormChanges =
 		lectureVideoGenerationTriggeredByFormChanges || lectureVideoNarrationTriggeredByFormChanges;
+	$: canRegenerateLectureVideo = isLectureMode && !data.isCreating;
+	$: if (!canRegenerateLectureVideo && regenerateRequested) {
+		regenerateRequested = false;
+	}
 	$: lectureVideoRegenerateButtonPressed =
 		regenerateRequested || lectureVideoRegenerationImpliedByFormChanges;
 	$: lectureVideoRegenerateHelperText = lectureVideoRegenerationImpliedByFormChanges
@@ -646,6 +658,7 @@
 			: 'Re-runs the knowledge check generation and re-creates all narration clips.';
 	$: lectureVideoSaveTriggersGeneration =
 		isLectureMode &&
+		canGenerateLectureVideoManifest &&
 		!overwriteManifest &&
 		(regenerateRequested || lectureVideoGenerationTriggeredByFormChanges);
 	$: saveButtonLabel =
@@ -1650,10 +1663,10 @@
 		) {
 			modifiedFields.push('lecture video manifest');
 		}
-		if (generationPrompt !== originalGenerationPrompt) {
+		if (canGenerateLectureVideoManifest && generationPrompt !== originalGenerationPrompt) {
 			modifiedFields.push('generation prompt');
 		}
-		if (regenerateRequested) {
+		if (canRegenerateLectureVideo && regenerateRequested) {
 			modifiedFields.push(
 				overwriteManifest ? 'lecture video narration' : 'lecture video generation'
 			);
@@ -1773,7 +1786,6 @@
 			lecture_video_id: isLectureMode ? (selectedLectureVideo?.id ?? undefined) : undefined,
 			voice_id: isLectureMode ? voiceId.trim() : undefined,
 			generation_prompt: isLectureMode ? generationPrompt : undefined,
-			regenerate_requested: isLectureMode ? regenerateRequested : undefined,
 			overwrite_manifest: isLectureMode ? overwriteManifest : undefined,
 			published: body.published?.toString() === 'on',
 			use_latex: isLectureMode
@@ -2187,6 +2199,12 @@
 				$loadingMessage = '';
 				return;
 			}
+			if (!canGenerateLectureVideoManifest && !overwriteManifest) {
+				sadToast('Please provide a lecture video manifest before saving.');
+				$loading = false;
+				$loadingMessage = '';
+				return;
+			}
 
 			const parsedManifest = overwriteManifest
 				? parseLectureVideoManifest(lectureVideoManifestJson)
@@ -2219,15 +2237,19 @@
 				lectureVideoVoiceChanged ||
 				generationPromptChanged ||
 				overwriteManifestChanged ||
-				regenerateRequested ||
+				(canRegenerateLectureVideo && regenerateRequested) ||
 				lastManifestRunFailed;
 
 			if (data.isCreating || lectureVideoFieldsChanged) {
 				params.lecture_video_id = selectedLectureVideoId;
 				params.lecture_video_manifest = parsedManifest.manifest ?? undefined;
 				params.voice_id = trimmedVoiceId;
-				params.generation_prompt = generationPromptForSave;
-				params.regenerate_requested = regenerateRequested;
+				params.generation_prompt = canGenerateLectureVideoManifest
+					? generationPromptForSave
+					: undefined;
+				if (canRegenerateLectureVideo) {
+					params.regenerate_requested = regenerateRequested;
+				}
 				params.overwrite_manifest = overwriteManifest;
 			} else {
 				delete params.lecture_video_id;
@@ -3385,44 +3407,46 @@
 								/>
 							</div>
 
-							<hr />
+							{#if canGenerateLectureVideoManifest}
+								<hr />
 
-							<div class="col-span-2 mb-1">
-								<div class="flex items-end justify-between gap-3">
-									<div>
-										<div class="flex items-center gap-2">
-											<Label
-												for="generation_prompt"
-												class="mb-0 text-gray-800 contrast-100 grayscale-0"
-												><div class="flex flex-row gap-1">
-													<div>Generation Instructions</div>
-													{#if generationPromptEdited}<div>&middot;</div>
-														<div class="text-gray-500">Edited</div>{/if}
-												</div></Label
-											>
+								<div class="col-span-2 mb-1">
+									<div class="flex items-end justify-between gap-3">
+										<div>
+											<div class="flex items-center gap-2">
+												<Label
+													for="generation_prompt"
+													class="mb-0 text-gray-800 contrast-100 grayscale-0"
+													><div class="flex flex-row gap-1">
+														<div>Generation Instructions</div>
+														{#if generationPromptEdited}<div>&middot;</div>
+															<div class="text-gray-500">Edited</div>{/if}
+													</div></Label
+												>
+											</div>
+											<Helper class="pb-1">Used to generate knowledge checks.</Helper>
 										</div>
-										<Helper class="pb-1">Used to generate knowledge checks.</Helper>
+										<button
+											type="button"
+											class="pb-1 text-xs text-blue-800 hover:underline disabled:cursor-not-allowed disabled:text-gray-400 disabled:no-underline"
+											disabled={preventEdits ||
+												overwriteManifest ||
+												generationPrompt === lectureVideoDefaultGenerationPrompt}
+											onclick={() => {
+												generationPrompt = lectureVideoDefaultGenerationPrompt;
+											}}>Reset to default</button
+										>
 									</div>
-									<button
-										type="button"
-										class="pb-1 text-xs text-blue-800 hover:underline disabled:cursor-not-allowed disabled:text-gray-400 disabled:no-underline"
-										disabled={preventEdits ||
-											overwriteManifest ||
-											generationPrompt === lectureVideoDefaultGenerationPrompt}
-										onclick={() => {
-											generationPrompt = lectureVideoDefaultGenerationPrompt;
-										}}>Reset to default</button
-									>
+									<Textarea
+										id="generation_prompt"
+										name="generation_prompt"
+										rows={10}
+										bind:value={generationPrompt}
+										disabled={preventEdits || overwriteManifest}
+										class="text-sm"
+									/>
 								</div>
-								<Textarea
-									id="generation_prompt"
-									name="generation_prompt"
-									rows={10}
-									bind:value={generationPrompt}
-									disabled={preventEdits || overwriteManifest}
-									class="text-sm"
-								/>
-							</div>
+							{/if}
 
 							<hr />
 
@@ -3433,58 +3457,64 @@
 										class="mb-0 text-gray-800 contrast-100 grayscale-0"
 										>Lecture Video Manifest</Label
 									>
-									<Checkbox bind:checked={overwriteManifest} disabled={preventEdits}
-										>Overwrite manifest</Checkbox
-									>
+									{#if canGenerateLectureVideoManifest}
+										<Checkbox bind:checked={overwriteManifest} disabled={preventEdits}
+											>Overwrite manifest</Checkbox
+										>
+									{/if}
 								</div>
 								<Helper class="pb-1"
 									>{overwriteManifest
 										? 'Provide a custom manifest to use for this lecture video.'
 										: 'Preview the manifest for this lecture video.'}</Helper
 								>
-								{#if originalOverwriteManifest && !overwriteManifest}
+								{#if canGenerateLectureVideoManifest && originalOverwriteManifest && !overwriteManifest}
 									<Helper class="pb-1 text-yellow-700">
 										You previously provided a custom manifest for this lecture video. On save, your
 										custom manifest will be replaced.
 									</Helper>
 								{/if}
-								<div class="mb-2 text-sm">
-									{#if manifestGenerationInFlight}
-										<span>Generating...</span>
-									{:else if lastManifestRunFailed}
-										<span class="text-red-700"
-											>Generation failed: {manifestGenerationStatus?.error_message ||
-												'Unknown error'}</span
+								{#if canGenerateLectureVideoManifest}
+									<div class="mb-2 text-sm">
+										{#if manifestGenerationInFlight}
+											<span>Generating...</span>
+										{:else if lastManifestRunFailed}
+											<span class="text-red-700"
+												>Generation failed: {manifestGenerationStatus?.error_message ||
+													'Unknown error'}</span
+											>
+										{:else if manifestGenerationStatus?.finished_at}
+											<span
+												>Last generated {new Date(
+													manifestGenerationStatus.finished_at
+												).toLocaleString()}</span
+											>
+										{/if}
+									</div>
+								{/if}
+								{#if canRegenerateLectureVideo}
+									<div class="mb-2 flex flex-wrap items-center gap-3 text-sm text-gray-600">
+										<button
+											type="button"
+											class={`${lectureVideoRegenerateButtonPressed ? 'border-blue-300 bg-blue-100 font-semibold text-blue-800 shadow-inner shadow-blue-200' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'} rounded-lg border px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-70`}
+											disabled={preventEdits ||
+												manifestGenerationInFlight ||
+												lectureVideoRegenerationImpliedByFormChanges}
+											aria-pressed={lectureVideoRegenerateButtonPressed}
+											onclick={() => {
+												regenerateRequested = !regenerateRequested;
+											}}
+											>{lectureVideoRegenerationImpliedByFormChanges
+												? overwriteManifest
+													? 'Regenerate audio on save'
+													: 'Regenerate on save'
+												: overwriteManifest
+													? 'Regenerate audio'
+													: 'Regenerate manifest & audio'}</button
 										>
-									{:else if manifestGenerationStatus?.finished_at}
-										<span
-											>Last generated {new Date(
-												manifestGenerationStatus.finished_at
-											).toLocaleString()}</span
-										>
-									{/if}
-								</div>
-								<div class="mb-2 flex flex-wrap items-center gap-3 text-sm text-gray-600">
-									<button
-										type="button"
-										class={`${lectureVideoRegenerateButtonPressed ? 'border-blue-300 bg-blue-100 font-semibold text-blue-800 shadow-inner shadow-blue-200' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'} rounded-lg border px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-70`}
-										disabled={preventEdits ||
-											manifestGenerationInFlight ||
-											lectureVideoRegenerationImpliedByFormChanges}
-										aria-pressed={lectureVideoRegenerateButtonPressed}
-										onclick={() => {
-											regenerateRequested = !regenerateRequested;
-										}}
-										>{lectureVideoRegenerationImpliedByFormChanges
-											? overwriteManifest
-												? 'Regenerate audio on save'
-												: 'Regenerate on save'
-											: overwriteManifest
-												? 'Regenerate audio'
-												: 'Regenerate manifest & audio'}</button
-									>
-									<span class="text-xs text-gray-600">{lectureVideoRegenerateHelperText}</span>
-								</div>
+										<span class="text-xs text-gray-600">{lectureVideoRegenerateHelperText}</span>
+									</div>
+								{/if}
 								{#if lectureVideoChatUnavailable}
 									<Helper class="pb-2 text-yellow-700">
 										Provide a manifest with word-level transcription (Version 2 or 3) to enable

@@ -33,7 +33,11 @@ async function ensureModels(
 	models: AssistantModel[];
 	defaultPrompts: AssistantDefaultPrompt[];
 	enforceClassicAssistants: boolean;
-	lectureVideoDefaults: { instructions: string; generation_prompt: string } | null;
+	lectureVideoDefaults: {
+		instructions: string;
+		generation_prompt: string;
+		can_generate_manifest: boolean;
+	} | null;
 }> {
 	const cache = get(modelsPromptsStore)[classId];
 
