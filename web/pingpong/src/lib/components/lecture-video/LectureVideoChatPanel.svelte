@@ -229,7 +229,7 @@
 	};
 
 	const isLectureContextPending = (message: api.OpenAIMessage) =>
-		message.role === 'assistant' && message.metadata?.lecture_context_pending === true;
+		message.metadata?.lecture_context_pending === true;
 
 	const getThreadImageUrl = (fileId: string) =>
 		api.fullPath(`/class/${classId}/thread/${threadId}/image/${fileId}`);
@@ -488,51 +488,3 @@
 		</div>
 	{/if}
 </div>
-
-<style lang="css">
-	.shimmer {
-		color: transparent;
-		-webkit-text-fill-color: transparent;
-		animation-delay: 0s;
-		animation-duration: 2s;
-		animation-iteration-count: infinite;
-		animation-name: shimmer;
-		background: #4b5563 -webkit-gradient(
-				linear,
-				100% 0,
-				0 0,
-				from(#5d5d5d),
-				color-stop(0.4, #ffffffbf),
-				to(#4b5563),
-				color-stop(0.6, #ffffffbf),
-				to(#4b5563)
-			);
-		-webkit-background-clip: text;
-		background-clip: text;
-		background-position: -100% 0;
-		background-position: unset top;
-		background-repeat: no-repeat;
-		background-size: 50% 200%;
-	}
-
-	@keyframes shimmer {
-		0% {
-			background-position: -100% 0;
-		}
-		100% {
-			background-position: 250% 0;
-		}
-	}
-
-	@media (prefers-reduced-motion: reduce) {
-		.shimmer {
-			animation: none;
-		}
-	}
-
-	.shimmer:hover {
-		-webkit-text-fill-color: #374151;
-		color: #374151;
-		background: 0 0;
-	}
-</style>

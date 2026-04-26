@@ -766,6 +766,7 @@ export class ThreadManager {
 			isLectureVideoThread && optimisticOutputIndex !== undefined
 				? optimisticOutputIndex + 1
 				: undefined;
+		const optimisticCreatedAt = Date.now() / 1000;
 		const optimistic: api.OpenAIMessage = {
 			id: optimisticMsgId,
 			role: 'user',
@@ -773,7 +774,7 @@ export class ThreadManager {
 				{ type: 'text', text: { value: optimisticMessageContent, annotations: [] } },
 				...optimisticImageContent
 			],
-			created_at: Math.floor(Date.now() / 1000),
+			created_at: optimisticCreatedAt,
 			metadata: {
 				user_id: fromUserId,
 				is_current_user: true,
@@ -806,7 +807,9 @@ export class ThreadManager {
 					id: optimisticAssistantMsgId,
 					role: 'assistant',
 					content: [],
-					created_at: Math.floor(Date.now() / 1000) + 0.001,
+					// Keep the pending assistant placeholder after the user's optimistic message if
+					// consumers fall back to created_at ordering before output_index is available.
+					created_at: optimisticCreatedAt + 0.001,
 					metadata: {
 						lecture_context_pending: true
 					},
@@ -822,7 +825,9 @@ export class ThreadManager {
 			: null;
 
 		// Interrupt any active TTS playback from a previous response
-		const interruptTtsPromise = this.interruptTts();
+		const interruptTtsPromise = this.interruptTts().catch((err) => {
+			console.warn('TTS: interrupt before send failed', err);
+		});
 
 		this.#data.update((d) => ({
 			...d,
@@ -910,6 +915,7 @@ export class ThreadManager {
 			for await (const chunk of chunks) {
 				await this.#handleStreamChunk(chunk, callback);
 			}
+			this.#clearLectureContextPending();
 		} catch (e) {
 			console.error('Error handling stream chunks', e);
 			// If stream was interrupted, stop any active TTS
@@ -957,6 +963,13 @@ export class ThreadManager {
 		return highest + 1;
 	}
 
+	#clearLectureContextPending() {
+		this.#data.update((d) => ({
+			...d,
+			optimistic: d.optimistic.filter((m) => m.metadata?.lecture_context_pending !== true)
+		}));
+	}
+
 	/**
 	 * Set the thread data.
 	 */
@@ -988,9 +1001,7 @@ export class ThreadManager {
 					};
 					return {
 						...d,
-						optimistic: d.optimistic.filter(
-							(message) => message.metadata?.lecture_context_pending !== true
-						),
+						optimistic: d.optimistic.filter((m) => m.metadata?.lecture_context_pending !== true),
 						data: {
 							...d.data!,
 							messages: [...(d.data?.messages || []), message]
@@ -1002,6 +1013,7 @@ export class ThreadManager {
 				this.#appendDelta(chunk.delta);
 				break;
 			case 'done':
+				this.#clearLectureContextPending();
 				break;
 			case 'error':
 				if (Array.isArray(chunk.detail)) {
