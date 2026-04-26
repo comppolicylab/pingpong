@@ -338,6 +338,63 @@ def lecture_video_config_matches(
     )
 
 
+async def latest_processing_run_summary(
+    session: AsyncSession,
+    lecture_video_id: int,
+    stage: schemas.LectureVideoProcessingStage,
+) -> schemas.LectureVideoProcessingRunSummary | None:
+    run = await session.scalar(
+        select(models.LectureVideoProcessingRun)
+        .where(
+            models.LectureVideoProcessingRun.lecture_video_id_snapshot
+            == lecture_video_id,
+            models.LectureVideoProcessingRun.stage == stage,
+        )
+        .order_by(models.LectureVideoProcessingRun.created.desc())
+        .limit(1)
+    )
+    if run is None:
+        return None
+    return schemas.LectureVideoProcessingRunSummary(
+        state=run.status,
+        error_message=run.error_message,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
+    )
+
+
+async def latest_processing_run_failed(
+    session: AsyncSession,
+    lecture_video_id: int,
+    stage: schemas.LectureVideoProcessingStage,
+) -> bool:
+    summary = await latest_processing_run_summary(session, lecture_video_id, stage)
+    return bool(
+        summary is not None
+        and summary.state == schemas.LectureVideoProcessingRunStatus.FAILED
+    )
+
+
+async def should_regenerate_manifest(
+    session: AsyncSession,
+    lecture_video: models.LectureVideo,
+    *,
+    incoming_generation_prompt: str | None,
+    generation_prompt_present: bool,
+) -> bool:
+    prompt_changed = (
+        generation_prompt_present
+        and incoming_generation_prompt != lecture_video.generation_prompt
+    )
+    if prompt_changed or lecture_video.manifest_data is None:
+        return True
+    return await latest_processing_run_failed(
+        session,
+        lecture_video.id,
+        schemas.LectureVideoProcessingStage.MANIFEST_GENERATION,
+    )
+
+
 async def clone_lecture_video_snapshot(
     session: AsyncSession,
     lecture_video: models.LectureVideo,
@@ -350,6 +407,8 @@ async def clone_lecture_video_snapshot(
         display_name=lecture_video.display_name,
         voice_id=lecture_video.voice_id,
         manifest_data=lecture_video.manifest_data,
+        generation_prompt=lecture_video.generation_prompt,
+        manual_manifest=lecture_video.manual_manifest,
         manifest_version=lecture_video.manifest_version,
         lecture_video_chat_available=lecture_video.lecture_video_chat_available,
         source_lecture_video_id_snapshot=lecture_video.id,
@@ -535,6 +594,11 @@ async def delete_lecture_video(
         lecture_video_id,
         schemas.LectureVideoProcessingCancelReason.LECTURE_VIDEO_DELETED,
     )
+    await lecture_video_processing.cancel_manifest_generation_processing_runs(
+        session,
+        lecture_video_id,
+        schemas.LectureVideoProcessingCancelReason.LECTURE_VIDEO_DELETED,
+    )
 
     lecture_video = await models.LectureVideo.get_by_id(session, lecture_video_id)
     if lecture_video is None:
@@ -644,10 +708,13 @@ async def persist_manifest(
     *,
     voice_id: str | None = None,
     create_narration_placeholders: bool = True,
+    manual_manifest: bool | None = None,
 ) -> None:
     await clear_normalized_content(session, lecture_video.id)
     if voice_id is not None:
         lecture_video.voice_id = voice_id
+    if manual_manifest is not None:
+        lecture_video.manual_manifest = manual_manifest
     lecture_video.manifest_data = lecture_video_manifest.model_dump(mode="json")
     lecture_video.manifest_version = lecture_video_manifest.version
     lecture_video.lecture_video_chat_available = (
