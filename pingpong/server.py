@@ -46,7 +46,7 @@ from openai.types.responses.response_output_text import AnnotationURLCitation
 from pydantic import PositiveInt, ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql import delete, func, update
+from sqlalchemy.sql import delete, func, select, update
 
 import pingpong.metrics as metrics
 import pingpong.models as models
@@ -8721,7 +8721,7 @@ async def get_assistant_lecture_video_config(
         raise HTTPException(404, "Lecture video not found.")
 
     lecture_video_manifest = None
-    if lecture_video.manifest_data is not None or lecture_video.questions:
+    if lecture_video.questions:
         try:
             lecture_video_manifest = (
                 lecture_video_service.lecture_video_manifest_from_model(lecture_video)
@@ -8786,7 +8786,7 @@ async def retry_assistant_lecture_video_processing(
     if lecture_video.status != schemas.LectureVideoStatus.FAILED:
         raise HTTPException(
             status_code=409,
-            detail="Lecture video retry is only available after narration processing fails.",
+            detail="Lecture video retry is only available after lecture video processing fails.",
         )
 
     claimed_for_retry = (
@@ -8797,25 +8797,58 @@ async def retry_assistant_lecture_video_processing(
     if not claimed_for_retry:
         raise HTTPException(
             status_code=409,
-            detail="Lecture video retry is only available after narration processing fails.",
+            detail="Lecture video retry is only available after lecture video processing fails.",
         )
 
-    audio_keys_to_delete = (
-        await lecture_video_processing.reset_failed_narrations_for_retry(
-            request.state["db"], lecture_video.id
-        )
-    )
     refreshed_lecture_video = await models.LectureVideo.get_by_id_with_copy_context(
         request.state["db"], lecture_video.id
     )
     if refreshed_lecture_video is None:
         raise HTTPException(404, "Lecture video not found.")
-    narration_run = await lecture_video_processing.queue_narration_processing_run(
-        request.state["db"],
-        refreshed_lecture_video,
-        assistant_id_at_start=assistant.id,
+
+    latest_failed_stage = await request.state["db"].scalar(
+        select(models.LectureVideoProcessingRun.stage)
+        .where(
+            models.LectureVideoProcessingRun.lecture_video_id_snapshot
+            == lecture_video.id,
+            models.LectureVideoProcessingRun.status
+            == schemas.LectureVideoProcessingRunStatus.FAILED,
+        )
+        .order_by(
+            models.LectureVideoProcessingRun.finished_at.desc().nulls_last(),
+            models.LectureVideoProcessingRun.id.desc(),
+        )
+        .limit(1)
     )
-    if narration_run is None:
+
+    needs_manifest_generation = (
+        latest_failed_stage == schemas.LectureVideoProcessingStage.MANIFEST_GENERATION
+        or (
+            not refreshed_lecture_video.manual_manifest
+            and len(refreshed_lecture_video.questions) == 0
+        )
+    )
+    audio_keys_to_delete: list[str] = []
+    if needs_manifest_generation:
+        retry_run = (
+            await lecture_video_processing.queue_manifest_generation_processing_run(
+                request.state["db"],
+                refreshed_lecture_video,
+                assistant_id_at_start=assistant.id,
+            )
+        )
+    else:
+        audio_keys_to_delete = (
+            await lecture_video_processing.reset_failed_narrations_for_retry(
+                request.state["db"], lecture_video.id
+            )
+        )
+        retry_run = await lecture_video_processing.queue_narration_processing_run(
+            request.state["db"],
+            refreshed_lecture_video,
+            assistant_id_at_start=assistant.id,
+        )
+    if retry_run is None:
         raise HTTPException(
             status_code=409,
             detail="Lecture video retry is no longer available because the assistant or lecture video configuration changed.",
