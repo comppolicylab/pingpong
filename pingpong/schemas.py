@@ -442,6 +442,7 @@ class LectureVideoNarrationStatus(StrEnum):
 
 
 class LectureVideoProcessingStage(StrEnum):
+    MANIFEST_GENERATION = "manifest_generation"
     NARRATION = "narration"
 
 
@@ -678,11 +679,26 @@ class LectureVideoAssistantEditorPolicy(BaseModel):
     message: str | None = None
 
 
+class LectureVideoProcessingRunSummary(BaseModel):
+    state: LectureVideoProcessingRunStatus
+    error_message: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+
 class LectureVideoConfigResponse(BaseModel):
     lecture_video: LectureVideoSummary
-    lecture_video_manifest: LectureVideoManifest
+    lecture_video_manifest: LectureVideoManifest | None = None
     voice_id: str
     lecture_video_chat_available: bool = False
+    generation_prompt: str | None = None
+    overwrite_manifest: bool = False
+    manifest_generation_status: LectureVideoProcessingRunSummary | None = None
+
+
+class LectureVideoDefaults(BaseModel):
+    instructions: str
+    generation_prompt: str
 
 
 class ValidateLectureVideoVoiceRequest(BaseModel):
@@ -919,14 +935,19 @@ def temperature_validator(self):
 
 
 def lecture_video_validator_create_assistant(self):
+    overwrite_manifest = (
+        self.overwrite_manifest
+        if "overwrite_manifest" in self.model_fields_set
+        else True
+    )
     if self.interaction_mode == InteractionMode.LECTURE_VIDEO:
         if self.lecture_video_id is None:
             raise ValueError(
                 "Specifying a lecture_video_id is required for lecture video assistants."
             )
-        if self.lecture_video_manifest is None:
+        if overwrite_manifest and self.lecture_video_manifest is None:
             raise ValueError(
-                "Specifying a lecture_video_manifest is required for lecture video assistants."
+                "Specifying a lecture_video_manifest is required when overwriting a lecture video manifest."
             )
         if not self.voice_id:
             raise ValueError(
@@ -936,6 +957,9 @@ def lecture_video_validator_create_assistant(self):
         self.lecture_video_id is not None
         or self.lecture_video_manifest is not None
         or self.voice_id is not None
+        or self.generation_prompt is not None
+        or self.regenerate_requested is not None
+        or self.overwrite_manifest is not None
     ):
         raise ValueError(
             "Lecture video data can only be set for assistants in Lecture Video mode."
@@ -962,17 +986,30 @@ def lecture_video_validator_update_assistant(self):
     lecture_video_id_present = "lecture_video_id" in self.model_fields_set
     lecture_video_manifest_present = "lecture_video_manifest" in self.model_fields_set
     voice_id_present = "voice_id" in self.model_fields_set
+    generation_prompt_present = "generation_prompt" in self.model_fields_set
+    regenerate_requested_present = "regenerate_requested" in self.model_fields_set
+    overwrite_manifest_present = "overwrite_manifest" in self.model_fields_set
     lecture_video_payload_present = (
-        lecture_video_id_present or lecture_video_manifest_present or voice_id_present
+        lecture_video_id_present
+        or lecture_video_manifest_present
+        or voice_id_present
+        or generation_prompt_present
+        or regenerate_requested_present
+        or overwrite_manifest_present
     )
+    overwrite_manifest = self.overwrite_manifest if overwrite_manifest_present else True
 
     if lecture_video_payload_present and self.lecture_video_id is None:
         raise ValueError(
             "Specifying a lecture_video_id is required when updating lecture video data."
         )
-    if lecture_video_payload_present and self.lecture_video_manifest is None:
+    if (
+        lecture_video_payload_present
+        and overwrite_manifest
+        and self.lecture_video_manifest is None
+    ):
         raise ValueError(
-            "Specifying a lecture_video_manifest is required when updating lecture video data."
+            "Specifying a lecture_video_manifest is required when overwriting a lecture video manifest."
         )
     if lecture_video_payload_present and not self.voice_id:
         raise ValueError(
@@ -1077,6 +1114,9 @@ class CreateAssistant(BaseModel):
     lecture_video_id: int | None = None
     lecture_video_manifest: LectureVideoManifest | None = None
     voice_id: str | None = None
+    generation_prompt: str | None = None
+    regenerate_requested: bool | None = None
+    overwrite_manifest: bool | None = None
     published: bool = False
     use_latex: bool = False
     use_image_descriptions: bool = False
@@ -1154,6 +1194,9 @@ class UpdateAssistant(BaseModel):
     lecture_video_id: int | None = None
     lecture_video_manifest: LectureVideoManifest | None = None
     voice_id: str | None = None
+    generation_prompt: str | None = None
+    regenerate_requested: bool | None = None
+    overwrite_manifest: bool | None = None
     model: str | None = Field(None, min_length=2)
     temperature: float | None = Field(None, ge=0.0, le=2.0)
     reasoning_effort: int | None = Field(None, ge=-1, le=2)
@@ -2357,6 +2400,7 @@ class AssistantModels(BaseModel):
     models: list[AssistantModel]
     default_prompts: list[AssistantDefaultPrompt] = []
     enforce_classic_assistants: bool = False
+    lecture_video_defaults: LectureVideoDefaults | None = None
 
 
 class Classes(BaseModel):
