@@ -458,6 +458,7 @@ class LectureVideoProcessingCancelReason(StrEnum):
     ASSISTANT_DETACHED = "assistant_detached"
     ASSISTANT_DELETED = "assistant_deleted"
     LECTURE_VIDEO_DELETED = "lecture_video_deleted"
+    MANUAL_MANIFEST_REPLACED = "manual_manifest_replaced"
 
 
 class LectureVideoSessionState(StrEnum):
@@ -950,6 +951,10 @@ def lecture_video_validator_create_assistant(self):
             raise ValueError(
                 "Specifying a lecture_video_manifest is required when overwriting a lecture video manifest."
             )
+        if not overwrite_manifest and self.lecture_video_manifest is not None:
+            raise ValueError(
+                "lecture_video_manifest cannot be supplied when overwrite_manifest is false."
+            )
         if not self.voice_id:
             raise ValueError(
                 "Specifying a voice_id is required for lecture video assistants."
@@ -1010,6 +1015,14 @@ def lecture_video_validator_update_assistant(self):
     ):
         raise ValueError(
             "Specifying a lecture_video_manifest is required when overwriting a lecture video manifest."
+        )
+    if (
+        lecture_video_payload_present
+        and not overwrite_manifest
+        and self.lecture_video_manifest is not None
+    ):
+        raise ValueError(
+            "lecture_video_manifest cannot be supplied when overwrite_manifest is false."
         )
     if lecture_video_payload_present and not self.voice_id:
         raise ValueError(
@@ -1114,7 +1127,7 @@ class CreateAssistant(BaseModel):
     lecture_video_id: int | None = None
     lecture_video_manifest: LectureVideoManifest | None = None
     voice_id: str | None = None
-    generation_prompt: str | None = None
+    generation_prompt: str | None = Field(None, max_length=20000)
     overwrite_manifest: bool | None = None
     published: bool = False
     use_latex: bool = False
@@ -1193,7 +1206,7 @@ class UpdateAssistant(BaseModel):
     lecture_video_id: int | None = None
     lecture_video_manifest: LectureVideoManifest | None = None
     voice_id: str | None = None
-    generation_prompt: str | None = None
+    generation_prompt: str | None = Field(None, max_length=20000)
     regenerate_requested: bool | None = None
     overwrite_manifest: bool | None = None
     model: str | None = Field(None, min_length=2)

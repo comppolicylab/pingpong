@@ -141,6 +141,55 @@
 		}[];
 	};
 
+	type LectureVideoSaveAffordances = {
+		regenerateHelperText: string;
+		regenerateButtonLabel: string;
+		saveButtonLabel: string;
+	};
+
+	const deriveLectureVideoSaveAffordances = ({
+		impliedRegeneration,
+		overwriteManifest,
+		saveTriggersGeneration,
+		regenerateRequested,
+		isCreating
+	}: {
+		impliedRegeneration: boolean;
+		overwriteManifest: boolean;
+		saveTriggersGeneration: boolean;
+		regenerateRequested: boolean;
+		isCreating: boolean;
+	}): LectureVideoSaveAffordances => {
+		if (impliedRegeneration && overwriteManifest) {
+			return {
+				regenerateHelperText: 'Your changes will re-create narration clips when you save.',
+				regenerateButtonLabel: 'Regenerate audio on save',
+				saveButtonLabel: 'Save'
+			};
+		}
+		if (impliedRegeneration) {
+			return {
+				regenerateHelperText:
+					'Your changes will regenerate the manifest and re-create narration clips when you save.',
+				regenerateButtonLabel: 'Regenerate on save',
+				saveButtonLabel: saveTriggersGeneration ? 'Save & generate' : 'Save'
+			};
+		}
+		if (overwriteManifest) {
+			return {
+				regenerateHelperText: 'Re-runs narration recreation for the current manifest.',
+				regenerateButtonLabel: 'Regenerate audio',
+				saveButtonLabel: regenerateRequested ? 'Save & regenerate audio' : 'Save'
+			};
+		}
+		return {
+			regenerateHelperText:
+				'Re-runs the knowledge check generation and re-creates all narration clips.',
+			regenerateButtonLabel: 'Regenerate manifest & audio',
+			saveButtonLabel: saveTriggersGeneration && isCreating ? 'Save & generate' : 'Save'
+		};
+	};
+
 	// Flag indicating whether we should check for changes before navigating away.
 	let checkForChanges = true;
 	let advancedOptionsOpen = false;
@@ -649,24 +698,21 @@
 	}
 	$: lectureVideoRegenerateButtonPressed =
 		regenerateRequested || lectureVideoRegenerationImpliedByFormChanges;
-	$: lectureVideoRegenerateHelperText = lectureVideoRegenerationImpliedByFormChanges
-		? overwriteManifest
-			? 'Your changes will re-create narration clips when you save.'
-			: 'Your changes will regenerate the manifest and re-create narration clips when you save.'
-		: overwriteManifest
-			? 'Re-runs narration recreation for the current manifest.'
-			: 'Re-runs the knowledge check generation and re-creates all narration clips.';
 	$: lectureVideoSaveTriggersGeneration =
 		isLectureMode &&
 		canGenerateLectureVideoManifest &&
 		!overwriteManifest &&
 		(regenerateRequested || lectureVideoGenerationTriggeredByFormChanges);
-	$: saveButtonLabel =
-		isLectureMode && lectureVideoSaveTriggersGeneration
-			? 'Save & generate'
-			: isLectureMode && overwriteManifest && regenerateRequested
-				? 'Save & regenerate audio'
-				: 'Save';
+	$: lectureVideoSaveAffordances = deriveLectureVideoSaveAffordances({
+		impliedRegeneration: lectureVideoRegenerationImpliedByFormChanges,
+		overwriteManifest,
+		saveTriggersGeneration: isLectureMode && lectureVideoSaveTriggersGeneration,
+		regenerateRequested,
+		isCreating: data.isCreating
+	});
+	$: lectureVideoRegenerateHelperText = lectureVideoSaveAffordances.regenerateHelperText;
+	$: lectureVideoRegenerateButtonLabel = lectureVideoSaveAffordances.regenerateButtonLabel;
+	$: saveButtonLabel = lectureVideoSaveAffordances.saveButtonLabel;
 	$: lectureVideoChatUnavailable = (() => {
 		try {
 			const manifestState = lectureVideoChatUnavailableForManifest(
@@ -3503,14 +3549,7 @@
 											aria-pressed={lectureVideoRegenerateButtonPressed}
 											onclick={() => {
 												regenerateRequested = !regenerateRequested;
-											}}
-											>{lectureVideoRegenerationImpliedByFormChanges
-												? overwriteManifest
-													? 'Regenerate audio on save'
-													: 'Regenerate on save'
-												: overwriteManifest
-													? 'Regenerate audio'
-													: 'Regenerate manifest & audio'}</button
+											}}>{lectureVideoRegenerateButtonLabel}</button
 										>
 										<span class="text-xs text-gray-600">{lectureVideoRegenerateHelperText}</span>
 									</div>

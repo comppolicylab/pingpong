@@ -14,7 +14,7 @@ from typing import Any
 
 import uuid_utils as uuid
 from google import genai
-from sqlalchemy import and_, delete, func, or_, select, update
+from sqlalchemy import and_, delete, func, inspect, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -568,6 +568,10 @@ async def _await_with_run_lease_heartbeat(
 def _existing_manifest_transcript(
     lecture_video: models.LectureVideo,
 ) -> list[schemas.LectureVideoManifestWordV3] | None:
+    if "manifest_data" in inspect(lecture_video).unloaded:
+        raise RuntimeError(
+            "LectureVideo.manifest_data must be loaded before reusing manifest transcript."
+        )
     if not lecture_video.manifest_data:
         return None
     manifest = schemas.validate_lecture_video_manifest(lecture_video.manifest_data)
@@ -926,10 +930,10 @@ async def _process_claimed_manifest_run(run_id: int, lease_token: str) -> None:
                             lecture_video_id,
                             gemini_file_name,
                         )
-                    await lecture_video_manifest_generation.delete_gemini_file(
-                        gemini_file_name,
-                        gemini_client,
-                    )
+                        await lecture_video_manifest_generation.delete_gemini_file(
+                            gemini_file_name,
+                            gemini_client,
+                        )
     except Exception as exc:
         logger.exception("Lecture video manifest generation failed. run_id=%s", run_id)
         await _mark_manifest_generation_run_failed(
@@ -964,11 +968,11 @@ async def _process_claimed_run(run_id: int, lease_token: str) -> None:
 async def _process_claimed_narration_run(run_id: int, lease_token: str) -> None:
     logger.info("Lecture video narration run starting. run_id=%s", run_id)
     while True:
-        logger.info(
+        logger.debug(
             "Lecture video narration run preparing next item. run_id=%s", run_id
         )
         state, payload = await _prepare_next_work_item(run_id, lease_token)
-        logger.info(
+        logger.debug(
             "Lecture video narration run prepared next item. run_id=%s state=%s",
             run_id,
             state,
@@ -1007,7 +1011,7 @@ async def _process_claimed_narration_run(run_id: int, lease_token: str) -> None:
             )
 
         try:
-            logger.info(
+            logger.debug(
                 "Lecture video narration synthesizing. run_id=%s "
                 "lecture_video_id=%s narration_id=%s text_length=%s",
                 run_id,
@@ -1050,7 +1054,7 @@ async def _process_claimed_narration_run(run_id: int, lease_token: str) -> None:
             )
             return
         content_type, audio = synthesis_result
-        logger.info(
+        logger.debug(
             "Lecture video narration synthesized. run_id=%s "
             "lecture_video_id=%s narration_id=%s content_type=%s bytes=%s",
             run_id,
@@ -1071,7 +1075,7 @@ async def _process_claimed_narration_run(run_id: int, lease_token: str) -> None:
             return
 
         try:
-            logger.info(
+            logger.debug(
                 "Lecture video narration storing audio. "
                 "run_id=%s lecture_video_id=%s narration_id=%s bytes=%s",
                 run_id,
@@ -1113,7 +1117,7 @@ async def _process_claimed_narration_run(run_id: int, lease_token: str) -> None:
             )
             return
         store_key, content_length = store_result
-        logger.info(
+        logger.debug(
             "Lecture video narration stored audio. run_id=%s "
             "lecture_video_id=%s narration_id=%s store_key=%s bytes=%s",
             run_id,
@@ -1124,7 +1128,7 @@ async def _process_claimed_narration_run(run_id: int, lease_token: str) -> None:
         )
 
         try:
-            logger.info(
+            logger.debug(
                 "Lecture video narration attaching audio. "
                 "run_id=%s lecture_video_id=%s narration_id=%s store_key=%s",
                 run_id,
@@ -1155,7 +1159,7 @@ async def _process_claimed_narration_run(run_id: int, lease_token: str) -> None:
             )
             await _delete_audio_key_quietly(store_key)
             return
-        logger.info(
+        logger.debug(
             "Lecture video narration attached audio. "
             "run_id=%s lecture_video_id=%s narration_id=%s store_key=%s",
             run_id,

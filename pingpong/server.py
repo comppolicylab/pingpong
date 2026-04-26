@@ -9387,6 +9387,14 @@ async def create_assistant(
                 status_code=400,
                 detail="Specifying a lecture_video_manifest is required when overwriting a lecture video manifest.",
             )
+        if (
+            not overwrite_lecture_video_manifest
+            and req.lecture_video_manifest is not None
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="lecture_video_manifest cannot be supplied when overwrite_manifest is false.",
+            )
         if req.voice_id is None:
             raise HTTPException(
                 status_code=400,
@@ -9580,6 +9588,11 @@ async def create_assistant(
             if overwrite_lecture_video_manifest:
                 if lecture_video_manifest is None:
                     raise HTTPException(400, "Lecture video manifest is required.")
+                await lecture_video_processing.cancel_manifest_generation_processing_runs(
+                    request.state["db"],
+                    lecture_video.id,
+                    schemas.LectureVideoProcessingCancelReason.MANUAL_MANIFEST_REPLACED,
+                )
                 await lecture_video_service.persist_manifest(
                     request.state["db"],
                     lecture_video,
@@ -10248,6 +10261,14 @@ async def update_assistant(
             raise HTTPException(
                 status_code=400,
                 detail="Specifying a lecture_video_manifest is required when overwriting a lecture video manifest.",
+            )
+        if (
+            not overwrite_lecture_video_manifest
+            and req.lecture_video_manifest is not None
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="lecture_video_manifest cannot be supplied when overwrite_manifest is false.",
             )
         if req.voice_id is None:
             raise HTTPException(
@@ -11213,6 +11234,11 @@ async def update_assistant(
                         lecture_video_generation_prompt
                     )
                 if overwrite_lecture_video_manifest and lecture_video_manifest:
+                    await lecture_video_processing.cancel_manifest_generation_processing_runs(
+                        request.state["db"],
+                        target_lecture_video.id,
+                        schemas.LectureVideoProcessingCancelReason.MANUAL_MANIFEST_REPLACED,
+                    )
                     await lecture_video_service.persist_manifest(
                         request.state["db"],
                         target_lecture_video,

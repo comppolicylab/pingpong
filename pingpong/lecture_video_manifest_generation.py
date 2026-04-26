@@ -17,6 +17,7 @@ from pingpong import gemini as gemini_helpers
 from pingpong.transcription import _prepare_audio_file_for_transcription_async
 
 logger = logging.getLogger(__name__)
+_FFPROBE_MISSING_LOGGED = False
 
 DEFAULT_LECTURE_VIDEO_INSTRUCTIONS = """You are a friendly, clear tutor helping a learner during an interactive video lesson.
 
@@ -300,6 +301,7 @@ async def transcribe_video_words(
 
 async def _ffprobe_duration_ms(video_path: str) -> int | None:
     def run_ffprobe() -> int | None:
+        global _FFPROBE_MISSING_LOGGED
         try:
             result = subprocess.run(
                 [
@@ -315,11 +317,24 @@ async def _ffprobe_duration_ms(video_path: str) -> int | None:
                 capture_output=True,
                 text=True,
                 check=True,
+                timeout=30,
             )
-        except Exception:
+            return _timestamp_to_ms(float(result.stdout.strip()))
+        except FileNotFoundError:
+            if not _FFPROBE_MISSING_LOGGED:
+                logger.warning(
+                    "ffprobe is unavailable; lecture video duration will be omitted "
+                    "from manifest generation prompts."
+                )
+                _FFPROBE_MISSING_LOGGED = True
+            return None
+        except (
+            subprocess.CalledProcessError,
+            subprocess.TimeoutExpired,
+            ValueError,
+        ):
             logger.warning("Failed to determine lecture video duration.", exc_info=True)
             return None
-        return _timestamp_to_ms(float(result.stdout.strip()))
 
     return await asyncio.to_thread(run_ffprobe)
 
@@ -615,7 +630,11 @@ def _question_to_manifest_question(
     correct_count = 0
     for choice in choices:
         choice_text = choice.text
-        feedback = feedback_by_choice[choice_text]
+        feedback = feedback_by_choice.get(choice_text)
+        if feedback is None:
+            raise ValueError(
+                f"Generated question feedback is missing for choice {choice_text!r}."
+            )
         is_correct = choice_text == correct_answer
         correct_count += 1 if is_correct else 0
         options.append(
