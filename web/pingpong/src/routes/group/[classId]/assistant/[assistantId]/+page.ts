@@ -33,6 +33,7 @@ async function ensureModels(
 	models: AssistantModel[];
 	defaultPrompts: AssistantDefaultPrompt[];
 	enforceClassicAssistants: boolean;
+	lectureVideoDefaults: { instructions: string; generation_prompt: string } | null;
 }> {
 	const cache = get(modelsPromptsStore)[classId];
 
@@ -40,7 +41,8 @@ async function ensureModels(
 		return {
 			models: cache.models,
 			defaultPrompts: cache.default_prompts ?? [],
-			enforceClassicAssistants: cache.enforce_classic_assistants ?? false
+			enforceClassicAssistants: cache.enforce_classic_assistants ?? false,
+			lectureVideoDefaults: cache.lecture_video_defaults ?? null
 		};
 	}
 
@@ -50,20 +52,25 @@ async function ensureModels(
 	const enforceClassicAssistants = modelsResponse.error
 		? false
 		: (modelsResponse.data.enforce_classic_assistants ?? false);
+	const lectureVideoDefaults = modelsResponse.error
+		? null
+		: (modelsResponse.data.lecture_video_defaults ?? null);
 
 	modelsPromptsStore.update((m) => ({
 		...m,
 		[classId]: {
 			models,
 			default_prompts: defaultPrompts,
-			enforce_classic_assistants: enforceClassicAssistants
+			enforce_classic_assistants: enforceClassicAssistants,
+			lecture_video_defaults: lectureVideoDefaults
 		} as (typeof m)[number]
 	}));
 
 	return {
 		models,
 		defaultPrompts,
-		enforceClassicAssistants
+		enforceClassicAssistants,
+		lectureVideoDefaults
 	};
 }
 
@@ -127,8 +134,13 @@ export const load: PageLoad = async ({ params, fetch, parent }) => {
 	const classId = parseInt(params.classId, 10);
 	const isCreating = params.assistantId === 'new';
 	const parentData = await parent();
-	const [{ models, defaultPrompts, enforceClassicAssistants }, lectureVideoPolicy] =
-		await Promise.all([ensureModels(fetch, classId), loadLectureVideoEditorPolicy(fetch, classId)]);
+	const [
+		{ models, defaultPrompts, enforceClassicAssistants, lectureVideoDefaults },
+		lectureVideoPolicy
+	] = await Promise.all([
+		ensureModels(fetch, classId),
+		loadLectureVideoEditorPolicy(fetch, classId)
+	]);
 
 	let assistant: Assistant | null = null;
 	let assistantFiles: AssistantFiles | null = null;
@@ -178,6 +190,7 @@ export const load: PageLoad = async ({ params, fetch, parent }) => {
 		models,
 		defaultPrompts,
 		enforceClassicAssistants,
+		lectureVideoDefaults,
 		lectureVideoPolicy: effectiveLectureVideoPolicy,
 		lectureVideoConfig,
 		lectureVideoConfigLoadError,
