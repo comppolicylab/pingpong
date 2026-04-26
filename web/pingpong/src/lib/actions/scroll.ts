@@ -44,13 +44,15 @@ export const scroll = (el: HTMLDivElement, params: ScrollParams) => {
 		return Math.abs(el.scrollTop - targetScrollTop) <= programmaticScrollEpsilon;
 	};
 
-	const scrollToBottom = () => {
+	const getBottomScrollTop = () => Math.max(0, el.scrollHeight - el.clientHeight);
+
+	const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
 		clearProgrammaticScrollTimeout();
 		isProgrammaticScroll = true;
-		targetScrollTop = el.scrollHeight;
+		targetScrollTop = getBottomScrollTop();
 		el.scrollTo({
 			top: targetScrollTop,
-			behavior: 'smooth'
+			behavior
 		});
 		if (!scrollEndSupported && hasReachedProgrammaticTarget()) {
 			completeProgrammaticScroll();
@@ -61,6 +63,25 @@ export const scroll = (el: HTMLDivElement, params: ScrollParams) => {
 		}, programmaticScrollTimeoutMs);
 	};
 
+	const reanchorAfterShrink = () => {
+		const scrollHeightDecreased = el.scrollHeight < lastKnownScrollHeight;
+		// Use the previous scroll metrics to preserve whether the user was anchored before a shrink.
+		const wasNearBottom = lastKnownScrollHeight - lastScrollTop - el.clientHeight < 80;
+		if (!isStreaming || !scrollHeightDecreased || !wasNearBottom) {
+			return false;
+		}
+
+		userPausedAutoScroll = false;
+		clearProgrammaticScrollTimeout();
+		isProgrammaticScroll = false;
+		targetScrollTop = null;
+		el.scrollTop = getBottomScrollTop();
+		lastScrollTop = el.scrollTop;
+		lastKnownScrollHeight = el.scrollHeight;
+		scheduleScrollToBottom(4, true);
+		return true;
+	};
+
 	const cancelSettledScroll = () => {
 		if (settleFrame !== null) {
 			cancelAnimationFrame(settleFrame);
@@ -69,8 +90,8 @@ export const scroll = (el: HTMLDivElement, params: ScrollParams) => {
 		settlePassesRemaining = 0;
 	};
 
-	const scheduleScrollToBottom = (passes = 6) => {
-		if (userPausedAutoScroll) {
+	const scheduleScrollToBottom = (passes = 6, force = false) => {
+		if (userPausedAutoScroll && !force) {
 			return;
 		}
 
@@ -81,7 +102,14 @@ export const scroll = (el: HTMLDivElement, params: ScrollParams) => {
 
 		const run = () => {
 			settleFrame = null;
-			if (userPausedAutoScroll) {
+			if (reanchorAfterShrink()) {
+				settlePassesRemaining -= 1;
+				if (settlePassesRemaining > 0) {
+					settleFrame = requestAnimationFrame(run);
+				}
+				return;
+			}
+			if (userPausedAutoScroll && !force) {
 				settlePassesRemaining = 0;
 				return;
 			}
@@ -102,6 +130,10 @@ export const scroll = (el: HTMLDivElement, params: ScrollParams) => {
 	};
 
 	const onScroll = () => {
+		if (reanchorAfterShrink()) {
+			return;
+		}
+
 		if (isProgrammaticScroll) {
 			if (hasReachedProgrammaticTarget()) {
 				completeProgrammaticScroll();
@@ -140,6 +172,9 @@ export const scroll = (el: HTMLDivElement, params: ScrollParams) => {
 	};
 
 	const mutationObserver = new MutationObserver(() => {
+		if (reanchorAfterShrink()) {
+			return;
+		}
 		if (isStreaming) scheduleScrollToBottom(4);
 	});
 	const onDescendantLoad = () => {
@@ -192,6 +227,7 @@ export const scroll = (el: HTMLDivElement, params: ScrollParams) => {
 			}
 
 			requestAnimationFrame(() => {
+				reanchorAfterShrink();
 				if (hasNewTailMessage && isCurrentUserTail) {
 					userPausedAutoScroll = false;
 				}

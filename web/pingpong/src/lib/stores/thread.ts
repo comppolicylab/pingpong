@@ -756,8 +756,17 @@ export class ThreadManager {
 		const optimisticMessageContent = message + visionImageDescriptionsString;
 		const threadVersion = get(this.version);
 		const currentState = get(this.#data);
+		const isLectureVideoThread = currentState?.data?.thread?.interaction_mode === 'lecture_video';
 		const optimisticOutputIndex =
 			threadVersion === 3 ? this.#getNextOutputIndex(currentState) : undefined;
+		const optimisticAssistantMsgId = isLectureVideoThread
+			? `optimistic-assistant-${(Math.random() + 1).toString(36).substring(2)}`
+			: null;
+		const optimisticAssistantOutputIndex =
+			isLectureVideoThread && optimisticOutputIndex !== undefined
+				? optimisticOutputIndex + 1
+				: undefined;
+		const optimisticCreatedAt = Date.now() / 1000;
 		const optimistic: api.OpenAIMessage = {
 			id: optimisticMsgId,
 			role: 'user',
@@ -765,7 +774,7 @@ export class ThreadManager {
 				{ type: 'text', text: { value: optimisticMessageContent, annotations: [] } },
 				...optimisticImageContent
 			],
-			created_at: Math.floor(Date.now() / 1000),
+			created_at: optimisticCreatedAt,
 			metadata: {
 				user_id: fromUserId,
 				is_current_user: true,
@@ -793,20 +802,49 @@ export class ThreadManager {
 			output_index: optimisticOutputIndex,
 			attachments: (attachments || []).map((file) => ({ file_id: file.file_id, tools: [] }))
 		};
+		const optimisticAssistant: api.OpenAIMessage | null = optimisticAssistantMsgId
+			? {
+					id: optimisticAssistantMsgId,
+					role: 'assistant',
+					content: [],
+					// Keep the pending assistant placeholder after the user's optimistic message if
+					// consumers fall back to created_at ordering before output_index is available.
+					created_at: optimisticCreatedAt + 0.001,
+					metadata: {
+						lecture_context_pending: true
+					},
+					assistant_id: '',
+					file_search_file_ids: [],
+					code_interpreter_file_ids: [],
+					vision_file_ids: [],
+					run_id: null,
+					object: 'thread.message',
+					output_index: optimisticAssistantOutputIndex,
+					attachments: []
+				}
+			: null;
 
 		// Interrupt any active TTS playback from a previous response
-		await this.interruptTts();
+		const interruptTtsPromise = this.interruptTts().catch((err) => {
+			console.warn('TTS: interrupt before send failed', err);
+		});
 
 		this.#data.update((d) => ({
 			...d,
 			error: null,
-			optimistic: [...d.optimistic, optimistic],
+			optimistic: [
+				...d.optimistic,
+				optimistic,
+				...(optimisticAssistant ? [optimisticAssistant] : [])
+			],
 			submitting: true,
 			attachments: {
 				...d.attachments,
 				...attachments?.reduce((acc, file) => ({ ...acc, [file.file_id]: file }), {})
 			}
 		}));
+
+		await interruptTtsPromise;
 
 		const chunks = await api.postMessage(this.#fetcher, this.classId, this.threadId, {
 			message,
@@ -815,9 +853,7 @@ export class ThreadManager {
 			vision_file_ids,
 			vision_image_descriptions,
 			timezone: this.timezone,
-			...(currentState?.data?.thread?.interaction_mode === 'lecture_video'
-				? { generate_speech: !get(this.#ttsMuted) }
-				: {})
+			...(isLectureVideoThread ? { generate_speech: !get(this.#ttsMuted) } : {})
 		});
 
 		this.attachments = derived(this.#data, ($data) => {
@@ -831,7 +867,9 @@ export class ThreadManager {
 			if (e instanceof api.PresendError || e instanceof api.RunActiveError) {
 				this.#data.update((d) => ({
 					...d,
-					optimistic: d.optimistic.filter((msg) => msg.id !== optimisticMsgId),
+					optimistic: d.optimistic.filter(
+						(msg) => msg.id !== optimisticMsgId && msg.id !== optimisticAssistantMsgId
+					),
 					error: { detail: e.message, wasSent: false },
 					attachments: Object.keys(d.attachments).reduce(
 						(acc: Record<string, api.ServerFile>, key: string) => {
@@ -849,11 +887,13 @@ export class ThreadManager {
 			} else if (e instanceof api.StreamError) {
 				this.#data.update((d) => ({
 					...d,
+					optimistic: d.optimistic.filter((msg) => msg.id !== optimisticAssistantMsgId),
 					error: { detail: e.message, wasSent: true }
 				}));
 			} else {
 				this.#data.update((d) => ({
 					...d,
+					optimistic: d.optimistic.filter((msg) => msg.id !== optimisticAssistantMsgId),
 					error: { detail: errorMessage(e, 'Unknown error'), wasSent: true }
 				}));
 			}
@@ -875,6 +915,7 @@ export class ThreadManager {
 			for await (const chunk of chunks) {
 				await this.#handleStreamChunk(chunk, callback);
 			}
+			this.#clearLectureContextPending();
 		} catch (e) {
 			console.error('Error handling stream chunks', e);
 			// If stream was interrupted, stop any active TTS
@@ -922,6 +963,13 @@ export class ThreadManager {
 		return highest + 1;
 	}
 
+	#clearLectureContextPending() {
+		this.#data.update((d) => ({
+			...d,
+			optimistic: d.optimistic.filter((m) => m.metadata?.lecture_context_pending !== true)
+		}));
+	}
+
 	/**
 	 * Set the thread data.
 	 */
@@ -953,6 +1001,7 @@ export class ThreadManager {
 					};
 					return {
 						...d,
+						optimistic: d.optimistic.filter((m) => m.metadata?.lecture_context_pending !== true),
 						data: {
 							...d.data!,
 							messages: [...(d.data?.messages || []), message]
@@ -964,6 +1013,7 @@ export class ThreadManager {
 				this.#appendDelta(chunk.delta);
 				break;
 			case 'done':
+				this.#clearLectureContextPending();
 				break;
 			case 'error':
 				if (Array.isArray(chunk.detail)) {
