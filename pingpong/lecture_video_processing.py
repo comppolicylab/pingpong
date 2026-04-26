@@ -964,7 +964,9 @@ async def _process_claimed_run(run_id: int, lease_token: str) -> None:
 async def _process_claimed_narration_run(run_id: int, lease_token: str) -> None:
     logger.info("Lecture video narration run starting. run_id=%s", run_id)
     while True:
-        logger.info("Lecture video narration run preparing next item. run_id=%s", run_id)
+        logger.info(
+            "Lecture video narration run preparing next item. run_id=%s", run_id
+        )
         state, payload = await _prepare_next_work_item(run_id, lease_token)
         logger.info(
             "Lecture video narration run prepared next item. run_id=%s state=%s",
