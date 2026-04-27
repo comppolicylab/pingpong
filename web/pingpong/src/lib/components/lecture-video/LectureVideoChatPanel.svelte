@@ -298,7 +298,7 @@
 						{getMessageTimestamp(message.data.created_at)}
 					</Tooltip>
 					{#if isLectureContextPending(message.data)}
-						<p class="shimmer text-sm">Analyzing lecture context</p>
+						<p class="shimmer text-sm">Thinking</p>
 					{/if}
 					{#each groupMessageContent(message.data.content) as block (block.key)}
 						{#if block.type === 'mcp_group'}
