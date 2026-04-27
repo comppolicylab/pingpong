@@ -87,7 +87,6 @@
 	let questionPlaybackLocked: boolean = $state(false);
 	let furthestOffsetMs: number = $state(0);
 	let initialStartOffsetMs: number = $state(0);
-	let initialAutoplayAttempted: boolean = $state(false);
 	let videoReadyForPlayback: boolean = $state(false);
 	let introNarrationPending: boolean = $state(false);
 	let postAnswerNarrationPending: boolean = $state(false);
@@ -384,7 +383,6 @@
 		questionPlaybackLocked = false;
 		furthestOffsetMs = 0;
 		initialStartOffsetMs = 0;
-		initialAutoplayAttempted = false;
 		videoReadyForPlayback = false;
 		introNarrationPending = false;
 		postAnswerNarrationPending = false;
@@ -459,10 +457,10 @@
 		initError = detail || 'Lecture video control was lost. Please refresh to continue.';
 	}
 
-	function failClosedOnConflict(
-		reason: string,
-		expanded: { $status: number; error: { detail?: string } | null }
-	): boolean {
+	function failClosedOnConflict(expanded: {
+		$status: number;
+		error: { detail?: string } | null;
+	}): boolean {
 		if (expanded.$status !== 409) {
 			return false;
 		}
@@ -602,16 +600,13 @@
 		}
 	}
 
-	async function tryPlayVideo(
-		reason: string,
-		{
-			suppressInteractionPost = false,
-			queueRetryOnFailure = false
-		}: {
-			suppressInteractionPost?: boolean;
-			queueRetryOnFailure?: boolean;
-		} = {}
-	): Promise<boolean> {
+	async function tryPlayVideo({
+		suppressInteractionPost = false,
+		queueRetryOnFailure = false
+	}: {
+		suppressInteractionPost?: boolean;
+		queueRetryOnFailure?: boolean;
+	} = {}): Promise<boolean> {
 		if (!videoElement) {
 			return false;
 		}
@@ -801,7 +796,9 @@
 		}
 
 		applyPendingResumeOffset();
-		attemptInitialAutoplay();
+		if (sessionState === 'playing' && !playbackLocked && !isVideoAtEnd()) {
+			queueVideoRetry();
+		}
 
 		// Start lease renewal every 20 seconds
 		leaseInterval = setInterval(async () => {
@@ -1004,35 +1001,16 @@
 
 		setVideoPosition(rollbackState.offsetMs);
 		if (rollbackState.shouldResumePlayback) {
-			await tryPlayVideo('question-presented-rollback', {
+			await tryPlayVideo({
 				suppressInteractionPost: true,
 				queueRetryOnFailure: true
 			});
 		}
 	}
 
-	function attemptInitialAutoplay() {
-		if (
-			initialAutoplayAttempted ||
-			!videoReadyForPlayback ||
-			!controllerSessionId ||
-			!videoElement
-		) {
-			return;
-		}
-		if (sessionState !== 'playing' || playbackLocked) return;
-
-		initialAutoplayAttempted = true;
-		void tryPlayVideo('initial-autoplay', {
-			suppressInteractionPost: true,
-			queueRetryOnFailure: true
-		});
-	}
-
 	function handleCanPlay() {
 		applyPendingResumeOffset();
 		videoReadyForPlayback = true;
-		attemptInitialAutoplay();
 	}
 
 	function handleTimeUpdate() {
@@ -1122,7 +1100,7 @@
 				return;
 			}
 			const expanded = api.expandResponse(response);
-			if (failClosedOnConflict('video-seeked-conflict', expanded)) {
+			if (failClosedOnConflict(expanded)) {
 				return;
 			}
 			if (!expanded.error) {
@@ -1159,7 +1137,7 @@
 				return;
 			}
 			const expanded = api.expandResponse(response);
-			if (failClosedOnConflict('video-ended-conflict', expanded)) {
+			if (failClosedOnConflict(expanded)) {
 				return;
 			}
 			if (!expanded.error) {
@@ -1305,7 +1283,7 @@
 				offset_ms: currentQuestion.stop_offset_ms
 			});
 			const expanded = api.expandResponse(response);
-			if (failClosedOnConflict('question-presented-conflict', expanded)) {
+			if (failClosedOnConflict(expanded)) {
 				return;
 			}
 			if (!expanded.error) {
@@ -1335,7 +1313,7 @@
 			option_id: optionId
 		});
 		const expanded = api.expandResponse(response);
-		if (failClosedOnConflict('answer-submitted-conflict', expanded)) {
+		if (failClosedOnConflict(expanded)) {
 			return;
 		}
 		if (!expanded.error) {
@@ -1416,7 +1394,7 @@
 			if (canSeekNow) {
 				setVideoPosition(resumeOffsetMs);
 			}
-			optimisticPlayPromise = tryPlayVideo('continue-click-optimistic', {
+			optimisticPlayPromise = tryPlayVideo({
 				suppressInteractionPost: true,
 				queueRetryOnFailure: true
 			});
@@ -1458,7 +1436,7 @@
 			return false;
 		}
 
-		if (failClosedOnConflict('continue-conflict', expanded)) {
+		if (failClosedOnConflict(expanded)) {
 			resumeOffsetOnCanPlay = null;
 			return false;
 		}
@@ -1474,7 +1452,7 @@
 				if (canSeekNow) {
 					setVideoPosition(resumeOffsetMs);
 				}
-				void tryPlayVideo('continue-post-response', {
+				void tryPlayVideo({
 					suppressInteractionPost: true,
 					queueRetryOnFailure: true
 				});
@@ -1515,7 +1493,7 @@
 			return;
 		}
 
-		await tryPlayVideo('manual-play-button', {
+		await tryPlayVideo({
 			suppressInteractionPost: true,
 			queueRetryOnFailure: true
 		});
