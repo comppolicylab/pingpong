@@ -273,6 +273,7 @@ async def validate_elevenlabs_api_key(api_key: str) -> bool:
 
 ELEVENLABS_STREAMING_TTS_MODEL = "eleven_flash_v2_5"
 ELEVENLABS_STREAMING_TTS_OUTPUT_FORMAT = "pcm_24000"
+ELEVENLABS_STREAMING_TTS_CHUNK_LENGTH_SCHEDULE = [50]
 
 _MARKDOWN_FENCE_RE = re.compile(r"```(?:[\w+-]+)?\s*([\s\S]*?)```")
 _MARKDOWN_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\([^)]+\)")
@@ -325,7 +326,7 @@ def strip_markdown_for_tts(text: str) -> str:
     plain_text = unescape(plain_text)
     plain_text = _MARKDOWN_WHITESPACE_RE.sub(" ", plain_text)
     plain_text = _MARKDOWN_BLANK_LINES_RE.sub("\n\n", plain_text)
-    return plain_text.strip()
+    return plain_text
 
 
 class StreamingMarkdownSanitizer:
@@ -480,6 +481,59 @@ class StreamingMarkdownSanitizer:
         return min(unresolved_starts) if unresolved_starts else len(text)
 
 
+class StreamingTTSChunker:
+    """Buffer streamed text until it is suitable to send to ElevenLabs TTS."""
+
+    _SPLITTERS = (
+        ".",
+        ",",
+        "?",
+        "!",
+        ";",
+        ":",
+        "\u2014",
+        "-",
+        "(",
+        ")",
+        "[",
+        "]",
+        "}",
+        " ",
+    )
+
+    def __init__(self) -> None:
+        self._pending = ""
+
+    def add(self, text: str) -> list[str]:
+        if not text:
+            return []
+
+        if self._pending.endswith(self._SPLITTERS):
+            chunk = self._with_trailing_space(self._pending)
+            self._pending = text
+            return [chunk]
+
+        if text.startswith(self._SPLITTERS):
+            output = self._pending + text[0]
+            self._pending = text[1:]
+            return [self._with_trailing_space(output)]
+
+        self._pending += text
+        return []
+
+    def flush(self) -> str | None:
+        if not self._pending:
+            return None
+
+        chunk = self._with_trailing_space(self._pending)
+        self._pending = ""
+        return chunk
+
+    @staticmethod
+    def _with_trailing_space(text: str) -> str:
+        return text if text.endswith(" ") else f"{text} "
+
+
 class ElevenLabsStreamingTTS:
     """WebSocket client for ElevenLabs streaming-input text-to-speech.
 
@@ -525,10 +579,17 @@ class ElevenLabsStreamingTTS:
             await self._ws.send_json(
                 {
                     "text": " ",
+                    "try_trigger_generation": True,
                     "voice_settings": {
                         "stability": 0.5,
+                        "use_speaker_boost": True,
                         "similarity_boost": 0.8,
-                        "speed": 0.8,
+                        "speed": 0.85,
+                    },
+                    "generation_config": {
+                        "chunk_length_schedule": (
+                            ELEVENLABS_STREAMING_TTS_CHUNK_LENGTH_SCHEDULE
+                        ),
                     },
                 }
             )
@@ -536,7 +597,13 @@ class ElevenLabsStreamingTTS:
             await self.cleanup()
             raise
 
-    async def send_text(self, text: str, *, flush: bool = False) -> None:
+    async def send_text(
+        self,
+        text: str,
+        *,
+        flush: bool = False,
+        try_trigger_generation: bool = False,
+    ) -> None:
         """Send a text chunk to be synthesized.
 
         *text* should ideally end with a space for optimal latency.
@@ -548,6 +615,8 @@ class ElevenLabsStreamingTTS:
         msg: dict[str, Any] = {"text": text}
         if flush:
             msg["flush"] = True
+        if try_trigger_generation:
+            msg["try_trigger_generation"] = True
         await self._ws.send_json(msg)
 
     async def close_input(self) -> None:

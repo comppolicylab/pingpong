@@ -44,7 +44,11 @@ from pingpong.schemas import (
     ToolCallType,
     WebSearchActionType,
 )
-from pingpong.elevenlabs import ElevenLabsStreamingTTS, StreamingMarkdownSanitizer
+from pingpong.elevenlabs import (
+    ElevenLabsStreamingTTS,
+    StreamingMarkdownSanitizer,
+    StreamingTTSChunker,
+)
 from starlette.requests import ClientDisconnect
 from datetime import datetime, timezone
 from openai.types.beta.assistant_stream_event import (
@@ -3632,6 +3636,7 @@ async def run_response(
             _tts_enabled = bool(tts_voice_id and tts_api_key)
             _tts_client: ElevenLabsStreamingTTS | None = None
             _tts_sanitizer = StreamingMarkdownSanitizer() if _tts_enabled else None
+            _tts_chunker = StreamingTTSChunker() if _tts_enabled else None
             _tts_audio_task: asyncio.Task | None = None
             _tts_audio_done = asyncio.Event()
             _tts_audio_ready = asyncio.Event()
@@ -3722,11 +3727,29 @@ async def run_response(
                         _tts_audio_done.set()
 
                 async def _tts_finish_input() -> None:
-                    if _tts_sanitizer and _tts_client:
+                    if _tts_sanitizer and _tts_chunker and _tts_client:
                         remaining = _tts_sanitizer.flush()
                         if remaining:
                             try:
-                                await _tts_client.send_text(remaining, flush=True)
+                                tts_chunks = _tts_chunker.add(remaining)
+                                for chunk in tts_chunks:
+                                    await _tts_client.send_text(
+                                        chunk,
+                                        try_trigger_generation=True,
+                                    )
+                            except Exception:
+                                logger.warning(
+                                    "TTS final flush failed",
+                                    exc_info=True,
+                                )
+                        final_chunk = _tts_chunker.flush()
+                        if final_chunk:
+                            try:
+                                await _tts_client.send_text(
+                                    final_chunk,
+                                    flush=True,
+                                    try_trigger_generation=True,
+                                )
                             except Exception:
                                 logger.warning(
                                     "TTS final flush failed",
@@ -3853,10 +3876,15 @@ async def run_response(
                             case "response.output_text.delta":
                                 await handler.on_output_text_delta(event)
                                 # Feed text to TTS accumulator
-                                if _tts_sanitizer and _tts_client:
+                                if _tts_sanitizer and _tts_chunker and _tts_client:
                                     for chunk in _tts_sanitizer.add(event.delta):
                                         try:
-                                            await _tts_client.send_text(chunk)
+                                            tts_chunks = _tts_chunker.add(chunk)
+                                            for tts_chunk in tts_chunks:
+                                                await _tts_client.send_text(
+                                                    tts_chunk,
+                                                    try_trigger_generation=True,
+                                                )
                                         except Exception:
                                             logger.warning(
                                                 "TTS send_text failed",

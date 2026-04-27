@@ -8,6 +8,7 @@ from elevenlabs.core.api_error import ApiError as ElevenLabsApiError
 from elevenlabs.errors import (
     UnprocessableEntityError as ElevenLabsUnprocessableEntityError,
 )
+from elevenlabs.realtime_tts import text_chunker
 from elevenlabs.types.http_validation_error import HttpValidationError
 import pytest
 from sqlalchemy import func, select
@@ -1405,7 +1406,7 @@ def test_strip_markdown_for_tts_removes_common_markdown_formatting():
 def test_streaming_markdown_sanitizer_sanitizes_markdown_across_streamed_deltas():
     sanitizer = elevenlabs_module.StreamingMarkdownSanitizer()
 
-    assert sanitizer.add("Here is **bold** and [a") == ["Here is bold and"]
+    assert sanitizer.add("Here is **bold** and [a") == ["Here is bold and "]
 
     flushed = sanitizer.add(" link](https://example.com).")
 
@@ -1418,10 +1419,18 @@ def test_streaming_markdown_sanitizer_streams_plain_prose_immediately():
     assert sanitizer.add("Hello, world.") == ["Hello, world."]
 
 
+def test_streaming_markdown_sanitizer_preserves_word_boundary_whitespace():
+    sanitizer = elevenlabs_module.StreamingMarkdownSanitizer()
+
+    assert sanitizer.add("Good") == ["Good"]
+    assert sanitizer.add(" morning") == [" morning"]
+    assert sanitizer.add("!") == ["!"]
+
+
 def test_streaming_markdown_sanitizer_strips_fenced_code_blocks_before_tts():
     sanitizer = elevenlabs_module.StreamingMarkdownSanitizer()
 
-    assert sanitizer.add("Example:\n```python\nprint('hello')\n") == ["Example:"]
+    assert sanitizer.add("Example:\n```python\nprint('hello')\n") == ["Example:\n"]
 
     flushed = sanitizer.add("```.")
 
@@ -1431,9 +1440,137 @@ def test_streaming_markdown_sanitizer_strips_fenced_code_blocks_before_tts():
 def test_streaming_markdown_sanitizer_flushes_incomplete_markdown_best_effort():
     sanitizer = elevenlabs_module.StreamingMarkdownSanitizer()
 
-    assert sanitizer.add("Here is [an unfinished link") == ["Here is"]
+    assert sanitizer.add("Here is [an unfinished link") == ["Here is "]
 
     assert sanitizer.flush() == "an unfinished link"
+
+
+def test_streaming_tts_chunker_buffers_partial_words_until_boundary():
+    chunker = elevenlabs_module.StreamingTTSChunker()
+
+    assert chunker.add("phon") == []
+    assert chunker.add("etic") == []
+    assert chunker.add(" words") == ["phonetic "]
+    assert chunker.flush() == "words "
+
+
+def test_streaming_tts_chunker_attaches_leading_punctuation_to_buffer():
+    chunker = elevenlabs_module.StreamingTTSChunker()
+
+    assert chunker.add("Hello") == []
+    assert chunker.add(", world") == ["Hello, "]
+    assert chunker.flush() == " world "
+
+
+def test_streaming_tts_chunker_emits_single_delta_with_safe_boundary():
+    chunker = elevenlabs_module.StreamingTTSChunker()
+
+    assert chunker.add("Hello, world.") == []
+    assert chunker.flush() == "Hello, world. "
+
+
+def test_streaming_tts_chunker_waits_for_next_delta_or_flush_after_internal_boundary():
+    chunker = elevenlabs_module.StreamingTTSChunker()
+
+    assert chunker.add("This is phon") == []
+    assert chunker.add("etic. Next") == []
+    assert chunker.flush() == "This is phonetic. Next "
+
+
+def test_streaming_tts_chunker_matches_elevenlabs_text_chunker():
+    cases = [
+        ["Sure", " \u2014", " it", "\u2019s"],
+        ["algebra", "ic", " expressions"],
+        ["correctly.\n\n", "The"],
+        ["this", ":", " you"],
+        ["terms", ",", " which"],
+        ["mistake", " \u2014", " turning"],
+        ["isn", "\u2019t", " valid", "."],
+    ]
+
+    for chunks in cases:
+        chunker = elevenlabs_module.StreamingTTSChunker()
+        emitted = []
+        for chunk in chunks:
+            emitted.extend(chunker.add(chunk))
+        final_chunk = chunker.flush()
+        if final_chunk is not None:
+            emitted.append(final_chunk)
+
+        assert emitted == list(text_chunker(iter(chunks)))
+
+
+async def test_elevenlabs_streaming_tts_sends_realtime_generation_payloads(monkeypatch):
+    sessions = []
+
+    class FakeWebSocket:
+        closed = False
+
+        def __init__(self):
+            self.sent_json = []
+
+        async def send_json(self, payload):
+            self.sent_json.append(payload)
+
+        async def close(self):
+            self.closed = True
+
+    class FakeSession:
+        def __init__(self, *, headers):
+            self.headers = headers
+            self.closed = False
+            self.websocket = FakeWebSocket()
+            self.url = None
+            self.timeout = None
+            sessions.append(self)
+
+        async def ws_connect(self, url, timeout):
+            self.url = url
+            self.timeout = timeout
+            return self.websocket
+
+        async def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(elevenlabs_module.aiohttp, "ClientSession", FakeSession)
+
+    tts = elevenlabs_module.ElevenLabsStreamingTTS(
+        "elevenlabs-key",
+        "voice-id",
+    )
+
+    await tts.connect()
+    await tts.send_text("Hello ", try_trigger_generation=True)
+    await tts.send_text("world ", flush=True, try_trigger_generation=True)
+
+    session = sessions[0]
+    assert session.headers == {"xi-api-key": "elevenlabs-key"}
+    assert "model_id=eleven_flash_v2_5" in session.url
+    assert "output_format=pcm_24000" in session.url
+    assert session.websocket.sent_json == [
+        {
+            "text": " ",
+            "try_trigger_generation": True,
+            "voice_settings": {
+                "stability": 0.5,
+                "use_speaker_boost": True,
+                "similarity_boost": 0.8,
+                "speed": 0.85,
+            },
+            "generation_config": {
+                "chunk_length_schedule": [50],
+            },
+        },
+        {
+            "text": "Hello ",
+            "try_trigger_generation": True,
+        },
+        {
+            "text": "world ",
+            "flush": True,
+            "try_trigger_generation": True,
+        },
+    ]
 
 
 async def test_validate_elevenlabs_api_key_maps_client_construction_errors_to_unavailable(
