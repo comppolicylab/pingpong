@@ -7,8 +7,7 @@
 		getAnonymousSessionToken,
 		getAnonymousShareToken,
 		hasAnonymousShareToken,
-		resetAnonymousSessionToken,
-		setAnonymousSessionToken
+		resetAnonymousSessionToken
 	} from '$lib/stores/anonymous';
 	import { happyToast, sadToast } from '$lib/toast';
 	import { errorMessage } from '$lib/errors';
@@ -153,8 +152,16 @@
 	$: lectureVideoSession = expandedThreadData.data?.lecture_video_session ?? null;
 	$: threadLectureChatAvailable = lectureVideoSession?.lecture_video_chat_available === true;
 	$: lectureVideoTtsAvailable = expandedThreadData.data?.lecture_video_tts_available === true;
-	$: effectiveLectureVideoMismatch = threadLectureVideoMismatch;
-	$: effectiveLectureVideoAssistantMismatch = threadLectureVideoMismatch;
+	let runtimeLectureVideoAssistantMismatch = false;
+	let runtimeLectureVideoAssistantMismatchKey: string | null = null;
+	$: currentLectureVideoThreadKey = `${classId}:${threadId}`;
+	$: if (runtimeLectureVideoAssistantMismatchKey !== currentLectureVideoThreadKey) {
+		runtimeLectureVideoAssistantMismatch = false;
+		runtimeLectureVideoAssistantMismatchKey = currentLectureVideoThreadKey;
+	}
+	$: effectiveLectureVideoAssistantMismatch =
+		threadLectureVideoMismatch || runtimeLectureVideoAssistantMismatch;
+	$: effectiveLectureVideoMismatch = effectiveLectureVideoAssistantMismatch;
 	let lectureVideoViewRef: LectureVideoViewHandle | null = null;
 	let lecturePlayerVolume = 1;
 	let liveLectureVideoSession: api.LectureVideoSession | null = null;
@@ -1423,31 +1430,24 @@
 		}
 	};
 
-	async function refreshLesson() {
-		await invalidateAll();
+	function handleLectureVideoLessonUpdated() {
+		runtimeLectureVideoAssistantMismatch = true;
+		runtimeLectureVideoAssistantMismatchKey = currentLectureVideoThreadKey;
 	}
 
 	async function startReplacementLectureThread() {
-		if (startingReplacementLectureThread || !$assistantId) return;
+		if (startingReplacementLectureThread || !$assistantId || isAnonymousSession) return;
 
 		startingReplacementLectureThread = true;
 		try {
 			const newThreadOpts = api.explodeResponse(
 				await api.createLectureThread(fetch, classId, {
 					assistant_id: $assistantId,
-					timezone: userTimezone,
-					conversation_id: $page.url.pathname.includes('/shared/')
-						? $page.url.searchParams.get('conversation_id')
-						: null
+					timezone: userTimezone
 				})
 			);
 
-			setAnonymousSessionToken(newThreadOpts.session_token || null);
-			if (newThreadOpts.session_token) {
-				await goto(resolve(`/group/${classId}/shared/thread/${newThreadOpts.thread.id}`));
-			} else {
-				await goto(resolve(`/group/${classId}/thread/${newThreadOpts.thread.id}`));
-			}
+			await goto(resolve(`/group/${classId}/thread/${newThreadOpts.thread.id}`));
 		} catch (e) {
 			sadToast(
 				`Failed to start lesson. Error: ${errorMessage(e, 'We could not start a new lesson. Try again in a moment.')}`
@@ -1507,23 +1507,16 @@
 						class="flex w-full max-w-2xl flex-col gap-4 rounded-2xl border border-orange/30 bg-orange-light px-6 py-5 text-slate-900 shadow-sm sm:flex-row sm:items-center sm:justify-between"
 					>
 						<div class="flex flex-col gap-1">
-							{#if effectiveLectureVideoAssistantMismatch}
-								<div class="text-base font-semibold text-slate-900">
-									This video lesson was updated
-								</div>
-								<div class="text-sm text-slate-700">
-									Start a fresh session to jump into the new version.
-								</div>
-							{:else}
-								<div class="text-base font-semibold text-slate-900">
-									We could not load this video lesson
-								</div>
-								<div class="text-sm text-slate-700">
-									Check your connection, then refresh to pick up where you left off.
-								</div>
-							{/if}
+							<div class="text-base font-semibold text-slate-900">
+								This video lesson was updated
+							</div>
+							<div class="text-sm text-slate-700">
+								{isAnonymousSession
+									? 'Ask the lesson owner for a new shared session.'
+									: 'Start a fresh session to jump into the new version.'}
+							</div>
 						</div>
-						{#if effectiveLectureVideoAssistantMismatch}
+						{#if !isAnonymousSession}
 							<button
 								type="button"
 								class="inline-flex shrink-0 items-center justify-center rounded-full bg-orange px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-dark focus:ring-2 focus:ring-orange focus:ring-offset-2 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
@@ -1534,14 +1527,6 @@
 									<Spinner color="custom" customColor="fill-white" class="mr-2 h-4 w-4" />
 								{/if}
 								Start new lesson
-							</button>
-						{:else}
-							<button
-								type="button"
-								class="inline-flex shrink-0 items-center justify-center rounded-full bg-orange px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-dark focus:ring-2 focus:ring-orange focus:ring-offset-2 focus:outline-none"
-								onclick={refreshLesson}
-							>
-								Refresh lesson
 							</button>
 						{/if}
 					</div>
@@ -1554,11 +1539,13 @@
 					{lectureVideoSrc}
 					title={lectureVideoDisplayTitle}
 					canParticipate={threadIsCurrentUserParticipant}
+					showRefreshAction={!isAnonymousSession}
 					initialSession={lectureVideoSession}
 					bind:playerVolume={lecturePlayerVolume}
 					chatAvailable={threadLectureChatAvailable}
 					on:sessionchange={handleLectureSessionChange}
 					on:playbackresumed={handleLecturePlaybackResumed}
+					on:lessonupdated={handleLectureVideoLessonUpdated}
 				>
 					{#snippet chat()}
 						{#if threadLectureChatAvailable}

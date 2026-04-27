@@ -41,6 +41,11 @@ from .testutil import with_authz, with_institution, with_user
 
 DEFAULT_LECTURE_VIDEO_VOICE_ID = "voice-test-id"
 VISIBLE_ASSISTANT_REPLY_TEXT = "visible reply"
+MSG_STALE_PAGE = lecture_video_runtime.MSG_STALE_PAGE
+MSG_TAB_DISCONNECTED = lecture_video_runtime.MSG_TAB_DISCONNECTED
+MSG_LESSON_UPDATED = lecture_video_runtime.MSG_LESSON_UPDATED
+MSG_QUESTION_ALREADY_CLOSED = lecture_video_runtime.MSG_QUESTION_ALREADY_CLOSED
+MSG_REFRESH_AND_RETRY = lecture_video_runtime.MSG_REFRESH_AND_RETRY
 server_module = importlib.import_module("pingpong.server")
 cli_module = importlib.import_module("pingpong.__main__")
 
@@ -1286,10 +1291,7 @@ async def test_lecture_video_control_reacquire_invalidates_old_controller(
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 409
-    assert (
-        response.json()["detail"]
-        == "This tab is no longer connected to the video. Refresh the lesson to continue."
-    )
+    assert response.json()["detail"] == MSG_TAB_DISCONNECTED
 
 
 @with_user(123)
@@ -1359,10 +1361,7 @@ async def test_lecture_video_duplicate_idempotent_request_from_old_controller_is
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert replay_from_old_controller.status_code == 409
-    assert (
-        replay_from_old_controller.json()["detail"]
-        == "This tab is no longer connected to the video. Refresh the lesson to continue."
-    )
+    assert replay_from_old_controller.json()["detail"] == MSG_TAB_DISCONNECTED
 
 
 @with_user(123)
@@ -1635,10 +1634,7 @@ async def test_lecture_video_interactions_derive_continuation_and_history(
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert stale_version.status_code == 409
-    assert (
-        stale_version.json()["detail"]
-        == "This lesson changed while you were working. Refresh the lesson and try again."
-    )
+    assert stale_version.json()["detail"] == MSG_REFRESH_AND_RETRY
 
     history_response = api.get(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/history",
@@ -1965,10 +1961,7 @@ async def test_lecture_video_interactions_reject_post_completion_playback_events
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert invalid_answer.status_code == 409
-    assert (
-        invalid_answer.json()["detail"]
-        == "This question is already closed. Refresh the lesson to continue."
-    )
+    assert invalid_answer.json()["detail"] == MSG_QUESTION_ALREADY_CLOSED
 
     refreshed_thread = api.get(
         f"/api/v1/class/{class_.id}/thread/{thread_id}",
@@ -2529,10 +2522,7 @@ async def test_lecture_video_interactions_reject_stale_playing_resume_version(
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert stale_resume.status_code == 409
-    assert (
-        stale_resume.json()["detail"]
-        == "This lesson changed while you were working. Refresh the lesson and try again."
-    )
+    assert stale_resume.json()["detail"] == MSG_REFRESH_AND_RETRY
 
     refreshed_thread = api.get(
         f"/api/v1/class/{class_.id}/thread/{thread_id}",
@@ -3258,10 +3248,7 @@ async def test_lecture_video_control_release_and_interaction_fail_after_expiry(
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert release.status_code == 409
-    assert (
-        release.json()["detail"]
-        == "This page was inactive for too long. Refresh the lesson to continue."
-    )
+    assert release.json()["detail"] == MSG_STALE_PAGE
 
     interaction = api.post(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
@@ -3275,10 +3262,7 @@ async def test_lecture_video_control_release_and_interaction_fail_after_expiry(
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert interaction.status_code == 409
-    assert (
-        interaction.json()["detail"]
-        == "This page was inactive for too long. Refresh the lesson to continue."
-    )
+    assert interaction.json()["detail"] == MSG_STALE_PAGE
 
 
 @with_user(123)
@@ -11397,10 +11381,7 @@ async def test_get_thread_video_rejects_assistant_mismatch(
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert video_response.status_code == 409
-    assert (
-        video_response.json()["detail"]
-        == "This video lesson was updated. Start a new lesson to continue."
-    )
+    assert video_response.json()["detail"] == MSG_LESSON_UPDATED
 
     thread_response = api.get(
         "/api/v1/class/1/thread/109",

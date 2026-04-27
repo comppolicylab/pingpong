@@ -4585,7 +4585,7 @@ async def get_thread_video(
     if not _lecture_video_matches_assistant(thread, assistant):
         raise HTTPException(
             status_code=409,
-            detail="This video lesson was updated. Start a new lesson to continue.",
+            detail=lecture_video_runtime.MSG_LESSON_UPDATED,
         )
 
     lecture_video = await models.LectureVideo.get_by_id(
@@ -4725,7 +4725,7 @@ async def get_thread_lecture_video_narration(
     ):
         raise HTTPException(
             status_code=409,
-            detail="This video lesson was updated. Start a new lesson to continue.",
+            detail=lecture_video_runtime.MSG_LESSON_UPDATED,
         )
 
     if not lecture_video_runtime.narration_allowed_for_thread_state(
