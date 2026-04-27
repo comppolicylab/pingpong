@@ -16,7 +16,7 @@ from pingpong.files import handle_create_file
 from pingpong.lecture_video_service import (
     LECTURE_VIDEO_CHAT_UNAVAILABLE_NOTE,
     lecture_video_chat_metadata,
-    lecture_video_manifest_from_model,
+    lecture_video_chat_context_from_model,
 )
 from pingpong.video_store import VideoInputSource, VideoStoreError
 
@@ -49,49 +49,6 @@ def _apply_lecture_video_chat_metadata(thread: models.Thread) -> None:
     thread.lecture_video_chat_available = lecture_video_chat_metadata(
         thread.lecture_video
     )
-
-
-def _transcript_timestamp_scale(
-    words: list[schemas.LectureVideoManifestWordV2],
-) -> int:
-    numeric_bounds = [(float(word.start), float(word.end)) for word in words]
-    if any(
-        not start.is_integer() or not end.is_integer() for start, end in numeric_bounds
-    ):
-        return 1000
-
-    positive_deltas = [end - start for start, end in numeric_bounds if end > start] + [
-        next_start - start
-        for (start, _), (next_start, _) in zip(numeric_bounds, numeric_bounds[1:])
-        if next_start > start
-    ]
-
-    # Decide the unit once for the whole transcript. Whole-second manifests tend
-    # to have very small positive deltas between words; millisecond manifests do
-    # not. This avoids mixing units based on the magnitude of individual values.
-    smallest_positive_delta = min(positive_deltas, default=None)
-    if smallest_positive_delta is not None and smallest_positive_delta <= 10:
-        return 1000
-
-    return 1
-
-
-def _normalize_timestamp_ms(value: int | float, *, scale: int) -> int:
-    return max(0, int(round(float(value) * scale)))
-
-
-def _serialize_transcript_words(
-    words: list[schemas.LectureVideoManifestWordV2],
-) -> list[tuple[int, int, str]]:
-    scale = _transcript_timestamp_scale(words)
-    return [
-        (
-            _normalize_timestamp_ms(word.start, scale=scale),
-            _normalize_timestamp_ms(word.end, scale=scale),
-            word.word,
-        )
-        for word in words
-    ]
 
 
 def _serialize_transcript_words_v3(
@@ -267,13 +224,12 @@ async def _build_answered_knowledge_checks_markdown(
     return await _build_answered_knowledge_checks(session, thread_id, format_answer)
 
 
-def _build_context_text(
+def _build_context_text_from_transcript(
     thread: models.Thread,
     state: models.LectureVideoThreadState,
-    manifest: schemas.LectureVideoManifestV2,
+    transcript_words: list[tuple[int, int, str]],
 ) -> tuple[str, int]:
     current_offset_ms = max(0, state.last_known_offset_ms)
-    transcript_words = _serialize_transcript_words(manifest.word_level_transcription)
 
     clamped_last_chat_context_end_ms = min(
         max(state.last_chat_context_end_ms, 0), current_offset_ms
@@ -394,14 +350,16 @@ def _format_video_descriptions(
     return "\n".join(lines) if lines else "None"
 
 
-def _build_context_text_v3(
+def _build_context_text_v3_from_parts(
     thread: models.Thread,
     state: models.LectureVideoThreadState,
-    manifest: schemas.LectureVideoManifestV3,
+    *,
+    word_level_transcription: list[schemas.LectureVideoManifestWordV3],
+    video_descriptions: list[schemas.LectureVideoManifestVideoDescriptionV3],
     answered_knowledge_checks: str,
 ) -> tuple[str, int]:
     current_offset_ms = max(0, state.last_known_offset_ms)
-    transcript_words = _serialize_transcript_words_v3(manifest.word_level_transcription)
+    transcript_words = _serialize_transcript_words_v3(word_level_transcription)
     transcript_start_ms, uncapped_transcript_start_ms = _transcript_context_window(
         state, current_offset_ms
     )
@@ -430,7 +388,7 @@ def _build_context_text_v3(
         lookahead_end_ms,
     )
     descriptions_text = _format_video_descriptions(
-        manifest.video_descriptions,
+        video_descriptions,
         transcript_start_ms,
         lookahead_end_ms,
     )
@@ -664,20 +622,22 @@ async def build_lecture_chat_context_message_parts(
             "Lecture video thread context must be loaded before building chat context."
         )
 
-    manifest = lecture_video_manifest_from_model(lecture_video)
-    if not isinstance(
-        manifest, (schemas.LectureVideoManifestV2, schemas.LectureVideoManifestV3)
-    ):
+    chat_context = lecture_video_chat_context_from_model(lecture_video)
+    if chat_context is None:
         raise ValueError(
             "Lecture chat requires a version 2 or 3 lecture video manifest."
         )
 
-    if isinstance(manifest, schemas.LectureVideoManifestV3):
+    if chat_context.version == 3:
         answered_knowledge_checks = await _build_answered_knowledge_checks_markdown(
             session, thread.id
         )
-        context_text, current_offset_ms = _build_context_text_v3(
-            thread, state, manifest, answered_knowledge_checks
+        context_text, current_offset_ms = _build_context_text_v3_from_parts(
+            thread,
+            state,
+            word_level_transcription=chat_context.word_level_transcription,
+            video_descriptions=chat_context.video_descriptions,
+            answered_knowledge_checks=answered_knowledge_checks,
         )
         text_part = models.MessagePart(
             part_index=0,
@@ -690,7 +650,11 @@ async def build_lecture_chat_context_message_parts(
             current_offset_ms=current_offset_ms,
         )
 
-    context_text, current_offset_ms = _build_context_text(thread, state, manifest)
+    context_text, current_offset_ms = _build_context_text_from_transcript(
+        thread,
+        state,
+        _serialize_transcript_words_v3(chat_context.word_level_transcription),
+    )
     answered_knowledge_checks = await _build_answered_knowledge_checks_text(
         session, thread.id
     )

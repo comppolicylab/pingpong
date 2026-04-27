@@ -2,12 +2,13 @@ import asyncio
 import functools
 import json
 import logging
+import os
 import shutil
 import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 import openai
 from google.genai.client import AsyncClient
@@ -16,9 +17,15 @@ from pydantic import BaseModel, ConfigDict, Field
 
 import pingpong.schemas as schemas
 from pingpong import gemini as gemini_helpers
-from pingpong.transcription import _prepare_audio_file_for_transcription_async
 
 logger = logging.getLogger(__name__)
+
+_ResponseModelT = TypeVar("_ResponseModelT", bound=BaseModel)
+
+_WHISPER_UPLOAD_MAX_BYTES = 25_000_000
+_WHISPER_UPLOAD_TARGET_BYTES = 24_500_000
+_TRANSCRIPTION_AUDIO_SAMPLE_RATE = 16_000
+_TRANSCRIPTION_AUDIO_BITRATES = ("32k", "24k", "16k", "12k")
 
 
 @functools.cache
@@ -138,6 +145,12 @@ GUIDELINES FOR QUESTIONS:
 
 _GEMINI_MODEL = "gemini-3.1-pro-preview"
 _VIDEO_DESCRIPTION_WINDOW_MS = 30_000
+_MANIFEST_CHUNK_DURATION_MS = 5 * 60 * 1000
+_MANIFEST_CHUNK_MIN_TAIL_MS = 3 * 60 * 1000
+_MANIFEST_CHUNK_OVERLAP_MS = 30_000
+_MANIFEST_CHUNK_MIN_SPLIT_MS = 3 * 60 * 1000
+_GEMINI_GENERATION_MAX_ATTEMPTS = 3
+_GEMINI_GENERATION_RETRY_DELAY_SECONDS = 5.0
 
 
 @dataclass(frozen=True)
@@ -145,6 +158,18 @@ class GeminiFileRef:
     name: str
     uri: str | None = None
     mime_type: str | None = None
+
+
+@dataclass(frozen=True)
+class ManifestGenerationChunk:
+    generation_start_ms: int
+    generation_end_ms: int
+    context_start_ms: int
+    context_end_ms: int
+
+    @property
+    def generation_duration_ms(self) -> int:
+        return self.generation_end_ms - self.generation_start_ms
 
 
 class GeneratedChoice(BaseModel):
@@ -222,47 +247,121 @@ class GeneratedQuizWithVideo(BaseModel):
     )
 
 
+class ReconciledGeneratedQuiz(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    questions: list[GeneratedQuestion] = Field(
+        min_length=1,
+        description="Final reconciled comprehension checks for the full video.",
+    )
+
+
 def _timestamp_to_ms(value: float | int) -> int:
     return int(round(float(value) * 1000))
 
 
-def _transcript_words_by_id(
+@dataclass(frozen=True)
+class TranscriptWordIndex:
+    by_id: dict[str, schemas.LectureVideoManifestWordV3]
+    by_start_ms: dict[int, list[schemas.LectureVideoManifestWordV3]]
+    by_end_ms: dict[int, list[schemas.LectureVideoManifestWordV3]]
+    position_by_id: dict[str, int]
+
+
+def _transcript_word_index(
     transcript: list[schemas.LectureVideoManifestWordV3],
-) -> dict[str, schemas.LectureVideoManifestWordV3]:
+) -> TranscriptWordIndex:
     words_by_id: dict[str, schemas.LectureVideoManifestWordV3] = {}
-    for word in transcript:
+    words_by_start_ms: dict[int, list[schemas.LectureVideoManifestWordV3]] = {}
+    words_by_end_ms: dict[int, list[schemas.LectureVideoManifestWordV3]] = {}
+    position_by_id: dict[str, int] = {}
+    for index, word in enumerate(transcript):
         if word.id in words_by_id:
             raise ValueError(f"Transcript contains duplicate word ID {word.id!r}.")
         words_by_id[word.id] = word
-    return words_by_id
+        words_by_start_ms.setdefault(word.start_offset_ms, []).append(word)
+        words_by_end_ms.setdefault(word.end_offset_ms, []).append(word)
+        position_by_id[word.id] = index
+    return TranscriptWordIndex(
+        by_id=words_by_id,
+        by_start_ms=words_by_start_ms,
+        by_end_ms=words_by_end_ms,
+        position_by_id=position_by_id,
+    )
 
 
 def _validated_transcript_timestamp_ms(
     *,
-    transcript_words_by_id: dict[str, schemas.LectureVideoManifestWordV3],
+    transcript_word_index: TranscriptWordIndex,
     word_id: str,
     word_text: str,
     timestamp: float,
     timestamp_kind: Literal["start", "end"],
 ) -> int:
-    transcript_word = transcript_words_by_id.get(word_id)
-    if transcript_word is None:
-        raise ValueError(f"Generated word ID {word_id!r} is missing from transcript.")
-    if transcript_word.word != word_text:
-        raise ValueError(
-            f"Generated word ID {word_id!r} text mismatch: "
-            f"expected {transcript_word.word!r}, got {word_text!r}."
+    generated_offset_ms = _timestamp_to_ms(timestamp)
+
+    def score_word(word: schemas.LectureVideoManifestWordV3) -> int:
+        transcript_offset_ms = (
+            word.start_offset_ms if timestamp_kind == "start" else word.end_offset_ms
         )
-    expected_offset_ms = (
-        transcript_word.start_offset_ms
+        return sum(
+            (
+                word.id == word_id,
+                word.word == word_text,
+                transcript_offset_ms == generated_offset_ms,
+            )
+        )
+
+    candidate_words_by_id: dict[str, schemas.LectureVideoManifestWordV3] = {}
+    word_by_id = transcript_word_index.by_id.get(word_id)
+    if word_by_id is not None:
+        candidate_words_by_id[word_by_id.id] = word_by_id
+    timestamp_words = (
+        transcript_word_index.by_start_ms
         if timestamp_kind == "start"
-        else transcript_word.end_offset_ms
+        else transcript_word_index.by_end_ms
+    ).get(generated_offset_ms, [])
+    for word in timestamp_words:
+        candidate_words_by_id[word.id] = word
+    candidate_words = sorted(
+        candidate_words_by_id.values(),
+        key=lambda word: transcript_word_index.position_by_id[word.id],
     )
-    actual_offset_ms = _timestamp_to_ms(timestamp)
-    if actual_offset_ms != expected_offset_ms:
+    best_word = max(
+        candidate_words,
+        key=lambda word: (
+            score_word(word),
+            word.id == word_id,
+            (word.start_offset_ms if timestamp_kind == "start" else word.end_offset_ms)
+            == generated_offset_ms,
+        ),
+        default=None,
+    )
+    best_score = score_word(best_word) if best_word is not None else 0
+    if best_score < 2:
         raise ValueError(
-            f"Generated word ID {word_id!r} {timestamp_kind} timestamp mismatch: "
-            f"expected {expected_offset_ms}ms, got {actual_offset_ms}ms."
+            f"Generated word reference did not match at least two of id, "
+            f"word, and {timestamp_kind} timestamp: id={word_id!r}, "
+            f"word={word_text!r}, timestamp={generated_offset_ms}ms."
+        )
+    assert best_word is not None
+    expected_offset_ms = (
+        best_word.start_offset_ms
+        if timestamp_kind == "start"
+        else best_word.end_offset_ms
+    )
+    if best_score == 2:
+        logger.warning(
+            "Generated word reference matched transcript with one mismatched field. "
+            "timestamp_kind=%s generated_id=%r matched_id=%r generated_word=%r "
+            "matched_word=%r generated_offset_ms=%s matched_offset_ms=%s",
+            timestamp_kind,
+            word_id,
+            best_word.id,
+            word_text,
+            best_word.word,
+            generated_offset_ms,
+            expected_offset_ms,
         )
     return expected_offset_ms
 
@@ -288,6 +387,118 @@ def _word_to_generation_word(
     }
 
 
+def _align_offset_down(offset_ms: int, alignment_ms: int) -> int:
+    if alignment_ms <= 0:
+        return offset_ms
+    return (offset_ms // alignment_ms) * alignment_ms
+
+
+def _aligned_split_offset(
+    start_ms: int,
+    end_ms: int,
+    *,
+    alignment_ms: int = _VIDEO_DESCRIPTION_WINDOW_MS,
+) -> int:
+    midpoint_ms = start_ms + (end_ms - start_ms) // 2
+    split_ms = _align_offset_down(midpoint_ms, alignment_ms)
+    if split_ms <= start_ms:
+        split_ms = start_ms + max(alignment_ms, (end_ms - start_ms) // 2)
+    if split_ms >= end_ms:
+        split_ms = midpoint_ms
+    return split_ms
+
+
+def _plan_manifest_generation_chunks(
+    video_duration_ms: int | None,
+    *,
+    max_chunk_duration_ms: int = _MANIFEST_CHUNK_DURATION_MS,
+    min_tail_duration_ms: int = _MANIFEST_CHUNK_MIN_TAIL_MS,
+    overlap_ms: int = _MANIFEST_CHUNK_OVERLAP_MS,
+    alignment_ms: int = _VIDEO_DESCRIPTION_WINDOW_MS,
+) -> list[ManifestGenerationChunk]:
+    if video_duration_ms is None or video_duration_ms <= max_chunk_duration_ms:
+        duration_ms = max(video_duration_ms or 1, 1)
+        return [
+            ManifestGenerationChunk(
+                generation_start_ms=0,
+                generation_end_ms=duration_ms,
+                context_start_ms=0,
+                context_end_ms=duration_ms,
+            )
+        ]
+
+    boundaries = list(range(0, video_duration_ms, max_chunk_duration_ms))
+    boundaries.append(video_duration_ms)
+    if len(boundaries) >= 3:
+        tail_duration_ms = boundaries[-1] - boundaries[-2]
+        if tail_duration_ms < min_tail_duration_ms:
+            tail_start_ms = boundaries[-3]
+            tail_end_ms = boundaries[-1]
+            split_ms = _aligned_split_offset(
+                tail_start_ms,
+                tail_end_ms,
+                alignment_ms=alignment_ms,
+            )
+            boundaries = boundaries[:-3] + [tail_start_ms, split_ms, tail_end_ms]
+
+    chunks = []
+    for start_ms, end_ms in zip(boundaries, boundaries[1:]):
+        chunks.append(
+            ManifestGenerationChunk(
+                generation_start_ms=start_ms,
+                generation_end_ms=end_ms,
+                context_start_ms=max(start_ms - overlap_ms, 0),
+                context_end_ms=min(end_ms + overlap_ms, video_duration_ms),
+            )
+        )
+    return chunks
+
+
+def _split_manifest_generation_chunk(
+    chunk: ManifestGenerationChunk,
+    *,
+    video_duration_ms: int,
+    overlap_ms: int = _MANIFEST_CHUNK_OVERLAP_MS,
+    alignment_ms: int = _VIDEO_DESCRIPTION_WINDOW_MS,
+) -> list[ManifestGenerationChunk]:
+    split_ms = _aligned_split_offset(
+        chunk.generation_start_ms,
+        chunk.generation_end_ms,
+        alignment_ms=alignment_ms,
+    )
+    return [
+        ManifestGenerationChunk(
+            generation_start_ms=chunk.generation_start_ms,
+            generation_end_ms=split_ms,
+            context_start_ms=max(chunk.generation_start_ms - overlap_ms, 0),
+            context_end_ms=min(split_ms + overlap_ms, video_duration_ms),
+        ),
+        ManifestGenerationChunk(
+            generation_start_ms=split_ms,
+            generation_end_ms=chunk.generation_end_ms,
+            context_start_ms=max(split_ms - overlap_ms, 0),
+            context_end_ms=min(
+                chunk.generation_end_ms + overlap_ms,
+                video_duration_ms,
+            ),
+        ),
+    ]
+
+
+def _transcript_for_window(
+    transcript: list[schemas.LectureVideoManifestWordV3],
+    *,
+    start_offset_ms: int,
+    end_offset_ms: int,
+) -> list[schemas.LectureVideoManifestWordV3]:
+    return [
+        word
+        for word in transcript
+        if word.end_offset_ms >= start_offset_ms
+        and word.start_offset_ms <= end_offset_ms
+    ]
+
+
 def _word_to_manifest_word(word: Any, *, word_index: int) -> dict[str, Any]:
     word_id = getattr(word, "id", None)
     word_text = getattr(word, "word", None)
@@ -308,14 +519,157 @@ def _word_to_manifest_word(word: Any, *, word_index: int) -> dict[str, Any]:
     }
 
 
+def _log_empty_transcription_word(
+    manifest_words: list[dict[str, Any]],
+    *,
+    index: int,
+) -> None:
+    word = manifest_words[index]
+    previous_word = next(
+        (
+            str(candidate["word"])
+            for candidate in reversed(manifest_words[:index])
+            if candidate["word"] != ""
+        ),
+        None,
+    )
+    next_word = next(
+        (
+            str(candidate["word"])
+            for candidate in manifest_words[index + 1 :]
+            if candidate["word"] != ""
+        ),
+        None,
+    )
+    logger.warning(
+        "Skipping empty OpenAI transcription word. index=%s start_offset_ms=%s "
+        "end_offset_ms=%s previous_word=%r next_word=%r",
+        index,
+        word["start_offset_ms"],
+        word["end_offset_ms"],
+        previous_word,
+        next_word,
+    )
+
+
+def _prepare_lecture_video_audio_for_whisper(*, video_path: str, temp_dir: str) -> str:
+    ffmpeg_path = shutil.which("ffmpeg")
+    if ffmpeg_path is None:
+        raise RuntimeError("ffmpeg is required for lecture video transcription.")
+
+    last_size: int | None = None
+    acceptable_path: str | None = None
+    for bitrate in _TRANSCRIPTION_AUDIO_BITRATES:
+        output_path = str(
+            Path(temp_dir) / f"lecture-video-transcription-{bitrate}.webm"
+        )
+        try:
+            subprocess.run(
+                [
+                    ffmpeg_path,
+                    "-y",
+                    "-i",
+                    video_path,
+                    "-vn",
+                    "-ac",
+                    "1",
+                    "-ar",
+                    str(_TRANSCRIPTION_AUDIO_SAMPLE_RATE),
+                    "-c:a",
+                    "libopus",
+                    "-b:a",
+                    bitrate,
+                    "-application",
+                    "voip",
+                    output_path,
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=60 * 10,
+            )
+        except (
+            subprocess.CalledProcessError,
+            subprocess.TimeoutExpired,
+        ) as exc:
+            try:
+                os.remove(output_path)
+            except OSError:
+                pass
+            raise RuntimeError(
+                "Failed to prepare lecture video audio for transcription."
+            ) from exc
+
+        size = os.path.getsize(output_path)
+        last_size = size
+        logger.info(
+            "Prepared lecture video audio for Whisper. bitrate=%s size_bytes=%s",
+            bitrate,
+            size,
+        )
+        if size <= _WHISPER_UPLOAD_TARGET_BYTES:
+            if acceptable_path is not None:
+                try:
+                    os.remove(acceptable_path)
+                except OSError:
+                    logger.warning(
+                        "Failed to remove previous lecture video transcription "
+                        "audio %s",
+                        acceptable_path,
+                        exc_info=True,
+                    )
+            return output_path
+
+        if size <= _WHISPER_UPLOAD_MAX_BYTES:
+            if acceptable_path is not None:
+                try:
+                    os.remove(acceptable_path)
+                except OSError:
+                    logger.warning(
+                        "Failed to remove previous lecture video transcription "
+                        "audio %s",
+                        acceptable_path,
+                        exc_info=True,
+                    )
+            acceptable_path = output_path
+            continue
+
+        try:
+            os.remove(output_path)
+        except OSError:
+            logger.warning(
+                "Failed to remove oversized lecture video transcription audio %s",
+                output_path,
+                exc_info=True,
+            )
+
+    if acceptable_path is not None:
+        return acceptable_path
+
+    raise ValueError(
+        "Lecture video audio is too large for Whisper after compression "
+        f"(last size: {last_size or 0} bytes; limit: {_WHISPER_UPLOAD_MAX_BYTES} bytes)."
+    )
+
+
+async def _prepare_lecture_video_audio_for_whisper_async(
+    *, video_path: str, temp_dir: str
+) -> str:
+    return await asyncio.to_thread(
+        _prepare_lecture_video_audio_for_whisper,
+        video_path=video_path,
+        temp_dir=temp_dir,
+    )
+
+
 async def transcribe_video_words(
     video_path: str,
     openai_client: openai.AsyncClient | openai.AsyncAzureOpenAI,
     *,
     temp_dir: str,
 ) -> list[schemas.LectureVideoManifestWordV3]:
-    path_to_send, speed_factor, _ = await _prepare_audio_file_for_transcription_async(
-        input_path=video_path,
+    path_to_send = await _prepare_lecture_video_audio_for_whisper_async(
+        video_path=video_path,
         temp_dir=temp_dir,
     )
     with open(path_to_send, "rb") as audio_file:
@@ -337,17 +691,17 @@ async def transcribe_video_words(
         _word_to_manifest_word(word, word_index=index)
         for index, word in enumerate(words)
     ]
-    if speed_factor > 1.0:
-        for word in manifest_words:
-            word["start_offset_ms"] = _timestamp_to_ms(
-                word["start_offset_ms"] * speed_factor / 1000
-            )
-            word["end_offset_ms"] = _timestamp_to_ms(
-                word["end_offset_ms"] * speed_factor / 1000
-            )
+    non_empty_manifest_words = []
+    for index, word in enumerate(manifest_words):
+        if word["word"] == "":
+            _log_empty_transcription_word(manifest_words, index=index)
+            continue
+        non_empty_manifest_words.append(word)
+    if not non_empty_manifest_words:
+        raise ValueError("OpenAI transcription returned no non-empty words.")
     return [
         schemas.LectureVideoManifestWordV3.model_validate(word)
-        for word in manifest_words
+        for word in non_empty_manifest_words
     ]
 
 
@@ -418,12 +772,63 @@ async def delete_gemini_file(name: str | None, client: AsyncClient) -> None:
         logger.warning("Failed to delete Gemini file %s.", name, exc_info=True)
 
 
+async def _write_video_clip(
+    video_path: str,
+    *,
+    temp_dir: str,
+    chunk: ManifestGenerationChunk,
+) -> str:
+    def run_ffmpeg() -> str:
+        ffmpeg_path = shutil.which("ffmpeg")
+        if ffmpeg_path is None:
+            raise RuntimeError(
+                "ffmpeg is required for chunked lecture video generation."
+            )
+
+        source_suffix = Path(video_path).suffix or ".mp4"
+        output_path = (
+            Path(temp_dir)
+            / f"manifest_chunk_{chunk.context_start_ms}_{chunk.context_end_ms}{source_suffix}"
+        )
+        duration_seconds = (chunk.context_end_ms - chunk.context_start_ms) / 1000
+        subprocess.run(
+            [
+                ffmpeg_path,
+                "-y",
+                "-ss",
+                f"{chunk.context_start_ms / 1000:.3f}",
+                "-t",
+                f"{duration_seconds:.3f}",
+                "-i",
+                video_path,
+                "-map",
+                "0",
+                "-c",
+                "copy",
+                "-avoid_negative_ts",
+                "make_zero",
+                str(output_path),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60 * 20,
+        )
+        return str(output_path)
+
+    return await asyncio.to_thread(run_ffmpeg)
+
+
 def build_generation_prompt(
     content_section: str,
     transcript: list[schemas.LectureVideoManifestWordV3],
     *,
     compact: bool = False,
     video_duration_ms: int | None = None,
+    generation_start_ms: int | None = None,
+    generation_end_ms: int | None = None,
+    context_start_ms: int | None = None,
+    context_end_ms: int | None = None,
 ) -> str:
     if compact:
         transcript_text = "\n".join(
@@ -452,10 +857,63 @@ def build_generation_prompt(
         if video_duration_ms is not None
         else ""
     )
+    generation_window_text = ""
+    video_description_scope = "the whole video"
+    video_description_start_rule = (
+        "Use consecutive millisecond ranges starting at 0: 0-30000, "
+        "30000-60000, 60000-90000, and so on through the full video."
+    )
+    video_description_end_rule = (
+        "The final segment must end exactly at the video duration. It may be "
+        "shorter than 30 seconds. Never set the final end_offset_ms after the "
+        "end of the video."
+    )
+    video_description_reminder = (
+        'The top-level "video_descriptions" array is REQUIRED for video-based '
+        "generation. It must be non-empty and must use contiguous millisecond "
+        "windows starting at 0. The final segment must end exactly at the video "
+        "duration, not after it."
+    )
+    if generation_start_ms is not None and generation_end_ms is not None:
+        video_description_scope = "the requested generation window"
+        video_description_start_rule = (
+            "Use consecutive millisecond ranges starting at the requested "
+            "generation window start. Use absolute offsets from the original "
+            "video, not clip-relative offsets."
+        )
+        video_description_end_rule = (
+            "The final segment must end exactly at the requested generation "
+            "window end. It may be shorter than 30 seconds. Never set the final "
+            "end_offset_ms after the requested generation window end."
+        )
+        video_description_reminder = (
+            'The top-level "video_descriptions" array is REQUIRED for '
+            "video-based generation. It must be non-empty and must use "
+            "contiguous millisecond windows starting at the requested generation "
+            "window start. The final segment must end exactly at the requested "
+            "generation window end, not after it."
+        )
+        context_window_text = (
+            f" The provided video clip covers absolute offsets "
+            f"{context_start_ms}ms through {context_end_ms}ms."
+            if context_start_ms is not None and context_end_ms is not None
+            else ""
+        )
+        generation_window_text = f"""
+
+CHUNK BOUNDARIES:
+This is one chunk from a longer lecture video.{context_window_text}
+Clip time 0 corresponds to absolute offset {context_start_ms or 0}ms in the original video.
+Use the whole clip as context, but generate output ONLY for the generation window from {generation_start_ms}ms through {generation_end_ms}ms.
+Do not create questions with pause points before {generation_start_ms}ms or after {generation_end_ms}ms.
+Generate "video_descriptions" starting exactly at {generation_start_ms}ms and ending exactly at {generation_end_ms}ms.
+Every non-final video description segment inside this generation window must be exactly 30000ms long.
+"""
 
     return f"""You are an expert educational content designer specializing in interactive video lessons. You speak as the teacher in first person, directly to the student.
 
 You will be given a lecture video and a word-level transcript. {transcript_description}{duration_text}
+{generation_window_text}
 
 Here's the WORD-LEVEL TRANSCRIPT:
 {transcript_text}
@@ -466,12 +924,12 @@ To ensure high confidence in analyzing the lesson, watch the video along with th
 YOUR TASK:
 Analyze the provided lesson materials to identify natural pause points where a multiple-choice comprehension check can be inserted. At each pause point, the video will stop, a question will be displayed as text on screen, and a voice clone of the teacher will introduce the question out loud. After the student selects an answer, the voice clone will give spoken feedback, and the video will resume. The resume point may differ depending on which answer the student chose.
 
-Also create a top-level "video_descriptions" array that describes what is visibly happening in fixed 30-second windows across the whole video.
+Also create a top-level "video_descriptions" array that describes what is visibly happening in fixed 30-second windows across {video_description_scope}.
 
 VISUAL DESCRIPTION GUIDELINES:
-- Use consecutive millisecond ranges starting at 0: 0-30000, 30000-60000, 60000-90000, and so on through the full video.
+- {video_description_start_rule}
 - Every segment except the final segment must be exactly 30 seconds long.
-- The final segment must end exactly at the video duration. It may be shorter than 30 seconds. Never set the final end_offset_ms after the end of the video.
+- {video_description_end_rule}
 - Each segment description should be concise and general-purpose, usually 1-2 sentences.
 - Focus only on observable teaching state: screen or board contents, written text, diagrams, values, equations, cursor movement, gesture emphasis, and meaningful visual changes.
 - Do not infer concepts from visuals alone. Tie visual details to what can actually be seen.
@@ -649,7 +1107,7 @@ IMPORTANT REMINDERS:
 - ALL word IDs and timestamps must come directly from the transcript entries. Look up each word's actual "id" field — do not count or guess. Copy "word", "start", and "end" exactly.
 - For teacher-posed questions: let them ask it, pause after the question, and resume into the teacher's own answer — do NOT skip past it.
 - For "generated" questions, voice_over_intro MUST include both a pause cue and the question spoken aloud. The student needs to hear it, not just read it.
-- The top-level "video_descriptions" array is REQUIRED for video-based generation. It must be non-empty and must use contiguous millisecond windows starting at 0. The final segment must end exactly at the video duration, not after it.
+- {video_description_reminder}
 
 REDUNDANCY CHECK:
 - Before finalizing each voice_over, read it concatenated with the teacher's words starting at the resume point. If any fact, number, or concept appears in both your feedback AND the teacher's next sentence, remove it from your feedback. The combined audio must never say the same thing twice.
@@ -666,15 +1124,78 @@ def _is_context_limit_error(exc: Exception) -> bool:
     )
 
 
+def _should_split_manifest_chunk_error(exc: Exception) -> bool:
+    error_text = str(exc).lower()
+    return _is_context_limit_error(exc) or (
+        "deadline expired" in error_text and "unavailable" in error_text
+    )
+
+
+def _is_retryable_gemini_generation_error(exc: Exception) -> bool:
+    if _is_context_limit_error(exc):
+        return False
+    error_text = str(exc).lower()
+    return any(
+        marker in error_text
+        for marker in (
+            "500 internal",
+            "503 unavailable",
+            "internal error encountered",
+            "deadline expired",
+            "resource_exhausted",
+            "429",
+        )
+    )
+
+
+async def _generate_manifest_quiz_with_retries(
+    gemini_client: AsyncClient,
+    *,
+    model: str,
+    prompt: str,
+    contents: types.ContentListUnion,
+    response_model: type[_ResponseModelT],
+    request_label: str,
+) -> _ResponseModelT:
+    for attempt in range(1, _GEMINI_GENERATION_MAX_ATTEMPTS + 1):
+        try:
+            return await gemini_helpers.generate_manifest_quiz(
+                gemini_client,
+                model=model,
+                prompt=prompt,
+                contents=contents,
+                response_model=response_model,
+            )
+        except Exception as exc:
+            if (
+                attempt >= _GEMINI_GENERATION_MAX_ATTEMPTS
+                or not _is_retryable_gemini_generation_error(exc)
+            ):
+                raise
+            delay_seconds = _GEMINI_GENERATION_RETRY_DELAY_SECONDS * attempt
+            logger.warning(
+                "Retrying Gemini manifest generation after transient provider "
+                "failure. request_label=%s attempt=%s max_attempts=%s "
+                "delay_seconds=%.1f error=%s",
+                request_label,
+                attempt,
+                _GEMINI_GENERATION_MAX_ATTEMPTS,
+                delay_seconds,
+                exc,
+            )
+            await asyncio.sleep(delay_seconds)
+    raise RuntimeError("Gemini manifest generation retry loop exited unexpectedly.")
+
+
 def _question_to_manifest_question(
     question: GeneratedQuestion,
-    transcript_words_by_id: dict[str, schemas.LectureVideoManifestWordV3],
+    transcript_word_index: TranscriptWordIndex,
 ) -> schemas.LectureVideoManifestQuestionV1:
     choices = question.choices
     feedback_by_choice = question.choice_feedback
     correct_answer = question.correct_answer
     stop_offset_ms = _validated_transcript_timestamp_ms(
-        transcript_words_by_id=transcript_words_by_id,
+        transcript_word_index=transcript_word_index,
         word_id=question.pause_after_word_id,
         word_text=question.pause_after_word,
         timestamp=question.pause_at,
@@ -693,7 +1214,7 @@ def _question_to_manifest_question(
         is_correct = choice_text == correct_answer
         correct_count += 1 if is_correct else 0
         continue_offset_ms = _validated_transcript_timestamp_ms(
-            transcript_words_by_id=transcript_words_by_id,
+            transcript_word_index=transcript_word_index,
             word_id=feedback.resume_at_word_id,
             word_text=feedback.resume_at_word,
             timestamp=feedback.resume_at,
@@ -720,11 +1241,13 @@ def _question_to_manifest_question(
 
 def _fallback_video_descriptions(
     video_duration_ms: int | None,
+    *,
+    start_offset_ms: int = 0,
 ) -> list[schemas.LectureVideoManifestVideoDescriptionV3]:
-    end_offset_ms = max(video_duration_ms or 1, 1)
+    end_offset_ms = max(video_duration_ms or 1, start_offset_ms + 1)
     return [
         schemas.LectureVideoManifestVideoDescriptionV3(
-            start_offset_ms=0,
+            start_offset_ms=start_offset_ms,
             end_offset_ms=end_offset_ms,
             description="Visual descriptions were unavailable for this transcript-only generation pass.",
         )
@@ -745,14 +1268,15 @@ def _video_descriptions_to_manifest_video_descriptions(
 def _validate_manifest_video_descriptions(
     video_descriptions: list[schemas.LectureVideoManifestVideoDescriptionV3],
     *,
-    video_duration_ms: int | None,
+    start_offset_ms: int = 0,
+    end_offset_ms: int | None,
 ) -> str | None:
     if len(video_descriptions) == 0:
         return "video_descriptions is empty"
-    if video_duration_ms is None:
+    if end_offset_ms is None:
         return None
 
-    expected_start_offset_ms = 0
+    expected_start_offset_ms = start_offset_ms
     for index, description in enumerate(video_descriptions):
         if description.start_offset_ms != expected_start_offset_ms:
             return (
@@ -778,10 +1302,10 @@ def _validate_manifest_video_descriptions(
         expected_start_offset_ms = description.end_offset_ms
 
     final_end_offset_ms = video_descriptions[-1].end_offset_ms
-    if final_end_offset_ms != video_duration_ms:
+    if final_end_offset_ms != end_offset_ms:
         return (
             f"final video description ends at {final_end_offset_ms}ms; "
-            f"expected video duration {video_duration_ms}ms"
+            f"expected video duration {end_offset_ms}ms"
         )
     return None
 
@@ -789,11 +1313,13 @@ def _validate_manifest_video_descriptions(
 def _validated_or_fallback_video_descriptions(
     video_descriptions: list[schemas.LectureVideoManifestVideoDescriptionV3],
     *,
-    video_duration_ms: int | None,
+    start_offset_ms: int = 0,
+    end_offset_ms: int | None,
 ) -> list[schemas.LectureVideoManifestVideoDescriptionV3]:
     validation_error = _validate_manifest_video_descriptions(
         video_descriptions,
-        video_duration_ms=video_duration_ms,
+        start_offset_ms=start_offset_ms,
+        end_offset_ms=end_offset_ms,
     )
     if validation_error is None:
         return video_descriptions
@@ -803,7 +1329,37 @@ def _validated_or_fallback_video_descriptions(
         "Falling back to transcript-only visual description.",
         validation_error,
     )
-    return _fallback_video_descriptions(video_duration_ms)
+    return _fallback_video_descriptions(
+        end_offset_ms,
+        start_offset_ms=start_offset_ms,
+    )
+
+
+def _validated_or_fallback_chunk_video_descriptions(
+    video_descriptions: list[schemas.LectureVideoManifestVideoDescriptionV3],
+    *,
+    chunk_index: int,
+    start_offset_ms: int,
+    end_offset_ms: int,
+) -> list[schemas.LectureVideoManifestVideoDescriptionV3]:
+    validation_error = _validate_manifest_video_descriptions(
+        video_descriptions,
+        start_offset_ms=start_offset_ms,
+        end_offset_ms=end_offset_ms,
+    )
+    if validation_error is None:
+        return video_descriptions
+
+    logger.warning(
+        "Generated chunk video_descriptions failed structural validation: %s. "
+        "chunk_index=%s Falling back for this chunk only.",
+        validation_error,
+        chunk_index,
+    )
+    return _fallback_video_descriptions(
+        end_offset_ms,
+        start_offset_ms=start_offset_ms,
+    )
 
 
 def _quiz_to_manifest(
@@ -811,22 +1367,288 @@ def _quiz_to_manifest(
     transcript: list[schemas.LectureVideoManifestWordV3],
     *,
     video_duration_ms: int | None,
+    video_description_start_offset_ms: int = 0,
+    video_description_end_offset_ms: int | None = None,
 ) -> schemas.LectureVideoManifestV3:
-    transcript_words_by_id = _transcript_words_by_id(transcript)
+    transcript_word_index = _transcript_word_index(transcript)
     video_descriptions = _video_descriptions_to_manifest_video_descriptions(
         quiz.video_descriptions
     )
     video_descriptions = _validated_or_fallback_video_descriptions(
         video_descriptions,
-        video_duration_ms=video_duration_ms,
+        start_offset_ms=video_description_start_offset_ms,
+        end_offset_ms=(
+            video_description_end_offset_ms
+            if video_description_end_offset_ms is not None
+            else video_duration_ms
+        ),
     )
     return schemas.LectureVideoManifestV3(
         word_level_transcription=transcript,
         video_descriptions=video_descriptions,
         questions=[
-            _question_to_manifest_question(question, transcript_words_by_id)
+            _question_to_manifest_question(question, transcript_word_index)
             for question in quiz.questions
         ],
+    )
+
+
+def _gemini_contents_for_file(gemini_file: GeminiFileRef) -> types.ContentListUnion:
+    if gemini_file.uri is None:
+        raise ValueError("Gemini file is missing a URI.")
+    return [
+        types.Part.from_uri(
+            file_uri=gemini_file.uri,
+            mime_type=gemini_file.mime_type,
+        )
+    ]
+
+
+def _filter_questions_for_window(
+    questions: list[schemas.LectureVideoManifestQuestionV1],
+    *,
+    start_offset_ms: int,
+    end_offset_ms: int,
+    is_final_chunk: bool,
+) -> list[schemas.LectureVideoManifestQuestionV1]:
+    return [
+        question
+        for question in questions
+        if start_offset_ms <= question.stop_offset_ms
+        and (
+            question.stop_offset_ms < end_offset_ms
+            or (is_final_chunk and question.stop_offset_ms <= end_offset_ms)
+        )
+    ]
+
+
+def _manifest_question_to_reconciliation_candidate(
+    question: schemas.LectureVideoManifestQuestionV1,
+) -> dict[str, Any]:
+    return {
+        "type": question.type.value,
+        "question_text": question.question_text,
+        "intro_text": question.intro_text,
+        "stop_offset_ms": question.stop_offset_ms,
+        "options": [
+            {
+                "option_text": option.option_text,
+                "post_answer_text": option.post_answer_text,
+                "continue_offset_ms": option.continue_offset_ms,
+                "correct": option.correct,
+            }
+            for option in question.options
+        ],
+    }
+
+
+def _reconciliation_prompt(generation_prompt_content: str) -> str:
+    return f"""You are an expert educational content designer reconciling independently generated interactive question candidates from chunks of one lecture video.
+
+You will be given:
+- The instructor's generation guidance.
+- The full word-level transcript for the complete video.
+- The final merged video_descriptions for the complete video.
+- Candidate questions generated independently from video chunks.
+
+Your task is to create the final question list for the complete video.
+
+Global requirements:
+- Follow the instructor's generation guidance globally, not per chunk. If it asks for a specific number of questions, output that number total across the whole video.
+- Candidate questions are suggestions, not requirements. You may keep, drop, rewrite, merge, or replace them to satisfy the instructor guidance.
+- Remove duplicate or near-duplicate questions, especially near chunk boundaries.
+- Prefer natural conceptual breakpoints and keep the selected questions appropriately spread across the complete video unless the instructor guidance says otherwise.
+- Preserve teacher-posed questions when they are pedagogically better than generated questions.
+- Do not include questions that depend on context outside their pause/resume location.
+- All pause and resume word IDs, words, and timestamps in your output must come exactly from the full transcript.
+- Do not invent word IDs or timestamps. Copy the "id", "word", "start", and "end" values from one transcript entry.
+- For teacher-posed questions, let the teacher ask the question and pause after the full question.
+- For generated questions, voice_over_intro must include both a pause cue and the question spoken aloud.
+- Output only JSON matching the requested schema.
+
+INSTRUCTOR GENERATION GUIDANCE:
+{generation_prompt_content.strip() or DEFAULT_GENERATION_PROMPT_CONTENT}
+"""
+
+
+def _reconciliation_payload(
+    *,
+    transcript: list[schemas.LectureVideoManifestWordV3],
+    video_descriptions: list[schemas.LectureVideoManifestVideoDescriptionV3],
+    chunk_manifests: list[schemas.LectureVideoManifestV3],
+    video_duration_ms: int | None,
+) -> str:
+    payload = {
+        "video_duration_ms": video_duration_ms,
+        "word_level_transcript": [
+            _word_to_generation_word(word, index)
+            for index, word in enumerate(transcript)
+        ],
+        "video_descriptions": [
+            description.model_dump() for description in video_descriptions
+        ],
+        "candidate_question_groups": [
+            {
+                "candidate_group_index": index,
+                "questions": [
+                    _manifest_question_to_reconciliation_candidate(question)
+                    for question in manifest.questions
+                ],
+            }
+            for index, manifest in enumerate(chunk_manifests)
+        ],
+    }
+    return json.dumps(payload, indent=2)
+
+
+def _final_questions_to_manifest(
+    quiz: ReconciledGeneratedQuiz,
+    transcript: list[schemas.LectureVideoManifestWordV3],
+) -> list[schemas.LectureVideoManifestQuestionV1]:
+    transcript_word_index = _transcript_word_index(transcript)
+    return [
+        _question_to_manifest_question(question, transcript_word_index)
+        for question in quiz.questions
+    ]
+
+
+async def _reconcile_chunk_questions(
+    *,
+    gemini_client: AsyncClient,
+    generation_prompt_content: str,
+    transcript: list[schemas.LectureVideoManifestWordV3],
+    video_descriptions: list[schemas.LectureVideoManifestVideoDescriptionV3],
+    chunk_manifests: list[schemas.LectureVideoManifestV3],
+    video_duration_ms: int | None,
+    model: str,
+) -> list[schemas.LectureVideoManifestQuestionV1]:
+    quiz = await _generate_manifest_quiz_with_retries(
+        gemini_client,
+        model=model,
+        prompt=_reconciliation_prompt(generation_prompt_content),
+        contents=[
+            types.Part.from_text(
+                text=_reconciliation_payload(
+                    transcript=transcript,
+                    video_descriptions=video_descriptions,
+                    chunk_manifests=chunk_manifests,
+                    video_duration_ms=video_duration_ms,
+                )
+            )
+        ],
+        response_model=ReconciledGeneratedQuiz,
+        request_label="manifest_reconciliation",
+    )
+    return _final_questions_to_manifest(quiz, transcript)
+
+
+async def _merge_chunk_manifests(
+    *,
+    gemini_client: AsyncClient,
+    generation_prompt_content: str,
+    model: str,
+    chunk_manifests: list[schemas.LectureVideoManifestV3],
+    full_transcript: list[schemas.LectureVideoManifestWordV3],
+    video_duration_ms: int | None,
+) -> schemas.LectureVideoManifestV3:
+    if video_duration_ms is None:
+        video_descriptions = [
+            description
+            for manifest in chunk_manifests
+            for description in manifest.video_descriptions
+        ]
+        video_descriptions = _validated_or_fallback_video_descriptions(
+            video_descriptions,
+            end_offset_ms=video_duration_ms,
+        )
+    else:
+        video_descriptions = []
+        expected_start_offset_ms = 0
+        for index, manifest in enumerate(chunk_manifests):
+            chunk_end_offset_ms = (
+                video_duration_ms
+                if index == len(chunk_manifests) - 1
+                else max(
+                    manifest.video_descriptions[-1].end_offset_ms,
+                    expected_start_offset_ms + 1,
+                )
+            )
+            chunk_descriptions = _validated_or_fallback_chunk_video_descriptions(
+                manifest.video_descriptions,
+                chunk_index=index,
+                start_offset_ms=expected_start_offset_ms,
+                end_offset_ms=chunk_end_offset_ms,
+            )
+            video_descriptions.extend(chunk_descriptions)
+            expected_start_offset_ms = chunk_descriptions[-1].end_offset_ms
+        if expected_start_offset_ms < video_duration_ms:
+            video_descriptions.extend(
+                _fallback_video_descriptions(
+                    video_duration_ms,
+                    start_offset_ms=expected_start_offset_ms,
+                )
+            )
+    questions = await _reconcile_chunk_questions(
+        gemini_client=gemini_client,
+        generation_prompt_content=generation_prompt_content,
+        transcript=full_transcript,
+        video_descriptions=video_descriptions,
+        chunk_manifests=chunk_manifests,
+        video_duration_ms=video_duration_ms,
+        model=model,
+    )
+    return schemas.LectureVideoManifestV3(
+        word_level_transcription=full_transcript,
+        video_descriptions=video_descriptions,
+        questions=questions,
+    )
+
+
+async def _generate_manifest_from_gemini_file(
+    *,
+    gemini_client: AsyncClient,
+    gemini_file: GeminiFileRef,
+    generation_prompt_content: str,
+    transcript: list[schemas.LectureVideoManifestWordV3],
+    video_duration_ms: int | None,
+    model: str,
+    compact: bool = False,
+    generation_start_ms: int | None = None,
+    generation_end_ms: int | None = None,
+    context_start_ms: int | None = None,
+    context_end_ms: int | None = None,
+) -> schemas.LectureVideoManifestV3:
+    prompt = build_generation_prompt(
+        generation_prompt_content,
+        transcript,
+        compact=compact,
+        video_duration_ms=video_duration_ms,
+        generation_start_ms=generation_start_ms,
+        generation_end_ms=generation_end_ms,
+        context_start_ms=context_start_ms,
+        context_end_ms=context_end_ms,
+    )
+    request_label = (
+        "manifest_chunk_compact"
+        if compact
+        else "manifest_chunk"
+        if generation_start_ms is not None
+        else "manifest_full"
+    )
+    quiz = await _generate_manifest_quiz_with_retries(
+        gemini_client,
+        model=model,
+        prompt=prompt,
+        contents=_gemini_contents_for_file(gemini_file),
+        response_model=GeneratedQuizWithVideo,
+        request_label=request_label,
+    )
+    return _quiz_to_manifest(
+        quiz,
+        transcript,
+        video_duration_ms=video_duration_ms,
+        video_description_start_offset_ms=generation_start_ms or 0,
+        video_description_end_offset_ms=generation_end_ms,
     )
 
 
@@ -840,44 +1662,278 @@ async def generate_manifest(
     model: str = _GEMINI_MODEL,
 ) -> schemas.LectureVideoManifestV3:
     video_duration_ms = await _ffprobe_duration_ms(video_path)
-    prompt = build_generation_prompt(
-        generation_prompt_content,
-        transcript,
-        video_duration_ms=video_duration_ms,
-    )
-    if gemini_file.uri is None:
-        raise ValueError("Gemini file is missing a URI.")
-    contents: types.ContentListUnion = [
-        types.Part.from_uri(
-            file_uri=gemini_file.uri,
-            mime_type=gemini_file.mime_type,
-        )
-    ]
     try:
-        quiz = await gemini_helpers.generate_manifest_quiz(
-            gemini_client,
+        return await _generate_manifest_from_gemini_file(
+            gemini_client=gemini_client,
+            gemini_file=gemini_file,
+            generation_prompt_content=generation_prompt_content,
+            transcript=transcript,
+            video_duration_ms=video_duration_ms,
             model=model,
-            prompt=prompt,
-            contents=contents,
-            response_model=GeneratedQuizWithVideo,
         )
     except Exception as exc:
         if not _is_context_limit_error(exc):
             raise
-        compact_prompt = build_generation_prompt(
-            generation_prompt_content,
-            transcript,
+        return await _generate_manifest_from_gemini_file(
+            gemini_client=gemini_client,
+            gemini_file=gemini_file,
+            generation_prompt_content=generation_prompt_content,
+            transcript=transcript,
+            video_duration_ms=video_duration_ms,
+            model=model,
             compact=True,
+        )
+
+
+async def _upload_and_generate_whole_manifest(
+    *,
+    video_path: str,
+    gemini_client: AsyncClient,
+    generation_prompt_content: str,
+    transcript: list[schemas.LectureVideoManifestWordV3],
+    video_duration_ms: int | None,
+    model: str,
+) -> schemas.LectureVideoManifestV3:
+    gemini_file_name: str | None = None
+    try:
+        logger.info("Uploading full lecture video to Gemini for manifest generation.")
+        gemini_file = await upload_video_to_gemini(video_path, gemini_client)
+        gemini_file_name = gemini_file.name
+        logger.info(
+            "Generating lecture video manifest from full Gemini upload. gemini_file=%s",
+            gemini_file_name,
+        )
+        try:
+            return await _generate_manifest_from_gemini_file(
+                gemini_client=gemini_client,
+                gemini_file=gemini_file,
+                generation_prompt_content=generation_prompt_content,
+                transcript=transcript,
+                video_duration_ms=video_duration_ms,
+                model=model,
+            )
+        except Exception as exc:
+            if not _is_context_limit_error(exc):
+                raise
+            return await _generate_manifest_from_gemini_file(
+                gemini_client=gemini_client,
+                gemini_file=gemini_file,
+                generation_prompt_content=generation_prompt_content,
+                transcript=transcript,
+                video_duration_ms=video_duration_ms,
+                model=model,
+                compact=True,
+            )
+    finally:
+        if gemini_file_name is not None:
+            logger.info(
+                "Deleting full lecture video Gemini upload. gemini_file=%s",
+                gemini_file_name,
+            )
+            await delete_gemini_file(gemini_file_name, gemini_client)
+
+
+async def _upload_and_generate_manifest_chunk(
+    *,
+    video_path: str,
+    gemini_client: AsyncClient,
+    generation_prompt_content: str,
+    transcript: list[schemas.LectureVideoManifestWordV3],
+    video_duration_ms: int,
+    chunk: ManifestGenerationChunk,
+    temp_dir: str,
+    model: str,
+) -> schemas.LectureVideoManifestV3:
+    chunk_transcript = _transcript_for_window(
+        transcript,
+        start_offset_ms=chunk.context_start_ms,
+        end_offset_ms=chunk.context_end_ms,
+    )
+    clip_path = await _write_video_clip(video_path, temp_dir=temp_dir, chunk=chunk)
+    gemini_file_name: str | None = None
+    try:
+        logger.info(
+            "Uploading lecture video chunk to Gemini for manifest generation. "
+            "generation_start_ms=%s generation_end_ms=%s context_start_ms=%s "
+            "context_end_ms=%s",
+            chunk.generation_start_ms,
+            chunk.generation_end_ms,
+            chunk.context_start_ms,
+            chunk.context_end_ms,
+        )
+        gemini_file = await upload_video_to_gemini(clip_path, gemini_client)
+        gemini_file_name = gemini_file.name
+        logger.info(
+            "Generating lecture video manifest chunk. gemini_file=%s "
+            "generation_start_ms=%s generation_end_ms=%s",
+            gemini_file_name,
+            chunk.generation_start_ms,
+            chunk.generation_end_ms,
+        )
+        try:
+            manifest = await _generate_manifest_from_gemini_file(
+                gemini_client=gemini_client,
+                gemini_file=gemini_file,
+                generation_prompt_content=generation_prompt_content,
+                transcript=chunk_transcript,
+                video_duration_ms=video_duration_ms,
+                model=model,
+                generation_start_ms=chunk.generation_start_ms,
+                generation_end_ms=chunk.generation_end_ms,
+                context_start_ms=chunk.context_start_ms,
+                context_end_ms=chunk.context_end_ms,
+            )
+        except Exception as exc:
+            if not _is_context_limit_error(exc):
+                raise
+            manifest = await _generate_manifest_from_gemini_file(
+                gemini_client=gemini_client,
+                gemini_file=gemini_file,
+                generation_prompt_content=generation_prompt_content,
+                transcript=chunk_transcript,
+                video_duration_ms=video_duration_ms,
+                model=model,
+                compact=True,
+                generation_start_ms=chunk.generation_start_ms,
+                generation_end_ms=chunk.generation_end_ms,
+                context_start_ms=chunk.context_start_ms,
+                context_end_ms=chunk.context_end_ms,
+            )
+        manifest.questions = _filter_questions_for_window(
+            manifest.questions,
+            start_offset_ms=chunk.generation_start_ms,
+            end_offset_ms=chunk.generation_end_ms,
+            is_final_chunk=chunk.generation_end_ms == video_duration_ms,
+        )
+        return manifest
+    finally:
+        if gemini_file_name is not None:
+            logger.info(
+                "Deleting lecture video chunk Gemini upload. gemini_file=%s",
+                gemini_file_name,
+            )
+            await delete_gemini_file(gemini_file_name, gemini_client)
+
+
+async def _upload_and_generate_manifest_chunks(
+    *,
+    video_path: str,
+    gemini_client: AsyncClient,
+    generation_prompt_content: str,
+    transcript: list[schemas.LectureVideoManifestWordV3],
+    video_duration_ms: int,
+    chunk: ManifestGenerationChunk,
+    temp_dir: str,
+    model: str,
+) -> list[schemas.LectureVideoManifestV3]:
+    try:
+        return [
+            await _upload_and_generate_manifest_chunk(
+                video_path=video_path,
+                gemini_client=gemini_client,
+                generation_prompt_content=generation_prompt_content,
+                transcript=transcript,
+                video_duration_ms=video_duration_ms,
+                chunk=chunk,
+                temp_dir=temp_dir,
+                model=model,
+            )
+        ]
+    except Exception as exc:
+        if (
+            not _should_split_manifest_chunk_error(exc)
+            or chunk.generation_duration_ms <= _MANIFEST_CHUNK_MIN_SPLIT_MS
+        ):
+            raise
+        child_chunks = _split_manifest_generation_chunk(
+            chunk,
             video_duration_ms=video_duration_ms,
         )
-        quiz = await gemini_helpers.generate_manifest_quiz(
-            gemini_client,
-            model=model,
-            prompt=compact_prompt,
-            contents=contents,
-            response_model=GeneratedQuizWithVideo,
+        logger.info(
+            "Splitting lecture video manifest chunk after provider limit. "
+            "generation_start_ms=%s generation_end_ms=%s split_ms=%s",
+            chunk.generation_start_ms,
+            chunk.generation_end_ms,
+            child_chunks[0].generation_end_ms,
         )
-    return _quiz_to_manifest(quiz, transcript, video_duration_ms=video_duration_ms)
+        chunk_manifests: list[schemas.LectureVideoManifestV3] = []
+        for child_chunk in child_chunks:
+            chunk_manifests.extend(
+                await _upload_and_generate_manifest_chunks(
+                    video_path=video_path,
+                    gemini_client=gemini_client,
+                    generation_prompt_content=generation_prompt_content,
+                    transcript=transcript,
+                    video_duration_ms=video_duration_ms,
+                    chunk=child_chunk,
+                    temp_dir=temp_dir,
+                    model=model,
+                )
+            )
+        return chunk_manifests
+
+
+async def upload_and_generate_manifest(
+    *,
+    video_path: str,
+    gemini_client: AsyncClient,
+    generation_prompt_content: str,
+    transcript: list[schemas.LectureVideoManifestWordV3],
+    temp_dir: str,
+    model: str = _GEMINI_MODEL,
+) -> schemas.LectureVideoManifestV3:
+    video_duration_ms = await _ffprobe_duration_ms(video_path)
+    chunks = _plan_manifest_generation_chunks(video_duration_ms)
+    if len(chunks) == 1:
+        try:
+            return await _upload_and_generate_whole_manifest(
+                video_path=video_path,
+                gemini_client=gemini_client,
+                generation_prompt_content=generation_prompt_content,
+                transcript=transcript,
+                video_duration_ms=video_duration_ms,
+                model=model,
+            )
+        except Exception as exc:
+            if (
+                video_duration_ms is None
+                or not _should_split_manifest_chunk_error(exc)
+                or chunks[0].generation_duration_ms <= _MANIFEST_CHUNK_MIN_SPLIT_MS
+            ):
+                raise
+            chunks = _split_manifest_generation_chunk(
+                chunks[0],
+                video_duration_ms=video_duration_ms,
+            )
+
+    logger.info(
+        "Generating lecture video manifest in chunks. video_duration_ms=%s "
+        "chunk_count=%s",
+        video_duration_ms,
+        len(chunks),
+    )
+    chunk_manifests: list[schemas.LectureVideoManifestV3] = []
+    for chunk in chunks:
+        chunk_manifests.extend(
+            await _upload_and_generate_manifest_chunks(
+                video_path=video_path,
+                gemini_client=gemini_client,
+                generation_prompt_content=generation_prompt_content,
+                transcript=transcript,
+                video_duration_ms=video_duration_ms or chunk.generation_end_ms,
+                chunk=chunk,
+                temp_dir=temp_dir,
+                model=model,
+            )
+        )
+    return await _merge_chunk_manifests(
+        gemini_client=gemini_client,
+        generation_prompt_content=generation_prompt_content,
+        model=model,
+        chunk_manifests=chunk_manifests,
+        full_transcript=transcript,
+        video_duration_ms=video_duration_ms,
+    )
 
 
 def video_suffix_for_content_type(content_type: str | None) -> str:

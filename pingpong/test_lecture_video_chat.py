@@ -5,14 +5,15 @@ import pytest
 
 import pingpong.models as models
 import pingpong.schemas as schemas
+import pingpong.lecture_video_service as lecture_video_service
 from pingpong.lecture_video_chat import (
     TRANSCRIPT_CONTEXT_WINDOW_MS,
     build_lecture_chat_context_message_parts,
     _build_frame_message_parts,
-    _build_context_text,
-    _build_context_text_v3,
+    _build_context_text_from_transcript,
+    _build_context_text_v3_from_parts,
     _extract_frame,
-    _serialize_transcript_words,
+    _serialize_transcript_words_v3,
 )
 from pingpong.video_store import VideoInputSource
 
@@ -210,7 +211,7 @@ def test_validate_lecture_video_manifest_rejects_empty_v3_video_descriptions():
         schemas.validate_lecture_video_manifest(payload)
 
 
-def test_serialize_transcript_words_preserves_millisecond_integer_timestamps():
+def test_v2_manifest_words_to_v3_preserves_millisecond_integer_timestamps():
     words = [
         schemas.LectureVideoManifestWordV2(
             id="w1",
@@ -226,13 +227,17 @@ def test_serialize_transcript_words_preserves_millisecond_integer_timestamps():
         ),
     ]
 
-    assert _serialize_transcript_words(words) == [
-        (400, 900, "Latency"),
-        (950, 1400, "matters"),
+    assert lecture_video_service._v2_manifest_words_to_v3(words) == [
+        schemas.LectureVideoManifestWordV3(
+            id="w1", word="Latency", start_offset_ms=400, end_offset_ms=900
+        ),
+        schemas.LectureVideoManifestWordV3(
+            id="w2", word="matters", start_offset_ms=950, end_offset_ms=1400
+        ),
     ]
 
 
-def test_serialize_transcript_words_preserves_second_integer_timestamps():
+def test_v2_manifest_words_to_v3_preserves_second_integer_timestamps():
     words = [
         schemas.LectureVideoManifestWordV2(
             id="w1",
@@ -248,9 +253,19 @@ def test_serialize_transcript_words_preserves_second_integer_timestamps():
         ),
     ]
 
-    assert _serialize_transcript_words(words) == [
-        (10_800_000, 10_801_000, "Protocol"),
-        (10_801_000, 10_802_000, "switch"),
+    assert lecture_video_service._v2_manifest_words_to_v3(words) == [
+        schemas.LectureVideoManifestWordV3(
+            id="w1",
+            word="Protocol",
+            start_offset_ms=10_800_000,
+            end_offset_ms=10_801_000,
+        ),
+        schemas.LectureVideoManifestWordV3(
+            id="w2",
+            word="switch",
+            start_offset_ms=10_801_000,
+            end_offset_ms=10_802_000,
+        ),
     ]
 
 
@@ -288,7 +303,15 @@ def test_build_context_text_caps_initial_transcript_context_window():
         questions=[_build_manifest_question()],
     )
 
-    context_text, current_offset_ms = _build_context_text(thread, state, manifest)
+    context_text, current_offset_ms = _build_context_text_from_transcript(
+        thread,
+        state,
+        _serialize_transcript_words_v3(
+            lecture_video_service._v2_manifest_words_to_v3(
+                manifest.word_level_transcription
+            )
+        ),
+    )
 
     assert current_offset_ms == 180_000
     assert "Recent transcript context" in context_text
@@ -331,7 +354,15 @@ def test_build_context_text_caps_transcript_since_last_chat():
         questions=[_build_manifest_question()],
     )
 
-    context_text, current_offset_ms = _build_context_text(thread, state, manifest)
+    context_text, current_offset_ms = _build_context_text_from_transcript(
+        thread,
+        state,
+        _serialize_transcript_words_v3(
+            lecture_video_service._v2_manifest_words_to_v3(
+                manifest.word_level_transcription
+            )
+        ),
+    )
 
     assert current_offset_ms == 300_000
     assert "Recent transcript since last lecture chat" in context_text
@@ -374,7 +405,15 @@ def test_build_context_text_clamps_last_chat_context_after_backward_seek():
         questions=[_build_manifest_question()],
     )
 
-    context_text, current_offset_ms = _build_context_text(thread, state, manifest)
+    context_text, current_offset_ms = _build_context_text_from_transcript(
+        thread,
+        state,
+        _serialize_transcript_words_v3(
+            lecture_video_service._v2_manifest_words_to_v3(
+                manifest.word_level_transcription
+            )
+        ),
+    )
 
     assert current_offset_ms == 120_000
     assert "Recent transcript context" in context_text
@@ -418,10 +457,11 @@ def test_build_context_text_v3_watching_status_and_filters_descriptions():
         questions=[_build_manifest_question()],
     )
 
-    context_text, current_offset_ms = _build_context_text_v3(
+    context_text, current_offset_ms = _build_context_text_v3_from_parts(
         thread,
         state,
-        manifest,
+        word_level_transcription=manifest.word_level_transcription,
+        video_descriptions=manifest.video_descriptions,
         answered_knowledge_checks="None",
     )
 
@@ -472,10 +512,11 @@ def test_build_context_text_v3_marks_omitted_transcript_since_last_chat():
         questions=[_build_manifest_question()],
     )
 
-    context_text, current_offset_ms = _build_context_text_v3(
+    context_text, current_offset_ms = _build_context_text_v3_from_parts(
         thread,
         state,
-        manifest,
+        word_level_transcription=manifest.word_level_transcription,
+        video_descriptions=manifest.video_descriptions,
         answered_knowledge_checks="None",
     )
 
@@ -554,7 +595,20 @@ async def test_build_lecture_chat_context_message_parts_v3_markdown_without_imag
         id=123,
         lecture_video=SimpleNamespace(
             id=456,
-            manifest_data=manifest.model_dump(mode="json"),
+            manifest_data={
+                "version": 3,
+                "video_descriptions": [
+                    description.model_dump(mode="json")
+                    for description in manifest.video_descriptions
+                ],
+            },
+            transcript_data={
+                "version": 3,
+                "word_level_transcription": [
+                    word.model_dump(mode="json")
+                    for word in manifest.word_level_transcription
+                ],
+            },
             questions=[first_question, next_question],
         ),
         lecture_video_state=state,

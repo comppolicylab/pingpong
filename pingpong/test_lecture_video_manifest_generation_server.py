@@ -1,3 +1,5 @@
+import importlib.util
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -15,6 +17,26 @@ from .test_lecture_video_server import (
     make_lecture_video,
 )
 from .testutil import with_institution
+
+
+def _load_transcript_data_migration_module():
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "df25d20d0f3a_add_lecture_video_transcript_data.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "transcript_data_migration", migration_path
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+transcript_data_migration = _load_transcript_data_migration_module()
 
 
 def test_create_assistant_rejects_overlong_generation_prompt() -> None:
@@ -436,24 +458,11 @@ async def test_process_claimed_manifest_run_persists_generated_manifest(
         calls.append(("transcribe", (video_path, openai_client, temp_dir)))
         return transcript
 
-    async def fake_upload_video_to_gemini(
-        video_path: str,
-        gemini_client: SimpleNamespace,
-    ) -> SimpleNamespace:
-        calls.append(("upload", (video_path, gemini_client)))
-        return SimpleNamespace(name="gemini-files/test")
-
-    async def fake_generate_manifest(
+    async def fake_upload_and_generate_manifest(
         **kwargs: object,
     ) -> schemas.LectureVideoManifestV3:
         calls.append(("generate", kwargs))
         return manifest
-
-    async def fake_delete_gemini_file(
-        name: str | None,
-        gemini_client: SimpleNamespace,
-    ) -> None:
-        calls.append(("delete", (name, gemini_client)))
 
     async def fake_get_gemini_client_by_class_id(
         session: AsyncSession,
@@ -483,18 +492,8 @@ async def test_process_claimed_manifest_run_persists_generated_manifest(
     )
     monkeypatch.setattr(
         lecture_video_processing.lecture_video_manifest_generation,
-        "upload_video_to_gemini",
-        fake_upload_video_to_gemini,
-    )
-    monkeypatch.setattr(
-        lecture_video_processing.lecture_video_manifest_generation,
-        "generate_manifest",
-        fake_generate_manifest,
-    )
-    monkeypatch.setattr(
-        lecture_video_processing.lecture_video_manifest_generation,
-        "delete_gemini_file",
-        fake_delete_gemini_file,
+        "upload_and_generate_manifest",
+        fake_upload_and_generate_manifest,
     )
 
     async with db.async_session() as session:
@@ -558,9 +557,7 @@ async def test_process_claimed_manifest_run_persists_generated_manifest(
     assert [call[0] for call in calls] == [
         "gemini-client",
         "transcribe",
-        "upload",
         "generate",
-        "delete",
     ]
 
 
@@ -626,7 +623,7 @@ async def test_process_claimed_manifest_run_marks_video_failed_on_context_load_e
     assert refreshed_video.error_message == error_message
 
 
-async def test_upload_and_generate_manifest_deletes_gemini_upload_on_failure(
+async def test_upload_and_generate_manifest_propagates_generation_failure(
     monkeypatch,
 ):
     calls: list[tuple[str, object]] = []
@@ -646,39 +643,16 @@ async def test_upload_and_generate_manifest_deletes_gemini_upload_on_failure(
             calls.append(("gemini-client", api_key))
             self.aio = FakeGeminiAio()
 
-    async def fake_upload_video_to_gemini(
-        video_path: str,
-        gemini_client: SimpleNamespace,
-    ) -> SimpleNamespace:
-        calls.append(("upload", (video_path, gemini_client)))
-        return SimpleNamespace(name="gemini-files/test")
-
-    async def fake_generate_manifest(
+    async def fake_upload_and_generate_manifest(
         **kwargs: object,
     ) -> schemas.LectureVideoManifestV3:
         calls.append(("generate", kwargs))
         raise RuntimeError("generation failed")
 
-    async def fake_delete_gemini_file(
-        name: str | None,
-        gemini_client: SimpleNamespace,
-    ) -> None:
-        calls.append(("delete", (name, gemini_client)))
-
     monkeypatch.setattr(
         lecture_video_processing.lecture_video_manifest_generation,
-        "upload_video_to_gemini",
-        fake_upload_video_to_gemini,
-    )
-    monkeypatch.setattr(
-        lecture_video_processing.lecture_video_manifest_generation,
-        "generate_manifest",
-        fake_generate_manifest,
-    )
-    monkeypatch.setattr(
-        lecture_video_processing.lecture_video_manifest_generation,
-        "delete_gemini_file",
-        fake_delete_gemini_file,
+        "upload_and_generate_manifest",
+        fake_upload_and_generate_manifest,
     )
 
     with pytest.raises(RuntimeError, match="generation failed"):
@@ -690,23 +664,17 @@ async def test_upload_and_generate_manifest_deletes_gemini_upload_on_failure(
             gemini_client=FakeGeminiClient(api_key="fake-gemini-key"),
             generation_prompt="Generate checks.",
             transcript=transcript,
+            temp_dir="/tmp",
         )
 
     assert [call[0] for call in calls] == [
         "gemini-client",
-        "upload",
         "generate",
-        "delete",
     ]
-    delete_args = calls[-1][1]
-    assert isinstance(delete_args, tuple)
-    assert delete_args[0] == "gemini-files/test"
 
 
 @with_institution(11, "Test Institution")
-async def test_existing_manifest_transcript_requires_loaded_manifest_data(
-    db, institution
-):
+async def test_transcript_reuse_only_requires_loaded_transcript_data(db, institution):
     async with db.async_session() as session:
         class_ = models.Class(
             id=1,
@@ -734,8 +702,344 @@ async def test_existing_manifest_transcript_requires_loaded_manifest_data(
         await session.commit()
 
     async with db.async_session() as session:
-        loaded_video = await models.LectureVideo.get_by_id(session, lecture_video_id)
+        loaded_video = await models.LectureVideo.get_by_id_with_transcript_data(
+            session, lecture_video_id
+        )
         assert loaded_video is not None
 
-        with pytest.raises(RuntimeError, match="manifest_data must be loaded"):
-            lecture_video_processing._existing_manifest_transcript(loaded_video)
+        transcript = lecture_video_processing._existing_manifest_transcript(
+            loaded_video
+        )
+
+    assert transcript is not None
+    assert [word.model_dump(mode="json") for word in transcript] == (
+        manifest.model_dump(mode="json")["word_level_transcription"]
+    )
+
+
+@with_institution(11, "Test Institution")
+async def test_persist_manifest_normalizes_transcript_out_of_manifest_data(
+    db, institution
+):
+    manifest = schemas.LectureVideoManifestV3.model_validate(
+        lecture_video_manifest_v3()
+    )
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        lecture_video = make_lecture_video(
+            class_.id,
+            "normalized-transcript.mp4",
+            filename="normalized-transcript.mp4",
+        )
+        session.add_all([class_, lecture_video])
+        await session.flush()
+
+        await lecture_video_service.persist_manifest(
+            session,
+            lecture_video,
+            manifest,
+            voice_id=DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            manual_manifest=True,
+        )
+        lecture_video_id = lecture_video.id
+        await session.commit()
+
+    async with db.async_session() as session:
+        loaded_video = await models.LectureVideo.get_by_id_with_copy_context(
+            session, lecture_video_id
+        )
+
+    assert loaded_video is not None
+    assert loaded_video.manifest_data is not None
+    assert loaded_video.manifest_data == {
+        "version": 3,
+        "video_descriptions": [
+            description.model_dump(mode="json")
+            for description in manifest.video_descriptions
+        ],
+    }
+    assert "questions" not in loaded_video.manifest_data
+    assert "word_level_transcription" not in loaded_video.manifest_data
+    assert loaded_video.transcript_data is not None
+    assert loaded_video.transcript_data["word_level_transcription"] == [
+        word.model_dump(mode="json") for word in manifest.word_level_transcription
+    ]
+
+    hydrated_manifest = lecture_video_service.lecture_video_manifest_from_model(
+        loaded_video
+    )
+    assert isinstance(hydrated_manifest, schemas.LectureVideoManifestV3)
+    assert (
+        hydrated_manifest.word_level_transcription == manifest.word_level_transcription
+    )
+    assert hydrated_manifest.video_descriptions == manifest.video_descriptions
+
+
+def test_transcript_data_migration_preserves_versionless_v2_manifest_version() -> None:
+    manifest_data = {
+        "questions": [
+            {
+                "type": "single_select",
+                "question_text": "Pick one.",
+                "intro_text": "",
+                "stop_offset_ms": 1000,
+                "options": [
+                    {
+                        "option_text": "Yes",
+                        "post_answer_text": "",
+                        "continue_offset_ms": 1000,
+                        "correct": True,
+                    },
+                    {
+                        "option_text": "No",
+                        "post_answer_text": "",
+                        "continue_offset_ms": 1000,
+                        "correct": False,
+                    },
+                ],
+            }
+        ],
+        "word_level_transcription": [
+            {"id": "w1", "word": "Hello", "start": 0, "end": 1}
+        ],
+    }
+
+    assert (
+        transcript_data_migration._manifest_version_for_split_transcript(manifest_data)
+        == 2
+    )
+
+
+def test_transcript_data_migration_preserves_versionless_v3_manifest_version() -> None:
+    manifest_data = {
+        "questions": [
+            {
+                "type": "single_select",
+                "question_text": "Pick one.",
+                "intro_text": "",
+                "stop_offset_ms": 1000,
+                "options": [
+                    {
+                        "option_text": "Yes",
+                        "post_answer_text": "",
+                        "continue_offset_ms": 1000,
+                        "correct": True,
+                    },
+                    {
+                        "option_text": "No",
+                        "post_answer_text": "",
+                        "continue_offset_ms": 1000,
+                        "correct": False,
+                    },
+                ],
+            }
+        ],
+        "word_level_transcription": [
+            {
+                "id": "w1",
+                "word": "Hello",
+                "start_offset_ms": 0,
+                "end_offset_ms": 1000,
+            }
+        ],
+        "video_descriptions": [
+            {
+                "start_offset_ms": 0,
+                "end_offset_ms": 1000,
+                "description": "The teacher is on screen.",
+            }
+        ],
+    }
+
+    assert (
+        transcript_data_migration._manifest_version_for_split_transcript(manifest_data)
+        == 3
+    )
+
+
+def test_transcript_data_migration_stores_only_v3_manifest_extras() -> None:
+    manifest_data = lecture_video_manifest_v3()
+
+    stored_manifest = transcript_data_migration._manifest_extras_for_storage(
+        manifest_data
+    )
+
+    assert stored_manifest == {
+        "version": 3,
+        "video_descriptions": manifest_data["video_descriptions"],
+    }
+
+
+def test_transcript_data_migration_stores_only_v2_manifest_extras() -> None:
+    manifest_data = {
+        "version": 2,
+        "questions": [
+            {
+                "type": "single_select",
+                "question_text": "Pick one.",
+                "intro_text": "",
+                "stop_offset_ms": 1000,
+                "options": [
+                    {
+                        "option_text": "Yes",
+                        "post_answer_text": "",
+                        "continue_offset_ms": 1000,
+                        "correct": True,
+                    },
+                    {
+                        "option_text": "No",
+                        "post_answer_text": "",
+                        "continue_offset_ms": 1000,
+                        "correct": False,
+                    },
+                ],
+            }
+        ],
+        "word_level_transcription": [
+            {"id": "w1", "word": "Hello", "start": 0, "end": 1}
+        ],
+    }
+
+    assert transcript_data_migration._manifest_extras_for_storage(manifest_data) == {
+        "version": 2
+    }
+
+
+@with_institution(11, "Test Institution")
+async def test_process_claimed_manifest_run_reuses_transcript_data(
+    db, institution, monkeypatch
+):
+    lease_token = "lease-token"
+    existing_manifest = schemas.LectureVideoManifestV3.model_validate(
+        lecture_video_manifest_v3()
+    )
+    generated_manifest = existing_manifest.model_copy(
+        update={
+            "questions": [
+                existing_manifest.questions[0].model_copy(
+                    update={"question_text": "Generated replacement?"}
+                )
+            ]
+        }
+    )
+    calls: list[tuple[str, object]] = []
+
+    class FakeGeminiAio:
+        async def __aenter__(self) -> SimpleNamespace:
+            return SimpleNamespace(name="fake-gemini-client")
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+    class FakeGeminiClient:
+        def __init__(self, *, api_key: str) -> None:
+            calls.append(("gemini-client", api_key))
+            self.aio = FakeGeminiAio()
+
+    async def fail_transcribe_video_words(
+        video_path: str,
+        openai_client: SimpleNamespace,
+        *,
+        temp_dir: str,
+    ) -> list[schemas.LectureVideoManifestWordV3]:
+        raise AssertionError("Whisper should not run when transcript_data exists.")
+
+    async def fake_upload_and_generate_manifest(
+        **kwargs: object,
+    ) -> schemas.LectureVideoManifestV3:
+        calls.append(("generate", kwargs))
+        assert kwargs["transcript"] == existing_manifest.word_level_transcription
+        return generated_manifest
+
+    async def fake_get_gemini_client_by_class_id(
+        session: AsyncSession,
+        class_id: int,
+    ) -> FakeGeminiClient:
+        return FakeGeminiClient(api_key=f"fake-gemini-key-{class_id}")
+
+    monkeypatch.setattr(
+        lecture_video_processing,
+        "get_openai_client_by_class_id",
+        AsyncMock(return_value=SimpleNamespace(name="fake-openai-client")),
+    )
+    monkeypatch.setattr(
+        lecture_video_processing.gemini,
+        "get_gemini_client_by_class_id",
+        fake_get_gemini_client_by_class_id,
+    )
+    monkeypatch.setattr(
+        lecture_video_processing,
+        "_write_video_to_temp_path",
+        AsyncMock(return_value="/tmp/fake-video.mp4"),
+    )
+    monkeypatch.setattr(
+        lecture_video_processing.lecture_video_manifest_generation,
+        "transcribe_video_words",
+        fail_transcribe_video_words,
+    )
+    monkeypatch.setattr(
+        lecture_video_processing.lecture_video_manifest_generation,
+        "upload_and_generate_manifest",
+        fake_upload_and_generate_manifest,
+    )
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        lecture_video = make_lecture_video(
+            1,
+            "retry-with-transcript-data.mp4",
+            status=schemas.LectureVideoStatus.PROCESSING.value,
+        )
+        assistant = models.Assistant(
+            name="Lecture Assistant",
+            class_id=1,
+            interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+            version=3,
+            lecture_video=lecture_video,
+            instructions="You are a lecture assistant.",
+            model="gpt-4o-mini",
+            tools="[]",
+            use_latex=False,
+            use_image_descriptions=False,
+            hide_prompt=False,
+        )
+        session.add_all([class_, lecture_video, assistant])
+        await session.flush()
+        await lecture_video_service.persist_manifest(
+            session,
+            lecture_video,
+            existing_manifest,
+            create_narration_placeholders=False,
+        )
+        lecture_video.status = schemas.LectureVideoStatus.PROCESSING
+        run = await models.LectureVideoProcessingRun.create(
+            session,
+            lecture_video_id=lecture_video.id,
+            lecture_video_id_snapshot=lecture_video.id,
+            class_id=class_.id,
+            assistant_id_at_start=None,
+            stage=schemas.LectureVideoProcessingStage.MANIFEST_GENERATION,
+            attempt_number=1,
+            status=schemas.LectureVideoProcessingRunStatus.RUNNING,
+        )
+        run.lease_token = lease_token
+        run_id = run.id
+        await session.commit()
+
+    await lecture_video_processing._process_claimed_manifest_run(run_id, lease_token)
+
+    assert [call[0] for call in calls] == [
+        "gemini-client",
+        "generate",
+    ]

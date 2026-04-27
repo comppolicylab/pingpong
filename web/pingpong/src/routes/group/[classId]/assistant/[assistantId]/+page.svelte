@@ -3463,7 +3463,7 @@
 													><div class="flex flex-row gap-1">
 														<div>Generation Instructions</div>
 														{#if generationPromptEdited}<div>&middot;</div>
-															<div class="text-gray-500">Edited</div>{/if}
+															<div class="text-gray-500">Edited from default</div>{/if}
 													</div></Label
 												>
 											</div>

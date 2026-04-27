@@ -8730,7 +8730,7 @@ async def get_assistant_lecture_video_config(
     if assistant.lecture_video_id is None:
         raise HTTPException(404, "Lecture video not found.")
 
-    lecture_video = await models.LectureVideo.get_by_id_with_copy_context(
+    lecture_video = await models.LectureVideo.get_by_id_with_manifest_context(
         request.state["db"], assistant.lecture_video_id
     )
     if lecture_video is None:
