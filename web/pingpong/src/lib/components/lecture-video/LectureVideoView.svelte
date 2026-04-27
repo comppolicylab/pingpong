@@ -446,7 +446,6 @@
 
 	async function refreshLesson() {
 		if (!browser) return;
-		await invalidateAll();
 		await initSession();
 	}
 
