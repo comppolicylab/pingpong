@@ -255,10 +255,18 @@ def _set_last_known_offset_ms(
 
 
 def _set_seek_offset_ms(
-    state: models.LectureVideoThreadState, *, from_offset_ms: int, to_offset_ms: int
+    state: models.LectureVideoThreadState,
+    *,
+    from_offset_ms: int,
+    to_offset_ms: int,
+    plausible_offset_ms: int,
 ) -> None:
     state.last_known_offset_ms = to_offset_ms
-    state.furthest_offset_ms = max(state.furthest_offset_ms, to_offset_ms)
+    state.furthest_offset_ms = max(
+        state.furthest_offset_ms,
+        to_offset_ms,
+        from_offset_ms if from_offset_ms <= plausible_offset_ms else 0,
+    )
 
 
 def _normalize_interaction_time(timestamp: datetime | None) -> datetime | None:
@@ -858,6 +866,7 @@ async def _handle_seeked(
         state,
         from_offset_ms=request.from_offset_ms,
         to_offset_ms=request.to_offset_ms,
+        plausible_offset_ms=plausible_offset_ms,
     )
     await _append_interaction(
         session,

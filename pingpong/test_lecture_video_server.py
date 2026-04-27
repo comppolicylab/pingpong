@@ -2117,6 +2117,113 @@ async def test_lecture_video_interactions_record_seek_and_end_events(
         ("user:123", "student", "class:1"),
     ]
 )
+async def test_lecture_video_seek_preserves_plausible_watched_from_offset_after_check(
+    api, authz, config, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_, lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+        lecture_video = await models.LectureVideo.get_by_id_with_copy_context(
+            session, lecture_video.id
+        )
+        question = lecture_video.questions[0]
+        option = question.options[0]
+
+    create_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/lecture",
+        json={"assistant_id": 1, "parties": [123]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+    thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
+
+    acquire = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert acquire.status_code == 200
+    controller_session_id = acquire.json()["controller_session_id"]
+
+    present_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "question_presented",
+            "controller_session_id": controller_session_id,
+            "expected_state_version": acquire.json()["lecture_video_session"][
+                "state_version"
+            ],
+            "idempotency_key": "question-presented",
+            "question_id": question.id,
+            "offset_ms": question.stop_offset_ms,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert present_response.status_code == 200
+
+    answer_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "answer_submitted",
+            "controller_session_id": controller_session_id,
+            "expected_state_version": present_response.json()["lecture_video_session"][
+                "state_version"
+            ],
+            "idempotency_key": "question-answer",
+            "question_id": question.id,
+            "option_id": option.id,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert answer_response.status_code == 200
+
+    resume_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "video_resumed",
+            "controller_session_id": controller_session_id,
+            "expected_state_version": answer_response.json()["lecture_video_session"][
+                "state_version"
+            ],
+            "idempotency_key": "post-answer-resume",
+            "offset_ms": option.continue_offset_ms,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert resume_response.status_code == 200
+
+    watched_from_offset_ms = option.continue_offset_ms + 1_000
+    seek_to_offset_ms = option.continue_offset_ms + 250
+    seek_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "video_seeked",
+            "controller_session_id": controller_session_id,
+            "expected_state_version": resume_response.json()["lecture_video_session"][
+                "state_version"
+            ],
+            "idempotency_key": "seek-back-after-check",
+            "from_offset_ms": watched_from_offset_ms,
+            "to_offset_ms": seek_to_offset_ms,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert seek_response.status_code == 200
+    seek_session = seek_response.json()["lecture_video_session"]
+    assert seek_session["last_known_offset_ms"] == seek_to_offset_ms
+    assert seek_session["furthest_offset_ms"] == watched_from_offset_ms
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
+    ]
+)
 async def test_lecture_video_interactions_reject_resume_past_unlocked_progress(
     api, authz, config, db, institution, valid_user_token
 ):
