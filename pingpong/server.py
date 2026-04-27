@@ -11250,9 +11250,14 @@ async def update_assistant(
                     voice_changed and not needs_manifest_generation
                 ):
                     if not overwrite_lecture_video_manifest:
+                        manifest_source_lecture_video = (
+                            current_lecture_video
+                            if current_lecture_video is not None
+                            else target_lecture_video
+                        )
                         existing_manifest = (
                             lecture_video_service.lecture_video_manifest_from_model(
-                                target_lecture_video
+                                manifest_source_lecture_video
                             )
                         )
                         await lecture_video_service.persist_manifest(

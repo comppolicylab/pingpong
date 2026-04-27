@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import json
 import logging
 import subprocess
@@ -17,7 +18,15 @@ from pingpong import gemini as gemini_helpers
 from pingpong.transcription import _prepare_audio_file_for_transcription_async
 
 logger = logging.getLogger(__name__)
-_FFPROBE_MISSING_LOGGED = False
+
+
+@functools.cache
+def _log_missing_ffprobe_once() -> None:
+    logger.warning(
+        "ffprobe is unavailable; lecture video duration will be omitted "
+        "from manifest generation prompts."
+    )
+
 
 DEFAULT_LECTURE_VIDEO_INSTRUCTIONS = """You are a friendly, clear tutor helping a learner during an interactive video lesson.
 
@@ -301,7 +310,6 @@ async def transcribe_video_words(
 
 async def _ffprobe_duration_ms(video_path: str) -> int | None:
     def run_ffprobe() -> int | None:
-        global _FFPROBE_MISSING_LOGGED
         try:
             result = subprocess.run(
                 [
@@ -321,12 +329,7 @@ async def _ffprobe_duration_ms(video_path: str) -> int | None:
             )
             return _timestamp_to_ms(float(result.stdout.strip()))
         except FileNotFoundError:
-            if not _FFPROBE_MISSING_LOGGED:
-                logger.warning(
-                    "ffprobe is unavailable; lecture video duration will be omitted "
-                    "from manifest generation prompts."
-                )
-                _FFPROBE_MISSING_LOGGED = True
+            _log_missing_ffprobe_once()
             return None
         except (
             subprocess.CalledProcessError,

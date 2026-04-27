@@ -143,7 +143,7 @@ async def test_ffprobe_duration_ms_logs_missing_binary_once(
     def fake_run(*args, **kwargs):  # type: ignore[no-untyped-def]
         raise FileNotFoundError("ffprobe")
 
-    monkeypatch.setattr(manifest_generation, "_FFPROBE_MISSING_LOGGED", False)
+    manifest_generation._log_missing_ffprobe_once.cache_clear()
     monkeypatch.setattr(subprocess, "run", fake_run)
 
     with caplog.at_level("WARNING"):

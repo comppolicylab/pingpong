@@ -7668,6 +7668,118 @@ async def test_update_assistant_with_same_lecture_video_id_clones_snapshot_and_p
         ("user:123", "admin", "class:1"),
     ]
 )
+async def test_update_assistant_with_same_lecture_video_id_and_voice_only_clones_existing_manifest(
+    api, db, institution, valid_user_token, monkeypatch
+):
+    patch_lecture_video_model_list(monkeypatch)
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        lecture_video = make_lecture_video(
+            class_.id,
+            "same-video-voice-only.mp4",
+            filename="same-video-voice-only.mp4",
+            status=schemas.LectureVideoStatus.UPLOADED.value,
+        )
+        session.add_all([class_, lecture_video])
+        await create_lecture_video_copy_credentials(session, class_.id)
+        await session.commit()
+        await session.refresh(lecture_video)
+
+    create_response = api.post(
+        "/api/v1/class/1/assistant",
+        json={
+            "name": "Lecture Assistant",
+            "instructions": "Guide the learner through the lecture.",
+            "description": "Lecture presentation assistant",
+            "interaction_mode": "lecture_video",
+            "model": "gpt-4o-mini",
+            "tools": [],
+            "lecture_video_id": lecture_video.id,
+            "lecture_video_manifest": lecture_video_manifest(
+                question_text="Original question?"
+            ),
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+
+    async with db.async_session() as session:
+        created_video = await session.get(models.LectureVideo, lecture_video.id)
+        assert created_video is not None
+        created_video.manual_manifest = False
+        session.add(
+            models.Thread(
+                id=1,
+                name="Lecture Thread",
+                version=3,
+                thread_id="thread-preserve-voice-only-video",
+                class_id=1,
+                assistant_id=1,
+                interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+                lecture_video_id=lecture_video.id,
+                private=True,
+                tools_available="[]",
+            )
+        )
+        session.add(created_video)
+        await session.commit()
+
+    update_response = api.put(
+        "/api/v1/class/1/assistant/1",
+        json={
+            "lecture_video_id": lecture_video.id,
+            "voice_id": "voice-updated",
+            "overwrite_manifest": False,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["lecture_video"]["id"] != lecture_video.id
+
+    async with db.async_session() as session:
+        assistant = await session.get(models.Assistant, 1)
+        original_video = await session.get(models.LectureVideo, lecture_video.id)
+        updated_video = await session.get(
+            models.LectureVideo, assistant.lecture_video_id
+        )
+        original_question = await session.scalar(
+            select(models.LectureVideoQuestion.question_text).where(
+                models.LectureVideoQuestion.lecture_video_id == lecture_video.id
+            )
+        )
+        updated_question = await session.scalar(
+            select(models.LectureVideoQuestion.question_text).where(
+                models.LectureVideoQuestion.lecture_video_id == updated_video.id
+            )
+        )
+
+    assert assistant is not None
+    assert original_video is not None
+    assert updated_video is not None
+    assert updated_video.id != original_video.id
+    assert updated_video.source_lecture_video_id_snapshot == original_video.id
+    assert updated_video.voice_id == "voice-updated"
+    assert original_video.voice_id == DEFAULT_LECTURE_VIDEO_VOICE_ID
+    assert original_question == "Original question?"
+    assert updated_question == "Original question?"
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_assistants", "class:1"),
+        ("user:123", "can_edit", "assistant:1"),
+        ("user:123", "admin", "class:1"),
+    ]
+)
 async def test_update_assistant_with_same_lecture_video_config_is_a_no_op(
     api, db, institution, valid_user_token, monkeypatch
 ):
