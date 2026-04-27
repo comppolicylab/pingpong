@@ -1785,14 +1785,10 @@
 			mcpServersForRequest = mcpServersLocal.map(cleanMcpServerForRequest);
 		}
 		const params = {
-			name: preventEdits ? assistant?.name || '' : body.name.toString(),
+			name: preventEdits ? assistant?.name || '' : assistantName,
 			interaction_mode: interactionMode,
-			description: preventEdits
-				? assistant?.description || ''
-				: normalizeNewlines(body.description.toString()),
-			instructions: preventEdits
-				? assistant?.instructions || ''
-				: normalizeNewlines(body.instructions?.toString() || ''),
+			description: preventEdits ? assistant?.description || '' : normalizeNewlines(description),
+			instructions: preventEdits ? assistant?.instructions || '' : normalizeNewlines(instructions),
 			notes: preventEdits ? assistant?.notes || '' : normalizeNewlines(notes),
 			model: isLectureMode
 				? data.isCreating
