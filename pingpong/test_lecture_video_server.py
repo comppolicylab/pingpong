@@ -7462,7 +7462,9 @@ async def test_create_lecture_video_assistant_requires_gemini_for_generation(
         )
         session.add_all([class_, lecture_video])
         await session.flush()
-        await create_lecture_video_copy_credentials(session, class_.id)
+        await create_lecture_video_copy_credentials(
+            session, class_.id, include_gemini=False
+        )
         await session.commit()
         await session.refresh(lecture_video)
 
@@ -7739,16 +7741,6 @@ async def test_update_assistant_with_new_lecture_video_id_without_manifest_queue
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert create_response.status_code == 200
-
-    async with db.async_session() as session:
-        await session.execute(
-            delete(models.ClassCredential).where(
-                models.ClassCredential.class_id == 1,
-                models.ClassCredential.purpose
-                == schemas.ClassCredentialPurpose.LECTURE_VIDEO_MANIFEST_GENERATION,
-            )
-        )
-        await session.commit()
 
     response = api.put(
         "/api/v1/class/1/assistant/1",
