@@ -787,6 +787,19 @@ async def _write_manifest_generation_temp_video(
                 run_id,
                 lecture_video_id,
             )
+            run = await models.LectureVideoProcessingRun.get_by_id(session, run_id)
+            if (
+                run is not None
+                and run.status == schemas.LectureVideoProcessingRunStatus.RUNNING
+                and run.lease_token == lease_token
+                and run.lecture_video_id_snapshot == lecture_video_id
+            ):
+                await _mark_run_cancelled(
+                    session,
+                    run,
+                    schemas.LectureVideoProcessingCancelReason.LECTURE_VIDEO_DELETED,
+                )
+                await session.commit()
             return None
         video_path = await _await_with_run_lease_heartbeat(
             run_id,

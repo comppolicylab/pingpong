@@ -782,6 +782,65 @@ async def test_process_claimed_run_dispatches_by_stage(db, institution, monkeypa
 
 
 @with_institution(11, "Test Institution")
+async def test_write_manifest_generation_temp_video_cancels_when_video_deleted(
+    db, institution
+):
+    lease_token = "lease-token"
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        lecture_video = make_lecture_video(
+            1,
+            "deleted-before-temp-write.mp4",
+            status=schemas.LectureVideoStatus.PROCESSING.value,
+        )
+        session.add_all([class_, lecture_video])
+        await session.flush()
+        run = await models.LectureVideoProcessingRun.create(
+            session,
+            lecture_video_id=lecture_video.id,
+            lecture_video_id_snapshot=lecture_video.id,
+            class_id=class_.id,
+            assistant_id_at_start=None,
+            stage=schemas.LectureVideoProcessingStage.MANIFEST_GENERATION,
+            attempt_number=1,
+            status=schemas.LectureVideoProcessingRunStatus.RUNNING,
+        )
+        run.lease_token = lease_token
+        run_id = run.id
+        lecture_video_id = lecture_video.id
+        await session.delete(lecture_video)
+        await session.commit()
+
+    video_path = await lecture_video_processing._write_manifest_generation_temp_video(
+        run_id,
+        lease_token,
+        lecture_video_id,
+        "/tmp",
+    )
+
+    async with db.async_session() as session:
+        refreshed_run = await models.LectureVideoProcessingRun.get_by_id(
+            session,
+            run_id,
+        )
+
+    assert video_path is None
+    assert refreshed_run is not None
+    assert refreshed_run.status == schemas.LectureVideoProcessingRunStatus.CANCELLED
+    assert (
+        refreshed_run.cancel_reason
+        == schemas.LectureVideoProcessingCancelReason.LECTURE_VIDEO_DELETED
+    )
+    assert refreshed_run.lease_token is None
+    assert refreshed_run.lease_expires_at is None
+
+
+@with_institution(11, "Test Institution")
 async def test_complete_manifest_generation_run_cancels_when_assistant_detached(
     db, institution
 ):
@@ -6823,6 +6882,7 @@ async def test_get_assistant_lecture_video_config_returns_manifest_and_voice_id(
     )
 
     assert response.status_code == 200
+    schemas.LectureVideoConfigResponse.model_validate(response.json())
     assert response.json() == {
         "lecture_video": {
             "id": 1,
@@ -8210,6 +8270,121 @@ async def test_update_assistant_with_same_lecture_video_config_is_a_no_op(
     assert refreshed_video is not None
     assert refreshed_video.voice_id == DEFAULT_LECTURE_VIDEO_VOICE_ID
     assert question == "No-op question?"
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_assistants", "class:1"),
+        ("user:123", "can_edit", "assistant:1"),
+        ("user:123", "admin", "class:1"),
+    ]
+)
+async def test_update_assistant_from_generated_to_manual_with_same_manifest_persists_manual_mode(
+    api, db, institution, valid_user_token, monkeypatch
+):
+    patch_lecture_video_model_list(monkeypatch)
+    manifest = lecture_video_manifest(question_text="Stable question?")
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        lecture_video = make_lecture_video(
+            class_.id,
+            "generated-to-manual.mp4",
+            filename="generated-to-manual.mp4",
+            status=schemas.LectureVideoStatus.UPLOADED.value,
+        )
+        session.add_all([class_, lecture_video])
+        await create_lecture_video_copy_credentials(session, class_.id)
+        await session.commit()
+        await session.refresh(lecture_video)
+
+    create_response = api.post(
+        "/api/v1/class/1/assistant",
+        json={
+            "name": "Lecture Assistant",
+            "instructions": "Guide the learner through the lecture.",
+            "description": "Lecture presentation assistant",
+            "interaction_mode": "lecture_video",
+            "model": "gpt-4o-mini",
+            "tools": [],
+            "lecture_video_id": lecture_video.id,
+            "lecture_video_manifest": manifest,
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "overwrite_manifest": True,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+
+    generated_response = api.put(
+        "/api/v1/class/1/assistant/1",
+        json={
+            "lecture_video_id": lecture_video.id,
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "overwrite_manifest": False,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert generated_response.status_code == 200
+    generated_video_id = generated_response.json()["lecture_video"]["id"]
+
+    manual_response = api.put(
+        "/api/v1/class/1/assistant/1",
+        json={
+            "lecture_video_id": generated_video_id,
+            "lecture_video_manifest": manifest,
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "overwrite_manifest": True,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert manual_response.status_code == 200
+    manual_video_id = manual_response.json()["lecture_video"]["id"]
+    assert manual_video_id != generated_video_id
+
+    async with db.async_session() as session:
+        assistant = await session.get(models.Assistant, 1)
+        generated_run = await session.scalar(
+            select(models.LectureVideoProcessingRun).where(
+                models.LectureVideoProcessingRun.lecture_video_id_snapshot
+                == generated_video_id,
+                models.LectureVideoProcessingRun.stage
+                == schemas.LectureVideoProcessingStage.MANIFEST_GENERATION,
+            )
+        )
+        manual_video = await models.LectureVideo.get_by_id_with_copy_context(
+            session, manual_video_id
+        )
+        narration_run = await session.scalar(
+            select(models.LectureVideoProcessingRun).where(
+                models.LectureVideoProcessingRun.lecture_video_id_snapshot
+                == manual_video_id,
+                models.LectureVideoProcessingRun.stage
+                == schemas.LectureVideoProcessingStage.NARRATION,
+            )
+        )
+
+    assert assistant is not None
+    assert assistant.lecture_video_id == manual_video_id
+    assert generated_run is not None
+    assert generated_run.status == schemas.LectureVideoProcessingRunStatus.CANCELLED
+    assert (
+        generated_run.cancel_reason
+        == schemas.LectureVideoProcessingCancelReason.ASSISTANT_DETACHED
+    )
+    assert manual_video is not None
+    assert manual_video.manual_manifest is True
+    assert manual_video.questions[0].question_text == "Stable question?"
+    assert narration_run is not None
+    assert narration_run.status == schemas.LectureVideoProcessingRunStatus.QUEUED
 
 
 @with_user(123)

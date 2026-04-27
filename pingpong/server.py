@@ -24,7 +24,6 @@ from fastapi import (
     Response,
     UploadFile,
 )
-from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from openai.types.beta.assistant_create_params import ToolResources
 from openai.types.beta.threads import MessageContentPartParam
@@ -8718,6 +8717,7 @@ async def get_class_lecture_video_editor_policy(
     "/class/{class_id}/assistant/{assistant_id}/lecture-video/config",
     dependencies=[Depends(Authz("can_edit", "assistant:{assistant_id}"))],
     response_model=schemas.LectureVideoConfigResponse,
+    response_model_exclude_unset=True,
 )
 async def get_assistant_lecture_video_config(
     class_id: str,
@@ -8762,20 +8762,25 @@ async def get_assistant_lecture_video_config(
         )
     )
 
-    response = {
+    response_lecture_video_manifest = (
+        lecture_video_manifest.model_dump(mode="json")
+        if lecture_video_manifest is not None
+        else None
+    )
+    response_kwargs: dict[str, Any] = {
         "lecture_video": await lecture_video_service.lecture_video_summary_from_model(
             request.state["db"], lecture_video
         ),
-        "lecture_video_manifest": lecture_video_manifest,
+        "lecture_video_manifest": response_lecture_video_manifest,
         "voice_id": lecture_video.voice_id or "",
         "lecture_video_chat_available": lecture_video_chat_available,
         "overwrite_manifest": lecture_video.manual_manifest,
     }
     if lecture_video.generation_prompt is not None:
-        response["generation_prompt"] = lecture_video.generation_prompt
+        response_kwargs["generation_prompt"] = lecture_video.generation_prompt
     if manifest_generation_status is not None:
-        response["manifest_generation_status"] = manifest_generation_status
-    return JSONResponse(jsonable_encoder(response))
+        response_kwargs["manifest_generation_status"] = manifest_generation_status
+    return schemas.LectureVideoConfigResponse(**response_kwargs)
 
 
 @v1.post(
@@ -11162,6 +11167,12 @@ async def update_assistant(
                 )
 
             prompt_present = "generation_prompt" in req.model_fields_set
+            # Manifest mode transitions:
+            # - manual -> manual: persist the supplied manifest only when it changed.
+            # - manual -> generated: clear manual mode and queue manifest generation.
+            # - generated -> manual: cancel generation and persist the supplied manifest.
+            # - generated -> generated: queue generation only for explicit retry,
+            #   failed/missing output, or generation prompt changes.
             needs_manifest_generation = not overwrite_lecture_video_manifest and (
                 regenerate_requested
                 or lecture_video.manual_manifest
@@ -11233,7 +11244,10 @@ async def update_assistant(
                     target_lecture_video.generation_prompt = (
                         lecture_video_generation_prompt
                     )
-                if overwrite_lecture_video_manifest and lecture_video_manifest:
+                if overwrite_lecture_video_manifest:
+                    manual_manifest = cast(
+                        schemas.LectureVideoManifest, lecture_video_manifest
+                    )
                     await lecture_video_processing.cancel_manifest_generation_processing_runs(
                         request.state["db"],
                         target_lecture_video.id,
@@ -11242,7 +11256,7 @@ async def update_assistant(
                     await lecture_video_service.persist_manifest(
                         request.state["db"],
                         target_lecture_video,
-                        lecture_video_manifest,
+                        manual_manifest,
                         voice_id=lecture_video_voice_id,
                         manual_manifest=True,
                     )
