@@ -44,7 +44,11 @@ from pingpong.schemas import (
     ToolCallType,
     WebSearchActionType,
 )
-from pingpong.elevenlabs import ElevenLabsStreamingTTS, StreamingMarkdownSanitizer
+from pingpong.elevenlabs import (
+    ElevenLabsStreamingTTS,
+    StreamingMarkdownSanitizer,
+    StreamingTTSChunker,
+)
 from starlette.requests import ClientDisconnect
 from datetime import datetime, timezone
 from openai.types.beta.assistant_stream_event import (
@@ -3632,13 +3636,39 @@ async def run_response(
             _tts_enabled = bool(tts_voice_id and tts_api_key)
             _tts_client: ElevenLabsStreamingTTS | None = None
             _tts_sanitizer = StreamingMarkdownSanitizer() if _tts_enabled else None
+            _tts_chunker = StreamingTTSChunker() if _tts_enabled else None
             _tts_audio_task: asyncio.Task | None = None
             _tts_audio_done = asyncio.Event()
             _tts_audio_ready = asyncio.Event()
             _tts_audio_chunk_idx = 0
+            _tts_connect_task: asyncio.Task[ElevenLabsStreamingTTS] | None = None
+            _tts_input_closed = False
 
             async def _tts_cleanup() -> None:
-                nonlocal _tts_client, _tts_audio_task
+                nonlocal _tts_client, _tts_audio_task, _tts_connect_task
+                if _tts_connect_task:
+                    connect_task = _tts_connect_task
+                    _tts_connect_task = None
+                    if not connect_task.done():
+                        connect_task.cancel()
+                    try:
+                        connected_client = await connect_task
+                    except asyncio.CancelledError:
+                        # Expected after explicitly canceling the connect task.
+                        pass
+                    except Exception:
+                        logger.warning("TTS connect cleanup failed", exc_info=True)
+                    else:
+                        if _tts_client is None:
+                            _tts_client = connected_client
+                        elif connected_client is not _tts_client:
+                            try:
+                                await connected_client.cleanup()
+                            except Exception:
+                                logger.warning(
+                                    "TTS orphaned connect cleanup failed",
+                                    exc_info=True,
+                                )
                 if _tts_audio_task and not _tts_audio_task.done():
                     _tts_audio_task.cancel()
                     try:
@@ -3660,6 +3690,29 @@ async def run_response(
                         _tts_client = None
 
             try:
+
+                async def _tts_connect() -> ElevenLabsStreamingTTS:
+                    assert tts_api_key is not None
+                    assert tts_voice_id is not None
+                    tts_client: ElevenLabsStreamingTTS | None = None
+                    try:
+                        tts_client = ElevenLabsStreamingTTS(tts_api_key, tts_voice_id)
+                        await tts_client.connect()
+                        return tts_client
+                    except asyncio.CancelledError:
+                        if tts_client is not None:
+                            try:
+                                await tts_client.cleanup()
+                            except Exception:
+                                logger.warning(
+                                    "TTS connect cancellation cleanup failed",
+                                    exc_info=True,
+                                )
+                        raise
+
+                if _tts_enabled:
+                    _tts_connect_task = asyncio.create_task(_tts_connect())
+
                 stream: AsyncStream[ResponseStreamEvent] = await cli.responses.create(
                     include=include_with,
                     input=input_items,
@@ -3721,17 +3774,74 @@ async def run_response(
                     finally:
                         _tts_audio_done.set()
 
+                async def _tts_start_audio() -> None:
+                    nonlocal _tts_client, _tts_audio_task, _tts_connect_task
+                    if _tts_client is not None:
+                        return
+                    try:
+                        if _tts_connect_task:
+                            _tts_client = await _tts_connect_task
+                            _tts_connect_task = None
+                        else:
+                            assert tts_api_key is not None
+                            assert tts_voice_id is not None
+                            _tts_client = ElevenLabsStreamingTTS(
+                                tts_api_key, tts_voice_id
+                            )
+                            await _tts_client.connect()
+                        handler.enqueue_audio_started()
+                        _tts_audio_task = asyncio.create_task(
+                            _tts_receive_audio(_tts_client)
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Failed to start TTS streaming",
+                            exc_info=True,
+                        )
+                        if _tts_client is not None:
+                            try:
+                                await _tts_client.cleanup()
+                            except Exception:
+                                logger.warning(
+                                    "TTS cleanup after connect failure failed",
+                                    exc_info=True,
+                                )
+                        _tts_client = None
+
                 async def _tts_finish_input() -> None:
-                    if _tts_sanitizer and _tts_client:
+                    if _tts_sanitizer and _tts_chunker and _tts_client:
                         remaining = _tts_sanitizer.flush()
                         if remaining:
                             try:
-                                await _tts_client.send_text(remaining, flush=True)
+                                tts_chunks = _tts_chunker.add(remaining)
+                                for chunk in tts_chunks:
+                                    await _tts_client.send_text(
+                                        chunk,
+                                    )
                             except Exception:
                                 logger.warning(
                                     "TTS final flush failed",
                                     exc_info=True,
                                 )
+                        final_chunk = _tts_chunker.flush()
+                        if final_chunk:
+                            try:
+                                await _tts_client.send_text(
+                                    final_chunk,
+                                    flush=True,
+                                )
+                            except Exception:
+                                logger.warning(
+                                    "TTS final flush failed",
+                                    exc_info=True,
+                                )
+
+                async def _tts_close_input() -> None:
+                    nonlocal _tts_input_closed
+                    if _tts_input_closed:
+                        return
+                    await _tts_finish_input()
+                    if _tts_client:
                         try:
                             await _tts_client.close_input()
                         except Exception:
@@ -3739,6 +3849,7 @@ async def run_response(
                                 "TTS close_input failed",
                                 exc_info=True,
                             )
+                    _tts_input_closed = True
 
                 stream_iter = stream.__aiter__()
                 openai_event_task = asyncio.create_task(stream_iter.__anext__())
@@ -3789,7 +3900,7 @@ async def run_response(
                                             event.item
                                         )
                                         if handler.force_stopped:
-                                            await _tts_finish_input()
+                                            await _tts_close_input()
                                             break
                                     case "code_interpreter_call":
                                         await handler.on_code_interpreter_tool_call_created(
@@ -3823,40 +3934,20 @@ async def run_response(
                                         )
                                         # Start TTS connection on first text part
                                         if _tts_enabled and not _tts_client:
-                                            try:
-                                                assert tts_api_key is not None
-                                                assert tts_voice_id is not None
-                                                _tts_client = ElevenLabsStreamingTTS(
-                                                    tts_api_key, tts_voice_id
-                                                )
-                                                await _tts_client.connect()
-                                                handler.enqueue_audio_started()
-                                                _tts_audio_task = asyncio.create_task(
-                                                    _tts_receive_audio(_tts_client)
-                                                )
-                                            except Exception:
-                                                logger.warning(
-                                                    "Failed to start TTS streaming",
-                                                    exc_info=True,
-                                                )
-                                                if _tts_client is not None:
-                                                    try:
-                                                        await _tts_client.cleanup()
-                                                    except Exception:
-                                                        logger.warning(
-                                                            "TTS cleanup after connect failure failed",
-                                                            exc_info=True,
-                                                        )
-                                                _tts_client = None
+                                            await _tts_start_audio()
                                     case _:
                                         pass
                             case "response.output_text.delta":
                                 await handler.on_output_text_delta(event)
                                 # Feed text to TTS accumulator
-                                if _tts_sanitizer and _tts_client:
+                                if _tts_sanitizer and _tts_chunker and _tts_client:
                                     for chunk in _tts_sanitizer.add(event.delta):
                                         try:
-                                            await _tts_client.send_text(chunk)
+                                            tts_chunks = _tts_chunker.add(chunk)
+                                            for tts_chunk in tts_chunks:
+                                                await _tts_client.send_text(
+                                                    tts_chunk,
+                                                )
                                         except Exception:
                                             logger.warning(
                                                 "TTS send_text failed",
@@ -3889,7 +3980,7 @@ async def run_response(
                                         await handler.on_output_text_part_done(
                                             event.part
                                         )
-                                        # Flush remaining text to TTS and close input
+                                        # Flush remaining text while keeping TTS open for later parts.
                                         await _tts_finish_input()
                                     case _:
                                         pass
@@ -3972,12 +4063,16 @@ async def run_response(
                                     case _:
                                         pass
                             case "response.completed":
+                                await _tts_close_input()
                                 await handler.on_response_completed(event)
                             case "response.incomplete":
+                                await _tts_close_input()
                                 await handler.on_response_completed(event)
                             case "response.failed":
+                                await _tts_close_input()
                                 await handler.on_response_completed(event)
                             case "error":
+                                await _tts_close_input()
                                 await handler.on_response_error(event)
                             case _:
                                 pass
