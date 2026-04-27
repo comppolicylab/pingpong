@@ -7,7 +7,7 @@ import secrets
 import socket
 import tempfile
 import time
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
@@ -684,7 +684,11 @@ async def _mark_manifest_generation_run_failed(
     lease_token: str,
     error_message: str,
 ) -> None:
-    await _mark_run_failed(run_id, lease_token, None, error_message)
+    await recover_failed_manifest_generation_run(
+        run_id,
+        lease_token,
+        error_message=error_message,
+    )
 
 
 async def _load_manifest_generation_run_context(
@@ -1292,51 +1296,25 @@ async def _claim_next_narration_run(
     *,
     leased_by: str | None = None,
 ) -> tuple[int, str] | None:
-    async with config.db.driver.async_session() as session:
-        now = utcnow()
-        claimable_run_condition = _claimable_processing_run_condition(now)
-        effective_leased_by = leased_by or build_runner_id()
-        candidate_ids = list(
-            (
-                await session.scalars(
-                    select(models.LectureVideoProcessingRun.id)
-                    .where(models.LectureVideoProcessingRun.stage == NARRATION_STAGE)
-                    .where(claimable_run_condition)
-                    .order_by(
-                        models.LectureVideoProcessingRun.created.asc(),
-                        models.LectureVideoProcessingRun.id.asc(),
-                    )
-                    .limit(25)
-                )
-            ).all()
-        )
-        for candidate_id in candidate_ids:
-            lease_token = secrets.token_urlsafe(24)
-            result = await session.execute(
-                update(models.LectureVideoProcessingRun)
-                .where(models.LectureVideoProcessingRun.id == candidate_id)
-                .where(models.LectureVideoProcessingRun.stage == NARRATION_STAGE)
-                .where(claimable_run_condition)
-                .values(
-                    status=schemas.LectureVideoProcessingRunStatus.RUNNING,
-                    lease_token=lease_token,
-                    leased_by=effective_leased_by,
-                    lease_expires_at=now + RUN_LEASE_DURATION,
-                    started_at=func.coalesce(
-                        models.LectureVideoProcessingRun.started_at, now
-                    ),
-                    cancel_reason=None,
-                    finished_at=None,
-                )
-            )
-            if result.rowcount:
-                await session.commit()
-                return candidate_id, lease_token
-    return None
+    return await _claim_next_processing_run_from_stages(
+        stages=[NARRATION_STAGE],
+        leased_by=leased_by,
+    )
 
 
 async def _claim_next_manifest_generation_run(
     *,
+    leased_by: str | None = None,
+) -> tuple[int, str] | None:
+    return await _claim_next_processing_run_from_stages(
+        stages=[MANIFEST_GENERATION_STAGE],
+        leased_by=leased_by,
+    )
+
+
+async def _claim_next_processing_run_from_stages(
+    *,
+    stages: Sequence[schemas.LectureVideoProcessingStage],
     leased_by: str | None = None,
 ) -> tuple[int, str] | None:
     async with config.db.driver.async_session() as session:
@@ -1347,13 +1325,12 @@ async def _claim_next_manifest_generation_run(
             (
                 await session.scalars(
                     select(models.LectureVideoProcessingRun.id)
-                    .where(
-                        models.LectureVideoProcessingRun.stage
-                        == MANIFEST_GENERATION_STAGE
-                    )
+                    .where(models.LectureVideoProcessingRun.stage.in_(stages))
                     .where(claimable_run_condition)
                     .order_by(
-                        models.LectureVideoProcessingRun.created.asc(),
+                        func.coalesce(
+                            models.LectureVideoProcessingRun.created, now
+                        ).asc(),
                         models.LectureVideoProcessingRun.id.asc(),
                     )
                     .limit(25)
@@ -1365,9 +1342,7 @@ async def _claim_next_manifest_generation_run(
             result = await session.execute(
                 update(models.LectureVideoProcessingRun)
                 .where(models.LectureVideoProcessingRun.id == candidate_id)
-                .where(
-                    models.LectureVideoProcessingRun.stage == MANIFEST_GENERATION_STAGE
-                )
+                .where(models.LectureVideoProcessingRun.stage.in_(stages))
                 .where(claimable_run_condition)
                 .values(
                     status=schemas.LectureVideoProcessingRunStatus.RUNNING,
@@ -1391,9 +1366,10 @@ async def _claim_next_processing_run(
     *,
     leased_by: str | None = None,
 ) -> tuple[int, str] | None:
-    return await _claim_next_manifest_generation_run(
-        leased_by=leased_by
-    ) or await _claim_next_narration_run(leased_by=leased_by)
+    return await _claim_next_processing_run_from_stages(
+        stages=[MANIFEST_GENERATION_STAGE, NARRATION_STAGE],
+        leased_by=leased_by,
+    )
 
 
 async def recover_failed_narration_run(

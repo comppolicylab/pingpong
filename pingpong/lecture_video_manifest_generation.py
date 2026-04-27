@@ -137,6 +137,7 @@ GUIDELINES FOR QUESTIONS:
   A question that any attentive student can answer without thinking is worse than no question at all."""
 
 _GEMINI_MODEL = "gemini-3.1-pro-preview"
+_VIDEO_DESCRIPTION_WINDOW_MS = 30_000
 
 
 @dataclass(frozen=True)
@@ -223,6 +224,47 @@ class GeneratedQuizWithVideo(BaseModel):
 
 def _timestamp_to_ms(value: float | int) -> int:
     return int(round(float(value) * 1000))
+
+
+def _transcript_words_by_id(
+    transcript: list[schemas.LectureVideoManifestWordV3],
+) -> dict[str, schemas.LectureVideoManifestWordV3]:
+    words_by_id: dict[str, schemas.LectureVideoManifestWordV3] = {}
+    for word in transcript:
+        if word.id in words_by_id:
+            raise ValueError(f"Transcript contains duplicate word ID {word.id!r}.")
+        words_by_id[word.id] = word
+    return words_by_id
+
+
+def _validated_transcript_timestamp_ms(
+    *,
+    transcript_words_by_id: dict[str, schemas.LectureVideoManifestWordV3],
+    word_id: str,
+    word_text: str,
+    timestamp: float,
+    timestamp_kind: Literal["start", "end"],
+) -> int:
+    transcript_word = transcript_words_by_id.get(word_id)
+    if transcript_word is None:
+        raise ValueError(f"Generated word ID {word_id!r} is missing from transcript.")
+    if transcript_word.word != word_text:
+        raise ValueError(
+            f"Generated word ID {word_id!r} text mismatch: "
+            f"expected {transcript_word.word!r}, got {word_text!r}."
+        )
+    expected_offset_ms = (
+        transcript_word.start_offset_ms
+        if timestamp_kind == "start"
+        else transcript_word.end_offset_ms
+    )
+    actual_offset_ms = _timestamp_to_ms(timestamp)
+    if actual_offset_ms != expected_offset_ms:
+        raise ValueError(
+            f"Generated word ID {word_id!r} {timestamp_kind} timestamp mismatch: "
+            f"expected {expected_offset_ms}ms, got {actual_offset_ms}ms."
+        )
+    return expected_offset_ms
 
 
 def _word_to_generation_word(
@@ -626,10 +668,18 @@ def _is_context_limit_error(exc: Exception) -> bool:
 
 def _question_to_manifest_question(
     question: GeneratedQuestion,
+    transcript_words_by_id: dict[str, schemas.LectureVideoManifestWordV3],
 ) -> schemas.LectureVideoManifestQuestionV1:
     choices = question.choices
     feedback_by_choice = question.choice_feedback
     correct_answer = question.correct_answer
+    stop_offset_ms = _validated_transcript_timestamp_ms(
+        transcript_words_by_id=transcript_words_by_id,
+        word_id=question.pause_after_word_id,
+        word_text=question.pause_after_word,
+        timestamp=question.pause_at,
+        timestamp_kind="end",
+    )
 
     options = []
     correct_count = 0
@@ -642,11 +692,18 @@ def _question_to_manifest_question(
             )
         is_correct = choice_text == correct_answer
         correct_count += 1 if is_correct else 0
+        continue_offset_ms = _validated_transcript_timestamp_ms(
+            transcript_words_by_id=transcript_words_by_id,
+            word_id=feedback.resume_at_word_id,
+            word_text=feedback.resume_at_word,
+            timestamp=feedback.resume_at,
+            timestamp_kind="start",
+        )
         options.append(
             schemas.LectureVideoManifestOptionV1(
                 option_text=choice_text,
                 post_answer_text=feedback.voice_over,
-                continue_offset_ms=_timestamp_to_ms(feedback.resume_at),
+                continue_offset_ms=continue_offset_ms,
                 correct=is_correct,
             )
         )
@@ -656,7 +713,7 @@ def _question_to_manifest_question(
         type=schemas.LectureVideoQuestionType.SINGLE_SELECT,
         question_text=question.question_text,
         intro_text=question.voice_over_intro,
-        stop_offset_ms=_timestamp_to_ms(question.pause_at),
+        stop_offset_ms=stop_offset_ms,
         options=options,
     )
 
@@ -685,22 +742,90 @@ def _video_descriptions_to_manifest_video_descriptions(
     ]
 
 
+def _validate_manifest_video_descriptions(
+    video_descriptions: list[schemas.LectureVideoManifestVideoDescriptionV3],
+    *,
+    video_duration_ms: int | None,
+) -> str | None:
+    if len(video_descriptions) == 0:
+        return "video_descriptions is empty"
+    if video_duration_ms is None:
+        return None
+
+    expected_start_offset_ms = 0
+    for index, description in enumerate(video_descriptions):
+        if description.start_offset_ms != expected_start_offset_ms:
+            return (
+                f"video_descriptions[{index}] starts at "
+                f"{description.start_offset_ms}ms; expected "
+                f"{expected_start_offset_ms}ms"
+            )
+
+        segment_duration_ms = description.end_offset_ms - description.start_offset_ms
+        is_final_segment = index == len(video_descriptions) - 1
+        if not is_final_segment and segment_duration_ms != _VIDEO_DESCRIPTION_WINDOW_MS:
+            return (
+                f"video_descriptions[{index}] duration is "
+                f"{segment_duration_ms}ms; expected "
+                f"{_VIDEO_DESCRIPTION_WINDOW_MS}ms"
+            )
+        if is_final_segment and segment_duration_ms > _VIDEO_DESCRIPTION_WINDOW_MS:
+            return (
+                f"final video description duration is {segment_duration_ms}ms; "
+                f"expected at most {_VIDEO_DESCRIPTION_WINDOW_MS}ms"
+            )
+
+        expected_start_offset_ms = description.end_offset_ms
+
+    final_end_offset_ms = video_descriptions[-1].end_offset_ms
+    if final_end_offset_ms != video_duration_ms:
+        return (
+            f"final video description ends at {final_end_offset_ms}ms; "
+            f"expected video duration {video_duration_ms}ms"
+        )
+    return None
+
+
+def _validated_or_fallback_video_descriptions(
+    video_descriptions: list[schemas.LectureVideoManifestVideoDescriptionV3],
+    *,
+    video_duration_ms: int | None,
+) -> list[schemas.LectureVideoManifestVideoDescriptionV3]:
+    validation_error = _validate_manifest_video_descriptions(
+        video_descriptions,
+        video_duration_ms=video_duration_ms,
+    )
+    if validation_error is None:
+        return video_descriptions
+
+    logger.warning(
+        "Generated video_descriptions failed structural validation: %s. "
+        "Falling back to transcript-only visual description.",
+        validation_error,
+    )
+    return _fallback_video_descriptions(video_duration_ms)
+
+
 def _quiz_to_manifest(
     quiz: GeneratedQuizWithVideo,
     transcript: list[schemas.LectureVideoManifestWordV3],
     *,
     video_duration_ms: int | None,
 ) -> schemas.LectureVideoManifestV3:
+    transcript_words_by_id = _transcript_words_by_id(transcript)
     video_descriptions = _video_descriptions_to_manifest_video_descriptions(
         quiz.video_descriptions
     )
-    if len(video_descriptions) == 0:
-        video_descriptions = _fallback_video_descriptions(video_duration_ms)
+    video_descriptions = _validated_or_fallback_video_descriptions(
+        video_descriptions,
+        video_duration_ms=video_duration_ms,
+    )
     return schemas.LectureVideoManifestV3(
         word_level_transcription=transcript,
         video_descriptions=video_descriptions,
         questions=[
-            _question_to_manifest_question(question) for question in quiz.questions
+            _question_to_manifest_question(question, transcript_words_by_id)
+            for question in quiz.questions
         ],
     )
 

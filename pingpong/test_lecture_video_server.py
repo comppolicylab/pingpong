@@ -1068,6 +1068,68 @@ async def test_process_claimed_manifest_run_persists_generated_manifest(
     ]
 
 
+@with_institution(11, "Test Institution")
+async def test_process_claimed_manifest_run_marks_video_failed_on_context_load_error(
+    db,
+    institution,
+    monkeypatch,
+):
+    lease_token = "lease-token"
+    error_message = "OpenAI credentials unavailable"
+    monkeypatch.setattr(
+        lecture_video_processing,
+        "get_openai_client_by_class_id",
+        AsyncMock(side_effect=RuntimeError(error_message)),
+    )
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        lecture_video = make_lecture_video(
+            1,
+            "context-load-failure.mp4",
+            status=schemas.LectureVideoStatus.PROCESSING.value,
+        )
+        session.add_all([class_, lecture_video])
+        await session.flush()
+        run = await models.LectureVideoProcessingRun.create(
+            session,
+            lecture_video_id=lecture_video.id,
+            lecture_video_id_snapshot=lecture_video.id,
+            class_id=class_.id,
+            assistant_id_at_start=None,
+            stage=schemas.LectureVideoProcessingStage.MANIFEST_GENERATION,
+            attempt_number=1,
+            status=schemas.LectureVideoProcessingRunStatus.RUNNING,
+        )
+        run.lease_token = lease_token
+        run_id = run.id
+        lecture_video_id = lecture_video.id
+        await session.commit()
+
+    await lecture_video_processing._process_claimed_manifest_run(run_id, lease_token)
+
+    async with db.async_session() as session:
+        refreshed_run = await models.LectureVideoProcessingRun.get_by_id(
+            session, run_id
+        )
+        refreshed_video = await models.LectureVideo.get_by_id_with_copy_context(
+            session, lecture_video_id
+        )
+
+    assert refreshed_run is not None
+    assert refreshed_run.status == schemas.LectureVideoProcessingRunStatus.FAILED
+    assert refreshed_run.error_message == error_message
+    assert refreshed_run.lease_token is None
+    assert refreshed_video is not None
+    assert refreshed_video.status == schemas.LectureVideoStatus.FAILED
+    assert refreshed_video.error_message == error_message
+
+
 async def test_upload_and_generate_manifest_deletes_gemini_upload_on_failure(
     monkeypatch,
 ):
@@ -6211,6 +6273,91 @@ def test_run_lecture_video_worker_cli_starts_health_server_and_passes_pool_setti
         "workers": 3,
         "server_started": True,
     }
+
+
+@with_institution(11, "Test Institution")
+async def test_claim_next_processing_run_claims_oldest_run_across_stages(
+    db, institution
+):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        narration_video = make_lecture_video(
+            class_.id,
+            "narration-oldest.mp4",
+            status=schemas.LectureVideoStatus.PROCESSING.value,
+        )
+        manifest_video = make_lecture_video(
+            class_.id,
+            "manifest-newer.mp4",
+            status=schemas.LectureVideoStatus.PROCESSING.value,
+        )
+        session.add_all([class_, narration_video, manifest_video])
+        await session.flush()
+
+        narration_run = await models.LectureVideoProcessingRun.create(
+            session,
+            lecture_video_id=narration_video.id,
+            lecture_video_id_snapshot=narration_video.id,
+            class_id=class_.id,
+            assistant_id_at_start=None,
+            stage=schemas.LectureVideoProcessingStage.NARRATION,
+            attempt_number=1,
+        )
+        manifest_run = await models.LectureVideoProcessingRun.create(
+            session,
+            lecture_video_id=manifest_video.id,
+            lecture_video_id_snapshot=manifest_video.id,
+            class_id=class_.id,
+            assistant_id_at_start=None,
+            stage=schemas.LectureVideoProcessingStage.MANIFEST_GENERATION,
+            attempt_number=1,
+        )
+        now = datetime.now(UTC)
+        narration_run.created = now - timedelta(minutes=10)
+        manifest_run.created = now - timedelta(minutes=1)
+        narration_run_id = narration_run.id
+        manifest_run_id = manifest_run.id
+        session.add_all([narration_run, manifest_run])
+        await session.commit()
+
+    first_claim = await lecture_video_processing._claim_next_processing_run(
+        leased_by="test-runner-1"
+    )
+    second_claim = await lecture_video_processing._claim_next_processing_run(
+        leased_by="test-runner-2"
+    )
+
+    assert first_claim is not None
+    assert first_claim[0] == narration_run_id
+    assert second_claim is not None
+    assert second_claim[0] == manifest_run_id
+
+    async with db.async_session() as session:
+        refreshed_narration_run = await models.LectureVideoProcessingRun.get_by_id(
+            session,
+            narration_run_id,
+        )
+        refreshed_manifest_run = await models.LectureVideoProcessingRun.get_by_id(
+            session,
+            manifest_run_id,
+        )
+
+    assert refreshed_narration_run is not None
+    assert (
+        refreshed_narration_run.status
+        == schemas.LectureVideoProcessingRunStatus.RUNNING
+    )
+    assert refreshed_narration_run.leased_by == "test-runner-1"
+    assert refreshed_manifest_run is not None
+    assert (
+        refreshed_manifest_run.status == schemas.LectureVideoProcessingRunStatus.RUNNING
+    )
+    assert refreshed_manifest_run.leased_by == "test-runner-2"
 
 
 @with_institution(11, "Test Institution")

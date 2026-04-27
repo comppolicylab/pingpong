@@ -283,6 +283,7 @@
 	let hasSetLectureVideoManifest = false;
 	let generationPrompt = '';
 	let hasSetGenerationPrompt = false;
+	let canGenerateLectureVideoManifest = data.lectureVideoDefaults?.can_generate_manifest ?? false;
 	$: canGenerateLectureVideoManifest = data.lectureVideoDefaults?.can_generate_manifest ?? false;
 	const effectiveOverwriteManifest = (storedOverwriteManifest?: boolean | null) =>
 		canGenerateLectureVideoManifest ? (storedOverwriteManifest ?? false) : true;

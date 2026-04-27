@@ -7,63 +7,83 @@ import pingpong.lecture_video_manifest_generation as manifest_generation
 import pingpong.schemas as schemas
 
 
-def test_quiz_to_manifest_converts_generated_video_descriptions() -> None:
-    quiz = manifest_generation.GeneratedQuizWithVideo(
+def _generated_question() -> manifest_generation.GeneratedQuestion:
+    return manifest_generation.GeneratedQuestion(
+        id=1,
+        question_source="generated",
+        pause_after_word_id="w1",
+        pause_after_word="expression",
+        pause_at=1.0,
+        voice_over_intro="Try this.",
+        question_text="What should happen next?",
+        choices=[
+            manifest_generation.GeneratedChoice(
+                text="Combine like terms", misconception=None
+            ),
+            manifest_generation.GeneratedChoice(
+                text="Change every variable",
+                misconception="Confuses simplification with substitution.",
+            ),
+        ],
+        correct_answer="Combine like terms",
+        choice_feedback={
+            "Combine like terms": manifest_generation.GeneratedChoiceFeedback(
+                voice_over="Right.",
+                resume_at_word_id="w2",
+                resume_at_word="Next",
+                resume_at=1.5,
+            ),
+            "Change every variable": manifest_generation.GeneratedChoiceFeedback(
+                voice_over="Not quite.",
+                resume_at_word_id="w2",
+                resume_at_word="Next",
+                resume_at=1.5,
+            ),
+        },
+    )
+
+
+def _transcript() -> list[schemas.LectureVideoManifestWordV3]:
+    return [
+        schemas.LectureVideoManifestWordV3(
+            id="w1",
+            word="expression",
+            start_offset_ms=0,
+            end_offset_ms=1000,
+        ),
+        schemas.LectureVideoManifestWordV3(
+            id="w2",
+            word="Next",
+            start_offset_ms=1500,
+            end_offset_ms=2000,
+        ),
+    ]
+
+
+def _quiz_with_video_descriptions(
+    video_descriptions: list[manifest_generation.GeneratedVideoDescription],
+) -> manifest_generation.GeneratedQuizWithVideo:
+    return manifest_generation.GeneratedQuizWithVideo(
         video_summary="A short algebra lesson.",
-        video_descriptions=[
+        video_descriptions=video_descriptions,
+        questions=[_generated_question()],
+    )
+
+
+def test_quiz_to_manifest_converts_generated_video_descriptions() -> None:
+    quiz = _quiz_with_video_descriptions(
+        [
             manifest_generation.GeneratedVideoDescription(
                 start_offset_ms=0,
                 end_offset_ms=30000,
                 description="The teacher writes an expression on the board.",
             )
-        ],
-        questions=[
-            manifest_generation.GeneratedQuestion(
-                id=1,
-                question_source="generated",
-                pause_after_word_id="w1",
-                pause_after_word="expression",
-                pause_at=1.0,
-                voice_over_intro="Try this.",
-                question_text="What should happen next?",
-                choices=[
-                    manifest_generation.GeneratedChoice(
-                        text="Combine like terms", misconception=None
-                    ),
-                    manifest_generation.GeneratedChoice(
-                        text="Change every variable",
-                        misconception="Confuses simplification with substitution.",
-                    ),
-                ],
-                correct_answer="Combine like terms",
-                choice_feedback={
-                    "Combine like terms": manifest_generation.GeneratedChoiceFeedback(
-                        voice_over="Right.",
-                        resume_at_word_id="w2",
-                        resume_at_word="Next",
-                        resume_at=1.5,
-                    ),
-                    "Change every variable": manifest_generation.GeneratedChoiceFeedback(
-                        voice_over="Not quite.",
-                        resume_at_word_id="w2",
-                        resume_at_word="Next",
-                        resume_at=1.5,
-                    ),
-                },
-            )
-        ],
+        ]
     )
 
     manifest = manifest_generation._quiz_to_manifest(
         quiz,
-        [
-            schemas.LectureVideoManifestWordV3(
-                id="w1",
-                word="expression",
-                start_offset_ms=0,
-                end_offset_ms=1000,
-            )
-        ],
+        _transcript(),
         video_duration_ms=30000,
     )
 
@@ -74,6 +94,128 @@ def test_quiz_to_manifest_converts_generated_video_descriptions() -> None:
     assert manifest.video_descriptions[0].description == (
         "The teacher writes an expression on the board."
     )
+
+
+@pytest.mark.parametrize(
+    ("video_descriptions", "video_duration_ms", "expected_log"),
+    [
+        (
+            [
+                manifest_generation.GeneratedVideoDescription(
+                    start_offset_ms=1000,
+                    end_offset_ms=30000,
+                    description="The teacher writes on the board.",
+                )
+            ],
+            30000,
+            "starts at 1000ms; expected 0ms",
+        ),
+        (
+            [
+                manifest_generation.GeneratedVideoDescription(
+                    start_offset_ms=0,
+                    end_offset_ms=30000,
+                    description="The teacher writes on the board.",
+                ),
+                manifest_generation.GeneratedVideoDescription(
+                    start_offset_ms=31000,
+                    end_offset_ms=60000,
+                    description="The teacher points at the board.",
+                ),
+            ],
+            60000,
+            "starts at 31000ms; expected 30000ms",
+        ),
+        (
+            [
+                manifest_generation.GeneratedVideoDescription(
+                    start_offset_ms=0,
+                    end_offset_ms=31000,
+                    description="The teacher writes on the board.",
+                ),
+                manifest_generation.GeneratedVideoDescription(
+                    start_offset_ms=31000,
+                    end_offset_ms=60000,
+                    description="The teacher points at the board.",
+                ),
+            ],
+            60000,
+            "duration is 31000ms; expected 30000ms",
+        ),
+        (
+            [
+                manifest_generation.GeneratedVideoDescription(
+                    start_offset_ms=0,
+                    end_offset_ms=30000,
+                    description="The teacher writes on the board.",
+                )
+            ],
+            45000,
+            "final video description ends at 30000ms; expected video duration 45000ms",
+        ),
+        (
+            [
+                manifest_generation.GeneratedVideoDescription(
+                    start_offset_ms=0,
+                    end_offset_ms=45000,
+                    description="The teacher writes on the board.",
+                )
+            ],
+            45000,
+            "final video description duration is 45000ms; expected at most 30000ms",
+        ),
+    ],
+)
+def test_quiz_to_manifest_falls_back_for_invalid_video_description_structure(
+    caplog,
+    video_descriptions: list[manifest_generation.GeneratedVideoDescription],
+    video_duration_ms: int,
+    expected_log: str,
+) -> None:
+    quiz = _quiz_with_video_descriptions(video_descriptions)
+
+    with caplog.at_level("WARNING"):
+        manifest = manifest_generation._quiz_to_manifest(
+            quiz,
+            _transcript(),
+            video_duration_ms=video_duration_ms,
+        )
+
+    assert (
+        manifest.video_descriptions
+        == manifest_generation._fallback_video_descriptions(video_duration_ms)
+    )
+    assert expected_log in caplog.text
+
+
+def test_quiz_to_manifest_accepts_final_video_description_shorter_than_window() -> None:
+    quiz = _quiz_with_video_descriptions(
+        [
+            manifest_generation.GeneratedVideoDescription(
+                start_offset_ms=0,
+                end_offset_ms=30000,
+                description="The teacher writes on the board.",
+            ),
+            manifest_generation.GeneratedVideoDescription(
+                start_offset_ms=30000,
+                end_offset_ms=45000,
+                description="The teacher points at the board.",
+            ),
+        ]
+    )
+
+    manifest = manifest_generation._quiz_to_manifest(
+        quiz,
+        _transcript(),
+        video_duration_ms=45000,
+    )
+
+    assert [
+        description.end_offset_ms for description in manifest.video_descriptions
+    ] == [
+        30000,
+        45000,
+    ]
 
 
 def test_quiz_to_manifest_reports_missing_choice_feedback() -> None:
@@ -132,7 +274,152 @@ def test_quiz_to_manifest_reports_missing_choice_feedback() -> None:
                     word="expression",
                     start_offset_ms=0,
                     end_offset_ms=1000,
-                )
+                ),
+                schemas.LectureVideoManifestWordV3(
+                    id="w2",
+                    word="Next",
+                    start_offset_ms=1500,
+                    end_offset_ms=2000,
+                ),
+            ],
+            video_duration_ms=30000,
+        )
+
+
+def test_quiz_to_manifest_uses_transcript_timestamps_for_question_offsets() -> None:
+    quiz = manifest_generation.GeneratedQuizWithVideo(
+        video_summary="A short algebra lesson.",
+        video_descriptions=[
+            manifest_generation.GeneratedVideoDescription(
+                start_offset_ms=0,
+                end_offset_ms=30000,
+                description="The teacher writes an expression on the board.",
+            )
+        ],
+        questions=[
+            manifest_generation.GeneratedQuestion(
+                id=1,
+                question_source="generated",
+                pause_after_word_id="w1",
+                pause_after_word="expression",
+                pause_at=1.0,
+                voice_over_intro="Try this.",
+                question_text="What should happen next?",
+                choices=[
+                    manifest_generation.GeneratedChoice(
+                        text="Combine like terms", misconception=None
+                    ),
+                    manifest_generation.GeneratedChoice(
+                        text="Change every variable",
+                        misconception="Confuses simplification with substitution.",
+                    ),
+                ],
+                correct_answer="Combine like terms",
+                choice_feedback={
+                    "Combine like terms": manifest_generation.GeneratedChoiceFeedback(
+                        voice_over="Right.",
+                        resume_at_word_id="w2",
+                        resume_at_word="Next",
+                        resume_at=1.5,
+                    ),
+                    "Change every variable": manifest_generation.GeneratedChoiceFeedback(
+                        voice_over="Not quite.",
+                        resume_at_word_id="w2",
+                        resume_at_word="Next",
+                        resume_at=1.5,
+                    ),
+                },
+            )
+        ],
+    )
+
+    manifest = manifest_generation._quiz_to_manifest(
+        quiz,
+        [
+            schemas.LectureVideoManifestWordV3(
+                id="w1",
+                word="expression",
+                start_offset_ms=100,
+                end_offset_ms=1000,
+            ),
+            schemas.LectureVideoManifestWordV3(
+                id="w2",
+                word="Next",
+                start_offset_ms=1500,
+                end_offset_ms=2000,
+            ),
+        ],
+        video_duration_ms=30000,
+    )
+
+    question = manifest.questions[0]
+    assert question.stop_offset_ms == 1000
+    assert [option.continue_offset_ms for option in question.options] == [1500, 1500]
+
+
+def test_quiz_to_manifest_rejects_mismatched_transcript_word_timestamp() -> None:
+    quiz = manifest_generation.GeneratedQuizWithVideo(
+        video_summary="A short algebra lesson.",
+        video_descriptions=[
+            manifest_generation.GeneratedVideoDescription(
+                start_offset_ms=0,
+                end_offset_ms=30000,
+                description="The teacher writes an expression on the board.",
+            )
+        ],
+        questions=[
+            manifest_generation.GeneratedQuestion(
+                id=1,
+                question_source="generated",
+                pause_after_word_id="w1",
+                pause_after_word="expression",
+                pause_at=1.1,
+                voice_over_intro="Try this.",
+                question_text="What should happen next?",
+                choices=[
+                    manifest_generation.GeneratedChoice(
+                        text="Combine like terms", misconception=None
+                    ),
+                    manifest_generation.GeneratedChoice(
+                        text="Change every variable",
+                        misconception="Confuses simplification with substitution.",
+                    ),
+                ],
+                correct_answer="Combine like terms",
+                choice_feedback={
+                    "Combine like terms": manifest_generation.GeneratedChoiceFeedback(
+                        voice_over="Right.",
+                        resume_at_word_id="w2",
+                        resume_at_word="Next",
+                        resume_at=1.5,
+                    ),
+                    "Change every variable": manifest_generation.GeneratedChoiceFeedback(
+                        voice_over="Not quite.",
+                        resume_at_word_id="w2",
+                        resume_at_word="Next",
+                        resume_at=1.5,
+                    ),
+                },
+            )
+        ],
+    )
+
+    with pytest.raises(ValueError, match="end timestamp mismatch"):
+        manifest_generation._quiz_to_manifest(
+            quiz,
+            [
+                schemas.LectureVideoManifestWordV3(
+                    id="w1",
+                    word="expression",
+                    start_offset_ms=100,
+                    end_offset_ms=1000,
+                ),
+                schemas.LectureVideoManifestWordV3(
+                    id="w2",
+                    word="Next",
+                    start_offset_ms=1500,
+                    end_offset_ms=2000,
+                ),
             ],
             video_duration_ms=30000,
         )
