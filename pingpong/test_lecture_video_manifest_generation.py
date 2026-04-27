@@ -4,28 +4,20 @@ import pytest
 
 import pingpong.lecture_video_manifest_generation as manifest_generation
 import pingpong.schemas as schemas
-from pingpong.lecture_video_manifest_generation import (
-    GeneratedChoice,
-    GeneratedChoiceFeedback,
-    GeneratedQuestion,
-    GeneratedQuizWithVideo,
-    GeneratedVideoDescription,
-    _quiz_to_manifest,
-)
 
 
 def test_quiz_to_manifest_converts_generated_video_descriptions() -> None:
-    quiz = GeneratedQuizWithVideo(
+    quiz = manifest_generation.GeneratedQuizWithVideo(
         video_summary="A short algebra lesson.",
         video_descriptions=[
-            GeneratedVideoDescription(
+            manifest_generation.GeneratedVideoDescription(
                 start_offset_ms=0,
                 end_offset_ms=30000,
                 description="The teacher writes an expression on the board.",
             )
         ],
         questions=[
-            GeneratedQuestion(
+            manifest_generation.GeneratedQuestion(
                 id=1,
                 question_source="generated",
                 pause_after_word_id="w1",
@@ -34,21 +26,23 @@ def test_quiz_to_manifest_converts_generated_video_descriptions() -> None:
                 voice_over_intro="Try this.",
                 question_text="What should happen next?",
                 choices=[
-                    GeneratedChoice(text="Combine like terms", misconception=None),
-                    GeneratedChoice(
+                    manifest_generation.GeneratedChoice(
+                        text="Combine like terms", misconception=None
+                    ),
+                    manifest_generation.GeneratedChoice(
                         text="Change every variable",
                         misconception="Confuses simplification with substitution.",
                     ),
                 ],
                 correct_answer="Combine like terms",
                 choice_feedback={
-                    "Combine like terms": GeneratedChoiceFeedback(
+                    "Combine like terms": manifest_generation.GeneratedChoiceFeedback(
                         voice_over="Right.",
                         resume_at_word_id="w2",
                         resume_at_word="Next",
                         resume_at=1.5,
                     ),
-                    "Change every variable": GeneratedChoiceFeedback(
+                    "Change every variable": manifest_generation.GeneratedChoiceFeedback(
                         voice_over="Not quite.",
                         resume_at_word_id="w2",
                         resume_at_word="Next",
@@ -59,7 +53,7 @@ def test_quiz_to_manifest_converts_generated_video_descriptions() -> None:
         ],
     )
 
-    manifest = _quiz_to_manifest(
+    manifest = manifest_generation._quiz_to_manifest(
         quiz,
         [
             schemas.LectureVideoManifestWordV3(
@@ -82,17 +76,17 @@ def test_quiz_to_manifest_converts_generated_video_descriptions() -> None:
 
 
 def test_quiz_to_manifest_reports_missing_choice_feedback() -> None:
-    quiz = GeneratedQuizWithVideo(
+    quiz = manifest_generation.GeneratedQuizWithVideo(
         video_summary="A short algebra lesson.",
         video_descriptions=[
-            GeneratedVideoDescription(
+            manifest_generation.GeneratedVideoDescription(
                 start_offset_ms=0,
                 end_offset_ms=30000,
                 description="The teacher writes an expression on the board.",
             )
         ],
         questions=[
-            GeneratedQuestion(
+            manifest_generation.GeneratedQuestion(
                 id=1,
                 question_source="generated",
                 pause_after_word_id="w1",
@@ -101,21 +95,23 @@ def test_quiz_to_manifest_reports_missing_choice_feedback() -> None:
                 voice_over_intro="Try this.",
                 question_text="What should happen next?",
                 choices=[
-                    GeneratedChoice(text="Combine like terms", misconception=None),
-                    GeneratedChoice(
+                    manifest_generation.GeneratedChoice(
+                        text="Combine like terms", misconception=None
+                    ),
+                    manifest_generation.GeneratedChoice(
                         text="Change every variable",
                         misconception="Confuses simplification with substitution.",
                     ),
                 ],
                 correct_answer="Combine like terms",
                 choice_feedback={
-                    "Combine like terms": GeneratedChoiceFeedback(
+                    "Combine like terms": manifest_generation.GeneratedChoiceFeedback(
                         voice_over="Right.",
                         resume_at_word_id="w2",
                         resume_at_word="Next",
                         resume_at=1.5,
                     ),
-                    "Change every variable ": GeneratedChoiceFeedback(
+                    "Change every variable ": manifest_generation.GeneratedChoiceFeedback(
                         voice_over="Not quite.",
                         resume_at_word_id="w2",
                         resume_at_word="Next",
@@ -127,7 +123,7 @@ def test_quiz_to_manifest_reports_missing_choice_feedback() -> None:
     )
 
     with pytest.raises(ValueError, match="feedback is missing"):
-        _quiz_to_manifest(
+        manifest_generation._quiz_to_manifest(
             quiz,
             [
                 schemas.LectureVideoManifestWordV3(
