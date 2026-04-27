@@ -460,15 +460,15 @@ def _require_controller(
 ) -> None:
     if not has_active_controller(state, now):
         raise _conflict(
-            detail="Lecture video control has expired. Acquire control again.",
+            detail="This page was inactive for too long. Refresh the lesson to continue.",
         )
     if state.controller_user_id != actor_user_id:
         raise _conflict(
-            detail="Another participant currently controls this lecture video.",
+            detail="Someone else is controlling this video right now. Try again in a moment.",
         )
     if state.controller_session_id != controller_session_id:
         raise _conflict(
-            detail="This browser window no longer controls the lecture video.",
+            detail="This tab is no longer connected to the video. Refresh the lesson to continue.",
         )
 
 
@@ -541,7 +541,7 @@ async def acquire_control(
     current_time = nowfn() if nowfn is not None else utcnow()
     if not lecture_video_matches_assistant(state.thread):
         raise LectureVideoConflictError(
-            "This thread's lecture video no longer matches the assistant configuration."
+            "This video lesson was updated. Start a new lesson to continue."
         )
 
     if (
@@ -549,7 +549,7 @@ async def acquire_control(
         and state.controller_user_id != actor_user_id
     ):
         raise _conflict(
-            detail="Another participant currently controls this lecture video.",
+            detail="Someone else is controlling this video right now. Try again in a moment.",
         )
 
     controller_session_id = str(uuid.uuid7())
@@ -625,7 +625,7 @@ async def renew_control(
     current_time = nowfn() if nowfn is not None else utcnow()
     if not lecture_video_matches_assistant(state.thread):
         raise LectureVideoConflictError(
-            "This thread's lecture video no longer matches the assistant configuration."
+            "This video lesson was updated. Start a new lesson to continue."
         )
 
     _require_controller(
@@ -674,7 +674,7 @@ async def _handle_question_presented(
         or current_question.id != request.question_id
     ):
         raise _conflict(
-            detail="This question is no longer active.",
+            detail="This question is no longer open. Refresh the lesson to see the latest question.",
         )
 
     if request.offset_ms != current_question.stop_offset_ms:
@@ -719,7 +719,7 @@ async def _handle_answer_submitted(
         or current_question.id != request.question_id
     ):
         raise _conflict(
-            detail="This question is no longer accepting answers.",
+            detail="This question is already closed. Refresh the lesson to continue.",
         )
 
     option = _find_option_for_question(current_question, request.option_id)
@@ -756,7 +756,7 @@ async def _handle_resumed(
         )
         if request.offset_ms > plausible_offset_ms:
             raise LectureVideoValidationError(
-                "Resuming past your unlocked progress is not allowed in this lecture video."
+                "You cannot skip ahead yet. Continue from where the lesson left off."
             )
         _set_last_known_offset_ms(state, request.offset_ms)
         await _append_interaction(
@@ -777,7 +777,7 @@ async def _handle_resumed(
         or request.offset_ms != active_option.continue_offset_ms
     ):
         raise _conflict(
-            detail="The lecture video cannot resume from this state.",
+            detail="The video cannot continue from here. Refresh the lesson and try again.",
         )
 
     next_question = _get_next_question(state.thread, current_question)
@@ -807,11 +807,11 @@ def _require_playing_state_for_playback_event(
 ) -> None:
     if state.state == schemas.LectureVideoSessionState.COMPLETED:
         raise _conflict(
-            detail="Session is already completed.",
+            detail="This lesson is already complete.",
         )
     if state.state != schemas.LectureVideoSessionState.PLAYING:
         raise _conflict(
-            detail="The lecture video cannot process playback events right now.",
+            detail="The video cannot do that right now. Wait a moment, then try again.",
         )
 
 
@@ -830,7 +830,7 @@ async def _handle_paused(
     )
     if request.offset_ms > plausible_offset_ms:
         raise LectureVideoValidationError(
-            "Pausing past your unlocked progress is not allowed in this lecture video."
+            "The lesson could not save that spot because it is ahead of your current progress."
         )
 
     _set_last_known_offset_ms(state, request.offset_ms)
@@ -859,7 +859,7 @@ async def _handle_seeked(
     )
     if request.to_offset_ms > plausible_offset_ms:
         raise LectureVideoValidationError(
-            "Seeking past your unlocked progress is not allowed in this lecture video."
+            "You cannot jump ahead yet. Continue from where the lesson left off."
         )
 
     _set_seek_offset_ms(
@@ -894,7 +894,7 @@ async def _handle_ended(
     )
     if request.offset_ms > plausible_offset_ms:
         raise LectureVideoValidationError(
-            "Ending past your unlocked progress is not allowed in this lecture video."
+            "The lesson cannot be marked complete from this spot. Continue from where you left off."
         )
 
     _set_last_known_offset_ms(state, request.offset_ms)
@@ -941,7 +941,7 @@ async def process_interaction(
     current_time = nowfn() if nowfn is not None else utcnow()
     if not lecture_video_matches_assistant(state.thread):
         raise LectureVideoConflictError(
-            "This thread's lecture video no longer matches the assistant configuration."
+            "This video lesson was updated. Start a new lesson to continue."
         )
 
     _require_controller(
@@ -970,7 +970,7 @@ async def process_interaction(
 
     if request.expected_state_version != state.version:
         raise _conflict(
-            detail="Lecture video state is out of date. Refresh and try again.",
+            detail="This lesson changed while you were working. Refresh the lesson and try again.",
         )
 
     event_type = schemas.LectureVideoInteractionEventType(request.type)

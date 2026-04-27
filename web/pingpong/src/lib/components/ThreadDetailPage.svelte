@@ -7,7 +7,8 @@
 		getAnonymousSessionToken,
 		getAnonymousShareToken,
 		hasAnonymousShareToken,
-		resetAnonymousSessionToken
+		resetAnonymousSessionToken,
+		setAnonymousSessionToken
 	} from '$lib/stores/anonymous';
 	import { happyToast, sadToast } from '$lib/toast';
 	import { errorMessage } from '$lib/errors';
@@ -158,6 +159,7 @@
 	let lecturePlayerVolume = 1;
 	let liveLectureVideoSession: api.LectureVideoSession | null = null;
 	let lectureVideoSessionKey: string | null = null;
+	let startingReplacementLectureThread = false;
 	$: {
 		const nextKey = `${classId}:${threadId}:${lectureVideoSession?.state_version ?? 'none'}:${
 			lectureVideoSession?.state ?? 'none'
@@ -1421,6 +1423,40 @@
 		}
 	};
 
+	async function refreshLesson() {
+		await invalidateAll();
+	}
+
+	async function startReplacementLectureThread() {
+		if (startingReplacementLectureThread || !$assistantId) return;
+
+		startingReplacementLectureThread = true;
+		try {
+			const newThreadOpts = api.explodeResponse(
+				await api.createLectureThread(fetch, classId, {
+					assistant_id: $assistantId,
+					timezone: userTimezone,
+					conversation_id: $page.url.pathname.includes('/shared/')
+						? $page.url.searchParams.get('conversation_id')
+						: null
+				})
+			);
+
+			setAnonymousSessionToken(newThreadOpts.session_token || null);
+			if (newThreadOpts.session_token) {
+				await goto(resolve(`/group/${classId}/shared/thread/${newThreadOpts.thread.id}`));
+			} else {
+				await goto(resolve(`/group/${classId}/thread/${newThreadOpts.thread.id}`));
+			}
+		} catch (e) {
+			sadToast(
+				`Failed to start lesson. Error: ${errorMessage(e, 'We could not start a new lesson. Try again in a moment.')}`
+			);
+		} finally {
+			startingReplacementLectureThread = false;
+		}
+	}
+
 	afterNavigate(async () => {
 		await resetAudioSession();
 	});
@@ -1468,14 +1504,45 @@
 			{#if effectiveLectureVideoMismatch}
 				<div class="flex h-full w-full items-center justify-center p-4">
 					<div
-						class="w-full max-w-2xl rounded-lg border border-amber-300 bg-amber-50 px-5 py-4 text-amber-900"
+						class="flex w-full max-w-2xl flex-col gap-4 rounded-2xl border border-orange/30 bg-orange-light px-6 py-5 text-slate-900 shadow-sm sm:flex-row sm:items-center sm:justify-between"
 					>
+						<div class="flex flex-col gap-1">
+							{#if effectiveLectureVideoAssistantMismatch}
+								<div class="text-base font-semibold text-slate-900">
+									This video lesson was updated
+								</div>
+								<div class="text-sm text-slate-700">
+									Start a fresh session to jump into the new version.
+								</div>
+							{:else}
+								<div class="text-base font-semibold text-slate-900">
+									We could not load this video lesson
+								</div>
+								<div class="text-sm text-slate-700">
+									Check your connection, then refresh to pick up where you left off.
+								</div>
+							{/if}
+						</div>
 						{#if effectiveLectureVideoAssistantMismatch}
-							This lecture video is no longer available for this thread because the assistant
-							configuration changed. Please start a new lecture thread.
+							<button
+								type="button"
+								class="inline-flex shrink-0 items-center justify-center rounded-full bg-orange px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-dark focus:ring-2 focus:ring-orange focus:ring-offset-2 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+								disabled={startingReplacementLectureThread || !$assistantId}
+								onclick={startReplacementLectureThread}
+							>
+								{#if startingReplacementLectureThread}
+									<Spinner color="custom" customColor="fill-white" class="mr-2 h-4 w-4" />
+								{/if}
+								Start new lesson
+							</button>
 						{:else}
-							This lecture video could not be loaded. Please check your connection and try
-							refreshing the page.
+							<button
+								type="button"
+								class="inline-flex shrink-0 items-center justify-center rounded-full bg-orange px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-dark focus:ring-2 focus:ring-orange focus:ring-offset-2 focus:outline-none"
+								onclick={refreshLesson}
+							>
+								Refresh lesson
+							</button>
 						{/if}
 					</div>
 				</div>

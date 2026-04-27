@@ -6,7 +6,7 @@
 
 <script lang="ts">
 	import { browser } from '$app/environment';
-	import { beforeNavigate } from '$app/navigation';
+	import { beforeNavigate, invalidateAll } from '$app/navigation';
 	import type { Snippet } from 'svelte';
 	import { createEventDispatcher } from 'svelte';
 	import { onMount } from 'svelte';
@@ -132,6 +132,9 @@
 	let manualPlaybackTarget: 'video' | 'narration' | null = $state(null);
 	let autoContinueInFlight = $state(false);
 	let autoContinueFailed = $state(false);
+	let initErrorCanRefresh = $derived(
+		(initError as string | null)?.includes('Refresh the lesson') ?? false
+	);
 	function shouldShowContinuePrompt(): boolean {
 		return (
 			(sessionState === 'awaiting_post_answer_resume' &&
@@ -433,6 +436,12 @@
 		manualPlaybackTarget = 'narration';
 	}
 
+	async function refreshLesson() {
+		if (!browser) return;
+		await invalidateAll();
+		await initSession();
+	}
+
 	function failClosedControl(detail?: string | null) {
 		if (leaseInterval) {
 			clearInterval(leaseInterval);
@@ -454,7 +463,9 @@
 
 		controllerSessionId = null;
 		playerDisabled = true;
-		initError = detail || 'Lecture video control was lost. Please refresh to continue.';
+		initError =
+			detail ||
+			'The video stopped because this tab is no longer connected. Refresh the lesson to continue.';
 	}
 
 	function failClosedOnConflict(expanded: {
@@ -567,7 +578,7 @@
 								return;
 							}
 							failClosedControl(
-								'Lecture video state changed and could not be refreshed. Please refresh to continue.'
+								'This lesson changed while you were watching. Refresh the lesson to continue.'
 							);
 							return;
 						}
@@ -576,7 +587,7 @@
 					if (expanded.error) {
 						failClosedControl(
 							expanded.error.detail ||
-								'Failed to sync lecture video playback. Please refresh to continue.'
+								'We could not save your video progress. Refresh the lesson to continue.'
 						);
 						return;
 					}
@@ -737,7 +748,9 @@
 		const response = await api.acquireLectureVideoControl(fetch, classId, threadId);
 		const expanded = api.expandResponse(response);
 		if (expanded.error) {
-			failClosedControl(expanded.error.detail || 'Failed to start lecture session');
+			failClosedControl(
+				expanded.error.detail || 'We could not start this lesson. Refresh the lesson and try again.'
+			);
 			return;
 		}
 		controllerSessionId = expanded.data.controller_session_id;
@@ -833,7 +846,9 @@
 			const historyResponse = await api.getLectureVideoHistory(fetch, classId, threadId);
 			const historyExpanded = api.expandResponse(historyResponse);
 			if (historyExpanded.error) {
-				initError = historyExpanded.error.detail || 'Failed to load lecture history';
+				initError =
+					historyExpanded.error.detail ||
+					'We could not load your lesson progress. Refresh the lesson and try again.';
 				return [];
 			}
 			interactions = historyExpanded.data.interactions;
@@ -1111,7 +1126,7 @@
 			setVideoPosition(fromOffsetMs);
 			failClosedControl(
 				expanded.error.detail ||
-					'Failed to sync lecture video seek position. Please refresh to continue.'
+					'We could not save your new video spot. Refresh the lesson to continue.'
 			);
 		} catch (error) {
 			if (controllerSessionId !== seekControllerSessionId) {
@@ -1147,7 +1162,7 @@
 
 			failClosedControl(
 				expanded.error.detail ||
-					'Failed to complete lecture video session. Please refresh to continue.'
+					'We could not mark this lesson complete. Refresh the lesson and try again.'
 			);
 		} catch (error) {
 			if (controllerSessionId !== endedControllerSessionId) {
@@ -1513,9 +1528,21 @@
 {:else if initError}
 	<div class="flex h-full w-full items-center justify-center p-4">
 		<div
-			class="w-full max-w-2xl rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 text-amber-900"
+			class="flex w-full max-w-2xl flex-col gap-4 rounded-2xl border border-orange/30 bg-orange-light px-6 py-5 text-slate-900 shadow-sm sm:flex-row sm:items-center sm:justify-between"
 		>
-			{initError}
+			<div class="flex flex-col gap-1">
+				<div class="text-base font-semibold text-slate-900">Let's get you back on track</div>
+				<div class="text-sm text-slate-700">{initError}</div>
+			</div>
+			{#if initErrorCanRefresh}
+				<button
+					type="button"
+					class="inline-flex shrink-0 items-center justify-center rounded-full bg-orange px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-dark focus:ring-2 focus:ring-orange focus:ring-offset-2 focus:outline-none"
+					onclick={refreshLesson}
+				>
+					Refresh lesson
+				</button>
+			{/if}
 		</div>
 	</div>
 {:else}
@@ -1566,7 +1593,7 @@
 							oncanplay={handleCanPlay}
 							onerror={() =>
 								failClosedControl(
-									'The lecture video could not be loaded. Please refresh to try again.'
+									'We could not load this video lesson. Refresh the lesson and try again.'
 								)}
 							onplay={handlePlay}
 							onpause={handlePause}

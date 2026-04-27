@@ -1286,7 +1286,10 @@ async def test_lecture_video_control_reacquire_invalidates_old_controller(
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 409
-    assert "no longer controls" in response.json()["detail"]
+    assert (
+        response.json()["detail"]
+        == "This tab is no longer connected to the video. Refresh the lesson to continue."
+    )
 
 
 @with_user(123)
@@ -1356,7 +1359,10 @@ async def test_lecture_video_duplicate_idempotent_request_from_old_controller_is
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert replay_from_old_controller.status_code == 409
-    assert "no longer controls" in replay_from_old_controller.json()["detail"]
+    assert (
+        replay_from_old_controller.json()["detail"]
+        == "This tab is no longer connected to the video. Refresh the lesson to continue."
+    )
 
 
 @with_user(123)
@@ -1629,7 +1635,10 @@ async def test_lecture_video_interactions_derive_continuation_and_history(
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert stale_version.status_code == 409
-    assert "out of date" in stale_version.json()["detail"]
+    assert (
+        stale_version.json()["detail"]
+        == "This lesson changed while you were working. Refresh the lesson and try again."
+    )
 
     history_response = api.get(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/history",
@@ -1750,7 +1759,7 @@ async def test_lecture_video_playback_events_are_rejected_while_awaiting_answer(
         assert response.status_code == 409
         assert (
             response.json()["detail"]
-            == "The lecture video cannot process playback events right now."
+            == "The video cannot do that right now. Wait a moment, then try again."
         )
 
     async with db.async_session() as session:
@@ -1912,7 +1921,7 @@ async def test_lecture_video_interactions_reject_post_completion_playback_events
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert invalid_pause.status_code == 409
-    assert invalid_pause.json()["detail"] == "Session is already completed."
+    assert invalid_pause.json()["detail"] == "This lesson is already complete."
 
     invalid_seek = api.post(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
@@ -1927,7 +1936,7 @@ async def test_lecture_video_interactions_reject_post_completion_playback_events
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert invalid_seek.status_code == 409
-    assert invalid_seek.json()["detail"] == "Session is already completed."
+    assert invalid_seek.json()["detail"] == "This lesson is already complete."
 
     invalid_end = api.post(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
@@ -1941,7 +1950,7 @@ async def test_lecture_video_interactions_reject_post_completion_playback_events
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert invalid_end.status_code == 409
-    assert invalid_end.json()["detail"] == "Session is already completed."
+    assert invalid_end.json()["detail"] == "This lesson is already complete."
 
     invalid_answer = api.post(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
@@ -1958,7 +1967,7 @@ async def test_lecture_video_interactions_reject_post_completion_playback_events
     assert invalid_answer.status_code == 409
     assert (
         invalid_answer.json()["detail"]
-        == "This question is no longer accepting answers."
+        == "This question is already closed. Refresh the lesson to continue."
     )
 
     refreshed_thread = api.get(
@@ -2264,7 +2273,7 @@ async def test_lecture_video_interactions_reject_resume_past_unlocked_progress(
     assert response.status_code == 422
     assert (
         response.json()["detail"]
-        == "Resuming past your unlocked progress is not allowed in this lecture video."
+        == "You cannot skip ahead yet. Continue from where the lesson left off."
     )
 
 
@@ -2378,7 +2387,7 @@ async def test_lecture_video_interactions_reject_seek_with_forged_from_offset(
     assert response.status_code == 422
     assert (
         response.json()["detail"]
-        == "Seeking past your unlocked progress is not allowed in this lecture video."
+        == "You cannot jump ahead yet. Continue from where the lesson left off."
     )
 
 
@@ -2448,7 +2457,7 @@ async def test_lecture_video_interactions_ignore_forged_seek_from_offset_for_unl
     assert resume_response.status_code == 422
     assert (
         resume_response.json()["detail"]
-        == "Resuming past your unlocked progress is not allowed in this lecture video."
+        == "You cannot skip ahead yet. Continue from where the lesson left off."
     )
 
     async with db.async_session() as session:
@@ -2520,7 +2529,10 @@ async def test_lecture_video_interactions_reject_stale_playing_resume_version(
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert stale_resume.status_code == 409
-    assert "out of date" in stale_resume.json()["detail"]
+    assert (
+        stale_resume.json()["detail"]
+        == "This lesson changed while you were working. Refresh the lesson and try again."
+    )
 
     refreshed_thread = api.get(
         f"/api/v1/class/{class_.id}/thread/{thread_id}",
@@ -3246,7 +3258,10 @@ async def test_lecture_video_control_release_and_interaction_fail_after_expiry(
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert release.status_code == 409
-    assert "expired" in release.json()["detail"]
+    assert (
+        release.json()["detail"]
+        == "This page was inactive for too long. Refresh the lesson to continue."
+    )
 
     interaction = api.post(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
@@ -3260,7 +3275,10 @@ async def test_lecture_video_control_release_and_interaction_fail_after_expiry(
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert interaction.status_code == 409
-    assert "expired" in interaction.json()["detail"]
+    assert (
+        interaction.json()["detail"]
+        == "This page was inactive for too long. Refresh the lesson to continue."
+    )
 
 
 @with_user(123)
@@ -3320,7 +3338,10 @@ async def test_lecture_video_control_blocks_other_users_until_expiry_then_allows
         headers={"Authorization": f"Bearer {other_user_token}"},
     )
     assert blocked.status_code == 409
-    assert "Another participant" in blocked.json()["detail"]
+    assert (
+        blocked.json()["detail"]
+        == "Someone else is controlling this video right now. Try again in a moment."
+    )
 
     other_thread = api.get(
         f"/api/v1/class/{class_.id}/thread/{thread_id}",
@@ -11378,7 +11399,7 @@ async def test_get_thread_video_rejects_assistant_mismatch(
     assert video_response.status_code == 409
     assert (
         video_response.json()["detail"]
-        == "This thread's lecture video no longer matches the assistant configuration."
+        == "This video lesson was updated. Start a new lesson to continue."
     )
 
     thread_response = api.get(
