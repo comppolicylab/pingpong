@@ -11187,11 +11187,8 @@ async def update_assistant(
                 await _ensure_lecture_video_manifest_generation_configured(
                     request.state["db"], int(class_id)
                 )
-            voice_changed = (
-                current_lecture_video is None
-                or (current_lecture_video.voice_id or "").strip()
-                != lecture_video_voice_id.strip()
-            )
+            requested_voice_id = lecture_video_voice_id.strip()
+            voice_changed = (lecture_video.voice_id or "").strip() != requested_voice_id
             manifest_changed = False
             if overwrite_lecture_video_manifest:
                 if lecture_video_manifest is None:
@@ -11210,9 +11207,14 @@ async def update_assistant(
                 and current_lecture_video.manual_manifest
                 != overwrite_lecture_video_manifest
             )
+            same_lecture_video = (
+                current_lecture_video is not None
+                and current_lecture_video.id == lecture_video.id
+            )
             should_touch_lecture_video = (
                 manifest_changed
                 or needs_manifest_generation
+                or regenerate_requested
                 or voice_changed
                 or overwrite_manifest_changed
                 or (current_lecture_video is None)
@@ -11221,10 +11223,8 @@ async def update_assistant(
 
             if should_touch_lecture_video:
                 target_lecture_video = lecture_video
-                if (
-                    current_lecture_video is not None
-                    and current_lecture_video.id == lecture_video.id
-                ):
+                if same_lecture_video:
+                    assert current_lecture_video is not None
                     target_lecture_video = (
                         await lecture_video_service.clone_lecture_video_snapshot(
                             request.state["db"], current_lecture_video
@@ -11239,6 +11239,8 @@ async def update_assistant(
                 if asst.lecture_video_id != target_lecture_video.id:
                     lecture_video_id_to_delete = asst.lecture_video_id
                 asst.lecture_video_id = target_lecture_video.id
+                request.state["db"].add(asst)
+                await request.state["db"].flush()
                 target_lecture_video.voice_id = lecture_video_voice_id
                 if prompt_present:
                     target_lecture_video.generation_prompt = (
@@ -11264,11 +11266,21 @@ async def update_assistant(
                     voice_changed and not needs_manifest_generation
                 ):
                     if not overwrite_lecture_video_manifest:
-                        manifest_source_lecture_video = (
-                            current_lecture_video
-                            if current_lecture_video is not None
-                            else target_lecture_video
-                        )
+                        if same_lecture_video:
+                            assert current_lecture_video is not None
+                            manifest_source_lecture_video = current_lecture_video
+                        else:
+                            loaded_lecture_video = (
+                                await models.LectureVideo.get_by_id_with_copy_context(
+                                    request.state["db"], target_lecture_video.id
+                                )
+                            )
+                            if loaded_lecture_video is None:
+                                raise HTTPException(
+                                    status_code=404,
+                                    detail="Could not find the lecture video you specified. Please try again.",
+                                )
+                            manifest_source_lecture_video = loaded_lecture_video
                         existing_manifest = (
                             lecture_video_service.lecture_video_manifest_from_model(
                                 manifest_source_lecture_video

@@ -7056,6 +7056,125 @@ async def test_update_assistant_with_new_lecture_video_id_without_manifest_queue
         ("user:123", "admin", "class:1"),
     ]
 )
+async def test_update_assistant_with_new_lecture_video_id_renarrates_when_target_voice_differs(
+    api, db, institution, valid_user_token, monkeypatch
+):
+    patch_lecture_video_model_list(monkeypatch)
+    queued_lecture_video_ids: list[int] = []
+
+    async def fake_queue_narration_processing_run(
+        session,
+        lecture_video: models.LectureVideo,
+        *,
+        assistant_id_at_start: int,
+    ):
+        queued_lecture_video_ids.append(lecture_video.id)
+        return None
+
+    monkeypatch.setattr(
+        lecture_video_processing,
+        "queue_narration_processing_run",
+        fake_queue_narration_processing_run,
+    )
+    monkeypatch.setattr(
+        lecture_video_service,
+        "should_regenerate_manifest",
+        AsyncMock(return_value=False),
+    )
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        first_video = make_lecture_video(
+            class_.id,
+            "first-narrated.mp4",
+            filename="first-narrated.mp4",
+            status=schemas.LectureVideoStatus.READY.value,
+        )
+        second_video = make_lecture_video(
+            class_.id,
+            "second-narrated.mp4",
+            filename="second-narrated.mp4",
+            status=schemas.LectureVideoStatus.READY.value,
+        )
+        session.add_all([class_, first_video, second_video])
+        await create_lecture_video_copy_credentials(session, class_.id)
+        await session.flush()
+        await lecture_video_service.persist_manifest(
+            session,
+            second_video,
+            schemas.LectureVideoManifestV1.model_validate(
+                lecture_video_manifest(question_text="Second question?")
+            ),
+            voice_id="target-video-voice",
+        )
+        second_video.manual_manifest = False
+        await session.commit()
+        await session.refresh(first_video)
+        await session.refresh(second_video)
+        assert second_video.voice_id == "target-video-voice"
+
+    create_response = api.post(
+        "/api/v1/class/1/assistant",
+        json={
+            "name": "Lecture Assistant",
+            "instructions": "Guide the learner through the lecture.",
+            "description": "Lecture presentation assistant",
+            "interaction_mode": "lecture_video",
+            "model": "gpt-4o-mini",
+            "tools": [],
+            "lecture_video_id": first_video.id,
+            "lecture_video_manifest": lecture_video_manifest(
+                question_text="First question?"
+            ),
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "overwrite_manifest": True,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+    queued_lecture_video_ids.clear()
+
+    update_response = api.put(
+        "/api/v1/class/1/assistant/1",
+        json={
+            "lecture_video_id": second_video.id,
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "overwrite_manifest": False,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert update_response.status_code == 200
+    assert update_response.json()["lecture_video"]["id"] == second_video.id
+
+    async with db.async_session() as session:
+        refreshed_video = await session.get(models.LectureVideo, second_video.id)
+        second_question = await session.scalar(
+            select(models.LectureVideoQuestion.question_text).where(
+                models.LectureVideoQuestion.lecture_video_id == second_video.id
+            )
+        )
+
+    assert refreshed_video is not None
+    assert refreshed_video.voice_id == DEFAULT_LECTURE_VIDEO_VOICE_ID
+    assert second_question == "Second question?"
+    assert queued_lecture_video_ids == [second_video.id]
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_assistants", "class:1"),
+        ("user:123", "can_edit", "assistant:1"),
+        ("user:123", "admin", "class:1"),
+    ]
+)
 async def test_update_lecture_video_assistant_requires_gemini_for_generation(
     api, db, institution, valid_user_token, monkeypatch
 ):
@@ -7685,6 +7804,103 @@ async def test_update_assistant_with_same_lecture_video_config_is_a_no_op(
     assert refreshed_video is not None
     assert refreshed_video.voice_id == DEFAULT_LECTURE_VIDEO_VOICE_ID
     assert question == "No-op question?"
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_assistants", "class:1"),
+        ("user:123", "can_edit", "assistant:1"),
+        ("user:123", "admin", "class:1"),
+    ]
+)
+async def test_update_assistant_with_manual_manifest_regenerate_queues_narration(
+    api, db, institution, valid_user_token, monkeypatch
+):
+    patch_lecture_video_model_list(monkeypatch)
+    manifest = lecture_video_manifest(question_text="Regenerate narration?")
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        lecture_video = make_lecture_video(
+            class_.id,
+            "manual-regenerate.mp4",
+            filename="manual-regenerate.mp4",
+            status=schemas.LectureVideoStatus.UPLOADED.value,
+        )
+        session.add_all([class_, lecture_video])
+        await create_lecture_video_copy_credentials(session, class_.id)
+        await session.commit()
+        await session.refresh(lecture_video)
+
+    create_response = api.post(
+        "/api/v1/class/1/assistant",
+        json={
+            "name": "Lecture Assistant",
+            "instructions": "Guide the learner through the lecture.",
+            "description": "Lecture presentation assistant",
+            "interaction_mode": "lecture_video",
+            "model": "gpt-4o-mini",
+            "tools": [],
+            "lecture_video_id": lecture_video.id,
+            "lecture_video_manifest": manifest,
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "overwrite_manifest": True,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+
+    update_response = api.put(
+        "/api/v1/class/1/assistant/1",
+        json={
+            "lecture_video_id": lecture_video.id,
+            "lecture_video_manifest": manifest,
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "overwrite_manifest": True,
+            "regenerate_requested": True,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert update_response.status_code == 200
+    regenerated_video_id = update_response.json()["lecture_video"]["id"]
+    assert regenerated_video_id != lecture_video.id
+
+    async with db.async_session() as session:
+        assistant = await session.get(models.Assistant, 1)
+        regenerated_video = await models.LectureVideo.get_by_id_with_copy_context(
+            session, regenerated_video_id
+        )
+        processing_runs = list(
+            (
+                await session.scalars(
+                    select(models.LectureVideoProcessingRun).order_by(
+                        models.LectureVideoProcessingRun.id.asc()
+                    )
+                )
+            ).all()
+        )
+
+    assert assistant is not None
+    assert assistant.lecture_video_id == regenerated_video_id
+    assert regenerated_video is not None
+    assert regenerated_video.manual_manifest is True
+    assert regenerated_video.questions[0].question_text == "Regenerate narration?"
+    assert len(processing_runs) == 2
+    assert processing_runs[0].lecture_video_id_snapshot == lecture_video.id
+    assert (
+        processing_runs[0].status == schemas.LectureVideoProcessingRunStatus.CANCELLED
+    )
+    assert processing_runs[1].lecture_video_id_snapshot == regenerated_video_id
+    assert processing_runs[1].stage == schemas.LectureVideoProcessingStage.NARRATION
+    assert processing_runs[1].status == schemas.LectureVideoProcessingRunStatus.QUEUED
 
 
 @with_user(123)
