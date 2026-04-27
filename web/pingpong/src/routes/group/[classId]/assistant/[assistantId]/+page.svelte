@@ -77,82 +77,8 @@
 	import MCPServerModal from '$lib/components/MCPServerModal.svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	export let data;
-	const LECTURE_VIDEO_DEFAULT_INSTRUCTIONS = `You are a friendly, clear tutor helping a learner during an interactive video lesson.
-
-Your responses will be **spoken aloud**, so they must sound natural, simple, and easy to follow.
-
----
-
-### Context Provided
-
-Each turn, the learner's question is preceded by a hidden developer message titled **"## Lecture Context"**. Read it before answering. It uses this structure:
-
-* **Status** — either *Watching the lecture video* or *Just answered Knowledge Check #N*. Tells you what the learner is doing right now.
-* **Current offset** — how far into the video they are, in milliseconds.
-* **### Recent Transcript** (sometimes **"Since Last Lecture Chat"**) — what the lecturer has just said. This is the main thing the learner is reacting to.
-* **### Lookahead Transcript** — a short window of what's about to be said. Use it to avoid spoiling upcoming explanations and to align your wording with what's coming.
-* **### Relevant Video Descriptions** — text descriptions of what's on screen during that window. Use this in place of "what I can see in the frame".
-* **### Upcoming Knowledge Check** — the next question the learner will be asked, with its options. Don't reveal the answer; you may nudge toward the relevant idea.
-* **### Knowledge Checks Answered** — earlier checks with the option chosen, whether it was correct, and any feedback shown. Build on these — reinforce what they got right, gently revisit what they missed.
-
-The learner's own question follows the developer message.
-
----
-
-### Instructions
-
-**1. Be clear and easy to follow**
-
-* Use plain language and match the level of the lecture
-* Avoid jargon, or define it briefly the first time it appears
-
-**2. Keep it short and focused**
-
-* Answer as directly as possible
-* One or two key ideas is usually enough
-
-**3. Make it sound natural when spoken**
-
-* Write like you're talking, not like a textbook
-* Read symbols and notation aloud (e.g. "x squared", "one over two") rather than using characters
-* Avoid long or complex sentences
-
-**4. Use the lecture context when helpful**
-
-* Ground your answer in what the lecturer just said (Recent Transcript) and what's on screen (Relevant Video Descriptions)
-  (e.g., "In the example the lecturer just worked through…")
-* Don't reference offsets, milliseconds, or section names from the developer message — translate them into natural phrases like "just now" or "in a moment"
-
-**5. Respect the upcoming Knowledge Check**
-
-* If the question is heading toward an Upcoming Knowledge Check, help them think — don't give away the answer
-* If they're asking after answering one (Status says *Just answered Knowledge Check #N*), build on the feedback they already saw
-
-**6. Prioritise helping over completeness**
-
-* Give the simplest explanation that moves the learner forward
-* Don't unfold long derivations or background unless asked
-
-**7. If the question is unclear or off-track**
-
-* Gently steer back, or ask one brief clarifying question
-* Don't guess wildly
-
-**8. Default to direct answers**
-
-* Only ask a question back if it's needed to help them
-
-**9. Keep the tone of a friendly teacher**
-
-* Supportive, calm, and encouraging
-* Not overly excited or overly formal
-
----
-
-### Output
-
-Respond with **only the answer**, written as a short, spoken explanation.
-`;
+	$: lectureVideoDefaultInstructions = data.lectureVideoDefaults?.instructions || '';
+	$: lectureVideoDefaultGenerationPrompt = data.lectureVideoDefaults?.generation_prompt || '';
 	const SUPPORTED_LECTURE_VIDEO_QUESTION_TYPES = new Set<api.LectureVideoQuestionType>([
 		'single_select'
 	]);
@@ -213,6 +139,55 @@ Respond with **only the answer**, written as a short, spoken explanation.
 			end_offset_ms: number;
 			description: string;
 		}[];
+	};
+
+	type LectureVideoSaveAffordances = {
+		regenerateHelperText: string;
+		regenerateButtonLabel: string;
+		saveButtonLabel: string;
+	};
+
+	const deriveLectureVideoSaveAffordances = ({
+		impliedRegeneration,
+		overwriteManifest,
+		saveTriggersGeneration,
+		regenerateRequested,
+		isCreating
+	}: {
+		impliedRegeneration: boolean;
+		overwriteManifest: boolean;
+		saveTriggersGeneration: boolean;
+		regenerateRequested: boolean;
+		isCreating: boolean;
+	}): LectureVideoSaveAffordances => {
+		if (impliedRegeneration && overwriteManifest) {
+			return {
+				regenerateHelperText: 'Your changes will re-create narration clips when you save.',
+				regenerateButtonLabel: 'Regenerate audio on save',
+				saveButtonLabel: 'Save'
+			};
+		}
+		if (impliedRegeneration) {
+			return {
+				regenerateHelperText:
+					'Your changes will regenerate the manifest and re-create narration clips when you save.',
+				regenerateButtonLabel: 'Regenerate on save',
+				saveButtonLabel: saveTriggersGeneration ? 'Save & generate' : 'Save'
+			};
+		}
+		if (overwriteManifest) {
+			return {
+				regenerateHelperText: 'Re-runs narration recreation for the current manifest.',
+				regenerateButtonLabel: 'Regenerate audio',
+				saveButtonLabel: regenerateRequested ? 'Save & regenerate audio' : 'Save'
+			};
+		}
+		return {
+			regenerateHelperText:
+				'Re-runs the knowledge check generation and re-creates all narration clips.',
+			regenerateButtonLabel: 'Regenerate manifest & audio',
+			saveButtonLabel: saveTriggersGeneration && isCreating ? 'Save & generate' : 'Save'
+		};
 	};
 
 	// Flag indicating whether we should check for changes before navigating away.
@@ -306,6 +281,15 @@ Respond with **only the answer**, written as a short, spoken explanation.
 	let lectureVideoManifestJson = '';
 	let lectureVideoChatUnavailable = false;
 	let hasSetLectureVideoManifest = false;
+	let generationPrompt = '';
+	let hasSetGenerationPrompt = false;
+	let canGenerateLectureVideoManifest = data.lectureVideoDefaults?.can_generate_manifest ?? false;
+	$: canGenerateLectureVideoManifest = data.lectureVideoDefaults?.can_generate_manifest ?? false;
+	const effectiveOverwriteManifest = (storedOverwriteManifest?: boolean | null) =>
+		canGenerateLectureVideoManifest ? (storedOverwriteManifest ?? false) : true;
+	let overwriteManifest = effectiveOverwriteManifest(data.lectureVideoConfig?.overwrite_manifest);
+	let hasSetOverwriteManifest = false;
+	let regenerateRequested = false;
 	let currentVoiceId = data.lectureVideoConfig?.voice_id || '';
 	let voiceId = '';
 	let hasSetVoiceId = false;
@@ -659,9 +643,77 @@ Respond with **only the answer**, written as a short, spoken explanation.
 		);
 		hasSetLectureVideoManifest = true;
 	}
+	$: if (!hasSetGenerationPrompt && !lectureVideoConfigLoadError) {
+		generationPrompt =
+			data.lectureVideoConfig?.generation_prompt || lectureVideoDefaultGenerationPrompt;
+		hasSetGenerationPrompt = true;
+	}
+	$: if (!hasSetOverwriteManifest && !lectureVideoConfigLoadError) {
+		overwriteManifest = effectiveOverwriteManifest(data.lectureVideoConfig?.overwrite_manifest);
+		hasSetOverwriteManifest = true;
+	}
 	$: currentLectureVideoManifestNormalized = normalizeLectureVideoManifestForCompare(
 		stringifyLectureVideoManifest(data.lectureVideoConfig?.lecture_video_manifest)
 	);
+	$: originalGenerationPrompt =
+		data.lectureVideoConfig?.generation_prompt || lectureVideoDefaultGenerationPrompt;
+	$: generationPromptEdited =
+		canGenerateLectureVideoManifest && generationPrompt !== lectureVideoDefaultGenerationPrompt;
+	$: generationPromptForSave = generationPromptEdited ? generationPrompt : null;
+	$: manifestGenerationStatus = data.lectureVideoConfig?.manifest_generation_status ?? null;
+	$: originalOverwriteManifest = effectiveOverwriteManifest(
+		data.lectureVideoConfig?.overwrite_manifest
+	);
+	$: manifestGenerationInFlight =
+		manifestGenerationStatus?.state === 'queued' || manifestGenerationStatus?.state === 'running';
+	$: lastManifestRunFailed = manifestGenerationStatus?.state === 'failed';
+	$: lectureVideoManifestChanged =
+		overwriteManifest &&
+		normalizeLectureVideoManifestForCompare(lectureVideoManifestJson) !==
+			currentLectureVideoManifestNormalized;
+	$: lectureVideoIdChanged =
+		(selectedLectureVideo?.id ?? null) !== (currentLectureVideo?.id ?? null);
+	$: lectureVideoVoiceChanged = voiceId.trim() !== currentVoiceId.trim();
+	$: generationPromptChanged =
+		canGenerateLectureVideoManifest && generationPrompt !== originalGenerationPrompt;
+	$: lectureVideoGenerationTriggeredByFormChanges =
+		isLectureMode &&
+		canGenerateLectureVideoManifest &&
+		!overwriteManifest &&
+		(originalOverwriteManifest ||
+			lectureVideoIdChanged ||
+			generationPromptChanged ||
+			lastManifestRunFailed ||
+			!data.lectureVideoConfig?.lecture_video_manifest);
+	$: lectureVideoNarrationTriggeredByFormChanges =
+		isLectureMode &&
+		overwriteManifest &&
+		(lectureVideoManifestChanged ||
+			lectureVideoVoiceChanged ||
+			overwriteManifest !== originalOverwriteManifest);
+	$: lectureVideoRegenerationImpliedByFormChanges =
+		lectureVideoGenerationTriggeredByFormChanges || lectureVideoNarrationTriggeredByFormChanges;
+	$: canRegenerateLectureVideo = isLectureMode && !data.isCreating;
+	$: if (!canRegenerateLectureVideo && regenerateRequested) {
+		regenerateRequested = false;
+	}
+	$: lectureVideoRegenerateButtonPressed =
+		regenerateRequested || lectureVideoRegenerationImpliedByFormChanges;
+	$: lectureVideoSaveTriggersGeneration =
+		isLectureMode &&
+		canGenerateLectureVideoManifest &&
+		!overwriteManifest &&
+		(regenerateRequested || lectureVideoGenerationTriggeredByFormChanges);
+	$: lectureVideoSaveAffordances = deriveLectureVideoSaveAffordances({
+		impliedRegeneration: lectureVideoRegenerationImpliedByFormChanges,
+		overwriteManifest,
+		saveTriggersGeneration: isLectureMode && lectureVideoSaveTriggersGeneration,
+		regenerateRequested,
+		isCreating: data.isCreating
+	});
+	$: lectureVideoRegenerateHelperText = lectureVideoSaveAffordances.regenerateHelperText;
+	$: lectureVideoRegenerateButtonLabel = lectureVideoSaveAffordances.regenerateButtonLabel;
+	$: saveButtonLabel = lectureVideoSaveAffordances.saveButtonLabel;
 	$: lectureVideoChatUnavailable = (() => {
 		try {
 			const manifestState = lectureVideoChatUnavailableForManifest(
@@ -1404,7 +1456,7 @@ Respond with **only the answer**, written as a short, spoken explanation.
 			instructions = assistant.instructions;
 			hasSetInstructions = true;
 		} else if (mode === 'lecture_video' && data.isCreating) {
-			instructions = LECTURE_VIDEO_DEFAULT_INSTRUCTIONS;
+			instructions = lectureVideoDefaultInstructions;
 			hasSetInstructions = true;
 		} else {
 			await tick();
@@ -1611,7 +1663,7 @@ Respond with **only the answer**, written as a short, spoken explanation.
 			data.isCreating &&
 			isLectureMode &&
 			normalizeNewlines(params.instructions || '') ===
-				normalizeNewlines(LECTURE_VIDEO_DEFAULT_INSTRUCTIONS)
+				normalizeNewlines(lectureVideoDefaultInstructions)
 		) {
 			fields = fields.filter((field) => field !== 'instructions');
 		}
@@ -1652,10 +1704,22 @@ Respond with **only the answer**, written as a short, spoken explanation.
 			modifiedFields.push('lecture video');
 		}
 		if (
+			overwriteManifest &&
 			normalizeLectureVideoManifestForCompare(lectureVideoManifestJson) !==
-			currentLectureVideoManifestNormalized
+				currentLectureVideoManifestNormalized
 		) {
 			modifiedFields.push('lecture video manifest');
+		}
+		if (canGenerateLectureVideoManifest && generationPrompt !== originalGenerationPrompt) {
+			modifiedFields.push('generation prompt');
+		}
+		if (canRegenerateLectureVideo && regenerateRequested) {
+			modifiedFields.push(
+				overwriteManifest ? 'lecture video narration' : 'lecture video generation'
+			);
+		}
+		if (overwriteManifest !== originalOverwriteManifest) {
+			modifiedFields.push('lecture video manifest mode');
 		}
 		if (voiceId.trim() !== currentVoiceId.trim()) {
 			modifiedFields.push('voice id');
@@ -1722,14 +1786,10 @@ Respond with **only the answer**, written as a short, spoken explanation.
 			mcpServersForRequest = mcpServersLocal.map(cleanMcpServerForRequest);
 		}
 		const params = {
-			name: preventEdits ? assistant?.name || '' : body.name.toString(),
+			name: preventEdits ? assistant?.name || '' : assistantName,
 			interaction_mode: interactionMode,
-			description: preventEdits
-				? assistant?.description || ''
-				: normalizeNewlines(body.description.toString()),
-			instructions: preventEdits
-				? assistant?.instructions || ''
-				: normalizeNewlines(body.instructions?.toString() || ''),
+			description: preventEdits ? assistant?.description || '' : normalizeNewlines(description),
+			instructions: preventEdits ? assistant?.instructions || '' : normalizeNewlines(instructions),
 			notes: preventEdits ? assistant?.notes || '' : normalizeNewlines(notes),
 			model: isLectureMode
 				? data.isCreating
@@ -1768,6 +1828,8 @@ Respond with **only the answer**, written as a short, spoken explanation.
 					: null,
 			lecture_video_id: isLectureMode ? (selectedLectureVideo?.id ?? undefined) : undefined,
 			voice_id: isLectureMode ? voiceId.trim() : undefined,
+			generation_prompt: isLectureMode ? generationPrompt : undefined,
+			overwrite_manifest: isLectureMode ? overwriteManifest : undefined,
 			published: body.published?.toString() === 'on',
 			use_latex: isLectureMode
 				? (assistant?.use_latex ?? false)
@@ -1933,6 +1995,15 @@ Respond with **only the answer**, written as a short, spoken explanation.
 			selectedLectureVideo = { ...selectedLectureVideo, ...summary };
 		}
 	};
+	const syncManifestGenerationStatus = (status: api.LectureVideoProcessingRunSummary) => {
+		if (!data.lectureVideoConfig) {
+			return;
+		}
+		data.lectureVideoConfig = {
+			...data.lectureVideoConfig,
+			manifest_generation_status: status
+		};
+	};
 	$: canRefreshCurrentLectureVideoStatus =
 		!data.isCreating &&
 		!!data.assistantId &&
@@ -1971,6 +2042,12 @@ Respond with **only the answer**, written as a short, spoken explanation.
 			}
 
 			syncLectureVideoSummary(expanded.data.lecture_video);
+			data.lectureVideoConfig = expanded.data;
+			if (expanded.data.lecture_video_manifest) {
+				lectureVideoManifestJson = stringifyLectureVideoManifest(
+					expanded.data.lecture_video_manifest
+				);
+			}
 		} finally {
 			refreshingLectureVideoStatus = false;
 		}
@@ -2001,6 +2078,10 @@ Respond with **only the answer**, written as a short, spoken explanation.
 		}
 
 		syncLectureVideoSummary(expanded.data);
+		if (lastManifestRunFailed) {
+			syncManifestGenerationStatus({ state: 'queued' });
+			void refreshAssistantLectureVideoStatus();
+		}
 		happyToast('Lecture video processing retried');
 	};
 
@@ -2161,9 +2242,17 @@ Respond with **only the answer**, written as a short, spoken explanation.
 				$loadingMessage = '';
 				return;
 			}
+			if (!canGenerateLectureVideoManifest && !overwriteManifest) {
+				sadToast('Please provide a lecture video manifest before saving.');
+				$loading = false;
+				$loadingMessage = '';
+				return;
+			}
 
-			const parsedManifest = parseLectureVideoManifest(lectureVideoManifestJson);
-			if (!parsedManifest.manifest || parsedManifest.error) {
+			const parsedManifest = overwriteManifest
+				? parseLectureVideoManifest(lectureVideoManifestJson)
+				: { manifest: null, error: null };
+			if (overwriteManifest && (!parsedManifest.manifest || parsedManifest.error)) {
 				sadToast(parsedManifest.error || 'Lecture video manifest is invalid.');
 				$loading = false;
 				$loadingMessage = '';
@@ -2184,22 +2273,34 @@ Respond with **only the answer**, written as a short, spoken explanation.
 				return;
 			}
 
-			const lectureVideoManifestChanged =
-				normalizeLectureVideoManifestForCompare(lectureVideoManifestJson) !==
-				currentLectureVideoManifestNormalized;
-			const lectureVideoIdChanged = selectedLectureVideoId !== (currentLectureVideo?.id ?? null);
-			const lectureVideoVoiceChanged = trimmedVoiceId !== currentVoiceId.trim();
+			const overwriteManifestChanged = overwriteManifest !== originalOverwriteManifest;
 			const lectureVideoFieldsChanged =
-				lectureVideoManifestChanged || lectureVideoIdChanged || lectureVideoVoiceChanged;
+				lectureVideoManifestChanged ||
+				lectureVideoIdChanged ||
+				lectureVideoVoiceChanged ||
+				generationPromptChanged ||
+				overwriteManifestChanged ||
+				(canRegenerateLectureVideo && regenerateRequested) ||
+				lastManifestRunFailed;
 
 			if (data.isCreating || lectureVideoFieldsChanged) {
 				params.lecture_video_id = selectedLectureVideoId;
-				params.lecture_video_manifest = parsedManifest.manifest;
+				params.lecture_video_manifest = parsedManifest.manifest ?? undefined;
 				params.voice_id = trimmedVoiceId;
+				params.generation_prompt = canGenerateLectureVideoManifest
+					? generationPromptForSave
+					: undefined;
+				if (canRegenerateLectureVideo) {
+					params.regenerate_requested = regenerateRequested;
+				}
+				params.overwrite_manifest = overwriteManifest;
 			} else {
 				delete params.lecture_video_id;
 				delete params.lecture_video_manifest;
 				delete params.voice_id;
+				delete params.generation_prompt;
+				delete params.regenerate_requested;
+				delete params.overwrite_manifest;
 			}
 		}
 
@@ -2729,30 +2830,6 @@ Respond with **only the answer**, written as a short, spoken explanation.
 				{/if}
 			</div>
 			<div class="col-span-2 mb-4">
-				<div class="flex items-center justify-between">
-					<Label for="lecture_video_manifest" class="mb-0">Lecture Video Manifest (JSON)</Label>
-				</div>
-				<Helper class="pb-1"
-					>Provide valid JSON with at least one question, supported question types, non-negative
-					offsets, at least two options per question, and exactly one correct option for
-					single-select questions.</Helper
-				>
-				{#if lectureVideoChatUnavailable}
-					<Helper class="pb-2 text-amber-700">
-						Lecture chat is only available for lecture videos with a version 2 or 3 manifest that
-						includes word-level transcription.
-					</Helper>
-				{/if}
-				<Textarea
-					id="lecture_video_manifest"
-					name="lecture_video_manifest"
-					rows={14}
-					bind:value={lectureVideoManifestJson}
-					disabled={preventEdits}
-					class="font-mono text-xs"
-				/>
-			</div>
-			<div class="col-span-2 mb-4">
 				<div class="flex items-center gap-2">
 					<Label for="voice_id">Voice ID</Label>
 					{#if voiceId.trim().length > 0 && (voiceId.trim() === lastValidatedVoiceId || voiceId.trim() === currentVoiceId.trim())}
@@ -2805,31 +2882,33 @@ Respond with **only the answer**, written as a short, spoken explanation.
 				{/if}
 			</div>
 		{/if}
-		<div class="col-span-2 mb-4">
-			<div class="flex flex-row items-end justify-between">
-				<div>
-					<Label for="instructions">Instructions</Label>
-					<Helper class="pb-1"
-						>This is the prompt the language model will use to generate responses.</Helper
+		{#if !isLectureMode}
+			<div class="col-span-2 mb-4">
+				<div class="flex flex-row items-end justify-between">
+					<div>
+						<Label for="instructions">Instructions</Label>
+						<Helper class="pb-1"
+							>This is the prompt the language model will use to generate responses.</Helper
+						>
+					</div>
+					<Button
+						class="mb-1 flex max-h-fit max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
+						onclick={previewInstructions}
+						type="button"
+						disabled={$loading || uploadingFSPrivate || uploadingCIPrivate}
 					>
+						Preview
+					</Button>
 				</div>
-				<Button
-					class="mb-1 flex max-h-fit max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
-					onclick={previewInstructions}
-					type="button"
-					disabled={$loading || uploadingFSPrivate || uploadingCIPrivate}
-				>
-					Preview
-				</Button>
+				<Textarea
+					id="instructions"
+					name="instructions"
+					rows={6}
+					bind:value={instructions}
+					disabled={preventEdits}
+				/>
 			</div>
-			<Textarea
-				id="instructions"
-				name="instructions"
-				rows={6}
-				bind:value={instructions}
-				disabled={preventEdits}
-			/>
-		</div>
+		{/if}
 		{#if !isLectureMode}
 			<div class="col-span-2 mb-4">
 				<Checkbox id="hide_prompt" name="hide_prompt" disabled={preventEdits} checked={hidePrompt}
@@ -3344,6 +3423,153 @@ Respond with **only the answer**, written as a short, spoken explanation.
 						</div></span
 					>
 					<div class="flex flex-col gap-4 px-1">
+						{#if isLectureMode}
+							<div class="col-span-2 mb-1">
+								<div class="flex flex-row items-end justify-between">
+									<div>
+										<Label for="instructions">Chat Instructions</Label>
+										<Helper class="pb-1"
+											>Used to generate responses to questions asked during lecture.</Helper
+										>
+									</div>
+									<Button
+										class="mb-1 flex max-h-fit max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
+										onclick={previewInstructions}
+										type="button"
+										disabled={$loading || uploadingFSPrivate || uploadingCIPrivate}
+									>
+										Preview
+									</Button>
+								</div>
+								<Textarea
+									id="instructions"
+									name="instructions"
+									rows={6}
+									bind:value={instructions}
+									disabled={preventEdits}
+								/>
+							</div>
+
+							{#if canGenerateLectureVideoManifest}
+								<hr />
+
+								<div class="col-span-2 mb-1">
+									<div class="flex items-end justify-between gap-3">
+										<div>
+											<div class="flex items-center gap-2">
+												<Label
+													for="generation_prompt"
+													class="mb-0 text-gray-800 contrast-100 grayscale-0"
+													><div class="flex flex-row gap-1">
+														<div>Generation Instructions</div>
+														{#if generationPromptEdited}<div>&middot;</div>
+															<div class="text-gray-500">Edited from default</div>{/if}
+													</div></Label
+												>
+											</div>
+											<Helper class="pb-1">Used to generate knowledge checks.</Helper>
+										</div>
+										<button
+											type="button"
+											class="pb-1 text-xs text-blue-800 hover:underline disabled:cursor-not-allowed disabled:text-gray-400 disabled:no-underline"
+											disabled={preventEdits ||
+												overwriteManifest ||
+												generationPrompt === lectureVideoDefaultGenerationPrompt}
+											onclick={() => {
+												generationPrompt = lectureVideoDefaultGenerationPrompt;
+											}}>Reset to default</button
+										>
+									</div>
+									<Textarea
+										id="generation_prompt"
+										name="generation_prompt"
+										rows={10}
+										bind:value={generationPrompt}
+										disabled={preventEdits || overwriteManifest}
+										class="text-sm"
+									/>
+								</div>
+							{/if}
+
+							<hr />
+
+							<div class="col-span-2 mb-1">
+								<div class="flex items-center justify-between gap-3">
+									<Label
+										for="lecture_video_manifest"
+										class="mb-0 text-gray-800 contrast-100 grayscale-0"
+										>Lecture Video Manifest</Label
+									>
+									{#if canGenerateLectureVideoManifest}
+										<Checkbox bind:checked={overwriteManifest} disabled={preventEdits}
+											>Overwrite manifest</Checkbox
+										>
+									{/if}
+								</div>
+								<Helper class="pb-1"
+									>{overwriteManifest
+										? 'Provide a custom manifest to use for this lecture video.'
+										: 'Preview the manifest for this lecture video.'}</Helper
+								>
+								{#if canGenerateLectureVideoManifest && originalOverwriteManifest && !overwriteManifest}
+									<Helper class="pb-1 text-yellow-700">
+										You previously provided a custom manifest for this lecture video. On save, your
+										custom manifest will be replaced.
+									</Helper>
+								{/if}
+								{#if canGenerateLectureVideoManifest}
+									<div class="mb-2 text-sm">
+										{#if manifestGenerationInFlight}
+											<span>Generating...</span>
+										{:else if lastManifestRunFailed}
+											<span class="text-red-700"
+												>Generation failed: {manifestGenerationStatus?.error_message ||
+													'Unknown error'}</span
+											>
+										{:else if manifestGenerationStatus?.finished_at}
+											<span
+												>Last generated {new Date(
+													manifestGenerationStatus.finished_at
+												).toLocaleString()}</span
+											>
+										{/if}
+									</div>
+								{/if}
+								{#if canRegenerateLectureVideo}
+									<div class="mb-2 flex flex-wrap items-center gap-3 text-sm text-gray-600">
+										<button
+											type="button"
+											class={`${lectureVideoRegenerateButtonPressed ? 'border-blue-300 bg-blue-100 font-semibold text-blue-800 shadow-inner shadow-blue-200' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'} rounded-lg border px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-70`}
+											disabled={preventEdits ||
+												manifestGenerationInFlight ||
+												lectureVideoRegenerationImpliedByFormChanges}
+											aria-pressed={lectureVideoRegenerateButtonPressed}
+											onclick={() => {
+												regenerateRequested = !regenerateRequested;
+											}}>{lectureVideoRegenerateButtonLabel}</button
+										>
+										<span class="text-xs text-gray-600">{lectureVideoRegenerateHelperText}</span>
+									</div>
+								{/if}
+								{#if lectureVideoChatUnavailable}
+									<Helper class="pb-2 text-yellow-700">
+										Provide a manifest with word-level transcription (Version 2 or 3) to enable
+										lecture chat.
+									</Helper>
+								{/if}
+								<Textarea
+									id="lecture_video_manifest"
+									name="lecture_video_manifest"
+									rows={14}
+									bind:value={lectureVideoManifestJson}
+									disabled={preventEdits || !overwriteManifest}
+									class="font-mono text-xs"
+								/>
+							</div>
+
+							<hr />
+						{/if}
+
 						{#if !isLectureMode}
 							<div class="col-span-2 mb-1">
 								<Checkbox
@@ -4023,7 +4249,7 @@ Respond with **only the answer**, written as a short, spoken explanation.
 				class="border border-orange bg-orange text-white hover:bg-orange-dark"
 				type="submit"
 				disabled={$loading || uploadingFSPrivate || uploadingCIPrivate || uploadingLectureVideo}
-				>Save</Button
+				>{saveButtonLabel}</Button
 			>
 			<Button
 				disabled={$loading || uploadingFSPrivate || uploadingCIPrivate || uploadingLectureVideo}

@@ -1,9 +1,16 @@
 import asyncio
+import functools
 import logging
 import ssl
+from typing import TypeVar
 
 from google import genai
+from google.genai.client import AsyncClient
+from google.genai import types
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
+import pingpong.models as models
 from pingpong import schemas
 from pingpong.class_credential_validation import (
     ClassCredentialValidationSSLError,
@@ -12,6 +19,58 @@ from pingpong.class_credential_validation import (
 from pingpong.log_utils import sanitize_for_log
 
 logger = logging.getLogger(__name__)
+
+_ResponseModelT = TypeVar("_ResponseModelT", bound=BaseModel)
+
+
+async def get_gemini_client_by_class_id(
+    session: AsyncSession,
+    class_id: int,
+) -> genai.Client:
+    credential = await models.ClassCredential.get_by_class_id_and_purpose(
+        session,
+        class_id,
+        schemas.ClassCredentialPurpose.LECTURE_VIDEO_MANIFEST_GENERATION,
+    )
+    if credential is None or credential.api_key_obj is None:
+        raise RuntimeError(
+            "A Gemini credential is required before lecture video manifests can be generated."
+        )
+    return get_gemini_client(credential.api_key_obj.api_key)
+
+
+@functools.cache
+def get_gemini_client(api_key: str) -> genai.Client:
+    if not api_key:
+        raise ValueError("API key is required")
+    return genai.Client(api_key=api_key)
+
+
+async def generate_manifest_quiz(
+    client: AsyncClient,
+    *,
+    model: str,
+    prompt: str,
+    contents: types.ContentListUnion,
+    response_model: type[_ResponseModelT],
+) -> _ResponseModelT:
+    response = await client.models.generate_content(
+        model=model,
+        config=types.GenerateContentConfig(
+            system_instruction=prompt,
+            response_mime_type="application/json",
+            response_json_schema=response_model.model_json_schema(),
+            media_resolution=types.MediaResolution.MEDIA_RESOLUTION_HIGH,
+        ),
+        contents=contents,
+    )
+    if not response.text:
+        raise ValueError("Gemini returned an empty response.")
+    return response_model.model_validate_json(response.text)
+
+
+async def delete_file(client: AsyncClient, name: str) -> None:
+    await client.files.delete(name=name)
 
 
 async def validate_gemini_api_key(api_key: str) -> bool:

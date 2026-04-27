@@ -5,8 +5,9 @@ import multiprocessing
 import os
 import secrets
 import socket
+import tempfile
 import time
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
@@ -18,6 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import pingpong.models as models
 import pingpong.schemas as schemas
+from pingpong import gemini, lecture_video_manifest_generation, lecture_video_service
+from pingpong.ai import get_openai_client_by_class_id
 from pingpong.audio_store import AudioStoreError
 from pingpong.class_credential_validation import (
     ClassCredentialValidationSSLError,
@@ -45,6 +48,7 @@ from pingpong.worker_pool import (
 logger = logging.getLogger(__name__)
 
 NARRATION_STAGE = schemas.LectureVideoProcessingStage.NARRATION
+MANIFEST_GENERATION_STAGE = schemas.LectureVideoProcessingStage.MANIFEST_GENERATION
 RUN_LEASE_DURATION = timedelta(minutes=10)
 RUN_LEASE_HEARTBEAT_INTERVAL = min(timedelta(minutes=1), RUN_LEASE_DURATION / 2)
 _ACTIVE_RUN_STATUSES = (
@@ -62,6 +66,16 @@ class NarrationWorkItem:
     voice_id: str
     narration_id: int
     text: str
+
+
+@dataclass(frozen=True)
+class ManifestGenerationRunContext:
+    class_id: int
+    lecture_video_id: int
+    generation_prompt: str
+    transcript: list[schemas.LectureVideoManifestWordV3] | None
+    openai_client: Any
+    gemini_client: Any
 
 
 class NarrationWorkerPoolManager(WorkerPoolManager):
@@ -82,8 +96,8 @@ class NarrationWorkerPoolManager(WorkerPoolManager):
             workers=workers,
             worker_target=_worker_process_main,
             process_context=process_context or get_forkserver_context(),
-            claim_run_fn=claim_run_fn or self._claim_next_narration_run_sync,
-            recover_run_fn=recover_run_fn or self._recover_failed_narration_run_sync,
+            claim_run_fn=claim_run_fn or self._claim_next_processing_run_sync,
+            recover_run_fn=recover_run_fn or self._recover_failed_processing_run_sync,
             build_runner_id_fn=build_runner_id,
             worker_label="lecture video worker",
             unexpected_exit_error_message=UNEXPECTED_WORKER_EXIT_ERROR_MESSAGE,
@@ -98,19 +112,19 @@ class NarrationWorkerPoolManager(WorkerPoolManager):
             self.async_runner = asyncio.Runner()
         return self.async_runner
 
-    def _claim_next_narration_run_sync(self, runner_id: str) -> tuple[int, str] | None:
+    def _claim_next_processing_run_sync(self, runner_id: str) -> tuple[int, str] | None:
         return self._ensure_async_runner().run(
-            _claim_next_narration_run(leased_by=runner_id)
+            _claim_next_processing_run(leased_by=runner_id)
         )
 
-    def _recover_failed_narration_run_sync(
+    def _recover_failed_processing_run_sync(
         self,
         run_id: int,
         lease_token: str,
         error_message: str,
     ) -> bool:
         return self._ensure_async_runner().run(
-            recover_failed_narration_run(
+            recover_failed_processing_run(
                 run_id,
                 lease_token,
                 error_message=error_message,
@@ -176,7 +190,7 @@ def _worker_process_main(
                 )
                 try:
                     runner.run(
-                        _process_claimed_narration_run(
+                        _process_claimed_run(
                             assignment.run_id,
                             assignment.lease_token,
                         )
@@ -326,6 +340,81 @@ async def queue_narration_processing_run(
     raise last_error
 
 
+async def queue_manifest_generation_processing_run(
+    session: AsyncSession,
+    lecture_video: models.LectureVideo,
+    *,
+    assistant_id_at_start: int,
+) -> models.LectureVideoProcessingRun | None:
+    attached_assistant = await models.Assistant.get_by_lecture_video_id(
+        session, lecture_video.id
+    )
+    if attached_assistant is None or attached_assistant.id != assistant_id_at_start:
+        return None
+
+    existing_run = (
+        await models.LectureVideoProcessingRun.get_non_terminal_by_snapshot_stage(
+            session,
+            lecture_video.id,
+            MANIFEST_GENERATION_STAGE,
+        )
+    )
+    if existing_run is not None:
+        return existing_run
+
+    lecture_video.status = schemas.LectureVideoStatus.PROCESSING
+    lecture_video.error_message = None
+    lecture_video_id = lecture_video.id
+    class_id = lecture_video.class_id
+    attempt_number = (
+        await models.LectureVideoProcessingRun.get_latest_attempt_number(
+            session,
+            lecture_video_id,
+            MANIFEST_GENERATION_STAGE,
+        )
+        + 1
+    )
+    last_error: IntegrityError | None = None
+    for _ in range(MAX_RUN_CREATE_RETRIES):
+        async with session.begin_nested() as savepoint:
+            try:
+                return await models.LectureVideoProcessingRun.create(
+                    session,
+                    lecture_video_id=lecture_video_id,
+                    lecture_video_id_snapshot=lecture_video_id,
+                    class_id=class_id,
+                    assistant_id_at_start=assistant_id_at_start,
+                    stage=MANIFEST_GENERATION_STAGE,
+                    attempt_number=attempt_number,
+                    status=schemas.LectureVideoProcessingRunStatus.QUEUED,
+                )
+            except IntegrityError as exc:
+                last_error = exc
+                await savepoint.rollback()
+
+        existing_run = (
+            await models.LectureVideoProcessingRun.get_non_terminal_by_snapshot_stage(
+                session,
+                lecture_video_id,
+                MANIFEST_GENERATION_STAGE,
+            )
+        )
+        if existing_run is not None:
+            return existing_run
+        attempt_number = (
+            await models.LectureVideoProcessingRun.get_latest_attempt_number(
+                session,
+                lecture_video_id,
+                MANIFEST_GENERATION_STAGE,
+            )
+            + 1
+        )
+
+    if last_error is None:
+        raise RuntimeError("Failed to queue manifest generation run.")
+    raise last_error
+
+
 async def cancel_narration_processing_runs(
     session: AsyncSession,
     lecture_video_id_snapshot: int,
@@ -338,6 +427,33 @@ async def cancel_narration_processing_runs(
             models.LectureVideoProcessingRun.lecture_video_id_snapshot
             == lecture_video_id_snapshot,
             models.LectureVideoProcessingRun.stage == NARRATION_STAGE,
+            models.LectureVideoProcessingRun.status.in_(_ACTIVE_RUN_STATUSES),
+        )
+        .values(
+            status=schemas.LectureVideoProcessingRunStatus.CANCELLED,
+            cancel_reason=cancel_reason,
+            finished_at=now,
+            lease_token=None,
+            leased_by=None,
+            lease_expires_at=None,
+        )
+    )
+    await session.flush()
+    return bool(result.rowcount)
+
+
+async def cancel_manifest_generation_processing_runs(
+    session: AsyncSession,
+    lecture_video_id_snapshot: int,
+    cancel_reason: schemas.LectureVideoProcessingCancelReason,
+) -> bool:
+    now = utcnow()
+    result = await session.execute(
+        update(models.LectureVideoProcessingRun)
+        .where(
+            models.LectureVideoProcessingRun.lecture_video_id_snapshot
+            == lecture_video_id_snapshot,
+            models.LectureVideoProcessingRun.stage == MANIFEST_GENERATION_STAGE,
             models.LectureVideoProcessingRun.status.in_(_ACTIVE_RUN_STATUSES),
         )
         .values(
@@ -458,17 +574,463 @@ async def _await_with_run_lease_heartbeat(
         raise
 
 
+def _existing_manifest_transcript(
+    lecture_video: models.LectureVideo,
+) -> list[schemas.LectureVideoManifestWordV3] | None:
+    return lecture_video_service.transcript_from_model(lecture_video)
+
+
+async def _write_video_to_temp_path(
+    lecture_video: models.LectureVideo,
+    temp_dir: str,
+) -> str:
+    if not config.video_store:
+        raise RuntimeError("Video store not configured or unavailable.")
+    if lecture_video.stored_object is None:
+        raise RuntimeError("Lecture video stored object is not loaded.")
+    suffix = lecture_video_manifest_generation.video_suffix_for_content_type(
+        lecture_video.stored_object.content_type
+    )
+    video_path = os.path.join(temp_dir, f"lecture_video_{lecture_video.id}{suffix}")
+    with open(video_path, "wb") as output:
+        async for chunk in config.video_store.store.stream_video(
+            lecture_video.stored_object.key
+        ):
+            await asyncio.to_thread(output.write, chunk)
+    return video_path
+
+
+async def _complete_manifest_generation_run(
+    run_id: int,
+    lease_token: str,
+    manifest: schemas.LectureVideoManifestV3,
+) -> None:
+    async with config.db.driver.async_session() as session:
+        run = await models.LectureVideoProcessingRun.get_by_id(session, run_id)
+        if run is None:
+            return
+        if (
+            run.status != schemas.LectureVideoProcessingRunStatus.RUNNING
+            or run.lease_token != lease_token
+            or run.lecture_video_id is None
+        ):
+            return
+
+        lecture_video = await models.LectureVideo.get_by_id_with_copy_context(
+            session, run.lecture_video_id
+        )
+        if lecture_video is None:
+            await _mark_run_cancelled(
+                session,
+                run,
+                schemas.LectureVideoProcessingCancelReason.LECTURE_VIDEO_DELETED,
+            )
+            await session.commit()
+            return
+        if not await _lecture_video_has_attached_assistant(session, lecture_video.id):
+            await _mark_run_cancelled(
+                session,
+                run,
+                schemas.LectureVideoProcessingCancelReason.ASSISTANT_DETACHED,
+            )
+            await session.commit()
+            return
+
+        await lecture_video_service.persist_manifest(
+            session,
+            lecture_video,
+            manifest,
+            manual_manifest=False,
+        )
+        if run.assistant_id_at_start is not None:
+            await queue_narration_processing_run(
+                session,
+                lecture_video,
+                assistant_id_at_start=run.assistant_id_at_start,
+            )
+        run.status = schemas.LectureVideoProcessingRunStatus.COMPLETED
+        run.finished_at = utcnow()
+        run.error_message = None
+        run.lease_token = None
+        run.leased_by = None
+        run.lease_expires_at = None
+        session.add(run)
+        await session.commit()
+
+
+async def _mark_manifest_generation_run_failed(
+    run_id: int,
+    lease_token: str,
+    error_message: str,
+) -> None:
+    await recover_failed_manifest_generation_run(
+        run_id,
+        lease_token,
+        error_message=error_message,
+    )
+
+
+async def _load_manifest_generation_run_context(
+    run_id: int,
+    lease_token: str,
+) -> ManifestGenerationRunContext | None:
+    logger.info("Lecture video manifest run loading context. run_id=%s", run_id)
+    async with config.db.driver.async_session() as session:
+        run = await models.LectureVideoProcessingRun.get_by_id(session, run_id)
+        if run is None:
+            logger.info(
+                "Lecture video manifest run disappeared before processing. run_id=%s",
+                run_id,
+            )
+            return None
+        if (
+            run.status != schemas.LectureVideoProcessingRunStatus.RUNNING
+            or run.lease_token != lease_token
+            or run.lecture_video_id is None
+        ):
+            logger.info(
+                "Lecture video manifest run no longer claimable. "
+                "run_id=%s status=%s lecture_video_id=%s",
+                run_id,
+                run.status,
+                run.lecture_video_id,
+            )
+            return None
+        lecture_video_id = run.lecture_video_id
+        lecture_video = await models.LectureVideo.get_by_id_with_transcript_data(
+            session, lecture_video_id
+        )
+        if lecture_video is None:
+            logger.info(
+                "Lecture video manifest run cancelling: video missing. "
+                "run_id=%s lecture_video_id=%s",
+                run_id,
+                lecture_video_id,
+            )
+            await _mark_run_cancelled(
+                session,
+                run,
+                schemas.LectureVideoProcessingCancelReason.LECTURE_VIDEO_DELETED,
+            )
+            await session.commit()
+            return None
+        transcript = _existing_manifest_transcript(lecture_video)
+        class_id = run.class_id
+        generation_prompt = (
+            lecture_video.generation_prompt
+            or lecture_video_manifest_generation.DEFAULT_GENERATION_PROMPT_CONTENT
+        )
+        logger.info(
+            "Lecture video manifest loading OpenAI client. "
+            "run_id=%s lecture_video_id=%s class_id=%s transcript_cached=%s",
+            run_id,
+            lecture_video_id,
+            class_id,
+            transcript is not None,
+        )
+        openai_client = await get_openai_client_by_class_id(session, class_id)
+        logger.info(
+            "Lecture video manifest loading Gemini client. "
+            "run_id=%s lecture_video_id=%s class_id=%s",
+            run_id,
+            lecture_video_id,
+            class_id,
+        )
+        gemini_client = await gemini.get_gemini_client_by_class_id(session, class_id)
+
+    return ManifestGenerationRunContext(
+        class_id=class_id,
+        lecture_video_id=lecture_video_id,
+        generation_prompt=generation_prompt,
+        transcript=transcript,
+        openai_client=openai_client,
+        gemini_client=gemini_client,
+    )
+
+
+async def _write_manifest_generation_temp_video(
+    run_id: int,
+    lease_token: str,
+    lecture_video_id: int,
+    temp_dir: str,
+) -> str | None:
+    logger.info(
+        "Lecture video manifest writing temp video. run_id=%s lecture_video_id=%s",
+        run_id,
+        lecture_video_id,
+    )
+    async with config.db.driver.async_session() as session:
+        lecture_video = await models.LectureVideo.get_by_id_with_copy_context(
+            session, lecture_video_id
+        )
+        if lecture_video is None:
+            logger.info(
+                "Lecture video manifest stopped before temp write. "
+                "run_id=%s lecture_video_id=%s",
+                run_id,
+                lecture_video_id,
+            )
+            run = await models.LectureVideoProcessingRun.get_by_id(session, run_id)
+            if (
+                run is not None
+                and run.status == schemas.LectureVideoProcessingRunStatus.RUNNING
+                and run.lease_token == lease_token
+                and run.lecture_video_id_snapshot == lecture_video_id
+            ):
+                await _mark_run_cancelled(
+                    session,
+                    run,
+                    schemas.LectureVideoProcessingCancelReason.LECTURE_VIDEO_DELETED,
+                )
+                await session.commit()
+            return None
+        video_path = await _await_with_run_lease_heartbeat(
+            run_id,
+            lease_token,
+            _write_video_to_temp_path(lecture_video, temp_dir),
+        )
+        if video_path is None:
+            logger.info(
+                "Lecture video manifest stopped during temp write. "
+                "run_id=%s lecture_video_id=%s",
+                run_id,
+                lecture_video_id,
+            )
+            return None
+    logger.info(
+        "Lecture video manifest wrote temp video. "
+        "run_id=%s lecture_video_id=%s video_path=%s",
+        run_id,
+        lecture_video_id,
+        video_path,
+    )
+    return video_path
+
+
+async def _ensure_manifest_generation_transcript(
+    run_id: int,
+    lease_token: str,
+    lecture_video_id: int,
+    video_path: str,
+    openai_client: Any,
+    temp_dir: str,
+    transcript: list[schemas.LectureVideoManifestWordV3] | None,
+) -> list[schemas.LectureVideoManifestWordV3] | None:
+    if transcript is not None:
+        logger.info(
+            "Lecture video manifest reused transcript. "
+            "run_id=%s lecture_video_id=%s word_count=%s",
+            run_id,
+            lecture_video_id,
+            len(transcript),
+        )
+        return transcript
+
+    logger.info(
+        "Lecture video manifest run transcribing video. run_id=%s lecture_video_id=%s",
+        run_id,
+        lecture_video_id,
+    )
+    generated_transcript = await _await_with_run_lease_heartbeat(
+        run_id,
+        lease_token,
+        lecture_video_manifest_generation.transcribe_video_words(
+            video_path,
+            openai_client,
+            temp_dir=temp_dir,
+        ),
+    )
+    if generated_transcript is None:
+        logger.info(
+            "Lecture video manifest stopped during transcription. "
+            "run_id=%s lecture_video_id=%s",
+            run_id,
+            lecture_video_id,
+        )
+        return None
+    logger.info(
+        "Lecture video manifest transcribed video. "
+        "run_id=%s lecture_video_id=%s word_count=%s",
+        run_id,
+        lecture_video_id,
+        len(generated_transcript),
+    )
+    return generated_transcript
+
+
+async def _upload_and_generate_manifest(
+    run_id: int,
+    lease_token: str,
+    lecture_video_id: int,
+    video_path: str,
+    gemini_client: Any,
+    generation_prompt: str,
+    transcript: list[schemas.LectureVideoManifestWordV3],
+    temp_dir: str,
+) -> None:
+    async with gemini_client.aio as gemini_async_client:
+        logger.info(
+            "Lecture video manifest generating. run_id=%s lecture_video_id=%s",
+            run_id,
+            lecture_video_id,
+        )
+        manifest = await _await_with_run_lease_heartbeat(
+            run_id,
+            lease_token,
+            lecture_video_manifest_generation.upload_and_generate_manifest(
+                video_path=video_path,
+                gemini_client=gemini_async_client,
+                generation_prompt_content=generation_prompt,
+                transcript=transcript,
+                temp_dir=temp_dir,
+            ),
+        )
+        if manifest is None:
+            logger.info(
+                "Lecture video manifest stopped during generation. "
+                "run_id=%s lecture_video_id=%s",
+                run_id,
+                lecture_video_id,
+            )
+            return
+        logger.info(
+            "Lecture video manifest generated. run_id=%s "
+            "lecture_video_id=%s question_count=%s video_description_count=%s",
+            run_id,
+            lecture_video_id,
+            len(manifest.questions),
+            len(manifest.video_descriptions),
+        )
+        logger.info(
+            "Lecture video manifest persisting. run_id=%s lecture_video_id=%s",
+            run_id,
+            lecture_video_id,
+        )
+        await _complete_manifest_generation_run(run_id, lease_token, manifest)
+        logger.info(
+            "Lecture video manifest persisted. run_id=%s lecture_video_id=%s",
+            run_id,
+            lecture_video_id,
+        )
+
+
+async def _process_claimed_manifest_run(run_id: int, lease_token: str) -> None:
+    context: ManifestGenerationRunContext | None = None
+    try:
+        context = await _load_manifest_generation_run_context(run_id, lease_token)
+        if context is None:
+            return
+    except Exception as exc:
+        logger.info(
+            "Lecture video manifest context load failed. run_id=%s lecture_video_id=%s",
+            run_id,
+            context.lecture_video_id if context is not None else None,
+        )
+        await _mark_manifest_generation_run_failed(
+            run_id,
+            lease_token,
+            _user_safe_processing_error_message(exc),
+        )
+        return
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="pingpong_lv_manifest_") as temp_dir:
+            video_path = await _write_manifest_generation_temp_video(
+                run_id,
+                lease_token,
+                context.lecture_video_id,
+                temp_dir,
+            )
+            if video_path is None:
+                return
+            transcript = await _ensure_manifest_generation_transcript(
+                run_id,
+                lease_token,
+                context.lecture_video_id,
+                video_path,
+                context.openai_client,
+                temp_dir,
+                context.transcript,
+            )
+            if transcript is None:
+                return
+            await _upload_and_generate_manifest(
+                run_id,
+                lease_token,
+                context.lecture_video_id,
+                video_path,
+                context.gemini_client,
+                context.generation_prompt,
+                transcript,
+                temp_dir,
+            )
+    except Exception as exc:
+        logger.exception("Lecture video manifest generation failed. run_id=%s", run_id)
+        await _mark_manifest_generation_run_failed(
+            run_id,
+            lease_token,
+            _user_safe_processing_error_message(exc),
+        )
+
+
+async def _process_claimed_run(run_id: int, lease_token: str) -> None:
+    async with config.db.driver.async_session() as session:
+        run = await models.LectureVideoProcessingRun.get_by_id(session, run_id)
+        if run is None:
+            logger.info("Lecture video processing run disappeared. run_id=%s", run_id)
+            return
+        stage = run.stage
+
+    logger.info(
+        "Lecture video processing run dispatching. run_id=%s stage=%s",
+        run_id,
+        stage,
+    )
+    if stage == MANIFEST_GENERATION_STAGE:
+        await _process_claimed_manifest_run(run_id, lease_token)
+        return
+    if stage == NARRATION_STAGE:
+        await _process_claimed_narration_run(run_id, lease_token)
+        return
+    raise ValueError(f"Unsupported lecture video processing stage: {stage}")
+
+
 async def _process_claimed_narration_run(run_id: int, lease_token: str) -> None:
+    logger.info("Lecture video narration run starting. run_id=%s", run_id)
     while True:
+        logger.debug(
+            "Lecture video narration run preparing next item. run_id=%s", run_id
+        )
         state, payload = await _prepare_next_work_item(run_id, lease_token)
+        logger.debug(
+            "Lecture video narration run prepared next item. run_id=%s state=%s",
+            run_id,
+            state,
+        )
         if state in {"cancelled", "missing"}:
+            logger.info(
+                "Lecture video narration run stopping. run_id=%s state=%s",
+                run_id,
+                state,
+            )
             return
         if state == "completed":
+            logger.info(
+                "Lecture video narration run marking completed. run_id=%s",
+                run_id,
+            )
             await _mark_run_completed(run_id, lease_token)
+            logger.info("Lecture video narration run completed. run_id=%s", run_id)
             return
         if state == "failed":
             assert isinstance(payload, tuple)
             narration_id, error_message = payload
+            logger.info(
+                "Lecture video narration run marking failed. run_id=%s narration_id=%s error=%s",
+                run_id,
+                narration_id,
+                error_message,
+            )
             await _mark_run_failed(run_id, lease_token, narration_id, error_message)
             return
 
@@ -479,6 +1041,14 @@ async def _process_claimed_narration_run(run_id: int, lease_token: str) -> None:
             )
 
         try:
+            logger.debug(
+                "Lecture video narration synthesizing. run_id=%s "
+                "lecture_video_id=%s narration_id=%s text_length=%s",
+                run_id,
+                work_item.lecture_video_id,
+                work_item.narration_id,
+                len(work_item.text),
+            )
             synthesis_result = await _await_with_run_lease_heartbeat(
                 run_id,
                 lease_token,
@@ -489,6 +1059,13 @@ async def _process_claimed_narration_run(run_id: int, lease_token: str) -> None:
                 ),
             )
         except Exception as exc:
+            logger.info(
+                "Lecture video narration synthesis failed. "
+                "run_id=%s lecture_video_id=%s narration_id=%s",
+                run_id,
+                work_item.lecture_video_id,
+                work_item.narration_id,
+            )
             await _mark_run_failed(
                 run_id,
                 lease_token,
@@ -498,13 +1075,44 @@ async def _process_claimed_narration_run(run_id: int, lease_token: str) -> None:
             return
 
         if synthesis_result is None:
+            logger.info(
+                "Lecture video narration stopped during synthesis. "
+                "run_id=%s lecture_video_id=%s narration_id=%s",
+                run_id,
+                work_item.lecture_video_id,
+                work_item.narration_id,
+            )
             return
         content_type, audio = synthesis_result
+        logger.debug(
+            "Lecture video narration synthesized. run_id=%s "
+            "lecture_video_id=%s narration_id=%s content_type=%s bytes=%s",
+            run_id,
+            work_item.lecture_video_id,
+            work_item.narration_id,
+            content_type,
+            len(audio),
+        )
 
         if not await _ensure_run_can_continue(run_id, lease_token):
+            logger.info(
+                "Lecture video narration stopped after synthesis. "
+                "run_id=%s lecture_video_id=%s narration_id=%s",
+                run_id,
+                work_item.lecture_video_id,
+                work_item.narration_id,
+            )
             return
 
         try:
+            logger.debug(
+                "Lecture video narration storing audio. "
+                "run_id=%s lecture_video_id=%s narration_id=%s bytes=%s",
+                run_id,
+                work_item.lecture_video_id,
+                work_item.narration_id,
+                len(audio),
+            )
             store_result = await _await_with_run_lease_heartbeat(
                 run_id,
                 lease_token,
@@ -514,6 +1122,13 @@ async def _process_claimed_narration_run(run_id: int, lease_token: str) -> None:
                 ),
             )
         except Exception as exc:
+            logger.info(
+                "Lecture video narration storage failed. "
+                "run_id=%s lecture_video_id=%s narration_id=%s",
+                run_id,
+                work_item.lecture_video_id,
+                work_item.narration_id,
+            )
             await _mark_run_failed(
                 run_id,
                 lease_token,
@@ -523,10 +1138,34 @@ async def _process_claimed_narration_run(run_id: int, lease_token: str) -> None:
             return
 
         if store_result is None:
+            logger.info(
+                "Lecture video narration stopped during storage. "
+                "run_id=%s lecture_video_id=%s narration_id=%s",
+                run_id,
+                work_item.lecture_video_id,
+                work_item.narration_id,
+            )
             return
         store_key, content_length = store_result
+        logger.debug(
+            "Lecture video narration stored audio. run_id=%s "
+            "lecture_video_id=%s narration_id=%s store_key=%s bytes=%s",
+            run_id,
+            work_item.lecture_video_id,
+            work_item.narration_id,
+            store_key,
+            content_length,
+        )
 
         try:
+            logger.debug(
+                "Lecture video narration attaching audio. "
+                "run_id=%s lecture_video_id=%s narration_id=%s store_key=%s",
+                run_id,
+                work_item.lecture_video_id,
+                work_item.narration_id,
+                store_key,
+            )
             attached = await _attach_stored_audio_to_narration(
                 run_id,
                 lease_token,
@@ -540,8 +1179,24 @@ async def _process_claimed_narration_run(run_id: int, lease_token: str) -> None:
             raise
 
         if not attached:
+            logger.info(
+                "Lecture video narration attach skipped; cleaning up. "
+                "run_id=%s lecture_video_id=%s narration_id=%s store_key=%s",
+                run_id,
+                work_item.lecture_video_id,
+                work_item.narration_id,
+                store_key,
+            )
             await _delete_audio_key_quietly(store_key)
             return
+        logger.debug(
+            "Lecture video narration attached audio. "
+            "run_id=%s lecture_video_id=%s narration_id=%s store_key=%s",
+            run_id,
+            work_item.lecture_video_id,
+            work_item.narration_id,
+            store_key,
+        )
 
 
 async def _get_elevenlabs_api_key(class_id: int) -> str:
@@ -558,7 +1213,7 @@ async def _get_elevenlabs_api_key(class_id: int) -> str:
         return credential.api_key_obj.api_key
 
 
-def _claimable_narration_run_condition(now) -> Any:
+def _claimable_processing_run_condition(now) -> Any:
     return or_(
         models.LectureVideoProcessingRun.status
         == schemas.LectureVideoProcessingRunStatus.QUEUED,
@@ -577,18 +1232,41 @@ async def _claim_next_narration_run(
     *,
     leased_by: str | None = None,
 ) -> tuple[int, str] | None:
+    return await _claim_next_processing_run_from_stages(
+        stages=[NARRATION_STAGE],
+        leased_by=leased_by,
+    )
+
+
+async def _claim_next_manifest_generation_run(
+    *,
+    leased_by: str | None = None,
+) -> tuple[int, str] | None:
+    return await _claim_next_processing_run_from_stages(
+        stages=[MANIFEST_GENERATION_STAGE],
+        leased_by=leased_by,
+    )
+
+
+async def _claim_next_processing_run_from_stages(
+    *,
+    stages: Sequence[schemas.LectureVideoProcessingStage],
+    leased_by: str | None = None,
+) -> tuple[int, str] | None:
     async with config.db.driver.async_session() as session:
         now = utcnow()
-        claimable_run_condition = _claimable_narration_run_condition(now)
+        claimable_run_condition = _claimable_processing_run_condition(now)
         effective_leased_by = leased_by or build_runner_id()
         candidate_ids = list(
             (
                 await session.scalars(
                     select(models.LectureVideoProcessingRun.id)
-                    .where(models.LectureVideoProcessingRun.stage == NARRATION_STAGE)
+                    .where(models.LectureVideoProcessingRun.stage.in_(stages))
                     .where(claimable_run_condition)
                     .order_by(
-                        models.LectureVideoProcessingRun.created.asc(),
+                        func.coalesce(
+                            models.LectureVideoProcessingRun.created, now
+                        ).asc(),
                         models.LectureVideoProcessingRun.id.asc(),
                     )
                     .limit(25)
@@ -600,7 +1278,7 @@ async def _claim_next_narration_run(
             result = await session.execute(
                 update(models.LectureVideoProcessingRun)
                 .where(models.LectureVideoProcessingRun.id == candidate_id)
-                .where(models.LectureVideoProcessingRun.stage == NARRATION_STAGE)
+                .where(models.LectureVideoProcessingRun.stage.in_(stages))
                 .where(claimable_run_condition)
                 .values(
                     status=schemas.LectureVideoProcessingRunStatus.RUNNING,
@@ -618,6 +1296,16 @@ async def _claim_next_narration_run(
                 await session.commit()
                 return candidate_id, lease_token
     return None
+
+
+async def _claim_next_processing_run(
+    *,
+    leased_by: str | None = None,
+) -> tuple[int, str] | None:
+    return await _claim_next_processing_run_from_stages(
+        stages=[MANIFEST_GENERATION_STAGE, NARRATION_STAGE],
+        leased_by=leased_by,
+    )
 
 
 async def recover_failed_narration_run(
@@ -672,6 +1360,68 @@ async def recover_failed_narration_run(
         session.add(run)
         await session.commit()
         return True
+
+
+async def recover_failed_manifest_generation_run(
+    run_id: int,
+    lease_token: str,
+    *,
+    error_message: str = UNEXPECTED_WORKER_EXIT_ERROR_MESSAGE,
+) -> bool:
+    async with config.db.driver.async_session() as session:
+        run = await models.LectureVideoProcessingRun.get_by_id(session, run_id)
+        if run is None:
+            return False
+        if (
+            run.status != schemas.LectureVideoProcessingRunStatus.RUNNING
+            or run.lease_token != lease_token
+        ):
+            return False
+        run.status = schemas.LectureVideoProcessingRunStatus.FAILED
+        run.error_message = error_message
+        run.finished_at = utcnow()
+        run.cancel_reason = None
+        run.lease_token = None
+        run.leased_by = None
+        run.lease_expires_at = None
+        if run.lecture_video_id is not None:
+            lecture_video = await models.LectureVideo.get_by_id_with_copy_context(
+                session, run.lecture_video_id
+            )
+            if lecture_video is not None:
+                lecture_video.status = schemas.LectureVideoStatus.FAILED
+                lecture_video.error_message = error_message
+                session.add(lecture_video)
+        session.add(run)
+        await session.commit()
+        return True
+
+
+async def recover_failed_processing_run(
+    run_id: int,
+    lease_token: str,
+    *,
+    error_message: str = UNEXPECTED_WORKER_EXIT_ERROR_MESSAGE,
+) -> bool:
+    async with config.db.driver.async_session() as session:
+        run = await models.LectureVideoProcessingRun.get_by_id(session, run_id)
+        if run is None:
+            return False
+        stage = run.stage
+
+    if stage == MANIFEST_GENERATION_STAGE:
+        return await recover_failed_manifest_generation_run(
+            run_id,
+            lease_token,
+            error_message=error_message,
+        )
+    if stage == NARRATION_STAGE:
+        return await recover_failed_narration_run(
+            run_id,
+            lease_token,
+            error_message=error_message,
+        )
+    return False
 
 
 async def _prepare_next_work_item(
@@ -1109,10 +1859,8 @@ def _user_safe_processing_error_message(exc: Exception) -> str:
         return "Unable to save lecture video narration audio right now. Please retry."
     if isinstance(exc, RuntimeError):
         return str(exc)
-    logger.exception(
-        "Unexpected lecture video narration processing failure", exc_info=exc
-    )
-    return "Unable to generate the lecture video narration right now. Please retry."
+    logger.exception("Unexpected lecture video processing failure", exc_info=exc)
+    return "Unable to process the lecture video right now. Please retry."
 
 
 async def _delete_audio_key_quietly(store_key: str) -> None:

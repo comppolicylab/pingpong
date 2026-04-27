@@ -1,10 +1,11 @@
 import logging
 from pathlib import Path
+from dataclasses import dataclass
 
 import humanize
 from fastapi import HTTPException, UploadFile
-from pydantic import ValidationError
-from sqlalchemy import delete, select, union, update
+from pydantic import TypeAdapter, ValidationError
+from sqlalchemy import delete, inspect, select, union, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 import uuid_utils as uuid
@@ -25,6 +26,15 @@ LECTURE_VIDEO_CHAT_UNAVAILABLE_NOTE = (
     "Lecture chat is only available for lecture videos with a version 2 or 3 manifest "
     "that includes word-level transcription."
 )
+
+_V3_TRANSCRIPT_ADAPTER = TypeAdapter(list[schemas.LectureVideoManifestWordV3])
+
+
+@dataclass(frozen=True)
+class LectureVideoChatContext:
+    version: int
+    word_level_transcription: list[schemas.LectureVideoManifestWordV3]
+    video_descriptions: list[schemas.LectureVideoManifestVideoDescriptionV3]
 
 
 def get_upload_size(upload: UploadFile) -> int:
@@ -282,23 +292,178 @@ def lecture_video_manifest_from_model(
     if not lecture_video.manifest_data:
         return base_manifest
 
-    stored_manifest = schemas.validate_lecture_video_manifest(
-        lecture_video.manifest_data
-    )
-    if stored_manifest is None or stored_manifest.version == 1:
+    manifest_context = _hydrate_stored_manifest_context(lecture_video)
+    if manifest_context is None or manifest_context.version == 1:
         return base_manifest
 
-    if isinstance(stored_manifest, schemas.LectureVideoManifestV3):
+    if manifest_context.version == 3:
         return schemas.LectureVideoManifestV3(
             questions=base_manifest.questions,
-            word_level_transcription=stored_manifest.word_level_transcription,
-            video_descriptions=stored_manifest.video_descriptions,
+            word_level_transcription=manifest_context.word_level_transcription,
+            video_descriptions=manifest_context.video_descriptions,
         )
 
     return schemas.LectureVideoManifestV2(
         questions=base_manifest.questions,
-        word_level_transcription=stored_manifest.word_level_transcription,
+        word_level_transcription=_v3_manifest_words_to_v2(
+            manifest_context.word_level_transcription
+        ),
     )
+
+
+def _v2_manifest_words_to_v3(
+    words: list[schemas.LectureVideoManifestWordV2],
+) -> list[schemas.LectureVideoManifestWordV3]:
+    return [
+        schemas.LectureVideoManifestWordV3(
+            id=word.id,
+            word=word.word,
+            start_offset_ms=_v2_timestamp_to_ms(word.start),
+            end_offset_ms=_v2_timestamp_to_ms(word.end),
+        )
+        for word in words
+    ]
+
+
+def _v2_timestamp_to_ms(value: int | float) -> int:
+    return max(0, int(round(float(value) * 1000)))
+
+
+def _v3_manifest_words_to_v2(
+    words: list[schemas.LectureVideoManifestWordV3],
+) -> list[schemas.LectureVideoManifestWordV2]:
+    return [
+        schemas.LectureVideoManifestWordV2(
+            id=word.id,
+            word=word.word,
+            start=word.start_offset_ms / 1000,
+            end=word.end_offset_ms / 1000,
+        )
+        for word in words
+    ]
+
+
+def _manifest_transcript_as_v3(
+    manifest: schemas.LectureVideoManifest,
+) -> list[schemas.LectureVideoManifestWordV3] | None:
+    if isinstance(manifest, schemas.LectureVideoManifestV3):
+        return manifest.word_level_transcription
+    if isinstance(manifest, schemas.LectureVideoManifestV2):
+        return _v2_manifest_words_to_v3(manifest.word_level_transcription)
+    return None
+
+
+def transcript_from_model(
+    lecture_video: models.LectureVideo,
+) -> list[schemas.LectureVideoManifestWordV3] | None:
+    inspection = inspect(lecture_video, raiseerr=False)
+    unloaded = inspection.unloaded if inspection is not None else set()
+    if "transcript_data" not in unloaded and lecture_video.transcript_data:
+        return _V3_TRANSCRIPT_ADAPTER.validate_python(
+            lecture_video.transcript_data.get("word_level_transcription")
+            if isinstance(lecture_video.transcript_data, dict)
+            else lecture_video.transcript_data
+        )
+    if "transcript_data" not in unloaded and "manifest_data" in unloaded:
+        return None
+    if "manifest_data" in unloaded:
+        raise RuntimeError(
+            "LectureVideo.manifest_data must be loaded before reusing legacy "
+            "manifest transcript."
+        )
+    if not lecture_video.manifest_data:
+        return None
+    try:
+        manifest = schemas.validate_lecture_video_manifest(lecture_video.manifest_data)
+    except ValueError:
+        return None
+    if manifest is None:
+        return None
+    return _manifest_transcript_as_v3(manifest)
+
+
+def _stored_manifest_extras(
+    manifest: schemas.LectureVideoManifest,
+) -> dict:
+    if isinstance(manifest, schemas.LectureVideoManifestV3):
+        return {
+            "version": 3,
+            "video_descriptions": [
+                description.model_dump(mode="json")
+                for description in manifest.video_descriptions
+            ],
+        }
+    return {"version": manifest.version}
+
+
+def _transcript_data_from_manifest(
+    manifest: schemas.LectureVideoManifest,
+) -> dict | None:
+    transcript = _manifest_transcript_as_v3(manifest)
+    if transcript is None:
+        return None
+    return {
+        "version": 3,
+        "word_level_transcription": [
+            word.model_dump(mode="json") for word in transcript
+        ],
+    }
+
+
+def _hydrate_stored_manifest_context(
+    lecture_video: models.LectureVideo,
+) -> LectureVideoChatContext | None:
+    if not lecture_video.manifest_data:
+        return None
+
+    manifest_data = lecture_video.manifest_data
+    transcript = transcript_from_model(lecture_video)
+    if isinstance(manifest_data, dict):
+        version = manifest_data.get("version")
+        if version == 1:
+            return None
+        if version == 2 and transcript is not None:
+            return LectureVideoChatContext(
+                version=2,
+                word_level_transcription=transcript,
+                video_descriptions=[],
+            )
+        if version == 3 and transcript is not None:
+            video_descriptions = [
+                schemas.LectureVideoManifestVideoDescriptionV3.model_validate(
+                    description
+                )
+                for description in manifest_data.get("video_descriptions") or []
+            ]
+            return LectureVideoChatContext(
+                version=3,
+                word_level_transcription=transcript,
+                video_descriptions=video_descriptions,
+            )
+
+    manifest = schemas.validate_lecture_video_manifest(manifest_data)
+    if manifest is None or manifest.version == 1:
+        return None
+    legacy_transcript = _manifest_transcript_as_v3(manifest)
+    if legacy_transcript is None:
+        return None
+    if isinstance(manifest, schemas.LectureVideoManifestV3):
+        return LectureVideoChatContext(
+            version=3,
+            word_level_transcription=legacy_transcript,
+            video_descriptions=manifest.video_descriptions,
+        )
+    return LectureVideoChatContext(
+        version=2,
+        word_level_transcription=legacy_transcript,
+        video_descriptions=[],
+    )
+
+
+def lecture_video_chat_context_from_model(
+    lecture_video: models.LectureVideo,
+) -> LectureVideoChatContext | None:
+    return _hydrate_stored_manifest_context(lecture_video)
 
 
 def lecture_video_chat_metadata(
@@ -338,6 +503,66 @@ def lecture_video_config_matches(
     )
 
 
+async def latest_processing_run_summary(
+    session: AsyncSession,
+    lecture_video_id: int,
+    stage: schemas.LectureVideoProcessingStage,
+) -> schemas.LectureVideoProcessingRunSummary | None:
+    run = await session.scalar(
+        select(models.LectureVideoProcessingRun)
+        .where(
+            models.LectureVideoProcessingRun.lecture_video_id_snapshot
+            == lecture_video_id,
+            models.LectureVideoProcessingRun.stage == stage,
+        )
+        .order_by(
+            models.LectureVideoProcessingRun.attempt_number.desc(),
+            models.LectureVideoProcessingRun.id.desc(),
+        )
+        .limit(1)
+    )
+    if run is None:
+        return None
+    return schemas.LectureVideoProcessingRunSummary(
+        state=run.status,
+        error_message=run.error_message,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
+    )
+
+
+async def latest_processing_run_failed(
+    session: AsyncSession,
+    lecture_video_id: int,
+    stage: schemas.LectureVideoProcessingStage,
+) -> bool:
+    summary = await latest_processing_run_summary(session, lecture_video_id, stage)
+    return bool(
+        summary is not None
+        and summary.state == schemas.LectureVideoProcessingRunStatus.FAILED
+    )
+
+
+async def should_regenerate_manifest(
+    session: AsyncSession,
+    lecture_video: models.LectureVideo,
+    *,
+    incoming_generation_prompt: str | None,
+    generation_prompt_present: bool,
+) -> bool:
+    prompt_changed = (
+        generation_prompt_present
+        and incoming_generation_prompt != lecture_video.generation_prompt
+    )
+    if prompt_changed or lecture_video.manifest_data is None:
+        return True
+    return await latest_processing_run_failed(
+        session,
+        lecture_video.id,
+        schemas.LectureVideoProcessingStage.MANIFEST_GENERATION,
+    )
+
+
 async def clone_lecture_video_snapshot(
     session: AsyncSession,
     lecture_video: models.LectureVideo,
@@ -350,6 +575,9 @@ async def clone_lecture_video_snapshot(
         display_name=lecture_video.display_name,
         voice_id=lecture_video.voice_id,
         manifest_data=lecture_video.manifest_data,
+        transcript_data=lecture_video.transcript_data,
+        generation_prompt=lecture_video.generation_prompt,
+        manual_manifest=lecture_video.manual_manifest,
         manifest_version=lecture_video.manifest_version,
         lecture_video_chat_available=lecture_video.lecture_video_chat_available,
         source_lecture_video_id_snapshot=lecture_video.id,
@@ -535,6 +763,11 @@ async def delete_lecture_video(
         lecture_video_id,
         schemas.LectureVideoProcessingCancelReason.LECTURE_VIDEO_DELETED,
     )
+    await lecture_video_processing.cancel_manifest_generation_processing_runs(
+        session,
+        lecture_video_id,
+        schemas.LectureVideoProcessingCancelReason.LECTURE_VIDEO_DELETED,
+    )
 
     lecture_video = await models.LectureVideo.get_by_id(session, lecture_video_id)
     if lecture_video is None:
@@ -644,18 +877,26 @@ async def persist_manifest(
     *,
     voice_id: str | None = None,
     create_narration_placeholders: bool = True,
+    manual_manifest: bool | None = None,
 ) -> None:
     await clear_normalized_content(session, lecture_video.id)
     if voice_id is not None:
         lecture_video.voice_id = voice_id
-    lecture_video.manifest_data = lecture_video_manifest.model_dump(mode="json")
+    if manual_manifest is not None:
+        lecture_video.manual_manifest = manual_manifest
+    lecture_video.manifest_data = _stored_manifest_extras(lecture_video_manifest)
+    lecture_video.transcript_data = _transcript_data_from_manifest(
+        lecture_video_manifest
+    )
     lecture_video.manifest_version = lecture_video_manifest.version
+    transcript = _manifest_transcript_as_v3(lecture_video_manifest)
     lecture_video.lecture_video_chat_available = (
         isinstance(
             lecture_video_manifest,
             (schemas.LectureVideoManifestV2, schemas.LectureVideoManifestV3),
         )
-        and len(lecture_video_manifest.word_level_transcription) > 0
+        and transcript is not None
+        and len(transcript) > 0
     )
 
     narration_placeholders_created = False

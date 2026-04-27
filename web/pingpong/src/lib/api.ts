@@ -1553,9 +1553,19 @@ export type LectureVideoManifest =
 
 export type LectureVideoConfigResponse = {
 	lecture_video: LectureVideoSummary;
-	lecture_video_manifest: LectureVideoManifest;
+	lecture_video_manifest: LectureVideoManifest | null;
 	voice_id: string;
 	lecture_video_chat_available: boolean;
+	generation_prompt?: string | null;
+	overwrite_manifest: boolean;
+	manifest_generation_status?: LectureVideoProcessingRunSummary | null;
+};
+
+export type LectureVideoProcessingRunSummary = {
+	state: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+	error_message?: string | null;
+	started_at?: string | null;
+	finished_at?: string | null;
 };
 
 export type LectureVideoEditorPolicyResponse = LectureVideoAssistantEditorPolicy;
@@ -2070,6 +2080,11 @@ export type AssistantModels = {
 	models: AssistantModel[];
 	default_prompts?: AssistantDefaultPrompt[];
 	enforce_classic_assistants?: boolean;
+	lecture_video_defaults?: {
+		instructions: string;
+		generation_prompt: string;
+		can_generate_manifest: boolean;
+	} | null;
 };
 
 export type AssistantModelLite = {
@@ -2351,6 +2366,8 @@ export type CreateAssistantRequest = {
 	lecture_video_id?: number | null;
 	lecture_video_manifest?: LectureVideoManifest | null;
 	voice_id?: string | null;
+	generation_prompt?: string | null;
+	overwrite_manifest?: boolean;
 	create_classic_assistant?: boolean;
 	temperature: number | null;
 	reasoning_effort: number | null;
@@ -2396,6 +2413,9 @@ export type UpdateAssistantRequest = {
 	lecture_video_id?: number | null;
 	lecture_video_manifest?: LectureVideoManifest | null;
 	voice_id?: string | null;
+	generation_prompt?: string | null;
+	regenerate_requested?: boolean;
+	overwrite_manifest?: boolean;
 	create_classic_assistant?: boolean;
 	temperature?: number | null;
 	reasoning_effort?: number | null;

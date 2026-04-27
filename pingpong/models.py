@@ -44,6 +44,7 @@ from sqlalchemy import (
     JSON,
     String,
     Table,
+    Text,
     and_,
     delete,
     select,
@@ -2075,6 +2076,13 @@ class LectureVideo(Base):
     manifest_data: Mapped[dict[str, Any] | None] = deferred(
         mapped_column(JSON, nullable=True)
     )
+    transcript_data: Mapped[dict[str, Any] | None] = deferred(
+        mapped_column(JSON, nullable=True)
+    )
+    generation_prompt: Mapped[str | None] = deferred(mapped_column(Text, nullable=True))
+    manual_manifest: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
     manifest_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     lecture_video_chat_available: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default="false"
@@ -2100,6 +2108,9 @@ class LectureVideo(Base):
         display_name: str | None = None,
         voice_id: str | None = None,
         manifest_data: dict[str, Any] | None = None,
+        transcript_data: dict[str, Any] | None = None,
+        generation_prompt: str | None = None,
+        manual_manifest: bool = False,
         manifest_version: int | None = None,
         lecture_video_chat_available: bool = False,
         source_lecture_video_id_snapshot: int | None = None,
@@ -2112,6 +2123,9 @@ class LectureVideo(Base):
             display_name=display_name,
             voice_id=voice_id,
             manifest_data=manifest_data,
+            transcript_data=transcript_data,
+            generation_prompt=generation_prompt,
+            manual_manifest=manual_manifest,
             manifest_version=manifest_version,
             lecture_video_chat_available=lecture_video_chat_available,
             source_lecture_video_id_snapshot=source_lecture_video_id_snapshot,
@@ -2131,7 +2145,44 @@ class LectureVideo(Base):
         stmt = (
             select(LectureVideo)
             .where(LectureVideo.id == id_)
+            .options(undefer(LectureVideo.generation_prompt))
             .options(selectinload(LectureVideo.stored_object))
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_id_with_transcript_data(
+        cls, session: AsyncSession, id_: int
+    ) -> Optional["LectureVideo"]:
+        stmt = (
+            select(LectureVideo)
+            .where(LectureVideo.id == id_)
+            .options(undefer(LectureVideo.generation_prompt))
+            .options(undefer(LectureVideo.transcript_data))
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_id_with_manifest_context(
+        cls, session: AsyncSession, id_: int
+    ) -> Optional["LectureVideo"]:
+        stmt = (
+            select(LectureVideo)
+            .where(LectureVideo.id == id_)
+            .options(undefer(LectureVideo.generation_prompt))
+            .options(undefer(LectureVideo.manifest_data))
+            .options(undefer(LectureVideo.transcript_data))
+            .options(selectinload(LectureVideo.stored_object))
+            .options(
+                selectinload(LectureVideo.questions).selectinload(
+                    LectureVideoQuestion.options
+                )
+            )
+            .options(
+                selectinload(LectureVideo.questions).selectinload(
+                    LectureVideoQuestion.correct_option
+                )
+            )
         )
         return await session.scalar(stmt)
 
@@ -2142,6 +2193,8 @@ class LectureVideo(Base):
         stmt = (
             select(LectureVideo)
             .where(LectureVideo.id == id_, LectureVideo.class_id == class_id)
+            .options(undefer(LectureVideo.manifest_data))
+            .options(undefer(LectureVideo.generation_prompt))
             .options(selectinload(LectureVideo.stored_object))
         )
         return await session.scalar(stmt)
@@ -2154,6 +2207,8 @@ class LectureVideo(Base):
             select(LectureVideo)
             .where(LectureVideo.id == id_)
             .options(undefer(LectureVideo.manifest_data))
+            .options(undefer(LectureVideo.transcript_data))
+            .options(undefer(LectureVideo.generation_prompt))
             .options(selectinload(LectureVideo.stored_object))
             .options(
                 selectinload(LectureVideo.questions).selectinload(
@@ -2263,6 +2318,9 @@ class LectureVideo(Base):
             # credentials, including ElevenLabs.
             voice_id=lecture_video.voice_id,
             manifest_data=lecture_video.manifest_data,
+            transcript_data=lecture_video.transcript_data,
+            generation_prompt=lecture_video.generation_prompt,
+            manual_manifest=lecture_video.manual_manifest,
             manifest_version=lecture_video.manifest_version,
             lecture_video_chat_available=lecture_video.lecture_video_chat_available,
             source_lecture_video_id_snapshot=lecture_video.id,
@@ -2652,6 +2710,7 @@ def _thread_lecture_video_base_loaders() -> tuple[Load, ...]:
         ),
         selectinload(Thread.lecture_video).options(
             undefer(LectureVideo.manifest_data),
+            undefer(LectureVideo.transcript_data),
             selectinload(LectureVideo.stored_object),
             selectinload(LectureVideo.questions).options(
                 *_lecture_video_question_context_loaders()
@@ -3885,6 +3944,8 @@ class Assistant(Base):
             selectinload(Assistant.mcp_server_tools),
             selectinload(Assistant.lecture_video).options(
                 undefer(LectureVideo.manifest_data),
+                undefer(LectureVideo.transcript_data),
+                undefer(LectureVideo.generation_prompt),
                 selectinload(LectureVideo.stored_object),
             ),
             selectinload(Assistant.lecture_video).selectinload(LectureVideo.questions),
@@ -3924,8 +3985,9 @@ class Assistant(Base):
             select(Assistant)
             .where(Assistant.id == int(id_))
             .options(
-                selectinload(Assistant.lecture_video).selectinload(
-                    LectureVideo.stored_object
+                selectinload(Assistant.lecture_video).options(
+                    undefer(LectureVideo.generation_prompt),
+                    selectinload(LectureVideo.stored_object),
                 )
             )
         )
@@ -3969,8 +4031,11 @@ class Assistant(Base):
             .options(selectinload(Assistant.code_interpreter_files))
             .options(selectinload(Assistant.mcp_server_tools))
             .options(
-                selectinload(Assistant.lecture_video).selectinload(
-                    LectureVideo.stored_object
+                selectinload(Assistant.lecture_video).options(
+                    undefer(LectureVideo.manifest_data),
+                    undefer(LectureVideo.transcript_data),
+                    undefer(LectureVideo.generation_prompt),
+                    selectinload(LectureVideo.stored_object),
                 )
             )
         )
@@ -4005,8 +4070,9 @@ class Assistant(Base):
             select(Assistant)
             .where(Assistant.class_id == int(class_id))
             .options(
-                selectinload(Assistant.lecture_video).selectinload(
-                    LectureVideo.stored_object
+                selectinload(Assistant.lecture_video).options(
+                    undefer(LectureVideo.generation_prompt),
+                    selectinload(LectureVideo.stored_object),
                 )
             )
         )

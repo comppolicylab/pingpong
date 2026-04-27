@@ -46,7 +46,7 @@ from openai.types.responses.response_output_text import AnnotationURLCitation
 from pydantic import PositiveInt, ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql import delete, func, update
+from sqlalchemy.sql import delete, func, select, update
 
 import pingpong.metrics as metrics
 import pingpong.models as models
@@ -109,6 +109,7 @@ from pingpong.video_store import VideoStoreError
 from . import (
     lecture_video_chat,
     assistant_service,
+    lecture_video_manifest_generation,
     lecture_video_processing,
     lecture_video_runtime,
     lecture_video_service,
@@ -3018,6 +3019,20 @@ def _get_lecture_video_provider_prerequisite_message(
     return "Lecture Video mode is in active development."
 
 
+async def _ensure_lecture_video_manifest_generation_configured(
+    session: AsyncSession,
+    class_id: int,
+) -> None:
+    lecture_video_context = await _get_class_lecture_video_provider_flags(
+        session, class_id
+    )
+    if not lecture_video_context["has_gemini_credential"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Configure a Gemini credential in Manage Group before generating a lecture video manifest.",
+        )
+
+
 async def _get_lecture_video_editor_policy(
     request: StateRequest,
     class_id: int,
@@ -3619,12 +3634,25 @@ async def list_class_models(
         for prompt_id in default_prompt_ids
         if prompt_id in DEFAULT_PROMPTS
     ]
+    lecture_video_context = await _get_class_lecture_video_provider_flags(
+        request.state["db"], int(class_id)
+    )
+    lecture_video_defaults = (
+        schemas.LectureVideoDefaults(
+            instructions=lecture_video_manifest_generation.DEFAULT_LECTURE_VIDEO_INSTRUCTIONS,
+            generation_prompt=lecture_video_manifest_generation.DEFAULT_GENERATION_PROMPT_CONTENT,
+            can_generate_manifest=lecture_video_context["has_gemini_credential"],
+        )
+        if lecture_video_context["lecture_video_enabled"]
+        else None
+    )
     return {
         "models": filtered,
         "default_prompts": default_prompts,
         "enforce_classic_assistants": isinstance(
             openai_client, openai.AsyncAzureOpenAI
         ),
+        "lecture_video_defaults": lecture_video_defaults,
     }
 
 
@@ -8689,6 +8717,7 @@ async def get_class_lecture_video_editor_policy(
     "/class/{class_id}/assistant/{assistant_id}/lecture-video/config",
     dependencies=[Depends(Authz("can_edit", "assistant:{assistant_id}"))],
     response_model=schemas.LectureVideoConfigResponse,
+    response_model_exclude_unset=True,
 )
 async def get_assistant_lecture_video_config(
     class_id: str,
@@ -8701,37 +8730,57 @@ async def get_assistant_lecture_video_config(
     if assistant.lecture_video_id is None:
         raise HTTPException(404, "Lecture video not found.")
 
-    lecture_video = await models.LectureVideo.get_by_id_with_copy_context(
+    lecture_video = await models.LectureVideo.get_by_id_with_manifest_context(
         request.state["db"], assistant.lecture_video_id
     )
     if lecture_video is None:
         raise HTTPException(404, "Lecture video not found.")
 
-    try:
-        lecture_video_manifest = (
-            lecture_video_service.lecture_video_manifest_from_model(lecture_video)
-        )
-    except (ValidationError, ValueError) as e:
-        logger.warning(
-            "Stored lecture video manifest is invalid. assistant_id=%s lecture_video_id=%s",
-            assistant.id,
-            lecture_video.id,
-            exc_info=True,
-        )
-        raise HTTPException(409, "Stored lecture video manifest is invalid.") from e
+    lecture_video_manifest = None
+    if lecture_video.questions:
+        try:
+            lecture_video_manifest = (
+                lecture_video_service.lecture_video_manifest_from_model(lecture_video)
+            )
+        except (ValidationError, ValueError) as e:
+            logger.warning(
+                "Stored lecture video manifest is invalid. assistant_id=%s lecture_video_id=%s",
+                assistant.id,
+                lecture_video.id,
+                exc_info=True,
+            )
+            raise HTTPException(409, "Stored lecture video manifest is invalid.") from e
 
     lecture_video_chat_available = lecture_video_service.lecture_video_chat_metadata(
         lecture_video
     )
+    manifest_generation_status = (
+        await lecture_video_service.latest_processing_run_summary(
+            request.state["db"],
+            lecture_video.id,
+            schemas.LectureVideoProcessingStage.MANIFEST_GENERATION,
+        )
+    )
 
-    return {
+    response_lecture_video_manifest = (
+        lecture_video_manifest.model_dump(mode="json")
+        if lecture_video_manifest is not None
+        else None
+    )
+    response_kwargs: dict[str, Any] = {
         "lecture_video": await lecture_video_service.lecture_video_summary_from_model(
             request.state["db"], lecture_video
         ),
-        "lecture_video_manifest": lecture_video_manifest,
+        "lecture_video_manifest": response_lecture_video_manifest,
         "voice_id": lecture_video.voice_id or "",
         "lecture_video_chat_available": lecture_video_chat_available,
+        "overwrite_manifest": lecture_video.manual_manifest,
     }
+    if lecture_video.generation_prompt is not None:
+        response_kwargs["generation_prompt"] = lecture_video.generation_prompt
+    if manifest_generation_status is not None:
+        response_kwargs["manifest_generation_status"] = manifest_generation_status
+    return schemas.LectureVideoConfigResponse(**response_kwargs)
 
 
 @v1.post(
@@ -8758,7 +8807,7 @@ async def retry_assistant_lecture_video_processing(
     if lecture_video.status != schemas.LectureVideoStatus.FAILED:
         raise HTTPException(
             status_code=409,
-            detail="Lecture video retry is only available after narration processing fails.",
+            detail="Lecture video retry is only available after lecture video processing fails.",
         )
 
     claimed_for_retry = (
@@ -8769,25 +8818,61 @@ async def retry_assistant_lecture_video_processing(
     if not claimed_for_retry:
         raise HTTPException(
             status_code=409,
-            detail="Lecture video retry is only available after narration processing fails.",
+            detail="Lecture video retry is only available after lecture video processing fails.",
         )
 
-    audio_keys_to_delete = (
-        await lecture_video_processing.reset_failed_narrations_for_retry(
-            request.state["db"], lecture_video.id
-        )
-    )
     refreshed_lecture_video = await models.LectureVideo.get_by_id_with_copy_context(
         request.state["db"], lecture_video.id
     )
     if refreshed_lecture_video is None:
         raise HTTPException(404, "Lecture video not found.")
-    narration_run = await lecture_video_processing.queue_narration_processing_run(
-        request.state["db"],
-        refreshed_lecture_video,
-        assistant_id_at_start=assistant.id,
+
+    latest_failed_stage = await request.state["db"].scalar(
+        select(models.LectureVideoProcessingRun.stage)
+        .where(
+            models.LectureVideoProcessingRun.lecture_video_id_snapshot
+            == lecture_video.id,
+            models.LectureVideoProcessingRun.status
+            == schemas.LectureVideoProcessingRunStatus.FAILED,
+        )
+        .order_by(
+            models.LectureVideoProcessingRun.finished_at.desc().nulls_last(),
+            models.LectureVideoProcessingRun.id.desc(),
+        )
+        .limit(1)
     )
-    if narration_run is None:
+
+    needs_manifest_generation = (
+        latest_failed_stage == schemas.LectureVideoProcessingStage.MANIFEST_GENERATION
+        or (
+            not refreshed_lecture_video.manual_manifest
+            and len(refreshed_lecture_video.questions) == 0
+        )
+    )
+    audio_keys_to_delete: list[str] = []
+    if needs_manifest_generation:
+        await _ensure_lecture_video_manifest_generation_configured(
+            request.state["db"], int(class_id)
+        )
+        retry_run = (
+            await lecture_video_processing.queue_manifest_generation_processing_run(
+                request.state["db"],
+                refreshed_lecture_video,
+                assistant_id_at_start=assistant.id,
+            )
+        )
+    else:
+        audio_keys_to_delete = (
+            await lecture_video_processing.reset_failed_narrations_for_retry(
+                request.state["db"], lecture_video.id
+            )
+        )
+        retry_run = await lecture_video_processing.queue_narration_processing_run(
+            request.state["db"],
+            refreshed_lecture_video,
+            assistant_id_at_start=assistant.id,
+        )
+    if retry_run is None:
         raise HTTPException(
             status_code=409,
             detail="Lecture video retry is no longer available because the assistant or lecture video configuration changed.",
@@ -9289,6 +9374,12 @@ async def create_assistant(
     lecture_video_manifest = None
     lecture_video_voice_id = None
     lecture_video_voice_id_validated = False
+    lecture_video_generation_prompt = None
+    overwrite_lecture_video_manifest = (
+        bool(req.overwrite_manifest)
+        if "overwrite_manifest" in req.model_fields_set
+        else False
+    )
 
     if is_video:
         if req.lecture_video_id is None:
@@ -9296,15 +9387,27 @@ async def create_assistant(
                 status_code=400,
                 detail="Specifying a lecture_video_id is required for lecture video assistants.",
             )
-        if req.lecture_video_manifest is None:
+        if overwrite_lecture_video_manifest and req.lecture_video_manifest is None:
             raise HTTPException(
                 status_code=400,
-                detail="Specifying a lecture_video_manifest is required for lecture video assistants.",
+                detail="Specifying a lecture_video_manifest is required when overwriting a lecture video manifest.",
+            )
+        if (
+            not overwrite_lecture_video_manifest
+            and req.lecture_video_manifest is not None
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="lecture_video_manifest cannot be supplied when overwrite_manifest is false.",
             )
         if req.voice_id is None:
             raise HTTPException(
                 status_code=400,
                 detail="Specifying a voice_id is required for lecture video assistants.",
+            )
+        if not overwrite_lecture_video_manifest:
+            await _ensure_lecture_video_manifest_generation_configured(
+                request.state["db"], class_id_int
             )
 
         lecture_video = await models.LectureVideo.get_by_id_for_class(
@@ -9321,6 +9424,7 @@ async def create_assistant(
         lecture_video_object_id = lecture_video.id
         lecture_video_manifest = req.lecture_video_manifest
         lecture_video_voice_id = req.voice_id
+        lecture_video_generation_prompt = req.generation_prompt
         try:
             await validate_lecture_video_voice_id_or_raise(
                 class_id_int,
@@ -9338,6 +9442,8 @@ async def create_assistant(
         req.lecture_video_id is not None
         or req.lecture_video_manifest is not None
         or req.voice_id is not None
+        or req.generation_prompt is not None
+        or req.overwrite_manifest is not None
     ):
         raise HTTPException(
             status_code=400,
@@ -9447,6 +9553,8 @@ async def create_assistant(
         del req.lecture_video_id
         del req.lecture_video_manifest
         del req.voice_id
+        del req.generation_prompt
+        del req.overwrite_manifest
 
         try:
             asst = await models.Assistant.create(
@@ -9463,7 +9571,7 @@ async def create_assistant(
             lecture_video_service.raise_if_lecture_video_assignment_conflict(e)
             raise
 
-        if is_video and lecture_video_manifest is not None:
+        if is_video:
             assert lecture_video is not None  # for mypy
             if lecture_video_voice_id is None:
                 raise HTTPException(400, "Lecture video voice is required.")
@@ -9480,17 +9588,35 @@ async def create_assistant(
                     ClassCredentialValidationUnavailableError,
                 ) as exc:
                     _raise_http_for_lecture_video_voice_validation_error(exc)
-            await lecture_video_service.persist_manifest(
-                request.state["db"],
-                lecture_video,
-                lecture_video_manifest,
-                voice_id=lecture_video_voice_id,
-            )
-            await lecture_video_processing.queue_narration_processing_run(
-                request.state["db"],
-                lecture_video,
-                assistant_id_at_start=asst.id,
-            )
+            lecture_video.voice_id = lecture_video_voice_id
+            lecture_video.generation_prompt = lecture_video_generation_prompt
+            if overwrite_lecture_video_manifest:
+                if lecture_video_manifest is None:
+                    raise HTTPException(400, "Lecture video manifest is required.")
+                await lecture_video_processing.cancel_manifest_generation_processing_runs(
+                    request.state["db"],
+                    lecture_video.id,
+                    schemas.LectureVideoProcessingCancelReason.MANUAL_MANIFEST_REPLACED,
+                )
+                await lecture_video_service.persist_manifest(
+                    request.state["db"],
+                    lecture_video,
+                    lecture_video_manifest,
+                    voice_id=lecture_video_voice_id,
+                    manual_manifest=True,
+                )
+                await lecture_video_processing.queue_narration_processing_run(
+                    request.state["db"],
+                    lecture_video,
+                    assistant_id_at_start=asst.id,
+                )
+            else:
+                lecture_video.manual_manifest = False
+                await lecture_video_processing.queue_manifest_generation_processing_run(
+                    request.state["db"],
+                    lecture_video,
+                    assistant_id_at_start=asst.id,
+                )
 
         # Delete private files uploaded but not attached to the assistant
         files_to_delete = await models.File.get_files_not_used_by_assistant(
@@ -10094,11 +10220,21 @@ async def update_assistant(
     lecture_video = asst.lecture_video
     lecture_video_manifest = None
     lecture_video_voice_id = None
+    lecture_video_generation_prompt = None
     lecture_video_voice_id_validated = False
+    regenerate_requested = bool(req.regenerate_requested)
+    overwrite_lecture_video_manifest = (
+        bool(req.overwrite_manifest)
+        if "overwrite_manifest" in req.model_fields_set
+        else False
+    )
     lecture_video_fields_present = (
         "lecture_video_id" in req.model_fields_set
         or "lecture_video_manifest" in req.model_fields_set
         or "voice_id" in req.model_fields_set
+        or "generation_prompt" in req.model_fields_set
+        or "regenerate_requested" in req.model_fields_set
+        or "overwrite_manifest" in req.model_fields_set
     )
 
     # Prevent updating existing assistants to lecture video mode
@@ -10126,10 +10262,18 @@ async def update_assistant(
                 status_code=400,
                 detail="Specifying a lecture_video_id is required when updating lecture video data.",
             )
-        if req.lecture_video_manifest is None:
+        if overwrite_lecture_video_manifest and req.lecture_video_manifest is None:
             raise HTTPException(
                 status_code=400,
-                detail="Specifying a lecture_video_manifest is required when updating lecture video data.",
+                detail="Specifying a lecture_video_manifest is required when overwriting a lecture video manifest.",
+            )
+        if (
+            not overwrite_lecture_video_manifest
+            and req.lecture_video_manifest is not None
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="lecture_video_manifest cannot be supplied when overwrite_manifest is false.",
             )
         if req.voice_id is None:
             raise HTTPException(
@@ -10149,6 +10293,7 @@ async def update_assistant(
         )
         lecture_video_manifest = req.lecture_video_manifest
         lecture_video_voice_id = req.voice_id
+        lecture_video_generation_prompt = req.generation_prompt
         try:
             await validate_lecture_video_voice_id_or_raise(
                 int(class_id),
@@ -10997,8 +11142,6 @@ async def update_assistant(
 
     try:
         if lecture_video_fields_present and lecture_video is not None:
-            if lecture_video_manifest is None:
-                raise HTTPException(400, "Lecture video manifest is required.")
             if lecture_video_voice_id is None:
                 raise HTTPException(400, "Lecture video voice is required.")
             if not lecture_video_voice_id_validated:
@@ -11023,20 +11166,71 @@ async def update_assistant(
                     )
                 )
 
-            if not (
-                current_lecture_video is not None
-                and lecture_video_service.lecture_video_config_matches(
-                    current_lecture_video,
+            prompt_present = "generation_prompt" in req.model_fields_set
+            # Manifest mode transitions:
+            # - manual -> manual: persist the supplied manifest only when it changed.
+            # - manual -> generated: clear manual mode and queue manifest generation.
+            # - generated -> manual: cancel generation and persist the supplied manifest.
+            # - generated -> generated: queue generation only for explicit retry,
+            #   failed/missing output, or generation prompt changes.
+            needs_manifest_generation = not overwrite_lecture_video_manifest and (
+                regenerate_requested
+                or lecture_video.manual_manifest
+                or await lecture_video_service.should_regenerate_manifest(
+                    request.state["db"],
                     lecture_video,
-                    lecture_video_manifest,
-                    lecture_video_voice_id,
+                    incoming_generation_prompt=lecture_video_generation_prompt,
+                    generation_prompt_present=prompt_present,
                 )
-            ):
-                target_lecture_video = lecture_video
-                if (
+            )
+            if needs_manifest_generation:
+                await _ensure_lecture_video_manifest_generation_configured(
+                    request.state["db"], int(class_id)
+                )
+            requested_voice_id = lecture_video_voice_id.strip()
+            voice_changed = (lecture_video.voice_id or "").strip() != requested_voice_id
+            manifest_changed = False
+            if overwrite_lecture_video_manifest:
+                if lecture_video_manifest is None:
+                    raise HTTPException(400, "Lecture video manifest is required.")
+                manifest_changed = not (
                     current_lecture_video is not None
-                    and current_lecture_video.id == lecture_video.id
-                ):
+                    and lecture_video_service.lecture_video_config_matches(
+                        current_lecture_video,
+                        lecture_video,
+                        lecture_video_manifest,
+                        lecture_video_voice_id,
+                    )
+                )
+            overwrite_manifest_changed = (
+                current_lecture_video is not None
+                and current_lecture_video.manual_manifest
+                != overwrite_lecture_video_manifest
+            )
+            same_lecture_video = (
+                current_lecture_video is not None
+                and current_lecture_video.id == lecture_video.id
+            )
+            should_touch_lecture_video = (
+                manifest_changed
+                or needs_manifest_generation
+                or regenerate_requested
+                or voice_changed
+                or overwrite_manifest_changed
+                or (current_lecture_video is None)
+                or current_lecture_video.id != lecture_video.id
+            )
+
+            if should_touch_lecture_video:
+                if needs_manifest_generation and current_lecture_video is not None:
+                    await lecture_video_processing.cancel_manifest_generation_processing_runs(
+                        request.state["db"],
+                        current_lecture_video.id,
+                        schemas.LectureVideoProcessingCancelReason.ASSISTANT_DETACHED,
+                    )
+                target_lecture_video = lecture_video
+                if same_lecture_video:
+                    assert current_lecture_video is not None
                     target_lecture_video = (
                         await lecture_video_service.clone_lecture_video_snapshot(
                             request.state["db"], current_lecture_video
@@ -11051,17 +11245,80 @@ async def update_assistant(
                 if asst.lecture_video_id != target_lecture_video.id:
                     lecture_video_id_to_delete = asst.lecture_video_id
                 asst.lecture_video_id = target_lecture_video.id
-                await lecture_video_service.persist_manifest(
-                    request.state["db"],
-                    target_lecture_video,
-                    lecture_video_manifest,
-                    voice_id=lecture_video_voice_id,
-                )
-                await lecture_video_processing.queue_narration_processing_run(
-                    request.state["db"],
-                    target_lecture_video,
-                    assistant_id_at_start=asst.id,
-                )
+                request.state["db"].add(asst)
+                await request.state["db"].flush()
+                target_lecture_video.voice_id = lecture_video_voice_id
+                if prompt_present:
+                    target_lecture_video.generation_prompt = (
+                        lecture_video_generation_prompt
+                    )
+                if overwrite_lecture_video_manifest:
+                    manual_manifest = cast(
+                        schemas.LectureVideoManifest, lecture_video_manifest
+                    )
+                    await lecture_video_processing.cancel_manifest_generation_processing_runs(
+                        request.state["db"],
+                        target_lecture_video.id,
+                        schemas.LectureVideoProcessingCancelReason.MANUAL_MANIFEST_REPLACED,
+                    )
+                    await lecture_video_service.persist_manifest(
+                        request.state["db"],
+                        target_lecture_video,
+                        manual_manifest,
+                        voice_id=lecture_video_voice_id,
+                        manual_manifest=True,
+                    )
+                if overwrite_lecture_video_manifest or (
+                    voice_changed and not needs_manifest_generation
+                ):
+                    if not overwrite_lecture_video_manifest:
+                        if same_lecture_video:
+                            assert current_lecture_video is not None
+                            manifest_source_lecture_video = current_lecture_video
+                        else:
+                            loaded_lecture_video = (
+                                await models.LectureVideo.get_by_id_with_copy_context(
+                                    request.state["db"], target_lecture_video.id
+                                )
+                            )
+                            if loaded_lecture_video is None:
+                                raise HTTPException(
+                                    status_code=404,
+                                    detail="Could not find the lecture video you specified. Please try again.",
+                                )
+                            manifest_source_lecture_video = loaded_lecture_video
+                        existing_manifest = (
+                            lecture_video_service.lecture_video_manifest_from_model(
+                                manifest_source_lecture_video
+                            )
+                        )
+                        await lecture_video_service.persist_manifest(
+                            request.state["db"],
+                            target_lecture_video,
+                            existing_manifest,
+                            voice_id=lecture_video_voice_id,
+                        )
+                    await lecture_video_processing.queue_narration_processing_run(
+                        request.state["db"],
+                        target_lecture_video,
+                        assistant_id_at_start=asst.id,
+                    )
+                elif needs_manifest_generation:
+                    target_lecture_video.manual_manifest = False
+                    if (
+                        current_lecture_video is None
+                        or target_lecture_video.id != current_lecture_video.id
+                    ):
+                        await lecture_video_processing.cancel_manifest_generation_processing_runs(
+                            request.state["db"],
+                            target_lecture_video.id,
+                            schemas.LectureVideoProcessingCancelReason.ASSISTANT_DETACHED,
+                        )
+                    await lecture_video_processing.queue_manifest_generation_processing_run(
+                        request.state["db"],
+                        target_lecture_video,
+                        assistant_id_at_start=asst.id,
+                    )
 
         await models.Thread.update_tools_available(
             request.state["db"],
@@ -11183,6 +11440,11 @@ async def update_assistant(
         try:
             # Cancel first in case the old lecture video is still kept alive by threads.
             await lecture_video_processing.cancel_narration_processing_runs(
+                request.state["db"],
+                lecture_video_id_to_delete,
+                schemas.LectureVideoProcessingCancelReason.ASSISTANT_DETACHED,
+            )
+            await lecture_video_processing.cancel_manifest_generation_processing_runs(
                 request.state["db"],
                 lecture_video_id_to_delete,
                 schemas.LectureVideoProcessingCancelReason.ASSISTANT_DETACHED,
@@ -11394,6 +11656,11 @@ async def delete_assistant(
         try:
             # Cancel first in case the lecture video is still kept alive by threads.
             await lecture_video_processing.cancel_narration_processing_runs(
+                request.state["db"],
+                lecture_video_id_to_delete,
+                schemas.LectureVideoProcessingCancelReason.ASSISTANT_DELETED,
+            )
+            await lecture_video_processing.cancel_manifest_generation_processing_runs(
                 request.state["db"],
                 lecture_video_id_to_delete,
                 schemas.LectureVideoProcessingCancelReason.ASSISTANT_DELETED,
