@@ -3641,9 +3641,20 @@ async def run_response(
             _tts_audio_done = asyncio.Event()
             _tts_audio_ready = asyncio.Event()
             _tts_audio_chunk_idx = 0
+            _tts_connect_task: asyncio.Task[ElevenLabsStreamingTTS] | None = None
 
             async def _tts_cleanup() -> None:
-                nonlocal _tts_client, _tts_audio_task
+                nonlocal _tts_client, _tts_audio_task, _tts_connect_task
+                if _tts_connect_task and not _tts_connect_task.done():
+                    _tts_connect_task.cancel()
+                    try:
+                        await _tts_connect_task
+                    except asyncio.CancelledError:
+                        # Expected after explicitly canceling the connect task.
+                        pass
+                    except Exception:
+                        logger.warning("TTS connect cleanup failed", exc_info=True)
+                _tts_connect_task = None
                 if _tts_audio_task and not _tts_audio_task.done():
                     _tts_audio_task.cancel()
                     try:
@@ -3665,21 +3676,35 @@ async def run_response(
                         _tts_client = None
 
             try:
-                stream: AsyncStream[ResponseStreamEvent] = await cli.responses.create(
-                    include=include_with,
-                    input=input_items,
-                    instructions=run.instructions,
-                    model=run.model,
-                    parallel_tool_calls=True,
-                    reasoning=reasoning_settings,
-                    safety_identifier=safety_identifier_setting,
-                    tools=tools,
-                    store=True,
-                    stream=True,
-                    temperature=temperature_setting,
-                    truncation="auto",
-                    text=text_settings,
+
+                async def _tts_connect() -> ElevenLabsStreamingTTS:
+                    assert tts_api_key is not None
+                    assert tts_voice_id is not None
+                    tts_client = ElevenLabsStreamingTTS(tts_api_key, tts_voice_id)
+                    await tts_client.connect()
+                    return tts_client
+
+                if _tts_enabled:
+                    _tts_connect_task = asyncio.create_task(_tts_connect())
+
+                stream_task = asyncio.create_task(
+                    cli.responses.create(
+                        include=include_with,
+                        input=input_items,
+                        instructions=run.instructions,
+                        model=run.model,
+                        parallel_tool_calls=True,
+                        reasoning=reasoning_settings,
+                        safety_identifier=safety_identifier_setting,
+                        tools=tools,
+                        store=True,
+                        stream=True,
+                        temperature=temperature_setting,
+                        truncation="auto",
+                        text=text_settings,
+                    )
                 )
+                stream: AsyncStream[ResponseStreamEvent] = await stream_task
                 handler = BufferedResponseStreamHandler(
                     session=session_,
                     auth=c,
@@ -3725,6 +3750,40 @@ async def run_response(
                         _tts_audio_ready.set()
                     finally:
                         _tts_audio_done.set()
+
+                async def _tts_start_audio() -> None:
+                    nonlocal _tts_client, _tts_audio_task, _tts_connect_task
+                    if _tts_client is not None:
+                        return
+                    try:
+                        if _tts_connect_task:
+                            _tts_client = await _tts_connect_task
+                            _tts_connect_task = None
+                        else:
+                            assert tts_api_key is not None
+                            assert tts_voice_id is not None
+                            _tts_client = ElevenLabsStreamingTTS(
+                                tts_api_key, tts_voice_id
+                            )
+                            await _tts_client.connect()
+                        handler.enqueue_audio_started()
+                        _tts_audio_task = asyncio.create_task(
+                            _tts_receive_audio(_tts_client)
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Failed to start TTS streaming",
+                            exc_info=True,
+                        )
+                        if _tts_client is not None:
+                            try:
+                                await _tts_client.cleanup()
+                            except Exception:
+                                logger.warning(
+                                    "TTS cleanup after connect failure failed",
+                                    exc_info=True,
+                                )
+                        _tts_client = None
 
                 async def _tts_finish_input() -> None:
                     if _tts_sanitizer and _tts_chunker and _tts_client:
@@ -3846,31 +3905,7 @@ async def run_response(
                                         )
                                         # Start TTS connection on first text part
                                         if _tts_enabled and not _tts_client:
-                                            try:
-                                                assert tts_api_key is not None
-                                                assert tts_voice_id is not None
-                                                _tts_client = ElevenLabsStreamingTTS(
-                                                    tts_api_key, tts_voice_id
-                                                )
-                                                await _tts_client.connect()
-                                                handler.enqueue_audio_started()
-                                                _tts_audio_task = asyncio.create_task(
-                                                    _tts_receive_audio(_tts_client)
-                                                )
-                                            except Exception:
-                                                logger.warning(
-                                                    "Failed to start TTS streaming",
-                                                    exc_info=True,
-                                                )
-                                                if _tts_client is not None:
-                                                    try:
-                                                        await _tts_client.cleanup()
-                                                    except Exception:
-                                                        logger.warning(
-                                                            "TTS cleanup after connect failure failed",
-                                                            exc_info=True,
-                                                        )
-                                                _tts_client = None
+                                            await _tts_start_audio()
                                     case _:
                                         pass
                             case "response.output_text.delta":
