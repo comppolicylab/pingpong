@@ -1054,6 +1054,31 @@ async def test_validate_class_credential_for_gemini_closes_async_and_sync_client
     ]
 
 
+def test_get_gemini_client_caches_by_api_key(monkeypatch):
+    events: list[tuple[str, str]] = []
+
+    class FakeClient:
+        def __init__(self, *, api_key):
+            events.append(("init", api_key))
+            self.api_key = api_key
+
+    gemini_module.get_gemini_client.cache_clear()
+    monkeypatch.setattr(gemini_module.genai, "Client", FakeClient)
+    try:
+        first = gemini_module.get_gemini_client("gemini-key")
+        second = gemini_module.get_gemini_client("gemini-key")
+        third = gemini_module.get_gemini_client("other-gemini-key")
+    finally:
+        gemini_module.get_gemini_client.cache_clear()
+
+    assert first is second
+    assert third is not first
+    assert events == [
+        ("init", "gemini-key"),
+        ("init", "other-gemini-key"),
+    ]
+
+
 def test_class_credential_validators_cover_all_providers():
     assert set(_CLASS_CREDENTIAL_VALIDATORS) == set(schemas.ClassCredentialProvider)
 

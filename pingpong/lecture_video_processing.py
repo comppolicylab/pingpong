@@ -13,14 +13,13 @@ from datetime import timedelta
 from typing import Any
 
 import uuid_utils as uuid
-from google import genai
 from sqlalchemy import and_, delete, func, inspect, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import pingpong.models as models
 import pingpong.schemas as schemas
-from pingpong import lecture_video_manifest_generation, lecture_video_service
+from pingpong import gemini, lecture_video_manifest_generation, lecture_video_service
 from pingpong.ai import get_openai_client_by_class_id
 from pingpong.audio_store import AudioStoreError
 from pingpong.class_credential_validation import (
@@ -67,6 +66,16 @@ class NarrationWorkItem:
     voice_id: str
     narration_id: int
     text: str
+
+
+@dataclass(frozen=True)
+class ManifestGenerationRunContext:
+    class_id: int
+    lecture_video_id: int
+    generation_prompt: str
+    transcript: list[schemas.LectureVideoManifestWordV3] | None
+    openai_client: Any
+    gemini_client: Any
 
 
 class NarrationWorkerPoolManager(WorkerPoolManager):
@@ -592,20 +601,6 @@ def _existing_manifest_transcript(
     ]
 
 
-async def _get_gemini_api_key(class_id: int) -> str:
-    async with config.db.driver.async_session() as session:
-        credential = await models.ClassCredential.get_by_class_id_and_purpose(
-            session,
-            class_id,
-            schemas.ClassCredentialPurpose.LECTURE_VIDEO_MANIFEST_GENERATION,
-        )
-        if credential is None or credential.api_key_obj is None:
-            raise RuntimeError(
-                "A Gemini credential is required before lecture video manifests can be generated."
-            )
-        return credential.api_key_obj.api_key
-
-
 async def _write_video_to_temp_path(
     lecture_video: models.LectureVideo,
     temp_dir: str,
@@ -622,7 +617,7 @@ async def _write_video_to_temp_path(
         async for chunk in config.video_store.store.stream_video(
             lecture_video.stored_object.key
         ):
-            output.write(chunk)
+            await asyncio.to_thread(output.write, chunk)
     return video_path
 
 
@@ -692,82 +687,292 @@ async def _mark_manifest_generation_run_failed(
     await _mark_run_failed(run_id, lease_token, None, error_message)
 
 
-async def _process_claimed_manifest_run(run_id: int, lease_token: str) -> None:
-    gemini_file_name: str | None = None
-    gemini_api_key: str | None = None
-    lecture_video_id: int | None = None
-    try:
-        logger.info("Lecture video manifest run loading context. run_id=%s", run_id)
-        async with config.db.driver.async_session() as session:
-            run = await models.LectureVideoProcessingRun.get_by_id(session, run_id)
-            if run is None:
-                logger.info(
-                    "Lecture video manifest run disappeared before processing. run_id=%s",
-                    run_id,
-                )
-                return
-            if (
-                run.status != schemas.LectureVideoProcessingRunStatus.RUNNING
-                or run.lease_token != lease_token
-                or run.lecture_video_id is None
-            ):
-                logger.info(
-                    "Lecture video manifest run no longer claimable. "
-                    "run_id=%s status=%s lecture_video_id=%s",
-                    run_id,
-                    run.status,
-                    run.lecture_video_id,
-                )
-                return
-            lecture_video_id = run.lecture_video_id
-            lecture_video = None
-            if lecture_video_id is not None:
-                lecture_video = await models.LectureVideo.get_by_id_with_copy_context(
-                    session, lecture_video_id
-                )
-            if lecture_video is None:
-                logger.info(
-                    "Lecture video manifest run cancelling: video missing. "
-                    "run_id=%s lecture_video_id=%s",
-                    run_id,
-                    lecture_video_id,
-                )
-                await _mark_run_cancelled(
-                    session,
-                    run,
-                    schemas.LectureVideoProcessingCancelReason.LECTURE_VIDEO_DELETED,
-                )
-                await session.commit()
-                return
-            transcript = _existing_manifest_transcript(lecture_video)
-            class_id = run.class_id
-            generation_prompt = (
-                lecture_video.generation_prompt
-                or lecture_video_manifest_generation.DEFAULT_GENERATION_PROMPT_CONTENT
-            )
+async def _load_manifest_generation_run_context(
+    run_id: int,
+    lease_token: str,
+) -> ManifestGenerationRunContext | None:
+    logger.info("Lecture video manifest run loading context. run_id=%s", run_id)
+    async with config.db.driver.async_session() as session:
+        run = await models.LectureVideoProcessingRun.get_by_id(session, run_id)
+        if run is None:
             logger.info(
-                "Lecture video manifest loading OpenAI client. "
-                "run_id=%s lecture_video_id=%s class_id=%s transcript_cached=%s",
+                "Lecture video manifest run disappeared before processing. run_id=%s",
+                run_id,
+            )
+            return None
+        if (
+            run.status != schemas.LectureVideoProcessingRunStatus.RUNNING
+            or run.lease_token != lease_token
+            or run.lecture_video_id is None
+        ):
+            logger.info(
+                "Lecture video manifest run no longer claimable. "
+                "run_id=%s status=%s lecture_video_id=%s",
+                run_id,
+                run.status,
+                run.lecture_video_id,
+            )
+            return None
+        lecture_video_id = run.lecture_video_id
+        lecture_video = await models.LectureVideo.get_by_id_with_copy_context(
+            session, lecture_video_id
+        )
+        if lecture_video is None:
+            logger.info(
+                "Lecture video manifest run cancelling: video missing. "
+                "run_id=%s lecture_video_id=%s",
                 run_id,
                 lecture_video_id,
-                class_id,
-                transcript is not None,
             )
-            openai_client = await get_openai_client_by_class_id(session, class_id)
-
+            await _mark_run_cancelled(
+                session,
+                run,
+                schemas.LectureVideoProcessingCancelReason.LECTURE_VIDEO_DELETED,
+            )
+            await session.commit()
+            return None
+        transcript = _existing_manifest_transcript(lecture_video)
+        class_id = run.class_id
+        generation_prompt = (
+            lecture_video.generation_prompt
+            or lecture_video_manifest_generation.DEFAULT_GENERATION_PROMPT_CONTENT
+        )
         logger.info(
-            "Lecture video manifest loading Gemini credential. "
+            "Lecture video manifest loading OpenAI client. "
+            "run_id=%s lecture_video_id=%s class_id=%s transcript_cached=%s",
+            run_id,
+            lecture_video_id,
+            class_id,
+            transcript is not None,
+        )
+        openai_client = await get_openai_client_by_class_id(session, class_id)
+        logger.info(
+            "Lecture video manifest loading Gemini client. "
             "run_id=%s lecture_video_id=%s class_id=%s",
             run_id,
             lecture_video_id,
             class_id,
         )
-        gemini_api_key = await _get_gemini_api_key(class_id)
+        gemini_client = await gemini.get_gemini_client_by_class_id(session, class_id)
+
+    return ManifestGenerationRunContext(
+        class_id=class_id,
+        lecture_video_id=lecture_video_id,
+        generation_prompt=generation_prompt,
+        transcript=transcript,
+        openai_client=openai_client,
+        gemini_client=gemini_client,
+    )
+
+
+async def _write_manifest_generation_temp_video(
+    run_id: int,
+    lease_token: str,
+    lecture_video_id: int,
+    temp_dir: str,
+) -> str | None:
+    logger.info(
+        "Lecture video manifest writing temp video. run_id=%s lecture_video_id=%s",
+        run_id,
+        lecture_video_id,
+    )
+    async with config.db.driver.async_session() as session:
+        lecture_video = await models.LectureVideo.get_by_id_with_copy_context(
+            session, lecture_video_id
+        )
+        if lecture_video is None:
+            logger.info(
+                "Lecture video manifest stopped before temp write. "
+                "run_id=%s lecture_video_id=%s",
+                run_id,
+                lecture_video_id,
+            )
+            return None
+        video_path = await _await_with_run_lease_heartbeat(
+            run_id,
+            lease_token,
+            _write_video_to_temp_path(lecture_video, temp_dir),
+        )
+        if video_path is None:
+            logger.info(
+                "Lecture video manifest stopped during temp write. "
+                "run_id=%s lecture_video_id=%s",
+                run_id,
+                lecture_video_id,
+            )
+            return None
+    logger.info(
+        "Lecture video manifest wrote temp video. "
+        "run_id=%s lecture_video_id=%s video_path=%s",
+        run_id,
+        lecture_video_id,
+        video_path,
+    )
+    return video_path
+
+
+async def _ensure_manifest_generation_transcript(
+    run_id: int,
+    lease_token: str,
+    lecture_video_id: int,
+    video_path: str,
+    openai_client: Any,
+    temp_dir: str,
+    transcript: list[schemas.LectureVideoManifestWordV3] | None,
+) -> list[schemas.LectureVideoManifestWordV3] | None:
+    if transcript is not None:
+        logger.info(
+            "Lecture video manifest reused transcript. "
+            "run_id=%s lecture_video_id=%s word_count=%s",
+            run_id,
+            lecture_video_id,
+            len(transcript),
+        )
+        return transcript
+
+    logger.info(
+        "Lecture video manifest run transcribing video. run_id=%s lecture_video_id=%s",
+        run_id,
+        lecture_video_id,
+    )
+    generated_transcript = await _await_with_run_lease_heartbeat(
+        run_id,
+        lease_token,
+        lecture_video_manifest_generation.transcribe_video_words(
+            video_path,
+            openai_client,
+            temp_dir=temp_dir,
+        ),
+    )
+    if generated_transcript is None:
+        logger.info(
+            "Lecture video manifest stopped during transcription. "
+            "run_id=%s lecture_video_id=%s",
+            run_id,
+            lecture_video_id,
+        )
+        return None
+    logger.info(
+        "Lecture video manifest transcribed video. "
+        "run_id=%s lecture_video_id=%s word_count=%s",
+        run_id,
+        lecture_video_id,
+        len(generated_transcript),
+    )
+    return generated_transcript
+
+
+async def _upload_and_generate_manifest(
+    run_id: int,
+    lease_token: str,
+    lecture_video_id: int,
+    video_path: str,
+    gemini_client: Any,
+    generation_prompt: str,
+    transcript: list[schemas.LectureVideoManifestWordV3],
+) -> None:
+    gemini_file_name: str | None = None
+    async with gemini_client.aio as gemini_async_client:
+        try:
+            logger.info(
+                "Lecture video manifest uploading to Gemini. run_id=%s lecture_video_id=%s",
+                run_id,
+                lecture_video_id,
+            )
+            gemini_file = await _await_with_run_lease_heartbeat(
+                run_id,
+                lease_token,
+                lecture_video_manifest_generation.upload_video_to_gemini(
+                    video_path,
+                    gemini_async_client,
+                ),
+            )
+            if gemini_file is None:
+                logger.info(
+                    "Lecture video manifest stopped during Gemini upload. "
+                    "run_id=%s lecture_video_id=%s",
+                    run_id,
+                    lecture_video_id,
+                )
+                return
+            gemini_file_name = gemini_file.name
+            logger.info(
+                "Lecture video manifest uploaded to Gemini. "
+                "run_id=%s lecture_video_id=%s gemini_file=%s",
+                run_id,
+                lecture_video_id,
+                gemini_file_name,
+            )
+
+            logger.info(
+                "Lecture video manifest generating. run_id=%s lecture_video_id=%s",
+                run_id,
+                lecture_video_id,
+            )
+            manifest = await _await_with_run_lease_heartbeat(
+                run_id,
+                lease_token,
+                lecture_video_manifest_generation.generate_manifest(
+                    video_path=video_path,
+                    gemini_client=gemini_async_client,
+                    gemini_file=gemini_file,
+                    generation_prompt_content=generation_prompt,
+                    transcript=transcript,
+                ),
+            )
+            if manifest is None:
+                logger.info(
+                    "Lecture video manifest stopped during generation. "
+                    "run_id=%s lecture_video_id=%s",
+                    run_id,
+                    lecture_video_id,
+                )
+                return
+            logger.info(
+                "Lecture video manifest generated. run_id=%s "
+                "lecture_video_id=%s question_count=%s video_description_count=%s",
+                run_id,
+                lecture_video_id,
+                len(manifest.questions),
+                len(manifest.video_descriptions),
+            )
+            logger.info(
+                "Lecture video manifest persisting. run_id=%s lecture_video_id=%s",
+                run_id,
+                lecture_video_id,
+            )
+            await _complete_manifest_generation_run(run_id, lease_token, manifest)
+            logger.info(
+                "Lecture video manifest persisted. run_id=%s lecture_video_id=%s",
+                run_id,
+                lecture_video_id,
+            )
+        finally:
+            if gemini_file_name is not None:
+                logger.info(
+                    "Lecture video manifest deleting Gemini upload. "
+                    "run_id=%s lecture_video_id=%s gemini_file=%s",
+                    run_id,
+                    lecture_video_id,
+                    gemini_file_name,
+                )
+                await lecture_video_manifest_generation.delete_gemini_file(
+                    gemini_file_name,
+                    gemini_async_client,
+                )
+
+
+async def _process_claimed_manifest_run(run_id: int, lease_token: str) -> None:
+    context: ManifestGenerationRunContext | None = None
+    try:
+        context = await _load_manifest_generation_run_context(run_id, lease_token)
+        if context is None:
+            return
     except Exception as exc:
         logger.info(
             "Lecture video manifest context load failed. run_id=%s lecture_video_id=%s",
             run_id,
-            lecture_video_id,
+            context.lecture_video_id if context is not None else None,
         )
         await _mark_manifest_generation_run_failed(
             run_id,
@@ -777,163 +982,35 @@ async def _process_claimed_manifest_run(run_id: int, lease_token: str) -> None:
         return
 
     try:
-        assert lecture_video_id is not None
         with tempfile.TemporaryDirectory(prefix="pingpong_lv_manifest_") as temp_dir:
-            logger.info(
-                "Lecture video manifest writing temp video. run_id=%s lecture_video_id=%s",
+            video_path = await _write_manifest_generation_temp_video(
                 run_id,
-                lecture_video_id,
+                lease_token,
+                context.lecture_video_id,
+                temp_dir,
             )
-            async with config.db.driver.async_session() as session:
-                lecture_video = await models.LectureVideo.get_by_id_with_copy_context(
-                    session, lecture_video_id
-                )
-                if lecture_video is None:
-                    logger.info(
-                        "Lecture video manifest stopped before temp write. "
-                        "run_id=%s lecture_video_id=%s",
-                        run_id,
-                        lecture_video_id,
-                    )
-                    return
-                video_path = await _write_video_to_temp_path(lecture_video, temp_dir)
-            logger.info(
-                "Lecture video manifest wrote temp video. "
-                "run_id=%s lecture_video_id=%s video_path=%s",
+            if video_path is None:
+                return
+            transcript = await _ensure_manifest_generation_transcript(
                 run_id,
-                lecture_video_id,
+                lease_token,
+                context.lecture_video_id,
                 video_path,
+                context.openai_client,
+                temp_dir,
+                context.transcript,
             )
-
             if transcript is None:
-                logger.info(
-                    "Lecture video manifest run transcribing video. run_id=%s lecture_video_id=%s",
-                    run_id,
-                    lecture_video_id,
-                )
-                transcript = await _await_with_run_lease_heartbeat(
-                    run_id,
-                    lease_token,
-                    lecture_video_manifest_generation.transcribe_video_words(
-                        video_path,
-                        openai_client,
-                        temp_dir=temp_dir,
-                    ),
-                )
-                if transcript is None:
-                    logger.info(
-                        "Lecture video manifest stopped during transcription. "
-                        "run_id=%s lecture_video_id=%s",
-                        run_id,
-                        lecture_video_id,
-                    )
-                    return
-                logger.info(
-                    "Lecture video manifest transcribed video. "
-                    "run_id=%s lecture_video_id=%s word_count=%s",
-                    run_id,
-                    lecture_video_id,
-                    len(transcript),
-                )
-            else:
-                logger.info(
-                    "Lecture video manifest reused transcript. "
-                    "run_id=%s lecture_video_id=%s word_count=%s",
-                    run_id,
-                    lecture_video_id,
-                    len(transcript),
-                )
-
-            async with genai.Client(api_key=gemini_api_key).aio as gemini_client:
-                try:
-                    logger.info(
-                        "Lecture video manifest uploading to Gemini. run_id=%s lecture_video_id=%s",
-                        run_id,
-                        lecture_video_id,
-                    )
-                    gemini_file = await _await_with_run_lease_heartbeat(
-                        run_id,
-                        lease_token,
-                        lecture_video_manifest_generation.upload_video_to_gemini(
-                            video_path,
-                            gemini_client,
-                        ),
-                    )
-                    if gemini_file is None:
-                        logger.info(
-                            "Lecture video manifest stopped during Gemini upload. "
-                            "run_id=%s lecture_video_id=%s",
-                            run_id,
-                            lecture_video_id,
-                        )
-                        return
-                    gemini_file_name = gemini_file.name
-                    logger.info(
-                        "Lecture video manifest uploaded to Gemini. "
-                        "run_id=%s lecture_video_id=%s gemini_file=%s",
-                        run_id,
-                        lecture_video_id,
-                        gemini_file_name,
-                    )
-
-                    logger.info(
-                        "Lecture video manifest generating. run_id=%s lecture_video_id=%s",
-                        run_id,
-                        lecture_video_id,
-                    )
-                    manifest = await _await_with_run_lease_heartbeat(
-                        run_id,
-                        lease_token,
-                        lecture_video_manifest_generation.generate_manifest(
-                            video_path=video_path,
-                            gemini_client=gemini_client,
-                            gemini_file=gemini_file,
-                            generation_prompt_content=generation_prompt,
-                            transcript=transcript,
-                        ),
-                    )
-                    if manifest is None:
-                        logger.info(
-                            "Lecture video manifest stopped during generation. "
-                            "run_id=%s lecture_video_id=%s",
-                            run_id,
-                            lecture_video_id,
-                        )
-                        return
-                    logger.info(
-                        "Lecture video manifest generated. run_id=%s "
-                        "lecture_video_id=%s question_count=%s video_description_count=%s",
-                        run_id,
-                        lecture_video_id,
-                        len(manifest.questions),
-                        len(manifest.video_descriptions),
-                    )
-                    logger.info(
-                        "Lecture video manifest persisting. run_id=%s lecture_video_id=%s",
-                        run_id,
-                        lecture_video_id,
-                    )
-                    await _complete_manifest_generation_run(
-                        run_id, lease_token, manifest
-                    )
-                    logger.info(
-                        "Lecture video manifest persisted. run_id=%s lecture_video_id=%s",
-                        run_id,
-                        lecture_video_id,
-                    )
-                finally:
-                    if gemini_file_name is not None:
-                        logger.info(
-                            "Lecture video manifest deleting Gemini upload. "
-                            "run_id=%s lecture_video_id=%s gemini_file=%s",
-                            run_id,
-                            lecture_video_id,
-                            gemini_file_name,
-                        )
-                        await lecture_video_manifest_generation.delete_gemini_file(
-                            gemini_file_name,
-                            gemini_client,
-                        )
+                return
+            await _upload_and_generate_manifest(
+                run_id,
+                lease_token,
+                context.lecture_video_id,
+                video_path,
+                context.gemini_client,
+                context.generation_prompt,
+                transcript,
+            )
     except Exception as exc:
         logger.exception("Lecture video manifest generation failed. run_id=%s", run_id)
         await _mark_manifest_generation_run_failed(

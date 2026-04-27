@@ -2,6 +2,7 @@ import asyncio
 import functools
 import json
 import logging
+import shutil
 import subprocess
 import time
 from dataclasses import dataclass
@@ -310,10 +311,14 @@ async def transcribe_video_words(
 
 async def _ffprobe_duration_ms(video_path: str) -> int | None:
     def run_ffprobe() -> int | None:
+        ffprobe_path = shutil.which("ffprobe")
+        if ffprobe_path is None:
+            _log_missing_ffprobe_once()
+            return None
         try:
             result = subprocess.run(
                 [
-                    "ffprobe",
+                    ffprobe_path,
                     "-v",
                     "quiet",
                     "-show_entries",
@@ -328,9 +333,6 @@ async def _ffprobe_duration_ms(video_path: str) -> int | None:
                 timeout=30,
             )
             return _timestamp_to_ms(float(result.stdout.strip()))
-        except FileNotFoundError:
-            _log_missing_ffprobe_once()
-            return None
         except (
             subprocess.CalledProcessError,
             subprocess.TimeoutExpired,
@@ -718,8 +720,13 @@ async def generate_manifest(
         transcript,
         video_duration_ms=video_duration_ms,
     )
+    if gemini_file.uri is None:
+        raise ValueError("Gemini file is missing a URI.")
     contents: types.ContentListUnion = [
-        await gemini_client.files.get(name=gemini_file.name)
+        types.Part.from_uri(
+            file_uri=gemini_file.uri,
+            mime_type=gemini_file.mime_type,
+        )
     ]
     try:
         quiz = await gemini_helpers.generate_manifest_quiz(

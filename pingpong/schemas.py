@@ -940,7 +940,7 @@ def lecture_video_validator_create_assistant(self):
     overwrite_manifest = (
         self.overwrite_manifest
         if "overwrite_manifest" in self.model_fields_set
-        else True
+        else False
     )
     if self.interaction_mode == InteractionMode.LECTURE_VIDEO:
         if self.lecture_video_id is None:
@@ -1002,7 +1002,9 @@ def lecture_video_validator_update_assistant(self):
         or regenerate_requested_present
         or overwrite_manifest_present
     )
-    overwrite_manifest = self.overwrite_manifest if overwrite_manifest_present else True
+    overwrite_manifest = (
+        self.overwrite_manifest if overwrite_manifest_present else False
+    )
 
     if lecture_video_payload_present and self.lecture_video_id is None:
         raise ValueError(

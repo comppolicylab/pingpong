@@ -9373,7 +9373,7 @@ async def create_assistant(
     overwrite_lecture_video_manifest = (
         bool(req.overwrite_manifest)
         if "overwrite_manifest" in req.model_fields_set
-        else True
+        else False
     )
 
     if is_video:
@@ -10221,7 +10221,7 @@ async def update_assistant(
     overwrite_lecture_video_manifest = (
         bool(req.overwrite_manifest)
         if "overwrite_manifest" in req.model_fields_set
-        else True
+        else False
     )
     lecture_video_fields_present = (
         "lecture_video_id" in req.model_fields_set

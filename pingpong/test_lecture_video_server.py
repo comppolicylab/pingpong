@@ -534,6 +534,7 @@ def test_create_assistant_rejects_overlong_generation_prompt() -> None:
                 "lecture_video_id": 1,
                 "lecture_video_manifest": lecture_video_manifest(),
                 "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+                "overwrite_manifest": True,
                 "generation_prompt": "x" * 20001,
             }
         )
@@ -546,6 +547,7 @@ def test_update_assistant_rejects_overlong_generation_prompt() -> None:
                 "lecture_video_id": 1,
                 "lecture_video_manifest": lecture_video_manifest(),
                 "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+                "overwrite_manifest": True,
                 "generation_prompt": "x" * 20001,
             }
         )
@@ -574,6 +576,26 @@ def test_create_assistant_rejects_manifest_when_generation_mode_requested() -> N
     )
 
 
+def test_create_assistant_defaults_to_generation_when_overwrite_manifest_omitted() -> (
+    None
+):
+    assistant = schemas.CreateAssistant.model_validate(
+        {
+            "name": "Lecture Assistant",
+            "instructions": "Guide the learner through the lecture.",
+            "description": "Lecture presentation assistant",
+            "interaction_mode": "lecture_video",
+            "model": "gpt-4o-mini",
+            "tools": [],
+            "lecture_video_id": 1,
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+        }
+    )
+
+    assert assistant.overwrite_manifest is None
+    assert "overwrite_manifest" not in assistant.model_fields_set
+
+
 def test_update_assistant_rejects_manifest_when_generation_mode_requested() -> None:
     with pytest.raises(ValidationError) as exc_info:
         schemas.UpdateAssistant.model_validate(
@@ -589,6 +611,20 @@ def test_update_assistant_rejects_manifest_when_generation_mode_requested() -> N
         "lecture_video_manifest cannot be supplied when overwrite_manifest is false"
         in str(exc_info.value)
     )
+
+
+def test_update_assistant_defaults_to_generation_when_overwrite_manifest_omitted() -> (
+    None
+):
+    assistant = schemas.UpdateAssistant.model_validate(
+        {
+            "lecture_video_id": 1,
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+        }
+    )
+
+    assert assistant.overwrite_manifest is None
+    assert "overwrite_manifest" not in assistant.model_fields_set
 
 
 @with_institution(11, "Test Institution")
@@ -811,6 +847,243 @@ async def test_complete_manifest_generation_run_cancels_when_assistant_detached(
         refreshed_run.cancel_reason
         == schemas.LectureVideoProcessingCancelReason.ASSISTANT_DETACHED
     )
+
+
+@with_institution(11, "Test Institution")
+async def test_process_claimed_manifest_run_persists_generated_manifest(
+    db, institution, monkeypatch
+):
+    lease_token = "lease-token"
+    manifest = schemas.LectureVideoManifestV3.model_validate(
+        lecture_video_manifest_v3()
+    )
+    transcript = manifest.word_level_transcription
+    calls: list[tuple[str, object]] = []
+
+    class FakeGeminiAio:
+        async def __aenter__(self) -> SimpleNamespace:
+            return SimpleNamespace(name="fake-gemini-client")
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+    class FakeGeminiClient:
+        def __init__(self, *, api_key: str) -> None:
+            calls.append(("gemini-client", api_key))
+            self.aio = FakeGeminiAio()
+
+    async def fake_transcribe_video_words(
+        video_path: str,
+        openai_client: SimpleNamespace,
+        *,
+        temp_dir: str,
+    ) -> list[schemas.LectureVideoManifestWordV3]:
+        calls.append(("transcribe", (video_path, openai_client, temp_dir)))
+        return transcript
+
+    async def fake_upload_video_to_gemini(
+        video_path: str,
+        gemini_client: SimpleNamespace,
+    ) -> SimpleNamespace:
+        calls.append(("upload", (video_path, gemini_client)))
+        return SimpleNamespace(name="gemini-files/test")
+
+    async def fake_generate_manifest(
+        **kwargs: object,
+    ) -> schemas.LectureVideoManifestV3:
+        calls.append(("generate", kwargs))
+        return manifest
+
+    async def fake_delete_gemini_file(
+        name: str | None,
+        gemini_client: SimpleNamespace,
+    ) -> None:
+        calls.append(("delete", (name, gemini_client)))
+
+    async def fake_get_gemini_client_by_class_id(
+        session: AsyncSession,
+        class_id: int,
+    ) -> FakeGeminiClient:
+        return FakeGeminiClient(api_key=f"fake-gemini-key-{class_id}")
+
+    monkeypatch.setattr(
+        lecture_video_processing,
+        "get_openai_client_by_class_id",
+        AsyncMock(return_value=SimpleNamespace(name="fake-openai-client")),
+    )
+    monkeypatch.setattr(
+        lecture_video_processing.gemini,
+        "get_gemini_client_by_class_id",
+        fake_get_gemini_client_by_class_id,
+    )
+    monkeypatch.setattr(
+        lecture_video_processing,
+        "_write_video_to_temp_path",
+        AsyncMock(return_value="/tmp/fake-video.mp4"),
+    )
+    monkeypatch.setattr(
+        lecture_video_processing.lecture_video_manifest_generation,
+        "transcribe_video_words",
+        fake_transcribe_video_words,
+    )
+    monkeypatch.setattr(
+        lecture_video_processing.lecture_video_manifest_generation,
+        "upload_video_to_gemini",
+        fake_upload_video_to_gemini,
+    )
+    monkeypatch.setattr(
+        lecture_video_processing.lecture_video_manifest_generation,
+        "generate_manifest",
+        fake_generate_manifest,
+    )
+    monkeypatch.setattr(
+        lecture_video_processing.lecture_video_manifest_generation,
+        "delete_gemini_file",
+        fake_delete_gemini_file,
+    )
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        lecture_video = make_lecture_video(
+            1,
+            "generated-manifest.mp4",
+            status=schemas.LectureVideoStatus.PROCESSING.value,
+        )
+        assistant = models.Assistant(
+            name="Lecture Assistant",
+            class_id=1,
+            interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+            version=3,
+            lecture_video=lecture_video,
+            instructions="You are a lecture assistant.",
+            model="gpt-4o-mini",
+            tools="[]",
+            use_latex=False,
+            use_image_descriptions=False,
+            hide_prompt=False,
+        )
+        session.add_all([class_, lecture_video, assistant])
+        await session.flush()
+        run = await models.LectureVideoProcessingRun.create(
+            session,
+            lecture_video_id=lecture_video.id,
+            lecture_video_id_snapshot=lecture_video.id,
+            class_id=class_.id,
+            assistant_id_at_start=None,
+            stage=schemas.LectureVideoProcessingStage.MANIFEST_GENERATION,
+            attempt_number=1,
+            status=schemas.LectureVideoProcessingRunStatus.RUNNING,
+        )
+        run.lease_token = lease_token
+        run_id = run.id
+        lecture_video_id = lecture_video.id
+        await session.commit()
+
+    await lecture_video_processing._process_claimed_manifest_run(run_id, lease_token)
+
+    async with db.async_session() as session:
+        refreshed_run = await models.LectureVideoProcessingRun.get_by_id(
+            session, run_id
+        )
+        refreshed_video = await models.LectureVideo.get_by_id_with_copy_context(
+            session, lecture_video_id
+        )
+
+    assert refreshed_run is not None
+    assert refreshed_run.status == schemas.LectureVideoProcessingRunStatus.COMPLETED
+    assert refreshed_run.lease_token is None
+    assert refreshed_video is not None
+    assert refreshed_video.manual_manifest is False
+    assert refreshed_video.manifest_version == 3
+    assert [call[0] for call in calls] == [
+        "gemini-client",
+        "transcribe",
+        "upload",
+        "generate",
+        "delete",
+    ]
+
+
+async def test_upload_and_generate_manifest_deletes_gemini_upload_on_failure(
+    monkeypatch,
+):
+    calls: list[tuple[str, object]] = []
+    transcript = schemas.LectureVideoManifestV3.model_validate(
+        lecture_video_manifest_v3()
+    ).word_level_transcription
+
+    class FakeGeminiAio:
+        async def __aenter__(self) -> SimpleNamespace:
+            return SimpleNamespace(name="fake-gemini-client")
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+    class FakeGeminiClient:
+        def __init__(self, *, api_key: str) -> None:
+            calls.append(("gemini-client", api_key))
+            self.aio = FakeGeminiAio()
+
+    async def fake_upload_video_to_gemini(
+        video_path: str,
+        gemini_client: SimpleNamespace,
+    ) -> SimpleNamespace:
+        calls.append(("upload", (video_path, gemini_client)))
+        return SimpleNamespace(name="gemini-files/test")
+
+    async def fake_generate_manifest(
+        **kwargs: object,
+    ) -> schemas.LectureVideoManifestV3:
+        calls.append(("generate", kwargs))
+        raise RuntimeError("generation failed")
+
+    async def fake_delete_gemini_file(
+        name: str | None,
+        gemini_client: SimpleNamespace,
+    ) -> None:
+        calls.append(("delete", (name, gemini_client)))
+
+    monkeypatch.setattr(
+        lecture_video_processing.lecture_video_manifest_generation,
+        "upload_video_to_gemini",
+        fake_upload_video_to_gemini,
+    )
+    monkeypatch.setattr(
+        lecture_video_processing.lecture_video_manifest_generation,
+        "generate_manifest",
+        fake_generate_manifest,
+    )
+    monkeypatch.setattr(
+        lecture_video_processing.lecture_video_manifest_generation,
+        "delete_gemini_file",
+        fake_delete_gemini_file,
+    )
+
+    with pytest.raises(RuntimeError, match="generation failed"):
+        await lecture_video_processing._upload_and_generate_manifest(
+            run_id=1,
+            lease_token="lease-token",
+            lecture_video_id=2,
+            video_path="/tmp/fake-video.mp4",
+            gemini_client=FakeGeminiClient(api_key="fake-gemini-key"),
+            generation_prompt="Generate checks.",
+            transcript=transcript,
+        )
+
+    assert [call[0] for call in calls] == [
+        "gemini-client",
+        "upload",
+        "generate",
+        "delete",
+    ]
+    delete_args = calls[-1][1]
+    assert isinstance(delete_args, tuple)
+    assert delete_args[0] == "gemini-files/test"
 
 
 @with_institution(11, "Test Institution")
@@ -5077,6 +5350,7 @@ async def test_create_lecture_video_assistant_persists_normalized_manifest(
             "lecture_video_id": lecture_video.id,
             "lecture_video_manifest": manifest,
             "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "overwrite_manifest": True,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -5170,6 +5444,7 @@ async def test_create_lecture_video_assistant_requires_provider_credentials(
             "lecture_video_id": lecture_video.id,
             "lecture_video_manifest": lecture_video_manifest(),
             "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "overwrite_manifest": True,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -6441,6 +6716,7 @@ async def test_invalid_lecture_video_manifest_returns_422_and_preserves_uploaded
             "lecture_video_id": lecture_video.id,
             "lecture_video_manifest": manifest,
             "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "overwrite_manifest": True,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -6469,9 +6745,11 @@ async def test_invalid_lecture_video_manifest_returns_422_and_preserves_uploaded
         ("user:123", "can_create_assistants", "class:1"),
     ]
 )
-async def test_create_lecture_video_assistant_without_manifest_returns_422(
-    api, db, institution, valid_user_token
+async def test_create_lecture_video_assistant_without_manifest_queues_generation(
+    api, db, institution, valid_user_token, monkeypatch
 ):
+    patch_lecture_video_model_list(monkeypatch)
+
     async with db.async_session() as session:
         class_ = models.Class(
             id=1,
@@ -6506,11 +6784,24 @@ async def test_create_lecture_video_assistant_without_manifest_returns_422(
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 200
+
+    async with db.async_session() as session:
+        refreshed_video = await session.get(models.LectureVideo, lecture_video.id)
+        processing_run = await session.scalar(
+            select(models.LectureVideoProcessingRun).where(
+                models.LectureVideoProcessingRun.lecture_video_id_snapshot
+                == lecture_video.id
+            )
+        )
+
+    assert refreshed_video is not None
+    assert refreshed_video.manual_manifest is False
+    assert processing_run is not None
     assert (
-        "Specifying a lecture_video_manifest is required"
-        in response.json()["detail"][0]["msg"]
+        processing_run.stage == schemas.LectureVideoProcessingStage.MANIFEST_GENERATION
     )
+    assert processing_run.status == schemas.LectureVideoProcessingRunStatus.QUEUED
 
 
 @with_user(123)
@@ -6915,6 +7206,7 @@ async def test_create_lecture_video_assistant_rejects_invalid_voice_id(
             "lecture_video_id": lecture_video.id,
             "lecture_video_manifest": lecture_video_manifest(),
             "voice_id": "bad-voice",
+            "overwrite_manifest": True,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -6963,9 +7255,7 @@ async def test_create_lecture_video_assistant_requires_gemini_for_generation(
         )
         session.add_all([class_, lecture_video])
         await session.flush()
-        await create_lecture_video_copy_credentials(
-            session, class_.id, include_gemini=False
-        )
+        await create_lecture_video_copy_credentials(session, class_.id)
         await session.commit()
         await session.refresh(lecture_video)
 
@@ -6987,7 +7277,7 @@ async def test_create_lecture_video_assistant_requires_gemini_for_generation(
 
     assert response.status_code == 400
     assert response.json() == {
-        "detail": "Configure a Gemini credential in Manage Group before generating a lecture video manifest."
+        "detail": "Configure a Gemini credential in Manage Group to enable Lecture Video mode."
     }
 
 
@@ -7046,6 +7336,7 @@ async def test_update_assistant_with_new_lecture_video_id_deletes_prior_video_wh
                 question_text="First question?"
             ),
             "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "overwrite_manifest": True,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -7059,6 +7350,7 @@ async def test_update_assistant_with_new_lecture_video_id_deletes_prior_video_wh
                 question_text="Second question?"
             ),
             "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "overwrite_manifest": True,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -7143,6 +7435,7 @@ async def test_update_assistant_with_new_lecture_video_id_ignores_cleanup_delete
                 question_text="First question?"
             ),
             "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "overwrite_manifest": True,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -7156,6 +7449,7 @@ async def test_update_assistant_with_new_lecture_video_id_ignores_cleanup_delete
                 question_text="Second question?"
             ),
             "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "overwrite_manifest": True,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -7187,7 +7481,7 @@ async def test_update_assistant_with_new_lecture_video_id_ignores_cleanup_delete
         ("user:123", "admin", "class:1"),
     ]
 )
-async def test_update_assistant_with_new_lecture_video_id_without_manifest_returns_422(
+async def test_update_assistant_with_new_lecture_video_id_without_manifest_queues_generation(
     api, db, institution, valid_user_token, monkeypatch
 ):
     patch_lecture_video_model_list(monkeypatch)
@@ -7233,10 +7527,21 @@ async def test_update_assistant_with_new_lecture_video_id_without_manifest_retur
                 question_text="First question?"
             ),
             "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "overwrite_manifest": True,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert create_response.status_code == 200
+
+    async with db.async_session() as session:
+        await session.execute(
+            delete(models.ClassCredential).where(
+                models.ClassCredential.class_id == 1,
+                models.ClassCredential.purpose
+                == schemas.ClassCredentialPurpose.LECTURE_VIDEO_MANIFEST_GENERATION,
+            )
+        )
+        await session.commit()
 
     response = api.put(
         "/api/v1/class/1/assistant/1",
@@ -7247,11 +7552,24 @@ async def test_update_assistant_with_new_lecture_video_id_without_manifest_retur
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 200
+
+    async with db.async_session() as session:
+        refreshed_video = await session.get(models.LectureVideo, second_video.id)
+        processing_run = await session.scalar(
+            select(models.LectureVideoProcessingRun).where(
+                models.LectureVideoProcessingRun.lecture_video_id_snapshot
+                == second_video.id
+            )
+        )
+
+    assert refreshed_video is not None
+    assert refreshed_video.manual_manifest is False
+    assert processing_run is not None
     assert (
-        "Specifying a lecture_video_manifest is required"
-        in response.json()["detail"][0]["msg"]
+        processing_run.stage == schemas.LectureVideoProcessingStage.MANIFEST_GENERATION
     )
+    assert processing_run.status == schemas.LectureVideoProcessingRunStatus.QUEUED
 
 
 @with_user(123)
@@ -7283,9 +7601,7 @@ async def test_update_lecture_video_assistant_requires_gemini_for_generation(
         )
         session.add_all([class_, lecture_video])
         await session.flush()
-        await create_lecture_video_copy_credentials(
-            session, class_.id, include_gemini=False
-        )
+        await create_lecture_video_copy_credentials(session, class_.id)
         await session.commit()
         await session.refresh(lecture_video)
 
@@ -7308,6 +7624,16 @@ async def test_update_lecture_video_assistant_requires_gemini_for_generation(
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert create_response.status_code == 200
+
+    async with db.async_session() as session:
+        await session.execute(
+            delete(models.ClassCredential).where(
+                models.ClassCredential.class_id == class_.id,
+                models.ClassCredential.purpose
+                == schemas.ClassCredentialPurpose.LECTURE_VIDEO_MANIFEST_GENERATION,
+            )
+        )
+        await session.commit()
 
     response = api.put(
         "/api/v1/class/1/assistant/1",
@@ -7345,6 +7671,7 @@ async def test_update_assistant_with_whitespace_voice_id_returns_422(
                 question_text="Updated question?"
             ),
             "voice_id": "   ",
+            "overwrite_manifest": True,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -7394,6 +7721,7 @@ async def test_update_assistant_rejects_invalid_voice_id(
                 question_text="Updated question?"
             ),
             "voice_id": "bad-voice",
+            "overwrite_manifest": True,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -7474,6 +7802,7 @@ async def test_update_assistant_with_new_lecture_video_id_preserves_prior_video_
                 question_text="First question?"
             ),
             "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "overwrite_manifest": True,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -7504,6 +7833,7 @@ async def test_update_assistant_with_new_lecture_video_id_preserves_prior_video_
                 question_text="Second question?"
             ),
             "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "overwrite_manifest": True,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -7577,6 +7907,7 @@ async def test_update_assistant_with_same_lecture_video_id_clones_snapshot_and_p
                 question_text="Original question?"
             ),
             "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "overwrite_manifest": True,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -7607,6 +7938,7 @@ async def test_update_assistant_with_same_lecture_video_id_clones_snapshot_and_p
                 question_text="Updated question?"
             ),
             "voice_id": "voice-updated",
+            "overwrite_manifest": True,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -7705,6 +8037,7 @@ async def test_update_assistant_with_same_lecture_video_id_and_voice_only_clones
                 question_text="Original question?"
             ),
             "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "overwrite_manifest": True,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -7817,6 +8150,7 @@ async def test_update_assistant_with_same_lecture_video_config_is_a_no_op(
                 question_text="No-op question?"
             ),
             "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "overwrite_manifest": True,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -7851,6 +8185,7 @@ async def test_update_assistant_with_same_lecture_video_config_is_a_no_op(
                     }
                 ]
             },
+            "overwrite_manifest": True,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -7942,6 +8277,7 @@ async def test_update_assistant_with_manual_manifest_cancels_in_flight_manifest_
                 question_text="Original question?"
             ),
             "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "overwrite_manifest": True,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -8234,6 +8570,7 @@ async def test_update_lecture_video_assistant_rejects_assigned_lecture_video(
             "lecture_video_id": first_video.id,
             "lecture_video_manifest": lecture_video_manifest(),
             "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "overwrite_manifest": True,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -8381,6 +8718,7 @@ async def test_retry_lecture_video_endpoint_queues_manifest_generation_after_man
             session,
             institution,
         )
+        await create_lecture_video_copy_credentials(session, class_.id)
         lecture_video = await models.LectureVideo.get_by_id_with_copy_context(
             session, lecture_video.id
         )
@@ -9343,6 +9681,7 @@ async def test_create_lecture_video_assistant_rejects_assigned_lecture_video(
             "lecture_video_id": lecture_video.id,
             "lecture_video_manifest": lecture_video_manifest(),
             "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "overwrite_manifest": True,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -9404,6 +9743,7 @@ async def test_create_assistant_handles_lecture_video_unique_conflict(
             "lecture_video_id": lecture_video.id,
             "lecture_video_manifest": lecture_video_manifest(),
             "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "overwrite_manifest": True,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
@@ -9482,6 +9822,7 @@ async def test_update_assistant_handles_lecture_video_unique_conflict(
             "lecture_video_id": second_video.id,
             "lecture_video_manifest": lecture_video_manifest(),
             "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "overwrite_manifest": True,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
