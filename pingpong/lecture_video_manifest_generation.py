@@ -595,7 +595,11 @@ def _prepare_lecture_video_audio_for_whisper(*, video_path: str, temp_dir: str) 
             try:
                 os.remove(output_path)
             except OSError:
-                pass
+                logger.warning(
+                    "Failed to remove failed lecture video transcription audio %s",
+                    output_path,
+                    exc_info=True,
+                )
             raise RuntimeError(
                 "Failed to prepare lecture video audio for transcription."
             ) from exc
@@ -1883,6 +1887,11 @@ async def upload_and_generate_manifest(
     model: str = _GEMINI_MODEL,
 ) -> schemas.LectureVideoManifestV3:
     video_duration_ms = await _ffprobe_duration_ms(video_path)
+    if video_duration_ms is None:
+        raise RuntimeError(
+            "Unable to determine lecture video duration with ffprobe; "
+            "manifest generation requires a valid video duration."
+        )
     chunks = _plan_manifest_generation_chunks(video_duration_ms)
     if len(chunks) == 1:
         try:

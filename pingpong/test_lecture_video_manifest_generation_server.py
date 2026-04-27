@@ -1,4 +1,5 @@
 import importlib.util
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -241,6 +242,72 @@ async def test_should_regenerate_manifest_matrix(
                 generation_prompt_present=generation_prompt_present,
             )
             is expected
+        )
+
+
+@with_institution(11, "Test Institution")
+async def test_latest_processing_run_uses_attempt_number_when_created_ties(
+    db, institution
+):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        session.add(class_)
+        await session.flush()
+        lecture_video = make_lecture_video(
+            class_.id,
+            "same-created-runs.mp4",
+            status=schemas.LectureVideoStatus.READY.value,
+        )
+        lecture_video.manifest_data = lecture_video_manifest()
+        lecture_video.generation_prompt = "Original prompt"
+        session.add(lecture_video)
+        await session.flush()
+
+        created = datetime(2026, 4, 27, 12, 0, tzinfo=timezone.utc)
+        failed_run = await models.LectureVideoProcessingRun.create(
+            session,
+            lecture_video_id=lecture_video.id,
+            lecture_video_id_snapshot=lecture_video.id,
+            class_id=class_.id,
+            assistant_id_at_start=None,
+            stage=schemas.LectureVideoProcessingStage.MANIFEST_GENERATION,
+            attempt_number=1,
+            status=schemas.LectureVideoProcessingRunStatus.FAILED,
+        )
+        completed_run = await models.LectureVideoProcessingRun.create(
+            session,
+            lecture_video_id=lecture_video.id,
+            lecture_video_id_snapshot=lecture_video.id,
+            class_id=class_.id,
+            assistant_id_at_start=None,
+            stage=schemas.LectureVideoProcessingStage.MANIFEST_GENERATION,
+            attempt_number=2,
+            status=schemas.LectureVideoProcessingRunStatus.COMPLETED,
+        )
+        failed_run.created = created
+        completed_run.created = created
+        await session.flush()
+
+        summary = await lecture_video_service.latest_processing_run_summary(
+            session,
+            lecture_video.id,
+            schemas.LectureVideoProcessingStage.MANIFEST_GENERATION,
+        )
+
+        assert summary is not None
+        assert summary.state == schemas.LectureVideoProcessingRunStatus.COMPLETED
+        assert (
+            await lecture_video_service.should_regenerate_manifest(
+                session,
+                lecture_video,
+                incoming_generation_prompt=None,
+                generation_prompt_present=False,
+            )
+            is False
         )
 
 

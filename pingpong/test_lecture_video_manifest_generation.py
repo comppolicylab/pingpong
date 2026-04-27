@@ -1068,6 +1068,36 @@ async def test_ffprobe_duration_ms_returns_none_on_probe_failure(monkeypatch) ->
     assert await manifest_generation._ffprobe_duration_ms("lecture.mp4") is None
 
 
+async def test_upload_and_generate_manifest_requires_video_duration(
+    monkeypatch,
+) -> None:
+    async def fake_ffprobe_duration_ms(_video_path: str) -> None:
+        return None
+
+    async def fail_upload_video_to_gemini(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("Gemini upload should not run without video duration.")
+
+    monkeypatch.setattr(
+        manifest_generation,
+        "_ffprobe_duration_ms",
+        fake_ffprobe_duration_ms,
+    )
+    monkeypatch.setattr(
+        manifest_generation,
+        "upload_video_to_gemini",
+        fail_upload_video_to_gemini,
+    )
+
+    with pytest.raises(RuntimeError, match="valid video duration"):
+        await manifest_generation.upload_and_generate_manifest(
+            video_path="lecture.mp4",
+            gemini_client=object(),  # type: ignore[arg-type]
+            generation_prompt_content="Generate checks.",
+            transcript=_transcript(),
+            temp_dir="/tmp",
+        )
+
+
 async def test_generate_manifest_uses_uploaded_file_uri_without_refetch(
     monkeypatch,
 ) -> None:

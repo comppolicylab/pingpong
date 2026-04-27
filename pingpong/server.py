@@ -11222,6 +11222,12 @@ async def update_assistant(
             )
 
             if should_touch_lecture_video:
+                if needs_manifest_generation and current_lecture_video is not None:
+                    await lecture_video_processing.cancel_manifest_generation_processing_runs(
+                        request.state["db"],
+                        current_lecture_video.id,
+                        schemas.LectureVideoProcessingCancelReason.ASSISTANT_DETACHED,
+                    )
                 target_lecture_video = lecture_video
                 if same_lecture_video:
                     assert current_lecture_video is not None
@@ -11299,6 +11305,15 @@ async def update_assistant(
                     )
                 elif needs_manifest_generation:
                     target_lecture_video.manual_manifest = False
+                    if (
+                        current_lecture_video is None
+                        or target_lecture_video.id != current_lecture_video.id
+                    ):
+                        await lecture_video_processing.cancel_manifest_generation_processing_runs(
+                            request.state["db"],
+                            target_lecture_video.id,
+                            schemas.LectureVideoProcessingCancelReason.ASSISTANT_DETACHED,
+                        )
                     await lecture_video_processing.queue_manifest_generation_processing_run(
                         request.state["db"],
                         target_lecture_video,

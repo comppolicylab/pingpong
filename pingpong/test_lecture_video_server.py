@@ -7056,6 +7056,120 @@ async def test_update_assistant_with_new_lecture_video_id_without_manifest_queue
         ("user:123", "admin", "class:1"),
     ]
 )
+async def test_update_assistant_cancels_target_manifest_run_before_queueing_generation(
+    api, db, institution, valid_user_token, monkeypatch
+):
+    patch_lecture_video_model_list(monkeypatch)
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        first_video = make_lecture_video(
+            class_.id,
+            "first-lecture.mp4",
+            filename="first-lecture.mp4",
+            status=schemas.LectureVideoStatus.UPLOADED.value,
+        )
+        second_video = make_lecture_video(
+            class_.id,
+            "second-lecture.mp4",
+            filename="second-lecture.mp4",
+            status=schemas.LectureVideoStatus.UPLOADED.value,
+        )
+        session.add_all([class_, first_video, second_video])
+        await create_lecture_video_copy_credentials(session, class_.id)
+        await session.flush()
+        stale_run = await models.LectureVideoProcessingRun.create(
+            session,
+            lecture_video_id=second_video.id,
+            lecture_video_id_snapshot=second_video.id,
+            class_id=class_.id,
+            assistant_id_at_start=None,
+            stage=schemas.LectureVideoProcessingStage.MANIFEST_GENERATION,
+            attempt_number=1,
+            status=schemas.LectureVideoProcessingRunStatus.QUEUED,
+        )
+        stale_run_id = stale_run.id
+        await session.commit()
+        await session.refresh(first_video)
+        await session.refresh(second_video)
+
+    create_response = api.post(
+        "/api/v1/class/1/assistant",
+        json={
+            "name": "Lecture Assistant",
+            "instructions": "Guide the learner through the lecture.",
+            "description": "Lecture presentation assistant",
+            "interaction_mode": "lecture_video",
+            "model": "gpt-4o-mini",
+            "tools": [],
+            "lecture_video_id": first_video.id,
+            "lecture_video_manifest": lecture_video_manifest(
+                question_text="First question?"
+            ),
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "overwrite_manifest": True,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+
+    response = api.put(
+        "/api/v1/class/1/assistant/1",
+        json={
+            "lecture_video_id": second_video.id,
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "generation_prompt": "Generate a fresh manifest.",
+            "overwrite_manifest": False,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+
+    async with db.async_session() as session:
+        assistant = await session.get(models.Assistant, 1)
+        target_runs = list(
+            (
+                await session.scalars(
+                    select(models.LectureVideoProcessingRun)
+                    .where(
+                        models.LectureVideoProcessingRun.lecture_video_id_snapshot
+                        == second_video.id
+                    )
+                    .order_by(models.LectureVideoProcessingRun.id.asc())
+                )
+            ).all()
+        )
+
+    assert assistant is not None
+    assert assistant.lecture_video_id == second_video.id
+    assert len(target_runs) == 2
+    assert target_runs[0].id == stale_run_id
+    assert target_runs[0].status == schemas.LectureVideoProcessingRunStatus.CANCELLED
+    assert (
+        target_runs[0].cancel_reason
+        == schemas.LectureVideoProcessingCancelReason.ASSISTANT_DETACHED
+    )
+    assert (
+        target_runs[1].stage == schemas.LectureVideoProcessingStage.MANIFEST_GENERATION
+    )
+    assert target_runs[1].status == schemas.LectureVideoProcessingRunStatus.QUEUED
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_assistants", "class:1"),
+        ("user:123", "can_edit", "assistant:1"),
+        ("user:123", "admin", "class:1"),
+    ]
+)
 async def test_update_assistant_with_new_lecture_video_id_renarrates_when_target_voice_differs(
     api, db, institution, valid_user_token, monkeypatch
 ):

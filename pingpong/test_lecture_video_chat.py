@@ -211,19 +211,19 @@ def test_validate_lecture_video_manifest_rejects_empty_v3_video_descriptions():
         schemas.validate_lecture_video_manifest(payload)
 
 
-def test_v2_manifest_words_to_v3_preserves_millisecond_integer_timestamps():
+def test_v2_manifest_words_to_v3_treats_start_end_as_seconds():
     words = [
         schemas.LectureVideoManifestWordV2(
             id="w1",
             word="Latency",
-            start=400,
-            end=900,
+            start=0.4,
+            end=0.9,
         ),
         schemas.LectureVideoManifestWordV2(
             id="w2",
             word="matters",
-            start=950,
-            end=1400,
+            start=0.95,
+            end=1.4,
         ),
     ]
 
@@ -237,19 +237,19 @@ def test_v2_manifest_words_to_v3_preserves_millisecond_integer_timestamps():
     ]
 
 
-def test_v2_manifest_words_to_v3_preserves_second_integer_timestamps():
+def test_v2_manifest_words_to_v3_treats_integer_start_end_as_seconds():
     words = [
         schemas.LectureVideoManifestWordV2(
             id="w1",
             word="Protocol",
-            start=10_800,
-            end=10_801,
+            start=10,
+            end=11,
         ),
         schemas.LectureVideoManifestWordV2(
             id="w2",
             word="switch",
-            start=10_801,
-            end=10_802,
+            start=11,
+            end=12,
         ),
     ]
 
@@ -257,14 +257,14 @@ def test_v2_manifest_words_to_v3_preserves_second_integer_timestamps():
         schemas.LectureVideoManifestWordV3(
             id="w1",
             word="Protocol",
-            start_offset_ms=10_800_000,
-            end_offset_ms=10_801_000,
+            start_offset_ms=10_000,
+            end_offset_ms=11_000,
         ),
         schemas.LectureVideoManifestWordV3(
             id="w2",
             word="switch",
-            start_offset_ms=10_801_000,
-            end_offset_ms=10_802_000,
+            start_offset_ms=11_000,
+            end_offset_ms=12_000,
         ),
     ]
 

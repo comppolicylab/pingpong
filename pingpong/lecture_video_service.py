@@ -314,42 +314,19 @@ def lecture_video_manifest_from_model(
 def _v2_manifest_words_to_v3(
     words: list[schemas.LectureVideoManifestWordV2],
 ) -> list[schemas.LectureVideoManifestWordV3]:
-    scale = _v2_transcript_timestamp_scale(words)
     return [
         schemas.LectureVideoManifestWordV3(
             id=word.id,
             word=word.word,
-            start_offset_ms=_normalize_v2_timestamp_ms(word.start, scale=scale),
-            end_offset_ms=_normalize_v2_timestamp_ms(word.end, scale=scale),
+            start_offset_ms=_v2_timestamp_to_ms(word.start),
+            end_offset_ms=_v2_timestamp_to_ms(word.end),
         )
         for word in words
     ]
 
 
-def _v2_transcript_timestamp_scale(
-    words: list[schemas.LectureVideoManifestWordV2],
-) -> int:
-    numeric_bounds = [(float(word.start), float(word.end)) for word in words]
-    if any(
-        not start.is_integer() or not end.is_integer() for start, end in numeric_bounds
-    ):
-        return 1000
-
-    positive_deltas = [end - start for start, end in numeric_bounds if end > start] + [
-        next_start - start
-        for (start, _), (next_start, _) in zip(numeric_bounds, numeric_bounds[1:])
-        if next_start > start
-    ]
-
-    smallest_positive_delta = min(positive_deltas, default=None)
-    if smallest_positive_delta is not None and smallest_positive_delta <= 10:
-        return 1000
-
-    return 1
-
-
-def _normalize_v2_timestamp_ms(value: int | float, *, scale: int) -> int:
-    return max(0, int(round(float(value) * scale)))
+def _v2_timestamp_to_ms(value: int | float) -> int:
+    return max(0, int(round(float(value) * 1000)))
 
 
 def _v3_manifest_words_to_v2(
@@ -538,7 +515,10 @@ async def latest_processing_run_summary(
             == lecture_video_id,
             models.LectureVideoProcessingRun.stage == stage,
         )
-        .order_by(models.LectureVideoProcessingRun.created.desc())
+        .order_by(
+            models.LectureVideoProcessingRun.attempt_number.desc(),
+            models.LectureVideoProcessingRun.id.desc(),
+        )
         .limit(1)
     )
     if run is None:
