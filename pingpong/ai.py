@@ -3645,16 +3645,29 @@ async def run_response(
 
             async def _tts_cleanup() -> None:
                 nonlocal _tts_client, _tts_audio_task, _tts_connect_task
-                if _tts_connect_task and not _tts_connect_task.done():
-                    _tts_connect_task.cancel()
+                if _tts_connect_task:
+                    connect_task = _tts_connect_task
+                    _tts_connect_task = None
+                    if not connect_task.done():
+                        connect_task.cancel()
                     try:
-                        await _tts_connect_task
+                        connected_client = await connect_task
                     except asyncio.CancelledError:
                         # Expected after explicitly canceling the connect task.
                         pass
                     except Exception:
                         logger.warning("TTS connect cleanup failed", exc_info=True)
-                _tts_connect_task = None
+                    else:
+                        if _tts_client is None:
+                            _tts_client = connected_client
+                        elif connected_client is not _tts_client:
+                            try:
+                                await connected_client.cleanup()
+                            except Exception:
+                                logger.warning(
+                                    "TTS orphaned connect cleanup failed",
+                                    exc_info=True,
+                                )
                 if _tts_audio_task and not _tts_audio_task.done():
                     _tts_audio_task.cancel()
                     try:
@@ -3680,31 +3693,40 @@ async def run_response(
                 async def _tts_connect() -> ElevenLabsStreamingTTS:
                     assert tts_api_key is not None
                     assert tts_voice_id is not None
-                    tts_client = ElevenLabsStreamingTTS(tts_api_key, tts_voice_id)
-                    await tts_client.connect()
-                    return tts_client
+                    tts_client: ElevenLabsStreamingTTS | None = None
+                    try:
+                        tts_client = ElevenLabsStreamingTTS(tts_api_key, tts_voice_id)
+                        await tts_client.connect()
+                        return tts_client
+                    except asyncio.CancelledError:
+                        if tts_client is not None:
+                            try:
+                                await tts_client.cleanup()
+                            except Exception:
+                                logger.warning(
+                                    "TTS connect cancellation cleanup failed",
+                                    exc_info=True,
+                                )
+                        raise
 
                 if _tts_enabled:
                     _tts_connect_task = asyncio.create_task(_tts_connect())
 
-                stream_task = asyncio.create_task(
-                    cli.responses.create(
-                        include=include_with,
-                        input=input_items,
-                        instructions=run.instructions,
-                        model=run.model,
-                        parallel_tool_calls=True,
-                        reasoning=reasoning_settings,
-                        safety_identifier=safety_identifier_setting,
-                        tools=tools,
-                        store=True,
-                        stream=True,
-                        temperature=temperature_setting,
-                        truncation="auto",
-                        text=text_settings,
-                    )
+                stream: AsyncStream[ResponseStreamEvent] = await cli.responses.create(
+                    include=include_with,
+                    input=input_items,
+                    instructions=run.instructions,
+                    model=run.model,
+                    parallel_tool_calls=True,
+                    reasoning=reasoning_settings,
+                    safety_identifier=safety_identifier_setting,
+                    tools=tools,
+                    store=True,
+                    stream=True,
+                    temperature=temperature_setting,
+                    truncation="auto",
+                    text=text_settings,
                 )
-                stream: AsyncStream[ResponseStreamEvent] = await stream_task
                 handler = BufferedResponseStreamHandler(
                     session=session_,
                     auth=c,
@@ -3794,7 +3816,6 @@ async def run_response(
                                 for chunk in tts_chunks:
                                     await _tts_client.send_text(
                                         chunk,
-                                        try_trigger_generation=True,
                                     )
                             except Exception:
                                 logger.warning(
@@ -3807,7 +3828,6 @@ async def run_response(
                                 await _tts_client.send_text(
                                     final_chunk,
                                     flush=True,
-                                    try_trigger_generation=True,
                                 )
                             except Exception:
                                 logger.warning(
@@ -3918,7 +3938,6 @@ async def run_response(
                                             for tts_chunk in tts_chunks:
                                                 await _tts_client.send_text(
                                                     tts_chunk,
-                                                    try_trigger_generation=True,
                                                 )
                                         except Exception:
                                             logger.warning(

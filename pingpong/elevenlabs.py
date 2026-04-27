@@ -484,6 +484,8 @@ class StreamingMarkdownSanitizer:
 class StreamingTTSChunker:
     """Buffer streamed text until it is suitable to send to ElevenLabs TTS."""
 
+    # Mirrors elevenlabs.realtime_tts.text_chunker, including its asymmetric
+    # brace handling: "}" is a splitter, "{" is not.
     _SPLITTERS = (
         ".",
         ",",

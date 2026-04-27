@@ -1486,6 +1486,8 @@ def test_streaming_tts_chunker_matches_elevenlabs_text_chunker():
         ["terms", ",", " which"],
         ["mistake", " \u2014", " turning"],
         ["isn", "\u2019t", " valid", "."],
+        ["JSON", "{", "like"],
+        ["JSON", "}", "done"],
     ]
 
     for chunks in cases:
@@ -1541,7 +1543,7 @@ async def test_elevenlabs_streaming_tts_sends_realtime_generation_payloads(monke
 
     await tts.connect()
     await tts.send_text("Hello ", try_trigger_generation=True)
-    await tts.send_text("world ", flush=True, try_trigger_generation=True)
+    await tts.send_text("world ", flush=True)
 
     session = sessions[0]
     assert session.headers == {"xi-api-key": "elevenlabs-key"}
@@ -1568,7 +1570,6 @@ async def test_elevenlabs_streaming_tts_sends_realtime_generation_payloads(monke
         {
             "text": "world ",
             "flush": True,
-            "try_trigger_generation": True,
         },
     ]
 
