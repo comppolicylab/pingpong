@@ -3642,6 +3642,7 @@ async def run_response(
             _tts_audio_ready = asyncio.Event()
             _tts_audio_chunk_idx = 0
             _tts_connect_task: asyncio.Task[ElevenLabsStreamingTTS] | None = None
+            _tts_input_closed = False
 
             async def _tts_cleanup() -> None:
                 nonlocal _tts_client, _tts_audio_task, _tts_connect_task
@@ -3834,6 +3835,13 @@ async def run_response(
                                     "TTS final flush failed",
                                     exc_info=True,
                                 )
+
+                async def _tts_close_input() -> None:
+                    nonlocal _tts_input_closed
+                    if _tts_input_closed:
+                        return
+                    await _tts_finish_input()
+                    if _tts_client:
                         try:
                             await _tts_client.close_input()
                         except Exception:
@@ -3841,6 +3849,7 @@ async def run_response(
                                 "TTS close_input failed",
                                 exc_info=True,
                             )
+                    _tts_input_closed = True
 
                 stream_iter = stream.__aiter__()
                 openai_event_task = asyncio.create_task(stream_iter.__anext__())
@@ -3891,7 +3900,7 @@ async def run_response(
                                             event.item
                                         )
                                         if handler.force_stopped:
-                                            await _tts_finish_input()
+                                            await _tts_close_input()
                                             break
                                     case "code_interpreter_call":
                                         await handler.on_code_interpreter_tool_call_created(
@@ -3971,7 +3980,7 @@ async def run_response(
                                         await handler.on_output_text_part_done(
                                             event.part
                                         )
-                                        # Flush remaining text to TTS and close input
+                                        # Flush remaining text while keeping TTS open for later parts.
                                         await _tts_finish_input()
                                     case _:
                                         pass
@@ -4054,12 +4063,16 @@ async def run_response(
                                     case _:
                                         pass
                             case "response.completed":
+                                await _tts_close_input()
                                 await handler.on_response_completed(event)
                             case "response.incomplete":
+                                await _tts_close_input()
                                 await handler.on_response_completed(event)
                             case "response.failed":
+                                await _tts_close_input()
                                 await handler.on_response_completed(event)
                             case "error":
+                                await _tts_close_input()
                                 await handler.on_response_error(event)
                             case _:
                                 pass
