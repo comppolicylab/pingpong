@@ -2080,6 +2080,9 @@ class LectureVideo(Base):
         mapped_column(JSON, nullable=True)
     )
     generation_prompt: Mapped[str | None] = deferred(mapped_column(Text, nullable=True))
+    video_description_duration_ms: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=30_000, server_default="30000"
+    )
     manual_manifest: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default="false"
     )
@@ -2110,6 +2113,7 @@ class LectureVideo(Base):
         manifest_data: dict[str, Any] | None = None,
         transcript_data: dict[str, Any] | None = None,
         generation_prompt: str | None = None,
+        video_description_duration_ms: int = 30_000,
         manual_manifest: bool = False,
         manifest_version: int | None = None,
         lecture_video_chat_available: bool = False,
@@ -2125,6 +2129,7 @@ class LectureVideo(Base):
             manifest_data=manifest_data,
             transcript_data=transcript_data,
             generation_prompt=generation_prompt,
+            video_description_duration_ms=video_description_duration_ms,
             manual_manifest=manual_manifest,
             manifest_version=manifest_version,
             lecture_video_chat_available=lecture_video_chat_available,
@@ -2320,6 +2325,7 @@ class LectureVideo(Base):
             manifest_data=lecture_video.manifest_data,
             transcript_data=lecture_video.transcript_data,
             generation_prompt=lecture_video.generation_prompt,
+            video_description_duration_ms=(lecture_video.video_description_duration_ms),
             manual_manifest=lecture_video.manual_manifest,
             manifest_version=lecture_video.manifest_version,
             lecture_video_chat_available=lecture_video.lecture_video_chat_available,

@@ -12,6 +12,7 @@ import uuid_utils as uuid
 
 import pingpong.models as models
 import pingpong.schemas as schemas
+from . import lecture_video_manifest_generation
 from .authz import AuthzClient, Relation
 from .config import config
 from .video_store import VideoStoreError
@@ -483,6 +484,9 @@ def lecture_video_config_matches(
     requested_lecture_video: models.LectureVideo,
     requested_manifest: schemas.LectureVideoManifest,
     requested_voice_id: str,
+    requested_video_description_duration_ms: int = (
+        lecture_video_manifest_generation.DEFAULT_VIDEO_DESCRIPTION_DURATION_MS
+    ),
 ) -> bool:
     try:
         current_manifest = lecture_video_manifest_from_model(current_lecture_video)
@@ -499,6 +503,8 @@ def lecture_video_config_matches(
         current_lecture_video.stored_object_id
         == requested_lecture_video.stored_object_id
         and (current_lecture_video.voice_id or "").strip() == requested_voice_id.strip()
+        and current_lecture_video.video_description_duration_ms
+        == requested_video_description_duration_ms
         and current_manifest.model_dump() == requested_manifest.model_dump()
     )
 
@@ -549,12 +555,20 @@ async def should_regenerate_manifest(
     *,
     incoming_generation_prompt: str | None,
     generation_prompt_present: bool,
+    incoming_video_description_duration_ms: int | None = None,
+    video_description_duration_ms_present: bool = False,
 ) -> bool:
     prompt_changed = (
         generation_prompt_present
         and incoming_generation_prompt != lecture_video.generation_prompt
     )
-    if prompt_changed or lecture_video.manifest_data is None:
+    duration_changed = (
+        video_description_duration_ms_present
+        and incoming_video_description_duration_ms is not None
+        and incoming_video_description_duration_ms
+        != lecture_video.video_description_duration_ms
+    )
+    if prompt_changed or duration_changed or lecture_video.manifest_data is None:
         return True
     return await latest_processing_run_failed(
         session,
@@ -577,6 +591,7 @@ async def clone_lecture_video_snapshot(
         manifest_data=lecture_video.manifest_data,
         transcript_data=lecture_video.transcript_data,
         generation_prompt=lecture_video.generation_prompt,
+        video_description_duration_ms=lecture_video.video_description_duration_ms,
         manual_manifest=lecture_video.manual_manifest,
         manifest_version=lecture_video.manifest_version,
         lecture_video_chat_available=lecture_video.lecture_video_chat_available,

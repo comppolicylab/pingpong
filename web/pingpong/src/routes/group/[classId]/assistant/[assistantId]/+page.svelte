@@ -107,6 +107,10 @@
 			}
 		]
 	};
+	const DEFAULT_VIDEO_DESCRIPTION_DURATION_MS = 30_000;
+	const MIN_VIDEO_DESCRIPTION_DURATION_MS = 5_000;
+	const MAX_VIDEO_DESCRIPTION_DURATION_MS = 300_000;
+	const VIDEO_DESCRIPTION_DURATION_STEP_MS = 5_000;
 
 	type LectureVideoOptionInput = {
 		option_text: string;
@@ -283,6 +287,9 @@
 	let hasSetLectureVideoManifest = false;
 	let generationPrompt = '';
 	let hasSetGenerationPrompt = false;
+	let videoDescriptionDurationMs =
+		data.lectureVideoConfig?.video_description_duration_ms || DEFAULT_VIDEO_DESCRIPTION_DURATION_MS;
+	let hasSetVideoDescriptionDuration = false;
 	let canGenerateLectureVideoManifest = data.lectureVideoDefaults?.can_generate_manifest ?? false;
 	$: canGenerateLectureVideoManifest = data.lectureVideoDefaults?.can_generate_manifest ?? false;
 	const effectiveOverwriteManifest = (storedOverwriteManifest?: boolean | null) =>
@@ -648,6 +655,12 @@
 			data.lectureVideoConfig?.generation_prompt || lectureVideoDefaultGenerationPrompt;
 		hasSetGenerationPrompt = true;
 	}
+	$: if (!hasSetVideoDescriptionDuration && !lectureVideoConfigLoadError) {
+		videoDescriptionDurationMs =
+			data.lectureVideoConfig?.video_description_duration_ms ||
+			DEFAULT_VIDEO_DESCRIPTION_DURATION_MS;
+		hasSetVideoDescriptionDuration = true;
+	}
 	$: if (!hasSetOverwriteManifest && !lectureVideoConfigLoadError) {
 		overwriteManifest = effectiveOverwriteManifest(data.lectureVideoConfig?.overwrite_manifest);
 		hasSetOverwriteManifest = true;
@@ -657,6 +670,8 @@
 	);
 	$: originalGenerationPrompt =
 		data.lectureVideoConfig?.generation_prompt || lectureVideoDefaultGenerationPrompt;
+	$: originalVideoDescriptionDurationMs =
+		data.lectureVideoConfig?.video_description_duration_ms || DEFAULT_VIDEO_DESCRIPTION_DURATION_MS;
 	$: generationPromptEdited =
 		canGenerateLectureVideoManifest && generationPrompt !== lectureVideoDefaultGenerationPrompt;
 	$: generationPromptForSave = generationPromptEdited ? generationPrompt : null;
@@ -676,6 +691,9 @@
 	$: lectureVideoVoiceChanged = voiceId.trim() !== currentVoiceId.trim();
 	$: generationPromptChanged =
 		canGenerateLectureVideoManifest && generationPrompt !== originalGenerationPrompt;
+	$: videoDescriptionDurationChanged =
+		canGenerateLectureVideoManifest &&
+		videoDescriptionDurationMs !== originalVideoDescriptionDurationMs;
 	$: lectureVideoGenerationTriggeredByFormChanges =
 		isLectureMode &&
 		canGenerateLectureVideoManifest &&
@@ -683,6 +701,7 @@
 		(originalOverwriteManifest ||
 			lectureVideoIdChanged ||
 			generationPromptChanged ||
+			videoDescriptionDurationChanged ||
 			lastManifestRunFailed ||
 			!data.lectureVideoConfig?.lecture_video_manifest);
 	$: lectureVideoNarrationTriggeredByFormChanges =
@@ -1713,6 +1732,12 @@
 		if (canGenerateLectureVideoManifest && generationPrompt !== originalGenerationPrompt) {
 			modifiedFields.push('generation prompt');
 		}
+		if (
+			canGenerateLectureVideoManifest &&
+			videoDescriptionDurationMs !== originalVideoDescriptionDurationMs
+		) {
+			modifiedFields.push('video description duration');
+		}
 		if (canRegenerateLectureVideo && regenerateRequested) {
 			modifiedFields.push(
 				overwriteManifest ? 'lecture video narration' : 'lecture video generation'
@@ -1829,6 +1854,7 @@
 			lecture_video_id: isLectureMode ? (selectedLectureVideo?.id ?? undefined) : undefined,
 			voice_id: isLectureMode ? voiceId.trim() : undefined,
 			generation_prompt: isLectureMode ? generationPrompt : undefined,
+			video_description_duration_ms: isLectureMode ? videoDescriptionDurationMs : undefined,
 			overwrite_manifest: isLectureMode ? overwriteManifest : undefined,
 			published: body.published?.toString() === 'on',
 			use_latex: isLectureMode
@@ -2279,6 +2305,7 @@
 				lectureVideoIdChanged ||
 				lectureVideoVoiceChanged ||
 				generationPromptChanged ||
+				videoDescriptionDurationChanged ||
 				overwriteManifestChanged ||
 				(canRegenerateLectureVideo && regenerateRequested) ||
 				lastManifestRunFailed;
@@ -2290,6 +2317,9 @@
 				params.generation_prompt = canGenerateLectureVideoManifest
 					? generationPromptForSave
 					: undefined;
+				params.video_description_duration_ms = canGenerateLectureVideoManifest
+					? videoDescriptionDurationMs
+					: undefined;
 				if (canRegenerateLectureVideo) {
 					params.regenerate_requested = regenerateRequested;
 				}
@@ -2299,6 +2329,7 @@
 				delete params.lecture_video_manifest;
 				delete params.voice_id;
 				delete params.generation_prompt;
+				delete params.video_description_duration_ms;
 				delete params.regenerate_requested;
 				delete params.overwrite_manifest;
 			}
@@ -3516,6 +3547,34 @@
 										disabled={preventEdits || overwriteManifest}
 										class="text-sm"
 									/>
+								</div>
+
+								<div class="col-span-2 mb-1">
+									<div class="flex items-center justify-between gap-3">
+										<Label
+											for="video_description_duration_ms"
+											class="mb-0 text-gray-800 contrast-100 grayscale-0"
+											>Video Description Length</Label
+										>
+										<span class="text-sm font-medium text-gray-700"
+											>{videoDescriptionDurationMs / 1000} seconds</span
+										>
+									</div>
+									<Helper class="pb-1">Used for each generated visual description segment.</Helper>
+									<Range
+										id="video_description_duration_ms"
+										name="video_description_duration_ms"
+										min={MIN_VIDEO_DESCRIPTION_DURATION_MS}
+										max={MAX_VIDEO_DESCRIPTION_DURATION_MS}
+										step={VIDEO_DESCRIPTION_DURATION_STEP_MS}
+										bind:value={videoDescriptionDurationMs}
+										disabled={preventEdits || overwriteManifest}
+										class="appearance-auto"
+									/>
+									<div class="mt-1 flex justify-between text-xs text-gray-500">
+										<span>{MIN_VIDEO_DESCRIPTION_DURATION_MS / 1000}s</span>
+										<span>{MAX_VIDEO_DESCRIPTION_DURATION_MS / 1000}s</span>
+									</div>
 								</div>
 							{/if}
 

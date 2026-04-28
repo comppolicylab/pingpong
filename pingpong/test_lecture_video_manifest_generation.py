@@ -401,6 +401,50 @@ def test_quiz_to_manifest_accepts_final_video_description_shorter_than_window() 
     ]
 
 
+def test_quiz_to_manifest_uses_custom_video_description_window() -> None:
+    quiz = _quiz_with_video_descriptions(
+        [
+            manifest_generation.GeneratedVideoDescription(
+                start_offset_ms=0,
+                end_offset_ms=10000,
+                description="The teacher writes on the board.",
+            ),
+            manifest_generation.GeneratedVideoDescription(
+                start_offset_ms=10000,
+                end_offset_ms=20000,
+                description="The teacher points at the board.",
+            ),
+        ]
+    )
+
+    manifest = manifest_generation._quiz_to_manifest(
+        quiz,
+        _transcript(),
+        video_duration_ms=20000,
+        video_description_window_ms=10000,
+    )
+
+    assert [
+        description.end_offset_ms for description in manifest.video_descriptions
+    ] == [
+        10000,
+        20000,
+    ]
+
+
+def test_build_generation_prompt_uses_custom_video_description_window() -> None:
+    prompt = manifest_generation.build_generation_prompt(
+        "Ask one question.",
+        _transcript(),
+        video_duration_ms=20000,
+        video_description_window_ms=10000,
+    )
+
+    assert "fixed 10-second windows" in prompt
+    assert "0-10000, 10000-20000" in prompt
+    assert "exactly 10000ms" in prompt
+
+
 def test_plan_manifest_generation_chunks_rebalances_short_tail() -> None:
     chunks = manifest_generation._plan_manifest_generation_chunks(3_664_600)
 
@@ -436,6 +480,22 @@ def test_plan_manifest_generation_chunks_rebalances_short_tail() -> None:
         (3_270_000, 3_510_000),
         (3_450_000, 3_664_600),
     ]
+
+
+def test_plan_manifest_generation_chunks_aligns_custom_window_boundaries() -> None:
+    chunks = manifest_generation._plan_manifest_generation_chunks(
+        700_000,
+        alignment_ms=35_000,
+    )
+
+    assert [
+        (chunk.generation_start_ms, chunk.generation_end_ms) for chunk in chunks
+    ] == [
+        (0, 280_000),
+        (280_000, 490_000),
+        (490_000, 700_000),
+    ]
+    assert all(chunk.generation_end_ms % 35_000 == 0 for chunk in chunks[:-1])
 
 
 def test_plan_manifest_generation_chunks_uses_single_chunk_under_limit() -> None:

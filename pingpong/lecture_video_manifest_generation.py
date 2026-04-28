@@ -169,7 +169,8 @@ GUIDELINES FOR QUESTIONS:
   A question that any attentive student can answer without thinking is worse than no question at all."""
 
 _GEMINI_MODEL = "gemini-3.1-pro-preview"
-_VIDEO_DESCRIPTION_WINDOW_MS = 30_000
+DEFAULT_VIDEO_DESCRIPTION_DURATION_MS = 30_000
+_VIDEO_DESCRIPTION_WINDOW_MS = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS
 _MANIFEST_CHUNK_DURATION_MS = 5 * 60 * 1000
 _MANIFEST_CHUNK_MIN_TAIL_MS = 3 * 60 * 1000
 _MANIFEST_CHUNK_OVERLAP_MS = 30_000
@@ -452,7 +453,10 @@ def _plan_manifest_generation_chunks(
             )
         ]
 
-    boundaries = list(range(0, video_duration_ms, max_chunk_duration_ms))
+    chunk_duration_ms = _align_offset_down(max_chunk_duration_ms, alignment_ms)
+    if chunk_duration_ms <= 0:
+        chunk_duration_ms = max_chunk_duration_ms
+    boundaries = list(range(0, video_duration_ms, chunk_duration_ms))
     boundaries.append(video_duration_ms)
     if len(boundaries) >= 3:
         tail_duration_ms = boundaries[-1] - boundaries[-2]
@@ -858,6 +862,7 @@ def build_generation_prompt(
     generation_end_ms: int | None = None,
     context_start_ms: int | None = None,
     context_end_ms: int | None = None,
+    video_description_window_ms: int = _VIDEO_DESCRIPTION_WINDOW_MS,
 ) -> str:
     if compact:
         transcript_text = "\n".join(
@@ -881,6 +886,9 @@ def build_generation_prompt(
 ...
 ]"""
 
+    video_description_window_seconds = video_description_window_ms / 1000
+    video_description_next_window_ms = video_description_window_ms * 2
+    video_description_window_text = f"{video_description_window_seconds:g}"
     duration_text = (
         f"\nThe video duration is {video_duration_ms} milliseconds."
         if video_duration_ms is not None
@@ -889,13 +897,15 @@ def build_generation_prompt(
     generation_window_text = ""
     video_description_scope = "the whole video"
     video_description_start_rule = (
-        "Use consecutive millisecond ranges starting at 0: 0-30000, "
-        "30000-60000, 60000-90000, and so on through the full video."
+        "Use consecutive millisecond ranges starting at 0: "
+        f"0-{video_description_window_ms}, "
+        f"{video_description_window_ms}-{video_description_next_window_ms}, "
+        "and so on through the full video."
     )
     video_description_end_rule = (
         "The final segment must end exactly at the video duration. It may be "
-        "shorter than 30 seconds. Never set the final end_offset_ms after the "
-        "end of the video."
+        f"shorter than {video_description_window_text} seconds. Never set the "
+        "final end_offset_ms after the end of the video."
     )
     video_description_reminder = (
         'The top-level "video_descriptions" array is REQUIRED for video-based '
@@ -912,7 +922,8 @@ def build_generation_prompt(
         )
         video_description_end_rule = (
             "The final segment must end exactly at the requested generation "
-            "window end. It may be shorter than 30 seconds. Never set the final "
+            "window end. It may be shorter than "
+            f"{video_description_window_text} seconds. Never set the final "
             "end_offset_ms after the requested generation window end."
         )
         video_description_reminder = (
@@ -936,7 +947,7 @@ Clip time 0 corresponds to absolute offset {context_start_ms or 0}ms in the orig
 Use the whole clip as context, but generate output ONLY for the generation window from {generation_start_ms}ms through {generation_end_ms}ms.
 Do not create questions with pause points before {generation_start_ms}ms or after {generation_end_ms}ms.
 Generate "video_descriptions" starting exactly at {generation_start_ms}ms and ending exactly at {generation_end_ms}ms.
-Every non-final video description segment inside this generation window must be exactly 30000ms long.
+Every non-final video description segment inside this generation window must be exactly {video_description_window_ms}ms long.
 """
 
     return f"""You are an expert educational content designer specializing in interactive video lessons. You speak as the teacher in first person, directly to the student.
@@ -953,11 +964,11 @@ To ensure high confidence in analyzing the lesson, watch the video along with th
 YOUR TASK:
 Analyze the provided lesson materials to identify natural pause points where a multiple-choice comprehension check can be inserted. At each pause point, the video will stop, a question will be displayed as text on screen, and a voice clone of the teacher will introduce the question out loud. After the student selects an answer, the voice clone will give spoken feedback, and the video will resume. The resume point may differ depending on which answer the student chose.
 
-Also create a top-level "video_descriptions" array that describes what is visibly happening in fixed 30-second windows across {video_description_scope}.
+Also create a top-level "video_descriptions" array that describes what is visibly happening in fixed {video_description_window_text}-second windows across {video_description_scope}.
 
 VISUAL DESCRIPTION GUIDELINES:
 - {video_description_start_rule}
-- Every segment except the final segment must be exactly 30 seconds long.
+- Every segment except the final segment must be exactly {video_description_window_text} seconds long.
 - {video_description_end_rule}
 - Each segment description should be concise and general-purpose, usually 1-2 sentences.
 - Focus only on observable teaching state: screen or board contents, written text, diagrams, values, equations, cursor movement, gesture emphasis, and meaningful visual changes.
@@ -1033,12 +1044,12 @@ Return a single JSON object. Do not include any text outside the JSON.
   "video_descriptions": [
     {{
       "start_offset_ms": 0,
-      "end_offset_ms": 30000,
+      "end_offset_ms": {video_description_window_ms},
       "description": "The teacher's screen shows a slide with a title and two bullet points. A cursor circles the first bullet while the speaker emphasizes the main idea."
     }},
     {{
-      "start_offset_ms": 30000,
-      "end_offset_ms": 60000,
+      "start_offset_ms": {video_description_window_ms},
+      "end_offset_ms": {video_description_next_window_ms},
       "description": "The same slide remains visible while a short example is added underneath the bullets. The cursor moves between the example and the earlier text to connect them."
     }}
   ],
@@ -1127,9 +1138,9 @@ FIELD DEFINITIONS:
   - "resume_at_word_id": The "id" of the first word the student hears when the video resumes after this choice. Copied exactly from the transcript.
   - "resume_at_word": The "word" text of that transcript entry. Copied exactly.
   - "resume_at": The "start" timestamp of the resume word. Copied exactly from the transcript — do not round or modify.
-- "video_descriptions": Array of contiguous visual segments covering the whole video. Each non-final segment is 30 seconds; the final segment ends exactly at the video duration and may be shorter. Each segment contains:
+- "video_descriptions": Array of contiguous visual segments covering the whole video. Each non-final segment is {video_description_window_text} seconds; the final segment ends exactly at the video duration and may be shorter. Each segment contains:
   - "start_offset_ms": Integer millisecond offset where this visual window starts.
-  - "end_offset_ms": Integer millisecond offset where this visual window ends. This must be exactly 30000ms after start_offset_ms except for the final segment, which must equal the video duration.
+  - "end_offset_ms": Integer millisecond offset where this visual window ends. This must be exactly {video_description_window_ms}ms after start_offset_ms except for the final segment, which must equal the video duration.
   - "description": Concise observable description of the teaching visuals in that window.
 
 IMPORTANT REMINDERS:
@@ -1299,6 +1310,7 @@ def _validate_manifest_video_descriptions(
     *,
     start_offset_ms: int = 0,
     end_offset_ms: int | None,
+    video_description_window_ms: int = _VIDEO_DESCRIPTION_WINDOW_MS,
 ) -> str | None:
     if len(video_descriptions) == 0:
         return "video_descriptions is empty"
@@ -1316,16 +1328,16 @@ def _validate_manifest_video_descriptions(
 
         segment_duration_ms = description.end_offset_ms - description.start_offset_ms
         is_final_segment = index == len(video_descriptions) - 1
-        if not is_final_segment and segment_duration_ms != _VIDEO_DESCRIPTION_WINDOW_MS:
+        if not is_final_segment and segment_duration_ms != video_description_window_ms:
             return (
                 f"video_descriptions[{index}] duration is "
                 f"{segment_duration_ms}ms; expected "
-                f"{_VIDEO_DESCRIPTION_WINDOW_MS}ms"
+                f"{video_description_window_ms}ms"
             )
-        if is_final_segment and segment_duration_ms > _VIDEO_DESCRIPTION_WINDOW_MS:
+        if is_final_segment and segment_duration_ms > video_description_window_ms:
             return (
                 f"final video description duration is {segment_duration_ms}ms; "
-                f"expected at most {_VIDEO_DESCRIPTION_WINDOW_MS}ms"
+                f"expected at most {video_description_window_ms}ms"
             )
 
         expected_start_offset_ms = description.end_offset_ms
@@ -1344,11 +1356,13 @@ def _validated_or_fallback_video_descriptions(
     *,
     start_offset_ms: int = 0,
     end_offset_ms: int | None,
+    video_description_window_ms: int = _VIDEO_DESCRIPTION_WINDOW_MS,
 ) -> list[schemas.LectureVideoManifestVideoDescriptionV3]:
     validation_error = _validate_manifest_video_descriptions(
         video_descriptions,
         start_offset_ms=start_offset_ms,
         end_offset_ms=end_offset_ms,
+        video_description_window_ms=video_description_window_ms,
     )
     if validation_error is None:
         return video_descriptions
@@ -1370,11 +1384,13 @@ def _validated_or_fallback_chunk_video_descriptions(
     chunk_index: int,
     start_offset_ms: int,
     end_offset_ms: int,
+    video_description_window_ms: int = _VIDEO_DESCRIPTION_WINDOW_MS,
 ) -> list[schemas.LectureVideoManifestVideoDescriptionV3]:
     validation_error = _validate_manifest_video_descriptions(
         video_descriptions,
         start_offset_ms=start_offset_ms,
         end_offset_ms=end_offset_ms,
+        video_description_window_ms=video_description_window_ms,
     )
     if validation_error is None:
         return video_descriptions
@@ -1398,6 +1414,7 @@ def _quiz_to_manifest(
     video_duration_ms: int | None,
     video_description_start_offset_ms: int = 0,
     video_description_end_offset_ms: int | None = None,
+    video_description_window_ms: int = _VIDEO_DESCRIPTION_WINDOW_MS,
 ) -> schemas.LectureVideoManifestV3:
     transcript_word_index = _transcript_word_index(transcript)
     video_descriptions = _video_descriptions_to_manifest_video_descriptions(
@@ -1411,6 +1428,7 @@ def _quiz_to_manifest(
             if video_description_end_offset_ms is not None
             else video_duration_ms
         ),
+        video_description_window_ms=video_description_window_ms,
     )
     return schemas.LectureVideoManifestV3(
         word_level_transcription=transcript,
@@ -1579,6 +1597,7 @@ async def _merge_chunk_manifests(
     chunk_manifests: list[schemas.LectureVideoManifestV3],
     full_transcript: list[schemas.LectureVideoManifestWordV3],
     video_duration_ms: int | None,
+    video_description_window_ms: int = _VIDEO_DESCRIPTION_WINDOW_MS,
 ) -> schemas.LectureVideoManifestV3:
     if video_duration_ms is None:
         video_descriptions = [
@@ -1589,6 +1608,7 @@ async def _merge_chunk_manifests(
         video_descriptions = _validated_or_fallback_video_descriptions(
             video_descriptions,
             end_offset_ms=video_duration_ms,
+            video_description_window_ms=video_description_window_ms,
         )
     else:
         video_descriptions = []
@@ -1607,6 +1627,7 @@ async def _merge_chunk_manifests(
                 chunk_index=index,
                 start_offset_ms=expected_start_offset_ms,
                 end_offset_ms=chunk_end_offset_ms,
+                video_description_window_ms=video_description_window_ms,
             )
             video_descriptions.extend(chunk_descriptions)
             expected_start_offset_ms = chunk_descriptions[-1].end_offset_ms
@@ -1646,6 +1667,7 @@ async def _generate_manifest_from_gemini_file(
     generation_end_ms: int | None = None,
     context_start_ms: int | None = None,
     context_end_ms: int | None = None,
+    video_description_window_ms: int = _VIDEO_DESCRIPTION_WINDOW_MS,
 ) -> schemas.LectureVideoManifestV3:
     prompt = build_generation_prompt(
         generation_prompt_content,
@@ -1656,6 +1678,7 @@ async def _generate_manifest_from_gemini_file(
         generation_end_ms=generation_end_ms,
         context_start_ms=context_start_ms,
         context_end_ms=context_end_ms,
+        video_description_window_ms=video_description_window_ms,
     )
     request_label = (
         "manifest_chunk_compact"
@@ -1678,6 +1701,7 @@ async def _generate_manifest_from_gemini_file(
         video_duration_ms=video_duration_ms,
         video_description_start_offset_ms=generation_start_ms or 0,
         video_description_end_offset_ms=generation_end_ms,
+        video_description_window_ms=video_description_window_ms,
     )
 
 
@@ -1689,8 +1713,10 @@ async def generate_manifest(
     generation_prompt_content: str,
     transcript: list[schemas.LectureVideoManifestWordV3],
     model: str = _GEMINI_MODEL,
+    video_description_duration_ms: int = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
 ) -> schemas.LectureVideoManifestV3:
     video_duration_ms = await _ffprobe_duration_ms(video_path)
+    video_description_window_ms = video_description_duration_ms
     try:
         return await _generate_manifest_from_gemini_file(
             gemini_client=gemini_client,
@@ -1699,6 +1725,7 @@ async def generate_manifest(
             transcript=transcript,
             video_duration_ms=video_duration_ms,
             model=model,
+            video_description_window_ms=video_description_window_ms,
         )
     except Exception as exc:
         if not _is_context_limit_error(exc):
@@ -1711,6 +1738,7 @@ async def generate_manifest(
             video_duration_ms=video_duration_ms,
             model=model,
             compact=True,
+            video_description_window_ms=video_description_window_ms,
         )
 
 
@@ -1722,6 +1750,7 @@ async def _upload_and_generate_whole_manifest(
     transcript: list[schemas.LectureVideoManifestWordV3],
     video_duration_ms: int | None,
     model: str,
+    video_description_window_ms: int = _VIDEO_DESCRIPTION_WINDOW_MS,
 ) -> schemas.LectureVideoManifestV3:
     gemini_file_name: str | None = None
     try:
@@ -1740,6 +1769,7 @@ async def _upload_and_generate_whole_manifest(
                 transcript=transcript,
                 video_duration_ms=video_duration_ms,
                 model=model,
+                video_description_window_ms=video_description_window_ms,
             )
         except Exception as exc:
             if not _is_context_limit_error(exc):
@@ -1752,6 +1782,7 @@ async def _upload_and_generate_whole_manifest(
                 video_duration_ms=video_duration_ms,
                 model=model,
                 compact=True,
+                video_description_window_ms=video_description_window_ms,
             )
     finally:
         if gemini_file_name is not None:
@@ -1772,6 +1803,7 @@ async def _upload_and_generate_manifest_chunk(
     chunk: ManifestGenerationChunk,
     temp_dir: str,
     model: str,
+    video_description_window_ms: int = _VIDEO_DESCRIPTION_WINDOW_MS,
 ) -> schemas.LectureVideoManifestV3:
     chunk_transcript = _transcript_for_window(
         transcript,
@@ -1811,6 +1843,7 @@ async def _upload_and_generate_manifest_chunk(
                 generation_end_ms=chunk.generation_end_ms,
                 context_start_ms=chunk.context_start_ms,
                 context_end_ms=chunk.context_end_ms,
+                video_description_window_ms=video_description_window_ms,
             )
         except Exception as exc:
             if not _is_context_limit_error(exc):
@@ -1827,6 +1860,7 @@ async def _upload_and_generate_manifest_chunk(
                 generation_end_ms=chunk.generation_end_ms,
                 context_start_ms=chunk.context_start_ms,
                 context_end_ms=chunk.context_end_ms,
+                video_description_window_ms=video_description_window_ms,
             )
         manifest.questions = _filter_questions_for_window(
             manifest.questions,
@@ -1854,6 +1888,7 @@ async def _upload_and_generate_manifest_chunks(
     chunk: ManifestGenerationChunk,
     temp_dir: str,
     model: str,
+    video_description_window_ms: int = _VIDEO_DESCRIPTION_WINDOW_MS,
 ) -> list[schemas.LectureVideoManifestV3]:
     try:
         return [
@@ -1866,6 +1901,7 @@ async def _upload_and_generate_manifest_chunks(
                 chunk=chunk,
                 temp_dir=temp_dir,
                 model=model,
+                video_description_window_ms=video_description_window_ms,
             )
         ]
     except Exception as exc:
@@ -1877,6 +1913,7 @@ async def _upload_and_generate_manifest_chunks(
         child_chunks = _split_manifest_generation_chunk(
             chunk,
             video_duration_ms=video_duration_ms,
+            alignment_ms=video_description_window_ms,
         )
         logger.info(
             "Splitting lecture video manifest chunk after provider limit. "
@@ -1897,6 +1934,7 @@ async def _upload_and_generate_manifest_chunks(
                     chunk=child_chunk,
                     temp_dir=temp_dir,
                     model=model,
+                    video_description_window_ms=video_description_window_ms,
                 )
             )
         return chunk_manifests
@@ -1910,6 +1948,7 @@ async def upload_and_generate_manifest(
     transcript: list[schemas.LectureVideoManifestWordV3],
     temp_dir: str,
     model: str = _GEMINI_MODEL,
+    video_description_duration_ms: int = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
 ) -> schemas.LectureVideoManifestV3:
     video_duration_ms = await _ffprobe_duration_ms(video_path)
     if video_duration_ms is None:
@@ -1917,7 +1956,11 @@ async def upload_and_generate_manifest(
             "Unable to determine lecture video duration with ffprobe; "
             "manifest generation requires a valid video duration."
         )
-    chunks = _plan_manifest_generation_chunks(video_duration_ms)
+    video_description_window_ms = video_description_duration_ms
+    chunks = _plan_manifest_generation_chunks(
+        video_duration_ms,
+        alignment_ms=video_description_window_ms,
+    )
     if len(chunks) == 1:
         try:
             return await _upload_and_generate_whole_manifest(
@@ -1927,6 +1970,7 @@ async def upload_and_generate_manifest(
                 transcript=transcript,
                 video_duration_ms=video_duration_ms,
                 model=model,
+                video_description_window_ms=video_description_window_ms,
             )
         except Exception as exc:
             if (
@@ -1938,6 +1982,7 @@ async def upload_and_generate_manifest(
             chunks = _split_manifest_generation_chunk(
                 chunks[0],
                 video_duration_ms=video_duration_ms,
+                alignment_ms=video_description_window_ms,
             )
 
     logger.info(
@@ -1958,6 +2003,7 @@ async def upload_and_generate_manifest(
                 chunk=chunk,
                 temp_dir=temp_dir,
                 model=model,
+                video_description_window_ms=video_description_window_ms,
             )
         )
     return await _merge_chunk_manifests(
@@ -1967,6 +2013,7 @@ async def upload_and_generate_manifest(
         chunk_manifests=chunk_manifests,
         full_transcript=transcript,
         video_duration_ms=video_duration_ms,
+        video_description_window_ms=video_description_window_ms,
     )
 
 

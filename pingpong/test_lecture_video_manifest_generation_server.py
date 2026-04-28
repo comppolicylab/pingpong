@@ -72,6 +72,38 @@ def test_update_assistant_rejects_overlong_generation_prompt() -> None:
         )
 
 
+@pytest.mark.parametrize("duration", [4999, 300001])
+def test_create_assistant_rejects_video_description_duration_out_of_range(
+    duration: int,
+) -> None:
+    with pytest.raises(ValidationError):
+        schemas.CreateAssistant.model_validate(
+            {
+                "name": "Lecture Assistant",
+                "instructions": "Guide the learner through the lecture.",
+                "description": "Lecture presentation assistant",
+                "interaction_mode": "lecture_video",
+                "model": "gpt-4o-mini",
+                "tools": [],
+                "lecture_video_id": 1,
+                "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+                "video_description_duration_ms": duration,
+            }
+        )
+
+
+def test_update_assistant_allows_non_step_video_description_duration() -> None:
+    assistant = schemas.UpdateAssistant.model_validate(
+        {
+            "lecture_video_id": 1,
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "video_description_duration_ms": 7000,
+        }
+    )
+
+    assert assistant.video_description_duration_ms == 7000
+
+
 def test_create_assistant_rejects_manifest_when_generation_mode_requested() -> None:
     with pytest.raises(ValidationError) as exc_info:
         schemas.CreateAssistant.model_validate(
@@ -242,6 +274,45 @@ async def test_should_regenerate_manifest_matrix(
                 generation_prompt_present=generation_prompt_present,
             )
             is expected
+        )
+
+
+@with_institution(11, "Test Institution")
+async def test_should_regenerate_manifest_ignores_null_video_description_duration(
+    db, institution
+):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        session.add(class_)
+        await session.flush()
+        lecture_video = make_lecture_video(
+            class_.id,
+            "null-duration-regenerate.mp4",
+            status=schemas.LectureVideoStatus.READY.value,
+        )
+        validated_manifest = schemas.validate_lecture_video_manifest(
+            lecture_video_manifest()
+        )
+        assert validated_manifest is not None
+        lecture_video.manifest_data = validated_manifest.model_dump(mode="json")
+        lecture_video.video_description_duration_ms = 30_000
+        session.add(lecture_video)
+        await session.flush()
+
+        assert (
+            await lecture_video_service.should_regenerate_manifest(
+                session,
+                lecture_video,
+                incoming_generation_prompt=None,
+                generation_prompt_present=False,
+                incoming_video_description_duration_ms=None,
+                video_description_duration_ms_present=True,
+            )
+            is False
         )
 
 

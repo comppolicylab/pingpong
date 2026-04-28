@@ -693,6 +693,7 @@ class LectureVideoConfigResponse(BaseModel):
     voice_id: str
     lecture_video_chat_available: bool = False
     generation_prompt: str | None = None
+    video_description_duration_ms: int = Field(30000, ge=5000, le=300000)
     overwrite_manifest: bool = False
     manifest_generation_status: LectureVideoProcessingRunSummary | None = None
 
@@ -974,6 +975,7 @@ def lecture_video_validator_create_assistant(self):
         or self.lecture_video_manifest is not None
         or self.voice_id is not None
         or self.generation_prompt is not None
+        or self.video_description_duration_ms is not None
         or self.overwrite_manifest is not None
     ):
         raise ValueError(
@@ -1002,6 +1004,9 @@ def lecture_video_validator_update_assistant(self):
     lecture_video_manifest_present = "lecture_video_manifest" in self.model_fields_set
     voice_id_present = "voice_id" in self.model_fields_set
     generation_prompt_present = "generation_prompt" in self.model_fields_set
+    video_description_duration_ms_present = (
+        "video_description_duration_ms" in self.model_fields_set
+    )
     regenerate_requested_present = "regenerate_requested" in self.model_fields_set
     overwrite_manifest_present = "overwrite_manifest" in self.model_fields_set
     lecture_video_payload_present = (
@@ -1009,6 +1014,7 @@ def lecture_video_validator_update_assistant(self):
         or lecture_video_manifest_present
         or voice_id_present
         or generation_prompt_present
+        or video_description_duration_ms_present
         or regenerate_requested_present
         or overwrite_manifest_present
     )
@@ -1140,6 +1146,7 @@ class CreateAssistant(BaseModel):
     lecture_video_manifest: LectureVideoManifest | None = None
     voice_id: str | None = None
     generation_prompt: str | None = Field(None, max_length=20000)
+    video_description_duration_ms: int | None = Field(None, ge=5000, le=300000)
     overwrite_manifest: bool | None = None
     published: bool = False
     use_latex: bool = False
@@ -1219,6 +1226,7 @@ class UpdateAssistant(BaseModel):
     lecture_video_manifest: LectureVideoManifest | None = None
     voice_id: str | None = None
     generation_prompt: str | None = Field(None, max_length=20000)
+    video_description_duration_ms: int | None = Field(None, ge=5000, le=300000)
     regenerate_requested: bool | None = None
     overwrite_manifest: bool | None = None
     model: str | None = Field(None, min_length=2)

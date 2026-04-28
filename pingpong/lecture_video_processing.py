@@ -73,6 +73,7 @@ class ManifestGenerationRunContext:
     class_id: int
     lecture_video_id: int
     generation_prompt: str
+    video_description_duration_ms: int
     transcript: list[schemas.LectureVideoManifestWordV3] | None
     openai_client: Any
     gemini_client: Any
@@ -720,6 +721,7 @@ async def _load_manifest_generation_run_context(
             lecture_video.generation_prompt
             or lecture_video_manifest_generation.DEFAULT_GENERATION_PROMPT_CONTENT
         )
+        video_description_duration_ms = lecture_video.video_description_duration_ms
         logger.info(
             "Lecture video manifest loading OpenAI client. "
             "run_id=%s lecture_video_id=%s class_id=%s transcript_cached=%s",
@@ -742,6 +744,7 @@ async def _load_manifest_generation_run_context(
         class_id=class_id,
         lecture_video_id=lecture_video_id,
         generation_prompt=generation_prompt,
+        video_description_duration_ms=video_description_duration_ms,
         transcript=transcript,
         openai_client=openai_client,
         gemini_client=gemini_client,
@@ -867,6 +870,7 @@ async def _upload_and_generate_manifest(
     generation_prompt: str,
     transcript: list[schemas.LectureVideoManifestWordV3],
     temp_dir: str,
+    video_description_duration_ms: int,
 ) -> None:
     async with gemini_client.aio as gemini_async_client:
         logger.info(
@@ -883,6 +887,7 @@ async def _upload_and_generate_manifest(
                 generation_prompt_content=generation_prompt,
                 transcript=transcript,
                 temp_dir=temp_dir,
+                video_description_duration_ms=video_description_duration_ms,
             ),
         )
         if manifest is None:
@@ -963,6 +968,7 @@ async def _process_claimed_manifest_run(run_id: int, lease_token: str) -> None:
                 context.generation_prompt,
                 transcript,
                 temp_dir,
+                context.video_description_duration_ms,
             )
     except Exception as exc:
         logger.exception("Lecture video manifest generation failed. run_id=%s", run_id)
