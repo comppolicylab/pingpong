@@ -3451,7 +3451,7 @@
 											type="button"
 											class="text-xs text-blue-800 hover:underline disabled:cursor-not-allowed disabled:text-gray-400 disabled:no-underline"
 											disabled={preventEdits ||
-												haveInstructionsChanged ||
+												!haveInstructionsChanged ||
 												$loading ||
 												uploadingFSPrivate ||
 												uploadingCIPrivate}
