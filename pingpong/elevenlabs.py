@@ -586,7 +586,7 @@ class ElevenLabsStreamingTTS:
                         "stability": 0.5,
                         "use_speaker_boost": True,
                         "similarity_boost": 0.8,
-                        "speed": 0.85,
+                        "speed": 1.0,
                     },
                     "generation_config": {
                         "chunk_length_schedule": (
