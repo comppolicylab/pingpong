@@ -3424,22 +3424,50 @@
 					>
 					<div class="flex flex-col gap-4 px-1">
 						{#if isLectureMode}
+							{@const haveInstructionsChanged =
+								normalizeNewlines(instructions) !==
+									normalizeNewlines(lectureVideoDefaultInstructions) &&
+								!!lectureVideoDefaultInstructions}
 							<div class="col-span-2 mb-1">
 								<div class="flex flex-row items-end justify-between">
 									<div>
-										<Label for="instructions">Chat Instructions</Label>
+										<div class="flex items-center gap-2">
+											<Label for="instructions" class="mb-0"
+												><div class="flex flex-row gap-1">
+													<div>Chat Instructions</div>
+													{#if haveInstructionsChanged}<div>&middot;</div>
+														<div class="text-gray-500">
+															Different from latest default prompt
+														</div>{/if}
+												</div></Label
+											>
+										</div>
 										<Helper class="pb-1"
 											>Used to generate responses to questions asked during lecture.</Helper
 										>
 									</div>
-									<Button
-										class="mb-1 flex max-h-fit max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
-										onclick={previewInstructions}
-										type="button"
-										disabled={$loading || uploadingFSPrivate || uploadingCIPrivate}
-									>
-										Preview
-									</Button>
+									<div class="flex items-center gap-3 pb-1">
+										<button
+											type="button"
+											class="text-xs text-blue-800 hover:underline disabled:cursor-not-allowed disabled:text-gray-400 disabled:no-underline"
+											disabled={preventEdits ||
+												!haveInstructionsChanged ||
+												$loading ||
+												uploadingFSPrivate ||
+												uploadingCIPrivate}
+											onclick={() => {
+												instructions = lectureVideoDefaultInstructions;
+											}}>Switch to latest default</button
+										>
+										<Button
+											class="flex max-h-fit max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
+											onclick={previewInstructions}
+											type="button"
+											disabled={$loading || uploadingFSPrivate || uploadingCIPrivate}
+										>
+											Preview
+										</Button>
+									</div>
 								</div>
 								<Textarea
 									id="instructions"
