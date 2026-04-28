@@ -213,6 +213,34 @@ class LMSSettings(BaseSettings):
     lms_instances: list[LMSInstance]
 
 
+class PanoptoTenantSettings(BaseSettings):
+    """One Panopto tenant (hostname + OAuth2 credentials)."""
+
+    tenant: str
+    tenant_friendly_name: str
+    host: str
+    client_id: str
+    client_secret: str
+
+
+class PanoptoConnectorSettings(BaseSettings):
+    """Panopto connector configuration."""
+
+    tenants: list[PanoptoTenantSettings] = Field([])
+
+    def tenant(self, tenant_id: str) -> PanoptoTenantSettings | None:
+        for t in self.tenants:
+            if t.tenant == tenant_id:
+                return t
+        return None
+
+
+class ConnectorsSettings(BaseSettings):
+    """Third-party service connector configuration."""
+
+    panopto: PanoptoConnectorSettings = Field(PanoptoConnectorSettings())
+
+
 class InitSettings(BaseSettings):
     """Settings for first-time app init."""
 
@@ -672,6 +700,7 @@ class Config(BaseSettings):
     email: EmailSettings
     lms: LMSSettings
     lti: LTISettings | None = Field(None)
+    connectors: ConnectorsSettings = Field(ConnectorsSettings())
     sentry: SentrySettings = Field(SentrySettings())
     metrics: MetricsSettings = Field(MetricsSettings())
     init: InitSettings = Field(InitSettings())

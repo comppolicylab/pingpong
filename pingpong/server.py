@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from math import ceil
 from typing import Annotated, Any, Literal, NoReturn, Union, cast
+from urllib.parse import urlencode
 
 import humanize
 import jwt
@@ -157,6 +158,7 @@ from .canvas import (
     decode_canvas_token,
     get_canvas_config,
 )
+from . import connectors as connectors_pkg
 from .config import config
 from .errors import sentry
 from .files import (
@@ -12136,6 +12138,242 @@ async def get_external_logins(request: StateRequest):
             request.state["db"], request.state["session"].user.id
         )
     }
+
+
+def _connector_callback_url(service: str) -> str:
+    return config.url(f"/api/v1/connectors/{service}/callback")
+
+
+def _connector_definition(
+    connector: connectors_pkg.OAuth2Connector,
+) -> schemas.ConnectorDefinition:
+    return schemas.ConnectorDefinition(
+        service=connector.slug,
+        display_name=connector.display_name,
+        icon=connector.icon,
+        requires_tenant=connector.requires_tenant,
+        tenants=[
+            schemas.ConnectorTenantOption(tenant=t, tenant_friendly_name=name)
+            for t, name in connector.tenant_options()
+        ],
+    )
+
+
+def _connector_summary(
+    row: models.UserConnector, connector: connectors_pkg.OAuth2Connector
+) -> schemas.ConnectorSummary:
+    status: Literal["active", "needs_reauth"] = (
+        "needs_reauth" if not row.refresh_token else "active"
+    )
+    return schemas.ConnectorSummary(
+        id=row.id,
+        service=row.service,
+        tenant=row.tenant,
+        tenant_friendly_name=connector.tenant_friendly_name(row.tenant),
+        connected_at=row.created,
+        status=status,
+    )
+
+
+@v1.get(
+    "/me/connectors",
+    dependencies=[Depends(LoggedIn())],
+    response_model=schemas.ConnectorsListResponse,
+)
+async def get_my_connectors(request: StateRequest):
+    """List the current user's connector rows plus the catalog of services."""
+    rows = await models.UserConnector.get_for_user(
+        request.state["db"], request.state["session"].user.id
+    )
+    summaries: list[schemas.ConnectorSummary] = []
+    for row in rows:
+        try:
+            connector = connectors_pkg.get(row.service)
+        except connectors_pkg.ConnectorNotRegistered:
+            # Row exists for a service the current deployment doesn't ship,
+            # e.g. a connector that was removed. Surface it in logs so
+            # operators can clean up or restore the registration rather
+            # than silently dropping the row from the user's view.
+            logger.warning(
+                "Skipping UserConnector row for unregistered service "
+                "(user_id=%s, connector_id=%s, service=%s)",
+                row.user_id,
+                row.id,
+                row.service,
+            )
+            continue
+        summaries.append(_connector_summary(row, connector))
+    available = [_connector_definition(c) for c in connectors_pkg.all_connectors()]
+    return schemas.ConnectorsListResponse(connectors=summaries, available=available)
+
+
+@v1.post(
+    "/connectors/{service}/connect",
+    dependencies=[Depends(LoggedIn())],
+    response_model=schemas.ConnectorConnectResponse,
+)
+async def connect_connector(
+    request: StateRequest,
+    service: str,
+    body: schemas.ConnectorConnectRequest,
+):
+    """Build the provider's authorize URL and return it for the frontend redirect."""
+    try:
+        connector = connectors_pkg.get(service)
+    except connectors_pkg.ConnectorNotRegistered as e:
+        raise HTTPException(status_code=404, detail="Unknown connector") from e
+
+    if connector.requires_tenant and not body.tenant:
+        raise HTTPException(status_code=400, detail="tenant is required")
+
+    try:
+        # Credential + tenant validation — raises ConnectorNotConfigured for
+        # unknown tenants, which we return as a 400 rather than a 500.
+        connector.client_credentials(body.tenant)
+    except connectors_pkg.ConnectorNotConfigured as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    pkce = connectors_pkg.generate_pkce_pair() if connector.use_pkce else None
+    state = connectors_pkg.encode_state(
+        user_id=request.state["session"].user.id,
+        service=service,
+        tenant=body.tenant,
+        pkce_verifier=pkce.verifier if pkce else None,
+        nowfn=get_now_fn(request),
+    )
+    try:
+        url = await connector.build_authorize_url(
+            tenant=body.tenant,
+            redirect_uri=_connector_callback_url(service),
+            state=state,
+            pkce=pkce,
+        )
+    except connectors_pkg.ConnectorError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    return schemas.ConnectorConnectResponse(url=url)
+
+
+def _connector_error_redirect(code: str) -> RedirectResponse:
+    # URL-encode the error code so a provider-supplied value like
+    # `access_denied&injected=1` can't inject extra query parameters.
+    return RedirectResponse(
+        config.url(f"/profile?{urlencode({'connector_error': code})}"),
+        status_code=303,
+    )
+
+
+@v1.get("/connectors/{service}/callback")
+async def connector_callback(request: StateRequest, service: str):
+    """Handle the OAuth redirect, exchange the code, and upsert the UserConnector row."""
+    code = request.query_params.get("code")
+    state = request.query_params.get("state")
+    error = request.query_params.get("error")
+
+    if error:
+        return _connector_error_redirect(error)
+    if not code or not state:
+        return _connector_error_redirect("missing_params")
+
+    try:
+        decoded = connectors_pkg.decode_state(state, nowfn=get_now_fn(request))
+    except connectors_pkg.OAuthStateError:
+        return _connector_error_redirect("bad_state")
+
+    if decoded.get("service") != service:
+        return _connector_error_redirect("service_mismatch")
+
+    # Bind the callback to the current browser session.  Without this check,
+    # a user who follows an authorize URL generated for a *different* PingPong
+    # account would get the provider tokens linked to whichever account they
+    # are currently logged in as.
+    session = request.state["session"]
+    session_user = session.user if session is not None else None
+    if session_user is None:
+        return _connector_error_redirect("not_logged_in")
+    user_id = int(decoded["sub"])
+    if user_id != session_user.id:
+        return _connector_error_redirect("user_mismatch")
+
+    try:
+        connector = connectors_pkg.get(service)
+    except connectors_pkg.ConnectorNotRegistered:
+        return _connector_error_redirect("unknown_service")
+
+    tenant = decoded.get("tenant")
+    pkce_verifier = decoded.get("pkce_verifier")
+
+    try:
+        tokens = await connector.exchange_code(
+            code=code,
+            tenant=tenant,
+            redirect_uri=_connector_callback_url(service),
+            pkce_verifier=pkce_verifier,
+        )
+    except connectors_pkg.ConnectorError:
+        logger.exception("Connector code exchange failed for %s", service)
+        return _connector_error_redirect("exchange_failed")
+
+    db = request.state["db"]
+    existing = await models.UserConnector.get_for_user_service_tenant(
+        db, user_id, service, tenant
+    )
+    if existing is None:
+        row = models.UserConnector(
+            user_id=user_id,
+            service=service,
+            tenant=tenant,
+            access_token=tokens.access_token,
+            refresh_token=tokens.refresh_token,
+            expires_at=tokens.expires_at,
+            scopes=tokens.scopes,
+            external_user_id=tokens.external_user_id,
+        )
+        db.add(row)
+    else:
+        existing.access_token = tokens.access_token
+        if tokens.refresh_token is not None:
+            existing.refresh_token = tokens.refresh_token
+        existing.expires_at = tokens.expires_at
+        if tokens.scopes is not None:
+            existing.scopes = tokens.scopes
+        if tokens.external_user_id is not None:
+            existing.external_user_id = tokens.external_user_id
+
+    await db.flush()
+    return RedirectResponse(
+        config.url(f"/profile?connected={service}"),
+        status_code=303,
+    )
+
+
+@v1.delete(
+    "/me/connectors/{connector_id}",
+    dependencies=[Depends(LoggedIn())],
+    response_model=schemas.ConnectorDisconnectResponse,
+)
+async def disconnect_connector(request: StateRequest, connector_id: int):
+    """Best-effort revoke the token with the provider, then delete the row."""
+    db = request.state["db"]
+    row = await models.UserConnector.get_by_id(db, connector_id)
+    # 404 on both unknown IDs and not-yours IDs to avoid leaking existence.
+    if row is None or row.user_id != request.state["session"].user.id:
+        raise HTTPException(status_code=404, detail="Connector not found")
+
+    try:
+        connector = connectors_pkg.get(row.service)
+    except connectors_pkg.ConnectorNotRegistered:
+        connector = None
+
+    if connector is not None:
+        try:
+            await connector.revoke(row)
+        except Exception:
+            # Revoke is best-effort; never block deletion on upstream failures.
+            logger.exception("Connector revoke failed for service=%s", row.service)
+
+    await db.delete(row)
+    await db.flush()
+    return schemas.ConnectorDisconnectResponse()
 
 
 @v1.get(

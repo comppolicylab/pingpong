@@ -1287,6 +1287,95 @@ class ExternalLogin(Base):
         return conflicts
 
 
+class UserConnector(Base):
+    __tablename__ = "user_connectors"
+    # Deliberate: NO ondelete="CASCADE" on user_id. Deleting via DB cascade
+    # would silently drop rows without going through the connector's revoke
+    # path, leaving upstream tokens valid on the provider side. The user
+    # deletion flow must iterate user.connectors, call revoke(), then delete.
+    __table_args__ = (
+        # Two partial indexes instead of a plain UniqueConstraint so that
+        # NULL-tenant connectors are correctly deduplicated.  PostgreSQL treats
+        # each NULL as distinct in a standard unique index, so a plain
+        # UniqueConstraint would allow duplicate (user_id, service, NULL) rows.
+        # ``sqlite_where`` mirrors the predicate for dev/test parity; without
+        # it the partial index degenerates into a plain unique on
+        # (user_id, service[, tenant]) on SQLite, which would reject a user
+        # connecting the same service to multiple tenants in tests.
+        Index(
+            "uq_user_service_no_tenant",
+            "user_id",
+            "service",
+            unique=True,
+            postgresql_where=text("tenant IS NULL"),
+            sqlite_where=text("tenant IS NULL"),
+        ),
+        Index(
+            "uq_user_service_tenant",
+            "user_id",
+            "service",
+            "tenant",
+            unique=True,
+            postgresql_where=text("tenant IS NOT NULL"),
+            sqlite_where=text("tenant IS NOT NULL"),
+        ),
+        Index("idx_user_connectors_user_id", "user_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user = relationship("User", back_populates="connectors")
+    service = Column(String, nullable=False)
+    tenant = Column(String, nullable=True)
+
+    access_token = Column(String, nullable=False)
+    refresh_token = Column(String, nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    scopes = Column(String, nullable=True)
+
+    external_user_id = Column(String, nullable=True)
+
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+
+    @classmethod
+    async def get_for_user(
+        cls, session: AsyncSession, user_id: int
+    ) -> list["UserConnector"]:
+        stmt = (
+            select(UserConnector)
+            .where(UserConnector.user_id == user_id)
+            .order_by(UserConnector.service.asc(), UserConnector.id.asc())
+        )
+        return list(await session.scalars(stmt))
+
+    @classmethod
+    async def get_by_id(
+        cls, session: AsyncSession, connector_id: int
+    ) -> "UserConnector | None":
+        return await session.get(UserConnector, connector_id)
+
+    @classmethod
+    async def get_for_user_service_tenant(
+        cls,
+        session: AsyncSession,
+        user_id: int,
+        service: str,
+        tenant: str | None,
+    ) -> "UserConnector | None":
+        stmt = select(UserConnector).where(
+            UserConnector.user_id == user_id,
+            UserConnector.service == service,
+            UserConnector.tenant.is_(None)
+            if tenant is None
+            else UserConnector.tenant == tenant,
+        )
+        return await session.scalar(stmt)
+
+
 user_merge_association = Table(
     "users_merged_users",
     Base.metadata,
@@ -1325,6 +1414,9 @@ class User(Base):
     )
     external_logins: Mapped[List["ExternalLogin"]] = relationship(
         "ExternalLogin", back_populates="user"
+    )
+    connectors: Mapped[List["UserConnector"]] = relationship(
+        "UserConnector", back_populates="user"
     )
     # Maps to classes in which the user has connected their LMS account
     lms_syncs: Mapped[List["Class"]] = relationship("Class", back_populates="lms_user")

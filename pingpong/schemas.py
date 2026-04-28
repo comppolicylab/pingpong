@@ -1416,6 +1416,45 @@ class ExternalLoginsResponse(BaseModel):
     external_logins: list[ExternalLogin]
 
 
+class ConnectorTenantOption(BaseModel):
+    tenant: str
+    tenant_friendly_name: str
+
+
+class ConnectorDefinition(BaseModel):
+    service: str
+    display_name: str
+    icon: str | None = None
+    requires_tenant: bool
+    tenants: list[ConnectorTenantOption] = Field([])
+
+
+class ConnectorSummary(BaseModel):
+    id: int
+    service: str
+    tenant: str | None
+    tenant_friendly_name: str | None
+    connected_at: datetime
+    status: Literal["active", "needs_reauth"]
+
+
+class ConnectorsListResponse(BaseModel):
+    connectors: list[ConnectorSummary]
+    available: list[ConnectorDefinition]
+
+
+class ConnectorConnectRequest(BaseModel):
+    tenant: str | None = None
+
+
+class ConnectorConnectResponse(BaseModel):
+    url: str
+
+
+class ConnectorDisconnectResponse(BaseModel):
+    status: Literal["disconnected"] = "disconnected"
+
+
 class ActivitySummarySubscriptionAdvancedOpts(BaseModel):
     dna_as_create: bool
     dna_as_join: bool

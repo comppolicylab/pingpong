@@ -55,3 +55,10 @@ client_id = "your client id here"
 client_secret = "your client secret here"
 sync_wait = 600
 auth_token_expiry = 3600
+
+[[connectors.panopto.tenants]]
+tenant = "demo"
+tenant_friendly_name = "Demo Panopto"
+host = "demo.hosted.panopto.com"
+client_id = "test-panopto-client-id"
+client_secret = "test-panopto-client-secret"

@@ -22,6 +22,7 @@ from pingpong.models import (
     MCPServerTool,
     User,
     UserClassRole,
+    UserConnector,
     UserInstitutionRole,
     _get_upsert_stmt,
     user_thread_association,
@@ -63,6 +64,7 @@ async def merge_db_operations(
     await merge_lms_users(session, new_user_id, old_user_id)
     await merge_lti_users(session, new_user_id, old_user_id)
     await merge_external_logins(session, new_user_id, old_user_id)
+    await merge_connectors(session, new_user_id, old_user_id)
     await merge_user_files(session, new_user_id, old_user_id)
 
 
@@ -369,6 +371,78 @@ async def merge_external_logins(
         ExternalLogin.user_id == old_user_id
     )
     await session.execute(delete_conflicting_stmt)
+
+
+async def merge_connectors(
+    session: AsyncSession,
+    new_user_id: int,
+    old_user_id: int,
+) -> None:
+    """Merge connector rows from old_user into new_user.
+
+    Non-conflicting connectors are reassigned to new_user.  When both users
+    have a connector for the same (service, tenant), the old connector's
+    tokens are revoked (best-effort) and the row is deleted; the new user's
+    connector takes precedence.
+    """
+    import pingpong.connectors as connector_registry
+
+    old_c = UserConnector.__table__.alias("old_c")
+    new_c = UserConnector.__table__.alias("new_c")
+
+    # IS NOT DISTINCT FROM handles NULL tenants correctly (NULL = NULL is false
+    # in SQL, so a plain == would miss connectors where both sides have
+    # tenant=None and treat them as non-conflicting).
+    new_has_same = exists(
+        select(1)
+        .select_from(new_c)
+        .where(
+            and_(
+                new_c.c.user_id == new_user_id,
+                new_c.c.service == old_c.c.service,
+                new_c.c.tenant.is_not_distinct_from(old_c.c.tenant),
+            )
+        )
+    )
+
+    conflicting_ids = select(old_c.c.id).where(
+        and_(old_c.c.user_id == old_user_id, new_has_same)
+    )
+
+    conflicting_result = await session.execute(
+        select(UserConnector).where(UserConnector.id.in_(conflicting_ids))
+    )
+    conflicting = conflicting_result.scalars().all()
+
+    # Known limitation: revocation makes an outbound HTTP call before the
+    # surrounding DB transaction has committed.  If a later step (e.g.
+    # merge_permissions) fails and rolls back, the DB row will be restored but
+    # the provider-side token may already be invalidated.  This is acceptable
+    # for two reasons: (a) the current Panopto connector has no revoke endpoint
+    # so revoke() is a no-op today, and (b) even if a future connector does
+    # revoke, the old user still exists after rollback and can re-authenticate.
+    for connector in conflicting:
+        try:
+            svc = connector_registry.get(connector.service)
+            await svc.revoke(connector)
+        except Exception:
+            logger.warning(
+                "Failed to revoke connector id=%s during user merge "
+                "(service=%s, old_user_id=%s)",
+                connector.id,
+                connector.service,
+                old_user_id,
+            )
+        await session.delete(connector)
+
+    await session.flush()
+
+    # Reassign all remaining old-user connectors (non-conflicting) to new_user.
+    await session.execute(
+        update(UserConnector)
+        .where(UserConnector.user_id == old_user_id)
+        .values(user_id=new_user_id)
+    )
 
 
 async def merge_user_files(
