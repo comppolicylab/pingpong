@@ -349,6 +349,11 @@ def _raise_lecture_video_runtime_http_error(
     if isinstance(err, lecture_video_runtime.LectureVideoValidationError):
         raise HTTPException(status_code=422, detail=err.detail)
     if isinstance(err, lecture_video_runtime.LectureVideoConflictError):
+        if err.error_code is not None:
+            raise HTTPException(
+                status_code=409,
+                detail={"message": err.detail, "error_code": err.error_code},
+            )
         raise HTTPException(status_code=409, detail=err.detail)
     raise HTTPException(status_code=500, detail=err.detail)
 
@@ -4858,7 +4863,10 @@ async def renew_lecture_video_control(
         )
     except lecture_video_runtime.LectureVideoRuntimeError as err:
         _raise_lecture_video_runtime_http_error(err)
-    return {"lease_expires_at": lease_expires_at}
+    return {
+        "lease_expires_at": lease_expires_at,
+        "lease_duration_ms": lecture_video_runtime.CONTROLLER_LEASE_DURATION_MS,
+    }
 
 
 @v1.post(

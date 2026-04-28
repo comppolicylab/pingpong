@@ -34,6 +34,9 @@
 		shouldResumePlayback: boolean;
 	};
 	const MSG_LESSON_UPDATED = 'This video lesson was updated. Start a new lesson to continue.';
+	const ERROR_CONTROLLER_LEASE_EXPIRED = 'controller_lease_expired';
+	const CONTROL_RECOVERY_GRACE_MS = 1_000;
+	const ACTIVE_PAGE_RECOVERY_DEBOUNCE_MS = 150;
 	type InitErrorAction = 'refresh' | null;
 	type InitErrorState = {
 		detail: string;
@@ -72,6 +75,8 @@
 
 	// --- Session state ---
 	let controllerSessionId: string | null = $state(null);
+	let controllerLeaseObservedAtMs: number | null = $state(null);
+	let controllerLeaseDurationMs: number | null = $state(null);
 	let sessionState: LectureVideoSessionState = $state('playing');
 	let stateVersion: number = $state(1);
 	let currentQuestion: LectureVideoQuestionPrompt | null = $state(null);
@@ -142,6 +147,11 @@
 	let manualPlaybackTarget: 'video' | 'narration' | null = $state(null);
 	let autoContinueInFlight = $state(false);
 	let autoContinueFailed = $state(false);
+	let expiredControlRecoveryInFlight = $state(false);
+	let controllerAcquireInFlight = $state(false);
+	let acquireControllerSessionInFlight: Promise<LectureVideoSession | null> | null = null;
+	let controllerAcquireGeneration = 0;
+	let activePageRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
 	let initErrorCanRefresh = $derived(showRefreshAction && initError?.action === 'refresh');
 	function shouldShowContinuePrompt(): boolean {
 		return (
@@ -216,6 +226,8 @@
 		canParticipate &&
 			(manualPlaybackTarget != null ||
 				(!controllerSessionId &&
+					!controllerAcquireInFlight &&
+					!expiredControlRecoveryInFlight &&
 					videoReadyForPlayback &&
 					paused &&
 					sessionState === 'playing' &&
@@ -327,9 +339,27 @@
 	onMount(() => {
 		void initSession();
 		window.addEventListener('beforeunload', handleBeforeUnload);
+		const handleActivePageRecovery = (event: Event) => {
+			if (document.visibilityState === 'hidden') return;
+			const force =
+				event.type === 'pageshow' &&
+				'persisted' in event &&
+				(event as PageTransitionEvent).persisted === true;
+			scheduleActivePageRecovery({ force });
+		};
+		document.addEventListener('visibilitychange', handleActivePageRecovery);
+		window.addEventListener('pageshow', handleActivePageRecovery);
+		window.addEventListener('focus', handleActivePageRecovery);
 
 		return () => {
+			if (activePageRecoveryTimer) {
+				clearTimeout(activePageRecoveryTimer);
+				activePageRecoveryTimer = null;
+			}
 			window.removeEventListener('beforeunload', handleBeforeUnload);
+			document.removeEventListener('visibilitychange', handleActivePageRecovery);
+			window.removeEventListener('pageshow', handleActivePageRecovery);
+			window.removeEventListener('focus', handleActivePageRecovery);
 			void cleanupLectureVideoSession({ postPause: true, releaseControl: true });
 			revokeNarrationResources();
 		};
@@ -381,6 +411,7 @@
 
 	function resetState() {
 		controllerSessionId = null;
+		clearControllerLease();
 		sessionState = 'playing';
 		stateVersion = 1;
 		currentQuestion = null;
@@ -414,6 +445,40 @@
 		clearPendingVideoRetry();
 		autoContinueInFlight = false;
 		autoContinueFailed = false;
+		expiredControlRecoveryInFlight = false;
+		controllerAcquireInFlight = false;
+		acquireControllerSessionInFlight = null;
+		controllerAcquireGeneration += 1;
+		if (activePageRecoveryTimer) {
+			clearTimeout(activePageRecoveryTimer);
+			activePageRecoveryTimer = null;
+		}
+	}
+
+	function clearControllerLease() {
+		controllerLeaseObservedAtMs = null;
+		controllerLeaseDurationMs = null;
+	}
+
+	function setControllerLease(leaseDurationMs?: number | null) {
+		if (leaseDurationMs != null && leaseDurationMs > 0) {
+			controllerLeaseObservedAtMs = Date.now();
+			controllerLeaseDurationMs = leaseDurationMs;
+			return;
+		}
+
+		controllerLeaseObservedAtMs = null;
+		controllerLeaseDurationMs = null;
+	}
+
+	function scheduleActivePageRecovery({ force = false }: { force?: boolean } = {}) {
+		if (activePageRecoveryTimer) {
+			clearTimeout(activePageRecoveryTimer);
+		}
+		activePageRecoveryTimer = setTimeout(() => {
+			activePageRecoveryTimer = null;
+			void recoverExpiredControl({ force });
+		}, ACTIVE_PAGE_RECOVERY_DEBOUNCE_MS);
 	}
 
 	function revokeNarrationResources() {
@@ -496,6 +561,7 @@
 		}
 
 		controllerSessionId = null;
+		clearControllerLease();
 		playerDisabled = true;
 		const resolvedDetail =
 			detail ||
@@ -508,7 +574,7 @@
 
 	function failClosedOnConflict(expanded: {
 		$status: number;
-		error: { detail?: string } | null;
+		error: { detail?: string; error_code?: string } | null;
 	}): boolean {
 		if (expanded.$status !== 409) {
 			return false;
@@ -518,6 +584,15 @@
 			action: actionForErrorResponse(expanded.$status, expanded.error?.detail)
 		});
 		return true;
+	}
+
+	function isControllerLeaseExpiredError(expanded: {
+		$status: number;
+		error: { error_code?: string } | null;
+	}): boolean {
+		return (
+			expanded.$status === 409 && expanded.error?.error_code === ERROR_CONTROLLER_LEASE_EXPIRED
+		);
 	}
 
 	async function refreshLectureVideoSession(
@@ -697,27 +772,107 @@
 		}
 	}
 
+	async function acquireControllerSession(): Promise<LectureVideoSession | null> {
+		if (acquireControllerSessionInFlight) {
+			return await acquireControllerSessionInFlight;
+		}
+
+		const acquireGeneration = controllerAcquireGeneration;
+		const acquirePromise = (async () => {
+			controllerAcquireInFlight = true;
+			try {
+				const response = await api.acquireLectureVideoControl(fetch, classId, threadId);
+				const expanded = api.expandResponse(response);
+				if (acquireGeneration !== controllerAcquireGeneration) {
+					return null;
+				}
+				if (expanded.error) {
+					failClosedControl(expanded.error.detail, {
+						action: actionForErrorResponse(expanded.$status, expanded.error.detail)
+					});
+					return null;
+				}
+
+				controllerSessionId = expanded.data.controller_session_id;
+				applySession(expanded.data.lecture_video_session);
+				return expanded.data.lecture_video_session;
+			} catch (error) {
+				if (acquireGeneration !== controllerAcquireGeneration) {
+					return null;
+				}
+				failClosedControl(error instanceof Error ? error.message : String(error));
+				return null;
+			}
+		})();
+		acquireControllerSessionInFlight = acquirePromise;
+		try {
+			return await acquirePromise;
+		} finally {
+			if (acquireControllerSessionInFlight === acquirePromise) {
+				acquireControllerSessionInFlight = null;
+				controllerAcquireInFlight = false;
+			}
+		}
+	}
+
 	async function ensureControllerSession(): Promise<boolean> {
 		if (controllerSessionId) {
 			return true;
 		}
 
+		return (await acquireControllerSession()) != null;
+	}
+
+	function hasExpiredControllerLease(): boolean {
+		return (
+			controllerSessionId != null &&
+			controllerLeaseObservedAtMs != null &&
+			controllerLeaseDurationMs != null &&
+			Date.now() >=
+				controllerLeaseObservedAtMs + controllerLeaseDurationMs - CONTROL_RECOVERY_GRACE_MS
+		);
+	}
+
+	async function recoverExpiredControl({ force = false }: { force?: boolean } = {}) {
+		if (
+			!browser ||
+			!canParticipate ||
+			sessionCleanupInFlight ||
+			expiredControlRecoveryInFlight ||
+			(!force && !hasExpiredControllerLease()) ||
+			!controllerSessionId
+		) {
+			return;
+		}
+
+		expiredControlRecoveryInFlight = true;
+		const shouldResumePlayback = sessionState === 'playing' && !playbackLocked && !isVideoAtEnd();
+		controllerSessionId = null;
+		clearControllerLease();
+		latestPlaybackInteraction = null;
+		playbackSessionRefreshController?.abort();
+		playbackSessionRefreshController = null;
+
 		try {
-			const response = await api.acquireLectureVideoControl(fetch, classId, threadId);
-			const expanded = api.expandResponse(response);
-			if (expanded.error) {
-				failClosedControl(expanded.error.detail, {
-					action: actionForErrorResponse(expanded.$status, expanded.error.detail)
-				});
-				return false;
+			const session = await acquireControllerSession();
+			if (!session) {
+				return;
 			}
 
-			controllerSessionId = expanded.data.controller_session_id;
-			applySession(expanded.data.lecture_video_session);
-			return true;
-		} catch (error) {
-			failClosedControl(error instanceof Error ? error.message : String(error));
-			return false;
+			if (session.last_known_offset_ms != null && session.last_known_offset_ms > 0) {
+				resumeOffsetOnCanPlay = session.last_known_offset_ms;
+				applyPendingResumeOffset();
+			}
+			if (
+				shouldResumePlayback &&
+				session.state === 'playing' &&
+				!playbackLocked &&
+				!isVideoAtEnd()
+			) {
+				queueVideoRetry();
+			}
+		} finally {
+			expiredControlRecoveryInFlight = false;
 		}
 	}
 
@@ -778,6 +933,7 @@
 		} finally {
 			if (controllerSessionId === cleanupSessionId) {
 				controllerSessionId = null;
+				clearControllerLease();
 			}
 			sessionCleanupInFlight = false;
 		}
@@ -801,24 +957,11 @@
 			return;
 		}
 
-		const response = await api.acquireLectureVideoControl(fetch, classId, threadId);
-		const expanded = api.expandResponse(response);
-		if (expanded.error) {
-			failClosedControl(
-				expanded.error.detail ||
-					'We could not start this lesson. Refresh the lesson and try again.',
-				{
-					action: actionForErrorResponse(expanded.$status, expanded.error.detail)
-				}
-			);
+		// If resuming mid-session, seek video to last known offset
+		const session = await acquireControllerSession();
+		if (!session) {
 			return;
 		}
-		controllerSessionId = expanded.data.controller_session_id;
-
-		applySession(expanded.data.lecture_video_session);
-
-		// If resuming mid-session, seek video to last known offset
-		const session = expanded.data.lecture_video_session;
 		initialStartOffsetMs = session.last_known_offset_ms ?? 0;
 		if (session.last_known_offset_ms && session.last_known_offset_ms > 0) {
 			resumeOffsetOnCanPlay = session.last_known_offset_ms;
@@ -886,6 +1029,10 @@
 				);
 				const expanded = api.expandResponse(response);
 				if (expanded.error) {
+					if (isControllerLeaseExpiredError(expanded)) {
+						await recoverExpiredControl({ force: true });
+						return;
+					}
 					failClosedControl(expanded.error.detail, {
 						action: actionForErrorResponse(expanded.$status, expanded.error.detail)
 					});
@@ -894,6 +1041,7 @@
 				if (controllerSessionId !== renewingControllerSessionId) {
 					return;
 				}
+				setControllerLease(expanded.data.lease_duration_ms);
 			} catch (error) {
 				failClosedControl(error instanceof Error ? error.message : String(error));
 			}
@@ -1013,6 +1161,11 @@
 		stateVersion = session.state_version;
 		currentQuestion = session.current_question;
 		currentContinuation = session.current_continuation;
+		if (session.controller.has_control) {
+			setControllerLease(session.controller.lease_duration_ms);
+		} else {
+			clearControllerLease();
+		}
 		if (session.state !== 'awaiting_post_answer_resume') {
 			autoContinueFailed = false;
 		}

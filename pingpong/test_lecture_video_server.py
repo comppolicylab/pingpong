@@ -3165,6 +3165,10 @@ async def test_lecture_video_control_lease_is_short_and_renewable(
     assert _parse_timestamp(
         acquired_session["controller"]["lease_expires_at"]
     ) == current_now["value"] + timedelta(seconds=30)
+    assert (
+        acquired_session["controller"]["lease_duration_ms"]
+        == lecture_video_runtime.CONTROLLER_LEASE_DURATION_MS
+    )
 
     current_now["value"] = current_now["value"] + timedelta(seconds=15)
     renew = api.post(
@@ -3176,6 +3180,10 @@ async def test_lecture_video_control_lease_is_short_and_renewable(
     assert _parse_timestamp(renew.json()["lease_expires_at"]) == current_now[
         "value"
     ] + timedelta(seconds=30)
+    assert (
+        renew.json()["lease_duration_ms"]
+        == lecture_video_runtime.CONTROLLER_LEASE_DURATION_MS
+    )
 
     refreshed_thread = api.get(
         f"/api/v1/class/{class_.id}/thread/{thread_id}",
@@ -3248,7 +3256,10 @@ async def test_lecture_video_control_release_and_interaction_fail_after_expiry(
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert release.status_code == 409
-    assert release.json()["detail"] == MSG_STALE_PAGE
+    assert release.json()["detail"] == {
+        "message": MSG_STALE_PAGE,
+        "error_code": lecture_video_runtime.ERROR_CONTROLLER_LEASE_EXPIRED,
+    }
 
     interaction = api.post(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
@@ -3262,7 +3273,10 @@ async def test_lecture_video_control_release_and_interaction_fail_after_expiry(
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert interaction.status_code == 409
-    assert interaction.json()["detail"] == MSG_STALE_PAGE
+    assert interaction.json()["detail"] == {
+        "message": MSG_STALE_PAGE,
+        "error_code": lecture_video_runtime.ERROR_CONTROLLER_LEASE_EXPIRED,
+    }
 
 
 @with_user(123)
