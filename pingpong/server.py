@@ -8782,7 +8782,7 @@ async def get_assistant_lecture_video_config(
         "lecture_video_manifest": response_lecture_video_manifest,
         "voice_id": lecture_video.voice_id or "",
         "lecture_video_chat_available": lecture_video_chat_available,
-        "video_description_duration_ms": (lecture_video.video_description_duration_ms),
+        "video_description_duration_ms": lecture_video.video_description_duration_ms,
         "overwrite_manifest": lecture_video.manual_manifest,
     }
     if lecture_video.generation_prompt is not None:
@@ -11230,6 +11230,11 @@ async def update_assistant(
             if overwrite_lecture_video_manifest:
                 if lecture_video_manifest is None:
                     raise HTTPException(400, "Lecture video manifest is required.")
+                requested_video_description_duration_ms = (
+                    lecture_video.video_description_duration_ms
+                    if lecture_video_video_description_duration_ms is None
+                    else lecture_video_video_description_duration_ms
+                )
                 manifest_changed = not (
                     current_lecture_video is not None
                     and lecture_video_service.lecture_video_config_matches(
@@ -11237,8 +11242,7 @@ async def update_assistant(
                         lecture_video,
                         lecture_video_manifest,
                         lecture_video_voice_id,
-                        lecture_video_video_description_duration_ms
-                        or lecture_video.video_description_duration_ms,
+                        requested_video_description_duration_ms,
                     )
                 )
             overwrite_manifest_changed = (

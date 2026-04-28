@@ -693,6 +693,8 @@ class LectureVideoConfigResponse(BaseModel):
     voice_id: str
     lecture_video_chat_available: bool = False
     generation_prompt: str | None = None
+    # The API intentionally allows non-UI-step values; only the editor slider
+    # snaps to 5-second increments.
     video_description_duration_ms: int = Field(30000, ge=5000, le=300000)
     overwrite_manifest: bool = False
     manifest_generation_status: LectureVideoProcessingRunSummary | None = None
@@ -1146,6 +1148,8 @@ class CreateAssistant(BaseModel):
     lecture_video_manifest: LectureVideoManifest | None = None
     voice_id: str | None = None
     generation_prompt: str | None = Field(None, max_length=20000)
+    # The API intentionally allows non-UI-step values; only the editor slider
+    # snaps to 5-second increments.
     video_description_duration_ms: int | None = Field(None, ge=5000, le=300000)
     overwrite_manifest: bool | None = None
     published: bool = False
@@ -1226,6 +1230,8 @@ class UpdateAssistant(BaseModel):
     lecture_video_manifest: LectureVideoManifest | None = None
     voice_id: str | None = None
     generation_prompt: str | None = Field(None, max_length=20000)
+    # The API intentionally allows non-UI-step values; only the editor slider
+    # snaps to 5-second increments.
     video_description_duration_ms: int | None = Field(None, ge=5000, le=300000)
     regenerate_requested: bool | None = None
     overwrite_manifest: bool | None = None

@@ -2325,7 +2325,7 @@ class LectureVideo(Base):
             manifest_data=lecture_video.manifest_data,
             transcript_data=lecture_video.transcript_data,
             generation_prompt=lecture_video.generation_prompt,
-            video_description_duration_ms=(lecture_video.video_description_duration_ms),
+            video_description_duration_ms=lecture_video.video_description_duration_ms,
             manual_manifest=lecture_video.manual_manifest,
             manifest_version=lecture_video.manifest_version,
             lecture_video_chat_available=lecture_video.lecture_video_chat_available,

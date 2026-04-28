@@ -12,7 +12,6 @@ import uuid_utils as uuid
 
 import pingpong.models as models
 import pingpong.schemas as schemas
-from . import lecture_video_manifest_generation
 from .authz import AuthzClient, Relation
 from .config import config
 from .video_store import VideoStoreError
@@ -484,9 +483,7 @@ def lecture_video_config_matches(
     requested_lecture_video: models.LectureVideo,
     requested_manifest: schemas.LectureVideoManifest,
     requested_voice_id: str,
-    requested_video_description_duration_ms: int = (
-        lecture_video_manifest_generation.DEFAULT_VIDEO_DESCRIPTION_DURATION_MS
-    ),
+    requested_video_description_duration_ms: int,
 ) -> bool:
     try:
         current_manifest = lecture_video_manifest_from_model(current_lecture_video)

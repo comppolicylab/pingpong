@@ -721,7 +721,10 @@ async def _load_manifest_generation_run_context(
             lecture_video.generation_prompt
             or lecture_video_manifest_generation.DEFAULT_GENERATION_PROMPT_CONTENT
         )
-        video_description_duration_ms = lecture_video.video_description_duration_ms
+        video_description_duration_ms = (
+            lecture_video.video_description_duration_ms
+            or lecture_video_manifest_generation.DEFAULT_VIDEO_DESCRIPTION_DURATION_MS
+        )
         logger.info(
             "Lecture video manifest loading OpenAI client. "
             "run_id=%s lecture_video_id=%s class_id=%s transcript_cached=%s",

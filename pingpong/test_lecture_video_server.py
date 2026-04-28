@@ -6220,12 +6220,43 @@ def test_lecture_video_config_matches_logs_invalid_current_manifest(
             requested_lecture_video,
             requested_manifest,
             DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            current_lecture_video.video_description_duration_ms,
         )
 
     assert matches is False
     assert (
         "Failed to serialize current lecture video manifest for comparison."
         in caplog.text
+    )
+
+
+def test_lecture_video_config_matches_checks_video_description_duration(
+    monkeypatch,
+):
+    requested_manifest = schemas.LectureVideoManifestV1.model_validate(
+        lecture_video_manifest()
+    )
+    current_lecture_video = make_lecture_video(
+        1, "same.mp4", voice_id=DEFAULT_LECTURE_VIDEO_VOICE_ID
+    )
+    current_lecture_video.video_description_duration_ms = 30_000
+    requested_lecture_video = make_lecture_video(1, "same.mp4")
+
+    monkeypatch.setattr(
+        lecture_video_service,
+        "lecture_video_manifest_from_model",
+        lambda _lecture_video: requested_manifest,
+    )
+
+    assert (
+        lecture_video_service.lecture_video_config_matches(
+            current_lecture_video,
+            requested_lecture_video,
+            requested_manifest,
+            DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            35_000,
+        )
+        is False
     )
 
 

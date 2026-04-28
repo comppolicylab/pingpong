@@ -288,7 +288,7 @@
 	let generationPrompt = '';
 	let hasSetGenerationPrompt = false;
 	let videoDescriptionDurationMs =
-		data.lectureVideoConfig?.video_description_duration_ms || DEFAULT_VIDEO_DESCRIPTION_DURATION_MS;
+		data.lectureVideoConfig?.video_description_duration_ms ?? DEFAULT_VIDEO_DESCRIPTION_DURATION_MS;
 	let hasSetVideoDescriptionDuration = false;
 	let canGenerateLectureVideoManifest = data.lectureVideoDefaults?.can_generate_manifest ?? false;
 	$: canGenerateLectureVideoManifest = data.lectureVideoDefaults?.can_generate_manifest ?? false;
@@ -657,7 +657,7 @@
 	}
 	$: if (!hasSetVideoDescriptionDuration && !lectureVideoConfigLoadError) {
 		videoDescriptionDurationMs =
-			data.lectureVideoConfig?.video_description_duration_ms ||
+			data.lectureVideoConfig?.video_description_duration_ms ??
 			DEFAULT_VIDEO_DESCRIPTION_DURATION_MS;
 		hasSetVideoDescriptionDuration = true;
 	}
@@ -671,7 +671,7 @@
 	$: originalGenerationPrompt =
 		data.lectureVideoConfig?.generation_prompt || lectureVideoDefaultGenerationPrompt;
 	$: originalVideoDescriptionDurationMs =
-		data.lectureVideoConfig?.video_description_duration_ms || DEFAULT_VIDEO_DESCRIPTION_DURATION_MS;
+		data.lectureVideoConfig?.video_description_duration_ms ?? DEFAULT_VIDEO_DESCRIPTION_DURATION_MS;
 	$: generationPromptEdited =
 		canGenerateLectureVideoManifest && generationPrompt !== lectureVideoDefaultGenerationPrompt;
 	$: generationPromptForSave = generationPromptEdited ? generationPrompt : null;
@@ -3560,7 +3560,11 @@
 											>{videoDescriptionDurationMs / 1000} seconds</span
 										>
 									</div>
-									<Helper class="pb-1">Used for each generated visual description segment.</Helper>
+									<Helper class="pb-1">
+										{overwriteManifest
+											? 'Available only when generating the manifest automatically.'
+											: 'Used for each generated visual description segment.'}
+									</Helper>
 									<Range
 										id="video_description_duration_ms"
 										name="video_description_duration_ms"

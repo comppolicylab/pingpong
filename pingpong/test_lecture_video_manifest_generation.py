@@ -835,6 +835,104 @@ async def test_merge_chunk_manifests_falls_back_only_for_invalid_chunk(
     assert "Falling back for this chunk only" in caplog.text
 
 
+async def test_merge_chunk_manifests_normalizes_split_child_descriptions(
+    monkeypatch,
+) -> None:
+    candidate_question = schemas.LectureVideoManifestQuestionV1(
+        type=schemas.LectureVideoQuestionType.SINGLE_SELECT,
+        question_text="Candidate?",
+        intro_text="Try this.",
+        stop_offset_ms=1000,
+        options=[
+            schemas.LectureVideoManifestOptionV1(
+                option_text="Combine like terms",
+                post_answer_text="Right.",
+                continue_offset_ms=1500,
+                correct=True,
+            ),
+            schemas.LectureVideoManifestOptionV1(
+                option_text="Change every variable",
+                post_answer_text="Not quite.",
+                continue_offset_ms=1500,
+                correct=False,
+            ),
+        ],
+    )
+    chunk_manifests = [
+        schemas.LectureVideoManifestV3(
+            word_level_transcription=_transcript(),
+            video_descriptions=[
+                schemas.LectureVideoManifestVideoDescriptionV3(
+                    start_offset_ms=0,
+                    end_offset_ms=15000,
+                    description="The teacher introduces the expression.",
+                )
+            ],
+            questions=[candidate_question],
+        ),
+        schemas.LectureVideoManifestV3(
+            word_level_transcription=_transcript(),
+            video_descriptions=[
+                schemas.LectureVideoManifestVideoDescriptionV3(
+                    start_offset_ms=15000,
+                    end_offset_ms=30000,
+                    description="The teacher finishes the first example.",
+                )
+            ],
+            questions=[candidate_question],
+        ),
+        schemas.LectureVideoManifestV3(
+            word_level_transcription=_transcript(),
+            video_descriptions=[
+                schemas.LectureVideoManifestVideoDescriptionV3(
+                    start_offset_ms=30000,
+                    end_offset_ms=60000,
+                    description="The teacher points at the next step.",
+                )
+            ],
+            questions=[candidate_question],
+        ),
+    ]
+
+    async def fake_generate_manifest_quiz(
+        _client,
+        *,
+        model,
+        prompt,
+        contents,
+        response_model,
+    ):  # type: ignore[no-untyped-def]
+        return manifest_generation.ReconciledGeneratedQuiz(
+            questions=[_generated_question()]
+        )
+
+    monkeypatch.setattr(
+        manifest_generation.gemini_helpers,
+        "generate_manifest_quiz",
+        fake_generate_manifest_quiz,
+    )
+
+    manifest = await manifest_generation._merge_chunk_manifests(
+        gemini_client=object(),  # type: ignore[arg-type]
+        generation_prompt_content="Ask only 1 question.",
+        model="gemini-test",
+        chunk_manifests=chunk_manifests,
+        full_transcript=_transcript(),
+        video_duration_ms=60000,
+    )
+
+    assert [
+        (description.start_offset_ms, description.end_offset_ms)
+        for description in manifest.video_descriptions
+    ] == [(0, 30000), (30000, 60000)]
+    assert manifest.video_descriptions[0].description == (
+        "The teacher introduces the expression. The teacher finishes the first example."
+    )
+    assert manifest.video_descriptions[1].description == (
+        "The teacher points at the next step."
+    )
+
+
 def test_quiz_to_manifest_reports_missing_choice_feedback() -> None:
     quiz = manifest_generation.GeneratedQuizWithVideo(
         video_summary="A short algebra lesson.",

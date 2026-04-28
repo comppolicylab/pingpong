@@ -170,7 +170,6 @@ GUIDELINES FOR QUESTIONS:
 
 _GEMINI_MODEL = "gemini-3.1-pro-preview"
 DEFAULT_VIDEO_DESCRIPTION_DURATION_MS = 30_000
-_VIDEO_DESCRIPTION_WINDOW_MS = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS
 _MANIFEST_CHUNK_DURATION_MS = 5 * 60 * 1000
 _MANIFEST_CHUNK_MIN_TAIL_MS = 3 * 60 * 1000
 _MANIFEST_CHUNK_OVERLAP_MS = 30_000
@@ -423,7 +422,7 @@ def _aligned_split_offset(
     start_ms: int,
     end_ms: int,
     *,
-    alignment_ms: int = _VIDEO_DESCRIPTION_WINDOW_MS,
+    alignment_ms: int = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
 ) -> int:
     midpoint_ms = start_ms + (end_ms - start_ms) // 2
     split_ms = _align_offset_down(midpoint_ms, alignment_ms)
@@ -440,7 +439,7 @@ def _plan_manifest_generation_chunks(
     max_chunk_duration_ms: int = _MANIFEST_CHUNK_DURATION_MS,
     min_tail_duration_ms: int = _MANIFEST_CHUNK_MIN_TAIL_MS,
     overlap_ms: int = _MANIFEST_CHUNK_OVERLAP_MS,
-    alignment_ms: int = _VIDEO_DESCRIPTION_WINDOW_MS,
+    alignment_ms: int = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
 ) -> list[ManifestGenerationChunk]:
     if video_duration_ms is None or video_duration_ms <= max_chunk_duration_ms:
         duration_ms = max(video_duration_ms or 1, 1)
@@ -488,7 +487,7 @@ def _split_manifest_generation_chunk(
     *,
     video_duration_ms: int,
     overlap_ms: int = _MANIFEST_CHUNK_OVERLAP_MS,
-    alignment_ms: int = _VIDEO_DESCRIPTION_WINDOW_MS,
+    alignment_ms: int = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
 ) -> list[ManifestGenerationChunk]:
     split_ms = _aligned_split_offset(
         chunk.generation_start_ms,
@@ -862,7 +861,7 @@ def build_generation_prompt(
     generation_end_ms: int | None = None,
     context_start_ms: int | None = None,
     context_end_ms: int | None = None,
-    video_description_window_ms: int = _VIDEO_DESCRIPTION_WINDOW_MS,
+    video_description_window_ms: int = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
 ) -> str:
     if compact:
         transcript_text = "\n".join(
@@ -1310,7 +1309,7 @@ def _validate_manifest_video_descriptions(
     *,
     start_offset_ms: int = 0,
     end_offset_ms: int | None,
-    video_description_window_ms: int = _VIDEO_DESCRIPTION_WINDOW_MS,
+    video_description_window_ms: int = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
 ) -> str | None:
     if len(video_descriptions) == 0:
         return "video_descriptions is empty"
@@ -1356,7 +1355,7 @@ def _validated_or_fallback_video_descriptions(
     *,
     start_offset_ms: int = 0,
     end_offset_ms: int | None,
-    video_description_window_ms: int = _VIDEO_DESCRIPTION_WINDOW_MS,
+    video_description_window_ms: int = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
 ) -> list[schemas.LectureVideoManifestVideoDescriptionV3]:
     validation_error = _validate_manifest_video_descriptions(
         video_descriptions,
@@ -1384,7 +1383,7 @@ def _validated_or_fallback_chunk_video_descriptions(
     chunk_index: int,
     start_offset_ms: int,
     end_offset_ms: int,
-    video_description_window_ms: int = _VIDEO_DESCRIPTION_WINDOW_MS,
+    video_description_window_ms: int = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
 ) -> list[schemas.LectureVideoManifestVideoDescriptionV3]:
     validation_error = _validate_manifest_video_descriptions(
         video_descriptions,
@@ -1407,6 +1406,85 @@ def _validated_or_fallback_chunk_video_descriptions(
     )
 
 
+def _normalize_video_descriptions_to_windows(
+    video_descriptions: list[schemas.LectureVideoManifestVideoDescriptionV3],
+    *,
+    video_duration_ms: int,
+    video_description_window_ms: int = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
+) -> list[schemas.LectureVideoManifestVideoDescriptionV3]:
+    if video_description_window_ms <= 0:
+        return video_descriptions
+
+    normalized_descriptions: list[schemas.LectureVideoManifestVideoDescriptionV3] = []
+    for start_offset_ms in range(0, video_duration_ms, video_description_window_ms):
+        end_offset_ms = min(
+            start_offset_ms + video_description_window_ms,
+            video_duration_ms,
+        )
+        exact_description = next(
+            (
+                description
+                for description in video_descriptions
+                if description.start_offset_ms == start_offset_ms
+                and description.end_offset_ms == end_offset_ms
+            ),
+            None,
+        )
+        if exact_description is not None:
+            normalized_descriptions.append(exact_description)
+            continue
+
+        overlapping_descriptions = [
+            description
+            for description in video_descriptions
+            if description.start_offset_ms < end_offset_ms
+            and description.end_offset_ms > start_offset_ms
+        ]
+        if len(overlapping_descriptions) == 0:
+            normalized_descriptions.extend(
+                _fallback_video_descriptions(
+                    end_offset_ms,
+                    start_offset_ms=start_offset_ms,
+                )
+            )
+            continue
+
+        normalized_descriptions.append(
+            schemas.LectureVideoManifestVideoDescriptionV3(
+                start_offset_ms=start_offset_ms,
+                end_offset_ms=end_offset_ms,
+                description=" ".join(
+                    description.description.strip()
+                    for description in overlapping_descriptions
+                    if description.description.strip()
+                )
+                or "Visual descriptions were unavailable for this transcript-only generation pass.",
+            )
+        )
+
+    validation_error = _validate_manifest_video_descriptions(
+        normalized_descriptions,
+        end_offset_ms=video_duration_ms,
+        video_description_window_ms=video_description_window_ms,
+    )
+    if validation_error is None:
+        return normalized_descriptions
+
+    logger.warning(
+        "Merged video_descriptions failed structural validation after window "
+        "normalization: %s. Falling back to transcript-only visual descriptions.",
+        validation_error,
+    )
+    return [
+        description
+        for start_offset_ms in range(0, video_duration_ms, video_description_window_ms)
+        for description in _fallback_video_descriptions(
+            min(start_offset_ms + video_description_window_ms, video_duration_ms),
+            start_offset_ms=start_offset_ms,
+        )
+    ]
+
+
 def _quiz_to_manifest(
     quiz: GeneratedQuizWithVideo,
     transcript: list[schemas.LectureVideoManifestWordV3],
@@ -1414,7 +1492,7 @@ def _quiz_to_manifest(
     video_duration_ms: int | None,
     video_description_start_offset_ms: int = 0,
     video_description_end_offset_ms: int | None = None,
-    video_description_window_ms: int = _VIDEO_DESCRIPTION_WINDOW_MS,
+    video_description_window_ms: int = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
 ) -> schemas.LectureVideoManifestV3:
     transcript_word_index = _transcript_word_index(transcript)
     video_descriptions = _video_descriptions_to_manifest_video_descriptions(
@@ -1597,7 +1675,7 @@ async def _merge_chunk_manifests(
     chunk_manifests: list[schemas.LectureVideoManifestV3],
     full_transcript: list[schemas.LectureVideoManifestWordV3],
     video_duration_ms: int | None,
-    video_description_window_ms: int = _VIDEO_DESCRIPTION_WINDOW_MS,
+    video_description_window_ms: int = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
 ) -> schemas.LectureVideoManifestV3:
     if video_duration_ms is None:
         video_descriptions = [
@@ -1638,6 +1716,11 @@ async def _merge_chunk_manifests(
                     start_offset_ms=expected_start_offset_ms,
                 )
             )
+        video_descriptions = _normalize_video_descriptions_to_windows(
+            video_descriptions,
+            video_duration_ms=video_duration_ms,
+            video_description_window_ms=video_description_window_ms,
+        )
     questions = await _reconcile_chunk_questions(
         gemini_client=gemini_client,
         generation_prompt_content=generation_prompt_content,
@@ -1667,7 +1750,7 @@ async def _generate_manifest_from_gemini_file(
     generation_end_ms: int | None = None,
     context_start_ms: int | None = None,
     context_end_ms: int | None = None,
-    video_description_window_ms: int = _VIDEO_DESCRIPTION_WINDOW_MS,
+    video_description_window_ms: int = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
 ) -> schemas.LectureVideoManifestV3:
     prompt = build_generation_prompt(
         generation_prompt_content,
@@ -1750,7 +1833,7 @@ async def _upload_and_generate_whole_manifest(
     transcript: list[schemas.LectureVideoManifestWordV3],
     video_duration_ms: int | None,
     model: str,
-    video_description_window_ms: int = _VIDEO_DESCRIPTION_WINDOW_MS,
+    video_description_window_ms: int = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
 ) -> schemas.LectureVideoManifestV3:
     gemini_file_name: str | None = None
     try:
@@ -1803,7 +1886,7 @@ async def _upload_and_generate_manifest_chunk(
     chunk: ManifestGenerationChunk,
     temp_dir: str,
     model: str,
-    video_description_window_ms: int = _VIDEO_DESCRIPTION_WINDOW_MS,
+    video_description_window_ms: int = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
 ) -> schemas.LectureVideoManifestV3:
     chunk_transcript = _transcript_for_window(
         transcript,
@@ -1888,7 +1971,7 @@ async def _upload_and_generate_manifest_chunks(
     chunk: ManifestGenerationChunk,
     temp_dir: str,
     model: str,
-    video_description_window_ms: int = _VIDEO_DESCRIPTION_WINDOW_MS,
+    video_description_window_ms: int = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
 ) -> list[schemas.LectureVideoManifestV3]:
     try:
         return [
