@@ -30,6 +30,13 @@ export type BaseResponse = {
  */
 export type Error = {
 	detail?: string;
+	error_code?: string;
+};
+
+type CodedErrorDetail = {
+	message?: string;
+	detail?: string;
+	error_code?: string;
 };
 
 export type ValidationError = {
@@ -102,6 +109,19 @@ export const expandResponse = <R extends BaseData>(
 			.join('\n'); // Join all error messages with newlines
 		return { $status, error: { detail: error } as Error, data: null };
 	} else if (isErrorResponse(r)) {
+		const errorResponse = r as Error;
+		const rawDetail = (r as { detail?: unknown }).detail;
+		if (rawDetail && typeof rawDetail === 'object' && !Array.isArray(rawDetail)) {
+			const detail = rawDetail as CodedErrorDetail;
+			return {
+				$status,
+				error: {
+					detail: detail.message ?? detail.detail,
+					error_code: detail.error_code ?? errorResponse.error_code
+				} as Error,
+				data: null
+			};
+		}
 		return { $status, error: r as Error, data: null };
 	} else {
 		return { $status, error: null, data: r as R };
@@ -290,6 +310,12 @@ export const readErrorDetail = async (response: Response) => {
 				.join('\n');
 		}
 		if (payload?.detail && typeof payload.detail === 'object') {
+			if (typeof payload.detail.message === 'string') {
+				return payload.detail.message;
+			}
+			if (typeof payload.detail.detail === 'string') {
+				return payload.detail.detail;
+			}
 			return JSON.stringify(payload.detail);
 		}
 	} catch {
@@ -1617,6 +1643,7 @@ export type LectureVideoSessionController = {
 	has_control: boolean;
 	has_active_controller: boolean;
 	lease_expires_at: string | null;
+	lease_duration_ms: number | null;
 };
 
 export type LectureVideoSession = {
@@ -1642,6 +1669,7 @@ export type LectureVideoControlReleaseResponse = {
 
 export type LectureVideoControlRenewResponse = {
 	lease_expires_at: string;
+	lease_duration_ms: number;
 };
 
 export type LectureVideoInteractionResponse = {

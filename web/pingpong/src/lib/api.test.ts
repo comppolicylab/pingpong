@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { getThread, type Fetcher } from '$lib/api';
+import { expandResponse, getThread, type Fetcher } from '$lib/api';
 import { resetAnonymousShareToken, setAnonymousShareToken } from '$lib/stores/anonymous';
 
 describe('getThread', () => {
@@ -32,5 +32,23 @@ describe('getThread', () => {
 				signal: abortController.signal
 			})
 		);
+	});
+});
+
+describe('expandResponse', () => {
+	it('normalizes coded HTTP error detail payloads', () => {
+		const response = {
+			$status: 409,
+			detail: {
+				message: 'This page was inactive for too long. Refresh the lesson to continue.',
+				error_code: 'controller_lease_expired'
+			}
+		} as unknown as Parameters<typeof expandResponse>[0];
+		const expanded = expandResponse(response);
+
+		expect(expanded.error).toEqual({
+			detail: 'This page was inactive for too long. Refresh the lesson to continue.',
+			error_code: 'controller_lease_expired'
+		});
 	});
 });

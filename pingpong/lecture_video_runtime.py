@@ -11,6 +11,8 @@ from pingpong.now import NowFn, utcnow
 
 CONTROLLER_SESSION_HEADER = "x-lecture-video-controller-session"
 CONTROLLER_LEASE_DURATION = timedelta(seconds=30)
+CONTROLLER_LEASE_DURATION_MS = int(CONTROLLER_LEASE_DURATION.total_seconds() * 1000)
+ERROR_CONTROLLER_LEASE_EXPIRED = "controller_lease_expired"
 PLAYBACK_PROGRESS_TOLERANCE_MS = 2_000
 
 MSG_STALE_PAGE = "This page was inactive for too long. Refresh the lesson to continue."
@@ -50,9 +52,10 @@ MSG_REFRESH_AND_RETRY = (
 
 
 class LectureVideoRuntimeError(Exception):
-    def __init__(self, detail: str) -> None:
+    def __init__(self, detail: str, *, error_code: str | None = None) -> None:
         super().__init__(detail)
         self.detail = detail
+        self.error_code = error_code
 
 
 class LectureVideoNotFoundError(LectureVideoRuntimeError):
@@ -254,6 +257,9 @@ def build_lecture_video_session(
                 if active_controller
                 else None
             ),
+            lease_duration_ms=CONTROLLER_LEASE_DURATION_MS
+            if active_controller
+            else None,
         ),
     )
 
@@ -482,8 +488,9 @@ def _require_state(
 def _conflict(
     *,
     detail: str,
+    error_code: str | None = None,
 ) -> LectureVideoConflictError:
-    return LectureVideoConflictError(detail)
+    return LectureVideoConflictError(detail, error_code=error_code)
 
 
 def _require_controller(
@@ -496,6 +503,7 @@ def _require_controller(
     if not has_active_controller(state, now):
         raise _conflict(
             detail=MSG_STALE_PAGE,
+            error_code=ERROR_CONTROLLER_LEASE_EXPIRED,
         )
     if state.controller_user_id != actor_user_id:
         raise _conflict(

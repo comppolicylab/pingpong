@@ -745,6 +745,7 @@ class LectureVideoSessionController(BaseModel):
     has_control: bool = False
     has_active_controller: bool = False
     lease_expires_at: datetime | None = None
+    lease_duration_ms: int | None = Field(None, ge=0)
 
     @model_validator(mode="after")
     def validate_controller_state(self) -> "LectureVideoSessionController":
@@ -757,11 +758,19 @@ class LectureVideoSessionController(BaseModel):
                 raise ValueError(
                     "lease_expires_at must be null when there is no active controller"
                 )
+            if self.lease_duration_ms is not None:
+                raise ValueError(
+                    "lease_duration_ms must be null when there is no active controller"
+                )
             return self
 
         if self.lease_expires_at is None:
             raise ValueError(
                 "lease_expires_at is required when there is an active controller"
+            )
+        if self.lease_duration_ms is None:
+            raise ValueError(
+                "lease_duration_ms is required when there is an active controller"
             )
         return self
 
@@ -797,6 +806,7 @@ class LectureVideoControlRenewRequest(BaseModel):
 
 class LectureVideoControlRenewResponse(BaseModel):
     lease_expires_at: datetime
+    lease_duration_ms: int = Field(..., ge=0)
 
 
 class LectureVideoInteractionRequestBase(BaseModel):
