@@ -13,6 +13,41 @@ CONTROLLER_SESSION_HEADER = "x-lecture-video-controller-session"
 CONTROLLER_LEASE_DURATION = timedelta(seconds=30)
 PLAYBACK_PROGRESS_TOLERANCE_MS = 2_000
 
+MSG_STALE_PAGE = "This page was inactive for too long. Refresh the lesson to continue."
+MSG_OTHER_CONTROLLER = (
+    "Someone else is controlling this video right now. Try again in a moment."
+)
+MSG_TAB_DISCONNECTED = (
+    "This tab is no longer connected to the video. Refresh the lesson to continue."
+)
+MSG_LESSON_UPDATED = "This video lesson was updated. Start a new lesson to continue."
+MSG_QUESTION_NO_LONGER_OPEN = (
+    "This question is no longer open. Refresh the lesson to see the latest question."
+)
+MSG_QUESTION_ALREADY_CLOSED = (
+    "This question is already closed. Refresh the lesson to continue."
+)
+MSG_SKIP_AHEAD_BLOCKED = (
+    "You cannot skip ahead yet. Continue from where the lesson left off."
+)
+MSG_CANNOT_CONTINUE_FROM_HERE = (
+    "The video cannot continue from here. Refresh the lesson and try again."
+)
+MSG_LESSON_ALREADY_COMPLETE = "This lesson is already complete."
+MSG_VIDEO_CANNOT_DO_THAT = (
+    "The video cannot do that right now. Wait a moment, then try again."
+)
+MSG_PAUSE_AHEAD_OF_PROGRESS = (
+    "The lesson could not save that spot because it is ahead of your current progress."
+)
+MSG_JUMP_AHEAD_BLOCKED = (
+    "You cannot jump ahead yet. Continue from where the lesson left off."
+)
+MSG_COMPLETE_FROM_SPOT_BLOCKED = "The lesson cannot be marked complete from this spot. Continue from where you left off."
+MSG_REFRESH_AND_RETRY = (
+    "This lesson changed while you were working. Refresh the lesson and try again."
+)
+
 
 class LectureVideoRuntimeError(Exception):
     def __init__(self, detail: str) -> None:
@@ -460,15 +495,15 @@ def _require_controller(
 ) -> None:
     if not has_active_controller(state, now):
         raise _conflict(
-            detail="Lecture video control has expired. Acquire control again.",
+            detail=MSG_STALE_PAGE,
         )
     if state.controller_user_id != actor_user_id:
         raise _conflict(
-            detail="Another participant currently controls this lecture video.",
+            detail=MSG_OTHER_CONTROLLER,
         )
     if state.controller_session_id != controller_session_id:
         raise _conflict(
-            detail="This browser window no longer controls the lecture video.",
+            detail=MSG_TAB_DISCONNECTED,
         )
 
 
@@ -540,16 +575,14 @@ async def acquire_control(
     state = await get_or_initialize_thread_state(session, thread_id, for_update=True)
     current_time = nowfn() if nowfn is not None else utcnow()
     if not lecture_video_matches_assistant(state.thread):
-        raise LectureVideoConflictError(
-            "This thread's lecture video no longer matches the assistant configuration."
-        )
+        raise LectureVideoConflictError(MSG_LESSON_UPDATED)
 
     if (
         has_active_controller(state, current_time)
         and state.controller_user_id != actor_user_id
     ):
         raise _conflict(
-            detail="Another participant currently controls this lecture video.",
+            detail=MSG_OTHER_CONTROLLER,
         )
 
     controller_session_id = str(uuid.uuid7())
@@ -624,9 +657,7 @@ async def renew_control(
     state = await get_or_initialize_thread_state(session, thread_id, for_update=True)
     current_time = nowfn() if nowfn is not None else utcnow()
     if not lecture_video_matches_assistant(state.thread):
-        raise LectureVideoConflictError(
-            "This thread's lecture video no longer matches the assistant configuration."
-        )
+        raise LectureVideoConflictError(MSG_LESSON_UPDATED)
 
     _require_controller(
         state,
@@ -674,7 +705,7 @@ async def _handle_question_presented(
         or current_question.id != request.question_id
     ):
         raise _conflict(
-            detail="This question is no longer active.",
+            detail=MSG_QUESTION_NO_LONGER_OPEN,
         )
 
     if request.offset_ms != current_question.stop_offset_ms:
@@ -719,7 +750,7 @@ async def _handle_answer_submitted(
         or current_question.id != request.question_id
     ):
         raise _conflict(
-            detail="This question is no longer accepting answers.",
+            detail=MSG_QUESTION_ALREADY_CLOSED,
         )
 
     option = _find_option_for_question(current_question, request.option_id)
@@ -755,9 +786,7 @@ async def _handle_resumed(
             session, state, current_time=current_time
         )
         if request.offset_ms > plausible_offset_ms:
-            raise LectureVideoValidationError(
-                "Resuming past your unlocked progress is not allowed in this lecture video."
-            )
+            raise LectureVideoValidationError(MSG_SKIP_AHEAD_BLOCKED)
         _set_last_known_offset_ms(state, request.offset_ms)
         await _append_interaction(
             session,
@@ -777,7 +806,7 @@ async def _handle_resumed(
         or request.offset_ms != active_option.continue_offset_ms
     ):
         raise _conflict(
-            detail="The lecture video cannot resume from this state.",
+            detail=MSG_CANNOT_CONTINUE_FROM_HERE,
         )
 
     next_question = _get_next_question(state.thread, current_question)
@@ -807,11 +836,11 @@ def _require_playing_state_for_playback_event(
 ) -> None:
     if state.state == schemas.LectureVideoSessionState.COMPLETED:
         raise _conflict(
-            detail="Session is already completed.",
+            detail=MSG_LESSON_ALREADY_COMPLETE,
         )
     if state.state != schemas.LectureVideoSessionState.PLAYING:
         raise _conflict(
-            detail="The lecture video cannot process playback events right now.",
+            detail=MSG_VIDEO_CANNOT_DO_THAT,
         )
 
 
@@ -829,9 +858,7 @@ async def _handle_paused(
         session, state, current_time=current_time
     )
     if request.offset_ms > plausible_offset_ms:
-        raise LectureVideoValidationError(
-            "Pausing past your unlocked progress is not allowed in this lecture video."
-        )
+        raise LectureVideoValidationError(MSG_PAUSE_AHEAD_OF_PROGRESS)
 
     _set_last_known_offset_ms(state, request.offset_ms)
     await _append_interaction(
@@ -858,9 +885,7 @@ async def _handle_seeked(
         session, state, current_time=current_time
     )
     if request.to_offset_ms > plausible_offset_ms:
-        raise LectureVideoValidationError(
-            "Seeking past your unlocked progress is not allowed in this lecture video."
-        )
+        raise LectureVideoValidationError(MSG_JUMP_AHEAD_BLOCKED)
 
     _set_seek_offset_ms(
         state,
@@ -893,9 +918,7 @@ async def _handle_ended(
         session, state, current_time=current_time
     )
     if request.offset_ms > plausible_offset_ms:
-        raise LectureVideoValidationError(
-            "Ending past your unlocked progress is not allowed in this lecture video."
-        )
+        raise LectureVideoValidationError(MSG_COMPLETE_FROM_SPOT_BLOCKED)
 
     _set_last_known_offset_ms(state, request.offset_ms)
     await _append_interaction(
@@ -940,9 +963,7 @@ async def process_interaction(
     state = await get_or_initialize_thread_state(session, thread_id, for_update=True)
     current_time = nowfn() if nowfn is not None else utcnow()
     if not lecture_video_matches_assistant(state.thread):
-        raise LectureVideoConflictError(
-            "This thread's lecture video no longer matches the assistant configuration."
-        )
+        raise LectureVideoConflictError(MSG_LESSON_UPDATED)
 
     _require_controller(
         state,
@@ -970,7 +991,7 @@ async def process_interaction(
 
     if request.expected_state_version != state.version:
         raise _conflict(
-            detail="Lecture video state is out of date. Refresh and try again.",
+            detail=MSG_REFRESH_AND_RETRY,
         )
 
     event_type = schemas.LectureVideoInteractionEventType(request.type)

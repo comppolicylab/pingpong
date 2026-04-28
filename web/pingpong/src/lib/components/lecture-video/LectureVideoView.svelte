@@ -33,6 +33,13 @@
 		offsetMs: number;
 		shouldResumePlayback: boolean;
 	};
+	const MSG_LESSON_UPDATED = 'This video lesson was updated. Start a new lesson to continue.';
+	type InitErrorAction = 'refresh' | null;
+	type InitErrorState = {
+		detail: string;
+		action: InitErrorAction;
+	};
+	type LectureVideoSessionRefreshResult = 'refreshed' | 'lesson_updated' | 'failed';
 
 	let {
 		classId,
@@ -40,6 +47,7 @@
 		lectureVideoSrc,
 		title = 'Lecture Video',
 		canParticipate = true,
+		showRefreshAction = true,
 		initialSession = null,
 		chatAvailable = false,
 		playerVolume = $bindable(1),
@@ -50,6 +58,7 @@
 		lectureVideoSrc: string;
 		title?: string;
 		canParticipate?: boolean;
+		showRefreshAction?: boolean;
 		initialSession?: LectureVideoSession | null;
 		chatAvailable?: boolean;
 		playerVolume?: number;
@@ -58,6 +67,7 @@
 	const dispatch = createEventDispatcher<{
 		sessionchange: LectureVideoSession;
 		playbackresumed: void;
+		lessonupdated: void;
 	}>();
 
 	// --- Session state ---
@@ -97,7 +107,7 @@
 	let activeMobilePanel: 'checks' | 'chat' | null = $state('checks');
 	let historyLoaded: boolean = $state(false);
 	let historyInteractions: LectureVideoInteractionHistoryItem[] = $state([]);
-	let initError: string | null = $state(null);
+	let initError = $state<InitErrorState | null>(null);
 	let sessionCleanupInFlight = false;
 
 	// Tracks which question we have already posted question_presented for
@@ -132,6 +142,7 @@
 	let manualPlaybackTarget: 'video' | 'narration' | null = $state(null);
 	let autoContinueInFlight = $state(false);
 	let autoContinueFailed = $state(false);
+	let initErrorCanRefresh = $derived(showRefreshAction && initError?.action === 'refresh');
 	function shouldShowContinuePrompt(): boolean {
 		return (
 			(sessionState === 'awaiting_post_answer_resume' &&
@@ -433,7 +444,39 @@
 		manualPlaybackTarget = 'narration';
 	}
 
-	function failClosedControl(detail?: string | null) {
+	async function refreshLesson() {
+		if (!browser) return;
+		await initSession();
+	}
+
+	function actionForErrorResponse(
+		status: number,
+		detail?: string | null,
+		defaultAction: InitErrorAction = 'refresh'
+	): InitErrorAction {
+		if (detail === MSG_LESSON_UPDATED) {
+			return null;
+		}
+		if (status === 409) {
+			return 'refresh';
+		}
+		if (status === 422) {
+			return null;
+		}
+		return defaultAction;
+	}
+
+	function setInitError(detail: string, action: InitErrorAction) {
+		initError = { detail, action };
+		if (detail === MSG_LESSON_UPDATED) {
+			dispatch('lessonupdated');
+		}
+	}
+
+	function failClosedControl(
+		detail?: string | null,
+		{ action }: { action?: InitErrorAction } = {}
+	) {
 		if (leaseInterval) {
 			clearInterval(leaseInterval);
 			leaseInterval = null;
@@ -454,7 +497,13 @@
 
 		controllerSessionId = null;
 		playerDisabled = true;
-		initError = detail || 'Lecture video control was lost. Please refresh to continue.';
+		const resolvedDetail =
+			detail ||
+			'The video stopped because this tab is no longer connected. Refresh the lesson to continue.';
+		setInitError(
+			resolvedDetail,
+			action ?? (resolvedDetail === MSG_LESSON_UPDATED ? null : 'refresh')
+		);
 	}
 
 	function failClosedOnConflict(expanded: {
@@ -465,13 +514,15 @@
 			return false;
 		}
 
-		failClosedControl(expanded.error?.detail);
+		failClosedControl(expanded.error?.detail, {
+			action: actionForErrorResponse(expanded.$status, expanded.error?.detail)
+		});
 		return true;
 	}
 
 	async function refreshLectureVideoSession(
 		controllerSessionIdForRequest: string
-	): Promise<boolean> {
+	): Promise<LectureVideoSessionRefreshResult> {
 		playbackSessionRefreshController?.abort();
 		const refreshController = new AbortController();
 		playbackSessionRefreshController = refreshController;
@@ -487,26 +538,30 @@
 				refreshController.signal.aborted ||
 				controllerSessionId !== controllerSessionIdForRequest
 			) {
-				return false;
+				return 'failed';
 			}
 
 			const expanded = api.expandResponse(response);
 			if (expanded.error) {
-				return false;
+				return 'failed';
+			}
+			if (expanded.data.lecture_video_matches_assistant === false) {
+				failClosedControl(MSG_LESSON_UPDATED, { action: null });
+				return 'lesson_updated';
 			}
 
 			const refreshedSession = expanded.data.lecture_video_session;
 			if (!refreshedSession) {
-				return false;
+				return 'failed';
 			}
 
 			applySession(refreshedSession);
-			return true;
+			return 'refreshed';
 		} catch (error) {
 			if (error instanceof DOMException && error.name === 'AbortError') {
-				return false;
+				return 'failed';
 			}
-			return false;
+			return 'failed';
 		} finally {
 			if (playbackSessionRefreshController === refreshController) {
 				playbackSessionRefreshController = null;
@@ -561,13 +616,20 @@
 
 					const expanded = api.expandResponse(response);
 					if (expanded.$status === 409) {
-						const refreshed = await refreshLectureVideoSession(interactionControllerSessionId);
-						if (!refreshed) {
+						if (expanded.error?.detail === MSG_LESSON_UPDATED) {
+							failClosedControl(expanded.error.detail, { action: null });
+							return;
+						}
+						const refreshResult = await refreshLectureVideoSession(interactionControllerSessionId);
+						if (refreshResult === 'lesson_updated') {
+							return;
+						}
+						if (refreshResult === 'failed') {
 							if (controllerSessionId !== interactionControllerSessionId) {
 								return;
 							}
 							failClosedControl(
-								'Lecture video state changed and could not be refreshed. Please refresh to continue.'
+								'This lesson changed while you were watching. Refresh the lesson to continue.'
 							);
 							return;
 						}
@@ -576,7 +638,10 @@
 					if (expanded.error) {
 						failClosedControl(
 							expanded.error.detail ||
-								'Failed to sync lecture video playback. Please refresh to continue.'
+								'We could not save your video progress. Refresh the lesson to continue.',
+							{
+								action: actionForErrorResponse(expanded.$status, expanded.error.detail)
+							}
 						);
 						return;
 					}
@@ -641,7 +706,9 @@
 			const response = await api.acquireLectureVideoControl(fetch, classId, threadId);
 			const expanded = api.expandResponse(response);
 			if (expanded.error) {
-				failClosedControl(expanded.error.detail);
+				failClosedControl(expanded.error.detail, {
+					action: actionForErrorResponse(expanded.$status, expanded.error.detail)
+				});
 				return false;
 			}
 
@@ -737,7 +804,13 @@
 		const response = await api.acquireLectureVideoControl(fetch, classId, threadId);
 		const expanded = api.expandResponse(response);
 		if (expanded.error) {
-			failClosedControl(expanded.error.detail || 'Failed to start lecture session');
+			failClosedControl(
+				expanded.error.detail ||
+					'We could not start this lesson. Refresh the lesson and try again.',
+				{
+					action: actionForErrorResponse(expanded.$status, expanded.error.detail)
+				}
+			);
 			return;
 		}
 		controllerSessionId = expanded.data.controller_session_id;
@@ -813,7 +886,9 @@
 				);
 				const expanded = api.expandResponse(response);
 				if (expanded.error) {
-					failClosedControl(expanded.error.detail);
+					failClosedControl(expanded.error.detail, {
+						action: actionForErrorResponse(expanded.$status, expanded.error.detail)
+					});
 					return;
 				}
 				if (controllerSessionId !== renewingControllerSessionId) {
@@ -833,7 +908,11 @@
 			const historyResponse = await api.getLectureVideoHistory(fetch, classId, threadId);
 			const historyExpanded = api.expandResponse(historyResponse);
 			if (historyExpanded.error) {
-				initError = historyExpanded.error.detail || 'Failed to load lecture history';
+				setInitError(
+					historyExpanded.error.detail ||
+						'We could not load your lesson progress. Refresh the lesson and try again.',
+					actionForErrorResponse(historyExpanded.$status, historyExpanded.error.detail)
+				);
 				return [];
 			}
 			interactions = historyExpanded.data.interactions;
@@ -1111,7 +1190,10 @@
 			setVideoPosition(fromOffsetMs);
 			failClosedControl(
 				expanded.error.detail ||
-					'Failed to sync lecture video seek position. Please refresh to continue.'
+					'We could not save your new video spot. Refresh the lesson to continue.',
+				{
+					action: actionForErrorResponse(expanded.$status, expanded.error.detail)
+				}
 			);
 		} catch (error) {
 			if (controllerSessionId !== seekControllerSessionId) {
@@ -1147,7 +1229,10 @@
 
 			failClosedControl(
 				expanded.error.detail ||
-					'Failed to complete lecture video session. Please refresh to continue.'
+					'We could not mark this lesson complete. Refresh the lesson and try again.',
+				{
+					action: actionForErrorResponse(expanded.$status, expanded.error.detail)
+				}
 			);
 		} catch (error) {
 			if (controllerSessionId !== endedControllerSessionId) {
@@ -1513,9 +1598,21 @@
 {:else if initError}
 	<div class="flex h-full w-full items-center justify-center p-4">
 		<div
-			class="w-full max-w-2xl rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 text-amber-900"
+			class="flex w-full max-w-2xl flex-col gap-4 rounded-2xl border border-orange/30 bg-orange-light px-6 py-5 text-slate-900 shadow-sm sm:flex-row sm:items-center sm:justify-between"
 		>
-			{initError}
+			<div class="flex flex-col gap-1">
+				<div class="text-base font-semibold text-slate-900">Let's get you back on track</div>
+				<div class="text-sm text-slate-700">{initError.detail}</div>
+			</div>
+			{#if initErrorCanRefresh}
+				<button
+					type="button"
+					class="inline-flex shrink-0 items-center justify-center rounded-full bg-orange px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-dark focus:ring-2 focus:ring-orange focus:ring-offset-2 focus:outline-none"
+					onclick={refreshLesson}
+				>
+					Refresh lesson
+				</button>
+			{/if}
 		</div>
 	</div>
 {:else}
@@ -1566,7 +1663,7 @@
 							oncanplay={handleCanPlay}
 							onerror={() =>
 								failClosedControl(
-									'The lecture video could not be loaded. Please refresh to try again.'
+									'We could not load this video lesson. Refresh the lesson and try again.'
 								)}
 							onplay={handlePlay}
 							onpause={handlePause}
