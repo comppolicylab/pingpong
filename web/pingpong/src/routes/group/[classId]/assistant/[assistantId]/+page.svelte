@@ -3424,6 +3424,10 @@
 					>
 					<div class="flex flex-col gap-4 px-1">
 						{#if isLectureMode}
+							{@const haveInstructionsChanged =
+								normalizeNewlines(instructions) !==
+									normalizeNewlines(lectureVideoDefaultInstructions) &&
+								!!lectureVideoDefaultInstructions}
 							<div class="col-span-2 mb-1">
 								<div class="flex flex-row items-end justify-between">
 									<div>
@@ -3431,7 +3435,7 @@
 											<Label for="instructions" class="mb-0"
 												><div class="flex flex-row gap-1">
 													<div>Chat Instructions</div>
-													{#if instructions !== lectureVideoDefaultInstructions}<div>&middot;</div>
+													{#if haveInstructionsChanged}<div>&middot;</div>
 														<div class="text-gray-500">
 															Different from latest default prompt
 														</div>{/if}
@@ -3446,7 +3450,11 @@
 										<button
 											type="button"
 											class="text-xs text-blue-800 hover:underline disabled:cursor-not-allowed disabled:text-gray-400 disabled:no-underline"
-											disabled={preventEdits || instructions === lectureVideoDefaultInstructions}
+											disabled={preventEdits ||
+												haveInstructionsChanged ||
+												$loading ||
+												uploadingFSPrivate ||
+												uploadingCIPrivate}
 											onclick={() => {
 												instructions = lectureVideoDefaultInstructions;
 											}}>Switch to latest default</button
