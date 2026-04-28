@@ -20,6 +20,8 @@ depends_on: Union[str, None] = None
 
 
 def upgrade() -> None:
+    # Resolves CodeQL's py/unused-global-variable
+    _ = revision, down_revision, branch_labels, depends_on
     op.add_column(
         "lecture_videos",
         sa.Column(
