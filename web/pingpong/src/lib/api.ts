@@ -1583,6 +1583,7 @@ export type LectureVideoConfigResponse = {
 	voice_id: string;
 	lecture_video_chat_available: boolean;
 	generation_prompt?: string | null;
+	video_description_duration_ms: number;
 	overwrite_manifest: boolean;
 	manifest_generation_status?: LectureVideoProcessingRunSummary | null;
 };
@@ -2395,6 +2396,7 @@ export type CreateAssistantRequest = {
 	lecture_video_manifest?: LectureVideoManifest | null;
 	voice_id?: string | null;
 	generation_prompt?: string | null;
+	video_description_duration_ms?: number | null;
 	overwrite_manifest?: boolean;
 	create_classic_assistant?: boolean;
 	temperature: number | null;
@@ -2442,6 +2444,7 @@ export type UpdateAssistantRequest = {
 	lecture_video_manifest?: LectureVideoManifest | null;
 	voice_id?: string | null;
 	generation_prompt?: string | null;
+	video_description_duration_ms?: number | null;
 	regenerate_requested?: boolean;
 	overwrite_manifest?: boolean;
 	create_classic_assistant?: boolean;

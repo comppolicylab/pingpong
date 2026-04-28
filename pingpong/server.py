@@ -8782,6 +8782,7 @@ async def get_assistant_lecture_video_config(
         "lecture_video_manifest": response_lecture_video_manifest,
         "voice_id": lecture_video.voice_id or "",
         "lecture_video_chat_available": lecture_video_chat_available,
+        "video_description_duration_ms": lecture_video.video_description_duration_ms,
         "overwrite_manifest": lecture_video.manual_manifest,
     }
     if lecture_video.generation_prompt is not None:
@@ -9383,6 +9384,7 @@ async def create_assistant(
     lecture_video_voice_id = None
     lecture_video_voice_id_validated = False
     lecture_video_generation_prompt = None
+    lecture_video_video_description_duration_ms = None
     overwrite_lecture_video_manifest = (
         bool(req.overwrite_manifest)
         if "overwrite_manifest" in req.model_fields_set
@@ -9433,6 +9435,7 @@ async def create_assistant(
         lecture_video_manifest = req.lecture_video_manifest
         lecture_video_voice_id = req.voice_id
         lecture_video_generation_prompt = req.generation_prompt
+        lecture_video_video_description_duration_ms = req.video_description_duration_ms
         try:
             await validate_lecture_video_voice_id_or_raise(
                 class_id_int,
@@ -9451,6 +9454,7 @@ async def create_assistant(
         or req.lecture_video_manifest is not None
         or req.voice_id is not None
         or req.generation_prompt is not None
+        or req.video_description_duration_ms is not None
         or req.overwrite_manifest is not None
     ):
         raise HTTPException(
@@ -9562,6 +9566,7 @@ async def create_assistant(
         del req.lecture_video_manifest
         del req.voice_id
         del req.generation_prompt
+        del req.video_description_duration_ms
         del req.overwrite_manifest
 
         try:
@@ -9598,6 +9603,10 @@ async def create_assistant(
                     _raise_http_for_lecture_video_voice_validation_error(exc)
             lecture_video.voice_id = lecture_video_voice_id
             lecture_video.generation_prompt = lecture_video_generation_prompt
+            if lecture_video_video_description_duration_ms is not None:
+                lecture_video.video_description_duration_ms = (
+                    lecture_video_video_description_duration_ms
+                )
             if overwrite_lecture_video_manifest:
                 if lecture_video_manifest is None:
                     raise HTTPException(400, "Lecture video manifest is required.")
@@ -10229,6 +10238,7 @@ async def update_assistant(
     lecture_video_manifest = None
     lecture_video_voice_id = None
     lecture_video_generation_prompt = None
+    lecture_video_video_description_duration_ms = None
     lecture_video_voice_id_validated = False
     regenerate_requested = bool(req.regenerate_requested)
     overwrite_lecture_video_manifest = (
@@ -10241,6 +10251,7 @@ async def update_assistant(
         or "lecture_video_manifest" in req.model_fields_set
         or "voice_id" in req.model_fields_set
         or "generation_prompt" in req.model_fields_set
+        or "video_description_duration_ms" in req.model_fields_set
         or "regenerate_requested" in req.model_fields_set
         or "overwrite_manifest" in req.model_fields_set
     )
@@ -10288,6 +10299,14 @@ async def update_assistant(
                 status_code=400,
                 detail="Specifying a voice_id is required when updating lecture video data.",
             )
+        if (
+            "video_description_duration_ms" in req.model_fields_set
+            and req.video_description_duration_ms is None
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Lecture video description duration is required.",
+            )
         lecture_video = await models.LectureVideo.get_by_id_for_class(
             request.state["db"], req.lecture_video_id, int(class_id)
         )
@@ -10302,6 +10321,7 @@ async def update_assistant(
         lecture_video_manifest = req.lecture_video_manifest
         lecture_video_voice_id = req.voice_id
         lecture_video_generation_prompt = req.generation_prompt
+        lecture_video_video_description_duration_ms = req.video_description_duration_ms
         try:
             await validate_lecture_video_voice_id_or_raise(
                 int(class_id),
@@ -11175,6 +11195,9 @@ async def update_assistant(
                 )
 
             prompt_present = "generation_prompt" in req.model_fields_set
+            video_description_duration_ms_present = (
+                "video_description_duration_ms" in req.model_fields_set
+            )
             # Manifest mode transitions:
             # - manual -> manual: persist the supplied manifest only when it changed.
             # - manual -> generated: clear manual mode and queue manifest generation.
@@ -11189,6 +11212,12 @@ async def update_assistant(
                     lecture_video,
                     incoming_generation_prompt=lecture_video_generation_prompt,
                     generation_prompt_present=prompt_present,
+                    incoming_video_description_duration_ms=(
+                        lecture_video_video_description_duration_ms
+                    ),
+                    video_description_duration_ms_present=(
+                        video_description_duration_ms_present
+                    ),
                 )
             )
             if needs_manifest_generation:
@@ -11201,6 +11230,11 @@ async def update_assistant(
             if overwrite_lecture_video_manifest:
                 if lecture_video_manifest is None:
                     raise HTTPException(400, "Lecture video manifest is required.")
+                requested_video_description_duration_ms = (
+                    lecture_video.video_description_duration_ms
+                    if lecture_video_video_description_duration_ms is None
+                    else lecture_video_video_description_duration_ms
+                )
                 manifest_changed = not (
                     current_lecture_video is not None
                     and lecture_video_service.lecture_video_config_matches(
@@ -11208,6 +11242,7 @@ async def update_assistant(
                         lecture_video,
                         lecture_video_manifest,
                         lecture_video_voice_id,
+                        requested_video_description_duration_ms,
                     )
                 )
             overwrite_manifest_changed = (
@@ -11259,6 +11294,14 @@ async def update_assistant(
                 if prompt_present:
                     target_lecture_video.generation_prompt = (
                         lecture_video_generation_prompt
+                    )
+                if video_description_duration_ms_present:
+                    if lecture_video_video_description_duration_ms is None:
+                        raise HTTPException(
+                            400, "Lecture video description duration is required."
+                        )
+                    target_lecture_video.video_description_duration_ms = (
+                        lecture_video_video_description_duration_ms
                     )
                 if overwrite_lecture_video_manifest:
                     manual_manifest = cast(

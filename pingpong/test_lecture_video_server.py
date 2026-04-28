@@ -6220,12 +6220,43 @@ def test_lecture_video_config_matches_logs_invalid_current_manifest(
             requested_lecture_video,
             requested_manifest,
             DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            current_lecture_video.video_description_duration_ms,
         )
 
     assert matches is False
     assert (
         "Failed to serialize current lecture video manifest for comparison."
         in caplog.text
+    )
+
+
+def test_lecture_video_config_matches_checks_video_description_duration(
+    monkeypatch,
+):
+    requested_manifest = schemas.LectureVideoManifestV1.model_validate(
+        lecture_video_manifest()
+    )
+    current_lecture_video = make_lecture_video(
+        1, "same.mp4", voice_id=DEFAULT_LECTURE_VIDEO_VOICE_ID
+    )
+    current_lecture_video.video_description_duration_ms = 30_000
+    requested_lecture_video = make_lecture_video(1, "same.mp4")
+
+    monkeypatch.setattr(
+        lecture_video_service,
+        "lecture_video_manifest_from_model",
+        lambda _lecture_video: requested_manifest,
+    )
+
+    assert (
+        lecture_video_service.lecture_video_config_matches(
+            current_lecture_video,
+            requested_lecture_video,
+            requested_manifest,
+            DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            35_000,
+        )
+        is False
     )
 
 
@@ -6446,6 +6477,7 @@ async def test_get_assistant_lecture_video_config_returns_manifest_and_voice_id(
         ),
         "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
         "lecture_video_chat_available": False,
+        "video_description_duration_ms": 30000,
         "overwrite_manifest": True,
     }
 
@@ -8044,6 +8076,86 @@ async def test_update_assistant_with_same_lecture_video_config_is_a_no_op(
     assert refreshed_video is not None
     assert refreshed_video.voice_id == DEFAULT_LECTURE_VIDEO_VOICE_ID
     assert question == "No-op question?"
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_assistants", "class:1"),
+        ("user:123", "can_edit", "assistant:1"),
+        ("user:123", "admin", "class:1"),
+    ]
+)
+async def test_update_assistant_rejects_null_video_description_duration(
+    api, db, institution, valid_user_token, monkeypatch
+):
+    patch_lecture_video_model_list(monkeypatch)
+    manifest = lecture_video_manifest(question_text="Null duration?")
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        lecture_video = make_lecture_video(
+            class_.id,
+            "null-duration.mp4",
+            filename="null-duration.mp4",
+            status=schemas.LectureVideoStatus.UPLOADED.value,
+        )
+        session.add_all([class_, lecture_video])
+        await create_lecture_video_copy_credentials(session, class_.id)
+        await session.commit()
+        await session.refresh(lecture_video)
+
+    create_response = api.post(
+        "/api/v1/class/1/assistant",
+        json={
+            "name": "Lecture Assistant",
+            "instructions": "Guide the learner through the lecture.",
+            "description": "Lecture presentation assistant",
+            "interaction_mode": "lecture_video",
+            "model": "gpt-4o-mini",
+            "tools": [],
+            "lecture_video_id": lecture_video.id,
+            "lecture_video_manifest": manifest,
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "overwrite_manifest": True,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+
+    update_response = api.put(
+        "/api/v1/class/1/assistant/1",
+        json={
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "lecture_video_id": lecture_video.id,
+            "lecture_video_manifest": manifest,
+            "overwrite_manifest": True,
+            "video_description_duration_ms": None,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert update_response.status_code == 400
+    assert update_response.json()["detail"] == (
+        "Lecture video description duration is required."
+    )
+
+    async with db.async_session() as session:
+        lecture_video_count = await session.scalar(
+            select(func.count()).select_from(models.LectureVideo)
+        )
+        processing_run_count = await session.scalar(
+            select(func.count()).select_from(models.LectureVideoProcessingRun)
+        )
+
+    assert lecture_video_count == 1
+    assert processing_run_count == 1
 
 
 @with_user(123)

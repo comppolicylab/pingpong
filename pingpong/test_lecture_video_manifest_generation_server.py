@@ -72,6 +72,38 @@ def test_update_assistant_rejects_overlong_generation_prompt() -> None:
         )
 
 
+@pytest.mark.parametrize("duration", [4999, 300001])
+def test_create_assistant_rejects_video_description_duration_out_of_range(
+    duration: int,
+) -> None:
+    with pytest.raises(ValidationError):
+        schemas.CreateAssistant.model_validate(
+            {
+                "name": "Lecture Assistant",
+                "instructions": "Guide the learner through the lecture.",
+                "description": "Lecture presentation assistant",
+                "interaction_mode": "lecture_video",
+                "model": "gpt-4o-mini",
+                "tools": [],
+                "lecture_video_id": 1,
+                "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+                "video_description_duration_ms": duration,
+            }
+        )
+
+
+def test_update_assistant_allows_non_step_video_description_duration() -> None:
+    assistant = schemas.UpdateAssistant.model_validate(
+        {
+            "lecture_video_id": 1,
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "video_description_duration_ms": 7000,
+        }
+    )
+
+    assert assistant.video_description_duration_ms == 7000
+
+
 def test_create_assistant_rejects_manifest_when_generation_mode_requested() -> None:
     with pytest.raises(ValidationError) as exc_info:
         schemas.CreateAssistant.model_validate(
@@ -243,6 +275,153 @@ async def test_should_regenerate_manifest_matrix(
             )
             is expected
         )
+
+
+@with_institution(11, "Test Institution")
+async def test_should_regenerate_manifest_ignores_null_video_description_duration(
+    db, institution
+):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        session.add(class_)
+        await session.flush()
+        lecture_video = make_lecture_video(
+            class_.id,
+            "null-duration-regenerate.mp4",
+            status=schemas.LectureVideoStatus.READY.value,
+        )
+        validated_manifest = schemas.validate_lecture_video_manifest(
+            lecture_video_manifest()
+        )
+        assert validated_manifest is not None
+        lecture_video.manifest_data = validated_manifest.model_dump(mode="json")
+        lecture_video.video_description_duration_ms = 30_000
+        session.add(lecture_video)
+        await session.flush()
+
+        assert (
+            await lecture_video_service.should_regenerate_manifest(
+                session,
+                lecture_video,
+                incoming_generation_prompt=None,
+                generation_prompt_present=False,
+                incoming_video_description_duration_ms=None,
+                video_description_duration_ms_present=True,
+            )
+            is False
+        )
+
+
+@with_institution(11, "Test Institution")
+async def test_should_regenerate_manifest_when_video_description_duration_changes(
+    db, institution
+):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        session.add(class_)
+        await session.flush()
+        lecture_video = make_lecture_video(
+            class_.id,
+            "duration-change-regenerate.mp4",
+            status=schemas.LectureVideoStatus.READY.value,
+        )
+        validated_manifest = schemas.validate_lecture_video_manifest(
+            lecture_video_manifest()
+        )
+        assert validated_manifest is not None
+        lecture_video.manifest_data = validated_manifest.model_dump(mode="json")
+        lecture_video.video_description_duration_ms = 30_000
+        session.add(lecture_video)
+        await session.flush()
+
+        assert (
+            await lecture_video_service.should_regenerate_manifest(
+                session,
+                lecture_video,
+                incoming_generation_prompt=None,
+                generation_prompt_present=False,
+                incoming_video_description_duration_ms=35_000,
+                video_description_duration_ms_present=True,
+            )
+            is True
+        )
+
+
+@with_institution(11, "Test Institution")
+async def test_load_manifest_generation_context_defaults_null_video_description_duration(
+    db,
+    institution,
+    monkeypatch,
+):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        session.add(class_)
+        await session.flush()
+        lecture_video = make_lecture_video(
+            class_.id,
+            "null-duration-context.mp4",
+            status=schemas.LectureVideoStatus.PROCESSING.value,
+        )
+        session.add(lecture_video)
+        await session.flush()
+        run = await models.LectureVideoProcessingRun.create(
+            session,
+            lecture_video_id=lecture_video.id,
+            lecture_video_id_snapshot=lecture_video.id,
+            class_id=class_.id,
+            assistant_id_at_start=None,
+            stage=schemas.LectureVideoProcessingStage.MANIFEST_GENERATION,
+            attempt_number=1,
+            status=schemas.LectureVideoProcessingRunStatus.RUNNING,
+        )
+        run.lease_token = "lease-token"
+        run_id = run.id
+        lecture_video_id = lecture_video.id
+        await session.commit()
+
+    monkeypatch.setattr(
+        models.LectureVideo,
+        "get_by_id_with_transcript_data",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                id=lecture_video_id,
+                transcript_data=None,
+                manifest_data=None,
+                generation_prompt=None,
+                video_description_duration_ms=None,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        lecture_video_processing,
+        "get_openai_client_by_class_id",
+        AsyncMock(return_value="openai-client"),
+    )
+    monkeypatch.setattr(
+        lecture_video_processing.gemini,
+        "get_gemini_client_by_class_id",
+        AsyncMock(return_value="gemini-client"),
+    )
+
+    context = await lecture_video_processing._load_manifest_generation_run_context(
+        run_id,
+        "lease-token",
+    )
+
+    assert context is not None
+    assert context.video_description_duration_ms == 30_000
 
 
 @with_institution(11, "Test Institution")
@@ -732,12 +911,14 @@ async def test_upload_and_generate_manifest_propagates_generation_failure(
             generation_prompt="Generate checks.",
             transcript=transcript,
             temp_dir="/tmp",
+            video_description_duration_ms=30_000,
         )
 
     assert [call[0] for call in calls] == [
         "gemini-client",
         "generate",
     ]
+    assert calls[1][1]["video_description_duration_ms"] == 30_000
 
 
 @with_institution(11, "Test Institution")

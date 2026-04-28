@@ -401,6 +401,50 @@ def test_quiz_to_manifest_accepts_final_video_description_shorter_than_window() 
     ]
 
 
+def test_quiz_to_manifest_uses_custom_video_description_window() -> None:
+    quiz = _quiz_with_video_descriptions(
+        [
+            manifest_generation.GeneratedVideoDescription(
+                start_offset_ms=0,
+                end_offset_ms=10000,
+                description="The teacher writes on the board.",
+            ),
+            manifest_generation.GeneratedVideoDescription(
+                start_offset_ms=10000,
+                end_offset_ms=20000,
+                description="The teacher points at the board.",
+            ),
+        ]
+    )
+
+    manifest = manifest_generation._quiz_to_manifest(
+        quiz,
+        _transcript(),
+        video_duration_ms=20000,
+        video_description_window_ms=10000,
+    )
+
+    assert [
+        description.end_offset_ms for description in manifest.video_descriptions
+    ] == [
+        10000,
+        20000,
+    ]
+
+
+def test_build_generation_prompt_uses_custom_video_description_window() -> None:
+    prompt = manifest_generation.build_generation_prompt(
+        "Ask one question.",
+        _transcript(),
+        video_duration_ms=20000,
+        video_description_window_ms=10000,
+    )
+
+    assert "fixed 10-second windows" in prompt
+    assert "0-10000, 10000-20000" in prompt
+    assert "exactly 10000ms" in prompt
+
+
 def test_plan_manifest_generation_chunks_rebalances_short_tail() -> None:
     chunks = manifest_generation._plan_manifest_generation_chunks(3_664_600)
 
@@ -436,6 +480,22 @@ def test_plan_manifest_generation_chunks_rebalances_short_tail() -> None:
         (3_270_000, 3_510_000),
         (3_450_000, 3_664_600),
     ]
+
+
+def test_plan_manifest_generation_chunks_aligns_custom_window_boundaries() -> None:
+    chunks = manifest_generation._plan_manifest_generation_chunks(
+        700_000,
+        alignment_ms=35_000,
+    )
+
+    assert [
+        (chunk.generation_start_ms, chunk.generation_end_ms) for chunk in chunks
+    ] == [
+        (0, 280_000),
+        (280_000, 490_000),
+        (490_000, 700_000),
+    ]
+    assert all(chunk.generation_end_ms % 35_000 == 0 for chunk in chunks[:-1])
 
 
 def test_plan_manifest_generation_chunks_uses_single_chunk_under_limit() -> None:
@@ -773,6 +833,104 @@ async def test_merge_chunk_manifests_falls_back_only_for_invalid_chunk(
         "Visual descriptions were unavailable for this transcript-only generation pass."
     )
     assert "Falling back for this chunk only" in caplog.text
+
+
+async def test_merge_chunk_manifests_normalizes_split_child_descriptions(
+    monkeypatch,
+) -> None:
+    candidate_question = schemas.LectureVideoManifestQuestionV1(
+        type=schemas.LectureVideoQuestionType.SINGLE_SELECT,
+        question_text="Candidate?",
+        intro_text="Try this.",
+        stop_offset_ms=1000,
+        options=[
+            schemas.LectureVideoManifestOptionV1(
+                option_text="Combine like terms",
+                post_answer_text="Right.",
+                continue_offset_ms=1500,
+                correct=True,
+            ),
+            schemas.LectureVideoManifestOptionV1(
+                option_text="Change every variable",
+                post_answer_text="Not quite.",
+                continue_offset_ms=1500,
+                correct=False,
+            ),
+        ],
+    )
+    chunk_manifests = [
+        schemas.LectureVideoManifestV3(
+            word_level_transcription=_transcript(),
+            video_descriptions=[
+                schemas.LectureVideoManifestVideoDescriptionV3(
+                    start_offset_ms=0,
+                    end_offset_ms=15000,
+                    description="The teacher introduces the expression.",
+                )
+            ],
+            questions=[candidate_question],
+        ),
+        schemas.LectureVideoManifestV3(
+            word_level_transcription=_transcript(),
+            video_descriptions=[
+                schemas.LectureVideoManifestVideoDescriptionV3(
+                    start_offset_ms=15000,
+                    end_offset_ms=30000,
+                    description="The teacher finishes the first example.",
+                )
+            ],
+            questions=[candidate_question],
+        ),
+        schemas.LectureVideoManifestV3(
+            word_level_transcription=_transcript(),
+            video_descriptions=[
+                schemas.LectureVideoManifestVideoDescriptionV3(
+                    start_offset_ms=30000,
+                    end_offset_ms=60000,
+                    description="The teacher points at the next step.",
+                )
+            ],
+            questions=[candidate_question],
+        ),
+    ]
+
+    async def fake_generate_manifest_quiz(
+        _client,
+        *,
+        model,
+        prompt,
+        contents,
+        response_model,
+    ):  # type: ignore[no-untyped-def]
+        return manifest_generation.ReconciledGeneratedQuiz(
+            questions=[_generated_question()]
+        )
+
+    monkeypatch.setattr(
+        manifest_generation.gemini_helpers,
+        "generate_manifest_quiz",
+        fake_generate_manifest_quiz,
+    )
+
+    manifest = await manifest_generation._merge_chunk_manifests(
+        gemini_client=object(),  # type: ignore[arg-type]
+        generation_prompt_content="Ask only 1 question.",
+        model="gemini-test",
+        chunk_manifests=chunk_manifests,
+        full_transcript=_transcript(),
+        video_duration_ms=60000,
+    )
+
+    assert [
+        (description.start_offset_ms, description.end_offset_ms)
+        for description in manifest.video_descriptions
+    ] == [(0, 30000), (30000, 60000)]
+    assert manifest.video_descriptions[0].description == (
+        "The teacher introduces the expression. The teacher finishes the first example."
+    )
+    assert manifest.video_descriptions[1].description == (
+        "The teacher points at the next step."
+    )
 
 
 def test_quiz_to_manifest_reports_missing_choice_feedback() -> None:
