@@ -11254,15 +11254,33 @@ async def update_assistant(
                 current_lecture_video is not None
                 and current_lecture_video.id == lecture_video.id
             )
+            manual_manifest_takeover_only = (
+                overwrite_lecture_video_manifest
+                and overwrite_manifest_changed
+                and same_lecture_video
+                and not manifest_changed
+                and not needs_manifest_generation
+                and not regenerate_requested
+                and not voice_changed
+            )
             should_touch_lecture_video = (
                 manifest_changed
                 or needs_manifest_generation
                 or regenerate_requested
                 or voice_changed
-                or overwrite_manifest_changed
+                or (overwrite_manifest_changed and not manual_manifest_takeover_only)
                 or (current_lecture_video is None)
                 or current_lecture_video.id != lecture_video.id
             )
+
+            if manual_manifest_takeover_only:
+                await lecture_video_processing.cancel_manifest_generation_processing_runs(
+                    request.state["db"],
+                    lecture_video.id,
+                    schemas.LectureVideoProcessingCancelReason.MANUAL_MANIFEST_REPLACED,
+                )
+                lecture_video.manual_manifest = True
+                request.state["db"].add(lecture_video)
 
             if should_touch_lecture_video:
                 if needs_manifest_generation and current_lecture_video is not None:

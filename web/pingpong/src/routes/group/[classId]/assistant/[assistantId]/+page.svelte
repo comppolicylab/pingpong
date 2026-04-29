@@ -705,11 +705,7 @@
 			lastManifestRunFailed ||
 			!data.lectureVideoConfig?.lecture_video_manifest);
 	$: lectureVideoNarrationTriggeredByFormChanges =
-		isLectureMode &&
-		overwriteManifest &&
-		(lectureVideoManifestChanged ||
-			lectureVideoVoiceChanged ||
-			overwriteManifest !== originalOverwriteManifest);
+		isLectureMode && overwriteManifest && (lectureVideoManifestChanged || lectureVideoVoiceChanged);
 	$: lectureVideoRegenerationImpliedByFormChanges =
 		lectureVideoGenerationTriggeredByFormChanges || lectureVideoNarrationTriggeredByFormChanges;
 	$: canRegenerateLectureVideo = isLectureMode && !data.isCreating;

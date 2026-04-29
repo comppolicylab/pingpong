@@ -8127,6 +8127,75 @@ async def test_update_assistant_with_same_lecture_video_config_is_a_no_op(
         ("user:123", "admin", "class:1"),
     ]
 )
+async def test_update_assistant_generated_to_manual_same_manifest_does_not_renarrate(
+    api, db, institution, valid_user_token, monkeypatch
+):
+    patch_lecture_video_model_list(monkeypatch)
+    manifest = lecture_video_manifest(question_text="Keep the existing audio?")
+
+    async with db.async_session() as session:
+        class_, lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+            manifest=manifest,
+        )
+        assistant = await session.get(models.Assistant, 1)
+        assert assistant is not None
+        assistant.creator_id = 123
+        refreshed_video = await session.get(models.LectureVideo, lecture_video.id)
+        assert refreshed_video is not None
+        refreshed_video.manual_manifest = False
+        await create_lecture_video_copy_credentials(session, class_.id)
+        await session.commit()
+
+    update_response = api.put(
+        f"/api/v1/class/{class_.id}/assistant/1",
+        json={
+            "lecture_video_id": lecture_video.id,
+            "lecture_video_manifest": manifest,
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "overwrite_manifest": True,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert update_response.status_code == 200
+    assert update_response.json()["lecture_video"]["id"] == lecture_video.id
+
+    async with db.async_session() as session:
+        refreshed_video = await models.LectureVideo.get_by_id_with_copy_context(
+            session, lecture_video.id
+        )
+        processing_run_count = await session.scalar(
+            select(func.count()).select_from(models.LectureVideoProcessingRun)
+        )
+        narration_statuses = list(
+            (
+                await session.scalars(
+                    select(models.LectureVideoNarration.status).order_by(
+                        models.LectureVideoNarration.id.asc()
+                    )
+                )
+            ).all()
+        )
+
+    assert refreshed_video is not None
+    assert refreshed_video.manual_manifest is True
+    assert refreshed_video.questions[0].question_text == "Keep the existing audio?"
+    assert processing_run_count == 0
+    assert narration_statuses
+    assert set(narration_statuses) == {schemas.LectureVideoNarrationStatus.READY}
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_assistants", "class:1"),
+        ("user:123", "can_edit", "assistant:1"),
+        ("user:123", "admin", "class:1"),
+    ]
+)
 async def test_update_assistant_rejects_null_video_description_duration(
     api, db, institution, valid_user_token, monkeypatch
 ):
