@@ -14,6 +14,11 @@
 		message: string;
 		callback: ({ success, errorMessage, message_sent }: CallbackParams) => void;
 	};
+
+	export type ChatInputHandle = {
+		addFiles: (selectedFiles: File[]) => void;
+		focus: () => void;
+	};
 </script>
 
 <script lang="ts">

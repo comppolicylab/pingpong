@@ -1196,7 +1196,15 @@
 	}
 
 	export async function continueWatchingAfterChat(): Promise<boolean> {
-		if (!canParticipate || playbackLocked || sessionState !== 'playing') {
+		if (!canParticipate) {
+			return false;
+		}
+
+		if (sessionState === 'awaiting_post_answer_resume') {
+			return requestContinue();
+		}
+
+		if (playbackLocked || sessionState !== 'playing') {
 			return false;
 		}
 
@@ -1613,14 +1621,16 @@
 		}
 	}
 
-	async function requestContinue() {
+	async function requestContinue(): Promise<boolean> {
 		if (autoContinueInFlight) {
-			return;
+			return false;
 		}
 
 		autoContinueInFlight = true;
 		try {
-			autoContinueFailed = !(await handleContinue());
+			const didContinue = await handleContinue();
+			autoContinueFailed = !didContinue;
+			return didContinue;
 		} finally {
 			autoContinueInFlight = false;
 		}
