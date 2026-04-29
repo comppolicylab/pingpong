@@ -143,6 +143,7 @@
 	const resolvedNarrationAudioSrcById = new SvelteMap<number, string>();
 	let pendingNarrationCleanup: (() => void) | null = null;
 	let pendingNarrationCompletion: (() => void) | null = null;
+	let pendingNarrationChatAbort: (() => void) | null = null;
 	let currentNarrationAudio: HTMLAudioElement | null = null;
 	let narrationPlaybackGeneration = 0;
 	let pendingVideoRetryCleanup: (() => void) | null = null;
@@ -292,17 +293,22 @@
 	function completePendingNarration() {
 		const complete = pendingNarrationCompletion;
 		pendingNarrationCompletion = null;
+		pendingNarrationChatAbort = null;
 		complete?.();
 	}
 
 	function cancelPendingNarration() {
 		stopNarrationPlayback();
 		pendingNarrationCompletion = null;
+		pendingNarrationChatAbort = null;
 	}
 
 	function abortNarrationPlaybackForChatSubmit() {
 		stopNarrationPlayback();
-		completePendingNarration();
+		const abort = pendingNarrationChatAbort ?? pendingNarrationCompletion;
+		pendingNarrationCompletion = null;
+		pendingNarrationChatAbort = null;
+		abort?.();
 		clearPendingVideoRetry();
 	}
 
@@ -519,6 +525,13 @@
 
 	function maybeAutoContinueAfterPostAnswer() {
 		void requestContinue();
+	}
+
+	function pausePostAnswerNarrationForChatSubmit() {
+		postAnswerNarrationPending = false;
+		if (!hasVisiblePostAnswerFeedback(currentContinuation)) {
+			autoContinueFailed = true;
+		}
 	}
 
 	function queueVideoRetry() {
@@ -1008,10 +1021,14 @@
 			currentContinuation?.post_answer_narration_id
 		) {
 			postAnswerNarrationPending = true;
-			void playNarration(currentContinuation.post_answer_narration_id, () => {
-				postAnswerNarrationPending = false;
-				maybeAutoContinueAfterPostAnswer();
-			});
+			void playNarration(
+				currentContinuation.post_answer_narration_id,
+				() => {
+					postAnswerNarrationPending = false;
+					maybeAutoContinueAfterPostAnswer();
+				},
+				pausePostAnswerNarrationForChatSubmit
+			);
 		} else if (
 			sessionState === 'awaiting_post_answer_resume' &&
 			!hasVisiblePostAnswerFeedback(currentContinuation)
@@ -1436,10 +1453,15 @@
 		return narrationSrcPromise;
 	}
 
-	async function playNarration(narrationId: number, onComplete: () => void) {
+	async function playNarration(
+		narrationId: number,
+		onComplete: () => void,
+		onChatAbort: () => void = onComplete
+	) {
 		stopNarrationPlayback();
 		const playbackGeneration = narrationPlaybackGeneration;
 		pendingNarrationCompletion = onComplete;
+		pendingNarrationChatAbort = onChatAbort;
 
 		try {
 			const narrationSrc = await getNarrationAudioSrc(narrationId);
@@ -1595,10 +1617,14 @@
 			// Play post-answer narration if available
 			if (continuationAtAnswer?.post_answer_narration_id) {
 				postAnswerNarrationPending = true;
-				void playNarration(continuationAtAnswer.post_answer_narration_id, () => {
-					postAnswerNarrationPending = false;
-					maybeAutoContinueAfterPostAnswer();
-				});
+				void playNarration(
+					continuationAtAnswer.post_answer_narration_id,
+					() => {
+						postAnswerNarrationPending = false;
+						maybeAutoContinueAfterPostAnswer();
+					},
+					pausePostAnswerNarrationForChatSubmit
+				);
 			} else if (!hasVisiblePostAnswerFeedback(currentContinuation)) {
 				maybeAutoContinueAfterPostAnswer();
 			}
