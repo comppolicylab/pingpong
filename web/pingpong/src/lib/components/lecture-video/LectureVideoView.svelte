@@ -1,6 +1,7 @@
 <script module lang="ts">
 	export type LectureVideoViewHandle = {
-		pauseForChatSubmit: () => Promise<void>;
+		pauseForChatSubmit: () => Promise<boolean>;
+		resumeAfterChatResponse: () => Promise<boolean>;
 	};
 </script>
 
@@ -1180,18 +1181,31 @@
 
 	export async function pauseForChatSubmit() {
 		if (!canParticipate || playbackLocked || sessionState !== 'playing') {
-			return;
+			return false;
 		}
 
-		if (paused || videoElement?.paused) {
-			return;
+		if (!videoElement || paused || videoElement.paused) {
+			return false;
 		}
 
-		videoElement?.pause();
+		videoElement.pause();
 
-		if (!(await ensureControllerSession())) {
-			return;
+		await ensureControllerSession();
+
+		return true;
+	}
+
+	export async function resumeAfterChatResponse() {
+		if (!canParticipate || playbackLocked || sessionState !== 'playing' || isVideoAtEnd()) {
+			return false;
 		}
+
+		const reacquireControlPromise = controllerSessionId ? null : ensureControllerSession();
+		if (reacquireControlPromise && !(await reacquireControlPromise)) {
+			return false;
+		}
+
+		return await tryPlayVideo({ queueRetryOnFailure: true });
 	}
 
 	// =========================================================================

@@ -167,6 +167,15 @@
 	let liveLectureVideoSession: api.LectureVideoSession | null = null;
 	let lectureVideoSessionKey: string | null = null;
 	let startingReplacementLectureThread = false;
+	let lectureChatResumeIntent:
+		| {
+				id: number;
+				waitForTts: boolean;
+				streamComplete: boolean;
+				sawTtsPlayback: boolean;
+		  }
+		| null = null;
+	let lectureChatResumeIntentId = 0;
 	$: {
 		const nextKey = `${classId}:${threadId}:${lectureVideoSession?.state_version ?? 'none'}:${
 			lectureVideoSession?.state ?? 'none'
@@ -250,6 +259,19 @@
 	$: ttsPlaying = threadMgr.ttsPlaying;
 	$: if (data.threadInteractionMode === 'lecture_video') {
 		threadMgr.setTtsVolume(lecturePlayerVolume);
+	}
+	$: {
+		if (lectureChatResumeIntent?.waitForTts && $ttsPlaying) {
+			lectureChatResumeIntent.sawTtsPlayback = true;
+		}
+		if (
+			lectureChatResumeIntent?.waitForTts &&
+			lectureChatResumeIntent.streamComplete &&
+			lectureChatResumeIntent.sawTtsPlayback &&
+			!$ttsPlaying
+		) {
+			void resumeLectureVideoAfterChat(lectureChatResumeIntent.id);
+		}
 	}
 	$: loading = threadMgr.loading;
 	$: canFetchMore = threadMgr.canFetchMore;
@@ -714,16 +736,48 @@
 	};
 
 	const handleLectureChatSubmit = async (message: ChatInputMessage) => {
-		void lectureVideoViewRef?.pauseForChatSubmit();
+		const shouldResumeAfterChat = (await lectureVideoViewRef?.pauseForChatSubmit()) === true;
+		const resumeIntent = shouldResumeAfterChat
+			? {
+					id: ++lectureChatResumeIntentId,
+					waitForTts: lectureVideoTtsAvailable && !$ttsMuted,
+					streamComplete: false,
+					sawTtsPlayback: false
+				}
+			: null;
+		lectureChatResumeIntent = resumeIntent;
+
 		await postMessage(message);
+
+		if (!resumeIntent || lectureChatResumeIntent?.id !== resumeIntent.id) {
+			return;
+		}
+
+		resumeIntent.streamComplete = true;
+		lectureChatResumeIntent = resumeIntent;
+		if (!resumeIntent.waitForTts || !resumeIntent.sawTtsPlayback) {
+			void resumeLectureVideoAfterChat(resumeIntent.id);
+		}
 	};
 
 	const handleLectureSessionChange = (e: CustomEvent<api.LectureVideoSession>) => {
 		liveLectureVideoSession = e.detail;
+		if (e.detail.state !== 'playing') {
+			lectureChatResumeIntent = null;
+		}
 	};
 
 	const handleLecturePlaybackResumed = () => {
+		lectureChatResumeIntent = null;
 		threadMgr.interruptTts().catch(() => {});
+	};
+
+	const resumeLectureVideoAfterChat = async (intentId: number) => {
+		if (lectureChatResumeIntent?.id !== intentId) {
+			return;
+		}
+		lectureChatResumeIntent = null;
+		await lectureVideoViewRef?.resumeAfterChatResponse();
 	};
 
 	// Handle file upload
