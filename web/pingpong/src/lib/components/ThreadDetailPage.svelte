@@ -31,7 +31,10 @@
 	import { DoubleBounce } from 'svelte-loading-spinners';
 	import Markdown from '$lib/components/Markdown.svelte';
 	import Logo from '$lib/components/Logo.svelte';
-	import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
+	import ChatInput, {
+		type ChatInputHandle,
+		type ChatInputMessage
+	} from '$lib/components/ChatInput.svelte';
 	import ChatDropOverlay from '$lib/components/ChatDropOverlay.svelte';
 	import AssistantVersionBadge from '$lib/components/AssistantVersionBadge.svelte';
 	import {
@@ -224,7 +227,6 @@
 			!$trashThreadFiles.includes(k) &&
 			(codeInterpreterAcceptedFiles ?? '').includes(v.content_type)
 	).length;
-	type ChatInputHandle = { addFiles: (selectedFiles: File[]) => void };
 	let chatInputRef: ChatInputHandle | null = null;
 	let dropOverlayVisible = false;
 	let dropDragCounter = 0;
@@ -724,6 +726,10 @@
 
 	const handleLecturePlaybackResumed = () => {
 		threadMgr.interruptTts().catch(() => {});
+	};
+
+	const handleLectureChatContinueWatching = async () => {
+		return (await lectureVideoViewRef?.continueWatchingAfterChat()) ?? false;
 	};
 
 	// Handle file upload
@@ -1577,6 +1583,7 @@
 								{fetchMoreMessages}
 								onsubmit={handleLectureChatSubmit}
 								ondismisserror={handleLectureChatDismissError}
+								oncontinuewatching={handleLectureChatContinueWatching}
 								onmutettstoggle={() => {
 									threadMgr.setTtsMuted(!$ttsMuted);
 								}}

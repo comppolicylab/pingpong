@@ -2,7 +2,10 @@
 	import { afterNavigate, goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { navigating, page } from '$app/stores';
-	import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
+	import ChatInput, {
+		type ChatInputHandle,
+		type ChatInputMessage
+	} from '$lib/components/ChatInput.svelte';
 	import ChatDropOverlay from '$lib/components/ChatDropOverlay.svelte';
 	import {
 		Button,
@@ -44,7 +47,6 @@
 	export let data;
 	$: lectureVideoEnabled = data?.lectureVideoEnabled ?? true;
 	$: conversationId = $page.url.searchParams.get('conversation_id');
-	type ChatInputHandle = { addFiles: (selectedFiles: File[]) => void };
 	let chatInputRef: ChatInputHandle | null = null;
 	let dropOverlayVisible = false;
 	let dropDragCounter = 0;

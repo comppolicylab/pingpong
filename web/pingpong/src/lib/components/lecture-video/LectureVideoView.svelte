@@ -1,6 +1,7 @@
 <script module lang="ts">
 	export type LectureVideoViewHandle = {
 		pauseForChatSubmit: () => Promise<void>;
+		continueWatchingAfterChat: () => Promise<boolean>;
 	};
 </script>
 
@@ -1221,6 +1222,33 @@
 		}
 	}
 
+	export async function continueWatchingAfterChat(): Promise<boolean> {
+		if (!canParticipate) {
+			return false;
+		}
+
+		if (sessionState === 'awaiting_post_answer_resume') {
+			return requestContinue();
+		}
+
+		if (playbackLocked || sessionState !== 'playing') {
+			return false;
+		}
+
+		if (videoElement && !videoElement.paused) {
+			return true;
+		}
+
+		if (!(await ensureControllerSession())) {
+			return false;
+		}
+
+		return tryPlayVideo({
+			suppressInteractionPost: true,
+			queueRetryOnFailure: true
+		});
+	}
+
 	// =========================================================================
 	// Video event handlers
 	// =========================================================================
@@ -1634,14 +1662,16 @@
 		}
 	}
 
-	async function requestContinue() {
+	async function requestContinue(): Promise<boolean> {
 		if (autoContinueInFlight) {
-			return;
+			return false;
 		}
 
 		autoContinueInFlight = true;
 		try {
-			autoContinueFailed = !(await handleContinue());
+			const didContinue = await handleContinue();
+			autoContinueFailed = !didContinue;
+			return didContinue;
 		} finally {
 			autoContinueInFlight = false;
 		}

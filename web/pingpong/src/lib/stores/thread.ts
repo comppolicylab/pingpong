@@ -41,6 +41,7 @@ export type Message = {
 	data: api.OpenAIMessage;
 	error: ApiError | null;
 	persisted: boolean;
+	streamedInSession?: boolean;
 };
 
 function getOutputIndexValue(message: api.OpenAIMessage): number | null {
@@ -193,6 +194,7 @@ export class ThreadManager {
 
 	#data: Writable<ThreadManagerState>;
 	#fetcher: api.Fetcher;
+	#streamedMessageIds = new Set<string>();
 
 	// -- TTS audio playback state --
 	#ttsPlayer: WavStreamPlayer | null = null;
@@ -257,37 +259,44 @@ export class ThreadManager {
 			const realMessages = ($data.data?.messages || []).map((message) => ({
 				data: withSourceMessageId(message),
 				error: null,
-				persisted: true
+				persisted: true,
+				streamedInSession: this.#streamedMessageIds.has(message.id)
 			}));
 			const ci_messages = ($data.data?.ci_messages || []).map((message) => ({
 				data: withSourceMessageId(message),
 				error: null,
-				persisted: true
+				persisted: true,
+				streamedInSession: this.#streamedMessageIds.has(message.id)
 			}));
 			const fs_messages = ($data.data?.fs_messages || []).map((message) => ({
 				data: withSourceMessageId(message),
 				error: null,
-				persisted: true
+				persisted: true,
+				streamedInSession: this.#streamedMessageIds.has(message.id)
 			}));
 			const ws_messages = ($data.data?.ws_messages || []).map((message) => ({
 				data: withSourceMessageId(message),
 				error: null,
-				persisted: true
+				persisted: true,
+				streamedInSession: this.#streamedMessageIds.has(message.id)
 			}));
 			const mcp_messages = ($data.data?.mcp_messages || []).map((message) => ({
 				data: withSourceMessageId(message),
 				error: null,
-				persisted: true
+				persisted: true,
+				streamedInSession: this.#streamedMessageIds.has(message.id)
 			}));
 			const reasoning_messages = ($data.data?.reasoning_messages || []).map((message) => ({
 				data: withSourceMessageId(message),
 				error: null,
-				persisted: true
+				persisted: true,
+				streamedInSession: this.#streamedMessageIds.has(message.id)
 			}));
 			const optimisticMessages = $data.optimistic.map((message) => ({
 				data: withSourceMessageId(message),
 				error: null,
-				persisted: false
+				persisted: false,
+				streamedInSession: false
 			}));
 
 			const allMessages = realMessages
@@ -335,6 +344,7 @@ export class ThreadManager {
 
 					const merged: Message = {
 						...base,
+						streamedInSession: group.some((message) => message.streamedInSession),
 						data: {
 							...base.data,
 							content: mergedContent
@@ -999,6 +1009,9 @@ export class ThreadManager {
 						created_at: createdAt,
 						output_index: outputIndex
 					};
+					if (message.role === 'assistant') {
+						this.#streamedMessageIds.add(message.id);
+					}
 					return {
 						...d,
 						optimistic: d.optimistic.filter((m) => m.metadata?.lecture_context_pending !== true),

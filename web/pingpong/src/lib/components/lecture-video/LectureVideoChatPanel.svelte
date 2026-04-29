@@ -9,11 +9,15 @@
 		TerminalOutline,
 		MessageDotsOutline,
 		VolumeUpSolid,
-		VolumeMuteSolid
+		VolumeMuteSolid,
+		PlaySolid
 	} from 'flowbite-svelte-icons';
 	import Logo from '$lib/components/Logo.svelte';
 	import Markdown from '$lib/components/Markdown.svelte';
-	import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
+	import ChatInput, {
+		type ChatInputHandle,
+		type ChatInputMessage
+	} from '$lib/components/ChatInput.svelte';
 	import FileCitation from '$lib/components/FileCitation.svelte';
 	import FilePlaceholder from '$lib/components/FilePlaceholder.svelte';
 	import FileSearchCallItem from '$lib/components/FileSearchCallItem.svelte';
@@ -23,6 +27,7 @@
 	import WebSearchCallItem from '$lib/components/WebSearchCallItem.svelte';
 	import { scroll } from '$lib/actions/scroll';
 	import type { Message } from '$lib/stores/thread';
+	import { SvelteSet } from 'svelte/reactivity';
 
 	let {
 		classId,
@@ -52,7 +57,8 @@
 		ttsMuted = false,
 		ttsPlaying = false,
 		ttsAvailable = false,
-		onmutettstoggle
+		onmutettstoggle,
+		oncontinuewatching
 	}: {
 		classId: number;
 		threadId: number;
@@ -82,9 +88,12 @@
 		ttsPlaying?: boolean;
 		ttsAvailable?: boolean;
 		onmutettstoggle?: () => void;
+		oncontinuewatching?: () => Promise<boolean> | boolean;
 	} = $props();
 
 	let messagesContainer: HTMLDivElement | null = null;
+	let chatInputRef: ChatInputHandle | null = $state(null);
+	const dismissedContinuePromptMessageIds = new SvelteSet<string>();
 
 	type MCPContent = api.MCPServerCallItem | api.MCPListToolsCallItem;
 	type ContentBlock =
@@ -246,6 +255,61 @@
 		}
 		return getThreadImageUrl(fileId);
 	};
+
+	const messageHasVisibleText = (message: api.OpenAIMessage) =>
+		message.content.some(
+			(content) => content.type === 'text' && content.text.value.trim().length > 0
+		);
+
+	let latestMessageId = $derived(messages.at(-1)?.data.id ?? null);
+	let latestAssistantMessageId = $derived.by(() => {
+		const latestMessage = messages.at(-1)?.data;
+		if (!latestMessage || latestMessage.role !== 'assistant') {
+			return null;
+		}
+		if (isLectureContextPending(latestMessage) || !messageHasVisibleText(latestMessage)) {
+			return null;
+		}
+		return latestMessage.id;
+	});
+
+	const shouldShowContinueWatchingPrompt = (message: Message) =>
+		showInput &&
+		!waiting &&
+		!submitting &&
+		!!oncontinuewatching &&
+		message.streamedInSession === true &&
+		message.data.id === latestMessageId &&
+		message.data.id === latestAssistantMessageId &&
+		!dismissedContinuePromptMessageIds.has(message.data.id);
+
+	let continueWatchingPromptScrollKey = $derived.by(() => {
+		const latestMessage = messages.at(-1);
+		if (!latestMessage || !shouldShowContinueWatchingPrompt(latestMessage)) {
+			return null;
+		}
+		return `continue-watching-${latestMessage.data.id}`;
+	});
+
+	function dismissContinueWatchingPrompt(message: Message) {
+		dismissedContinuePromptMessageIds.add(message.data.id);
+	}
+
+	async function continueWatching(message: Message) {
+		try {
+			const didResume = (await oncontinuewatching?.()) ?? true;
+			if (didResume) {
+				dismissContinueWatchingPrompt(message);
+			}
+		} catch {
+			// Keep prompt visible so the user can retry.
+		}
+	}
+
+	function askAnotherQuestion(message: Message) {
+		dismissContinueWatchingPrompt(message);
+		chatInputRef?.focus();
+	}
 </script>
 
 <div
@@ -254,7 +318,12 @@
 	<div
 		class="min-h-0 flex-1 overflow-y-auto px-4 py-4"
 		bind:this={messagesContainer}
-		use:scroll={{ messages, threadId, streaming: submitting || waiting }}
+		use:scroll={{
+			messages,
+			threadId,
+			streaming: submitting || waiting,
+			tailContentKey: continueWatchingPromptScrollKey
+		}}
 	>
 		{#if canFetchMore}
 			<div class="mb-4 flex justify-center">
@@ -430,6 +499,25 @@
 							{/if}
 						{/if}
 					{/each}
+					{#if shouldShowContinueWatchingPrompt(message)}
+						<div class="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2" aria-live="polite">
+							<button
+								type="button"
+								class="inline-flex items-center gap-2 rounded-full bg-orange px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-dark focus:ring-2 focus:ring-orange focus:ring-offset-2 focus:outline-none"
+								onclick={() => void continueWatching(message)}
+							>
+								<PlaySolid class="h-3.5 w-3.5" />
+								Continue watching
+							</button>
+							<button
+								type="button"
+								class="text-sm font-medium text-slate-500 transition hover:text-slate-800"
+								onclick={() => askAnotherQuestion(message)}
+							>
+								Ask another question
+							</button>
+						</div>
+					{/if}
 				</div>
 			</div>
 		{/each}
@@ -459,6 +547,7 @@
 					</div>
 				{/if}
 				<ChatInput
+					bind:this={chatInputRef}
 					{mimeType}
 					maxSize={0}
 					attachments={[]}
