@@ -1163,7 +1163,15 @@ async def test_validate_class_credential_for_gemini_raises_unavailable_for_non_a
 async def test_synthesize_elevenlabs_voice_sample_maps_generic_voice_not_found_api_error(
     monkeypatch,
 ):
-    def fake_convert(*, voice_id, text, output_format, request_options=None):
+    def fake_convert(
+        *,
+        voice_id,
+        text,
+        model_id,
+        output_format,
+        voice_settings,
+        request_options=None,
+    ):
         raise ElevenLabsApiError(
             status_code=404,
             body={
@@ -1195,7 +1203,15 @@ async def test_synthesize_elevenlabs_voice_sample_maps_generic_voice_not_found_a
 async def test_synthesize_elevenlabs_speech_maps_invalid_voice_id_api_error(
     monkeypatch,
 ):
-    def fake_convert(*, voice_id, text, output_format, request_options=None):
+    def fake_convert(
+        *,
+        voice_id,
+        text,
+        model_id,
+        output_format,
+        voice_settings,
+        request_options=None,
+    ):
         raise ElevenLabsApiError(
             status_code=400,
             body={
@@ -1228,7 +1244,15 @@ async def test_synthesize_elevenlabs_speech_maps_invalid_voice_id_api_error(
 async def test_synthesize_elevenlabs_speech_maps_non_voice_unprocessable_entity_to_unavailable(
     monkeypatch,
 ):
-    def fake_convert(*, voice_id, text, output_format, request_options=None):
+    def fake_convert(
+        *,
+        voice_id,
+        text,
+        model_id,
+        output_format,
+        voice_settings,
+        request_options=None,
+    ):
         raise ElevenLabsUnprocessableEntityError(
             body=HttpValidationError(
                 detail=[
@@ -1266,10 +1290,20 @@ async def test_synthesize_elevenlabs_voice_sample_requests_direct_ogg_opus(monke
     async def fake_collect_audio_chunks(_audio_stream) -> bytes:
         return b"ogg-audio"
 
-    def fake_convert(*, voice_id, text, output_format, request_options=None):
+    def fake_convert(
+        *,
+        voice_id,
+        text,
+        model_id,
+        output_format,
+        voice_settings,
+        request_options=None,
+    ):
         seen["voice_id"] = voice_id
         seen["text"] = text
+        seen["model_id"] = model_id
         seen["output_format"] = output_format
+        seen["voice_settings"] = voice_settings
         seen["request_options"] = request_options
         return object()
 
@@ -1296,7 +1330,14 @@ async def test_synthesize_elevenlabs_voice_sample_requests_direct_ogg_opus(monke
         "api_key": "elevenlabs-key",
         "voice_id": "voice-123",
         "text": elevenlabs_module.ELEVENLABS_VOICE_VALIDATION_SAMPLE_TEXT,
+        "model_id": "eleven_flash_v2_5",
         "output_format": "opus_48000_32",
+        "voice_settings": elevenlabs_module.VoiceSettings(
+            stability=0.5,
+            use_speaker_boost=True,
+            similarity_boost=0.8,
+            speed=1.0,
+        ),
         "request_options": {"timeout_in_seconds": 15},
     }
     assert sample_text == elevenlabs_module.ELEVENLABS_VOICE_VALIDATION_SAMPLE_TEXT
@@ -1308,7 +1349,15 @@ async def test_synthesize_elevenlabs_voice_sample_requests_direct_ogg_opus(monke
 async def test_synthesize_elevenlabs_voice_sample_maps_httpx_timeout_to_unavailable(
     monkeypatch,
 ):
-    def fake_convert(*, voice_id, text, output_format, request_options=None):
+    def fake_convert(
+        *,
+        voice_id,
+        text,
+        model_id,
+        output_format,
+        voice_settings,
+        request_options=None,
+    ):
         assert request_options == {"timeout_in_seconds": 15}
         raise httpx.ReadTimeout("timed out")
 
@@ -1339,10 +1388,20 @@ async def test_synthesize_elevenlabs_speech_omits_request_options_without_timeou
     async def fake_collect_audio_chunks(_audio_stream) -> bytes:
         return b"ogg-audio"
 
-    def fake_convert(*, voice_id, text, output_format, request_options=None):
+    def fake_convert(
+        *,
+        voice_id,
+        text,
+        model_id,
+        output_format,
+        voice_settings,
+        request_options=None,
+    ):
         seen["voice_id"] = voice_id
         seen["text"] = text
+        seen["model_id"] = model_id
         seen["output_format"] = output_format
+        seen["voice_settings"] = voice_settings
         seen["request_options"] = request_options
         return object()
 
@@ -1366,7 +1425,14 @@ async def test_synthesize_elevenlabs_speech_omits_request_options_without_timeou
         "api_key": "elevenlabs-key",
         "voice_id": "voice-123",
         "text": "Narration text",
+        "model_id": "eleven_flash_v2_5",
         "output_format": "opus_48000_32",
+        "voice_settings": elevenlabs_module.VoiceSettings(
+            stability=0.5,
+            use_speaker_boost=True,
+            similarity_boost=0.8,
+            speed=1.0,
+        ),
         "request_options": None,
     }
     assert content_type == "audio/ogg"
