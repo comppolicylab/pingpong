@@ -645,11 +645,34 @@ async def test_create_lecture_thread_success(api, db, institution, valid_user_to
 async def test_get_thread_returns_lecture_video_session(
     api, authz, config, db, institution, valid_user_token
 ):
+    manifest = lecture_video_manifest_v2()
+    manifest["questions"].append(
+        {
+            "type": "single_select",
+            "question_text": "What comes next?",
+            "intro_text": "Second intro",
+            "stop_offset_ms": 2500,
+            "options": [
+                {
+                    "option_text": "Continue",
+                    "post_answer_text": "Nice work",
+                    "continue_offset_ms": 3000,
+                    "correct": True,
+                },
+                {
+                    "option_text": "Stop",
+                    "post_answer_text": "Not this one",
+                    "continue_offset_ms": 3200,
+                    "correct": False,
+                },
+            ],
+        }
+    )
     async with db.async_session() as session:
         class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
             session,
             institution,
-            manifest=lecture_video_manifest_v2(),
+            manifest=manifest,
         )
 
     create_response = api.post(
@@ -674,6 +697,12 @@ async def test_get_thread_returns_lecture_video_session(
     assert session_data["state_version"] == 1
     assert session_data["current_question"] is None
     assert session_data["current_continuation"] is None
+    assert [
+        marker["stop_offset_ms"] for marker in session_data["question_markers"]
+    ] == [
+        1000,
+        2500,
+    ]
     assert session_data["controller"]["has_control"] is False
     assert response.json()["lecture_video_tts_available"] is False
 

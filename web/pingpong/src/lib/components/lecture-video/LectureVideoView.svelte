@@ -17,6 +17,7 @@
 		LectureVideoSession,
 		LectureVideoSessionState,
 		LectureVideoQuestionPrompt,
+		LectureVideoQuestionMarker,
 		LectureVideoContinuation,
 		LectureVideoInteractionHistoryItem
 	} from '$lib/api';
@@ -93,6 +94,7 @@
 	>();
 	let allQuestions: { id: number; position: number; questionText: string; stopOffsetMs: number }[] =
 		$state([]);
+	let sessionQuestionMarkers: LectureVideoQuestionMarker[] = $state([]);
 
 	// --- Player state ---
 	let videoElement: HTMLVideoElement | null = $state(null);
@@ -198,11 +200,19 @@
 	}
 
 	// --- Derived ---
-	let questionMarkers = $derived(
-		[...allQuestions]
-			.sort((a, b) => a.stopOffsetMs - b.stopOffsetMs)
-			.map((q) => {
-				const answer = answeredQuestions.get(q.id);
+	let questionMarkers = $derived.by(() => {
+		const markerOffsets = new SvelteMap<number, number>();
+		for (const marker of sessionQuestionMarkers) {
+			markerOffsets.set(marker.id, marker.stop_offset_ms);
+		}
+		for (const question of allQuestions) {
+			markerOffsets.set(question.id, question.stopOffsetMs);
+		}
+
+		return [...markerOffsets]
+			.sort((a, b) => a[1] - b[1])
+			.map(([id, offsetMs]) => {
+				const answer = answeredQuestions.get(id);
 				const state: QuestionMarkerState =
 					answer == null
 						? 'upcoming'
@@ -210,13 +220,13 @@
 							? 'correct'
 							: 'incorrect';
 				return {
-					id: q.id,
-					offsetMs: q.stopOffsetMs,
+					id,
+					offsetMs,
 					label: 'Comprehension Check',
 					state
 				};
-			})
-	);
+			});
+	});
 	let playbackLocked = $derived(playerDisabled || questionPlaybackLocked);
 	let hasQuestionPrompt = $derived(hasVisibleQuestionPrompt(sessionState));
 	let isCompleted = $derived(isCompletedSession(sessionState));
@@ -445,6 +455,7 @@
 		currentContinuation = null;
 		answeredQuestions.clear();
 		allQuestions = [];
+		sessionQuestionMarkers = [];
 		currentTimeMs = 0;
 		paused = true;
 		subtitleText = null;
@@ -1187,6 +1198,7 @@
 		stateVersion = session.state_version;
 		currentQuestion = session.current_question;
 		currentContinuation = session.current_continuation;
+		sessionQuestionMarkers = session.question_markers ?? [];
 		if (session.controller.has_control) {
 			setControllerLease(session.controller.lease_duration_ms);
 		} else {

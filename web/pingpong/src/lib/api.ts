@@ -1630,6 +1630,11 @@ export type LectureVideoQuestionPrompt = {
 	options: LectureVideoOptionPrompt[];
 };
 
+export type LectureVideoQuestionMarker = {
+	id: number;
+	stop_offset_ms: number;
+};
+
 export type LectureVideoContinuation = {
 	option_id: number;
 	correct_option_id: number | null;
@@ -1655,6 +1660,7 @@ export type LectureVideoSession = {
 	latest_interaction_at: string | null;
 	current_question: LectureVideoQuestionPrompt | null;
 	current_continuation: LectureVideoContinuation | null;
+	question_markers: LectureVideoQuestionMarker[];
 	state_version: number;
 	controller: LectureVideoSessionController;
 };
