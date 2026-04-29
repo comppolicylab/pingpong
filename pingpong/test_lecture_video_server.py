@@ -674,6 +674,19 @@ async def test_get_thread_returns_lecture_video_session(
             institution,
             manifest=manifest,
         )
+        expected_question_markers = [
+            {"id": question.id, "stop_offset_ms": question.stop_offset_ms}
+            for question in (
+                await session.scalars(
+                    select(models.LectureVideoQuestion)
+                    .where(
+                        models.LectureVideoQuestion.lecture_video_id
+                        == _lecture_video.id
+                    )
+                    .order_by(models.LectureVideoQuestion.stop_offset_ms)
+                )
+            ).all()
+        ]
 
     create_response = api.post(
         f"/api/v1/class/{class_.id}/thread/lecture",
@@ -697,12 +710,10 @@ async def test_get_thread_returns_lecture_video_session(
     assert session_data["state_version"] == 1
     assert session_data["current_question"] is None
     assert session_data["current_continuation"] is None
-    assert [
-        marker["stop_offset_ms"] for marker in session_data["question_markers"]
-    ] == [
-        1000,
-        2500,
-    ]
+    assert session_data["question_markers"] == expected_question_markers
+    assert all(
+        isinstance(marker["id"], int) for marker in session_data["question_markers"]
+    )
     assert session_data["controller"]["has_control"] is False
     assert response.json()["lecture_video_tts_available"] is False
 

@@ -201,17 +201,22 @@
 
 	// --- Derived ---
 	let questionMarkers = $derived.by(() => {
-		const markerOffsets = new SvelteMap<number, number>();
+		const markerOffsets = allQuestions.map((question) => ({
+			id: question.id,
+			offsetMs: question.stopOffsetMs
+		}));
 		for (const marker of sessionQuestionMarkers) {
-			markerOffsets.set(marker.id, marker.stop_offset_ms);
-		}
-		for (const question of allQuestions) {
-			markerOffsets.set(question.id, question.stopOffsetMs);
+			const existingMarker = markerOffsets.find((item) => item.id === marker.id);
+			if (existingMarker) {
+				existingMarker.offsetMs = marker.stop_offset_ms;
+			} else {
+				markerOffsets.push({ id: marker.id, offsetMs: marker.stop_offset_ms });
+			}
 		}
 
-		return [...markerOffsets]
-			.sort((a, b) => a[1] - b[1])
-			.map(([id, offsetMs]) => {
+		return markerOffsets
+			.sort((a, b) => a.offsetMs - b.offsetMs)
+			.map(({ id, offsetMs }) => {
 				const answer = answeredQuestions.get(id);
 				const state: QuestionMarkerState =
 					answer == null

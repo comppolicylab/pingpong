@@ -163,7 +163,7 @@ def _question_markers(
             stop_offset_ms=question.stop_offset_ms,
         )
         for question in sorted(
-            thread.lecture_video.questions, key=lambda item: item.position
+            thread.lecture_video.questions, key=lambda item: item.stop_offset_ms
         )
     ]
 
