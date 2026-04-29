@@ -142,6 +142,7 @@
 	const narrationObjectUrls = new SvelteSet<string>();
 	const resolvedNarrationAudioSrcById = new SvelteMap<number, string>();
 	let pendingNarrationCleanup: (() => void) | null = null;
+	let pendingNarrationCompletion: (() => void) | null = null;
 	let currentNarrationAudio: HTMLAudioElement | null = null;
 	let narrationPlaybackGeneration = 0;
 	let pendingVideoRetryCleanup: (() => void) | null = null;
@@ -288,10 +289,20 @@
 		currentNarrationAudio = null;
 	}
 
+	function completePendingNarration() {
+		const complete = pendingNarrationCompletion;
+		pendingNarrationCompletion = null;
+		complete?.();
+	}
+
+	function cancelPendingNarration() {
+		stopNarrationPlayback();
+		pendingNarrationCompletion = null;
+	}
+
 	function abortNarrationPlaybackForChatSubmit() {
 		stopNarrationPlayback();
-		introNarrationPending = false;
-		postAnswerNarrationPending = false;
+		completePendingNarration();
 		clearPendingVideoRetry();
 	}
 
@@ -497,7 +508,7 @@
 		narrationObjectUrls.clear();
 		narrationAudioSrcById.clear();
 		resolvedNarrationAudioSrcById.clear();
-		stopNarrationPlayback();
+		cancelPendingNarration();
 	}
 
 	function clearPendingVideoRetry() {
@@ -558,7 +569,7 @@
 
 		clearPendingVideoRetry();
 		resumeOffsetOnCanPlay = null;
-		stopNarrationPlayback();
+		cancelPendingNarration();
 		autoContinueInFlight = false;
 		playbackSessionRefreshController?.abort();
 		playbackSessionRefreshController = null;
@@ -904,7 +915,7 @@
 			leaseInterval = null;
 		}
 
-		stopNarrationPlayback();
+		cancelPendingNarration();
 		clearPendingVideoRetry();
 
 		if (videoElement && !videoElement.paused) {
@@ -985,15 +996,9 @@
 			if (currentQuestion.intro_narration_id) {
 				playerDisabled = true;
 				introNarrationPending = true;
-				void playNarration(currentQuestion.intro_narration_id, {
-					onEnded: () => {
-						playerDisabled = false;
-						introNarrationPending = false;
-					},
-					onError: () => {
-						playerDisabled = false;
-						introNarrationPending = false;
-					}
+				void playNarration(currentQuestion.intro_narration_id, () => {
+					playerDisabled = false;
+					introNarrationPending = false;
 				});
 			}
 		}
@@ -1003,15 +1008,9 @@
 			currentContinuation?.post_answer_narration_id
 		) {
 			postAnswerNarrationPending = true;
-			void playNarration(currentContinuation.post_answer_narration_id, {
-				onEnded: () => {
-					postAnswerNarrationPending = false;
-					maybeAutoContinueAfterPostAnswer();
-				},
-				onError: () => {
-					postAnswerNarrationPending = false;
-					maybeAutoContinueAfterPostAnswer();
-				}
+			void playNarration(currentContinuation.post_answer_narration_id, () => {
+				postAnswerNarrationPending = false;
+				maybeAutoContinueAfterPostAnswer();
 			});
 		} else if (
 			sessionState === 'awaiting_post_answer_resume' &&
@@ -1437,15 +1436,10 @@
 		return narrationSrcPromise;
 	}
 
-	async function playNarration(
-		narrationId: number,
-		handlers: {
-			onEnded?: () => void;
-			onError?: () => void;
-		} = {}
-	) {
+	async function playNarration(narrationId: number, onComplete: () => void) {
 		stopNarrationPlayback();
 		const playbackGeneration = narrationPlaybackGeneration;
+		pendingNarrationCompletion = onComplete;
 
 		try {
 			const narrationSrc = await getNarrationAudioSrc(narrationId);
@@ -1465,7 +1459,7 @@
 				if (currentNarrationAudio === audio) {
 					currentNarrationAudio = null;
 				}
-				handlers.onEnded?.();
+				completePendingNarration();
 			});
 			audio.addEventListener('error', () => {
 				if (playbackGeneration !== narrationPlaybackGeneration) {
@@ -1477,7 +1471,7 @@
 				if (currentNarrationAudio === audio) {
 					currentNarrationAudio = null;
 				}
-				handlers.onError?.();
+				completePendingNarration();
 			});
 			try {
 				await audio.play();
@@ -1503,7 +1497,7 @@
 				return;
 			}
 			currentNarrationAudio = null;
-			handlers.onError?.();
+			completePendingNarration();
 		}
 	}
 
@@ -1519,17 +1513,10 @@
 		if (currentQuestion.intro_narration_id) {
 			playerDisabled = true;
 			introNarrationPending = true;
-			void playNarration(currentQuestion.intro_narration_id, {
-				onEnded: () => {
-					playerDisabled = false;
-					introNarrationPending = false;
-					void postQuestionPresented(rollbackState);
-				},
-				onError: () => {
-					playerDisabled = false;
-					introNarrationPending = false;
-					void postQuestionPresented(rollbackState);
-				}
+			void playNarration(currentQuestion.intro_narration_id, () => {
+				playerDisabled = false;
+				introNarrationPending = false;
+				void postQuestionPresented(rollbackState);
 			});
 		} else {
 			void postQuestionPresented(rollbackState);
@@ -1608,15 +1595,9 @@
 			// Play post-answer narration if available
 			if (continuationAtAnswer?.post_answer_narration_id) {
 				postAnswerNarrationPending = true;
-				void playNarration(continuationAtAnswer.post_answer_narration_id, {
-					onEnded: () => {
-						postAnswerNarrationPending = false;
-						maybeAutoContinueAfterPostAnswer();
-					},
-					onError: () => {
-						postAnswerNarrationPending = false;
-						maybeAutoContinueAfterPostAnswer();
-					}
+				void playNarration(continuationAtAnswer.post_answer_narration_id, () => {
+					postAnswerNarrationPending = false;
+					maybeAutoContinueAfterPostAnswer();
 				});
 			} else if (!hasVisiblePostAnswerFeedback(currentContinuation)) {
 				maybeAutoContinueAfterPostAnswer();
