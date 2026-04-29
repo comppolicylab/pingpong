@@ -734,6 +734,11 @@ class LectureVideoQuestionPrompt(BaseModel):
     options: list[LectureVideoOptionPrompt]
 
 
+class LectureVideoQuestionMarker(BaseModel):
+    id: int
+    stop_offset_ms: int = Field(..., ge=0)
+
+
 class LectureVideoContinuation(BaseModel):
     option_id: int
     correct_option_id: int | None = None
@@ -786,6 +791,7 @@ class LectureVideoSession(BaseModel):
     latest_interaction_at: datetime | None = None
     current_question: LectureVideoQuestionPrompt | None = None
     current_continuation: LectureVideoContinuation | None = None
+    question_markers: list[LectureVideoQuestionMarker] = Field(default_factory=list)
     state_version: int = Field(..., ge=1)
     controller: LectureVideoSessionController
 

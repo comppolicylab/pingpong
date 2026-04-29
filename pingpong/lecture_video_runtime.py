@@ -152,6 +152,22 @@ def _question_prompt(
     )
 
 
+def _question_markers(
+    thread: models.Thread,
+) -> list[schemas.LectureVideoQuestionMarker]:
+    if not thread.lecture_video:
+        return []
+    return [
+        schemas.LectureVideoQuestionMarker(
+            id=question.id,
+            stop_offset_ms=question.stop_offset_ms,
+        )
+        for question in sorted(
+            thread.lecture_video.questions, key=lambda item: item.stop_offset_ms
+        )
+    ]
+
+
 def _get_current_question(
     thread: models.Thread, state: models.LectureVideoThreadState
 ) -> models.LectureVideoQuestion | None:
@@ -248,6 +264,7 @@ def build_lecture_video_session(
         current_continuation=(
             _build_continuation(thread, state) if request_has_control else None
         ),
+        question_markers=_question_markers(thread),
         state_version=state.version,
         controller=schemas.LectureVideoSessionController(
             has_control=request_has_control,
