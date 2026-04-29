@@ -23,6 +23,7 @@
 	} from '$lib/api';
 	import { hasVisiblePostAnswerFeedback } from '$lib/lectureVideoFeedback';
 	import { mergeQuestionOptions } from '$lib/utils/lecture-video';
+	import { LECTURE_NARRATION_VOLUME_SCALE } from './audio-levels';
 	import LectureVideoPlayer from './LectureVideoPlayer.svelte';
 	import LectureVideoQuestionGallery from './LectureVideoQuestionGallery.svelte';
 	import LectureVideoCompletedView from './LectureVideoCompletedView.svelte';
@@ -159,6 +160,7 @@
 	let controllerAcquireGeneration = 0;
 	let activePageRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
 	let initErrorCanRefresh = $derived(showRefreshAction && initError?.action === 'refresh');
+	let narrationVolume = $derived(playerVolume * LECTURE_NARRATION_VOLUME_SCALE);
 	function shouldShowContinuePrompt(): boolean {
 		return (
 			(sessionState === 'awaiting_post_answer_resume' &&
@@ -363,7 +365,7 @@
 
 	$effect(() => {
 		if (currentNarrationAudio) {
-			currentNarrationAudio.volume = playerVolume;
+			currentNarrationAudio.volume = narrationVolume;
 		}
 	});
 
@@ -1514,7 +1516,7 @@
 				return;
 			}
 			const audio = new Audio(narrationSrc);
-			audio.volume = playerVolume;
+			audio.volume = narrationVolume;
 			currentNarrationAudio = audio;
 			audio.addEventListener('ended', () => {
 				if (playbackGeneration !== narrationPlaybackGeneration) {

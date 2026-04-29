@@ -84,6 +84,7 @@
 	import LectureVideoView, {
 		type LectureVideoViewHandle
 	} from '$lib/components/lecture-video/LectureVideoView.svelte';
+	import { LECTURE_CHAT_TTS_VOLUME_SCALE } from '$lib/components/lecture-video/audio-levels';
 	import LectureVideoChatPanel from '$lib/components/lecture-video/LectureVideoChatPanel.svelte';
 
 	function formatLectureVideoTitle(filename: string | null | undefined): string | null {
@@ -251,7 +252,7 @@
 	$: waiting = threadMgr.waiting;
 	$: ttsPlaying = threadMgr.ttsPlaying;
 	$: if (data.threadInteractionMode === 'lecture_video') {
-		threadMgr.setTtsVolume(lecturePlayerVolume);
+		threadMgr.setTtsVolume(lecturePlayerVolume * LECTURE_CHAT_TTS_VOLUME_SCALE);
 	}
 	$: loading = threadMgr.loading;
 	$: canFetchMore = threadMgr.canFetchMore;
