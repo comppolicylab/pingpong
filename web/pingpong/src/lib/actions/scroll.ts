@@ -4,6 +4,7 @@ export type ScrollParams = {
 	messages: Message[];
 	threadId: number;
 	streaming: boolean;
+	tailContentKey?: string | null;
 };
 
 export const scroll = (el: HTMLDivElement, params: ScrollParams) => {
@@ -19,6 +20,7 @@ export const scroll = (el: HTMLDivElement, params: ScrollParams) => {
 	let programmaticScrollTimeout: ReturnType<typeof setTimeout> | null = null;
 	let lastKnownScrollHeight = el.scrollHeight;
 	let lastMessageId: string | null = params.messages[params.messages.length - 1]?.data.id ?? null;
+	let lastTailContentKey: string | null = params.tailContentKey ?? null;
 	let currentThreadId = params.threadId;
 	let isStreaming = params.streaming;
 
@@ -207,6 +209,7 @@ export const scroll = (el: HTMLDivElement, params: ScrollParams) => {
 				currentThreadId = nextParams.threadId;
 				userPausedAutoScroll = false;
 				lastMessageId = null;
+				lastTailContentKey = nextParams.tailContentKey ?? null;
 				lastScrollTop = 0;
 				lastKnownScrollHeight = el.scrollHeight;
 				scheduleScrollToBottom();
@@ -217,10 +220,13 @@ export const scroll = (el: HTMLDivElement, params: ScrollParams) => {
 			const nextLastMessage = nextMessages[nextMessages.length - 1];
 			const nextLastMessageId = nextLastMessage?.data.id ?? null;
 			const hasNewTailMessage = nextLastMessageId && nextLastMessageId !== lastMessageId;
+			const nextTailContentKey = nextParams.tailContentKey ?? null;
+			const hasTailContentChange = nextTailContentKey !== lastTailContentKey;
 			const isCurrentUserTail =
 				nextLastMessage?.data.role === 'user' &&
 				nextLastMessage?.data.metadata?.is_current_user === true;
 			lastMessageId = nextLastMessageId;
+			lastTailContentKey = nextTailContentKey;
 
 			if (isStreaming && !wasStreaming) {
 				userPausedAutoScroll = false;
@@ -231,7 +237,7 @@ export const scroll = (el: HTMLDivElement, params: ScrollParams) => {
 				if (hasNewTailMessage && isCurrentUserTail) {
 					userPausedAutoScroll = false;
 				}
-				if (!userPausedAutoScroll && (hasNewTailMessage || isStreaming)) {
+				if (!userPausedAutoScroll && (hasNewTailMessage || hasTailContentChange || isStreaming)) {
 					scheduleScrollToBottom();
 				}
 			});

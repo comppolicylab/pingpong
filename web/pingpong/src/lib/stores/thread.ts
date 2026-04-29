@@ -997,7 +997,14 @@ export class ThreadManager {
 					const message: api.OpenAIMessage = {
 						...chunk.message,
 						created_at: createdAt,
-						output_index: outputIndex
+						output_index: outputIndex,
+						metadata:
+							chunk.message.role === 'assistant'
+								? {
+										...(chunk.message.metadata ?? {}),
+										lecture_video_chat_streamed: true
+									}
+								: chunk.message.metadata
 					};
 					return {
 						...d,

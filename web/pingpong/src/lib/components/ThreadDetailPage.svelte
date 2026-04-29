@@ -726,6 +726,10 @@
 		threadMgr.interruptTts().catch(() => {});
 	};
 
+	const handleLectureChatContinueWatching = async () => {
+		await lectureVideoViewRef?.continueWatchingAfterChat();
+	};
+
 	// Handle file upload
 	const handleUpload = (
 		f: File,
@@ -1577,6 +1581,7 @@
 								{fetchMoreMessages}
 								onsubmit={handleLectureChatSubmit}
 								ondismisserror={handleLectureChatDismissError}
+								oncontinuewatching={handleLectureChatContinueWatching}
 								onmutettstoggle={() => {
 									threadMgr.setTtsMuted(!$ttsMuted);
 								}}

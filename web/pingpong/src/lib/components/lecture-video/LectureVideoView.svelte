@@ -1,6 +1,7 @@
 <script module lang="ts">
 	export type LectureVideoViewHandle = {
 		pauseForChatSubmit: () => Promise<void>;
+		continueWatchingAfterChat: () => Promise<boolean>;
 	};
 </script>
 
@@ -1192,6 +1193,22 @@
 		if (!(await ensureControllerSession())) {
 			return;
 		}
+	}
+
+	export async function continueWatchingAfterChat(): Promise<boolean> {
+		if (!canParticipate || playbackLocked || sessionState !== 'playing') {
+			return false;
+		}
+
+		if (videoElement && !videoElement.paused) {
+			return true;
+		}
+
+		if (!(await ensureControllerSession())) {
+			return false;
+		}
+
+		return await tryPlayVideo();
 	}
 
 	// =========================================================================

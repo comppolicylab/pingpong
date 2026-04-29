@@ -9,7 +9,8 @@
 		TerminalOutline,
 		MessageDotsOutline,
 		VolumeUpSolid,
-		VolumeMuteSolid
+		VolumeMuteSolid,
+		PlaySolid
 	} from 'flowbite-svelte-icons';
 	import Logo from '$lib/components/Logo.svelte';
 	import Markdown from '$lib/components/Markdown.svelte';
@@ -23,6 +24,7 @@
 	import WebSearchCallItem from '$lib/components/WebSearchCallItem.svelte';
 	import { scroll } from '$lib/actions/scroll';
 	import type { Message } from '$lib/stores/thread';
+	import { SvelteSet } from 'svelte/reactivity';
 
 	let {
 		classId,
@@ -52,7 +54,8 @@
 		ttsMuted = false,
 		ttsPlaying = false,
 		ttsAvailable = false,
-		onmutettstoggle
+		onmutettstoggle,
+		oncontinuewatching
 	}: {
 		classId: number;
 		threadId: number;
@@ -82,9 +85,11 @@
 		ttsPlaying?: boolean;
 		ttsAvailable?: boolean;
 		onmutettstoggle?: () => void;
+		oncontinuewatching?: () => Promise<void> | void;
 	} = $props();
 
 	let messagesContainer: HTMLDivElement | null = null;
+	let dismissedContinuePromptMessageIds = $state(new Set<string>());
 
 	type MCPContent = api.MCPServerCallItem | api.MCPListToolsCallItem;
 	type ContentBlock =
@@ -231,6 +236,9 @@
 	const isLectureContextPending = (message: api.OpenAIMessage) =>
 		message.metadata?.lecture_context_pending === true;
 
+	const isStreamedAssistantMessage = (message: api.OpenAIMessage) =>
+		message.metadata?.lecture_video_chat_streamed === true;
+
 	const getThreadImageUrl = (fileId: string) =>
 		api.fullPath(`/class/${classId}/thread/${threadId}/image/${fileId}`);
 
@@ -246,6 +254,55 @@
 		}
 		return getThreadImageUrl(fileId);
 	};
+
+	const messageHasVisibleText = (message: api.OpenAIMessage) =>
+		message.content.some(
+			(content) => content.type === 'text' && content.text.value.trim().length > 0
+		);
+
+	let latestMessageId = $derived(messages.at(-1)?.data.id ?? null);
+	let latestAssistantMessageId = $derived.by(() => {
+		const latestMessage = messages.at(-1)?.data;
+		if (!latestMessage || latestMessage.role !== 'assistant') {
+			return null;
+		}
+		if (isLectureContextPending(latestMessage) || !messageHasVisibleText(latestMessage)) {
+			return null;
+		}
+		return latestMessage.id;
+	});
+
+	const shouldShowContinueWatchingPrompt = (message: api.OpenAIMessage) =>
+		showInput &&
+		!waiting &&
+		!submitting &&
+		!!oncontinuewatching &&
+		isStreamedAssistantMessage(message) &&
+		message.id === latestMessageId &&
+		message.id === latestAssistantMessageId &&
+		!dismissedContinuePromptMessageIds.has(message.id);
+
+	let continueWatchingPromptScrollKey = $derived.by(() => {
+		const latestMessage = messages.at(-1)?.data;
+		if (!latestMessage || !shouldShowContinueWatchingPrompt(latestMessage)) {
+			return null;
+		}
+		return `continue-watching-${latestMessage.id}`;
+	});
+
+	async function continueWatching(messageId: string) {
+		dismissedContinuePromptMessageIds = new SvelteSet(dismissedContinuePromptMessageIds).add(
+			messageId
+		);
+		await oncontinuewatching?.();
+	}
+
+	function askAnotherQuestion(messageId: string) {
+		dismissedContinuePromptMessageIds = new SvelteSet(dismissedContinuePromptMessageIds).add(
+			messageId
+		);
+		document.getElementById('message')?.focus();
+	}
 </script>
 
 <div
@@ -254,7 +311,12 @@
 	<div
 		class="min-h-0 flex-1 overflow-y-auto px-4 py-4"
 		bind:this={messagesContainer}
-		use:scroll={{ messages, threadId, streaming: submitting || waiting }}
+		use:scroll={{
+			messages,
+			threadId,
+			streaming: submitting || waiting,
+			tailContentKey: continueWatchingPromptScrollKey
+		}}
 	>
 		{#if canFetchMore}
 			<div class="mb-4 flex justify-center">
@@ -430,6 +492,25 @@
 							{/if}
 						{/if}
 					{/each}
+					{#if shouldShowContinueWatchingPrompt(message.data)}
+						<div class="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
+							<button
+								type="button"
+								class="inline-flex items-center gap-2 rounded-full bg-orange px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-dark focus:ring-2 focus:ring-orange focus:ring-offset-2 focus:outline-none"
+								onclick={() => void continueWatching(message.data.id)}
+							>
+								<PlaySolid class="h-3.5 w-3.5" />
+								Continue watching
+							</button>
+							<button
+								type="button"
+								class="text-sm font-medium text-slate-500 transition hover:text-slate-800"
+								onclick={() => askAnotherQuestion(message.data.id)}
+							>
+								Ask another question
+							</button>
+						</div>
+					{/if}
 				</div>
 			</div>
 		{/each}
