@@ -1301,7 +1301,9 @@ async def test_synthesize_elevenlabs_voice_sample_requests_direct_ogg_opus(monke
     ):
         seen["voice_id"] = voice_id
         seen["text"] = text
+        seen["model_id"] = model_id
         seen["output_format"] = output_format
+        seen["voice_settings"] = voice_settings
         seen["request_options"] = request_options
         return object()
 
@@ -1328,7 +1330,14 @@ async def test_synthesize_elevenlabs_voice_sample_requests_direct_ogg_opus(monke
         "api_key": "elevenlabs-key",
         "voice_id": "voice-123",
         "text": elevenlabs_module.ELEVENLABS_VOICE_VALIDATION_SAMPLE_TEXT,
+        "model_id": "eleven_flash_v2_5",
         "output_format": "opus_48000_32",
+        "voice_settings": elevenlabs_module.VoiceSettings(
+            stability=0.5,
+            use_speaker_boost=True,
+            similarity_boost=0.8,
+            speed=1.0,
+        ),
         "request_options": {"timeout_in_seconds": 15},
     }
     assert sample_text == elevenlabs_module.ELEVENLABS_VOICE_VALIDATION_SAMPLE_TEXT

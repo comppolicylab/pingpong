@@ -1,21 +1,22 @@
 import logging
 import ssl
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Mapping
 from html import unescape
 import re
-from typing import Any
+from types import MappingProxyType
+from typing import Any, Final
 from urllib.parse import quote, urlencode
 
 import aiohttp
 import httpx
 import orjson
+from elevenlabs import VoiceSettings
 from elevenlabs.client import AsyncElevenLabs
 from elevenlabs.core.api_error import ApiError as ElevenLabsApiError
 from elevenlabs.core.request_options import RequestOptions
 from elevenlabs.errors import (
     UnauthorizedError as ElevenLabsUnauthorizedError,
 )
-from elevenlabs.types.voice_settings import VoiceSettings
 
 from pingpong import schemas
 from pingpong.class_credential_validation import (
@@ -34,12 +35,14 @@ ELEVENLABS_VOICE_VALIDATION_OUTPUT_FORMAT = "opus_48000_32"
 ELEVENLABS_VOICE_VALIDATION_CONTENT_TYPE = "audio/ogg"
 ELEVENLABS_VOICE_SAMPLE_TEXT_HEADER = "X-PingPong-Voice-Sample-Text"
 ELEVENLABS_TTS_MODEL = "eleven_flash_v2_5"
-ELEVENLABS_TTS_VOICE_SETTINGS: dict[str, Any] = {
-    "stability": 0.5,
-    "use_speaker_boost": True,
-    "similarity_boost": 0.8,
-    "speed": 1.0,
-}
+ELEVENLABS_TTS_VOICE_SETTINGS: Final[Mapping[str, Any]] = MappingProxyType(
+    {
+        "stability": 0.5,
+        "use_speaker_boost": True,
+        "similarity_boost": 0.8,
+        "speed": 1.0,
+    }
+)
 ELEVENLABS_STREAMING_TTS_CONNECT_TIMEOUT = aiohttp.ClientWSTimeout(
     ws_receive=30.0,
     ws_close=10.0,
