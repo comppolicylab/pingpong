@@ -22,6 +22,7 @@
 	} from '$lib/api';
 	import { hasVisiblePostAnswerFeedback } from '$lib/lectureVideoFeedback';
 	import { mergeQuestionOptions } from '$lib/utils/lecture-video';
+	import { LECTURE_NARRATION_VOLUME_SCALE } from './audio-levels';
 	import LectureVideoPlayer from './LectureVideoPlayer.svelte';
 	import LectureVideoQuestionGallery from './LectureVideoQuestionGallery.svelte';
 	import LectureVideoCompletedView from './LectureVideoCompletedView.svelte';
@@ -38,7 +39,6 @@
 	const ERROR_CONTROLLER_LEASE_EXPIRED = 'controller_lease_expired';
 	const CONTROL_RECOVERY_GRACE_MS = 1_000;
 	const ACTIVE_PAGE_RECOVERY_DEBOUNCE_MS = 150;
-	const LECTURE_NARRATION_VOLUME_GAIN = 0.85;
 	type InitErrorAction = 'refresh' | null;
 	type InitErrorState = {
 		detail: string;
@@ -158,7 +158,7 @@
 	let controllerAcquireGeneration = 0;
 	let activePageRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
 	let initErrorCanRefresh = $derived(showRefreshAction && initError?.action === 'refresh');
-	let narrationVolume = $derived(playerVolume * LECTURE_NARRATION_VOLUME_GAIN);
+	let narrationVolume = $derived(playerVolume * LECTURE_NARRATION_VOLUME_SCALE);
 	function shouldShowContinuePrompt(): boolean {
 		return (
 			(sessionState === 'awaiting_post_answer_resume' &&
