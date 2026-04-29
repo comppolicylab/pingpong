@@ -1208,7 +1208,7 @@
 			return false;
 		}
 
-		return await tryPlayVideo();
+		return tryPlayVideo();
 	}
 
 	// =========================================================================

@@ -24,7 +24,8 @@
 	import WebSearchCallItem from '$lib/components/WebSearchCallItem.svelte';
 	import { scroll } from '$lib/actions/scroll';
 	import type { Message } from '$lib/stores/thread';
-	import { SvelteSet } from 'svelte/reactivity';
+
+	type ChatInputHandle = { focus: () => void };
 
 	let {
 		classId,
@@ -85,11 +86,11 @@
 		ttsPlaying?: boolean;
 		ttsAvailable?: boolean;
 		onmutettstoggle?: () => void;
-		oncontinuewatching?: () => Promise<void> | void;
+		oncontinuewatching?: () => Promise<boolean> | boolean;
 	} = $props();
 
 	let messagesContainer: HTMLDivElement | null = null;
-	let dismissedContinuePromptMessageIds = $state(new Set<string>());
+	let chatInputRef: ChatInputHandle | null = $state(null);
 
 	type MCPContent = api.MCPServerCallItem | api.MCPListToolsCallItem;
 	type ContentBlock =
@@ -237,7 +238,10 @@
 		message.metadata?.lecture_context_pending === true;
 
 	const isStreamedAssistantMessage = (message: api.OpenAIMessage) =>
-		message.metadata?.lecture_video_chat_streamed === true;
+		message.metadata?.streamed_in_session === true;
+
+	const isContinueWatchingPromptDismissed = (message: api.OpenAIMessage) =>
+		message.metadata?.continue_watching_prompt_dismissed === true;
 
 	const getThreadImageUrl = (fileId: string) =>
 		api.fullPath(`/class/${classId}/thread/${threadId}/image/${fileId}`);
@@ -280,7 +284,7 @@
 		isStreamedAssistantMessage(message) &&
 		message.id === latestMessageId &&
 		message.id === latestAssistantMessageId &&
-		!dismissedContinuePromptMessageIds.has(message.id);
+		!isContinueWatchingPromptDismissed(message);
 
 	let continueWatchingPromptScrollKey = $derived.by(() => {
 		const latestMessage = messages.at(-1)?.data;
@@ -290,18 +294,34 @@
 		return `continue-watching-${latestMessage.id}`;
 	});
 
-	async function continueWatching(messageId: string) {
-		dismissedContinuePromptMessageIds = new SvelteSet(dismissedContinuePromptMessageIds).add(
-			messageId
-		);
-		await oncontinuewatching?.();
+	function dismissContinueWatchingPrompt(message: api.OpenAIMessage) {
+		messages = messages.map((item) => {
+			if (item.data.id !== message.id) {
+				return item;
+			}
+			return {
+				...item,
+				data: {
+					...item.data,
+					metadata: {
+						...(item.data.metadata ?? {}),
+						continue_watching_prompt_dismissed: true
+					}
+				}
+			};
+		});
 	}
 
-	function askAnotherQuestion(messageId: string) {
-		dismissedContinuePromptMessageIds = new SvelteSet(dismissedContinuePromptMessageIds).add(
-			messageId
-		);
-		document.getElementById('message')?.focus();
+	async function continueWatching(message: api.OpenAIMessage) {
+		const didResume = (await oncontinuewatching?.()) ?? true;
+		if (didResume) {
+			dismissContinueWatchingPrompt(message);
+		}
+	}
+
+	function askAnotherQuestion(message: api.OpenAIMessage) {
+		dismissContinueWatchingPrompt(message);
+		chatInputRef?.focus();
 	}
 </script>
 
@@ -493,11 +513,11 @@
 						{/if}
 					{/each}
 					{#if shouldShowContinueWatchingPrompt(message.data)}
-						<div class="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
+						<div class="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2" aria-live="polite">
 							<button
 								type="button"
 								class="inline-flex items-center gap-2 rounded-full bg-orange px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-dark focus:ring-2 focus:ring-orange focus:ring-offset-2 focus:outline-none"
-								onclick={() => void continueWatching(message.data.id)}
+								onclick={() => void continueWatching(message.data)}
 							>
 								<PlaySolid class="h-3.5 w-3.5" />
 								Continue watching
@@ -505,7 +525,7 @@
 							<button
 								type="button"
 								class="text-sm font-medium text-slate-500 transition hover:text-slate-800"
-								onclick={() => askAnotherQuestion(message.data.id)}
+								onclick={() => askAnotherQuestion(message.data)}
 							>
 								Ask another question
 							</button>
@@ -540,6 +560,7 @@
 					</div>
 				{/if}
 				<ChatInput
+					bind:this={chatInputRef}
 					{mimeType}
 					maxSize={0}
 					attachments={[]}

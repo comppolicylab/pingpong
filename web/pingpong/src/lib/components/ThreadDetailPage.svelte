@@ -727,7 +727,7 @@
 	};
 
 	const handleLectureChatContinueWatching = async () => {
-		await lectureVideoViewRef?.continueWatchingAfterChat();
+		return (await lectureVideoViewRef?.continueWatchingAfterChat()) ?? false;
 	};
 
 	// Handle file upload

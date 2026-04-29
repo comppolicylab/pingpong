@@ -287,8 +287,10 @@
 		if (!browser) {
 			return;
 		}
-		document.getElementById('message')?.focus();
+		realRef?.focus();
 	};
+
+	export const focus = focusMessage;
 
 	$: if (!loading || !uploading) {
 		focusMessage();
@@ -477,11 +479,10 @@
 	// Fix the height of the container when the file list changes.
 	const fixFileListHeight: Action<HTMLElement, FileUploadInfo[]> = () => {
 		const update = () => {
-			const el = document.getElementById('message');
-			if (!el) {
+			if (!realRef) {
 				return;
 			}
-			fixHeight(el as HTMLTextAreaElement);
+			fixHeight(realRef);
 		};
 		return { update };
 	};

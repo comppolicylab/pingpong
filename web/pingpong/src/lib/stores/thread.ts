@@ -1002,7 +1002,7 @@ export class ThreadManager {
 							chunk.message.role === 'assistant'
 								? {
 										...(chunk.message.metadata ?? {}),
-										lecture_video_chat_streamed: true
+										streamed_in_session: true
 									}
 								: chunk.message.metadata
 					};
