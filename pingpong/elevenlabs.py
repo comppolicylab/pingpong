@@ -15,6 +15,7 @@ from elevenlabs.core.request_options import RequestOptions
 from elevenlabs.errors import (
     UnauthorizedError as ElevenLabsUnauthorizedError,
 )
+from elevenlabs.types.voice_settings import VoiceSettings
 
 from pingpong import schemas
 from pingpong.class_credential_validation import (
@@ -32,6 +33,13 @@ ELEVENLABS_VOICE_VALIDATION_SAMPLE_TEXT = (
 ELEVENLABS_VOICE_VALIDATION_OUTPUT_FORMAT = "opus_48000_32"
 ELEVENLABS_VOICE_VALIDATION_CONTENT_TYPE = "audio/ogg"
 ELEVENLABS_VOICE_SAMPLE_TEXT_HEADER = "X-PingPong-Voice-Sample-Text"
+ELEVENLABS_TTS_MODEL = "eleven_flash_v2_5"
+ELEVENLABS_TTS_VOICE_SETTINGS: dict[str, Any] = {
+    "stability": 0.5,
+    "use_speaker_boost": True,
+    "similarity_boost": 0.8,
+    "speed": 1.0,
+}
 ELEVENLABS_STREAMING_TTS_CONNECT_TIMEOUT = aiohttp.ClientWSTimeout(
     ws_receive=30.0,
     ws_close=10.0,
@@ -136,7 +144,9 @@ async def synthesize_elevenlabs_speech(
             client.text_to_speech.convert(
                 voice_id=voice_id,
                 text=text,
+                model_id=ELEVENLABS_TTS_MODEL,
                 output_format=ELEVENLABS_VOICE_VALIDATION_OUTPUT_FORMAT,
+                voice_settings=VoiceSettings(**ELEVENLABS_TTS_VOICE_SETTINGS),
                 request_options=request_options,
             ),
         )
@@ -271,7 +281,7 @@ async def validate_elevenlabs_api_key(api_key: str) -> bool:
 # Streaming TTS via ElevenLabs WebSocket API
 # ---------------------------------------------------------------------------
 
-ELEVENLABS_STREAMING_TTS_MODEL = "eleven_flash_v2_5"
+ELEVENLABS_STREAMING_TTS_MODEL = ELEVENLABS_TTS_MODEL
 ELEVENLABS_STREAMING_TTS_OUTPUT_FORMAT = "pcm_24000"
 ELEVENLABS_STREAMING_TTS_CHUNK_LENGTH_SCHEDULE = [50]
 
@@ -582,12 +592,7 @@ class ElevenLabsStreamingTTS:
                 {
                     "text": " ",
                     "try_trigger_generation": True,
-                    "voice_settings": {
-                        "stability": 0.5,
-                        "use_speaker_boost": True,
-                        "similarity_boost": 0.8,
-                        "speed": 1.0,
-                    },
+                    "voice_settings": dict(ELEVENLABS_TTS_VOICE_SETTINGS),
                     "generation_config": {
                         "chunk_length_schedule": (
                             ELEVENLABS_STREAMING_TTS_CHUNK_LENGTH_SCHEDULE
