@@ -296,9 +296,13 @@
 	}
 
 	async function continueWatching(message: Message) {
-		const didResume = (await oncontinuewatching?.()) ?? true;
-		if (didResume) {
-			dismissContinueWatchingPrompt(message);
+		try {
+			const didResume = (await oncontinuewatching?.()) ?? true;
+			if (didResume) {
+				dismissContinueWatchingPrompt(message);
+			}
+		} catch {
+			// Keep prompt visible so the user can retry.
 		}
 	}
 

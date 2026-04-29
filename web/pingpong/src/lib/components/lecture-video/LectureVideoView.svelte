@@ -1216,7 +1216,10 @@
 			return false;
 		}
 
-		return tryPlayVideo();
+		return tryPlayVideo({
+			suppressInteractionPost: true,
+			queueRetryOnFailure: true
+		});
 	}
 
 	// =========================================================================
