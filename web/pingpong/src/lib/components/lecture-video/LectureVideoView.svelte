@@ -38,6 +38,7 @@
 	const ERROR_CONTROLLER_LEASE_EXPIRED = 'controller_lease_expired';
 	const CONTROL_RECOVERY_GRACE_MS = 1_000;
 	const ACTIVE_PAGE_RECOVERY_DEBOUNCE_MS = 150;
+	const LECTURE_NARRATION_VOLUME_GAIN = 0.85;
 	type InitErrorAction = 'refresh' | null;
 	type InitErrorState = {
 		detail: string;
@@ -157,6 +158,7 @@
 	let controllerAcquireGeneration = 0;
 	let activePageRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
 	let initErrorCanRefresh = $derived(showRefreshAction && initError?.action === 'refresh');
+	let narrationVolume = $derived(playerVolume * LECTURE_NARRATION_VOLUME_GAIN);
 	function shouldShowContinuePrompt(): boolean {
 		return (
 			(sessionState === 'awaiting_post_answer_resume' &&
@@ -348,7 +350,7 @@
 
 	$effect(() => {
 		if (currentNarrationAudio) {
-			currentNarrationAudio.volume = playerVolume;
+			currentNarrationAudio.volume = narrationVolume;
 		}
 	});
 
@@ -1497,7 +1499,7 @@
 				return;
 			}
 			const audio = new Audio(narrationSrc);
-			audio.volume = playerVolume;
+			audio.volume = narrationVolume;
 			currentNarrationAudio = audio;
 			audio.addEventListener('ended', () => {
 				if (playbackGeneration !== narrationPlaybackGeneration) {
