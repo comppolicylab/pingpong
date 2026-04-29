@@ -143,6 +143,7 @@
 	const resolvedNarrationAudioSrcById = new SvelteMap<number, string>();
 	let pendingNarrationCleanup: (() => void) | null = null;
 	let currentNarrationAudio: HTMLAudioElement | null = null;
+	let narrationPlaybackGeneration = 0;
 	let pendingVideoRetryCleanup: (() => void) | null = null;
 	let manualPlaybackTarget: 'video' | 'narration' | null = $state(null);
 	let autoContinueInFlight = $state(false);
@@ -280,10 +281,18 @@
 	}
 
 	function stopNarrationPlayback() {
+		narrationPlaybackGeneration += 1;
 		pendingNarrationCleanup?.();
 		pendingNarrationCleanup = null;
 		currentNarrationAudio?.pause();
 		currentNarrationAudio = null;
+	}
+
+	function abortNarrationPlaybackForChatSubmit() {
+		stopNarrationPlayback();
+		introNarrationPending = false;
+		postAnswerNarrationPending = false;
+		clearPendingVideoRetry();
 	}
 
 	function trackQuestion(
@@ -1179,6 +1188,8 @@
 	}
 
 	export async function pauseForChatSubmit() {
+		abortNarrationPlaybackForChatSubmit();
+
 		if (!canParticipate || playbackLocked || sessionState !== 'playing') {
 			return;
 		}
@@ -1434,13 +1445,20 @@
 		} = {}
 	) {
 		stopNarrationPlayback();
+		const playbackGeneration = narrationPlaybackGeneration;
 
 		try {
 			const narrationSrc = await getNarrationAudioSrc(narrationId);
+			if (playbackGeneration !== narrationPlaybackGeneration) {
+				return;
+			}
 			const audio = new Audio(narrationSrc);
 			audio.volume = playerVolume;
 			currentNarrationAudio = audio;
 			audio.addEventListener('ended', () => {
+				if (playbackGeneration !== narrationPlaybackGeneration) {
+					return;
+				}
 				if (manualPlaybackTarget === 'narration' && currentNarrationAudio === audio) {
 					clearPendingVideoRetry();
 				}
@@ -1450,6 +1468,9 @@
 				handlers.onEnded?.();
 			});
 			audio.addEventListener('error', () => {
+				if (playbackGeneration !== narrationPlaybackGeneration) {
+					return;
+				}
 				if (manualPlaybackTarget === 'narration' && currentNarrationAudio === audio) {
 					clearPendingVideoRetry();
 				}
@@ -1460,8 +1481,15 @@
 			});
 			try {
 				await audio.play();
+				if (playbackGeneration !== narrationPlaybackGeneration) {
+					audio.pause();
+					return;
+				}
 				clearPendingVideoRetry();
 			} catch {
+				if (playbackGeneration !== narrationPlaybackGeneration) {
+					return;
+				}
 				pendingNarrationCleanup = () => {
 					audio.pause();
 					if (currentNarrationAudio === audio) {
@@ -1471,6 +1499,9 @@
 				queueNarrationRetry();
 			}
 		} catch {
+			if (playbackGeneration !== narrationPlaybackGeneration) {
+				return;
+			}
 			currentNarrationAudio = null;
 			handlers.onError?.();
 		}
