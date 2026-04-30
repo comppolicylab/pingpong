@@ -35,6 +35,7 @@
 		messages,
 		canFetchMore,
 		showInput = true,
+		showContinueWatchingPrompt = true,
 		canSubmit,
 		disabled,
 		waiting,
@@ -65,6 +66,7 @@
 		messages: Message[];
 		canFetchMore: boolean;
 		showInput?: boolean;
+		showContinueWatchingPrompt?: boolean;
 		canSubmit: boolean;
 		disabled: boolean;
 		waiting: boolean;
@@ -275,6 +277,7 @@
 
 	const shouldShowContinueWatchingPrompt = (message: Message) =>
 		showInput &&
+		showContinueWatchingPrompt &&
 		!waiting &&
 		!submitting &&
 		!!oncontinuewatching &&

@@ -290,6 +290,9 @@
 		!!$navigating ||
 		!threadLectureChatAvailable ||
 		effectiveLectureVideoSession?.state === 'completed';
+	$: lectureChatContinuePromptVisible =
+		effectiveLectureVideoSession?.state !== 'awaiting_answer' &&
+		effectiveLectureVideoSession?.state !== 'completed';
 	$: canDropUploadsIntoThread =
 		data.threadInteractionMode === 'chat' &&
 		assistantInteractionMode === 'chat' &&
@@ -1561,6 +1564,7 @@
 								messages={$messages}
 								canFetchMore={$canFetchMore}
 								showInput={effectiveLectureVideoSession?.state !== 'completed'}
+								showContinueWatchingPrompt={lectureChatContinuePromptVisible}
 								canSubmit={lectureChatCanSubmit}
 								disabled={lectureChatInputDisabled}
 								waiting={$waiting}
