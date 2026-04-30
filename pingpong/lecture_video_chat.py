@@ -160,7 +160,7 @@ async def _build_answered_knowledge_checks(
     session: AsyncSession,
     thread_id: int,
     format_answer: _KnowledgeCheckAnswerFormatter,
-) -> str:
+) -> str | None:
     interactions = (
         await models.LectureVideoInteraction.list_question_history_by_thread_id(
             session, thread_id
@@ -178,7 +178,7 @@ async def _build_answered_knowledge_checks(
         if question is None or option is None:
             continue
         answer_lines.append(format_answer(question, option))
-    return "\n".join(answer_lines) if answer_lines else "None"
+    return "\n".join(answer_lines) if answer_lines else None
 
 
 def _knowledge_check_label(question: models.LectureVideoQuestion) -> str:
@@ -187,7 +187,7 @@ def _knowledge_check_label(question: models.LectureVideoQuestion) -> str:
 
 async def _build_answered_knowledge_checks_markdown(
     session: AsyncSession, thread_id: int
-) -> str:
+) -> str | None:
     def format_answer(
         question: models.LectureVideoQuestion,
         option: models.LectureVideoQuestionOption,
@@ -235,11 +235,9 @@ def _build_context_text_from_parts(
     transcript_start_ms, uncapped_transcript_start_ms = _transcript_context_window(
         state, current_offset_ms
     )
-    transcript_heading = "Recent Transcript"
-    if uncapped_transcript_start_ms > 0:
-        transcript_heading += " Since Last Lecture Chat"
-    if transcript_start_ms > uncapped_transcript_start_ms:
-        transcript_heading += " (older transcript omitted)"
+    transcript_heading = _transcript_context_heading(
+        transcript_start_ms, uncapped_transcript_start_ms
+    )
 
     transcript_text = _transcript_slice_text(
         transcript_words,
@@ -274,16 +272,29 @@ def _build_context_text_from_parts(
         _build_lecture_context_text(
             state=state,
             current_question=current_question,
-            current_offset_ms=current_offset_ms,
-            transcript_heading=transcript_heading,
-            transcript_text=transcript_text,
-            lookahead_text=lookahead_text,
-            upcoming_question=next_future_question,
-            answered_knowledge_checks=answered_knowledge_checks,
-            video_descriptions_text=descriptions_text,
+            context=_LectureContextSections(
+                current_offset_ms=current_offset_ms,
+                transcript_heading=transcript_heading,
+                transcript_text=transcript_text,
+                lookahead_text=lookahead_text,
+                upcoming_question=next_future_question,
+                answered_knowledge_checks=answered_knowledge_checks,
+                video_descriptions_text=descriptions_text,
+            ),
         ),
         current_offset_ms,
     )
+
+
+def _transcript_context_heading(
+    transcript_start_ms: int, uncapped_transcript_start_ms: int
+) -> str:
+    heading = "Recent Transcript"
+    if uncapped_transcript_start_ms > 0:
+        heading += " Since Last Lecture Chat"
+    if transcript_start_ms > uncapped_transcript_start_ms:
+        heading += " (older transcript omitted)"
+    return heading
 
 
 def _transcript_context_window(
@@ -350,7 +361,7 @@ def _format_video_descriptions(
     descriptions: list[schemas.LectureVideoManifestVideoDescriptionV3],
     range_start_ms: int,
     range_end_ms: int,
-) -> str:
+) -> str | None:
     lines = [
         f"- {description.start_offset_ms}-{description.end_offset_ms}ms: "
         f"{description.description}"
@@ -362,23 +373,29 @@ def _format_video_descriptions(
             range_end_ms,
         )
     ]
-    return "\n".join(lines)
+    return "\n".join(lines) if lines else None
 
 
 def _lecture_context_status(
     state: models.LectureVideoThreadState,
     current_question: models.LectureVideoQuestion | None,
 ) -> str:
-    if (
-        state.state == schemas.LectureVideoSessionState.AWAITING_ANSWER
-        and current_question is not None
-    ):
-        return f"Answering {_knowledge_check_label(current_question)}"
-    if (
-        state.state == schemas.LectureVideoSessionState.AWAITING_POST_ANSWER_RESUME
-        and current_question is not None
-    ):
-        return f"Just answered {_knowledge_check_label(current_question)}"
+    if state.state == schemas.LectureVideoSessionState.AWAITING_ANSWER:
+        if current_question is not None:
+            return f"Answering {_knowledge_check_label(current_question)}"
+        logger.warning(
+            "Lecture video state is awaiting_answer without a current question.",
+            extra={"thread_id": getattr(state, "thread_id", None)},
+        )
+        return "Answering Knowledge Check (missing question)"
+    if state.state == schemas.LectureVideoSessionState.AWAITING_POST_ANSWER_RESUME:
+        if current_question is not None:
+            return f"Just answered {_knowledge_check_label(current_question)}"
+        logger.warning(
+            "Lecture video state is awaiting_post_answer_resume without a current question.",
+            extra={"thread_id": getattr(state, "thread_id", None)},
+        )
+        return "Just answered Knowledge Check (missing question)"
     return "Watching the lecture video"
 
 
@@ -387,22 +404,27 @@ def _append_lecture_context_section(
     heading: str,
     body: str | None,
 ) -> None:
-    if body is None or body == "None" or not body.strip():
+    if body is None or not body.strip():
         return
     lines.extend(["", f"### {heading}", "", body])
+
+
+@dataclass
+class _LectureContextSections:
+    current_offset_ms: int
+    transcript_heading: str
+    transcript_text: str
+    lookahead_text: str
+    upcoming_question: models.LectureVideoQuestion | None
+    answered_knowledge_checks: str | None = None
+    video_descriptions_text: str | None = None
 
 
 def _build_lecture_context_text(
     *,
     state: models.LectureVideoThreadState,
     current_question: models.LectureVideoQuestion | None,
-    current_offset_ms: int,
-    transcript_heading: str,
-    transcript_text: str,
-    lookahead_text: str,
-    upcoming_question: models.LectureVideoQuestion | None,
-    answered_knowledge_checks: str | None = None,
-    video_descriptions_text: str | None = None,
+    context: _LectureContextSections,
 ) -> str:
     current_knowledge_check = None
     if (
@@ -412,22 +434,29 @@ def _build_lecture_context_text(
         current_knowledge_check = _format_knowledge_check_prompt(current_question)
 
     upcoming_knowledge_check = None
-    if upcoming_question is not None:
+    if context.upcoming_question is not None:
         upcoming_knowledge_check = _format_knowledge_check_prompt(
-            upcoming_question,
-            prefix=f"At {upcoming_question.stop_offset_ms}ms, the learner will be asked:",
+            context.upcoming_question,
+            prefix=(
+                f"At {context.upcoming_question.stop_offset_ms}ms, "
+                "the learner will be asked:"
+            ),
         )
 
     lines = [
         "## Lecture Context",
         "",
         f"Status: {_lecture_context_status(state, current_question)}",
-        f"Current offset: {current_offset_ms}ms",
+        f"Current offset: {context.current_offset_ms}ms",
     ]
-    _append_lecture_context_section(lines, transcript_heading, transcript_text)
-    _append_lecture_context_section(lines, "Lookahead Transcript", lookahead_text)
     _append_lecture_context_section(
-        lines, "Relevant Video Descriptions", video_descriptions_text
+        lines, context.transcript_heading, context.transcript_text
+    )
+    _append_lecture_context_section(
+        lines, "Lookahead Transcript", context.lookahead_text
+    )
+    _append_lecture_context_section(
+        lines, "Relevant Video Descriptions", context.video_descriptions_text
     )
     _append_lecture_context_section(
         lines, "Current Knowledge Check", current_knowledge_check
@@ -436,7 +465,7 @@ def _build_lecture_context_text(
         lines, "Upcoming Knowledge Check", upcoming_knowledge_check
     )
     _append_lecture_context_section(
-        lines, "Knowledge Checks Answered", answered_knowledge_checks
+        lines, "Knowledge Checks Answered", context.answered_knowledge_checks
     )
     return "\n".join(lines)
 
@@ -447,7 +476,7 @@ def _build_context_text_v3_from_parts(
     *,
     word_level_transcription: list[schemas.LectureVideoManifestWordV3],
     video_descriptions: list[schemas.LectureVideoManifestVideoDescriptionV3],
-    answered_knowledge_checks: str,
+    answered_knowledge_checks: str | None,
 ) -> tuple[str, int]:
     return _build_context_text_from_parts(
         thread,

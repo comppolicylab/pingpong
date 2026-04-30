@@ -1,3 +1,4 @@
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -526,13 +527,14 @@ def test_build_context_text_v3_watching_status_and_filters_descriptions():
         state,
         word_level_transcription=manifest.word_level_transcription,
         video_descriptions=manifest.video_descriptions,
-        answered_knowledge_checks="None",
+        answered_knowledge_checks=None,
     )
 
     assert current_offset_ms == 5_000
     assert "Status: Watching the lecture video" in context_text
     assert "### Relevant Video Descriptions" not in context_text
     assert "A much later slide appears." not in context_text
+    assert "### Knowledge Checks Answered" not in context_text
 
 
 def test_build_context_text_v3_answering_status_includes_current_question_answer_context():
@@ -617,7 +619,7 @@ def test_build_context_text_v3_answering_status_includes_current_question_answer
         state,
         word_level_transcription=manifest.word_level_transcription,
         video_descriptions=manifest.video_descriptions,
-        answered_knowledge_checks="None",
+        answered_knowledge_checks=None,
     )
 
     assert current_offset_ms == 5_000
@@ -633,6 +635,31 @@ def test_build_context_text_v3_answering_status_includes_current_question_answer
     assert "Knowledge Check #2: What comes next?" in context_text
     assert "What comes next?" in context_text
     assert "Selected `" not in context_text
+    assert "### Knowledge Checks Answered" not in context_text
+
+
+def test_build_context_text_warns_when_answer_state_has_no_current_question(caplog):
+    thread = SimpleNamespace(lecture_video=SimpleNamespace(questions=[]))
+    state = SimpleNamespace(
+        thread_id=123,
+        last_known_offset_ms=5_000,
+        last_chat_context_end_ms=0,
+        current_question=None,
+        current_question_id=None,
+        state=schemas.LectureVideoSessionState.AWAITING_ANSWER,
+    )
+
+    with caplog.at_level(logging.WARNING, logger="pingpong.lecture_video_chat"):
+        context_text, current_offset_ms = _build_context_text_from_transcript(
+            thread,
+            state,
+            [],
+        )
+
+    assert current_offset_ms == 5_000
+    assert "Status: Answering Knowledge Check (missing question)" in context_text
+    assert "Status: Watching the lecture video" not in context_text
+    assert "awaiting_answer without a current question" in caplog.text
 
 
 def test_build_context_text_v3_marks_omitted_transcript_since_last_chat():
@@ -681,7 +708,7 @@ def test_build_context_text_v3_marks_omitted_transcript_since_last_chat():
         state,
         word_level_transcription=manifest.word_level_transcription,
         video_descriptions=manifest.video_descriptions,
-        answered_knowledge_checks="None",
+        answered_knowledge_checks=None,
     )
 
     assert current_offset_ms == 300_000

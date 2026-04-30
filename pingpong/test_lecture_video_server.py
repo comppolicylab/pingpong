@@ -935,7 +935,7 @@ async def test_send_message_allows_lecture_chat_while_awaiting_answer(
         class_, lecture_video, _assistant = await create_ready_lecture_video_assistant(
             session,
             institution,
-            manifest=lecture_video_manifest_v2(),
+            manifest=lecture_video_manifest_v3(),
         )
         question = await session.scalar(
             select(models.LectureVideoQuestion)
@@ -979,24 +979,6 @@ async def test_send_message_allows_lecture_chat_while_awaiting_answer(
         present_response.json()["lecture_video_session"]["state"] == "awaiting_answer"
     )
 
-    async def fake_build_context(*args, **kwargs):
-        return server_module.lecture_video_chat.LectureChatContextBuildResult(
-            text_message_parts=[
-                models.MessagePart(
-                    part_index=0,
-                    type=schemas.MessagePartType.INPUT_TEXT,
-                    text="Lecture chat context\nStatus: Answering Knowledge Check #1",
-                )
-            ],
-            frame_message_parts=[],
-            current_offset_ms=question.stop_offset_ms,
-        )
-
-    monkeypatch.setattr(
-        server_module.lecture_video_chat,
-        "build_lecture_chat_context_message_parts",
-        fake_build_context,
-    )
     monkeypatch.setattr(server_module, "run_response", fake_visible_reply_run_response)
 
     response = api.post(
@@ -1006,6 +988,38 @@ async def test_send_message_allows_lecture_chat_while_awaiting_answer(
     )
 
     assert response.status_code == 200
+
+    async with db.async_session() as session:
+        run = await session.scalar(
+            select(models.Run)
+            .where(models.Run.thread_id == thread_id)
+            .options(
+                selectinload(models.Run.messages).selectinload(models.Message.content)
+            )
+            .order_by(models.Run.id.desc())
+            .limit(1)
+        )
+        assert run is not None
+
+    ordered_messages = sorted(run.messages, key=lambda item: item.output_index)
+    assert [message.role for message in ordered_messages] == [
+        schemas.MessageRole.DEVELOPER,
+        schemas.MessageRole.USER,
+        schemas.MessageRole.ASSISTANT,
+    ]
+    assert [message.is_hidden for message in ordered_messages] == [True, False, False]
+
+    hidden_context_text = ordered_messages[0].content[0].text
+    assert hidden_context_text is not None
+    assert "Status: Answering Knowledge Check #1" in hidden_context_text
+    assert (
+        "### Current Knowledge Check\n\n"
+        "Knowledge Check #1: What is the right answer?\n\n"
+        "Options:\n"
+        "- Option A (correct). Feedback: Correct answer\n"
+        "- Option B (incorrect). Feedback: Try again"
+    ) in hidden_context_text
+    assert "### Knowledge Checks Answered" not in hidden_context_text
 
 
 @with_user(123)
