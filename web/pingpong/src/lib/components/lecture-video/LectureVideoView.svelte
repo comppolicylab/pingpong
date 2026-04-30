@@ -2,6 +2,7 @@
 	export type LectureVideoViewHandle = {
 		pauseForChatSubmit: () => Promise<void>;
 		continueWatchingAfterChat: () => Promise<boolean>;
+		getPlaybackPositionMs: () => number;
 	};
 </script>
 
@@ -1247,6 +1248,10 @@
 		if (!(await ensureControllerSession())) {
 			return;
 		}
+	}
+
+	export function getPlaybackPositionMs(): number {
+		return Math.round(currentTimeMs);
 	}
 
 	export async function continueWatchingAfterChat(): Promise<boolean> {

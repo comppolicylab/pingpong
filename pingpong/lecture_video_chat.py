@@ -1,16 +1,19 @@
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import logging
 import tempfile
 from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException, UploadFile
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import pingpong.models as models
 import pingpong.schemas as schemas
+from pingpong import lecture_video_runtime
 from pingpong.config import config
 from pingpong.files import handle_create_file
 from pingpong.lecture_video_service import (
@@ -37,12 +40,14 @@ class LectureChatContextBuildResult:
     text_message_parts: list[models.MessagePart]
     frame_message_parts: list[models.MessagePart]
     current_offset_ms: int
+    user_assistant_messages_only: bool = False
 
 
 @dataclass
 class LectureChatTurnPreparation:
     prepended_messages: list[models.Message]
     user_output_index: int
+    user_assistant_messages_only: bool = False
 
 
 def _apply_lecture_video_chat_metadata(thread: models.Thread) -> None:
@@ -490,6 +495,131 @@ def _build_context_text_v3_from_parts(
     )
 
 
+def _select_summary_checkpoint(
+    checkpoints: list[schemas.LectureVideoManifestSummaryCheckpointV4],
+    furthest_offset_ms: int,
+) -> schemas.LectureVideoManifestSummaryCheckpointV4 | None:
+    selected = None
+    for checkpoint in checkpoints:
+        if checkpoint.end_offset_ms <= furthest_offset_ms:
+            selected = checkpoint
+        else:
+            break
+    return selected
+
+
+def _select_moment_context(
+    moments: list[schemas.LectureVideoManifestMomentContextV4],
+    playback_position_ms: int,
+) -> schemas.LectureVideoManifestMomentContextV4 | None:
+    selected = None
+    for moment in moments:
+        if moment.center_offset_ms <= playback_position_ms:
+            selected = moment
+        else:
+            break
+    return selected
+
+
+def _format_v4_moment_context(
+    moment: schemas.LectureVideoManifestMomentContextV4,
+) -> str:
+    return (
+        f"Before this moment ({moment.start_offset_ms}-{moment.center_offset_ms}ms):\n"
+        f"{moment.before}\n\n"
+        f"At this moment ({moment.center_offset_ms}ms):\n"
+        f"{moment.at}\n\n"
+        f"After this moment ({moment.center_offset_ms}-{moment.end_offset_ms}ms):\n"
+        f"{moment.after}"
+    )
+
+
+def _build_context_text_v4_from_parts(
+    thread: models.Thread,
+    state: models.LectureVideoThreadState,
+    *,
+    summary_checkpoints: list[schemas.LectureVideoManifestSummaryCheckpointV4],
+    moment_contexts: list[schemas.LectureVideoManifestMomentContextV4],
+    lecture_video_playback_position_ms: int,
+    answered_knowledge_checks: str | None,
+) -> tuple[str, int]:
+    playback_position_ms = max(0, lecture_video_playback_position_ms)
+    furthest_offset_ms = max(state.furthest_offset_ms, playback_position_ms, 0)
+    summary_checkpoint = _select_summary_checkpoint(
+        summary_checkpoints,
+        furthest_offset_ms,
+    )
+    moment_context = _select_moment_context(moment_contexts, playback_position_ms)
+    current_question = _get_current_question(thread, state)
+
+    current_knowledge_check = None
+    if (
+        state.state == schemas.LectureVideoSessionState.AWAITING_ANSWER
+        and current_question is not None
+    ):
+        current_knowledge_check = _format_knowledge_check_prompt(current_question)
+
+    lines = [
+        "## Lecture Context",
+        "",
+        f"Status: {_lecture_context_status(state, current_question)}",
+        f"Current offset: {playback_position_ms}ms",
+        f"Furthest watched offset: {furthest_offset_ms}ms",
+    ]
+    _append_lecture_context_section(
+        lines,
+        "Lecture Summary So Far",
+        (
+            f"Through {summary_checkpoint.end_offset_ms}ms:\n"
+            f"{summary_checkpoint.summary}"
+            if summary_checkpoint is not None
+            else None
+        ),
+    )
+    _append_lecture_context_section(
+        lines,
+        "Current Moment Context",
+        _format_v4_moment_context(moment_context)
+        if moment_context is not None
+        else None,
+    )
+    _append_lecture_context_section(
+        lines, "Current Knowledge Check", current_knowledge_check
+    )
+    _append_lecture_context_section(
+        lines, "Knowledge Checks Answered", answered_knowledge_checks
+    )
+    return "\n".join(lines), playback_position_ms
+
+
+async def _validate_v4_playback_position(
+    session: AsyncSession,
+    state: models.LectureVideoThreadState,
+    lecture_video_playback_position_ms: int | None,
+) -> int:
+    if lecture_video_playback_position_ms is None:
+        raise HTTPException(
+            status_code=400,
+            detail="lecture_video_playback_position_ms is required for this lecture video.",
+        )
+    if lecture_video_playback_position_ms < 0:
+        raise HTTPException(
+            status_code=400,
+            detail="lecture_video_playback_position_ms must be greater than or equal to 0.",
+        )
+    plausible_offset_ms = await lecture_video_runtime.get_plausible_playback_offset_ms(
+        session,
+        state,
+        current_time=datetime.now(timezone.utc),
+    )
+    if lecture_video_playback_position_ms > plausible_offset_ms:
+        raise HTTPException(
+            status_code=400,
+            detail="lecture_video_playback_position_ms is past your unlocked progress in this lecture video.",
+        )
+    return lecture_video_playback_position_ms
+
+
 async def _get_video_input_source(
     lecture_video: models.LectureVideo,
 ) -> VideoInputSource:
@@ -671,6 +801,7 @@ async def build_lecture_chat_context_message_parts(
     anonymous_user_auth: str | None,
     anonymous_session_id: int | None,
     anonymous_link_id: int | None,
+    lecture_video_playback_position_ms: int | None = None,
 ) -> LectureChatContextBuildResult:
     lecture_video = thread.lecture_video
     state = thread.lecture_video_state
@@ -679,10 +810,22 @@ async def build_lecture_chat_context_message_parts(
             "Lecture video thread context must be loaded before building chat context."
         )
 
-    chat_context = lecture_video_chat_context_from_model(lecture_video)
+    try:
+        chat_context = lecture_video_chat_context_from_model(lecture_video)
+    except (ValidationError, ValueError) as exc:
+        logger.warning(
+            "Stored lecture video chat manifest is invalid. lecture_video_id=%s",
+            lecture_video.id,
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=LECTURE_VIDEO_CHAT_UNAVAILABLE_NOTE,
+        ) from exc
     if chat_context is None:
-        raise ValueError(
-            "Lecture chat requires a version 2 or 3 lecture video manifest."
+        raise HTTPException(
+            status_code=409,
+            detail=LECTURE_VIDEO_CHAT_UNAVAILABLE_NOTE,
         )
 
     if chat_context.version == 3:
@@ -705,6 +848,35 @@ async def build_lecture_chat_context_message_parts(
             text_message_parts=[text_part],
             frame_message_parts=[],
             current_offset_ms=current_offset_ms,
+        )
+
+    if chat_context.version == 4:
+        playback_position_ms = await _validate_v4_playback_position(
+            session,
+            state,
+            lecture_video_playback_position_ms,
+        )
+        answered_knowledge_checks = await _build_answered_knowledge_checks_markdown(
+            session, thread.id
+        )
+        context_text, current_offset_ms = _build_context_text_v4_from_parts(
+            thread,
+            state,
+            summary_checkpoints=chat_context.summary_checkpoints,
+            moment_contexts=chat_context.moment_contexts,
+            lecture_video_playback_position_ms=playback_position_ms,
+            answered_knowledge_checks=answered_knowledge_checks,
+        )
+        text_part = models.MessagePart(
+            part_index=0,
+            type=schemas.MessagePartType.INPUT_TEXT,
+            text=context_text,
+        )
+        return LectureChatContextBuildResult(
+            text_message_parts=[text_part],
+            frame_message_parts=[],
+            current_offset_ms=current_offset_ms,
+            user_assistant_messages_only=True,
         )
 
     answered_knowledge_checks = await _build_answered_knowledge_checks_markdown(
@@ -751,6 +923,7 @@ async def prepare_lecture_chat_turn(
     thread: models.Thread,
     user_id: int,
     prev_output_sequence: int,
+    lecture_video_playback_position_ms: int | None = None,
 ) -> LectureChatTurnPreparation:
     lecture_thread = await models.Thread.get_by_id_for_class_with_lecture_video_context(
         request.state["db"], int(class_id), thread.id
@@ -789,6 +962,7 @@ async def prepare_lecture_chat_turn(
         anonymous_user_auth=request.state["anonymous_session_token_auth"],
         anonymous_session_id=request.state["anonymous_session_id"],
         anonymous_link_id=request.state["anonymous_link_id"],
+        lecture_video_playback_position_ms=lecture_video_playback_position_ms,
     )
 
     lecture_state.last_chat_context_end_ms = context_result.current_offset_ms
@@ -822,4 +996,5 @@ async def prepare_lecture_chat_turn(
     return LectureChatTurnPreparation(
         prepended_messages=prepended_messages,
         user_output_index=next_output_index,
+        user_assistant_messages_only=context_result.user_assistant_messages_only,
     )

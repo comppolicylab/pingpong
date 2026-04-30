@@ -7941,6 +7941,9 @@ async def send_message(
                     thread=thread,
                     user_id=request.state["session"].user.id,
                     prev_output_sequence=prev_output_sequence,
+                    lecture_video_playback_position_ms=(
+                        data.lecture_video_playback_position_ms
+                    ),
                 )
 
             # Resolve TTS credentials for lecture-video chat audio streaming.
@@ -8098,6 +8101,11 @@ async def send_message(
                 response_safety_identifier=request.state["response_safety_identifier"],
                 tts_voice_id=tts_voice_id,
                 tts_api_key=tts_api_key,
+                user_assistant_messages_only=(
+                    lecture_chat_prep.user_assistant_messages_only
+                    if lecture_chat_prep is not None
+                    else False
+                ),
             )
         else:
             raise HTTPException(

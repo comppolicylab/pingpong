@@ -1572,10 +1572,33 @@ export type LectureVideoManifestV3 = {
 	video_descriptions: LectureVideoManifestVideoDescriptionV3[];
 };
 
+export type LectureVideoManifestSummaryCheckpointV4 = {
+	end_offset_ms: number;
+	summary: string;
+};
+
+export type LectureVideoManifestMomentContextV4 = {
+	center_offset_ms: number;
+	start_offset_ms: number;
+	end_offset_ms: number;
+	before: string;
+	at: string;
+	after: string;
+};
+
+export type LectureVideoManifestV4 = {
+	version: 4;
+	questions: LectureVideoManifestQuestion[];
+	word_level_transcription: LectureVideoManifestWordV3[];
+	summary_checkpoints: LectureVideoManifestSummaryCheckpointV4[];
+	moment_contexts: LectureVideoManifestMomentContextV4[];
+};
+
 export type LectureVideoManifest =
 	| LectureVideoManifestV1
 	| LectureVideoManifestV2
-	| LectureVideoManifestV3;
+	| LectureVideoManifestV3
+	| LectureVideoManifestV4;
 
 export type LectureVideoConfigResponse = {
 	lecture_video: LectureVideoSummary;
@@ -3613,6 +3636,7 @@ export type NewThreadMessageRequest = {
 	vision_image_descriptions?: ImageProxy[];
 	timezone?: string;
 	generate_speech?: boolean;
+	lecture_video_playback_position_ms?: number;
 };
 
 /**

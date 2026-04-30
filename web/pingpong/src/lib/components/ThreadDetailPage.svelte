@@ -56,6 +56,7 @@
 		LinkOutline,
 		TerminalOutline
 	} from 'flowbite-svelte-icons';
+
 	import { parseTextContent } from '$lib/content';
 	import { ThreadManager, type Message } from '$lib/stores/thread';
 	import AttachmentDeletedPlaceholder from '$lib/components/AttachmentDeletedPlaceholder.svelte';
@@ -86,6 +87,10 @@
 	} from '$lib/components/lecture-video/LectureVideoView.svelte';
 	import { LECTURE_CHAT_TTS_VOLUME_SCALE } from '$lib/components/lecture-video/audio-levels';
 	import LectureVideoChatPanel from '$lib/components/lecture-video/LectureVideoChatPanel.svelte';
+
+	type ThreadPostMessage = ChatInputMessage & {
+		lecture_video_playback_position_ms?: number;
+	};
 
 	function formatLectureVideoTitle(filename: string | null | undefined): string | null {
 		if (!filename) return null;
@@ -684,8 +689,9 @@
 		vision_file_ids,
 		visionFileImageDescriptions,
 		optimisticVisionFiles,
+		lecture_video_playback_position_ms,
 		callback
-	}: ChatInputMessage) => {
+	}: ThreadPostMessage) => {
 		try {
 			await threadMgr.postMessage(
 				data.me.user!.id,
@@ -696,7 +702,8 @@
 				vision_file_ids,
 				visionFileImageDescriptions,
 				optimisticVisionFiles,
-				currentMessageAttachments
+				currentMessageAttachments,
+				lecture_video_playback_position_ms
 			);
 		} catch (e) {
 			callback({
@@ -713,8 +720,14 @@
 	};
 
 	const handleLectureChatSubmit = async (message: ChatInputMessage) => {
+		const lectureVideoPlaybackPositionMs = lectureVideoViewRef?.getPlaybackPositionMs();
 		void lectureVideoViewRef?.pauseForChatSubmit();
-		await postMessage(message);
+		await postMessage({
+			...message,
+			...(lectureVideoPlaybackPositionMs !== undefined
+				? { lecture_video_playback_position_ms: lectureVideoPlaybackPositionMs }
+				: {})
+		});
 	};
 
 	const handleLectureSessionChange = (e: CustomEvent<api.LectureVideoSession>) => {

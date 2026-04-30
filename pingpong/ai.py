@@ -602,7 +602,12 @@ class BufferedStreamHandler(openai.AsyncAssistantEventHandler):
 
 
 async def build_response_input_item_list(
-    session: AsyncSession, thread_id: int, uses_reasoning: bool = False
+    session: AsyncSession,
+    thread_id: int,
+    uses_reasoning: bool = False,
+    *,
+    current_run_id: int | None = None,
+    user_assistant_messages_only: bool = False,
 ) -> list[ResponseInputItemParam]:
     """Build a list of ResponseInputItem from a thread run step."""
     response_input_items: list[ResponseInputItemParam] = []
@@ -615,7 +620,20 @@ async def build_response_input_item_list(
     def coerce_utc(value: datetime) -> datetime:
         return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
-    async for message in models.Thread.list_all_messages_gen(session, thread_id):
+    message_roles = (
+        [MessageRole.USER, MessageRole.ASSISTANT]
+        if user_assistant_messages_only
+        else None
+    )
+    if user_assistant_messages_only and current_run_id is not None:
+        messages = models.Thread.list_user_assistant_messages_with_run_developer_gen(
+            session, thread_id, current_run_id
+        )
+    else:
+        messages = models.Thread.list_all_messages_gen(
+            session, thread_id, roles=message_roles
+        )
+    async for message in messages:
         phase = get_response_message_phase_value(message.phase)
         content_list: list[ResponseInputMessageContentListParam] = []
         for content in message.content:
@@ -726,242 +744,245 @@ async def build_response_input_item_list(
             )
         )
 
-    async for tool_call in models.Thread.list_all_tool_calls_gen(session, thread_id):
-        if tool_call.status == ToolCallStatus.INCOMPLETE:
-            continue
-        match tool_call.type:
-            case ToolCallType.CODE_INTERPRETER:
-                tool_call_outputs: list[Output] = []
-                for output in tool_call.outputs:
-                    match output.output_type:
-                        case CodeInterpreterOutputType.LOGS:
-                            tool_call_outputs.append(
-                                OutputLogs(logs=output.logs, type="logs")
-                            )
-                        case CodeInterpreterOutputType.IMAGE:
-                            tool_call_outputs.append(
-                                OutputImage(url=output.url, type="image")
-                            )
-                response_input_items_with_time.append(
-                    (
-                        tool_call.created,
-                        tool_call.output_index,
-                        "code_interpreter_call",
-                        ResponseCodeInterpreterToolCallParam(
-                            id=tool_call.tool_call_id,
-                            code=tool_call.code,
-                            container_id=tool_call.container_id,
-                            outputs=tool_call_outputs,
-                            status=ToolCallStatus(tool_call.status).value,
-                            type="code_interpreter_call",
-                        ),
-                    )
-                )
-
-                existing_time = container_by_last_active_time.get(
-                    tool_call.container_id
-                )
-                candidates: list[datetime] = []
-                if existing_time is not None:
-                    candidates.append(coerce_utc(existing_time))
-                if tool_call.created is not None:
-                    candidates.append(coerce_utc(tool_call.created))
-                if getattr(tool_call, "completed", None) is not None:
-                    candidates.append(coerce_utc(tool_call.completed))
-                if candidates:
-                    container_by_last_active_time[tool_call.container_id] = max(
-                        candidates
-                    )
-
-            case ToolCallType.FILE_SEARCH:
-                file_search_results: list[Result] = []
-                for result in tool_call.results:
-                    file_search_results.append(
-                        Result(
-                            attributes=json.loads(result.attributes)
-                            if result.attributes
-                            else {},
-                            file_id=result.file_id,
-                            filename=result.filename,
-                            score=result.score,
-                            text=result.text,
+    if not user_assistant_messages_only:
+        async for tool_call in models.Thread.list_all_tool_calls_gen(
+            session, thread_id
+        ):
+            if tool_call.status == ToolCallStatus.INCOMPLETE:
+                continue
+            match tool_call.type:
+                case ToolCallType.CODE_INTERPRETER:
+                    tool_call_outputs: list[Output] = []
+                    for output in tool_call.outputs:
+                        match output.output_type:
+                            case CodeInterpreterOutputType.LOGS:
+                                tool_call_outputs.append(
+                                    OutputLogs(logs=output.logs, type="logs")
+                                )
+                            case CodeInterpreterOutputType.IMAGE:
+                                tool_call_outputs.append(
+                                    OutputImage(url=output.url, type="image")
+                                )
+                    response_input_items_with_time.append(
+                        (
+                            tool_call.created,
+                            tool_call.output_index,
+                            "code_interpreter_call",
+                            ResponseCodeInterpreterToolCallParam(
+                                id=tool_call.tool_call_id,
+                                code=tool_call.code,
+                                container_id=tool_call.container_id,
+                                outputs=tool_call_outputs,
+                                status=ToolCallStatus(tool_call.status).value,
+                                type="code_interpreter_call",
+                            ),
                         )
                     )
-                response_input_items_with_time.append(
-                    (
-                        tool_call.created,
-                        tool_call.output_index,
-                        "file_search_call",
-                        ResponseFileSearchToolCallParam(
-                            id=tool_call.tool_call_id,
-                            queries=json.loads(tool_call.queries)
-                            if tool_call.queries
-                            else [],
-                            status=ToolCallStatus(tool_call.status).value,
-                            results=file_search_results,
-                            type="file_search_call",
-                        ),
+
+                    existing_time = container_by_last_active_time.get(
+                        tool_call.container_id
                     )
-                )
+                    candidates: list[datetime] = []
+                    if existing_time is not None:
+                        candidates.append(coerce_utc(existing_time))
+                    if tool_call.created is not None:
+                        candidates.append(coerce_utc(tool_call.created))
+                    if getattr(tool_call, "completed", None) is not None:
+                        candidates.append(coerce_utc(tool_call.completed))
+                    if candidates:
+                        container_by_last_active_time[tool_call.container_id] = max(
+                            candidates
+                        )
 
-            case ToolCallType.WEB_SEARCH:
-                action_rec = (
-                    tool_call.web_search_actions[0]
-                    if tool_call.web_search_actions
-                    else None
-                )
-
-                action = None
-                if action_rec:
-                    match action_rec.type:
-                        case WebSearchActionType.SEARCH:
-                            action = ActionSearch(
-                                type="search",
-                                query=action_rec.query or "",
+                case ToolCallType.FILE_SEARCH:
+                    file_search_results: list[Result] = []
+                    for result in tool_call.results:
+                        file_search_results.append(
+                            Result(
+                                attributes=json.loads(result.attributes)
+                                if result.attributes
+                                else {},
+                                file_id=result.file_id,
+                                filename=result.filename,
+                                score=result.score,
+                                text=result.text,
                             )
-                        case WebSearchActionType.OPEN_PAGE:
-                            action = ActionOpenPage(
-                                type="open_page",
-                                url=action_rec.url or "",
-                            )
-                        case WebSearchActionType.FIND:
-                            action = ActionFind(
-                                type="find",
-                                pattern=action_rec.pattern or "",
-                                url=action_rec.url or "",
-                            )
-                        case _:
-                            action = None
-
-                response_input_items_with_time.append(
-                    (
-                        tool_call.created,
-                        tool_call.output_index,
-                        "web_search_call",
-                        ResponseFunctionWebSearchParam(
-                            id=tool_call.tool_call_id,
-                            action=action,
-                            status=ToolCallStatus(tool_call.status).value,
-                            type="web_search_call",
-                        ),
-                    )
-                )
-
-            case ToolCallType.MCP_SERVER:
-                server_label = tool_call.mcp_server_label or (
-                    tool_call.mcp_server_tool.server_label
-                    if tool_call.mcp_server_tool
-                    else None
-                )
-                if not server_label:
-                    logger.warning(
-                        "Skipping MCP tool call %s due to missing server label.",
-                        tool_call.tool_call_id,
-                    )
-                    continue
-                try:
-                    error = json.loads(tool_call.error) if tool_call.error else None
-                except json.JSONDecodeError:
-                    error = {"message": tool_call.error}
-                response_input_items_with_time.append(
-                    (
-                        tool_call.created,
-                        tool_call.output_index,
-                        "mcp_call",
-                        McpCallParam(
-                            id=tool_call.tool_call_id,
-                            arguments=tool_call.mcp_arguments,
-                            name=tool_call.mcp_tool_name,
-                            server_label=server_label,
-                            type="mcp_call",
-                            approval_request_id=None,
-                            error=error,
-                            output=tool_call.mcp_output,
-                            status=ToolCallStatus(tool_call.status).value,
-                        ),
-                    )
-                )
-            case ToolCallType.MCP_LIST_TOOLS:
-                server_label = tool_call.mcp_server_label or (
-                    tool_call.mcp_server_tool.server_label
-                    if tool_call.mcp_server_tool
-                    else None
-                )
-                if not server_label:
-                    logger.warning(
-                        "Skipping MCP list tools call %s due to missing server label.",
-                        tool_call.tool_call_id,
-                    )
-                    continue
-                mcp_tools: list[McpListToolsToolParam] = []
-                for tool in tool_call.mcp_tools_listed:
-                    mcp_tools.append(
-                        McpListToolsToolParam(
-                            input_schema=json.loads(tool.input_schema)
-                            if tool.input_schema
-                            else {},
-                            name=tool.name,
-                            description=tool.description,
-                            annotations=json.loads(tool.annotations)
-                            if tool.annotations
-                            else {},
+                        )
+                    response_input_items_with_time.append(
+                        (
+                            tool_call.created,
+                            tool_call.output_index,
+                            "file_search_call",
+                            ResponseFileSearchToolCallParam(
+                                id=tool_call.tool_call_id,
+                                queries=json.loads(tool_call.queries)
+                                if tool_call.queries
+                                else [],
+                                status=ToolCallStatus(tool_call.status).value,
+                                results=file_search_results,
+                                type="file_search_call",
+                            ),
                         )
                     )
-                try:
-                    error = json.loads(tool_call.error) if tool_call.error else None
-                except json.JSONDecodeError:
-                    error = {"message": tool_call.error}
 
-                response_input_items_with_time.append(
-                    (
-                        tool_call.created,
-                        tool_call.output_index,
-                        "mcp_list_tools",
-                        McpListToolsParam(
-                            id=tool_call.tool_call_id,
-                            server_label=server_label,
-                            tools=mcp_tools,
-                            type="mcp_list_tools",
-                            error=error,
-                        ),
+                case ToolCallType.WEB_SEARCH:
+                    action_rec = (
+                        tool_call.web_search_actions[0]
+                        if tool_call.web_search_actions
+                        else None
+                    )
+
+                    action = None
+                    if action_rec:
+                        match action_rec.type:
+                            case WebSearchActionType.SEARCH:
+                                action = ActionSearch(
+                                    type="search",
+                                    query=action_rec.query or "",
+                                )
+                            case WebSearchActionType.OPEN_PAGE:
+                                action = ActionOpenPage(
+                                    type="open_page",
+                                    url=action_rec.url or "",
+                                )
+                            case WebSearchActionType.FIND:
+                                action = ActionFind(
+                                    type="find",
+                                    pattern=action_rec.pattern or "",
+                                    url=action_rec.url or "",
+                                )
+                            case _:
+                                action = None
+
+                    response_input_items_with_time.append(
+                        (
+                            tool_call.created,
+                            tool_call.output_index,
+                            "web_search_call",
+                            ResponseFunctionWebSearchParam(
+                                id=tool_call.tool_call_id,
+                                action=action,
+                                status=ToolCallStatus(tool_call.status).value,
+                                type="web_search_call",
+                            ),
+                        )
+                    )
+
+                case ToolCallType.MCP_SERVER:
+                    server_label = tool_call.mcp_server_label or (
+                        tool_call.mcp_server_tool.server_label
+                        if tool_call.mcp_server_tool
+                        else None
+                    )
+                    if not server_label:
+                        logger.warning(
+                            "Skipping MCP tool call %s due to missing server label.",
+                            tool_call.tool_call_id,
+                        )
+                        continue
+                    try:
+                        error = json.loads(tool_call.error) if tool_call.error else None
+                    except json.JSONDecodeError:
+                        error = {"message": tool_call.error}
+                    response_input_items_with_time.append(
+                        (
+                            tool_call.created,
+                            tool_call.output_index,
+                            "mcp_call",
+                            McpCallParam(
+                                id=tool_call.tool_call_id,
+                                arguments=tool_call.mcp_arguments,
+                                name=tool_call.mcp_tool_name,
+                                server_label=server_label,
+                                type="mcp_call",
+                                approval_request_id=None,
+                                error=error,
+                                output=tool_call.mcp_output,
+                                status=ToolCallStatus(tool_call.status).value,
+                            ),
+                        )
+                    )
+                case ToolCallType.MCP_LIST_TOOLS:
+                    server_label = tool_call.mcp_server_label or (
+                        tool_call.mcp_server_tool.server_label
+                        if tool_call.mcp_server_tool
+                        else None
+                    )
+                    if not server_label:
+                        logger.warning(
+                            "Skipping MCP list tools call %s due to missing server label.",
+                            tool_call.tool_call_id,
+                        )
+                        continue
+                    mcp_tools: list[McpListToolsToolParam] = []
+                    for tool in tool_call.mcp_tools_listed:
+                        mcp_tools.append(
+                            McpListToolsToolParam(
+                                input_schema=json.loads(tool.input_schema)
+                                if tool.input_schema
+                                else {},
+                                name=tool.name,
+                                description=tool.description,
+                                annotations=json.loads(tool.annotations)
+                                if tool.annotations
+                                else {},
+                            )
+                        )
+                    try:
+                        error = json.loads(tool_call.error) if tool_call.error else None
+                    except json.JSONDecodeError:
+                        error = {"message": tool_call.error}
+
+                    response_input_items_with_time.append(
+                        (
+                            tool_call.created,
+                            tool_call.output_index,
+                            "mcp_list_tools",
+                            McpListToolsParam(
+                                id=tool_call.tool_call_id,
+                                server_label=server_label,
+                                tools=mcp_tools,
+                                type="mcp_list_tools",
+                                error=error,
+                            ),
+                        )
+                    )
+
+        async for reasoning in models.Thread.list_all_reasoning_steps_gen(
+            session, thread_id
+        ):
+            summary_array: list[Summary] = []
+            for summary_step in reasoning.summary_parts:
+                summary_array.append(
+                    Summary(
+                        text=summary_step.summary_text,
+                        type="summary_text",
                     )
                 )
 
-    async for reasoning in models.Thread.list_all_reasoning_steps_gen(
-        session, thread_id
-    ):
-        summary_array: list[Summary] = []
-        for summary_step in reasoning.summary_parts:
-            summary_array.append(
-                Summary(
-                    text=summary_step.summary_text,
-                    type="summary_text",
+            content_array: list[Content] = []
+            for content_step in reasoning.content_parts:
+                content_array.append(
+                    Content(
+                        text=content_step.content_text,
+                        type="reasoning_text",
+                    )
+                )
+
+            response_input_items_with_time.append(
+                (
+                    reasoning.created,
+                    reasoning.output_index,
+                    "reasoning",
+                    ResponseReasoningItemParam(
+                        id=reasoning.reasoning_id,
+                        content=content_array if content_array else None,
+                        summary=summary_array if summary_array else [],
+                        encrypted_content=reasoning.encrypted_content,
+                        type="reasoning",
+                    ),
                 )
             )
-
-        content_array: list[Content] = []
-        for content_step in reasoning.content_parts:
-            content_array.append(
-                Content(
-                    text=content_step.content_text,
-                    type="reasoning_text",
-                )
-            )
-
-        response_input_items_with_time.append(
-            (
-                reasoning.created,
-                reasoning.output_index,
-                "reasoning",
-                ResponseReasoningItemParam(
-                    id=reasoning.reasoning_id,
-                    content=content_array if content_array else None,
-                    summary=summary_array if summary_array else [],
-                    encrypted_content=reasoning.encrypted_content,
-                    type="reasoning",
-                ),
-            )
-        )
     # Sort by output index, falling back to created time for ties.
     response_input_items_with_time.sort(key=lambda x: (x[1], x[0]))
 
@@ -3512,6 +3533,7 @@ async def run_response(
     response_safety_identifier: str | None = None,
     tts_voice_id: str | None = None,
     tts_api_key: str | None = None,
+    user_assistant_messages_only: bool = False,
 ):
     is_canceled = False
     await config.authz.driver.init()
@@ -3558,6 +3580,8 @@ async def run_response(
                     session_,
                     thread_id=run.thread_id,
                     uses_reasoning=not isinstance(reasoning_settings, openai.NotGiven),
+                    current_run_id=run.id,
+                    user_assistant_messages_only=user_assistant_messages_only,
                 )
                 max_output_index = await models.Thread.get_max_output_sequence(
                     session_, run.thread_id

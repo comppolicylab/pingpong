@@ -267,6 +267,35 @@ def lecture_video_manifest_v3(**kwargs) -> dict:
     return manifest
 
 
+def lecture_video_manifest_v4(**kwargs) -> dict:
+    manifest = lecture_video_manifest_v3(**kwargs)
+    manifest["version"] = 4
+    manifest.pop("video_descriptions")
+    manifest["summary_checkpoints"] = [
+        {"end_offset_ms": 0, "summary": "The lesson has just started."},
+        {"end_offset_ms": 900, "summary": "The lesson introduces latency."},
+    ]
+    manifest["moment_contexts"] = [
+        {
+            "center_offset_ms": 0,
+            "start_offset_ms": 0,
+            "end_offset_ms": 400,
+            "before": "The lesson is starting.",
+            "at": "The first point is introduced.",
+            "after": "The teacher continues the explanation.",
+        },
+        {
+            "center_offset_ms": 500,
+            "start_offset_ms": 400,
+            "end_offset_ms": 900,
+            "before": "Latency has been introduced.",
+            "at": "The teacher explains why latency matters.",
+            "after": "The lesson continues from the example.",
+        },
+    ]
+    return manifest
+
+
 async def create_lecture_video_copy_credentials(
     session: AsyncSession,
     class_id: int,
@@ -1020,6 +1049,44 @@ async def test_send_message_allows_lecture_chat_while_awaiting_answer(
         "- Option B (incorrect). Feedback: Try again"
     ) in hidden_context_text
     assert "### Knowledge Checks Answered" not in hidden_context_text
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
+        ("user:123", "can_view", "assistant:1"),
+    ]
+)
+async def test_send_message_requires_playback_position_for_v4_lecture_chat(
+    api, config, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+            manifest=lecture_video_manifest_v4(),
+        )
+
+    create_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/lecture",
+        json={"assistant_id": 1, "parties": [123]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+    thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
+
+    response = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}",
+        json={"message": "What is happening here?"},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 400
+    assert "lecture_video_playback_position_ms is required" in response.json()["detail"]
 
 
 @with_user(123)
@@ -2975,7 +3042,7 @@ async def test_get_plausible_playback_offset_ms_only_advances_while_playing(
         await session.flush()
 
         plausible_offset_ms = (
-            await lecture_video_runtime._get_plausible_playback_offset_ms(
+            await lecture_video_runtime.get_plausible_playback_offset_ms(
                 session,
                 state,
                 current_time=current_time,
@@ -5346,8 +5413,9 @@ def test_get_forkserver_context_requests_forkserver(monkeypatch):
     monkeypatch.setattr(
         lecture_video_processing.multiprocessing,
         "get_context",
-        lambda start_method: seen.__setitem__("start_method", start_method)
-        or expected_context,
+        lambda start_method: (
+            seen.__setitem__("start_method", start_method) or expected_context
+        ),
     )
 
     context = lecture_video_processing.get_forkserver_context()
@@ -5434,10 +5502,9 @@ def test_worker_pool_manager_uses_generic_labels_and_recovery(caplog):
         worker_target=lambda *_args: None,
         process_context=fake_context,
         claim_run_fn=lambda _runner_id: next(claims),
-        recover_run_fn=lambda run_id, lease_token, error_message: recoveries.append(
-            (run_id, lease_token, error_message)
-        )
-        or True,
+        recover_run_fn=lambda run_id, lease_token, error_message: (
+            recoveries.append((run_id, lease_token, error_message)) or True
+        ),
         build_runner_id_fn=lambda worker_slot, pid: f"custom:{worker_slot}:{pid}",
         worker_label="custom worker",
         unexpected_exit_error_message="custom exit",
@@ -5508,10 +5575,9 @@ def test_narration_worker_pool_manager_recovers_job_exception_and_keeps_worker_i
         poll_interval_seconds=0.25,
         process_context=fake_context,
         claim_run_fn=lambda _runner_id: next(claims),
-        recover_run_fn=lambda run_id, lease_token, error_message: recoveries.append(
-            (run_id, lease_token, error_message)
-        )
-        or True,
+        recover_run_fn=lambda run_id, lease_token, error_message: (
+            recoveries.append((run_id, lease_token, error_message)) or True
+        ),
     )
 
     manager.start()
@@ -5575,10 +5641,9 @@ def test_narration_worker_pool_manager_recovers_dead_worker_and_respawns():
         poll_interval_seconds=0.25,
         process_context=fake_context,
         claim_run_fn=lambda _runner_id: next(claims),
-        recover_run_fn=lambda run_id, lease_token, error_message: recoveries.append(
-            (run_id, lease_token, error_message)
-        )
-        or True,
+        recover_run_fn=lambda run_id, lease_token, error_message: (
+            recoveries.append((run_id, lease_token, error_message)) or True
+        ),
     )
 
     manager.start()
@@ -5658,10 +5723,9 @@ def test_narration_worker_pool_manager_shutdown_recovers_busy_assignments_before
         poll_interval_seconds=0.25,
         process_context=fake_context,
         claim_run_fn=lambda _runner_id: next(claims),
-        recover_run_fn=lambda run_id, lease_token, error_message: recoveries.append(
-            (run_id, lease_token, error_message)
-        )
-        or True,
+        recover_run_fn=lambda run_id, lease_token, error_message: (
+            recoveries.append((run_id, lease_token, error_message)) or True
+        ),
         shutdown_grace_seconds=1.0,
     )
 
@@ -5698,10 +5762,9 @@ def test_narration_worker_pool_manager_shutdown_drains_queued_worker_job_excepti
         poll_interval_seconds=0.25,
         process_context=fake_context,
         claim_run_fn=lambda _runner_id: next(claims),
-        recover_run_fn=lambda run_id, lease_token, error_message: recoveries.append(
-            (run_id, lease_token, error_message)
-        )
-        or True,
+        recover_run_fn=lambda run_id, lease_token, error_message: (
+            recoveries.append((run_id, lease_token, error_message)) or True
+        ),
         shutdown_grace_seconds=1.0,
     )
 

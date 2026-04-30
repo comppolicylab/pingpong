@@ -717,7 +717,8 @@ export class ThreadManager {
 		vision_file_ids?: string[],
 		vision_image_descriptions?: api.ImageProxy[],
 		optimisticVisionFiles?: api.OptimisticVisionFile[],
-		attachments?: api.ServerFile[]
+		attachments?: api.ServerFile[],
+		lecture_video_playback_position_ms?: number
 	) {
 		if (!message) {
 			callback({
@@ -863,7 +864,10 @@ export class ThreadManager {
 			vision_file_ids,
 			vision_image_descriptions,
 			timezone: this.timezone,
-			...(isLectureVideoThread ? { generate_speech: !get(this.#ttsMuted) } : {})
+			...(isLectureVideoThread ? { generate_speech: !get(this.#ttsMuted) } : {}),
+			...(lecture_video_playback_position_ms !== undefined
+				? { lecture_video_playback_position_ms }
+				: {})
 		});
 
 		this.attachments = derived(this.#data, ($data) => {

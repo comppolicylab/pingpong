@@ -577,6 +577,68 @@ class LectureVideoManifestVideoDescriptionV3(BaseModel):
         return self
 
 
+class LectureVideoManifestSummaryCheckpointV4(BaseModel):
+    end_offset_ms: int = Field(..., ge=0)
+    summary: str = Field(..., min_length=1)
+
+    @field_validator("summary")
+    @classmethod
+    def strip_summary(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("summary must not be empty")
+        return value
+
+
+class LectureVideoManifestMomentContextV4(BaseModel):
+    center_offset_ms: int = Field(..., ge=0)
+    start_offset_ms: int = Field(..., ge=0)
+    end_offset_ms: int = Field(..., ge=0)
+    before: str = Field(..., min_length=1)
+    at: str = Field(..., min_length=1)
+    after: str = Field(..., min_length=1)
+
+    @field_validator("before", "at", "after")
+    @classmethod
+    def strip_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("context text must not be empty")
+        return value
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "LectureVideoManifestMomentContextV4":
+        if not self.start_offset_ms <= self.center_offset_ms <= self.end_offset_ms:
+            raise ValueError(
+                "start_offset_ms <= center_offset_ms <= end_offset_ms is required"
+            )
+        return self
+
+
+def normalize_lecture_video_manifest_v4_context_arrays(
+    summary_checkpoints: list[LectureVideoManifestSummaryCheckpointV4],
+    moment_contexts: list[LectureVideoManifestMomentContextV4],
+) -> tuple[
+    list[LectureVideoManifestSummaryCheckpointV4],
+    list[LectureVideoManifestMomentContextV4],
+]:
+    summary_checkpoints = sorted(
+        {
+            checkpoint.end_offset_ms: checkpoint for checkpoint in summary_checkpoints
+        }.values(),
+        key=lambda item: item.end_offset_ms,
+    )
+    moment_contexts = sorted(
+        {moment.center_offset_ms: moment for moment in moment_contexts}.values(),
+        key=lambda item: item.center_offset_ms,
+    )
+    if not summary_checkpoints:
+        raise ValueError("summary_checkpoints must not be empty")
+    if not moment_contexts:
+        raise ValueError("moment_contexts must not be empty")
+    return summary_checkpoints, moment_contexts
+
+
 class LectureVideoManifestV3(LectureVideoManifestBase):
     version: Literal[3] = 3
     word_level_transcription: list[LectureVideoManifestWordV3] = Field(
@@ -595,9 +657,39 @@ class LectureVideoManifestV3(LectureVideoManifestBase):
         return self
 
 
+class LectureVideoManifestV4(LectureVideoManifestBase):
+    version: Literal[4] = 4
+    word_level_transcription: list[LectureVideoManifestWordV3] = Field(
+        ..., min_length=1
+    )
+    summary_checkpoints: list[LectureVideoManifestSummaryCheckpointV4] = Field(
+        ..., min_length=1
+    )
+    moment_contexts: list[LectureVideoManifestMomentContextV4] = Field(
+        ..., min_length=1
+    )
+
+    @model_validator(mode="after")
+    def normalize_context_arrays(self) -> "LectureVideoManifestV4":
+        self.summary_checkpoints, self.moment_contexts = (
+            normalize_lecture_video_manifest_v4_context_arrays(
+                self.summary_checkpoints,
+                self.moment_contexts,
+            )
+        )
+        return self
+
+
 LectureVideoManifest: TypeAlias = (
-    LectureVideoManifestV1 | LectureVideoManifestV2 | LectureVideoManifestV3
+    LectureVideoManifestV1
+    | LectureVideoManifestV2
+    | LectureVideoManifestV3
+    | LectureVideoManifestV4
 )
+
+
+def _looks_like_lecture_video_manifest_v4(value: dict[str, Any]) -> bool:
+    return "summary_checkpoints" in value or "moment_contexts" in value
 
 
 def _looks_like_lecture_video_manifest_v3(value: dict[str, Any]) -> bool:
@@ -628,7 +720,12 @@ def validate_lecture_video_manifest(
 ) -> LectureVideoManifest | None:
     if lecture_video_manifest is None or isinstance(
         lecture_video_manifest,
-        (LectureVideoManifestV1, LectureVideoManifestV2, LectureVideoManifestV3),
+        (
+            LectureVideoManifestV1,
+            LectureVideoManifestV2,
+            LectureVideoManifestV3,
+            LectureVideoManifestV4,
+        ),
     ):
         return lecture_video_manifest
     try:
@@ -637,6 +734,14 @@ def validate_lecture_video_manifest(
             if isinstance(lecture_video_manifest, dict)
             else None
         )
+        if version == 4 or (
+            version is None
+            # V4 is inferred only from V4-only context fields. Explicit
+            # versioned payloads still validate against their own contract.
+            and isinstance(lecture_video_manifest, dict)
+            and _looks_like_lecture_video_manifest_v4(lecture_video_manifest)
+        ):
+            return LectureVideoManifestV4.model_validate(lecture_video_manifest)
         if version == 3 or (
             version is None
             # Only infer V3 for legacy manifests without an explicit version;
@@ -1519,6 +1624,7 @@ class NewThreadMessage(BaseModel):
     vision_image_descriptions: list[ImageProxy] = Field([])
     timezone: str | None = None
     generate_speech: bool | None = None
+    lecture_video_playback_position_ms: int | None = None
 
     _file_check = model_validator(mode="after")(file_validator)
 
