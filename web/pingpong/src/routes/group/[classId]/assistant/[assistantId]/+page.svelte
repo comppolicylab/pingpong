@@ -143,6 +143,18 @@
 			end_offset_ms: number;
 			description: string;
 		}[];
+		summary_checkpoints?: {
+			end_offset_ms: number;
+			summary: string;
+		}[];
+		moment_contexts?: {
+			center_offset_ms: number;
+			start_offset_ms: number;
+			end_offset_ms: number;
+			before: string;
+			at: string;
+			after: string;
+		}[];
 	};
 
 	type LectureVideoSaveAffordances = {
@@ -368,7 +380,7 @@
 		if (candidate.version === 1) {
 			return true;
 		}
-		if (candidate.version === 2 || candidate.version === 3) {
+		if (candidate.version === 2 || candidate.version === 3 || candidate.version === 4) {
 			return !hasWordLevelTranscription;
 		}
 		if (candidate.word_level_transcription !== undefined) {
@@ -407,11 +419,12 @@
 			candidate.version !== undefined &&
 			candidate.version !== 1 &&
 			candidate.version !== 2 &&
-			candidate.version !== 3
+			candidate.version !== 3 &&
+			candidate.version !== 4
 		) {
 			return {
 				manifest: null,
-				error: 'Lecture video manifest version must be 1, 2, or 3.'
+				error: 'Lecture video manifest version must be 1, 2, 3, or 4.'
 			};
 		}
 		if (!Array.isArray(candidate.questions) || candidate.questions.length < 1) {
@@ -519,7 +532,127 @@
 			candidate.version === 3 ||
 			(candidate.version === undefined &&
 				(candidate.video_descriptions !== undefined || hasV3TranscriptShape));
+		const shouldUseV4Manifest =
+			candidate.version === 4 ||
+			(candidate.version === undefined &&
+				(candidate.summary_checkpoints !== undefined || candidate.moment_contexts !== undefined));
 		const shouldUseV2Manifest = candidate.version === 2 || hasWordLevelTranscription;
+
+		if (shouldUseV4Manifest) {
+			if (
+				!Array.isArray(candidate.word_level_transcription) ||
+				candidate.word_level_transcription.length < 1
+			) {
+				return {
+					manifest: null,
+					error: 'Lecture video manifest version 4 must include non-empty word_level_transcription.'
+				};
+			}
+			if (
+				!Array.isArray(candidate.summary_checkpoints) ||
+				candidate.summary_checkpoints.length < 1
+			) {
+				return {
+					manifest: null,
+					error: 'Lecture video manifest version 4 must include non-empty summary_checkpoints.'
+				};
+			}
+			if (!Array.isArray(candidate.moment_contexts) || candidate.moment_contexts.length < 1) {
+				return {
+					manifest: null,
+					error: 'Lecture video manifest version 4 must include non-empty moment_contexts.'
+				};
+			}
+
+			for (let index = 0; index < candidate.word_level_transcription.length; index += 1) {
+				const word = candidate.word_level_transcription[index];
+				if (
+					!word ||
+					typeof word !== 'object' ||
+					typeof word.id !== 'string' ||
+					word.id.length < 1 ||
+					typeof word.word !== 'string' ||
+					word.word.length < 1 ||
+					!isValidLectureVideoInterval(word.start_offset_ms, word.end_offset_ms)
+				) {
+					return {
+						manifest: null,
+						error: `word_level_transcription entry ${index + 1} is invalid.`
+					};
+				}
+			}
+
+			for (let index = 0; index < candidate.summary_checkpoints.length; index += 1) {
+				const checkpoint = candidate.summary_checkpoints[index];
+				if (
+					!checkpoint ||
+					typeof checkpoint !== 'object' ||
+					typeof checkpoint.summary !== 'string' ||
+					checkpoint.summary.trim().length < 1 ||
+					typeof checkpoint.end_offset_ms !== 'number' ||
+					!Number.isFinite(checkpoint.end_offset_ms) ||
+					checkpoint.end_offset_ms < 0
+				) {
+					return {
+						manifest: null,
+						error: `summary_checkpoints entry ${index + 1} is invalid.`
+					};
+				}
+			}
+
+			for (let index = 0; index < candidate.moment_contexts.length; index += 1) {
+				const moment = candidate.moment_contexts[index];
+				if (
+					!moment ||
+					typeof moment !== 'object' ||
+					typeof moment.before !== 'string' ||
+					moment.before.trim().length < 1 ||
+					typeof moment.at !== 'string' ||
+					moment.at.trim().length < 1 ||
+					typeof moment.after !== 'string' ||
+					moment.after.trim().length < 1 ||
+					!isValidLectureVideoInterval(moment.start_offset_ms, moment.end_offset_ms) ||
+					typeof moment.center_offset_ms !== 'number' ||
+					!Number.isFinite(moment.center_offset_ms) ||
+					moment.center_offset_ms < moment.start_offset_ms ||
+					moment.center_offset_ms > moment.end_offset_ms
+				) {
+					return {
+						manifest: null,
+						error: `moment_contexts entry ${index + 1} is invalid.`
+					};
+				}
+			}
+
+			const wordLevelTranscription = candidate.word_level_transcription.map((word) => ({
+				id: word.id,
+				word: word.word,
+				start_offset_ms: word.start_offset_ms as number,
+				end_offset_ms: word.end_offset_ms as number
+			})) satisfies api.LectureVideoManifestWordV3[];
+			const manifest = {
+				version: 4,
+				questions,
+				word_level_transcription: wordLevelTranscription,
+				summary_checkpoints: candidate.summary_checkpoints.map((checkpoint) => ({
+					end_offset_ms: checkpoint.end_offset_ms,
+					summary: checkpoint.summary.trim()
+				})),
+				moment_contexts: candidate.moment_contexts.map((moment) => ({
+					center_offset_ms: moment.center_offset_ms,
+					start_offset_ms: moment.start_offset_ms,
+					end_offset_ms: moment.end_offset_ms,
+					before: moment.before.trim(),
+					at: moment.at.trim(),
+					after: moment.after.trim()
+				}))
+			} satisfies api.LectureVideoManifestV4;
+
+			return {
+				manifest,
+				error: null
+			};
+		}
 
 		if (shouldUseV3Manifest) {
 			if (

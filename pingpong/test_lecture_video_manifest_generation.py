@@ -279,6 +279,147 @@ def test_quiz_to_manifest_converts_generated_video_descriptions() -> None:
     )
 
 
+def test_quiz_to_manifest_converts_generated_v4_context_arrays() -> None:
+    quiz = manifest_generation.GeneratedQuizWithVideoContext(
+        video_summary="A short algebra lesson.",
+        summary_checkpoints=[
+            manifest_generation.GeneratedSummaryCheckpoint(
+                end_offset_ms=30000,
+                summary="The teacher introduces the expression.",
+            )
+        ],
+        moment_contexts=[
+            manifest_generation.GeneratedMomentContext(
+                center_offset_ms=0,
+                start_offset_ms=0,
+                end_offset_ms=30000,
+                before="The lesson is starting.",
+                at="The teacher writes an expression on the board.",
+                after="The teacher prepares the next step.",
+            )
+        ],
+        questions=[_generated_question()],
+    )
+
+    manifest = manifest_generation._quiz_to_manifest(
+        quiz,
+        _transcript(),
+        video_duration_ms=30000,
+    )
+
+    assert isinstance(manifest, schemas.LectureVideoManifestV4)
+    assert manifest.summary_checkpoints[0].summary == (
+        "The teacher introduces the expression."
+    )
+    assert manifest.moment_contexts[0].at == (
+        "The teacher writes an expression on the board."
+    )
+    assert not hasattr(manifest, "video_descriptions")
+
+
+def test_quiz_to_manifest_falls_back_for_missing_v4_context_arrays(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    quiz = manifest_generation.GeneratedQuizWithVideoContext(
+        video_summary="A short algebra lesson.",
+        questions=[_generated_question()],
+    )
+
+    with caplog.at_level("WARNING", logger=manifest_generation.logger.name):
+        manifest = manifest_generation._quiz_to_manifest(
+            quiz,
+            _transcript(),
+            video_duration_ms=30000,
+        )
+
+    assert isinstance(manifest, schemas.LectureVideoManifestV4)
+    assert [
+        checkpoint.end_offset_ms for checkpoint in manifest.summary_checkpoints
+    ] == [30000]
+    assert [moment.center_offset_ms for moment in manifest.moment_contexts] == [
+        0,
+        30000,
+    ]
+    assert [moment.start_offset_ms for moment in manifest.moment_contexts] == [
+        0,
+        15000,
+    ]
+    assert [moment.end_offset_ms for moment in manifest.moment_contexts] == [
+        15000,
+        30000,
+    ]
+    assert "missing required offset 30000ms" in caplog.text
+    assert "missing required center 0ms" in caplog.text
+
+
+def test_quiz_to_manifest_normalizes_v4_context_arrays_to_description_cadence() -> None:
+    quiz = manifest_generation.GeneratedQuizWithVideoContext(
+        video_summary="A short algebra lesson.",
+        summary_checkpoints=[
+            manifest_generation.GeneratedSummaryCheckpoint(
+                end_offset_ms=30000,
+                summary="The teacher has reached thirty seconds.",
+            ),
+            manifest_generation.GeneratedSummaryCheckpoint(
+                end_offset_ms=10000,
+                summary="The teacher has reached ten seconds.",
+            ),
+        ],
+        moment_contexts=[
+            manifest_generation.GeneratedMomentContext(
+                center_offset_ms=10000,
+                start_offset_ms=0,
+                end_offset_ms=20000,
+                before="Before ten seconds.",
+                at="At ten seconds.",
+                after="After ten seconds.",
+            ),
+            manifest_generation.GeneratedMomentContext(
+                center_offset_ms=0,
+                start_offset_ms=0,
+                end_offset_ms=5000,
+                before="Before start.",
+                at="At start.",
+                after="After start.",
+            ),
+        ],
+        questions=[_generated_question()],
+    )
+
+    manifest = manifest_generation._quiz_to_manifest(
+        quiz,
+        _transcript(),
+        video_duration_ms=184166,
+        video_description_window_ms=5000,
+    )
+
+    assert [checkpoint.end_offset_ms for checkpoint in manifest.summary_checkpoints][
+        :6
+    ] == [
+        5000,
+        10000,
+        15000,
+        20000,
+        25000,
+        30000,
+    ]
+    assert manifest.summary_checkpoints[-1].end_offset_ms == 184166
+    assert [moment.center_offset_ms for moment in manifest.moment_contexts[:4]] == [
+        0,
+        5000,
+        10000,
+        15000,
+    ]
+    assert manifest.moment_contexts[-1].center_offset_ms == 184166
+    assert manifest.moment_contexts[-1].start_offset_ms == 181666
+    assert manifest.moment_contexts[-1].end_offset_ms == 184166
+    assert manifest.moment_contexts[0].start_offset_ms == 0
+    assert manifest.moment_contexts[0].end_offset_ms == 2500
+    assert manifest.moment_contexts[2].start_offset_ms == 7500
+    assert manifest.moment_contexts[2].end_offset_ms == 12500
+    assert manifest.moment_contexts[2].at == "At ten seconds."
+
+
 @pytest.mark.parametrize(
     ("video_descriptions", "video_duration_ms", "expected_log"),
     [
@@ -440,9 +581,59 @@ def test_build_generation_prompt_uses_custom_video_description_window() -> None:
         video_description_window_ms=10000,
     )
 
-    assert "fixed 10-second windows" in prompt
-    assert "0-10000, 10000-20000" in prompt
-    assert "exactly 10000ms" in prompt
+    assert (
+        "Use a 10-second context cadence (10000ms): summary checkpoints and "
+        "moment_context centers follow this cadence."
+    ) in prompt
+    assert "exactly every 10 seconds" in prompt
+    assert "plus a final context centered on the final video/request end" in prompt
+    assert "do not emit clip-relative offsets" not in prompt
+    assert "REQUIRED summary_checkpoints end_offset_ms values" not in prompt
+    assert "REQUIRED moment_contexts center/start/end triples" not in prompt
+
+
+def test_build_generation_prompt_warns_against_clip_relative_offsets_for_chunks() -> (
+    None
+):
+    prompt = manifest_generation.build_generation_prompt(
+        "Ask one question.",
+        _transcript(),
+        video_duration_ms=30000,
+        generation_start_ms=10000,
+        generation_end_ms=20000,
+        context_start_ms=5000,
+        context_end_ms=25000,
+        video_description_window_ms=10000,
+    )
+
+    assert (
+        "The provided media is a clipped excerpt, so do not emit "
+        "excerpt-relative offsets."
+    ) in prompt
+    assert (
+        'use the surrounding clip context when writing "before" and "after"'
+    ) in prompt
+    assert (
+        "The first required moment_context center is 10000ms. Include it even "
+        "when it equals generation_start_ms; boundary centers are required, "
+        "not optional."
+    ) in prompt
+
+
+def test_build_generation_prompt_uses_half_window_moment_context_bounds() -> None:
+    prompt = manifest_generation.build_generation_prompt(
+        "Ask one question.",
+        _transcript(),
+        video_duration_ms=20000,
+        video_description_window_ms=5000,
+    )
+
+    assert (
+        "with a 5-second context cadence, center_offset_ms=10000 "
+        "must use start_offset_ms=7500 and end_offset_ms=12500"
+    ) in prompt
+    assert "REQUIRED summary_checkpoints end_offset_ms values" not in prompt
+    assert "REQUIRED moment_contexts center/start/end triples" not in prompt
 
 
 def test_plan_manifest_generation_chunks_rebalances_short_tail() -> None:
@@ -496,6 +687,35 @@ def test_plan_manifest_generation_chunks_aligns_custom_window_boundaries() -> No
         (490_000, 700_000),
     ]
     assert all(chunk.generation_end_ms % 35_000 == 0 for chunk in chunks[:-1])
+
+
+def test_manifest_chunk_overlap_scales_to_half_context_cadence() -> None:
+    assert manifest_generation._manifest_chunk_overlap_ms(30_000) == 30_000
+    assert manifest_generation._manifest_chunk_overlap_ms(120_000) == 60_000
+
+
+def test_plan_manifest_generation_chunks_can_use_scaled_context_overlap() -> None:
+    video_description_window_ms = 120_000
+    chunks = manifest_generation._plan_manifest_generation_chunks(
+        700_000,
+        overlap_ms=manifest_generation._manifest_chunk_overlap_ms(
+            video_description_window_ms
+        ),
+        alignment_ms=video_description_window_ms,
+    )
+
+    assert [
+        (chunk.generation_start_ms, chunk.generation_end_ms) for chunk in chunks
+    ] == [
+        (0, 240_000),
+        (240_000, 480_000),
+        (480_000, 700_000),
+    ]
+    assert [(chunk.context_start_ms, chunk.context_end_ms) for chunk in chunks] == [
+        (0, 300_000),
+        (180_000, 540_000),
+        (420_000, 700_000),
+    ]
 
 
 def test_plan_manifest_generation_chunks_uses_single_chunk_under_limit() -> None:
@@ -737,6 +957,127 @@ async def test_merge_chunk_manifests_reconciles_questions_with_gemini(
     assert [
         description.end_offset_ms for description in manifest.video_descriptions
     ] == [30000, 60000]
+
+
+async def test_merge_chunk_manifests_dedupes_and_sorts_v4_context_arrays(
+    monkeypatch,
+) -> None:
+    candidate_question = schemas.LectureVideoManifestQuestionV1(
+        type=schemas.LectureVideoQuestionType.SINGLE_SELECT,
+        question_text="Candidate?",
+        intro_text="Try this.",
+        stop_offset_ms=1000,
+        options=[
+            schemas.LectureVideoManifestOptionV1(
+                option_text="Combine like terms",
+                post_answer_text="Right.",
+                continue_offset_ms=1500,
+                correct=True,
+            ),
+            schemas.LectureVideoManifestOptionV1(
+                option_text="Change every variable",
+                post_answer_text="Not quite.",
+                continue_offset_ms=1500,
+                correct=False,
+            ),
+        ],
+    )
+    chunk_one = schemas.LectureVideoManifestV4(
+        word_level_transcription=_transcript(),
+        summary_checkpoints=[
+            schemas.LectureVideoManifestSummaryCheckpointV4(
+                end_offset_ms=60000,
+                summary="Later summary.",
+            ),
+            schemas.LectureVideoManifestSummaryCheckpointV4(
+                end_offset_ms=30000,
+                summary="First summary.",
+            ),
+        ],
+        moment_contexts=[
+            schemas.LectureVideoManifestMomentContextV4(
+                center_offset_ms=60000,
+                start_offset_ms=55000,
+                end_offset_ms=65000,
+                before="Before later.",
+                at="At later.",
+                after="After later.",
+            )
+        ],
+        questions=[candidate_question],
+    )
+    chunk_two = schemas.LectureVideoManifestV4(
+        word_level_transcription=_transcript(),
+        summary_checkpoints=[
+            schemas.LectureVideoManifestSummaryCheckpointV4(
+                end_offset_ms=30000,
+                summary="First summary replacement.",
+            )
+        ],
+        moment_contexts=[
+            schemas.LectureVideoManifestMomentContextV4(
+                center_offset_ms=0,
+                start_offset_ms=0,
+                end_offset_ms=5000,
+                before="Before start.",
+                at="At start.",
+                after="After start.",
+            ),
+            schemas.LectureVideoManifestMomentContextV4(
+                center_offset_ms=60000,
+                start_offset_ms=55000,
+                end_offset_ms=65000,
+                before="Before later replacement.",
+                at="At later replacement.",
+                after="After later replacement.",
+            ),
+        ],
+        questions=[candidate_question],
+    )
+
+    async def fake_generate_manifest_quiz(
+        _client,
+        *,
+        model,
+        prompt,
+        contents,
+        response_model,
+    ):  # type: ignore[no-untyped-def]
+        return manifest_generation.ReconciledGeneratedQuiz(
+            questions=[_generated_question()]
+        )
+
+    monkeypatch.setattr(
+        manifest_generation.gemini_helpers,
+        "generate_manifest_quiz",
+        fake_generate_manifest_quiz,
+    )
+
+    manifest = await manifest_generation._merge_chunk_manifests(
+        gemini_client=object(),  # type: ignore[arg-type]
+        generation_prompt_content="Ask only 1 question.",
+        model="gemini-test",
+        chunk_manifests=[chunk_one, chunk_two],
+        full_transcript=_transcript(),
+        video_duration_ms=60000,
+    )
+
+    assert isinstance(manifest, schemas.LectureVideoManifestV4)
+    assert [
+        checkpoint.end_offset_ms for checkpoint in manifest.summary_checkpoints
+    ] == [
+        30000,
+        60000,
+    ]
+    assert manifest.summary_checkpoints[0].summary == "First summary replacement."
+    assert [moment.center_offset_ms for moment in manifest.moment_contexts] == [
+        0,
+        30000,
+        60000,
+    ]
+    assert manifest.moment_contexts[2].at == "At later replacement."
+    assert manifest.moment_contexts[2].start_offset_ms == 45000
+    assert manifest.moment_contexts[2].end_offset_ms == 60000
 
 
 async def test_merge_chunk_manifests_falls_back_only_for_invalid_chunk(

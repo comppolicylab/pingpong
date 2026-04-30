@@ -602,7 +602,12 @@ class BufferedStreamHandler(openai.AsyncAssistantEventHandler):
 
 
 async def build_response_input_item_list(
-    session: AsyncSession, thread_id: int, uses_reasoning: bool = False
+    session: AsyncSession,
+    thread_id: int,
+    uses_reasoning: bool = False,
+    *,
+    current_run_id: int | None = None,
+    filter_prior_hidden_messages: bool = False,
 ) -> list[ResponseInputItemParam]:
     """Build a list of ResponseInputItem from a thread run step."""
     response_input_items: list[ResponseInputItemParam] = []
@@ -616,6 +621,12 @@ async def build_response_input_item_list(
         return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
     async for message in models.Thread.list_all_messages_gen(session, thread_id):
+        if (
+            filter_prior_hidden_messages
+            and message.is_hidden
+            and message.run_id != current_run_id
+        ):
+            continue
         phase = get_response_message_phase_value(message.phase)
         content_list: list[ResponseInputMessageContentListParam] = []
         for content in message.content:
@@ -3512,6 +3523,7 @@ async def run_response(
     response_safety_identifier: str | None = None,
     tts_voice_id: str | None = None,
     tts_api_key: str | None = None,
+    filter_prior_hidden_messages: bool = False,
 ):
     is_canceled = False
     await config.authz.driver.init()
@@ -3558,6 +3570,8 @@ async def run_response(
                     session_,
                     thread_id=run.thread_id,
                     uses_reasoning=not isinstance(reasoning_settings, openai.NotGiven),
+                    current_run_id=run.id,
+                    filter_prior_hidden_messages=filter_prior_hidden_messages,
                 )
                 max_output_index = await models.Thread.get_max_output_sequence(
                     session_, run.thread_id

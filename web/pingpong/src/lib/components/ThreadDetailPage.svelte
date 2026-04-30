@@ -684,6 +684,7 @@
 		vision_file_ids,
 		visionFileImageDescriptions,
 		optimisticVisionFiles,
+		lecture_video_playback_position_ms,
 		callback
 	}: ChatInputMessage) => {
 		try {
@@ -696,7 +697,8 @@
 				vision_file_ids,
 				visionFileImageDescriptions,
 				optimisticVisionFiles,
-				currentMessageAttachments
+				currentMessageAttachments,
+				lecture_video_playback_position_ms
 			);
 		} catch (e) {
 			callback({
@@ -713,8 +715,14 @@
 	};
 
 	const handleLectureChatSubmit = async (message: ChatInputMessage) => {
+		const lectureVideoPlaybackPositionMs = lectureVideoViewRef?.getPlaybackPositionMs();
 		void lectureVideoViewRef?.pauseForChatSubmit();
-		await postMessage(message);
+		await postMessage({
+			...message,
+			...(lectureVideoPlaybackPositionMs !== undefined
+				? { lecture_video_playback_position_ms: lectureVideoPlaybackPositionMs }
+				: {})
+		});
 	};
 
 	const handleLectureSessionChange = (e: CustomEvent<api.LectureVideoSession>) => {

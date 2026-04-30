@@ -13,6 +13,7 @@ from pingpong.lecture_video_chat import (
     _build_frame_message_parts,
     _build_context_text_from_transcript,
     _build_context_text_v3_from_parts,
+    _build_context_text_v4_from_parts,
     _extract_frame,
     _serialize_transcript_words_v3,
 )
@@ -95,6 +96,36 @@ def _build_manifest_v3_dict() -> dict:
             ).model_dump(mode="json"),
         ],
     }
+
+
+def _build_manifest_v4_dict() -> dict:
+    manifest = _build_manifest_v3_dict()
+    manifest.pop("video_descriptions")
+    manifest["version"] = 4
+    manifest["summary_checkpoints"] = [
+        {"end_offset_ms": 550, "summary": "Later cumulative summary."},
+        {"end_offset_ms": 450, "summary": "Earlier cumulative summary."},
+        {"end_offset_ms": 450, "summary": "Earlier cumulative summary replacement."},
+    ]
+    manifest["moment_contexts"] = [
+        {
+            "center_offset_ms": 550,
+            "start_offset_ms": 500,
+            "end_offset_ms": 700,
+            "before": "Before later.",
+            "at": "At later.",
+            "after": "After later.",
+        },
+        {
+            "center_offset_ms": 450,
+            "start_offset_ms": 400,
+            "end_offset_ms": 500,
+            "before": " Before earlier. ",
+            "at": " At earlier. ",
+            "after": " After earlier. ",
+        },
+    ]
+    return manifest
 
 
 def test_validate_lecture_video_manifest_accepts_omitted_version_v3():
@@ -212,6 +243,83 @@ def test_validate_lecture_video_manifest_rejects_empty_v3_video_descriptions():
         schemas.validate_lecture_video_manifest(payload)
 
 
+def test_validate_lecture_video_manifest_accepts_explicit_v4_and_normalizes_contexts():
+    manifest = schemas.validate_lecture_video_manifest(_build_manifest_v4_dict())
+
+    assert isinstance(manifest, schemas.LectureVideoManifestV4)
+    assert manifest.version == 4
+    assert not hasattr(manifest, "frames")
+    assert not hasattr(manifest, "video_descriptions")
+    assert [
+        checkpoint.end_offset_ms for checkpoint in manifest.summary_checkpoints
+    ] == [
+        450,
+        550,
+    ]
+    assert manifest.summary_checkpoints[0].summary == (
+        "Earlier cumulative summary replacement."
+    )
+    assert [moment.center_offset_ms for moment in manifest.moment_contexts] == [
+        450,
+        550,
+    ]
+    assert manifest.moment_contexts[0].before == "Before earlier."
+
+
+def test_validate_lecture_video_manifest_infers_versionless_v4_only_from_v4_fields():
+    payload = _build_manifest_v4_dict()
+    payload.pop("version")
+
+    manifest = schemas.validate_lecture_video_manifest(payload)
+
+    assert isinstance(manifest, schemas.LectureVideoManifestV4)
+
+
+@pytest.mark.parametrize(
+    "payload_update",
+    [
+        {"summary_checkpoints": [{"end_offset_ms": 450, "summary": "   "}]},
+        {
+            "moment_contexts": [
+                {
+                    "center_offset_ms": 500,
+                    "start_offset_ms": 600,
+                    "end_offset_ms": 700,
+                    "before": "Before.",
+                    "at": "At.",
+                    "after": "After.",
+                }
+            ]
+        },
+        {
+            "moment_contexts": [
+                {
+                    "center_offset_ms": 500,
+                    "start_offset_ms": 400,
+                    "end_offset_ms": 700,
+                    "before": "",
+                    "at": "At.",
+                    "after": "After.",
+                }
+            ]
+        },
+    ],
+)
+def test_validate_lecture_video_manifest_rejects_invalid_v4_contexts(payload_update):
+    payload = {**_build_manifest_v4_dict(), **payload_update}
+
+    with pytest.raises(ValueError, match="Invalid lecture video manifest"):
+        schemas.validate_lecture_video_manifest(payload)
+
+
+def test_validate_lecture_video_manifest_keeps_explicit_v3_authoritative():
+    payload = _build_manifest_v4_dict()
+    payload["version"] = 3
+
+    with pytest.raises(ValueError, match="video_descriptions"):
+        schemas.validate_lecture_video_manifest(payload)
+
+
 def test_v2_manifest_words_to_v3_treats_start_end_as_seconds():
     words = [
         schemas.LectureVideoManifestWordV2(
@@ -319,6 +427,106 @@ def test_build_context_text_caps_initial_transcript_context_window():
     assert "(older transcript omitted)" in context_text
     assert "intro" not in context_text
     assert "recent now" in context_text
+
+
+def test_build_context_text_v4_selects_floor_summary_and_moment_context():
+    thread = SimpleNamespace(lecture_video=SimpleNamespace(questions=[]))
+    state = SimpleNamespace(
+        last_known_offset_ms=500,
+        furthest_offset_ms=500,
+        last_chat_context_end_ms=0,
+        current_question=None,
+        current_question_id=None,
+        state=SimpleNamespace(value="active"),
+    )
+
+    context_text, current_offset_ms = _build_context_text_v4_from_parts(
+        thread,
+        state,
+        summary_checkpoints=[
+            schemas.LectureVideoManifestSummaryCheckpointV4(
+                end_offset_ms=450,
+                summary="Summary through 450.",
+            ),
+            schemas.LectureVideoManifestSummaryCheckpointV4(
+                end_offset_ms=550,
+                summary="Summary through 550.",
+            ),
+        ],
+        moment_contexts=[
+            schemas.LectureVideoManifestMomentContextV4(
+                center_offset_ms=450,
+                start_offset_ms=400,
+                end_offset_ms=500,
+                before="Before 450.",
+                at="At 450.",
+                after="After 450.",
+            ),
+            schemas.LectureVideoManifestMomentContextV4(
+                center_offset_ms=550,
+                start_offset_ms=500,
+                end_offset_ms=600,
+                before="Before 550.",
+                at="At 550.",
+                after="After 550.",
+            ),
+        ],
+        lecture_video_playback_position_ms=500,
+        answered_knowledge_checks=None,
+    )
+
+    assert current_offset_ms == 500
+    assert "Summary through 450." in context_text
+    assert "Summary through 550." not in context_text
+    assert "Before this moment (400-450ms):" in context_text
+    assert "At this moment (450ms):" in context_text
+    assert "At 450." in context_text
+    assert "After this moment (450-500ms):" in context_text
+    assert "At 550." not in context_text
+    assert "Before:" not in context_text
+    assert "At:" not in context_text
+    assert "After:" not in context_text
+    assert "Recent Transcript" not in context_text
+    assert "Lookahead Transcript" not in context_text
+    assert "Relevant Video Descriptions" not in context_text
+
+
+def test_build_context_text_v4_omits_unavailable_floor_context_sections():
+    thread = SimpleNamespace(lecture_video=SimpleNamespace(questions=[]))
+    state = SimpleNamespace(
+        last_known_offset_ms=100,
+        furthest_offset_ms=100,
+        last_chat_context_end_ms=0,
+        current_question=None,
+        current_question_id=None,
+        state=SimpleNamespace(value="active"),
+    )
+
+    context_text, _current_offset_ms = _build_context_text_v4_from_parts(
+        thread,
+        state,
+        summary_checkpoints=[
+            schemas.LectureVideoManifestSummaryCheckpointV4(
+                end_offset_ms=450,
+                summary="Summary through 450.",
+            )
+        ],
+        moment_contexts=[
+            schemas.LectureVideoManifestMomentContextV4(
+                center_offset_ms=450,
+                start_offset_ms=400,
+                end_offset_ms=500,
+                before="Before 450.",
+                at="At 450.",
+                after="After 450.",
+            )
+        ],
+        lecture_video_playback_position_ms=100,
+        answered_knowledge_checks=None,
+    )
+
+    assert "### Lecture Summary So Far" not in context_text
+    assert "### Current Moment Context" not in context_text
 
 
 def test_build_context_text_caps_transcript_since_last_chat():

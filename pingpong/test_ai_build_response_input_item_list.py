@@ -418,6 +418,108 @@ async def test_build_response_input_item_list_replays_developer_and_system_messa
     assert items[4]["content"][0]["type"] == "output_text"
 
 
+@pytest.mark.asyncio
+async def test_build_response_input_item_list_can_filter_prior_hidden_messages(
+    db,
+):
+    async with db.async_session() as session:
+        thread = models.Thread(thread_id="thread_v4_context_filter", version=3)
+        session.add(thread)
+        await session.flush()
+
+        prior_run = models.Run(status=schemas.RunStatus.COMPLETED, thread_id=thread.id)
+        current_run = models.Run(status=schemas.RunStatus.PENDING, thread_id=thread.id)
+        session.add_all([prior_run, current_run])
+        await session.flush()
+
+        prior_developer_message = models.Message(
+            message_status=schemas.MessageStatus.COMPLETED,
+            run_id=prior_run.id,
+            thread_id=thread.id,
+            output_index=1,
+            role=schemas.MessageRole.DEVELOPER,
+            is_hidden=True,
+            content=[
+                models.MessagePart(
+                    part_index=0,
+                    type=schemas.MessagePartType.INPUT_TEXT,
+                    text="Prior lecture context",
+                )
+            ],
+            created=utcnow() - timedelta(minutes=3),
+        )
+        current_developer_message = models.Message(
+            message_status=schemas.MessageStatus.COMPLETED,
+            run_id=current_run.id,
+            thread_id=thread.id,
+            output_index=2,
+            role=schemas.MessageRole.DEVELOPER,
+            is_hidden=True,
+            content=[
+                models.MessagePart(
+                    part_index=0,
+                    type=schemas.MessagePartType.INPUT_TEXT,
+                    text="Current lecture context",
+                )
+            ],
+            created=utcnow() - timedelta(minutes=2),
+        )
+        prior_hidden_image_message = models.Message(
+            message_status=schemas.MessageStatus.COMPLETED,
+            run_id=prior_run.id,
+            thread_id=thread.id,
+            output_index=3,
+            role=schemas.MessageRole.USER,
+            is_hidden=True,
+            content=[
+                models.MessagePart(
+                    part_index=0,
+                    type=schemas.MessagePartType.INPUT_IMAGE,
+                    input_image_file_id="prior-frame-file-id",
+                )
+            ],
+            created=utcnow() - timedelta(minutes=1, seconds=30),
+        )
+        user_message = models.Message(
+            message_status=schemas.MessageStatus.COMPLETED,
+            run_id=current_run.id,
+            thread_id=thread.id,
+            output_index=4,
+            role=schemas.MessageRole.USER,
+            content=[
+                models.MessagePart(
+                    part_index=0,
+                    type=schemas.MessagePartType.INPUT_TEXT,
+                    text="What is happening here?",
+                )
+            ],
+            created=utcnow() - timedelta(minutes=1),
+        )
+        session.add_all(
+            [
+                prior_developer_message,
+                current_developer_message,
+                prior_hidden_image_message,
+                user_message,
+            ]
+        )
+        await session.commit()
+
+        thread_id = thread.id
+        current_run_id = current_run.id
+
+    async with db.async_session() as session:
+        items = await build_response_input_item_list(
+            session,
+            thread_id=thread_id,
+            current_run_id=current_run_id,
+            filter_prior_hidden_messages=True,
+        )
+
+    assert [item["role"] for item in items] == ["developer", "user"]
+    assert items[0]["content"][0]["text"] == "Current lecture context"
+
+
 def test_get_known_response_message_phase_returns_known_phase_only():
     assert (
         ai.get_known_response_message_phase("commentary")

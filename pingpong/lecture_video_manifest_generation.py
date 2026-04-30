@@ -258,6 +258,58 @@ class GeneratedVideoDescription(BaseModel):
     description: str = Field(description="Visual description for this video window.")
 
 
+class GeneratedSummaryCheckpoint(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    end_offset_ms: int = Field(
+        ge=0, description="Checkpoint end offset in milliseconds."
+    )
+    summary: str = Field(
+        description=(
+            "Cumulative summary from the relevant generation scope start "
+            "through end_offset_ms."
+        )
+    )
+
+
+class GeneratedMomentContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    center_offset_ms: int = Field(
+        ge=0, description="The center offset for this local context."
+    )
+    start_offset_ms: int = Field(
+        ge=0, description="The start offset of the local context window."
+    )
+    end_offset_ms: int = Field(
+        ge=0, description="The end offset of the local context window."
+    )
+    before: str = Field(description="What immediately leads into this moment.")
+    at: str = Field(description="What is happening at the center moment.")
+    after: str = Field(description="What immediately follows this moment.")
+
+
+class GeneratedQuizWithVideoContext(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    video_summary: str = Field(description="Brief summary of the lesson.")
+    questions: list[GeneratedQuestion] = Field(
+        min_length=1,
+        description="Generated comprehension checks.",
+    )
+    summary_checkpoints: list[GeneratedSummaryCheckpoint] = Field(
+        default_factory=list,
+        description=(
+            "Cumulative summaries from the relevant generation scope start "
+            "through increasing checkpoint offsets."
+        ),
+    )
+    moment_contexts: list[GeneratedMomentContext] = Field(
+        default_factory=list,
+        description="Local context windows centered on increasing offsets.",
+    )
+
+
 class GeneratedQuizWithVideo(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -283,6 +335,83 @@ class ReconciledGeneratedQuiz(BaseModel):
 
 def _timestamp_to_ms(value: float | int) -> int:
     return int(round(float(value) * 1000))
+
+
+def _manifest_chunk_overlap_ms(video_description_window_ms: int) -> int:
+    return max(_MANIFEST_CHUNK_OVERLAP_MS, video_description_window_ms // 2)
+
+
+def _scheduled_summary_checkpoint_offsets(
+    *,
+    video_duration_ms: int | None,
+    generation_start_ms: int | None,
+    generation_end_ms: int | None,
+    video_description_window_ms: int,
+) -> list[int]:
+    if video_description_window_ms <= 0:
+        return []
+    effective_end_ms = (
+        generation_end_ms if generation_end_ms is not None else video_duration_ms
+    )
+    if effective_end_ms is None:
+        return []
+    effective_start_ms = max(generation_start_ms or 0, 0)
+    effective_end_ms = max(effective_end_ms, 0)
+    if effective_end_ms <= effective_start_ms:
+        return []
+    first_offset_ms = (
+        (effective_start_ms // video_description_window_ms) + 1
+    ) * video_description_window_ms
+    offsets = list(
+        range(first_offset_ms, effective_end_ms + 1, video_description_window_ms)
+    )
+    if not offsets or offsets[-1] != effective_end_ms:
+        offsets.append(effective_end_ms)
+    return offsets
+
+
+def _scheduled_moment_context_windows(
+    *,
+    video_duration_ms: int | None,
+    generation_start_ms: int | None,
+    generation_end_ms: int | None,
+    video_description_window_ms: int,
+) -> list[tuple[int, int, int]]:
+    if video_description_window_ms <= 0:
+        return []
+    effective_end_ms = (
+        generation_end_ms if generation_end_ms is not None else video_duration_ms
+    )
+    if effective_end_ms is None:
+        return []
+    effective_start_ms = max(generation_start_ms or 0, 0)
+    effective_end_ms = max(effective_end_ms, 0)
+    if effective_end_ms < effective_start_ms:
+        return []
+    if effective_start_ms == 0:
+        first_center_ms = 0
+    else:
+        first_center_ms = (
+            (effective_start_ms + video_description_window_ms - 1)
+            // video_description_window_ms
+        ) * video_description_window_ms
+    if first_center_ms > effective_end_ms:
+        return []
+    half_window_ms = video_description_window_ms // 2
+    duration_cap_ms = (
+        video_duration_ms if video_duration_ms is not None else effective_end_ms
+    )
+    windows: list[tuple[int, int, int]] = []
+    for center_offset_ms in range(
+        first_center_ms, effective_end_ms + 1, video_description_window_ms
+    ):
+        start_offset_ms = max(0, center_offset_ms - half_window_ms)
+        end_offset_ms = min(duration_cap_ms, center_offset_ms + half_window_ms)
+        windows.append((center_offset_ms, start_offset_ms, end_offset_ms))
+    if windows and windows[-1][0] != effective_end_ms:
+        start_offset_ms = max(0, effective_end_ms - half_window_ms)
+        windows.append((effective_end_ms, start_offset_ms, effective_end_ms))
+    return windows
 
 
 @dataclass(frozen=True)
@@ -887,50 +1016,99 @@ def build_generation_prompt(
 
     video_description_window_seconds = video_description_window_ms / 1000
     video_description_next_window_ms = video_description_window_ms * 2
+    video_description_half_window_ms = video_description_window_ms // 2
+    video_description_half_window_seconds = video_description_half_window_ms / 1000
     video_description_window_text = f"{video_description_window_seconds:g}"
+    video_description_half_window_text = f"{video_description_half_window_seconds:g}"
+    context_array_summary_scope = "0ms through each end_offset_ms"
+    summary_schedule_guidance = (
+        f"- Generate summary checkpoints exactly every {video_description_window_text} "
+        "seconds from the start of the video, plus the final video end if it is "
+        "not already on that cadence, using absolute millisecond offsets."
+    )
+    moment_schedule_guidance = (
+        f"- Generate moment contexts centered exactly every {video_description_window_text} "
+        "seconds from the start of the video, plus a final context centered on "
+        "the final video/request end if it is not already on that cadence, using "
+        "absolute millisecond offsets."
+    )
+    initial_moment_guidance = (
+        "- Always include an initial moment_context with start_offset_ms=0, "
+        "center_offset_ms=0, and end_offset_ms="
+        f"{video_description_half_window_ms}."
+    )
     duration_text = (
         f"\nThe video duration is {video_duration_ms} milliseconds."
         if video_duration_ms is not None
         else ""
     )
     generation_window_text = ""
-    video_description_scope = "the whole video"
-    video_description_start_rule = (
-        "Use consecutive millisecond ranges starting at 0: "
-        f"0-{video_description_window_ms}, "
-        f"{video_description_window_ms}-{video_description_next_window_ms}, "
-        "and so on through the full video."
+    context_array_scope = "the whole video"
+    chunk_moment_boundary_guidance = ""
+    context_offset_guidance = (
+        "- Use absolute millisecond offsets from the original video for every "
+        "summary end_offset_ms and every moment center_offset_ms, start_offset_ms, "
+        "and end_offset_ms."
     )
-    video_description_end_rule = (
-        "The final segment must end exactly at the video duration. It may be "
-        f"shorter than {video_description_window_text} seconds. Never set the "
-        "final end_offset_ms after the end of the video."
-    )
-    video_description_reminder = (
-        'The top-level "video_descriptions" array is REQUIRED for video-based '
-        "generation. It must be non-empty and must use contiguous millisecond "
-        "windows starting at 0. The final segment must end exactly at the video "
-        "duration, not after it."
+    context_array_reminder = (
+        'The top-level "summary_checkpoints" and "moment_contexts" arrays are '
+        "REQUIRED for video-based generation. They must be non-empty and use "
+        "absolute millisecond offsets from the original video."
     )
     if generation_start_ms is not None and generation_end_ms is not None:
-        video_description_scope = "the requested generation window"
-        video_description_start_rule = (
-            "Use consecutive millisecond ranges starting at the requested "
-            "generation window start. Use absolute offsets from the original "
-            "video, not clip-relative offsets."
+        context_array_scope = "the requested generation window"
+        context_array_summary_scope = (
+            f"{generation_start_ms}ms through each end_offset_ms"
         )
-        video_description_end_rule = (
-            "The final segment must end exactly at the requested generation "
-            "window end. It may be shorter than "
-            f"{video_description_window_text} seconds. Never set the final "
-            "end_offset_ms after the requested generation window end."
+        summary_schedule_guidance = (
+            f"- Generate summary checkpoints at the fixed {video_description_window_text}"
+            "-second cadence inside the requested generation window, plus the "
+            "request end if it is not already on that cadence, using absolute "
+            "millisecond offsets from the original video. The first checkpoint is "
+            f"the first cadence offset greater than {generation_start_ms}ms; do "
+            "not force a checkpoint at 0ms for a chunk that starts later."
         )
-        video_description_reminder = (
-            'The top-level "video_descriptions" array is REQUIRED for '
-            "video-based generation. It must be non-empty and must use "
-            "contiguous millisecond windows starting at the requested generation "
-            "window start. The final segment must end exactly at the requested "
-            "generation window end, not after it."
+        moment_schedule_guidance = (
+            f"- Generate moment contexts centered at the fixed {video_description_window_text}"
+            "-second cadence inside the requested generation window, plus a final "
+            "context centered on the request end if it is not already on that "
+            "cadence, using absolute millisecond offsets from the original video."
+        )
+        initial_moment_guidance = (
+            "- If the requested generation window starts at 0ms, include the "
+            "initial moment_context with start_offset_ms=0, center_offset_ms=0, "
+            f"and end_offset_ms={video_description_half_window_ms}. If the "
+            "requested generation window starts later, do not include a 0ms "
+            "moment_context; start with the first fixed-cadence center inside "
+            "the requested generation window."
+        )
+        if generation_start_ms == 0:
+            first_moment_center_ms = 0
+        else:
+            first_moment_center_ms = (
+                (generation_start_ms + video_description_window_ms - 1)
+                // video_description_window_ms
+            ) * video_description_window_ms
+        chunk_moment_boundary_guidance = (
+            "- For moment_contexts near the requested generation window boundaries, "
+            'use the surrounding clip context when writing "before" and "after". '
+            "The local context window may extend outside the generation window, "
+            "but center_offset_ms must stay inside the generation window.\n"
+            f"- The first required moment_context center is {first_moment_center_ms}ms. "
+            "Include it even when it equals generation_start_ms; boundary centers "
+            "are required, not optional."
+        )
+        context_offset_guidance = (
+            "- Use absolute millisecond offsets from the original video for every "
+            "summary end_offset_ms and every moment center_offset_ms, start_offset_ms, "
+            "and end_offset_ms. The provided media is a clipped excerpt, so do "
+            "not emit excerpt-relative offsets."
+        )
+        context_array_reminder = (
+            'The top-level "summary_checkpoints" and "moment_contexts" arrays '
+            "are REQUIRED for video-based generation. They must be non-empty, "
+            "must use absolute offsets from the original video, and should only "
+            "cover the requested generation window."
         )
         context_window_text = (
             f" The provided video clip covers absolute offsets "
@@ -945,8 +1123,7 @@ This is one chunk from a longer lecture video.{context_window_text}
 Clip time 0 corresponds to absolute offset {context_start_ms or 0}ms in the original video.
 Use the whole clip as context, but generate output ONLY for the generation window from {generation_start_ms}ms through {generation_end_ms}ms.
 Do not create questions with pause points before {generation_start_ms}ms or after {generation_end_ms}ms.
-Generate "video_descriptions" starting exactly at {generation_start_ms}ms and ending exactly at {generation_end_ms}ms.
-Every non-final video description segment inside this generation window must be exactly {video_description_window_ms}ms long.
+Generate "summary_checkpoints" and "moment_contexts" for offsets inside {generation_start_ms}ms through {generation_end_ms}ms.
 """
 
     return f"""You are an expert educational content designer specializing in interactive video lessons. You speak as the teacher in first person, directly to the student.
@@ -963,23 +1140,38 @@ To ensure high confidence in analyzing the lesson, watch the video along with th
 YOUR TASK:
 Analyze the provided lesson materials to identify natural pause points where a multiple-choice comprehension check can be inserted. At each pause point, the video will stop, a question will be displayed as text on screen, and a voice clone of the teacher will introduce the question out loud. After the student selects an answer, the voice clone will give spoken feedback, and the video will resume. The resume point may differ depending on which answer the student chose.
 
-Also create a top-level "video_descriptions" array that describes what is visibly happening in fixed {video_description_window_text}-second windows across {video_description_scope}.
+Also create two top-level context arrays across {context_array_scope}:
+- "summary_checkpoints": cumulative summaries over {context_array_summary_scope}, ordered by increasing end_offset_ms.
+- "moment_contexts": local context windows centered on increasing center_offset_ms values, with separate "before", "at", and "after" fields.
 
-VISUAL DESCRIPTION GUIDELINES:
-- {video_description_start_rule}
-- Every segment except the final segment must be exactly {video_description_window_text} seconds long.
-- {video_description_end_rule}
-- Each segment description should be concise and general-purpose, usually 1-2 sentences.
-- Focus only on observable teaching state: screen or board contents, written text, diagrams, values, equations, cursor movement, gesture emphasis, and meaningful visual changes.
-- Do not infer concepts from visuals alone. Tie visual details to what can actually be seen.
-- If the visual state is mostly unchanged from the prior window, briefly say what remains visible and note any small meaningful changes.
+CONTEXT ARRAY GROUNDING:
+- Use a {video_description_window_text}-second context cadence ({video_description_window_ms}ms): summary checkpoints and moment_context centers follow this cadence.
+{context_offset_guidance}
+- Do not choose semantically interesting offsets instead of the fixed cadence.
+- Use the provided transcript and visible video content as the source of truth. You may combine spoken content with observable teaching state, but make conceptual claims only when they are supported by the transcript, visible text, or clearly visible teaching action.
+
+SUMMARY CHECKPOINT GUIDELINES:
+{summary_schedule_guidance}
+- Do not skip the first required checkpoint for this generation scope.
+- Each summary must be cumulative over {context_array_summary_scope}. For a chunked request, summarize from the requested generation start through end_offset_ms; do not claim to summarize unseen earlier video content.
+
+MOMENT CONTEXT GUIDELINES:
+{moment_schedule_guidance}
+- Moment context windows must extend half the context cadence on each side of the center: start_offset_ms = center_offset_ms - {video_description_half_window_text} seconds, end_offset_ms = center_offset_ms + {video_description_half_window_text} seconds, clamped to 0ms and the video duration.
+- For example, with a 5-second context cadence, center_offset_ms=10000 must use start_offset_ms=7500 and end_offset_ms=12500.
+{initial_moment_guidance}
+{chunk_moment_boundary_guidance}
+- For every moment_context, enforce start_offset_ms <= center_offset_ms <= end_offset_ms.
+- "before" should explain what immediately leads into the center moment.
+- "at" should explain what is happening at the center moment.
+- "after" should explain what immediately follows the center moment.
+- Context text should combine spoken content and observable teaching state where useful: screen or board contents, written text, diagrams, values, equations, cursor movement, gesture emphasis, and meaningful visual changes.
 
 IMPORTANT CONTEXT:
-- The student sees subtitles/captions during playback, so they both hear and read what the teacher says. For your purposes, that means attention-based questions are not useful here.
 - The voice-over feedback is spoken by a clone of the teacher's voice. It must sound like the teacher is speaking directly to the student in first person — not a separate narrator or tutor commenting from the outside.
 - The feedback voice-over is spliced into the lecture audio. When the video resumes, the teacher's voice continues seamlessly. Your feedback must flow naturally into whatever the teacher says at the determined resume point — as if it were all one continuous spoken experience.
 
-EDITABLE GENERATION GUIDANCE:
+GENERATION GUIDANCE SPECIFIC TO THIS VIDEO:
 {content_section.strip() or DEFAULT_GENERATION_PROMPT_CONTENT}
 
 GUIDELINES FOR VOICE AND PERSPECTIVE:
@@ -1040,16 +1232,32 @@ Return a single JSON object. Do not include any text outside the JSON.
 ```json
 {{
   "video_summary": "Brief description of the video topic",
-  "video_descriptions": [
+  "summary_checkpoints": [
     {{
-      "start_offset_ms": 0,
       "end_offset_ms": {video_description_window_ms},
-      "description": "The teacher's screen shows a slide with a title and two bullet points. A cursor circles the first bullet while the speaker emphasizes the main idea."
+      "summary": "From the start through this point, the teacher introduces the main idea and works through the first example."
     }},
     {{
-      "start_offset_ms": {video_description_window_ms},
       "end_offset_ms": {video_description_next_window_ms},
-      "description": "The same slide remains visible while a short example is added underneath the bullets. The cursor moves between the example and the earlier text to connect them."
+      "summary": "From the start through this point, the teacher introduces the main idea, works through the first example, and connects it to the next step."
+    }}
+  ],
+  "moment_contexts": [
+    {{
+      "center_offset_ms": 0,
+      "start_offset_ms": 0,
+      "end_offset_ms": {video_description_half_window_ms},
+      "before": "The lesson is just beginning.",
+      "at": "The teacher introduces the topic and the first visible teaching materials.",
+      "after": "The teacher begins the first example."
+    }},
+    {{
+      "center_offset_ms": {video_description_window_ms},
+      "start_offset_ms": {video_description_half_window_ms},
+      "end_offset_ms": {video_description_window_ms + video_description_half_window_ms},
+      "before": "The teacher has introduced the main idea.",
+      "at": "The teacher is working through the next step of the example.",
+      "after": "The teacher connects the example back to the main concept."
     }}
   ],
   "questions": [
@@ -1137,16 +1345,22 @@ FIELD DEFINITIONS:
   - "resume_at_word_id": The "id" of the first word the student hears when the video resumes after this choice. Copied exactly from the transcript.
   - "resume_at_word": The "word" text of that transcript entry. Copied exactly.
   - "resume_at": The "start" timestamp of the resume word. Copied exactly from the transcript — do not round or modify.
-- "video_descriptions": Array of contiguous visual segments covering the whole video. Each non-final segment is {video_description_window_text} seconds; the final segment ends exactly at the video duration and may be shorter. Each segment contains:
-  - "start_offset_ms": Integer millisecond offset where this visual window starts.
-  - "end_offset_ms": Integer millisecond offset where this visual window ends. This must be exactly {video_description_window_ms}ms after start_offset_ms except for the final segment, which must equal the video duration.
-  - "description": Concise observable description of the teaching visuals in that window.
+- "summary_checkpoints": Array of cumulative summaries. Each entry contains:
+  - "end_offset_ms": Integer millisecond offset through which this summary applies.
+  - "summary": Non-empty cumulative summary from the relevant generation scope start through end_offset_ms.
+- "moment_contexts": Array of local context windows. Each entry contains:
+  - "center_offset_ms": Integer millisecond offset used to select this local context.
+  - "start_offset_ms": Integer millisecond offset where the local window starts.
+  - "end_offset_ms": Integer millisecond offset where the local window ends.
+  - "before": Non-empty local context before center_offset_ms.
+  - "at": Non-empty local context at center_offset_ms.
+  - "after": Non-empty local context after center_offset_ms.
 
 IMPORTANT REMINDERS:
 - ALL word IDs and timestamps must come directly from the transcript entries. Look up each word's actual "id" field — do not count or guess. Copy "word", "start", and "end" exactly.
 - For teacher-posed questions: let them ask it, pause after the question, and resume into the teacher's own answer — do NOT skip past it.
 - For "generated" questions, voice_over_intro MUST include both a pause cue and the question spoken aloud. The student needs to hear it, not just read it.
-- {video_description_reminder}
+- {context_array_reminder}
 
 REDUNDANCY CHECK:
 - Before finalizing each voice_over, read it concatenated with the teacher's words starting at the resume point. If any fact, number, or concept appears in both your feedback AND the teacher's next sentence, remove it from your feedback. The combined audio must never say the same thing twice.
@@ -1485,32 +1699,203 @@ def _normalize_video_descriptions_to_windows(
     ]
 
 
+def _fallback_summary_checkpoints(
+    video_duration_ms: int | None,
+) -> list[schemas.LectureVideoManifestSummaryCheckpointV4]:
+    return [
+        schemas.LectureVideoManifestSummaryCheckpointV4(
+            end_offset_ms=max(video_duration_ms or 0, 0),
+            summary="A cumulative lecture summary was unavailable for this generation pass.",
+        )
+    ]
+
+
+def _fallback_moment_contexts() -> list[schemas.LectureVideoManifestMomentContextV4]:
+    return [
+        schemas.LectureVideoManifestMomentContextV4(
+            center_offset_ms=0,
+            start_offset_ms=0,
+            end_offset_ms=0,
+            before="No earlier local lecture context is available.",
+            at="Local lecture context was unavailable for this generation pass.",
+            after="No later local lecture context is available.",
+        )
+    ]
+
+
+def _generated_summary_checkpoints_to_manifest(
+    checkpoints: list[GeneratedSummaryCheckpoint],
+) -> list[schemas.LectureVideoManifestSummaryCheckpointV4]:
+    return [
+        schemas.LectureVideoManifestSummaryCheckpointV4.model_validate(
+            checkpoint.model_dump()
+        )
+        for checkpoint in checkpoints
+    ]
+
+
+def _generated_moment_contexts_to_manifest(
+    moments: list[GeneratedMomentContext],
+) -> list[schemas.LectureVideoManifestMomentContextV4]:
+    return [
+        schemas.LectureVideoManifestMomentContextV4.model_validate(moment.model_dump())
+        for moment in moments
+    ]
+
+
+def _normalize_v4_context_arrays(
+    *,
+    summary_checkpoints: list[schemas.LectureVideoManifestSummaryCheckpointV4],
+    moment_contexts: list[schemas.LectureVideoManifestMomentContextV4],
+    video_duration_ms: int | None,
+    generation_start_ms: int | None = None,
+    generation_end_ms: int | None = None,
+    video_description_window_ms: int = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
+) -> tuple[
+    list[schemas.LectureVideoManifestSummaryCheckpointV4],
+    list[schemas.LectureVideoManifestMomentContextV4],
+]:
+    summary_checkpoint_by_offset = {
+        checkpoint.end_offset_ms: checkpoint for checkpoint in summary_checkpoints
+    }
+    required_summary_offsets = _scheduled_summary_checkpoint_offsets(
+        video_duration_ms=video_duration_ms,
+        generation_start_ms=generation_start_ms,
+        generation_end_ms=generation_end_ms,
+        video_description_window_ms=video_description_window_ms,
+    )
+    if required_summary_offsets:
+        summary_checkpoints = []
+        for end_offset_ms in required_summary_offsets:
+            checkpoint = summary_checkpoint_by_offset.get(end_offset_ms)
+            if checkpoint is not None:
+                summary_checkpoints.append(checkpoint)
+                continue
+            logger.warning(
+                "Generated summary_checkpoints missing required offset %sms; "
+                "falling back to unavailable summary for that checkpoint.",
+                end_offset_ms,
+            )
+            summary_checkpoints.append(
+                schemas.LectureVideoManifestSummaryCheckpointV4(
+                    end_offset_ms=end_offset_ms,
+                    summary=(
+                        "A cumulative lecture summary was unavailable for this "
+                        "checkpoint."
+                    ),
+                )
+            )
+    else:
+        summary_checkpoints = sorted(
+            summary_checkpoint_by_offset.values(),
+            key=lambda item: item.end_offset_ms,
+        )
+
+    moment_context_by_center = {
+        moment.center_offset_ms: moment for moment in moment_contexts
+    }
+    required_moment_windows = _scheduled_moment_context_windows(
+        video_duration_ms=video_duration_ms,
+        generation_start_ms=generation_start_ms,
+        generation_end_ms=generation_end_ms,
+        video_description_window_ms=video_description_window_ms,
+    )
+    if required_moment_windows:
+        moment_contexts = []
+        for center_offset_ms, start_offset_ms, end_offset_ms in required_moment_windows:
+            moment = moment_context_by_center.get(center_offset_ms)
+            if moment is None:
+                logger.warning(
+                    "Generated moment_contexts missing required center %sms; "
+                    "falling back to unavailable local context for that moment.",
+                    center_offset_ms,
+                )
+                moment_contexts.append(
+                    schemas.LectureVideoManifestMomentContextV4(
+                        center_offset_ms=center_offset_ms,
+                        start_offset_ms=start_offset_ms,
+                        end_offset_ms=end_offset_ms,
+                        before="No earlier local lecture context is available.",
+                        at=("Local lecture context was unavailable for this moment."),
+                        after="No later local lecture context is available.",
+                    )
+                )
+                continue
+            moment_contexts.append(
+                schemas.LectureVideoManifestMomentContextV4(
+                    center_offset_ms=center_offset_ms,
+                    start_offset_ms=start_offset_ms,
+                    end_offset_ms=end_offset_ms,
+                    before=moment.before,
+                    at=moment.at,
+                    after=moment.after,
+                )
+            )
+    else:
+        moment_contexts = sorted(
+            moment_context_by_center.values(),
+            key=lambda item: item.center_offset_ms,
+        )
+    if not summary_checkpoints:
+        logger.warning(
+            "Generated summary_checkpoints was empty; falling back to unavailable summary."
+        )
+        summary_checkpoints = _fallback_summary_checkpoints(video_duration_ms)
+    if not moment_contexts:
+        logger.warning(
+            "Generated moment_contexts was empty; falling back to unavailable moment context."
+        )
+        moment_contexts = _fallback_moment_contexts()
+    return summary_checkpoints, moment_contexts
+
+
 def _quiz_to_manifest(
-    quiz: GeneratedQuizWithVideo,
+    quiz: GeneratedQuizWithVideoContext | GeneratedQuizWithVideo,
     transcript: list[schemas.LectureVideoManifestWordV3],
     *,
     video_duration_ms: int | None,
     video_description_start_offset_ms: int = 0,
     video_description_end_offset_ms: int | None = None,
     video_description_window_ms: int = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
-) -> schemas.LectureVideoManifestV3:
+) -> schemas.LectureVideoManifestV3 | schemas.LectureVideoManifestV4:
     transcript_word_index = _transcript_word_index(transcript)
-    video_descriptions = _video_descriptions_to_manifest_video_descriptions(
-        quiz.video_descriptions
-    )
-    video_descriptions = _validated_or_fallback_video_descriptions(
-        video_descriptions,
-        start_offset_ms=video_description_start_offset_ms,
-        end_offset_ms=(
-            video_description_end_offset_ms
-            if video_description_end_offset_ms is not None
-            else video_duration_ms
+    if isinstance(quiz, GeneratedQuizWithVideo):
+        video_descriptions = _video_descriptions_to_manifest_video_descriptions(
+            quiz.video_descriptions
+        )
+        video_descriptions = _validated_or_fallback_video_descriptions(
+            video_descriptions,
+            start_offset_ms=video_description_start_offset_ms,
+            end_offset_ms=(
+                video_description_end_offset_ms
+                if video_description_end_offset_ms is not None
+                else video_duration_ms
+            ),
+            video_description_window_ms=video_description_window_ms,
+        )
+        return schemas.LectureVideoManifestV3(
+            word_level_transcription=transcript,
+            video_descriptions=video_descriptions,
+            questions=[
+                _question_to_manifest_question(question, transcript_word_index)
+                for question in quiz.questions
+            ],
+        )
+
+    summary_checkpoints, moment_contexts = _normalize_v4_context_arrays(
+        summary_checkpoints=_generated_summary_checkpoints_to_manifest(
+            quiz.summary_checkpoints
         ),
+        moment_contexts=_generated_moment_contexts_to_manifest(quiz.moment_contexts),
+        video_duration_ms=video_duration_ms or video_description_end_offset_ms,
+        generation_start_ms=video_description_start_offset_ms,
+        generation_end_ms=video_description_end_offset_ms,
         video_description_window_ms=video_description_window_ms,
     )
-    return schemas.LectureVideoManifestV3(
+    return schemas.LectureVideoManifestV4(
         word_level_transcription=transcript,
-        video_descriptions=video_descriptions,
+        summary_checkpoints=summary_checkpoints,
+        moment_contexts=moment_contexts,
         questions=[
             _question_to_manifest_question(question, transcript_word_index)
             for question in quiz.questions
@@ -1573,7 +1958,7 @@ def _reconciliation_prompt(generation_prompt_content: str) -> str:
 You will be given:
 - The instructor's generation guidance.
 - The full word-level transcript for the complete video.
-- The final merged video_descriptions for the complete video.
+- The final merged summary_checkpoints and moment_contexts for the complete video.
 - Candidate questions generated independently from video chunks.
 
 Your task is to create the final question list for the complete video.
@@ -1599,8 +1984,9 @@ INSTRUCTOR GENERATION GUIDANCE:
 def _reconciliation_payload(
     *,
     transcript: list[schemas.LectureVideoManifestWordV3],
-    video_descriptions: list[schemas.LectureVideoManifestVideoDescriptionV3],
-    chunk_manifests: list[schemas.LectureVideoManifestV3],
+    summary_checkpoints: list[schemas.LectureVideoManifestSummaryCheckpointV4],
+    moment_contexts: list[schemas.LectureVideoManifestMomentContextV4],
+    chunk_manifests: list[schemas.LectureVideoManifestV4],
     video_duration_ms: int | None,
 ) -> str:
     payload = {
@@ -1609,9 +1995,10 @@ def _reconciliation_payload(
             _word_to_generation_word(word, index)
             for index, word in enumerate(transcript)
         ],
-        "video_descriptions": [
-            description.model_dump() for description in video_descriptions
+        "summary_checkpoints": [
+            checkpoint.model_dump() for checkpoint in summary_checkpoints
         ],
+        "moment_contexts": [moment.model_dump() for moment in moment_contexts],
         "candidate_question_groups": [
             {
                 "candidate_group_index": index,
@@ -1642,8 +2029,9 @@ async def _reconcile_chunk_questions(
     gemini_client: AsyncClient,
     generation_prompt_content: str,
     transcript: list[schemas.LectureVideoManifestWordV3],
-    video_descriptions: list[schemas.LectureVideoManifestVideoDescriptionV3],
-    chunk_manifests: list[schemas.LectureVideoManifestV3],
+    summary_checkpoints: list[schemas.LectureVideoManifestSummaryCheckpointV4],
+    moment_contexts: list[schemas.LectureVideoManifestMomentContextV4],
+    chunk_manifests: list[schemas.LectureVideoManifestV4],
     video_duration_ms: int | None,
     model: str,
 ) -> list[schemas.LectureVideoManifestQuestionV1]:
@@ -1655,7 +2043,8 @@ async def _reconcile_chunk_questions(
             types.Part.from_text(
                 text=_reconciliation_payload(
                     transcript=transcript,
-                    video_descriptions=video_descriptions,
+                    summary_checkpoints=summary_checkpoints,
+                    moment_contexts=moment_contexts,
                     chunk_manifests=chunk_manifests,
                     video_duration_ms=video_duration_ms,
                 )
@@ -1672,67 +2061,108 @@ async def _merge_chunk_manifests(
     gemini_client: AsyncClient,
     generation_prompt_content: str,
     model: str,
-    chunk_manifests: list[schemas.LectureVideoManifestV3],
+    chunk_manifests: list[schemas.LectureVideoManifestV4],
     full_transcript: list[schemas.LectureVideoManifestWordV3],
     video_duration_ms: int | None,
     video_description_window_ms: int = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
-) -> schemas.LectureVideoManifestV3:
-    if video_duration_ms is None:
-        video_descriptions = [
-            description
+) -> schemas.LectureVideoManifestV3 | schemas.LectureVideoManifestV4:
+    if all(
+        isinstance(manifest, schemas.LectureVideoManifestV3)
+        for manifest in chunk_manifests
+    ):
+        v3_chunk_manifests = [
+            manifest
             for manifest in chunk_manifests
-            for description in manifest.video_descriptions
+            if isinstance(manifest, schemas.LectureVideoManifestV3)
         ]
-        video_descriptions = _validated_or_fallback_video_descriptions(
-            video_descriptions,
-            end_offset_ms=video_duration_ms,
-            video_description_window_ms=video_description_window_ms,
-        )
-    else:
-        video_descriptions = []
-        expected_start_offset_ms = 0
-        for index, manifest in enumerate(chunk_manifests):
-            chunk_end_offset_ms = (
-                video_duration_ms
-                if index == len(chunk_manifests) - 1
-                else max(
-                    manifest.video_descriptions[-1].end_offset_ms,
-                    expected_start_offset_ms + 1,
-                )
-            )
-            chunk_descriptions = _validated_or_fallback_chunk_video_descriptions(
-                manifest.video_descriptions,
-                chunk_index=index,
-                start_offset_ms=expected_start_offset_ms,
-                end_offset_ms=chunk_end_offset_ms,
+        if video_duration_ms is None:
+            video_descriptions = [
+                description
+                for manifest in v3_chunk_manifests
+                for description in manifest.video_descriptions
+            ]
+            video_descriptions = _validated_or_fallback_video_descriptions(
+                video_descriptions,
+                end_offset_ms=video_duration_ms,
                 video_description_window_ms=video_description_window_ms,
             )
-            video_descriptions.extend(chunk_descriptions)
-            expected_start_offset_ms = chunk_descriptions[-1].end_offset_ms
-        if expected_start_offset_ms < video_duration_ms:
-            video_descriptions.extend(
-                _fallback_video_descriptions(
-                    video_duration_ms,
-                    start_offset_ms=expected_start_offset_ms,
+        else:
+            video_descriptions = []
+            expected_start_offset_ms = 0
+            for index, manifest in enumerate(v3_chunk_manifests):
+                chunk_end_offset_ms = (
+                    video_duration_ms
+                    if index == len(v3_chunk_manifests) - 1
+                    else max(
+                        manifest.video_descriptions[-1].end_offset_ms,
+                        expected_start_offset_ms + 1,
+                    )
                 )
+                chunk_descriptions = _validated_or_fallback_chunk_video_descriptions(
+                    manifest.video_descriptions,
+                    chunk_index=index,
+                    start_offset_ms=expected_start_offset_ms,
+                    end_offset_ms=chunk_end_offset_ms,
+                    video_description_window_ms=video_description_window_ms,
+                )
+                video_descriptions.extend(chunk_descriptions)
+                expected_start_offset_ms = chunk_descriptions[-1].end_offset_ms
+            if expected_start_offset_ms < video_duration_ms:
+                video_descriptions.extend(
+                    _fallback_video_descriptions(
+                        video_duration_ms,
+                        start_offset_ms=expected_start_offset_ms,
+                    )
+                )
+            video_descriptions = _normalize_video_descriptions_to_windows(
+                video_descriptions,
+                video_duration_ms=video_duration_ms,
+                video_description_window_ms=video_description_window_ms,
             )
-        video_descriptions = _normalize_video_descriptions_to_windows(
-            video_descriptions,
+        questions = await _reconcile_chunk_questions(
+            gemini_client=gemini_client,
+            generation_prompt_content=generation_prompt_content,
+            transcript=full_transcript,
+            summary_checkpoints=_fallback_summary_checkpoints(video_duration_ms),
+            moment_contexts=_fallback_moment_contexts(),
+            chunk_manifests=v3_chunk_manifests,  # type: ignore[arg-type]
             video_duration_ms=video_duration_ms,
-            video_description_window_ms=video_description_window_ms,
+            model=model,
         )
+        return schemas.LectureVideoManifestV3(
+            word_level_transcription=full_transcript,
+            video_descriptions=video_descriptions,
+            questions=questions,
+        )
+
+    summary_checkpoints, moment_contexts = _normalize_v4_context_arrays(
+        summary_checkpoints=[
+            checkpoint
+            for manifest in chunk_manifests
+            for checkpoint in manifest.summary_checkpoints
+        ],
+        moment_contexts=[
+            moment
+            for manifest in chunk_manifests
+            for moment in manifest.moment_contexts
+        ],
+        video_duration_ms=video_duration_ms,
+        video_description_window_ms=video_description_window_ms,
+    )
     questions = await _reconcile_chunk_questions(
         gemini_client=gemini_client,
         generation_prompt_content=generation_prompt_content,
         transcript=full_transcript,
-        video_descriptions=video_descriptions,
+        summary_checkpoints=summary_checkpoints,
+        moment_contexts=moment_contexts,
         chunk_manifests=chunk_manifests,
         video_duration_ms=video_duration_ms,
         model=model,
     )
-    return schemas.LectureVideoManifestV3(
+    return schemas.LectureVideoManifestV4(
         word_level_transcription=full_transcript,
-        video_descriptions=video_descriptions,
+        summary_checkpoints=summary_checkpoints,
+        moment_contexts=moment_contexts,
         questions=questions,
     )
 
@@ -1751,7 +2181,7 @@ async def _generate_manifest_from_gemini_file(
     context_start_ms: int | None = None,
     context_end_ms: int | None = None,
     video_description_window_ms: int = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
-) -> schemas.LectureVideoManifestV3:
+) -> schemas.LectureVideoManifestV4:
     prompt = build_generation_prompt(
         generation_prompt_content,
         transcript,
@@ -1775,7 +2205,7 @@ async def _generate_manifest_from_gemini_file(
         model=model,
         prompt=prompt,
         contents=_gemini_contents_for_file(gemini_file),
-        response_model=GeneratedQuizWithVideo,
+        response_model=GeneratedQuizWithVideoContext,
         request_label=request_label,
     )
     return _quiz_to_manifest(
@@ -1797,7 +2227,7 @@ async def generate_manifest(
     transcript: list[schemas.LectureVideoManifestWordV3],
     model: str = _GEMINI_MODEL,
     video_description_duration_ms: int = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
-) -> schemas.LectureVideoManifestV3:
+) -> schemas.LectureVideoManifestV4:
     video_duration_ms = await _ffprobe_duration_ms(video_path)
     video_description_window_ms = video_description_duration_ms
     try:
@@ -1834,7 +2264,7 @@ async def _upload_and_generate_whole_manifest(
     video_duration_ms: int | None,
     model: str,
     video_description_window_ms: int = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
-) -> schemas.LectureVideoManifestV3:
+) -> schemas.LectureVideoManifestV4:
     gemini_file_name: str | None = None
     try:
         logger.info("Uploading full lecture video to Gemini for manifest generation.")
@@ -1887,7 +2317,7 @@ async def _upload_and_generate_manifest_chunk(
     temp_dir: str,
     model: str,
     video_description_window_ms: int = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
-) -> schemas.LectureVideoManifestV3:
+) -> schemas.LectureVideoManifestV4:
     chunk_transcript = _transcript_for_window(
         transcript,
         start_offset_ms=chunk.context_start_ms,
@@ -1972,7 +2402,8 @@ async def _upload_and_generate_manifest_chunks(
     temp_dir: str,
     model: str,
     video_description_window_ms: int = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
-) -> list[schemas.LectureVideoManifestV3]:
+    overlap_ms: int = _MANIFEST_CHUNK_OVERLAP_MS,
+) -> list[schemas.LectureVideoManifestV4]:
     try:
         return [
             await _upload_and_generate_manifest_chunk(
@@ -1996,6 +2427,7 @@ async def _upload_and_generate_manifest_chunks(
         child_chunks = _split_manifest_generation_chunk(
             chunk,
             video_duration_ms=video_duration_ms,
+            overlap_ms=overlap_ms,
             alignment_ms=video_description_window_ms,
         )
         logger.info(
@@ -2005,7 +2437,7 @@ async def _upload_and_generate_manifest_chunks(
             chunk.generation_end_ms,
             child_chunks[0].generation_end_ms,
         )
-        chunk_manifests: list[schemas.LectureVideoManifestV3] = []
+        chunk_manifests: list[schemas.LectureVideoManifestV4] = []
         for child_chunk in child_chunks:
             chunk_manifests.extend(
                 await _upload_and_generate_manifest_chunks(
@@ -2018,6 +2450,7 @@ async def _upload_and_generate_manifest_chunks(
                     temp_dir=temp_dir,
                     model=model,
                     video_description_window_ms=video_description_window_ms,
+                    overlap_ms=overlap_ms,
                 )
             )
         return chunk_manifests
@@ -2032,7 +2465,7 @@ async def upload_and_generate_manifest(
     temp_dir: str,
     model: str = _GEMINI_MODEL,
     video_description_duration_ms: int = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
-) -> schemas.LectureVideoManifestV3:
+) -> schemas.LectureVideoManifestV4:
     video_duration_ms = await _ffprobe_duration_ms(video_path)
     if video_duration_ms is None:
         raise RuntimeError(
@@ -2040,8 +2473,10 @@ async def upload_and_generate_manifest(
             "manifest generation requires a valid video duration."
         )
     video_description_window_ms = video_description_duration_ms
+    overlap_ms = _manifest_chunk_overlap_ms(video_description_window_ms)
     chunks = _plan_manifest_generation_chunks(
         video_duration_ms,
+        overlap_ms=overlap_ms,
         alignment_ms=video_description_window_ms,
     )
     if len(chunks) == 1:
@@ -2065,6 +2500,7 @@ async def upload_and_generate_manifest(
             chunks = _split_manifest_generation_chunk(
                 chunks[0],
                 video_duration_ms=video_duration_ms,
+                overlap_ms=overlap_ms,
                 alignment_ms=video_description_window_ms,
             )
 
@@ -2074,7 +2510,7 @@ async def upload_and_generate_manifest(
         video_duration_ms,
         len(chunks),
     )
-    chunk_manifests: list[schemas.LectureVideoManifestV3] = []
+    chunk_manifests: list[schemas.LectureVideoManifestV4] = []
     for chunk in chunks:
         chunk_manifests.extend(
             await _upload_and_generate_manifest_chunks(
@@ -2087,6 +2523,7 @@ async def upload_and_generate_manifest(
                 temp_dir=temp_dir,
                 model=model,
                 video_description_window_ms=video_description_window_ms,
+                overlap_ms=overlap_ms,
             )
         )
     return await _merge_chunk_manifests(

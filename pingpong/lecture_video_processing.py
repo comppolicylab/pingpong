@@ -604,7 +604,7 @@ async def _write_video_to_temp_path(
 async def _complete_manifest_generation_run(
     run_id: int,
     lease_token: str,
-    manifest: schemas.LectureVideoManifestV3,
+    manifest: schemas.LectureVideoManifestV4,
 ) -> None:
     async with config.db.driver.async_session() as session:
         run = await models.LectureVideoProcessingRun.get_by_id(session, run_id)
@@ -903,11 +903,13 @@ async def _upload_and_generate_manifest(
             return
         logger.info(
             "Lecture video manifest generated. run_id=%s "
-            "lecture_video_id=%s question_count=%s video_description_count=%s",
+            "lecture_video_id=%s question_count=%s summary_checkpoint_count=%s "
+            "moment_context_count=%s",
             run_id,
             lecture_video_id,
             len(manifest.questions),
-            len(manifest.video_descriptions),
+            len(manifest.summary_checkpoints),
+            len(manifest.moment_contexts),
         )
         logger.info(
             "Lecture video manifest persisting. run_id=%s lecture_video_id=%s",
