@@ -314,7 +314,7 @@ def test_build_context_text_caps_initial_transcript_context_window():
     )
 
     assert current_offset_ms == 180_000
-    assert "Recent transcript context" in context_text
+    assert "### Recent Transcript (older transcript omitted)" in context_text
     assert "(older transcript omitted)" in context_text
     assert "intro" not in context_text
     assert "recent now" in context_text
@@ -365,7 +365,10 @@ def test_build_context_text_caps_transcript_since_last_chat():
     )
 
     assert current_offset_ms == 300_000
-    assert "Recent transcript since last lecture chat" in context_text
+    assert (
+        "### Recent Transcript Since Last Lecture Chat (older transcript omitted)"
+        in context_text
+    )
     assert "(older transcript omitted)" in context_text
     assert "stale" not in context_text
     assert "fresh context" in context_text
@@ -416,10 +419,71 @@ def test_build_context_text_clamps_last_chat_context_after_backward_seek():
     )
 
     assert current_offset_ms == 120_000
-    assert "Recent transcript context" in context_text
+    assert "### Recent Transcript" in context_text
     assert "(older transcript omitted)" not in context_text
     assert "earlier context" in context_text
     assert "future" not in context_text
+
+
+def test_build_context_text_answering_status_includes_current_question_context():
+    option_a = SimpleNamespace(
+        id=101,
+        position=0,
+        option_text="Latency",
+        post_answer_text="Correct.",
+        continue_offset_ms=10_500,
+    )
+    option_b = SimpleNamespace(
+        id=102,
+        position=1,
+        option_text="Color",
+        post_answer_text="Incorrect.",
+        continue_offset_ms=10_500,
+    )
+    current_question = SimpleNamespace(
+        id=10,
+        position=0,
+        question_type=schemas.LectureVideoQuestionType.SINGLE_SELECT,
+        question_text="What matters here?",
+        intro_text="",
+        options=[option_a, option_b],
+        correct_option=option_a,
+        stop_offset_ms=5_000,
+    )
+    thread = SimpleNamespace(
+        lecture_video=SimpleNamespace(questions=[current_question])
+    )
+    state = SimpleNamespace(
+        last_known_offset_ms=5_000,
+        last_chat_context_end_ms=0,
+        current_question=current_question,
+        current_question_id=current_question.id,
+        state=schemas.LectureVideoSessionState.AWAITING_ANSWER,
+    )
+    transcript_words = [
+        schemas.LectureVideoManifestWordV3(
+            id="w1",
+            word="Before",
+            start_offset_ms=4_700,
+            end_offset_ms=5_000,
+        )
+    ]
+
+    context_text, current_offset_ms = _build_context_text_from_transcript(
+        thread,
+        state,
+        _serialize_transcript_words_v3(transcript_words),
+    )
+
+    assert current_offset_ms == 5_000
+    assert "Status: Answering Knowledge Check #1" in context_text
+    assert (
+        "### Current Knowledge Check\n\n"
+        "Knowledge Check #1: What matters here?\n\n"
+        "Options:\n"
+        "- Latency (correct). Feedback: Correct.\n"
+        "- Color (incorrect). Feedback: Incorrect."
+    ) in context_text
 
 
 def test_build_context_text_v3_watching_status_and_filters_descriptions():
@@ -467,8 +531,108 @@ def test_build_context_text_v3_watching_status_and_filters_descriptions():
 
     assert current_offset_ms == 5_000
     assert "Status: Watching the lecture video" in context_text
-    assert "### Relevant Video Descriptions\n\nNone" in context_text
+    assert "### Relevant Video Descriptions" not in context_text
     assert "A much later slide appears." not in context_text
+
+
+def test_build_context_text_v3_answering_status_includes_current_question_answer_context():
+    option_a = SimpleNamespace(
+        id=101,
+        position=0,
+        option_text="Latency",
+        post_answer_text="Correct.",
+        continue_offset_ms=10_500,
+    )
+    option_b = SimpleNamespace(
+        id=102,
+        position=1,
+        option_text="Color",
+        post_answer_text="Incorrect.",
+        continue_offset_ms=10_500,
+    )
+    current_question = SimpleNamespace(
+        id=10,
+        position=0,
+        question_type=schemas.LectureVideoQuestionType.SINGLE_SELECT,
+        question_text="What matters here?",
+        intro_text="",
+        options=[option_a, option_b],
+        correct_option=option_a,
+        stop_offset_ms=5_000,
+    )
+    next_option_a = SimpleNamespace(
+        id=201,
+        position=0,
+        option_text="A proof",
+        post_answer_text="Correct.",
+    )
+    next_option_b = SimpleNamespace(
+        id=202,
+        position=1,
+        option_text="A joke",
+        post_answer_text="Incorrect.",
+    )
+    next_question = SimpleNamespace(
+        id=20,
+        position=1,
+        question_type=schemas.LectureVideoQuestionType.SINGLE_SELECT,
+        question_text="What comes next?",
+        intro_text="",
+        options=[next_option_a, next_option_b],
+        correct_option=next_option_a,
+        stop_offset_ms=10_000,
+    )
+    thread = SimpleNamespace(
+        lecture_video=SimpleNamespace(questions=[current_question, next_question])
+    )
+    state = SimpleNamespace(
+        last_known_offset_ms=5_000,
+        last_chat_context_end_ms=0,
+        current_question=current_question,
+        current_question_id=current_question.id,
+        state=schemas.LectureVideoSessionState.AWAITING_ANSWER,
+    )
+    manifest = schemas.LectureVideoManifestV3(
+        version=3,
+        word_level_transcription=[
+            schemas.LectureVideoManifestWordV3(
+                id="w1",
+                word="Before",
+                start_offset_ms=4_700,
+                end_offset_ms=5_000,
+            )
+        ],
+        video_descriptions=[
+            schemas.LectureVideoManifestVideoDescriptionV3(
+                start_offset_ms=20_000,
+                end_offset_ms=21_000,
+                description="A later slide appears.",
+            )
+        ],
+        questions=[_build_manifest_question()],
+    )
+
+    context_text, current_offset_ms = _build_context_text_v3_from_parts(
+        thread,
+        state,
+        word_level_transcription=manifest.word_level_transcription,
+        video_descriptions=manifest.video_descriptions,
+        answered_knowledge_checks="None",
+    )
+
+    assert current_offset_ms == 5_000
+    assert "Status: Answering Knowledge Check #1" in context_text
+    assert (
+        "### Current Knowledge Check\n\n"
+        "Knowledge Check #1: What matters here?\n\n"
+        "Options:\n"
+        "- Latency (correct). Feedback: Correct.\n"
+        "- Color (incorrect). Feedback: Incorrect." in context_text
+    )
+    assert "### Upcoming Knowledge Check" in context_text
+    assert "Knowledge Check #2: What comes next?" in context_text
+    assert "What comes next?" in context_text
+    assert "Selected `" not in context_text
 
 
 def test_build_context_text_v3_marks_omitted_transcript_since_last_chat():
@@ -662,9 +826,16 @@ async def test_build_lecture_chat_context_message_parts_v3_markdown_without_imag
     assert "### Relevant Video Descriptions" in context_text
     assert "- 4000-5500ms: The slide shows a highlighted formula." in context_text
     assert "At 10000ms, the learner will be asked:" in context_text
-    assert "Options:\n- A proof\n- A joke" in context_text
+    assert "Knowledge Check #2: What comes next?" in context_text
+    assert (
+        "Options:\n"
+        "- A proof (correct). Feedback: Correct.\n"
+        "- A joke (incorrect). Feedback: Incorrect." in context_text
+    )
     assert "- Knowledge Check #1: What matters here?" in context_text
-    assert "Selected `Latency`; correct. Feedback: Correct." in context_text
+    assert "Student selected `Latency`." in context_text
+    assert "- Latency (selected, correct). Feedback: Correct." in context_text
+    assert "- Color (incorrect). Feedback: Incorrect." in context_text
 
 
 @pytest.mark.asyncio

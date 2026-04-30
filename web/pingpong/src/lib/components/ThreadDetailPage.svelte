@@ -289,7 +289,6 @@
 		!lectureChatCanSubmit ||
 		!!$navigating ||
 		!threadLectureChatAvailable ||
-		effectiveLectureVideoSession?.state === 'awaiting_answer' ||
 		effectiveLectureVideoSession?.state === 'completed';
 	$: canDropUploadsIntoThread =
 		data.threadInteractionMode === 'chat' &&
