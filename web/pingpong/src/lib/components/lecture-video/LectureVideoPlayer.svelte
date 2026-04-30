@@ -92,6 +92,7 @@
 		previewVideoElement = $bindable(null),
 		currentTimeMs = $bindable(0),
 		paused = $bindable(true),
+		endedPlayback = $bindable(false),
 		effectiveVolume = $bindable(1),
 		ontimeupdate,
 		onseek,
@@ -117,6 +118,7 @@
 		previewVideoElement?: HTMLVideoElement | null;
 		currentTimeMs?: number;
 		paused?: boolean;
+		endedPlayback?: boolean;
 		effectiveVolume?: number;
 		ontimeupdate?: () => void;
 		onseek?: (toOffsetMs: number, fromOffsetMs: number) => void;
@@ -171,6 +173,7 @@
 	let playerContainerElement: HTMLDivElement | null = $state(null);
 	let activeClusterKey: string | null = $state(null);
 	let clusterCollapseTimeout: ReturnType<typeof setTimeout> | null = $state(null);
+	let playbackCompleted = $state(false);
 
 	let effectiveOffsetMs = $derived(
 		draggingSeek ? (dragPreviewOffsetMs ?? currentTimeMs) : currentTimeMs
@@ -182,7 +185,10 @@
 	let seekLimitProgress = $derived(
 		durationMs > 0 ? Math.min((seekLimitOffsetMs / durationMs) * 100, 100) : 0
 	);
-	let endedPlayback = $derived(durationMs > 0 && currentTimeMs >= Math.max(durationMs - 50, 0));
+	let computedEndedPlayback = $derived(playbackCompleted);
+	$effect(() => {
+		endedPlayback = computedEndedPlayback;
+	});
 	let questionPendingControls = $derived(Boolean(activeQuestionIds?.length));
 	let visibleControls = $derived(
 		!manualPlaybackPrompt &&
@@ -479,6 +485,7 @@
 		if (videoElement) {
 			currentTimeMs = videoElement.currentTime * 1000;
 			paused = videoElement.paused;
+			playbackCompleted = videoElement.ended;
 		}
 		syncMediaSessionState();
 		ontimeupdate?.();
@@ -488,6 +495,7 @@
 		if (!videoElement) return;
 		videoElement.currentTime = offsetMs / 1000;
 		currentTimeMs = offsetMs;
+		playbackCompleted = false;
 		syncMediaSessionPositionState();
 	}
 
@@ -499,6 +507,7 @@
 		if (videoElement) {
 			durationMs = videoElement.duration * 1000;
 			currentTimeMs = videoElement.currentTime * 1000;
+			playbackCompleted = videoElement.ended;
 		}
 		syncMediaSessionState();
 		oncanplay?.();
@@ -509,6 +518,7 @@
 			currentTimeMs = videoElement.currentTime * 1000;
 			paused = videoElement.paused;
 		}
+		playbackCompleted = true;
 		showControls = true;
 		syncMediaSessionState();
 		onended?.();
@@ -527,6 +537,7 @@
 	function handlePlayEvent() {
 		if (videoElement) {
 			paused = videoElement.paused;
+			playbackCompleted = videoElement.ended;
 		}
 		startedPlaybackOnce = true;
 		showControls = true;
@@ -853,6 +864,7 @@
 	function commitSeek(offsetMs: number, fromOffsetMs: number) {
 		if (disabled || questionPendingControls || !videoElement) return;
 		setMainVideoCurrentTime(offsetMs);
+		if (durationMs > 0 && offsetMs >= durationMs) return;
 		onseek?.(offsetMs, fromOffsetMs);
 	}
 

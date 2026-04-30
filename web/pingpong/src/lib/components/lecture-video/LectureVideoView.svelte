@@ -101,6 +101,7 @@
 	let videoElement: HTMLVideoElement | null = $state(null);
 	let currentTimeMs: number = $state(0);
 	let paused: boolean = $state(true);
+	let videoAtEnd: boolean = $state(false);
 	let subtitleText: string | null = $state(null);
 	let playerDisabled: boolean = $state(false);
 	let questionPlaybackLocked: boolean = $state(false);
@@ -176,22 +177,16 @@
 		continueDisabled: !canParticipate || postAnswerNarrationPending || autoContinueInFlight,
 		oncontinue: requestContinue
 	});
-	let videoAtEnd = $derived.by(() => {
-		const media = videoElement;
-		return Boolean(
-			media &&
-			Number.isFinite(media.duration) &&
-			media.duration > 0 &&
-			currentTimeMs >= media.duration * 1000 - 50
-		);
-	});
-
 	function hasVisibleQuestionPrompt(state: LectureVideoSessionState): boolean {
 		return state === 'awaiting_answer' || state === 'awaiting_post_answer_resume';
 	}
 
 	function isCompletedSession(state: LectureVideoSessionState): boolean {
 		return state === 'completed';
+	}
+
+	function allowsPlaybackInteraction(state: LectureVideoSessionState): boolean {
+		return state === 'playing' || state === 'completed';
 	}
 
 	function isDefinedNumber(id: number | null | undefined): id is number {
@@ -244,6 +239,7 @@
 			});
 	});
 	let playbackLocked = $derived(playerDisabled || questionPlaybackLocked);
+	let playbackInteractionAllowed = $derived(allowsPlaybackInteraction(sessionState));
 	let hasQuestionPrompt = $derived(hasVisibleQuestionPrompt(sessionState));
 	let isCompleted = $derived(isCompletedSession(sessionState));
 	let visibleCurrentQuestion = $derived(hasQuestionPrompt ? currentQuestion : null);
@@ -262,7 +258,7 @@
 					!expiredControlRecoveryInFlight &&
 					videoReadyForPlayback &&
 					paused &&
-					sessionState === 'playing' &&
+					playbackInteractionAllowed &&
 					!playbackLocked))
 	);
 
@@ -708,7 +704,7 @@
 	}
 
 	function queuePlaybackInteraction(type: 'video_paused' | 'video_resumed') {
-		if (!controllerSessionId || (sessionState !== 'playing' && sessionState !== 'completed')) {
+		if (!controllerSessionId || !playbackInteractionAllowed) {
 			return;
 		}
 
@@ -734,10 +730,7 @@
 				latestPlaybackInteraction = null;
 
 				const interactionControllerSessionId = controllerSessionId;
-				if (
-					!interactionControllerSessionId ||
-					(sessionState !== 'playing' && sessionState !== 'completed')
-				) {
+				if (!interactionControllerSessionId || !playbackInteractionAllowed) {
 					// Playback telemetry is only meaningful while video playback is active.
 					// If the session moved into a question/completion state, drop the stale desired state.
 					return;
@@ -913,10 +906,7 @@
 
 		expiredControlRecoveryInFlight = true;
 		const shouldResumePlayback =
-			(sessionState === 'playing' || sessionState === 'completed') &&
-			!paused &&
-			!playbackLocked &&
-			!isVideoAtEnd();
+			playbackInteractionAllowed && !paused && !playbackLocked && !isVideoAtEnd();
 		controllerSessionId = null;
 		clearControllerLease();
 		latestPlaybackInteraction = null;
@@ -935,7 +925,7 @@
 			}
 			if (
 				shouldResumePlayback &&
-				(session.state === 'playing' || session.state === 'completed') &&
+				allowsPlaybackInteraction(session.state) &&
 				!playbackLocked &&
 				!isVideoAtEnd()
 			) {
@@ -974,10 +964,7 @@
 		}
 
 		const shouldPostPause =
-			postPause &&
-			(sessionState === 'playing' || sessionState === 'completed') &&
-			!playbackLocked &&
-			!isVideoAtEnd();
+			postPause && playbackInteractionAllowed && !playbackLocked && !isVideoAtEnd();
 
 		try {
 			if (shouldPostPause) {
@@ -1077,7 +1064,7 @@
 		}
 
 		applyPendingResumeOffset();
-		if (sessionState === 'playing' && !playbackLocked && !isVideoAtEnd()) {
+		if (playbackInteractionAllowed && !playbackLocked && !isVideoAtEnd()) {
 			queueVideoRetry();
 		}
 
@@ -1247,7 +1234,7 @@
 	export async function pauseForChatSubmit() {
 		abortNarrationPlaybackForChatSubmit();
 
-		if (!canParticipate || playbackLocked || sessionState !== 'playing') {
+		if (!canParticipate || playbackLocked || !playbackInteractionAllowed) {
 			return;
 		}
 
@@ -1271,7 +1258,7 @@
 			return requestContinue();
 		}
 
-		if (playbackLocked || sessionState !== 'playing') {
+		if (playbackLocked || !playbackInteractionAllowed) {
 			return false;
 		}
 
@@ -1381,8 +1368,7 @@
 			return;
 		}
 		if (playbackLocked) return;
-		if (!controllerSessionId || (sessionState !== 'playing' && sessionState !== 'completed'))
-			return;
+		if (!controllerSessionId || !playbackInteractionAllowed) return;
 		queuePlaybackInteraction('video_paused');
 	}
 
@@ -1399,8 +1385,7 @@
 			suppressPlayInteraction = false;
 			return;
 		}
-		if (!controllerSessionId || (sessionState !== 'playing' && sessionState !== 'completed'))
-			return;
+		if (!controllerSessionId || !playbackInteractionAllowed) return;
 		queuePlaybackInteraction('video_resumed');
 	}
 
@@ -1425,7 +1410,6 @@
 
 		try {
 			const response = await api.postLectureVideoInteraction(fetch, classId, threadId, payload);
-
 			if (controllerSessionId !== seekControllerSessionId) {
 				return;
 			}
@@ -1921,6 +1905,7 @@
 							bind:videoElement
 							bind:currentTimeMs
 							bind:paused
+							bind:endedPlayback={videoAtEnd}
 							bind:effectiveVolume={playerVolume}
 							ontimeupdate={handleTimeUpdate}
 							onseek={handleSeek}

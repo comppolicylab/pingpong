@@ -2125,17 +2125,14 @@ async def test_lecture_video_interactions_allow_participant_rewatch_after_comple
             "controller_session_id": controller_session_id,
             "expected_state_version": completed_resume_session["state_version"],
             "idempotency_key": "post-completion-ended",
-            "offset_ms": completed_session["last_known_offset_ms"],
+            "offset_ms": rewatch_offset_ms,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert completed_end.status_code == 200
     completed_end_session = completed_end.json()["lecture_video_session"]
     assert completed_end_session["state"] == "completed"
-    assert (
-        completed_end_session["last_known_offset_ms"]
-        == completed_session["last_known_offset_ms"]
-    )
+    assert completed_end_session["last_known_offset_ms"] == rewatch_offset_ms
 
     invalid_answer = api.post(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
