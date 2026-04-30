@@ -198,7 +198,8 @@ async def _build_answered_knowledge_checks_markdown(
             f"  {line}" for line in option_lines.splitlines()
         )
         return (
-            f"- {_knowledge_check_label(question)}: {question_text}\n"
+            f"- At {question.stop_offset_ms}ms, {_knowledge_check_label(question)} "
+            f"was asked: {question_text}\n"
             f"  Student selected `{option.option_text}`.\n"
             f"  Options:\n{indented_option_lines}"
         )
@@ -380,6 +381,8 @@ def _lecture_context_status(
     state: models.LectureVideoThreadState,
     current_question: models.LectureVideoQuestion | None,
 ) -> str:
+    if state.state == schemas.LectureVideoSessionState.COMPLETED:
+        return "Finished watching the lecture video"
     if state.state == schemas.LectureVideoSessionState.AWAITING_ANSWER:
         if current_question is not None:
             return f"Answering {_knowledge_check_label(current_question)}"
@@ -763,16 +766,11 @@ async def prepare_lecture_chat_turn(
         )
 
     lecture_state = lecture_thread.lecture_video_state
-    if lecture_state.state == schemas.LectureVideoSessionState.COMPLETED:
-        raise HTTPException(
-            status_code=409,
-            detail="Lecture chat is unavailable after the lecture is completed.",
-        )
-
     if lecture_state.state not in {
         schemas.LectureVideoSessionState.PLAYING,
         schemas.LectureVideoSessionState.AWAITING_ANSWER,
         schemas.LectureVideoSessionState.AWAITING_POST_ANSWER_RESUME,
+        schemas.LectureVideoSessionState.COMPLETED,
     }:
         raise HTTPException(
             status_code=409,

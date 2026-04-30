@@ -68,7 +68,7 @@
 		initialSession?: LectureVideoSession | null;
 		chatAvailable?: boolean;
 		playerVolume?: number;
-		chat?: Snippet;
+		chat?: Snippet<[boolean]>;
 	} = $props();
 	const dispatch = createEventDispatcher<{
 		sessionchange: LectureVideoSession;
@@ -176,6 +176,15 @@
 		continueDisabled: !canParticipate || postAnswerNarrationPending || autoContinueInFlight,
 		oncontinue: requestContinue
 	});
+	let videoAtEnd = $derived.by(() => {
+		const media = videoElement;
+		return Boolean(
+			media &&
+			Number.isFinite(media.duration) &&
+			media.duration > 0 &&
+			currentTimeMs >= media.duration * 1000 - 50
+		);
+	});
 
 	function hasVisibleQuestionPrompt(state: LectureVideoSessionState): boolean {
 		return state === 'awaiting_answer' || state === 'awaiting_post_answer_resume';
@@ -241,7 +250,9 @@
 	let hasMobileChecksPanel = $derived(true);
 	let hasMobileChatPanel = $derived(chatAvailable);
 	let activeQuestionIds = $derived(
-		getActiveQuestionIds(questionPlaybackLocked, currentQuestion, currentContinuation)
+		isCompleted
+			? null
+			: getActiveQuestionIds(questionPlaybackLocked, currentQuestion, currentContinuation)
 	);
 	let playbackRequiresManualStart = $derived(
 		canParticipate &&
@@ -697,7 +708,7 @@
 	}
 
 	function queuePlaybackInteraction(type: 'video_paused' | 'video_resumed') {
-		if (!controllerSessionId || sessionState !== 'playing') {
+		if (!controllerSessionId || (sessionState !== 'playing' && sessionState !== 'completed')) {
 			return;
 		}
 
@@ -723,7 +734,10 @@
 				latestPlaybackInteraction = null;
 
 				const interactionControllerSessionId = controllerSessionId;
-				if (!interactionControllerSessionId || sessionState !== 'playing') {
+				if (
+					!interactionControllerSessionId ||
+					(sessionState !== 'playing' && sessionState !== 'completed')
+				) {
 					// Playback telemetry is only meaningful while video playback is active.
 					// If the session moved into a question/completion state, drop the stale desired state.
 					return;
@@ -898,7 +912,11 @@
 		}
 
 		expiredControlRecoveryInFlight = true;
-		const shouldResumePlayback = sessionState === 'playing' && !playbackLocked && !isVideoAtEnd();
+		const shouldResumePlayback =
+			(sessionState === 'playing' || sessionState === 'completed') &&
+			!paused &&
+			!playbackLocked &&
+			!isVideoAtEnd();
 		controllerSessionId = null;
 		clearControllerLease();
 		latestPlaybackInteraction = null;
@@ -917,7 +935,7 @@
 			}
 			if (
 				shouldResumePlayback &&
-				session.state === 'playing' &&
+				(session.state === 'playing' || session.state === 'completed') &&
 				!playbackLocked &&
 				!isVideoAtEnd()
 			) {
@@ -956,7 +974,10 @@
 		}
 
 		const shouldPostPause =
-			postPause && sessionState === 'playing' && !playbackLocked && !isVideoAtEnd();
+			postPause &&
+			(sessionState === 'playing' || sessionState === 'completed') &&
+			!playbackLocked &&
+			!isVideoAtEnd();
 
 		try {
 			if (shouldPostPause) {
@@ -1360,7 +1381,8 @@
 			return;
 		}
 		if (playbackLocked) return;
-		if (!controllerSessionId || sessionState !== 'playing') return;
+		if (!controllerSessionId || (sessionState !== 'playing' && sessionState !== 'completed'))
+			return;
 		queuePlaybackInteraction('video_paused');
 	}
 
@@ -1377,7 +1399,8 @@
 			suppressPlayInteraction = false;
 			return;
 		}
-		if (!controllerSessionId || sessionState !== 'playing') return;
+		if (!controllerSessionId || (sessionState !== 'playing' && sessionState !== 'completed'))
+			return;
 		queuePlaybackInteraction('video_resumed');
 	}
 
@@ -1402,6 +1425,7 @@
 
 		try {
 			const response = await api.postLectureVideoInteraction(fetch, classId, threadId, payload);
+
 			if (controllerSessionId !== seekControllerSessionId) {
 				return;
 			}
@@ -1871,13 +1895,13 @@
 						available only to participants.
 					</div>
 				{/if}
-				{#if isCompleted && isDesktopLayout}
+				{#if isCompleted && isDesktopLayout && !canParticipate}
 					<LectureVideoCompletedView
 						{classId}
 						{threadId}
 						initialInteractions={historyInteractions}
 					/>
-				{:else if !isCompleted}
+				{:else if !isCompleted || canParticipate}
 					<div
 						class="mx-auto min-h-0 w-full max-w-[calc((40dvh-4rem)*16/9)] shrink-0 overflow-hidden rounded-3xl border border-slate-200 bg-white p-3 shadow-xl xl:max-h-[50%] xl:w-fit xl:max-w-none"
 					>
@@ -1892,6 +1916,7 @@
 							disabled={!canParticipate || playbackLocked}
 							{activeQuestionIds}
 							{furthestOffsetMs}
+							allowFullSeek={isCompleted && canParticipate}
 							manualPlaybackPrompt={playbackRequiresManualStart}
 							bind:videoElement
 							bind:currentTimeMs
@@ -1932,7 +1957,7 @@
 			</div>
 			{#if isDesktopLayout}
 				<div class="col-span-2 h-full min-h-0 min-w-0">
-					{@render chat?.()}
+					{@render chat?.(videoAtEnd)}
 				</div>
 			{:else}
 				<div class="flex min-h-0 flex-1 flex-col gap-4">
@@ -1962,7 +1987,7 @@
 					{/if}
 					{#if hasMobileChecksPanel && (!hasMobileChatPanel || activeMobilePanel === 'checks')}
 						<div class="min-h-0 flex-1 overflow-y-auto">
-							{#if isCompleted}
+							{#if isCompleted && !canParticipate}
 								<LectureVideoCompletedView
 									{classId}
 									{threadId}
@@ -1987,7 +2012,7 @@
 					{/if}
 					{#if hasMobileChatPanel && (!hasMobileChecksPanel || activeMobilePanel === 'chat')}
 						<div class="min-h-0 flex-1">
-							{@render chat?.()}
+							{@render chat?.(videoAtEnd)}
 						</div>
 					{/if}
 				</div>

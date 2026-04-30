@@ -150,7 +150,6 @@
 	$: threadRecording = data.threadRecording;
 	$: displayUserInfo = data.threadDisplayUserInfo;
 	$: threadLectureVideoMismatch = data.threadLectureVideoMismatch === true;
-	$: threadLectureVideoCompleted = data.threadLectureVideoCompleted === true;
 	$: threadIsCurrentUserParticipant =
 		expandedThreadData.data?.thread?.is_current_user_participant === true;
 	$: lectureVideoSession = expandedThreadData.data?.lecture_video_session ?? null;
@@ -286,10 +285,7 @@
 	$: lectureChatCanSubmit =
 		canSubmit && threadIsCurrentUserParticipant && !assistantDeleted && canViewAssistant;
 	$: lectureChatInputDisabled =
-		!lectureChatCanSubmit ||
-		!!$navigating ||
-		!threadLectureChatAvailable ||
-		effectiveLectureVideoSession?.state === 'completed';
+		!lectureChatCanSubmit || !!$navigating || !threadLectureChatAvailable;
 	$: lectureChatContinuePromptVisible = effectiveLectureVideoSession?.state !== 'awaiting_answer';
 	$: canDropUploadsIntoThread =
 		data.threadInteractionMode === 'chat' &&
@@ -1507,7 +1503,7 @@
 	ondrop={handleThreadDrop}
 >
 	{#if data.threadInteractionMode === 'lecture_video'}
-		{#key `${classId}:${threadId}:${lectureVideoSrc}:${threadLectureVideoCompleted}:${effectiveLectureVideoMismatch}`}
+		{#key `${classId}:${threadId}:${lectureVideoSrc}:${effectiveLectureVideoMismatch}`}
 			{#if effectiveLectureVideoMismatch}
 				<div class="flex h-full w-full items-center justify-center p-4">
 					<div
@@ -1554,15 +1550,17 @@
 					on:playbackresumed={handleLecturePlaybackResumed}
 					on:lessonupdated={handleLectureVideoLessonUpdated}
 				>
-					{#snippet chat()}
+					{#snippet chat(lectureVideoAtEnd = false)}
 						{#if threadLectureChatAvailable}
 							<LectureVideoChatPanel
 								{classId}
 								{threadId}
 								messages={$messages}
 								canFetchMore={$canFetchMore}
-								showInput={effectiveLectureVideoSession?.state !== 'completed'}
-								showContinueWatchingPrompt={lectureChatContinuePromptVisible}
+								showInput={effectiveLectureVideoSession?.state !== 'completed' ||
+									threadIsCurrentUserParticipant}
+								showContinueWatchingPrompt={lectureChatContinuePromptVisible &&
+									!(effectiveLectureVideoSession?.state === 'completed' && lectureVideoAtEnd)}
 								canSubmit={lectureChatCanSubmit}
 								disabled={lectureChatInputDisabled}
 								waiting={$waiting}
