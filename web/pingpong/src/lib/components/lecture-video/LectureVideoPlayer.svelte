@@ -4,6 +4,7 @@
 		CloseOutline,
 		PauseSolid,
 		PlaySolid,
+		RefreshOutline,
 		VolumeDownSolid,
 		VolumeUpSolid,
 		VolumeMuteSolid
@@ -84,12 +85,14 @@
 		subtitleText = null,
 		disabled = false,
 		manualPlaybackPrompt = false,
+		allowFullSeek = false,
 		activeQuestionIds = null,
 		furthestOffsetMs = null,
 		videoElement = $bindable(null),
 		previewVideoElement = $bindable(null),
 		currentTimeMs = $bindable(0),
 		paused = $bindable(true),
+		endedPlayback = $bindable(false),
 		effectiveVolume = $bindable(1),
 		ontimeupdate,
 		onseek,
@@ -108,12 +111,14 @@
 		subtitleText?: string | null;
 		disabled?: boolean;
 		manualPlaybackPrompt?: boolean;
+		allowFullSeek?: boolean;
 		activeQuestionIds?: number[] | null;
 		furthestOffsetMs?: number | null;
 		videoElement?: HTMLVideoElement | null;
 		previewVideoElement?: HTMLVideoElement | null;
 		currentTimeMs?: number;
 		paused?: boolean;
+		endedPlayback?: boolean;
 		effectiveVolume?: number;
 		ontimeupdate?: () => void;
 		onseek?: (toOffsetMs: number, fromOffsetMs: number) => void;
@@ -168,19 +173,27 @@
 	let playerContainerElement: HTMLDivElement | null = $state(null);
 	let activeClusterKey: string | null = $state(null);
 	let clusterCollapseTimeout: ReturnType<typeof setTimeout> | null = $state(null);
+	let playbackCompleted = $state(false);
 
 	let effectiveOffsetMs = $derived(
 		draggingSeek ? (dragPreviewOffsetMs ?? currentTimeMs) : currentTimeMs
 	);
 	let progress = $derived(durationMs > 0 ? (effectiveOffsetMs / durationMs) * 100 : 0);
-	let seekLimitOffsetMs = $derived(Math.max(currentTimeMs, furthestOffsetMs ?? 0));
+	let seekLimitOffsetMs = $derived(
+		allowFullSeek && durationMs > 0 ? durationMs : Math.max(currentTimeMs, furthestOffsetMs ?? 0)
+	);
 	let seekLimitProgress = $derived(
 		durationMs > 0 ? Math.min((seekLimitOffsetMs / durationMs) * 100, 100) : 0
 	);
+	let computedEndedPlayback = $derived(playbackCompleted);
+	$effect(() => {
+		endedPlayback = computedEndedPlayback;
+	});
 	let questionPendingControls = $derived(Boolean(activeQuestionIds?.length));
 	let visibleControls = $derived(
 		!manualPlaybackPrompt &&
-			(questionPendingControls || (!disabled && (!startedPlaybackOnce || showControls)))
+			(questionPendingControls ||
+				(!disabled && (endedPlayback || !startedPlaybackOnce || showControls)))
 	);
 	let visibleMarkers = $derived(
 		condensedMarkerMode && condensedMarkerIds.length > 0
@@ -433,6 +446,9 @@
 
 		setActionHandler('play', () => {
 			if (!videoElement || disabled || !videoElement.paused) return;
+			if (endedPlayback) {
+				setMainVideoCurrentTime(0);
+			}
 			void videoElement.play().catch(() => {});
 		});
 		setActionHandler('pause', () => {
@@ -469,6 +485,7 @@
 		if (videoElement) {
 			currentTimeMs = videoElement.currentTime * 1000;
 			paused = videoElement.paused;
+			playbackCompleted = videoElement.ended;
 		}
 		syncMediaSessionState();
 		ontimeupdate?.();
@@ -478,6 +495,7 @@
 		if (!videoElement) return;
 		videoElement.currentTime = offsetMs / 1000;
 		currentTimeMs = offsetMs;
+		playbackCompleted = false;
 		syncMediaSessionPositionState();
 	}
 
@@ -489,6 +507,7 @@
 		if (videoElement) {
 			durationMs = videoElement.duration * 1000;
 			currentTimeMs = videoElement.currentTime * 1000;
+			playbackCompleted = videoElement.ended;
 		}
 		syncMediaSessionState();
 		oncanplay?.();
@@ -496,8 +515,11 @@
 
 	function handleEnded() {
 		if (videoElement) {
+			currentTimeMs = videoElement.currentTime * 1000;
 			paused = videoElement.paused;
 		}
+		playbackCompleted = true;
+		showControls = true;
 		syncMediaSessionState();
 		onended?.();
 	}
@@ -515,6 +537,7 @@
 	function handlePlayEvent() {
 		if (videoElement) {
 			paused = videoElement.paused;
+			playbackCompleted = videoElement.ended;
 		}
 		startedPlaybackOnce = true;
 		showControls = true;
@@ -539,6 +562,11 @@
 
 	function togglePlayPause() {
 		if (disabled || questionPendingControls || !videoElement) return;
+		if (endedPlayback) {
+			setMainVideoCurrentTime(0);
+			void videoElement.play().catch(() => {});
+			return;
+		}
 		if (videoElement.paused) {
 			void videoElement.play().catch(() => {});
 			return;
@@ -641,7 +669,8 @@
 		const clickRatio = clamp(pointerOffsetPx / rect.width, 0, 1);
 		const fromOffsetMs = dragStartOffsetMs ?? Math.round(videoElement.currentTime * 1000);
 		const requestedOffsetMs = Math.round(durationMs * clickRatio);
-		const allowedSeekOffsetMs = Math.max(fromOffsetMs, furthestOffsetMs ?? 0);
+		const allowedSeekOffsetMs =
+			allowFullSeek && durationMs > 0 ? durationMs : Math.max(fromOffsetMs, furthestOffsetMs ?? 0);
 		const locked = requestedOffsetMs > allowedSeekOffsetMs;
 
 		return {
@@ -835,6 +864,7 @@
 	function commitSeek(offsetMs: number, fromOffsetMs: number) {
 		if (disabled || questionPendingControls || !videoElement) return;
 		setMainVideoCurrentTime(offsetMs);
+		if (durationMs > 0 && offsetMs >= durationMs) return;
 		onseek?.(offsetMs, fromOffsetMs);
 	}
 
@@ -1013,7 +1043,7 @@
 			return;
 		}
 		if (disabled || !videoElement) return;
-		showKeyboardIndicator(videoElement.paused ? 'play' : 'pause');
+		showKeyboardIndicator(endedPlayback || videoElement.paused ? 'play' : 'pause');
 		togglePlayPause();
 	}
 
@@ -1334,7 +1364,7 @@
 							<div
 								class="w-full overflow-hidden rounded-lg border border-slate-200/90 bg-slate-950 bg-clip-border shadow-xl"
 							>
-								<div class="relative overflow-hidden bg-slate-900">
+								<div class="relative aspect-video overflow-hidden bg-slate-900">
 									<canvas
 										bind:this={snapshotCanvasElement}
 										class="absolute inset-0 h-full w-full object-cover"
@@ -1423,9 +1453,11 @@
 									e.stopPropagation();
 									togglePlayPause();
 								}}
-								aria-label={paused ? 'Play' : 'Pause'}
+								aria-label={endedPlayback ? 'Restart' : paused ? 'Play' : 'Pause'}
 							>
-								{#if paused}
+								{#if endedPlayback}
+									<RefreshOutline class="size-5 text-white" />
+								{:else if paused}
 									<PlaySolid class="size-6 translate-x-px text-white" />
 								{:else}
 									<PauseSolid class="size-6 text-white" />

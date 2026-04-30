@@ -859,7 +859,9 @@ async def test_build_lecture_chat_context_message_parts_v3_markdown_without_imag
         "- A proof (correct). Feedback: Correct.\n"
         "- A joke (incorrect). Feedback: Incorrect." in context_text
     )
-    assert "- Knowledge Check #1: What matters here?" in context_text
+    assert (
+        "- At 4000ms, Knowledge Check #1 was asked: What matters here?" in context_text
+    )
     assert "Student selected `Latency`." in context_text
     assert "- Latency (selected, correct). Feedback: Correct." in context_text
     assert "- Color (incorrect). Feedback: Incorrect." in context_text

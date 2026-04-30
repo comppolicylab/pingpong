@@ -1927,7 +1927,7 @@ async def test_lecture_video_playback_events_are_rejected_while_awaiting_answer(
         ("user:123", "can_view", "assistant:1"),
     ]
 )
-async def test_lecture_video_interactions_reject_post_completion_playback_events(
+async def test_lecture_video_interactions_allow_participant_rewatch_after_completion(
     api, authz, config, db, institution, valid_user_token, monkeypatch
 ):
     async with db.async_session() as session:
@@ -2053,61 +2053,93 @@ async def test_lecture_video_interactions_reject_post_completion_playback_events
         json={"message": "Can I still ask about this lesson?"},
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
-    assert completed_chat.status_code == 409
-    assert (
-        completed_chat.json()["detail"]
-        == "Lecture chat is unavailable after the lecture is completed."
-    )
+    assert completed_chat.status_code == 200
 
-    invalid_pause = api.post(
-        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
-        json={
-            "type": "video_paused",
-            "controller_session_id": controller_session_id,
-            "expected_state_version": completed_session["state_version"],
-            "idempotency_key": "post-completion-pause",
-            "offset_ms": option.continue_offset_ms + 250,
-        },
-        headers={"Authorization": f"Bearer {valid_user_token}"},
-    )
-    assert invalid_pause.status_code == 409
-    assert invalid_pause.json()["detail"] == "This lesson is already complete."
+    rewatch_offset_ms = option.continue_offset_ms + 250
 
-    invalid_seek = api.post(
+    completed_seek = api.post(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
         json={
             "type": "video_seeked",
             "controller_session_id": controller_session_id,
             "expected_state_version": completed_session["state_version"],
             "idempotency_key": "post-completion-seek",
-            "from_offset_ms": option.continue_offset_ms,
-            "to_offset_ms": option.continue_offset_ms + 500,
+            "from_offset_ms": completed_session["last_known_offset_ms"],
+            "to_offset_ms": rewatch_offset_ms,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
-    assert invalid_seek.status_code == 409
-    assert invalid_seek.json()["detail"] == "This lesson is already complete."
+    assert completed_seek.status_code == 200
+    completed_seek_session = completed_seek.json()["lecture_video_session"]
+    assert completed_seek_session["state"] == "completed"
+    assert completed_seek_session["last_known_offset_ms"] == rewatch_offset_ms
 
-    invalid_end = api.post(
+    completed_pause = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "video_paused",
+            "controller_session_id": controller_session_id,
+            "expected_state_version": completed_seek_session["state_version"],
+            "idempotency_key": "post-completion-pause",
+            "offset_ms": rewatch_offset_ms,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert completed_pause.status_code == 200
+    completed_pause_session = completed_pause.json()["lecture_video_session"]
+    assert completed_pause_session["state"] == "completed"
+    assert completed_pause_session["last_known_offset_ms"] == rewatch_offset_ms
+
+    paused_thread = api.get(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}",
+        headers={
+            "Authorization": f"Bearer {valid_user_token}",
+            "X-Lecture-Video-Controller-Session": controller_session_id,
+        },
+    )
+    assert paused_thread.status_code == 200
+    paused_session = paused_thread.json()["lecture_video_session"]
+    assert paused_session["state"] == "completed"
+    assert paused_session["last_known_offset_ms"] == rewatch_offset_ms
+
+    completed_resume = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "video_resumed",
+            "controller_session_id": controller_session_id,
+            "expected_state_version": completed_pause_session["state_version"],
+            "idempotency_key": "post-completion-resume",
+            "offset_ms": rewatch_offset_ms,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert completed_resume.status_code == 200
+    completed_resume_session = completed_resume.json()["lecture_video_session"]
+    assert completed_resume_session["state"] == "completed"
+    assert completed_resume_session["last_known_offset_ms"] == rewatch_offset_ms
+
+    completed_end = api.post(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
         json={
             "type": "video_ended",
             "controller_session_id": controller_session_id,
-            "expected_state_version": completed_session["state_version"],
+            "expected_state_version": completed_resume_session["state_version"],
             "idempotency_key": "post-completion-ended",
-            "offset_ms": option.continue_offset_ms + 750,
+            "offset_ms": rewatch_offset_ms,
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
-    assert invalid_end.status_code == 409
-    assert invalid_end.json()["detail"] == "This lesson is already complete."
+    assert completed_end.status_code == 200
+    completed_end_session = completed_end.json()["lecture_video_session"]
+    assert completed_end_session["state"] == "completed"
+    assert completed_end_session["last_known_offset_ms"] == rewatch_offset_ms
 
     invalid_answer = api.post(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
         json={
             "type": "answer_submitted",
             "controller_session_id": controller_session_id,
-            "expected_state_version": completed_session["state_version"],
+            "expected_state_version": completed_end_session["state_version"],
             "idempotency_key": "post-completion-answer",
             "question_id": question.id,
             "option_id": option.id,
@@ -2127,15 +2159,18 @@ async def test_lecture_video_interactions_reject_post_completion_playback_events
     assert refreshed_thread.status_code == 200
     refreshed_session = refreshed_thread.json()["lecture_video_session"]
     assert refreshed_session["state"] == "completed"
-    assert refreshed_session["state_version"] == completed_session["state_version"]
+    assert refreshed_session["state_version"] == completed_end_session["state_version"]
     assert (
         refreshed_session["last_known_offset_ms"]
-        == completed_session["last_known_offset_ms"]
+        == completed_end_session["last_known_offset_ms"]
     )
-    assert [
+    message_texts = [
         message["content"][0]["text"]["value"]
         for message in refreshed_thread.json()["messages"]
-    ] == ["Summarize the first concept again.", VISIBLE_ASSISTANT_REPLY_TEXT]
+    ]
+    assert message_texts[0] == "Summarize the first concept again."
+    assert "Can I still ask about this lesson?" in message_texts
+    assert message_texts.count(VISIBLE_ASSISTANT_REPLY_TEXT) == 2
 
     history_response = api.get(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/history",

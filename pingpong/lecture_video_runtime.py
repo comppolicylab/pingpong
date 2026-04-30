@@ -806,7 +806,10 @@ async def _handle_resumed(
     event_type: schemas.LectureVideoInteractionEventType,
     current_time: datetime,
 ) -> None:
-    if state.state == schemas.LectureVideoSessionState.PLAYING:
+    if state.state in {
+        schemas.LectureVideoSessionState.PLAYING,
+        schemas.LectureVideoSessionState.COMPLETED,
+    }:
         plausible_offset_ms = await _get_plausible_playback_offset_ms(
             session, state, current_time=current_time
         )
@@ -859,11 +862,10 @@ async def _handle_resumed(
 def _require_playing_state_for_playback_event(
     state: models.LectureVideoThreadState,
 ) -> None:
-    if state.state == schemas.LectureVideoSessionState.COMPLETED:
-        raise _conflict(
-            detail=MSG_LESSON_ALREADY_COMPLETE,
-        )
-    if state.state != schemas.LectureVideoSessionState.PLAYING:
+    if state.state not in {
+        schemas.LectureVideoSessionState.PLAYING,
+        schemas.LectureVideoSessionState.COMPLETED,
+    }:
         raise _conflict(
             detail=MSG_VIDEO_CANNOT_DO_THAT,
         )
@@ -954,6 +956,9 @@ async def _handle_ended(
         offset_ms=request.offset_ms,
         idempotency_key=request.idempotency_key,
     )
+
+    if state.state == schemas.LectureVideoSessionState.COMPLETED:
+        return
 
     if state.current_question_id is None:
         state.state = schemas.LectureVideoSessionState.COMPLETED
