@@ -335,7 +335,7 @@ def _normalize_interaction_time(timestamp: datetime | None) -> datetime | None:
     return timestamp
 
 
-async def _get_plausible_playback_offset_ms(
+async def get_plausible_playback_offset_ms(
     session: AsyncSession,
     state: models.LectureVideoThreadState,
     *,
@@ -738,7 +738,7 @@ async def _handle_question_presented(
             "Question presentation must occur at the configured stop offset."
         )
 
-    plausible_offset_ms = await _get_plausible_playback_offset_ms(
+    plausible_offset_ms = await get_plausible_playback_offset_ms(
         session, state, current_time=current_time
     )
     if request.offset_ms > plausible_offset_ms:
@@ -810,7 +810,7 @@ async def _handle_resumed(
         schemas.LectureVideoSessionState.PLAYING,
         schemas.LectureVideoSessionState.COMPLETED,
     }:
-        plausible_offset_ms = await _get_plausible_playback_offset_ms(
+        plausible_offset_ms = await get_plausible_playback_offset_ms(
             session, state, current_time=current_time
         )
         if request.offset_ms > plausible_offset_ms:
@@ -881,7 +881,7 @@ async def _handle_paused(
     current_time: datetime,
 ) -> None:
     _require_playing_state_for_playback_event(state)
-    plausible_offset_ms = await _get_plausible_playback_offset_ms(
+    plausible_offset_ms = await get_plausible_playback_offset_ms(
         session, state, current_time=current_time
     )
     if request.offset_ms > plausible_offset_ms:
@@ -908,7 +908,7 @@ async def _handle_seeked(
     current_time: datetime,
 ) -> None:
     _require_playing_state_for_playback_event(state)
-    plausible_offset_ms = await _get_plausible_playback_offset_ms(
+    plausible_offset_ms = await get_plausible_playback_offset_ms(
         session, state, current_time=current_time
     )
     if request.to_offset_ms > plausible_offset_ms:
@@ -941,7 +941,7 @@ async def _handle_ended(
     current_time: datetime,
 ) -> None:
     _require_playing_state_for_playback_event(state)
-    plausible_offset_ms = await _get_plausible_playback_offset_ms(
+    plausible_offset_ms = await get_plausible_playback_offset_ms(
         session, state, current_time=current_time
     )
     if request.offset_ms > plausible_offset_ms:

@@ -258,8 +258,8 @@ class GeneratedSummaryCheckpoint(BaseModel):
     )
     summary: str = Field(
         description=(
-            "Cumulative summary from the relevant generation scope start "
-            "through end_offset_ms."
+            "Cumulative summary through end_offset_ms, extending any supplied "
+            "prior cumulative summary."
         )
     )
 
@@ -282,7 +282,7 @@ class GeneratedMomentContext(BaseModel):
 
 
 class GeneratedQuizWithVideoContext(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     video_summary: str = Field(description="Brief summary of the lesson.")
     questions: list[GeneratedQuestion] = Field(
@@ -319,6 +319,25 @@ def _manifest_chunk_overlap_ms(video_description_window_ms: int) -> int:
     return max(_MANIFEST_CHUNK_OVERLAP_MS, video_description_window_ms // 2)
 
 
+def _resolve_context_schedule_bounds(
+    *,
+    video_duration_ms: int | None,
+    generation_start_ms: int | None,
+    generation_end_ms: int | None,
+    video_description_window_ms: int,
+) -> tuple[int, int] | None:
+    if video_description_window_ms <= 0:
+        return None
+    effective_end_ms = (
+        generation_end_ms if generation_end_ms is not None else video_duration_ms
+    )
+    if effective_end_ms is None:
+        return None
+    effective_start_ms = max(generation_start_ms or 0, 0)
+    effective_end_ms = max(effective_end_ms, 0)
+    return effective_start_ms, effective_end_ms
+
+
 def _scheduled_summary_checkpoint_offsets(
     *,
     video_duration_ms: int | None,
@@ -326,15 +345,15 @@ def _scheduled_summary_checkpoint_offsets(
     generation_end_ms: int | None,
     video_description_window_ms: int,
 ) -> list[int]:
-    if video_description_window_ms <= 0:
-        return []
-    effective_end_ms = (
-        generation_end_ms if generation_end_ms is not None else video_duration_ms
+    bounds = _resolve_context_schedule_bounds(
+        video_duration_ms=video_duration_ms,
+        generation_start_ms=generation_start_ms,
+        generation_end_ms=generation_end_ms,
+        video_description_window_ms=video_description_window_ms,
     )
-    if effective_end_ms is None:
+    if bounds is None:
         return []
-    effective_start_ms = max(generation_start_ms or 0, 0)
-    effective_end_ms = max(effective_end_ms, 0)
+    effective_start_ms, effective_end_ms = bounds
     if effective_end_ms <= effective_start_ms:
         return []
     first_offset_ms = (
@@ -355,15 +374,15 @@ def _scheduled_moment_context_windows(
     generation_end_ms: int | None,
     video_description_window_ms: int,
 ) -> list[tuple[int, int, int]]:
-    if video_description_window_ms <= 0:
-        return []
-    effective_end_ms = (
-        generation_end_ms if generation_end_ms is not None else video_duration_ms
+    bounds = _resolve_context_schedule_bounds(
+        video_duration_ms=video_duration_ms,
+        generation_start_ms=generation_start_ms,
+        generation_end_ms=generation_end_ms,
+        video_description_window_ms=video_description_window_ms,
     )
-    if effective_end_ms is None:
+    if bounds is None:
         return []
-    effective_start_ms = max(generation_start_ms or 0, 0)
-    effective_end_ms = max(effective_end_ms, 0)
+    effective_start_ms, effective_end_ms = bounds
     if effective_end_ms < effective_start_ms:
         return []
     if effective_start_ms == 0:
@@ -969,6 +988,8 @@ def build_generation_prompt(
     context_start_ms: int | None = None,
     context_end_ms: int | None = None,
     video_description_window_ms: int = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
+    previous_summary_checkpoint: schemas.LectureVideoManifestSummaryCheckpointV4
+    | None = None,
 ) -> str:
     if compact:
         transcript_text = "\n".join(
@@ -1022,8 +1043,12 @@ def build_generation_prompt(
         else ""
     )
     generation_window_text = ""
+    previous_summary_text = ""
     context_array_scope = "the whole video"
     chunk_moment_boundary_guidance = ""
+    summary_cumulative_guidance = (
+        f"- Each summary must be cumulative over {context_array_summary_scope}."
+    )
     context_offset_guidance = (
         "- Use absolute millisecond offsets from the original video for every "
         "summary end_offset_ms and every moment center_offset_ms, start_offset_ms, "
@@ -1038,6 +1063,11 @@ def build_generation_prompt(
         context_array_scope = "the requested generation window"
         context_array_summary_scope = (
             f"{generation_start_ms}ms through each end_offset_ms"
+        )
+        summary_cumulative_guidance = (
+            "- Each summary must be cumulative from the requested generation start "
+            "through end_offset_ms; do not claim to summarize unseen earlier video "
+            "content."
         )
         summary_schedule_guidance = (
             f"- Generate summary checkpoints at the fixed {video_description_window_unit_text} "
@@ -1089,6 +1119,25 @@ def build_generation_prompt(
             "must use absolute offsets from the original video, and should only "
             "cover the requested generation window."
         )
+        if previous_summary_checkpoint is not None:
+            context_array_summary_scope = (
+                "the full lecture so far at each end_offset_ms"
+            )
+            previous_summary_text = (
+                "\nPRIOR CUMULATIVE SUMMARY:\n"
+                "The previous generated chunk summarized the lecture through "
+                f"{previous_summary_checkpoint.end_offset_ms}ms:\n"
+                f"{previous_summary_checkpoint.summary}\n\n"
+                "Use this as the only source for lecture content before "
+                f"{generation_start_ms}ms. Do not invent or infer earlier content "
+                "beyond this prior summary.\n"
+            )
+            summary_cumulative_guidance = (
+                "- Each summary must be cumulative for the full lecture so far: "
+                "start from the supplied prior cumulative summary, then add only "
+                "content supported by this chunk's transcript/video through "
+                "end_offset_ms."
+            )
         context_window_text = (
             f" The provided video clip covers absolute offsets "
             f"{context_start_ms}ms through {context_end_ms}ms."
@@ -1109,6 +1158,7 @@ Generate "summary_checkpoints" and "moment_contexts" for offsets inside {generat
 
 You will be given a lecture video and a word-level transcript. {transcript_description}{duration_text}
 {generation_window_text}
+{previous_summary_text}
 
 Here's the WORD-LEVEL TRANSCRIPT:
 {transcript_text}
@@ -1132,7 +1182,7 @@ CONTEXT ARRAY GROUNDING:
 SUMMARY CHECKPOINT GUIDELINES:
 {summary_schedule_guidance}
 - Do not skip the first required checkpoint for this generation scope.
-- Each summary must be cumulative over {context_array_summary_scope}. For a chunked request, summarize from the requested generation start through end_offset_ms; do not claim to summarize unseen earlier video content.
+{summary_cumulative_guidance}
 
 MOMENT CONTEXT GUIDELINES:
 {moment_schedule_guidance}
@@ -1326,7 +1376,7 @@ FIELD DEFINITIONS:
   - "resume_at": The "start" timestamp of the resume word. Copied exactly from the transcript — do not round or modify.
 - "summary_checkpoints": Array of cumulative summaries. Each entry contains:
   - "end_offset_ms": Integer millisecond offset through which this summary applies.
-  - "summary": Non-empty cumulative summary from the relevant generation scope start through end_offset_ms.
+  - "summary": Non-empty cumulative summary through end_offset_ms, extending any supplied prior cumulative summary.
 - "moment_contexts": Array of local context windows. Each entry contains:
   - "center_offset_ms": Integer millisecond offset used to select this local context.
   - "start_offset_ms": Integer millisecond offset where the local window starts.
@@ -1704,6 +1754,20 @@ def _manifest_question_to_reconciliation_candidate(
     }
 
 
+def _latest_summary_checkpoint(
+    manifests: list[schemas.LectureVideoManifestV4],
+    fallback: schemas.LectureVideoManifestSummaryCheckpointV4 | None = None,
+) -> schemas.LectureVideoManifestSummaryCheckpointV4 | None:
+    checkpoints = [
+        checkpoint
+        for manifest in manifests
+        for checkpoint in manifest.summary_checkpoints
+    ]
+    if not checkpoints:
+        return fallback
+    return max(checkpoints, key=lambda checkpoint: checkpoint.end_offset_ms)
+
+
 def _reconciliation_prompt(generation_prompt_content: str) -> str:
     return f"""You are an expert educational content designer reconciling independently generated interactive question candidates from chunks of one lecture video.
 
@@ -1864,6 +1928,8 @@ async def _generate_manifest_from_gemini_file(
     context_start_ms: int | None = None,
     context_end_ms: int | None = None,
     video_description_window_ms: int = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
+    previous_summary_checkpoint: schemas.LectureVideoManifestSummaryCheckpointV4
+    | None = None,
 ) -> schemas.LectureVideoManifestV4:
     prompt = build_generation_prompt(
         generation_prompt_content,
@@ -1875,6 +1941,7 @@ async def _generate_manifest_from_gemini_file(
         context_start_ms=context_start_ms,
         context_end_ms=context_end_ms,
         video_description_window_ms=video_description_window_ms,
+        previous_summary_checkpoint=previous_summary_checkpoint,
     )
     request_label = (
         "manifest_chunk_compact"
@@ -2000,6 +2067,8 @@ async def _upload_and_generate_manifest_chunk(
     temp_dir: str,
     model: str,
     video_description_window_ms: int = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
+    previous_summary_checkpoint: schemas.LectureVideoManifestSummaryCheckpointV4
+    | None = None,
 ) -> schemas.LectureVideoManifestV4:
     chunk_transcript = _transcript_for_window(
         transcript,
@@ -2040,6 +2109,7 @@ async def _upload_and_generate_manifest_chunk(
                 context_start_ms=chunk.context_start_ms,
                 context_end_ms=chunk.context_end_ms,
                 video_description_window_ms=video_description_window_ms,
+                previous_summary_checkpoint=previous_summary_checkpoint,
             )
         except Exception as exc:
             if not _is_context_limit_error(exc):
@@ -2057,6 +2127,7 @@ async def _upload_and_generate_manifest_chunk(
                 context_start_ms=chunk.context_start_ms,
                 context_end_ms=chunk.context_end_ms,
                 video_description_window_ms=video_description_window_ms,
+                previous_summary_checkpoint=previous_summary_checkpoint,
             )
         manifest.questions = _filter_questions_for_window(
             manifest.questions,
@@ -2086,6 +2157,8 @@ async def _upload_and_generate_manifest_chunks(
     model: str,
     video_description_window_ms: int = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
     overlap_ms: int = _MANIFEST_CHUNK_OVERLAP_MS,
+    previous_summary_checkpoint: schemas.LectureVideoManifestSummaryCheckpointV4
+    | None = None,
 ) -> list[schemas.LectureVideoManifestV4]:
     try:
         return [
@@ -2099,6 +2172,7 @@ async def _upload_and_generate_manifest_chunks(
                 temp_dir=temp_dir,
                 model=model,
                 video_description_window_ms=video_description_window_ms,
+                previous_summary_checkpoint=previous_summary_checkpoint,
             )
         ]
     except Exception as exc:
@@ -2121,20 +2195,25 @@ async def _upload_and_generate_manifest_chunks(
             child_chunks[0].generation_end_ms,
         )
         chunk_manifests: list[schemas.LectureVideoManifestV4] = []
+        current_summary_checkpoint = previous_summary_checkpoint
         for child_chunk in child_chunks:
-            chunk_manifests.extend(
-                await _upload_and_generate_manifest_chunks(
-                    video_path=video_path,
-                    gemini_client=gemini_client,
-                    generation_prompt_content=generation_prompt_content,
-                    transcript=transcript,
-                    video_duration_ms=video_duration_ms,
-                    chunk=child_chunk,
-                    temp_dir=temp_dir,
-                    model=model,
-                    video_description_window_ms=video_description_window_ms,
-                    overlap_ms=overlap_ms,
-                )
+            child_manifests = await _upload_and_generate_manifest_chunks(
+                video_path=video_path,
+                gemini_client=gemini_client,
+                generation_prompt_content=generation_prompt_content,
+                transcript=transcript,
+                video_duration_ms=video_duration_ms,
+                chunk=child_chunk,
+                temp_dir=temp_dir,
+                model=model,
+                video_description_window_ms=video_description_window_ms,
+                overlap_ms=overlap_ms,
+                previous_summary_checkpoint=current_summary_checkpoint,
+            )
+            chunk_manifests.extend(child_manifests)
+            current_summary_checkpoint = _latest_summary_checkpoint(
+                child_manifests,
+                current_summary_checkpoint,
             )
         return chunk_manifests
 
@@ -2194,20 +2273,27 @@ async def upload_and_generate_manifest(
         len(chunks),
     )
     chunk_manifests: list[schemas.LectureVideoManifestV4] = []
+    current_summary_checkpoint: (
+        schemas.LectureVideoManifestSummaryCheckpointV4 | None
+    ) = None
     for chunk in chunks:
-        chunk_manifests.extend(
-            await _upload_and_generate_manifest_chunks(
-                video_path=video_path,
-                gemini_client=gemini_client,
-                generation_prompt_content=generation_prompt_content,
-                transcript=transcript,
-                video_duration_ms=video_duration_ms or chunk.generation_end_ms,
-                chunk=chunk,
-                temp_dir=temp_dir,
-                model=model,
-                video_description_window_ms=video_description_window_ms,
-                overlap_ms=overlap_ms,
-            )
+        generated_chunk_manifests = await _upload_and_generate_manifest_chunks(
+            video_path=video_path,
+            gemini_client=gemini_client,
+            generation_prompt_content=generation_prompt_content,
+            transcript=transcript,
+            video_duration_ms=video_duration_ms or chunk.generation_end_ms,
+            chunk=chunk,
+            temp_dir=temp_dir,
+            model=model,
+            video_description_window_ms=video_description_window_ms,
+            overlap_ms=overlap_ms,
+            previous_summary_checkpoint=current_summary_checkpoint,
+        )
+        chunk_manifests.extend(generated_chunk_manifests)
+        current_summary_checkpoint = _latest_summary_checkpoint(
+            generated_chunk_manifests,
+            current_summary_checkpoint,
         )
     return await _merge_chunk_manifests(
         gemini_client=gemini_client,

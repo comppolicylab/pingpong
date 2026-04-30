@@ -615,6 +615,30 @@ class LectureVideoManifestMomentContextV4(BaseModel):
         return self
 
 
+def normalize_lecture_video_manifest_v4_context_arrays(
+    summary_checkpoints: list[LectureVideoManifestSummaryCheckpointV4],
+    moment_contexts: list[LectureVideoManifestMomentContextV4],
+) -> tuple[
+    list[LectureVideoManifestSummaryCheckpointV4],
+    list[LectureVideoManifestMomentContextV4],
+]:
+    summary_checkpoints = sorted(
+        {
+            checkpoint.end_offset_ms: checkpoint for checkpoint in summary_checkpoints
+        }.values(),
+        key=lambda item: item.end_offset_ms,
+    )
+    moment_contexts = sorted(
+        {moment.center_offset_ms: moment for moment in moment_contexts}.values(),
+        key=lambda item: item.center_offset_ms,
+    )
+    if not summary_checkpoints:
+        raise ValueError("summary_checkpoints must not be empty")
+    if not moment_contexts:
+        raise ValueError("moment_contexts must not be empty")
+    return summary_checkpoints, moment_contexts
+
+
 class LectureVideoManifestV3(LectureVideoManifestBase):
     version: Literal[3] = 3
     word_level_transcription: list[LectureVideoManifestWordV3] = Field(
@@ -647,23 +671,12 @@ class LectureVideoManifestV4(LectureVideoManifestBase):
 
     @model_validator(mode="after")
     def normalize_context_arrays(self) -> "LectureVideoManifestV4":
-        self.summary_checkpoints = sorted(
-            {
-                checkpoint.end_offset_ms: checkpoint
-                for checkpoint in self.summary_checkpoints
-            }.values(),
-            key=lambda item: item.end_offset_ms,
+        self.summary_checkpoints, self.moment_contexts = (
+            normalize_lecture_video_manifest_v4_context_arrays(
+                self.summary_checkpoints,
+                self.moment_contexts,
+            )
         )
-        self.moment_contexts = sorted(
-            {
-                moment.center_offset_ms: moment for moment in self.moment_contexts
-            }.values(),
-            key=lambda item: item.center_offset_ms,
-        )
-        if not self.summary_checkpoints:
-            raise ValueError("summary_checkpoints must not be empty")
-        if not self.moment_contexts:
-            raise ValueError("moment_contexts must not be empty")
         return self
 
 

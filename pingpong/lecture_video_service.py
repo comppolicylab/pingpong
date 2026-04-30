@@ -491,6 +491,12 @@ def _hydrate_stored_manifest_context(
                 schemas.LectureVideoManifestMomentContextV4.model_validate(moment)
                 for moment in manifest_data.get("moment_contexts") or []
             ]
+            summary_checkpoints, moment_contexts = (
+                schemas.normalize_lecture_video_manifest_v4_context_arrays(
+                    summary_checkpoints,
+                    moment_contexts,
+                )
+            )
             return LectureVideoChatContextV4(
                 version=4,
                 word_level_transcription=transcript,

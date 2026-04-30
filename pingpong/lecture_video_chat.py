@@ -606,7 +606,7 @@ async def _validate_v4_playback_position(
             status_code=400,
             detail="lecture_video_playback_position_ms must be greater than or equal to 0.",
         )
-    plausible_offset_ms = await lecture_video_runtime._get_plausible_playback_offset_ms(
+    plausible_offset_ms = await lecture_video_runtime.get_plausible_playback_offset_ms(
         session,
         state,
         current_time=datetime.now(timezone.utc),

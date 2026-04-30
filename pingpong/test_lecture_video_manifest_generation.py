@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from typing import cast
 
 from google.genai import types
+from pydantic import ValidationError
 import pytest
 
 import pingpong.lecture_video_manifest_generation as manifest_generation
@@ -61,6 +62,53 @@ def _transcript() -> list[schemas.LectureVideoManifestWordV3]:
             end_offset_ms=2000,
         ),
     ]
+
+
+def _manifest_with_summary_checkpoint(
+    end_offset_ms: int,
+    summary: str,
+) -> schemas.LectureVideoManifestV4:
+    return schemas.LectureVideoManifestV4(
+        word_level_transcription=_transcript(),
+        summary_checkpoints=[
+            schemas.LectureVideoManifestSummaryCheckpointV4(
+                end_offset_ms=end_offset_ms,
+                summary=summary,
+            )
+        ],
+        moment_contexts=[
+            schemas.LectureVideoManifestMomentContextV4(
+                center_offset_ms=end_offset_ms,
+                start_offset_ms=0,
+                end_offset_ms=end_offset_ms,
+                before="Before this checkpoint.",
+                at="At this checkpoint.",
+                after="After this checkpoint.",
+            )
+        ],
+        questions=[
+            schemas.LectureVideoManifestQuestionV1(
+                type=schemas.LectureVideoQuestionType.SINGLE_SELECT,
+                question_text="Candidate?",
+                intro_text="Try this.",
+                stop_offset_ms=1000,
+                options=[
+                    schemas.LectureVideoManifestOptionV1(
+                        option_text="Combine like terms",
+                        post_answer_text="Right.",
+                        continue_offset_ms=1500,
+                        correct=True,
+                    ),
+                    schemas.LectureVideoManifestOptionV1(
+                        option_text="Change every variable",
+                        post_answer_text="Not quite.",
+                        continue_offset_ms=1500,
+                        correct=False,
+                    ),
+                ],
+            )
+        ],
+    )
 
 
 def test_prepare_lecture_video_audio_for_whisper_retries_until_under_target(
@@ -250,6 +298,23 @@ def _quiz_with_context(
         video_summary="A short algebra lesson.",
         questions=questions or [_generated_question()],
     )
+
+
+def test_generated_quiz_with_video_context_rejects_legacy_video_descriptions() -> None:
+    with pytest.raises(ValidationError, match="video_descriptions"):
+        manifest_generation.GeneratedQuizWithVideoContext.model_validate(
+            {
+                "video_summary": "A short algebra lesson.",
+                "questions": [_generated_question().model_dump()],
+                "video_descriptions": [
+                    {
+                        "start_offset_ms": 0,
+                        "end_offset_ms": 30000,
+                        "description": "Legacy V3 visual context.",
+                    }
+                ],
+            }
+        )
 
 
 def test_quiz_to_manifest_converts_generated_v4_context_arrays() -> None:
@@ -451,6 +516,27 @@ def test_build_generation_prompt_warns_against_clip_relative_offsets_for_chunks(
     assert "seconds-second" not in prompt
 
 
+def test_build_generation_prompt_extends_prior_chunk_summary() -> None:
+    prompt = manifest_generation.build_generation_prompt(
+        "Ask one question.",
+        _transcript(),
+        video_duration_ms=60000,
+        generation_start_ms=30000,
+        generation_end_ms=60000,
+        context_start_ms=0,
+        context_end_ms=60000,
+        previous_summary_checkpoint=schemas.LectureVideoManifestSummaryCheckpointV4(
+            end_offset_ms=30000,
+            summary="The teacher introduces the expression and combines like terms.",
+        ),
+    )
+
+    assert "PRIOR CUMULATIVE SUMMARY:" in prompt
+    assert "summarized the lecture through 30000ms" in prompt
+    assert "start from the supplied prior cumulative summary" in prompt
+    assert "Use this as the only source for lecture content before 30000ms" in prompt
+
+
 def test_build_generation_prompt_uses_half_window_moment_context_bounds() -> None:
     prompt = manifest_generation.build_generation_prompt(
         "Ask one question.",
@@ -591,6 +677,131 @@ def test_should_split_manifest_chunk_error_accepts_provider_deadline() -> None:
     )
 
     assert manifest_generation._should_split_manifest_chunk_error(exc)
+
+
+async def test_upload_and_generate_manifest_threads_summary_between_top_level_chunks(
+    monkeypatch,
+) -> None:
+    captured_previous_offsets: list[int | None] = []
+
+    async def fake_ffprobe_duration_ms(_video_path: str) -> int:
+        return 600_000
+
+    async def fake_upload_and_generate_manifest_chunks(
+        *,
+        chunk: manifest_generation.ManifestGenerationChunk,
+        previous_summary_checkpoint: schemas.LectureVideoManifestSummaryCheckpointV4
+        | None,
+        **_kwargs: object,
+    ) -> list[schemas.LectureVideoManifestV4]:
+        captured_previous_offsets.append(
+            previous_summary_checkpoint.end_offset_ms
+            if previous_summary_checkpoint is not None
+            else None
+        )
+        return [
+            _manifest_with_summary_checkpoint(
+                chunk.generation_end_ms,
+                f"Summary through {chunk.generation_end_ms}ms.",
+            )
+        ]
+
+    async def fake_merge_chunk_manifests(
+        *,
+        chunk_manifests: list[schemas.LectureVideoManifestV4],
+        **_kwargs: object,
+    ) -> schemas.LectureVideoManifestV4:
+        return chunk_manifests[-1]
+
+    monkeypatch.setattr(
+        manifest_generation,
+        "_ffprobe_duration_ms",
+        fake_ffprobe_duration_ms,
+    )
+    monkeypatch.setattr(
+        manifest_generation,
+        "_upload_and_generate_manifest_chunks",
+        fake_upload_and_generate_manifest_chunks,
+    )
+    monkeypatch.setattr(
+        manifest_generation,
+        "_merge_chunk_manifests",
+        fake_merge_chunk_manifests,
+    )
+
+    await manifest_generation.upload_and_generate_manifest(
+        video_path="lecture.mp4",
+        gemini_client=object(),  # type: ignore[arg-type]
+        generation_prompt_content="Generate checks.",
+        transcript=_transcript(),
+        temp_dir="/tmp",
+        model="gemini-test",
+    )
+
+    assert captured_previous_offsets == [None, 300_000]
+
+
+async def test_upload_and_generate_manifest_chunks_threads_summary_through_split(
+    monkeypatch,
+) -> None:
+    captured: list[tuple[int, int, int | None]] = []
+
+    async def fake_upload_and_generate_manifest_chunk(
+        *,
+        chunk: manifest_generation.ManifestGenerationChunk,
+        previous_summary_checkpoint: schemas.LectureVideoManifestSummaryCheckpointV4
+        | None,
+        **_kwargs: object,
+    ) -> schemas.LectureVideoManifestV4:
+        captured.append(
+            (
+                chunk.generation_start_ms,
+                chunk.generation_end_ms,
+                previous_summary_checkpoint.end_offset_ms
+                if previous_summary_checkpoint is not None
+                else None,
+            )
+        )
+        if chunk.generation_start_ms == 0 and chunk.generation_end_ms == 600_000:
+            raise RuntimeError("503 UNAVAILABLE. Deadline expired.")
+        return _manifest_with_summary_checkpoint(
+            chunk.generation_end_ms,
+            f"Summary through {chunk.generation_end_ms}ms.",
+        )
+
+    monkeypatch.setattr(
+        manifest_generation,
+        "_upload_and_generate_manifest_chunk",
+        fake_upload_and_generate_manifest_chunk,
+    )
+
+    manifests = await manifest_generation._upload_and_generate_manifest_chunks(
+        video_path="lecture.mp4",
+        gemini_client=object(),  # type: ignore[arg-type]
+        generation_prompt_content="Generate checks.",
+        transcript=_transcript(),
+        video_duration_ms=600_000,
+        chunk=manifest_generation.ManifestGenerationChunk(
+            generation_start_ms=0,
+            generation_end_ms=600_000,
+            context_start_ms=0,
+            context_end_ms=600_000,
+        ),
+        temp_dir="/tmp",
+        model="gemini-test",
+    )
+
+    assert [
+        manifest.summary_checkpoints[-1].end_offset_ms for manifest in manifests
+    ] == [
+        300_000,
+        600_000,
+    ]
+    assert captured == [
+        (0, 600_000, None),
+        (0, 300_000, None),
+        (300_000, 600_000, 300_000),
+    ]
 
 
 async def test_generate_manifest_quiz_with_retries_handles_transient_provider_error(

@@ -3042,7 +3042,7 @@ async def test_get_plausible_playback_offset_ms_only_advances_while_playing(
         await session.flush()
 
         plausible_offset_ms = (
-            await lecture_video_runtime._get_plausible_playback_offset_ms(
+            await lecture_video_runtime.get_plausible_playback_offset_ms(
                 session,
                 state,
                 current_time=current_time,

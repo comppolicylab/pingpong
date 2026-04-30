@@ -15,6 +15,7 @@ from .test_lecture_video_server import (
     DEFAULT_LECTURE_VIDEO_VOICE_ID,
     lecture_video_manifest,
     lecture_video_manifest_v3,
+    lecture_video_manifest_v4,
     make_lecture_video,
 )
 from .testutil import with_institution
@@ -655,7 +656,7 @@ async def test_complete_manifest_generation_run_cancels_when_assistant_detached(
     await lecture_video_processing._complete_manifest_generation_run(
         run_id,
         lease_token,
-        schemas.LectureVideoManifestV3.model_validate(lecture_video_manifest_v3()),
+        schemas.LectureVideoManifestV4.model_validate(lecture_video_manifest_v4()),
     )
 
     async with db.async_session() as session:
@@ -677,8 +678,8 @@ async def test_process_claimed_manifest_run_persists_generated_manifest(
     db, institution, monkeypatch
 ):
     lease_token = "lease-token"
-    manifest = schemas.LectureVideoManifestV3.model_validate(
-        lecture_video_manifest_v3()
+    manifest = schemas.LectureVideoManifestV4.model_validate(
+        lecture_video_manifest_v4()
     )
     transcript = manifest.word_level_transcription
     calls: list[tuple[str, object]] = []
@@ -706,7 +707,7 @@ async def test_process_claimed_manifest_run_persists_generated_manifest(
 
     async def fake_upload_and_generate_manifest(
         **kwargs: object,
-    ) -> schemas.LectureVideoManifestV3:
+    ) -> schemas.LectureVideoManifestV4:
         calls.append(("generate", kwargs))
         return manifest
 
@@ -799,7 +800,7 @@ async def test_process_claimed_manifest_run_persists_generated_manifest(
     assert refreshed_run.lease_token is None
     assert refreshed_video is not None
     assert refreshed_video.manual_manifest is False
-    assert refreshed_video.manifest_version == 3
+    assert refreshed_video.manifest_version == 4
     assert [call[0] for call in calls] == [
         "gemini-client",
         "transcribe",
@@ -873,8 +874,8 @@ async def test_upload_and_generate_manifest_propagates_generation_failure(
     monkeypatch,
 ):
     calls: list[tuple[str, object]] = []
-    transcript = schemas.LectureVideoManifestV3.model_validate(
-        lecture_video_manifest_v3()
+    transcript = schemas.LectureVideoManifestV4.model_validate(
+        lecture_video_manifest_v4()
     ).word_level_transcription
 
     class FakeGeminiAio:
@@ -891,7 +892,7 @@ async def test_upload_and_generate_manifest_propagates_generation_failure(
 
     async def fake_upload_and_generate_manifest(
         **kwargs: object,
-    ) -> schemas.LectureVideoManifestV3:
+    ) -> schemas.LectureVideoManifestV4:
         calls.append(("generate", kwargs))
         raise RuntimeError("generation failed")
 
@@ -1164,8 +1165,8 @@ async def test_process_claimed_manifest_run_reuses_transcript_data(
     db, institution, monkeypatch
 ):
     lease_token = "lease-token"
-    existing_manifest = schemas.LectureVideoManifestV3.model_validate(
-        lecture_video_manifest_v3()
+    existing_manifest = schemas.LectureVideoManifestV4.model_validate(
+        lecture_video_manifest_v4()
     )
     generated_manifest = existing_manifest.model_copy(
         update={
@@ -1200,7 +1201,7 @@ async def test_process_claimed_manifest_run_reuses_transcript_data(
 
     async def fake_upload_and_generate_manifest(
         **kwargs: object,
-    ) -> schemas.LectureVideoManifestV3:
+    ) -> schemas.LectureVideoManifestV4:
         calls.append(("generate", kwargs))
         assert kwargs["transcript"] == existing_manifest.word_level_transcription
         return generated_manifest

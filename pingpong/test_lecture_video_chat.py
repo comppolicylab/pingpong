@@ -266,6 +266,37 @@ def test_validate_lecture_video_manifest_accepts_explicit_v4_and_normalizes_cont
     assert manifest.moment_contexts[0].before == "Before earlier."
 
 
+def test_lecture_video_chat_context_from_split_v4_storage_normalizes_contexts():
+    manifest_data = _build_manifest_v4_dict()
+    lecture_video = SimpleNamespace(
+        manifest_data={
+            "version": 4,
+            "summary_checkpoints": manifest_data["summary_checkpoints"],
+            "moment_contexts": manifest_data["moment_contexts"],
+        },
+        transcript_data={
+            "word_level_transcription": manifest_data["word_level_transcription"],
+        },
+    )
+
+    context = lecture_video_service.lecture_video_chat_context_from_model(lecture_video)
+
+    assert context is not None
+    assert context.version == 4
+    assert [checkpoint.end_offset_ms for checkpoint in context.summary_checkpoints] == [
+        450,
+        550,
+    ]
+    assert context.summary_checkpoints[0].summary == (
+        "Earlier cumulative summary replacement."
+    )
+    assert [moment.center_offset_ms for moment in context.moment_contexts] == [
+        450,
+        550,
+    ]
+    assert context.moment_contexts[0].before == "Before earlier."
+
+
 def test_validate_lecture_video_manifest_infers_versionless_v4_only_from_v4_fields():
     payload = _build_manifest_v4_dict()
     payload.pop("version")

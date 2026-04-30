@@ -8161,21 +8161,41 @@ class Thread(Base):
         session: AsyncSession,
         thread_id: int,
         roles: Collection[schemas.MessageRole] | None = None,
-        include_current_run_developer_messages_for_run_id: int | None = None,
     ) -> AsyncGenerator["Message", None]:
         filters = [Message.thread_id == thread_id]
         if roles is not None:
-            role_filter = Message.role.in_(roles)
-            if include_current_run_developer_messages_for_run_id is not None:
-                role_filter = or_(
-                    role_filter,
-                    and_(
-                        Message.run_id
-                        == include_current_run_developer_messages_for_run_id,
-                        Message.role == schemas.MessageRole.DEVELOPER,
-                    ),
-                )
-            filters.append(role_filter)
+            filters.append(Message.role.in_(roles))
+        async for message in cls._list_messages_with_filters_gen(session, filters):
+            yield message
+
+    @classmethod
+    async def list_user_assistant_messages_with_run_developer_gen(
+        cls,
+        session: AsyncSession,
+        thread_id: int,
+        run_id: int,
+    ) -> AsyncGenerator["Message", None]:
+        filters = [
+            Message.thread_id == thread_id,
+            or_(
+                Message.role.in_(
+                    [schemas.MessageRole.USER, schemas.MessageRole.ASSISTANT]
+                ),
+                and_(
+                    Message.run_id == run_id,
+                    Message.role == schemas.MessageRole.DEVELOPER,
+                ),
+            ),
+        ]
+        async for message in cls._list_messages_with_filters_gen(session, filters):
+            yield message
+
+    @classmethod
+    async def _list_messages_with_filters_gen(
+        cls,
+        session: AsyncSession,
+        filters: Sequence[Any],
+    ) -> AsyncGenerator["Message", None]:
         stmt = (
             select(Message)
             .where(*filters)

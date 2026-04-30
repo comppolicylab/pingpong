@@ -625,14 +625,15 @@ async def build_response_input_item_list(
         if user_assistant_messages_only
         else None
     )
-    async for message in models.Thread.list_all_messages_gen(
-        session,
-        thread_id,
-        roles=message_roles,
-        include_current_run_developer_messages_for_run_id=(
-            current_run_id if user_assistant_messages_only else None
-        ),
-    ):
+    if user_assistant_messages_only and current_run_id is not None:
+        messages = models.Thread.list_user_assistant_messages_with_run_developer_gen(
+            session, thread_id, current_run_id
+        )
+    else:
+        messages = models.Thread.list_all_messages_gen(
+            session, thread_id, roles=message_roles
+        )
+    async for message in messages:
         phase = get_response_message_phase_value(message.phase)
         content_list: list[ResponseInputMessageContentListParam] = []
         for content in message.content:
