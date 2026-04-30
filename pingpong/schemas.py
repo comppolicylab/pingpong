@@ -1611,7 +1611,7 @@ class NewThreadMessage(BaseModel):
     vision_image_descriptions: list[ImageProxy] = Field([])
     timezone: str | None = None
     generate_speech: bool | None = None
-    lecture_video_playback_position_ms: Any | None = None
+    lecture_video_playback_position_ms: int | None = None
 
     _file_check = model_validator(mode="after")(file_validator)
 

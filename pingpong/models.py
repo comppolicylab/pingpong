@@ -8160,10 +8160,25 @@ class Thread(Base):
         cls,
         session: AsyncSession,
         thread_id: int,
+        roles: Collection[schemas.MessageRole] | None = None,
+        include_current_run_developer_messages_for_run_id: int | None = None,
     ) -> AsyncGenerator["Message", None]:
+        filters = [Message.thread_id == thread_id]
+        if roles is not None:
+            role_filter = Message.role.in_(roles)
+            if include_current_run_developer_messages_for_run_id is not None:
+                role_filter = or_(
+                    role_filter,
+                    and_(
+                        Message.run_id
+                        == include_current_run_developer_messages_for_run_id,
+                        Message.role == schemas.MessageRole.DEVELOPER,
+                    ),
+                )
+            filters.append(role_filter)
         stmt = (
             select(Message)
-            .where(Message.thread_id == thread_id)
+            .where(*filters)
             .options(
                 selectinload(Message.content).selectinload(MessagePart.annotations),
                 selectinload(Message.file_search_attachments),

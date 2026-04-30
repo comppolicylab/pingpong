@@ -491,6 +491,54 @@ def test_build_context_text_v4_selects_floor_summary_and_moment_context():
     assert "Relevant Video Descriptions" not in context_text
 
 
+def test_build_context_text_v4_uses_live_playback_position_for_summary():
+    thread = SimpleNamespace(lecture_video=SimpleNamespace(questions=[]))
+    state = SimpleNamespace(
+        last_known_offset_ms=500,
+        furthest_offset_ms=500,
+        last_chat_context_end_ms=0,
+        current_question=None,
+        current_question_id=None,
+        state=SimpleNamespace(value="active"),
+    )
+
+    context_text, current_offset_ms = _build_context_text_v4_from_parts(
+        thread,
+        state,
+        summary_checkpoints=[
+            schemas.LectureVideoManifestSummaryCheckpointV4(
+                end_offset_ms=500,
+                summary="Summary through persisted progress.",
+            ),
+            schemas.LectureVideoManifestSummaryCheckpointV4(
+                end_offset_ms=1000,
+                summary="Summary through live playback.",
+            ),
+            schemas.LectureVideoManifestSummaryCheckpointV4(
+                end_offset_ms=1500,
+                summary="Summary past playback.",
+            ),
+        ],
+        moment_contexts=[
+            schemas.LectureVideoManifestMomentContextV4(
+                center_offset_ms=1000,
+                start_offset_ms=500,
+                end_offset_ms=1500,
+                before="Before live playback.",
+                at="At live playback.",
+                after="After live playback.",
+            )
+        ],
+        lecture_video_playback_position_ms=1000,
+        answered_knowledge_checks=None,
+    )
+
+    assert current_offset_ms == 1000
+    assert "Summary through live playback." in context_text
+    assert "Summary through persisted progress." not in context_text
+    assert "Summary past playback." not in context_text
+
+
 def test_build_context_text_v4_omits_unavailable_floor_context_sections():
     thread = SimpleNamespace(lecture_video=SimpleNamespace(questions=[]))
     state = SimpleNamespace(

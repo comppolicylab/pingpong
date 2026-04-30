@@ -12,7 +12,6 @@
 		visionFileImageDescriptions: ImageProxy[];
 		optimisticVisionFiles: OptimisticVisionFile[];
 		message: string;
-		lecture_video_playback_position_ms?: number;
 		callback: ({ success, errorMessage, message_sent }: CallbackParams) => void;
 	};
 

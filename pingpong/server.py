@@ -8101,8 +8101,8 @@ async def send_message(
                 response_safety_identifier=request.state["response_safety_identifier"],
                 tts_voice_id=tts_voice_id,
                 tts_api_key=tts_api_key,
-                filter_prior_hidden_messages=(
-                    lecture_chat_prep.filter_prior_hidden_messages
+                user_assistant_messages_only=(
+                    lecture_chat_prep.user_assistant_messages_only
                     if lecture_chat_prep is not None
                     else False
                 ),

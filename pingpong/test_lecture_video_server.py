@@ -1098,50 +1098,6 @@ async def test_send_message_requires_playback_position_for_v4_lecture_chat(
         ("user:123", "can_view", "assistant:1"),
     ]
 )
-async def test_send_message_rejects_invalid_v4_playback_position_with_400(
-    api, config, db, institution, valid_user_token
-):
-    async with db.async_session() as session:
-        class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
-            session,
-            institution,
-            manifest=lecture_video_manifest_v4(),
-        )
-
-    create_response = api.post(
-        f"/api/v1/class/{class_.id}/thread/lecture",
-        json={"assistant_id": 1, "parties": [123]},
-        headers={"Authorization": f"Bearer {valid_user_token}"},
-    )
-    assert create_response.status_code == 200
-    thread_id = create_response.json()["thread"]["id"]
-    await grant_thread_permissions(config, thread_id, 123)
-
-    response = api.post(
-        f"/api/v1/class/{class_.id}/thread/{thread_id}",
-        json={
-            "message": "What is happening here?",
-            "lecture_video_playback_position_ms": "500",
-        },
-        headers={"Authorization": f"Bearer {valid_user_token}"},
-    )
-
-    assert response.status_code == 400
-    assert (
-        "lecture_video_playback_position_ms must be an integer"
-        in response.json()["detail"]
-    )
-
-
-@with_user(123)
-@with_institution(11, "Test Institution")
-@with_authz(
-    grants=[
-        ("user:123", "can_create_thread", "class:1"),
-        ("user:123", "student", "class:1"),
-        ("user:123", "can_view", "assistant:1"),
-    ]
-)
 async def test_list_thread_messages_hides_lecture_chat_context_messages(
     api, config, db, institution, monkeypatch, valid_user_token
 ):

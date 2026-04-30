@@ -419,7 +419,7 @@ async def test_build_response_input_item_list_replays_developer_and_system_messa
 
 
 @pytest.mark.asyncio
-async def test_build_response_input_item_list_can_filter_prior_hidden_messages(
+async def test_build_response_input_item_list_can_build_user_assistant_messages_only(
     db,
 ):
     async with db.async_session() as session:
@@ -513,11 +513,13 @@ async def test_build_response_input_item_list_can_filter_prior_hidden_messages(
             session,
             thread_id=thread_id,
             current_run_id=current_run_id,
-            filter_prior_hidden_messages=True,
+            user_assistant_messages_only=True,
         )
 
-    assert [item["role"] for item in items] == ["developer", "user"]
+    assert [item["role"] for item in items] == ["developer", "user", "user"]
     assert items[0]["content"][0]["text"] == "Current lecture context"
+    assert items[1]["content"][0]["type"] == "input_image"
+    assert items[2]["content"][0]["text"] == "What is happening here?"
 
 
 def test_get_known_response_message_phase_returns_known_phase_only():

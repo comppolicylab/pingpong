@@ -39,14 +39,14 @@ class LectureChatContextBuildResult:
     text_message_parts: list[models.MessagePart]
     frame_message_parts: list[models.MessagePart]
     current_offset_ms: int
-    filter_prior_hidden_messages: bool = False
+    user_assistant_messages_only: bool = False
 
 
 @dataclass
 class LectureChatTurnPreparation:
     prepended_messages: list[models.Message]
     user_output_index: int
-    filter_prior_hidden_messages: bool = False
+    user_assistant_messages_only: bool = False
 
 
 def _apply_lecture_video_chat_metadata(thread: models.Thread) -> None:
@@ -543,7 +543,7 @@ def _build_context_text_v4_from_parts(
     answered_knowledge_checks: str | None,
 ) -> tuple[str, int]:
     playback_position_ms = max(0, lecture_video_playback_position_ms)
-    furthest_offset_ms = max(state.furthest_offset_ms, 0)
+    furthest_offset_ms = max(state.furthest_offset_ms, playback_position_ms, 0)
     summary_checkpoint = _select_summary_checkpoint(
         summary_checkpoints,
         furthest_offset_ms,
@@ -594,19 +594,12 @@ def _build_context_text_v4_from_parts(
 async def _validate_v4_playback_position(
     session: AsyncSession,
     state: models.LectureVideoThreadState,
-    lecture_video_playback_position_ms: Any | None,
+    lecture_video_playback_position_ms: int | None,
 ) -> int:
     if lecture_video_playback_position_ms is None:
         raise HTTPException(
             status_code=400,
             detail="lecture_video_playback_position_ms is required for this lecture video.",
-        )
-    if not isinstance(lecture_video_playback_position_ms, int) or isinstance(
-        lecture_video_playback_position_ms, bool
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail="lecture_video_playback_position_ms must be an integer.",
         )
     if lecture_video_playback_position_ms < 0:
         raise HTTPException(
@@ -807,7 +800,7 @@ async def build_lecture_chat_context_message_parts(
     anonymous_user_auth: str | None,
     anonymous_session_id: int | None,
     anonymous_link_id: int | None,
-    lecture_video_playback_position_ms: Any | None = None,
+    lecture_video_playback_position_ms: int | None = None,
 ) -> LectureChatContextBuildResult:
     lecture_video = thread.lecture_video
     state = thread.lecture_video_state
@@ -856,8 +849,8 @@ async def build_lecture_chat_context_message_parts(
         context_text, current_offset_ms = _build_context_text_v4_from_parts(
             thread,
             state,
-            summary_checkpoints=chat_context.summary_checkpoints or [],
-            moment_contexts=chat_context.moment_contexts or [],
+            summary_checkpoints=chat_context.summary_checkpoints,
+            moment_contexts=chat_context.moment_contexts,
             lecture_video_playback_position_ms=playback_position_ms,
             answered_knowledge_checks=answered_knowledge_checks,
         )
@@ -870,7 +863,7 @@ async def build_lecture_chat_context_message_parts(
             text_message_parts=[text_part],
             frame_message_parts=[],
             current_offset_ms=current_offset_ms,
-            filter_prior_hidden_messages=True,
+            user_assistant_messages_only=True,
         )
 
     answered_knowledge_checks = await _build_answered_knowledge_checks_markdown(
@@ -917,7 +910,7 @@ async def prepare_lecture_chat_turn(
     thread: models.Thread,
     user_id: int,
     prev_output_sequence: int,
-    lecture_video_playback_position_ms: Any | None = None,
+    lecture_video_playback_position_ms: int | None = None,
 ) -> LectureChatTurnPreparation:
     lecture_thread = await models.Thread.get_by_id_for_class_with_lecture_video_context(
         request.state["db"], int(class_id), thread.id
@@ -990,5 +983,5 @@ async def prepare_lecture_chat_turn(
     return LectureChatTurnPreparation(
         prepended_messages=prepended_messages,
         user_output_index=next_output_index,
-        filter_prior_hidden_messages=context_result.filter_prior_hidden_messages,
+        user_assistant_messages_only=context_result.user_assistant_messages_only,
     )

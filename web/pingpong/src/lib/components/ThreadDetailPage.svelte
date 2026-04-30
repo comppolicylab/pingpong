@@ -56,6 +56,7 @@
 		LinkOutline,
 		TerminalOutline
 	} from 'flowbite-svelte-icons';
+
 	import { parseTextContent } from '$lib/content';
 	import { ThreadManager, type Message } from '$lib/stores/thread';
 	import AttachmentDeletedPlaceholder from '$lib/components/AttachmentDeletedPlaceholder.svelte';
@@ -86,6 +87,10 @@
 	} from '$lib/components/lecture-video/LectureVideoView.svelte';
 	import { LECTURE_CHAT_TTS_VOLUME_SCALE } from '$lib/components/lecture-video/audio-levels';
 	import LectureVideoChatPanel from '$lib/components/lecture-video/LectureVideoChatPanel.svelte';
+
+	type ThreadPostMessage = ChatInputMessage & {
+		lecture_video_playback_position_ms?: number;
+	};
 
 	function formatLectureVideoTitle(filename: string | null | undefined): string | null {
 		if (!filename) return null;
@@ -686,7 +691,7 @@
 		optimisticVisionFiles,
 		lecture_video_playback_position_ms,
 		callback
-	}: ChatInputMessage) => {
+	}: ThreadPostMessage) => {
 		try {
 			await threadMgr.postMessage(
 				data.me.user!.id,

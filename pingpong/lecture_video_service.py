@@ -1,6 +1,7 @@
 import logging
 from pathlib import Path
 from dataclasses import dataclass
+from typing import Literal
 
 import humanize
 from fastapi import HTTPException, UploadFile
@@ -31,14 +32,29 @@ _V3_TRANSCRIPT_ADAPTER = TypeAdapter(list[schemas.LectureVideoManifestWordV3])
 
 
 @dataclass(frozen=True)
-class LectureVideoChatContext:
-    version: int
+class LectureVideoChatContextV2:
+    version: Literal[2]
+    word_level_transcription: list[schemas.LectureVideoManifestWordV3]
+
+
+@dataclass(frozen=True)
+class LectureVideoChatContextV3:
+    version: Literal[3]
     word_level_transcription: list[schemas.LectureVideoManifestWordV3]
     video_descriptions: list[schemas.LectureVideoManifestVideoDescriptionV3]
-    summary_checkpoints: (
-        list[schemas.LectureVideoManifestSummaryCheckpointV4] | None
-    ) = None
-    moment_contexts: list[schemas.LectureVideoManifestMomentContextV4] | None = None
+
+
+@dataclass(frozen=True)
+class LectureVideoChatContextV4:
+    version: Literal[4]
+    word_level_transcription: list[schemas.LectureVideoManifestWordV3]
+    summary_checkpoints: list[schemas.LectureVideoManifestSummaryCheckpointV4]
+    moment_contexts: list[schemas.LectureVideoManifestMomentContextV4]
+
+
+LectureVideoChatContext = (
+    LectureVideoChatContextV2 | LectureVideoChatContextV3 | LectureVideoChatContextV4
+)
 
 
 def get_upload_size(upload: UploadFile) -> int:
@@ -297,15 +313,15 @@ def lecture_video_manifest_from_model(
         return base_manifest
 
     manifest_context = _hydrate_stored_manifest_context(lecture_video)
-    if manifest_context is None or manifest_context.version == 1:
+    if manifest_context is None:
         return base_manifest
 
     if manifest_context.version == 4:
         return schemas.LectureVideoManifestV4(
             questions=base_manifest.questions,
             word_level_transcription=manifest_context.word_level_transcription,
-            summary_checkpoints=manifest_context.summary_checkpoints or [],
-            moment_contexts=manifest_context.moment_contexts or [],
+            summary_checkpoints=manifest_context.summary_checkpoints,
+            moment_contexts=manifest_context.moment_contexts,
         )
 
     if manifest_context.version == 3:
@@ -448,10 +464,9 @@ def _hydrate_stored_manifest_context(
         if version == 1:
             return None
         if version == 2 and transcript is not None:
-            return LectureVideoChatContext(
+            return LectureVideoChatContextV2(
                 version=2,
                 word_level_transcription=transcript,
-                video_descriptions=[],
             )
         if version == 3 and transcript is not None:
             video_descriptions = [
@@ -460,7 +475,7 @@ def _hydrate_stored_manifest_context(
                 )
                 for description in manifest_data.get("video_descriptions") or []
             ]
-            return LectureVideoChatContext(
+            return LectureVideoChatContextV3(
                 version=3,
                 word_level_transcription=transcript,
                 video_descriptions=video_descriptions,
@@ -476,10 +491,9 @@ def _hydrate_stored_manifest_context(
                 schemas.LectureVideoManifestMomentContextV4.model_validate(moment)
                 for moment in manifest_data.get("moment_contexts") or []
             ]
-            return LectureVideoChatContext(
+            return LectureVideoChatContextV4(
                 version=4,
                 word_level_transcription=transcript,
-                video_descriptions=[],
                 summary_checkpoints=summary_checkpoints,
                 moment_contexts=moment_contexts,
             )
@@ -491,23 +505,21 @@ def _hydrate_stored_manifest_context(
     if legacy_transcript is None:
         return None
     if isinstance(manifest, schemas.LectureVideoManifestV3):
-        return LectureVideoChatContext(
+        return LectureVideoChatContextV3(
             version=3,
             word_level_transcription=legacy_transcript,
             video_descriptions=manifest.video_descriptions,
         )
     if isinstance(manifest, schemas.LectureVideoManifestV4):
-        return LectureVideoChatContext(
+        return LectureVideoChatContextV4(
             version=4,
             word_level_transcription=legacy_transcript,
-            video_descriptions=[],
             summary_checkpoints=manifest.summary_checkpoints,
             moment_contexts=manifest.moment_contexts,
         )
-    return LectureVideoChatContext(
+    return LectureVideoChatContextV2(
         version=2,
         word_level_transcription=legacy_transcript,
-        video_descriptions=[],
     )
 
 
