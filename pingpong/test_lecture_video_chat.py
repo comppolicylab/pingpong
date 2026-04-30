@@ -2,6 +2,7 @@ import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+from fastapi import HTTPException
 import pytest
 
 import pingpong.models as models
@@ -349,6 +350,49 @@ def test_validate_lecture_video_manifest_keeps_explicit_v3_authoritative():
 
     with pytest.raises(ValueError, match="video_descriptions"):
         schemas.validate_lecture_video_manifest(payload)
+
+
+@pytest.mark.asyncio
+async def test_build_lecture_chat_context_message_parts_returns_409_for_invalid_v4_context():
+    manifest_data = _build_manifest_v4_dict()
+    lecture_video = SimpleNamespace(
+        id=123,
+        manifest_data={
+            "version": 4,
+            "summary_checkpoints": [],
+            "moment_contexts": manifest_data["moment_contexts"],
+        },
+        transcript_data={
+            "word_level_transcription": manifest_data["word_level_transcription"],
+        },
+    )
+    thread = SimpleNamespace(
+        id=456,
+        lecture_video=lecture_video,
+        lecture_video_state=SimpleNamespace(),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await build_lecture_chat_context_message_parts(
+            SimpleNamespace(),
+            SimpleNamespace(),
+            SimpleNamespace(),
+            thread=thread,
+            class_id=1,
+            uploader_id=1,
+            user_auth=None,
+            anonymous_link_auth=None,
+            anonymous_user_auth=None,
+            anonymous_session_id=None,
+            anonymous_link_id=None,
+            lecture_video_playback_position_ms=450,
+        )
+
+    assert exc_info.value.status_code == 409
+    assert (
+        exc_info.value.detail
+        == lecture_video_service.LECTURE_VIDEO_CHAT_UNAVAILABLE_NOTE
+    )
 
 
 def test_v2_manifest_words_to_v3_treats_start_end_as_seconds():

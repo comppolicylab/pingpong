@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException, UploadFile
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import pingpong.models as models
@@ -809,10 +810,22 @@ async def build_lecture_chat_context_message_parts(
             "Lecture video thread context must be loaded before building chat context."
         )
 
-    chat_context = lecture_video_chat_context_from_model(lecture_video)
+    try:
+        chat_context = lecture_video_chat_context_from_model(lecture_video)
+    except (ValidationError, ValueError) as exc:
+        logger.warning(
+            "Stored lecture video chat manifest is invalid. lecture_video_id=%s",
+            lecture_video.id,
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=LECTURE_VIDEO_CHAT_UNAVAILABLE_NOTE,
+        ) from exc
     if chat_context is None:
-        raise ValueError(
-            "Lecture chat requires a version 2, 3, or 4 lecture video manifest."
+        raise HTTPException(
+            status_code=409,
+            detail=LECTURE_VIDEO_CHAT_UNAVAILABLE_NOTE,
         )
 
     if chat_context.version == 3:
