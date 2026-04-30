@@ -377,7 +377,7 @@
 	});
 
 	$effect(() => {
-		if (sessionState !== 'completed' || !leaseInterval) return;
+		if (sessionState !== 'completed' || !leaseInterval || canParticipate) return;
 
 		clearInterval(leaseInterval);
 		leaseInterval = null;
