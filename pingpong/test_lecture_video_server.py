@@ -928,6 +928,109 @@ async def test_send_message_creates_lecture_chat_run_with_hidden_context(
         ("user:123", "can_view", "assistant:1"),
     ]
 )
+async def test_send_message_allows_lecture_chat_while_awaiting_answer(
+    api, config, db, institution, monkeypatch, valid_user_token
+):
+    async with db.async_session() as session:
+        class_, lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+            manifest=lecture_video_manifest_v3(),
+        )
+        question = await session.scalar(
+            select(models.LectureVideoQuestion)
+            .where(models.LectureVideoQuestion.lecture_video_id == lecture_video.id)
+            .order_by(models.LectureVideoQuestion.position)
+            .limit(1)
+        )
+        assert question is not None
+
+    create_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/lecture",
+        json={"assistant_id": 1, "parties": [123]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+    thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
+
+    acquire = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert acquire.status_code == 200
+    controller_session_id = acquire.json()["controller_session_id"]
+    state_version = acquire.json()["lecture_video_session"]["state_version"]
+
+    present_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "question_presented",
+            "controller_session_id": controller_session_id,
+            "expected_state_version": state_version,
+            "idempotency_key": "question-presented-before-chat",
+            "question_id": question.id,
+            "offset_ms": question.stop_offset_ms,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert present_response.status_code == 200
+    assert (
+        present_response.json()["lecture_video_session"]["state"] == "awaiting_answer"
+    )
+
+    monkeypatch.setattr(server_module, "run_response", fake_visible_reply_run_response)
+
+    response = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}",
+        json={"message": "Can you explain what this question is asking?"},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+
+    async with db.async_session() as session:
+        run = await session.scalar(
+            select(models.Run)
+            .where(models.Run.thread_id == thread_id)
+            .options(
+                selectinload(models.Run.messages).selectinload(models.Message.content)
+            )
+            .order_by(models.Run.id.desc())
+            .limit(1)
+        )
+        assert run is not None
+
+    ordered_messages = sorted(run.messages, key=lambda item: item.output_index)
+    assert [message.role for message in ordered_messages] == [
+        schemas.MessageRole.DEVELOPER,
+        schemas.MessageRole.USER,
+        schemas.MessageRole.ASSISTANT,
+    ]
+    assert [message.is_hidden for message in ordered_messages] == [True, False, False]
+
+    hidden_context_text = ordered_messages[0].content[0].text
+    assert hidden_context_text is not None
+    assert "Status: Answering Knowledge Check #1" in hidden_context_text
+    assert (
+        "### Current Knowledge Check\n\n"
+        "Knowledge Check #1: What is the right answer?\n\n"
+        "Options:\n"
+        "- Option A (correct). Feedback: Correct answer\n"
+        "- Option B (incorrect). Feedback: Try again"
+    ) in hidden_context_text
+    assert "### Knowledge Checks Answered" not in hidden_context_text
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
+        ("user:123", "can_view", "assistant:1"),
+    ]
+)
 async def test_list_thread_messages_hides_lecture_chat_context_messages(
     api, config, db, institution, monkeypatch, valid_user_token
 ):
@@ -1944,6 +2047,17 @@ async def test_lecture_video_interactions_reject_post_completion_playback_events
     assert ended_response.status_code == 200
     completed_session = ended_response.json()["lecture_video_session"]
     assert completed_session["state"] == "completed"
+
+    completed_chat = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}",
+        json={"message": "Can I still ask about this lesson?"},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert completed_chat.status_code == 409
+    assert (
+        completed_chat.json()["detail"]
+        == "Lecture chat is unavailable after the lecture is completed."
+    )
 
     invalid_pause = api.post(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
