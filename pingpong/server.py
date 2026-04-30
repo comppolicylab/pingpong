@@ -11254,23 +11254,26 @@ async def update_assistant(
                 current_lecture_video is not None
                 and current_lecture_video.id == lecture_video.id
             )
-            manual_manifest_takeover_only = (
-                overwrite_lecture_video_manifest
-                and overwrite_manifest_changed
-                and same_lecture_video
-                and not manifest_changed
-                and not needs_manifest_generation
-                and not regenerate_requested
-                and not voice_changed
+            lecture_video_selection_changed = (
+                current_lecture_video is None
+                or current_lecture_video.id != lecture_video.id
             )
-            should_touch_lecture_video = (
+            lecture_video_content_changed = (
                 manifest_changed
                 or needs_manifest_generation
                 or regenerate_requested
                 or voice_changed
-                or (overwrite_manifest_changed and not manual_manifest_takeover_only)
-                or (current_lecture_video is None)
-                or current_lecture_video.id != lecture_video.id
+            )
+            manual_manifest_takeover_only = (
+                overwrite_lecture_video_manifest
+                and overwrite_manifest_changed
+                and same_lecture_video
+                and not lecture_video_content_changed
+            )
+            should_touch_lecture_video = (
+                lecture_video_content_changed
+                or overwrite_manifest_changed
+                or lecture_video_selection_changed
             )
 
             if manual_manifest_takeover_only:
@@ -11280,9 +11283,17 @@ async def update_assistant(
                     schemas.LectureVideoProcessingCancelReason.MANUAL_MANIFEST_REPLACED,
                 )
                 lecture_video.manual_manifest = True
-                request.state["db"].add(lecture_video)
-
-            if should_touch_lecture_video:
+                if prompt_present:
+                    lecture_video.generation_prompt = lecture_video_generation_prompt
+                if video_description_duration_ms_present:
+                    if lecture_video_video_description_duration_ms is None:
+                        raise HTTPException(
+                            400, "Lecture video description duration is required."
+                        )
+                    lecture_video.video_description_duration_ms = (
+                        lecture_video_video_description_duration_ms
+                    )
+            elif should_touch_lecture_video:
                 if needs_manifest_generation and current_lecture_video is not None:
                     await lecture_video_processing.cancel_manifest_generation_processing_runs(
                         request.state["db"],
