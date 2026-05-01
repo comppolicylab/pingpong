@@ -74,6 +74,7 @@
 	const dispatch = createEventDispatcher<{
 		sessionchange: LectureVideoSession;
 		playbackresumed: void;
+		narrationplaybackstarted: void;
 		lessonupdated: void;
 	}>();
 
@@ -1519,6 +1520,7 @@
 		onChatAbort: () => void = onComplete
 	) {
 		stopNarrationPlayback();
+		dispatch('narrationplaybackstarted');
 		const playbackGeneration = narrationPlaybackGeneration;
 		pendingNarrationCompletion = onComplete;
 		pendingNarrationChatAbort = onChatAbort;

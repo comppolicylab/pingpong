@@ -738,6 +738,10 @@
 		threadMgr.interruptTts().catch(() => {});
 	};
 
+	const handleLectureNarrationPlaybackStarted = () => {
+		threadMgr.interruptTts().catch(() => {});
+	};
+
 	const handleLectureChatContinueWatching = async () => {
 		return (await lectureVideoViewRef?.continueWatchingAfterChat()) ?? false;
 	};
@@ -1561,6 +1565,7 @@
 					chatAvailable={threadLectureChatAvailable}
 					on:sessionchange={handleLectureSessionChange}
 					on:playbackresumed={handleLecturePlaybackResumed}
+					on:narrationplaybackstarted={handleLectureNarrationPlaybackStarted}
 					on:lessonupdated={handleLectureVideoLessonUpdated}
 				>
 					{#snippet chat(lectureVideoAtEnd = false)}
