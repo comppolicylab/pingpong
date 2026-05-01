@@ -30,6 +30,11 @@ LOOKAHEAD_WINDOW_MS = 30_000
 FRAME_LOOKBACK_MS = 1_000
 TRANSCRIPT_CONTEXT_WINDOW_MS = 120_000
 
+# Sentinel output_index that places the per-turn lecture context developer
+# message before any conversation history when the run input is sorted by
+# output_index.
+LECTURE_CONTEXT_OUTPUT_INDEX = -1
+
 
 class LectureVideoFrameContextError(Exception):
     """Raised for expected failures while assembling lecture video frame context."""
@@ -45,6 +50,7 @@ class LectureChatContextBuildResult:
 
 @dataclass
 class LectureChatTurnPreparation:
+    developer_context_message: models.Message
     prepended_messages: list[models.Message]
     user_output_index: int
     user_assistant_messages_only: bool = False
@@ -986,18 +992,17 @@ async def prepare_lecture_chat_turn(
     lecture_state.last_chat_context_end_ms = context_result.current_offset_ms
     request.state["db"].add(lecture_state)
 
-    prepended_messages = [
-        models.Message(
-            thread_id=lecture_thread.id,
-            output_index=prev_output_sequence + 1,
-            message_status=schemas.MessageStatus.COMPLETED,
-            role=schemas.MessageRole.DEVELOPER,
-            is_hidden=True,
-            content=context_result.text_message_parts,
-        )
-    ]
+    developer_context_message = models.Message(
+        thread_id=lecture_thread.id,
+        output_index=LECTURE_CONTEXT_OUTPUT_INDEX,
+        message_status=schemas.MessageStatus.COMPLETED,
+        role=schemas.MessageRole.DEVELOPER,
+        is_hidden=True,
+        content=context_result.text_message_parts,
+    )
 
-    next_output_index = prev_output_sequence + 2
+    prepended_messages: list[models.Message] = []
+    next_output_index = prev_output_sequence + 1
     if context_result.frame_message_parts:
         prepended_messages.append(
             models.Message(
@@ -1012,6 +1017,7 @@ async def prepare_lecture_chat_turn(
         next_output_index += 1
 
     return LectureChatTurnPreparation(
+        developer_context_message=developer_context_message,
         prepended_messages=prepended_messages,
         user_output_index=next_output_index,
         user_assistant_messages_only=context_result.user_assistant_messages_only,
