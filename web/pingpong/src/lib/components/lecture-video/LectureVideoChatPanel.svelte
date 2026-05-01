@@ -27,7 +27,7 @@
 	import WebSearchCallItem from '$lib/components/WebSearchCallItem.svelte';
 	import { scroll } from '$lib/actions/scroll';
 	import type { Message } from '$lib/stores/thread';
-	import { SvelteSet } from 'svelte/reactivity';
+	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
 	let {
 		classId,
@@ -96,6 +96,7 @@
 	let messagesContainer: HTMLDivElement | null = null;
 	let chatInputRef: ChatInputHandle | null = $state(null);
 	const dismissedContinuePromptMessageIds = new SvelteSet<string>();
+	const continuePromptDecisionByMessageId = new SvelteMap<string, boolean>();
 
 	type MCPContent = api.MCPServerCallItem | api.MCPListToolsCallItem;
 	type ContentBlock =
@@ -275,15 +276,37 @@
 		return latestMessage.id;
 	});
 
-	const shouldShowContinueWatchingPrompt = (message: Message) =>
-		showInput &&
-		showContinueWatchingPrompt &&
-		!waiting &&
-		!submitting &&
-		!!oncontinuewatching &&
+	const isLatestStreamedAssistantResponse = (message: Message) =>
 		message.streamedInSession === true &&
 		message.data.id === latestMessageId &&
-		message.data.id === latestAssistantMessageId &&
+		message.data.id === latestAssistantMessageId;
+
+	const isContinuePromptDecisionReady = (message: Message) =>
+		isLatestStreamedAssistantResponse(message) && !waiting && !submitting;
+
+	const shouldLatchContinuePromptVisible = (message: Message) =>
+		showInput &&
+		showContinueWatchingPrompt &&
+		!!oncontinuewatching &&
+		isContinuePromptDecisionReady(message);
+
+	$effect(() => {
+		const latestMessage = messages.at(-1);
+		if (!latestMessage || !isContinuePromptDecisionReady(latestMessage)) {
+			return;
+		}
+		if (continuePromptDecisionByMessageId.has(latestMessage.data.id)) {
+			return;
+		}
+		continuePromptDecisionByMessageId.set(
+			latestMessage.data.id,
+			shouldLatchContinuePromptVisible(latestMessage)
+		);
+	});
+
+	const shouldShowContinueWatchingPrompt = (message: Message) =>
+		isLatestStreamedAssistantResponse(message) &&
+		continuePromptDecisionByMessageId.get(message.data.id) === true &&
 		!dismissedContinuePromptMessageIds.has(message.data.id);
 
 	let continueWatchingPromptScrollKey = $derived.by(() => {
