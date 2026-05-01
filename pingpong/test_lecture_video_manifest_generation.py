@@ -296,6 +296,22 @@ def _quiz_with_context(
 ) -> manifest_generation.GeneratedQuizWithVideoContext:
     return manifest_generation.GeneratedQuizWithVideoContext(
         video_summary="A short algebra lesson.",
+        summary_checkpoints=[
+            manifest_generation.GeneratedSummaryCheckpoint(
+                end_offset_ms=30000,
+                summary="The teacher introduces the expression.",
+            )
+        ],
+        moment_contexts=[
+            manifest_generation.GeneratedMomentContext(
+                center_offset_ms=0,
+                start_offset_ms=0,
+                end_offset_ms=30000,
+                before="The lesson is starting.",
+                at="The teacher writes an expression on the board.",
+                after="The teacher prepares the next step.",
+            )
+        ],
         questions=questions or [_generated_question()],
     )
 
@@ -355,11 +371,27 @@ def test_quiz_to_manifest_converts_generated_v4_context_arrays() -> None:
     assert not hasattr(manifest, "video_descriptions")
 
 
-def test_quiz_to_manifest_falls_back_for_missing_v4_context_arrays(
+def test_quiz_to_manifest_falls_back_for_missing_required_context_offsets(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     quiz = manifest_generation.GeneratedQuizWithVideoContext(
         video_summary="A short algebra lesson.",
+        summary_checkpoints=[
+            manifest_generation.GeneratedSummaryCheckpoint(
+                end_offset_ms=10000,
+                summary="The teacher has reached ten seconds.",
+            )
+        ],
+        moment_contexts=[
+            manifest_generation.GeneratedMomentContext(
+                center_offset_ms=10000,
+                start_offset_ms=0,
+                end_offset_ms=20000,
+                before="Before ten seconds.",
+                at="At ten seconds.",
+                after="After ten seconds.",
+            )
+        ],
         questions=[_generated_question()],
     )
 
@@ -469,7 +501,6 @@ def test_quiz_to_manifest_normalizes_v4_context_arrays_to_description_cadence() 
 def test_build_generation_prompt_uses_custom_video_description_window() -> None:
     prompt = manifest_generation.build_generation_prompt(
         "Ask one question.",
-        _transcript(),
         video_duration_ms=20000,
         video_description_window_ms=10000,
     )
@@ -490,7 +521,6 @@ def test_build_generation_prompt_warns_against_clip_relative_offsets_for_chunks(
 ):
     prompt = manifest_generation.build_generation_prompt(
         "Ask one question.",
-        _transcript(),
         video_duration_ms=30000,
         generation_start_ms=10000,
         generation_end_ms=20000,
@@ -519,28 +549,23 @@ def test_build_generation_prompt_warns_against_clip_relative_offsets_for_chunks(
 def test_build_generation_prompt_extends_prior_chunk_summary() -> None:
     prompt = manifest_generation.build_generation_prompt(
         "Ask one question.",
-        _transcript(),
         video_duration_ms=60000,
         generation_start_ms=30000,
         generation_end_ms=60000,
         context_start_ms=0,
         context_end_ms=60000,
-        previous_summary_checkpoint=schemas.LectureVideoManifestSummaryCheckpointV4(
-            end_offset_ms=30000,
-            summary="The teacher introduces the expression and combines like terms.",
-        ),
+        has_previous_summary_checkpoint=True,
     )
 
     assert "PRIOR CUMULATIVE SUMMARY:" in prompt
-    assert "summarized the lecture through 30000ms" in prompt
     assert "start from the supplied prior cumulative summary" in prompt
-    assert "Use this as the only source for lecture content before 30000ms" in prompt
+    assert "Use it as the only source for lecture content before" in prompt
+    assert "The teacher introduces the expression" not in prompt
 
 
 def test_build_generation_prompt_uses_half_window_moment_context_bounds() -> None:
     prompt = manifest_generation.build_generation_prompt(
         "Ask one question.",
-        _transcript(),
         video_duration_ms=20000,
         video_description_window_ms=5000,
     )
@@ -551,6 +576,28 @@ def test_build_generation_prompt_uses_half_window_moment_context_bounds() -> Non
     ) in prompt
     assert "REQUIRED summary_checkpoints end_offset_ms values" not in prompt
     assert "REQUIRED moment_contexts center/start/end triples" not in prompt
+
+
+def test_generation_source_material_parts_include_transcript_and_prior_summary() -> None:
+    parts = manifest_generation._generation_source_material_parts(
+        transcript=_transcript(),
+        compact=False,
+        previous_summary_checkpoint=schemas.LectureVideoManifestSummaryCheckpointV4(
+            end_offset_ms=30000,
+            summary="The teacher introduces the expression and combines like terms.",
+        ),
+    )
+
+    assert len(parts) == 1
+    assert parts[0].text is not None
+    assert "PRIOR CUMULATIVE SUMMARY SOURCE DATA:" in parts[0].text
+    assert "summary_through_offset_ms: 30000" in parts[0].text
+    assert (
+        "The teacher introduces the expression and combines like terms."
+        in parts[0].text
+    )
+    assert "WORD-LEVEL TRANSCRIPT SOURCE DATA:" in parts[0].text
+    assert '"word": "expression"' in parts[0].text
 
 
 def test_plan_manifest_generation_chunks_rebalances_short_tail() -> None:
@@ -1547,6 +1594,10 @@ async def test_generate_manifest_uses_uploaded_file_uri_without_refetch(
         == "https://generativelanguage.googleapis.com/v1beta/files/abc"
     )
     assert file_data.mime_type == "video/mp4"
+    source_part = captured_contents[1]
+    assert source_part.text is not None
+    assert "WORD-LEVEL TRANSCRIPT SOURCE DATA:" in source_part.text
+    assert '"word": "expression"' in source_part.text
 
 
 async def test_upload_and_generate_whole_manifest_deletes_gemini_upload_on_failure(
