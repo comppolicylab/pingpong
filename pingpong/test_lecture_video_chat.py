@@ -614,6 +614,117 @@ def test_build_context_text_v4_uses_live_playback_position_for_summary():
     assert "Summary past playback." not in context_text
 
 
+def test_build_context_text_v4_includes_upcoming_knowledge_check_when_no_current_question():
+    upcoming_question = SimpleNamespace(
+        id=10,
+        position=0,
+        question_type=schemas.LectureVideoQuestionType.SINGLE_SELECT,
+        question_text="What comes next?",
+        intro_text="",
+        options=[
+            SimpleNamespace(
+                id=101,
+                position=0,
+                option_text="A proof",
+                post_answer_text="Correct.",
+                continue_offset_ms=10_500,
+            ),
+            SimpleNamespace(
+                id=102,
+                position=1,
+                option_text="A joke",
+                post_answer_text="Incorrect.",
+                continue_offset_ms=10_500,
+            ),
+        ],
+        correct_option=SimpleNamespace(id=101),
+        stop_offset_ms=10_000,
+    )
+    thread = SimpleNamespace(lecture_video=SimpleNamespace(questions=[upcoming_question]))
+    state = SimpleNamespace(
+        last_known_offset_ms=500,
+        furthest_offset_ms=500,
+        last_chat_context_end_ms=0,
+        current_question=None,
+        current_question_id=None,
+        state=schemas.LectureVideoSessionState.PLAYING,
+    )
+
+    context_text, _current_offset_ms = _build_context_text_v4_from_parts(
+        thread,
+        state,
+        summary_checkpoints=[],
+        moment_contexts=[],
+        lecture_video_playback_position_ms=500,
+        answered_knowledge_checks=None,
+    )
+
+    assert "### Current Knowledge Check" not in context_text
+    assert (
+        "### Upcoming Knowledge Check\n\n"
+        "At 10000ms, the learner will be asked:\n\n"
+        "Knowledge Check #1: What comes next?\n\n"
+        "Options:\n"
+        "- A proof (correct). Feedback: Correct.\n"
+        "- A joke (incorrect). Feedback: Incorrect."
+    ) in context_text
+
+
+def test_build_context_text_v4_omits_upcoming_knowledge_check_when_current_question_is_active():
+    option_a = SimpleNamespace(
+        id=101,
+        position=0,
+        option_text="Latency",
+        post_answer_text="Correct.",
+        continue_offset_ms=10_500,
+    )
+    current_question = SimpleNamespace(
+        id=10,
+        position=0,
+        question_type=schemas.LectureVideoQuestionType.SINGLE_SELECT,
+        question_text="What matters here?",
+        intro_text="",
+        options=[option_a],
+        correct_option=option_a,
+        stop_offset_ms=5_000,
+    )
+    upcoming_question = SimpleNamespace(
+        id=11,
+        position=1,
+        question_type=schemas.LectureVideoQuestionType.SINGLE_SELECT,
+        question_text="What comes next?",
+        intro_text="",
+        options=[option_a],
+        correct_option=option_a,
+        stop_offset_ms=10_000,
+    )
+    thread = SimpleNamespace(
+        lecture_video=SimpleNamespace(questions=[current_question, upcoming_question])
+    )
+    state = SimpleNamespace(
+        last_known_offset_ms=5_000,
+        furthest_offset_ms=5_000,
+        last_chat_context_end_ms=0,
+        current_question=current_question,
+        current_question_id=current_question.id,
+        state=schemas.LectureVideoSessionState.AWAITING_ANSWER,
+    )
+
+    context_text, _current_offset_ms = _build_context_text_v4_from_parts(
+        thread,
+        state,
+        summary_checkpoints=[],
+        moment_contexts=[],
+        lecture_video_playback_position_ms=5_000,
+        answered_knowledge_checks=None,
+    )
+
+    assert "### Current Knowledge Check" in context_text
+    assert "Knowledge Check #1: What matters here?" in context_text
+    assert "### Upcoming Knowledge Check" not in context_text
+    assert "Knowledge Check #2: What comes next?" not in context_text
+
+
 def test_build_context_text_v4_omits_unavailable_floor_context_sections():
     thread = SimpleNamespace(lecture_video=SimpleNamespace(questions=[]))
     state = SimpleNamespace(

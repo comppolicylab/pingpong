@@ -558,6 +558,17 @@ def _build_context_text_v4_from_parts(
         and current_question is not None
     ):
         current_knowledge_check = _format_knowledge_check_prompt(current_question)
+    upcoming_knowledge_check = None
+    if current_knowledge_check is None:
+        upcoming_question = _get_next_future_question(thread, playback_position_ms)
+        if upcoming_question is not None:
+            upcoming_knowledge_check = _format_knowledge_check_prompt(
+                upcoming_question,
+                prefix=(
+                    f"At {upcoming_question.stop_offset_ms}ms, "
+                    "the learner will be asked:"
+                ),
+            )
 
     lines = [
         "## Lecture Context",
@@ -585,6 +596,9 @@ def _build_context_text_v4_from_parts(
     )
     _append_lecture_context_section(
         lines, "Current Knowledge Check", current_knowledge_check
+    )
+    _append_lecture_context_section(
+        lines, "Upcoming Knowledge Check", upcoming_knowledge_check
     )
     _append_lecture_context_section(
         lines, "Knowledge Checks Answered", answered_knowledge_checks
