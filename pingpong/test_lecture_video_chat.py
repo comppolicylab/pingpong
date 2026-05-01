@@ -727,6 +727,69 @@ def test_build_context_text_v4_omits_upcoming_knowledge_check_when_current_quest
     assert "Knowledge Check #2: What comes next?" not in context_text
 
 
+def test_build_context_text_v4_uses_next_question_after_answer_despite_stale_playback_position():
+    option_a = SimpleNamespace(
+        id=101,
+        position=0,
+        option_text="Latency",
+        post_answer_text="Correct.",
+        continue_offset_ms=10_500,
+    )
+    option_b = SimpleNamespace(
+        id=102,
+        position=1,
+        option_text="Color",
+        post_answer_text="Incorrect.",
+        continue_offset_ms=10_500,
+    )
+    current_question = SimpleNamespace(
+        id=10,
+        position=0,
+        question_type=schemas.LectureVideoQuestionType.SINGLE_SELECT,
+        question_text="What matters here?",
+        intro_text="",
+        options=[option_a, option_b],
+        correct_option=option_a,
+        stop_offset_ms=5_000,
+    )
+    upcoming_question = SimpleNamespace(
+        id=11,
+        position=1,
+        question_type=schemas.LectureVideoQuestionType.SINGLE_SELECT,
+        question_text="What comes next?",
+        intro_text="",
+        options=[option_a, option_b],
+        correct_option=option_a,
+        stop_offset_ms=10_000,
+    )
+    thread = SimpleNamespace(
+        lecture_video=SimpleNamespace(questions=[current_question, upcoming_question])
+    )
+    state = SimpleNamespace(
+        last_known_offset_ms=5_000,
+        furthest_offset_ms=5_000,
+        last_chat_context_end_ms=0,
+        current_question=current_question,
+        current_question_id=current_question.id,
+        state=schemas.LectureVideoSessionState.AWAITING_POST_ANSWER_RESUME,
+    )
+
+    context_text, _current_offset_ms = _build_context_text_v4_from_parts(
+        thread,
+        state,
+        summary_checkpoints=[],
+        moment_contexts=[],
+        lecture_video_playback_position_ms=4_999,
+        answered_knowledge_checks=None,
+    )
+
+    assert "Status: Just answered Knowledge Check #1" in context_text
+    assert "### Current Knowledge Check" not in context_text
+    assert "### Upcoming Knowledge Check" in context_text
+    assert "Knowledge Check #1: What matters here?" not in context_text
+    assert "Knowledge Check #2: What comes next?" in context_text
+
+
 def test_build_context_text_v4_omits_unavailable_floor_context_sections():
     thread = SimpleNamespace(lecture_video=SimpleNamespace(questions=[]))
     state = SimpleNamespace(

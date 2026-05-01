@@ -336,6 +336,17 @@ def _format_knowledge_check_prompt(
     return "\n".join(parts)
 
 
+def _format_upcoming_knowledge_check(
+    question: models.LectureVideoQuestion | None,
+) -> str | None:
+    if question is None:
+        return None
+    return _format_knowledge_check_prompt(
+        question,
+        prefix=f"At {question.stop_offset_ms}ms, the learner will be asked:",
+    )
+
+
 def _format_knowledge_check_options(
     question: models.LectureVideoQuestion,
     *,
@@ -441,15 +452,9 @@ def _build_lecture_context_text(
     ):
         current_knowledge_check = _format_knowledge_check_prompt(current_question)
 
-    upcoming_knowledge_check = None
-    if context.upcoming_question is not None:
-        upcoming_knowledge_check = _format_knowledge_check_prompt(
-            context.upcoming_question,
-            prefix=(
-                f"At {context.upcoming_question.stop_offset_ms}ms, "
-                "the learner will be asked:"
-            ),
-        )
+    upcoming_knowledge_check = _format_upcoming_knowledge_check(
+        context.upcoming_question
+    )
 
     lines = [
         "## Lecture Context",
@@ -560,15 +565,14 @@ def _build_context_text_v4_from_parts(
         current_knowledge_check = _format_knowledge_check_prompt(current_question)
     upcoming_knowledge_check = None
     if current_knowledge_check is None:
-        upcoming_question = _get_next_future_question(thread, playback_position_ms)
-        if upcoming_question is not None:
-            upcoming_knowledge_check = _format_knowledge_check_prompt(
-                upcoming_question,
-                prefix=(
-                    f"At {upcoming_question.stop_offset_ms}ms, "
-                    "the learner will be asked:"
-                ),
-            )
+        if (
+            state.state == schemas.LectureVideoSessionState.AWAITING_POST_ANSWER_RESUME
+            and current_question is not None
+        ):
+            upcoming_question = _get_next_question(thread, current_question)
+        else:
+            upcoming_question = _get_next_future_question(thread, playback_position_ms)
+        upcoming_knowledge_check = _format_upcoming_knowledge_check(upcoming_question)
 
     lines = [
         "## Lecture Context",
