@@ -510,10 +510,41 @@ def test_build_generation_prompt_uses_custom_video_description_window() -> None:
         "moment_context centers follow this cadence."
     ) in prompt
     assert "exactly every 10 seconds" in prompt
+    assert (
+        "with a 10-second context cadence, center_offset_ms=20000 "
+        "must use start_offset_ms=15000 and end_offset_ms=25000"
+    ) in prompt
     assert "plus a final context centered on the final video/request end" in prompt
     assert "do not emit clip-relative offsets" not in prompt
     assert "REQUIRED summary_checkpoints end_offset_ms values" not in prompt
     assert "REQUIRED moment_contexts center/start/end triples" not in prompt
+    assert "FINAL VERIFICATION BEFORE OUTPUT:" in prompt
+    assert (
+        "Each summary must cover the whole lesson seen so far for that checkpoint"
+    ) in prompt
+    assert "QUALITY EXAMPLES:" in prompt
+    assert "Good summary_checkpoint:" in prompt
+    assert "Good moment_context:" in prompt
+    assert (
+        "Summaries are for cumulative conceptual memory. Moment contexts are "
+        "for narrow, timestamp-centered local state."
+    ) in prompt
+    assert "Do not use moment_contexts to preserve the full lesson narrative." in prompt
+    assert (
+        "Write moment contexts as concrete evidence from the transcript and video"
+        in prompt
+    )
+    assert (
+        'Do not use "after" to preview later lesson content beyond end_offset_ms.'
+        in prompt
+    )
+    assert "It should not summarize the whole lesson so far." in prompt
+    assert "Good teacher-posed question:" in prompt
+    assert "Good generated question:" in prompt
+    assert "generate the interactive question layer now" not in prompt
+    assert "prior cumulative summary" not in prompt
+    assert "```json" not in prompt
+    assert "FIELD DEFINITIONS:" not in prompt
 
 
 def test_build_generation_prompt_warns_against_clip_relative_offsets_for_chunks() -> (
@@ -578,7 +609,9 @@ def test_build_generation_prompt_uses_half_window_moment_context_bounds() -> Non
     assert "REQUIRED moment_contexts center/start/end triples" not in prompt
 
 
-def test_generation_source_material_parts_include_transcript_and_prior_summary() -> None:
+def test_generation_source_material_parts_include_transcript_and_prior_summary() -> (
+    None
+):
     parts = manifest_generation._generation_source_material_parts(
         transcript=_transcript(),
         compact=False,
@@ -588,7 +621,7 @@ def test_generation_source_material_parts_include_transcript_and_prior_summary()
         ),
     )
 
-    assert len(parts) == 1
+    assert len(parts) == 3
     assert parts[0].text is not None
     assert "PRIOR CUMULATIVE SUMMARY SOURCE DATA:" in parts[0].text
     assert "summary_through_offset_ms: 30000" in parts[0].text
@@ -596,8 +629,31 @@ def test_generation_source_material_parts_include_transcript_and_prior_summary()
         "The teacher introduces the expression and combines like terms."
         in parts[0].text
     )
+    assert "WORD-LEVEL TRANSCRIPT SOURCE DATA:" not in parts[0].text
+    assert parts[1].text is not None
+    assert "WORD-LEVEL TRANSCRIPT SOURCE DATA:" in parts[1].text
+    assert '"word": "expression"' in parts[1].text
+    assert "PRIOR CUMULATIVE SUMMARY SOURCE DATA:" not in parts[1].text
+    assert parts[2].text is not None
+    assert "prior cumulative summary source data" in parts[2].text
+    assert "generate the interactive question layer now" in parts[2].text
+    assert "return only the schema-valid JSON object" in parts[2].text
+
+
+def test_generation_source_material_parts_omit_prior_summary_part_when_absent() -> None:
+    parts = manifest_generation._generation_source_material_parts(
+        transcript=_transcript(),
+        compact=False,
+        previous_summary_checkpoint=None,
+    )
+
+    assert len(parts) == 2
+    assert parts[0].text is not None
     assert "WORD-LEVEL TRANSCRIPT SOURCE DATA:" in parts[0].text
-    assert '"word": "expression"' in parts[0].text
+    assert "PRIOR CUMULATIVE SUMMARY SOURCE DATA:" not in parts[0].text
+    assert parts[1].text is not None
+    assert "generate the interactive question layer now" in parts[1].text
+    assert "prior cumulative summary" not in parts[1].text
 
 
 def test_plan_manifest_generation_chunks_rebalances_short_tail() -> None:
