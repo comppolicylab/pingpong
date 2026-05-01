@@ -100,7 +100,9 @@ async def _extract_poster_to_path(
             stderr=asyncio.subprocess.PIPE,
         )
     except FileNotFoundError:
-        logger.warning("ffmpeg is unavailable; skipping lecture video poster extraction")
+        logger.warning(
+            "ffmpeg is unavailable; skipping lecture video poster extraction"
+        )
         return False
 
     try:

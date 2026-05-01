@@ -2019,9 +2019,7 @@ class LectureVideoPosterStoredObject(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     key = Column(String, nullable=False, unique=True)
     content_type = Column(String, nullable=False)
-    lecture_videos = relationship(
-        "LectureVideo", back_populates="poster_stored_object"
-    )
+    lecture_videos = relationship("LectureVideo", back_populates="poster_stored_object")
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), onupdate=func.now())
 
