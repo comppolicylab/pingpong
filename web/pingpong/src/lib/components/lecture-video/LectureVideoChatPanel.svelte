@@ -27,7 +27,8 @@
 	import WebSearchCallItem from '$lib/components/WebSearchCallItem.svelte';
 	import { scroll } from '$lib/actions/scroll';
 	import type { Message } from '$lib/stores/thread';
-	import { SvelteSet } from 'svelte/reactivity';
+	import { tick } from 'svelte';
+	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
 	let {
 		classId,
@@ -96,6 +97,7 @@
 	let messagesContainer: HTMLDivElement | null = null;
 	let chatInputRef: ChatInputHandle | null = $state(null);
 	const dismissedContinuePromptMessageIds = new SvelteSet<string>();
+	const continuePromptDecisionByMessageId = new SvelteMap<string, boolean>();
 
 	type MCPContent = api.MCPServerCallItem | api.MCPListToolsCallItem;
 	type ContentBlock =
@@ -275,15 +277,63 @@
 		return latestMessage.id;
 	});
 
-	const shouldShowContinueWatchingPrompt = (message: Message) =>
-		showInput &&
-		showContinueWatchingPrompt &&
-		!waiting &&
-		!submitting &&
-		!!oncontinuewatching &&
+	const isLatestStreamedAssistantResponse = (message: Message) =>
 		message.streamedInSession === true &&
 		message.data.id === latestMessageId &&
-		message.data.id === latestAssistantMessageId &&
+		message.data.id === latestAssistantMessageId;
+
+	const canLatchContinuePromptDecision = (message: Message) =>
+		isLatestStreamedAssistantResponse(message) && !waiting && !submitting;
+
+	const evaluateContinuePromptVisibility = () =>
+		showInput && showContinueWatchingPrompt && !!oncontinuewatching;
+
+	$effect(() => {
+		let cancelled = false;
+		const latestMessage = messages.at(-1);
+		const latestMessageId = latestMessage?.data.id ?? null;
+		const promptVisibilityAtEffectStart = evaluateContinuePromptVisibility();
+		if (!latestMessage || !canLatchContinuePromptDecision(latestMessage)) {
+			return () => {
+				cancelled = true;
+			};
+		}
+		void (async () => {
+			await tick();
+			if (cancelled) {
+				return;
+			}
+			const currentLatestMessage = messages.at(-1);
+			if (
+				!currentLatestMessage ||
+				currentLatestMessage.data.id !== latestMessageId ||
+				!canLatchContinuePromptDecision(currentLatestMessage)
+			) {
+				return;
+			}
+			if (!continuePromptDecisionByMessageId.has(latestMessageId)) {
+				continuePromptDecisionByMessageId.set(latestMessageId, promptVisibilityAtEffectStart);
+			}
+			for (const messageId of Array.from(continuePromptDecisionByMessageId.keys())) {
+				if (messageId !== latestMessageId) {
+					continuePromptDecisionByMessageId.delete(messageId);
+				}
+			}
+			for (const messageId of Array.from(dismissedContinuePromptMessageIds)) {
+				if (messageId !== latestMessageId) {
+					dismissedContinuePromptMessageIds.delete(messageId);
+				}
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	});
+
+	const shouldShowContinueWatchingPrompt = (message: Message) =>
+		evaluateContinuePromptVisibility() &&
+		isLatestStreamedAssistantResponse(message) &&
+		continuePromptDecisionByMessageId.get(message.data.id) === true &&
 		!dismissedContinuePromptMessageIds.has(message.data.id);
 
 	let continueWatchingPromptScrollKey = $derived.by(() => {
