@@ -107,10 +107,9 @@ from pingpong.summary import send_class_summary_to_user_task
 from pingpong.video_store import VideoStoreError
 
 from . import (
-    lecture_video_chat,
     assistant_service,
+    lecture_video_chat,
     lecture_video_manifest_generation,
-    lecture_video_poster,
     lecture_video_processing,
     lecture_video_runtime,
     lecture_video_service,
@@ -8590,17 +8589,7 @@ async def get_assistant_lecture_video_poster(
         raise HTTPException(status_code=404, detail="Lecture video not found.")
 
     if lecture_video.poster_stored_object_id is None:
-        try:
-            await lecture_video_poster.extract_and_store_poster(
-                request.state["db"], lecture_video
-            )
-        except Exception:
-            logger.exception(
-                "Failed to lazily extract lecture video poster. lecture_video_id=%s",
-                lecture_video.id,
-            )
-        if lecture_video.poster_stored_object_id is None:
-            raise HTTPException(status_code=404, detail="Poster not available.")
+        raise HTTPException(status_code=404, detail="Poster not available.")
 
     poster = await request.state["db"].get(
         models.LectureVideoPosterStoredObject, lecture_video.poster_stored_object_id

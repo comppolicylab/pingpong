@@ -7,7 +7,9 @@ import tempfile
 from pathlib import Path
 
 import uuid_utils as uuid
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 import pingpong.models as models
 from pingpong.config import config
@@ -52,6 +54,7 @@ async def _probe_duration_ms(video_source: VideoInputSource) -> int | None:
                     ffprobe_path,
                     "-v",
                     "quiet",
+                    *video_source.ffmpeg_input_args,
                     "-show_entries",
                     "format=duration",
                     "-of",
@@ -71,6 +74,34 @@ async def _probe_duration_ms(video_source: VideoInputSource) -> int | None:
     return await asyncio.to_thread(run_ffprobe)
 
 
+def _build_ffmpeg_extract_args(
+    *,
+    video_source: VideoInputSource,
+    output_path: Path,
+    offset_ms: int,
+) -> list[str]:
+    return [
+        "ffmpeg",
+        "-loglevel",
+        "error",
+        "-y",
+        "-ss",
+        f"{offset_ms / 1000:.3f}",
+        *video_source.ffmpeg_input_args,
+        "-i",
+        video_source.url,
+        "-frames:v",
+        "1",
+        "-vf",
+        f"scale='min({_POSTER_MAX_WIDTH},iw)':-2",
+        "-c:v",
+        "libwebp",
+        "-quality",
+        str(_POSTER_QUALITY),
+        str(output_path),
+    ]
+
+
 async def _extract_poster_to_path(
     video_source: VideoInputSource,
     output_path: Path,
@@ -78,24 +109,11 @@ async def _extract_poster_to_path(
 ) -> bool:
     try:
         process = await asyncio.create_subprocess_exec(
-            "ffmpeg",
-            "-loglevel",
-            "error",
-            "-y",
-            "-ss",
-            f"{offset_ms / 1000:.3f}",
-            *video_source.ffmpeg_input_args,
-            "-i",
-            video_source.url,
-            "-frames:v",
-            "1",
-            "-vf",
-            f"scale='min({_POSTER_MAX_WIDTH},iw)':-2",
-            "-c:v",
-            "libwebp",
-            "-quality",
-            str(_POSTER_QUALITY),
-            str(output_path),
+            *_build_ffmpeg_extract_args(
+                video_source=video_source,
+                output_path=output_path,
+                offset_ms=offset_ms,
+            ),
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -158,6 +176,9 @@ async def extract_poster_bytes(
     manifest pipeline) for a fast probe + extract. Otherwise pass a
     `video_source` from the configured video store.
     """
+    if local_video_path is not None and video_source is not None:
+        raise ValueError("Pass either local_video_path or video_source, not both.")
+
     if local_video_path is not None:
         source = VideoInputSource(
             url=Path(local_video_path).as_uri(),
@@ -214,15 +235,15 @@ async def _persist_poster_bytes(
         return None
 
     try:
-        stored_object = await models.LectureVideoPosterStoredObject.create(
-            session,
-            key=store_key,
-            content_type=_POSTER_CONTENT_TYPE,
-        )
-        lecture_video.poster_stored_object_id = stored_object.id
-        lecture_video.poster_stored_object = stored_object
-        await session.flush()
-        return stored_object
+        async with session.begin_nested():
+            stored_object = await models.LectureVideoPosterStoredObject.create(
+                session,
+                key=store_key,
+                content_type=_POSTER_CONTENT_TYPE,
+            )
+            lecture_video.poster_stored_object_id = stored_object.id
+            lecture_video.poster_stored_object = stored_object
+            await session.flush()
     except Exception:
         logger.exception(
             "Failed to persist lecture video poster row. lecture_video_id=%s key=%s",
@@ -238,6 +259,20 @@ async def _persist_poster_bytes(
             )
         return None
 
+    return stored_object
+
+
+async def _lock_lecture_video_for_poster(
+    session: AsyncSession,
+    lecture_video_id: int,
+) -> models.LectureVideo | None:
+    return await session.scalar(
+        select(models.LectureVideo)
+        .where(models.LectureVideo.id == lecture_video_id)
+        .options(selectinload(models.LectureVideo.stored_object))
+        .with_for_update()
+    )
+
 
 async def extract_and_store_poster(
     session: AsyncSession,
@@ -245,13 +280,18 @@ async def extract_and_store_poster(
     *,
     local_video_path: str | None = None,
 ) -> models.LectureVideoPosterStoredObject | None:
-    if lecture_video.poster_stored_object_id is not None:
+    locked_lecture_video = await _lock_lecture_video_for_poster(
+        session, lecture_video.id
+    )
+    if locked_lecture_video is None:
+        return None
+    if locked_lecture_video.poster_stored_object_id is not None:
         return None
 
     if local_video_path is not None:
         poster_bytes = await extract_poster_bytes(local_video_path=local_video_path)
     else:
-        video_source = await _video_source_for_lecture_video(lecture_video)
+        video_source = await _video_source_for_lecture_video(locked_lecture_video)
         if video_source is None:
             return None
         poster_bytes = await extract_poster_bytes(video_source=video_source)
@@ -259,4 +299,4 @@ async def extract_and_store_poster(
     if poster_bytes is None:
         return None
 
-    return await _persist_poster_bytes(session, lecture_video, poster_bytes)
+    return await _persist_poster_bytes(session, locked_lecture_video, poster_bytes)

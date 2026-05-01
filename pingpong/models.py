@@ -2375,6 +2375,7 @@ class LectureVideo(Base):
             source_lecture_video_id_snapshot=lecture_video.id,
             status=lecture_video.status,
             error_message=lecture_video.error_message,
+            poster_stored_object_id=lecture_video.poster_stored_object_id,
         )
 
         option_map: dict[int, LectureVideoQuestionOption] = {}

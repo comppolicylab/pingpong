@@ -37,15 +37,30 @@ async def backfill_lecture_video_posters(session: AsyncSession) -> int:
         if not lecture_videos:
             break
 
-        for lecture_video in lecture_videos:
-            last_processed_id = lecture_video.id
+        lecture_video_ids = [lecture_video.id for lecture_video in lecture_videos]
+        for lecture_video_id in lecture_video_ids:
+            last_processed_id = lecture_video_id
+            lecture_video = await session.get(
+                models.LectureVideo,
+                lecture_video_id,
+                options=[selectinload(models.LectureVideo.stored_object)],
+            )
+            if lecture_video is None:
+                skipped += 1
+                logger.warning(
+                    "Could not find lecture video for poster backfill. lecture_video_id=%s",
+                    lecture_video_id,
+                )
+                continue
+
             try:
                 stored_object = await extract_and_store_poster(session, lecture_video)
             except Exception:
+                await session.rollback()
                 skipped += 1
                 logger.exception(
                     "Unexpected error backfilling lecture video poster. lecture_video_id=%s",
-                    lecture_video.id,
+                    lecture_video_id,
                 )
                 continue
 
@@ -53,17 +68,19 @@ async def backfill_lecture_video_posters(session: AsyncSession) -> int:
                 skipped += 1
                 logger.warning(
                     "Could not generate poster for lecture video. lecture_video_id=%s",
-                    lecture_video.id,
+                    lecture_video_id,
                 )
                 continue
 
+            stored_object_key = stored_object.key
+            await session.commit()
             extracted += 1
             logger.info(
                 "Backfilled lecture video poster. lecture_video_id=%s key=%s",
-                lecture_video.id,
-                stored_object.key,
+                lecture_video_id,
+                stored_object_key,
             )
-        await session.commit()
+        # Keep long-running backfills from retaining every processed ORM object.
         session.expunge_all()
 
     logger.info(

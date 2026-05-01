@@ -142,14 +142,16 @@
 	let assistant = {} as Assistant;
 	$: assistantMeta = getAssistantMetadata(assistant);
 	let lectureVideoPosterFailed = false;
+	let lectureVideoPosterLoaded = false;
 	$: lectureVideoPosterUrl =
 		assistant.interaction_mode === 'lecture_video' && data?.class?.id && assistant.id
 			? `/api/v1/class/${data.class.id}/assistant/${assistant.id}/lecture-video/poster`
 			: '';
 	$: {
 		// Reset failure state when the selected assistant changes so we re-attempt the new poster.
-		void assistant.id;
+		assistant.id;
 		lectureVideoPosterFailed = false;
+		lectureVideoPosterLoaded = false;
 	}
 	// Whether billing is set up for the class (which controls everything).
 	$: hasVisibleAssistants = assistants.length > 0;
@@ -833,12 +835,21 @@
 				{:else if assistant.interaction_mode === 'lecture_video'}
 					<div class="h-[5%] max-h-8"></div>
 					{#if lectureVideoPosterUrl && !lectureVideoPosterFailed}
-						<img
-							src={lectureVideoPosterUrl}
-							alt=""
-							class="aspect-video w-full max-w-md rounded-lg object-cover shadow-lg"
-							onerror={() => (lectureVideoPosterFailed = true)}
-						/>
+						<div class="relative aspect-video w-full max-w-md overflow-hidden rounded-lg shadow-lg">
+							{#if !lectureVideoPosterLoaded}
+								<div class="flex h-full w-full items-center justify-center bg-blue-light-50">
+									<ClapperboardPlayOutline size="xl" class="text-blue-dark-40" />
+								</div>
+							{/if}
+							<img
+								src={lectureVideoPosterUrl}
+								alt=""
+								class="absolute inset-0 h-full w-full object-cover transition-opacity"
+								class:opacity-0={!lectureVideoPosterLoaded}
+								onload={() => (lectureVideoPosterLoaded = true)}
+								onerror={() => (lectureVideoPosterFailed = true)}
+							/>
+						</div>
 					{:else}
 						<div class="rounded-lg bg-blue-light-50 p-3">
 							<ClapperboardPlayOutline size="xl" class="text-blue-dark-40" />
