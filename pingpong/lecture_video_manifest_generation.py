@@ -209,6 +209,20 @@ _GEMINI_GENERATION_MAX_ATTEMPTS = 3
 _GEMINI_GENERATION_RETRY_DELAY_SECONDS = 5.0
 
 
+def _generation_final_task_text(*, has_previous_summary_checkpoint: bool) -> str:
+    source_list = "the video and word-level transcript source data"
+    if has_previous_summary_checkpoint:
+        source_list = (
+            "the video, prior cumulative summary source data, and word-level "
+            "transcript source data"
+        )
+    return (
+        f"Based on {source_list} above, generate the interactive question layer "
+        "now. Follow the system instruction and return only the schema-valid "
+        "JSON object."
+    )
+
+
 @dataclass(frozen=True)
 class GeminiFileRef:
     name: str
@@ -289,8 +303,9 @@ class GeneratedSummaryCheckpoint(BaseModel):
     )
     summary: str = Field(
         description=(
-            "Cumulative summary through end_offset_ms, extending any supplied "
-            "prior cumulative summary."
+            "Cumulative multi-sentence summary through end_offset_ms, extending "
+            "any supplied prior cumulative summary and preserving earlier lesson "
+            "concepts before adding new material."
         )
     )
 
@@ -321,14 +336,14 @@ class GeneratedQuizWithVideoContext(BaseModel):
         description="Generated comprehension checks.",
     )
     summary_checkpoints: list[GeneratedSummaryCheckpoint] = Field(
-        default_factory=list,
+        min_length=1,
         description=(
-            "Cumulative summaries from the relevant generation scope start "
-            "through increasing checkpoint offsets."
+            "Cumulative multi-sentence summaries from the relevant generation "
+            "scope start through increasing checkpoint offsets."
         ),
     )
     moment_contexts: list[GeneratedMomentContext] = Field(
-        default_factory=list,
+        min_length=1,
         description="Local context windows centered on increasing offsets.",
     )
 
@@ -1008,26 +1023,32 @@ async def _write_video_clip(
     return await asyncio.to_thread(run_ffmpeg)
 
 
-def build_generation_prompt(
-    content_section: str,
+def _generation_transcript_format_description(*, compact: bool) -> str:
+    if compact:
+        return "Each transcript line is id|start|end|word."
+    return (
+        'A word-level transcript of the lesson. Each word has a unique "id", '
+        'a "start" timestamp, an "end" timestamp, and the "word" text:\n'
+        "[\n"
+        '{{"id": "0", "word": "Hello", "start": 0.00, "end": 0.52}},\n'
+        '{{"id": "1", "word": "Let\'s", "start": 1.26, "end": 1.66}},\n'
+        '{{"id": "2", "word": "imagine", "start": 1.66, "end": 2.10}},\n'
+        "...\n"
+        "]"
+    )
+
+
+def _generation_transcript_source_text(
     transcript: list[schemas.LectureVideoManifestWordV3],
     *,
     compact: bool = False,
-    video_duration_ms: int | None = None,
-    generation_start_ms: int | None = None,
-    generation_end_ms: int | None = None,
-    context_start_ms: int | None = None,
-    context_end_ms: int | None = None,
-    video_description_window_ms: int = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
-    previous_summary_checkpoint: schemas.LectureVideoManifestSummaryCheckpointV4
-    | None = None,
 ) -> str:
     if compact:
         transcript_text = "\n".join(
-            f"{word.id}|{word.start_offset_ms / 1000}|{word.end_offset_ms / 1000}|{word.word.replace('|', '/')}"
+            f"{word.id}|{word.start_offset_ms / 1000}|"
+            f"{word.end_offset_ms / 1000}|{word.word.replace('|', '/')}"
             for word in transcript
         )
-        transcript_description = "Each transcript line is id|start|end|word."
     else:
         transcript_text = json.dumps(
             [
@@ -1036,17 +1057,74 @@ def build_generation_prompt(
             ],
             indent=2,
         )
-        transcript_description = """A word-level transcript of the lesson. Each word has a unique "id", a "start" timestamp, an "end" timestamp, and the "word" text:
-[
-{{"id": "0", "word": "Hello", "start": 0.00, "end": 0.52}},
-{{"id": "1", "word": "Let's", "start": 1.26, "end": 1.66}},
-{{"id": "2", "word": "imagine", "start": 1.66, "end": 2.10}},
-...
-]"""
+    return (
+        "WORD-LEVEL TRANSCRIPT SOURCE DATA:\n"
+        f"{_generation_transcript_format_description(compact=compact)}\n\n"
+        f"{transcript_text}"
+    )
+
+
+def _prior_summary_source_text(
+    previous_summary_checkpoint: schemas.LectureVideoManifestSummaryCheckpointV4 | None,
+) -> str | None:
+    if previous_summary_checkpoint is None:
+        return None
+    return (
+        "PRIOR CUMULATIVE SUMMARY SOURCE DATA:\n"
+        f"summary_through_offset_ms: {previous_summary_checkpoint.end_offset_ms}\n"
+        f"summary: {previous_summary_checkpoint.summary}"
+    )
+
+
+def _generation_source_material_parts(
+    *,
+    transcript: list[schemas.LectureVideoManifestWordV3],
+    compact: bool,
+    previous_summary_checkpoint: schemas.LectureVideoManifestSummaryCheckpointV4 | None,
+) -> list[types.Part]:
+    prior_summary_text = _prior_summary_source_text(previous_summary_checkpoint)
+    parts = []
+    if prior_summary_text is not None:
+        parts.append(types.Part.from_text(text=prior_summary_text))
+    parts.append(
+        types.Part.from_text(
+            text=_generation_transcript_source_text(transcript, compact=compact)
+        )
+    )
+    parts.append(
+        types.Part.from_text(
+            text=_generation_final_task_text(
+                has_previous_summary_checkpoint=previous_summary_checkpoint is not None
+            )
+        )
+    )
+    return parts
+
+
+def build_generation_prompt(
+    content_section: str,
+    *,
+    compact: bool = False,
+    video_duration_ms: int | None = None,
+    generation_start_ms: int | None = None,
+    generation_end_ms: int | None = None,
+    context_start_ms: int | None = None,
+    context_end_ms: int | None = None,
+    video_description_window_ms: int = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
+    has_previous_summary_checkpoint: bool = False,
+) -> str:
+    transcript_description = _generation_transcript_format_description(compact=compact)
 
     video_description_window_seconds = video_description_window_ms / 1000
     video_description_next_window_ms = video_description_window_ms * 2
     video_description_half_window_ms = video_description_window_ms // 2
+    video_description_example_center_ms = video_description_window_ms * 2
+    video_description_example_start_ms = (
+        video_description_example_center_ms - video_description_half_window_ms
+    )
+    video_description_example_end_ms = (
+        video_description_example_center_ms + video_description_half_window_ms
+    )
     video_description_half_window_seconds = video_description_half_window_ms / 1000
     video_description_window_text = f"{video_description_window_seconds:g}"
     video_description_window_unit_text = f"{video_description_window_text}-second"
@@ -1075,6 +1153,10 @@ def build_generation_prompt(
     )
     generation_window_text = ""
     previous_summary_text = ""
+    request_contents_description = (
+        "The video file and word-level transcript source data are provided in "
+        "the request contents outside this system instruction."
+    )
     context_array_scope = "the whole video"
     chunk_moment_boundary_guidance = ""
     summary_cumulative_guidance = (
@@ -1150,18 +1232,21 @@ def build_generation_prompt(
             "must use absolute offsets from the original video, and should only "
             "cover the requested generation window."
         )
-        if previous_summary_checkpoint is not None:
+        if has_previous_summary_checkpoint:
             context_array_summary_scope = (
                 "the full lecture so far at each end_offset_ms"
             )
             previous_summary_text = (
                 "\nPRIOR CUMULATIVE SUMMARY:\n"
-                "The previous generated chunk summarized the lecture through "
-                f"{previous_summary_checkpoint.end_offset_ms}ms:\n"
-                f"{previous_summary_checkpoint.summary}\n\n"
-                "Use this as the only source for lecture content before "
-                f"{generation_start_ms}ms. Do not invent or infer earlier content "
-                "beyond this prior summary.\n"
+                "A prior cumulative summary source is provided in the request "
+                "contents. Use it as the only source for lecture content before "
+                "this requested generation window. Do not invent or infer "
+                "earlier content beyond that prior summary.\n"
+            )
+            request_contents_description = (
+                "The video file, prior cumulative summary source data, and "
+                "word-level transcript source data are provided in the request "
+                "contents outside this system instruction."
             )
             summary_cumulative_guidance = (
                 "- Each summary must be cumulative for the full lecture so far: "
@@ -1191,14 +1276,13 @@ You will be given a lecture video and a word-level transcript. {transcript_descr
 {generation_window_text}
 {previous_summary_text}
 
-Here's the WORD-LEVEL TRANSCRIPT:
-{transcript_text}
+{request_contents_description}
 
 TO-DO's FOR SUCCESSFUL QUIZ-GENERATION:
 To ensure high confidence in analyzing the lesson, watch the video along with the transcript. Don't make up anything or assume based on your preconceived idea of the lecture - always remember you have the transcript.
 
 YOUR TASK:
-Analyze the provided lesson materials to identify natural pause points where a multiple-choice comprehension check can be inserted. At each pause point, the video will stop, a question will be displayed as text on screen, and a voice clone of the teacher will introduce the question out loud. After the student selects an answer, the voice clone will give spoken feedback, and the video will resume. The resume point may differ depending on which answer the student chose.
+Analyze the provided lesson transcript and video to identify natural pause points where a multiple-choice comprehension check can be inserted. At each pause point, the video will stop, a question will be displayed as text on screen, and a voice clone of the teacher will introduce the question out loud. After the student selects an answer, the voice clone will give spoken feedback, and the video will resume. The resume point may differ depending on which answer the student chose.
 
 Also create two top-level context arrays across {context_array_scope}:
 - "summary_checkpoints": cumulative summaries over {context_array_summary_scope}, ordered by increasing end_offset_ms.
@@ -1214,17 +1298,32 @@ SUMMARY CHECKPOINT GUIDELINES:
 {summary_schedule_guidance}
 - Do not skip the first required checkpoint for this generation scope.
 {summary_cumulative_guidance}
+- Do not write each checkpoint as only a summary of the latest cadence window.
+  Later checkpoints must preserve the important concepts and examples from
+  earlier checkpoints, then append what changed by end_offset_ms.
+- Treat each later checkpoint as a replacement for all earlier checkpoints,
+  not a continuation the reader will see alongside them. A later checkpoint is
+  invalid if it drops earlier setup, examples, values, or conclusions that are
+  still needed to understand the lesson so far.
+- Do not limit checkpoint summaries to one sentence. Use at least two concise
+  sentences for every checkpoint after the first, and use more when needed to
+  make the cumulative state useful for a later chat answer without rereading
+  earlier video.
 
 MOMENT CONTEXT GUIDELINES:
 {moment_schedule_guidance}
+- Summaries are for cumulative conceptual memory. Moment contexts are for narrow, timestamp-centered local state.
+- Each moment_context must describe only what is happening inside that local window around center_offset_ms. Do not use moment_contexts to preserve the full lesson narrative.
+- Write moment contexts as concrete evidence from the transcript and video, not as broad conceptual summaries.
 - Moment context windows must extend half the context cadence on each side of the center: start_offset_ms = center_offset_ms - {video_description_half_window_text} seconds, end_offset_ms = center_offset_ms + {video_description_half_window_text} seconds, clamped to 0ms and the video duration.
-- For example, with a 5-second context cadence, center_offset_ms=10000 must use start_offset_ms=7500 and end_offset_ms=12500.
+- For example, with a {video_description_window_unit_text} context cadence, center_offset_ms={video_description_example_center_ms} must use start_offset_ms={video_description_example_start_ms} and end_offset_ms={video_description_example_end_ms}.
 {initial_moment_guidance}
 {chunk_moment_boundary_guidance}
 - For every moment_context, enforce start_offset_ms <= center_offset_ms <= end_offset_ms.
 - "before" should explain what immediately leads into the center moment.
 - "at" should explain what is happening at the center moment.
 - "after" should explain what immediately follows the center moment.
+- Do not use "after" to preview later lesson content beyond end_offset_ms.
 - Context text should combine spoken content and observable teaching state where useful: screen or board contents, written text, diagrams, values, equations, cursor movement, gesture emphasis, and meaningful visual changes.
 
 IMPORTANT CONTEXT:
@@ -1288,133 +1387,13 @@ You MUST specify pause and resume points using word IDs from the transcript, NOT
 WARNING: Word IDs in the transcript are NOT necessarily sequential indices into the text. You MUST look up the actual "id" field from the transcript entry for each word. Do NOT count words manually or guess IDs based on position. The "id", "word", "start", and "end" fields must ALL come from the same transcript entry and must be copied exactly.
 
 OUTPUT FORMAT:
-Return a single JSON object. Do not include any text outside the JSON.
-```json
-{{
-  "video_summary": "Brief description of the video topic",
-  "summary_checkpoints": [
-    {{
-      "end_offset_ms": {video_description_window_ms},
-      "summary": "From the start through this point, the teacher introduces the main idea and works through the first example."
-    }},
-    {{
-      "end_offset_ms": {video_description_next_window_ms},
-      "summary": "From the start through this point, the teacher introduces the main idea, works through the first example, and connects it to the next step."
-    }}
-  ],
-  "moment_contexts": [
-    {{
-      "center_offset_ms": 0,
-      "start_offset_ms": 0,
-      "end_offset_ms": {video_description_half_window_ms},
-      "before": "The lesson is just beginning.",
-      "at": "The teacher introduces the topic and the first visible teaching materials.",
-      "after": "The teacher begins the first example."
-    }},
-    {{
-      "center_offset_ms": {video_description_window_ms},
-      "start_offset_ms": {video_description_half_window_ms},
-      "end_offset_ms": {video_description_window_ms + video_description_half_window_ms},
-      "before": "The teacher has introduced the main idea.",
-      "at": "The teacher is working through the next step of the example.",
-      "after": "The teacher connects the example back to the main concept."
-    }}
-  ],
-  "questions": [
-    {{
-      "id": 1,
-      "question_source": "teacher",
-      "pause_after_word_id": "77",
-      "pause_after_word": "correct",
-      "pause_at": 26.80,
-      "voice_over_intro": "",
-      "question_text": "Is it correct to round 2.4 up to 3?",
-      "choices": [
-        {{"text": "Yes", "misconception": "Thinks any digit above 0 rounds up, ignoring the 5-or-above rule"}},
-        {{"text": "No", "misconception": null}}
-      ],
+Return a single JSON object matching the requested schema. Do not include any text outside the JSON.
 
-      "correct_answer": "No",
-      "choice_feedback": {{
-        "Yes": {{
-          "voice_over": "Hmm, not quite.",
-          "resume_at_word_id": "78",
-          "resume_at_word": "Well",
-          "resume_at": 27.58
-        }},
-        "No": {{
-          "voice_over": "Good instinct!",
-          "resume_at_word_id": "78",
-          "resume_at_word": "Well",
-          "resume_at": 27.58
-        }}
-      }}
-    }},
-    {{
-      "id": 2,
-      "question_source": "generated",
-      "pause_after_word_id": "120",
-      "pause_after_word": "together",
-      "pause_at": 42.15,
-      "voice_over_intro": "Let's pause here for a quick check. What place value do you look at when rounding to the nearest ten?",
-      "question_text": "What place value do you look at when rounding to the nearest ten?",
-      "choices": [
-        {{"text": "The ones place", "misconception": null}},
-        {{"text": "The tens place", "misconception": "Confuses the place being rounded with the digit that determines rounding"}},
-        {{"text": "The hundreds place", "misconception": "Looks at a higher place value instead of the digit immediately to the right"}}
-      ],
-      "correct_answer": "The ones place",
-      "choice_feedback": {{
-        "The ones place": {{
-          "voice_over": "That's right!",
-          "resume_at_word_id": "121",
-          "resume_at_word": "So",
-          "resume_at": 43.00
-        }},
-        "The tens place": {{
-          "voice_over": "Not quite — you look at the digit to the right of the place you're rounding to, which is the ones place.",
-          "resume_at_word_id": "121",
-          "resume_at_word": "So",
-          "resume_at": 43.00
-        }},
-        "The hundreds place": {{
-          "voice_over": "Not quite — you look at the digit to the right of the place you're rounding to, which is the ones place.",
-          "resume_at_word_id": "121",
-          "resume_at_word": "So",
-          "resume_at": 43.00
-        }}
-      }}
-    }}
-  ]
-}}
-```
-
-FIELD DEFINITIONS:
-- "question_source": Either "teacher" (based on a question the teacher posed in the video) or "generated" (a comprehension check you created). This determines voice_over_intro requirements.
-- "pause_after_word_id": The "id" of the last word the student hears before the pause. Copied exactly from the transcript.
-- "pause_after_word": The "word" text of that transcript entry. Copied exactly.
-- "pause_at": The "end" timestamp of the pause word. Copied exactly from the transcript — do not round or modify.
-- "voice_over_intro": Brief first-person spoken intro. For "generated" questions, this must include both a pause cue and a spoken version of the question. For "teacher" questions, empty or minimal.
-- "question_text": The question displayed as text on screen.
-- "choices": Array of answer choice objects. Each object contains:
-  - "text": The answer choice string. No letter labels.
-  - "misconception": For distractors (incorrect choices), a brief description of the common misconception or error this choice is designed to surface. For the correct answer, this is null. This field is for analytics only — it is never shown to the student.
-- "correct_answer": The correct choice string, matching the "text" of one entry in choices exactly.
-- "choice_feedback": Object keyed by each choice's "text" string, containing:
-  - "voice_over": The spoken feedback for this choice (1-2 sentences).
-  - "resume_at_word_id": The "id" of the first word the student hears when the video resumes after this choice. Copied exactly from the transcript.
-  - "resume_at_word": The "word" text of that transcript entry. Copied exactly.
-  - "resume_at": The "start" timestamp of the resume word. Copied exactly from the transcript — do not round or modify.
-- "summary_checkpoints": Array of cumulative summaries. Each entry contains:
-  - "end_offset_ms": Integer millisecond offset through which this summary applies.
-  - "summary": Non-empty cumulative summary through end_offset_ms, extending any supplied prior cumulative summary.
-- "moment_contexts": Array of local context windows. Each entry contains:
-  - "center_offset_ms": Integer millisecond offset used to select this local context.
-  - "start_offset_ms": Integer millisecond offset where the local window starts.
-  - "end_offset_ms": Integer millisecond offset where the local window ends.
-  - "before": Non-empty local context before center_offset_ms.
-  - "at": Non-empty local context at center_offset_ms.
-  - "after": Non-empty local context after center_offset_ms.
+QUALITY EXAMPLES:
+- Good summary_checkpoint: at end_offset_ms={video_description_next_window_ms}, the summary explains the lesson from the beginning through that endpoint. It preserves the setup from the first {video_description_window_text} seconds, then adds what changed by {video_description_next_window_ms}ms. It is not just a description of the most recent {video_description_window_unit_text} window.
+- Good moment_context: at center_offset_ms={video_description_example_center_ms}, use start_offset_ms={video_description_example_start_ms} and end_offset_ms={video_description_example_end_ms}. The "before", "at", and "after" text should describe concrete local transcript/video evidence around that timestamp, such as the exact spoken point, visible equation, board state, cursor movement, or gesture. It should not summarize the whole lesson so far.
+- Good teacher-posed question: when the teacher asks a question out loud, pause only after the full question is heard. Keep voice_over_intro empty or use a very short nudge, rewrite the on-screen question clearly, and resume into the teacher's answer or explanation.
+- Good generated question: pause at a completed thought, use a short voice_over_intro that includes both a pause cue and the spoken question, keep answer choices concise, and make distractors reflect likely misconceptions rather than random wrong answers.
 
 IMPORTANT REMINDERS:
 - ALL word IDs and timestamps must come directly from the transcript entries. Look up each word's actual "id" field — do not count or guess. Copy "word", "start", and "end" exactly.
@@ -1422,11 +1401,15 @@ IMPORTANT REMINDERS:
 - For "generated" questions, voice_over_intro MUST include both a pause cue and the question spoken aloud. The student needs to hear it, not just read it.
 - {context_array_reminder}
 
+FINAL VERIFICATION BEFORE OUTPUT:
+- Verify every pause/resume word ID, word, and timestamp is copied from a single transcript entry.
+- Verify every question pause point is inside the requested generation window, if a generation window was provided.
+- Verify every summary_checkpoint is cumulative through its own end_offset_ms. Each summary must cover the whole lesson seen so far for that checkpoint, not just the latest cadence window.
+- Verify every moment_context follows the required cadence and uses absolute original-video offsets.
+- Verify each visual or conceptual claim is supported by the transcript, visible text, or clearly visible teaching action.
+
 REDUNDANCY CHECK:
 - Before finalizing each voice_over, read it concatenated with the teacher's words starting at the resume point. If any fact, number, or concept appears in both your feedback AND the teacher's next sentence, remove it from your feedback. The combined audio must never say the same thing twice.
-
-Now analyze the provided lesson materials and generate the interactive question layer.
-
 """
 
 
@@ -1736,14 +1719,25 @@ def _quiz_to_manifest(
     )
 
 
-def _gemini_contents_for_file(gemini_file: GeminiFileRef) -> types.ContentListUnion:
+def _gemini_contents_for_generation(
+    *,
+    gemini_file: GeminiFileRef,
+    transcript: list[schemas.LectureVideoManifestWordV3],
+    compact: bool,
+    previous_summary_checkpoint: schemas.LectureVideoManifestSummaryCheckpointV4 | None,
+) -> types.ContentListUnion:
     if gemini_file.uri is None:
         raise ValueError("Gemini file is missing a URI.")
     return [
         types.Part.from_uri(
             file_uri=gemini_file.uri,
             mime_type=gemini_file.mime_type,
-        )
+        ),
+        *_generation_source_material_parts(
+            transcript=transcript,
+            compact=compact,
+            previous_summary_checkpoint=previous_summary_checkpoint,
+        ),
     ]
 
 
@@ -1964,7 +1958,6 @@ async def _generate_manifest_from_gemini_file(
 ) -> schemas.LectureVideoManifestV4:
     prompt = build_generation_prompt(
         generation_prompt_content,
-        transcript,
         compact=compact,
         video_duration_ms=video_duration_ms,
         generation_start_ms=generation_start_ms,
@@ -1972,7 +1965,7 @@ async def _generate_manifest_from_gemini_file(
         context_start_ms=context_start_ms,
         context_end_ms=context_end_ms,
         video_description_window_ms=video_description_window_ms,
-        previous_summary_checkpoint=previous_summary_checkpoint,
+        has_previous_summary_checkpoint=previous_summary_checkpoint is not None,
     )
     request_label = (
         "manifest_chunk_compact"
@@ -1985,7 +1978,12 @@ async def _generate_manifest_from_gemini_file(
         gemini_client,
         model=model,
         prompt=prompt,
-        contents=_gemini_contents_for_file(gemini_file),
+        contents=_gemini_contents_for_generation(
+            gemini_file=gemini_file,
+            transcript=transcript,
+            compact=compact,
+            previous_summary_checkpoint=previous_summary_checkpoint,
+        ),
         response_model=GeneratedQuizWithVideoContext,
         request_label=request_label,
     )
