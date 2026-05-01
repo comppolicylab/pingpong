@@ -118,6 +118,7 @@ from .ai import (
     GetOpenAIClientException,
     export_class_threads_anonymized,
     export_threads_multiple_classes,
+    format_current_datetime_context,
     format_instructions,
     get_azure_model_deployment_name_equivalent,
     get_ci_messages_from_step,
@@ -211,6 +212,28 @@ from .vector_stores import (
 
 logger = logging.getLogger(__name__)
 responses_api_transition_logger = logging.getLogger("responses_api_transition")
+
+
+def _current_datetime_context_message(
+    *,
+    thread_id: int,
+    output_index: int,
+    timezone: str | None,
+) -> models.Message:
+    return models.Message(
+        thread_id=thread_id,
+        output_index=output_index,
+        message_status=schemas.MessageStatus.COMPLETED,
+        role=schemas.MessageRole.DEVELOPER,
+        is_hidden=True,
+        content=[
+            models.MessagePart(
+                part_index=0,
+                type=schemas.MessagePartType.INPUT_TEXT,
+                text=format_current_datetime_context(timezone),
+            )
+        ],
+    )
 
 
 def allowed_assistant_message_ids(
@@ -7204,6 +7227,27 @@ async def create_thread(
                     )
                 part_index += 1
 
+            run_messages = [
+                _current_datetime_context_message(
+                    thread_id=thread_db_record.id,
+                    output_index=0,
+                    timezone=thread_db_record.timezone,
+                )
+            ]
+            if messageContentParts:
+                run_messages.append(
+                    models.Message(
+                        thread_id=thread_db_record.id,
+                        output_index=1,
+                        message_status=schemas.MessageStatus.COMPLETED,
+                        role=schemas.MessageRole.USER,
+                        user_id=request.state["session"].user.id,
+                        content=messageContentParts,
+                        file_search_attachments=file_search_files,
+                        code_interpreter_attachments=code_interpreter_files,
+                    )
+                )
+
             run = models.Run(
                 status=schemas.RunStatus.PENDING,
                 thread_id=thread_db_record.id,
@@ -7214,23 +7258,8 @@ async def create_thread(
                 reasoning_effort=assistant.reasoning_effort,
                 temperature=assistant.temperature,
                 tools_available=thread_db_record.tools_available,
-                instructions=inject_timestamp_to_instructions(
-                    thread_db_record.instructions, thread_db_record.timezone
-                ),
-                messages=[
-                    models.Message(
-                        thread_id=thread_db_record.id,
-                        output_index=0,
-                        message_status=schemas.MessageStatus.COMPLETED,
-                        role=schemas.MessageRole.USER,
-                        user_id=request.state["session"].user.id,
-                        content=messageContentParts,
-                        file_search_attachments=file_search_files,
-                        code_interpreter_attachments=code_interpreter_files,
-                    )
-                ]
-                if messageContentParts
-                else [],
+                instructions=thread_db_record.instructions,
+                messages=run_messages,
             )
 
             request.state["db"].add(run)
@@ -7410,9 +7439,7 @@ async def create_run(
                     reasoning_effort=asst.reasoning_effort,
                     temperature=asst.temperature,
                     tools_available=thread.tools_available,
-                    instructions=inject_timestamp_to_instructions(
-                        thread.instructions, req.timezone if req else thread.timezone
-                    ),
+                    instructions=thread.instructions,
                     verbosity=asst.verbosity,
                 )
                 request.state["db"].add(run_to_complete)
@@ -8012,14 +8039,19 @@ async def send_message(
                         )
                     )
                 part_index += 1
-            user_output_index = (
-                lecture_chat_prep.user_output_index
-                if lecture_chat_prep is not None
-                else prev_output_sequence + 1
-            )
-
-            run_messages = [
-                *(lecture_chat_prep.prepended_messages if lecture_chat_prep else []),
+            if lecture_chat_prep is not None:
+                user_output_index = lecture_chat_prep.user_output_index
+                run_messages = [*lecture_chat_prep.prepended_messages]
+            else:
+                user_output_index = prev_output_sequence + 2
+                run_messages = [
+                    _current_datetime_context_message(
+                        thread_id=thread.id,
+                        output_index=prev_output_sequence + 1,
+                        timezone=data.timezone if data.timezone else thread.timezone,
+                    )
+                ]
+            run_messages.append(
                 models.Message(
                     thread_id=thread.id,
                     output_index=user_output_index,
@@ -8030,8 +8062,8 @@ async def send_message(
                     content=messageContentParts,
                     file_search_attachments=file_search_files,
                     code_interpreter_attachments=code_interpreter_files,
-                ),
-            ]
+                )
+            )
 
             run_to_complete = models.Run(
                 status=schemas.RunStatus.PENDING,
@@ -8042,14 +8074,7 @@ async def send_message(
                 reasoning_effort=asst.reasoning_effort,
                 temperature=asst.temperature,
                 tools_available=thread.tools_available,
-                instructions=(
-                    thread.instructions
-                    if thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
-                    else inject_timestamp_to_instructions(
-                        thread.instructions,
-                        data.timezone if data.timezone else thread.timezone,
-                    )
-                ),
+                instructions=thread.instructions,
                 verbosity=asst.verbosity,
                 messages=run_messages,
             )
