@@ -452,7 +452,7 @@ async def test_build_response_input_item_list_can_build_user_assistant_messages_
             message_status=schemas.MessageStatus.COMPLETED,
             run_id=current_run.id,
             thread_id=thread.id,
-            output_index=2,
+            output_index=5,
             role=schemas.MessageRole.DEVELOPER,
             is_hidden=True,
             content=[
