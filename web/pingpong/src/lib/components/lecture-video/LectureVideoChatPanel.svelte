@@ -27,6 +27,7 @@
 	import WebSearchCallItem from '$lib/components/WebSearchCallItem.svelte';
 	import { scroll } from '$lib/actions/scroll';
 	import type { Message } from '$lib/stores/thread';
+	import { tick } from 'svelte';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
 	let {
@@ -281,30 +282,56 @@
 		message.data.id === latestMessageId &&
 		message.data.id === latestAssistantMessageId;
 
-	const isContinuePromptDecisionReady = (message: Message) =>
+	const canLatchContinuePromptDecision = (message: Message) =>
 		isLatestStreamedAssistantResponse(message) && !waiting && !submitting;
 
-	const shouldLatchContinuePromptVisible = (message: Message) =>
-		showInput &&
-		showContinueWatchingPrompt &&
-		!!oncontinuewatching &&
-		isContinuePromptDecisionReady(message);
+	const evaluateContinuePromptVisibility = () =>
+		showInput && showContinueWatchingPrompt && !!oncontinuewatching;
 
 	$effect(() => {
+		let cancelled = false;
 		const latestMessage = messages.at(-1);
-		if (!latestMessage || !isContinuePromptDecisionReady(latestMessage)) {
-			return;
+		const latestMessageId = latestMessage?.data.id ?? null;
+		const promptVisibilityAtEffectStart = evaluateContinuePromptVisibility();
+		if (!latestMessage || !canLatchContinuePromptDecision(latestMessage)) {
+			return () => {
+				cancelled = true;
+			};
 		}
-		if (continuePromptDecisionByMessageId.has(latestMessage.data.id)) {
-			return;
-		}
-		continuePromptDecisionByMessageId.set(
-			latestMessage.data.id,
-			shouldLatchContinuePromptVisible(latestMessage)
-		);
+		void (async () => {
+			await tick();
+			if (cancelled) {
+				return;
+			}
+			const currentLatestMessage = messages.at(-1);
+			if (
+				!currentLatestMessage ||
+				currentLatestMessage.data.id !== latestMessageId ||
+				!canLatchContinuePromptDecision(currentLatestMessage)
+			) {
+				return;
+			}
+			if (!continuePromptDecisionByMessageId.has(latestMessageId)) {
+				continuePromptDecisionByMessageId.set(latestMessageId, promptVisibilityAtEffectStart);
+			}
+			for (const messageId of Array.from(continuePromptDecisionByMessageId.keys())) {
+				if (messageId !== latestMessageId) {
+					continuePromptDecisionByMessageId.delete(messageId);
+				}
+			}
+			for (const messageId of Array.from(dismissedContinuePromptMessageIds)) {
+				if (messageId !== latestMessageId) {
+					dismissedContinuePromptMessageIds.delete(messageId);
+				}
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
 	});
 
 	const shouldShowContinueWatchingPrompt = (message: Message) =>
+		evaluateContinuePromptVisibility() &&
 		isLatestStreamedAssistantResponse(message) &&
 		continuePromptDecisionByMessageId.get(message.data.id) === true &&
 		!dismissedContinuePromptMessageIds.has(message.data.id);
