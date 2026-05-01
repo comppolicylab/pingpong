@@ -836,7 +836,7 @@
 						<img
 							src={lectureVideoPosterUrl}
 							alt=""
-							class="aspect-video w-full max-w-md rounded-lg object-cover shadow-sm"
+							class="aspect-video w-full max-w-md rounded-lg object-cover shadow-lg"
 							onerror={() => (lectureVideoPosterFailed = true)}
 						/>
 					{:else}
