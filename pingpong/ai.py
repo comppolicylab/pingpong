@@ -4626,7 +4626,15 @@ def inject_timestamp_to_instructions(
     instructions: str, timezone: str | None = None
 ) -> str:
     """Inject a timestamp into the instructions for the assistant."""
-    # Inject the current time into the instructions
+    return (
+        instructions
+        + "\n---Other context---\n"
+        + format_current_datetime_context(timezone)
+    )
+
+
+def format_current_datetime_context(timezone: str | None = None) -> str:
+    """Format the current date and time for model context."""
     if timezone:
         try:
             tz = ZoneInfo(timezone)
@@ -4640,8 +4648,7 @@ def inject_timestamp_to_instructions(
         tz = ZoneInfo("UTC")
 
     dt = datetime.now(tz)
-    return instructions + (
-        "\n---Other context---\n"
+    return (
         "The current date and time is "
         f"{dt.strftime('%Y-%m-%d %H:%M:%S')} ({dt.tzname()})."
     )
