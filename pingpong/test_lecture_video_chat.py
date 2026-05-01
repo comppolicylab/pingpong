@@ -640,7 +640,9 @@ def test_build_context_text_v4_includes_upcoming_knowledge_check_when_no_current
         correct_option=SimpleNamespace(id=101),
         stop_offset_ms=10_000,
     )
-    thread = SimpleNamespace(lecture_video=SimpleNamespace(questions=[upcoming_question]))
+    thread = SimpleNamespace(
+        lecture_video=SimpleNamespace(questions=[upcoming_question])
+    )
     state = SimpleNamespace(
         last_known_offset_ms=500,
         furthest_offset_ms=500,
