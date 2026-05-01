@@ -9855,6 +9855,10 @@ async def test_copy_lecture_video_assistant_to_other_class_clones_lecture_video_
             status=schemas.LectureVideoStatus.READY.value,
             uploader_id=123,
         )
+        lecture_video.poster_stored_object = models.LectureVideoPosterStoredObject(
+            key="copy-source-poster.webp",
+            content_type="image/webp",
+        )
         session.add(source_class)
         session.add(target_class)
         session.add(lecture_video)
@@ -9942,6 +9946,7 @@ async def test_copy_lecture_video_assistant_to_other_class_clones_lecture_video_
     assert copied_assistant.lecture_video_id != lecture_video.id
     assert copied_video.class_id == 2
     assert copied_video.stored_object_id == lecture_video.stored_object_id
+    assert copied_video.poster_stored_object_id == source_video.poster_stored_object_id
     assert copied_video.source_lecture_video_id_snapshot == lecture_video.id
     assert copied_question == "Copied question?"
 
@@ -10891,6 +10896,73 @@ async def test_lecture_video_delete_deletes_unused_video_stored_object(
     assert stored_object_after_first_delete is not None
     assert stored_object_after_second_delete is None
     assert not (video_dir / "shared-video.mp4").exists()
+
+
+@with_institution(11, "Test Institution")
+async def test_lecture_video_delete_deletes_unused_poster_stored_object(
+    db, institution, config, monkeypatch, tmp_path
+):
+    video_dir = tmp_path / "videos"
+    monkeypatch.setattr(
+        config,
+        "video_store",
+        LocalVideoStoreSettings(type="local", save_target=str(video_dir)),
+    )
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        stored_object = models.LectureVideoStoredObject(
+            key="shared-video.mp4",
+            original_filename="shared-video.mp4",
+            content_type="video/mp4",
+            content_length=1000,
+        )
+        poster_stored_object = models.LectureVideoPosterStoredObject(
+            key="shared-poster.webp",
+            content_type="image/webp",
+        )
+        session.add_all([class_, stored_object, poster_stored_object])
+        await session.flush()
+        video_dir.mkdir(parents=True, exist_ok=True)
+        (video_dir / stored_object.key).write_bytes(b"shared-video")
+        (video_dir / poster_stored_object.key).write_bytes(b"shared-poster")
+
+        first_video = await models.LectureVideo.create(
+            session,
+            class_id=class_.id,
+            stored_object_id=stored_object.id,
+            user_id=None,
+            poster_stored_object_id=poster_stored_object.id,
+        )
+        second_video = await models.LectureVideo.create(
+            session,
+            class_id=class_.id,
+            stored_object_id=stored_object.id,
+            user_id=None,
+            poster_stored_object_id=poster_stored_object.id,
+        )
+        await session.commit()
+
+        await lecture_video_service.delete_lecture_video(session, first_video.id)
+        await session.commit()
+        poster_after_first_delete = await session.get(
+            models.LectureVideoPosterStoredObject, poster_stored_object.id
+        )
+
+        await lecture_video_service.delete_lecture_video(session, second_video.id)
+        await session.commit()
+        poster_after_second_delete = await session.get(
+            models.LectureVideoPosterStoredObject, poster_stored_object.id
+        )
+
+    assert poster_after_first_delete is not None
+    assert poster_after_second_delete is None
+    assert not (video_dir / "shared-poster.webp").exists()
 
 
 @with_institution(11, "Test Institution")

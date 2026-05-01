@@ -62,6 +62,9 @@ from pingpong.migrations.m07_backfill_lecture_video_content_lengths import (
 from pingpong.migrations.m08_cleanup_invalid_lecture_video_schema_rows import (
     cleanup_invalid_lecture_video_schema_rows,
 )
+from pingpong.migrations.m09_backfill_lecture_video_posters import (
+    backfill_lecture_video_posters,
+)
 from pingpong.now import _get_next_run_time, croner, utcnow
 from pingpong.schemas import LMSType, RunStatus
 from pingpong.lti.course_bridge import course_bridge_sync_all
@@ -1008,6 +1011,20 @@ def m08_cleanup_invalid_lecture_video_schema_rows() -> None:
                 )
 
     asyncio.run(_m08_cleanup_invalid_lecture_video_schema_rows())
+
+
+@db.command("m09_backfill_lecture_video_posters")
+def m09_backfill_lecture_video_posters() -> None:
+    async def _m09_backfill_lecture_video_posters() -> None:
+        async with config.db.driver.async_session() as session:
+            logger.info("Backfilling lecture video posters...")
+            extracted = await backfill_lecture_video_posters(session)
+            logger.info(
+                "Done! Backfilled posters for %s lecture videos.",
+                extracted,
+            )
+
+    asyncio.run(_m09_backfill_lecture_video_posters())
 
 
 @db.command("m02_remove_responses_threads")

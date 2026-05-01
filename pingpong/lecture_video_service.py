@@ -664,6 +664,7 @@ async def clone_lecture_video_snapshot(
         source_lecture_video_id_snapshot=lecture_video.id,
         status=lecture_video.status,
         error_message=lecture_video.error_message,
+        poster_stored_object_id=lecture_video.poster_stored_object_id,
     )
     cloned_lecture_video.stored_object = lecture_video.stored_object
     return cloned_lecture_video
@@ -857,10 +858,25 @@ async def delete_lecture_video(
     revoke_grants = lecture_video_grants(lecture_video)
     stored_object_id = lecture_video.stored_object_id
     store_key = lecture_video.stored_object.key if lecture_video.stored_object else None
+    poster_stored_object_id = lecture_video.poster_stored_object_id
+    poster_store_key = None
+    if poster_stored_object_id is not None:
+        poster_stored_object = await session.get(
+            models.LectureVideoPosterStoredObject, poster_stored_object_id
+        )
+        poster_store_key = poster_stored_object.key if poster_stored_object else None
     is_orphaned_after_delete = not bool(
         await session.scalar(
             select(models.LectureVideo.id).where(
                 models.LectureVideo.stored_object_id == stored_object_id,
+                models.LectureVideo.id != lecture_video_id,
+            )
+        )
+    )
+    is_poster_orphaned_after_delete = poster_stored_object_id is not None and not bool(
+        await session.scalar(
+            select(models.LectureVideo.id).where(
+                models.LectureVideo.poster_stored_object_id == poster_stored_object_id,
                 models.LectureVideo.id != lecture_video_id,
             )
         )
@@ -888,12 +904,22 @@ async def delete_lecture_video(
             )
         )
 
+    if is_poster_orphaned_after_delete and poster_stored_object_id is not None:
+        await session.execute(
+            delete(models.LectureVideoPosterStoredObject).where(
+                models.LectureVideoPosterStoredObject.id == poster_stored_object_id
+            )
+        )
+
     if audio_keys_to_delete and config.lecture_video_audio_store:
         for key in audio_keys_to_delete:
             await config.lecture_video_audio_store.store.delete_file(key)
 
     if is_orphaned_after_delete and store_key and config.video_store:
         await config.video_store.store.delete(store_key)
+
+    if is_poster_orphaned_after_delete and poster_store_key and config.video_store:
+        await config.video_store.store.delete(poster_store_key)
 
     if authz is not None:
         await authz.write_safe(revoke=revoke_grants)

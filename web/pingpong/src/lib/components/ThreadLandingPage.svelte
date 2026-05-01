@@ -123,8 +123,39 @@
 		(asst: Assistant) => asst.creator_id !== data.me.user?.id
 	);
 	$: otherAssistants = otherAssistantsAll.filter((asst: Assistant) => !asst.endorsed);
+	$: lessonAssistants = assistants.filter(
+		(asst: Assistant) => asst.interaction_mode === 'lecture_video'
+	);
+	// In LV mode, lessons are surfaced in their own section at the top of the
+	// dropdown, so exclude them from the source-attribution sections to avoid
+	// listing the same assistant twice.
+	$: inLectureVideoMode = assistant.interaction_mode === 'lecture_video';
+	$: courseAssistantsForDropdown = inLectureVideoMode
+		? courseAssistants.filter((asst: Assistant) => asst.interaction_mode !== 'lecture_video')
+		: courseAssistants;
+	$: myAssistantsForDropdown = inLectureVideoMode
+		? myAssistants.filter((asst: Assistant) => asst.interaction_mode !== 'lecture_video')
+		: myAssistants;
+	$: otherAssistantsForDropdown = inLectureVideoMode
+		? otherAssistants.filter((asst: Assistant) => asst.interaction_mode !== 'lecture_video')
+		: otherAssistants;
 	let assistant = {} as Assistant;
 	$: assistantMeta = getAssistantMetadata(assistant);
+	let lectureVideoPosterFailed = false;
+	let lectureVideoPosterLoaded = false;
+	let lectureVideoPosterAssistantId: number | undefined;
+	$: lectureVideoPosterUrl =
+		assistant.interaction_mode === 'lecture_video' && data?.class?.id && assistant.id
+			? `/api/v1/class/${data.class.id}/assistant/${assistant.id}/lecture-video/poster`
+			: '';
+	$: {
+		// Reset failure state when the selected assistant changes so we re-attempt the new poster.
+		if (lectureVideoPosterAssistantId !== assistant.id) {
+			lectureVideoPosterAssistantId = assistant.id;
+			lectureVideoPosterFailed = false;
+			lectureVideoPosterLoaded = false;
+		}
+	}
 	// Whether billing is set up for the class (which controls everything).
 	$: hasVisibleAssistants = assistants.length > 0;
 	$: isConfigured = hasVisibleAssistants && data?.hasAPIKey;
@@ -534,7 +565,7 @@
 					<div class="flex flex-col items-center justify-center gap-1">
 						<div class="text-xl leading-tight font-medium md:text-4xl">{assistant.name}</div>
 					</div>
-					{#if !(data.isSharedAssistantPage || data.isSharedThreadPage)}
+					{#if !(data.isSharedAssistantPage || data.isSharedThreadPage) && assistant.interaction_mode !== 'lecture_video'}
 						<div
 							class="flex flex-row items-center gap-1 text-xs font-normal text-gray-400 sm:text-sm"
 						>
@@ -560,7 +591,11 @@
 								(assistantDropdownOpen ? ' bg-gray-50' : '')}
 							type="button"
 						>
-							<span class="text-center text-xs font-normal"> Change assistant </span>
+							<span class="text-center text-xs font-normal">
+								{assistant.interaction_mode === 'lecture_video'
+									? 'Change lesson'
+									: 'Change assistant'}
+							</span>
 							<ChevronSortOutline class="text-gray-500" size="xs" />
 						</Button>
 						<Dropdown
@@ -568,8 +603,49 @@
 							classContainer="rounded-3xl lg:w-1/3 md:w-1/2 w-2/3 border border-gray-100 max-h-[40%] overflow-y-auto"
 							bind:open={assistantDropdownOpen}
 						>
+							<!-- Lessons (LV mode only) -->
+							{#if inLectureVideoMode && lessonAssistants.length > 0}
+								<DropdownItem
+									class="pointer-events-none pb-1 font-normal tracking-tight text-gray-400 normal-case select-none hover:bg-none"
+								>
+									Lessons
+								</DropdownItem>
+								{#each lessonAssistants as asst (asst.id)}
+									<DropdownItem
+										onclick={() => selectAi(asst)}
+										ontouchstart={() => selectAi(asst)}
+										class="group max-w-full rounded-lg font-normal tracking-tight normal-case select-none hover:bg-gray-100"
+									>
+										<div class="flex max-w-full flex-row items-center justify-between gap-5">
+											<div class="flex w-10/12 flex-col gap-1">
+												<div class="text-sm leading-snug">
+													<ClapperboardPlayOutline
+														size="sm"
+														class="inline align-text-bottom text-gray-400"
+													/>
+													<Tooltip>Lecture Video mode assistant</Tooltip>
+													{asst.name}
+												</div>
+												{#if asst.description}
+													<div class="truncate text-xs text-gray-500">
+														{asst.description}
+													</div>
+												{/if}
+											</div>
+
+											{#if assistant.id === asst.id}
+												<CheckCircleSolid size="md" class="text-blue-dark-40 group-hover:hidden" />
+											{/if}
+										</div>
+									</DropdownItem>
+								{/each}
+								{#if courseAssistantsForDropdown.length > 0 || myAssistantsForDropdown.length > 0 || otherAssistantsForDropdown.length > 0}
+									<DropdownDivider />
+								{/if}
+							{/if}
+
 							<!-- Show course assistants first -->
-							{#if courseAssistants.length > 0}
+							{#if courseAssistantsForDropdown.length > 0}
 								<DropdownItem
 									class="pointer-events-none pb-1 font-normal tracking-tight text-gray-400 normal-case select-none hover:bg-none"
 								>
@@ -577,7 +653,7 @@
 								</DropdownItem>
 							{/if}
 
-							{#each courseAssistants as asst (asst.id)}
+							{#each courseAssistantsForDropdown as asst (asst.id)}
 								<DropdownItem
 									onclick={() => selectAi(asst)}
 									ontouchstart={() => selectAi(asst)}
@@ -616,19 +692,19 @@
 							{/each}
 
 							<!-- Show a divider if necessary -->
-							{#if myAssistants.length > 0 && courseAssistants.length > 0}
+							{#if myAssistantsForDropdown.length > 0 && courseAssistantsForDropdown.length > 0}
 								<DropdownDivider />
 							{/if}
 
 							<!-- Show the user's assistants -->
-							{#if myAssistants.length > 0}
+							{#if myAssistantsForDropdown.length > 0}
 								<DropdownItem
 									class="pointer-events-none pb-1 font-normal tracking-tight text-gray-400 normal-case select-none hover:bg-none"
 								>
 									Your assistants
 								</DropdownItem>
 
-								{#each myAssistants as asst (asst.id)}
+								{#each myAssistantsForDropdown as asst (asst.id)}
 									<DropdownItem
 										onclick={() => selectAi(asst)}
 										ontouchstart={() => selectAi(asst)}
@@ -667,19 +743,19 @@
 								{/each}
 							{/if}
 							<!-- Show a divider if necessary -->
-							{#if otherAssistants.length > 0 && (myAssistants.length > 0 || courseAssistants.length > 0)}
+							{#if otherAssistantsForDropdown.length > 0 && (myAssistantsForDropdown.length > 0 || courseAssistantsForDropdown.length > 0)}
 								<DropdownDivider />
 							{/if}
 
 							<!-- Show the user's assistants -->
-							{#if otherAssistants.length > 0}
+							{#if otherAssistantsForDropdown.length > 0}
 								<DropdownItem
 									class="pointer-events-none pb-1 font-normal tracking-tight text-gray-400 normal-case select-none hover:bg-none"
 								>
 									Other assistants
 								</DropdownItem>
 
-								{#each otherAssistants as asst (asst.id)}
+								{#each otherAssistantsForDropdown as asst (asst.id)}
 									<DropdownItem
 										onclick={() => selectAi(asst)}
 										ontouchstart={() => selectAi(asst)}
@@ -761,9 +837,27 @@
 					{/if}
 				{:else if assistant.interaction_mode === 'lecture_video'}
 					<div class="h-[5%] max-h-8"></div>
-					<div class="rounded-lg bg-blue-light-50 p-3">
-						<ClapperboardPlayOutline size="xl" class="text-blue-dark-40" />
-					</div>
+					{#if lectureVideoPosterUrl && !lectureVideoPosterFailed}
+						<div class="relative aspect-video w-full max-w-md overflow-hidden rounded-lg shadow-lg">
+							{#if !lectureVideoPosterLoaded}
+								<div class="flex h-full w-full items-center justify-center bg-blue-light-50">
+									<ClapperboardPlayOutline size="xl" class="text-blue-dark-40" />
+								</div>
+							{/if}
+							<img
+								src={lectureVideoPosterUrl}
+								alt=""
+								class="absolute inset-0 h-full w-full object-cover transition-opacity"
+								class:opacity-0={!lectureVideoPosterLoaded}
+								onload={() => (lectureVideoPosterLoaded = true)}
+								onerror={() => (lectureVideoPosterFailed = true)}
+							/>
+						</div>
+					{:else}
+						<div class="rounded-lg bg-blue-light-50 p-3">
+							<ClapperboardPlayOutline size="xl" class="text-blue-dark-40" />
+						</div>
+					{/if}
 					<div class="flex min-w-2/5 flex-col items-center">
 						<p class="text-center text-sm font-semibold text-blue-dark-40 sm:text-xl">
 							Learn with Interactive Videos

@@ -107,8 +107,8 @@ from pingpong.summary import send_class_summary_to_user_task
 from pingpong.video_store import VideoStoreError
 
 from . import (
-    lecture_video_chat,
     assistant_service,
+    lecture_video_chat,
     lecture_video_manifest_generation,
     lecture_video_processing,
     lecture_video_runtime,
@@ -8560,6 +8560,61 @@ async def upload_lecture_video_for_assistant(
     )
     return await lecture_video_service.lecture_video_summary_from_model(
         request.state["db"], lecture_video
+    )
+
+
+@v1.get(
+    "/class/{class_id}/assistant/{assistant_id}/lecture-video/poster",
+    dependencies=[Depends(Authz("can_view", "assistant:{assistant_id}"))],
+    response_class=StreamingResponse,
+)
+async def get_assistant_lecture_video_poster(
+    class_id: str,
+    assistant_id: str,
+    request: StateRequest,
+):
+    if not config.video_store:
+        raise HTTPException(status_code=404, detail="No Video Store exists.")
+
+    assistant = await lecture_video_service.get_lecture_video_assistant_for_class(
+        request.state["db"], int(assistant_id), int(class_id)
+    )
+    if assistant.lecture_video_id is None:
+        raise HTTPException(status_code=404, detail="Lecture video not found.")
+
+    lecture_video = await models.LectureVideo.get_by_id(
+        request.state["db"], assistant.lecture_video_id
+    )
+    if lecture_video is None:
+        raise HTTPException(status_code=404, detail="Lecture video not found.")
+
+    if lecture_video.poster_stored_object_id is None:
+        raise HTTPException(status_code=404, detail="Poster not available.")
+
+    poster = await request.state["db"].get(
+        models.LectureVideoPosterStoredObject, lecture_video.poster_stored_object_id
+    )
+    if poster is None:
+        raise HTTPException(status_code=404, detail="Poster not available.")
+
+    try:
+        stream = await prefetch_stream(
+            config.video_store.store.stream_video_range(key=poster.key),
+            store_error=VideoStoreError,
+            logger=logger,
+            store_error_log="VideoStoreError while streaming lecture video poster; aborting stream.",
+            unexpected_error_log="Unexpected error while streaming lecture video poster",
+        )
+    except VideoStoreError as e:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unable to stream lecture video poster: {e.detail or str(e)}",
+        ) from e
+
+    return StreamingResponse(
+        stream,
+        media_type=poster.content_type or "image/webp",
+        headers={"Cache-Control": "private, max-age=86400"},
     )
 
 

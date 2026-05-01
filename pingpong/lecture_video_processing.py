@@ -19,7 +19,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import pingpong.models as models
 import pingpong.schemas as schemas
-from pingpong import gemini, lecture_video_manifest_generation, lecture_video_service
+from pingpong import (
+    gemini,
+    lecture_video_manifest_generation,
+    lecture_video_poster,
+    lecture_video_service,
+)
 from pingpong.ai import get_openai_client_by_class_id
 from pingpong.audio_store import AudioStoreError
 from pingpong.class_credential_validation import (
@@ -864,6 +869,49 @@ async def _ensure_manifest_generation_transcript(
     return generated_transcript
 
 
+async def _extract_manifest_generation_poster(
+    run_id: int,
+    lease_token: str,
+    lecture_video_id: int,
+    video_path: str,
+) -> None:
+    logger.info(
+        "Lecture video manifest extracting poster. run_id=%s lecture_video_id=%s",
+        run_id,
+        lecture_video_id,
+    )
+    async with config.db.driver.async_session() as session:
+        lecture_video = await models.LectureVideo.get_by_id(session, lecture_video_id)
+        if lecture_video is None or lecture_video.poster_stored_object_id is not None:
+            return
+
+        stored_object = await _await_with_run_lease_heartbeat(
+            run_id,
+            lease_token,
+            lecture_video_poster.extract_and_store_poster(
+                session,
+                lecture_video,
+                local_video_path=video_path,
+            ),
+        )
+        if stored_object is None:
+            logger.info(
+                "Lecture video manifest poster not extracted. run_id=%s lecture_video_id=%s",
+                run_id,
+                lecture_video_id,
+            )
+            return
+
+        stored_object_key = stored_object.key
+        await session.commit()
+        logger.info(
+            "Lecture video manifest extracted poster. run_id=%s lecture_video_id=%s key=%s",
+            run_id,
+            lecture_video_id,
+            stored_object_key,
+        )
+
+
 async def _upload_and_generate_manifest(
     run_id: int,
     lease_token: str,
@@ -953,6 +1001,12 @@ async def _process_claimed_manifest_run(run_id: int, lease_token: str) -> None:
             )
             if video_path is None:
                 return
+            await _extract_manifest_generation_poster(
+                run_id,
+                lease_token,
+                context.lecture_video_id,
+                video_path,
+            )
             transcript = await _ensure_manifest_generation_transcript(
                 run_id,
                 lease_token,
