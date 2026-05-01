@@ -143,15 +143,18 @@
 	$: assistantMeta = getAssistantMetadata(assistant);
 	let lectureVideoPosterFailed = false;
 	let lectureVideoPosterLoaded = false;
+	let lectureVideoPosterAssistantId: number | undefined;
 	$: lectureVideoPosterUrl =
 		assistant.interaction_mode === 'lecture_video' && data?.class?.id && assistant.id
 			? `/api/v1/class/${data.class.id}/assistant/${assistant.id}/lecture-video/poster`
 			: '';
 	$: {
 		// Reset failure state when the selected assistant changes so we re-attempt the new poster.
-		assistant.id;
-		lectureVideoPosterFailed = false;
-		lectureVideoPosterLoaded = false;
+		if (lectureVideoPosterAssistantId !== assistant.id) {
+			lectureVideoPosterAssistantId = assistant.id;
+			lectureVideoPosterFailed = false;
+			lectureVideoPosterLoaded = false;
+		}
 	}
 	// Whether billing is set up for the class (which controls everything).
 	$: hasVisibleAssistants = assistants.length > 0;
