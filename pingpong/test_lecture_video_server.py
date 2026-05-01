@@ -947,6 +947,33 @@ async def test_send_message_creates_lecture_chat_run_with_hidden_context(
     ] == ["Why does latency matter more here?", VISIBLE_ASSISTANT_REPLY_TEXT]
     assert thread_response.json()["thread"]["is_current_user_participant"] is True
 
+    second_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}",
+        json={"message": "What should I watch for next?"},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert second_response.status_code == 200
+
+    async with db.async_session() as session:
+        developer_output_indices = (
+            (
+                await session.execute(
+                    select(models.Message.output_index)
+                    .where(
+                        models.Message.thread_id == thread_id,
+                        models.Message.role == schemas.MessageRole.DEVELOPER,
+                    )
+                    .order_by(models.Message.output_index)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    assert len(developer_output_indices) == 2
+    assert len(set(developer_output_indices)) == 2
+    assert all(output_index >= 0 for output_index in developer_output_indices)
+
 
 @with_user(123)
 @with_institution(11, "Test Institution")

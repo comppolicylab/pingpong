@@ -8041,10 +8041,7 @@ async def send_message(
                 part_index += 1
             if lecture_chat_prep is not None:
                 user_output_index = lecture_chat_prep.user_output_index
-                run_messages = [
-                    lecture_chat_prep.developer_context_message,
-                    *lecture_chat_prep.prepended_messages,
-                ]
+                run_messages = [*lecture_chat_prep.prepended_messages]
             else:
                 user_output_index = prev_output_sequence + 2
                 run_messages = [

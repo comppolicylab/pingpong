@@ -983,8 +983,24 @@ async def build_response_input_item_list(
                     ),
                 )
             )
-    # Sort by output index, falling back to created time for ties.
-    response_input_items_with_time.sort(key=lambda x: (x[1], x[0]))
+
+    def input_item_sort_key(
+        entry: tuple[datetime, int, str, ResponseInputItemParam],
+    ) -> tuple[int, int, datetime]:
+        created, output_index, item_type, item = entry
+        if (
+            user_assistant_messages_only
+            and current_run_id is not None
+            and item_type == "message"
+            and item.get("role") == MessageRole.DEVELOPER
+        ):
+            return (0, 0, created)
+        return (1, output_index, created)
+
+    # Sort by output index, falling back to created time for ties. Lecture-video
+    # runs that filter history explicitly prepend the current run developer
+    # context without encoding that ordering into messages.output_index.
+    response_input_items_with_time.sort(key=input_item_sort_key)
 
     def convert_to_message(
         item: ResponseCodeInterpreterToolCallParam, uses_reasoning: bool
