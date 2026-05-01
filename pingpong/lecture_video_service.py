@@ -13,6 +13,7 @@ import uuid_utils as uuid
 
 import pingpong.models as models
 import pingpong.schemas as schemas
+from . import lecture_video_poster
 from .authz import AuthzClient, Relation
 from .config import config
 from .video_store import VideoStoreError
@@ -180,6 +181,13 @@ async def create_lecture_video(
             user_id=uploader_id,
         )
         lecture_video.stored_object = stored_object
+        try:
+            await lecture_video_poster.extract_and_store_poster(session, lecture_video)
+        except Exception:
+            logger.exception(
+                "Failed to extract lecture video poster on upload. lecture_video_id=%s",
+                lecture_video.id,
+            )
         return lecture_video
     except Exception as e:
         try:
@@ -664,6 +672,7 @@ async def clone_lecture_video_snapshot(
         source_lecture_video_id_snapshot=lecture_video.id,
         status=lecture_video.status,
         error_message=lecture_video.error_message,
+        poster_stored_object_id=lecture_video.poster_stored_object_id,
     )
     cloned_lecture_video.stored_object = lecture_video.stored_object
     return cloned_lecture_video

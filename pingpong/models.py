@@ -2013,6 +2013,36 @@ class LectureVideoNarrationStoredObject(Base):
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
 
 
+class LectureVideoPosterStoredObject(Base):
+    __tablename__ = "lecture_video_poster_stored_objects"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    key = Column(String, nullable=False, unique=True)
+    content_type = Column(String, nullable=False)
+    lecture_videos = relationship(
+        "LectureVideo", back_populates="poster_stored_object"
+    )
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(DateTime(timezone=True), onupdate=func.now())
+
+    @classmethod
+    async def create(
+        cls,
+        session: AsyncSession,
+        *,
+        key: str,
+        content_type: str,
+    ) -> "LectureVideoPosterStoredObject":
+        stored_object = LectureVideoPosterStoredObject(
+            key=key,
+            content_type=content_type,
+        )
+        session.add(stored_object)
+        await session.flush()
+        await session.refresh(stored_object)
+        return stored_object
+
+
 # Single-select correctness gets its own storage so multi-select can use a
 # separate schema later without overloading the same table.
 lecture_video_question_single_select_correct_option_association = Table(
@@ -2054,6 +2084,19 @@ class LectureVideo(Base):
     )
     stored_object = relationship(
         "LectureVideoStoredObject", back_populates="lecture_videos", uselist=False
+    )
+    poster_stored_object_id = Column(
+        Integer,
+        ForeignKey(
+            "lecture_video_poster_stored_objects.id",
+            name="fk_lecture_videos_poster_stored_object_id",
+        ),
+        nullable=True,
+    )
+    poster_stored_object = relationship(
+        "LectureVideoPosterStoredObject",
+        back_populates="lecture_videos",
+        uselist=False,
     )
     # Immutable provenance pointer to the immediate source snapshot when this
     # lecture video was cloned. This is intentionally not a live FK because
@@ -2120,6 +2163,7 @@ class LectureVideo(Base):
         source_lecture_video_id_snapshot: int | None = None,
         status: schemas.LectureVideoStatus = schemas.LectureVideoStatus.UPLOADED,
         error_message: str | None = None,
+        poster_stored_object_id: int | None = None,
     ) -> "LectureVideo":
         lecture_video = LectureVideo(
             class_id=class_id,
@@ -2137,6 +2181,7 @@ class LectureVideo(Base):
             status=status,
             error_message=error_message,
             uploader_id=user_id,
+            poster_stored_object_id=poster_stored_object_id,
         )
         session.add(lecture_video)
         await session.flush()
