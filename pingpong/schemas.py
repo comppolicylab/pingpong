@@ -34,6 +34,13 @@ from pydantic import (
 )
 
 from pingpong.authz.base import Relation
+from pingpong.elevenlabs_defaults import (
+    DEFAULT_ELEVENLABS_SIMILARITY_BOOST,
+    DEFAULT_ELEVENLABS_SPEED,
+    DEFAULT_ELEVENLABS_STABILITY,
+    DEFAULT_ELEVENLABS_STYLE,
+    DEFAULT_ELEVENLABS_USE_SPEAKER_BOOST,
+)
 from .gravatar import get_email_hash, get_gravatar_image
 
 
@@ -844,6 +851,13 @@ class LectureVideoDefaults(BaseModel):
 
 class ValidateLectureVideoVoiceRequest(BaseModel):
     voice_id: str
+    elevenlabs_stability: float = Field(DEFAULT_ELEVENLABS_STABILITY, ge=0.0, le=1.0)
+    elevenlabs_similarity_boost: float = Field(
+        DEFAULT_ELEVENLABS_SIMILARITY_BOOST, ge=0.0, le=1.0
+    )
+    elevenlabs_use_speaker_boost: bool = DEFAULT_ELEVENLABS_USE_SPEAKER_BOOST
+    elevenlabs_style: float = Field(DEFAULT_ELEVENLABS_STYLE, ge=0.0, le=1.0)
+    elevenlabs_speed: float = Field(DEFAULT_ELEVENLABS_SPEED, ge=0.7, le=1.2)
 
     @field_validator("voice_id")
     @classmethod
@@ -1060,6 +1074,11 @@ class Assistant(BaseModel):
     realtime_voice: RealtimeVoice | None = None
     realtime_speed: float | None = None
     realtime_noise_reduction: RealtimeNoiseReduction | None = None
+    elevenlabs_stability: float | None = None
+    elevenlabs_similarity_boost: float | None = None
+    elevenlabs_use_speaker_boost: bool | None = None
+    elevenlabs_style: float | None = None
+    elevenlabs_speed: float | None = None
     class_id: int
     creator_id: int
     locked: bool = False
@@ -1303,6 +1322,13 @@ class CreateAssistant(BaseModel):
     realtime_voice: RealtimeVoice = RealtimeVoice.MARIN
     realtime_speed: float = Field(1.0, ge=0.25, le=1.5)
     realtime_noise_reduction: RealtimeNoiseReduction = RealtimeNoiseReduction.FAR_FIELD
+    elevenlabs_stability: float = Field(DEFAULT_ELEVENLABS_STABILITY, ge=0.0, le=1.0)
+    elevenlabs_similarity_boost: float = Field(
+        DEFAULT_ELEVENLABS_SIMILARITY_BOOST, ge=0.0, le=1.0
+    )
+    elevenlabs_use_speaker_boost: bool = DEFAULT_ELEVENLABS_USE_SPEAKER_BOOST
+    elevenlabs_style: float = Field(DEFAULT_ELEVENLABS_STYLE, ge=0.0, le=1.0)
+    elevenlabs_speed: float = Field(DEFAULT_ELEVENLABS_SPEED, ge=0.7, le=1.2)
     tools: list[ToolOption] = Field(default_factory=list)
     lecture_video_id: int | None = None
     lecture_video_manifest: LectureVideoManifest | None = None
@@ -1408,6 +1434,11 @@ class UpdateAssistant(BaseModel):
     realtime_voice: RealtimeVoice | None = None
     realtime_speed: float | None = Field(None, ge=0.25, le=1.5)
     realtime_noise_reduction: RealtimeNoiseReduction | None = None
+    elevenlabs_stability: float | None = Field(None, ge=0.0, le=1.0)
+    elevenlabs_similarity_boost: float | None = Field(None, ge=0.0, le=1.0)
+    elevenlabs_use_speaker_boost: bool | None = None
+    elevenlabs_style: float | None = Field(None, ge=0.0, le=1.0)
+    elevenlabs_speed: float | None = Field(None, ge=0.7, le=1.2)
     tools: list[ToolOption] | None = None
     published: bool | None = None
     use_latex: bool | None = None

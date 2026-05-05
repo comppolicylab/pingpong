@@ -1622,6 +1622,11 @@ export type LectureVideoEditorPolicyResponse = LectureVideoAssistantEditorPolicy
 
 export type ValidateLectureVideoVoiceRequest = {
 	voice_id: string;
+	elevenlabs_stability: number;
+	elevenlabs_similarity_boost: number;
+	elevenlabs_use_speaker_boost: boolean;
+	elevenlabs_style: number;
+	elevenlabs_speed: number;
 };
 
 export type ValidateLectureVideoVoiceResponse = {
@@ -2309,6 +2314,11 @@ export type Assistant = {
 	realtime_voice: RealtimeVoice | null;
 	realtime_speed: number | null;
 	realtime_noise_reduction: RealtimeNoiseReduction | null;
+	elevenlabs_stability: number | null;
+	elevenlabs_similarity_boost: number | null;
+	elevenlabs_use_speaker_boost: boolean | null;
+	elevenlabs_style: number | null;
+	elevenlabs_speed: number | null;
 	tools: string;
 	class_id: number;
 	creator_id: number;
@@ -2464,6 +2474,11 @@ export type CreateAssistantRequest = {
 	realtime_voice?: RealtimeVoice;
 	realtime_speed?: number | null;
 	realtime_noise_reduction?: RealtimeNoiseReduction;
+	elevenlabs_stability?: number | null;
+	elevenlabs_similarity_boost?: number | null;
+	elevenlabs_use_speaker_boost?: boolean | null;
+	elevenlabs_style?: number | null;
+	elevenlabs_speed?: number | null;
 	tools: Tool[];
 	code_interpreter_file_ids: string[];
 	file_search_file_ids: string[];
@@ -2522,6 +2537,11 @@ export type UpdateAssistantRequest = {
 	realtime_voice?: RealtimeVoice | null;
 	realtime_speed?: number | null;
 	realtime_noise_reduction?: RealtimeNoiseReduction | null;
+	elevenlabs_stability?: number | null;
+	elevenlabs_similarity_boost?: number | null;
+	elevenlabs_use_speaker_boost?: boolean | null;
+	elevenlabs_style?: number | null;
+	elevenlabs_speed?: number | null;
 	tools?: Tool[];
 	code_interpreter_file_ids?: string[];
 	file_search_file_ids?: string[];

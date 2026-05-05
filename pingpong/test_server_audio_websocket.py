@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 from pydantic import ValidationError
 
+from pingpong import models
 from pingpong import schemas
 from pingpong import websocket as websocket_module
 
@@ -69,6 +70,51 @@ def test_realtime_session_uses_create_defaults_for_null_fields():
         "interrupt_response": False,
         "eagerness": "auto",
     }
+
+
+async def test_create_non_lecture_assistant_clears_elevenlabs_settings(db):
+    req = schemas.CreateAssistant(
+        name="Chat Assistant",
+        instructions="You are a helpful assistant.",
+        description="",
+        model="gpt-4o-mini",
+        elevenlabs_stability=0.9,
+        elevenlabs_similarity_boost=0.4,
+        elevenlabs_use_speaker_boost=False,
+        elevenlabs_style=0.2,
+        elevenlabs_speed=1.1,
+    )
+    for field in (
+        "file_search_file_ids",
+        "deleted_private_files",
+        "mcp_servers",
+        "lecture_video_id",
+        "lecture_video_manifest",
+        "voice_id",
+        "generation_prompt",
+        "video_description_duration_ms",
+        "overwrite_manifest",
+        "create_classic_assistant",
+    ):
+        delattr(req, field)
+
+    async with db.async_session() as session:
+        class_ = models.Class(id=1, name="Test Class", api_key="test-key")
+        session.add(class_)
+        await session.flush()
+
+        assistant = await models.Assistant.create(
+            session,
+            req,
+            class_id=class_.id,
+            user_id=123,
+        )
+
+        assert assistant.elevenlabs_stability is None
+        assert assistant.elevenlabs_similarity_boost is None
+        assert assistant.elevenlabs_use_speaker_boost is None
+        assert assistant.elevenlabs_style is None
+        assert assistant.elevenlabs_speed is None
 
 
 def test_realtime_session_builds_server_vad_payload():

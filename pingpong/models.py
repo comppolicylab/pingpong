@@ -3947,6 +3947,11 @@ class Assistant(Base):
     realtime_noise_reduction = Column(
         SQLEnum(schemas.RealtimeNoiseReduction), nullable=True
     )
+    elevenlabs_stability = Column(Float, nullable=True)
+    elevenlabs_similarity_boost = Column(Float, nullable=True)
+    elevenlabs_use_speaker_boost = Column(Boolean, nullable=True)
+    elevenlabs_style = Column(Float, nullable=True)
+    elevenlabs_speed = Column(Float, nullable=True)
     assistant_should_message_first = Column(Boolean, server_default="false")
     should_record_user_information = Column(Boolean, server_default="false")
     disable_prompt_randomization = Column(
@@ -4205,6 +4210,15 @@ class Assistant(Base):
                 "realtime_voice",
                 "realtime_speed",
                 "realtime_noise_reduction",
+            ):
+                params[field] = None
+        if data.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
+            for field in (
+                "elevenlabs_stability",
+                "elevenlabs_similarity_boost",
+                "elevenlabs_use_speaker_boost",
+                "elevenlabs_style",
+                "elevenlabs_speed",
             ):
                 params[field] = None
         params["tools"] = json.dumps(params["tools"])

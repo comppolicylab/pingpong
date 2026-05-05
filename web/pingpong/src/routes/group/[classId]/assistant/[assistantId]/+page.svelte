@@ -112,6 +112,11 @@
 	const MIN_VIDEO_DESCRIPTION_DURATION_MS = 5_000;
 	const MAX_VIDEO_DESCRIPTION_DURATION_MS = 300_000;
 	const VIDEO_DESCRIPTION_DURATION_STEP_MS = 5_000;
+	const DEFAULT_ELEVENLABS_STABILITY = 0.5;
+	const DEFAULT_ELEVENLABS_SIMILARITY_BOOST = 0.8;
+	const DEFAULT_ELEVENLABS_USE_SPEAKER_BOOST = true;
+	const DEFAULT_ELEVENLABS_STYLE = 0.0;
+	const DEFAULT_ELEVENLABS_SPEED = 1.0;
 
 	type LectureVideoOptionInput = {
 		option_text: string;
@@ -320,17 +325,47 @@
 	let lastValidatedVoiceId = '';
 	let voiceRequiresValidation = false;
 	let voiceSampleCache: Record<string, { text: string; audioSrc: string }> = {};
+	const elevenlabsVoiceSettingsPayload = () => ({
+		elevenlabs_stability: elevenlabsStabilityValue,
+		elevenlabs_similarity_boost: elevenlabsSimilarityBoostValue,
+		elevenlabs_use_speaker_boost: elevenlabsUseSpeakerBoostValue,
+		elevenlabs_style: elevenlabsStyleValue,
+		elevenlabs_speed: elevenlabsSpeedValue
+	});
+	const voiceSampleCacheKey = (voiceId: string) =>
+		JSON.stringify({
+			voice_id: voiceId,
+			...elevenlabsVoiceSettingsPayload()
+		});
 	const revokeVoiceSampleAudioSrc = (audioSrc: string) => {
 		if (audioSrc.startsWith('blob:')) {
 			URL.revokeObjectURL(audioSrc);
 		}
 	};
-	const setVoiceSampleCacheEntry = (voiceId: string, text: string, audioSrc: string) => {
-		const existing = voiceSampleCache[voiceId];
+	const voiceIdFromSampleCacheKey = (cacheKey: string) => {
+		try {
+			const parsed = JSON.parse(cacheKey);
+			return typeof parsed.voice_id === 'string' ? parsed.voice_id : null;
+		} catch {
+			return null;
+		}
+	};
+	const setVoiceSampleCacheEntry = (cacheKey: string, text: string, audioSrc: string) => {
+		const existing = voiceSampleCache[cacheKey];
 		if (existing && existing.audioSrc !== audioSrc) {
 			revokeVoiceSampleAudioSrc(existing.audioSrc);
 		}
-		voiceSampleCache[voiceId] = { text, audioSrc };
+		const voiceId = voiceIdFromSampleCacheKey(cacheKey);
+		const nextCache = { ...voiceSampleCache, [cacheKey]: { text, audioSrc } };
+		if (voiceId !== null) {
+			for (const [candidateKey, sample] of Object.entries(voiceSampleCache)) {
+				if (candidateKey !== cacheKey && voiceIdFromSampleCacheKey(candidateKey) === voiceId) {
+					revokeVoiceSampleAudioSrc(sample.audioSrc);
+					delete nextCache[candidateKey];
+				}
+			}
+		}
+		voiceSampleCache = nextCache;
 	};
 	onDestroy(() => {
 		for (const sample of Object.values(voiceSampleCache)) {
@@ -883,7 +918,7 @@
 	}
 	$: {
 		const trimmed = voiceId.trim();
-		const cached = voiceSampleCache[trimmed];
+		const cached = voiceSampleCache[voiceSampleCacheKey(trimmed)];
 		if (cached) {
 			voiceSampleAudioSrc = cached.audioSrc;
 			voiceSampleText = cached.text;
@@ -1389,6 +1424,11 @@
 	let realtimeVoiceValue: api.RealtimeVoice = 'marin';
 	let realtimeSpeedValue = 1.0;
 	let realtimeNoiseReductionValue: api.RealtimeNoiseReduction = 'far_field';
+	let elevenlabsStabilityValue = DEFAULT_ELEVENLABS_STABILITY;
+	let elevenlabsSimilarityBoostValue = DEFAULT_ELEVENLABS_SIMILARITY_BOOST;
+	let elevenlabsUseSpeakerBoostValue = DEFAULT_ELEVENLABS_USE_SPEAKER_BOOST;
+	let elevenlabsStyleValue = DEFAULT_ELEVENLABS_STYLE;
+	let elevenlabsSpeedValue = DEFAULT_ELEVENLABS_SPEED;
 	const normalizeRealtimeVadIdleTimeoutSeconds = (value: string) => {
 		if (value === '') {
 			return null;
@@ -1423,6 +1463,13 @@
 		realtimeVoiceValue = assistant.realtime_voice ?? 'marin';
 		realtimeSpeedValue = assistant.realtime_speed ?? 1.0;
 		realtimeNoiseReductionValue = assistant.realtime_noise_reduction ?? 'far_field';
+		elevenlabsStabilityValue = assistant.elevenlabs_stability ?? DEFAULT_ELEVENLABS_STABILITY;
+		elevenlabsSimilarityBoostValue =
+			assistant.elevenlabs_similarity_boost ?? DEFAULT_ELEVENLABS_SIMILARITY_BOOST;
+		elevenlabsUseSpeakerBoostValue =
+			assistant.elevenlabs_use_speaker_boost ?? DEFAULT_ELEVENLABS_USE_SPEAKER_BOOST;
+		elevenlabsStyleValue = assistant.elevenlabs_style ?? DEFAULT_ELEVENLABS_STYLE;
+		elevenlabsSpeedValue = assistant.elevenlabs_speed ?? DEFAULT_ELEVENLABS_SPEED;
 		hasSetRealtimeSettings = true;
 	}
 
@@ -1858,6 +1905,25 @@
 						? newValue !== ((oldValue as api.RealtimeNoiseReduction | null) ?? 'far_field')
 						: false;
 				break;
+			case 'elevenlabs_stability':
+				dirty = isLectureMode ? newValue !== (oldValue ?? DEFAULT_ELEVENLABS_STABILITY) : false;
+				break;
+			case 'elevenlabs_similarity_boost':
+				dirty = isLectureMode
+					? newValue !== (oldValue ?? DEFAULT_ELEVENLABS_SIMILARITY_BOOST)
+					: false;
+				break;
+			case 'elevenlabs_use_speaker_boost':
+				dirty = isLectureMode
+					? newValue !== (oldValue ?? DEFAULT_ELEVENLABS_USE_SPEAKER_BOOST)
+					: false;
+				break;
+			case 'elevenlabs_style':
+				dirty = isLectureMode ? newValue !== (oldValue ?? DEFAULT_ELEVENLABS_STYLE) : false;
+				break;
+			case 'elevenlabs_speed':
+				dirty = isLectureMode ? newValue !== (oldValue ?? DEFAULT_ELEVENLABS_SPEED) : false;
+				break;
 			case 'published':
 				dirty = newValue === undefined ? false : newValue !== !!oldValue;
 				break;
@@ -1927,7 +1993,12 @@
 					'realtime_vad_idle_timeout_ms',
 					'realtime_voice',
 					'realtime_speed',
-					'realtime_noise_reduction'
+					'realtime_noise_reduction',
+					'elevenlabs_stability',
+					'elevenlabs_similarity_boost',
+					'elevenlabs_use_speaker_boost',
+					'elevenlabs_style',
+					'elevenlabs_speed'
 				]
 			: ['name', 'description', 'instructions'];
 		if (
@@ -2137,6 +2208,21 @@
 				interactionMode === 'voice'
 					? realtimeNoiseReductionValue
 					: (assistant?.realtime_noise_reduction ?? undefined),
+			elevenlabs_stability: isLectureMode
+				? elevenlabsStabilityValue
+				: (assistant?.elevenlabs_stability ?? undefined),
+			elevenlabs_similarity_boost: isLectureMode
+				? elevenlabsSimilarityBoostValue
+				: (assistant?.elevenlabs_similarity_boost ?? undefined),
+			elevenlabs_use_speaker_boost: isLectureMode
+				? elevenlabsUseSpeakerBoostValue
+				: (assistant?.elevenlabs_use_speaker_boost ?? undefined),
+			elevenlabs_style: isLectureMode
+				? elevenlabsStyleValue
+				: (assistant?.elevenlabs_style ?? undefined),
+			elevenlabs_speed: isLectureMode
+				? elevenlabsSpeedValue
+				: (assistant?.elevenlabs_speed ?? undefined),
 			lecture_video_id: isLectureMode ? (selectedLectureVideo?.id ?? undefined) : undefined,
 			voice_id: isLectureMode ? voiceId.trim() : undefined,
 			generation_prompt: isLectureMode ? generationPrompt : undefined,
@@ -2413,7 +2499,8 @@
 				fetch,
 				data.class.id,
 				{
-					voice_id: trimmedVoiceId
+					voice_id: trimmedVoiceId,
+					...elevenlabsVoiceSettingsPayload()
 				},
 				data.isCreating ? undefined : (data.assistantId ?? undefined)
 			);
@@ -2427,7 +2514,11 @@
 			const audioSrc = URL.createObjectURL(response.audio_blob);
 			voiceSampleText = response.sample_text;
 			voiceSampleAudioSrc = audioSrc;
-			setVoiceSampleCacheEntry(trimmedVoiceId, voiceSampleText, voiceSampleAudioSrc);
+			setVoiceSampleCacheEntry(
+				voiceSampleCacheKey(trimmedVoiceId),
+				voiceSampleText,
+				voiceSampleAudioSrc
+			);
 			lastValidatedVoiceId = trimmedVoiceId;
 			happyToast('Voice validated');
 		} catch (error) {
@@ -3942,6 +4033,143 @@
 									disabled={preventEdits || !overwriteManifest}
 									class="font-mono text-xs"
 								/>
+							</div>
+
+							<div class="col-span-2 mb-1">
+								<div class="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+									<div>
+										<div class="text-sm font-medium text-gray-900">ElevenLabs voice settings</div>
+										<Helper class="pb-1"
+											>Fine-tune the generated voice used for spoken lecture chat responses.</Helper
+										>
+									</div>
+									<Button
+										type="button"
+										color="light"
+										class="w-full shrink-0 sm:w-auto"
+										disabled={preventEdits || validatingVoiceId || voiceId.trim().length === 0}
+										onclick={validateLectureVideoVoice}>Preview Voice</Button
+									>
+								</div>
+
+								<div class="grid gap-4 md:grid-cols-2">
+									<div>
+										<div class="flex items-start justify-between gap-4">
+											<div>
+												<Label for="elevenlabs_stability">Stability</Label>
+												<Helper class="pb-1"
+													>Controls how consistent each generation sounds. Lower values can sound
+													more expressive but less predictable, while higher values can sound more
+													steady and restrained.</Helper
+												>
+											</div>
+											<Input
+												id="elevenlabs_stability"
+												name="elevenlabs_stability"
+												type="number"
+												min="0"
+												max="1"
+												step="0.05"
+												bind:value={elevenlabsStabilityValue}
+												disabled={preventEdits}
+												class="w-28 shrink-0"
+											/>
+										</div>
+									</div>
+
+									<div>
+										<div class="flex items-start justify-between gap-4">
+											<div>
+												<Label for="elevenlabs_similarity_boost">Similarity boost</Label>
+												<Helper class="pb-1"
+													>Controls how strongly the generated speech follows the selected voice.
+													Higher values can preserve identity better, but may emphasize flaws from
+													low-quality source audio.</Helper
+												>
+											</div>
+											<Input
+												id="elevenlabs_similarity_boost"
+												name="elevenlabs_similarity_boost"
+												type="number"
+												min="0"
+												max="1"
+												step="0.05"
+												bind:value={elevenlabsSimilarityBoostValue}
+												disabled={preventEdits}
+												class="w-28 shrink-0"
+											/>
+										</div>
+									</div>
+
+									<div>
+										<div class="flex items-start justify-between gap-4">
+											<div>
+												<Label for="elevenlabs_speed">Voice speed</Label>
+												<Helper class="pb-1"
+													>Adjusts speech pace from 0.7x to 1.2x. The default 1.0 leaves the
+													selected voice at its normal speed.</Helper
+												>
+											</div>
+											<Input
+												id="elevenlabs_speed"
+												name="elevenlabs_speed"
+												type="number"
+												min="0.7"
+												max="1.2"
+												step="0.05"
+												bind:value={elevenlabsSpeedValue}
+												disabled={preventEdits}
+												class="w-28 shrink-0"
+											/>
+										</div>
+									</div>
+
+									<div>
+										<div class="flex items-start justify-between gap-4">
+											<div>
+												<Label for="elevenlabs_style">Style exaggeration</Label>
+												<Helper class="pb-1"
+													>Amplifies the voice's original style, which can add latency when raised.
+													<b>We recommend keeping this setting at 0 at all times.</b></Helper
+												>
+											</div>
+											<Input
+												id="elevenlabs_style"
+												name="elevenlabs_style"
+												type="number"
+												min="0"
+												max="1"
+												step="0.05"
+												bind:value={elevenlabsStyleValue}
+												disabled={preventEdits}
+												class="w-28 shrink-0"
+											/>
+										</div>
+									</div>
+								</div>
+
+								<div class="mt-3">
+									<Checkbox
+										id="elevenlabs_use_speaker_boost"
+										name="elevenlabs_use_speaker_boost"
+										disabled={preventEdits}
+										bind:checked={elevenlabsUseSpeakerBoostValue}>Speaker boost</Checkbox
+									>
+									<Helper>Improves speaker similarity at a small latency cost.</Helper>
+								</div>
+
+								{#if validatingVoiceId}
+									<Helper class="pt-3">Generating voice preview...</Helper>
+								{/if}
+								{#if voiceValidationError}
+									<div class="pt-3 text-sm text-red-700">{voiceValidationError}</div>
+								{/if}
+								{#if voiceSampleAudioSrc}
+									<div class="pt-3">
+										<div class="mb-1 text-sm text-gray-700">Sample phrase: "{voiceSampleText}"</div>
+										<audio controls preload="auto" src={voiceSampleAudioSrc} class="w-full"></audio>
+									</div>
+								{/if}
 							</div>
 
 							<hr />

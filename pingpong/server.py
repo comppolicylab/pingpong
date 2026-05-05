@@ -76,6 +76,7 @@ from pingpong.class_credentials import (
     validate_class_credential,
 )
 from pingpong.elevenlabs import (
+    ELEVENLABS_TTS_VOICE_SETTINGS,
     ELEVENLABS_VOICE_SAMPLE_TEXT_HEADER,
     synthesize_elevenlabs_voice_sample,
 )
@@ -7977,6 +7978,7 @@ async def send_message(
             # Skip entirely when the client explicitly opted out of speech.
             tts_voice_id: str | None = None
             tts_api_key: str | None = None
+            tts_voice_settings: dict[str, Any] | None = None
             if (
                 data.generate_speech is not False
                 and thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
@@ -7996,6 +7998,9 @@ async def send_message(
                     if credential and credential.api_key_obj:
                         tts_voice_id = lecture_video.voice_id.strip()
                         tts_api_key = credential.api_key_obj.api_key
+                        tts_voice_settings = _elevenlabs_voice_settings_from_assistant(
+                            asst
+                        )
 
             show_reasoning_summaries = is_supervisor or (
                 asst and not asst.hide_reasoning_summaries
@@ -8126,6 +8131,7 @@ async def send_message(
                 response_safety_identifier=request.state["response_safety_identifier"],
                 tts_voice_id=tts_voice_id,
                 tts_api_key=tts_api_key,
+                tts_voice_settings=tts_voice_settings,
                 user_assistant_messages_only=(
                     lecture_chat_prep.user_assistant_messages_only
                     if lecture_chat_prep is not None
@@ -8717,10 +8723,55 @@ class LectureVideoVoiceValidationError(ValueError):
     pass
 
 
+_ELEVENLABS_VOICE_SETTING_FIELDS = (
+    ("elevenlabs_stability", "stability"),
+    ("elevenlabs_similarity_boost", "similarity_boost"),
+    ("elevenlabs_use_speaker_boost", "use_speaker_boost"),
+    ("elevenlabs_style", "style"),
+    ("elevenlabs_speed", "speed"),
+)
+
+
+def _elevenlabs_voice_settings_from_assistant(
+    assistant: models.Assistant,
+) -> dict[str, Any]:
+    settings: dict[str, Any] = {}
+    for model_field, settings_key in _ELEVENLABS_VOICE_SETTING_FIELDS:
+        value = getattr(assistant, model_field)
+        settings[settings_key] = (
+            value if value is not None else ELEVENLABS_TTS_VOICE_SETTINGS[settings_key]
+        )
+    return settings
+
+
+def _elevenlabs_voice_settings_from_validation_request(
+    body: schemas.ValidateLectureVideoVoiceRequest | schemas.CreateAssistant,
+) -> dict[str, Any]:
+    return {
+        settings_key: getattr(body, model_field)
+        for model_field, settings_key in _ELEVENLABS_VOICE_SETTING_FIELDS
+    }
+
+
+def _elevenlabs_voice_settings_with_request_overrides(
+    assistant: models.Assistant,
+    body: schemas.UpdateAssistant,
+) -> dict[str, Any]:
+    settings = _elevenlabs_voice_settings_from_assistant(assistant)
+    for model_field, settings_key in _ELEVENLABS_VOICE_SETTING_FIELDS:
+        if model_field in body.model_fields_set:
+            value = getattr(body, model_field)
+            if value is not None:
+                settings[settings_key] = value
+    return settings
+
+
 async def _get_lecture_video_voice_sample_or_raise(
     class_id: int,
     request: StateRequest,
     voice_id: str,
+    *,
+    voice_settings: dict[str, Any] | None = None,
 ) -> tuple[str, str, bytes]:
     credential = await models.ClassCredential.get_by_class_id_and_purpose(
         request.state["db"],
@@ -8737,6 +8788,7 @@ async def _get_lecture_video_voice_sample_or_raise(
         return await synthesize_elevenlabs_voice_sample(
             credential.api_key_obj.api_key,
             voice_id,
+            voice_settings=voice_settings,
         )
     except ClassCredentialVoiceValidationError as exc:
         raise LectureVideoVoiceValidationError(str(exc)) from exc
@@ -8746,8 +8798,15 @@ async def validate_lecture_video_voice_id_or_raise(
     class_id: int,
     request: StateRequest,
     voice_id: str,
+    *,
+    voice_settings: dict[str, Any] | None = None,
 ) -> None:
-    await _get_lecture_video_voice_sample_or_raise(class_id, request, voice_id)
+    await _get_lecture_video_voice_sample_or_raise(
+        class_id,
+        request,
+        voice_id,
+        voice_settings=voice_settings,
+    )
 
 
 def _raise_http_for_lecture_video_voice_validation_error(exc: Exception) -> NoReturn:
@@ -8776,13 +8835,20 @@ async def _validate_lecture_video_voice_id(
     class_id: int,
     request: StateRequest,
     voice_id: str,
+    *,
+    voice_settings: dict[str, Any] | None = None,
 ) -> Response:
     try:
         (
             sample_text,
             content_type,
             audio,
-        ) = await _get_lecture_video_voice_sample_or_raise(class_id, request, voice_id)
+        ) = await _get_lecture_video_voice_sample_or_raise(
+            class_id,
+            request,
+            voice_id,
+            voice_settings=voice_settings,
+        )
     except (
         LectureVideoVoiceValidationError,
         ClassCredentialValidationSSLError,
@@ -9012,6 +9078,7 @@ async def validate_class_lecture_video_voice(
         int(class_id),
         request,
         body.voice_id,
+        voice_settings=_elevenlabs_voice_settings_from_validation_request(body),
     )
 
 
@@ -9043,6 +9110,7 @@ async def validate_assistant_lecture_video_voice(
         int(class_id),
         request,
         body.voice_id,
+        voice_settings=_elevenlabs_voice_settings_from_validation_request(body),
     )
 
 
@@ -9473,6 +9541,9 @@ async def create_assistant(
     lecture_video_voice_id_validated = False
     lecture_video_generation_prompt = None
     lecture_video_video_description_duration_ms = None
+    lecture_video_voice_settings = _elevenlabs_voice_settings_from_validation_request(
+        req
+    )
     overwrite_lecture_video_manifest = (
         bool(req.overwrite_manifest)
         if "overwrite_manifest" in req.model_fields_set
@@ -9529,6 +9600,7 @@ async def create_assistant(
                 class_id_int,
                 request,
                 lecture_video_voice_id,
+                voice_settings=lecture_video_voice_settings,
             )
         except (
             LectureVideoVoiceValidationError,
@@ -9682,6 +9754,7 @@ async def create_assistant(
                         class_id_int,
                         request,
                         lecture_video_voice_id,
+                        voice_settings=lecture_video_voice_settings,
                     )
                 except (
                     LectureVideoVoiceValidationError,
@@ -10327,6 +10400,9 @@ async def update_assistant(
     lecture_video_voice_id = None
     lecture_video_generation_prompt = None
     lecture_video_video_description_duration_ms = None
+    lecture_video_voice_settings = _elevenlabs_voice_settings_with_request_overrides(
+        asst, req
+    )
     lecture_video_voice_id_validated = False
     regenerate_requested = bool(req.regenerate_requested)
     overwrite_lecture_video_manifest = (
@@ -10415,6 +10491,7 @@ async def update_assistant(
                 int(class_id),
                 request,
                 lecture_video_voice_id,
+                voice_settings=lecture_video_voice_settings,
             )
         except (
             LectureVideoVoiceValidationError,
@@ -10858,6 +10935,21 @@ async def update_assistant(
     if "realtime_noise_reduction" in req.model_fields_set:
         asst.realtime_noise_reduction = req.realtime_noise_reduction
 
+    if "elevenlabs_stability" in req.model_fields_set:
+        asst.elevenlabs_stability = req.elevenlabs_stability
+
+    if "elevenlabs_similarity_boost" in req.model_fields_set:
+        asst.elevenlabs_similarity_boost = req.elevenlabs_similarity_boost
+
+    if "elevenlabs_use_speaker_boost" in req.model_fields_set:
+        asst.elevenlabs_use_speaker_boost = req.elevenlabs_use_speaker_boost
+
+    if "elevenlabs_style" in req.model_fields_set:
+        asst.elevenlabs_style = req.elevenlabs_style
+
+    if "elevenlabs_speed" in req.model_fields_set:
+        asst.elevenlabs_speed = req.elevenlabs_speed
+
     # Track whether we have an empty vector store to delete
     vector_store_id_to_delete = None
     lecture_video_id_to_delete = None
@@ -11293,6 +11385,7 @@ async def update_assistant(
                         int(class_id),
                         request,
                         lecture_video_voice_id,
+                        voice_settings=lecture_video_voice_settings,
                     )
                 except (
                     LectureVideoVoiceValidationError,

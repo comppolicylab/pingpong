@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import logging
+from collections.abc import Mapping
 from fastapi import UploadFile
 import openai
 import orjson
@@ -164,7 +165,7 @@ from pingpong.now import NowFn, utcnow
 from pingpong.ai_error import get_details_from_api_error
 from pingpong.schemas import CodeInterpreterMessage, DownloadExport
 from pingpong.config import config
-from typing import Dict, Literal, Union, overload
+from typing import Any, Dict, Literal, Union, overload
 from sqlalchemy.ext.asyncio import AsyncSession
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -3549,6 +3550,7 @@ async def run_response(
     response_safety_identifier: str | None = None,
     tts_voice_id: str | None = None,
     tts_api_key: str | None = None,
+    tts_voice_settings: Mapping[str, Any] | None = None,
     user_assistant_messages_only: bool = False,
 ):
     is_canceled = False
@@ -3736,7 +3738,11 @@ async def run_response(
                     assert tts_voice_id is not None
                     tts_client: ElevenLabsStreamingTTS | None = None
                     try:
-                        tts_client = ElevenLabsStreamingTTS(tts_api_key, tts_voice_id)
+                        tts_client = ElevenLabsStreamingTTS(
+                            tts_api_key,
+                            tts_voice_id,
+                            voice_settings=tts_voice_settings,
+                        )
                         await tts_client.connect()
                         return tts_client
                     except asyncio.CancelledError:
@@ -3826,7 +3832,9 @@ async def run_response(
                             assert tts_api_key is not None
                             assert tts_voice_id is not None
                             _tts_client = ElevenLabsStreamingTTS(
-                                tts_api_key, tts_voice_id
+                                tts_api_key,
+                                tts_voice_id,
+                                voice_settings=tts_voice_settings,
                             )
                             await _tts_client.connect()
                         handler.enqueue_audio_started()

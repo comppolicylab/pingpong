@@ -1336,6 +1336,7 @@ async def test_synthesize_elevenlabs_voice_sample_requests_direct_ogg_opus(monke
             stability=0.5,
             use_speaker_boost=True,
             similarity_boost=0.8,
+            style=0.0,
             speed=1.0,
         ),
         "request_options": {"timeout_in_seconds": 15},
@@ -1343,6 +1344,54 @@ async def test_synthesize_elevenlabs_voice_sample_requests_direct_ogg_opus(monke
     assert sample_text == elevenlabs_module.ELEVENLABS_VOICE_VALIDATION_SAMPLE_TEXT
     assert content_type == "audio/ogg"
     assert audio == b"ogg-audio"
+
+
+async def test_synthesize_elevenlabs_voice_sample_forwards_custom_settings(monkeypatch):
+    seen: dict[str, object] = {}
+
+    async def fake_collect_audio_chunks(_audio_stream) -> bytes:
+        return b"ogg-audio"
+
+    def fake_convert(
+        *,
+        voice_id,
+        text,
+        model_id,
+        output_format,
+        voice_settings,
+        request_options=None,
+    ):
+        seen["voice_settings"] = voice_settings
+        return object()
+
+    class FakeClient:
+        def __init__(self, *, api_key):
+            self.text_to_speech = SimpleNamespace(convert=fake_convert)
+
+    monkeypatch.setattr(elevenlabs_module, "AsyncElevenLabs", FakeClient)
+    monkeypatch.setattr(
+        elevenlabs_module, "_collect_audio_chunks", fake_collect_audio_chunks
+    )
+
+    await elevenlabs_module.synthesize_elevenlabs_voice_sample(
+        api_key="elevenlabs-key",
+        voice_id="voice-123",
+        voice_settings={
+            "stability": 0.9,
+            "use_speaker_boost": False,
+            "similarity_boost": 0.4,
+            "style": 0.2,
+            "speed": 1.1,
+        },
+    )
+
+    assert seen["voice_settings"] == elevenlabs_module.VoiceSettings(
+        stability=0.9,
+        use_speaker_boost=False,
+        similarity_boost=0.4,
+        style=0.2,
+        speed=1.1,
+    )
 
 
 @pytest.mark.asyncio
@@ -1431,6 +1480,7 @@ async def test_synthesize_elevenlabs_speech_omits_request_options_without_timeou
             stability=0.5,
             use_speaker_boost=True,
             similarity_boost=0.8,
+            style=0.0,
             speed=1.0,
         ),
         "request_options": None,
@@ -1623,6 +1673,7 @@ async def test_elevenlabs_streaming_tts_sends_realtime_generation_payloads(monke
                 "stability": 0.5,
                 "use_speaker_boost": True,
                 "similarity_boost": 0.8,
+                "style": 0.0,
                 "speed": 1.0,
             },
             "generation_config": {
@@ -1638,6 +1689,52 @@ async def test_elevenlabs_streaming_tts_sends_realtime_generation_payloads(monke
             "flush": True,
         },
     ]
+
+
+async def test_elevenlabs_streaming_tts_sends_custom_voice_settings(monkeypatch):
+    sessions = []
+
+    class FakeWebSocket:
+        def __init__(self):
+            self.sent_json = []
+
+        async def send_json(self, payload):
+            self.sent_json.append(payload)
+
+    class FakeSession:
+        def __init__(self, *, headers):
+            self.websocket = FakeWebSocket()
+            sessions.append(self)
+
+        async def ws_connect(self, url, timeout):
+            return self.websocket
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(elevenlabs_module.aiohttp, "ClientSession", FakeSession)
+
+    tts = elevenlabs_module.ElevenLabsStreamingTTS(
+        "elevenlabs-key",
+        "voice-id",
+        voice_settings={
+            "stability": 0.9,
+            "use_speaker_boost": False,
+            "similarity_boost": 0.4,
+            "style": 0.2,
+            "speed": 1.1,
+        },
+    )
+
+    await tts.connect()
+
+    assert sessions[0].websocket.sent_json[0]["voice_settings"] == {
+        "stability": 0.9,
+        "use_speaker_boost": False,
+        "similarity_boost": 0.4,
+        "style": 0.2,
+        "speed": 1.1,
+    }
 
 
 async def test_validate_elevenlabs_api_key_maps_client_construction_errors_to_unavailable(
