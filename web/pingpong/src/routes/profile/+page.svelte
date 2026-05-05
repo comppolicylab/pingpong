@@ -182,6 +182,34 @@
 			}
 		}
 	};
+
+	$: connectorsByService = new Map<string, api.ConnectorSummary>(
+		(data.connectors ?? []).map((c: api.ConnectorSummary) => [`${c.service}:${c.tenant ?? ''}`, c])
+	);
+
+	const connectedFor = (service: string, tenant: string | null): api.ConnectorSummary | undefined =>
+		connectorsByService.get(`${service}:${tenant ?? ''}`);
+
+	const connectService = async (service: string, tenant: string | null) => {
+		const result = await api.connectConnector(fetch, service, { tenant });
+		const response = api.expandResponse(result);
+		if (response.error || !response.data) {
+			sadToast(response.error?.detail || 'Could not start connect flow');
+			return;
+		}
+		window.location.href = response.data.url;
+	};
+
+	const disconnectService = async (connector: api.ConnectorSummary) => {
+		const result = await api.disconnectConnector(fetch, connector.id);
+		const response = api.expandResponse(result);
+		if (response.error) {
+			sadToast(response.error.detail || 'Could not disconnect');
+		} else {
+			happyToast(`Disconnected ${connector.service}.`, 3000);
+			invalidateAll();
+		}
+	};
 </script>
 
 <div class="relative flex h-full w-full flex-col">
@@ -327,6 +355,106 @@
 				</div>
 			{/if}
 		</div>
+
+		{#if data.availableConnectors && data.availableConnectors.length > 0}
+			<div class="mt-12 mb-4 flex flex-row flex-wrap items-center justify-between gap-y-4">
+				<Heading
+					tag="h2"
+					class="text-dark-blue-40 mr-5 max-w-max shrink-0 font-serif text-3xl font-medium"
+					>Service Connectors</Heading
+				>
+			</div>
+			<div class="flex flex-col gap-4">
+				<P>
+					Connect external services so that PingPong assistants can draw on your course's
+					third-party content (for example, Panopto lecture transcripts). Connections are per-user;
+					you can disconnect at any time.
+				</P>
+				<div class="w-full">
+					<div class="rounded-2xl bg-gray-100 p-6">
+						<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+							{#each data.availableConnectors as def (def.service)}
+								<div class="flex flex-col rounded-xl bg-white p-4 shadow-xs">
+									<div class="mb-3 flex items-center justify-between gap-3">
+										<span class="font-medium">{def.display_name}</span>
+										{#if def.requires_tenant && def.tenants.length === 0}
+											<span class="text-sm text-gray-500">Not configured</span>
+										{/if}
+									</div>
+									{#if !def.requires_tenant}
+										{@const existing = connectedFor(def.service, null)}
+										<div class="flex items-center justify-between gap-3">
+											<span class="text-sm text-gray-600">
+												{existing
+													? `Connected ${dayjs(existing.connected_at).format('MMM D, YYYY')}`
+													: 'Not connected'}
+											</span>
+											{#if existing}
+												<Button
+													pill
+													color="red"
+													size="xs"
+													onclick={() => disconnectService(existing)}
+												>
+													Disconnect
+												</Button>
+											{:else}
+												<Button
+													pill
+													color="blue"
+													size="xs"
+													onclick={() => connectService(def.service, null)}
+												>
+													Connect
+												</Button>
+											{/if}
+										</div>
+									{:else}
+										<div class="flex flex-col gap-2">
+											{#each def.tenants as tenantOpt (tenantOpt.tenant)}
+												{@const existing = connectedFor(def.service, tenantOpt.tenant)}
+												<div class="flex items-center justify-between gap-3">
+													<span class="text-sm">
+														<span class="font-medium">{tenantOpt.tenant_friendly_name}</span>
+														<span class="text-gray-500">
+															{existing
+																? `— connected ${dayjs(existing.connected_at).format('MMM D, YYYY')}`
+																: '— not connected'}
+														</span>
+														{#if existing && existing.status === 'needs_reauth'}
+															<span class="ml-2 text-amber-600">(needs reauth)</span>
+														{/if}
+													</span>
+													{#if existing}
+														<Button
+															pill
+															color="red"
+															size="xs"
+															onclick={() => disconnectService(existing)}
+														>
+															Disconnect
+														</Button>
+													{:else}
+														<Button
+															pill
+															color="blue"
+															size="xs"
+															onclick={() => connectService(def.service, tenantOpt.tenant)}
+														>
+															Connect
+														</Button>
+													{/if}
+												</div>
+											{/each}
+										</div>
+									{/if}
+								</div>
+							{/each}
+						</div>
+					</div>
+				</div>
+			</div>
+		{/if}
 
 		{#if activitySubscription.length > 0}
 			<div class="mt-14 mb-4 flex flex-row flex-wrap items-center justify-between gap-y-4">

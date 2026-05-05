@@ -1331,6 +1331,55 @@ export const getExternalLogins = async (f: Fetcher) => {
 	return await GET<never, ExternalLoginsResponse>(f, 'me/external-logins');
 };
 
+export type ConnectorStatus = 'active' | 'needs_reauth';
+
+export type ConnectorSummary = {
+	id: number;
+	service: string;
+	tenant: string | null;
+	tenant_friendly_name: string | null;
+	connected_at: string;
+	status: ConnectorStatus;
+};
+
+export type ConnectorTenantOption = {
+	tenant: string;
+	tenant_friendly_name: string;
+};
+
+export type ConnectorDefinition = {
+	service: string;
+	display_name: string;
+	icon: string | null;
+	requires_tenant: boolean;
+	tenants: ConnectorTenantOption[];
+};
+
+export type ConnectorsListResponse = {
+	connectors: ConnectorSummary[];
+	available: ConnectorDefinition[];
+};
+
+export const getMyConnectors = async (f: Fetcher) => {
+	return await GET<never, ConnectorsListResponse>(f, 'me/connectors');
+};
+
+export const connectConnector = async (
+	f: Fetcher,
+	service: string,
+	body: { tenant?: string | null }
+) => {
+	return await POST<{ tenant?: string | null }, { url: string }>(
+		f,
+		`connectors/${service}/connect`,
+		body
+	);
+};
+
+export const disconnectConnector = async (f: Fetcher, connectorId: number) => {
+	return await DELETE<never, { status: string }>(f, `me/connectors/${connectorId}`);
+};
+
 /**
  * Information about a summary subscription.
  */
