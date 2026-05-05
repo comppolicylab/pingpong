@@ -423,6 +423,37 @@ class InteractionMode(StrEnum):
     LECTURE_VIDEO = "lecture_video"
 
 
+class RealtimeEagerness(StrEnum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    AUTO = "auto"
+
+
+class RealtimeVadMode(StrEnum):
+    SEMANTIC_VAD = "semantic_vad"
+    SERVER_VAD = "server_vad"
+
+
+class RealtimeNoiseReduction(StrEnum):
+    NEAR_FIELD = "near_field"
+    FAR_FIELD = "far_field"
+    NONE = "none"
+
+
+class RealtimeVoice(StrEnum):
+    ALLOY = "alloy"
+    ASH = "ash"
+    BALLAD = "ballad"
+    CORAL = "coral"
+    ECHO = "echo"
+    SAGE = "sage"
+    SHIMMER = "shimmer"
+    VERSE = "verse"
+    MARIN = "marin"
+    CEDAR = "cedar"
+
+
 class LectureVideoStatus(StrEnum):
     UPLOADED = "uploaded"
     PROCESSING = "processing"
@@ -1020,6 +1051,15 @@ class Assistant(BaseModel):
     temperature: float | None
     verbosity: int | None
     reasoning_effort: int | None
+    realtime_vad_mode: RealtimeVadMode | None = None
+    realtime_eagerness: RealtimeEagerness | None = None
+    realtime_vad_threshold: float | None = None
+    realtime_vad_prefix_padding_ms: int | None = None
+    realtime_vad_silence_duration_ms: int | None = None
+    realtime_vad_idle_timeout_ms: int | None = None
+    realtime_voice: RealtimeVoice | None = None
+    realtime_speed: float | None = None
+    realtime_noise_reduction: RealtimeNoiseReduction | None = None
     class_id: int
     creator_id: int
     locked: bool = False
@@ -1254,6 +1294,15 @@ class CreateAssistant(BaseModel):
     temperature: float | None = Field(None, ge=0.0, le=2.0)
     reasoning_effort: int | None = Field(None, ge=-1, le=2)
     verbosity: int | None = Field(None, ge=0, le=2)
+    realtime_vad_mode: RealtimeVadMode = RealtimeVadMode.SEMANTIC_VAD
+    realtime_eagerness: RealtimeEagerness = RealtimeEagerness.AUTO
+    realtime_vad_threshold: float | None = Field(0.5, ge=0.0, le=1.0)
+    realtime_vad_prefix_padding_ms: int | None = Field(300, ge=0)
+    realtime_vad_silence_duration_ms: int | None = Field(500, ge=0)
+    realtime_vad_idle_timeout_ms: int | None = Field(None, ge=5000, le=30000)
+    realtime_voice: RealtimeVoice = RealtimeVoice.MARIN
+    realtime_speed: float = Field(1.0, ge=0.25, le=1.5)
+    realtime_noise_reduction: RealtimeNoiseReduction = RealtimeNoiseReduction.FAR_FIELD
     tools: list[ToolOption] = Field(default_factory=list)
     lecture_video_id: int | None = None
     lecture_video_manifest: LectureVideoManifest | None = None
@@ -1350,6 +1399,15 @@ class UpdateAssistant(BaseModel):
     temperature: float | None = Field(None, ge=0.0, le=2.0)
     reasoning_effort: int | None = Field(None, ge=-1, le=2)
     verbosity: int | None = Field(None, ge=0, le=2)
+    realtime_vad_mode: RealtimeVadMode | None = None
+    realtime_eagerness: RealtimeEagerness | None = None
+    realtime_vad_threshold: float | None = Field(None, ge=0.0, le=1.0)
+    realtime_vad_prefix_padding_ms: int | None = Field(None, ge=0)
+    realtime_vad_silence_duration_ms: int | None = Field(None, ge=0)
+    realtime_vad_idle_timeout_ms: int | None = Field(None, ge=5000, le=30000)
+    realtime_voice: RealtimeVoice | None = None
+    realtime_speed: float | None = Field(None, ge=0.25, le=1.5)
+    realtime_noise_reduction: RealtimeNoiseReduction | None = None
     tools: list[ToolOption] | None = None
     published: bool | None = None
     use_latex: bool | None = None

@@ -1,6 +1,6 @@
 from functools import wraps
 import logging
-from typing import cast
+from typing import Any, cast
 
 from pingpong import models, schemas
 from pingpong.ai import (
@@ -14,6 +14,94 @@ from .config import config
 
 browser_connection_logger = logging.getLogger("realtime_browser")
 openai_connection_logger = logging.getLogger("realtime_openai")
+
+
+def _coerce_realtime_enum(enum_type, value, default):
+    if value is None:
+        return default
+    if isinstance(value, enum_type):
+        return value
+    return enum_type.__members__.get(value) or enum_type(value)
+
+
+def build_realtime_session(
+    assistant: models.Assistant, conversation_instructions: str
+) -> dict[str, Any]:
+    realtime_vad_mode = _coerce_realtime_enum(
+        schemas.RealtimeVadMode,
+        assistant.realtime_vad_mode,
+        schemas.RealtimeVadMode.SEMANTIC_VAD,
+    )
+    realtime_eagerness = _coerce_realtime_enum(
+        schemas.RealtimeEagerness,
+        assistant.realtime_eagerness,
+        schemas.RealtimeEagerness.AUTO,
+    )
+    realtime_voice = _coerce_realtime_enum(
+        schemas.RealtimeVoice,
+        assistant.realtime_voice,
+        schemas.RealtimeVoice.MARIN,
+    )
+    realtime_noise_reduction = _coerce_realtime_enum(
+        schemas.RealtimeNoiseReduction,
+        assistant.realtime_noise_reduction,
+        schemas.RealtimeNoiseReduction.FAR_FIELD,
+    )
+    turn_detection: dict[str, Any] = {
+        "create_response": True,
+        "type": realtime_vad_mode.value,
+        "interrupt_response": False,
+    }
+    if realtime_vad_mode == schemas.RealtimeVadMode.SEMANTIC_VAD:
+        turn_detection["eagerness"] = realtime_eagerness.value
+    else:
+        turn_detection["threshold"] = (
+            assistant.realtime_vad_threshold
+            if assistant.realtime_vad_threshold is not None
+            else 0.5
+        )
+        turn_detection["prefix_padding_ms"] = (
+            assistant.realtime_vad_prefix_padding_ms
+            if assistant.realtime_vad_prefix_padding_ms is not None
+            else 300
+        )
+        turn_detection["silence_duration_ms"] = (
+            assistant.realtime_vad_silence_duration_ms
+            if assistant.realtime_vad_silence_duration_ms is not None
+            else 500
+        )
+        if assistant.realtime_vad_idle_timeout_ms is not None:
+            turn_detection["idle_timeout_ms"] = assistant.realtime_vad_idle_timeout_ms
+    noise_reduction = (
+        None
+        if realtime_noise_reduction == schemas.RealtimeNoiseReduction.NONE
+        else {"type": realtime_noise_reduction.value}
+    )
+    return {
+        "type": "realtime",
+        "audio": {
+            "input": {
+                "noise_reduction": noise_reduction,
+                "transcription": {
+                    "model": "whisper-1",
+                    "language": "en",
+                },
+                "turn_detection": turn_detection,
+            },
+            "output": {
+                "voice": realtime_voice.value,
+                "speed": (
+                    assistant.realtime_speed
+                    if assistant.realtime_speed is not None
+                    else 1.0
+                ),
+            },
+        },
+        "instructions": conversation_instructions,
+        "output_modalities": ["audio"],
+        "tool_choice": "none",
+        "tools": [],
+    }
 
 
 def ws_auth_middleware(func):
@@ -194,36 +282,13 @@ def ws_with_realtime_connection(func):
         conversation_instructions: str = browser_connection.state[
             "conversation_instructions"
         ]
+        session = build_realtime_session(assistant, conversation_instructions)
         try:
             async with openai_client.realtime.connect(
                 model=assistant.model,
             ) as realtime_connection:
                 browser_connection.state["realtime_connection"] = realtime_connection
-                await realtime_connection.session.update(
-                    session={
-                        "type": "realtime",
-                        "audio": {
-                            "input": {
-                                "noise_reduction": {"type": "far_field"},
-                                "transcription": {
-                                    "model": "whisper-1",
-                                    "language": "en",
-                                },
-                                "turn_detection": {
-                                    "create_response": True,
-                                    "eagerness": "high",
-                                    "type": "semantic_vad",
-                                    "interrupt_response": False,
-                                },
-                            },
-                            "output": {"voice": "alloy", "speed": 1.15},
-                        },
-                        "instructions": conversation_instructions,
-                        "output_modalities": ["audio"],
-                        "tool_choice": "none",
-                        "tools": [],
-                    }
-                )
+                await realtime_connection.session.update(session=session)
                 if assistant.assistant_should_message_first:
                     await realtime_connection.response.create()
                 await func(browser_connection, *args, **kwargs)

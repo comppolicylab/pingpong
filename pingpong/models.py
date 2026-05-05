@@ -3932,6 +3932,21 @@ class Assistant(Base):
     temperature = Column(Float, nullable=True)
     reasoning_effort = Column(Integer, nullable=True)
     verbosity = Column(Integer, nullable=True)
+    realtime_vad_mode = Column(SQLEnum(schemas.RealtimeVadMode), nullable=True)
+    realtime_eagerness = Column(
+        SQLEnum(schemas.RealtimeEagerness),
+        nullable=True,
+        default=schemas.RealtimeEagerness.AUTO,
+    )
+    realtime_vad_threshold = Column(Float, nullable=True)
+    realtime_vad_prefix_padding_ms = Column(Integer, nullable=True)
+    realtime_vad_silence_duration_ms = Column(Integer, nullable=True)
+    realtime_vad_idle_timeout_ms = Column(Integer, nullable=True)
+    realtime_voice = Column(SQLEnum(schemas.RealtimeVoice), nullable=True)
+    realtime_speed = Column(Float, nullable=True)
+    realtime_noise_reduction = Column(
+        SQLEnum(schemas.RealtimeNoiseReduction), nullable=True
+    )
     assistant_should_message_first = Column(Boolean, server_default="false")
     should_record_user_information = Column(Boolean, server_default="false")
     disable_prompt_randomization = Column(
@@ -4179,6 +4194,19 @@ class Assistant(Base):
         params.pop("lecture_video_id", None)
         params.pop("lecture_video_manifest", None)
         params.pop("voice_id", None)
+        if data.interaction_mode != schemas.InteractionMode.VOICE:
+            for field in (
+                "realtime_vad_mode",
+                "realtime_eagerness",
+                "realtime_vad_threshold",
+                "realtime_vad_prefix_padding_ms",
+                "realtime_vad_silence_duration_ms",
+                "realtime_vad_idle_timeout_ms",
+                "realtime_voice",
+                "realtime_speed",
+                "realtime_noise_reduction",
+            ):
+                params[field] = None
         params["tools"] = json.dumps(params["tools"])
         params["class_id"] = int(class_id)
         params["creator_id"] = int(user_id)
