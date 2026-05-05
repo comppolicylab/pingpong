@@ -8735,14 +8735,13 @@ _ELEVENLABS_VOICE_SETTING_FIELDS = (
 def _elevenlabs_voice_settings_from_assistant(
     assistant: models.Assistant,
 ) -> dict[str, Any]:
-    return {
-        settings_key: (
-            value
-            if (value := getattr(assistant, model_field)) is not None
-            else ELEVENLABS_TTS_VOICE_SETTINGS[settings_key]
+    settings: dict[str, Any] = {}
+    for model_field, settings_key in _ELEVENLABS_VOICE_SETTING_FIELDS:
+        value = getattr(assistant, model_field)
+        settings[settings_key] = (
+            value if value is not None else ELEVENLABS_TTS_VOICE_SETTINGS[settings_key]
         )
-        for model_field, settings_key in _ELEVENLABS_VOICE_SETTING_FIELDS
-    }
+    return settings
 
 
 def _elevenlabs_voice_settings_from_validation_request(
@@ -8761,7 +8760,9 @@ def _elevenlabs_voice_settings_with_request_overrides(
     settings = _elevenlabs_voice_settings_from_assistant(assistant)
     for model_field, settings_key in _ELEVENLABS_VOICE_SETTING_FIELDS:
         if model_field in body.model_fields_set:
-            settings[settings_key] = getattr(body, model_field)
+            value = getattr(body, model_field)
+            if value is not None:
+                settings[settings_key] = value
     return settings
 
 

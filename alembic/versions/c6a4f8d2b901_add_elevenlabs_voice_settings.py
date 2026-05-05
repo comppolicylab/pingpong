@@ -37,9 +37,9 @@ def _backfill_elevenlabs_voice_settings() -> None:
         sa.column("elevenlabs_style", sa.Float()),
         sa.column("elevenlabs_speed", sa.Float()),
     )
-    bind = op.get_bind()
-    rows = bind.execute(
-        sa.select(table.c.id).where(
+    op.get_bind().execute(
+        table.update()
+        .where(
             sa.and_(
                 table.c.interaction_mode == "LECTURE_VIDEO",
                 sa.or_(
@@ -51,19 +51,14 @@ def _backfill_elevenlabs_voice_settings() -> None:
                 ),
             )
         )
-    ).fetchall()
-    for row in rows:
-        bind.execute(
-            table.update()
-            .where(table.c.id == row.id)
-            .values(
-                elevenlabs_stability=DEFAULT_ELEVENLABS_STABILITY,
-                elevenlabs_similarity_boost=DEFAULT_ELEVENLABS_SIMILARITY_BOOST,
-                elevenlabs_use_speaker_boost=DEFAULT_ELEVENLABS_USE_SPEAKER_BOOST,
-                elevenlabs_style=DEFAULT_ELEVENLABS_STYLE,
-                elevenlabs_speed=DEFAULT_ELEVENLABS_SPEED,
-            )
+        .values(
+            elevenlabs_stability=DEFAULT_ELEVENLABS_STABILITY,
+            elevenlabs_similarity_boost=DEFAULT_ELEVENLABS_SIMILARITY_BOOST,
+            elevenlabs_use_speaker_boost=DEFAULT_ELEVENLABS_USE_SPEAKER_BOOST,
+            elevenlabs_style=DEFAULT_ELEVENLABS_STYLE,
+            elevenlabs_speed=DEFAULT_ELEVENLABS_SPEED,
         )
+    )
 
 
 def upgrade() -> None:

@@ -998,6 +998,7 @@ async def test_send_message_forwards_assistant_elevenlabs_settings_to_tts(
         assistant.elevenlabs_use_speaker_boost = False
         assistant.elevenlabs_style = 0.2
         assistant.elevenlabs_speed = 1.1
+        assistant.creator_id = 123
         await create_lecture_video_copy_credentials(session, class_.id)
         await session.commit()
 
@@ -7994,6 +7995,77 @@ async def test_update_assistant_rejects_out_of_range_elevenlabs_speed(
     )
 
     assert response.status_code == 422
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_edit", "assistant:1"),
+        ("user:123", "can_create_assistants", "class:1"),
+        ("user:123", "admin", "class:1"),
+    ]
+)
+async def test_update_assistant_voice_settings_ignore_none_overrides_for_validation(
+    api, db, institution, valid_user_token, monkeypatch
+):
+    patch_lecture_video_model_list(monkeypatch)
+
+    async with db.async_session() as session:
+        class_, lecture_video, assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+        assistant.elevenlabs_stability = 0.9
+        assistant.elevenlabs_similarity_boost = 0.4
+        assistant.elevenlabs_use_speaker_boost = False
+        assistant.elevenlabs_style = 0.2
+        assistant.elevenlabs_speed = 1.1
+        assistant.creator_id = 123
+        await create_lecture_video_copy_credentials(session, class_.id)
+        await session.commit()
+
+    synthesize_mock = AsyncMock(
+        return_value=("Sample phrase", "audio/ogg", b"fake-audio")
+    )
+    monkeypatch.setattr(
+        server_module,
+        "synthesize_elevenlabs_voice_sample",
+        synthesize_mock,
+    )
+
+    response = api.put(
+        f"/api/v1/class/{class_.id}/assistant/1",
+        json={
+            "lecture_video_id": lecture_video.id,
+            "lecture_video_manifest": lecture_video_manifest(
+                question_text="Updated question?"
+            ),
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "overwrite_manifest": True,
+            "elevenlabs_stability": None,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    synthesize_mock.assert_awaited_with(
+        "shared-elevenlabs-key",
+        DEFAULT_LECTURE_VIDEO_VOICE_ID,
+        voice_settings={
+            "stability": 0.9,
+            "similarity_boost": 0.4,
+            "use_speaker_boost": False,
+            "style": 0.2,
+            "speed": 1.1,
+        },
+    )
+
+    async with db.async_session() as session:
+        refreshed = await session.get(models.Assistant, 1)
+
+    assert refreshed is not None
+    assert refreshed.elevenlabs_stability is None
 
 
 @with_user(123)

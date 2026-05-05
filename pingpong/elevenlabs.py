@@ -24,6 +24,13 @@ from pingpong.class_credential_validation import (
     ClassCredentialValidationUnavailableError,
     ClassCredentialVoiceValidationError,
 )
+from pingpong.elevenlabs_defaults import (
+    DEFAULT_ELEVENLABS_SIMILARITY_BOOST,
+    DEFAULT_ELEVENLABS_SPEED,
+    DEFAULT_ELEVENLABS_STABILITY,
+    DEFAULT_ELEVENLABS_STYLE,
+    DEFAULT_ELEVENLABS_USE_SPEAKER_BOOST,
+)
 from pingpong.log_utils import sanitize_for_log
 
 logger = logging.getLogger(__name__)
@@ -37,11 +44,11 @@ ELEVENLABS_VOICE_SAMPLE_TEXT_HEADER = "X-PingPong-Voice-Sample-Text"
 ELEVENLABS_TTS_MODEL = "eleven_flash_v2_5"
 ELEVENLABS_TTS_VOICE_SETTINGS: Final[Mapping[str, Any]] = MappingProxyType(
     {
-        "stability": 0.5,
-        "use_speaker_boost": True,
-        "similarity_boost": 0.8,
-        "style": 0.0,
-        "speed": 1.0,
+        "stability": DEFAULT_ELEVENLABS_STABILITY,
+        "use_speaker_boost": DEFAULT_ELEVENLABS_USE_SPEAKER_BOOST,
+        "similarity_boost": DEFAULT_ELEVENLABS_SIMILARITY_BOOST,
+        "style": DEFAULT_ELEVENLABS_STYLE,
+        "speed": DEFAULT_ELEVENLABS_SPEED,
     }
 )
 ELEVENLABS_STREAMING_TTS_CONNECT_TIMEOUT = aiohttp.ClientWSTimeout(

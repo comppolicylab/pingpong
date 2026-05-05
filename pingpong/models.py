@@ -4212,6 +4212,15 @@ class Assistant(Base):
                 "realtime_noise_reduction",
             ):
                 params[field] = None
+        if data.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
+            for field in (
+                "elevenlabs_stability",
+                "elevenlabs_similarity_boost",
+                "elevenlabs_use_speaker_boost",
+                "elevenlabs_style",
+                "elevenlabs_speed",
+            ):
+                params[field] = None
         params["tools"] = json.dumps(params["tools"])
         params["class_id"] = int(class_id)
         params["creator_id"] = int(user_id)

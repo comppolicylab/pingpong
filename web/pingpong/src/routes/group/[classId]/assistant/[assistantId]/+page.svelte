@@ -4036,10 +4036,19 @@
 							</div>
 
 							<div class="col-span-2 mb-1">
-								<div class="mb-3">
-									<div class="text-sm font-medium text-gray-900">ElevenLabs voice settings</div>
-									<Helper class="pb-1"
-										>Fine-tune the generated voice used for spoken lecture chat responses.</Helper
+								<div class="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+									<div>
+										<div class="text-sm font-medium text-gray-900">ElevenLabs voice settings</div>
+										<Helper class="pb-1"
+											>Fine-tune the generated voice used for spoken lecture chat responses.</Helper
+										>
+									</div>
+									<Button
+										type="button"
+										color="light"
+										class="w-full shrink-0 sm:w-auto"
+										disabled={preventEdits || validatingVoiceId || voiceId.trim().length === 0}
+										onclick={validateLectureVideoVoice}>Preview Voice</Button
 									>
 								</div>
 
@@ -4148,6 +4157,19 @@
 									>
 									<Helper>Improves speaker similarity at a small latency cost.</Helper>
 								</div>
+
+								{#if validatingVoiceId}
+									<Helper class="pt-3">Generating voice preview...</Helper>
+								{/if}
+								{#if voiceValidationError}
+									<div class="pt-3 text-sm text-red-700">{voiceValidationError}</div>
+								{/if}
+								{#if voiceSampleAudioSrc}
+									<div class="pt-3">
+										<div class="mb-1 text-sm text-gray-700">Sample phrase: "{voiceSampleText}"</div>
+										<audio controls preload="auto" src={voiceSampleAudioSrc} class="w-full"></audio>
+									</div>
+								{/if}
 							</div>
 
 							<hr />
