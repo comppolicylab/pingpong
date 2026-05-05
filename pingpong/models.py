@@ -3947,6 +3947,11 @@ class Assistant(Base):
     realtime_noise_reduction = Column(
         SQLEnum(schemas.RealtimeNoiseReduction), nullable=True
     )
+    elevenlabs_stability = Column(Float, nullable=True)
+    elevenlabs_similarity_boost = Column(Float, nullable=True)
+    elevenlabs_use_speaker_boost = Column(Boolean, nullable=True)
+    elevenlabs_style = Column(Float, nullable=True)
+    elevenlabs_speed = Column(Float, nullable=True)
     assistant_should_message_first = Column(Boolean, server_default="false")
     should_record_user_information = Column(Boolean, server_default="false")
     disable_prompt_randomization = Column(

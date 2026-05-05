@@ -40,6 +40,7 @@ ELEVENLABS_TTS_VOICE_SETTINGS: Final[Mapping[str, Any]] = MappingProxyType(
         "stability": 0.5,
         "use_speaker_boost": True,
         "similarity_boost": 0.8,
+        "style": 0.0,
         "speed": 1.0,
     }
 )
@@ -103,12 +104,15 @@ def _is_invalid_elevenlabs_voice_error(exc: ElevenLabsApiError) -> bool:
 async def synthesize_elevenlabs_voice_sample(
     api_key: str,
     voice_id: str,
+    *,
+    voice_settings: Mapping[str, Any] | None = None,
 ) -> tuple[str, str, bytes]:
     try:
         content_type, audio = await synthesize_elevenlabs_speech(
             api_key,
             voice_id,
             ELEVENLABS_VOICE_VALIDATION_SAMPLE_TEXT,
+            voice_settings=voice_settings,
             timeout_seconds=15,
         )
     except ClassCredentialValidationSSLError as exc:
@@ -133,6 +137,7 @@ async def synthesize_elevenlabs_speech(
     voice_id: str,
     text: str,
     *,
+    voice_settings: Mapping[str, Any] | None = None,
     timeout_seconds: int | None = None,
 ) -> tuple[str, bytes]:
     safe_voice_id = sanitize_for_log(voice_id)
@@ -149,7 +154,13 @@ async def synthesize_elevenlabs_speech(
                 text=text,
                 model_id=ELEVENLABS_TTS_MODEL,
                 output_format=ELEVENLABS_VOICE_VALIDATION_OUTPUT_FORMAT,
-                voice_settings=VoiceSettings(**ELEVENLABS_TTS_VOICE_SETTINGS),
+                voice_settings=VoiceSettings(
+                    **(
+                        ELEVENLABS_TTS_VOICE_SETTINGS
+                        if voice_settings is None
+                        else voice_settings
+                    )
+                ),
                 request_options=request_options,
             ),
         )
@@ -564,11 +575,15 @@ class ElevenLabsStreamingTTS:
         *,
         model_id: str = ELEVENLABS_STREAMING_TTS_MODEL,
         output_format: str = ELEVENLABS_STREAMING_TTS_OUTPUT_FORMAT,
+        voice_settings: Mapping[str, Any] | None = None,
     ) -> None:
         self._api_key = api_key
         self._voice_id = voice_id
         self._model_id = model_id
         self._output_format = output_format
+        self._voice_settings = dict(
+            ELEVENLABS_TTS_VOICE_SETTINGS if voice_settings is None else voice_settings
+        )
         self._session: aiohttp.ClientSession | None = None
         self._ws: aiohttp.ClientWebSocketResponse | None = None
 
@@ -595,7 +610,7 @@ class ElevenLabsStreamingTTS:
                 {
                     "text": " ",
                     "try_trigger_generation": True,
-                    "voice_settings": dict(ELEVENLABS_TTS_VOICE_SETTINGS),
+                    "voice_settings": self._voice_settings,
                     "generation_config": {
                         "chunk_length_schedule": (
                             ELEVENLABS_STREAMING_TTS_CHUNK_LENGTH_SCHEDULE
