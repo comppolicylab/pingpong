@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { CheckOutline } from 'flowbite-svelte-icons';
-	import { tick, type Snippet } from 'svelte';
+	import { type Snippet } from 'svelte';
 
 	type QuestionOption = {
 		id: number;
@@ -35,7 +35,7 @@
 	type Props =
 		| (BaseProps & {
 				state: 'answering';
-				onselectOption: (optionId: number) => void;
+				onselectOption: (optionId: number) => void | Promise<void>;
 		  })
 		| (BaseProps & {
 				state: 'feedback' | 'answered';
@@ -58,8 +58,7 @@
 		headerTrailing
 	}: Props = $props();
 
-	let pendingOptionId: number | null = $state(null);
-	let checkButton: HTMLButtonElement | null = $state(null);
+	let submittingOptionId: number | null = $state(null);
 
 	const cardClass = 'rounded-lg border border-slate-200 bg-white p-4';
 	const questionLabelClass = 'text-xs font-semibold uppercase tracking-widest text-slate-400';
@@ -109,19 +108,19 @@
 		return String.fromCharCode(65 + index);
 	}
 
-	async function selectPendingOption(optionId: number) {
-		pendingOptionId = optionId;
-		await tick();
-		checkButton?.scrollIntoView({ block: 'end', behavior: 'smooth' });
-	}
+	async function submitOption(optionId: number) {
+		if (cardState !== 'answering' || answeringDisabled || submittingOptionId !== null) return;
+		if (!onselectOption) {
+			throw new Error('LectureVideoQuestionCard requires onselectOption when answering');
+		}
 
-	function handleCheck() {
-		if (cardState === 'answering' && pendingOptionId !== null) {
-			if (!onselectOption) {
-				throw new Error('LectureVideoQuestionCard requires onselectOption when answering');
+		submittingOptionId = optionId;
+		try {
+			await onselectOption(optionId);
+		} finally {
+			if (cardState === 'answering') {
+				submittingOptionId = null;
 			}
-			onselectOption(pendingOptionId);
-			pendingOptionId = null;
 		}
 	}
 
@@ -171,7 +170,8 @@
 			{@render questionHeader('mb-4')}
 			<div class="border-b border-slate-200">
 				{#each options as option, index (option.id)}
-					{@const isSelected = pendingOptionId === option.id}
+					{@const isSelected = submittingOptionId === option.id}
+					{@const answerDisabled = answeringDisabled || submittingOptionId !== null}
 					<div class="group/option-row relative">
 						<span
 							class="pointer-events-none absolute inset-x-0 -top-px z-0 h-px bg-slate-200 transition-all group-hover/option-row:z-20 group-hover/option-row:h-0.5 group-hover/option-row:bg-slate-400"
@@ -181,15 +181,15 @@
 						></span>
 						<button
 							type="button"
-							class="{answerOptionButtonClass(answeringDisabled)} relative z-10"
-							disabled={answeringDisabled}
+							class="{answerOptionButtonClass(answerDisabled)} relative z-10"
+							disabled={answerDisabled}
 							aria-pressed={isSelected}
-							onclick={() => selectPendingOption(option.id)}
+							onclick={() => submitOption(option.id)}
 						>
 							<span
 								class="flex size-6 shrink-0 items-center justify-center rounded-full border-2 text-[10px] leading-none font-semibold {answerOptionMarkerClass(
 									isSelected,
-									answeringDisabled
+									answerDisabled
 								)}"
 							>
 								{optionLabel(index)}
@@ -201,16 +201,6 @@
 					</div>
 				{/each}
 			</div>
-			{#if pendingOptionId !== null}
-				<button
-					bind:this={checkButton}
-					type="button"
-					class="{actionButtonClass} cursor-pointer bg-blue-600 text-white hover:bg-blue-700"
-					onclick={handleCheck}
-				>
-					Check
-				</button>
-			{/if}
 		</div>
 	{:else}
 		<div class={cardClass}>

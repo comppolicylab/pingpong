@@ -56,7 +56,7 @@
 		showContinue?: boolean;
 		continueDisabled?: boolean;
 		scrollToQuestionId: number | null;
-		onselectOption: (optionId: number) => void;
+		onselectOption: (optionId: number) => void | Promise<void>;
 		oncontinue?: () => void;
 		onscrollcomplete: () => void;
 	} = $props();
