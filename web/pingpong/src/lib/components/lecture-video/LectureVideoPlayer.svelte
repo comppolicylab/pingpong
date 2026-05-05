@@ -86,6 +86,7 @@
 		disabled = false,
 		manualPlaybackPrompt = false,
 		allowFullSeek = false,
+		maxSeekOffsetMs = null,
 		activeQuestionIds = null,
 		furthestOffsetMs = null,
 		videoElement = $bindable(null),
@@ -112,6 +113,7 @@
 		disabled?: boolean;
 		manualPlaybackPrompt?: boolean;
 		allowFullSeek?: boolean;
+		maxSeekOffsetMs?: number | null;
 		activeQuestionIds?: number[] | null;
 		furthestOffsetMs?: number | null;
 		videoElement?: HTMLVideoElement | null;
@@ -179,8 +181,13 @@
 		draggingSeek ? (dragPreviewOffsetMs ?? currentTimeMs) : currentTimeMs
 	);
 	let progress = $derived(durationMs > 0 ? (effectiveOffsetMs / durationMs) * 100 : 0);
-	let seekLimitOffsetMs = $derived(
+	let unboundedSeekLimitOffsetMs = $derived(
 		allowFullSeek && durationMs > 0 ? durationMs : Math.max(currentTimeMs, furthestOffsetMs ?? 0)
+	);
+	let seekLimitOffsetMs = $derived(
+		maxSeekOffsetMs == null
+			? unboundedSeekLimitOffsetMs
+			: Math.min(unboundedSeekLimitOffsetMs, maxSeekOffsetMs)
 	);
 	let seekLimitProgress = $derived(
 		durationMs > 0 ? Math.min((seekLimitOffsetMs / durationMs) * 100, 100) : 0
@@ -253,6 +260,7 @@
 			: '--:-- / --:--'
 	);
 	let titleText = $derived(displayTitle.trim() || 'Lecture Video');
+	let questionControlsLocked = $derived(questionPendingControls && maxSeekOffsetMs == null);
 
 	function markerDisplayLabel(marker: QuestionMarker): string {
 		const markerNumber = markerNumberById.get(marker.id);
@@ -561,7 +569,7 @@
 	}
 
 	function togglePlayPause() {
-		if (disabled || questionPendingControls || !videoElement) return;
+		if (disabled || questionControlsLocked || !videoElement) return;
 		if (endedPlayback) {
 			setMainVideoCurrentTime(0);
 			void videoElement.play().catch(() => {});
@@ -662,7 +670,7 @@
 	}
 
 	function getSeekDetails(clientX: number, track: HTMLDivElement) {
-		if (disabled || questionPendingControls || !videoElement || durationMs <= 0) return;
+		if (disabled || questionControlsLocked || !videoElement || durationMs <= 0) return;
 
 		const rect = track.getBoundingClientRect();
 		const pointerOffsetPx = clamp(clientX - rect.left, 0, rect.width);
@@ -837,7 +845,7 @@
 	}
 
 	function previewSeek(offsetMs: number) {
-		if (disabled || questionPendingControls) return;
+		if (disabled || questionControlsLocked) return;
 		dragPreviewOffsetMs = offsetMs;
 	}
 
@@ -862,14 +870,14 @@
 	}
 
 	function commitSeek(offsetMs: number, fromOffsetMs: number) {
-		if (disabled || questionPendingControls || !videoElement) return;
+		if (disabled || questionControlsLocked || !videoElement) return;
 		setMainVideoCurrentTime(offsetMs);
 		if (durationMs > 0 && offsetMs >= durationMs) return;
 		onseek?.(offsetMs, fromOffsetMs);
 	}
 
 	function handleSeekPointerDown(event: PointerEvent) {
-		if (event.button !== 0 || disabled || questionPendingControls) return;
+		if (event.button !== 0 || disabled || questionControlsLocked) return;
 
 		const track = event.currentTarget;
 		if (!(track instanceof HTMLDivElement) || !videoElement) return;
@@ -895,7 +903,7 @@
 	function handleSeekPointerMove(event: PointerEvent) {
 		const track = event.currentTarget;
 		if (!(track instanceof HTMLDivElement)) return;
-		if (disabled || questionPendingControls) {
+		if (disabled || questionControlsLocked) {
 			if (draggingSeek) {
 				cancelSeekInteraction(track, event.pointerId, { syncToPlayback: true });
 			}
@@ -923,7 +931,7 @@
 	function finishSeekDrag(event: PointerEvent) {
 		const track = event.currentTarget;
 		if (!(track instanceof HTMLDivElement)) return;
-		if (disabled || questionPendingControls) {
+		if (disabled || questionControlsLocked) {
 			cancelSeekInteraction(track, event.pointerId, { syncToPlayback: true });
 			return;
 		}
@@ -946,7 +954,7 @@
 	function cancelSeekDrag(event: PointerEvent) {
 		const track = event.currentTarget;
 		if (!(track instanceof HTMLDivElement)) return;
-		if (disabled || questionPendingControls) {
+		if (disabled || questionControlsLocked) {
 			cancelSeekInteraction(track, event.pointerId, { syncToPlayback: true });
 			return;
 		}
@@ -1442,7 +1450,7 @@
 					</div>
 					<div class="relative mt-1.5 flex items-center gap-2">
 						<div
-							class="shrink-0 rounded-full bg-black/30 p-1 {questionPendingControls
+							class="shrink-0 rounded-full bg-black/30 p-1 {questionControlsLocked
 								? 'pointer-events-none invisible'
 								: 'pointer-events-auto'}"
 						>
@@ -1466,7 +1474,7 @@
 						</div>
 						<!-- svelte-ignore a11y_no_static_element_interactions -->
 						<div
-							class="relative shrink-0 rounded-full bg-black/30 p-1 {questionPendingControls
+							class="relative shrink-0 rounded-full bg-black/30 p-1 {questionControlsLocked
 								? 'pointer-events-none invisible'
 								: 'pointer-events-auto'}"
 							onmouseenter={() => {
@@ -1535,7 +1543,7 @@
 							</div>
 						</div>
 						<div
-							class="shrink-0 rounded-full bg-black/30 p-1 {questionPendingControls
+							class="shrink-0 rounded-full bg-black/30 p-1 {questionControlsLocked
 								? 'pointer-events-none invisible'
 								: 'pointer-events-auto'}"
 						>

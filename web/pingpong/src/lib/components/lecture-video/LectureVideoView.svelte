@@ -187,12 +187,20 @@
 		return state === 'completed';
 	}
 
+	function isAwaitingAnswerSession(state: LectureVideoSessionState): boolean {
+		return state === 'awaiting_answer';
+	}
+
 	function allowsPlaybackInteraction(state: LectureVideoSessionState): boolean {
 		return state === 'playing' || state === 'completed';
 	}
 
 	function isDefinedNumber(id: number | null | undefined): id is number {
 		return id != null;
+	}
+
+	function getQuestionStopOffsetMs(question: LectureVideoQuestionPrompt | null): number | null {
+		return question?.stop_offset_ms ?? null;
 	}
 
 	function getActiveQuestionIds(
@@ -245,6 +253,18 @@
 	let hasQuestionPrompt = $derived(hasVisibleQuestionPrompt(sessionState));
 	let isCompleted = $derived(isCompletedSession(sessionState));
 	let visibleCurrentQuestion = $derived(hasQuestionPrompt ? currentQuestion : null);
+	let questionReviewPlaybackAllowed = $derived(
+		isAwaitingAnswerSession(sessionState) &&
+			questionPlaybackLocked &&
+			currentQuestion != null &&
+			!playerDisabled
+	);
+	let questionReviewSeekLimitMs = $derived(
+		questionReviewPlaybackAllowed ? getQuestionStopOffsetMs(currentQuestion) : null
+	);
+	let playerInteractionDisabled = $derived(
+		!canParticipate || (playbackLocked && !questionReviewPlaybackAllowed)
+	);
 	let hasMobileChecksPanel = $derived(true);
 	let hasMobileChatPanel = $derived(chatAvailable);
 	let activeQuestionIds = $derived(
@@ -1334,6 +1354,15 @@
 	}
 
 	function handleTimeUpdate() {
+		if (questionReviewPlaybackAllowed && currentQuestion) {
+			if (currentTimeMs >= currentQuestion.stop_offset_ms) {
+				suppressPauseInteraction = true;
+				setVideoPosition(currentQuestion.stop_offset_ms);
+				videoElement?.pause();
+			}
+			return;
+		}
+
 		if (sessionState !== 'playing' || !currentQuestion || playerDisabled) return;
 		if (answeredQuestions.has(currentQuestion.id)) return;
 
@@ -1382,6 +1411,13 @@
 		clearPendingVideoRetry();
 		dispatch('playbackresumed');
 		if (!videoElement) return;
+		if (questionReviewPlaybackAllowed) {
+			if (currentQuestion && currentTimeMs >= currentQuestion.stop_offset_ms) {
+				suppressPauseInteraction = true;
+				videoElement.pause();
+			}
+			return;
+		}
 		if (playbackLocked) {
 			suppressPauseInteraction = true;
 			videoElement.pause();
@@ -1904,10 +1940,11 @@
 							startOffsetMs={initialStartOffsetMs}
 							{questionMarkers}
 							{subtitleText}
-							disabled={!canParticipate || playbackLocked}
+							disabled={playerInteractionDisabled}
 							{activeQuestionIds}
 							{furthestOffsetMs}
 							allowFullSeek={isCompleted && canParticipate}
+							maxSeekOffsetMs={questionReviewSeekLimitMs}
 							manualPlaybackPrompt={playbackRequiresManualStart}
 							bind:videoElement
 							bind:currentTimeMs
