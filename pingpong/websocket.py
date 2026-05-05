@@ -16,6 +16,14 @@ browser_connection_logger = logging.getLogger("realtime_browser")
 openai_connection_logger = logging.getLogger("realtime_openai")
 
 
+def _coerce_realtime_enum(enum_type, value, default):
+    if value is None:
+        return default
+    if isinstance(value, enum_type):
+        return value
+    return enum_type.__members__.get(value) or enum_type(value)
+
+
 def ws_auth_middleware(func):
     @wraps(func)
     async def wrapper(websocket: StateWebSocket, *args, **kwargs):
@@ -194,6 +202,58 @@ def ws_with_realtime_connection(func):
         conversation_instructions: str = browser_connection.state[
             "conversation_instructions"
         ]
+        realtime_vad_mode = _coerce_realtime_enum(
+            schemas.RealtimeVadMode,
+            assistant.realtime_vad_mode,
+            schemas.RealtimeVadMode.SEMANTIC_VAD,
+        )
+        realtime_eagerness = _coerce_realtime_enum(
+            schemas.RealtimeEagerness,
+            assistant.realtime_eagerness,
+            schemas.RealtimeEagerness.HIGH,
+        )
+        realtime_voice = _coerce_realtime_enum(
+            schemas.RealtimeVoice,
+            assistant.realtime_voice,
+            schemas.RealtimeVoice.ALLOY,
+        )
+        realtime_noise_reduction = _coerce_realtime_enum(
+            schemas.RealtimeNoiseReduction,
+            assistant.realtime_noise_reduction,
+            schemas.RealtimeNoiseReduction.FAR_FIELD,
+        )
+        turn_detection = {
+            "create_response": True,
+            "type": realtime_vad_mode.value,
+            "interrupt_response": False,
+        }
+        if realtime_vad_mode == schemas.RealtimeVadMode.SEMANTIC_VAD:
+            turn_detection["eagerness"] = realtime_eagerness.value
+        else:
+            turn_detection["threshold"] = (
+                assistant.realtime_vad_threshold
+                if assistant.realtime_vad_threshold is not None
+                else 0.5
+            )
+            turn_detection["prefix_padding_ms"] = (
+                assistant.realtime_vad_prefix_padding_ms
+                if assistant.realtime_vad_prefix_padding_ms is not None
+                else 300
+            )
+            turn_detection["silence_duration_ms"] = (
+                assistant.realtime_vad_silence_duration_ms
+                if assistant.realtime_vad_silence_duration_ms is not None
+                else 500
+            )
+            if assistant.realtime_vad_idle_timeout_ms is not None:
+                turn_detection["idle_timeout_ms"] = (
+                    assistant.realtime_vad_idle_timeout_ms
+                )
+        noise_reduction = (
+            None
+            if realtime_noise_reduction == schemas.RealtimeNoiseReduction.NONE
+            else {"type": realtime_noise_reduction.value}
+        )
         try:
             async with openai_client.realtime.connect(
                 model=assistant.model,
@@ -204,19 +264,17 @@ def ws_with_realtime_connection(func):
                         "type": "realtime",
                         "audio": {
                             "input": {
-                                "noise_reduction": {"type": "far_field"},
+                                "noise_reduction": noise_reduction,
                                 "transcription": {
                                     "model": "whisper-1",
                                     "language": "en",
                                 },
-                                "turn_detection": {
-                                    "create_response": True,
-                                    "eagerness": "high",
-                                    "type": "semantic_vad",
-                                    "interrupt_response": False,
-                                },
+                                "turn_detection": turn_detection,
                             },
-                            "output": {"voice": "alloy", "speed": 1.15},
+                            "output": {
+                                "voice": realtime_voice.value,
+                                "speed": assistant.realtime_speed or 1.0,
+                            },
                         },
                         "instructions": conversation_instructions,
                         "output_modalities": ["audio"],

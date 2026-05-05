@@ -73,6 +73,7 @@
 	import { computeLatestIncidentTimestamps, filterLatestIncidentUpdates } from '$lib/statusUpdates';
 	import { tick } from 'svelte';
 	import { onDestroy } from 'svelte';
+	import { slide } from 'svelte/transition';
 	import WebSourceChip from '$lib/components/WebSourceChip.svelte';
 	import MCPServerModal from '$lib/components/MCPServerModal.svelte';
 	import { SvelteSet } from 'svelte/reactivity';
@@ -1350,6 +1351,70 @@
 		assistantShouldMessageFirst = assistant?.assistant_should_message_first;
 		hasSetAssistantShouldMessageFirst = true;
 	}
+	const realtimeEagernessOptions: { value: api.RealtimeEagerness; label: string }[] = [
+		{ value: 'auto', label: 'Auto' },
+		{ value: 'low', label: 'Low' },
+		{ value: 'medium', label: 'Medium' },
+		{ value: 'high', label: 'High' }
+	];
+	const realtimeVadModeOptions: { value: api.RealtimeVadMode; label: string }[] = [
+		{ value: 'server_vad', label: 'Normal' },
+		{ value: 'semantic_vad', label: 'Semantic' }
+	];
+	const realtimeNoiseReductionOptions: { value: api.RealtimeNoiseReduction; label: string }[] = [
+		{ value: 'none', label: 'Off' },
+		{ value: 'near_field', label: 'Near field' },
+		{ value: 'far_field', label: 'Far field' }
+	];
+	const realtimeVoiceOptions: { value: api.RealtimeVoice; label: string }[] = [
+		{ value: 'alloy', label: 'Alloy' },
+		{ value: 'ash', label: 'Ash' },
+		{ value: 'ballad', label: 'Ballad' },
+		{ value: 'cedar', label: 'Cedar (recommended)' },
+		{ value: 'coral', label: 'Coral' },
+		{ value: 'echo', label: 'Echo' },
+		{ value: 'marin', label: 'Marin (recommended)' },
+		{ value: 'sage', label: 'Sage' },
+		{ value: 'shimmer', label: 'Shimmer' },
+		{ value: 'verse', label: 'Verse' }
+	];
+	const realtimeVoicePreviewUrl = (voice: api.RealtimeVoice) =>
+		`https://cdn.openai.com/API/voice-previews/${voice}.flac`;
+	let realtimeVadModeValue: api.RealtimeVadMode = 'semantic_vad';
+	let realtimeEagernessValue: api.RealtimeEagerness = data.isCreating ? 'auto' : 'high';
+	let realtimeVadThresholdValue = 0.5;
+	let realtimeVadPrefixPaddingSecondsValue = 0.3;
+	let realtimeVadSilenceDurationSecondsValue = 0.5;
+	let realtimeVadIdleTimeoutSecondsValue: number | null = null;
+	let realtimeVoiceValue: api.RealtimeVoice = 'marin';
+	let realtimeSpeedValue = 1.0;
+	let realtimeNoiseReductionValue: api.RealtimeNoiseReduction = 'far_field';
+	let hasSetRealtimeEagerness = false;
+	$: if (
+		assistant?.realtime_eagerness !== undefined &&
+		assistant?.realtime_eagerness !== null &&
+		!hasSetRealtimeEagerness
+	) {
+		realtimeEagernessValue = assistant.realtime_eagerness;
+		hasSetRealtimeEagerness = true;
+	}
+	let hasSetRealtimeSettings = false;
+	$: if (assistant !== undefined && assistant !== null && !hasSetRealtimeSettings) {
+		realtimeVadModeValue = assistant.realtime_vad_mode ?? 'semantic_vad';
+		realtimeVadThresholdValue = assistant.realtime_vad_threshold ?? 0.5;
+		realtimeVadPrefixPaddingSecondsValue = (assistant.realtime_vad_prefix_padding_ms ?? 300) / 1000;
+		realtimeVadSilenceDurationSecondsValue =
+			(assistant.realtime_vad_silence_duration_ms ?? 500) / 1000;
+		realtimeVadIdleTimeoutSecondsValue =
+			assistant.realtime_vad_idle_timeout_ms === null ||
+			assistant.realtime_vad_idle_timeout_ms === undefined
+				? null
+				: assistant.realtime_vad_idle_timeout_ms / 1000;
+		realtimeVoiceValue = assistant.realtime_voice ?? 'alloy';
+		realtimeSpeedValue = assistant.realtime_speed ?? 1.15;
+		realtimeNoiseReductionValue = assistant.realtime_noise_reduction ?? 'far_field';
+		hasSetRealtimeSettings = true;
+	}
 
 	let shouldRecordNameOrVoice = false;
 	let hasSetShouldRecordNameOrVoice = false;
@@ -1744,6 +1809,45 @@
 			case 'reasoning_effort':
 				dirty = newValue !== oldValue;
 				break;
+			case 'realtime_eagerness':
+				dirty =
+					interactionMode === 'voice'
+						? newValue !== ((oldValue as api.RealtimeEagerness | null) ?? 'auto')
+						: false;
+				break;
+			case 'realtime_vad_mode':
+				dirty =
+					interactionMode === 'voice'
+						? newValue !== ((oldValue as api.RealtimeVadMode | null) ?? 'semantic_vad')
+						: false;
+				break;
+			case 'realtime_vad_threshold':
+				dirty = interactionMode === 'voice' ? newValue !== (oldValue ?? 0.5) : false;
+				break;
+			case 'realtime_vad_prefix_padding_ms':
+				dirty = interactionMode === 'voice' ? newValue !== (oldValue ?? 300) : false;
+				break;
+			case 'realtime_vad_silence_duration_ms':
+				dirty = interactionMode === 'voice' ? newValue !== (oldValue ?? 500) : false;
+				break;
+			case 'realtime_vad_idle_timeout_ms':
+				dirty = interactionMode === 'voice' ? newValue !== (oldValue ?? null) : false;
+				break;
+			case 'realtime_voice':
+				dirty =
+					interactionMode === 'voice'
+						? newValue !== ((oldValue as api.RealtimeVoice | null) ?? 'marin')
+						: false;
+				break;
+			case 'realtime_speed':
+				dirty = interactionMode === 'voice' ? newValue !== (oldValue ?? 1.0) : false;
+				break;
+			case 'realtime_noise_reduction':
+				dirty =
+					interactionMode === 'voice'
+						? newValue !== ((oldValue as api.RealtimeNoiseReduction | null) ?? 'far_field')
+						: false;
+				break;
 			case 'published':
 				dirty = newValue === undefined ? false : newValue !== !!oldValue;
 				break;
@@ -1804,7 +1908,16 @@
 					'disable_prompt_randomization',
 					'tools',
 					'temperature',
-					'reasoning_effort'
+					'reasoning_effort',
+					'realtime_eagerness',
+					'realtime_vad_mode',
+					'realtime_vad_threshold',
+					'realtime_vad_prefix_padding_ms',
+					'realtime_vad_silence_duration_ms',
+					'realtime_vad_idle_timeout_ms',
+					'realtime_voice',
+					'realtime_speed',
+					'realtime_noise_reduction'
 				]
 			: ['name', 'description', 'instructions'];
 		if (
@@ -1980,6 +2093,40 @@
 				: supportsVerbosity
 					? verbosityValue
 					: null,
+			realtime_eagerness:
+				interactionMode === 'voice'
+					? realtimeEagernessValue
+					: (assistant?.realtime_eagerness ?? undefined),
+			realtime_vad_mode:
+				interactionMode === 'voice'
+					? realtimeVadModeValue
+					: (assistant?.realtime_vad_mode ?? undefined),
+			realtime_vad_threshold:
+				interactionMode === 'voice'
+					? realtimeVadThresholdValue
+					: (assistant?.realtime_vad_threshold ?? undefined),
+			realtime_vad_prefix_padding_ms:
+				interactionMode === 'voice'
+					? Math.round(realtimeVadPrefixPaddingSecondsValue * 1000)
+					: (assistant?.realtime_vad_prefix_padding_ms ?? undefined),
+			realtime_vad_silence_duration_ms:
+				interactionMode === 'voice'
+					? Math.round(realtimeVadSilenceDurationSecondsValue * 1000)
+					: (assistant?.realtime_vad_silence_duration_ms ?? undefined),
+			realtime_vad_idle_timeout_ms:
+				interactionMode === 'voice'
+					? realtimeVadIdleTimeoutSecondsValue === null
+						? null
+						: Math.round(realtimeVadIdleTimeoutSecondsValue * 1000)
+					: (assistant?.realtime_vad_idle_timeout_ms ?? undefined),
+			realtime_voice:
+				interactionMode === 'voice' ? realtimeVoiceValue : (assistant?.realtime_voice ?? undefined),
+			realtime_speed:
+				interactionMode === 'voice' ? realtimeSpeedValue : (assistant?.realtime_speed ?? undefined),
+			realtime_noise_reduction:
+				interactionMode === 'voice'
+					? realtimeNoiseReductionValue
+					: (assistant?.realtime_noise_reduction ?? undefined),
 			lecture_video_id: isLectureMode ? (selectedLectureVideo?.id ?? undefined) : undefined,
 			voice_id: isLectureMode ? voiceId.trim() : undefined,
 			generation_prompt: isLectureMode ? generationPrompt : undefined,
@@ -3804,6 +3951,230 @@
 									users will be able to send their first message after the assistant responds.</Helper
 								>
 							</div>
+
+							{#if interactionMode === 'voice'}
+								<div class="col-span-2 mb-1 flex items-start justify-between gap-6">
+									<div class="min-w-0">
+										<Label for="realtime_voice">Voice</Label>
+										<Helper class="pb-1"
+											>Select the voice used when generating audio. For the best quality, choose
+											Marin or Cedar.</Helper
+										>
+										<audio
+											controls
+											preload="none"
+											src={realtimeVoicePreviewUrl(realtimeVoiceValue)}
+											class="mt-2 w-full max-w-md"
+										></audio>
+									</div>
+									<select
+										id="realtime_voice"
+										name="realtime_voice"
+										class="block w-52 shrink-0 rounded-lg border border-gray-300 bg-gray-50 p-2.5 text-sm text-gray-900 focus:border-blue-500 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+										bind:value={realtimeVoiceValue}
+										disabled={preventEdits}
+									>
+										{#each realtimeVoiceOptions as option}
+											<option value={option.value}>{option.label}</option>
+										{/each}
+									</select>
+								</div>
+
+								<div class="col-span-2 mb-1">
+									<div class="flex items-start justify-between gap-6">
+										<div>
+											<Label for="realtime_speed">Voice speed</Label>
+											<Helper class="pb-1"
+												>The speed of the model's spoken response as a multiple of the original
+												speed. 1.0 is the default speed. 0.25 is the minimum speed. 1.5 is the
+												maximum speed. It's also possible to prompt the model to speak faster or
+												slower.</Helper
+											>
+										</div>
+										<Badge
+											class="flex shrink-0 flex-row items-center gap-x-2 rounded-md border border-sky-400 bg-gradient-to-b from-sky-100 to-sky-200 px-2 py-0.5 text-xs text-sky-800 normal-case"
+										>
+											<div>{realtimeSpeedValue.toFixed(2)}x</div>
+										</Badge>
+									</div>
+									<Range
+										id="realtime_speed"
+										name="realtime_speed"
+										min="0.25"
+										max="1.5"
+										step="0.05"
+										bind:value={realtimeSpeedValue}
+										disabled={preventEdits}
+										class="appearance-auto"
+									/>
+								</div>
+
+								<div class="col-span-2 mb-1 flex items-start justify-between gap-6">
+									<div>
+										<Label for="realtime_noise_reduction">Microphone noise reduction</Label>
+										<Helper class="pb-1"
+											>Noise reduction applied to audio input. Near field is for close-talking
+											microphones such as headphones. Far field is for far-field microphones such as
+											laptop or conference room microphones.
+										</Helper>
+									</div>
+									<select
+										id="realtime_noise_reduction"
+										name="realtime_noise_reduction"
+										class="block w-40 shrink-0 rounded-lg border border-gray-300 bg-gray-50 p-2.5 text-sm text-gray-900 focus:border-blue-500 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+										bind:value={realtimeNoiseReductionValue}
+										disabled={preventEdits}
+									>
+										{#each realtimeNoiseReductionOptions as option}
+											<option value={option.value}>{option.label}</option>
+										{/each}
+									</select>
+								</div>
+
+								<div class="col-span-2 mb-1 flex items-start justify-between gap-6">
+									<div>
+										<Label for="realtime_vad_mode">Automatic turn detection</Label>
+										<Helper class="pb-1"
+											>Choose how voice mode decides the user has finished speaking. <br /><br
+											/>Normal means that the model will detect the start and end of speech based on
+											audio volume and respond at the end of user speech. <br /><br />Semantic uses
+											a turn detection model (in conjunction with VAD) to semantically estimate
+											whether the user has finished speaking, then dynamically sets a timeout based
+											on this probability. For example, if user audio trails off with “uhhm”, the
+											model will score a low probability of turn end and wait longer for the user to
+											continue speaking. This can be useful for more natural conversations, but may
+											have a higher latency.</Helper
+										>
+									</div>
+									<ButtonGroup class="shrink-0">
+										{#each realtimeVadModeOptions as option}
+											<RadioButton
+												value={option.value}
+												bind:group={realtimeVadModeValue}
+												disabled={preventEdits}
+												class={`${preventEdits ? 'hover:bg-transparent' : ''} ${realtimeVadModeValue === option.value ? '!border-blue-300 !bg-blue-100 font-semibold !text-blue-800 !shadow-blue-200' : ''} select-none`}
+												>{option.label}</RadioButton
+											>
+										{/each}
+									</ButtonGroup>
+								</div>
+
+								{#if realtimeVadModeValue === 'semantic_vad'}
+									<div
+										class="col-span-2 mb-1 flex items-start justify-between gap-6 overflow-hidden"
+										transition:slide={{ duration: 180 }}
+									>
+										<div>
+											<Label for="realtime_eagerness">Realtime eagerness</Label>
+											<Helper class="pb-1"
+												>Adjust how quickly or patiently the model waits to respond. Higher
+												eagerness means faster responses. Auto is equivalent to medium. Low waits up
+												to 8 seconds, medium waits up to 4 seconds, and high waits up to 2 seconds.</Helper
+											>
+										</div>
+										<select
+											id="realtime_eagerness"
+											name="realtime_eagerness"
+											class="block w-40 shrink-0 rounded-lg border border-gray-300 bg-gray-50 p-2.5 text-sm text-gray-900 focus:border-blue-500 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+											bind:value={realtimeEagernessValue}
+											disabled={preventEdits}
+										>
+											{#each realtimeEagernessOptions as option}
+												<option value={option.value}>{option.label}</option>
+											{/each}
+										</select>
+									</div>
+								{:else}
+									<div
+										class="col-span-2 mb-1 grid grid-cols-2 gap-4 overflow-hidden"
+										transition:slide={{ duration: 180 }}
+									>
+										<div>
+											<Label for="realtime_vad_threshold">Activation threshold</Label>
+											<Helper class="pb-1"
+												>A higher threshold will require louder audio to activate the model, and
+												thus might perform better in noisy environments.</Helper
+											>
+											<Input
+												id="realtime_vad_threshold"
+												name="realtime_vad_threshold"
+												type="number"
+												min="0"
+												max="1"
+												step="0.05"
+												bind:value={realtimeVadThresholdValue}
+												disabled={preventEdits}
+											/>
+										</div>
+										<div>
+											<Label for="realtime_vad_prefix_padding_ms">Prefix padding</Label>
+											<Helper class="pb-1"
+												>Amount of audio to include before the turn detections marks as the point
+												where the user has started speaking, in seconds.</Helper
+											>
+											<Input
+												id="realtime_vad_prefix_padding_ms"
+												name="realtime_vad_prefix_padding_ms"
+												type="number"
+												min="0"
+												step="any"
+												value={realtimeVadPrefixPaddingSecondsValue}
+												disabled={preventEdits}
+												oninput={(event) => {
+													realtimeVadPrefixPaddingSecondsValue = Number(
+														(event.currentTarget as HTMLInputElement).value
+													);
+												}}
+											/>
+										</div>
+										<div>
+											<Label for="realtime_vad_silence_duration_ms">Silence duration</Label>
+											<Helper class="pb-1"
+												>Duration of silence to detect speech stop, in seconds. With shorter values
+												the model will respond more quickly, but may jump in on short pauses from
+												the user.</Helper
+											>
+											<Input
+												id="realtime_vad_silence_duration_ms"
+												name="realtime_vad_silence_duration_ms"
+												type="number"
+												min="0"
+												step="any"
+												value={realtimeVadSilenceDurationSecondsValue}
+												disabled={preventEdits}
+												oninput={(event) => {
+													realtimeVadSilenceDurationSecondsValue = Number(
+														(event.currentTarget as HTMLInputElement).value
+													);
+												}}
+											/>
+										</div>
+										<div>
+											<Label for="realtime_vad_idle_timeout_ms">Idle timeout</Label>
+											<Helper class="pb-1"
+												>Optional timeout after which a model response will be triggered
+												automatically. This is useful for situations in which a long pause from the
+												user is unexpected. The model will effectively prompt the user to continue
+												the conversation based on the current context. Use 5 to 30 seconds.</Helper
+											>
+											<Input
+												id="realtime_vad_idle_timeout_ms"
+												name="realtime_vad_idle_timeout_ms"
+												type="number"
+												min="5"
+												max="30"
+												step="any"
+												value={realtimeVadIdleTimeoutSecondsValue ?? ''}
+												disabled={preventEdits}
+												oninput={(event) => {
+													const value = (event.currentTarget as HTMLInputElement).value;
+													realtimeVadIdleTimeoutSecondsValue = value === '' ? null : Number(value);
+												}}
+											/>
+										</div>
+									</div>
+								{/if}
+							{/if}
 
 							<hr />
 						{/if}

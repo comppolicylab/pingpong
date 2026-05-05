@@ -2300,6 +2300,15 @@ export type Assistant = {
 	temperature: number | null;
 	reasoning_effort: number | null;
 	verbosity: number | null;
+	realtime_vad_mode: RealtimeVadMode | null;
+	realtime_eagerness: RealtimeEagerness | null;
+	realtime_vad_threshold: number | null;
+	realtime_vad_prefix_padding_ms: number | null;
+	realtime_vad_silence_duration_ms: number | null;
+	realtime_vad_idle_timeout_ms: number | null;
+	realtime_voice: RealtimeVoice | null;
+	realtime_speed: number | null;
+	realtime_noise_reduction: RealtimeNoiseReduction | null;
 	tools: string;
 	class_id: number;
 	creator_id: number;
@@ -2385,6 +2394,21 @@ export type Tool = {
 	type: string;
 };
 
+export type RealtimeEagerness = 'low' | 'medium' | 'high' | 'auto';
+export type RealtimeVadMode = 'semantic_vad' | 'server_vad';
+export type RealtimeNoiseReduction = 'near_field' | 'far_field' | 'none';
+export type RealtimeVoice =
+	| 'alloy'
+	| 'ash'
+	| 'ballad'
+	| 'coral'
+	| 'echo'
+	| 'sage'
+	| 'shimmer'
+	| 'verse'
+	| 'marin'
+	| 'cedar';
+
 /**
  * MCP Server authentication type.
  */
@@ -2431,6 +2455,15 @@ export type CreateAssistantRequest = {
 	temperature: number | null;
 	reasoning_effort: number | null;
 	verbosity: number | null;
+	realtime_vad_mode?: RealtimeVadMode;
+	realtime_eagerness?: RealtimeEagerness;
+	realtime_vad_threshold?: number | null;
+	realtime_vad_prefix_padding_ms?: number | null;
+	realtime_vad_silence_duration_ms?: number | null;
+	realtime_vad_idle_timeout_ms?: number | null;
+	realtime_voice?: RealtimeVoice;
+	realtime_speed?: number | null;
+	realtime_noise_reduction?: RealtimeNoiseReduction;
 	tools: Tool[];
 	code_interpreter_file_ids: string[];
 	file_search_file_ids: string[];
@@ -2480,6 +2513,15 @@ export type UpdateAssistantRequest = {
 	temperature?: number | null;
 	reasoning_effort?: number | null;
 	verbosity?: number | null;
+	realtime_vad_mode?: RealtimeVadMode;
+	realtime_eagerness?: RealtimeEagerness;
+	realtime_vad_threshold?: number | null;
+	realtime_vad_prefix_padding_ms?: number | null;
+	realtime_vad_silence_duration_ms?: number | null;
+	realtime_vad_idle_timeout_ms?: number | null;
+	realtime_voice?: RealtimeVoice;
+	realtime_speed?: number | null;
+	realtime_noise_reduction?: RealtimeNoiseReduction;
 	tools?: Tool[];
 	code_interpreter_file_ids?: string[];
 	file_search_file_ids?: string[];

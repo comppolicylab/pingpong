@@ -3932,6 +3932,21 @@ class Assistant(Base):
     temperature = Column(Float, nullable=True)
     reasoning_effort = Column(Integer, nullable=True)
     verbosity = Column(Integer, nullable=True)
+    realtime_vad_mode = Column(SQLEnum(schemas.RealtimeVadMode), nullable=True)
+    realtime_eagerness = Column(
+        SQLEnum(schemas.RealtimeEagerness),
+        nullable=True,
+        default=schemas.RealtimeEagerness.AUTO,
+    )
+    realtime_vad_threshold = Column(Float, nullable=True)
+    realtime_vad_prefix_padding_ms = Column(Integer, nullable=True)
+    realtime_vad_silence_duration_ms = Column(Integer, nullable=True)
+    realtime_vad_idle_timeout_ms = Column(Integer, nullable=True)
+    realtime_voice = Column(SQLEnum(schemas.RealtimeVoice), nullable=True)
+    realtime_speed = Column(Float, nullable=True)
+    realtime_noise_reduction = Column(
+        SQLEnum(schemas.RealtimeNoiseReduction), nullable=True
+    )
     assistant_should_message_first = Column(Boolean, server_default="false")
     should_record_user_information = Column(Boolean, server_default="false")
     disable_prompt_randomization = Column(
