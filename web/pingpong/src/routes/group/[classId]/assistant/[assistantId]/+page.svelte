@@ -1381,7 +1381,7 @@
 	const realtimeVoicePreviewUrl = (voice: api.RealtimeVoice) =>
 		`https://cdn.openai.com/API/voice-previews/${voice}.flac`;
 	let realtimeVadModeValue: api.RealtimeVadMode = 'semantic_vad';
-	let realtimeEagernessValue: api.RealtimeEagerness = data.isCreating ? 'auto' : 'high';
+	let realtimeEagernessValue: api.RealtimeEagerness = 'auto';
 	let realtimeVadThresholdValue = 0.5;
 	let realtimeVadPrefixPaddingSecondsValue = 0.3;
 	let realtimeVadSilenceDurationSecondsValue = 0.5;
@@ -1389,6 +1389,16 @@
 	let realtimeVoiceValue: api.RealtimeVoice = 'marin';
 	let realtimeSpeedValue = 1.0;
 	let realtimeNoiseReductionValue: api.RealtimeNoiseReduction = 'far_field';
+	const normalizeRealtimeVadIdleTimeoutSeconds = (value: string) => {
+		if (value === '') {
+			return null;
+		}
+		const seconds = Number(value);
+		if (!Number.isFinite(seconds)) {
+			return null;
+		}
+		return Math.min(30, Math.max(5, seconds));
+	};
 	let hasSetRealtimeEagerness = false;
 	$: if (
 		assistant?.realtime_eagerness !== undefined &&
@@ -1410,8 +1420,8 @@
 			assistant.realtime_vad_idle_timeout_ms === undefined
 				? null
 				: assistant.realtime_vad_idle_timeout_ms / 1000;
-		realtimeVoiceValue = assistant.realtime_voice ?? 'alloy';
-		realtimeSpeedValue = assistant.realtime_speed ?? 1.15;
+		realtimeVoiceValue = assistant.realtime_voice ?? 'marin';
+		realtimeSpeedValue = assistant.realtime_speed ?? 1.0;
 		realtimeNoiseReductionValue = assistant.realtime_noise_reduction ?? 'far_field';
 		hasSetRealtimeSettings = true;
 	}
@@ -3974,7 +3984,7 @@
 										bind:value={realtimeVoiceValue}
 										disabled={preventEdits}
 									>
-										{#each realtimeVoiceOptions as option}
+										{#each realtimeVoiceOptions as option (option.value)}
 											<option value={option.value}>{option.label}</option>
 										{/each}
 									</select>
@@ -4025,7 +4035,7 @@
 										bind:value={realtimeNoiseReductionValue}
 										disabled={preventEdits}
 									>
-										{#each realtimeNoiseReductionOptions as option}
+										{#each realtimeNoiseReductionOptions as option (option.value)}
 											<option value={option.value}>{option.label}</option>
 										{/each}
 									</select>
@@ -4047,7 +4057,7 @@
 										>
 									</div>
 									<ButtonGroup class="shrink-0">
-										{#each realtimeVadModeOptions as option}
+										{#each realtimeVadModeOptions as option (option.value)}
 											<RadioButton
 												value={option.value}
 												bind:group={realtimeVadModeValue}
@@ -4079,7 +4089,7 @@
 											bind:value={realtimeEagernessValue}
 											disabled={preventEdits}
 										>
-											{#each realtimeEagernessOptions as option}
+											{#each realtimeEagernessOptions as option (option.value)}
 												<option value={option.value}>{option.label}</option>
 											{/each}
 										</select>
@@ -4168,7 +4178,8 @@
 												disabled={preventEdits}
 												oninput={(event) => {
 													const value = (event.currentTarget as HTMLInputElement).value;
-													realtimeVadIdleTimeoutSecondsValue = value === '' ? null : Number(value);
+													realtimeVadIdleTimeoutSecondsValue =
+														normalizeRealtimeVadIdleTimeoutSeconds(value);
 												}}
 											/>
 										</div>

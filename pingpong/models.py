@@ -4194,6 +4194,19 @@ class Assistant(Base):
         params.pop("lecture_video_id", None)
         params.pop("lecture_video_manifest", None)
         params.pop("voice_id", None)
+        if data.interaction_mode != schemas.InteractionMode.VOICE:
+            for field in (
+                "realtime_vad_mode",
+                "realtime_eagerness",
+                "realtime_vad_threshold",
+                "realtime_vad_prefix_padding_ms",
+                "realtime_vad_silence_duration_ms",
+                "realtime_vad_idle_timeout_ms",
+                "realtime_voice",
+                "realtime_speed",
+                "realtime_noise_reduction",
+            ):
+                params[field] = None
         params["tools"] = json.dumps(params["tools"])
         params["class_id"] = int(class_id)
         params["creator_id"] = int(user_id)

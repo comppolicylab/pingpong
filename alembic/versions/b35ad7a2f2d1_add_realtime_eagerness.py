@@ -10,6 +10,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.orm import declarative_base, sessionmaker
 
 
 # revision identifiers, used by Alembic.
@@ -50,6 +51,23 @@ realtime_noise_reduction = sa.Enum(
     "NONE",
     name="realtimenoisereduction",
 )
+
+Base = declarative_base()
+
+
+class Assistant(Base):
+    __tablename__ = "assistants"
+
+    id = sa.Column(sa.Integer, primary_key=True)
+    interaction_mode = sa.Column(sa.String)
+    realtime_vad_mode = sa.Column(realtime_vad_mode)
+    realtime_eagerness = sa.Column(realtime_eagerness)
+    realtime_vad_threshold = sa.Column(sa.Float)
+    realtime_vad_prefix_padding_ms = sa.Column(sa.Integer)
+    realtime_vad_silence_duration_ms = sa.Column(sa.Integer)
+    realtime_voice = sa.Column(realtime_voice)
+    realtime_speed = sa.Column(sa.Float)
+    realtime_noise_reduction = sa.Column(realtime_noise_reduction)
 
 
 def upgrade() -> None:
@@ -100,6 +118,25 @@ def upgrade() -> None:
             nullable=True,
         ),
     )
+    Session = sessionmaker(bind=bind)
+    session = Session()
+    try:
+        session.query(Assistant).filter(Assistant.interaction_mode == "VOICE").update(
+            {
+                Assistant.realtime_vad_mode: "SEMANTIC_VAD",
+                Assistant.realtime_eagerness: "HIGH",
+                Assistant.realtime_vad_threshold: 0.5,
+                Assistant.realtime_vad_prefix_padding_ms: 300,
+                Assistant.realtime_vad_silence_duration_ms: 500,
+                Assistant.realtime_voice: "ALLOY",
+                Assistant.realtime_speed: 1.15,
+                Assistant.realtime_noise_reduction: "FAR_FIELD",
+            },
+            synchronize_session=False,
+        )
+        session.commit()
+    finally:
+        session.close()
 
 
 def downgrade() -> None:

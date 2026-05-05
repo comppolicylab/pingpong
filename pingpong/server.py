@@ -10831,16 +10831,10 @@ async def update_assistant(
                 "The selected model does not support verbosity settings. Please remove the verbosity setting.",
             )
 
-    if (
-        "realtime_eagerness" in req.model_fields_set
-        and req.realtime_eagerness is not None
-    ):
+    if "realtime_eagerness" in req.model_fields_set:
         asst.realtime_eagerness = req.realtime_eagerness
 
-    if (
-        "realtime_vad_mode" in req.model_fields_set
-        and req.realtime_vad_mode is not None
-    ):
+    if "realtime_vad_mode" in req.model_fields_set:
         asst.realtime_vad_mode = req.realtime_vad_mode
 
     if "realtime_vad_threshold" in req.model_fields_set:
@@ -10855,16 +10849,13 @@ async def update_assistant(
     if "realtime_vad_idle_timeout_ms" in req.model_fields_set:
         asst.realtime_vad_idle_timeout_ms = req.realtime_vad_idle_timeout_ms
 
-    if "realtime_voice" in req.model_fields_set and req.realtime_voice is not None:
+    if "realtime_voice" in req.model_fields_set:
         asst.realtime_voice = req.realtime_voice
 
     if "realtime_speed" in req.model_fields_set:
         asst.realtime_speed = req.realtime_speed
 
-    if (
-        "realtime_noise_reduction" in req.model_fields_set
-        and req.realtime_noise_reduction is not None
-    ):
+    if "realtime_noise_reduction" in req.model_fields_set:
         asst.realtime_noise_reduction = req.realtime_noise_reduction
 
     # Track whether we have an empty vector store to delete
