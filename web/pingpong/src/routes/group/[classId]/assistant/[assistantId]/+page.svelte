@@ -4175,7 +4175,41 @@
 							<hr />
 						{/if}
 
-						{#if !isLectureMode}
+						<div class="col-span-2 mb-1">
+							<Checkbox
+								id="should_record_user_information"
+								name="should_record_user_information"
+								disabled={preventEdits || isClassPrivate}
+								bind:checked={shouldRecordNameOrVoice}
+								><div class="flex flex-row gap-1">
+									<div>
+										{#if interactionMode === 'voice'}Record User Name and Conversation{/if}
+										{#if interactionMode !== 'voice'}Record User Name{/if}
+									</div>
+									{#if isClassPrivate}<div>&middot;</div>
+										<div>Unavailable for Private Groups</div>{/if}
+								</div></Checkbox
+							>
+							<Helper
+								>{#if interactionMode !== 'voice'}Control whether moderators should be able to view
+									the user's name when viewing a thread. When checked, users will be given a notice
+									that their name will be visible to moderators. Published threads will display
+									pseudonyms to members. Only threads <span class="font-extrabold"
+										>created while this option is enabled</span
+									> will show the user's name.{:else}Control whether moderators should be able to
+									view the user's name and listen to a recording of their conversation when viewing
+									a thread. When checked, users will be given a notice that their name will be
+									visible to moderators and that their conversation will be recorded. Published
+									threads will still display pseudonyms to members. Members cannot listen to
+									recordings of published threads. Only threads <span class="font-extrabold"
+										>created while this option is enabled</span
+									> will show the user's name and be recorded.
+								{/if}</Helper
+							>
+						</div>
+						{#if isLectureMode}
+							<hr />
+						{:else}
 							<div class="col-span-2 mb-1">
 								<Checkbox
 									id="assistant_should_message_first"
@@ -4189,6 +4223,7 @@
 									users will be able to send their first message after the assistant responds.</Helper
 								>
 							</div>
+							<hr />
 
 							{#if interactionMode === 'voice'}
 								<div class="col-span-2 mb-1 flex items-start justify-between gap-6">
@@ -4413,48 +4448,259 @@
 										</div>
 									</div>
 								{/if}
+								<hr />
 							{/if}
-
-							<hr />
 						{/if}
 
-						<div class="col-span-2 mb-1">
-							<Checkbox
-								id="should_record_user_information"
-								name="should_record_user_information"
-								disabled={preventEdits || isClassPrivate}
-								bind:checked={shouldRecordNameOrVoice}
-								><div class="flex flex-row gap-1">
-									<div>
-										{#if interactionMode === 'voice'}Record User Name and Conversation{/if}
-										{#if interactionMode !== 'voice'}Record User Name{/if}
+						{#if !isLectureMode}
+							{#if supportsReasoning}
+								<div class="flex flex-col">
+									<Label for="reasoning-effort">Reasoning effort</Label>
+									<Helper class="pb-1"
+										>Select your desired reasoning effort, which gives the model guidance on how
+										much time it should spend "reasoning" before creating a response to the prompt. {#if reasoningEffortLabels.length !== 1}You
+											can specify one of
+											{#each reasoningEffortLabels as label, idx (label)}
+												<span class="font-mono">{label}</span>{idx <
+												reasoningEffortLabels.length - 1
+													? ', '
+													: ''}
+											{/each} for this setting, where <span class="font-mono">low</span> will favor
+											speed, and
+											<span class="font-mono">high</span>
+											will favor more complete reasoning at the cost of slower responses. The default
+											value is <span class="font-mono">{defaultReasoningLabel}</span>.{/if}
+										{#if supportsTemperatureWithReasoningNone}Temperature controls become available
+											only when reasoning effort is set to <span class="font-mono">none</span
+											>.{/if}</Helper
+									>
+									{#if reasoningEffortLabels.length === 1}
+										<div
+											class="mt-2 flex flex-row items-center justify-between gap-x-4 rounded-lg border border-amber-400 bg-gradient-to-b from-amber-50 to-amber-100 p-3 text-amber-800"
+										>
+											<div class="flex flex-row items-center gap-x-3">
+												<LightbulbSolid size="md" class="shrink-0" />
+												<div class="flex flex-col text-xs">
+													<span class="font-bold"
+														>This model only supports <span class="font-mono"
+															>{reasoningEffortLabels[0]}</span
+														> reasoning effort</span
+													>
+													<span
+														>For other models, you can control how long the model spends thinking
+														using this setting.</span
+													>
+												</div>
+											</div>
+										</div>
+									{/if}
+								</div>
+								{#if reasoningEffortLabels.length !== 1}
+									<Range
+										id="reasoning-effort"
+										name="reasoning-effort"
+										min={reasoningEffortMin}
+										max={reasoningEffortMax}
+										bind:value={reasoningEffortValue}
+										step="1"
+										disabled={preventEdits}
+										class="appearance-auto"
+									/>
+									<div class="mt-2 flex flex-row justify-between">
+										{#if reasoningEffortLabels.length < 4}
+											{#each reasoningEffortLabels as label (label)}
+												<p class="text-sm">{label}</p>
+											{/each}
+										{:else if supportsNoneReasoningEffort}
+											<p class="text-sm">{reasoningEffortLabels[0]}</p>
+											<p class="ml-4 text-sm">{reasoningEffortLabels[1]}</p>
+											<p class="ml-2 text-sm">{reasoningEffortLabels[2]}</p>
+											<p class="text-sm">{reasoningEffortLabels[3]}</p>
+										{:else}
+											<p class="text-sm">{reasoningEffortLabels[0]}</p>
+											<p class="-ml-2 text-sm">{reasoningEffortLabels[1]}</p>
+											<p class="ml-1 text-sm">{reasoningEffortLabels[2]}</p>
+											<p class="text-sm">{reasoningEffortLabels[3]}</p>
+										{/if}
 									</div>
-									{#if isClassPrivate}<div>&middot;</div>
-										<div>Unavailable for Private Groups</div>{/if}
-								</div></Checkbox
-							>
-							<Helper
-								>{#if interactionMode !== 'voice'}Control whether moderators should be able to view
-									the user's name when viewing a thread. When checked, users will be given a notice
-									that their name will be visible to moderators. Published threads will display
-									pseudonyms to members. Only threads <span class="font-extrabold"
-										>created while this option is enabled</span
-									> will show the user's name.{:else}Control whether moderators should be able to
-									view the user's name and listen to a recording of their conversation when viewing
-									a thread. When checked, users will be given a notice that their name will be
-									visible to moderators and that their conversation will be recorded. Published
-									threads will still display pseudonyms to members. Members cannot listen to
-									recordings of published threads. Only threads <span class="font-extrabold"
-										>created while this option is enabled</span
-									> will show the user's name and be recorded.
-								{/if}</Helper
-							>
-						</div>
-						{#if !isLectureMode}
+								{/if}
+							{/if}
+							{#if supportsTemperatureForCurrentReasoning && !isLectureMode}
+								<div class="flex flex-col">
+									<Label for="temperature">Temperature</Label>
+									{#if interactionMode === 'voice'}
+										<Helper class="pb-1"
+											>Select the model's "temperature," a setting from 0.6 to 1.2 that controls how
+											creative or predictable the assistant's responses are. For audio models, a
+											temperature of 0.8 is highly recommended for best performance. You can change
+											this setting anytime.</Helper
+										>
+									{:else}
+										<Helper class="pb-1"
+											>Select the model's "temperature," a setting from 0 to 2 that controls how
+											creative or predictable the assistant's responses are. For reliable, focused
+											answers, choose a temperature closer to 0.2. For more varied or creative
+											responses, try a setting closer to 1. Avoid setting the temperature much above
+											1 unless you need very experimental responses, as it may lead to less
+											predictable and more random answers.</Helper
+										>
+									{/if}
+								</div>
+								<div class="mt-2 flex flex-row justify-between">
+									<div class="flex flex-row items-center gap-1 text-sm">
+										<ArrowLeftOutline />
+										<div>More focused</div>
+									</div>
+									<Badge
+										class="flex shrink-0 flex-row items-center gap-x-2 rounded-md border border-sky-400 bg-gradient-to-b from-sky-100 to-sky-200 px-2 py-0.5 text-xs text-sky-800 normal-case"
+									>
+										<div>Temperature: {temperatureValue.toFixed(1)}</div>
+									</Badge>
+									<div class="flex flex-row items-center gap-1 text-sm">
+										<div>More creative</div>
+										<ArrowRightOutline />
+									</div>
+								</div>
+								{#if interactionMode !== 'voice'}
+									<Range
+										id="temperature"
+										name="temperature"
+										min={minChatTemperature}
+										max={maxChatTemperature}
+										bind:value={temperatureValue}
+										step="0.1"
+										disabled={preventEdits}
+										onchange={checkForLargeTemperatureChat}
+										class="appearance-auto"
+									/>
+									<div class="mx-2 grid grid-cols-20 gap-0">
+										<button
+											type="button"
+											class="col-span-4 ml-1 flex flex-col items-center justify-start border-0 bg-transparent"
+											onclick={() => {
+												temperatureValue = defaultChatTemperature;
+												_temperatureValue = defaultChatTemperature;
+											}}
+											onkeydown={(e) => {
+												if (e.key === 'Enter' || e.key === ' ') {
+													temperatureValue = defaultChatTemperature;
+													_temperatureValue = defaultChatTemperature;
+												}
+											}}
+										>
+											<HeartSolid class="max-w-fit text-gray-500" />
+											<div class="mx-10 mt-1 text-center text-sm text-wrap">
+												Default (recommended)
+											</div>
+										</button>
+										<button
+											type="button"
+											class="col-span-4 col-start-6 flex flex-col items-center justify-start border-0 bg-transparent"
+											onclick={() => {
+												temperatureValue = 0.7;
+												_temperatureValue = 0.7;
+											}}
+											onkeydown={(e) => {
+												if (e.key === 'Enter' || e.key === ' ') {
+													temperatureValue = 0.7;
+													_temperatureValue = 0.7;
+												}
+											}}
+										>
+											<LightbulbSolid class="max-w-fit text-gray-500" />
+											<div class="mx-10 mt-1 text-center text-sm text-wrap">
+												Great for creative tasks and brainstorming
+											</div>
+										</button>
+										<div
+											class="col-span-9 col-start-12 -mr-2 -ml-2 h-6 h-fit rounded-md border border-amber-400 bg-gradient-to-b from-amber-100 to-amber-200 py-1 text-center text-sm text-amber-800"
+										>
+											Output may be unpredictable
+										</div>
+									</div>
+								{:else}
+									<Range
+										id="temperature"
+										name="temperature"
+										min={minAudioTemperature}
+										max={maxAudioTemperature}
+										bind:value={temperatureValue}
+										step="0.1"
+										disabled={preventEdits}
+										onchange={checkForLargeTemperatureAudio}
+										class="appearance-auto"
+									/>
+									<div class="mx-2 grid grid-cols-6 gap-0">
+										<button
+											type="button"
+											class="col-span-4 ml-1 flex flex-col items-center justify-start border-0 bg-transparent"
+											onclick={() => {
+												temperatureValue = defaultAudioTemperature;
+												_temperatureValue = defaultAudioTemperature;
+											}}
+											onkeydown={(e) => {
+												if (e.key === 'Enter' || e.key === ' ') {
+													temperatureValue = defaultAudioTemperature;
+													_temperatureValue = defaultAudioTemperature;
+												}
+											}}
+										>
+											<HeartSolid class="max-w-fit text-gray-500" />
+											<div class="mx-10 mt-1 text-center text-sm text-wrap">
+												Default (highly recommended)
+											</div>
+										</button>
+									</div>
+								{/if}
+							{/if}
+							{#if supportsVerbosity}
+								<div class="flex flex-col">
+									<Label for="verbosity">Verbosity</Label>
+									<Helper class="pb-1"
+										>Select your desired verbosity. Verbosity determines how many output tokens are
+										generated. Lowering the number of tokens reduces overall latency. While the
+										model's reasoning approach stays mostly the same, the model finds ways to answer
+										more concisely—which can either improve or diminish answer quality, depending on
+										your use case. Here are some scenarios for both ends of the verbosity spectrum:
+										<ol class="ml-7 list-disc">
+											<li class="my-1">
+												<span class="font-medium">High verbosity:</span> Use when you need the model to
+												provide thorough explanations of documents or perform extensive code refactoring.
+											</li>
+											<li class="my-1">
+												<span class="font-medium">Low verbosity:</span> Best for situations where you
+												want concise answers or simple code generation, such as SQL queries.
+											</li>
+										</ol>
+										Models before GPT-5 have used medium verbosity by default. With GPT-5, this option
+										is configurable as one of<span class="font-mono">high</span>,
+										<span class="font-mono">medium</span>, or <span class="font-mono">low</span>.
+										When generating code, <span class="font-mono">medium</span> and
+										<span class="font-mono">high</span>
+										verbosity levels yield longer, more structured code with inline explanations, while
+										<span class="font-mono">low</span>
+										verbosity produces shorter, more concise code with minimal commentary. The default
+										value is
+										<span class="font-mono">medium</span>.</Helper
+									>
+								</div>
+								<Range
+									id="verbosity"
+									name="verbosity"
+									min="0"
+									max="2"
+									bind:value={verbosityValue}
+									step="1"
+									disabled={preventEdits}
+									class="appearance-auto"
+								/>
+								<div class="mt-2 flex flex-row justify-between">
+									<p class="text-sm">low</p>
+									<p class="text-sm">medium</p>
+									<p class="text-sm">high</p>
+								</div>
+							{/if}
 							<hr />
-						{/if}
-
-						{#if !isLectureMode}
 							<div class="col-span-2 mb-1">
 								<Checkbox
 									id="allow_user_file_uploads"
@@ -4498,6 +4744,7 @@
 								>
 							</div>
 							<hr />
+
 							<div class="col-span-2 mb-1">
 								<Checkbox
 									id="hide_file_search_queries"
@@ -4707,254 +4954,6 @@
 							</div>
 							<hr />
 						{/if}
-
-						{#if supportsReasoning && !isLectureMode}
-							<div class="flex flex-col">
-								<Label for="reasoning-effort">Reasoning effort</Label>
-								<Helper class="pb-1"
-									>Select your desired reasoning effort, which gives the model guidance on how much
-									time it should spend "reasoning" before creating a response to the prompt. {#if reasoningEffortLabels.length !== 1}You
-										can specify one of
-										{#each reasoningEffortLabels as label, idx (label)}
-											<span class="font-mono">{label}</span>{idx < reasoningEffortLabels.length - 1
-												? ','
-												: ''}
-										{/each}for this setting, where <span class="font-mono">low</span> will favor
-										speed, and
-										<span class="font-mono">high</span>
-										will favor more complete reasoning at the cost of slower responses. The default value
-										is <span class="font-mono">{defaultReasoningLabel}</span>.{/if}
-									{#if supportsTemperatureWithReasoningNone}Temperature controls become available
-										only when reasoning effort is set to <span class="font-mono">none</span
-										>.{/if}</Helper
-								>
-								{#if reasoningEffortLabels.length === 1}
-									<div
-										class="mt-2 flex flex-row items-center justify-between gap-x-4 rounded-lg border border-amber-400 bg-gradient-to-b from-amber-50 to-amber-100 p-3 text-amber-800"
-									>
-										<div class="flex flex-row items-center gap-x-3">
-											<LightbulbSolid size="md" class="shrink-0" />
-											<div class="flex flex-col text-xs">
-												<span class="font-bold"
-													>This model only supports <span class="font-mono"
-														>{reasoningEffortLabels[0]}</span
-													> reasoning effort</span
-												>
-												<span
-													>For other models, you can control how long the model spends thinking
-													using this setting.</span
-												>
-											</div>
-										</div>
-									</div>
-								{/if}
-							</div>
-							{#if reasoningEffortLabels.length !== 1}
-								<Range
-									id="reasoning-effort"
-									name="reasoning-effort"
-									min={reasoningEffortMin}
-									max={reasoningEffortMax}
-									bind:value={reasoningEffortValue}
-									step="1"
-									disabled={preventEdits}
-									class="appearance-auto"
-								/>
-								<div class="mt-2 flex flex-row justify-between">
-									{#if reasoningEffortLabels.length < 4}
-										{#each reasoningEffortLabels as label (label)}
-											<p class="text-sm">{label}</p>
-										{/each}
-									{:else if supportsNoneReasoningEffort}
-										<p class="text-sm">{reasoningEffortLabels[0]}</p>
-										<p class="ml-4 text-sm">{reasoningEffortLabels[1]}</p>
-										<p class="ml-2 text-sm">{reasoningEffortLabels[2]}</p>
-										<p class="text-sm">{reasoningEffortLabels[3]}</p>
-									{:else}
-										<p class="text-sm">{reasoningEffortLabels[0]}</p>
-										<p class="-ml-2 text-sm">{reasoningEffortLabels[1]}</p>
-										<p class="ml-1 text-sm">{reasoningEffortLabels[2]}</p>
-										<p class="text-sm">{reasoningEffortLabels[3]}</p>
-									{/if}
-								</div>
-							{/if}
-						{/if}
-						{#if supportsTemperatureForCurrentReasoning && !isLectureMode}
-							<div class="flex flex-col">
-								<Label for="temperature">Temperature</Label>
-								{#if interactionMode === 'voice'}
-									<Helper class="pb-1"
-										>Select the model's "temperature," a setting from 0.6 to 1.2 that controls how
-										creative or predictable the assistant's responses are. For audio models, a
-										temperature of 0.8 is highly recommended for best performance. You can change
-										this setting anytime.</Helper
-									>
-								{:else}
-									<Helper class="pb-1"
-										>Select the model's "temperature," a setting from 0 to 2 that controls how
-										creative or predictable the assistant's responses are. For reliable, focused
-										answers, choose a temperature closer to 0.2. For more varied or creative
-										responses, try a setting closer to 1. Avoid setting the temperature much above 1
-										unless you need very experimental responses, as it may lead to less predictable
-										and more random answers.</Helper
-									>
-								{/if}
-							</div>
-							<div class="mt-2 flex flex-row justify-between">
-								<div class="flex flex-row items-center gap-1 text-sm">
-									<ArrowLeftOutline />
-									<div>More focused</div>
-								</div>
-								<Badge
-									class="flex shrink-0 flex-row items-center gap-x-2 rounded-md border border-sky-400 bg-gradient-to-b from-sky-100 to-sky-200 px-2 py-0.5 text-xs text-sky-800 normal-case"
-								>
-									<div>Temperature: {temperatureValue.toFixed(1)}</div>
-								</Badge>
-								<div class="flex flex-row items-center gap-1 text-sm">
-									<div>More creative</div>
-									<ArrowRightOutline />
-								</div>
-							</div>
-							{#if interactionMode !== 'voice'}
-								<Range
-									id="temperature"
-									name="temperature"
-									min={minChatTemperature}
-									max={maxChatTemperature}
-									bind:value={temperatureValue}
-									step="0.1"
-									disabled={preventEdits}
-									onchange={checkForLargeTemperatureChat}
-									class="appearance-auto"
-								/>
-								<div class="mx-2 grid grid-cols-20 gap-0">
-									<button
-										type="button"
-										class="col-span-4 ml-1 flex flex-col items-center justify-start border-0 bg-transparent"
-										onclick={() => {
-											temperatureValue = defaultChatTemperature;
-											_temperatureValue = defaultChatTemperature;
-										}}
-										onkeydown={(e) => {
-											if (e.key === 'Enter' || e.key === ' ') {
-												temperatureValue = defaultChatTemperature;
-												_temperatureValue = defaultChatTemperature;
-											}
-										}}
-									>
-										<HeartSolid class="max-w-fit text-gray-500" />
-										<div class="mx-10 mt-1 text-center text-sm text-wrap">
-											Default (recommended)
-										</div>
-									</button>
-									<button
-										type="button"
-										class="col-span-4 col-start-6 flex flex-col items-center justify-start border-0 bg-transparent"
-										onclick={() => {
-											temperatureValue = 0.7;
-											_temperatureValue = 0.7;
-										}}
-										onkeydown={(e) => {
-											if (e.key === 'Enter' || e.key === ' ') {
-												temperatureValue = 0.7;
-												_temperatureValue = 0.7;
-											}
-										}}
-									>
-										<LightbulbSolid class="max-w-fit text-gray-500" />
-										<div class="mx-10 mt-1 text-center text-sm text-wrap">
-											Great for creative tasks and brainstorming
-										</div>
-									</button>
-									<div
-										class="col-span-9 col-start-12 -mr-2 -ml-2 h-6 h-fit rounded-md border border-amber-400 bg-gradient-to-b from-amber-100 to-amber-200 py-1 text-center text-sm text-amber-800"
-									>
-										Output may be unpredictable
-									</div>
-								</div>
-							{:else}
-								<Range
-									id="temperature"
-									name="temperature"
-									min={minAudioTemperature}
-									max={maxAudioTemperature}
-									bind:value={temperatureValue}
-									step="0.1"
-									disabled={preventEdits}
-									onchange={checkForLargeTemperatureAudio}
-									class="appearance-auto"
-								/>
-								<div class="mx-2 grid grid-cols-6 gap-0">
-									<button
-										type="button"
-										class="col-span-4 ml-1 flex flex-col items-center justify-start border-0 bg-transparent"
-										onclick={() => {
-											temperatureValue = defaultAudioTemperature;
-											_temperatureValue = defaultAudioTemperature;
-										}}
-										onkeydown={(e) => {
-											if (e.key === 'Enter' || e.key === ' ') {
-												temperatureValue = defaultAudioTemperature;
-												_temperatureValue = defaultAudioTemperature;
-											}
-										}}
-									>
-										<HeartSolid class="max-w-fit text-gray-500" />
-										<div class="mx-10 mt-1 text-center text-sm text-wrap">
-											Default (highly recommended)
-										</div>
-									</button>
-								</div>
-							{/if}
-						{/if}
-						{#if supportsVerbosity && !isLectureMode}
-							<div class="flex flex-col">
-								<Label for="verbosity">Verbosity</Label>
-								<Helper class="pb-1"
-									>Select your desired verbosity. Verbosity determines how many output tokens are
-									generated. Lowering the number of tokens reduces overall latency. While the
-									model's reasoning approach stays mostly the same, the model finds ways to answer
-									more concisely—which can either improve or diminish answer quality, depending on
-									your use case. Here are some scenarios for both ends of the verbosity spectrum:
-									<ol class="ml-7 list-disc">
-										<li class="my-1">
-											<span class="font-medium">High verbosity:</span> Use when you need the model to
-											provide thorough explanations of documents or perform extensive code refactoring.
-										</li>
-										<li class="my-1">
-											<span class="font-medium">Low verbosity:</span> Best for situations where you want
-											concise answers or simple code generation, such as SQL queries.
-										</li>
-									</ol>
-									Models before GPT-5 have used medium verbosity by default. With GPT-5, this option is
-									configurable as one of<span class="font-mono">high</span>,
-									<span class="font-mono">medium</span>, or <span class="font-mono">low</span>. When
-									generating code, <span class="font-mono">medium</span> and
-									<span class="font-mono">high</span>
-									verbosity levels yield longer, more structured code with inline explanations, while
-									<span class="font-mono">low</span>
-									verbosity produces shorter, more concise code with minimal commentary. The default value
-									is
-									<span class="font-mono">medium</span>.</Helper
-								>
-							</div>
-							<Range
-								id="verbosity"
-								name="verbosity"
-								min="0"
-								max="2"
-								bind:value={verbosityValue}
-								step="1"
-								disabled={preventEdits}
-								class="appearance-auto"
-							/>
-							<div class="mt-2 flex flex-row justify-between">
-								<p class="text-sm">low</p>
-								<p class="text-sm">medium</p>
-								<p class="text-sm">high</p>
-							</div>
-						{/if}
-						<hr />
 
 						{#if !data.isCreating || isLectureMode}
 							<div class="col-span-2 mb-1">
