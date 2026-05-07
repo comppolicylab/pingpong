@@ -362,7 +362,7 @@ def ws_with_single_realtime_session(func):
             await _reject_realtime_session(
                 browser_connection, "This voice session was not found."
             )
-            return
+            return None
 
         if thread.voice_mode_recording or await _thread_has_messages(
             browser_connection.state["db"], thread.id
@@ -370,7 +370,7 @@ def ws_with_single_realtime_session(func):
             await _reject_realtime_session(
                 browser_connection, VOICE_SESSION_FINAL_MESSAGE
             )
-            return
+            return None
 
         browser_connection.state["thread"] = thread
         browser_connection.state["assistant"] = thread.assistant
