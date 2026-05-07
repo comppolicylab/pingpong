@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from pydantic import ValidationError
+from starlette.datastructures import State
 
 from pingpong import ai_models
 from pingpong import models
@@ -15,8 +16,16 @@ server = importlib.import_module("pingpong.server")
 
 class DummyWebSocket:
     def __init__(self, cookies: dict[str, str] | None = None):
-        self.state: dict[str, object] = {}
+        self.state = State()
         self.cookies: dict[str, str] = cookies or {}
+        self.sent_json: list[dict] = []
+        self.closed = False
+
+    async def send_json(self, data: dict) -> None:
+        self.sent_json.append(data)
+
+    async def close(self) -> None:
+        self.closed = True
 
 
 async def test_audio_stream_uses_lti_session_when_cookie_missing(monkeypatch):
@@ -106,6 +115,53 @@ def test_realtime_extra_headers_omit_missing_safety_identifier():
     websocket = DummyWebSocket()
 
     assert websocket_module.build_realtime_extra_headers(websocket) == {}
+
+
+@pytest.mark.parametrize("has_recording,has_messages", [(True, False), (False, True)])
+async def test_single_realtime_session_rejects_finished_thread(
+    monkeypatch, has_recording, has_messages
+):
+    async def fake_get_by_id_with_assistant(_session, thread_id, **kwargs):
+        assert kwargs == {
+            "for_update": True,
+            "include_voice_mode_recording": True,
+        }
+        return SimpleNamespace(
+            id=thread_id,
+            assistant=realtime_assistant(),
+            instructions="Speak clearly.",
+            timezone=None,
+            voice_mode_recording=object() if has_recording else None,
+        )
+
+    async def fake_thread_has_realtime_messages(_db, _thread_id):
+        return has_messages
+
+    monkeypatch.setattr(
+        models.Thread,
+        "get_by_id_with_assistant",
+        fake_get_by_id_with_assistant,
+    )
+    monkeypatch.setattr(
+        websocket_module,
+        "_thread_has_realtime_messages",
+        fake_thread_has_realtime_messages,
+    )
+
+    websocket = DummyWebSocket()
+    websocket.state["db"] = object()
+    handler = AsyncMock()
+    wrapped = websocket_module.ws_with_single_realtime_session(handler)
+
+    with pytest.raises(ValueError, match=websocket_module.VOICE_SESSION_FINAL_MESSAGE):
+        await wrapped(websocket, "10", "20")
+
+    handler.assert_not_awaited()
+    assert websocket.closed is True
+    assert (
+        websocket.sent_json[0]["error"]["message"]
+        == websocket_module.VOICE_SESSION_FINAL_MESSAGE
+    )
 
 
 def test_gpt_realtime_2_model_metadata_supports_realtime_reasoning():

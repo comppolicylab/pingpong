@@ -2,6 +2,8 @@ from functools import wraps
 import logging
 from typing import Any, cast
 
+from sqlalchemy import select
+
 from pingpong import models, schemas
 from pingpong.ai_models import get_reasoning_effort_map
 from pingpong.ai import (
@@ -15,6 +17,13 @@ from .config import config
 
 browser_connection_logger = logging.getLogger("realtime_browser")
 openai_connection_logger = logging.getLogger("realtime_openai")
+
+VOICE_SESSION_ACTIVE_MESSAGE = (
+    "This voice session is already active in another connection."
+)
+VOICE_SESSION_FINAL_MESSAGE = (
+    "This voice session has already ended. Start a new thread to continue."
+)
 
 
 def _coerce_realtime_enum(enum_type, value, default):
@@ -129,11 +138,38 @@ def build_realtime_session(
 def build_realtime_extra_headers(
     browser_connection: StateWebSocket,
 ) -> dict[str, str]:
-    safety_identifier = browser_connection.state.get("response_safety_identifier")
+    safety_identifier = (
+        browser_connection.state["response_safety_identifier"]
+        if "response_safety_identifier" in browser_connection.state
+        else None
+    )
     if not isinstance(safety_identifier, str) or not safety_identifier:
         return {}
 
     return {"OpenAI-Safety-Identifier": safety_identifier}
+
+
+async def _thread_has_realtime_messages(db, thread_id: int) -> bool:
+    message_id = await db.scalar(
+        select(models.Message.id).where(models.Message.thread_id == thread_id).limit(1)
+    )
+    return message_id is not None
+
+
+async def _reject_realtime_session(
+    browser_connection: StateWebSocket, message: str
+) -> None:
+    await browser_connection.send_json(
+        {
+            "type": "error",
+            "error": {
+                "type": "invalid_request_error",
+                "code": "voice_session_unavailable",
+                "message": message,
+            },
+        }
+    )
+    await browser_connection.close()
 
 
 def ws_auth_middleware(func):
@@ -299,6 +335,49 @@ def ws_with_thread_assistant_prompt(func):
             inject_timestamp_to_instructions(
                 browser_connection.state["thread"].instructions,
                 browser_connection.state["thread"].timezone,
+            )
+        )
+        return await func(browser_connection, class_id, thread_id, *args, **kwargs)
+
+    return wrapper
+
+
+def ws_with_single_realtime_session(func):
+    @wraps(func)
+    async def wrapper(
+        browser_connection: StateWebSocket,
+        class_id: str,
+        thread_id: str,
+        *args,
+        **kwargs,
+    ):
+        thread_pk = int(thread_id)
+        thread = await models.Thread.get_by_id_with_assistant(
+            browser_connection.state["db"],
+            thread_pk,
+            for_update=True,
+            include_voice_mode_recording=True,
+        )
+        if thread is None:
+            await _reject_realtime_session(
+                browser_connection, "This voice session was not found."
+            )
+            raise ValueError("This voice session was not found.")
+
+        if thread.voice_mode_recording or await _thread_has_realtime_messages(
+            browser_connection.state["db"], thread.id
+        ):
+            await _reject_realtime_session(
+                browser_connection, VOICE_SESSION_FINAL_MESSAGE
+            )
+            raise ValueError(VOICE_SESSION_FINAL_MESSAGE)
+
+        browser_connection.state["thread"] = thread
+        browser_connection.state["assistant"] = thread.assistant
+        browser_connection.state["conversation_instructions"] = (
+            inject_timestamp_to_instructions(
+                thread.instructions,
+                thread.timezone,
             )
         )
         return await func(browser_connection, class_id, thread_id, *args, **kwargs)

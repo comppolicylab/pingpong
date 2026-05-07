@@ -9664,16 +9664,6 @@ async def create_assistant(
                 )
 
             reasoning_effort_map = get_reasoning_effort_map(model_record.id)
-            reasoning_effort = (
-                reasoning_effort_map.get(req.reasoning_effort)
-                if req.reasoning_effort is not None
-                else None
-            )
-            reasoning_extra_body = (
-                {"reasoning_effort": reasoning_effort}
-                if reasoning_effort is not None
-                else {}
-            )
 
             # Set default temperature based on the interaction mode
             # This is to ensure that the temperature is set
@@ -9695,7 +9685,7 @@ async def create_assistant(
                 temperature=req.temperature,
                 metadata={"class_id": class_id, "creator_id": str(creator_id)},
                 tool_resources=tool_resources,
-                extra_body=reasoning_extra_body,
+                extra_body=None,
             )
         except openai.BadRequestError as e:
             raise HTTPException(
