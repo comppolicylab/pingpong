@@ -171,6 +171,14 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 logger = logging.getLogger(__name__)
 
+CONTAINER_TTL_SECONDS = 19 * 60
+ANNOTATION_PRIORITY_TYPES = (
+    AnnotationType.CONTAINER_FILE_CITATION,
+    AnnotationType.FILE_CITATION,
+    AnnotationType.URL_CITATION,
+    AnnotationType.FILE_PATH,
+)
+
 
 def get_response_message_phase_value(phase: object) -> str | None:
     return phase if isinstance(phase, str) else None
@@ -639,9 +647,15 @@ async def build_response_input_item_list(
             return True
         return (
             utcnow() - container_by_last_active_time[container_id]
-        ).total_seconds() > 19 * 60
+        ).total_seconds() > CONTAINER_TTL_SECONDS
 
-    async for tool_call in models.Thread.list_all_tool_calls_gen(session, thread_id):
+    tool_calls = [
+        tool_call
+        async for tool_call in models.Thread.list_all_tool_calls_gen(session, thread_id)
+    ]
+    for tool_call in tool_calls:
+        if tool_call.status == ToolCallStatus.INCOMPLETE:
+            continue
         if tool_call.type != ToolCallType.CODE_INTERPRETER:
             continue
         update_container_last_active_time(
@@ -681,30 +695,28 @@ async def build_response_input_item_list(
                 case MessagePartType.OUTPUT_TEXT:
                     annotations: list[Annotation] = []
                     stored_annotations = list(content.annotations)
-                    selected_citation_type = next(
+                    present_annotation_types = {
+                        annotation.type
+                        for annotation in stored_annotations
+                        if annotation.type in ANNOTATION_PRIORITY_TYPES
+                        and (
+                            annotation.type != AnnotationType.CONTAINER_FILE_CITATION
+                            or not is_container_expired(annotation.container_id)
+                        )
+                    }
+                    selected_annotation_type = next(
                         (
                             annotation_type
-                            for annotation_type in (
-                                AnnotationType.CONTAINER_FILE_CITATION,
-                                AnnotationType.FILE_CITATION,
-                                AnnotationType.URL_CITATION,
-                            )
-                            if any(
-                                annotation.type == annotation_type
-                                and (
-                                    annotation_type
-                                    != AnnotationType.CONTAINER_FILE_CITATION
-                                    or not is_container_expired(annotation.container_id)
-                                )
-                                for annotation in stored_annotations
-                            )
+                            for annotation_type in ANNOTATION_PRIORITY_TYPES
+                            if annotation_type in present_annotation_types
                         ),
                         None,
                     )
                     for annotation in stored_annotations:
                         if (
-                            selected_citation_type is not None
-                            and annotation.type != selected_citation_type
+                            selected_annotation_type is not None
+                            and annotation.type in ANNOTATION_PRIORITY_TYPES
+                            and annotation.type != selected_annotation_type
                         ):
                             continue
                         match annotation.type:
@@ -720,7 +732,7 @@ async def build_response_input_item_list(
                             case AnnotationType.FILE_PATH:
                                 annotations.append(
                                     AnnotationFilePath(
-                                        file_path=annotation.file_path,
+                                        file_id=annotation.file_id,
                                         index=annotation.index or 0,
                                         type="file_path",
                                     )
@@ -798,9 +810,7 @@ async def build_response_input_item_list(
         )
 
     if not user_assistant_messages_only:
-        async for tool_call in models.Thread.list_all_tool_calls_gen(
-            session, thread_id
-        ):
+        for tool_call in tool_calls:
             if tool_call.status == ToolCallStatus.INCOMPLETE:
                 continue
             match tool_call.type:
