@@ -74,6 +74,12 @@ class StreamProcessor extends AudioWorkletProcessor {
   }
 
   writeData(float32Array, trackId = null, eventId = null) {
+    if (
+      this.writeOffset > 0 &&
+      (this.write.trackId !== trackId || this.write.eventId !== eventId)
+    ) {
+      this.flushWriteBuffer();
+    }
     this.write.trackId = trackId;
     this.write.eventId = eventId;
     let { buffer } = this.write;
@@ -88,6 +94,20 @@ class StreamProcessor extends AudioWorkletProcessor {
       }
     }
     this.writeOffset = offset;
+    return true;
+  }
+
+  flushWriteBuffer() {
+    if (this.writeOffset === 0) {
+      return false;
+    }
+    this.outputBuffers.push(this.write);
+    this.write = {
+      buffer: new Float32Array(this.bufferLength),
+      trackId: null,
+      eventId: null,
+    };
+    this.writeOffset = 0;
     return true;
   }
 
@@ -135,6 +155,9 @@ class StreamProcessor extends AudioWorkletProcessor {
       }
       return true;
     } else if (this.hasStarted) {
+      if (this.flushWriteBuffer()) {
+        return true;
+      }
       this.port.postMessage({ event: 'stop' });
       return false;
     } else {
