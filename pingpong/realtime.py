@@ -721,6 +721,23 @@ async def handle_browser_messages(
                                 started_playing_at_ms=started_playing_at_ms,
                             )
                         )
+                    elif type == "response.audio.delta.ended":
+                        if not realtime_recorder:
+                            continue
+                        item_id = data.get("item_id")
+                        event_id = data.get("event_id")
+                        if item_id is None or event_id is None:
+                            browser_connection_logger.exception(
+                                "Received response.audio.delta.ended message without item_id or event_id: %s",
+                                sanitize_for_log(
+                                    json.dumps(data, sort_keys=True), max_len=512
+                                ),
+                            )
+                            continue
+                        await realtime_recorder.ended_playing_assistant_response_delta(
+                            item_id=item_id,
+                            event_id=event_id,
+                        )
 
                 except json.JSONDecodeError as e:
                     browser_connection_logger.exception(

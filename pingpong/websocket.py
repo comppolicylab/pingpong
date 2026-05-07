@@ -67,7 +67,7 @@ def build_realtime_session(
     turn_detection: dict[str, Any] = {
         "create_response": True,
         "type": realtime_vad_mode.value,
-        "interrupt_response": False,
+        "interrupt_response": True,
     }
     if realtime_vad_mode == schemas.RealtimeVadMode.SEMANTIC_VAD:
         turn_detection["eagerness"] = realtime_eagerness.value

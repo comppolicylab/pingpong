@@ -70,7 +70,7 @@ def test_realtime_session_uses_create_defaults_for_null_fields():
     assert session["audio"]["input"]["turn_detection"] == {
         "create_response": True,
         "type": "semantic_vad",
-        "interrupt_response": False,
+        "interrupt_response": True,
         "eagerness": "auto",
     }
 
@@ -187,7 +187,7 @@ def test_realtime_session_builds_server_vad_payload():
     assert session["audio"]["input"]["turn_detection"] == {
         "create_response": True,
         "type": "server_vad",
-        "interrupt_response": False,
+        "interrupt_response": True,
         "threshold": 0.7,
         "prefix_padding_ms": 200,
         "silence_duration_ms": 650,

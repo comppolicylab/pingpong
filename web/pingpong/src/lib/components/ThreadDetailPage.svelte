@@ -1078,7 +1078,8 @@
 		wavRecorder = new WavRecorder({ sampleRate: 24000, debug: true });
 		wavStreamPlayer = new WavStreamPlayer({
 			sampleRate: 24000,
-			onAudioPartStarted: onAudioPartStartedProcessor
+			onAudioPartStarted: onAudioPartStartedProcessor,
+			onAudioPartEnded: onAudioPartEndedProcessor
 		});
 		try {
 			await wavStreamPlayer.connect();
@@ -1159,6 +1160,27 @@
 				item_id: data.trackId,
 				event_id: data.eventId,
 				started_playing_at: data.timestamp
+			})
+		);
+	};
+
+	/**
+	 * Handle the end of an assistant message audio chunk playback.
+	 * @param data The data associated with the completed audio chunk.
+	 * @param data.trackId The ID of the track.
+	 * @param data.timestamp The timestamp of when the chunk ended.
+	 */
+	const onAudioPartEndedProcessor = (data: {
+		trackId: string;
+		eventId: string;
+		timestamp: number;
+	}) => {
+		socket?.send(
+			JSON.stringify({
+				type: 'response.audio.delta.ended',
+				item_id: data.trackId,
+				event_id: data.eventId,
+				ended_playing_at: data.timestamp
 			})
 		);
 	};

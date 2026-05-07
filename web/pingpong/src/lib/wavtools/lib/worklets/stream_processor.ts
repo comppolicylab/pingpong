@@ -39,6 +39,7 @@ class StreamProcessor extends AudioWorkletProcessor {
     this.writeOffset = 0;
     this.trackSampleOffsets = {};
     this.processedEventIds = new Set();
+    this.endedEventIds = new Set();
     this.port.onmessage = (event) => {
       if (event.data) {
         const payload = event.data;
@@ -117,6 +118,20 @@ class StreamProcessor extends AudioWorkletProcessor {
             timestamp: startTimestamp,
         });
         this.processedEventIds.add(eventId);
+      }
+      if (
+        eventId &&
+        !this.endedEventIds.has(eventId) &&
+        !outputBuffers.some((queued) => queued.eventId === eventId) &&
+        (this.writeOffset === 0 || this.write.eventId !== eventId)
+      ) {
+        this.port.postMessage({
+            event: 'audio_part_ended',
+            trackId: trackId,
+            eventId: eventId,
+            timestamp: Date.now(),
+        });
+        this.endedEventIds.add(eventId);
       }
       return true;
     } else if (this.hasStarted) {
