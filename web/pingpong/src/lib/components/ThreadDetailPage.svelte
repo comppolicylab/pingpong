@@ -1124,6 +1124,22 @@
 	let startingAudioSession = false;
 	let audioSessionStarted = false;
 
+	const sendRealtimeBinary = (payload: ArrayBuffer): boolean => {
+		if (!socket || socket.readyState !== WebSocket.OPEN) {
+			return false;
+		}
+		socket.send(payload);
+		return true;
+	};
+
+	const sendRealtimeEvent = (payload: Record<string, unknown>): boolean => {
+		if (!socket || socket.readyState !== WebSocket.OPEN) {
+			return false;
+		}
+		socket.send(JSON.stringify(payload));
+		return true;
+	};
+
 	/**
 	 * Process audio chunks.
 	 * This function sends the audio data to the server via WebSocket.
@@ -1132,7 +1148,7 @@
 	 * @param data.mono The mono audio data.
 	 */
 	const chunkProcessor = (data: { raw: ArrayBuffer; mono: ArrayBuffer }) => {
-		if (!socket || !audioSessionStarted) {
+		if (!audioSessionStarted) {
 			return;
 		}
 		const audio = new Uint8Array(data.mono);
@@ -1140,7 +1156,7 @@
 		const view = new DataView(buffer);
 		view.setFloat64(0, Date.now());
 		new Uint8Array(buffer, 8).set(audio);
-		socket.send(buffer);
+		sendRealtimeBinary(buffer);
 	};
 
 	/**
@@ -1154,14 +1170,12 @@
 		eventId: string;
 		timestamp: number;
 	}) => {
-		socket?.send(
-			JSON.stringify({
-				type: 'response.audio.delta.started',
-				item_id: data.trackId,
-				event_id: data.eventId,
-				started_playing_at: data.timestamp
-			})
-		);
+		sendRealtimeEvent({
+			type: 'response.audio.delta.started',
+			item_id: data.trackId,
+			event_id: data.eventId,
+			started_playing_at: data.timestamp
+		});
 	};
 
 	/**
@@ -1175,14 +1189,12 @@
 		eventId: string;
 		timestamp: number;
 	}) => {
-		socket?.send(
-			JSON.stringify({
-				type: 'response.audio.delta.ended',
-				item_id: data.trackId,
-				event_id: data.eventId,
-				ended_playing_at: data.timestamp
-			})
-		);
+		sendRealtimeEvent({
+			type: 'response.audio.delta.ended',
+			item_id: data.trackId,
+			event_id: data.eventId,
+			ended_playing_at: data.timestamp
+		});
 	};
 
 	/**
@@ -1273,7 +1285,7 @@
 					const trackSampleOffset = await wavStreamPlayer.interrupt();
 					if (trackSampleOffset?.trackId) {
 						const { trackId, offset } = trackSampleOffset;
-						if (!socket) {
+						if (!socket || socket.readyState !== WebSocket.OPEN) {
 							sadToast('Error connecting with the server.');
 							return;
 						}
@@ -1281,13 +1293,11 @@
 							sadToast('Failed to set up audio output to your speakers.');
 							return;
 						}
-						socket.send(
-							JSON.stringify({
-								type: 'conversation.item.truncate',
-								item_id: trackId,
-								audio_end_ms: Math.floor((offset / wavStreamPlayer.getSampleRate()) * 1000)
-							})
-						);
+						sendRealtimeEvent({
+							type: 'conversation.item.truncate',
+							item_id: trackId,
+							audio_end_ms: Math.floor((offset / wavStreamPlayer.getSampleRate()) * 1000)
+						});
 					}
 					break;
 				}

@@ -1,4 +1,5 @@
 import asyncio
+import binascii
 import base64
 from collections import deque
 import json
@@ -37,7 +38,6 @@ from pingpong.websocket import (
     ws_with_single_realtime_session,
     ws_with_openai_client,
     ws_with_realtime_connection,
-    ws_with_thread_assistant_prompt,
 )
 from pingpong.state_types import StateWebSocket
 
@@ -78,29 +78,27 @@ class RealtimeAssistantAudioTracker:
 
     async def add_audio_delta(
         self, item_id: str | None, audio_bytes: bytes | None
-    ) -> int | None:
+    ) -> None:
         if not item_id or audio_bytes is None:
-            return None
+            return
 
         sample_count = len(audio_bytes) // self._BYTES_PER_FRAME
         async with self._lock:
             self._sample_counts_by_item_id[item_id] = (
                 self._sample_counts_by_item_id.get(item_id, 0) + sample_count
             )
-            return self._duration_ms_for_sample_count(
-                self._sample_counts_by_item_id[item_id]
-            )
 
     async def clamp_truncate_audio_end_ms(
         self, item_id: str, requested_audio_end_ms: int
     ) -> int:
+        sanitized_item_id = sanitize_for_log(item_id, max_len=256)
         async with self._lock:
             sample_count = self._sample_counts_by_item_id.get(item_id)
 
         if sample_count is None:
             browser_connection_logger.warning(
                 "Received truncate for assistant item_id %s before any tracked audio duration.",
-                item_id,
+                sanitized_item_id,
             )
             return requested_audio_end_ms
 
@@ -110,9 +108,9 @@ class RealtimeAssistantAudioTracker:
 
         browser_connection_logger.warning(
             "Clamping realtime truncate audio_end_ms for item_id %s from %s to %s.",
-            item_id,
-            requested_audio_end_ms,
-            generated_duration_ms,
+            sanitized_item_id,
+            sanitize_for_log(str(requested_audio_end_ms)),
+            sanitize_for_log(str(generated_duration_ms)),
         )
         return generated_duration_ms
 
@@ -670,7 +668,7 @@ async def handle_browser_messages(
                         if not isinstance(audio_end_ms, int) or isinstance(
                             audio_end_ms, bool
                         ):
-                            browser_connection_logger.exception(
+                            browser_connection_logger.warning(
                                 "Received conversation.item.truncate message with invalid audio_end_ms: %s",
                                 sanitize_for_log(
                                     json.dumps(data, sort_keys=True), max_len=512
@@ -728,7 +726,7 @@ async def handle_browser_messages(
                         item_id = data.get("item_id")
                         event_id = data.get("event_id")
                         if item_id is None or event_id is None:
-                            browser_connection_logger.exception(
+                            browser_connection_logger.warning(
                                 "Received response.audio.delta.ended message without item_id or event_id: %s",
                                 sanitize_for_log(
                                     json.dumps(data, sort_keys=True), max_len=512
@@ -895,7 +893,7 @@ async def handle_openai_events(
                     delta_audio_b64 = event.delta
                     try:
                         delta_audio_bytes = pybase64.b64decode(delta_audio_b64)
-                    except Exception as e:
+                    except (binascii.Error, TypeError, ValueError) as e:
                         openai_connection_logger.warning(
                             "Failed to decode realtime assistant audio delta: %s",
                             e,
@@ -998,7 +996,6 @@ async def process_queue_tasks(
 @ws_parse_session_token
 @ws_check_realtime_permissions
 @ws_with_openai_client
-@ws_with_thread_assistant_prompt
 @ws_with_single_realtime_session
 @ws_with_realtime_connection
 async def browser_realtime_websocket(

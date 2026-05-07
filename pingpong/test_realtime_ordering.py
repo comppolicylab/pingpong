@@ -17,17 +17,18 @@ def _drain_ready_messages(buffer: ConversationItemOrderingBuffer):
         ready_messages.append(next_message)
 
 
+@pytest.mark.asyncio
 async def test_assistant_audio_tracker_clamps_to_generated_duration():
     tracker = RealtimeAssistantAudioTracker()
     audio_delta = b"\0" * (24_000 * 2)
 
-    duration_ms = await tracker.add_audio_delta("item-1", audio_delta)
+    await tracker.add_audio_delta("item-1", audio_delta)
 
-    assert duration_ms == 1000
     assert await tracker.clamp_truncate_audio_end_ms("item-1", 1500) == 1000
     assert await tracker.clamp_truncate_audio_end_ms("item-1", 500) == 500
 
 
+@pytest.mark.asyncio
 async def test_assistant_audio_tracker_leaves_unknown_item_duration_unchanged():
     tracker = RealtimeAssistantAudioTracker()
 

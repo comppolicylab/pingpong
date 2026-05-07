@@ -138,10 +138,8 @@ def build_realtime_session(
 def build_realtime_extra_headers(
     browser_connection: StateWebSocket,
 ) -> dict[str, str]:
-    safety_identifier = (
-        browser_connection.state["response_safety_identifier"]
-        if "response_safety_identifier" in browser_connection.state
-        else None
+    safety_identifier = getattr(
+        browser_connection.state, "response_safety_identifier", None
     )
     if not isinstance(safety_identifier, str) or not safety_identifier:
         return {}
@@ -149,7 +147,7 @@ def build_realtime_extra_headers(
     return {"OpenAI-Safety-Identifier": safety_identifier}
 
 
-async def _thread_has_realtime_messages(db, thread_id: int) -> bool:
+async def _thread_has_messages(db, thread_id: int) -> bool:
     message_id = await db.scalar(
         select(models.Message.id).where(models.Message.thread_id == thread_id).limit(1)
     )
@@ -352,6 +350,8 @@ def ws_with_single_realtime_session(func):
         **kwargs,
     ):
         thread_pk = int(thread_id)
+        # The row lock intentionally spans the websocket transaction so a second
+        # concurrent connection to the same unfinished voice session waits here.
         thread = await models.Thread.get_by_id_with_assistant(
             browser_connection.state["db"],
             thread_pk,
@@ -362,15 +362,15 @@ def ws_with_single_realtime_session(func):
             await _reject_realtime_session(
                 browser_connection, "This voice session was not found."
             )
-            raise ValueError("This voice session was not found.")
+            return
 
-        if thread.voice_mode_recording or await _thread_has_realtime_messages(
+        if thread.voice_mode_recording or await _thread_has_messages(
             browser_connection.state["db"], thread.id
         ):
             await _reject_realtime_session(
                 browser_connection, VOICE_SESSION_FINAL_MESSAGE
             )
-            raise ValueError(VOICE_SESSION_FINAL_MESSAGE)
+            return
 
         browser_connection.state["thread"] = thread
         browser_connection.state["assistant"] = thread.assistant

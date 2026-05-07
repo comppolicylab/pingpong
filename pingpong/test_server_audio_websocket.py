@@ -134,7 +134,7 @@ async def test_single_realtime_session_rejects_finished_thread(
             voice_mode_recording=object() if has_recording else None,
         )
 
-    async def fake_thread_has_realtime_messages(_db, _thread_id):
+    async def fake_thread_has_messages(_db, _thread_id):
         return has_messages
 
     monkeypatch.setattr(
@@ -144,8 +144,8 @@ async def test_single_realtime_session_rejects_finished_thread(
     )
     monkeypatch.setattr(
         websocket_module,
-        "_thread_has_realtime_messages",
-        fake_thread_has_realtime_messages,
+        "_thread_has_messages",
+        fake_thread_has_messages,
     )
 
     websocket = DummyWebSocket()
@@ -153,8 +153,7 @@ async def test_single_realtime_session_rejects_finished_thread(
     handler = AsyncMock()
     wrapped = websocket_module.ws_with_single_realtime_session(handler)
 
-    with pytest.raises(ValueError, match=websocket_module.VOICE_SESSION_FINAL_MESSAGE):
-        await wrapped(websocket, "10", "20")
+    await wrapped(websocket, "10", "20")
 
     handler.assert_not_awaited()
     assert websocket.closed is True

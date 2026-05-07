@@ -293,13 +293,16 @@ class RealtimeRecorder:
     async def ended_playing_assistant_response_delta(self, item_id: str, event_id: str):
         async with self.save_lock:
             if not self.assistant_responses.get(item_id):
-                realtime_recorder_logger.exception(
-                    f"Ended playing assistant response delta for item_id {item_id} but no such response exists."
+                realtime_recorder_logger.warning(
+                    "Ended playing assistant response delta for item_id %s but no such response exists.",
+                    item_id,
                 )
                 return
             if not self.assistant_responses[item_id].audio_chunks.get(event_id):
-                realtime_recorder_logger.exception(
-                    f"Ended playing assistant response delta for item_id {item_id} and event_id {event_id} but no such audio chunk exists."
+                realtime_recorder_logger.warning(
+                    "Ended playing assistant response delta for item_id %s and event_id %s but no such audio chunk exists.",
+                    item_id,
+                    event_id,
                 )
                 return
             self.assistant_responses[item_id].audio_chunks[event_id].ended = True
@@ -419,6 +422,8 @@ class RealtimeRecorder:
                 for k, v in response.audio_chunks.items()
                 if v.starts_at is not None
             }
+            # The browser requested discard after playback stopped, so retained chunks
+            # are already confirmed played and do not need separate end events.
             for audio_chunk in response.audio_chunks.values():
                 audio_chunk.ended = True
 
