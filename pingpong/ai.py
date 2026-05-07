@@ -616,10 +616,39 @@ async def build_response_input_item_list(
     response_input_items_with_time: list[
         tuple[datetime, int, str, ResponseInputItemParam]
     ] = []
-    container_by_last_active_time: dict[int, datetime] = {}
+    container_by_last_active_time: dict[str, datetime] = {}
 
     def coerce_utc(value: datetime) -> datetime:
         return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+    def update_container_last_active_time(
+        container_id: str | None,
+        *timestamps: datetime | None,
+    ) -> None:
+        if not container_id:
+            return
+        existing_time = container_by_last_active_time.get(container_id)
+        candidates = [coerce_utc(value) for value in timestamps if value is not None]
+        if existing_time is not None:
+            candidates.append(coerce_utc(existing_time))
+        if candidates:
+            container_by_last_active_time[container_id] = max(candidates)
+
+    def is_container_expired(container_id: str | None) -> bool:
+        if not container_id or container_id not in container_by_last_active_time:
+            return True
+        return (
+            utcnow() - container_by_last_active_time[container_id]
+        ).total_seconds() > 19 * 60
+
+    async for tool_call in models.Thread.list_all_tool_calls_gen(session, thread_id):
+        if tool_call.type != ToolCallType.CODE_INTERPRETER:
+            continue
+        update_container_last_active_time(
+            tool_call.container_id,
+            tool_call.created,
+            getattr(tool_call, "completed", None),
+        )
 
     message_roles = (
         [MessageRole.USER, MessageRole.ASSISTANT]
@@ -651,7 +680,33 @@ async def build_response_input_item_list(
                     )
                 case MessagePartType.OUTPUT_TEXT:
                     annotations: list[Annotation] = []
-                    for annotation in content.annotations:
+                    stored_annotations = list(content.annotations)
+                    selected_citation_type = next(
+                        (
+                            annotation_type
+                            for annotation_type in (
+                                AnnotationType.CONTAINER_FILE_CITATION,
+                                AnnotationType.FILE_CITATION,
+                                AnnotationType.URL_CITATION,
+                            )
+                            if any(
+                                annotation.type == annotation_type
+                                and (
+                                    annotation_type
+                                    != AnnotationType.CONTAINER_FILE_CITATION
+                                    or not is_container_expired(annotation.container_id)
+                                )
+                                for annotation in stored_annotations
+                            )
+                        ),
+                        None,
+                    )
+                    for annotation in stored_annotations:
+                        if (
+                            selected_citation_type is not None
+                            and annotation.type != selected_citation_type
+                        ):
+                            continue
                         match annotation.type:
                             case AnnotationType.FILE_CITATION:
                                 annotations.append(
@@ -681,21 +736,18 @@ async def build_response_input_item_list(
                                     )
                                 )
                             case AnnotationType.CONTAINER_FILE_CITATION:
-                                continue
-                                # The API currently rejects
-                                # container_file_citation as input
-                                #
-                                # annotations.append(
-                                #     AnnotationContainerFileCitation(
-                                #         file_id=annotation.file_id,
-                                #         container_id=annotation.container_id,
-                                #         filename=annotation.filename,
-                                #         start_index=annotation.start_index or 0,
-                                #         end_index=annotation.end_index or 0,
-                                #         type="container_file_citation",
-                                #         index=0,
-                                #     )
-                                # )
+                                if is_container_expired(annotation.container_id):
+                                    continue
+                                annotations.append(
+                                    AnnotationContainerFileCitation(
+                                        file_id=annotation.file_id,
+                                        container_id=annotation.container_id,
+                                        filename=annotation.filename,
+                                        start_index=annotation.start_index or 0,
+                                        end_index=annotation.end_index or 0,
+                                        type="container_file_citation",
+                                    )
+                                )
                             case _:
                                 continue  # Skip unsupported annotation types
 
@@ -779,21 +831,11 @@ async def build_response_input_item_list(
                             ),
                         )
                     )
-
-                    existing_time = container_by_last_active_time.get(
-                        tool_call.container_id
+                    update_container_last_active_time(
+                        tool_call.container_id,
+                        tool_call.created,
+                        getattr(tool_call, "completed", None),
                     )
-                    candidates: list[datetime] = []
-                    if existing_time is not None:
-                        candidates.append(coerce_utc(existing_time))
-                    if tool_call.created is not None:
-                        candidates.append(coerce_utc(tool_call.created))
-                    if getattr(tool_call, "completed", None) is not None:
-                        candidates.append(coerce_utc(tool_call.completed))
-                    if candidates:
-                        container_by_last_active_time[tool_call.container_id] = max(
-                            candidates
-                        )
 
                 case ToolCallType.FILE_SEARCH:
                     file_search_results: list[Result] = []
@@ -1033,11 +1075,7 @@ async def build_response_input_item_list(
         if not container_id:
             expired_ci_output_indices.add(output_index)
             continue
-        if (
-            container_id not in container_by_last_active_time
-            or (utcnow() - container_by_last_active_time[container_id]).total_seconds()
-            > 19 * 60
-        ):
+        if is_container_expired(container_id):
             expired_ci_output_indices.add(output_index)
 
     reasoning_output_indices_to_remove: set[int] = set()

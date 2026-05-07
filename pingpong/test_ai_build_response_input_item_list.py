@@ -419,6 +419,304 @@ async def test_build_response_input_item_list_replays_developer_and_system_messa
 
 
 @pytest.mark.asyncio
+async def test_build_response_input_item_list_keeps_only_file_citations_when_present(
+    db,
+):
+    async with db.async_session() as session:
+        thread = models.Thread(
+            thread_id="thread_mixed_output_text_annotations", version=3
+        )
+        session.add(thread)
+        await session.flush()
+
+        run = models.Run(status=schemas.RunStatus.COMPLETED, thread_id=thread.id)
+        session.add(run)
+        await session.flush()
+
+        message = models.Message(
+            message_status=schemas.MessageStatus.COMPLETED,
+            run_id=run.id,
+            thread_id=thread.id,
+            output_index=1,
+            role=schemas.MessageRole.ASSISTANT,
+            content=[
+                models.MessagePart(
+                    part_index=0,
+                    type=schemas.MessagePartType.OUTPUT_TEXT,
+                    text="See the cited source.",
+                    annotations=[
+                        models.Annotation(
+                            annotation_index=0,
+                            type=schemas.AnnotationType.URL_CITATION,
+                            url="https://example.com",
+                            title="Example",
+                            start_index=4,
+                            end_index=9,
+                        ),
+                        models.Annotation(
+                            annotation_index=1,
+                            type=schemas.AnnotationType.FILE_CITATION,
+                            file_id="file_123",
+                            filename="source.pdf",
+                            index=14,
+                        ),
+                    ],
+                )
+            ],
+            created=utcnow(),
+        )
+        session.add(message)
+        await session.commit()
+
+        thread_id = thread.id
+
+    async with db.async_session() as session:
+        items = await build_response_input_item_list(session, thread_id=thread_id)
+
+    annotations = items[0]["content"][0]["annotations"]
+    assert annotations == [
+        {
+            "file_id": "file_123",
+            "filename": "source.pdf",
+            "index": 14,
+            "type": "file_citation",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_build_response_input_item_list_keeps_non_file_citations_when_no_file_citation(
+    db,
+):
+    async with db.async_session() as session:
+        thread = models.Thread(
+            thread_id="thread_non_file_output_text_annotations", version=3
+        )
+        session.add(thread)
+        await session.flush()
+
+        run = models.Run(status=schemas.RunStatus.COMPLETED, thread_id=thread.id)
+        session.add(run)
+        await session.flush()
+
+        message = models.Message(
+            message_status=schemas.MessageStatus.COMPLETED,
+            run_id=run.id,
+            thread_id=thread.id,
+            output_index=1,
+            role=schemas.MessageRole.ASSISTANT,
+            content=[
+                models.MessagePart(
+                    part_index=0,
+                    type=schemas.MessagePartType.OUTPUT_TEXT,
+                    text="See the cited page.",
+                    annotations=[
+                        models.Annotation(
+                            annotation_index=0,
+                            type=schemas.AnnotationType.URL_CITATION,
+                            url="https://example.com",
+                            title="Example",
+                            start_index=4,
+                            end_index=9,
+                        ),
+                    ],
+                )
+            ],
+            created=utcnow(),
+        )
+        session.add(message)
+        await session.commit()
+
+        thread_id = thread.id
+
+    async with db.async_session() as session:
+        items = await build_response_input_item_list(session, thread_id=thread_id)
+
+    annotations = items[0]["content"][0]["annotations"]
+    assert [annotation["type"] for annotation in annotations] == ["url_citation"]
+
+
+@pytest.mark.asyncio
+async def test_build_response_input_item_list_prefers_active_container_file_citations(
+    db,
+):
+    async with db.async_session() as session:
+        thread = models.Thread(
+            thread_id="thread_container_output_text_annotations", version=3
+        )
+        session.add(thread)
+        await session.flush()
+
+        run = models.Run(status=schemas.RunStatus.COMPLETED, thread_id=thread.id)
+        session.add(run)
+        await session.flush()
+
+        base_time = utcnow() - timedelta(minutes=5)
+        message = models.Message(
+            message_status=schemas.MessageStatus.COMPLETED,
+            run_id=run.id,
+            thread_id=thread.id,
+            output_index=1,
+            role=schemas.MessageRole.ASSISTANT,
+            content=[
+                models.MessagePart(
+                    part_index=0,
+                    type=schemas.MessagePartType.OUTPUT_TEXT,
+                    text="See the generated file.",
+                    annotations=[
+                        models.Annotation(
+                            annotation_index=0,
+                            type=schemas.AnnotationType.URL_CITATION,
+                            url="https://example.com",
+                            title="Example",
+                            start_index=4,
+                            end_index=9,
+                        ),
+                        models.Annotation(
+                            annotation_index=1,
+                            type=schemas.AnnotationType.FILE_CITATION,
+                            file_id="file_search_123",
+                            filename="source.pdf",
+                            index=14,
+                        ),
+                        models.Annotation(
+                            annotation_index=2,
+                            type=schemas.AnnotationType.CONTAINER_FILE_CITATION,
+                            file_id="container_file_123",
+                            container_id="container-active-citation",
+                            filename="output.csv",
+                            start_index=14,
+                            end_index=18,
+                        ),
+                    ],
+                )
+            ],
+            created=base_time,
+        )
+        tool_call = models.ToolCall(
+            tool_call_id="tc_active_citation",
+            type=schemas.ToolCallType.CODE_INTERPRETER,
+            status=schemas.ToolCallStatus.COMPLETED,
+            run_id=run.id,
+            thread_id=thread.id,
+            output_index=2,
+            code="print('ok')",
+            container_id="container-active-citation",
+            created=base_time + timedelta(minutes=1),
+            completed=base_time + timedelta(minutes=2),
+        )
+
+        session.add_all([message, tool_call])
+        await session.commit()
+
+        thread_id = thread.id
+
+    async with db.async_session() as session:
+        items = await build_response_input_item_list(session, thread_id=thread_id)
+
+    annotations = items[0]["content"][0]["annotations"]
+    assert annotations == [
+        {
+            "container_id": "container-active-citation",
+            "end_index": 18,
+            "file_id": "container_file_123",
+            "filename": "output.csv",
+            "start_index": 14,
+            "type": "container_file_citation",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_build_response_input_item_list_skips_expired_container_file_citations(
+    db,
+):
+    async with db.async_session() as session:
+        thread = models.Thread(
+            thread_id="thread_expired_container_output_text_annotations", version=3
+        )
+        session.add(thread)
+        await session.flush()
+
+        run = models.Run(status=schemas.RunStatus.COMPLETED, thread_id=thread.id)
+        session.add(run)
+        await session.flush()
+
+        base_time = utcnow() - timedelta(hours=1)
+        message = models.Message(
+            message_status=schemas.MessageStatus.COMPLETED,
+            run_id=run.id,
+            thread_id=thread.id,
+            output_index=1,
+            role=schemas.MessageRole.ASSISTANT,
+            content=[
+                models.MessagePart(
+                    part_index=0,
+                    type=schemas.MessagePartType.OUTPUT_TEXT,
+                    text="See the generated file.",
+                    annotations=[
+                        models.Annotation(
+                            annotation_index=0,
+                            type=schemas.AnnotationType.URL_CITATION,
+                            url="https://example.com",
+                            title="Example",
+                            start_index=4,
+                            end_index=9,
+                        ),
+                        models.Annotation(
+                            annotation_index=1,
+                            type=schemas.AnnotationType.FILE_CITATION,
+                            file_id="file_search_456",
+                            filename="source.pdf",
+                            index=14,
+                        ),
+                        models.Annotation(
+                            annotation_index=2,
+                            type=schemas.AnnotationType.CONTAINER_FILE_CITATION,
+                            file_id="container_file_456",
+                            container_id="container-expired-citation",
+                            filename="output.csv",
+                            start_index=14,
+                            end_index=18,
+                        ),
+                    ],
+                )
+            ],
+            created=base_time,
+        )
+        tool_call = models.ToolCall(
+            tool_call_id="tc_expired_citation",
+            type=schemas.ToolCallType.CODE_INTERPRETER,
+            status=schemas.ToolCallStatus.COMPLETED,
+            run_id=run.id,
+            thread_id=thread.id,
+            output_index=2,
+            code="print('expired')",
+            container_id="container-expired-citation",
+            created=base_time + timedelta(minutes=1),
+            completed=base_time + timedelta(minutes=2),
+        )
+
+        session.add_all([message, tool_call])
+        await session.commit()
+
+        thread_id = thread.id
+
+    async with db.async_session() as session:
+        items = await build_response_input_item_list(session, thread_id=thread_id)
+
+    annotations = items[0]["content"][0]["annotations"]
+    assert annotations == [
+        {
+            "file_id": "file_search_456",
+            "filename": "source.pdf",
+            "index": 14,
+            "type": "file_citation",
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_build_response_input_item_list_can_build_user_assistant_messages_only(
     db,
 ):
