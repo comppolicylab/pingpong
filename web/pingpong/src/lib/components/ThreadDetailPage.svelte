@@ -1248,7 +1248,6 @@
 						sadToast('Failed to set up audio output to your speakers.');
 						return;
 					}
-					await wavStreamPlayer.interrupt();
 					const trackSampleOffset = await wavStreamPlayer.interrupt();
 					if (trackSampleOffset?.trackId) {
 						const { trackId, offset } = trackSampleOffset;
