@@ -67,4 +67,4 @@ dev = [
 ]
 
 [tool.uv]
-override-dependencies = ["pygments ~= 2.20.0"]
+override-dependencies = ["pygments ~= 2.20.0", "mako ~= 1.3.12"]
