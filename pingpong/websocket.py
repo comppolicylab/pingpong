@@ -3,6 +3,7 @@ import logging
 from typing import Any, cast
 
 from pingpong import models, schemas
+from pingpong.ai_models import get_reasoning_effort_map
 from pingpong.ai import (
     OpenAIClientType,
     get_openai_client_by_class_id,
@@ -22,6 +23,22 @@ def _coerce_realtime_enum(enum_type, value, default):
     if isinstance(value, enum_type):
         return value
     return enum_type.__members__.get(value) or enum_type(value)
+
+
+def build_realtime_reasoning(assistant: models.Assistant) -> dict[str, str] | None:
+    reasoning_effort_map = get_reasoning_effort_map(assistant.model)
+    if not reasoning_effort_map:
+        return None
+
+    reasoning_effort = (
+        assistant.reasoning_effort if assistant.reasoning_effort is not None else 0
+    )
+    if reasoning_effort not in reasoning_effort_map:
+        raise ValueError(
+            f"Invalid realtime reasoning effort {reasoning_effort} for model {assistant.model}."
+        )
+
+    return {"effort": reasoning_effort_map[reasoning_effort]}
 
 
 def build_realtime_session(
@@ -77,7 +94,7 @@ def build_realtime_session(
         if realtime_noise_reduction == schemas.RealtimeNoiseReduction.NONE
         else {"type": realtime_noise_reduction.value}
     )
-    return {
+    session = {
         "type": "realtime",
         "audio": {
             "input": {
@@ -102,6 +119,21 @@ def build_realtime_session(
         "tool_choice": "none",
         "tools": [],
     }
+    reasoning = build_realtime_reasoning(assistant)
+    if reasoning is not None:
+        session["reasoning"] = reasoning
+
+    return session
+
+
+def build_realtime_extra_headers(
+    browser_connection: StateWebSocket,
+) -> dict[str, str]:
+    safety_identifier = browser_connection.state.get("response_safety_identifier")
+    if not isinstance(safety_identifier, str) or not safety_identifier:
+        return {}
+
+    return {"OpenAI-Safety-Identifier": safety_identifier}
 
 
 def ws_auth_middleware(func):
@@ -283,9 +315,11 @@ def ws_with_realtime_connection(func):
             "conversation_instructions"
         ]
         session = build_realtime_session(assistant, conversation_instructions)
+        extra_headers = build_realtime_extra_headers(browser_connection)
         try:
             async with openai_client.realtime.connect(
                 model=assistant.model,
+                extra_headers=extra_headers,
             ) as realtime_connection:
                 browser_connection.state["realtime_connection"] = realtime_connection
                 await realtime_connection.session.update(session=session)
