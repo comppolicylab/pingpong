@@ -649,6 +649,11 @@ async def build_response_input_item_list(
             utcnow() - container_by_last_active_time[container_id]
         ).total_seconds() > CONTAINER_TTL_SECONDS
 
+    def is_container_file_citation_replayable(annotation: models.Annotation) -> bool:
+        return bool(
+            annotation.file_id and annotation.file_id.startswith("cfile_")
+        ) and (not is_container_expired(annotation.container_id))
+
     tool_calls = [
         tool_call
         async for tool_call in models.Thread.list_all_tool_calls_gen(session, thread_id)
@@ -701,7 +706,7 @@ async def build_response_input_item_list(
                         if annotation.type in ANNOTATION_PRIORITY_TYPES
                         and (
                             annotation.type != AnnotationType.CONTAINER_FILE_CITATION
-                            or not is_container_expired(annotation.container_id)
+                            or is_container_file_citation_replayable(annotation)
                         )
                     }
                     selected_annotation_type = next(
@@ -748,7 +753,9 @@ async def build_response_input_item_list(
                                     )
                                 )
                             case AnnotationType.CONTAINER_FILE_CITATION:
-                                if is_container_expired(annotation.container_id):
+                                if not is_container_file_citation_replayable(
+                                    annotation
+                                ):
                                     continue
                                 annotations.append(
                                     AnnotationContainerFileCitation(
@@ -1535,7 +1542,7 @@ class BufferedResponseStreamHandler:
 
         annotation_data = {
             "type": AnnotationType.CONTAINER_FILE_CITATION,
-            "file_id": file.file_id,
+            "file_id": data["file_id"],
             "file_object_id": file.id if not file.vision_file_id else None,
             "vision_file_id": file.vision_file_id,
             "vision_file_object_id": file.id if file.vision_file_id else None,
