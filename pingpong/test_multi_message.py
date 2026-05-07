@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 from sqlalchemy import select
 
+from pingpong import ai as ai_module
 from pingpong import models, schemas
 from pingpong.ai import BufferedResponseStreamHandler
 from pingpong.testutil import with_authz, with_user
@@ -109,6 +110,71 @@ async def _setup_handler_with_initial_message(db):
     await handler.on_output_message_created(first_event)
     assert handler.message_id is not None
     return handler, 5001, handler.message_id
+
+
+async def test_container_file_citation_preserves_container_file_id(db, monkeypatch):
+    handler, _, _ = await _setup_handler_with_initial_message(db)
+    await handler.on_output_text_part_created(
+        SimpleNamespace(type="output_text", text="Generated a CSV.")
+    )
+    assert handler.message_part_id is not None
+
+    handler.openai_cli = SimpleNamespace(
+        containers=SimpleNamespace(
+            files=SimpleNamespace(
+                content=SimpleNamespace(
+                    retrieve=AsyncMock(
+                        return_value=SimpleNamespace(content=b"name,email\n")
+                    )
+                )
+            )
+        )
+    )
+
+    async def fake_handle_create_file(session, **_kwargs):
+        file = models.File(
+            file_id="file-uploaded-copy",
+            name="random_names_emails.csv",
+            content_type="text/csv",
+            class_id=handler.class_id,
+        )
+        session.add(file)
+        await session.flush()
+        return schemas.File(
+            id=file.id,
+            file_id=file.file_id,
+            name=file.name,
+            content_type=file.content_type,
+            private=True,
+            uploader_id=handler.user_id,
+            created=file.created,
+            updated=file.updated,
+        )
+
+    monkeypatch.setattr(ai_module, "handle_create_file", fake_handle_create_file)
+
+    await handler.on_output_text_container_file_citation_added(
+        {
+            "type": "container_file_citation",
+            "file_id": "cfile-original-container",
+            "container_id": "cntr-original",
+            "filename": "random_names_emails.csv",
+            "start_index": 10,
+            "end_index": 30,
+        },
+        annotation_index=0,
+    )
+
+    async with db.async_session() as session:
+        annotation = await session.scalar(
+            select(models.Annotation).where(
+                models.Annotation.message_part_id == handler.message_part_id
+            )
+        )
+
+    assert annotation is not None
+    assert annotation.file_id == "cfile-original-container"
+    assert annotation.file_object_id is not None
 
 
 async def _setup_handler_with_phase(db, phase: str):
