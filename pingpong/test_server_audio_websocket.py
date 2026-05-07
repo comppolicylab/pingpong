@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 from pydantic import ValidationError
 
+from pingpong import ai_models
 from pingpong import models
 from pingpong import schemas
 from pingpong import websocket as websocket_module
@@ -41,6 +42,7 @@ def realtime_assistant(**overrides):
     defaults = {
         "model": "gpt-4o-realtime-preview",
         "assistant_should_message_first": False,
+        "reasoning_effort": None,
         "realtime_vad_mode": None,
         "realtime_eagerness": None,
         "realtime_vad_threshold": None,
@@ -63,12 +65,60 @@ def test_realtime_session_uses_create_defaults_for_null_fields():
 
     assert session["instructions"] == "Speak clearly."
     assert session["audio"]["output"] == {"voice": "marin", "speed": 1.0}
+    assert "reasoning" not in session
     assert session["audio"]["input"]["noise_reduction"] == {"type": "far_field"}
     assert session["audio"]["input"]["turn_detection"] == {
         "create_response": True,
         "type": "semantic_vad",
         "interrupt_response": False,
         "eagerness": "auto",
+    }
+
+
+def test_realtime_session_adds_low_reasoning_by_default_for_gpt_realtime_2():
+    session = websocket_module.build_realtime_session(
+        realtime_assistant(model="gpt-realtime-2"),
+        "Speak clearly.",
+    )
+
+    assert session["reasoning"] == {"effort": "low"}
+
+
+def test_realtime_session_uses_selected_reasoning_for_gpt_realtime_2():
+    session = websocket_module.build_realtime_session(
+        realtime_assistant(model="gpt-realtime-2", reasoning_effort=-1),
+        "Speak clearly.",
+    )
+
+    assert session["reasoning"] == {"effort": "minimal"}
+
+
+def test_realtime_extra_headers_include_safety_identifier():
+    websocket = DummyWebSocket()
+    websocket.state["response_safety_identifier"] = "safety-id"
+
+    assert websocket_module.build_realtime_extra_headers(websocket) == {
+        "OpenAI-Safety-Identifier": "safety-id"
+    }
+
+
+def test_realtime_extra_headers_omit_missing_safety_identifier():
+    websocket = DummyWebSocket()
+
+    assert websocket_module.build_realtime_extra_headers(websocket) == {}
+
+
+def test_gpt_realtime_2_model_metadata_supports_realtime_reasoning():
+    model = ai_models.KNOWN_MODELS["gpt-realtime-2"]
+
+    assert model["type"] == "voice"
+    assert model["supports_reasoning"] is True
+    assert model["supports_minimal_reasoning_effort"] is True
+    assert ai_models.get_reasoning_effort_map("gpt-realtime-2") == {
+        -1: "minimal",
+        0: "low",
+        1: "medium",
+        2: "high",
     }
 
 
