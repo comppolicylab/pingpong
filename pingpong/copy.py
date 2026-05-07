@@ -7,7 +7,6 @@ from pingpong.ai import (
     format_instructions,
     get_azure_model_deployment_name_equivalent,
 )
-from pingpong.ai_models import get_reasoning_effort_map
 from pingpong.auth import generate_auth_link
 from pingpong.authz.base import Relation
 from pingpong.authz.openfga import OpenFgaAuthzClient
@@ -521,18 +520,6 @@ async def copy_assistant(
                 else assistant.model
             )
 
-        reasoning_map = get_reasoning_effort_map(assistant.model)
-        reasoning_effort = (
-            reasoning_map.get(assistant.reasoning_effort)
-            if assistant.reasoning_effort is not None
-            else None
-        )
-        reasoning_extra_body = (
-            {"reasoning_effort": reasoning_effort}
-            if reasoning_effort is not None
-            else {}
-        )
-
         openai_assistant = await cli.beta.assistants.create(
             instructions=format_instructions(
                 assistant.instructions,
@@ -548,7 +535,6 @@ async def copy_assistant(
                 "creator_id": str(assistant.creator_id),
             },
             tool_resources=tool_resources,
-            extra_body=reasoning_extra_body,
         )
 
         new_assistant.assistant_id = openai_assistant.id
