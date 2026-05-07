@@ -7,8 +7,6 @@ import logging
 import sys
 from typing import Union
 
-import pybase64
-
 from pingpong.audio_store import LocalAudioUploadObject, S3AudioUploadObject
 from pingpong.models import VoiceModeRecording
 
@@ -40,6 +38,7 @@ class AssistantAudioChunk(BaseModel):
     audio: AudioSegment
     event_id: str
     starts_at: int | None = None
+    ended: bool = False
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -52,8 +51,35 @@ class AssistantResponse(BaseModel):
     first_audio_chunk_event_id: str
     audio_chunks: dict[str, AssistantAudioChunk] = Field(default_factory=dict)
     prev: str | None = None
+    truncated: bool = False
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    def chunks_required_for_saved_audio(self) -> list[AssistantAudioChunk]:
+        required_chunks: list[AssistantAudioChunk] = []
+        duration_so_far = 0
+        for chunk in self.audio_chunks.values():
+            if duration_so_far >= self.duration:
+                break
+            required_chunks.append(chunk)
+            duration_so_far += len(chunk.audio)
+        return required_chunks
+
+    def has_required_start_times(self) -> bool:
+        return all(
+            chunk.starts_at is not None
+            for chunk in self.chunks_required_for_saved_audio()
+        )
+
+    def has_required_end_events(self) -> bool:
+        return all(chunk.ended for chunk in self.chunks_required_for_saved_audio())
+
+    def is_ready_to_save(self) -> bool:
+        return (
+            self.complete
+            and self.has_required_start_times()
+            and (self.truncated or self.has_required_end_events())
+        )
 
 
 def not_closed(func):
@@ -230,8 +256,17 @@ class RealtimeRecorder:
         self, item_id: str, final_duration_ms: int
     ):
         async with self.save_lock:
-            self.assistant_responses[item_id].complete = True
-            self.assistant_responses[item_id].duration = final_duration_ms
+            response = self.assistant_responses.get(item_id)
+            if not response:
+                realtime_recorder_logger.warning(
+                    "Stopped playing assistant response for item_id %s but no such "
+                    "response exists.",
+                    item_id,
+                )
+                return
+            response.complete = True
+            response.truncated = True
+            response.duration = final_duration_ms
 
     @not_closed
     async def started_playing_assistant_response_delta(
@@ -255,12 +290,29 @@ class RealtimeRecorder:
                 self.assistant_responses[item_id].starts_at = started_playing_at_ms
 
     @not_closed
+    async def ended_playing_assistant_response_delta(self, item_id: str, event_id: str):
+        async with self.save_lock:
+            if not self.assistant_responses.get(item_id):
+                realtime_recorder_logger.warning(
+                    "Ended playing assistant response delta for item_id %s but no such response exists.",
+                    item_id,
+                )
+                return
+            if not self.assistant_responses[item_id].audio_chunks.get(event_id):
+                realtime_recorder_logger.warning(
+                    "Ended playing assistant response delta for item_id %s and event_id %s but no such audio chunk exists.",
+                    item_id,
+                    event_id,
+                )
+                return
+            self.assistant_responses[item_id].audio_chunks[event_id].ended = True
+
+    @not_closed
     async def add_assistant_response_delta(
-        self, b64_audio_chunk: str, event_id: str, item_id: str
+        self, audio_chunk_bytes: bytes, event_id: str, item_id: str
     ):
-        # Create an AudioSegment from the base64-encoded audio chunk
         audio_chunk = AudioSegment(
-            data=pybase64.b64decode(b64_audio_chunk),
+            data=audio_chunk_bytes,
             sample_width=AUDIO_SAMPLE_WIDTH,
             frame_rate=AUDIO_FRAME_RATE,
             channels=AUDIO_CHANNELS,
@@ -370,6 +422,10 @@ class RealtimeRecorder:
                 for k, v in response.audio_chunks.items()
                 if v.starts_at is not None
             }
+            # The browser requested discard after playback stopped, so retained chunks
+            # are already confirmed played and do not need separate end events.
+            for audio_chunk in response.audio_chunks.values():
+                audio_chunk.ended = True
 
     @not_closed
     async def save_buffer(self):
@@ -435,6 +491,13 @@ class RealtimeRecorder:
                 )
                 return
 
+            if not last_assistant_response.is_ready_to_save():
+                realtime_recorder_logger.debug(
+                    "Last assistant response is not done playing in the browser. "
+                    "Skipping save."
+                )
+                return
+
             last_assistant_response_ends_at = (
                 last_assistant_response.starts_at + last_assistant_response.duration
             )
@@ -447,6 +510,13 @@ class RealtimeRecorder:
                     or item.starts_at > last_assistant_response.starts_at
                 ):
                     continue
+
+                if not item.is_ready_to_save():
+                    realtime_recorder_logger.debug(
+                        "Assistant response is not done playing in the browser. "
+                        "Skipping save."
+                    )
+                    return
 
                 item_ids_to_pop.append(item_id)
                 assistant_responses_to_save.append(item)

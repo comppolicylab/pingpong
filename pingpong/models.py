@@ -8197,14 +8197,20 @@ class Thread(Base):
 
     @classmethod
     async def get_by_id_with_assistant(
-        cls, session: AsyncSession, thread_id: int
+        cls,
+        session: AsyncSession,
+        thread_id: int,
+        *,
+        for_update: bool = False,
+        include_voice_mode_recording: bool = False,
     ) -> "Thread":
         """Get a thread by its thread_id with the assistant eager loaded."""
-        stmt = (
-            select(Thread)
-            .options(joinedload(Thread.assistant))
-            .where(Thread.id == thread_id)
-        )
+        options = [joinedload(Thread.assistant)]
+        if include_voice_mode_recording:
+            options.append(selectinload(Thread.voice_mode_recording))
+        stmt = select(Thread).options(*options).where(Thread.id == thread_id)
+        if for_update:
+            stmt = stmt.with_for_update(of=Thread)
         result = await session.execute(stmt)
         thread = result.scalar()
         return thread

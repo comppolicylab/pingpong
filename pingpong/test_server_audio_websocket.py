@@ -4,7 +4,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 from pydantic import ValidationError
+from starlette.datastructures import State
 
+from pingpong import ai_models
 from pingpong import models
 from pingpong import schemas
 from pingpong import websocket as websocket_module
@@ -14,8 +16,16 @@ server = importlib.import_module("pingpong.server")
 
 class DummyWebSocket:
     def __init__(self, cookies: dict[str, str] | None = None):
-        self.state: dict[str, object] = {}
+        self.state = State()
         self.cookies: dict[str, str] = cookies or {}
+        self.sent_json: list[dict] = []
+        self.closed = False
+
+    async def send_json(self, data: dict) -> None:
+        self.sent_json.append(data)
+
+    async def close(self) -> None:
+        self.closed = True
 
 
 async def test_audio_stream_uses_lti_session_when_cookie_missing(monkeypatch):
@@ -41,6 +51,7 @@ def realtime_assistant(**overrides):
     defaults = {
         "model": "gpt-4o-realtime-preview",
         "assistant_should_message_first": False,
+        "reasoning_effort": None,
         "realtime_vad_mode": None,
         "realtime_eagerness": None,
         "realtime_vad_threshold": None,
@@ -63,12 +74,106 @@ def test_realtime_session_uses_create_defaults_for_null_fields():
 
     assert session["instructions"] == "Speak clearly."
     assert session["audio"]["output"] == {"voice": "marin", "speed": 1.0}
+    assert "reasoning" not in session
     assert session["audio"]["input"]["noise_reduction"] == {"type": "far_field"}
     assert session["audio"]["input"]["turn_detection"] == {
         "create_response": True,
         "type": "semantic_vad",
-        "interrupt_response": False,
+        "interrupt_response": True,
         "eagerness": "auto",
+    }
+
+
+def test_realtime_session_adds_low_reasoning_by_default_for_gpt_realtime_2():
+    session = websocket_module.build_realtime_session(
+        realtime_assistant(model="gpt-realtime-2"),
+        "Speak clearly.",
+    )
+
+    assert session["reasoning"] == {"effort": "low"}
+
+
+def test_realtime_session_uses_selected_reasoning_for_gpt_realtime_2():
+    session = websocket_module.build_realtime_session(
+        realtime_assistant(model="gpt-realtime-2", reasoning_effort=-1),
+        "Speak clearly.",
+    )
+
+    assert session["reasoning"] == {"effort": "minimal"}
+
+
+def test_realtime_extra_headers_include_safety_identifier():
+    websocket = DummyWebSocket()
+    websocket.state["response_safety_identifier"] = "safety-id"
+
+    assert websocket_module.build_realtime_extra_headers(websocket) == {
+        "OpenAI-Safety-Identifier": "safety-id"
+    }
+
+
+def test_realtime_extra_headers_omit_missing_safety_identifier():
+    websocket = DummyWebSocket()
+
+    assert websocket_module.build_realtime_extra_headers(websocket) == {}
+
+
+@pytest.mark.parametrize("has_recording,has_messages", [(True, False), (False, True)])
+async def test_single_realtime_session_rejects_finished_thread(
+    monkeypatch, has_recording, has_messages
+):
+    async def fake_get_by_id_with_assistant(_session, thread_id, **kwargs):
+        assert kwargs == {
+            "for_update": True,
+            "include_voice_mode_recording": True,
+        }
+        return SimpleNamespace(
+            id=thread_id,
+            assistant=realtime_assistant(),
+            instructions="Speak clearly.",
+            timezone=None,
+            voice_mode_recording=object() if has_recording else None,
+        )
+
+    async def fake_thread_has_messages(_db, _thread_id):
+        return has_messages
+
+    monkeypatch.setattr(
+        models.Thread,
+        "get_by_id_with_assistant",
+        fake_get_by_id_with_assistant,
+    )
+    monkeypatch.setattr(
+        websocket_module,
+        "_thread_has_messages",
+        fake_thread_has_messages,
+    )
+
+    websocket = DummyWebSocket()
+    websocket.state["db"] = object()
+    handler = AsyncMock()
+    wrapped = websocket_module.ws_with_single_realtime_session(handler)
+
+    await wrapped(websocket, "10", "20")
+
+    handler.assert_not_awaited()
+    assert websocket.closed is True
+    assert (
+        websocket.sent_json[0]["error"]["message"]
+        == websocket_module.VOICE_SESSION_FINAL_MESSAGE
+    )
+
+
+def test_gpt_realtime_2_model_metadata_supports_realtime_reasoning():
+    model = ai_models.KNOWN_MODELS["gpt-realtime-2"]
+
+    assert model["type"] == "voice"
+    assert model["supports_reasoning"] is True
+    assert model["supports_minimal_reasoning_effort"] is True
+    assert ai_models.get_reasoning_effort_map("gpt-realtime-2") == {
+        -1: "minimal",
+        0: "low",
+        1: "medium",
+        2: "high",
     }
 
 
@@ -137,7 +242,7 @@ def test_realtime_session_builds_server_vad_payload():
     assert session["audio"]["input"]["turn_detection"] == {
         "create_response": True,
         "type": "server_vad",
-        "interrupt_response": False,
+        "interrupt_response": True,
         "threshold": 0.7,
         "prefix_padding_ms": 200,
         "silence_duration_ms": 650,

@@ -39,6 +39,7 @@ class StreamProcessor extends AudioWorkletProcessor {
     this.writeOffset = 0;
     this.trackSampleOffsets = {};
     this.processedEventIds = new Set();
+    this.endedEventIds = new Set();
     this.port.onmessage = (event) => {
       if (event.data) {
         const payload = event.data;
@@ -73,6 +74,12 @@ class StreamProcessor extends AudioWorkletProcessor {
   }
 
   writeData(float32Array, trackId = null, eventId = null) {
+    if (
+      this.writeOffset > 0 &&
+      (this.write.trackId !== trackId || this.write.eventId !== eventId)
+    ) {
+      this.flushWriteBuffer();
+    }
     this.write.trackId = trackId;
     this.write.eventId = eventId;
     let { buffer } = this.write;
@@ -87,6 +94,20 @@ class StreamProcessor extends AudioWorkletProcessor {
       }
     }
     this.writeOffset = offset;
+    return true;
+  }
+
+  flushWriteBuffer() {
+    if (this.writeOffset === 0) {
+      return false;
+    }
+    this.outputBuffers.push(this.write);
+    this.write = {
+      buffer: new Float32Array(this.bufferLength),
+      trackId: null,
+      eventId: null,
+    };
+    this.writeOffset = 0;
     return true;
   }
 
@@ -118,8 +139,25 @@ class StreamProcessor extends AudioWorkletProcessor {
         });
         this.processedEventIds.add(eventId);
       }
+      if (
+        eventId &&
+        !this.endedEventIds.has(eventId) &&
+        !outputBuffers.some((queued) => queued.eventId === eventId) &&
+        (this.writeOffset === 0 || this.write.eventId !== eventId)
+      ) {
+        this.port.postMessage({
+            event: 'audio_part_ended',
+            trackId: trackId,
+            eventId: eventId,
+            timestamp: Date.now(),
+        });
+        this.endedEventIds.add(eventId);
+      }
       return true;
     } else if (this.hasStarted) {
+      if (this.flushWriteBuffer()) {
+        return true;
+      }
       this.port.postMessage({ event: 'stop' });
       return false;
     } else {

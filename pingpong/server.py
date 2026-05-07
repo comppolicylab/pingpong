@@ -9663,18 +9663,6 @@ async def create_assistant(
                     else req.model
                 )
 
-            reasoning_effort_map = get_reasoning_effort_map(model_record.id)
-            reasoning_effort = (
-                reasoning_effort_map.get(req.reasoning_effort)
-                if req.reasoning_effort is not None
-                else None
-            )
-            reasoning_extra_body = (
-                {"reasoning_effort": reasoning_effort}
-                if reasoning_effort is not None
-                else {}
-            )
-
             # Set default temperature based on the interaction mode
             # This is to ensure that the temperature is set
             # appropriately for the mode.
@@ -9695,7 +9683,6 @@ async def create_assistant(
                 temperature=req.temperature,
                 metadata={"class_id": class_id, "creator_id": str(creator_id)},
                 tool_resources=tool_resources,
-                extra_body=reasoning_extra_body,
             )
         except openai.BadRequestError as e:
             raise HTTPException(
@@ -10663,7 +10650,6 @@ async def update_assistant(
         model_record and model_record.supports_tools_with_none_reasoning_effort
     )
 
-    new_reasoning_effort_body = None
     if "reasoning_effort" in req.model_fields_set:
         if (
             req.reasoning_effort is not None
@@ -10705,17 +10691,7 @@ async def update_assistant(
                     else "You cannot use tools when the reasoning effort is set to 'Minimal'. Please select a higher reasoning effort level."
                 ),
             )
-
-        reasoning_extra_body: dict[str, str | None] = (
-            {"reasoning_effort": reasoning_effort}
-            if reasoning_effort
-            else (
-                {"reasoning_effort": None} if asst.reasoning_effort is not None else {}
-            )
-        )
-        openai_update["extra_body"] = reasoning_extra_body
         asst.reasoning_effort = req.reasoning_effort
-        new_reasoning_effort_body = reasoning_extra_body
     else:
         if (
             asst.reasoning_effort is not None
@@ -10750,15 +10726,6 @@ async def update_assistant(
             )
         if model_record:
             reasoning_effort_map = get_reasoning_effort_map(model_record.id)
-            new_reasoning_effort_body = (
-                {"reasoning_effort": reasoning_effort_map.get(asst.reasoning_effort)}
-                if asst.reasoning_effort
-                else {}
-            )
-        else:
-            new_reasoning_effort_body = (
-                {"reasoning_effort": None} if asst.reasoning_effort else {}
-            )
 
     if (
         model_record
@@ -11669,7 +11636,6 @@ async def update_assistant(
                             "creator_id": str(request.state["session"].user.id),
                         },
                         tool_resources=new_tool_resources,
-                        extra_body=new_reasoning_effort_body,
                     )
                     asst.assistant_id = new_asst.id
                     request.state["db"].add(asst)

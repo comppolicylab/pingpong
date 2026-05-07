@@ -2,7 +2,10 @@ from functools import wraps
 import logging
 from typing import Any, cast
 
+from sqlalchemy import select
+
 from pingpong import models, schemas
+from pingpong.ai_models import get_reasoning_effort_map
 from pingpong.ai import (
     OpenAIClientType,
     get_openai_client_by_class_id,
@@ -15,6 +18,13 @@ from .config import config
 browser_connection_logger = logging.getLogger("realtime_browser")
 openai_connection_logger = logging.getLogger("realtime_openai")
 
+VOICE_SESSION_ACTIVE_MESSAGE = (
+    "This voice session is already active in another connection."
+)
+VOICE_SESSION_FINAL_MESSAGE = (
+    "This voice session has already ended. Start a new thread to continue."
+)
+
 
 def _coerce_realtime_enum(enum_type, value, default):
     if value is None:
@@ -22,6 +32,22 @@ def _coerce_realtime_enum(enum_type, value, default):
     if isinstance(value, enum_type):
         return value
     return enum_type.__members__.get(value) or enum_type(value)
+
+
+def build_realtime_reasoning(assistant: models.Assistant) -> dict[str, str] | None:
+    reasoning_effort_map = get_reasoning_effort_map(assistant.model)
+    if not reasoning_effort_map:
+        return None
+
+    reasoning_effort = (
+        assistant.reasoning_effort if assistant.reasoning_effort is not None else 0
+    )
+    if reasoning_effort not in reasoning_effort_map:
+        raise ValueError(
+            f"Invalid realtime reasoning effort {reasoning_effort} for model {assistant.model}."
+        )
+
+    return {"effort": reasoning_effort_map[reasoning_effort]}
 
 
 def build_realtime_session(
@@ -50,7 +76,7 @@ def build_realtime_session(
     turn_detection: dict[str, Any] = {
         "create_response": True,
         "type": realtime_vad_mode.value,
-        "interrupt_response": False,
+        "interrupt_response": True,
     }
     if realtime_vad_mode == schemas.RealtimeVadMode.SEMANTIC_VAD:
         turn_detection["eagerness"] = realtime_eagerness.value
@@ -77,7 +103,7 @@ def build_realtime_session(
         if realtime_noise_reduction == schemas.RealtimeNoiseReduction.NONE
         else {"type": realtime_noise_reduction.value}
     )
-    return {
+    session = {
         "type": "realtime",
         "audio": {
             "input": {
@@ -102,6 +128,46 @@ def build_realtime_session(
         "tool_choice": "none",
         "tools": [],
     }
+    reasoning = build_realtime_reasoning(assistant)
+    if reasoning is not None:
+        session["reasoning"] = reasoning
+
+    return session
+
+
+def build_realtime_extra_headers(
+    browser_connection: StateWebSocket,
+) -> dict[str, str]:
+    safety_identifier = getattr(
+        browser_connection.state, "response_safety_identifier", None
+    )
+    if not isinstance(safety_identifier, str) or not safety_identifier:
+        return {}
+
+    return {"OpenAI-Safety-Identifier": safety_identifier}
+
+
+async def _thread_has_messages(db, thread_id: int) -> bool:
+    message_id = await db.scalar(
+        select(models.Message.id).where(models.Message.thread_id == thread_id).limit(1)
+    )
+    return message_id is not None
+
+
+async def _reject_realtime_session(
+    browser_connection: StateWebSocket, message: str
+) -> None:
+    await browser_connection.send_json(
+        {
+            "type": "error",
+            "error": {
+                "type": "invalid_request_error",
+                "code": "voice_session_unavailable",
+                "message": message,
+            },
+        }
+    )
+    await browser_connection.close()
 
 
 def ws_auth_middleware(func):
@@ -274,6 +340,51 @@ def ws_with_thread_assistant_prompt(func):
     return wrapper
 
 
+def ws_with_single_realtime_session(func):
+    @wraps(func)
+    async def wrapper(
+        browser_connection: StateWebSocket,
+        class_id: str,
+        thread_id: str,
+        *args,
+        **kwargs,
+    ):
+        thread_pk = int(thread_id)
+        # The row lock intentionally spans the websocket transaction so a second
+        # concurrent connection to the same unfinished voice session waits here.
+        thread = await models.Thread.get_by_id_with_assistant(
+            browser_connection.state["db"],
+            thread_pk,
+            for_update=True,
+            include_voice_mode_recording=True,
+        )
+        if thread is None:
+            await _reject_realtime_session(
+                browser_connection, "This voice session was not found."
+            )
+            return None
+
+        if thread.voice_mode_recording or await _thread_has_messages(
+            browser_connection.state["db"], thread.id
+        ):
+            await _reject_realtime_session(
+                browser_connection, VOICE_SESSION_FINAL_MESSAGE
+            )
+            return None
+
+        browser_connection.state["thread"] = thread
+        browser_connection.state["assistant"] = thread.assistant
+        browser_connection.state["conversation_instructions"] = (
+            inject_timestamp_to_instructions(
+                thread.instructions,
+                thread.timezone,
+            )
+        )
+        return await func(browser_connection, class_id, thread_id, *args, **kwargs)
+
+    return wrapper
+
+
 def ws_with_realtime_connection(func):
     @wraps(func)
     async def wrapper(browser_connection: StateWebSocket, *args, **kwargs):
@@ -283,9 +394,11 @@ def ws_with_realtime_connection(func):
             "conversation_instructions"
         ]
         session = build_realtime_session(assistant, conversation_instructions)
+        extra_headers = build_realtime_extra_headers(browser_connection)
         try:
             async with openai_client.realtime.connect(
                 model=assistant.model,
+                extra_headers=extra_headers,
             ) as realtime_connection:
                 browser_connection.state["realtime_connection"] = realtime_connection
                 await realtime_connection.session.update(session=session)

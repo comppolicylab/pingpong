@@ -36,10 +36,16 @@ export type OnAudioPartStartedProcessor = (data: {
 	eventId: string;
 	timestamp: number;
 }) => void;
+export type OnAudioPartEndedProcessor = (data: {
+	trackId: string;
+	eventId: string;
+	timestamp: number;
+}) => void;
 export type OnPlaybackStoppedProcessor = () => void;
 interface WavStreamPlayerOptions {
 	sampleRate?: number;
 	onAudioPartStarted?: OnAudioPartStartedProcessor;
+	onAudioPartEnded?: OnAudioPartEndedProcessor;
 	onPlaybackStopped?: OnPlaybackStoppedProcessor;
 }
 
@@ -65,6 +71,7 @@ export class WavStreamPlayer {
 	private trackSampleOffsets: Record<string, TrackSampleOffset>;
 	private interruptedTrackIds: Record<string, boolean>;
 	private onAudioPartStarted: OnAudioPartStartedProcessor | null;
+	private onAudioPartEnded: OnAudioPartEndedProcessor | null;
 	private onPlaybackStopped: OnPlaybackStoppedProcessor | null;
 
 	/**
@@ -75,6 +82,7 @@ export class WavStreamPlayer {
 	constructor({
 		sampleRate = 44100,
 		onAudioPartStarted,
+		onAudioPartEnded,
 		onPlaybackStopped
 	}: WavStreamPlayerOptions = {}) {
 		this.scriptSrc = StreamProcessorSrc;
@@ -86,6 +94,7 @@ export class WavStreamPlayer {
 		this.trackSampleOffsets = {};
 		this.interruptedTrackIds = {};
 		this.onAudioPartStarted = onAudioPartStarted || null;
+		this.onAudioPartEnded = onAudioPartEnded || null;
 		this.onPlaybackStopped = onPlaybackStopped || null;
 	}
 
@@ -188,6 +197,11 @@ export class WavStreamPlayer {
 				const { trackId, eventId, timestamp } = e.data;
 				if (this.onAudioPartStarted) {
 					this.onAudioPartStarted({ trackId, eventId, timestamp });
+				}
+			} else if (event === 'audio_part_ended') {
+				const { trackId, eventId, timestamp } = e.data;
+				if (this.onAudioPartEnded) {
+					this.onAudioPartEnded({ trackId, eventId, timestamp });
 				}
 			}
 		};
