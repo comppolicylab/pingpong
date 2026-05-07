@@ -7,8 +7,6 @@ import logging
 import sys
 from typing import Union
 
-import pybase64
-
 from pingpong.audio_store import LocalAudioUploadObject, S3AudioUploadObject
 from pingpong.models import VoiceModeRecording
 
@@ -256,11 +254,10 @@ class RealtimeRecorder:
 
     @not_closed
     async def add_assistant_response_delta(
-        self, b64_audio_chunk: str, event_id: str, item_id: str
+        self, audio_chunk_bytes: bytes, event_id: str, item_id: str
     ):
-        # Create an AudioSegment from the base64-encoded audio chunk
         audio_chunk = AudioSegment(
-            data=pybase64.b64decode(b64_audio_chunk),
+            data=audio_chunk_bytes,
             sample_width=AUDIO_SAMPLE_WIDTH,
             frame_rate=AUDIO_FRAME_RATE,
             channels=AUDIO_CHANNELS,
