@@ -1140,6 +1140,22 @@
 		return true;
 	};
 
+	const sendTruncateForTrackSampleOffset = (
+		trackSampleOffset: Awaited<ReturnType<WavStreamPlayer['interrupt']>>
+	): boolean => {
+		if (!trackSampleOffset?.trackId || !wavStreamPlayer) {
+			return false;
+		}
+		const { trackId, offset, eventId } = trackSampleOffset;
+		const audioEndMs = Math.floor((offset / wavStreamPlayer.getSampleRate()) * 1000);
+		return sendRealtimeEvent({
+			type: 'conversation.item.truncate',
+			item_id: trackId,
+			event_id: eventId,
+			audio_end_ms: audioEndMs
+		});
+	};
+
 	/**
 	 * Process audio chunks.
 	 * This function sends the audio data to the server via WebSocket.
@@ -1284,7 +1300,6 @@
 					}
 					const trackSampleOffset = await wavStreamPlayer.interrupt();
 					if (trackSampleOffset?.trackId) {
-						const { trackId, offset } = trackSampleOffset;
 						if (!socket || socket.readyState !== WebSocket.OPEN) {
 							sadToast('Error connecting with the server.');
 							return;
@@ -1293,11 +1308,7 @@
 							sadToast('Failed to set up audio output to your speakers.');
 							return;
 						}
-						sendRealtimeEvent({
-							type: 'conversation.item.truncate',
-							item_id: trackId,
-							audio_end_ms: Math.floor((offset / wavStreamPlayer.getSampleRate()) * 1000)
-						});
+						sendTruncateForTrackSampleOffset(trackSampleOffset);
 					}
 					break;
 				}
@@ -1342,26 +1353,38 @@
 			return;
 		}
 		endingAudioSession = true;
-		if (socket) {
-			socket.close();
-			socket = null;
+		try {
+			if (wavStreamPlayer) {
+				try {
+					const trackSampleOffset = await wavStreamPlayer.interrupt();
+					sendTruncateForTrackSampleOffset(trackSampleOffset);
+				} catch (error) {
+					console.warn('Voice mode session-end interrupt failed.', error);
+				} finally {
+					wavStreamPlayer = null;
+				}
+			}
+			if (socket) {
+				socket.close();
+				socket = null;
+			}
+			audioDevices = [];
+			selectedAudioDevice = null;
+			if (wavRecorder) {
+				try {
+					await wavRecorder.quit();
+				} finally {
+					wavRecorder = null;
+				}
+			}
+			await invalidateAll();
+		} finally {
+			startingAudioSession = false;
+			audioSessionStarted = false;
+			openMicrophoneModal = false;
+			microphoneAccess = false;
+			endingAudioSession = false;
 		}
-		audioDevices = [];
-		selectedAudioDevice = null;
-		if (wavRecorder) {
-			await wavRecorder.quit();
-			wavRecorder = null;
-		}
-		if (wavStreamPlayer) {
-			await wavStreamPlayer.interrupt();
-			wavStreamPlayer = null;
-		}
-		await invalidateAll();
-		startingAudioSession = false;
-		audioSessionStarted = false;
-		openMicrophoneModal = false;
-		microphoneAccess = false;
-		endingAudioSession = false;
 	};
 
 	/*

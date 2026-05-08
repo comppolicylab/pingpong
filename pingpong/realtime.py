@@ -68,32 +68,93 @@ class ConversationChainItem:
 
 
 class RealtimeAssistantAudioTracker:
-    """Tracks generated assistant audio duration by realtime item id."""
+    """Tracks generated assistant audio duration while playback can be truncated."""
 
     _BYTES_PER_FRAME = AUDIO_SAMPLE_WIDTH * AUDIO_CHANNELS
 
     def __init__(self):
         self._lock = asyncio.Lock()
         self._sample_counts_by_item_id: dict[str, int] = {}
+        self._event_end_sample_counts_by_item_id: dict[str, dict[str, int]] = {}
+        self._audio_done_item_ids: set[str] = set()
 
     async def add_audio_delta(
-        self, item_id: str | None, audio_bytes: bytes | None
+        self,
+        item_id: str | None,
+        event_id: str | None,
+        audio_bytes: bytes | None,
     ) -> None:
         if not item_id or audio_bytes is None:
             return
 
         sample_count = len(audio_bytes) // self._BYTES_PER_FRAME
         async with self._lock:
-            self._sample_counts_by_item_id[item_id] = (
+            item_sample_count = (
                 self._sample_counts_by_item_id.get(item_id, 0) + sample_count
             )
+            self._sample_counts_by_item_id[item_id] = item_sample_count
+            if event_id:
+                self._event_end_sample_counts_by_item_id.setdefault(item_id, {})[
+                    event_id
+                ] = item_sample_count
+            browser_connection_logger.debug(
+                "Tracked realtime assistant audio delta item_id=%s event_id=%s "
+                "delta_samples=%s total_duration_ms=%s.",
+                sanitize_for_log(item_id, max_len=256),
+                sanitize_for_log(str(event_id), max_len=256),
+                sanitize_for_log(str(sample_count)),
+                sanitize_for_log(
+                    str(self._duration_ms_for_sample_count(item_sample_count))
+                ),
+            )
+
+    async def mark_audio_event_playback_ended(
+        self, item_id: str | None, event_id: str | None
+    ) -> None:
+        if not item_id or not event_id:
+            return
+
+        async with self._lock:
+            event_sample_counts = self._event_end_sample_counts_by_item_id.get(item_id)
+            if event_sample_counts is None:
+                return
+
+            event_sample_counts.pop(event_id, None)
+            if event_sample_counts:
+                return
+
+            self._event_end_sample_counts_by_item_id.pop(item_id, None)
+            self._forget_item_if_audio_is_done(item_id)
+
+    async def mark_item_audio_done(self, item_id: str | None) -> None:
+        if not item_id:
+            return
+
+        async with self._lock:
+            self._audio_done_item_ids.add(item_id)
+            self._forget_item_if_audio_is_done(item_id)
+
+    async def forget_item(self, item_id: str | None) -> None:
+        if not item_id:
+            return
+
+        async with self._lock:
+            self._forget_item(item_id)
 
     async def clamp_truncate_audio_end_ms(
-        self, item_id: str, requested_audio_end_ms: int
+        self, item_id: str, requested_audio_end_ms: int, event_id: str | None = None
     ) -> int:
         sanitized_item_id = sanitize_for_log(item_id, max_len=256)
+        sanitized_event_id = sanitize_for_log(str(event_id), max_len=256)
+        event_sample_count: int | None = None
         async with self._lock:
             sample_count = self._sample_counts_by_item_id.get(item_id)
+            if event_id:
+                event_sample_count = self._event_end_sample_counts_by_item_id.get(
+                    item_id, {}
+                ).get(event_id)
+                if event_sample_count is not None:
+                    sample_count = event_sample_count
 
         if sample_count is None:
             browser_connection_logger.warning(
@@ -102,8 +163,24 @@ class RealtimeAssistantAudioTracker:
             )
             return requested_audio_end_ms
 
+        if event_id and event_sample_count is None:
+            browser_connection_logger.warning(
+                "Realtime truncate event_id=%s for item_id=%s had no tracked event boundary; "
+                "falling back to item duration.",
+                sanitized_event_id,
+                sanitized_item_id,
+            )
+
         generated_duration_ms = self._duration_ms_for_sample_count(sample_count)
         if requested_audio_end_ms <= generated_duration_ms:
+            browser_connection_logger.debug(
+                "Realtime truncate did not require clamping item_id=%s event_id=%s "
+                "requested_audio_end_ms=%s generated_duration_ms=%s.",
+                sanitized_item_id,
+                sanitized_event_id,
+                sanitize_for_log(str(requested_audio_end_ms)),
+                sanitize_for_log(str(generated_duration_ms)),
+            )
             return requested_audio_end_ms
 
         browser_connection_logger.warning(
@@ -117,6 +194,19 @@ class RealtimeAssistantAudioTracker:
     @staticmethod
     def _duration_ms_for_sample_count(sample_count: int) -> int:
         return (sample_count * 1000) // AUDIO_FRAME_RATE
+
+    def _forget_item_if_audio_is_done(self, item_id: str) -> None:
+        if item_id not in self._audio_done_item_ids:
+            return
+        if self._event_end_sample_counts_by_item_id.get(item_id):
+            return
+
+        self._forget_item(item_id)
+
+    def _forget_item(self, item_id: str) -> None:
+        self._sample_counts_by_item_id.pop(item_id, None)
+        self._event_end_sample_counts_by_item_id.pop(item_id, None)
+        self._audio_done_item_ids.discard(item_id)
 
 
 class ConversationItemOrderingBuffer:
@@ -659,12 +749,21 @@ async def handle_browser_messages(
                         )
                     elif type == "conversation.item.truncate":
                         item_id = data.get("item_id")
+                        event_id = data.get("event_id")
                         audio_end_ms = data.get("audio_end_ms")
                         if item_id is None or audio_end_ms is None:
                             browser_connection_logger.exception(
                                 "Received conversation.item.truncate message without item_id or audio_end_ms"
                             )
                             continue
+                        if event_id is not None and not isinstance(event_id, str):
+                            browser_connection_logger.warning(
+                                "Received conversation.item.truncate message with invalid event_id: %s",
+                                sanitize_for_log(
+                                    json.dumps(data, sort_keys=True), max_len=512
+                                ),
+                            )
+                            event_id = None
                         if not isinstance(audio_end_ms, int) or isinstance(
                             audio_end_ms, bool
                         ):
@@ -675,12 +774,22 @@ async def handle_browser_messages(
                                 ),
                             )
                             continue
+                        requested_audio_end_ms = audio_end_ms
                         audio_end_ms = max(
                             0,
                             await assistant_audio_tracker.clamp_truncate_audio_end_ms(
                                 item_id=item_id,
+                                event_id=event_id,
                                 requested_audio_end_ms=audio_end_ms,
                             ),
+                        )
+                        browser_connection_logger.debug(
+                            "Forwarding browser truncate item_id=%s event_id=%s "
+                            "requested_audio_end_ms=%s forwarded_audio_end_ms=%s.",
+                            sanitize_for_log(item_id, max_len=256),
+                            sanitize_for_log(str(event_id), max_len=256),
+                            sanitize_for_log(str(requested_audio_end_ms)),
+                            sanitize_for_log(str(audio_end_ms)),
                         )
                         # Truncate the audio buffer for the specified item
                         # NOTE: This does not impact the transcription process,
@@ -690,6 +799,7 @@ async def handle_browser_messages(
                             content_index=0,
                             item_id=item_id,
                         )
+                        await assistant_audio_tracker.forget_item(item_id)
                         if realtime_recorder:
                             await realtime_recorder.stopped_playing_assistant_response(
                                 item_id=item_id,
@@ -721,8 +831,6 @@ async def handle_browser_messages(
                             )
                         )
                     elif type == "response.audio.delta.ended":
-                        if not realtime_recorder:
-                            continue
                         item_id = data.get("item_id")
                         event_id = data.get("event_id")
                         if item_id is None or event_id is None:
@@ -732,6 +840,12 @@ async def handle_browser_messages(
                                     json.dumps(data, sort_keys=True), max_len=512
                                 ),
                             )
+                            continue
+                        await assistant_audio_tracker.mark_audio_event_playback_ended(
+                            item_id=item_id,
+                            event_id=event_id,
+                        )
+                        if not realtime_recorder:
                             continue
                         await realtime_recorder.ended_playing_assistant_response_delta(
                             item_id=item_id,
@@ -901,6 +1015,7 @@ async def handle_openai_events(
                         continue
                     await assistant_audio_tracker.add_audio_delta(
                         item_id=event.item_id,
+                        event_id=event.event_id,
                         audio_bytes=delta_audio_bytes,
                     )
                     await browser_connection.send_json(
@@ -917,6 +1032,10 @@ async def handle_openai_events(
                             event_id=event.event_id,
                             item_id=event.item_id,
                         )
+                case "response.output_audio.done" | "response.audio.done":
+                    await assistant_audio_tracker.mark_item_audio_done(
+                        getattr(event, "item_id", None)
+                    )
                 case "input_audio_buffer.speech_started":
                     await browser_connection.send_json(
                         {
@@ -943,7 +1062,6 @@ async def handle_openai_events(
                     | "response.content_part.done"
                     | "response.text.delta"
                     | "response.text.done"
-                    | "response.output_audio.done"
                     | "response.output_text.delta"
                     | "response.output_text.done"
                     | "response.function_call_arguments.delta"

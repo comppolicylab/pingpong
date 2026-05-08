@@ -53,6 +53,7 @@ interface TrackSampleOffset {
 	trackId: string | null;
 	offset: number;
 	currentTime: number;
+	eventId?: string | null;
 }
 
 const TRACK_SAMPLE_OFFSET_TIMEOUT_MS = 250;
@@ -190,9 +191,14 @@ export class WavStreamPlayer {
 				this.stream = null;
 				this.onPlaybackStopped?.();
 			} else if (event === 'offset') {
-				const { requestId, trackId, offset } = e.data;
+				const { requestId, trackId, offset, eventId } = e.data;
 				const currentTime = offset / this.sampleRate;
-				this.trackSampleOffsets[requestId] = { trackId, offset, currentTime };
+				this.trackSampleOffsets[requestId] = {
+					trackId,
+					offset,
+					currentTime,
+					eventId
+				};
 			} else if (event === 'audio_part_started') {
 				const { trackId, eventId, timestamp } = e.data;
 				if (this.onAudioPartStarted) {

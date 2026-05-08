@@ -35,9 +35,16 @@ class StreamProcessor extends AudioWorkletProcessor {
     this.hasInterrupted = false;
     this.outputBuffers = [];
     this.bufferLength = 128;
-    this.write = { buffer: new Float32Array(this.bufferLength), trackId: null, eventId: null };
+    this.write = {
+      buffer: new Float32Array(this.bufferLength),
+      validSampleCount: 0,
+      trackId: null,
+      eventId: null,
+    };
     this.writeOffset = 0;
     this.trackSampleOffsets = {};
+    this.currentlyPlayingTrackId = null;
+    this.currentlyPlayingEventId = null;
     this.processedEventIds = new Set();
     this.endedEventIds = new Set();
     this.port.onmessage = (event) => {
@@ -55,13 +62,14 @@ class StreamProcessor extends AudioWorkletProcessor {
           payload.event === 'interrupt'
         ) {
           const requestId = payload.requestId;
-          const trackId = this.write.trackId;
-          const offset = this.trackSampleOffsets[trackId] || 0;
+          const trackId = this.currentlyPlayingTrackId;
+          const offset = trackId ? this.trackSampleOffsets[trackId] || 0 : 0;
           this.port.postMessage({
             event: 'offset',
             requestId,
             trackId,
             offset,
+            eventId: this.currentlyPlayingEventId,
           });
           if (payload.event === 'interrupt') {
             this.hasInterrupted = true;
@@ -86,9 +94,15 @@ class StreamProcessor extends AudioWorkletProcessor {
     let offset = this.writeOffset;
     for (let i = 0; i < float32Array.length; i++) {
       buffer[offset++] = float32Array[i];
+      this.write.validSampleCount++;
       if (offset >= buffer.length) {
         this.outputBuffers.push(this.write);
-        this.write = { buffer: new Float32Array(this.bufferLength), trackId, eventId };
+        this.write = {
+          buffer: new Float32Array(this.bufferLength),
+          validSampleCount: 0,
+          trackId,
+          eventId,
+        };
         buffer = this.write.buffer;
         offset = 0;
       }
@@ -104,6 +118,7 @@ class StreamProcessor extends AudioWorkletProcessor {
     this.outputBuffers.push(this.write);
     this.write = {
       buffer: new Float32Array(this.bufferLength),
+      validSampleCount: 0,
       trackId: null,
       eventId: null,
     };
@@ -120,17 +135,19 @@ class StreamProcessor extends AudioWorkletProcessor {
       return false;
     } else if (outputBuffers.length) {
       this.hasStarted = true;
-      const { buffer, trackId, eventId } = outputBuffers.shift();
+      const { buffer, validSampleCount, trackId, eventId } = outputBuffers.shift();
       const startTimestamp = Date.now();
       for (let i = 0; i < outputChannelData.length; i++) {
         outputChannelData[i] = buffer[i] || 0;
       }
+      this.currentlyPlayingTrackId = trackId;
+      this.currentlyPlayingEventId = eventId;
       if (trackId) {
         this.trackSampleOffsets[trackId] =
           this.trackSampleOffsets[trackId] || 0;
-        this.trackSampleOffsets[trackId] += buffer.length;
+        this.trackSampleOffsets[trackId] += validSampleCount;
       }
-      if (!this.processedEventIds.has(eventId)) {
+      if (eventId && !this.processedEventIds.has(eventId)) {
         this.port.postMessage({
             event: 'audio_part_started',
             trackId: trackId,
