@@ -78,8 +78,7 @@ describe('StreamProcessor worklet', () => {
 			requestId: 'request-1',
 			trackId: 'track-1',
 			offset: 129,
-			eventId: 'event-1',
-			lastStartedEventId: 'event-1'
+			eventId: 'event-1'
 		});
 	});
 
@@ -101,8 +100,7 @@ describe('StreamProcessor worklet', () => {
 			requestId: 'request-1',
 			trackId: 'track-1',
 			offset: 128,
-			eventId: 'event-1',
-			lastStartedEventId: 'event-1'
+			eventId: 'event-1'
 		});
 	});
 });

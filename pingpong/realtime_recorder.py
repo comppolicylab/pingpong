@@ -98,12 +98,12 @@ def not_closed(func):
                 )
                 return None
             if getattr(self, "ffmpeg", None) is None:
-                realtime_recorder_logger.exception(
+                realtime_recorder_logger.error(
                     f"Skipping {func.__name__} because ffmpeg is not running."
                 )
                 return None
             if getattr(self, "audio_store_obj", None) is None:
-                realtime_recorder_logger.exception(
+                realtime_recorder_logger.error(
                     f"Skipping {func.__name__} because audio_store_obj is not set."
                 )
                 return None
@@ -146,6 +146,15 @@ class RealtimeRecorder:
         self.thread_id = thread_id
         self.session = session
         self.should_save_audio = False
+
+    def _discard_assistant_response(self, item_id: str) -> AssistantResponse | None:
+        response = self.assistant_responses.pop(item_id, None)
+        if self.latest_active_assistant_response_item_id == item_id:
+            if response and response.prev in self.assistant_responses:
+                self.latest_active_assistant_response_item_id = response.prev
+            else:
+                self.latest_active_assistant_response_item_id = None
+        return response
 
     @classmethod
     async def create(
@@ -276,6 +285,14 @@ class RealtimeRecorder:
                 for k, v in response.audio_chunks.items()
                 if v.starts_at is not None
             }
+            if not response.audio_chunks:
+                self._discard_assistant_response(item_id)
+                realtime_recorder_logger.debug(
+                    "Discarded truncated assistant response item_id=%s because no "
+                    "audio chunks had browser start telemetry.",
+                    sanitize_for_log(item_id, max_len=256),
+                )
+                return
             for audio_chunk in response.audio_chunks.values():
                 audio_chunk.ended = True
             retained_starts_at = [
@@ -310,13 +327,13 @@ class RealtimeRecorder:
     ):
         async with self.save_lock:
             if not self.assistant_responses.get(item_id):
-                realtime_recorder_logger.exception(
+                realtime_recorder_logger.warning(
                     "Started playing assistant response delta for item_id %s but no such response exists.",
                     sanitize_for_log(item_id, max_len=256),
                 )
                 return
             if not self.assistant_responses[item_id].audio_chunks.get(event_id):
-                realtime_recorder_logger.exception(
+                realtime_recorder_logger.warning(
                     "Started playing assistant response delta for item_id %s and event_id %s but no such audio chunk exists.",
                     sanitize_for_log(item_id, max_len=256),
                     sanitize_for_log(event_id, max_len=256),
@@ -441,7 +458,7 @@ class RealtimeRecorder:
                     )
                     self.latest_active_assistant_response_item_id = item_id
                 else:
-                    realtime_recorder_logger.exception(
+                    realtime_recorder_logger.error(
                         "Received assistant response delta for item_id %s but no such response exists.",
                         sanitize_for_log(item_id, max_len=256),
                     )
@@ -472,6 +489,27 @@ class RealtimeRecorder:
                 for k, v in response.audio_chunks.items()
                 if v.starts_at is not None
             }
+            if not response.audio_chunks:
+                self._discard_assistant_response(item_id)
+                realtime_recorder_logger.debug(
+                    "Discarded finalized assistant response item_id=%s because no "
+                    "audio chunks had browser start telemetry.",
+                    sanitize_for_log(item_id, max_len=256),
+                )
+                return
+            retained_starts_at = [
+                audio_chunk.starts_at
+                for audio_chunk in response.audio_chunks.values()
+                if audio_chunk.starts_at is not None
+            ]
+            response.starts_at = min(retained_starts_at) if retained_starts_at else None
+            response.duration = min(
+                response.duration,
+                sum(
+                    len(audio_chunk.audio)
+                    for audio_chunk in response.audio_chunks.values()
+                ),
+            )
             # The browser requested discard after playback stopped, so retained chunks
             # are already confirmed played and do not need separate end events.
             for audio_chunk in response.audio_chunks.values():
@@ -666,8 +704,8 @@ class RealtimeRecorder:
                 ],
                 key=lambda x: x.starts_at if x.starts_at is not None else float("inf"),
             ):
-                if not audio_chunk.starts_at:
-                    realtime_recorder_logger.exception(
+                if audio_chunk.starts_at is None:
+                    realtime_recorder_logger.error(
                         "Audio chunk %s has no start time.",
                         sanitize_for_log(audio_chunk.event_id, max_len=256),
                     )

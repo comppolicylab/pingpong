@@ -1146,12 +1146,12 @@
 		if (!trackSampleOffset?.trackId || !wavStreamPlayer) {
 			return false;
 		}
-		const { trackId, offset, lastStartedEventId } = trackSampleOffset;
+		const { trackId, offset, eventId } = trackSampleOffset;
 		const audioEndMs = Math.floor((offset / wavStreamPlayer.getSampleRate()) * 1000);
 		return sendRealtimeEvent({
 			type: 'conversation.item.truncate',
 			item_id: trackId,
-			event_id: lastStartedEventId,
+			event_id: eventId,
 			audio_end_ms: audioEndMs
 		});
 	};

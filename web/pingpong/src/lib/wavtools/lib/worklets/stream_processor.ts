@@ -45,10 +45,6 @@ class StreamProcessor extends AudioWorkletProcessor {
     this.trackSampleOffsets = {};
     this.currentlyPlayingTrackId = null;
     this.currentlyPlayingEventId = null;
-    this.lastStartedEventId = null;
-    this.lastEndedEventId = null;
-    this.eventStartOffsets = {};
-    this.eventEndOffsets = {};
     this.processedEventIds = new Set();
     this.endedEventIds = new Set();
     this.port.onmessage = (event) => {
@@ -74,14 +70,6 @@ class StreamProcessor extends AudioWorkletProcessor {
             trackId,
             offset,
             eventId: this.currentlyPlayingEventId,
-            lastStartedEventId: this.lastStartedEventId,
-            lastStartedEventOffset: this.lastStartedEventId
-              ? this.eventStartOffsets[this.lastStartedEventId] ?? null
-              : null,
-            lastEndedEventId: this.lastEndedEventId,
-            lastEndedEventOffset: this.lastEndedEventId
-              ? this.eventEndOffsets[this.lastEndedEventId] ?? null
-              : null,
           });
           if (payload.event === 'interrupt') {
             this.hasInterrupted = true;
@@ -157,18 +145,7 @@ class StreamProcessor extends AudioWorkletProcessor {
       if (trackId) {
         this.trackSampleOffsets[trackId] =
           this.trackSampleOffsets[trackId] || 0;
-        const startOffset = this.trackSampleOffsets[trackId];
         this.trackSampleOffsets[trackId] += validSampleCount;
-        const endOffset = this.trackSampleOffsets[trackId];
-        if (
-          eventId &&
-          !Object.prototype.hasOwnProperty.call(this.eventStartOffsets, eventId)
-        ) {
-          this.eventStartOffsets[eventId] = startOffset;
-        }
-        if (eventId) {
-          this.eventEndOffsets[eventId] = endOffset;
-        }
       }
       if (eventId && !this.processedEventIds.has(eventId)) {
         this.port.postMessage({
@@ -177,7 +154,6 @@ class StreamProcessor extends AudioWorkletProcessor {
             eventId: eventId,
             timestamp: startTimestamp,
         });
-        this.lastStartedEventId = eventId;
         this.processedEventIds.add(eventId);
       }
       if (
@@ -192,7 +168,6 @@ class StreamProcessor extends AudioWorkletProcessor {
             eventId: eventId,
             timestamp: Date.now(),
         });
-        this.lastEndedEventId = eventId;
         this.endedEventIds.add(eventId);
       }
       return true;
