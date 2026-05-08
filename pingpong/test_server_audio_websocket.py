@@ -131,7 +131,11 @@ async def test_single_realtime_session_rejects_finished_thread(
             assistant=realtime_assistant(),
             instructions="Speak clearly.",
             timezone=None,
-            voice_mode_recording=object() if has_recording else None,
+            voice_mode_recording=(
+                SimpleNamespace(recording_id="recording.webm")
+                if has_recording
+                else None
+            ),
         )
 
     async def fake_thread_has_messages(_db, _thread_id):
@@ -205,14 +209,15 @@ async def test_create_non_lecture_assistant_clears_elevenlabs_settings(db):
 
     async with db.async_session() as session:
         class_ = models.Class(id=1, name="Test Class", api_key="test-key")
-        session.add(class_)
+        user = models.User(email="assistant-creator@example.com")
+        session.add_all([class_, user])
         await session.flush()
 
         assistant = await models.Assistant.create(
             session,
             req,
             class_id=class_.id,
-            user_id=123,
+            user_id=user.id,
         )
 
         assert assistant.elevenlabs_stability is None
