@@ -86,15 +86,20 @@ def test_make_audio_recording_id_keeps_thread_id_and_adds_unique_suffix():
 @pytest.mark.asyncio
 async def test_create_or_replace_for_thread_updates_existing_recording(db):
     async with db.async_session() as session:
+        thread = models.Thread(thread_id="thread-create-or-replace", version=3)
+        session.add(thread)
+        await session.flush()
+
         existing = await VoiceModeRecording.create(
             session,
             {
-                "thread_id": 123,
+                "thread_id": thread.id,
                 "recording_id": "old.webm",
                 "duration": 1000,
             },
         )
         existing_id = existing.id
+        thread_id = thread.id
         await session.commit()
 
         (
@@ -103,7 +108,7 @@ async def test_create_or_replace_for_thread_updates_existing_recording(db):
         ) = await VoiceModeRecording.create_or_replace_for_thread(
             session,
             {
-                "thread_id": 123,
+                "thread_id": thread_id,
                 "recording_id": "new.webm",
                 "duration": 2000,
             },
@@ -148,17 +153,18 @@ async def test_complete_audio_upload_keeps_completed_object_on_metadata_error(
 
 
 @pytest.mark.asyncio
-async def test_recording_metadata_error_does_not_roll_back_transcript_messages(db):
-    async with db.async_session() as session:
-        await VoiceModeRecording.create(
-            session,
-            {
-                "thread_id": 999,
-                "recording_id": "test.webm",
-                "duration": 500,
-            },
-        )
-        await session.commit()
+async def test_recording_metadata_error_does_not_roll_back_transcript_messages(
+    db,
+    monkeypatch,
+):
+    async def fail_create_or_replace_for_thread(cls, session, data):
+        raise RuntimeError("metadata failed")
+
+    monkeypatch.setattr(
+        VoiceModeRecording,
+        "create_or_replace_for_thread",
+        classmethod(fail_create_or_replace_for_thread),
+    )
 
     async with db.async_session() as session:
         thread = models.Thread(thread_id="thread-recording-savepoint", version=3)
@@ -201,8 +207,16 @@ async def test_recording_metadata_error_does_not_roll_back_transcript_messages(d
         await recorder.complete_audio_upload()
         await session.commit()
         message_id = message.id
+        thread_id = thread.id
 
     async with db.async_session() as session:
+        recording = await session.scalar(
+            select(VoiceModeRecording).where(
+                VoiceModeRecording.thread_id == thread_id,
+            )
+        )
+        assert recording is None
+
         saved_message = await session.get(models.Message, message_id)
         assert saved_message is not None
         assert saved_message.message_id == "item-1"

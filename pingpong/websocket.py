@@ -13,6 +13,7 @@ from pingpong.ai import (
 )
 from pingpong.session import populate_request
 from pingpong.state_types import StateWebSocket
+from pingpong.log_utils import sanitize_for_log
 from .config import config
 
 browser_connection_logger = logging.getLogger("realtime_browser")
@@ -368,14 +369,16 @@ def ws_with_single_realtime_session(func):
             browser_connection.state["db"], thread.id
         )
         if thread.voice_mode_recording or has_messages:
-            existing_recording_id = getattr(
-                thread.voice_mode_recording, "recording_id", None
+            existing_recording_id = (
+                thread.voice_mode_recording.recording_id
+                if thread.voice_mode_recording
+                else None
             )
             browser_connection_logger.warning(
                 "Rejecting realtime session for finalized thread. "
                 "thread_id=%s, existing_recording_id=%s, has_messages=%s",
                 thread.id,
-                existing_recording_id,
+                sanitize_for_log(existing_recording_id, max_len=256),
                 has_messages,
             )
             await _reject_realtime_session(

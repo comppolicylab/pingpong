@@ -5815,6 +5815,10 @@ class VoiceModeRecording(Base):
     async def create_or_replace_for_thread(
         cls, session: AsyncSession, data: dict
     ) -> tuple["VoiceModeRecording", str | None]:
+        await session.scalar(
+            select(Thread.id).where(Thread.id == data["thread_id"]).with_for_update()
+        )
+
         stmt = (
             select(VoiceModeRecording)
             .where(VoiceModeRecording.thread_id == data["thread_id"])
