@@ -22,10 +22,32 @@ async def test_assistant_audio_tracker_clamps_to_generated_duration():
     tracker = RealtimeAssistantAudioTracker()
     audio_delta = b"\0" * (24_000 * 2)
 
-    await tracker.add_audio_delta("item-1", audio_delta)
+    await tracker.add_audio_delta("item-1", "event-1", audio_delta)
 
     assert await tracker.clamp_truncate_audio_end_ms("item-1", 1500) == 1000
     assert await tracker.clamp_truncate_audio_end_ms("item-1", 500) == 500
+
+
+@pytest.mark.asyncio
+async def test_assistant_audio_tracker_clamps_to_event_end_duration():
+    tracker = RealtimeAssistantAudioTracker()
+    half_second_audio_delta = b"\0" * (12_000 * 2)
+
+    await tracker.add_audio_delta("item-1", "event-1", half_second_audio_delta)
+    await tracker.add_audio_delta("item-1", "event-2", half_second_audio_delta)
+
+    assert (
+        await tracker.clamp_truncate_audio_end_ms(
+            "item-1", requested_audio_end_ms=900, event_id="event-1"
+        )
+        == 500
+    )
+    assert (
+        await tracker.clamp_truncate_audio_end_ms(
+            "item-1", requested_audio_end_ms=900, event_id="event-2"
+        )
+        == 900
+    )
 
 
 @pytest.mark.asyncio

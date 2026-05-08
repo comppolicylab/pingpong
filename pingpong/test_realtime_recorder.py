@@ -115,6 +115,42 @@ async def test_save_buffer_allows_truncated_response_without_delta_end():
     assert get_write_count(recorder) > 0
 
 
+@pytest.mark.asyncio
+async def test_save_buffer_allows_truncated_response_extending_into_unstarted_chunk():
+    recorder = make_recorder()
+
+    for event_id in ("event-1", "event-2", "event-3"):
+        await recorder.add_assistant_response_delta(
+            audio_chunk_bytes=ONE_SECOND_PCM16,
+            event_id=event_id,
+            item_id="item-1",
+        )
+    await recorder.started_playing_assistant_response_delta(
+        item_id="item-1",
+        event_id="event-1",
+        started_playing_at_ms=1_000,
+    )
+    await recorder.ended_playing_assistant_response_delta(
+        item_id="item-1",
+        event_id="event-1",
+    )
+    await recorder.started_playing_assistant_response_delta(
+        item_id="item-1",
+        event_id="event-2",
+        started_playing_at_ms=2_000,
+    )
+
+    await recorder.stopped_playing_assistant_response(
+        item_id="item-1",
+        final_duration_ms=2_500,
+    )
+    await recorder.save_buffer()
+
+    assert "item-1" not in recorder.assistant_responses
+    assert get_write_count(recorder) > 0
+    assert recorder.audio_duration == 2_000
+
+
 def get_write_count(recorder: RealtimeRecorder) -> int:
     ffmpeg = recorder.ffmpeg
     assert ffmpeg is not None

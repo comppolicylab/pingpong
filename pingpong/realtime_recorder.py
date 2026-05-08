@@ -8,6 +8,7 @@ import sys
 from typing import Union
 
 from pingpong.audio_store import LocalAudioUploadObject, S3AudioUploadObject
+from pingpong.log_utils import sanitize_for_log
 from pingpong.models import VoiceModeRecording
 
 from .config import config
@@ -261,12 +262,47 @@ class RealtimeRecorder:
                 realtime_recorder_logger.warning(
                     "Stopped playing assistant response for item_id %s but no such "
                     "response exists.",
-                    item_id,
+                    sanitize_for_log(item_id, max_len=256),
                 )
                 return
             response.complete = True
             response.truncated = True
-            response.duration = final_duration_ms
+            original_chunk_count = len(response.audio_chunks)
+            # After a truncate, only chunks with browser start telemetry are
+            # eligible for saved audio. The duration clamp below depends on this
+            # pruning happening before summing retained chunk durations.
+            response.audio_chunks = {
+                k: v
+                for k, v in response.audio_chunks.items()
+                if v.starts_at is not None
+            }
+            for audio_chunk in response.audio_chunks.values():
+                audio_chunk.ended = True
+            retained_starts_at = [
+                audio_chunk.starts_at
+                for audio_chunk in response.audio_chunks.values()
+                if audio_chunk.starts_at is not None
+            ]
+            # Recompute from retained chunks so a truncate with no confirmed
+            # playback cannot keep a stale response-level start time.
+            response.starts_at = min(retained_starts_at) if retained_starts_at else None
+            max_played_duration_ms = sum(
+                len(audio_chunk.audio) for audio_chunk in response.audio_chunks.values()
+            )
+            response.duration = min(max(final_duration_ms, 0), max_played_duration_ms)
+            realtime_recorder_logger.debug(
+                "Truncated assistant response item_id=%s requested_duration_ms=%s "
+                "saved_duration_ms=%s retained_chunks=%s dropped_unstarted_chunks=%s "
+                "starts_at=%s.",
+                sanitize_for_log(item_id, max_len=256),
+                sanitize_for_log(str(final_duration_ms)),
+                sanitize_for_log(str(response.duration)),
+                sanitize_for_log(str(len(response.audio_chunks))),
+                sanitize_for_log(
+                    str(original_chunk_count - len(response.audio_chunks))
+                ),
+                sanitize_for_log(str(response.starts_at)),
+            )
 
     @not_closed
     async def started_playing_assistant_response_delta(
@@ -275,12 +311,15 @@ class RealtimeRecorder:
         async with self.save_lock:
             if not self.assistant_responses.get(item_id):
                 realtime_recorder_logger.exception(
-                    f"Started playing assistant response delta for item_id {item_id} but no such response exists."
+                    "Started playing assistant response delta for item_id %s but no such response exists.",
+                    sanitize_for_log(item_id, max_len=256),
                 )
                 return
             if not self.assistant_responses[item_id].audio_chunks.get(event_id):
                 realtime_recorder_logger.exception(
-                    f"Started playing assistant response delta for item_id {item_id} and event_id {event_id} but no such audio chunk exists."
+                    "Started playing assistant response delta for item_id %s and event_id %s but no such audio chunk exists.",
+                    sanitize_for_log(item_id, max_len=256),
+                    sanitize_for_log(event_id, max_len=256),
                 )
                 return
             self.assistant_responses[item_id].audio_chunks[
@@ -295,14 +334,14 @@ class RealtimeRecorder:
             if not self.assistant_responses.get(item_id):
                 realtime_recorder_logger.warning(
                     "Ended playing assistant response delta for item_id %s but no such response exists.",
-                    item_id,
+                    sanitize_for_log(item_id, max_len=256),
                 )
                 return
             if not self.assistant_responses[item_id].audio_chunks.get(event_id):
                 realtime_recorder_logger.warning(
                     "Ended playing assistant response delta for item_id %s and event_id %s but no such audio chunk exists.",
-                    item_id,
-                    event_id,
+                    sanitize_for_log(item_id, max_len=256),
+                    sanitize_for_log(event_id, max_len=256),
                 )
                 return
             self.assistant_responses[item_id].audio_chunks[event_id].ended = True
@@ -324,7 +363,9 @@ class RealtimeRecorder:
             if not self.latest_active_assistant_response_item_id:
                 # Create a new AssistantResponse object
                 realtime_recorder_logger.debug(
-                    f"Adding first assistant response delta for item_id {item_id} and event_id {event_id}"
+                    "Adding first assistant response delta for item_id %s and event_id %s.",
+                    sanitize_for_log(item_id, max_len=256),
+                    sanitize_for_log(event_id, max_len=256),
                 )
                 self.assistant_responses[item_id] = AssistantResponse(
                     item_id=item_id,
@@ -346,7 +387,9 @@ class RealtimeRecorder:
                     and not self.assistant_responses[item_id].complete
                 ):
                     realtime_recorder_logger.debug(
-                        f"Adding assistant response delta to active response for item_id {item_id} and event_id {event_id}"
+                        "Adding assistant response delta to active response for item_id %s and event_id %s.",
+                        sanitize_for_log(item_id, max_len=256),
+                        sanitize_for_log(event_id, max_len=256),
                     )
                     self.assistant_responses[item_id].duration += len(audio_chunk)
                     self.assistant_responses[item_id].audio_chunks[event_id] = (
@@ -364,7 +407,13 @@ class RealtimeRecorder:
                     and item_id not in self.assistant_responses
                 ):
                     realtime_recorder_logger.debug(
-                        f"Received new assistant response delta for item_id {item_id} and event_id {event_id} while another response with item_id {self.latest_active_assistant_response_item_id} is active."
+                        "Received new assistant response delta for item_id %s and event_id %s while another response with item_id %s is active.",
+                        sanitize_for_log(item_id, max_len=256),
+                        sanitize_for_log(event_id, max_len=256),
+                        sanitize_for_log(
+                            str(self.latest_active_assistant_response_item_id),
+                            max_len=256,
+                        ),
                     )
 
                     # Mark the previous response as complete
@@ -393,7 +442,8 @@ class RealtimeRecorder:
                     self.latest_active_assistant_response_item_id = item_id
                 else:
                     realtime_recorder_logger.exception(
-                        f"Received assistant response delta for item_id {item_id} but no such response exists."
+                        "Received assistant response delta for item_id %s but no such response exists.",
+                        sanitize_for_log(item_id, max_len=256),
                     )
                     return
 
@@ -439,7 +489,10 @@ class RealtimeRecorder:
                 # we can't save anything.
                 return
             realtime_recorder_logger.debug(
-                f"Latest active assistant response item ID: {self.latest_active_assistant_response_item_id}"
+                "Latest active assistant response item ID: %s",
+                sanitize_for_log(
+                    str(self.latest_active_assistant_response_item_id), max_len=256
+                ),
             )
             current_assistant_response = self.assistant_responses.get(
                 self.latest_active_assistant_response_item_id
@@ -478,7 +531,8 @@ class RealtimeRecorder:
                 return
 
             realtime_recorder_logger.debug(
-                f"Last assistant response item ID: {last_assistant_response.item_id}"
+                "Last assistant response item ID: %s",
+                sanitize_for_log(last_assistant_response.item_id, max_len=256),
             )
 
             if not last_assistant_response.starts_at:
@@ -614,7 +668,8 @@ class RealtimeRecorder:
             ):
                 if not audio_chunk.starts_at:
                     realtime_recorder_logger.exception(
-                        f"Audio chunk {audio_chunk.event_id} has no start time."
+                        "Audio chunk %s has no start time.",
+                        sanitize_for_log(audio_chunk.event_id, max_len=256),
                     )
                     continue
                 if duration_so_far + len(audio_chunk.audio) > response.duration:
