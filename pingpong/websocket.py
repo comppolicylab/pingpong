@@ -364,9 +364,20 @@ def ws_with_single_realtime_session(func):
             )
             return None
 
-        if thread.voice_mode_recording or await _thread_has_messages(
+        has_messages = await _thread_has_messages(
             browser_connection.state["db"], thread.id
-        ):
+        )
+        if thread.voice_mode_recording or has_messages:
+            existing_recording_id = getattr(
+                thread.voice_mode_recording, "recording_id", None
+            )
+            browser_connection_logger.warning(
+                "Rejecting realtime session for finalized thread. "
+                "thread_id=%s, existing_recording_id=%s, has_messages=%s",
+                thread.id,
+                existing_recording_id,
+                has_messages,
+            )
             await _reject_realtime_session(
                 browser_connection, VOICE_SESSION_FINAL_MESSAGE
             )
