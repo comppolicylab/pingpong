@@ -5,6 +5,7 @@ import inspect
 from io import BytesIO
 import logging
 import sys
+import uuid_utils as uuid
 from typing import Union
 
 from pingpong.audio_store import LocalAudioUploadObject, S3AudioUploadObject
@@ -26,6 +27,10 @@ AUDIO_APPLICATION = "voip"
 MIN_AUDIO_CHUNK_SIZE = 5 * 1024 * 1024  # S3 multipart minimum (except last)
 AUDIO_SIZE_TO_READ = 4_096
 STDIN_CHUNK_SIZE = 32_768
+
+
+def make_audio_recording_id(thread_obj_id: str) -> str:
+    return f"realtime_recorder_{thread_obj_id}_{uuid.uuid4().hex}.webm"
 
 
 class UserAudioChunk(BaseModel):
@@ -166,7 +171,12 @@ class RealtimeRecorder:
         """
         Creates a new RealtimeRecorder instance.
         """
-        audio_recording_id = f"realtime_recorder_{thread_obj_id}.webm"
+        audio_recording_id = make_audio_recording_id(thread_obj_id)
+        realtime_recorder_logger.info(
+            "Creating realtime recorder upload: thread_id=%s, recording_id=%s",
+            thread_id,
+            sanitize_for_log(audio_recording_id, max_len=256),
+        )
         audio_store_obj = await config.audio_store.store.create_upload(
             name=audio_recording_id,
             content_type="audio/webm",
@@ -774,19 +784,53 @@ class RealtimeRecorder:
         # Complete the upload
         await self.audio_store_obj.complete_upload()
 
-        # Save the recording metadata to the database
+        # Save the recording metadata to the database. Keep this in a savepoint so
+        # a metadata conflict cannot poison the websocket transaction that contains
+        # the persisted realtime transcript messages.
         try:
-            await VoiceModeRecording.create(
-                session=self.session,
-                data={
-                    "recording_id": self.audio_recording_id,
-                    "thread_id": self.thread_id,
-                    "duration": self.audio_duration,
-                },
-            )
+            async with self.session.begin_nested():
+                (
+                    recording,
+                    previous_recording_id,
+                ) = await VoiceModeRecording.create_or_replace_for_thread(
+                    session=self.session,
+                    data={
+                        "recording_id": self.audio_recording_id,
+                        "thread_id": self.thread_id,
+                        "duration": self.audio_duration,
+                    },
+                )
         except Exception as e:
-            realtime_recorder_logger.exception("Error saving VoiceModeRecording: %s", e)
-            await self.audio_store_obj.delete_file()
+            realtime_recorder_logger.exception(
+                "Error saving VoiceModeRecording; keeping completed audio object. "
+                "thread_id=%s, recording_id=%s, duration_ms=%s, error=%s",
+                self.thread_id,
+                sanitize_for_log(self.audio_recording_id, max_len=256),
+                self.audio_duration,
+                e,
+            )
+        else:
+            if previous_recording_id:
+                realtime_recorder_logger.warning(
+                    "Replaced existing VoiceModeRecording metadata. "
+                    "thread_id=%s, recording_row_id=%s, previous_recording_id=%s, "
+                    "new_recording_id=%s, duration_ms=%s. "
+                    "Previous audio object left intact.",
+                    self.thread_id,
+                    recording.id,
+                    sanitize_for_log(previous_recording_id, max_len=256),
+                    sanitize_for_log(self.audio_recording_id, max_len=256),
+                    self.audio_duration,
+                )
+            else:
+                realtime_recorder_logger.info(
+                    "Saved VoiceModeRecording metadata. "
+                    "thread_id=%s, recording_row_id=%s, recording_id=%s, duration_ms=%s",
+                    self.thread_id,
+                    recording.id,
+                    sanitize_for_log(self.audio_recording_id, max_len=256),
+                    self.audio_duration,
+                )
 
         self.closed = True
 

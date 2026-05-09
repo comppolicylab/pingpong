@@ -5812,6 +5812,36 @@ class VoiceModeRecording(Base):
         return recording
 
     @classmethod
+    async def create_or_replace_for_thread(
+        cls, session: AsyncSession, data: dict
+    ) -> tuple["VoiceModeRecording", str | None]:
+        await session.scalar(
+            select(Thread.id).where(Thread.id == data["thread_id"]).with_for_update()
+        )
+
+        stmt = (
+            select(VoiceModeRecording)
+            .where(VoiceModeRecording.thread_id == data["thread_id"])
+            .order_by(
+                VoiceModeRecording.created_at.desc(),
+                VoiceModeRecording.id.desc(),
+            )
+            .with_for_update()
+            .limit(1)
+        )
+        existing_recording = await session.scalar(stmt)
+        if existing_recording:
+            previous_recording_id = existing_recording.recording_id
+            existing_recording.recording_id = data["recording_id"]
+            existing_recording.duration = data["duration"]
+            session.add(existing_recording)
+            await session.flush()
+            return existing_recording, previous_recording_id
+
+        recording = await cls.create(session, data)
+        return recording, None
+
+    @classmethod
     async def delete(cls, session: AsyncSession, id_: int) -> None:
         stmt = delete(VoiceModeRecording).where(VoiceModeRecording.id == id_)
         await session.execute(stmt)
