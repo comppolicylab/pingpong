@@ -61,7 +61,7 @@
 		"katex": "^0.16.45",
 		"marked": "^18.0.3",
 		"marked-highlight": "^2.2.4",
-		"mermaid": "^11.14.0",
+		"mermaid": "^11.15.0",
 		"svelte-copy": "^2.0.0",
 		"tldts": "^7.0.30"
 	},
