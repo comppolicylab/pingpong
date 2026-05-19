@@ -80,10 +80,12 @@ def test_redact_share_token_uses_last_ten_chars():
 
 def test_export_share_link_fields_use_name_and_redacted_token():
     link = models.AnonymousLink(
+        id=1,
         name="Study A",
         share_token="019afc9f-7634-7621-8aca-50c93f6dd956",
     )
     unnamed_link = models.AnonymousLink(
+        id=2,
         name=None,
         share_token="019afc9f-7634-7621-8aca-50c93f6dd957",
     )
@@ -98,3 +100,18 @@ def test_export_share_link_fields_use_name_and_redacted_token():
         "Study A, Shared Link",
         "...c93f6dd956, ...c93f6dd957",
     )
+
+
+def test_export_share_link_columns_deduplicates_links():
+    link = models.AnonymousLink(
+        id=1,
+        name="Study A",
+        share_token="019afc9f-7634-7621-8aca-50c93f6dd956",
+    )
+    users = [
+        models.User(id=1, anonymous_link=link),
+        models.User(id=2, anonymous_link=link),
+    ]
+    thread = models.Thread(users=users)
+
+    assert export_share_link_columns(thread) == ("Study A", "...c93f6dd956")

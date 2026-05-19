@@ -4767,7 +4767,19 @@ def redact_share_token(share_token: str) -> str:
 
 
 def export_share_link_columns(thread: models.Thread) -> tuple[str, str]:
-    links = [user.anonymous_link for user in thread.users if user.anonymous_link]
+    links = []
+    seen_link_keys: set[int | str] = set()
+    for user in thread.users:
+        if not user.anonymous_link:
+            continue
+
+        link_key = user.anonymous_link.id or user.anonymous_link.share_token
+        if link_key in seen_link_keys:
+            continue
+
+        seen_link_keys.add(link_key)
+        links.append(user.anonymous_link)
+
     names = [link.name or "Shared Link" for link in links]
     tokens = [redact_share_token(link.share_token) for link in links]
     return ", ".join(names), ", ".join(tokens)
