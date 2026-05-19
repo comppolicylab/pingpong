@@ -187,20 +187,12 @@
 		return state === 'completed';
 	}
 
-	function isAwaitingAnswerSession(state: LectureVideoSessionState): boolean {
-		return state === 'awaiting_answer';
-	}
-
 	function allowsPlaybackInteraction(state: LectureVideoSessionState): boolean {
 		return state === 'playing' || state === 'completed';
 	}
 
 	function isDefinedNumber(id: number | null | undefined): id is number {
 		return id != null;
-	}
-
-	function getQuestionStopOffsetMs(question: LectureVideoQuestionPrompt | null): number | null {
-		return question?.stop_offset_ms ?? null;
 	}
 
 	function getActiveQuestionIds(
@@ -254,14 +246,12 @@
 	let isCompleted = $derived(isCompletedSession(sessionState));
 	let visibleCurrentQuestion = $derived(hasQuestionPrompt ? currentQuestion : null);
 	let questionReviewPlaybackAllowed = $derived(
-		isAwaitingAnswerSession(sessionState) &&
-			questionPlaybackLocked &&
-			currentQuestion != null &&
-			!playerDisabled
+		hasQuestionPrompt && questionPlaybackLocked && currentQuestion != null && !playerDisabled
 	);
-	let questionReviewSeekLimitMs = $derived(
-		questionReviewPlaybackAllowed ? getQuestionStopOffsetMs(currentQuestion) : null
-	);
+	let questionReviewSeekLimitMs = $derived.by(() => {
+		const question: LectureVideoQuestionPrompt | null = currentQuestion;
+		return questionReviewPlaybackAllowed && question ? question.stop_offset_ms : null;
+	});
 	let playerInteractionDisabled = $derived(
 		!canParticipate || (playbackLocked && !questionReviewPlaybackAllowed)
 	);

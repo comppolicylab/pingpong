@@ -677,8 +677,12 @@
 		const clickRatio = clamp(pointerOffsetPx / rect.width, 0, 1);
 		const fromOffsetMs = dragStartOffsetMs ?? Math.round(videoElement.currentTime * 1000);
 		const requestedOffsetMs = Math.round(durationMs * clickRatio);
-		const allowedSeekOffsetMs =
+		const unboundedAllowedSeekOffsetMs =
 			allowFullSeek && durationMs > 0 ? durationMs : Math.max(fromOffsetMs, furthestOffsetMs ?? 0);
+		const allowedSeekOffsetMs =
+			maxSeekOffsetMs == null
+				? unboundedAllowedSeekOffsetMs
+				: Math.min(unboundedAllowedSeekOffsetMs, maxSeekOffsetMs);
 		const locked = requestedOffsetMs > allowedSeekOffsetMs;
 
 		return {
