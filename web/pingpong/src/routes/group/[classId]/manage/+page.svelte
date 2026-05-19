@@ -1541,7 +1541,7 @@
 											</Button>
 										</div>
 										<div class="space-y-2">
-											{#each exportThreadsAssistantOptions as assistant}
+											{#each exportThreadsAssistantOptions as assistant (assistant.id)}
 												<Checkbox
 													id={`exportAssistant${assistant.id}`}
 													color="blue"
