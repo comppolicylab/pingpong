@@ -4762,6 +4762,29 @@ def export_user_identifier(thread: models.Thread, class_: models.Class) -> str:
     return ", ".join(user_hashes)
 
 
+def redact_share_token(share_token: str) -> str:
+    return f"...{share_token[-10:]}"
+
+
+def export_share_link_columns(thread: models.Thread) -> tuple[str, str]:
+    links = []
+    seen_link_keys: set[int | str] = set()
+    for user in thread.users:
+        if not user.anonymous_link:
+            continue
+
+        link_key = user.anonymous_link.id or user.anonymous_link.share_token
+        if link_key in seen_link_keys:
+            continue
+
+        seen_link_keys.add(link_key)
+        links.append(user.anonymous_link)
+
+    names = [link.name or "Shared Link" for link in links]
+    tokens = [redact_share_token(link.share_token) for link in links]
+    return ", ".join(names), ", ".join(tokens)
+
+
 async def export_class_threads_anonymized(
     cli: openai.AsyncClient,
     class_id: str,
@@ -4829,6 +4852,8 @@ async def export_threads_multiple_classes(
                 [
                     "Class ID",
                     "Class Name",
+                    "Share Link Name",
+                    "Share Token",
                     "Assistant ID",
                     "Assistant Name",
                     "Role",
@@ -4867,6 +4892,7 @@ async def export_threads_multiple_classes(
                         user_hashes_str = thread.conversation_id
                     else:
                         user_hashes_str = export_user_identifier(thread, class_)
+                    share_link_names, share_tokens = export_share_link_columns(thread)
 
                     user_emails_str = "REDACTED"
                     if include_user_emails:
@@ -4882,6 +4908,8 @@ async def export_threads_multiple_classes(
                         [
                             class_.id,
                             class_.name,
+                            share_link_names,
+                            share_tokens,
                             assistant_id,
                             assistant_name,
                             "system_prompt",
@@ -4919,6 +4947,8 @@ async def export_threads_multiple_classes(
                                     [
                                         class_.id,
                                         class_.name,
+                                        share_link_names,
+                                        share_tokens,
                                         assistant_id,
                                         assistant_name,
                                         message.role,
@@ -4953,6 +4983,8 @@ async def export_threads_multiple_classes(
                                 [
                                     class_.id,
                                     class_.name,
+                                    share_link_names,
+                                    share_tokens,
                                     assistant_id,
                                     assistant_name,
                                     role,
@@ -5052,6 +5084,8 @@ async def export_class_threads(
                 [
                     "Class ID",
                     "Class Name",
+                    "Share Link Name",
+                    "Share Token",
                     "Assistant ID",
                     "Assistant Name",
                     "Role",
@@ -5079,6 +5113,7 @@ async def export_class_threads(
                     user_hashes_str = thread.conversation_id
                 else:
                     user_hashes_str = export_user_identifier(thread, class_)
+                share_link_names, share_tokens = export_share_link_columns(thread)
 
                 user_emails_str = "REDACTED"
                 if include_user_emails:
@@ -5094,6 +5129,8 @@ async def export_class_threads(
                     [
                         class_.id,
                         class_.name,
+                        share_link_names,
+                        share_tokens,
                         assistant_id,
                         assistant_name,
                         "system_prompt",
@@ -5131,6 +5168,8 @@ async def export_class_threads(
                                 [
                                     class_.id,
                                     class_.name,
+                                    share_link_names,
+                                    share_tokens,
                                     assistant_id,
                                     assistant_name,
                                     message.role,
@@ -5165,6 +5204,8 @@ async def export_class_threads(
                             [
                                 class_.id,
                                 class_.name,
+                                share_link_names,
+                                share_tokens,
                                 assistant_id,
                                 assistant_name,
                                 role,
