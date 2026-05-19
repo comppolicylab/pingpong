@@ -75,10 +75,7 @@ def test_export_user_identifier_empty_users_returns_unknown():
 
 
 def test_redact_share_token_uses_last_ten_chars():
-    assert (
-        redact_share_token("019afc9f-7634-7621-8aca-50c93f6dd956")
-        == "...c93f6dd956"
-    )
+    assert redact_share_token("019afc9f-7634-7621-8aca-50c93f6dd956") == "...c93f6dd956"
 
 
 def test_export_share_link_fields_use_name_and_redacted_token():

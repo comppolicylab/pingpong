@@ -346,8 +346,7 @@ async def test_get_thread_by_class_id_preloads_export_user_fields(db):
     assert loaded_user.email == "export-user@example.com"
     assert loaded_user.anonymous_link.name == "Research cohort"
     assert (
-        loaded_user.anonymous_link.share_token
-        == "019afc9f-7634-7621-8aca-50c93f6dd956"
+        loaded_user.anonymous_link.share_token == "019afc9f-7634-7621-8aca-50c93f6dd956"
     )
 
 
