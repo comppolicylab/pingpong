@@ -148,7 +148,7 @@
 		submittingQuestionId = questionId;
 		submittingOptionId = optionId;
 		try {
-			await withSubmissionTimeout(onselectOption(optionId));
+			await waitForSubmission(onselectOption(optionId));
 		} catch (error) {
 			sadToast(
 				`Failed to submit answer. Error: ${errorMessage(error, 'Please try again in a moment.')}`
@@ -161,18 +161,13 @@
 		}
 	}
 
-	async function withSubmissionTimeout(submission: void | Promise<void>): Promise<void> {
+	async function waitForSubmission(submission: void | Promise<void>): Promise<void> {
 		let timeoutId: ReturnType<typeof setTimeout> | undefined;
 		try {
-			await Promise.race([
-				Promise.resolve(submission),
-				new Promise<never>((_, reject) => {
-					timeoutId = setTimeout(
-						() => reject(new Error('The answer submission timed out.')),
-						ANSWER_SUBMISSION_TIMEOUT_MS
-					);
-				})
-			]);
+			timeoutId = setTimeout(() => {
+				sadToast('Still submitting answer. Please wait a moment before trying again.');
+			}, ANSWER_SUBMISSION_TIMEOUT_MS);
+			await Promise.resolve(submission);
 		} finally {
 			if (timeoutId) clearTimeout(timeoutId);
 		}
