@@ -4790,6 +4790,7 @@ async def export_class_threads_anonymized(
     class_id: str,
     user_id: int,
     nowfn: NowFn = utcnow,
+    include_only_assistant_ids: list[int] | None = None,
     last_activity_after: datetime | None = None,
     last_activity_before: datetime | None = None,
 ) -> None:
@@ -4799,6 +4800,7 @@ async def export_class_threads_anonymized(
         user_id=user_id,
         nowfn=nowfn,
         include_user_emails=False,
+        include_only_assistant_ids=include_only_assistant_ids,
         last_activity_after=last_activity_after,
         last_activity_before=last_activity_before,
     )
@@ -4809,6 +4811,7 @@ async def export_class_threads_with_emails(
     class_id: str,
     user_id: int,
     nowfn: NowFn = utcnow,
+    include_only_assistant_ids: list[int] | None = None,
     last_activity_after: datetime | None = None,
     last_activity_before: datetime | None = None,
 ) -> None:
@@ -4818,6 +4821,7 @@ async def export_class_threads_with_emails(
         user_id=user_id,
         nowfn=nowfn,
         include_user_emails=True,
+        include_only_assistant_ids=include_only_assistant_ids,
         last_activity_after=last_activity_after,
         last_activity_before=last_activity_before,
     )
@@ -4829,6 +4833,7 @@ async def export_threads_multiple_classes(
     include_user_emails: bool = False,
     include_only_user_ids: list[int] | None = None,
     include_only_user_emails: list[str] | None = None,
+    include_only_assistant_ids: list[int] | None = None,
     nowfn: NowFn = utcnow,
     last_activity_after: datetime | None = None,
     last_activity_before: datetime | None = None,
@@ -4885,6 +4890,7 @@ async def export_threads_multiple_classes(
                     class_id=int(class_.id),
                     desc=False,
                     include_only_user_ids=user_ids,
+                    include_only_assistant_ids=include_only_assistant_ids,
                     last_activity_after=last_activity_after,
                     last_activity_before=last_activity_before,
                 ):
@@ -5074,6 +5080,7 @@ async def export_class_threads(
     user_id: int,
     nowfn: NowFn = utcnow,
     include_user_emails: bool = False,
+    include_only_assistant_ids: list[int] | None = None,
     last_activity_after: datetime | None = None,
     last_activity_before: datetime | None = None,
 ) -> None:
@@ -5114,6 +5121,7 @@ async def export_class_threads(
                 session,
                 class_id=int(class_id),
                 desc=False,
+                include_only_assistant_ids=include_only_assistant_ids,
                 last_activity_after=last_activity_after,
                 last_activity_before=last_activity_before,
             ):

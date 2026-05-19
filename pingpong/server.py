@@ -5245,18 +5245,41 @@ def _validate_activity_range(after: datetime | None, before: datetime | None) ->
         )
 
 
-@v1.get(
+async def _validate_export_assistant_ids(
+    session: AsyncSession, class_id: int, assistant_ids: list[int] | None
+) -> list[int] | None:
+    if not assistant_ids:
+        return None
+
+    parsed_ids = list(dict.fromkeys(assistant_ids))
+    if any(id_ <= 0 for id_ in parsed_ids):
+        raise HTTPException(status_code=400, detail="Assistant IDs must be positive")
+
+    class_assistant_ids = {
+        assistant.id
+        for assistant in await models.Assistant.get_by_class_id(session, class_id)
+    }
+    invalid_ids = [id_ for id_ in parsed_ids if id_ not in class_assistant_ids]
+    if invalid_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="Assistant IDs must belong to this class",
+        )
+
+    return parsed_ids
+
+
+@v1.post(
     "/class/{class_id}/export",
     dependencies=[Depends(Authz("supervisor", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
 async def export_class_threads(
     class_id: str,
+    export_options: schemas.ThreadExportRequest,
     request: StateRequest,
     tasks: BackgroundTasks,
     openai_client: OpenAIClient,
-    last_activity_after: datetime | None = None,
-    last_activity_before: datetime | None = None,
 ):
     class_ = await models.Class.get_by_id(request.state["db"], int(class_id))
     if not class_:
@@ -5266,15 +5289,22 @@ async def export_class_threads(
             status_code=403,
             detail="Cannot export private classes",
         )
-    _validate_activity_range(last_activity_after, last_activity_before)
+    _validate_activity_range(
+        export_options.last_activity_after,
+        export_options.last_activity_before,
+    )
+    include_only_assistant_ids = await _validate_export_assistant_ids(
+        request.state["db"], int(class_id), export_options.assistant_ids
+    )
     tasks.add_task(
         safe_task,
         export_class_threads_anonymized,
         openai_client,
         class_id,
         request.state["session"].user.id,
-        last_activity_after=last_activity_after,
-        last_activity_before=last_activity_before,
+        include_only_assistant_ids=include_only_assistant_ids,
+        last_activity_after=export_options.last_activity_after,
+        last_activity_before=export_options.last_activity_before,
     )
     return {"status": "ok"}
 

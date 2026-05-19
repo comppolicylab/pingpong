@@ -3099,6 +3099,7 @@ export const removeClassUser = async (f: Fetcher, classId: number, userId: numbe
 export type ExportThreadsOptions = {
 	last_activity_after?: string;
 	last_activity_before?: string;
+	assistant_ids?: number[];
 };
 
 export const exportThreads = async (
@@ -3107,7 +3108,7 @@ export const exportThreads = async (
 	options?: ExportThreadsOptions
 ) => {
 	const url = `class/${classId}/export`;
-	return await GET<ExportThreadsOptions, GenericStatus>(f, url, options);
+	return await POST<ExportThreadsOptions, GenericStatus>(f, url, options);
 };
 
 /**
