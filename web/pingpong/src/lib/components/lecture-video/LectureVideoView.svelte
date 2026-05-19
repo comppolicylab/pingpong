@@ -566,10 +566,25 @@
 	}
 
 	function pausePostAnswerNarrationForChatSubmit() {
+		playerDisabled = false;
 		postAnswerNarrationPending = false;
 		if (!hasVisiblePostAnswerFeedback(currentContinuation)) {
 			autoContinueFailed = true;
 		}
+	}
+
+	function beginPostAnswerNarration(narrationId: number) {
+		playerDisabled = true;
+		postAnswerNarrationPending = true;
+		void playNarration(
+			narrationId,
+			() => {
+				playerDisabled = false;
+				postAnswerNarrationPending = false;
+				maybeAutoContinueAfterPostAnswer();
+			},
+			pausePostAnswerNarrationForChatSubmit
+		);
 	}
 
 	function queueVideoRetry() {
@@ -1059,15 +1074,7 @@
 			sessionState === 'awaiting_post_answer_resume' &&
 			currentContinuation?.post_answer_narration_id
 		) {
-			postAnswerNarrationPending = true;
-			void playNarration(
-				currentContinuation.post_answer_narration_id,
-				() => {
-					postAnswerNarrationPending = false;
-					maybeAutoContinueAfterPostAnswer();
-				},
-				pausePostAnswerNarrationForChatSubmit
-			);
+			beginPostAnswerNarration(currentContinuation.post_answer_narration_id);
 		} else if (
 			sessionState === 'awaiting_post_answer_resume' &&
 			!hasVisiblePostAnswerFeedback(currentContinuation)
@@ -1704,15 +1711,7 @@
 
 			// Play post-answer narration if available
 			if (continuationAtAnswer?.post_answer_narration_id) {
-				postAnswerNarrationPending = true;
-				void playNarration(
-					continuationAtAnswer.post_answer_narration_id,
-					() => {
-						postAnswerNarrationPending = false;
-						maybeAutoContinueAfterPostAnswer();
-					},
-					pausePostAnswerNarrationForChatSubmit
-				);
+				beginPostAnswerNarration(continuationAtAnswer.post_answer_narration_id);
 			} else if (!hasVisiblePostAnswerFeedback(currentContinuation)) {
 				maybeAutoContinueAfterPostAnswer();
 			}
