@@ -7783,6 +7783,8 @@ class Thread(Base):
         class_id: int,
         desc: bool = True,
         include_only_user_ids: list[int] | None = None,
+        last_activity_after: datetime | None = None,
+        last_activity_before: datetime | None = None,
     ) -> AsyncGenerator["Thread", None]:
         condition = Thread.class_id == int(class_id)
         if include_only_user_ids is not None:
@@ -7791,6 +7793,10 @@ class Thread(Base):
             condition = and_(
                 condition, Thread.users.any(User.id.in_(include_only_user_ids))
             )
+        if last_activity_after:
+            condition = and_(condition, Thread.last_activity >= last_activity_after)
+        if last_activity_before:
+            condition = and_(condition, Thread.last_activity <= last_activity_before)
         stmt = (
             select(Thread)
             .outerjoin(Thread.users)

@@ -5237,6 +5237,14 @@ async def get_ci_messages(
     }
 
 
+def _validate_activity_range(after: datetime | None, before: datetime | None) -> None:
+    if after and before and after > before:
+        raise HTTPException(
+            status_code=400,
+            detail="Start date must be before end date",
+        )
+
+
 @v1.get(
     "/class/{class_id}/export",
     dependencies=[Depends(Authz("supervisor", "class:{class_id}"))],
@@ -5247,6 +5255,8 @@ async def export_class_threads(
     request: StateRequest,
     tasks: BackgroundTasks,
     openai_client: OpenAIClient,
+    last_activity_after: datetime | None = None,
+    last_activity_before: datetime | None = None,
 ):
     class_ = await models.Class.get_by_id(request.state["db"], int(class_id))
     if not class_:
@@ -5256,12 +5266,15 @@ async def export_class_threads(
             status_code=403,
             detail="Cannot export private classes",
         )
+    _validate_activity_range(last_activity_after, last_activity_before)
     tasks.add_task(
         safe_task,
         export_class_threads_anonymized,
         openai_client,
         class_id,
         request.state["session"].user.id,
+        last_activity_after=last_activity_after,
+        last_activity_before=last_activity_before,
     )
     return {"status": "ok"}
 
@@ -5340,6 +5353,7 @@ async def export_class_threads_multiple_classes(
     request: StateRequest,
     tasks: BackgroundTasks,
 ):
+    _validate_activity_range(data.last_activity_after, data.last_activity_before)
     tasks.add_task(
         safe_task,
         export_threads_multiple_classes,
@@ -5348,6 +5362,8 @@ async def export_class_threads_multiple_classes(
         data.include_user_emails,
         data.user_ids,
         data.user_emails,
+        last_activity_after=data.last_activity_after,
+        last_activity_before=data.last_activity_before,
     )
     return {"status": "ok"}
 

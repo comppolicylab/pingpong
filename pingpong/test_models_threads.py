@@ -351,6 +351,45 @@ async def test_get_thread_by_class_id_preloads_export_user_fields(db):
 
 
 @pytest.mark.asyncio
+async def test_get_thread_by_class_id_filters_by_last_activity_range(db):
+    async with db.async_session() as session:
+        class_ = models.Class(name="Export Thread Date Range Class")
+        base_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        before = models.Thread(
+            thread_id="thread_export_before_range",
+            class_=class_,
+            last_activity=base_time,
+        )
+        in_range = models.Thread(
+            thread_id="thread_export_in_range",
+            class_=class_,
+            last_activity=base_time + timedelta(days=1),
+        )
+        after = models.Thread(
+            thread_id="thread_export_after_range",
+            class_=class_,
+            last_activity=base_time + timedelta(days=2),
+        )
+        session.add_all([before, in_range, after])
+        await session.commit()
+        class_id = class_.id
+
+    async with db.async_session() as session:
+        threads = [
+            t
+            async for t in models.Thread.get_thread_by_class_id(
+                session,
+                class_id=class_id,
+                desc=False,
+                last_activity_after=base_time + timedelta(hours=12),
+                last_activity_before=base_time + timedelta(days=1, hours=12),
+            )
+        ]
+
+    assert [thread.thread_id for thread in threads] == ["thread_export_in_range"]
+
+
+@pytest.mark.asyncio
 async def test_list_messages_tool_calls_excludes_hidden_messages_by_default(db):
     async with db.async_session() as session:
         thread = models.Thread(thread_id="thread_hidden_messages_default", version=3)

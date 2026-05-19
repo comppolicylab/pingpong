@@ -4790,6 +4790,8 @@ async def export_class_threads_anonymized(
     class_id: str,
     user_id: int,
     nowfn: NowFn = utcnow,
+    last_activity_after: datetime | None = None,
+    last_activity_before: datetime | None = None,
 ) -> None:
     await export_class_threads(
         cli=cli,
@@ -4797,6 +4799,8 @@ async def export_class_threads_anonymized(
         user_id=user_id,
         nowfn=nowfn,
         include_user_emails=False,
+        last_activity_after=last_activity_after,
+        last_activity_before=last_activity_before,
     )
 
 
@@ -4805,6 +4809,8 @@ async def export_class_threads_with_emails(
     class_id: str,
     user_id: int,
     nowfn: NowFn = utcnow,
+    last_activity_after: datetime | None = None,
+    last_activity_before: datetime | None = None,
 ) -> None:
     await export_class_threads(
         cli=cli,
@@ -4812,6 +4818,8 @@ async def export_class_threads_with_emails(
         user_id=user_id,
         nowfn=nowfn,
         include_user_emails=True,
+        last_activity_after=last_activity_after,
+        last_activity_before=last_activity_before,
     )
 
 
@@ -4822,6 +4830,8 @@ async def export_threads_multiple_classes(
     include_only_user_ids: list[int] | None = None,
     include_only_user_emails: list[str] | None = None,
     nowfn: NowFn = utcnow,
+    last_activity_after: datetime | None = None,
+    last_activity_before: datetime | None = None,
 ) -> None:
     async with config.db.driver.async_session() as session:
         requestor = None
@@ -4875,6 +4885,8 @@ async def export_threads_multiple_classes(
                     class_id=int(class_.id),
                     desc=False,
                     include_only_user_ids=user_ids,
+                    last_activity_after=last_activity_after,
+                    last_activity_before=last_activity_before,
                 ):
                     (
                         assistant,
@@ -5062,6 +5074,8 @@ async def export_class_threads(
     user_id: int,
     nowfn: NowFn = utcnow,
     include_user_emails: bool = False,
+    last_activity_after: datetime | None = None,
+    last_activity_before: datetime | None = None,
 ) -> None:
     async with config.db.driver.async_session() as session:
         class_ = None
@@ -5097,7 +5111,11 @@ async def export_class_threads(
             csvwriter.writerow(header)
 
             async for thread in models.Thread.get_thread_by_class_id(
-                session, class_id=int(class_id), desc=False
+                session,
+                class_id=int(class_id),
+                desc=False,
+                last_activity_after=last_activity_after,
+                last_activity_before=last_activity_before,
             ):
                 (
                     assistant,
