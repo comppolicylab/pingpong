@@ -4328,8 +4328,9 @@
 									<div>
 										<Label for="realtime_transcription_model">Transcription Model</Label>
 										<Helper class="pb-1"
-											>Whisper 1 keeps the existing transcription behavior. GPT Realtime Whisper uses
-											OpenAI's newer realtime transcription model for stronger transcription quality.</Helper
+											>Whisper 1 keeps the existing transcription behavior. GPT Realtime Whisper
+											uses OpenAI's newer realtime transcription model for stronger transcription
+											quality.</Helper
 										>
 									</div>
 									<select
