@@ -312,10 +312,16 @@ async def test_get_thread_by_class_id_preloads_export_user_fields(db):
             last_name="User",
             anonymous_link=share_link,
         )
+        second_user = models.User(
+            email="export-user-2@example.com",
+            display_name="Second Export User",
+            first_name="Second",
+            last_name="User",
+        )
         thread = models.Thread(
             thread_id="thread_export_user_fields",
             class_=class_,
-            users=[user],
+            users=[user, second_user],
             display_user_info=True,
         )
         session.add(thread)
@@ -331,7 +337,10 @@ async def test_get_thread_by_class_id_preloads_export_user_fields(db):
         ]
 
     assert len(threads) == 1
-    loaded_user = threads[0].users[0]
+    assert len(threads[0].users) == 2
+    loaded_user = next(
+        user for user in threads[0].users if user.email == "export-user@example.com"
+    )
     unloaded = inspect(loaded_user).unloaded
 
     assert "id" not in unloaded
@@ -431,6 +440,56 @@ async def test_get_thread_by_class_id_filters_by_assistant_ids(db):
     assert [thread.thread_id for thread in threads] == [
         "thread_export_included_assistant"
     ]
+
+
+@pytest.mark.asyncio
+async def test_get_thread_by_class_id_empty_user_filter_returns_no_threads(db):
+    async with db.async_session() as session:
+        class_ = models.Class(name="Export Thread Empty User Filter Class")
+        thread = models.Thread(
+            thread_id="thread_export_empty_user_filter",
+            class_=class_,
+        )
+        session.add(thread)
+        await session.commit()
+        class_id = class_.id
+
+    async with db.async_session() as session:
+        threads = [
+            t
+            async for t in models.Thread.get_thread_by_class_id(
+                session,
+                class_id=class_id,
+                include_only_user_ids=[],
+            )
+        ]
+
+    assert threads == []
+
+
+@pytest.mark.asyncio
+async def test_get_thread_by_class_id_empty_assistant_filter_returns_no_threads(db):
+    async with db.async_session() as session:
+        class_ = models.Class(name="Export Thread Empty Assistant Filter Class")
+        thread = models.Thread(
+            thread_id="thread_export_empty_assistant_filter",
+            class_=class_,
+        )
+        session.add(thread)
+        await session.commit()
+        class_id = class_.id
+
+    async with db.async_session() as session:
+        threads = [
+            t
+            async for t in models.Thread.get_thread_by_class_id(
+                session,
+                class_id=class_id,
+                include_only_assistant_ids=[],
+            )
+        ]
+
+    assert threads == []
 
 
 @pytest.mark.asyncio
