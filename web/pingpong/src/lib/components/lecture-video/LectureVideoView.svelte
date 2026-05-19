@@ -155,6 +155,7 @@
 	let narrationPlaybackGeneration = 0;
 	let pendingVideoRetryCleanup: (() => void) | null = null;
 	let manualPlaybackTarget: 'video' | 'narration' | null = $state(null);
+	let answerSubmissionInFlight = $state(false);
 	let autoContinueInFlight = $state(false);
 	let autoContinueFailed = $state(false);
 	let expiredControlRecoveryInFlight = $state(false);
@@ -497,6 +498,7 @@
 		latestPlaybackInteraction = null;
 		revokeNarrationResources();
 		clearPendingVideoRetry();
+		answerSubmissionInFlight = false;
 		autoContinueInFlight = false;
 		autoContinueFailed = false;
 		expiredControlRecoveryInFlight = false;
@@ -611,6 +613,7 @@
 		clearPendingVideoRetry();
 		resumeOffsetOnCanPlay = null;
 		cancelPendingNarration();
+		answerSubmissionInFlight = false;
 		autoContinueInFlight = false;
 		playbackSessionRefreshController?.abort();
 		playbackSessionRefreshController = null;
@@ -1640,23 +1643,42 @@
 	}
 
 	async function handleSelectOption(optionId: number) {
-		if (!controllerSessionId || !currentQuestion || introNarrationPending) return;
-		const questionAtAnswer = currentQuestion;
-		autoContinueFailed = false;
-
-		const response = await api.postLectureVideoInteraction(fetch, classId, threadId, {
-			type: 'answer_submitted',
-			controller_session_id: controllerSessionId,
-			expected_state_version: stateVersion,
-			idempotency_key: crypto.randomUUID(),
-			question_id: currentQuestion.id,
-			option_id: optionId
-		});
-		const expanded = api.expandResponse(response);
-		if (failClosedOnConflict(expanded)) {
+		if (
+			!controllerSessionId ||
+			!currentQuestion ||
+			introNarrationPending ||
+			answerSubmissionInFlight
+		) {
 			return;
 		}
-		if (!expanded.error) {
+		const questionAtAnswer = currentQuestion;
+		autoContinueFailed = false;
+		answerSubmissionInFlight = true;
+
+		try {
+			const response = await api.postLectureVideoInteraction(fetch, classId, threadId, {
+				type: 'answer_submitted',
+				controller_session_id: controllerSessionId,
+				expected_state_version: stateVersion,
+				idempotency_key: crypto.randomUUID(),
+				question_id: currentQuestion.id,
+				option_id: optionId
+			});
+			const expanded = api.expandResponse(response);
+			if (failClosedOnConflict(expanded)) {
+				return;
+			}
+			if (expanded.error) {
+				failClosedControl(
+					expanded.error.detail ||
+						'We could not submit your answer. Refresh the lesson to continue.',
+					{
+						action: actionForErrorResponse(expanded.$status, expanded.error.detail)
+					}
+				);
+				return;
+			}
+
 			const continuationAtAnswer = expanded.data.lecture_video_session.current_continuation;
 			appendAnswerToHistory(
 				questionAtAnswer,
@@ -1693,6 +1715,10 @@
 
 			// Clear subtitle
 			subtitleText = null;
+		} catch (error) {
+			failClosedControl(error instanceof Error ? error.message : String(error));
+		} finally {
+			answerSubmissionInFlight = false;
 		}
 	}
 
