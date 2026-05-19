@@ -33,7 +33,6 @@ from sqlalchemy import (
     literal,
     not_,
     or_,
-    true,
     union_all,
 )
 from sqlalchemy import Enum as SQLEnum
@@ -7788,18 +7787,12 @@ class Thread(Base):
         last_activity_after: datetime | None = None,
         last_activity_before: datetime | None = None,
     ) -> AsyncGenerator["Thread", None]:
-        condition = and_(
-            Thread.class_id == int(class_id), Thread.private.is_not(true())
-        )
-        if include_only_user_ids is not None:
-            if not include_only_user_ids:
-                return
+        condition = Thread.class_id == int(class_id)
+        if include_only_user_ids:
             condition = and_(
                 condition, Thread.users.any(User.id.in_(include_only_user_ids))
             )
-        if include_only_assistant_ids is not None:
-            if not include_only_assistant_ids:
-                return
+        if include_only_assistant_ids:
             condition = and_(
                 condition, Thread.assistant_id.in_(include_only_assistant_ids)
             )
@@ -7809,7 +7802,6 @@ class Thread(Base):
             condition = and_(condition, Thread.last_activity <= last_activity_before)
         stmt = (
             select(Thread)
-            .outerjoin(Thread.users)
             .options(
                 selectinload(Thread.users).options(
                     load_only(
