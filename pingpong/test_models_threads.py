@@ -301,11 +301,16 @@ async def test_list_messages_tool_calls_filters_and_orders(db):
 async def test_get_thread_by_class_id_preloads_export_user_fields(db):
     async with db.async_session() as session:
         class_ = models.Class(name="Export Thread Class")
+        share_link = models.AnonymousLink(
+            name="Research cohort",
+            share_token="019afc9f-7634-7621-8aca-50c93f6dd956",
+        )
         user = models.User(
             email="export-user@example.com",
             display_name="Export User",
             first_name="Export",
             last_name="User",
+            anonymous_link=share_link,
         )
         thread = models.Thread(
             thread_id="thread_export_user_fields",
@@ -331,12 +336,19 @@ async def test_get_thread_by_class_id_preloads_export_user_fields(db):
 
     assert "id" not in unloaded
     assert "created" not in unloaded
+    assert "anonymous_link_id" not in unloaded
+    assert "anonymous_link" not in unloaded
     assert "display_name" not in unloaded
     assert "first_name" not in unloaded
     assert "last_name" not in unloaded
     assert "email" not in unloaded
     assert loaded_user.display_name == "Export User"
     assert loaded_user.email == "export-user@example.com"
+    assert loaded_user.anonymous_link.name == "Research cohort"
+    assert (
+        loaded_user.anonymous_link.share_token
+        == "019afc9f-7634-7621-8aca-50c93f6dd956"
+    )
 
 
 @pytest.mark.asyncio

@@ -7795,13 +7795,19 @@ class Thread(Base):
             select(Thread)
             .outerjoin(Thread.users)
             .options(
-                selectinload(Thread.users).load_only(
-                    User.id,
-                    User.created,
-                    User.display_name,
-                    User.first_name,
-                    User.last_name,
-                    User.email,
+                selectinload(Thread.users).options(
+                    load_only(
+                        User.id,
+                        User.created,
+                        User.anonymous_link_id,
+                        User.display_name,
+                        User.first_name,
+                        User.last_name,
+                        User.email,
+                    ),
+                    selectinload(User.anonymous_link).load_only(
+                        AnonymousLink.name, AnonymousLink.share_token
+                    ),
                 ),
             )
             .order_by(Thread.updated.desc() if desc else Thread.updated.asc())
