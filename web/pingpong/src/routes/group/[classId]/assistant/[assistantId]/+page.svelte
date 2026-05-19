@@ -4124,7 +4124,7 @@
 									<div>
 										<div class="flex items-start justify-between gap-4">
 											<div>
-												<Label for="elevenlabs_speed">Voice Speed</Label>
+												<Label for="elevenlabs_speed">Voice speed</Label>
 												<Helper class="pb-1"
 													>Adjusts speech pace from 0.7x to 1.2x. The default 1.0 leaves the
 													selected voice at its normal speed.</Helper
@@ -4304,7 +4304,7 @@
 
 								<div class="col-span-2 mb-1 flex items-start justify-between gap-6">
 									<div>
-										<Label for="realtime_noise_reduction">Microphone Noise Reduction</Label>
+										<Label for="realtime_noise_reduction">Microphone noise reduction</Label>
 										<Helper class="pb-1"
 											>Noise reduction applied to audio input. Near field is for close-talking
 											microphones such as headphones. Far field is for far-field microphones such as
@@ -4328,7 +4328,8 @@
 									<div>
 										<Label for="realtime_transcription_model">Transcription Model</Label>
 										<Helper class="pb-1"
-											>Select the model used to transcribe user speech during voice conversations.</Helper
+											>Whisper 1 keeps the existing transcription behavior. GPT Realtime Whisper uses
+											OpenAI's newer realtime transcription model for stronger transcription quality.</Helper
 										>
 									</div>
 									<select
@@ -4346,7 +4347,7 @@
 
 								<div class="col-span-2 mb-1 flex items-start justify-between gap-6">
 									<div>
-										<Label for="realtime_vad_mode">Automatic Turn Detection</Label>
+										<Label for="realtime_vad_mode">Automatic turn detection</Label>
 										<Helper class="pb-1"
 											>Choose how voice mode decides the user has finished speaking. <br /><br
 											/>Normal means that the model will detect the start and end of speech based on
@@ -4378,7 +4379,7 @@
 										transition:slide={{ duration: 180 }}
 									>
 										<div>
-											<Label for="realtime_eagerness">Eagerness</Label>
+											<Label for="realtime_eagerness">Realtime eagerness</Label>
 											<Helper class="pb-1"
 												>Adjust how quickly or patiently the model waits to respond. Higher
 												eagerness means faster responses. Auto is equivalent to medium. Low waits up
