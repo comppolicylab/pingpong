@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { errorMessage } from '$lib/errors';
+	import { sadToast } from '$lib/toast';
 	import {
 		ChevronLeftOutline,
 		ChevronRightOutline,
@@ -62,7 +64,10 @@
 	} = $props();
 
 	let requestedActiveIndex: number = $state(0);
+	let submittingQuestionId: number | null = $state(null);
+	let submittingOptionId: number | null = $state(null);
 
+	const ANSWER_SUBMISSION_TIMEOUT_MS = 30_000;
 	const navigationButtonClass =
 		'mt-4 xl:mt-12 inline-flex shrink-0 items-center justify-center rounded-full p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-300 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400';
 	const dotBaseClass =
@@ -90,6 +95,10 @@
 	);
 	let atFirstQuestion = $derived(activeIndex === 0);
 	let atLastQuestion = $derived(activeIndex >= sortedQuestions.length - 1);
+	let answerSubmissionInFlight = $derived(submittingQuestionId !== null);
+	let activeSubmittingOptionId = $derived(
+		activeQuestion?.id === submittingQuestionId ? submittingOptionId : null
+	);
 
 	// Auto-navigate to active question when state changes
 	$effect(() => {
@@ -123,7 +132,50 @@
 	}
 
 	function moveActiveIndex(offset: number) {
+		if (answerSubmissionInFlight) return;
 		requestedActiveIndex = activeIndex + offset;
+	}
+
+	function goToQuestionIndex(index: number) {
+		if (answerSubmissionInFlight) return;
+		requestedActiveIndex = index;
+	}
+
+	async function selectOption(optionId: number) {
+		if (!activeQuestion || submittingQuestionId !== null) return;
+
+		const questionId = activeQuestion.id;
+		submittingQuestionId = questionId;
+		submittingOptionId = optionId;
+		try {
+			await withSubmissionTimeout(onselectOption(optionId));
+		} catch (error) {
+			sadToast(
+				`Failed to submit answer. Error: ${errorMessage(error, 'Please try again in a moment.')}`
+			);
+		} finally {
+			if (submittingQuestionId === questionId) {
+				submittingQuestionId = null;
+				submittingOptionId = null;
+			}
+		}
+	}
+
+	async function withSubmissionTimeout(submission: void | Promise<void>): Promise<void> {
+		let timeoutId: ReturnType<typeof setTimeout> | undefined;
+		try {
+			await Promise.race([
+				Promise.resolve(submission),
+				new Promise<never>((_, reject) => {
+					timeoutId = setTimeout(
+						() => reject(new Error('The answer submission timed out.')),
+						ANSWER_SUBMISSION_TIMEOUT_MS
+					);
+				})
+			]);
+		} finally {
+			if (timeoutId) clearTimeout(timeoutId);
+		}
 	}
 
 	function dotClass(questionId: number, index: number): string {
@@ -155,7 +207,7 @@
 		<div class="flex items-start gap-2 sm:gap-3 xl:min-h-0 xl:flex-1">
 			<button
 				type="button"
-				disabled={atFirstQuestion}
+				disabled={atFirstQuestion || answerSubmissionInFlight}
 				onclick={() => moveActiveIndex(-1)}
 				aria-label="Previous question"
 				class={navigationButtonClass}
@@ -189,7 +241,8 @@
 								correctOptionId={null}
 								postAnswerText={null}
 								{answeringDisabled}
-								{onselectOption}
+								submittingOptionId={activeSubmittingOptionId}
+								onselectOption={selectOption}
 								headerTrailing={dots}
 							/>
 						{:else if isCurrentFeedback && currentQuestion && currentContinuation}
@@ -211,7 +264,7 @@
 
 			<button
 				type="button"
-				disabled={atLastQuestion}
+				disabled={atLastQuestion || answerSubmissionInFlight}
 				onclick={() => moveActiveIndex(1)}
 				aria-label="Next question"
 				class={navigationButtonClass}
@@ -242,7 +295,8 @@
 			{#each sortedQuestions as question, index (question.id)}
 				<button
 					type="button"
-					onclick={() => (requestedActiveIndex = index)}
+					disabled={answerSubmissionInFlight}
+					onclick={() => goToQuestionIndex(index)}
 					class="{dotBaseClass} {dotClass(question.id, index)}"
 					aria-label="Go to question {question.position}"
 				></button>

@@ -1644,19 +1644,30 @@
 		const questionAtAnswer = currentQuestion;
 		autoContinueFailed = false;
 
-		const response = await api.postLectureVideoInteraction(fetch, classId, threadId, {
-			type: 'answer_submitted',
-			controller_session_id: controllerSessionId,
-			expected_state_version: stateVersion,
-			idempotency_key: crypto.randomUUID(),
-			question_id: currentQuestion.id,
-			option_id: optionId
-		});
-		const expanded = api.expandResponse(response);
-		if (failClosedOnConflict(expanded)) {
-			return;
-		}
-		if (!expanded.error) {
+		try {
+			const response = await api.postLectureVideoInteraction(fetch, classId, threadId, {
+				type: 'answer_submitted',
+				controller_session_id: controllerSessionId,
+				expected_state_version: stateVersion,
+				idempotency_key: crypto.randomUUID(),
+				question_id: currentQuestion.id,
+				option_id: optionId
+			});
+			const expanded = api.expandResponse(response);
+			if (failClosedOnConflict(expanded)) {
+				return;
+			}
+			if (expanded.error) {
+				failClosedControl(
+					expanded.error.detail ||
+						'We could not submit your answer. Refresh the lesson to continue.',
+					{
+						action: actionForErrorResponse(expanded.$status, expanded.error.detail)
+					}
+				);
+				return;
+			}
+
 			const continuationAtAnswer = expanded.data.lecture_video_session.current_continuation;
 			appendAnswerToHistory(
 				questionAtAnswer,
@@ -1693,6 +1704,8 @@
 
 			// Clear subtitle
 			subtitleText = null;
+		} catch (error) {
+			failClosedControl(error instanceof Error ? error.message : String(error));
 		}
 	}
 
