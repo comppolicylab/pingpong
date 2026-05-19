@@ -199,7 +199,7 @@ GUIDELINES FOR QUESTIONS:
   (b) Skip the question entirely and wait for the next genuine conceptual breakpoint.
   A question that any attentive student can answer without thinking is worse than no question at all."""
 
-_GEMINI_MODEL = "gemini-3.1-pro-preview"
+_GEMINI_MODEL = "gemini-3.5-flash"
 DEFAULT_VIDEO_DESCRIPTION_DURATION_MS = 30_000
 _MANIFEST_CHUNK_DURATION_MS = 5 * 60 * 1000
 _MANIFEST_CHUNK_MIN_TAIL_MS = 3 * 60 * 1000
