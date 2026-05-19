@@ -5237,6 +5237,14 @@ async def get_ci_messages(
     }
 
 
+def _validate_activity_range(after: datetime | None, before: datetime | None) -> None:
+    if after and before and after > before:
+        raise HTTPException(
+            status_code=400,
+            detail="Start date must be before end date",
+        )
+
+
 @v1.get(
     "/class/{class_id}/export",
     dependencies=[Depends(Authz("supervisor", "class:{class_id}"))],
@@ -5258,15 +5266,7 @@ async def export_class_threads(
             status_code=403,
             detail="Cannot export private classes",
         )
-    if (
-        last_activity_after
-        and last_activity_before
-        and last_activity_after > last_activity_before
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail="Start date must be before end date",
-        )
+    _validate_activity_range(last_activity_after, last_activity_before)
     tasks.add_task(
         safe_task,
         export_class_threads_anonymized,
@@ -5353,15 +5353,7 @@ async def export_class_threads_multiple_classes(
     request: StateRequest,
     tasks: BackgroundTasks,
 ):
-    if (
-        data.last_activity_after
-        and data.last_activity_before
-        and data.last_activity_after > data.last_activity_before
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail="Start date must be before end date",
-        )
+    _validate_activity_range(data.last_activity_after, data.last_activity_before)
     tasks.add_task(
         safe_task,
         export_threads_multiple_classes,

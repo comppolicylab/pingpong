@@ -1136,12 +1136,19 @@
 		exportThreadsEndDate !== '' &&
 		exportThreadsStartDate > exportThreadsEndDate;
 
+	$: exportThreadsFilterEmpty =
+		exportThreadsRange === 'filter' && !exportThreadsStartDate && !exportThreadsEndDate;
+
 	$: exportThreadsSummary =
 		exportThreadsRange === 'all'
 			? 'All threads'
-			: exportThreadsStartDate || exportThreadsEndDate
-				? `Active ${exportThreadsStartDate ? `from ${dayjs(exportThreadsStartDate).format('MMM D, YYYY')}` : 'anytime'} ${exportThreadsEndDate ? `to ${dayjs(exportThreadsEndDate).format('MMM D, YYYY')}` : 'onward'}`
-				: 'Filter by date range';
+			: exportThreadsStartDate && exportThreadsEndDate
+				? `Active ${dayjs(exportThreadsStartDate).format('MMM D, YYYY')} – ${dayjs(exportThreadsEndDate).format('MMM D, YYYY')}`
+				: exportThreadsStartDate
+					? `Active from ${dayjs(exportThreadsStartDate).format('MMM D, YYYY')}`
+					: exportThreadsEndDate
+						? `Active up to ${dayjs(exportThreadsEndDate).format('MMM D, YYYY')}`
+						: 'Filter by date range';
 
 	const exportThreads = async () => {
 		if (exportThreadsDateRangeInvalid) {
@@ -1163,6 +1170,9 @@
 			sadToast(response.error.detail || 'An unknown error occurred');
 		} else {
 			exportThreadsModal = false;
+			exportThreadsRange = 'all';
+			exportThreadsStartDate = '';
+			exportThreadsEndDate = '';
 			happyToast("We've started exporting your threads. You'll receive an email when it's ready.");
 		}
 	};
@@ -1434,6 +1444,10 @@
 											<Helper class="mt-2" color="red">
 												"Active from" must be before "Active until".
 											</Helper>
+										{:else if exportThreadsFilterEmpty}
+											<Helper class="mt-2" color="red">
+												Set at least one date, or pick "All threads" above.
+											</Helper>
 										{:else}
 											<Helper class="mt-2">
 												Leave either field blank to leave that end of the window open.
@@ -1453,7 +1467,8 @@
 							outline
 							color="blue"
 							onclick={exportThreads}
-							disabled={exportThreadsDateRangeInvalid}>Export threads</Button
+							disabled={exportThreadsDateRangeInvalid || exportThreadsFilterEmpty}
+							>Export threads</Button
 						>
 					</div>
 				</div>
