@@ -443,6 +443,56 @@ async def test_get_thread_by_class_id_filters_by_assistant_ids(db):
 
 
 @pytest.mark.asyncio
+async def test_get_thread_by_class_id_empty_user_filter_returns_no_threads(db):
+    async with db.async_session() as session:
+        class_ = models.Class(name="Export Thread Empty User Filter Class")
+        thread = models.Thread(
+            thread_id="thread_export_empty_user_filter",
+            class_=class_,
+        )
+        session.add(thread)
+        await session.commit()
+        class_id = class_.id
+
+    async with db.async_session() as session:
+        threads = [
+            t
+            async for t in models.Thread.get_thread_by_class_id(
+                session,
+                class_id=class_id,
+                include_only_user_ids=[],
+            )
+        ]
+
+    assert threads == []
+
+
+@pytest.mark.asyncio
+async def test_get_thread_by_class_id_empty_assistant_filter_returns_no_threads(db):
+    async with db.async_session() as session:
+        class_ = models.Class(name="Export Thread Empty Assistant Filter Class")
+        thread = models.Thread(
+            thread_id="thread_export_empty_assistant_filter",
+            class_=class_,
+        )
+        session.add(thread)
+        await session.commit()
+        class_id = class_.id
+
+    async with db.async_session() as session:
+        threads = [
+            t
+            async for t in models.Thread.get_thread_by_class_id(
+                session,
+                class_id=class_id,
+                include_only_assistant_ids=[],
+            )
+        ]
+
+    assert threads == []
+
+
+@pytest.mark.asyncio
 async def test_list_messages_tool_calls_excludes_hidden_messages_by_default(db):
     async with db.async_session() as session:
         thread = models.Thread(thread_id="thread_hidden_messages_default", version=3)
