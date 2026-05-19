@@ -203,6 +203,9 @@
 	let deleteModal = false;
 	let cloneModal = false;
 	let exportThreadsModal = false;
+	let exportThreadsRange: 'all' | 'filter' = 'all';
+	let exportThreadsStartDate = '';
+	let exportThreadsEndDate = '';
 	let customSummaryModal = false;
 	let defaultDaysToSummarize = 7;
 	let daysToSummarize = defaultDaysToSummarize;
@@ -1127,12 +1130,39 @@
 		}
 	};
 
+	$: exportThreadsDateRangeInvalid =
+		exportThreadsRange === 'filter' &&
+		exportThreadsStartDate !== '' &&
+		exportThreadsEndDate !== '' &&
+		exportThreadsStartDate > exportThreadsEndDate;
+
+	$: exportThreadsSummary =
+		exportThreadsRange === 'all'
+			? 'All threads'
+			: exportThreadsStartDate || exportThreadsEndDate
+				? `Active ${exportThreadsStartDate ? `from ${dayjs(exportThreadsStartDate).format('MMM D, YYYY')}` : 'anytime'} ${exportThreadsEndDate ? `to ${dayjs(exportThreadsEndDate).format('MMM D, YYYY')}` : 'onward'}`
+				: 'Filter by date range';
+
 	const exportThreads = async () => {
-		const result = await api.exportThreads(fetch, data.class.id);
+		if (exportThreadsDateRangeInvalid) {
+			sadToast('Start date must be before end date');
+			return;
+		}
+
+		const options: api.ExportThreadsOptions = {};
+		if (exportThreadsRange === 'filter' && exportThreadsStartDate) {
+			options.last_activity_after = dayjs(exportThreadsStartDate).startOf('day').toISOString();
+		}
+		if (exportThreadsRange === 'filter' && exportThreadsEndDate) {
+			options.last_activity_before = dayjs(exportThreadsEndDate).endOf('day').toISOString();
+		}
+
+		const result = await api.exportThreads(fetch, data.class.id, options);
 		const response = api.expandResponse(result);
 		if (response.error) {
 			sadToast(response.error.detail || 'An unknown error occurred');
 		} else {
+			exportThreadsModal = false;
 			happyToast("We've started exporting your threads. You'll receive an email when it's ready.");
 		}
 	};
@@ -1341,24 +1371,90 @@
 					<div>Delete group</div>
 				</DropdownItem>
 			</Dropdown>
-			<Modal bind:open={exportThreadsModal} size="xs" autoclose>
+			<Modal bind:open={exportThreadsModal} size="md">
 				<div class="px-2 text-center">
 					<EnvelopeOutline class="mx-auto mb-4 h-12 w-12 text-slate-500" />
-					<h3 class="mb-5 text-xl font-bold text-gray-900 dark:text-white">
-						Before we start exporting
-					</h3>
-					<p class="mb-5 text-sm text-gray-700 dark:text-gray-300">
-						Depending on the number of threads in your group, exporting may take a while. You'll
-						receive an email when your threads are ready to download.
+					<h3 class="mb-1 text-xl font-bold text-gray-900 dark:text-white">Export threads</h3>
+					<p class="mx-auto mb-5 w-5/6 text-sm text-gray-700 dark:text-gray-300">
+						Choose which threads to export. Exporting may take a while &mdash; you'll receive an
+						email when your threads are ready to download.
 						{#if presignedUrlExpiration}<span class="font-bold"
 								>The download link will be valid for {presignedUrlExpiration}.</span
 							>{/if}
 					</p>
+					<div class="mb-4 px-2">
+						<Accordion class="w-full text-left" flush>
+							<AccordionItem paddingFlush="py-2" open>
+								<span slot="header" class="mr-3 w-full">
+									<div class="flex w-full flex-row items-center justify-between space-x-2">
+										<div>Threads to include</div>
+										<div class="text-sm font-light">{exportThreadsSummary}</div>
+									</div>
+								</span>
+								<p class="mb-3 text-sm font-light text-gray-500">
+									Pick the set of threads to include in the export. Filtering includes all threads
+									that have had activity within the selected date range; all messages in matching
+									threads are exported.
+								</p>
+								<Radio name="exportThreadsRange" value="all" bind:group={exportThreadsRange}>
+									All threads
+								</Radio>
+								<Radio name="exportThreadsRange" value="filter" bind:group={exportThreadsRange}>
+									Filter by date range
+								</Radio>
+								{#if exportThreadsRange === 'filter'}
+									<div
+										class="mt-3 ml-7 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-gray-700 dark:bg-gray-800"
+									>
+										<div class="grid gap-3 sm:grid-cols-2">
+											<div>
+												<Label for="exportThreadsStartDate" class="mb-1 text-xs font-medium">
+													Active from
+												</Label>
+												<Input
+													id="exportThreadsStartDate"
+													type="date"
+													max={exportThreadsEndDate || undefined}
+													bind:value={exportThreadsStartDate}
+												/>
+											</div>
+											<div>
+												<Label for="exportThreadsEndDate" class="mb-1 text-xs font-medium">
+													Active until
+												</Label>
+												<Input
+													id="exportThreadsEndDate"
+													type="date"
+													min={exportThreadsStartDate || undefined}
+													bind:value={exportThreadsEndDate}
+												/>
+											</div>
+										</div>
+										{#if exportThreadsDateRangeInvalid}
+											<Helper class="mt-2" color="red">
+												"Active from" must be before "Active until".
+											</Helper>
+										{:else}
+											<Helper class="mt-2">
+												Leave either field blank to leave that end of the window open.
+											</Helper>
+										{/if}
+									</div>
+								{/if}
+							</AccordionItem>
+						</Accordion>
+					</div>
 					<div class="flex justify-center gap-4">
 						<Button pill color="alternative" onclick={() => (exportThreadsModal = false)}
 							>Cancel</Button
 						>
-						<Button pill outline color="blue" onclick={exportThreads}>Export threads</Button>
+						<Button
+							pill
+							outline
+							color="blue"
+							onclick={exportThreads}
+							disabled={exportThreadsDateRangeInvalid}>Export threads</Button
+						>
 					</div>
 				</div>
 			</Modal>

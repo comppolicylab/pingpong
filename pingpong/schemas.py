@@ -1854,6 +1854,8 @@ class MultipleClassThreadExportRequest(BaseModel):
     user_emails: list[str] | None = None
     user_ids: list[int] | None = None
     include_user_emails: bool = False
+    last_activity_after: datetime | None = None
+    last_activity_before: datetime | None = None
 
 
 class CreateUserInviteConfig(BaseModel):
