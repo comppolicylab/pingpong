@@ -27,6 +27,9 @@ realtime_transcription_model = sa.Enum(
 
 
 def upgrade() -> None:
+    # Resolves CodeQL's py/unused-global-variable
+    _ = revision, down_revision, branch_labels, depends_on
+
     realtime_transcription_model.create(op.get_bind(), checkfirst=True)
     op.add_column(
         "assistants",
