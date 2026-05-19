@@ -2314,6 +2314,7 @@ export type Assistant = {
 	realtime_voice: RealtimeVoice | null;
 	realtime_speed: number | null;
 	realtime_noise_reduction: RealtimeNoiseReduction | null;
+	realtime_transcription_model: RealtimeTranscriptionModel | null;
 	elevenlabs_stability: number | null;
 	elevenlabs_similarity_boost: number | null;
 	elevenlabs_use_speaker_boost: boolean | null;
@@ -2407,6 +2408,7 @@ export type Tool = {
 export type RealtimeEagerness = 'low' | 'medium' | 'high' | 'auto';
 export type RealtimeVadMode = 'semantic_vad' | 'server_vad';
 export type RealtimeNoiseReduction = 'near_field' | 'far_field' | 'none';
+export type RealtimeTranscriptionModel = 'whisper-1' | 'gpt-realtime-whisper';
 export type RealtimeVoice =
 	| 'alloy'
 	| 'ash'
@@ -2474,6 +2476,7 @@ export type CreateAssistantRequest = {
 	realtime_voice?: RealtimeVoice;
 	realtime_speed?: number | null;
 	realtime_noise_reduction?: RealtimeNoiseReduction;
+	realtime_transcription_model?: RealtimeTranscriptionModel;
 	elevenlabs_stability?: number | null;
 	elevenlabs_similarity_boost?: number | null;
 	elevenlabs_use_speaker_boost?: boolean | null;
@@ -2537,6 +2540,7 @@ export type UpdateAssistantRequest = {
 	realtime_voice?: RealtimeVoice | null;
 	realtime_speed?: number | null;
 	realtime_noise_reduction?: RealtimeNoiseReduction | null;
+	realtime_transcription_model?: RealtimeTranscriptionModel | null;
 	elevenlabs_stability?: number | null;
 	elevenlabs_similarity_boost?: number | null;
 	elevenlabs_use_speaker_boost?: boolean | null;

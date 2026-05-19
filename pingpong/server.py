@@ -10948,6 +10948,11 @@ async def update_assistant(
     if "realtime_noise_reduction" in req.model_fields_set:
         asst.realtime_noise_reduction = req.realtime_noise_reduction
 
+    if not uses_voice:
+        asst.realtime_transcription_model = None
+    elif "realtime_transcription_model" in req.model_fields_set:
+        asst.realtime_transcription_model = req.realtime_transcription_model
+
     if "elevenlabs_stability" in req.model_fields_set:
         asst.elevenlabs_stability = req.elevenlabs_stability
 

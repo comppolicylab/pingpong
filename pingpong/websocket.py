@@ -74,6 +74,11 @@ def build_realtime_session(
         assistant.realtime_noise_reduction,
         schemas.RealtimeNoiseReduction.FAR_FIELD,
     )
+    realtime_transcription_model = _coerce_realtime_enum(
+        schemas.RealtimeTranscriptionModel,
+        assistant.realtime_transcription_model,
+        schemas.RealtimeTranscriptionModel.WHISPER_1,
+    )
     turn_detection: dict[str, Any] = {
         "create_response": True,
         "type": realtime_vad_mode.value,
@@ -110,7 +115,7 @@ def build_realtime_session(
             "input": {
                 "noise_reduction": noise_reduction,
                 "transcription": {
-                    "model": "whisper-1",
+                    "model": realtime_transcription_model.value,
                     "language": "en",
                 },
                 "turn_detection": turn_detection,

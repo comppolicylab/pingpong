@@ -1415,6 +1415,13 @@
 	];
 	const realtimeVoicePreviewUrl = (voice: api.RealtimeVoice) =>
 		`https://cdn.openai.com/API/voice-previews/${voice}.flac`;
+	const realtimeTranscriptionModelOptions: {
+		value: api.RealtimeTranscriptionModel;
+		label: string;
+	}[] = [
+		{ value: 'whisper-1', label: 'Whisper 1' },
+		{ value: 'gpt-realtime-whisper', label: 'GPT Realtime Whisper' }
+	];
 	let realtimeVadModeValue: api.RealtimeVadMode = 'semantic_vad';
 	let realtimeEagernessValue: api.RealtimeEagerness = 'auto';
 	let realtimeVadThresholdValue = 0.5;
@@ -1424,6 +1431,7 @@
 	let realtimeVoiceValue: api.RealtimeVoice = 'marin';
 	let realtimeSpeedValue = 1.0;
 	let realtimeNoiseReductionValue: api.RealtimeNoiseReduction = 'far_field';
+	let realtimeTranscriptionModelValue: api.RealtimeTranscriptionModel = 'whisper-1';
 	let elevenlabsStabilityValue = DEFAULT_ELEVENLABS_STABILITY;
 	let elevenlabsSimilarityBoostValue = DEFAULT_ELEVENLABS_SIMILARITY_BOOST;
 	let elevenlabsUseSpeakerBoostValue = DEFAULT_ELEVENLABS_USE_SPEAKER_BOOST;
@@ -1463,6 +1471,7 @@
 		realtimeVoiceValue = assistant.realtime_voice ?? 'marin';
 		realtimeSpeedValue = assistant.realtime_speed ?? 1.0;
 		realtimeNoiseReductionValue = assistant.realtime_noise_reduction ?? 'far_field';
+		realtimeTranscriptionModelValue = assistant.realtime_transcription_model ?? 'whisper-1';
 		elevenlabsStabilityValue = assistant.elevenlabs_stability ?? DEFAULT_ELEVENLABS_STABILITY;
 		elevenlabsSimilarityBoostValue =
 			assistant.elevenlabs_similarity_boost ?? DEFAULT_ELEVENLABS_SIMILARITY_BOOST;
@@ -1905,6 +1914,12 @@
 						? newValue !== ((oldValue as api.RealtimeNoiseReduction | null) ?? 'far_field')
 						: false;
 				break;
+			case 'realtime_transcription_model':
+				dirty =
+					interactionMode === 'voice'
+						? newValue !== ((oldValue as api.RealtimeTranscriptionModel | null) ?? 'whisper-1')
+						: false;
+				break;
 			case 'elevenlabs_stability':
 				dirty = isLectureMode ? newValue !== (oldValue ?? DEFAULT_ELEVENLABS_STABILITY) : false;
 				break;
@@ -1994,6 +2009,7 @@
 					'realtime_voice',
 					'realtime_speed',
 					'realtime_noise_reduction',
+					'realtime_transcription_model',
 					'elevenlabs_stability',
 					'elevenlabs_similarity_boost',
 					'elevenlabs_use_speaker_boost',
@@ -2208,6 +2224,10 @@
 				interactionMode === 'voice'
 					? realtimeNoiseReductionValue
 					: (assistant?.realtime_noise_reduction ?? undefined),
+			realtime_transcription_model:
+				interactionMode === 'voice'
+					? realtimeTranscriptionModelValue
+					: (assistant?.realtime_transcription_model ?? undefined),
 			elevenlabs_stability: isLectureMode
 				? elevenlabsStabilityValue
 				: (assistant?.elevenlabs_stability ?? undefined),
@@ -4299,6 +4319,28 @@
 										disabled={preventEdits}
 									>
 										{#each realtimeNoiseReductionOptions as option (option.value)}
+											<option value={option.value}>{option.label}</option>
+										{/each}
+									</select>
+								</div>
+
+								<div class="col-span-2 mb-1 flex items-start justify-between gap-6">
+									<div>
+										<Label for="realtime_transcription_model">Transcription Model</Label>
+										<Helper class="pb-1"
+											>Whisper 1 keeps the existing transcription behavior. GPT Realtime Whisper
+											uses OpenAI's newer realtime transcription model for stronger transcription
+											quality.</Helper
+										>
+									</div>
+									<select
+										id="realtime_transcription_model"
+										name="realtime_transcription_model"
+										class="block w-56 shrink-0 rounded-lg border border-gray-300 bg-gray-50 p-2.5 text-sm text-gray-900 focus:border-blue-500 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+										bind:value={realtimeTranscriptionModelValue}
+										disabled={preventEdits}
+									>
+										{#each realtimeTranscriptionModelOptions as option (option.value)}
 											<option value={option.value}>{option.label}</option>
 										{/each}
 									</select>

@@ -448,6 +448,11 @@ class RealtimeNoiseReduction(StrEnum):
     NONE = "none"
 
 
+class RealtimeTranscriptionModel(StrEnum):
+    WHISPER_1 = "whisper-1"
+    GPT_REALTIME_WHISPER = "gpt-realtime-whisper"
+
+
 class RealtimeVoice(StrEnum):
     ALLOY = "alloy"
     ASH = "ash"
@@ -1074,6 +1079,7 @@ class Assistant(BaseModel):
     realtime_voice: RealtimeVoice | None = None
     realtime_speed: float | None = None
     realtime_noise_reduction: RealtimeNoiseReduction | None = None
+    realtime_transcription_model: RealtimeTranscriptionModel | None = None
     elevenlabs_stability: float | None = None
     elevenlabs_similarity_boost: float | None = None
     elevenlabs_use_speaker_boost: bool | None = None
@@ -1322,6 +1328,9 @@ class CreateAssistant(BaseModel):
     realtime_voice: RealtimeVoice = RealtimeVoice.MARIN
     realtime_speed: float = Field(1.0, ge=0.25, le=1.5)
     realtime_noise_reduction: RealtimeNoiseReduction = RealtimeNoiseReduction.FAR_FIELD
+    realtime_transcription_model: RealtimeTranscriptionModel = (
+        RealtimeTranscriptionModel.WHISPER_1
+    )
     elevenlabs_stability: float = Field(DEFAULT_ELEVENLABS_STABILITY, ge=0.0, le=1.0)
     elevenlabs_similarity_boost: float = Field(
         DEFAULT_ELEVENLABS_SIMILARITY_BOOST, ge=0.0, le=1.0
@@ -1434,6 +1443,7 @@ class UpdateAssistant(BaseModel):
     realtime_voice: RealtimeVoice | None = None
     realtime_speed: float | None = Field(None, ge=0.25, le=1.5)
     realtime_noise_reduction: RealtimeNoiseReduction | None = None
+    realtime_transcription_model: RealtimeTranscriptionModel | None = None
     elevenlabs_stability: float | None = Field(None, ge=0.0, le=1.0)
     elevenlabs_similarity_boost: float | None = Field(None, ge=0.0, le=1.0)
     elevenlabs_use_speaker_boost: bool | None = None
