@@ -61,6 +61,7 @@ def realtime_assistant(**overrides):
         "realtime_voice": None,
         "realtime_speed": None,
         "realtime_noise_reduction": None,
+        "realtime_transcription_model": None,
     }
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
@@ -76,6 +77,10 @@ def test_realtime_session_uses_create_defaults_for_null_fields():
     assert session["audio"]["output"] == {"voice": "marin", "speed": 1.0}
     assert "reasoning" not in session
     assert session["audio"]["input"]["noise_reduction"] == {"type": "far_field"}
+    assert session["audio"]["input"]["transcription"] == {
+        "model": "whisper-1",
+        "language": "en",
+    }
     assert session["audio"]["input"]["turn_detection"] == {
         "create_response": True,
         "type": "semantic_vad",
@@ -100,6 +105,20 @@ def test_realtime_session_uses_selected_reasoning_for_gpt_realtime_2():
     )
 
     assert session["reasoning"] == {"effort": "minimal"}
+
+
+def test_realtime_session_uses_selected_transcription_model():
+    session = websocket_module.build_realtime_session(
+        realtime_assistant(
+            realtime_transcription_model=schemas.RealtimeTranscriptionModel.GPT_REALTIME_WHISPER,
+        ),
+        "Speak clearly.",
+    )
+
+    assert session["audio"]["input"]["transcription"] == {
+        "model": "gpt-realtime-whisper",
+        "language": "en",
+    }
 
 
 def test_realtime_extra_headers_include_safety_identifier():

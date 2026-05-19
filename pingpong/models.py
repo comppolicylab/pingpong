@@ -3947,6 +3947,9 @@ class Assistant(Base):
     realtime_noise_reduction = Column(
         SQLEnum(schemas.RealtimeNoiseReduction), nullable=True
     )
+    realtime_transcription_model = Column(
+        SQLEnum(schemas.RealtimeTranscriptionModel), nullable=True
+    )
     elevenlabs_stability = Column(Float, nullable=True)
     elevenlabs_similarity_boost = Column(Float, nullable=True)
     elevenlabs_use_speaker_boost = Column(Boolean, nullable=True)
@@ -4210,6 +4213,7 @@ class Assistant(Base):
                 "realtime_voice",
                 "realtime_speed",
                 "realtime_noise_reduction",
+                "realtime_transcription_model",
             ):
                 params[field] = None
         if data.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:

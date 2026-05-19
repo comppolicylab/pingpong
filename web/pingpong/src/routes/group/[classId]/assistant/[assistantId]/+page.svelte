@@ -1415,6 +1415,13 @@
 	];
 	const realtimeVoicePreviewUrl = (voice: api.RealtimeVoice) =>
 		`https://cdn.openai.com/API/voice-previews/${voice}.flac`;
+	const realtimeTranscriptionModelOptions: {
+		value: api.RealtimeTranscriptionModel;
+		label: string;
+	}[] = [
+		{ value: 'whisper-1', label: 'Whisper 1' },
+		{ value: 'gpt-realtime-whisper', label: 'GPT Realtime Whisper' }
+	];
 	let realtimeVadModeValue: api.RealtimeVadMode = 'semantic_vad';
 	let realtimeEagernessValue: api.RealtimeEagerness = 'auto';
 	let realtimeVadThresholdValue = 0.5;
@@ -1424,6 +1431,7 @@
 	let realtimeVoiceValue: api.RealtimeVoice = 'marin';
 	let realtimeSpeedValue = 1.0;
 	let realtimeNoiseReductionValue: api.RealtimeNoiseReduction = 'far_field';
+	let realtimeTranscriptionModelValue: api.RealtimeTranscriptionModel = 'whisper-1';
 	let elevenlabsStabilityValue = DEFAULT_ELEVENLABS_STABILITY;
 	let elevenlabsSimilarityBoostValue = DEFAULT_ELEVENLABS_SIMILARITY_BOOST;
 	let elevenlabsUseSpeakerBoostValue = DEFAULT_ELEVENLABS_USE_SPEAKER_BOOST;
@@ -1463,6 +1471,7 @@
 		realtimeVoiceValue = assistant.realtime_voice ?? 'marin';
 		realtimeSpeedValue = assistant.realtime_speed ?? 1.0;
 		realtimeNoiseReductionValue = assistant.realtime_noise_reduction ?? 'far_field';
+		realtimeTranscriptionModelValue = assistant.realtime_transcription_model ?? 'whisper-1';
 		elevenlabsStabilityValue = assistant.elevenlabs_stability ?? DEFAULT_ELEVENLABS_STABILITY;
 		elevenlabsSimilarityBoostValue =
 			assistant.elevenlabs_similarity_boost ?? DEFAULT_ELEVENLABS_SIMILARITY_BOOST;
@@ -1905,6 +1914,12 @@
 						? newValue !== ((oldValue as api.RealtimeNoiseReduction | null) ?? 'far_field')
 						: false;
 				break;
+			case 'realtime_transcription_model':
+				dirty =
+					interactionMode === 'voice'
+						? newValue !== ((oldValue as api.RealtimeTranscriptionModel | null) ?? 'whisper-1')
+						: false;
+				break;
 			case 'elevenlabs_stability':
 				dirty = isLectureMode ? newValue !== (oldValue ?? DEFAULT_ELEVENLABS_STABILITY) : false;
 				break;
@@ -1994,6 +2009,7 @@
 					'realtime_voice',
 					'realtime_speed',
 					'realtime_noise_reduction',
+					'realtime_transcription_model',
 					'elevenlabs_stability',
 					'elevenlabs_similarity_boost',
 					'elevenlabs_use_speaker_boost',
@@ -2208,6 +2224,10 @@
 				interactionMode === 'voice'
 					? realtimeNoiseReductionValue
 					: (assistant?.realtime_noise_reduction ?? undefined),
+			realtime_transcription_model:
+				interactionMode === 'voice'
+					? realtimeTranscriptionModelValue
+					: (assistant?.realtime_transcription_model ?? undefined),
 			elevenlabs_stability: isLectureMode
 				? elevenlabsStabilityValue
 				: (assistant?.elevenlabs_stability ?? undefined),
@@ -4104,7 +4124,7 @@
 									<div>
 										<div class="flex items-start justify-between gap-4">
 											<div>
-												<Label for="elevenlabs_speed">Voice speed</Label>
+												<Label for="elevenlabs_speed">Voice Speed</Label>
 												<Helper class="pb-1"
 													>Adjusts speech pace from 0.7x to 1.2x. The default 1.0 leaves the
 													selected voice at its normal speed.</Helper
@@ -4284,7 +4304,7 @@
 
 								<div class="col-span-2 mb-1 flex items-start justify-between gap-6">
 									<div>
-										<Label for="realtime_noise_reduction">Microphone noise reduction</Label>
+										<Label for="realtime_noise_reduction">Microphone Noise Reduction</Label>
 										<Helper class="pb-1"
 											>Noise reduction applied to audio input. Near field is for close-talking
 											microphones such as headphones. Far field is for far-field microphones such as
@@ -4306,7 +4326,27 @@
 
 								<div class="col-span-2 mb-1 flex items-start justify-between gap-6">
 									<div>
-										<Label for="realtime_vad_mode">Automatic turn detection</Label>
+										<Label for="realtime_transcription_model">Transcription Model</Label>
+										<Helper class="pb-1"
+											>Select the model used to transcribe user speech during voice conversations.</Helper
+										>
+									</div>
+									<select
+										id="realtime_transcription_model"
+										name="realtime_transcription_model"
+										class="block w-56 shrink-0 rounded-lg border border-gray-300 bg-gray-50 p-2.5 text-sm text-gray-900 focus:border-blue-500 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+										bind:value={realtimeTranscriptionModelValue}
+										disabled={preventEdits}
+									>
+										{#each realtimeTranscriptionModelOptions as option (option.value)}
+											<option value={option.value}>{option.label}</option>
+										{/each}
+									</select>
+								</div>
+
+								<div class="col-span-2 mb-1 flex items-start justify-between gap-6">
+									<div>
+										<Label for="realtime_vad_mode">Automatic Turn Detection</Label>
 										<Helper class="pb-1"
 											>Choose how voice mode decides the user has finished speaking. <br /><br
 											/>Normal means that the model will detect the start and end of speech based on
@@ -4338,7 +4378,7 @@
 										transition:slide={{ duration: 180 }}
 									>
 										<div>
-											<Label for="realtime_eagerness">Realtime eagerness</Label>
+											<Label for="realtime_eagerness">Eagerness</Label>
 											<Helper class="pb-1"
 												>Adjust how quickly or patiently the model waits to respond. Higher
 												eagerness means faster responses. Auto is equivalent to medium. Low waits up
