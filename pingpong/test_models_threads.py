@@ -390,6 +390,50 @@ async def test_get_thread_by_class_id_filters_by_last_activity_range(db):
 
 
 @pytest.mark.asyncio
+async def test_get_thread_by_class_id_filters_by_assistant_ids(db):
+    async with db.async_session() as session:
+        class_ = models.Class(name="Export Thread Assistant Filter Class")
+        other_class = models.Class(name="Other Assistant Filter Class")
+        included_assistant = models.Assistant(name="Included", class_=class_)
+        excluded_assistant = models.Assistant(name="Excluded", class_=class_)
+        other_class_assistant = models.Assistant(name="Other Class", class_=other_class)
+        included = models.Thread(
+            thread_id="thread_export_included_assistant",
+            class_=class_,
+            assistant=included_assistant,
+        )
+        excluded = models.Thread(
+            thread_id="thread_export_excluded_assistant",
+            class_=class_,
+            assistant=excluded_assistant,
+        )
+        other_class_thread = models.Thread(
+            thread_id="thread_export_other_class_assistant",
+            class_=other_class,
+            assistant=other_class_assistant,
+        )
+        session.add_all([included, excluded, other_class_thread])
+        await session.commit()
+        class_id = class_.id
+        included_assistant_id = included_assistant.id
+
+    async with db.async_session() as session:
+        threads = [
+            t
+            async for t in models.Thread.get_thread_by_class_id(
+                session,
+                class_id=class_id,
+                desc=False,
+                include_only_assistant_ids=[included_assistant_id],
+            )
+        ]
+
+    assert [thread.thread_id for thread in threads] == [
+        "thread_export_included_assistant"
+    ]
+
+
+@pytest.mark.asyncio
 async def test_list_messages_tool_calls_excludes_hidden_messages_by_default(db):
     async with db.async_session() as session:
         thread = models.Thread(thread_id="thread_hidden_messages_default", version=3)

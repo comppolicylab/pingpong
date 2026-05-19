@@ -7783,15 +7783,22 @@ class Thread(Base):
         class_id: int,
         desc: bool = True,
         include_only_user_ids: list[int] | None = None,
+        include_only_assistant_ids: list[int] | None = None,
         last_activity_after: datetime | None = None,
         last_activity_before: datetime | None = None,
     ) -> AsyncGenerator["Thread", None]:
-        condition = Thread.class_id == int(class_id)
+        condition = and_(Thread.class_id == int(class_id), not_(Thread.private))
         if include_only_user_ids is not None:
             if not include_only_user_ids:
                 return
             condition = and_(
                 condition, Thread.users.any(User.id.in_(include_only_user_ids))
+            )
+        if include_only_assistant_ids is not None:
+            if not include_only_assistant_ids:
+                return
+            condition = and_(
+                condition, Thread.assistant_id.in_(include_only_assistant_ids)
             )
         if last_activity_after:
             condition = and_(condition, Thread.last_activity >= last_activity_after)

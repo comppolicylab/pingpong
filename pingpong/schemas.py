@@ -1858,6 +1858,12 @@ class MultipleClassThreadExportRequest(BaseModel):
     last_activity_before: datetime | None = None
 
 
+class ThreadExportRequest(BaseModel):
+    last_activity_after: datetime | None = None
+    last_activity_before: datetime | None = None
+    assistant_ids: list[int] | None = None
+
+
 class CreateUserInviteConfig(BaseModel):
     invites: list[CreateInvite] = []
     formatted_roles: dict[str, str] = {}
