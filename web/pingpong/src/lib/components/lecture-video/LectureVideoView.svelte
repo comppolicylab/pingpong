@@ -589,6 +589,15 @@
 		);
 	}
 
+	function pauseVideoForAnswerSubmission() {
+		clearPendingVideoRetry();
+		if (!videoElement || videoElement.paused) return;
+
+		suppressPauseInteraction = true;
+		videoElement.pause();
+		paused = true;
+	}
+
 	function queueVideoRetry() {
 		manualPlaybackTarget = 'video';
 	}
@@ -1687,6 +1696,7 @@
 		const questionAtAnswer = currentQuestion;
 		autoContinueFailed = false;
 		answerSubmissionInFlight = true;
+		pauseVideoForAnswerSubmission();
 
 		try {
 			const response = await api.postLectureVideoInteraction(fetch, classId, threadId, {
