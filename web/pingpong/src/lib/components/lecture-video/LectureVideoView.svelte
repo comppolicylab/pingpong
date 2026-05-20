@@ -107,6 +107,7 @@
 	let subtitleText: string | null = $state(null);
 	let playerDisabled: boolean = $state(false);
 	let questionPlaybackLocked: boolean = $state(false);
+	let questionPresentationVersion: number = $state(0);
 	let furthestOffsetMs: number = $state(0);
 	let initialStartOffsetMs: number = $state(0);
 	let videoReadyForPlayback: boolean = $state(false);
@@ -587,6 +588,15 @@
 			},
 			pausePostAnswerNarrationForChatSubmit
 		);
+	}
+
+	function pauseVideoForAnswerSubmission() {
+		clearPendingVideoRetry();
+		if (!videoElement || videoElement.paused) return;
+
+		suppressPauseInteraction = true;
+		paused = true;
+		videoElement.pause();
 	}
 
 	function queueVideoRetry() {
@@ -1356,6 +1366,9 @@
 	function handleTimeUpdate() {
 		if (questionReviewPlaybackAllowed && currentQuestion) {
 			if (currentTimeMs >= currentQuestion.stop_offset_ms) {
+				if (!videoElement?.paused) {
+					questionPresentationVersion += 1;
+				}
 				suppressPauseInteraction = true;
 				setVideoPosition(currentQuestion.stop_offset_ms);
 				videoElement?.pause();
@@ -1380,6 +1393,7 @@
 
 			// Auto-pause at question timestamp (suppress the pause interaction)
 			questionPlaybackLocked = true;
+			questionPresentationVersion += 1;
 			suppressPauseInteraction = true;
 			setVideoPosition(currentQuestion.stop_offset_ms);
 			videoElement?.pause();
@@ -1413,6 +1427,7 @@
 		if (!videoElement) return;
 		if (questionReviewPlaybackAllowed) {
 			if (currentQuestion && currentTimeMs >= currentQuestion.stop_offset_ms) {
+				questionPresentationVersion += 1;
 				suppressPauseInteraction = true;
 				videoElement.pause();
 			}
@@ -1687,6 +1702,7 @@
 		const questionAtAnswer = currentQuestion;
 		autoContinueFailed = false;
 		answerSubmissionInFlight = true;
+		pauseVideoForAnswerSubmission();
 
 		try {
 			const response = await api.postLectureVideoInteraction(fetch, classId, threadId, {
@@ -1957,6 +1973,7 @@
 							{subtitleText}
 							disabled={playerInteractionDisabled}
 							{activeQuestionIds}
+							{questionPresentationVersion}
 							{furthestOffsetMs}
 							allowFullSeek={isCompleted && canParticipate}
 							maxSeekOffsetMs={questionReviewSeekLimitMs}

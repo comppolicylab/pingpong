@@ -27,6 +27,7 @@
 
 	const PREVIEW_WIDTH = 224;
 	const PREVIEW_VIDEO_IDLE_DEACTIVATE_MS = 3000;
+	const QUESTION_PRESENTATION_CONTROLS_HIDE_MS = 2000;
 	const PREVIEW_VIDEO_SEEK_TOLERANCE_S = 0.15;
 	const PREVIEW_FRAME_REDRAW_EPSILON_S = 0.001;
 	const VOLUME_SLIDER_PADDING_PX = 5;
@@ -88,6 +89,7 @@
 		allowFullSeek = false,
 		maxSeekOffsetMs = null,
 		activeQuestionIds = null,
+		questionPresentationVersion = 0,
 		furthestOffsetMs = null,
 		videoElement = $bindable(null),
 		previewVideoElement = $bindable(null),
@@ -115,6 +117,7 @@
 		allowFullSeek?: boolean;
 		maxSeekOffsetMs?: number | null;
 		activeQuestionIds?: number[] | null;
+		questionPresentationVersion?: number;
 		furthestOffsetMs?: number | null;
 		videoElement?: HTMLVideoElement | null;
 		previewVideoElement?: HTMLVideoElement | null;
@@ -171,11 +174,14 @@
 	let keyboardActionOverlayUnmountTimeout: ReturnType<typeof setTimeout> | null = $state(null);
 	let mediaSessionRefreshTimeout: ReturnType<typeof setTimeout> | null = $state(null);
 	let previewVideoDeactivateTimeout: ReturnType<typeof setTimeout> | null = $state(null);
+	let questionPresentationHideTimeout: ReturnType<typeof setTimeout> | null = $state(null);
 	let snapshotCanvasElement: HTMLCanvasElement | null = $state(null);
 	let playerContainerElement: HTMLDivElement | null = $state(null);
 	let activeClusterKey: string | null = $state(null);
 	let clusterCollapseTimeout: ReturnType<typeof setTimeout> | null = $state(null);
 	let playbackCompleted = $state(false);
+	// Non-reactive: tracks the last shown question without retriggering the effect.
+	let lastQuestionPresentationKey: string | null = null;
 
 	let effectiveOffsetMs = $derived(
 		draggingSeek ? (dragPreviewOffsetMs ?? currentTimeMs) : currentTimeMs
@@ -197,10 +203,13 @@
 		endedPlayback = computedEndedPlayback;
 	});
 	let questionPendingControls = $derived(Boolean(activeQuestionIds?.length));
+	let questionPresentationKey = $derived(
+		activeQuestionIds?.[0] == null ? null : `${activeQuestionIds[0]}:${questionPresentationVersion}`
+	);
 	let visibleControls = $derived(
 		!manualPlaybackPrompt &&
-			(questionPendingControls ||
-				(!disabled && (endedPlayback || !startedPlaybackOnce || showControls)))
+			(!disabled || questionPendingControls) &&
+			(endedPlayback || (!startedPlaybackOnce && !questionPendingControls) || showControls)
 	);
 	let visibleMarkers = $derived(
 		condensedMarkerMode && condensedMarkerIds.length > 0
@@ -402,11 +411,22 @@
 
 	$effect(() => {
 		if (questionPendingControls) {
+			if (questionPresentationKey !== lastQuestionPresentationKey) {
+				lastQuestionPresentationKey = questionPresentationKey;
+				showControls = true;
+			}
+			if (disabled) {
+				clearQuestionPresentationHideTimeout();
+			} else if (showControls && !questionPresentationHideTimeout) {
+				scheduleQuestionPresentationHide();
+			}
 			showVolumeSlider = false;
 			condensedMarkerMode = true;
 			condensedMarkerIds = [...activeQuestionIds!];
 			return;
 		}
+		lastQuestionPresentationKey = null;
+		clearQuestionPresentationHideTimeout();
 		if (!visibleControls) {
 			condensedMarkerMode = false;
 			condensedMarkerIds = [];
@@ -427,6 +447,12 @@
 	});
 
 	$effect(() => () => clearClusterCollapseTimeout());
+	$effect(() => () => {
+		if (hideTimeout) {
+			clearTimeout(hideTimeout);
+		}
+		clearQuestionPresentationHideTimeout();
+	});
 
 	$effect(() => {
 		if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) {
@@ -536,8 +562,10 @@
 		if (videoElement) {
 			paused = videoElement.paused;
 		}
-		showControls = true;
-		scheduleHide();
+		if (!questionPendingControls || questionPresentationKey !== lastQuestionPresentationKey) {
+			showControls = true;
+			scheduleHide();
+		}
 		syncMediaSessionState();
 		onpause?.();
 	}
@@ -967,6 +995,11 @@
 	}
 
 	function scheduleHide(delayMs: number = 3000) {
+		if (questionPendingControls) {
+			// Question presentations use a fixed short window instead of caller-specific delays.
+			scheduleQuestionPresentationHide();
+			return;
+		}
 		if (hideTimeout) {
 			clearTimeout(hideTimeout);
 		}
@@ -983,6 +1016,29 @@
 			}
 			showControls = false;
 		}, delayMs);
+	}
+
+	function clearQuestionPresentationHideTimeout() {
+		if (!questionPresentationHideTimeout) return;
+		clearTimeout(questionPresentationHideTimeout);
+		questionPresentationHideTimeout = null;
+	}
+
+	function scheduleQuestionPresentationHide() {
+		if (hideTimeout) {
+			clearTimeout(hideTimeout);
+			hideTimeout = null;
+		}
+		clearQuestionPresentationHideTimeout();
+		questionPresentationHideTimeout = setTimeout(() => {
+			questionPresentationHideTimeout = null;
+			if (!questionPendingControls) return;
+			if (disabled || pointerInsidePlayer || draggingSeek || draggingVolume || seekPreviewVisible) {
+				scheduleQuestionPresentationHide();
+				return;
+			}
+			showControls = false;
+		}, QUESTION_PRESENTATION_CONTROLS_HIDE_MS);
 	}
 
 	function handleMouseMove() {
@@ -1005,6 +1061,12 @@
 		}
 		hoveringLockedSeek = false;
 		hideSeekPreview();
+		if (questionPendingControls) {
+			if (!disabled && showControls && !questionPresentationHideTimeout) {
+				scheduleQuestionPresentationHide();
+			}
+			return;
+		}
 		showControls = false;
 	}
 
@@ -1160,7 +1222,7 @@
 		</div>
 	{/if}
 
-	{#if visibleControls && subtitleText == null}
+	{#if !disabled && visibleControls && subtitleText == null}
 		<div
 			class="pointer-events-none absolute inset-x-0 top-4 z-[11] hidden justify-center px-4 sm:flex"
 		>
