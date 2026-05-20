@@ -246,6 +246,16 @@
 	let hasQuestionPrompt = $derived(hasVisibleQuestionPrompt(sessionState));
 	let isCompleted = $derived(isCompletedSession(sessionState));
 	let visibleCurrentQuestion = $derived(hasQuestionPrompt ? currentQuestion : null);
+	let questionReviewPlaybackAllowed = $derived(
+		hasQuestionPrompt && questionPlaybackLocked && currentQuestion != null && !playerDisabled
+	);
+	let questionReviewSeekLimitMs = $derived.by(() => {
+		const question: LectureVideoQuestionPrompt | null = currentQuestion;
+		return questionReviewPlaybackAllowed && question ? question.stop_offset_ms : null;
+	});
+	let playerInteractionDisabled = $derived(
+		!canParticipate || (playbackLocked && !questionReviewPlaybackAllowed)
+	);
 	let hasMobileChecksPanel = $derived(true);
 	let hasMobileChatPanel = $derived(chatAvailable);
 	let activeQuestionIds = $derived(
@@ -558,10 +568,25 @@
 	}
 
 	function pausePostAnswerNarrationForChatSubmit() {
+		playerDisabled = false;
 		postAnswerNarrationPending = false;
 		if (!hasVisiblePostAnswerFeedback(currentContinuation)) {
 			autoContinueFailed = true;
 		}
+	}
+
+	function beginPostAnswerNarration(narrationId: number) {
+		playerDisabled = true;
+		postAnswerNarrationPending = true;
+		void playNarration(
+			narrationId,
+			() => {
+				playerDisabled = false;
+				postAnswerNarrationPending = false;
+				maybeAutoContinueAfterPostAnswer();
+			},
+			pausePostAnswerNarrationForChatSubmit
+		);
 	}
 
 	function queueVideoRetry() {
@@ -1052,15 +1077,7 @@
 			sessionState === 'awaiting_post_answer_resume' &&
 			currentContinuation?.post_answer_narration_id
 		) {
-			postAnswerNarrationPending = true;
-			void playNarration(
-				currentContinuation.post_answer_narration_id,
-				() => {
-					postAnswerNarrationPending = false;
-					maybeAutoContinueAfterPostAnswer();
-				},
-				pausePostAnswerNarrationForChatSubmit
-			);
+			beginPostAnswerNarration(currentContinuation.post_answer_narration_id);
 		} else if (
 			sessionState === 'awaiting_post_answer_resume' &&
 			!hasVisiblePostAnswerFeedback(currentContinuation)
@@ -1337,6 +1354,15 @@
 	}
 
 	function handleTimeUpdate() {
+		if (questionReviewPlaybackAllowed && currentQuestion) {
+			if (currentTimeMs >= currentQuestion.stop_offset_ms) {
+				suppressPauseInteraction = true;
+				setVideoPosition(currentQuestion.stop_offset_ms);
+				videoElement?.pause();
+			}
+			return;
+		}
+
 		if (sessionState !== 'playing' || !currentQuestion || playerDisabled) return;
 		if (answeredQuestions.has(currentQuestion.id)) return;
 
@@ -1385,6 +1411,13 @@
 		clearPendingVideoRetry();
 		dispatch('playbackresumed');
 		if (!videoElement) return;
+		if (questionReviewPlaybackAllowed) {
+			if (currentQuestion && currentTimeMs >= currentQuestion.stop_offset_ms) {
+				suppressPauseInteraction = true;
+				videoElement.pause();
+			}
+			return;
+		}
 		if (playbackLocked) {
 			suppressPauseInteraction = true;
 			videoElement.pause();
@@ -1700,15 +1733,7 @@
 
 			// Play post-answer narration if available
 			if (continuationAtAnswer?.post_answer_narration_id) {
-				postAnswerNarrationPending = true;
-				void playNarration(
-					continuationAtAnswer.post_answer_narration_id,
-					() => {
-						postAnswerNarrationPending = false;
-						maybeAutoContinueAfterPostAnswer();
-					},
-					pausePostAnswerNarrationForChatSubmit
-				);
+				beginPostAnswerNarration(continuationAtAnswer.post_answer_narration_id);
 			} else if (!hasVisiblePostAnswerFeedback(currentContinuation)) {
 				maybeAutoContinueAfterPostAnswer();
 			}
@@ -1930,10 +1955,11 @@
 							startOffsetMs={initialStartOffsetMs}
 							{questionMarkers}
 							{subtitleText}
-							disabled={!canParticipate || playbackLocked}
+							disabled={playerInteractionDisabled}
 							{activeQuestionIds}
 							{furthestOffsetMs}
 							allowFullSeek={isCompleted && canParticipate}
+							maxSeekOffsetMs={questionReviewSeekLimitMs}
 							manualPlaybackPrompt={playbackRequiresManualStart}
 							bind:videoElement
 							bind:currentTimeMs
