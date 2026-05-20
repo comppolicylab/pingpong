@@ -89,6 +89,7 @@
 		allowFullSeek = false,
 		maxSeekOffsetMs = null,
 		activeQuestionIds = null,
+		questionPresentationVersion = 0,
 		furthestOffsetMs = null,
 		videoElement = $bindable(null),
 		previewVideoElement = $bindable(null),
@@ -116,6 +117,7 @@
 		allowFullSeek?: boolean;
 		maxSeekOffsetMs?: number | null;
 		activeQuestionIds?: number[] | null;
+		questionPresentationVersion?: number;
 		furthestOffsetMs?: number | null;
 		videoElement?: HTMLVideoElement | null;
 		previewVideoElement?: HTMLVideoElement | null;
@@ -178,6 +180,7 @@
 	let activeClusterKey: string | null = $state(null);
 	let clusterCollapseTimeout: ReturnType<typeof setTimeout> | null = $state(null);
 	let playbackCompleted = $state(false);
+	// Non-reactive: tracks the last shown question without retriggering the effect.
 	let lastQuestionPresentationKey: string | null = null;
 
 	let effectiveOffsetMs = $derived(
@@ -200,10 +203,12 @@
 		endedPlayback = computedEndedPlayback;
 	});
 	let questionPendingControls = $derived(Boolean(activeQuestionIds?.length));
-	let questionPresentationKey = $derived(activeQuestionIds?.join(':') ?? null);
+	let questionPresentationKey = $derived(
+		activeQuestionIds?.[0] == null ? null : `${activeQuestionIds[0]}:${questionPresentationVersion}`
+	);
 	let visibleControls = $derived(
 		!manualPlaybackPrompt &&
-			!disabled &&
+			(!disabled || questionPendingControls) &&
 			(endedPlayback || (!startedPlaybackOnce && !questionPendingControls) || showControls)
 	);
 	let visibleMarkers = $derived(
@@ -409,6 +414,10 @@
 			if (questionPresentationKey !== lastQuestionPresentationKey) {
 				lastQuestionPresentationKey = questionPresentationKey;
 				showControls = true;
+			}
+			if (disabled) {
+				clearQuestionPresentationHideTimeout();
+			} else if (showControls && !questionPresentationHideTimeout) {
 				scheduleQuestionPresentationHide();
 			}
 			showVolumeSlider = false;
@@ -438,6 +447,12 @@
 	});
 
 	$effect(() => () => clearClusterCollapseTimeout());
+	$effect(() => () => {
+		if (hideTimeout) {
+			clearTimeout(hideTimeout);
+		}
+		clearQuestionPresentationHideTimeout();
+	});
 
 	$effect(() => {
 		if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) {
@@ -547,8 +562,10 @@
 		if (videoElement) {
 			paused = videoElement.paused;
 		}
-		showControls = true;
-		scheduleHide();
+		if (!questionPendingControls || questionPresentationKey !== lastQuestionPresentationKey) {
+			showControls = true;
+			scheduleHide();
+		}
 		syncMediaSessionState();
 		onpause?.();
 	}
@@ -979,6 +996,7 @@
 
 	function scheduleHide(delayMs: number = 3000) {
 		if (questionPendingControls) {
+			// Question presentations use a fixed short window instead of caller-specific delays.
 			scheduleQuestionPresentationHide();
 			return;
 		}
@@ -1015,7 +1033,7 @@
 		questionPresentationHideTimeout = setTimeout(() => {
 			questionPresentationHideTimeout = null;
 			if (!questionPendingControls) return;
-			if (draggingSeek || draggingVolume || seekPreviewVisible) {
+			if (disabled || pointerInsidePlayer || draggingSeek || draggingVolume || seekPreviewVisible) {
 				scheduleQuestionPresentationHide();
 				return;
 			}
@@ -1198,7 +1216,7 @@
 		</div>
 	{/if}
 
-	{#if visibleControls && subtitleText == null}
+	{#if !disabled && visibleControls && subtitleText == null}
 		<div
 			class="pointer-events-none absolute inset-x-0 top-4 z-[11] hidden justify-center px-4 sm:flex"
 		>

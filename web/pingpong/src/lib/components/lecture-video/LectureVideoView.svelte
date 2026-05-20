@@ -107,6 +107,7 @@
 	let subtitleText: string | null = $state(null);
 	let playerDisabled: boolean = $state(false);
 	let questionPlaybackLocked: boolean = $state(false);
+	let questionPresentationVersion: number = $state(0);
 	let furthestOffsetMs: number = $state(0);
 	let initialStartOffsetMs: number = $state(0);
 	let videoReadyForPlayback: boolean = $state(false);
@@ -594,8 +595,8 @@
 		if (!videoElement || videoElement.paused) return;
 
 		suppressPauseInteraction = true;
-		videoElement.pause();
 		paused = true;
+		videoElement.pause();
 	}
 
 	function queueVideoRetry() {
@@ -1365,6 +1366,9 @@
 	function handleTimeUpdate() {
 		if (questionReviewPlaybackAllowed && currentQuestion) {
 			if (currentTimeMs >= currentQuestion.stop_offset_ms) {
+				if (!videoElement?.paused) {
+					questionPresentationVersion += 1;
+				}
 				suppressPauseInteraction = true;
 				setVideoPosition(currentQuestion.stop_offset_ms);
 				videoElement?.pause();
@@ -1389,6 +1393,7 @@
 
 			// Auto-pause at question timestamp (suppress the pause interaction)
 			questionPlaybackLocked = true;
+			questionPresentationVersion += 1;
 			suppressPauseInteraction = true;
 			setVideoPosition(currentQuestion.stop_offset_ms);
 			videoElement?.pause();
@@ -1422,6 +1427,7 @@
 		if (!videoElement) return;
 		if (questionReviewPlaybackAllowed) {
 			if (currentQuestion && currentTimeMs >= currentQuestion.stop_offset_ms) {
+				questionPresentationVersion += 1;
 				suppressPauseInteraction = true;
 				videoElement.pause();
 			}
@@ -1967,6 +1973,7 @@
 							{subtitleText}
 							disabled={playerInteractionDisabled}
 							{activeQuestionIds}
+							{questionPresentationVersion}
 							{furthestOffsetMs}
 							allowFullSeek={isCompleted && canParticipate}
 							maxSeekOffsetMs={questionReviewSeekLimitMs}
