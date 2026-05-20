@@ -1061,6 +1061,12 @@
 		}
 		hoveringLockedSeek = false;
 		hideSeekPreview();
+		if (questionPendingControls) {
+			if (!disabled && showControls && !questionPresentationHideTimeout) {
+				scheduleQuestionPresentationHide();
+			}
+			return;
+		}
 		showControls = false;
 	}
 
