@@ -2048,6 +2048,27 @@ export const lectureVideoNarrationUrl = (
 };
 
 /**
+ * Build the URL for a lecture video WebVTT captions file.
+ */
+export const getLectureVideoCaptionsUrl = (classId: number, threadId: number): string => {
+	const base = fullPath(`class/${classId}/thread/${threadId}/lecture-video/captions.vtt`);
+	const queryParts: string[] = [];
+	const anonymousSessionToken = getAnonymousSessionToken();
+	const anonymousShareToken = getAnonymousShareToken();
+	if (anonymousSessionToken) {
+		queryParts.push(`anonymous_session_token=${encodeURIComponent(anonymousSessionToken)}`);
+	}
+	if (anonymousShareToken) {
+		queryParts.push(`anonymous_share_token=${encodeURIComponent(anonymousShareToken)}`);
+	}
+	const ltiSessionToken = getLTISessionToken();
+	if (ltiSessionToken) {
+		queryParts.push(`lti_session=${encodeURIComponent(ltiSessionToken)}`);
+	}
+	return queryParts.length > 0 ? `${base}?${queryParts.join('&')}` : base;
+};
+
+/**
  * Create a purpose-scoped credential for a class.
  */
 export const createClassCredential = async (
@@ -3562,6 +3583,7 @@ export type ThreadWithMeta = {
 	lecture_video_matches_assistant?: boolean | null;
 	lecture_video_session?: LectureVideoSession | null;
 	lecture_video_tts_available?: boolean;
+	lecture_video_captions_available?: boolean;
 	recording: VoiceModeRecordingInfo | null;
 	has_more: boolean;
 };

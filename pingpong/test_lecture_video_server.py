@@ -296,6 +296,274 @@ def lecture_video_manifest_v4(**kwargs) -> dict:
     return manifest
 
 
+def test_lecture_video_words_to_webvtt_groups_and_escapes_text():
+    words = [
+        schemas.LectureVideoManifestWordV3(
+            id="w1",
+            word="Hello",
+            start_offset_ms=0,
+            end_offset_ms=400,
+        ),
+        schemas.LectureVideoManifestWordV3(
+            id="w2",
+            word="world",
+            start_offset_ms=400,
+            end_offset_ms=900,
+        ),
+        schemas.LectureVideoManifestWordV3(
+            id="w3",
+            word="!",
+            start_offset_ms=900,
+            end_offset_ms=1000,
+        ),
+        schemas.LectureVideoManifestWordV3(
+            id="w4",
+            word="<next>",
+            start_offset_ms=2400,
+            end_offset_ms=3000,
+        ),
+    ]
+
+    assert lecture_video_service.lecture_video_words_to_webvtt(words) == (
+        "WEBVTT\n\n"
+        "00:00:00.000 --> 00:00:01.000\n"
+        "Hello world!\n\n"
+        "00:00:02.400 --> 00:00:03.000\n"
+        "&lt;next&gt;\n"
+    )
+
+
+def test_lecture_video_words_to_webvtt_splits_cues_at_question_stop_offsets():
+    words = [
+        schemas.LectureVideoManifestWordV3(
+            id="w1",
+            word="Question",
+            start_offset_ms=0,
+            end_offset_ms=400,
+        ),
+        schemas.LectureVideoManifestWordV3(
+            id="w2",
+            word="future",
+            start_offset_ms=500,
+            end_offset_ms=800,
+        ),
+        schemas.LectureVideoManifestWordV3(
+            id="w3",
+            word="answer",
+            start_offset_ms=800,
+            end_offset_ms=1100,
+        ),
+    ]
+
+    assert lecture_video_service.lecture_video_words_to_webvtt(
+        words,
+        question_stop_offsets_ms=[450],
+    ) == (
+        "WEBVTT\n\n"
+        "00:00:00.000 --> 00:00:00.400\n"
+        "Question\n\n"
+        "00:00:00.500 --> 00:00:01.100\n"
+        "future answer\n"
+    )
+
+
+def test_lecture_video_words_to_webvtt_keeps_zero_duration_words_in_valid_cues():
+    words = [
+        schemas.LectureVideoManifestWordV3(
+            id="w1",
+            word="of",
+            start_offset_ms=12600,
+            end_offset_ms=13080,
+        ),
+        schemas.LectureVideoManifestWordV3(
+            id="w2",
+            word="course",
+            start_offset_ms=13080,
+            end_offset_ms=13080,
+        ),
+        schemas.LectureVideoManifestWordV3(
+            id="w3",
+            word="it",
+            start_offset_ms=13080,
+            end_offset_ms=13400,
+        ),
+        schemas.LectureVideoManifestWordV3(
+            id="w4",
+            word="simplifies.",
+            start_offset_ms=13400,
+            end_offset_ms=14020,
+        ),
+    ]
+
+    assert lecture_video_service.lecture_video_words_to_webvtt(words) == (
+        "WEBVTT\n\n00:00:12.600 --> 00:00:14.020\nof course it simplifies.\n"
+    )
+
+
+def test_lecture_video_words_to_webvtt_keeps_zero_duration_words_at_split_boundaries():
+    words = [
+        schemas.LectureVideoManifestWordV3(
+            id="w1",
+            word="into",
+            start_offset_ms=40100,
+            end_offset_ms=40320,
+        ),
+        schemas.LectureVideoManifestWordV3(
+            id="w2",
+            word="the",
+            start_offset_ms=40320,
+            end_offset_ms=40580,
+        ),
+        schemas.LectureVideoManifestWordV3(
+            id="w3",
+            word="theme",
+            start_offset_ms=40580,
+            end_offset_ms=40840,
+        ),
+        schemas.LectureVideoManifestWordV3(
+            id="w4",
+            word="park",
+            start_offset_ms=40840,
+            end_offset_ms=41220,
+        ),
+        schemas.LectureVideoManifestWordV3(
+            id="w5",
+            word="cost",
+            start_offset_ms=41220,
+            end_offset_ms=41740,
+        ),
+        schemas.LectureVideoManifestWordV3(
+            id="w6",
+            word="a",
+            start_offset_ms=41740,
+            end_offset_ms=41940,
+        ),
+        schemas.LectureVideoManifestWordV3(
+            id="w7",
+            word="certain",
+            start_offset_ms=41940,
+            end_offset_ms=42220,
+        ),
+        schemas.LectureVideoManifestWordV3(
+            id="w8",
+            word="price",
+            start_offset_ms=42220,
+            end_offset_ms=42500,
+        ),
+        schemas.LectureVideoManifestWordV3(
+            id="w9",
+            word="for",
+            start_offset_ms=42500,
+            end_offset_ms=42980,
+        ),
+        schemas.LectureVideoManifestWordV3(
+            id="w10",
+            word="adults",
+            start_offset_ms=42980,
+            end_offset_ms=42980,
+        ),
+        schemas.LectureVideoManifestWordV3(
+            id="w11",
+            word="and",
+            start_offset_ms=42980,
+            end_offset_ms=43220,
+        ),
+        schemas.LectureVideoManifestWordV3(
+            id="w12",
+            word="a",
+            start_offset_ms=43220,
+            end_offset_ms=43720,
+        ),
+        schemas.LectureVideoManifestWordV3(
+            id="w13",
+            word="certain",
+            start_offset_ms=43720,
+            end_offset_ms=43720,
+        ),
+        schemas.LectureVideoManifestWordV3(
+            id="w14",
+            word="price",
+            start_offset_ms=43720,
+            end_offset_ms=43920,
+        ),
+        schemas.LectureVideoManifestWordV3(
+            id="w15",
+            word="for",
+            start_offset_ms=43920,
+            end_offset_ms=44560,
+        ),
+        schemas.LectureVideoManifestWordV3(
+            id="w16",
+            word="children.",
+            start_offset_ms=44560,
+            end_offset_ms=44560,
+        ),
+        schemas.LectureVideoManifestWordV3(
+            id="w17",
+            word="So",
+            start_offset_ms=45120,
+            end_offset_ms=45420,
+        ),
+    ]
+
+    assert lecture_video_service.lecture_video_words_to_webvtt(words) == (
+        "WEBVTT\n\n"
+        "00:00:40.100 --> 00:00:44.560\n"
+        "into the theme park cost a certain price for adults and a certain price "
+        "for children.\n\n"
+        "00:00:45.120 --> 00:00:45.420\n"
+        "So\n"
+    )
+
+
+@with_institution(11, "Test Institution")
+async def test_persist_manifest_creates_caption_artifact(
+    db, institution, config, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        config,
+        "video_store",
+        LocalVideoStoreSettings(type="local", save_target=str(tmp_path)),
+    )
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        lecture_video = make_lecture_video(class_.id, "lecture.mp4")
+        session.add_all([class_, lecture_video])
+        await session.flush()
+
+        manifest = schemas.LectureVideoManifestV3.model_validate(
+            lecture_video_manifest_v3()
+        )
+        await lecture_video_service.persist_manifest(
+            session,
+            lecture_video,
+            manifest,
+            create_narration_placeholders=False,
+        )
+        await session.commit()
+
+        caption_id = lecture_video.caption_stored_object_id
+        assert caption_id is not None
+        caption = await session.get(models.LectureVideoCaptionStoredObject, caption_id)
+        assert caption is not None
+        caption_key = caption.key
+        caption_content_type = caption.content_type
+        caption_content_length = caption.content_length
+
+    caption_path = tmp_path / caption_key
+    assert caption_content_type == "text/vtt; charset=utf-8"
+    assert caption_content_length == caption_path.stat().st_size
+    assert caption_path.read_text() == (
+        "WEBVTT\n\n00:00:00.000 --> 00:00:00.900\nLatency matters\n"
+    )
+
+
 async def create_lecture_video_copy_credentials(
     session: AsyncSession,
     class_id: int,
@@ -10126,6 +10394,11 @@ async def test_copy_lecture_video_assistant_to_other_class_clones_lecture_video_
             key="copy-source-poster.webp",
             content_type="image/webp",
         )
+        lecture_video.caption_stored_object = models.LectureVideoCaptionStoredObject(
+            key="copy-source-captions.vtt",
+            content_type="text/vtt; charset=utf-8",
+            content_length=128,
+        )
         session.add(source_class)
         session.add(target_class)
         session.add(lecture_video)
@@ -10214,6 +10487,9 @@ async def test_copy_lecture_video_assistant_to_other_class_clones_lecture_video_
     assert copied_video.class_id == 2
     assert copied_video.stored_object_id == lecture_video.stored_object_id
     assert copied_video.poster_stored_object_id == source_video.poster_stored_object_id
+    assert (
+        copied_video.caption_stored_object_id == source_video.caption_stored_object_id
+    )
     assert copied_video.source_lecture_video_id_snapshot == lecture_video.id
     assert copied_question == "Copied question?"
 
@@ -11233,6 +11509,74 @@ async def test_lecture_video_delete_deletes_unused_poster_stored_object(
 
 
 @with_institution(11, "Test Institution")
+async def test_lecture_video_delete_deletes_unused_caption_stored_object(
+    db, institution, config, monkeypatch, tmp_path
+):
+    video_dir = tmp_path / "videos"
+    monkeypatch.setattr(
+        config,
+        "video_store",
+        LocalVideoStoreSettings(type="local", save_target=str(video_dir)),
+    )
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        stored_object = models.LectureVideoStoredObject(
+            key="shared-video.mp4",
+            original_filename="shared-video.mp4",
+            content_type="video/mp4",
+            content_length=1000,
+        )
+        caption_stored_object = models.LectureVideoCaptionStoredObject(
+            key="shared-captions.vtt",
+            content_type="text/vtt; charset=utf-8",
+            content_length=18,
+        )
+        session.add_all([class_, stored_object, caption_stored_object])
+        await session.flush()
+        video_dir.mkdir(parents=True, exist_ok=True)
+        (video_dir / stored_object.key).write_bytes(b"shared-video")
+        (video_dir / caption_stored_object.key).write_text("WEBVTT\n\ncaption\n")
+
+        first_video = await models.LectureVideo.create(
+            session,
+            class_id=class_.id,
+            stored_object_id=stored_object.id,
+            user_id=None,
+            caption_stored_object_id=caption_stored_object.id,
+        )
+        second_video = await models.LectureVideo.create(
+            session,
+            class_id=class_.id,
+            stored_object_id=stored_object.id,
+            user_id=None,
+            caption_stored_object_id=caption_stored_object.id,
+        )
+        await session.commit()
+
+        await lecture_video_service.delete_lecture_video(session, first_video.id)
+        await session.commit()
+        caption_after_first_delete = await session.get(
+            models.LectureVideoCaptionStoredObject, caption_stored_object.id
+        )
+
+        await lecture_video_service.delete_lecture_video(session, second_video.id)
+        await session.commit()
+        caption_after_second_delete = await session.get(
+            models.LectureVideoCaptionStoredObject, caption_stored_object.id
+        )
+
+    assert caption_after_first_delete is not None
+    assert caption_after_second_delete is None
+    assert not (video_dir / "shared-captions.vtt").exists()
+
+
+@with_institution(11, "Test Institution")
 async def test_lecture_video_delete_deletes_unused_stored_object_without_video_store(
     db, institution, config, monkeypatch
 ):
@@ -11555,6 +11899,189 @@ async def test_get_thread_video_stream_and_range(
     assert partial.headers["content-range"] == f"bytes 2-5/{len(video_bytes)}"
     assert partial.headers["content-length"] == "4"
     assert partial.content == video_bytes[2:6]
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_view", "thread:109"),
+    ]
+)
+async def test_get_thread_lecture_video_captions_streams_vtt(
+    api, db, institution, valid_user_token, config, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        config,
+        "video_store",
+        LocalVideoStoreSettings(type="local", save_target=str(tmp_path)),
+    )
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+        )
+        lecture_video = make_lecture_video(class_.id, "lecture-video.mp4")
+        session.add_all([class_, lecture_video])
+        await session.flush()
+        await lecture_video_service.persist_manifest(
+            session,
+            lecture_video,
+            schemas.LectureVideoManifestV3.model_validate(lecture_video_manifest_v3()),
+            create_narration_placeholders=False,
+        )
+        assistant = models.Assistant(
+            id=1,
+            name="Lecture Assistant",
+            class_id=class_.id,
+            interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+            version=3,
+            lecture_video_id=lecture_video.id,
+        )
+        thread = models.Thread(
+            id=109,
+            name="Lecture Lesson",
+            version=3,
+            thread_id="thread-captions-109",
+            class_id=class_.id,
+            assistant_id=assistant.id,
+            interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+            lecture_video_id=lecture_video.id,
+            private=True,
+            tools_available="[]",
+        )
+        session.add_all([assistant, thread])
+        await session.commit()
+
+    response = api.get(
+        "/api/v1/class/1/thread/109/lecture-video/captions.vtt",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/vtt")
+    assert response.text.startswith("WEBVTT\n\n")
+    assert "Latency matters" in response.text
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_view", "thread:109"),
+    ]
+)
+async def test_get_thread_lecture_video_captions_returns_404_when_missing(
+    api, db, institution, valid_user_token, config, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        config,
+        "video_store",
+        LocalVideoStoreSettings(type="local", save_target=str(tmp_path)),
+    )
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+        )
+        lecture_video = make_lecture_video(class_.id, "lecture-video.mp4")
+        assistant = models.Assistant(
+            id=1,
+            name="Lecture Assistant",
+            class_id=class_.id,
+            interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+            version=3,
+            lecture_video_id=1,
+        )
+        thread = models.Thread(
+            id=109,
+            name="Lecture Lesson",
+            version=3,
+            thread_id="thread-captions-109",
+            class_id=class_.id,
+            assistant_id=assistant.id,
+            interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+            lecture_video_id=1,
+            private=True,
+            tools_available="[]",
+        )
+        session.add_all([class_, lecture_video, assistant, thread])
+        await session.commit()
+
+    response = api.get(
+        "/api/v1/class/1/thread/109/lecture-video/captions.vtt",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 404
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_view", "thread:109"),
+    ]
+)
+async def test_get_thread_lecture_video_captions_returns_409_for_mismatched_lesson(
+    api, db, institution, valid_user_token, config, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        config,
+        "video_store",
+        LocalVideoStoreSettings(type="local", save_target=str(tmp_path)),
+    )
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+        )
+        first_video = make_lecture_video(class_.id, "first.mp4")
+        second_video = make_lecture_video(class_.id, "second.mp4")
+        session.add_all([class_, first_video, second_video])
+        await session.flush()
+        await lecture_video_service.persist_manifest(
+            session,
+            first_video,
+            schemas.LectureVideoManifestV3.model_validate(lecture_video_manifest_v3()),
+            create_narration_placeholders=False,
+        )
+        assistant = models.Assistant(
+            id=1,
+            name="Lecture Assistant",
+            class_id=class_.id,
+            interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+            version=3,
+            lecture_video_id=second_video.id,
+        )
+        thread = models.Thread(
+            id=109,
+            name="Lecture Lesson",
+            version=3,
+            thread_id="thread-captions-109",
+            class_id=class_.id,
+            assistant_id=assistant.id,
+            interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+            lecture_video_id=first_video.id,
+            private=True,
+            tools_available="[]",
+        )
+        session.add_all([assistant, thread])
+        await session.commit()
+
+    response = api.get(
+        "/api/v1/class/1/thread/109/lecture-video/captions.vtt",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == MSG_LESSON_UPDATED
 
 
 @with_user(123)

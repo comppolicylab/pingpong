@@ -365,6 +365,24 @@ async def _lecture_video_tts_available(
     )
 
 
+async def _lecture_video_captions_available(
+    db: Any,
+    thread: models.Thread,
+) -> bool:
+    if (
+        thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO
+        or thread.lecture_video_id is None
+    ):
+        return False
+
+    caption_stored_object_id = await db.scalar(
+        select(models.LectureVideo.caption_stored_object_id).where(
+            models.LectureVideo.id == thread.lecture_video_id
+        )
+    )
+    return caption_stored_object_id is not None
+
+
 def _raise_lecture_video_runtime_http_error(
     err: lecture_video_runtime.LectureVideoRuntimeError,
 ) -> NoReturn:
@@ -3827,11 +3845,15 @@ async def get_thread(
             thread, assistant
         )
         lecture_video_tts_available = False
+        lecture_video_captions_available = False
         lecture_video_session = None
         if thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
             lecture_video_can_participate = await can_participate_thread(request)
             thread.is_current_user_participant = lecture_video_can_participate
             lecture_video_tts_available = await _lecture_video_tts_available(
+                request.state["db"], thread
+            )
+            lecture_video_captions_available = await _lecture_video_captions_available(
                 request.state["db"], thread
             )
             lecture_video_session = await lecture_video_runtime.get_thread_session(
@@ -3865,6 +3887,7 @@ async def get_thread(
             "lecture_video_matches_assistant": lecture_video_matches_assistant,
             "lecture_video_session": lecture_video_session,
             "lecture_video_tts_available": lecture_video_tts_available,
+            "lecture_video_captions_available": lecture_video_captions_available,
             "recording": thread.voice_mode_recording
             if is_supervisor or is_current_user
             else None,
@@ -4440,11 +4463,15 @@ async def get_thread(
             thread, assistant
         )
         lecture_video_tts_available = False
+        lecture_video_captions_available = False
         lecture_video_session = None
         if thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
             lecture_video_can_participate = await can_participate_thread(request)
             thread.is_current_user_participant = lecture_video_can_participate
             lecture_video_tts_available = await _lecture_video_tts_available(
+                request.state["db"], thread
+            )
+            lecture_video_captions_available = await _lecture_video_captions_available(
                 request.state["db"], thread
             )
             lecture_video_session = await lecture_video_runtime.get_thread_session(
@@ -4506,6 +4533,7 @@ async def get_thread(
             "lecture_video_matches_assistant": lecture_video_matches_assistant,
             "lecture_video_session": lecture_video_session,
             "lecture_video_tts_available": lecture_video_tts_available,
+            "lecture_video_captions_available": lecture_video_captions_available,
             "recording": thread.voice_mode_recording
             if is_supervisor or is_current_user
             else None,
@@ -4712,6 +4740,77 @@ async def get_thread_video(
             status_code=500,
             detail="An internal error occurred while streaming the lecture video.",
         ) from e
+
+
+@v1.get(
+    "/class/{class_id}/thread/{thread_id}/lecture-video/captions.vtt",
+    dependencies=[Depends(Authz("can_view", "thread:{thread_id}"))],
+    response_class=StreamingResponse,
+)
+async def get_thread_lecture_video_captions(
+    class_id: str,
+    thread_id: str,
+    request: StateRequest,
+):
+    if not config.video_store:
+        raise HTTPException(status_code=404, detail="No Video Store exists.")
+
+    thread = await models.Thread.get_by_id_for_class(
+        request.state["db"], int(class_id), int(thread_id)
+    )
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if (
+        thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO
+        or thread.lecture_video_id is None
+    ):
+        raise HTTPException(status_code=404, detail="Lecture video thread not found.")
+
+    assistant = (
+        await models.Assistant.get_by_id(request.state["db"], int(thread.assistant_id))
+        if thread.assistant_id
+        else None
+    )
+    if not _lecture_video_matches_assistant(thread, assistant):
+        raise HTTPException(
+            status_code=409,
+            detail=lecture_video_runtime.MSG_LESSON_UPDATED,
+        )
+
+    caption = await request.state["db"].scalar(
+        select(models.LectureVideoCaptionStoredObject)
+        .join(
+            models.LectureVideo,
+            models.LectureVideo.caption_stored_object_id
+            == models.LectureVideoCaptionStoredObject.id,
+        )
+        .where(models.LectureVideo.id == thread.lecture_video_id)
+    )
+    if caption is None:
+        raise HTTPException(status_code=404, detail="Captions not available.")
+
+    try:
+        stream = await prefetch_stream(
+            config.video_store.store.stream_video_range(key=caption.key),
+            store_error=VideoStoreError,
+            logger=logger,
+            store_error_log="VideoStoreError while streaming lecture video captions; aborting stream.",
+            unexpected_error_log="Unexpected error while streaming lecture video captions",
+        )
+    except VideoStoreError as e:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unable to stream lecture video captions: {e.detail or str(e)}",
+        ) from e
+
+    return StreamingResponse(
+        stream,
+        media_type=caption.content_type or "text/vtt; charset=utf-8",
+        headers={
+            "Cache-Control": "private, max-age=300",
+            "Content-Length": str(caption.content_length),
+        },
+    )
 
 
 @v1.get(

@@ -159,6 +159,11 @@
 		expandedThreadData.data?.thread?.is_current_user_participant === true;
 	$: lectureVideoSession = expandedThreadData.data?.lecture_video_session ?? null;
 	$: threadLectureChatAvailable = lectureVideoSession?.lecture_video_chat_available === true;
+	$: threadLectureVideoCaptionsAvailable =
+		expandedThreadData.data?.lecture_video_captions_available === true;
+	$: lectureVideoCaptionsSrc = threadLectureVideoCaptionsAvailable
+		? api.getLectureVideoCaptionsUrl(classId, threadId)
+		: null;
 	$: lectureVideoTtsAvailable = expandedThreadData.data?.lecture_video_tts_available === true;
 	let runtimeLectureVideoAssistantMismatch = false;
 	let runtimeLectureVideoAssistantMismatchKey: string | null = null;
@@ -1611,6 +1616,7 @@
 					{classId}
 					{threadId}
 					{lectureVideoSrc}
+					captionsSrc={lectureVideoCaptionsSrc}
 					title={lectureVideoDisplayTitle}
 					canParticipate={threadIsCurrentUserParticipant}
 					showRefreshAction={!isAnonymousSession}

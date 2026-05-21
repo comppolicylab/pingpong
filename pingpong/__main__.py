@@ -65,6 +65,10 @@ from pingpong.migrations.m08_cleanup_invalid_lecture_video_schema_rows import (
 from pingpong.migrations.m09_backfill_lecture_video_posters import (
     backfill_lecture_video_posters,
 )
+from pingpong.migrations.m10_backfill_lecture_video_captions import (
+    backfill_lecture_video_captions,
+    retranscribe_active_lecture_video_words,
+)
 from pingpong.now import _get_next_run_time, croner, utcnow
 from pingpong.schemas import LMSType, RunStatus
 from pingpong.lti.course_bridge import course_bridge_sync_all
@@ -1025,6 +1029,59 @@ def m09_backfill_lecture_video_posters() -> None:
             )
 
     asyncio.run(_m09_backfill_lecture_video_posters())
+
+
+@db.command("m10_backfill_lecture_video_captions")
+@click.option(
+    "--retranscribe-batch-size",
+    default=10,
+    type=click.IntRange(min=1),
+    help="Number of active lecture videos to retranscribe per batch.",
+)
+@click.option(
+    "--caption-batch-size",
+    default=50,
+    type=click.IntRange(min=1),
+    help="Number of active lecture videos to caption per batch.",
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Retranscribe lecture videos even when transcript data is already current.",
+)
+def m10_backfill_lecture_video_captions(
+    retranscribe_batch_size: int,
+    caption_batch_size: int,
+    force: bool,
+) -> None:
+    async def _m10_backfill_lecture_video_captions() -> None:
+        async with config.db.driver.async_session() as session:
+            logger.info(
+                "Retranscribing active assistant lecture video words with punctuation..."
+            )
+            retranscription_result = await retranscribe_active_lecture_video_words(
+                session, batch_size=retranscribe_batch_size, force=force
+            )
+            logger.info(
+                "Done! Retranscribed %s lecture videos. skipped=%s failed=%s",
+                retranscription_result.updated,
+                retranscription_result.skipped,
+                retranscription_result.failed,
+            )
+            logger.info(
+                "Backfilling lecture video captions for active assistant lecture videos..."
+            )
+            caption_result = await backfill_lecture_video_captions(
+                session, batch_size=caption_batch_size
+            )
+            logger.info(
+                "Done! Backfilled captions for %s lecture videos. skipped=%s failed=%s",
+                caption_result.created,
+                caption_result.skipped,
+                caption_result.failed,
+            )
+
+    asyncio.run(_m10_backfill_lecture_video_captions())
 
 
 @db.command("m02_remove_responses_threads")

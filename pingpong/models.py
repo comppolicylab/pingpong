@@ -2041,6 +2041,39 @@ class LectureVideoPosterStoredObject(Base):
         return stored_object
 
 
+class LectureVideoCaptionStoredObject(Base):
+    __tablename__ = "lecture_video_caption_stored_objects"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    key = Column(String, nullable=False, unique=True)
+    content_type = Column(String, nullable=False)
+    content_length = Column(Integer, nullable=False, server_default="0")
+    lecture_videos = relationship(
+        "LectureVideo", back_populates="caption_stored_object"
+    )
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(DateTime(timezone=True), onupdate=func.now())
+
+    @classmethod
+    async def create(
+        cls,
+        session: AsyncSession,
+        *,
+        key: str,
+        content_type: str,
+        content_length: int,
+    ) -> "LectureVideoCaptionStoredObject":
+        stored_object = LectureVideoCaptionStoredObject(
+            key=key,
+            content_type=content_type,
+            content_length=content_length,
+        )
+        session.add(stored_object)
+        await session.flush()
+        await session.refresh(stored_object)
+        return stored_object
+
+
 # Single-select correctness gets its own storage so multi-select can use a
 # separate schema later without overloading the same table.
 lecture_video_question_single_select_correct_option_association = Table(
@@ -2093,6 +2126,19 @@ class LectureVideo(Base):
     )
     poster_stored_object = relationship(
         "LectureVideoPosterStoredObject",
+        back_populates="lecture_videos",
+        uselist=False,
+    )
+    caption_stored_object_id = Column(
+        Integer,
+        ForeignKey(
+            "lecture_video_caption_stored_objects.id",
+            name="fk_lecture_videos_caption_stored_object_id",
+        ),
+        nullable=True,
+    )
+    caption_stored_object = relationship(
+        "LectureVideoCaptionStoredObject",
         back_populates="lecture_videos",
         uselist=False,
     )
@@ -2162,6 +2208,7 @@ class LectureVideo(Base):
         status: schemas.LectureVideoStatus = schemas.LectureVideoStatus.UPLOADED,
         error_message: str | None = None,
         poster_stored_object_id: int | None = None,
+        caption_stored_object_id: int | None = None,
     ) -> "LectureVideo":
         lecture_video = LectureVideo(
             class_id=class_id,
@@ -2180,6 +2227,7 @@ class LectureVideo(Base):
             error_message=error_message,
             uploader_id=user_id,
             poster_stored_object_id=poster_stored_object_id,
+            caption_stored_object_id=caption_stored_object_id,
         )
         session.add(lecture_video)
         await session.flush()
@@ -2376,6 +2424,7 @@ class LectureVideo(Base):
             status=lecture_video.status,
             error_message=lecture_video.error_message,
             poster_stored_object_id=lecture_video.poster_stored_object_id,
+            caption_stored_object_id=lecture_video.caption_stored_object_id,
         )
 
         option_map: dict[int, LectureVideoQuestionOption] = {}
