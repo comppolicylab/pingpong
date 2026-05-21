@@ -274,6 +274,8 @@ async def backfill_lecture_video_captions(
                 )
             except Exception:
                 await session.rollback()
+                # _persist_caption_artifact cleans up failures before flush; this
+                # handles commit failures after the caption row was created.
                 if caption_key:
                     try:
                         await config.video_store.store.delete(caption_key)

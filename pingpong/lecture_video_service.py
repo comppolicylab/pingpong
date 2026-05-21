@@ -31,7 +31,7 @@ LECTURE_VIDEO_CHAT_UNAVAILABLE_NOTE = (
 
 _V3_TRANSCRIPT_ADAPTER = TypeAdapter(list[schemas.LectureVideoManifestWordV3])
 TRANSCRIPT_DATA_VERSION = 4
-_CAPTION_CONTENT_TYPE = "text/vtt; charset=utf-8"
+_CAPTION_CONTENT_TYPE = "text/vtt"
 _CAPTION_MAX_CUE_DURATION_MS = 5_000
 _CAPTION_MAX_CUE_CHARS = 84
 _CAPTION_MAX_GAP_MS = 900
@@ -533,7 +533,9 @@ def lecture_video_words_to_webvtt(
             split_offsets_ms=question_stop_offsets_ms,
         )
     ]
-    return "WEBVTT\n\n" + "\n\n".join(cue_blocks) + ("\n" if cue_blocks else "")
+    if not cue_blocks:
+        return "WEBVTT\n\n"
+    return "WEBVTT\n\n" + "\n\n".join(cue_blocks) + "\n"
 
 
 def _manifest_transcript_as_v3(
@@ -583,6 +585,7 @@ def _question_stop_offsets_from_model(
     inspection = inspect(lecture_video, raiseerr=False)
     unloaded = inspection.unloaded if inspection is not None else set()
     if "questions" in unloaded:
+        # Callers that need question-aligned cue boundaries must preload questions.
         return []
     return [question.stop_offset_ms for question in lecture_video.questions]
 

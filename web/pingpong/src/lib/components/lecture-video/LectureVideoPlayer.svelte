@@ -39,6 +39,7 @@
 	const MARKER_CLUSTER_COLLAPSE_DELAY_MS = 120;
 	const OVERLAY_TEXT_SHADOW = 'text-shadow: rgb(0 0 0) 0 0 2px;';
 	const CAPTION_CONTROL_GAP_PX = 12;
+	const CAPTIONS_PREFERENCE_STORAGE_KEY = 'pingpong:lecture-video:captions-enabled';
 
 	type QuestionMarker = {
 		id: number;
@@ -192,6 +193,18 @@
 	// Non-reactive: tracks the last shown question without retriggering the effect.
 	let lastQuestionPresentationKey: string | null = null;
 	let lastCaptionsSrc: string | null = null;
+
+	function getStoredCaptionsPreference(): boolean {
+		if (typeof localStorage === 'undefined') return true;
+		const storedPreference = localStorage.getItem(CAPTIONS_PREFERENCE_STORAGE_KEY);
+		if (storedPreference == null) return true;
+		return storedPreference === 'true';
+	}
+
+	function storeCaptionsPreference(enabled: boolean) {
+		if (typeof localStorage === 'undefined') return;
+		localStorage.setItem(CAPTIONS_PREFERENCE_STORAGE_KEY, String(enabled));
+	}
 
 	let effectiveOffsetMs = $derived(
 		draggingSeek ? (dragPreviewOffsetMs ?? currentTimeMs) : currentTimeMs
@@ -424,6 +437,7 @@
 	function toggleCaptions() {
 		if (!captionsAvailable) return;
 		captionsEnabled = !captionsEnabled;
+		storeCaptionsPreference(captionsEnabled);
 		syncCaptionTrackMode();
 	}
 
@@ -496,7 +510,7 @@
 	$effect(() => {
 		if (captionsSrc !== lastCaptionsSrc) {
 			lastCaptionsSrc = captionsSrc;
-			captionsEnabled = Boolean(captionsSrc);
+			captionsEnabled = captionsSrc ? getStoredCaptionsPreference() : false;
 			activeCaptionLines = [];
 		}
 		syncCaptionTrackMode();

@@ -557,7 +557,7 @@ async def test_persist_manifest_creates_caption_artifact(
         caption_content_length = caption.content_length
 
     caption_path = tmp_path / caption_key
-    assert caption_content_type == "text/vtt; charset=utf-8"
+    assert caption_content_type == "text/vtt"
     assert caption_content_length == caption_path.stat().st_size
     assert caption_path.read_text() == (
         "WEBVTT\n\n00:00:00.000 --> 00:00:00.900\nLatency matters\n"
@@ -12002,8 +12002,20 @@ async def test_get_thread_lecture_video_captions_streams_vtt(
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/vtt")
+    assert response.headers["cache-control"] == "private, no-cache"
+    assert response.headers["etag"].startswith('"lv_caption_')
     assert response.text.startswith("WEBVTT\n\n")
     assert "Latency matters" in response.text
+
+    cached_response = api.get(
+        "/api/v1/class/1/thread/109/lecture-video/captions.vtt",
+        headers={
+            "Authorization": f"Bearer {valid_user_token}",
+            "If-None-Match": response.headers["etag"],
+        },
+    )
+
+    assert cached_response.status_code == 304
 
 
 @with_user(123)

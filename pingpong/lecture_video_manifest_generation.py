@@ -739,6 +739,8 @@ def _augment_manifest_words_with_segment_text(
     manifest_words: list[dict[str, Any]],
     segments: Any,
 ) -> list[dict[str, Any]]:
+    # Best effort: keep word timings from Whisper and copy punctuation from segment text
+    # only when normalized tokens still align.
     if not segments:
         return manifest_words
 
