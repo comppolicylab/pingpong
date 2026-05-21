@@ -564,6 +564,46 @@ async def test_persist_manifest_creates_caption_artifact(
     )
 
 
+@with_institution(11, "Test Institution")
+async def test_persist_manifest_cleans_uploaded_caption_when_row_create_fails(
+    db, institution, config, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        config,
+        "video_store",
+        LocalVideoStoreSettings(type="local", save_target=str(tmp_path)),
+    )
+
+    async def fail_create(*args, **kwargs):
+        raise RuntimeError("caption row failed")
+
+    monkeypatch.setattr(models.LectureVideoCaptionStoredObject, "create", fail_create)
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        lecture_video = make_lecture_video(class_.id, "lecture.mp4")
+        session.add_all([class_, lecture_video])
+        await session.flush()
+
+        manifest = schemas.LectureVideoManifestV3.model_validate(
+            lecture_video_manifest_v3()
+        )
+        with pytest.raises(RuntimeError, match="caption row failed"):
+            await lecture_video_service.persist_manifest(
+                session,
+                lecture_video,
+                manifest,
+                create_narration_placeholders=False,
+            )
+
+    assert list(tmp_path.glob("lv_caption_*.vtt")) == []
+
+
 async def create_lecture_video_copy_credentials(
     session: AsyncSession,
     class_id: int,

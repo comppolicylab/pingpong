@@ -1068,20 +1068,33 @@ async def _persist_caption_artifact(
     caption_bytes = caption_text.encode("utf-8")
     store_key = generate_caption_store_key()
 
-    await config.video_store.store.put(
-        store_key,
-        io.BytesIO(caption_bytes),
-        _CAPTION_CONTENT_TYPE,
-    )
-    stored_object = await models.LectureVideoCaptionStoredObject.create(
-        session,
-        key=store_key,
-        content_type=_CAPTION_CONTENT_TYPE,
-        content_length=len(caption_bytes),
-    )
-    lecture_video.caption_stored_object_id = stored_object.id
-    lecture_video.caption_stored_object = stored_object
-    return old_stored_object_id, old_store_key, store_key
+    uploaded = False
+    try:
+        await config.video_store.store.put(
+            store_key,
+            io.BytesIO(caption_bytes),
+            _CAPTION_CONTENT_TYPE,
+        )
+        uploaded = True
+        stored_object = await models.LectureVideoCaptionStoredObject.create(
+            session,
+            key=store_key,
+            content_type=_CAPTION_CONTENT_TYPE,
+            content_length=len(caption_bytes),
+        )
+        lecture_video.caption_stored_object_id = stored_object.id
+        lecture_video.caption_stored_object = stored_object
+        return old_stored_object_id, old_store_key, store_key
+    except Exception:
+        if uploaded and config.video_store:
+            try:
+                await config.video_store.store.delete(store_key)
+            except Exception:
+                logger.exception(
+                    "Failed to clean up uploaded caption after caption row error. key=%s",
+                    store_key,
+                )
+        raise
 
 
 async def persist_caption_artifact_for_lecture_video(
