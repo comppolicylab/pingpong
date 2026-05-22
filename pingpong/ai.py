@@ -27,21 +27,22 @@ from pingpong.invite import send_export_download, send_export_failed
 from pingpong.log_utils import sanitize_for_log
 import pingpong.models as models
 from pingpong.prompt import replace_random_blocks
-from pingpong.say_transform import SayTransformer
+from pingpong.say_transform import SayTransformer, transform_say_text
 from pingpong.schemas import (
     APIKeyValidationResponse,
     AnnotationType,
     BufferedStreamHandlerToolCallState,
     CodeInterpreterOutputType,
     FileSearchToolAnnotationResult,
+    InteractionMode,
     MessagePhase,
+    MessagePartType,
     MessageRole,
     MessageStatus,
+    NewThreadMessage,
     ReasoningStatus,
     RunStatus,
     ThreadName,
-    NewThreadMessage,
-    MessagePartType,
     ToolCallStatus,
     ToolCallType,
     WebSearchActionType,
@@ -1163,8 +1164,8 @@ class BufferedResponseStreamHandler:
         show_web_search_actions: bool | None = None,
         show_reasoning_summaries: bool | None = None,
         show_mcp_server_call_details: bool | None = None,
-        lecture_video_dual_text_mode: bool = False,
         *args,
+        lecture_video_dual_text_mode: bool = False,
         **kwargs,
     ):
         self.__buffer = io.BytesIO()
@@ -5085,8 +5086,16 @@ async def export_threads_multiple_classes(
                                 break
                             after = messages.data[-1].id
                     elif thread.version == 3:
+                        display_say_snippets = (
+                            thread.interaction_mode == InteractionMode.LECTURE_VIDEO
+                            and assistant is not None
+                            and assistant.use_latex
+                        )
                         export_rows = await list_export_rows_v3(
-                            session, thread.id, file_names
+                            session,
+                            thread.id,
+                            file_names,
+                            display_say_snippets=display_say_snippets,
                         )
 
                         for role, created_at, content in export_rows:
@@ -5314,8 +5323,16 @@ async def export_class_threads(
                             break
                         after = messages.data[-1].id
                 elif thread.version == 3:
+                    display_say_snippets = (
+                        thread.interaction_mode == InteractionMode.LECTURE_VIDEO
+                        and assistant is not None
+                        and assistant.use_latex
+                    )
                     export_rows = await list_export_rows_v3(
-                        session, thread.id, file_names
+                        session,
+                        thread.id,
+                        file_names,
+                        display_say_snippets=display_say_snippets,
                     )
 
                     for role, created_at, content in export_rows:
@@ -5453,11 +5470,36 @@ def _format_message_uploads_v3(message: models.Message) -> str | None:
     return "\n".join(lines)
 
 
+def _export_message_part_text_v3(
+    message: models.Message,
+    part: models.MessagePart,
+    file_names: dict[str, str],
+    class_id: int,
+    thread_id: int,
+    display_say_snippets: bool,
+) -> str:
+    text = replace_annotations_in_text_v3(
+        part=part,
+        file_names=file_names,
+        class_id=class_id,
+        thread_id=thread_id,
+        message_id=message.id,
+    )
+    if (
+        display_say_snippets
+        and message.role == MessageRole.ASSISTANT
+        and part.type == MessagePartType.OUTPUT_TEXT
+    ):
+        return transform_say_text(text, "display")
+    return text
+
+
 def process_message_content_v3(
     message: models.Message,
     file_names: dict[str, str],
     class_id: int,
     thread_id: int,
+    display_say_snippets: bool = False,
 ) -> str:
     """Process message content for CSV export. The end result is a single string with all the content combined.
     Images are replaced with their file names, and text is extracted from the content parts.
@@ -5468,12 +5510,13 @@ def process_message_content_v3(
         match part.type:
             case MessagePartType.INPUT_TEXT:
                 processed_content.append(
-                    replace_annotations_in_text_v3(
-                        part=part,
-                        file_names=file_names,
-                        class_id=class_id,
-                        thread_id=thread_id,
-                        message_id=message.id,
+                    _export_message_part_text_v3(
+                        message,
+                        part,
+                        file_names,
+                        class_id,
+                        thread_id,
+                        display_say_snippets,
                     )
                 )
             case MessagePartType.INPUT_IMAGE:
@@ -5482,12 +5525,13 @@ def process_message_content_v3(
                 )
             case MessagePartType.OUTPUT_TEXT:
                 processed_content.append(
-                    replace_annotations_in_text_v3(
-                        part=part,
-                        file_names=file_names,
-                        class_id=class_id,
-                        thread_id=thread_id,
-                        message_id=message.id,
+                    _export_message_part_text_v3(
+                        message,
+                        part,
+                        file_names,
+                        class_id,
+                        thread_id,
+                        display_say_snippets,
                     )
                 )
             case MessagePartType.REFUSAL:
@@ -5738,6 +5782,7 @@ def build_export_rows_v3(
     class_id: int,
     thread_id: int,
     file_names: dict[str, str],
+    display_say_snippets: bool = False,
 ) -> list[tuple[str, datetime, str]]:
     rows: list[tuple[int, datetime, str, str]] = []
 
@@ -5747,7 +5792,13 @@ def build_export_rows_v3(
                 message.output_index,
                 message.created,
                 _enum_value(message.role),
-                process_message_content_v3(message, file_names, class_id, thread_id),
+                process_message_content_v3(
+                    message,
+                    file_names,
+                    class_id,
+                    thread_id,
+                    display_say_snippets=display_say_snippets,
+                ),
             )
         )
 
@@ -5776,7 +5827,10 @@ def build_export_rows_v3(
 
 
 async def list_export_rows_v3(
-    session: AsyncSession, thread_id: int, file_names: dict[str, str]
+    session: AsyncSession,
+    thread_id: int,
+    file_names: dict[str, str],
+    display_say_snippets: bool = False,
 ) -> list[tuple[str, datetime, str]]:
     messages = [
         message
@@ -5802,6 +5856,7 @@ async def list_export_rows_v3(
         thread.class_id,
         thread_id,
         file_names,
+        display_say_snippets=display_say_snippets,
     )
 
 

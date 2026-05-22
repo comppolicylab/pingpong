@@ -2654,6 +2654,7 @@ export type AssistantInstructionsPreviewRequest = {
 	instructions: string;
 	use_latex: boolean;
 	disable_prompt_randomization: boolean;
+	interaction_mode?: 'chat' | 'voice' | 'lecture_video';
 };
 
 /**

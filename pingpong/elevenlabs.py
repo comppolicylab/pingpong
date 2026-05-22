@@ -318,6 +318,7 @@ _MARKDOWN_STRIKE_RE = re.compile(r"~~(.*?)~~")
 _MARKDOWN_STRONG_RE = re.compile(r"(\*\*|__)(.*?)\1")
 _MARKDOWN_EMPHASIS_RE = re.compile(r"(?<!\w)(\*|_)([^*_]+?)\1(?!\w)")
 _MARKDOWN_LATEX_BLOCK_RE = re.compile(r"\$\$\s*([\s\S]*?)\s*\$\$")
+# Best-effort TTS cleanup: this may also catch unusual raw currency spans.
 _MARKDOWN_LATEX_INLINE_RE = re.compile(r"\$\s*([^$\n]+?)\s*\$")
 _MARKDOWN_AUTOLINK_START_RE = re.compile(r"<(?:https?|mailto):", re.IGNORECASE)
 _MARKDOWN_WHITESPACE_RE = re.compile(r"[ \t]+")

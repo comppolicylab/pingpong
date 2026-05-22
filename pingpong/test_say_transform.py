@@ -1,3 +1,5 @@
+import logging
+
 from pingpong.ai import format_instructions
 from pingpong.say_transform import (
     SAY_MARKER_END,
@@ -76,10 +78,13 @@ def test_say_transformer_buffers_split_deltas():
     assert transformer.flush() == ""
 
 
-def test_say_transformer_suppresses_malformed_json():
+def test_say_transformer_suppresses_malformed_json(caplog):
     text = "Before " + say_payload('{"speech":') + " after"
 
-    assert transform_say_text(text, "display") == "Before  after"
+    with caplog.at_level(logging.DEBUG, logger="pingpong.say_transform"):
+        assert transform_say_text(text, "display") == "Before  after"
+
+    assert "Dropping malformed say snippet with invalid JSON" in caplog.text
 
 
 def test_say_transformer_suppresses_non_string_display():

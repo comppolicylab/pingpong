@@ -362,6 +362,17 @@ def _display_text_for_thread(
     return transform_say_text(text, "display")
 
 
+def _display_message_part_text_for_thread(
+    thread: models.Thread,
+    assistant: models.Assistant | None,
+    message: models.Message,
+    part: models.MessagePart,
+) -> str | None:
+    if message.role != schemas.MessageRole.ASSISTANT:
+        return part.text
+    return _display_text_for_thread(thread, assistant, part.text)
+
+
 async def _lecture_video_availability(
     db: Any,
     thread: models.Thread,
@@ -4422,8 +4433,8 @@ async def get_thread(
                             schemas.ThreadTextContentBlock(
                                 type="text",
                                 text=schemas.ThreadText(
-                                    value=_display_text_for_thread(
-                                        thread, assistant, content.text
+                                    value=_display_message_part_text_for_thread(
+                                        thread, assistant, message, content
                                     ),
                                     annotations=_annotations,
                                 ),
@@ -6267,8 +6278,8 @@ async def list_thread_messages(
                             schemas.ThreadTextContentBlock(
                                 type="text",
                                 text=schemas.ThreadText(
-                                    value=_display_text_for_thread(
-                                        thread, assistant, content.text
+                                    value=_display_message_part_text_for_thread(
+                                        thread, assistant, message, content
                                     ),
                                     annotations=_annotations,
                                 ),
@@ -10090,6 +10101,9 @@ async def preview_assistant_instructions(
             disable_prompt_randomization=req.disable_prompt_randomization,
             user_id=request.state["session"].user.id,
             thread_id=f"preview_{uuid.uuid4()}",
+            lecture_video_mode=(
+                req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
+            ),
         )
     }
 

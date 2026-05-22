@@ -1513,24 +1513,43 @@ async def test_get_thread_transforms_lecture_video_say_history_for_latex_assista
         )
         session.add(run)
         await session.flush()
-        session.add(
-            models.Message(
-                run_id=run.id,
-                thread_id=thread_id,
-                assistant_id=assistant.id,
-                output_index=1,
-                message_status=schemas.MessageStatus.COMPLETED,
-                role=schemas.MessageRole.ASSISTANT,
-                is_hidden=False,
-                completed=datetime.now(UTC),
-                content=[
-                    models.MessagePart(
-                        part_index=0,
-                        type=schemas.MessagePartType.OUTPUT_TEXT,
-                        text="Use " + raw_snippet + ".",
-                    )
-                ],
-            )
+        session.add_all(
+            [
+                models.Message(
+                    run_id=run.id,
+                    thread_id=thread_id,
+                    assistant_id=assistant.id,
+                    output_index=0,
+                    message_status=schemas.MessageStatus.COMPLETED,
+                    role=schemas.MessageRole.USER,
+                    is_hidden=False,
+                    completed=datetime.now(UTC),
+                    content=[
+                        models.MessagePart(
+                            part_index=0,
+                            type=schemas.MessagePartType.INPUT_TEXT,
+                            text="User literal " + raw_snippet + ".",
+                        )
+                    ],
+                ),
+                models.Message(
+                    run_id=run.id,
+                    thread_id=thread_id,
+                    assistant_id=assistant.id,
+                    output_index=1,
+                    message_status=schemas.MessageStatus.COMPLETED,
+                    role=schemas.MessageRole.ASSISTANT,
+                    is_hidden=False,
+                    completed=datetime.now(UTC),
+                    content=[
+                        models.MessagePart(
+                            part_index=0,
+                            type=schemas.MessagePartType.OUTPUT_TEXT,
+                            text="Use " + raw_snippet + ".",
+                        )
+                    ],
+                ),
+            ]
         )
         await session.commit()
 
@@ -1540,9 +1559,11 @@ async def test_get_thread_transforms_lecture_video_say_history_for_latex_assista
     )
 
     assert response.status_code == 200
-    assert response.json()["messages"][0]["content"][0]["text"]["value"] == (
-        "Use $ x^2 + y^2 $."
+    messages = response.json()["messages"]
+    assert messages[0]["content"][0]["text"]["value"] == (
+        "User literal " + raw_snippet + "."
     )
+    assert messages[1]["content"][0]["text"]["value"] == "Use $ x^2 + y^2 $."
 
 
 @with_user(123)
