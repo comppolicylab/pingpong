@@ -1390,6 +1390,7 @@ class AssistantInstructionsPreviewRequest(BaseModel):
     instructions: str
     use_latex: bool = False
     disable_prompt_randomization: bool = False
+    interaction_mode: InteractionMode | None = None
 
 
 class AssistantInstructionsPreviewResponse(BaseModel):

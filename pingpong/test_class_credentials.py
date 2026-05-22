@@ -1519,6 +1519,23 @@ def test_strip_markdown_for_tts_removes_common_markdown_formatting():
     )
 
 
+def test_strip_markdown_for_tts_removes_latex_math_delimiters():
+    assert (
+        elevenlabs_module.strip_markdown_for_tts(
+            "One has $a$, the other has $c$. Also $$\n10a + 5c\n$$.",
+            strip_latex_delimiters=True,
+        )
+        == "One has a, the other has c. Also 10a + 5c."
+    )
+
+
+def test_strip_markdown_for_tts_preserves_currency_by_default():
+    assert (
+        elevenlabs_module.strip_markdown_for_tts("It costs $5.99 for the $10 bundle.")
+        == "It costs $5.99 for the $10 bundle."
+    )
+
+
 def test_streaming_markdown_sanitizer_sanitizes_markdown_across_streamed_deltas():
     sanitizer = elevenlabs_module.StreamingMarkdownSanitizer()
 
@@ -1559,6 +1576,14 @@ def test_streaming_markdown_sanitizer_flushes_incomplete_markdown_best_effort():
     assert sanitizer.add("Here is [an unfinished link") == ["Here is "]
 
     assert sanitizer.flush() == "an unfinished link"
+
+
+def test_streaming_markdown_sanitizer_can_strip_latex_delimiters():
+    sanitizer = elevenlabs_module.StreamingMarkdownSanitizer(
+        strip_latex_delimiters=True
+    )
+
+    assert sanitizer.add("One has $a$.") == ["One has a."]
 
 
 def test_streaming_tts_chunker_buffers_partial_words_until_boundary():

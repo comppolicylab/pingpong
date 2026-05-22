@@ -27,20 +27,22 @@ from pingpong.invite import send_export_download, send_export_failed
 from pingpong.log_utils import sanitize_for_log
 import pingpong.models as models
 from pingpong.prompt import replace_random_blocks
+from pingpong.say_transform import SayTransformer, transform_say_text
 from pingpong.schemas import (
     APIKeyValidationResponse,
     AnnotationType,
     BufferedStreamHandlerToolCallState,
     CodeInterpreterOutputType,
     FileSearchToolAnnotationResult,
+    InteractionMode,
     MessagePhase,
+    MessagePartType,
     MessageRole,
     MessageStatus,
+    NewThreadMessage,
     ReasoningStatus,
     RunStatus,
     ThreadName,
-    NewThreadMessage,
-    MessagePartType,
     ToolCallStatus,
     ToolCallType,
     WebSearchActionType,
@@ -1163,6 +1165,7 @@ class BufferedResponseStreamHandler:
         show_reasoning_summaries: bool | None = None,
         show_mcp_server_call_details: bool | None = None,
         *args,
+        lecture_video_dual_text_mode: bool = False,
         **kwargs,
     ):
         self.__buffer = io.BytesIO()
@@ -1227,6 +1230,10 @@ class BufferedResponseStreamHandler:
             show_mcp_server_call_details
             if show_mcp_server_call_details is not None
             else True
+        )
+        self.lecture_video_dual_text_mode = lecture_video_dual_text_mode
+        self._display_say_transformer = (
+            SayTransformer("display") if lecture_video_dual_text_mode else None
         )
 
     def enqueue(self, data: Dict) -> None:
@@ -1433,24 +1440,30 @@ class BufferedResponseStreamHandler:
             await session.commit()
 
         await update_message_part_on_output_text_delta()
-        self.enqueue(
-            {
-                "type": "message_delta",
-                "delta": {
-                    "content": [
-                        {
-                            "index": 0,
-                            "type": "text",
-                            "text": {
-                                "value": data.delta,
-                                "annotations": [],
-                            },
-                        },
-                    ],
-                    "role": None,
-                },
-            }
+        display_delta = (
+            self._display_say_transformer.add(data.delta)
+            if self._display_say_transformer
+            else data.delta
         )
+        if display_delta:
+            self.enqueue(
+                {
+                    "type": "message_delta",
+                    "delta": {
+                        "content": [
+                            {
+                                "index": 0,
+                                "type": "text",
+                                "text": {
+                                    "value": display_delta,
+                                    "annotations": [],
+                                },
+                            },
+                        ],
+                        "role": None,
+                    },
+                }
+            )
 
     async def on_output_text_container_file_citation_added(
         self, data: AnnotationContainerFileCitation, annotation_index: int | None = None
@@ -1742,6 +1755,27 @@ class BufferedResponseStreamHandler:
             )
             return
 
+        if self._display_say_transformer:
+            display_delta = self._display_say_transformer.flush()
+            if display_delta:
+                self.enqueue(
+                    {
+                        "type": "message_delta",
+                        "delta": {
+                            "content": [
+                                {
+                                    "index": 0,
+                                    "type": "text",
+                                    "text": {
+                                        "value": display_delta,
+                                        "annotations": [],
+                                    },
+                                },
+                            ],
+                            "role": None,
+                        },
+                    }
+                )
         self.message_part_id = None
 
     async def on_output_message_done(self, data: ResponseOutputMessage):
@@ -3607,6 +3641,7 @@ async def run_response(
     tts_api_key: str | None = None,
     tts_voice_settings: Mapping[str, Any] | None = None,
     user_assistant_messages_only: bool = False,
+    lecture_video_dual_text_mode: bool = False,
 ):
     is_canceled = False
     await config.authz.driver.init()
@@ -3732,8 +3767,19 @@ async def run_response(
             # Make cleanup safe even when the OpenAI stream fails before TTS setup runs.
             _tts_enabled = bool(tts_voice_id and tts_api_key)
             _tts_client: ElevenLabsStreamingTTS | None = None
-            _tts_sanitizer = StreamingMarkdownSanitizer() if _tts_enabled else None
+            _tts_sanitizer = (
+                StreamingMarkdownSanitizer(
+                    strip_latex_delimiters=lecture_video_dual_text_mode
+                )
+                if _tts_enabled
+                else None
+            )
             _tts_chunker = StreamingTTSChunker() if _tts_enabled else None
+            _tts_say_transformer = (
+                SayTransformer("speech")
+                if _tts_enabled and lecture_video_dual_text_mode
+                else None
+            )
             _tts_audio_task: asyncio.Task | None = None
             _tts_audio_done = asyncio.Event()
             _tts_audio_ready = asyncio.Event()
@@ -3854,6 +3900,7 @@ async def run_response(
                     anonymous_link_auth=anonymous_link_auth,
                     anonymous_session_id=anonymous_session_id,
                     anonymous_link_id=anonymous_link_id,
+                    lecture_video_dual_text_mode=lecture_video_dual_text_mode,
                 )
 
                 async def _tts_receive_audio(
@@ -3913,6 +3960,21 @@ async def run_response(
 
                 async def _tts_finish_input() -> None:
                     if _tts_sanitizer and _tts_chunker and _tts_client:
+                        if _tts_say_transformer:
+                            transformed_remaining = _tts_say_transformer.flush()
+                            if transformed_remaining:
+                                for chunk in _tts_sanitizer.add(transformed_remaining):
+                                    try:
+                                        tts_chunks = _tts_chunker.add(chunk)
+                                        for tts_chunk in tts_chunks:
+                                            await _tts_client.send_text(
+                                                tts_chunk,
+                                            )
+                                    except Exception:
+                                        logger.warning(
+                                            "TTS final say flush failed",
+                                            exc_info=True,
+                                        )
                         remaining = _tts_sanitizer.flush()
                         if remaining:
                             try:
@@ -4044,18 +4106,24 @@ async def run_response(
                                 await handler.on_output_text_delta(event)
                                 # Feed text to TTS accumulator
                                 if _tts_sanitizer and _tts_chunker and _tts_client:
-                                    for chunk in _tts_sanitizer.add(event.delta):
-                                        try:
-                                            tts_chunks = _tts_chunker.add(chunk)
-                                            for tts_chunk in tts_chunks:
-                                                await _tts_client.send_text(
-                                                    tts_chunk,
+                                    tts_delta = (
+                                        _tts_say_transformer.add(event.delta)
+                                        if _tts_say_transformer
+                                        else event.delta
+                                    )
+                                    if tts_delta:
+                                        for chunk in _tts_sanitizer.add(tts_delta):
+                                            try:
+                                                tts_chunks = _tts_chunker.add(chunk)
+                                                for tts_chunk in tts_chunks:
+                                                    await _tts_client.send_text(
+                                                        tts_chunk,
+                                                    )
+                                            except Exception:
+                                                logger.warning(
+                                                    "TTS send_text failed",
+                                                    exc_info=True,
                                                 )
-                                        except Exception:
-                                            logger.warning(
-                                                "TTS send_text failed",
-                                                exc_info=True,
-                                            )
                             case "response.output_text.annotation.added":
                                 match event.annotation["type"]:
                                     case "container_file_citation":
@@ -4586,19 +4654,12 @@ def format_instructions(
     disable_prompt_randomization: bool = False,
     thread_id: str | None = None,
     user_id: int | None = None,
+    lecture_video_mode: bool = False,
 ) -> str:
     """Format instructions for a prompt."""
 
     if use_latex:
-        instructions += (
-            "\n\n"
-            "---Formatting: LaTeX---\n"
-            "Use LaTeX with math mode delimiters when outputting "
-            "mathematical tokens. Use the single dollar sign $ with spaces "
-            "surrounding it to delimit "
-            "inline math. For block-level math, use double dollar signs $$ "
-            "with newlines before and after them as the opening and closing "
-            "delimiter. Do not use LaTeX inside backticks.\n\n"
+        diagram_formatting_instructions = (
             "---Formatting: Mermaid---\n"
             "When a diagram would make the answer clearer, use Mermaid. "
             "Wrap Mermaid diagrams in fenced code blocks with the language "
@@ -4622,6 +4683,71 @@ def format_instructions(
             "foreignObject, or external assets inside SVG. Prefer simple inline "
             "styles or attributes and include a viewBox."
         )
+        if lecture_video_mode:
+            instructions += (
+                "\n\n"
+                "---Formatting: Lecture Video LaTeX---\n"
+                "Before producing the final answer, check whether any part of it "
+                "contains math, symbols, formulas, special characters, "
+                "notation, or any text that should be spoken differently from "
+                "how it should be displayed. If it does, you MUST emit that part "
+                "as a private-use `say` snippet.\n"
+                "Use the `display` value for what the student should read. In "
+                "`display`, use the single dollar sign $ with spaces surrounding "
+                "it for inline math. For block-level math, use double dollar "
+                "signs $$ with newlines before and after them as the opening and "
+                "closing delimiter. Do not use LaTeX inside backticks.\n"
+                "Use the `speech` value for what the student should hear, written "
+                "as natural spoken language.\n"
+                "Do not output raw $...$ or $$...$$ math directly in normal "
+                "lecture-video answers. Do not output raw symbolic tokens like "
+                "variable names, operators, equations, inequalities, units, "
+                "abbreviations, or notation directly when their spoken form "
+                "differs from their written form. This includes short "
+                "single-symbol math like $a$ or $c$. Only leave text outside "
+                "a `say` snippet when the visible text is already exactly "
+                "natural and correct for speech as written.\n"
+                "Use a `say` snippet for math, symbols, formulas, special "
+                "characters, abbreviations, notation, or any text that should be "
+                "spelled out for speech but displayed differently for reading.\n"
+                "Use exactly this format, with U+E200 before `say`, U+E202 before "
+                "the JSON payload, and U+E201 after the JSON payload:\n"
+                '\ue200say\ue202{"speech":"a squared plus b squared equals c squared",'
+                '"display":"$$\\na^2 + b^2 = c^2\\n$$"}\ue201\n'
+                "The JSON payload must be valid and compact. `speech` is what the "
+                "student should hear. `display` is the exact text the student "
+                "should read, using the LaTeX, symbol, or normal text formatting "
+                "rules above.\n"
+                "Incorrect: They have written $ 10a + 5c $ and ask whether it "
+                "becomes $ 15ac $.\n"
+                "Correct: They have written "
+                '\ue200say\ue202{"speech":"ten a plus five c",'
+                '"display":"$ 10a + 5c $"}\ue201'
+                " and ask whether it becomes "
+                '\ue200say\ue202{"speech":"fifteen a c",'
+                '"display":"$ 15ac $"}\ue201.\n'
+                "Incorrect: One has $a$, the other has $c$.\n"
+                "Correct: One has "
+                '\ue200say\ue202{"speech":"a","display":"$a$"}\ue201'
+                ", the other has "
+                '\ue200say\ue202{"speech":"c","display":"$c$"}\ue201.\n'
+                "If you are deciding between raw LaTeX and a `say` snippet "
+                "in a lecture-video response, choose the `say` snippet.\n"
+                "Do not mention the snippet syntax to the user.\n\n"
+                + diagram_formatting_instructions
+            )
+        else:
+            instructions += (
+                "\n\n"
+                "---Formatting: LaTeX---\n"
+                "Use LaTeX with math mode delimiters when outputting "
+                "mathematical tokens. Use the single dollar sign $ with spaces "
+                "surrounding it to delimit "
+                "inline math. For block-level math, use double dollar signs $$ "
+                "with newlines before and after them as the opening and closing "
+                "delimiter. Do not use LaTeX inside backticks.\n\n"
+                + diagram_formatting_instructions
+            )
 
     if use_image_descriptions:
         instructions += (
@@ -4987,8 +5113,14 @@ async def export_threads_multiple_classes(
                                 break
                             after = messages.data[-1].id
                     elif thread.version == 3:
+                        display_say_snippets = (
+                            thread.interaction_mode == InteractionMode.LECTURE_VIDEO
+                        )
                         export_rows = await list_export_rows_v3(
-                            session, thread.id, file_names
+                            session,
+                            thread.id,
+                            file_names,
+                            display_say_snippets=display_say_snippets,
                         )
 
                         for role, created_at, content in export_rows:
@@ -5216,8 +5348,14 @@ async def export_class_threads(
                             break
                         after = messages.data[-1].id
                 elif thread.version == 3:
+                    display_say_snippets = (
+                        thread.interaction_mode == InteractionMode.LECTURE_VIDEO
+                    )
                     export_rows = await list_export_rows_v3(
-                        session, thread.id, file_names
+                        session,
+                        thread.id,
+                        file_names,
+                        display_say_snippets=display_say_snippets,
                     )
 
                     for role, created_at, content in export_rows:
@@ -5355,11 +5493,36 @@ def _format_message_uploads_v3(message: models.Message) -> str | None:
     return "\n".join(lines)
 
 
+def _export_message_part_text_v3(
+    message: models.Message,
+    part: models.MessagePart,
+    file_names: dict[str, str],
+    class_id: int,
+    thread_id: int,
+    display_say_snippets: bool,
+) -> str:
+    text = replace_annotations_in_text_v3(
+        part=part,
+        file_names=file_names,
+        class_id=class_id,
+        thread_id=thread_id,
+        message_id=message.id,
+    )
+    if (
+        display_say_snippets
+        and message.role == MessageRole.ASSISTANT
+        and part.type == MessagePartType.OUTPUT_TEXT
+    ):
+        return transform_say_text(text, "display")
+    return text
+
+
 def process_message_content_v3(
     message: models.Message,
     file_names: dict[str, str],
     class_id: int,
     thread_id: int,
+    display_say_snippets: bool = False,
 ) -> str:
     """Process message content for CSV export. The end result is a single string with all the content combined.
     Images are replaced with their file names, and text is extracted from the content parts.
@@ -5370,12 +5533,13 @@ def process_message_content_v3(
         match part.type:
             case MessagePartType.INPUT_TEXT:
                 processed_content.append(
-                    replace_annotations_in_text_v3(
-                        part=part,
-                        file_names=file_names,
-                        class_id=class_id,
-                        thread_id=thread_id,
-                        message_id=message.id,
+                    _export_message_part_text_v3(
+                        message,
+                        part,
+                        file_names,
+                        class_id,
+                        thread_id,
+                        display_say_snippets,
                     )
                 )
             case MessagePartType.INPUT_IMAGE:
@@ -5384,12 +5548,13 @@ def process_message_content_v3(
                 )
             case MessagePartType.OUTPUT_TEXT:
                 processed_content.append(
-                    replace_annotations_in_text_v3(
-                        part=part,
-                        file_names=file_names,
-                        class_id=class_id,
-                        thread_id=thread_id,
-                        message_id=message.id,
+                    _export_message_part_text_v3(
+                        message,
+                        part,
+                        file_names,
+                        class_id,
+                        thread_id,
+                        display_say_snippets,
                     )
                 )
             case MessagePartType.REFUSAL:
@@ -5640,6 +5805,7 @@ def build_export_rows_v3(
     class_id: int,
     thread_id: int,
     file_names: dict[str, str],
+    display_say_snippets: bool = False,
 ) -> list[tuple[str, datetime, str]]:
     rows: list[tuple[int, datetime, str, str]] = []
 
@@ -5649,7 +5815,13 @@ def build_export_rows_v3(
                 message.output_index,
                 message.created,
                 _enum_value(message.role),
-                process_message_content_v3(message, file_names, class_id, thread_id),
+                process_message_content_v3(
+                    message,
+                    file_names,
+                    class_id,
+                    thread_id,
+                    display_say_snippets=display_say_snippets,
+                ),
             )
         )
 
@@ -5678,7 +5850,10 @@ def build_export_rows_v3(
 
 
 async def list_export_rows_v3(
-    session: AsyncSession, thread_id: int, file_names: dict[str, str]
+    session: AsyncSession,
+    thread_id: int,
+    file_names: dict[str, str],
+    display_say_snippets: bool = False,
 ) -> list[tuple[str, datetime, str]]:
     messages = [
         message
@@ -5704,6 +5879,7 @@ async def list_export_rows_v3(
         thread.class_id,
         thread_id,
         file_names,
+        display_say_snippets=display_say_snippets,
     )
 
 

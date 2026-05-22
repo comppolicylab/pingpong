@@ -317,12 +317,14 @@ _MARKDOWN_CODE_RE = re.compile(r"`([^`]+)`")
 _MARKDOWN_STRIKE_RE = re.compile(r"~~(.*?)~~")
 _MARKDOWN_STRONG_RE = re.compile(r"(\*\*|__)(.*?)\1")
 _MARKDOWN_EMPHASIS_RE = re.compile(r"(?<!\w)(\*|_)([^*_]+?)\1(?!\w)")
+_MARKDOWN_LATEX_BLOCK_RE = re.compile(r"\$\$\s*([\s\S]*?)\s*\$\$")
+_MARKDOWN_LATEX_INLINE_RE = re.compile(r"\$\s*([^$\n]+?)\s*\$")
 _MARKDOWN_AUTOLINK_START_RE = re.compile(r"<(?:https?|mailto):", re.IGNORECASE)
 _MARKDOWN_WHITESPACE_RE = re.compile(r"[ \t]+")
 _MARKDOWN_BLANK_LINES_RE = re.compile(r"\n{3,}")
 
 
-def strip_markdown_for_tts(text: str) -> str:
+def strip_markdown_for_tts(text: str, *, strip_latex_delimiters: bool = False) -> str:
     """Reduce common Markdown formatting to cleaner spoken text."""
     if not text:
         return ""
@@ -347,6 +349,13 @@ def strip_markdown_for_tts(text: str) -> str:
     )
     plain_text = _MARKDOWN_STRONG_RE.sub(lambda match: match.group(2), plain_text)
     plain_text = _MARKDOWN_EMPHASIS_RE.sub(lambda match: match.group(2), plain_text)
+    if strip_latex_delimiters:
+        plain_text = _MARKDOWN_LATEX_BLOCK_RE.sub(
+            lambda match: match.group(1).strip(), plain_text
+        )
+        plain_text = _MARKDOWN_LATEX_INLINE_RE.sub(
+            lambda match: match.group(1).strip(), plain_text
+        )
     plain_text = plain_text.replace("```", "")
     plain_text = plain_text.replace("`", "")
     plain_text = plain_text.replace("![", "")
@@ -368,8 +377,9 @@ class StreamingMarkdownSanitizer:
     Plain prose is passed through as soon as it is safe to speak.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, strip_latex_delimiters: bool = False) -> None:
         self._pending = ""
+        self.strip_latex_delimiters = strip_latex_delimiters
 
     def add(self, text: str) -> list[str]:
         """Append streamed text and return any snippets safe for TTS."""
@@ -382,7 +392,9 @@ class StreamingMarkdownSanitizer:
         """Return any remaining text after best-effort markdown cleanup."""
         if not self._pending:
             return None
-        chunk = strip_markdown_for_tts(self._pending)
+        chunk = strip_markdown_for_tts(
+            self._pending, strip_latex_delimiters=self.strip_latex_delimiters
+        )
         self._pending = ""
         return chunk or None
 
@@ -392,7 +404,10 @@ class StreamingMarkdownSanitizer:
             safe_end = self._find_safe_prefix_end(self._pending)
             if safe_end <= 0:
                 break
-            chunk = strip_markdown_for_tts(self._pending[:safe_end])
+            chunk = strip_markdown_for_tts(
+                self._pending[:safe_end],
+                strip_latex_delimiters=self.strip_latex_delimiters,
+            )
             self._pending = self._pending[safe_end:]
             if chunk:
                 snippets.append(chunk)
