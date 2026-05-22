@@ -1403,6 +1403,152 @@ async def test_send_message_creates_lecture_chat_run_with_hidden_context(
 @with_institution(11, "Test Institution")
 @with_authz(
     grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
+        ("user:123", "can_view", "assistant:1"),
+    ]
+)
+async def test_lecture_video_thread_instructions_include_say_contract_only_with_latex(
+    api, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_, _lecture_video, assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+        assistant.use_latex = True
+        session.add(assistant)
+        await session.commit()
+
+    response = api.post(
+        f"/api/v1/class/{class_.id}/thread/lecture",
+        json={"assistant_id": 1, "parties": [123]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    async with db.async_session() as session:
+        thread = await models.Thread.get_by_id(session, response.json()["thread"]["id"])
+
+    assert thread is not None
+    assert "---Formatting: LaTeX---" in thread.instructions
+    assert "---Lecture Video: Spoken and Written Output---" in thread.instructions
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
+        ("user:123", "can_view", "assistant:1"),
+    ]
+)
+async def test_lecture_video_thread_instructions_omit_say_contract_without_latex(
+    api, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+
+    response = api.post(
+        f"/api/v1/class/{class_.id}/thread/lecture",
+        json={"assistant_id": 1, "parties": [123]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    async with db.async_session() as session:
+        thread = await models.Thread.get_by_id(session, response.json()["thread"]["id"])
+
+    assert thread is not None
+    assert "---Formatting: LaTeX---" not in thread.instructions
+    assert "---Lecture Video: Spoken and Written Output---" not in thread.instructions
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
+        ("user:123", "can_view", "assistant:1"),
+    ]
+)
+async def test_get_thread_transforms_lecture_video_say_history_for_latex_assistant(
+    api, config, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_, _lecture_video, assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+        assistant.use_latex = True
+        session.add(assistant)
+        await session.commit()
+
+    create_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/lecture",
+        json={"assistant_id": 1, "parties": [123]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+    thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
+
+    raw_snippet = (
+        "\ue200say\ue202"
+        '{"speech":"x squared plus y squared","display":"$ x^2 + y^2 $"}'
+        "\ue201"
+    )
+    async with db.async_session() as session:
+        run = models.Run(
+            status=schemas.RunStatus.COMPLETED,
+            thread_id=thread_id,
+            creator_id=123,
+            assistant_id=assistant.id,
+            model=assistant.model,
+        )
+        session.add(run)
+        await session.flush()
+        session.add(
+            models.Message(
+                run_id=run.id,
+                thread_id=thread_id,
+                assistant_id=assistant.id,
+                output_index=1,
+                message_status=schemas.MessageStatus.COMPLETED,
+                role=schemas.MessageRole.ASSISTANT,
+                is_hidden=False,
+                completed=datetime.now(UTC),
+                content=[
+                    models.MessagePart(
+                        part_index=0,
+                        type=schemas.MessagePartType.OUTPUT_TEXT,
+                        text="Use " + raw_snippet + ".",
+                    )
+                ],
+            )
+        )
+        await session.commit()
+
+    response = api.get(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["messages"][0]["content"][0]["text"]["value"] == (
+        "Use $ x^2 + y^2 $."
+    )
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
         ("user:123", "can_view", "assistant:1"),
         ("user:123", "can_create_thread", "class:1"),
         ("user:123", "student", "class:1"),

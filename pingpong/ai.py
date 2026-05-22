@@ -27,6 +27,7 @@ from pingpong.invite import send_export_download, send_export_failed
 from pingpong.log_utils import sanitize_for_log
 import pingpong.models as models
 from pingpong.prompt import replace_random_blocks
+from pingpong.say_transform import SayTransformer
 from pingpong.schemas import (
     APIKeyValidationResponse,
     AnnotationType,
@@ -1162,6 +1163,7 @@ class BufferedResponseStreamHandler:
         show_web_search_actions: bool | None = None,
         show_reasoning_summaries: bool | None = None,
         show_mcp_server_call_details: bool | None = None,
+        lecture_video_dual_text_mode: bool = False,
         *args,
         **kwargs,
     ):
@@ -1227,6 +1229,10 @@ class BufferedResponseStreamHandler:
             show_mcp_server_call_details
             if show_mcp_server_call_details is not None
             else True
+        )
+        self.lecture_video_dual_text_mode = lecture_video_dual_text_mode
+        self._display_say_transformer = (
+            SayTransformer("display") if lecture_video_dual_text_mode else None
         )
 
     def enqueue(self, data: Dict) -> None:
@@ -1433,24 +1439,30 @@ class BufferedResponseStreamHandler:
             await session.commit()
 
         await update_message_part_on_output_text_delta()
-        self.enqueue(
-            {
-                "type": "message_delta",
-                "delta": {
-                    "content": [
-                        {
-                            "index": 0,
-                            "type": "text",
-                            "text": {
-                                "value": data.delta,
-                                "annotations": [],
-                            },
-                        },
-                    ],
-                    "role": None,
-                },
-            }
+        display_delta = (
+            self._display_say_transformer.add(data.delta)
+            if self._display_say_transformer
+            else data.delta
         )
+        if display_delta:
+            self.enqueue(
+                {
+                    "type": "message_delta",
+                    "delta": {
+                        "content": [
+                            {
+                                "index": 0,
+                                "type": "text",
+                                "text": {
+                                    "value": display_delta,
+                                    "annotations": [],
+                                },
+                            },
+                        ],
+                        "role": None,
+                    },
+                }
+            )
 
     async def on_output_text_container_file_citation_added(
         self, data: AnnotationContainerFileCitation, annotation_index: int | None = None
@@ -1742,6 +1754,27 @@ class BufferedResponseStreamHandler:
             )
             return
 
+        if self._display_say_transformer:
+            display_delta = self._display_say_transformer.flush()
+            if display_delta:
+                self.enqueue(
+                    {
+                        "type": "message_delta",
+                        "delta": {
+                            "content": [
+                                {
+                                    "index": 0,
+                                    "type": "text",
+                                    "text": {
+                                        "value": display_delta,
+                                        "annotations": [],
+                                    },
+                                },
+                            ],
+                            "role": None,
+                        },
+                    }
+                )
         self.message_part_id = None
 
     async def on_output_message_done(self, data: ResponseOutputMessage):
@@ -3607,6 +3640,7 @@ async def run_response(
     tts_api_key: str | None = None,
     tts_voice_settings: Mapping[str, Any] | None = None,
     user_assistant_messages_only: bool = False,
+    lecture_video_dual_text_mode: bool = False,
 ):
     is_canceled = False
     await config.authz.driver.init()
@@ -3734,6 +3768,11 @@ async def run_response(
             _tts_client: ElevenLabsStreamingTTS | None = None
             _tts_sanitizer = StreamingMarkdownSanitizer() if _tts_enabled else None
             _tts_chunker = StreamingTTSChunker() if _tts_enabled else None
+            _tts_say_transformer = (
+                SayTransformer("speech")
+                if _tts_enabled and lecture_video_dual_text_mode
+                else None
+            )
             _tts_audio_task: asyncio.Task | None = None
             _tts_audio_done = asyncio.Event()
             _tts_audio_ready = asyncio.Event()
@@ -3854,6 +3893,7 @@ async def run_response(
                     anonymous_link_auth=anonymous_link_auth,
                     anonymous_session_id=anonymous_session_id,
                     anonymous_link_id=anonymous_link_id,
+                    lecture_video_dual_text_mode=lecture_video_dual_text_mode,
                 )
 
                 async def _tts_receive_audio(
@@ -3913,6 +3953,21 @@ async def run_response(
 
                 async def _tts_finish_input() -> None:
                     if _tts_sanitizer and _tts_chunker and _tts_client:
+                        if _tts_say_transformer:
+                            transformed_remaining = _tts_say_transformer.flush()
+                            if transformed_remaining:
+                                for chunk in _tts_sanitizer.add(transformed_remaining):
+                                    try:
+                                        tts_chunks = _tts_chunker.add(chunk)
+                                        for tts_chunk in tts_chunks:
+                                            await _tts_client.send_text(
+                                                tts_chunk,
+                                            )
+                                    except Exception:
+                                        logger.warning(
+                                            "TTS final say flush failed",
+                                            exc_info=True,
+                                        )
                         remaining = _tts_sanitizer.flush()
                         if remaining:
                             try:
@@ -4044,7 +4099,12 @@ async def run_response(
                                 await handler.on_output_text_delta(event)
                                 # Feed text to TTS accumulator
                                 if _tts_sanitizer and _tts_chunker and _tts_client:
-                                    for chunk in _tts_sanitizer.add(event.delta):
+                                    tts_delta = (
+                                        _tts_say_transformer.add(event.delta)
+                                        if _tts_say_transformer
+                                        else event.delta
+                                    )
+                                    for chunk in _tts_sanitizer.add(tts_delta):
                                         try:
                                             tts_chunks = _tts_chunker.add(chunk)
                                             for tts_chunk in tts_chunks:
@@ -4586,6 +4646,7 @@ def format_instructions(
     disable_prompt_randomization: bool = False,
     thread_id: str | None = None,
     user_id: int | None = None,
+    lecture_video_mode: bool = False,
 ) -> str:
     """Format instructions for a prompt."""
 
@@ -4622,6 +4683,43 @@ def format_instructions(
             "foreignObject, or external assets inside SVG. Prefer simple inline "
             "styles or attributes and include a viewBox."
         )
+        if lecture_video_mode:
+            instructions += (
+                "\n\n"
+                "---Lecture Video: Spoken and Written Output---\n"
+                "This section overrides the general LaTeX formatting rule above "
+                "for lecture-video responses. The response will be spoken aloud, "
+                "so any inline or block math that would be awkward, ambiguous, or "
+                "incorrect when read aloud MUST be emitted as a private-use `say` "
+                "snippet instead of raw LaTeX. Do not output raw $...$ or $$...$$ "
+                "math directly, including short single-symbol math like $a$ or "
+                "$c$, unless the visible math is also exactly natural for speech.\n"
+                "Use a `say` snippet for math, symbols, formulas, special "
+                "characters, abbreviations, notation, or any text that should be "
+                "spelled out for speech but displayed differently for reading.\n"
+                "Use exactly this format, with U+E200 before `say`, U+E202 before "
+                "the JSON payload, and U+E201 after the JSON payload:\n"
+                '\ue200say\ue202{"speech":"a squared plus b squared equals c squared",'
+                '"display":"$$\\na^2 + b^2 = c^2\\n$$"}\ue201\n'
+                "The JSON payload must be valid and compact. `speech` is what the "
+                "student should hear. `display` is the exact text the student "
+                "should read, using the LaTeX, symbol, or normal text formatting "
+                "rules above.\n"
+                "Incorrect: They have written $ 10a + 5c $ and ask whether it "
+                "becomes $ 15ac $.\n"
+                "Correct: They have written "
+                '\ue200say\ue202{"speech":"ten a plus five c",'
+                '"display":"$ 10a + 5c $"}\ue201'
+                " and ask whether it becomes "
+                '\ue200say\ue202{"speech":"fifteen a c",'
+                '"display":"$ 15ac $"}\ue201.\n'
+                "Incorrect: One has $a$, the other has $c$.\n"
+                "Correct: One has "
+                '\ue200say\ue202{"speech":"a","display":"$a$"}\ue201'
+                ", the other has "
+                '\ue200say\ue202{"speech":"c","display":"$c$"}\ue201.\n'
+                "Do not mention the snippet syntax to the user."
+            )
 
     if use_image_descriptions:
         instructions += (

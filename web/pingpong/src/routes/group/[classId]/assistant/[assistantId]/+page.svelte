@@ -1710,6 +1710,9 @@
 		} else if (mode === 'lecture_video') {
 			forcedAssistantVersion = 3;
 			convertToNextGen = null;
+			if (assistant?.interaction_mode !== 'lecture_video') {
+				useLatex = true;
+			}
 		} else {
 			forcedAssistantVersion = null;
 		}
@@ -2249,9 +2252,7 @@
 			video_description_duration_ms: isLectureMode ? videoDescriptionDurationMs : undefined,
 			overwrite_manifest: isLectureMode ? overwriteManifest : undefined,
 			published: body.published?.toString() === 'on',
-			use_latex: isLectureMode
-				? (assistant?.use_latex ?? false)
-				: body.use_latex?.toString() === 'on',
+			use_latex: isLectureMode ? useLatex : body.use_latex?.toString() === 'on',
 			use_image_descriptions: isLectureMode
 				? (assistant?.use_image_descriptions ?? false)
 				: body.use_image_descriptions?.toString() === 'on',
@@ -2560,7 +2561,7 @@
 
 		const result = await api.previewAssistantInstructions(fetch, data.class.id, {
 			instructions,
-			use_latex: interactionMode === 'lecture_video' ? (assistant?.use_latex ?? false) : useLatex,
+			use_latex: useLatex,
 			disable_prompt_randomization: disablePromptRandomization
 		});
 		const expanded = api.expandResponse(result);

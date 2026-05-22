@@ -94,6 +94,7 @@ from pingpong.lti.lti_course import (
     find_class_by_course_id_search_by_canvas_account_lti_guid,
 )
 from pingpong.realtime import browser_realtime_websocket
+from pingpong.say_transform import transform_say_text
 from pingpong.session import populate_request
 from pingpong.stats import (
     get_runs_with_multiple_assistant_messages_stats,
@@ -339,6 +340,26 @@ def _lecture_video_matches_assistant(
         and thread.lecture_video_id is not None
         and assistant.lecture_video_id == thread.lecture_video_id
     )
+
+
+def _lecture_video_dual_text_enabled(
+    thread: models.Thread, assistant: models.Assistant | None
+) -> bool:
+    return (
+        thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
+        and assistant is not None
+        and assistant.use_latex
+    )
+
+
+def _display_text_for_thread(
+    thread: models.Thread, assistant: models.Assistant | None, text: str | None
+) -> str | None:
+    if text is None:
+        return None
+    if not _lecture_video_dual_text_enabled(thread, assistant):
+        return text
+    return transform_say_text(text, "display")
 
 
 async def _lecture_video_availability(
@@ -4401,7 +4422,9 @@ async def get_thread(
                             schemas.ThreadTextContentBlock(
                                 type="text",
                                 text=schemas.ThreadText(
-                                    value=content.text,
+                                    value=_display_text_for_thread(
+                                        thread, assistant, content.text
+                                    ),
                                     annotations=_annotations,
                                 ),
                             )
@@ -6244,7 +6267,9 @@ async def list_thread_messages(
                             schemas.ThreadTextContentBlock(
                                 type="text",
                                 text=schemas.ThreadText(
-                                    value=content.text,
+                                    value=_display_text_for_thread(
+                                        thread, assistant, content.text
+                                    ),
                                     annotations=_annotations,
                                 ),
                             )
@@ -6979,6 +7004,7 @@ async def create_lecture_thread(
             disable_prompt_randomization=assistant.disable_prompt_randomization,
             thread_id=result.id,
             user_id=request.state["session"].user.id,
+            lecture_video_mode=True,
         )
         request.state["db"].add(result)
         await request.state["db"].flush()
@@ -7585,6 +7611,10 @@ async def create_run(
                         disable_prompt_randomization=asst.disable_prompt_randomization,
                         thread_id=str(thread.id),
                         user_id=request.state["session"].user.id,
+                        lecture_video_mode=(
+                            thread.interaction_mode
+                            == schemas.InteractionMode.LECTURE_VIDEO
+                        ),
                     )
                     request.state["db"].add(thread)
                     await request.state["db"].flush()
@@ -7695,6 +7725,9 @@ async def create_run(
                 or not asst.hide_web_search_actions,
                 show_mcp_server_call_details=is_supervisor
                 or not asst.hide_mcp_server_call_details,
+                lecture_video_dual_text_mode=_lecture_video_dual_text_enabled(
+                    thread, asst
+                ),
             )
         except Exception as e:
             logger.exception("Error running thread")
@@ -8017,6 +8050,9 @@ async def send_message(
                 disable_prompt_randomization=asst.disable_prompt_randomization,
                 thread_id=thread.thread_id or str(thread.id),
                 user_id=request.state["session"].user.id,
+                lecture_video_mode=(
+                    thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
+                ),
             )
             request.state["db"].add(thread)
             await request.state["db"].flush()
@@ -8291,6 +8327,9 @@ async def send_message(
                 tts_voice_id=tts_voice_id,
                 tts_api_key=tts_api_key,
                 tts_voice_settings=tts_voice_settings,
+                lecture_video_dual_text_mode=_lecture_video_dual_text_enabled(
+                    thread, asst
+                ),
                 user_assistant_messages_only=(
                     lecture_chat_prep.user_assistant_messages_only
                     if lecture_chat_prep is not None

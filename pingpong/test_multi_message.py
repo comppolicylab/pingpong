@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 import importlib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import orjson
 import pytest
 from sqlalchemy import select
 
@@ -84,6 +86,248 @@ async def _create_handler_context(
         assistant_id=assistant_id,
         user_id=user_id,
     )
+
+
+async def test_dual_text_stream_handler_stores_raw_say_snippet_and_streams_display(
+    db,
+):
+    handler = await _create_handler_context(
+        db,
+        user_id=9003,
+        email="dual-text@test.dev",
+        class_id=3003,
+        class_name="Dual Text Class",
+        assistant_id=6003,
+        assistant_name="Dual Text Assistant",
+        assistant_external_id="asst-dual-text",
+        model="gpt-4o-mini",
+        thread_id=4003,
+        thread_external_id="thread-dual-text",
+        run_id=5003,
+        run_external_id="run-dual-text",
+    )
+    handler.lecture_video_dual_text_mode = True
+    handler._display_say_transformer = ai_module.SayTransformer("display")
+    await handler.on_output_message_created(
+        SimpleNamespace(
+            id="msg-dual-text",
+            status=schemas.MessageStatus.IN_PROGRESS.value,
+            role="assistant",
+        )
+    )
+    await handler.on_output_text_part_created(
+        SimpleNamespace(type="output_text", text="")
+    )
+    message_part_id = handler.message_part_id
+    assert message_part_id is not None
+
+    raw_snippet = (
+        "\ue200say\ue202"
+        '{"speech":"x squared plus y squared","display":"$ x^2 + y^2 $"}'
+        "\ue201"
+    )
+    await handler.on_output_text_delta(SimpleNamespace(delta="Use " + raw_snippet[:12]))
+    await handler.on_output_text_delta(SimpleNamespace(delta=raw_snippet[12:] + "."))
+    await handler.on_output_text_part_done(SimpleNamespace(type="output_text", text=""))
+
+    async with db.async_session() as session:
+        saved_part = await session.get(models.MessagePart, message_part_id)
+
+    assert saved_part is not None
+    assert saved_part.text == "Use " + raw_snippet + "."
+
+    events = [
+        orjson.loads(line) for line in handler.flush().splitlines() if line.strip()
+    ]
+    streamed_text = "".join(
+        event["delta"]["content"][0]["text"]["value"]
+        for event in events
+        if event["type"] == "message_delta"
+    )
+    assert streamed_text == "Use $ x^2 + y^2 $."
+    assert "\ue200" not in streamed_text
+
+
+async def test_run_response_sends_say_speech_text_to_tts(db, monkeypatch):
+    sent_tts_text: list[tuple[str, bool, bool]] = []
+
+    class FakeTTS:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def connect(self):
+            pass
+
+        async def receive_audio(self):
+            if False:
+                yield ""
+
+        async def send_text(
+            self,
+            text: str,
+            *,
+            try_trigger_generation: bool = True,
+            flush: bool = False,
+        ):
+            sent_tts_text.append((text, try_trigger_generation, flush))
+
+        async def close_input(self):
+            pass
+
+        async def cleanup(self):
+            pass
+
+    class FakeResponseStream:
+        def __init__(self, events):
+            self._events = iter(events)
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            try:
+                return next(self._events)
+            except StopIteration:
+                raise StopAsyncIteration
+
+    class FakeAuthzDriver:
+        async def init(self):
+            pass
+
+        @asynccontextmanager
+        async def get_client(self):
+            yield AsyncMock()
+
+    raw_snippet = (
+        "\ue200say\ue202"
+        '{"speech":"x squared plus y squared.","display":"$ x^2 + y^2 $"}'
+        "\ue201"
+    )
+    events = [
+        SimpleNamespace(
+            type="response.created",
+            response=SimpleNamespace(id="resp-dual-text", status="in_progress"),
+        ),
+        SimpleNamespace(
+            type="response.output_item.added",
+            item=SimpleNamespace(
+                type="message",
+                id="msg-dual-text-run",
+                status=schemas.MessageStatus.IN_PROGRESS.value,
+                role="assistant",
+            ),
+        ),
+        SimpleNamespace(
+            type="response.content_part.added",
+            part=SimpleNamespace(type="output_text", text=""),
+        ),
+        SimpleNamespace(type="response.output_text.delta", delta="Use " + raw_snippet),
+        SimpleNamespace(
+            type="response.content_part.done",
+            part=SimpleNamespace(type="output_text", text=""),
+        ),
+        SimpleNamespace(
+            type="response.output_item.done",
+            item=SimpleNamespace(
+                type="message",
+                id="msg-dual-text-run",
+                status=schemas.MessageStatus.COMPLETED.value,
+                role="assistant",
+            ),
+        ),
+        SimpleNamespace(
+            type="response.completed",
+            response=SimpleNamespace(
+                status=schemas.RunStatus.COMPLETED.value,
+                error=None,
+                incomplete_details=None,
+                output=[],
+            ),
+        ),
+    ]
+    fake_client = SimpleNamespace(
+        responses=SimpleNamespace(
+            create=AsyncMock(return_value=FakeResponseStream(events))
+        )
+    )
+    monkeypatch.setattr(ai_module, "ElevenLabsStreamingTTS", FakeTTS)
+    monkeypatch.setattr(ai_module.config.authz, "driver", FakeAuthzDriver())
+
+    base_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    async with db.async_session() as session:
+        class_ = models.Class(id=3004, name="Dual Text TTS Class", api_key="sk-test")
+        user = models.User(
+            id=9004,
+            email="dual-text-tts@test.dev",
+            state=schemas.UserState.VERIFIED,
+        )
+        assistant = models.Assistant(
+            id=6004,
+            name="Dual Text TTS Assistant",
+            class_id=3004,
+            assistant_id="asst-dual-text-tts",
+            model="gpt-4o-mini",
+            creator_id=9004,
+        )
+        thread = models.Thread(
+            id=4004,
+            thread_id="thread-dual-text-tts",
+            class_id=3004,
+            assistant_id=6004,
+            version=3,
+            tools_available="",
+            private=False,
+        )
+        run = models.Run(
+            id=5004,
+            run_id="run-dual-text-tts",
+            status=schemas.RunStatus.QUEUED,
+            thread_id=4004,
+            assistant_id=6004,
+            creator_id=9004,
+            model="gpt-4o-mini",
+            created=base_time,
+            updated=base_time,
+        )
+        session.add_all([class_, user, assistant, thread, run])
+        await session.commit()
+
+    chunks = []
+    async for chunk in ai_module.run_response(
+        fake_client,
+        run=run,
+        class_id="3004",
+        tts_voice_id="voice-id",
+        tts_api_key="tts-key",
+        lecture_video_dual_text_mode=True,
+    ):
+        chunks.append(chunk)
+
+    spoken_text = "".join(text for text, _, _ in sent_tts_text)
+    assert "Use x squared plus y squared." in spoken_text
+    assert all("\ue200" not in text for text, _, _ in sent_tts_text)
+    streamed_events = [
+        orjson.loads(line)
+        for chunk in chunks
+        for line in chunk.splitlines()
+        if line.strip()
+    ]
+    streamed_text = "".join(
+        event["delta"]["content"][0]["text"]["value"]
+        for event in streamed_events
+        if event["type"] == "message_delta"
+    )
+    assert streamed_text == "Use $ x^2 + y^2 $"
+
+    async with db.async_session() as session:
+        saved_part = await session.scalar(
+            select(models.MessagePart).where(
+                models.MessagePart.type == schemas.MessagePartType.OUTPUT_TEXT
+            )
+        )
+
+    assert saved_part is not None
+    assert saved_part.text == "Use " + raw_snippet
 
 
 async def _setup_handler_with_initial_message(db):

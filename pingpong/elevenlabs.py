@@ -317,6 +317,8 @@ _MARKDOWN_CODE_RE = re.compile(r"`([^`]+)`")
 _MARKDOWN_STRIKE_RE = re.compile(r"~~(.*?)~~")
 _MARKDOWN_STRONG_RE = re.compile(r"(\*\*|__)(.*?)\1")
 _MARKDOWN_EMPHASIS_RE = re.compile(r"(?<!\w)(\*|_)([^*_]+?)\1(?!\w)")
+_MARKDOWN_LATEX_BLOCK_RE = re.compile(r"\$\$\s*([\s\S]*?)\s*\$\$")
+_MARKDOWN_LATEX_INLINE_RE = re.compile(r"\$\s*([^$\n]+?)\s*\$")
 _MARKDOWN_AUTOLINK_START_RE = re.compile(r"<(?:https?|mailto):", re.IGNORECASE)
 _MARKDOWN_WHITESPACE_RE = re.compile(r"[ \t]+")
 _MARKDOWN_BLANK_LINES_RE = re.compile(r"\n{3,}")
@@ -347,6 +349,12 @@ def strip_markdown_for_tts(text: str) -> str:
     )
     plain_text = _MARKDOWN_STRONG_RE.sub(lambda match: match.group(2), plain_text)
     plain_text = _MARKDOWN_EMPHASIS_RE.sub(lambda match: match.group(2), plain_text)
+    plain_text = _MARKDOWN_LATEX_BLOCK_RE.sub(
+        lambda match: match.group(1).strip(), plain_text
+    )
+    plain_text = _MARKDOWN_LATEX_INLINE_RE.sub(
+        lambda match: match.group(1).strip(), plain_text
+    )
     plain_text = plain_text.replace("```", "")
     plain_text = plain_text.replace("`", "")
     plain_text = plain_text.replace("![", "")

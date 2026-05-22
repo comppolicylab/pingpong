@@ -1519,6 +1519,15 @@ def test_strip_markdown_for_tts_removes_common_markdown_formatting():
     )
 
 
+def test_strip_markdown_for_tts_removes_latex_math_delimiters():
+    assert (
+        elevenlabs_module.strip_markdown_for_tts(
+            "One has $a$, the other has $c$. Also $$\n10a + 5c\n$$."
+        )
+        == "One has a, the other has c. Also 10a + 5c."
+    )
+
+
 def test_streaming_markdown_sanitizer_sanitizes_markdown_across_streamed_deltas():
     sanitizer = elevenlabs_module.StreamingMarkdownSanitizer()
 
