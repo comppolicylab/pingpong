@@ -4781,6 +4781,24 @@ def format_instructions(
                 '\ue200say\ue202{"speech":"a","display":"$a$"}\ue201'
                 ", the other has "
                 '\ue200say\ue202{"speech":"c","display":"$c$"}\ue201.\n'
+                "When you output a Mermaid or SVG fenced code block in a "
+                "lecture-video response, you MUST wrap the entire fenced code "
+                "block in a `say` snippet. The `speech` value should be a short, "
+                "natural description of what the diagram shows, not the code. "
+                "The `display` value should be the exact fenced code block the "
+                "student should see. Use escaped newlines in the JSON string.\n"
+                "Correct Mermaid diagram:\n"
+                '\ue200say\ue202{"speech":"Here is a simple flow from input to '
+                'output.","display":"```mermaid\\ngraph TD\\n    A[Input] --> '
+                'B[Output]\\n```"}\ue201\n'
+                "Correct SVG diagram:\n"
+                '\ue200say\ue202{"speech":"Here is a simple yellow circle.",'
+                '"display":"```svg\\n<svg xmlns=\'http://www.w3.org/2000/svg\' '
+                "viewBox='0 0 100 100'>\\n  <circle cx='50' cy='50' r='40' "
+                "fill='gold'/>\\n</svg>\\n```\"}\ue201\n"
+                "If Mermaid or SVG contains labels, formulas, symbols, or "
+                "notation, the spoken description must include the natural "
+                "spoken form of those labels or symbols.\n"
                 "If you are deciding between raw LaTeX and a `say` snippet "
                 "in a lecture-video response, choose the `say` snippet.\n"
                 "Do not mention the snippet syntax to the user.\n\n"
