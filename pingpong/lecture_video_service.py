@@ -390,6 +390,7 @@ def _webvtt_timestamp(offset_ms: int) -> str:
 
 
 def _escape_webvtt_text(text: str) -> str:
+    # Collapse all whitespace, including newlines, before applying WebVTT escaping.
     return (
         " ".join(text.split())
         .replace("&", "&amp;")
@@ -585,8 +586,10 @@ def _question_stop_offsets_from_model(
     inspection = inspect(lecture_video, raiseerr=False)
     unloaded = inspection.unloaded if inspection is not None else set()
     if "questions" in unloaded:
-        # Callers that need question-aligned cue boundaries must preload questions.
-        return []
+        raise RuntimeError(
+            "LectureVideo.questions must be loaded before generating caption "
+            f"splits. Preload questions for lecture_video_id={lecture_video.id}."
+        )
     return [question.stop_offset_ms for question in lecture_video.questions]
 
 
@@ -1058,11 +1061,15 @@ async def _persist_caption_artifact(
         )
         old_store_key = old_stored_object.key if old_stored_object else None
 
+    if not transcript:
+        lecture_video.caption_stored_object_id = None
+        lecture_video.caption_stored_object = None
+        return old_stored_object_id, old_store_key, None
+    if not config.video_store:
+        return None, None, None
+
     lecture_video.caption_stored_object_id = None
     lecture_video.caption_stored_object = None
-
-    if not transcript or not config.video_store:
-        return old_stored_object_id, old_store_key, None
 
     caption_text = lecture_video_words_to_webvtt(
         transcript,
@@ -1127,6 +1134,9 @@ async def persist_caption_artifact_for_lecture_video(
             old_store_key,
         )
     except Exception:
+        # If old caption deletion has already happened and the outer transaction
+        # later rolls back, the recovery path is to regenerate captions by
+        # re-running the caption backfill or re-persisting the manifest.
         if uploaded_caption_key and config.video_store:
             try:
                 await config.video_store.store.delete(uploaded_caption_key)

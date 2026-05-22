@@ -584,7 +584,7 @@ def _existing_manifest_transcript(
     lecture_video: models.LectureVideo,
 ) -> list[schemas.LectureVideoManifestWordV3] | None:
     transcript_data = lecture_video.transcript_data
-    if transcript_data and (
+    if transcript_data is not None and (
         not isinstance(transcript_data, dict)
         or transcript_data.get("version")
         != lecture_video_service.TRANSCRIPT_DATA_VERSION

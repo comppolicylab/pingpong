@@ -195,15 +195,23 @@
 	let lastCaptionsSrc: string | null = null;
 
 	function getStoredCaptionsPreference(): boolean {
-		if (typeof localStorage === 'undefined') return true;
-		const storedPreference = localStorage.getItem(CAPTIONS_PREFERENCE_STORAGE_KEY);
-		if (storedPreference == null) return true;
-		return storedPreference === 'true';
+		if (typeof localStorage === 'undefined') return false;
+		try {
+			const storedPreference = localStorage.getItem(CAPTIONS_PREFERENCE_STORAGE_KEY);
+			if (storedPreference == null) return false;
+			return storedPreference === 'true';
+		} catch {
+			return false;
+		}
 	}
 
 	function storeCaptionsPreference(enabled: boolean) {
 		if (typeof localStorage === 'undefined') return;
-		localStorage.setItem(CAPTIONS_PREFERENCE_STORAGE_KEY, String(enabled));
+		try {
+			localStorage.setItem(CAPTIONS_PREFERENCE_STORAGE_KEY, String(enabled));
+		} catch {
+			// Ignore blocked or full browser storage; caption toggles should still work.
+		}
 	}
 
 	let effectiveOffsetMs = $derived(
@@ -536,6 +544,15 @@
 			}
 			if (disabled) {
 				clearQuestionPresentationHideTimeout();
+			} else if (
+				showControls &&
+				!questionPresentationHideTimeout &&
+				!pointerInsidePlayer &&
+				!draggingSeek &&
+				!draggingVolume &&
+				!seekPreviewVisible
+			) {
+				scheduleQuestionPresentationHide();
 			}
 			showVolumeSlider = false;
 			condensedMarkerMode = true;
@@ -1175,10 +1192,17 @@
 		pointerInsidePlayer = false;
 		if (hideTimeout) {
 			clearTimeout(hideTimeout);
+			hideTimeout = null;
 		}
 		clearQuestionPresentationHideTimeout();
 		hoveringLockedSeek = false;
 		hideSeekPreview();
+		if (questionPendingControls) {
+			if (!disabled && showControls) {
+				scheduleQuestionPresentationHide();
+			}
+			return;
+		}
 		showControls = false;
 	}
 
@@ -1322,10 +1346,8 @@
 			<track
 				bind:this={captionsTrackElement}
 				kind="captions"
-				srclang="en"
-				label="English"
+				label="Captions"
 				src={captionsSrc}
-				default
 				onload={syncCaptionTrackMode}
 			/>
 		{/if}

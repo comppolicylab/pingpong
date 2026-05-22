@@ -17,7 +17,7 @@ from pydantic import ValidationError
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import object_session, selectinload
+from sqlalchemy.orm import object_session, selectinload, undefer
 
 import pingpong.schemas as schemas
 from pingpong import (
@@ -516,6 +516,7 @@ def test_lecture_video_words_to_webvtt_keeps_zero_duration_words_at_split_bounda
     )
 
 
+@pytest.mark.asyncio
 @with_institution(11, "Test Institution")
 async def test_persist_manifest_creates_caption_artifact(
     db, institution, config, monkeypatch, tmp_path
@@ -564,6 +565,7 @@ async def test_persist_manifest_creates_caption_artifact(
     )
 
 
+@pytest.mark.asyncio
 @with_institution(11, "Test Institution")
 async def test_persist_manifest_cleans_uploaded_caption_when_row_create_fails(
     db, institution, config, monkeypatch, tmp_path
@@ -602,6 +604,120 @@ async def test_persist_manifest_cleans_uploaded_caption_when_row_create_fails(
             )
 
     assert list(tmp_path.glob("lv_caption_*.vtt")) == []
+
+
+@pytest.mark.asyncio
+@with_institution(11, "Test Institution")
+async def test_persist_caption_artifact_preserves_existing_caption_without_video_store(
+    db, institution, config, monkeypatch
+):
+    monkeypatch.setattr(config, "video_store", None)
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        caption = models.LectureVideoCaptionStoredObject(
+            key="existing-captions.vtt",
+            content_type="text/vtt",
+            content_length=18,
+        )
+        lecture_video = make_lecture_video(class_.id, "lecture.mp4")
+        lecture_video.caption_stored_object = caption
+        lecture_video.transcript_data = {
+            "version": lecture_video_service.TRANSCRIPT_DATA_VERSION,
+            "word_level_transcription": [
+                {
+                    "id": "w1",
+                    "word": "Latency",
+                    "start_offset_ms": 0,
+                    "end_offset_ms": 400,
+                }
+            ],
+        }
+        lecture_video.questions = [
+            models.LectureVideoQuestion(
+                position=0,
+                question_type=schemas.LectureVideoQuestionType.SINGLE_SELECT,
+                question_text="Question?",
+                intro_text="Intro",
+                stop_offset_ms=500,
+            )
+        ]
+        session.add_all([class_, lecture_video])
+        await session.flush()
+
+        result = await lecture_video_service.persist_caption_artifact_for_lecture_video(
+            session, lecture_video
+        )
+        await session.commit()
+
+        assert result is not None
+        assert result.id == caption.id
+        assert lecture_video.caption_stored_object_id == caption.id
+        assert (
+            await session.get(models.LectureVideoCaptionStoredObject, caption.id)
+            is not None
+        )
+
+
+@pytest.mark.asyncio
+@with_institution(11, "Test Institution")
+async def test_persist_caption_artifact_requires_loaded_questions(
+    db, institution, config, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        config,
+        "video_store",
+        LocalVideoStoreSettings(type="local", save_target=str(tmp_path)),
+    )
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        lecture_video = make_lecture_video(class_.id, "lecture.mp4")
+        lecture_video.transcript_data = {
+            "version": lecture_video_service.TRANSCRIPT_DATA_VERSION,
+            "word_level_transcription": [
+                {
+                    "id": "w1",
+                    "word": "Latency",
+                    "start_offset_ms": 0,
+                    "end_offset_ms": 400,
+                }
+            ],
+        }
+        lecture_video.questions = [
+            models.LectureVideoQuestion(
+                position=0,
+                question_type=schemas.LectureVideoQuestionType.SINGLE_SELECT,
+                question_text="Question?",
+                intro_text="Intro",
+                stop_offset_ms=500,
+            )
+        ]
+        session.add_all([class_, lecture_video])
+        await session.commit()
+        lecture_video_id = lecture_video.id
+
+    async with db.async_session() as session:
+        loaded_lecture_video = await session.get(
+            models.LectureVideo,
+            lecture_video_id,
+            options=[undefer(models.LectureVideo.transcript_data)],
+        )
+        assert loaded_lecture_video is not None
+        with pytest.raises(RuntimeError, match="questions must be loaded"):
+            await lecture_video_service.persist_caption_artifact_for_lecture_video(
+                session, loaded_lecture_video
+            )
 
 
 async def create_lecture_video_copy_credentials(
@@ -11548,6 +11664,7 @@ async def test_lecture_video_delete_deletes_unused_poster_stored_object(
     assert not (video_dir / "shared-poster.webp").exists()
 
 
+@pytest.mark.asyncio
 @with_institution(11, "Test Institution")
 async def test_lecture_video_delete_deletes_unused_caption_stored_object(
     db, institution, config, monkeypatch, tmp_path
@@ -11857,6 +11974,7 @@ async def test_lecture_thread_returns_failed_specific_message_when_lecture_video
     )
 
 
+@pytest.mark.asyncio
 @with_user(123)
 @with_institution(11, "Test Institution")
 @with_authz(
@@ -12017,7 +12135,26 @@ async def test_get_thread_lecture_video_captions_streams_vtt(
 
     assert cached_response.status_code == 304
 
+    weak_cached_response = api.get(
+        "/api/v1/class/1/thread/109/lecture-video/captions.vtt",
+        headers={
+            "Authorization": f"Bearer {valid_user_token}",
+            "If-None-Match": f"W/{response.headers['etag']}",
+        },
+    )
+    assert weak_cached_response.status_code == 304
 
+    wildcard_cached_response = api.get(
+        "/api/v1/class/1/thread/109/lecture-video/captions.vtt",
+        headers={
+            "Authorization": f"Bearer {valid_user_token}",
+            "If-None-Match": "*",
+        },
+    )
+    assert wildcard_cached_response.status_code == 304
+
+
+@pytest.mark.asyncio
 @with_user(123)
 @with_institution(11, "Test Institution")
 @with_authz(
@@ -12041,13 +12178,15 @@ async def test_get_thread_lecture_video_captions_returns_404_when_missing(
             institution_id=institution.id,
         )
         lecture_video = make_lecture_video(class_.id, "lecture-video.mp4")
+        session.add_all([class_, lecture_video])
+        await session.flush()
         assistant = models.Assistant(
             id=1,
             name="Lecture Assistant",
             class_id=class_.id,
             interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
             version=3,
-            lecture_video_id=1,
+            lecture_video_id=lecture_video.id,
         )
         thread = models.Thread(
             id=109,
@@ -12057,11 +12196,11 @@ async def test_get_thread_lecture_video_captions_returns_404_when_missing(
             class_id=class_.id,
             assistant_id=assistant.id,
             interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
-            lecture_video_id=1,
+            lecture_video_id=lecture_video.id,
             private=True,
             tools_available="[]",
         )
-        session.add_all([class_, lecture_video, assistant, thread])
+        session.add_all([assistant, thread])
         await session.commit()
 
     response = api.get(
@@ -12072,6 +12211,7 @@ async def test_get_thread_lecture_video_captions_returns_404_when_missing(
     assert response.status_code == 404
 
 
+@pytest.mark.asyncio
 @with_user(123)
 @with_institution(11, "Test Institution")
 @with_authz(

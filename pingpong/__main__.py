@@ -1036,7 +1036,10 @@ def m09_backfill_lecture_video_posters() -> None:
     "--retranscribe-batch-size",
     default=10,
     type=click.IntRange(min=1),
-    help="Number of active lecture videos to retranscribe per batch.",
+    help=(
+        "Number of ready lecture videos to retranscribe per batch. "
+        "Retranscription uses paid OpenAI Whisper requests for non-current videos."
+    ),
 )
 @click.option(
     "--caption-batch-size",
@@ -1047,7 +1050,10 @@ def m09_backfill_lecture_video_posters() -> None:
 @click.option(
     "--force",
     is_flag=True,
-    help="Retranscribe lecture videos even when transcript data is already current.",
+    help=(
+        "Retranscribe lecture videos even when transcript data is already current; "
+        "this can incur OpenAI Whisper costs for every ready lecture video."
+    ),
 )
 def m10_backfill_lecture_video_captions(
     retranscribe_batch_size: int,
@@ -1056,6 +1062,10 @@ def m10_backfill_lecture_video_captions(
 ) -> None:
     async def _m10_backfill_lecture_video_captions() -> None:
         async with config.db.driver.async_session() as session:
+            logger.warning(
+                "m10 caption backfill may make paid OpenAI Whisper requests for "
+                "ready lecture videos whose transcript data is not current."
+            )
             logger.info(
                 "Retranscribing active assistant lecture video words with punctuation..."
             )

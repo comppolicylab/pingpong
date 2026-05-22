@@ -43,10 +43,11 @@ class LectureVideoCaptionBackfillResult:
 
 def _has_current_transcript_data(lecture_video: models.LectureVideo) -> bool:
     transcript_data = lecture_video.transcript_data
-    return (
-        isinstance(transcript_data, dict)
-        and transcript_data.get("version") == TRANSCRIPT_DATA_VERSION
-        and bool(transcript_data.get("word_level_transcription"))
+    if not isinstance(transcript_data, dict):
+        return False
+    word_level_transcription = transcript_data.get("word_level_transcription")
+    return transcript_data.get("version") == TRANSCRIPT_DATA_VERSION and isinstance(
+        word_level_transcription, list
     )
 
 
@@ -101,6 +102,7 @@ async def retranscribe_active_lecture_video_words(
                     .where(
                         models.Assistant.interaction_mode
                         == schemas.InteractionMode.LECTURE_VIDEO,
+                        models.LectureVideo.status == schemas.LectureVideoStatus.READY,
                         models.LectureVideo.id > last_processed_id,
                     )
                     .order_by(models.LectureVideo.id.asc())
@@ -222,6 +224,7 @@ async def backfill_lecture_video_captions(
                         models.Assistant.interaction_mode
                         == schemas.InteractionMode.LECTURE_VIDEO,
                         models.LectureVideo.caption_stored_object_id.is_(None),
+                        models.LectureVideo.status == schemas.LectureVideoStatus.READY,
                         models.LectureVideo.id > last_processed_id,
                     )
                     .order_by(models.LectureVideo.id.asc())

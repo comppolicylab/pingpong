@@ -4780,10 +4780,20 @@ async def get_thread_lecture_video_captions(
         raise HTTPException(status_code=404, detail="Captions not available.")
 
     etag = f'"{caption.key}"'
-    if etag in {
-        candidate.strip()
-        for candidate in request.headers.get("if-none-match", "").split(",")
-    }:
+    normalized_etag = caption.key
+    etag_candidates = []
+    for candidate in request.headers.get("if-none-match", "").split(","):
+        normalized_candidate = candidate.strip()
+        if normalized_candidate.startswith("W/"):
+            normalized_candidate = normalized_candidate[2:].strip()
+        if (
+            len(normalized_candidate) >= 2
+            and normalized_candidate[0] == '"'
+            and normalized_candidate[-1] == '"'
+        ):
+            normalized_candidate = normalized_candidate[1:-1]
+        etag_candidates.append(normalized_candidate)
+    if "*" in etag_candidates or normalized_etag in etag_candidates:
         return Response(
             status_code=304,
             headers={

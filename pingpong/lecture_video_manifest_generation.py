@@ -772,6 +772,7 @@ def _augment_manifest_words_with_segment_text(
             normalized_token = _normalize_transcription_token(token)
             if not normalized_token:
                 continue
+            matched = False
             while word_cursor < len(candidate_indices):
                 word_index = candidate_indices[word_cursor]
                 normalized_word = _normalize_transcription_token(
@@ -780,7 +781,16 @@ def _augment_manifest_words_with_segment_text(
                 word_cursor += 1
                 if normalized_word == normalized_token:
                     augmented_words[word_index]["word"] = token
+                    matched = True
                     break
+            if not matched:
+                logger.debug(
+                    "Could not align transcription segment token with word-level "
+                    "transcript. token=%r segment_start=%r segment_end=%r",
+                    token,
+                    segment_start,
+                    segment_end,
+                )
 
     return augmented_words
 
