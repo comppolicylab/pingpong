@@ -356,6 +356,31 @@ def _lecture_video_followups_enabled(thread: models.Thread) -> bool:
     return thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
 
 
+def _build_run_instructions(
+    thread: models.Thread,
+    asst: models.Assistant,
+    user_id: int | None,
+) -> str | None:
+    """Return the instructions to send to OpenAI for a V3 run.
+
+    Lecture-video threads compute formatting fresh per run so that prompt
+    segment updates (say snippets, follow-ups, LaTeX/diagrams) take effect on
+    existing threads. Other modes continue to use the thread's stored
+    instructions verbatim.
+    """
+    if thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
+        return format_instructions(
+            asst.instructions or "",
+            use_latex=asst.use_latex,
+            use_image_descriptions=asst.use_image_descriptions,
+            disable_prompt_randomization=asst.disable_prompt_randomization,
+            thread_id=str(thread.id),
+            user_id=user_id,
+            lecture_video_mode=True,
+        )
+    return thread.instructions
+
+
 def _display_text_for_thread(thread: models.Thread, text: str) -> str:
     if _lecture_video_followups_enabled(thread):
         text = strip_followup_snippets(text)
@@ -7042,15 +7067,9 @@ async def create_lecture_thread(
     result: None | models.Thread = None
     try:
         result = await models.Thread.create(request.state["db"], new_thread)
-        result.instructions = format_instructions(
-            assistant.instructions,
-            assistant.use_latex,
-            assistant.use_image_descriptions,
-            disable_prompt_randomization=assistant.disable_prompt_randomization,
-            thread_id=result.id,
-            user_id=request.state["session"].user.id,
-            lecture_video_mode=True,
-        )
+        # Lecture-video formatting (say snippets, follow-ups, LaTeX/diagrams)
+        # is injected at OpenAI request time so prompt-segment updates apply to
+        # existing threads. Leave thread.instructions unset here.
         request.state["db"].add(result)
         await request.state["db"].flush()
         try:
@@ -7648,7 +7667,11 @@ async def create_run(
                     schemas.RunStatus.INCOMPLETE,
                 }
             ):
-                if not thread.instructions:
+                if (
+                    not thread.instructions
+                    and thread.interaction_mode
+                    != schemas.InteractionMode.LECTURE_VIDEO
+                ):
                     thread.instructions = format_instructions(
                         asst.instructions,
                         asst.use_latex,
@@ -7656,10 +7679,6 @@ async def create_run(
                         disable_prompt_randomization=asst.disable_prompt_randomization,
                         thread_id=str(thread.id),
                         user_id=request.state["session"].user.id,
-                        lecture_video_mode=(
-                            thread.interaction_mode
-                            == schemas.InteractionMode.LECTURE_VIDEO
-                        ),
                     )
                     request.state["db"].add(thread)
                     await request.state["db"].flush()
@@ -7674,7 +7693,9 @@ async def create_run(
                     reasoning_effort=asst.reasoning_effort,
                     temperature=asst.temperature,
                     tools_available=thread.tools_available,
-                    instructions=thread.instructions,
+                    instructions=_build_run_instructions(
+                        thread, asst, request.state["session"].user.id
+                    ),
                     verbosity=asst.verbosity,
                 )
                 request.state["db"].add(run_to_complete)
@@ -8081,8 +8102,13 @@ async def send_message(
         thread.last_activity = func.now()
         thread.user_message_ct += 1
 
-        # One-time migration for threads that don't have instructions set
-        if not thread.instructions:
+        # One-time migration for threads that don't have instructions set.
+        # Lecture-video threads format fresh at run time (see _build_run_instructions)
+        # so prompt segment updates apply to existing threads.
+        if (
+            not thread.instructions
+            and thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO
+        ):
             logger.info(
                 "Thread %s does not have instructions set, migrating from assistant instructions",
                 thread.id,
@@ -8094,9 +8120,6 @@ async def send_message(
                 disable_prompt_randomization=asst.disable_prompt_randomization,
                 thread_id=thread.thread_id or str(thread.id),
                 user_id=request.state["session"].user.id,
-                lecture_video_mode=(
-                    thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
-                ),
             )
             request.state["db"].add(thread)
             await request.state["db"].flush()
@@ -8318,7 +8341,9 @@ async def send_message(
                 reasoning_effort=asst.reasoning_effort,
                 temperature=asst.temperature,
                 tools_available=thread.tools_available,
-                instructions=thread.instructions,
+                instructions=_build_run_instructions(
+                    thread, asst, request.state["session"].user.id
+                ),
                 verbosity=asst.verbosity,
                 messages=run_messages,
             )
