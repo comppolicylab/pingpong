@@ -35,6 +35,7 @@ async def _create_handler_context(
     run_id: int,
     run_external_id: str,
     lecture_video_dual_text_mode: bool = False,
+    lecture_video_followups_mode: bool = False,
 ):
     base_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
 
@@ -87,6 +88,7 @@ async def _create_handler_context(
         assistant_id=assistant_id,
         user_id=user_id,
         lecture_video_dual_text_mode=lecture_video_dual_text_mode,
+        lecture_video_followups_mode=lecture_video_followups_mode,
     )
 
 
@@ -108,6 +110,7 @@ async def test_dual_text_stream_handler_stores_raw_say_snippet_and_streams_displ
         run_id=5003,
         run_external_id="run-dual-text",
         lecture_video_dual_text_mode=True,
+        lecture_video_followups_mode=True,
     )
     await handler.on_output_message_created(
         SimpleNamespace(
@@ -127,15 +130,23 @@ async def test_dual_text_stream_handler_stores_raw_say_snippet_and_streams_displ
         '{"speech":"x squared plus y squared","display":"$ x^2 + y^2 $"}'
         "\ue201"
     )
+    raw_followups = (
+        "\ue200followups\ue202"
+        '{"responses":["Can you show another example?","What happens next?"]}'
+        "\ue201"
+    )
     await handler.on_output_text_delta(SimpleNamespace(delta="Use " + raw_snippet[:12]))
-    await handler.on_output_text_delta(SimpleNamespace(delta=raw_snippet[12:] + "."))
+    await handler.on_output_text_delta(
+        SimpleNamespace(delta=raw_snippet[12:] + "." + raw_followups[:18])
+    )
+    await handler.on_output_text_delta(SimpleNamespace(delta=raw_followups[18:]))
     await handler.on_output_text_part_done(SimpleNamespace(type="output_text", text=""))
 
     async with db.async_session() as session:
         saved_part = await session.get(models.MessagePart, message_part_id)
 
     assert saved_part is not None
-    assert saved_part.text == "Use " + raw_snippet + "."
+    assert saved_part.text == "Use " + raw_snippet + "." + raw_followups
 
     events = [
         orjson.loads(line) for line in handler.flush().splitlines() if line.strip()
@@ -147,6 +158,19 @@ async def test_dual_text_stream_handler_stores_raw_say_snippet_and_streams_displ
     )
     assert streamed_text == "Use $ x^2 + y^2 $."
     assert "\ue200" not in streamed_text
+    followup_events = [
+        event for event in events if event["type"] == "followup_suggestions"
+    ]
+    assert followup_events == [
+        {
+            "type": "followup_suggestions",
+            "message_id": str(handler.message_id),
+            "suggestions": [
+                "Can you show another example?",
+                "What happens next?",
+            ],
+        }
+    ]
 
 
 async def test_run_response_sends_say_speech_text_to_tts(db, monkeypatch):
@@ -204,6 +228,9 @@ async def test_run_response_sends_say_speech_text_to_tts(db, monkeypatch):
         '{"speech":"x squared plus y squared.","display":"$ x^2 + y^2 $"}'
         "\ue201"
     )
+    raw_followups = (
+        '\ue200followups\ue202{"responses":["Can you show another example?"]}\ue201'
+    )
     events = [
         SimpleNamespace(
             type="response.created",
@@ -224,7 +251,10 @@ async def test_run_response_sends_say_speech_text_to_tts(db, monkeypatch):
         ),
         SimpleNamespace(type="response.output_text.delta", delta="Use "),
         SimpleNamespace(type="response.output_text.delta", delta=raw_snippet[:12]),
-        SimpleNamespace(type="response.output_text.delta", delta=raw_snippet[12:]),
+        SimpleNamespace(
+            type="response.output_text.delta",
+            delta=raw_snippet[12:] + raw_followups,
+        ),
         SimpleNamespace(
             type="response.content_part.done",
             part=SimpleNamespace(type="output_text", text=""),
@@ -303,11 +333,13 @@ async def test_run_response_sends_say_speech_text_to_tts(db, monkeypatch):
         tts_voice_id="voice-id",
         tts_api_key="tts-key",
         lecture_video_dual_text_mode=True,
+        lecture_video_followups_mode=True,
     ):
         chunks.append(chunk)
 
     spoken_text = "".join(text for text, _, _ in sent_tts_text)
     assert "Use x squared plus y squared." in spoken_text
+    assert "Can you show another example?" not in spoken_text
     assert all(text for text, _, _ in sent_tts_text)
     assert all("\ue200" not in text for text, _, _ in sent_tts_text)
     streamed_events = [
@@ -322,6 +354,20 @@ async def test_run_response_sends_say_speech_text_to_tts(db, monkeypatch):
         if event["type"] == "message_delta"
     )
     assert streamed_text == "Use $ x^2 + y^2 $"
+    followup_events = [
+        event for event in streamed_events if event["type"] == "followup_suggestions"
+    ]
+    message_created_events = [
+        event for event in streamed_events if event["type"] == "message_created"
+    ]
+    assert message_created_events
+    assert followup_events == [
+        {
+            "type": "followup_suggestions",
+            "message_id": message_created_events[0]["message"]["id"],
+            "suggestions": ["Can you show another example?"],
+        }
+    ]
 
     async with db.async_session() as session:
         saved_part = await session.scalar(
@@ -331,7 +377,7 @@ async def test_run_response_sends_say_speech_text_to_tts(db, monkeypatch):
         )
 
     assert saved_part is not None
-    assert saved_part.text == "Use " + raw_snippet
+    assert saved_part.text == "Use " + raw_snippet + raw_followups
 
 
 async def _setup_handler_with_initial_message(db):
@@ -599,6 +645,66 @@ async def _create_server_thread_alt(db, *, class_id: int, thread_id: int, run_id
         older_phase=schemas.MessagePhase.FINAL_ANSWER.value,
         newer_phase=schemas.MessagePhase.FINAL_ANSWER.value,
     )
+
+
+async def _create_lecture_video_thread_with_followup_message(
+    db, *, class_id: int, thread_id: int, run_id: int, assistant_id: int
+) -> None:
+    base_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    raw_followups = (
+        "\ue200followups\ue202"
+        '{"responses":["Can you show another example?","What happens next?"]}'
+        "\ue201"
+    )
+    async with db.async_session() as session:
+        class_ = models.Class(id=class_id, name=f"Class {class_id}", api_key="sk-test")
+        assistant = models.Assistant(
+            id=assistant_id,
+            name=f"Assistant {assistant_id}",
+            class_id=class_id,
+            assistant_id=f"asst-{assistant_id}",
+            model="gpt-4o-mini",
+        )
+        thread = models.Thread(
+            id=thread_id,
+            thread_id=f"thread-{thread_id}",
+            class_id=class_id,
+            assistant_id=assistant_id,
+            version=3,
+            tools_available="",
+            private=False,
+            interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+        )
+        run = models.Run(
+            id=run_id,
+            run_id=f"run-{run_id}",
+            status=schemas.RunStatus.COMPLETED,
+            thread_id=thread_id,
+            assistant_id=assistant_id,
+            created=base_time,
+            updated=base_time,
+        )
+        message = models.Message(
+            message_status=schemas.MessageStatus.COMPLETED,
+            run_id=run_id,
+            thread_id=thread_id,
+            assistant_id=assistant_id,
+            role=schemas.MessageRole.ASSISTANT,
+            output_index=1,
+            phase=schemas.MessagePhase.FINAL_ANSWER.value,
+            created=base_time,
+        )
+        session.add_all([class_, assistant, thread, run, message])
+        await session.flush()
+        session.add(
+            models.MessagePart(
+                type=schemas.MessagePartType.OUTPUT_TEXT,
+                message_id=message.id,
+                part_index=0,
+                text=f"Here is the answer. {raw_followups}",
+            )
+        )
+        await session.commit()
 
 
 async def _create_thread_with_phase_separated_assistant_messages(
@@ -1378,6 +1484,42 @@ async def test_list_thread_messages_deduplicates_extra_assistant_messages(
     assert len(messages) == 1
     assert messages[0]["output_index"] == 3
     assert messages[0]["run_id"] == str(run_id)
+
+
+@with_user(337)
+@with_authz(grants=[("user:337", "can_view", "thread:3141")])
+async def test_list_thread_messages_appends_followup_suggestions_from_stored_text(
+    api, db, valid_user_token
+):
+    class_id = 3041
+    thread_id = 3141
+    run_id = 3241
+    assistant_id = 3341
+    await _create_lecture_video_thread_with_followup_message(
+        db,
+        class_id=class_id,
+        thread_id=thread_id,
+        run_id=run_id,
+        assistant_id=assistant_id,
+    )
+
+    response = api.get(
+        f"/api/v1/class/{class_id}/thread/{thread_id}/messages",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    messages = response.json()["messages"]
+    assert messages[0]["content"] == [
+        {
+            "type": "text",
+            "text": {"value": "Here is the answer. ", "annotations": []},
+        },
+        {
+            "type": "followup_suggestions",
+            "suggestions": ["Can you show another example?", "What happens next?"],
+        },
+    ]
 
 
 @with_user(334)

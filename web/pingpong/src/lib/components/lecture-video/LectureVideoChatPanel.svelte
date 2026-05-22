@@ -10,7 +10,8 @@
 		MessageDotsOutline,
 		VolumeUpSolid,
 		VolumeMuteSolid,
-		PlaySolid
+		PlaySolid,
+		ReplyOutline
 	} from 'flowbite-svelte-icons';
 	import Logo from '$lib/components/Logo.svelte';
 	import Markdown from '$lib/components/Markdown.svelte';
@@ -265,6 +266,16 @@
 			(content) => content.type === 'text' && content.text.value.trim().length > 0
 		);
 
+	const getFollowupSuggestions = (message: api.OpenAIMessage) => {
+		for (let i = message.content.length - 1; i >= 0; i -= 1) {
+			const content = message.content[i];
+			if (content.type === 'followup_suggestions') {
+				return content.suggestions;
+			}
+		}
+		return [];
+	};
+
 	let latestMessageId = $derived(messages.at(-1)?.data.id ?? null);
 	let latestAssistantMessageId = $derived.by(() => {
 		const latestMessage = messages.at(-1)?.data;
@@ -284,6 +295,37 @@
 
 	const canLatchContinuePromptDecision = (message: Message) =>
 		isLatestStreamedAssistantResponse(message) && !waiting && !submitting;
+
+	const getVisibleFollowupSuggestions = (message: Message) => {
+		if (
+			!showInput ||
+			!canSubmit ||
+			disabled ||
+			assistantDeleted ||
+			!canViewAssistant ||
+			waiting ||
+			submitting ||
+			message.data.id !== latestAssistantMessageId
+		) {
+			return [];
+		}
+		return getFollowupSuggestions(message.data);
+	};
+
+	const submitFollowupSuggestion = (suggestion: string) => {
+		if (!onsubmit || waiting || submitting || disabled || !canSubmit) {
+			return;
+		}
+		onsubmit({
+			code_interpreter_file_ids: [],
+			file_search_file_ids: [],
+			vision_file_ids: [],
+			visionFileImageDescriptions: [],
+			optimisticVisionFiles: [],
+			message: suggestion,
+			callback: () => {}
+		});
+	};
 
 	const evaluateContinuePromptVisibility = () =>
 		showInput && showContinueWatchingPrompt && !!oncontinuewatching;
@@ -552,19 +594,46 @@
 							{/if}
 						{/if}
 					{/each}
+					{#each [{ key: message.data.id, suggestions: getVisibleFollowupSuggestions(message) }] as followupGroup (followupGroup.key)}
+						{#if followupGroup.suggestions.length > 0}
+							<div
+								class="mt-1 flex flex-col items-stretch"
+								role="group"
+								aria-label="Suggested follow-up responses"
+							>
+								{#each followupGroup.suggestions as suggestion, i (i)}
+									<button
+										type="button"
+										class="group flex items-center gap-1.5 py-1.5 text-left text-sm text-gray-500 transition hover:text-gray-700 focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-1 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60 {i >
+										0
+											? 'border-t border-gray-200'
+											: ''}"
+										disabled={waiting || submitting || disabled || !canSubmit}
+										onclick={() => submitFollowupSuggestion(suggestion)}
+									>
+										<ReplyOutline
+											class="h-3.5 w-3.5 shrink-0 -scale-x-100 text-gray-400 transition group-hover:text-gray-700"
+											aria-hidden="true"
+										/>
+										<span>{suggestion}</span>
+									</button>
+								{/each}
+							</div>
+						{/if}
+					{/each}
 					{#if shouldShowContinueWatchingPrompt(message)}
-						<div class="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2" aria-live="polite">
+						<div class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1" aria-live="polite">
 							<button
 								type="button"
-								class="inline-flex items-center gap-2 rounded-full bg-orange px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-dark focus:ring-2 focus:ring-orange focus:ring-offset-2 focus:outline-none"
+								class="inline-flex items-center gap-1.5 rounded-full bg-orange px-3 py-1 text-sm font-medium text-white transition hover:bg-orange-dark focus:outline-none"
 								onclick={() => void continueWatching(message)}
 							>
-								<PlaySolid class="h-3.5 w-3.5" />
+								<PlaySolid class="h-3 w-3" />
 								Continue watching
 							</button>
 							<button
 								type="button"
-								class="text-sm font-medium text-slate-500 transition hover:text-slate-800"
+								class="text-sm text-slate-500 transition hover:text-slate-700"
 								onclick={() => askAnotherQuestion(message)}
 							>
 								Ask another question

@@ -3416,6 +3416,11 @@ export type MessageContentText = ContentSource & {
 	type: 'text';
 };
 
+export type MessageContentFollowupSuggestions = ContentSource & {
+	suggestions: string[];
+	type: 'followup_suggestions';
+};
+
 export type ImageFile = {
 	file_id: string;
 };
@@ -3521,6 +3526,7 @@ export type ReasoningCallItem = ContentSource & {
 export type Content =
 	| MessageContentImageFile
 	| MessageContentText
+	| MessageContentFollowupSuggestions
 	| MessageContentCode
 	| MessageContentCodeOutputImageFile
 	| MessageContentCodeOutputImageURL
@@ -3763,6 +3769,12 @@ export type ThreadStreamMessageCreatedChunk = {
 	message: OpenAIMessage;
 };
 
+export type ThreadStreamFollowupSuggestionsChunk = {
+	type: 'followup_suggestions';
+	message_id: string;
+	suggestions: string[];
+};
+
 export type ToolImageOutput = {
 	image: ImageFile;
 	index: number;
@@ -3977,6 +3989,7 @@ export type ThreadValidationError = {
 export type ThreadStreamChunk =
 	| ThreadStreamMessageDeltaChunk
 	| ThreadStreamMessageCreatedChunk
+	| ThreadStreamFollowupSuggestionsChunk
 	| ThreadStreamErrorChunk
 	| ThreadRunActiveErrorChunk
 	| ThreadPreSendErrorChunk

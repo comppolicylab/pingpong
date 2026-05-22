@@ -23,11 +23,22 @@ from pingpong.files import (
     file_extension_to_mime_type,
     handle_create_file,
 )
+from pingpong.followup_transform import (
+    FOLLOWUP_MARKER_NAME,
+    FollowupTransformer,
+    strip_followup_snippets,
+)
 from pingpong.invite import send_export_download, send_export_failed
 from pingpong.log_utils import sanitize_for_log
 import pingpong.models as models
 from pingpong.prompt import replace_random_blocks
-from pingpong.say_transform import SayTransformer, transform_say_text
+from pingpong.say_transform import (
+    SAY_MARKER_END,
+    SAY_MARKER_SEPARATOR,
+    SAY_MARKER_START,
+    SayTransformer,
+    transform_say_text,
+)
 from pingpong.schemas import (
     APIKeyValidationResponse,
     AnnotationType,
@@ -774,7 +785,7 @@ async def build_response_input_item_list(
 
                     content_list.append(
                         ResponseOutputTextParam(
-                            text=content.text,
+                            text=strip_followup_snippets(content.text or ""),
                             annotations=annotations,
                             type="output_text",
                         )
@@ -1166,6 +1177,7 @@ class BufferedResponseStreamHandler:
         show_mcp_server_call_details: bool | None = None,
         *args,
         lecture_video_dual_text_mode: bool = False,
+        lecture_video_followups_mode: bool = False,
         **kwargs,
     ):
         self.__buffer = io.BytesIO()
@@ -1232,8 +1244,12 @@ class BufferedResponseStreamHandler:
             else True
         )
         self.lecture_video_dual_text_mode = lecture_video_dual_text_mode
+        self.lecture_video_followups_mode = lecture_video_followups_mode
         self._display_say_transformer = (
             SayTransformer("display") if lecture_video_dual_text_mode else None
+        )
+        self._followup_transformer = (
+            FollowupTransformer() if lecture_video_followups_mode else None
         )
 
     def enqueue(self, data: Dict) -> None:
@@ -1276,6 +1292,46 @@ class BufferedResponseStreamHandler:
 
     def enqueue_audio_error(self) -> None:
         self.enqueue({"type": "audio_error"})
+
+    def enqueue_message_text_delta(self, text: str) -> None:
+        if not text:
+            return
+        self.enqueue(
+            {
+                "type": "message_delta",
+                "delta": {
+                    "content": [
+                        {
+                            "index": 0,
+                            "type": "text",
+                            "text": {
+                                "value": text,
+                                "annotations": [],
+                            },
+                        },
+                    ],
+                    "role": None,
+                },
+            }
+        )
+
+    def enqueue_followup_suggestions(self) -> None:
+        if (
+            not self.lecture_video_followups_mode
+            or not self.message_id
+            or not self._followup_transformer
+        ):
+            return
+        suggestions = self._followup_transformer.consume_suggestions()
+        if not suggestions:
+            return
+        self.enqueue(
+            {
+                "type": "followup_suggestions",
+                "message_id": str(self.message_id),
+                "suggestions": suggestions,
+            }
+        )
 
     async def on_response_created(self, data: ResponseCreatedEvent):
         if not self.run_id:
@@ -1441,29 +1497,16 @@ class BufferedResponseStreamHandler:
 
         await update_message_part_on_output_text_delta()
         display_delta = (
-            self._display_say_transformer.add(data.delta)
-            if self._display_say_transformer
+            self._followup_transformer.add(data.delta)
+            if self._followup_transformer
             else data.delta
         )
-        if display_delta:
-            self.enqueue(
-                {
-                    "type": "message_delta",
-                    "delta": {
-                        "content": [
-                            {
-                                "index": 0,
-                                "type": "text",
-                                "text": {
-                                    "value": display_delta,
-                                    "annotations": [],
-                                },
-                            },
-                        ],
-                        "role": None,
-                    },
-                }
-            )
+        display_delta = (
+            self._display_say_transformer.add(display_delta)
+            if self._display_say_transformer
+            else display_delta
+        )
+        self.enqueue_message_text_delta(display_delta)
 
     async def on_output_text_container_file_citation_added(
         self, data: AnnotationContainerFileCitation, annotation_index: int | None = None
@@ -1755,27 +1798,15 @@ class BufferedResponseStreamHandler:
             )
             return
 
+        display_delta = ""
+        if self._followup_transformer:
+            display_delta = self._followup_transformer.flush()
         if self._display_say_transformer:
-            display_delta = self._display_say_transformer.flush()
             if display_delta:
-                self.enqueue(
-                    {
-                        "type": "message_delta",
-                        "delta": {
-                            "content": [
-                                {
-                                    "index": 0,
-                                    "type": "text",
-                                    "text": {
-                                        "value": display_delta,
-                                        "annotations": [],
-                                    },
-                                },
-                            ],
-                            "role": None,
-                        },
-                    }
-                )
+                display_delta = self._display_say_transformer.add(display_delta)
+            display_delta += self._display_say_transformer.flush()
+        self.enqueue_message_text_delta(display_delta)
+        self.enqueue_followup_suggestions()
         self.message_part_id = None
 
     async def on_output_message_done(self, data: ResponseOutputMessage):
@@ -3642,6 +3673,7 @@ async def run_response(
     tts_voice_settings: Mapping[str, Any] | None = None,
     user_assistant_messages_only: bool = False,
     lecture_video_dual_text_mode: bool = False,
+    lecture_video_followups_mode: bool = False,
 ):
     is_canceled = False
     await config.authz.driver.init()
@@ -3780,6 +3812,11 @@ async def run_response(
                 if _tts_enabled and lecture_video_dual_text_mode
                 else None
             )
+            _tts_followup_transformer = (
+                FollowupTransformer()
+                if _tts_enabled and lecture_video_followups_mode
+                else None
+            )
             _tts_audio_task: asyncio.Task | None = None
             _tts_audio_done = asyncio.Event()
             _tts_audio_ready = asyncio.Event()
@@ -3901,6 +3938,7 @@ async def run_response(
                     anonymous_session_id=anonymous_session_id,
                     anonymous_link_id=anonymous_link_id,
                     lecture_video_dual_text_mode=lecture_video_dual_text_mode,
+                    lecture_video_followups_mode=lecture_video_followups_mode,
                 )
 
                 async def _tts_receive_audio(
@@ -3960,21 +3998,28 @@ async def run_response(
 
                 async def _tts_finish_input() -> None:
                     if _tts_sanitizer and _tts_chunker and _tts_client:
+                        transformed_remaining = ""
+                        if _tts_followup_transformer:
+                            transformed_remaining = _tts_followup_transformer.flush()
                         if _tts_say_transformer:
-                            transformed_remaining = _tts_say_transformer.flush()
                             if transformed_remaining:
-                                for chunk in _tts_sanitizer.add(transformed_remaining):
-                                    try:
-                                        tts_chunks = _tts_chunker.add(chunk)
-                                        for tts_chunk in tts_chunks:
-                                            await _tts_client.send_text(
-                                                tts_chunk,
-                                            )
-                                    except Exception:
-                                        logger.warning(
-                                            "TTS final say flush failed",
-                                            exc_info=True,
+                                transformed_remaining = _tts_say_transformer.add(
+                                    transformed_remaining
+                                )
+                            transformed_remaining += _tts_say_transformer.flush()
+                        if transformed_remaining:
+                            for chunk in _tts_sanitizer.add(transformed_remaining):
+                                try:
+                                    tts_chunks = _tts_chunker.add(chunk)
+                                    for tts_chunk in tts_chunks:
+                                        await _tts_client.send_text(
+                                            tts_chunk,
                                         )
+                                except Exception:
+                                    logger.warning(
+                                        "TTS final transform flush failed",
+                                        exc_info=True,
+                                    )
                         remaining = _tts_sanitizer.flush()
                         if remaining:
                             try:
@@ -4107,9 +4152,14 @@ async def run_response(
                                 # Feed text to TTS accumulator
                                 if _tts_sanitizer and _tts_chunker and _tts_client:
                                     tts_delta = (
-                                        _tts_say_transformer.add(event.delta)
-                                        if _tts_say_transformer
+                                        _tts_followup_transformer.add(event.delta)
+                                        if _tts_followup_transformer
                                         else event.delta
+                                    )
+                                    tts_delta = (
+                                        _tts_say_transformer.add(tts_delta)
+                                        if _tts_say_transformer
+                                        else tts_delta
                                     )
                                     if tts_delta:
                                         for chunk in _tts_sanitizer.add(tts_delta):
@@ -4806,6 +4856,46 @@ def format_instructions(
             - Assistant:
             "You've uploaded two images in total. Would you like more details on either one?"
             """
+        )
+
+    if lecture_video_mode:
+        instructions += (
+            "\n\n"
+            "---Formatting: Lecture Video Follow-ups---\n"
+            "At the very end of your final answer, you may emit follow-up "
+            "responses that the student can select to continue the chat. Three "
+            "is the maximum, not a target. Return 0, 1, 2, or 3 responses "
+            "depending on what is genuinely useful. Prefer fewer responses when "
+            "the options would be repetitive, overlapping, or only weakly "
+            "helpful. Each response must be meaningfully distinct from the "
+            "others and written as a direct user message in the student's voice, "
+            "not as a question from the assistant.\n"
+            "Follow-up responses must obey the same content-control boundary as "
+            "your answer. They must only invite discussion of what the learner "
+            "has already encountered at or before the current point. Do not "
+            "include, preview, hint at, ask about, or steer toward content from "
+            "`After this moment`, `Upcoming Knowledge Check`, or any part of the "
+            "lecture the learner has not reached yet. Avoid next-step prompts "
+            'like "What should I look for next?" or "What happens next?" because '
+            "they point ahead of the current moment. If the learner has seen "
+            "very little so far, return 0 or 1 response rather than padding the "
+            "list. If several candidate responses would all mean roughly the "
+            "same thing, keep only the best one.\n"
+            "Use exactly this private-use format, with U+E200 before "
+            f"`{FOLLOWUP_MARKER_NAME}`, U+E202 before the JSON payload, and U+E201 "
+            "after the JSON payload:\n"
+            f"{SAY_MARKER_START}{FOLLOWUP_MARKER_NAME}{SAY_MARKER_SEPARATOR}"
+            '{"responses":["Can you explain that another way?",'
+            f'"Show me a quick example from what we just covered."]}}{SAY_MARKER_END}\n'
+            "If no follow-up responses would help, omit the snippet or return "
+            f"an empty array like {SAY_MARKER_START}{FOLLOWUP_MARKER_NAME}"
+            f'{SAY_MARKER_SEPARATOR}{{"responses":[]}}{SAY_MARKER_END}. '
+            "The JSON payload must be valid and compact. Include only the "
+            "`responses` array with at most 3 strings. Do not duplicate the "
+            "answer text or provide multiple phrasings of the same next step. "
+            "Do not include answers, hints, clues, or narrowed choices for "
+            "restricted knowledge checks or quizzes. Do not mention the snippet "
+            "syntax to the user."
         )
 
     if (
@@ -5508,6 +5598,11 @@ def _export_message_part_text_v3(
         thread_id=thread_id,
         message_id=message.id,
     )
+    if (
+        message.role == MessageRole.ASSISTANT
+        and part.type == MessagePartType.OUTPUT_TEXT
+    ):
+        text = strip_followup_snippets(text or "")
     if (
         display_say_snippets
         and message.role == MessageRole.ASSISTANT

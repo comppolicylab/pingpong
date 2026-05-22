@@ -1029,6 +1029,9 @@ export class ThreadManager {
 			case 'message_delta':
 				this.#appendDelta(chunk.delta);
 				break;
+			case 'followup_suggestions':
+				this.#setFollowupSuggestions(chunk);
+				break;
 			case 'done':
 				this.#clearLectureContextPending();
 				break;
@@ -1671,6 +1674,30 @@ export class ThreadManager {
 
 			for (const content of chunk.content) {
 				this.#mergeContent(lastMessage.content, content);
+			}
+
+			return { ...d };
+		});
+	}
+
+	#setFollowupSuggestions(chunk: api.ThreadStreamFollowupSuggestionsChunk) {
+		this.#data.update((d) => {
+			const messages = d.data?.messages || [];
+			const message = messages.find((candidate) => candidate.id === chunk.message_id);
+			if (!message) {
+				console.warn('Received follow-up suggestions for an unknown message.');
+				return d;
+			}
+
+			message.content = message.content.filter(
+				(content) => content.type !== 'followup_suggestions'
+			);
+			const suggestions = chunk.suggestions.map((suggestion) => suggestion.trim()).filter(Boolean);
+			if (suggestions.length > 0) {
+				message.content.push({
+					type: 'followup_suggestions',
+					suggestions
+				});
 			}
 
 			return { ...d };

@@ -8,6 +8,10 @@ from pingpong.ai import build_response_input_item_list
 from pingpong.now import utcnow
 
 
+def followup_payload(payload: str) -> str:
+    return f"\ue200followups\ue202{payload}\ue201"
+
+
 @pytest.mark.asyncio
 async def test_build_response_input_item_list_drops_reasoning_for_expired_ci(db):
     async with db.async_session() as session:
@@ -75,6 +79,43 @@ async def test_build_response_input_item_list_drops_reasoning_for_expired_ci(db)
     summary_messages = [item for item in items if isinstance(item.get("content"), str)]
     assert len(summary_messages) == 1
     assert "code interpreter tool" in summary_messages[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_build_response_input_item_list_strips_followup_snippets(db):
+    raw_followups = followup_payload('{"responses":["Can you show another example?"]}')
+    async with db.async_session() as session:
+        thread = models.Thread(thread_id="thread_followups_context", version=3)
+        session.add(thread)
+        await session.flush()
+
+        run = models.Run(status=schemas.RunStatus.COMPLETED, thread_id=thread.id)
+        session.add(run)
+        await session.flush()
+
+        session.add(
+            models.Message(
+                message_status=schemas.MessageStatus.COMPLETED,
+                run_id=run.id,
+                thread_id=thread.id,
+                output_index=1,
+                role=schemas.MessageRole.ASSISTANT,
+                content=[
+                    models.MessagePart(
+                        part_index=0,
+                        type=schemas.MessagePartType.OUTPUT_TEXT,
+                        text="Visible answer." + raw_followups,
+                    )
+                ],
+            )
+        )
+        await session.commit()
+        thread_id = thread.id
+
+    async with db.async_session() as session:
+        items = await build_response_input_item_list(session, thread_id=thread_id)
+
+    assert items[0]["content"][0]["text"] == "Visible answer."
 
 
 @pytest.mark.asyncio

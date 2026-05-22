@@ -2907,12 +2907,18 @@ class ThreadTextContentBlock(TextContentBlock):
     text: ThreadText
 
 
+class ThreadFollowupSuggestionsContentBlock(BaseModel):
+    type: Literal["followup_suggestions"]
+    suggestions: list[str]
+
+
 ThreadMessageContent: TypeAlias = Annotated[
     Union[
         ImageFileContentBlock,
         ImageURLContentBlock,
         ThreadTextContentBlock,
         RefusalContentBlock,
+        ThreadFollowupSuggestionsContentBlock,
     ],
     PropertyInfo(discriminator="type"),
 ]
