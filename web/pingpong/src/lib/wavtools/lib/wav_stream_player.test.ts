@@ -70,4 +70,13 @@ describe('WavStreamPlayer', () => {
 
 		expect(postMessage).toHaveBeenCalledWith({ event: 'finish' });
 	});
+
+	it('stops playback when finish is called before a stream starts', () => {
+		const onPlaybackStopped = vi.fn();
+		const player = new WavStreamPlayer({ onPlaybackStopped });
+
+		player.finish();
+
+		expect(onPlaybackStopped).toHaveBeenCalledTimes(1);
+	});
 });

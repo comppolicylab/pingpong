@@ -188,6 +188,8 @@ export class WavStreamPlayer {
 		}
 		const streamNode = new AudioWorkletNode(this.context, 'stream_processor');
 		streamNode.connect(this.gainNode || this.context.destination);
+		// This is queued before any write messages, so the worklet sees this
+		// configuration before it can process streamed PCM.
 		streamNode.port.postMessage({
 			event: 'configure',
 			stopOnEmptyBuffer: this.stopOnEmptyBuffer
@@ -195,9 +197,7 @@ export class WavStreamPlayer {
 		streamNode.port.onmessage = (e) => {
 			const { event } = e.data;
 			if (event === 'stop') {
-				streamNode.disconnect();
-				this.stream = null;
-				this.onPlaybackStopped?.();
+				this._handlePlaybackStopped(streamNode);
 			} else if (event === 'offset') {
 				const { requestId, trackId, offset, eventId } = e.data;
 				const currentTime = offset / this.sampleRate;
@@ -225,6 +225,14 @@ export class WavStreamPlayer {
 		}
 		this.stream = streamNode;
 		return true;
+	}
+
+	private _handlePlaybackStopped(streamNode: AudioWorkletNode | null): void {
+		streamNode?.disconnect();
+		if (!streamNode || this.stream === streamNode) {
+			this.stream = null;
+		}
+		this.onPlaybackStopped?.();
 	}
 
 	/**
@@ -264,7 +272,11 @@ export class WavStreamPlayer {
 	 * Signals that no more PCM chunks will be written.
 	 */
 	finish(): void {
-		this.stream?.port.postMessage({ event: 'finish' });
+		if (!this.stream) {
+			this._handlePlaybackStopped(null);
+			return;
+		}
+		this.stream.port.postMessage({ event: 'finish' });
 	}
 
 	/**

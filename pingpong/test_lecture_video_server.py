@@ -1155,7 +1155,11 @@ async def test_get_thread_returns_lecture_video_session(
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 200
-    session_data = response.json()["lecture_video_session"]
+    data = response.json()
+    assert data["instructions"] is not None
+    assert data["instructions"].startswith("You are a lecture assistant.")
+    assert "---Formatting: Lecture Video Follow-ups---" in data["instructions"]
+    session_data = data["lecture_video_session"]
     assert session_data["state"] == "playing"
     assert session_data["last_known_offset_ms"] == 0
     assert session_data["furthest_offset_ms"] == 0

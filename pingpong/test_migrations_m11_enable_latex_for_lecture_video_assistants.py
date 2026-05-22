@@ -6,7 +6,7 @@ from pingpong.migrations import m11_enable_latex_for_lecture_video_assistants as
 pytestmark = pytest.mark.asyncio
 
 
-async def test_enable_latex_for_lecture_video_assistants_sets_use_latex(
+async def test_enable_latex_for_lecture_video_assistants_sets_use_latex_and_clears_threads(
     db,
 ):
     async with db.async_session() as session:
@@ -46,9 +46,7 @@ async def test_enable_latex_for_lecture_video_assistants_sets_use_latex(
     assert assistant is not None
     assert assistant.use_latex is True
     assert thread is not None
-    # Thread instructions should not be touched by the migration; the lecture
-    # video formatting is now injected at OpenAI request time.
-    assert thread.instructions == "Old instructions"
+    assert thread.instructions is None
 
 
 async def test_enable_latex_for_lecture_video_assistants_only_updates_lv_assistants(

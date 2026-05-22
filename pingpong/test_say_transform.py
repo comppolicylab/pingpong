@@ -1,3 +1,4 @@
+import json
 import logging
 
 from pingpong.ai import format_instructions
@@ -94,10 +95,13 @@ def test_transform_say_text_can_wrap_svg_block_for_dual_display_and_speech():
         "```"
     )
     text = "Here: " + say_payload(
-        '{"speech":"Here is a simple yellow circle.",'
-        '"display":"```svg\\n<svg xmlns=\'http://www.w3.org/2000/svg\' '
-        "viewBox='0 0 100 100'>\\n  <circle cx='50' cy='50' r='40' "
-        "fill='gold'/>\\n</svg>\\n```\"}"
+        json.dumps(
+            {
+                "speech": "Here is a simple yellow circle.",
+                "display": svg_block,
+            },
+            separators=(",", ":"),
+        )
     )
 
     assert transform_say_text(text, "display") == "Here: " + svg_block
