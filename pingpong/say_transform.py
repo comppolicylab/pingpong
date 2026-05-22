@@ -103,6 +103,8 @@ def _transform_payload(payload: str, target: SayTransformTarget) -> str | None:
         return speech
 
     display = data.get("display")
+    if display is None and "display" not in data:
+        return speech
     if not isinstance(display, str):
         logger.debug("Dropping malformed say snippet with missing display string")
         return None

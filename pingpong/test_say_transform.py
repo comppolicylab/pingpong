@@ -69,6 +69,12 @@ def test_transform_say_text_returns_speech_string():
     assert transform_say_text(text, "speech") == "Use x squared here."
 
 
+def test_transform_say_text_falls_back_to_speech_when_display_missing():
+    text = "Use " + say_payload('{"speech":"x squared"}') + " here."
+
+    assert transform_say_text(text, "display") == "Use x squared here."
+
+
 def test_say_transformer_buffers_split_deltas():
     transformer = SayTransformer("display")
     snippet = say_payload('{"speech":"alpha","display":"α"}')
