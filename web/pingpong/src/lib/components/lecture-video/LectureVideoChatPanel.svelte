@@ -10,7 +10,8 @@
 		MessageDotsOutline,
 		VolumeUpSolid,
 		VolumeMuteSolid,
-		PlaySolid
+		PlaySolid,
+		ReplyOutline
 	} from 'flowbite-svelte-icons';
 	import Logo from '$lib/components/Logo.svelte';
 	import Markdown from '$lib/components/Markdown.svelte';
@@ -588,28 +589,20 @@
 					{/each}
 					{#if shouldShowFollowupSuggestions(message)}
 						<div class="mt-1 flex flex-col items-stretch" aria-live="polite">
-							{#each getFollowupSuggestions(message.data) as suggestion, i (suggestion)}
+							{#each getFollowupSuggestions(message.data) as suggestion, i (i)}
 								<button
 									type="button"
-									class="flex items-center gap-2 py-1.5 text-left text-sm text-gray-500 transition hover:text-gray-700 focus:outline-none {i >
+									class="group flex items-center gap-1.5 py-1.5 text-left text-sm text-gray-500 transition hover:text-gray-700 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 {i >
 									0
-										? 'border-t border-gray-100'
+										? 'border-t border-gray-200'
 										: ''}"
+									disabled={waiting || submitting || disabled || !canSubmit}
 									onclick={() => submitFollowupSuggestion(suggestion)}
 								>
-									<svg
-										class="h-3.5 w-3.5 shrink-0 text-gray-400"
-										viewBox="0 0 24 24"
-										fill="none"
-										stroke="currentColor"
-										stroke-width="2"
-										stroke-linecap="round"
-										stroke-linejoin="round"
+									<ReplyOutline
+										class="h-3.5 w-3.5 shrink-0 -scale-x-100 text-gray-400 transition group-hover:text-gray-700"
 										aria-hidden="true"
-									>
-										<polyline points="15 10 20 15 15 20" />
-										<path d="M4 4v7a4 4 0 0 0 4 4h12" />
-									</svg>
+									/>
 									<span>{suggestion}</span>
 								</button>
 							{/each}

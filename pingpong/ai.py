@@ -23,12 +23,22 @@ from pingpong.files import (
     file_extension_to_mime_type,
     handle_create_file,
 )
-from pingpong.followup_transform import FollowupTransformer, strip_followup_snippets
+from pingpong.followup_transform import (
+    FOLLOWUP_MARKER_NAME,
+    FollowupTransformer,
+    strip_followup_snippets,
+)
 from pingpong.invite import send_export_download, send_export_failed
 from pingpong.log_utils import sanitize_for_log
 import pingpong.models as models
 from pingpong.prompt import replace_random_blocks
-from pingpong.say_transform import SayTransformer, transform_say_text
+from pingpong.say_transform import (
+    SAY_MARKER_END,
+    SAY_MARKER_SEPARATOR,
+    SAY_MARKER_START,
+    SayTransformer,
+    transform_say_text,
+)
 from pingpong.schemas import (
     APIKeyValidationResponse,
     AnnotationType,
@@ -1167,6 +1177,7 @@ class BufferedResponseStreamHandler:
         show_mcp_server_call_details: bool | None = None,
         *args,
         lecture_video_dual_text_mode: bool = False,
+        lecture_video_followups_mode: bool = False,
         **kwargs,
     ):
         self.__buffer = io.BytesIO()
@@ -1233,11 +1244,12 @@ class BufferedResponseStreamHandler:
             else True
         )
         self.lecture_video_dual_text_mode = lecture_video_dual_text_mode
+        self.lecture_video_followups_mode = lecture_video_followups_mode
         self._display_say_transformer = (
             SayTransformer("display") if lecture_video_dual_text_mode else None
         )
         self._followup_transformer = (
-            FollowupTransformer() if lecture_video_dual_text_mode else None
+            FollowupTransformer() if lecture_video_followups_mode else None
         )
 
     def enqueue(self, data: Dict) -> None:
@@ -1305,20 +1317,21 @@ class BufferedResponseStreamHandler:
 
     def enqueue_followup_suggestions(self) -> None:
         if (
-            not self.lecture_video_dual_text_mode
+            not self.lecture_video_followups_mode
             or not self.message_id
             or not self._followup_transformer
-            or not self._followup_transformer.suggestions
         ):
+            return
+        suggestions = self._followup_transformer.consume_suggestions()
+        if not suggestions:
             return
         self.enqueue(
             {
                 "type": "followup_suggestions",
                 "message_id": str(self.message_id),
-                "suggestions": self._followup_transformer.suggestions,
+                "suggestions": suggestions,
             }
         )
-        self._followup_transformer.suggestions = []
 
     async def on_response_created(self, data: ResponseCreatedEvent):
         if not self.run_id:
@@ -3660,6 +3673,7 @@ async def run_response(
     tts_voice_settings: Mapping[str, Any] | None = None,
     user_assistant_messages_only: bool = False,
     lecture_video_dual_text_mode: bool = False,
+    lecture_video_followups_mode: bool = False,
 ):
     is_canceled = False
     await config.authz.driver.init()
@@ -3800,7 +3814,7 @@ async def run_response(
             )
             _tts_followup_transformer = (
                 FollowupTransformer()
-                if _tts_enabled and lecture_video_dual_text_mode
+                if _tts_enabled and lecture_video_followups_mode
                 else None
             )
             _tts_audio_task: asyncio.Task | None = None
@@ -3924,6 +3938,7 @@ async def run_response(
                     anonymous_session_id=anonymous_session_id,
                     anonymous_link_id=anonymous_link_id,
                     lecture_video_dual_text_mode=lecture_video_dual_text_mode,
+                    lecture_video_followups_mode=lecture_video_followups_mode,
                 )
 
                 async def _tts_receive_audio(
@@ -4867,12 +4882,14 @@ def format_instructions(
             "list. If several candidate responses would all mean roughly the "
             "same thing, keep only the best one.\n"
             "Use exactly this private-use format, with U+E200 before "
-            "`followups`, U+E202 before the JSON payload, and U+E201 after the "
-            "JSON payload:\n"
-            '\ue200followups\ue202{"responses":["Can you explain that another way?",'
-            '"Show me a quick example from what we just covered."]}\ue201\n'
+            f"`{FOLLOWUP_MARKER_NAME}`, U+E202 before the JSON payload, and U+E201 "
+            "after the JSON payload:\n"
+            f"{SAY_MARKER_START}{FOLLOWUP_MARKER_NAME}{SAY_MARKER_SEPARATOR}"
+            '{"responses":["Can you explain that another way?",'
+            f'"Show me a quick example from what we just covered."]}}{SAY_MARKER_END}\n'
             "If no follow-up responses would help, omit the snippet or return "
-            'an empty array like \ue200followups\ue202{"responses":[]}\ue201. '
+            f"an empty array like {SAY_MARKER_START}{FOLLOWUP_MARKER_NAME}"
+            f'{SAY_MARKER_SEPARATOR}{{"responses":[]}}{SAY_MARKER_END}. '
             "The JSON payload must be valid and compact. Include only the "
             "`responses` array with at most 3 strings. Do not duplicate the "
             "answer text or provide multiple phrasings of the same next step. "

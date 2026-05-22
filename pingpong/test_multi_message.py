@@ -35,6 +35,7 @@ async def _create_handler_context(
     run_id: int,
     run_external_id: str,
     lecture_video_dual_text_mode: bool = False,
+    lecture_video_followups_mode: bool = False,
 ):
     base_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
 
@@ -87,6 +88,7 @@ async def _create_handler_context(
         assistant_id=assistant_id,
         user_id=user_id,
         lecture_video_dual_text_mode=lecture_video_dual_text_mode,
+        lecture_video_followups_mode=lecture_video_followups_mode,
     )
 
 
@@ -108,6 +110,7 @@ async def test_dual_text_stream_handler_stores_raw_say_snippet_and_streams_displ
         run_id=5003,
         run_external_id="run-dual-text",
         lecture_video_dual_text_mode=True,
+        lecture_video_followups_mode=True,
     )
     await handler.on_output_message_created(
         SimpleNamespace(
@@ -330,6 +333,7 @@ async def test_run_response_sends_say_speech_text_to_tts(db, monkeypatch):
         tts_voice_id="voice-id",
         tts_api_key="tts-key",
         lecture_video_dual_text_mode=True,
+        lecture_video_followups_mode=True,
     ):
         chunks.append(chunk)
 

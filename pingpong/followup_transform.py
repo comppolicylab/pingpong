@@ -94,6 +94,11 @@ class FollowupTransformer:
                 break
             self.suggestions.append(suggestion)
 
+    def consume_suggestions(self) -> list[str]:
+        suggestions = list(self.suggestions)
+        self.suggestions.clear()
+        return suggestions
+
 
 def strip_followup_snippets(text: str) -> str:
     transformer = FollowupTransformer()
@@ -132,13 +137,13 @@ def _extract_payload(payload: str) -> list[str]:
         if not suggestion or suggestion in suggestions:
             continue
         suggestions.append(suggestion)
-        if len(suggestions) >= MAX_FOLLOWUP_SUGGESTIONS:
-            break
     return suggestions
 
 
 def _is_incomplete_followup_marker(buffer: str) -> bool:
-    return buffer.startswith(f"{SAY_MARKER_START}{FOLLOWUP_MARKER_NAME}") or (
-        buffer.startswith(SAY_MARKER_START)
-        and FOLLOWUP_MARKER_NAME.startswith(buffer[1:].strip())
-    )
+    if buffer.startswith(f"{SAY_MARKER_START}{FOLLOWUP_MARKER_NAME}"):
+        return True
+    if not buffer.startswith(SAY_MARKER_START):
+        return False
+    marker_prefix = buffer[1:].strip()
+    return bool(marker_prefix) and FOLLOWUP_MARKER_NAME.startswith(marker_prefix)

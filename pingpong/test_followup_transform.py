@@ -39,6 +39,14 @@ def test_extract_followup_suggestions_caps_trims_and_dedupes():
     ]
 
 
+def test_followup_transformer_consume_returns_and_clears_suggestions():
+    transformer = FollowupTransformer()
+    transformer.add(followup_payload('{"responses":["Explain more."]}'))
+
+    assert transformer.consume_suggestions() == ["Explain more."]
+    assert transformer.consume_suggestions() == []
+
+
 def test_followup_transformer_buffers_split_deltas_and_preserves_say_snippets():
     transformer = FollowupTransformer()
     snippet = followup_payload('{"responses":["What happens next?"]}')
@@ -70,3 +78,13 @@ def test_followup_transformer_drops_incomplete_followup_on_flush(caplog):
         assert transformer.flush() == ""
 
     assert "Dropping incomplete followups snippet buffer" in caplog.text
+
+
+def test_followup_transformer_treats_lone_marker_as_non_followup_on_flush(caplog):
+    transformer = FollowupTransformer()
+
+    assert transformer.add(SAY_MARKER_START) == ""
+    with caplog.at_level(logging.WARNING, logger="pingpong.followup_transform"):
+        assert transformer.flush() == SAY_MARKER_START
+
+    assert "Dropping incomplete followups snippet buffer" not in caplog.text
