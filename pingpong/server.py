@@ -351,6 +351,8 @@ def _lecture_video_dual_text_enabled(thread: models.Thread) -> bool:
 
 
 def _lecture_video_followups_enabled(thread: models.Thread) -> bool:
+    # Intentionally mirrors _lecture_video_dual_text_enabled; both are gated on
+    # LECTURE_VIDEO mode. Keep these conditions in sync if either changes.
     return thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
 
 

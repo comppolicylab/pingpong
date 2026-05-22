@@ -80,6 +80,29 @@ def test_followup_transformer_drops_incomplete_followup_on_flush(caplog):
     assert "Dropping incomplete followups snippet buffer" in caplog.text
 
 
+def test_followup_transformer_preserves_non_followup_marker_with_same_prefix(caplog):
+    for suffix in ("_extra", "1"):
+        transformer = FollowupTransformer()
+        text = f"{SAY_MARKER_START}followups{suffix}"
+
+        assert transformer.add(text) == ""
+        with caplog.at_level(logging.WARNING, logger="pingpong.followup_transform"):
+            assert transformer.flush() == text
+
+        assert "Dropping incomplete followups snippet buffer" not in caplog.text
+
+
+def test_followup_transformer_preserves_single_character_marker_prefix(caplog):
+    transformer = FollowupTransformer()
+    text = f"{SAY_MARKER_START}f"
+
+    assert transformer.add(text) == ""
+    with caplog.at_level(logging.WARNING, logger="pingpong.followup_transform"):
+        assert transformer.flush() == text
+
+    assert "Dropping incomplete followups snippet buffer" not in caplog.text
+
+
 def test_followup_transformer_treats_lone_marker_as_non_followup_on_flush(caplog):
     transformer = FollowupTransformer()
 

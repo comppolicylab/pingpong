@@ -647,6 +647,66 @@ async def _create_server_thread_alt(db, *, class_id: int, thread_id: int, run_id
     )
 
 
+async def _create_lecture_video_thread_with_followup_message(
+    db, *, class_id: int, thread_id: int, run_id: int, assistant_id: int
+) -> None:
+    base_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    raw_followups = (
+        "\ue200followups\ue202"
+        '{"responses":["Can you show another example?","What happens next?"]}'
+        "\ue201"
+    )
+    async with db.async_session() as session:
+        class_ = models.Class(id=class_id, name=f"Class {class_id}", api_key="sk-test")
+        assistant = models.Assistant(
+            id=assistant_id,
+            name=f"Assistant {assistant_id}",
+            class_id=class_id,
+            assistant_id=f"asst-{assistant_id}",
+            model="gpt-4o-mini",
+        )
+        thread = models.Thread(
+            id=thread_id,
+            thread_id=f"thread-{thread_id}",
+            class_id=class_id,
+            assistant_id=assistant_id,
+            version=3,
+            tools_available="",
+            private=False,
+            interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+        )
+        run = models.Run(
+            id=run_id,
+            run_id=f"run-{run_id}",
+            status=schemas.RunStatus.COMPLETED,
+            thread_id=thread_id,
+            assistant_id=assistant_id,
+            created=base_time,
+            updated=base_time,
+        )
+        message = models.Message(
+            message_status=schemas.MessageStatus.COMPLETED,
+            run_id=run_id,
+            thread_id=thread_id,
+            assistant_id=assistant_id,
+            role=schemas.MessageRole.ASSISTANT,
+            output_index=1,
+            phase=schemas.MessagePhase.FINAL_ANSWER.value,
+            created=base_time,
+        )
+        session.add_all([class_, assistant, thread, run, message])
+        await session.flush()
+        session.add(
+            models.MessagePart(
+                type=schemas.MessagePartType.OUTPUT_TEXT,
+                message_id=message.id,
+                part_index=0,
+                text=f"Here is the answer. {raw_followups}",
+            )
+        )
+        await session.commit()
+
+
 async def _create_thread_with_phase_separated_assistant_messages(
     db,
     *,
@@ -1424,6 +1484,42 @@ async def test_list_thread_messages_deduplicates_extra_assistant_messages(
     assert len(messages) == 1
     assert messages[0]["output_index"] == 3
     assert messages[0]["run_id"] == str(run_id)
+
+
+@with_user(337)
+@with_authz(grants=[("user:337", "can_view", "thread:3141")])
+async def test_list_thread_messages_appends_followup_suggestions_from_stored_text(
+    api, db, valid_user_token
+):
+    class_id = 3041
+    thread_id = 3141
+    run_id = 3241
+    assistant_id = 3341
+    await _create_lecture_video_thread_with_followup_message(
+        db,
+        class_id=class_id,
+        thread_id=thread_id,
+        run_id=run_id,
+        assistant_id=assistant_id,
+    )
+
+    response = api.get(
+        f"/api/v1/class/{class_id}/thread/{thread_id}/messages",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    messages = response.json()["messages"]
+    assert messages[0]["content"] == [
+        {
+            "type": "text",
+            "text": {"value": "Here is the answer. ", "annotations": []},
+        },
+        {
+            "type": "followup_suggestions",
+            "suggestions": ["Can you show another example?", "What happens next?"],
+        },
+    ]
 
 
 @with_user(334)

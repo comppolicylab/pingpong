@@ -267,11 +267,13 @@
 		);
 
 	const getFollowupSuggestions = (message: api.OpenAIMessage) => {
-		const content = message.content.find(
-			(content): content is api.MessageContentFollowupSuggestions =>
-				content.type === 'followup_suggestions'
-		);
-		return content?.suggestions ?? [];
+		for (let i = message.content.length - 1; i >= 0; i -= 1) {
+			const content = message.content[i];
+			if (content.type === 'followup_suggestions') {
+				return content.suggestions;
+			}
+		}
+		return [];
 	};
 
 	let latestMessageId = $derived(messages.at(-1)?.data.id ?? null);
@@ -294,16 +296,21 @@
 	const canLatchContinuePromptDecision = (message: Message) =>
 		isLatestStreamedAssistantResponse(message) && !waiting && !submitting;
 
-	const shouldShowFollowupSuggestions = (message: Message) =>
-		showInput &&
-		canSubmit &&
-		!disabled &&
-		!assistantDeleted &&
-		canViewAssistant &&
-		!waiting &&
-		!submitting &&
-		message.data.id === latestAssistantMessageId &&
-		getFollowupSuggestions(message.data).length > 0;
+	const getVisibleFollowupSuggestions = (message: Message) => {
+		if (
+			!showInput ||
+			!canSubmit ||
+			disabled ||
+			assistantDeleted ||
+			!canViewAssistant ||
+			waiting ||
+			submitting ||
+			message.data.id !== latestAssistantMessageId
+		) {
+			return [];
+		}
+		return getFollowupSuggestions(message.data);
+	};
 
 	const submitFollowupSuggestion = (suggestion: string) => {
 		if (!onsubmit || waiting || submitting || disabled || !canSubmit) {
@@ -587,27 +594,33 @@
 							{/if}
 						{/if}
 					{/each}
-					{#if shouldShowFollowupSuggestions(message)}
-						<div class="mt-1 flex flex-col items-stretch" aria-live="polite">
-							{#each getFollowupSuggestions(message.data) as suggestion, i (i)}
-								<button
-									type="button"
-									class="group flex items-center gap-1.5 py-1.5 text-left text-sm text-gray-500 transition hover:text-gray-700 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 {i >
-									0
-										? 'border-t border-gray-200'
-										: ''}"
-									disabled={waiting || submitting || disabled || !canSubmit}
-									onclick={() => submitFollowupSuggestion(suggestion)}
-								>
-									<ReplyOutline
-										class="h-3.5 w-3.5 shrink-0 -scale-x-100 text-gray-400 transition group-hover:text-gray-700"
-										aria-hidden="true"
-									/>
-									<span>{suggestion}</span>
-								</button>
-							{/each}
-						</div>
-					{/if}
+					{#each [{ key: message.data.id, suggestions: getVisibleFollowupSuggestions(message) }] as followupGroup (followupGroup.key)}
+						{#if followupGroup.suggestions.length > 0}
+							<div
+								class="mt-1 flex flex-col items-stretch"
+								role="group"
+								aria-label="Suggested follow-up responses"
+							>
+								{#each followupGroup.suggestions as suggestion, i (i)}
+									<button
+										type="button"
+										class="group flex items-center gap-1.5 py-1.5 text-left text-sm text-gray-500 transition hover:text-gray-700 focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-1 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60 {i >
+										0
+											? 'border-t border-gray-200'
+											: ''}"
+										disabled={waiting || submitting || disabled || !canSubmit}
+										onclick={() => submitFollowupSuggestion(suggestion)}
+									>
+										<ReplyOutline
+											class="h-3.5 w-3.5 shrink-0 -scale-x-100 text-gray-400 transition group-hover:text-gray-700"
+											aria-hidden="true"
+										/>
+										<span>{suggestion}</span>
+									</button>
+								{/each}
+							</div>
+						{/if}
+					{/each}
 					{#if shouldShowContinueWatchingPrompt(message)}
 						<div class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1" aria-live="polite">
 							<button

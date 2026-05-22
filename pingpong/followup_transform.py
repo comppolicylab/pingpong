@@ -141,9 +141,16 @@ def _extract_payload(payload: str) -> list[str]:
 
 
 def _is_incomplete_followup_marker(buffer: str) -> bool:
-    if buffer.startswith(f"{SAY_MARKER_START}{FOLLOWUP_MARKER_NAME}"):
-        return True
+    followup_prefix = f"{SAY_MARKER_START}{FOLLOWUP_MARKER_NAME}"
+    if buffer.startswith(followup_prefix):
+        next_index = len(followup_prefix)
+        next_char = buffer[next_index] if next_index < len(buffer) else ""
+        return next_index == len(buffer) or not _is_identifier_continuation(next_char)
     if not buffer.startswith(SAY_MARKER_START):
         return False
     marker_prefix = buffer[1:].strip()
-    return bool(marker_prefix) and FOLLOWUP_MARKER_NAME.startswith(marker_prefix)
+    return len(marker_prefix) >= 2 and FOLLOWUP_MARKER_NAME.startswith(marker_prefix)
+
+
+def _is_identifier_continuation(char: str) -> bool:
+    return char == "_" or char.isalnum()
