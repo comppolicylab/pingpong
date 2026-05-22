@@ -52,6 +52,7 @@
 		classId,
 		threadId,
 		lectureVideoSrc,
+		captionsSrc = null,
 		title = 'Lecture Video',
 		canParticipate = true,
 		showRefreshAction = true,
@@ -63,6 +64,7 @@
 		classId: number;
 		threadId: number;
 		lectureVideoSrc: string;
+		captionsSrc?: string | null;
 		title?: string;
 		canParticipate?: boolean;
 		showRefreshAction?: boolean;
@@ -1965,6 +1967,7 @@
 					>
 						<LectureVideoPlayer
 							src={lectureVideoSrc}
+							{captionsSrc}
 							displayTitle={sessionState === 'awaiting_answer'
 								? 'Answer the comprehension check to continue'
 								: title}

@@ -3,6 +3,7 @@ import functools
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -719,6 +720,81 @@ def _word_to_manifest_word(word: Any, *, word_index: int) -> dict[str, Any]:
     }
 
 
+def _audio_transcription_item_value(item: Any, key: str) -> Any:
+    value = getattr(item, key, None)
+    if isinstance(item, dict):
+        value = item.get(key, value)
+    return value
+
+
+def _normalize_transcription_token(value: str) -> str:
+    return re.sub(r"[^\w']+", "", value.casefold())
+
+
+def _segment_text_tokens(segment_text: str) -> list[str]:
+    return [match.group(0).strip() for match in re.finditer(r"\S+", segment_text)]
+
+
+def _augment_manifest_words_with_segment_text(
+    manifest_words: list[dict[str, Any]],
+    segments: Any,
+) -> list[dict[str, Any]]:
+    # Best effort: keep word timings from Whisper and copy punctuation from segment text
+    # only when normalized tokens still align.
+    if not segments:
+        return manifest_words
+
+    augmented_words = [dict(word) for word in manifest_words]
+    for segment in segments:
+        segment_text = _audio_transcription_item_value(segment, "text")
+        segment_start = _audio_transcription_item_value(segment, "start")
+        segment_end = _audio_transcription_item_value(segment, "end")
+        if not segment_text:
+            continue
+
+        if segment_start is None or segment_end is None:
+            candidate_indices = list(range(len(augmented_words)))
+        else:
+            start_offset_ms = _timestamp_to_ms(segment_start)
+            end_offset_ms = _timestamp_to_ms(segment_end)
+            candidate_indices = [
+                index
+                for index, word in enumerate(augmented_words)
+                if word["end_offset_ms"] >= start_offset_ms
+                and word["start_offset_ms"] <= end_offset_ms
+            ]
+        if not candidate_indices:
+            continue
+
+        tokens = _segment_text_tokens(str(segment_text))
+        word_cursor = 0
+        for token in tokens:
+            normalized_token = _normalize_transcription_token(token)
+            if not normalized_token:
+                continue
+            matched = False
+            while word_cursor < len(candidate_indices):
+                word_index = candidate_indices[word_cursor]
+                normalized_word = _normalize_transcription_token(
+                    str(augmented_words[word_index]["word"])
+                )
+                word_cursor += 1
+                if normalized_word == normalized_token:
+                    augmented_words[word_index]["word"] = token
+                    matched = True
+                    break
+            if not matched:
+                logger.debug(
+                    "Could not align transcription segment token with word-level "
+                    "transcript. token=%r segment_start=%r segment_end=%r",
+                    token,
+                    segment_start,
+                    segment_end,
+                )
+
+    return augmented_words
+
+
 def _log_empty_transcription_word(
     manifest_words: list[dict[str, Any]],
     *,
@@ -881,20 +957,26 @@ async def transcribe_video_words(
             file=audio_file,
             model="whisper-1",
             response_format="verbose_json",
-            timestamp_granularities=["word"],
+            timestamp_granularities=["word", "segment"],
             timeout=60 * 20,
         )
 
     words = getattr(transcription, "words", None)
     if words is None and isinstance(transcription, dict):
         words = transcription.get("words")
+    segments = getattr(transcription, "segments", None)
+    if segments is None and isinstance(transcription, dict):
+        segments = transcription.get("segments")
     if not words:
         raise ValueError("OpenAI transcription returned no word-level timestamps.")
 
-    manifest_words = [
-        _word_to_manifest_word(word, word_index=index)
-        for index, word in enumerate(words)
-    ]
+    manifest_words = _augment_manifest_words_with_segment_text(
+        [
+            _word_to_manifest_word(word, word_index=index)
+            for index, word in enumerate(words)
+        ],
+        segments,
+    )
     non_empty_manifest_words = []
     for index, word in enumerate(manifest_words):
         if word["word"] == "":

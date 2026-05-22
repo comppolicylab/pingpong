@@ -203,7 +203,8 @@ async def test_transcribe_video_words_uses_prepared_audio_without_timestamp_resc
                         start=1.25,
                         end=2.5,
                     )
-                ]
+                ],
+                segments=[],
             )
 
     fake_client = SimpleNamespace(
@@ -222,6 +223,7 @@ async def test_transcribe_video_words_uses_prepared_audio_without_timestamp_resc
     )
 
     assert calls[0]["model"] == "whisper-1"
+    assert calls[0]["timestamp_granularities"] == ["word", "segment"]
     assert words == [
         schemas.LectureVideoManifestWordV3(
             id="w1",
@@ -289,6 +291,51 @@ async def test_transcribe_video_words_skips_empty_words_with_context_warning(
         "start_offset_ms=1200 end_offset_ms=1300 previous_word='Fifteen' "
         "next_word='increase'"
     ) in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_transcribe_video_words_augments_words_with_segment_punctuation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    prepared_audio_path = tmp_path / "prepared.webm"
+    prepared_audio_path.write_bytes(b"audio")
+
+    async def fake_prepare(*, video_path: str, temp_dir: str) -> str:
+        return str(prepared_audio_path)
+
+    class FakeTranscriptions:
+        async def create(self, **_kwargs):
+            return SimpleNamespace(
+                words=[
+                    SimpleNamespace(id="w1", word="Well", start=0.0, end=0.2),
+                    SimpleNamespace(id="w2", word="is", start=0.2, end=0.35),
+                    SimpleNamespace(id="w3", word="that", start=0.35, end=0.5),
+                    SimpleNamespace(id="w4", word="right", start=0.5, end=0.7),
+                    SimpleNamespace(id="w5", word="Next", start=1.2, end=1.5),
+                ],
+                segments=[
+                    SimpleNamespace(start=0.0, end=0.7, text=" Well, is that right?"),
+                    SimpleNamespace(start=1.2, end=1.5, text=" Next."),
+                ],
+            )
+
+    fake_client = SimpleNamespace(
+        audio=SimpleNamespace(transcriptions=FakeTranscriptions())
+    )
+    monkeypatch.setattr(
+        manifest_generation,
+        "_prepare_lecture_video_audio_for_whisper_async",
+        fake_prepare,
+    )
+
+    words = await manifest_generation.transcribe_video_words(
+        "/tmp/lecture.mp4",
+        fake_client,
+        temp_dir=str(tmp_path),
+    )
+
+    assert [word.word for word in words] == ["Well,", "is", "that", "right?", "Next."]
 
 
 def _quiz_with_context(
