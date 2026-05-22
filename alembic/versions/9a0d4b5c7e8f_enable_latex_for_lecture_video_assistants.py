@@ -1,5 +1,9 @@
 """enable latex for lecture video assistants
 
+Existing lecture-video thread instructions receive the new formatting section
+from the companion ``pingpong db m11_enable_latex_for_lecture_video_assistants``
+command after the schema migration has been applied.
+
 Revision ID: 9a0d4b5c7e8f
 Revises: 7e6f23c1a9b4
 Create Date: 2026-05-22 00:00:00.000000

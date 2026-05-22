@@ -14,9 +14,10 @@ logger = logging.getLogger(__name__)
 class SayTransformer:
     """Streaming transformer for PUA-delimited `say` snippets."""
 
-    def __init__(self, target: SayTransformTarget):
+    def __init__(self, target: SayTransformTarget, *, max_buffer_chars: int = 4096):
         self.target = target
         self._buffer_parts: list[str] = []
+        self.max_buffer_chars = max_buffer_chars
 
     def add(self, text: str) -> str:
         if not text:
@@ -57,13 +58,21 @@ class SayTransformer:
             self._buffer_parts = []
         else:
             self._buffer_parts = [buffer[cursor:]]
+            if len(self._buffer_parts[0]) > self.max_buffer_chars:
+                logger.warning(
+                    "Emitting oversized incomplete say snippet buffer as raw text"
+                )
+                output_parts.append(self._buffer_parts[0])
+                self._buffer_parts = []
 
         return "".join(output_parts)
 
     def flush(self) -> str:
         output = ""
         buffer = "".join(self._buffer_parts)
-        if buffer and SAY_MARKER_START not in buffer:
+        if buffer:
+            if SAY_MARKER_START in buffer:
+                logger.warning("Emitting incomplete say snippet buffer as raw text")
             output = buffer
         self._buffer_parts = []
         return output

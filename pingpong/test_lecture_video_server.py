@@ -1408,6 +1408,7 @@ async def test_send_message_creates_lecture_chat_run_with_hidden_context(
         ("user:123", "can_view", "assistant:1"),
     ]
 )
+@pytest.mark.asyncio
 async def test_lecture_video_thread_instructions_include_say_contract_only_with_latex(
     api, db, institution, valid_user_token
 ):
@@ -1431,8 +1432,8 @@ async def test_lecture_video_thread_instructions_include_say_contract_only_with_
         thread = await models.Thread.get_by_id(session, response.json()["thread"]["id"])
 
     assert thread is not None
-    assert "---Formatting: LaTeX---" in thread.instructions
-    assert "---Lecture Video: Spoken and Written Output---" in thread.instructions
+    assert "---Formatting: Lecture Video LaTeX---" in thread.instructions
+    assert "---Formatting: LaTeX---" not in thread.instructions
 
 
 @with_user(123)
@@ -1444,6 +1445,7 @@ async def test_lecture_video_thread_instructions_include_say_contract_only_with_
         ("user:123", "can_view", "assistant:1"),
     ]
 )
+@pytest.mark.asyncio
 async def test_lecture_video_thread_instructions_omit_say_contract_without_latex(
     api, db, institution, valid_user_token
 ):
@@ -1465,7 +1467,7 @@ async def test_lecture_video_thread_instructions_omit_say_contract_without_latex
 
     assert thread is not None
     assert "---Formatting: LaTeX---" not in thread.instructions
-    assert "---Lecture Video: Spoken and Written Output---" not in thread.instructions
+    assert "---Formatting: Lecture Video LaTeX---" not in thread.instructions
 
 
 @with_user(123)
@@ -1477,7 +1479,8 @@ async def test_lecture_video_thread_instructions_omit_say_contract_without_latex
         ("user:123", "can_view", "assistant:1"),
     ]
 )
-async def test_get_thread_transforms_lecture_video_say_history_for_latex_assistant(
+@pytest.mark.asyncio
+async def test_get_thread_transforms_lecture_video_say_history_after_latex_disabled(
     api, config, db, institution, valid_user_token
 ):
     async with db.async_session() as session:
@@ -1551,6 +1554,8 @@ async def test_get_thread_transforms_lecture_video_say_history_for_latex_assista
                 ),
             ]
         )
+        assistant.use_latex = False
+        session.add(assistant)
         await session.commit()
 
     response = api.get(

@@ -1871,6 +1871,7 @@ async def test_preview_assistant_instructions_includes_latex_formatting(
 @with_user(123)
 @with_institution(1, "Test Institution")
 @with_authz(grants=[("user:123", "can_create_assistants", "class:1")])
+@pytest.mark.asyncio
 async def test_preview_assistant_instructions_includes_lecture_video_say_contract(
     api, db, institution, valid_user_token
 ):
@@ -1891,7 +1892,7 @@ async def test_preview_assistant_instructions_includes_lecture_video_say_contrac
 
     assert response.status_code == 200
     instructions_preview = response.json()["instructions_preview"]
-    assert "---Lecture Video: Spoken and Written Output---" in instructions_preview
+    assert "---Formatting: Lecture Video LaTeX---" in instructions_preview
 
 
 @with_user(123)

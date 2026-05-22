@@ -21,10 +21,11 @@ def test_format_instructions_adds_say_contract_for_latex_lecture_video_only():
         lecture_video_mode=True,
     )
 
-    assert "---Formatting: LaTeX---" in instructions
-    assert "---Lecture Video: Spoken and Written Output---" in instructions
-    assert "overrides the general LaTeX formatting rule" in instructions
-    assert "MUST be emitted as a private-use `say`" in instructions
+    assert "---Formatting: Lecture Video LaTeX---" in instructions
+    assert "---Formatting: LaTeX---" not in instructions
+    assert "MUST emit that part as a private-use `say`" in instructions
+    assert "Use the `display` value for what the student should read" in instructions
+    assert "For block-level math, use double dollar signs $$" in instructions
     assert "Do not output raw $...$ or $$...$$ math directly" in instructions
     assert "Incorrect: They have written $ 10a + 5c $" in instructions
     assert '"speech":"ten a plus five c"' in instructions
@@ -42,7 +43,7 @@ def test_format_instructions_does_not_add_say_contract_for_normal_latex_chat():
     )
 
     assert "---Formatting: LaTeX---" in instructions
-    assert "---Lecture Video: Spoken and Written Output---" not in instructions
+    assert "---Formatting: Lecture Video LaTeX---" not in instructions
 
 
 def test_format_instructions_does_not_add_say_contract_without_latex():
@@ -53,7 +54,7 @@ def test_format_instructions_does_not_add_say_contract_without_latex():
     )
 
     assert "---Formatting: LaTeX---" not in instructions
-    assert "---Lecture Video: Spoken and Written Output---" not in instructions
+    assert "---Formatting: Lecture Video LaTeX---" not in instructions
 
 
 def test_transform_say_text_returns_display_string():
@@ -97,8 +98,23 @@ def test_say_transformer_suppresses_non_string_display():
     assert transform_say_text(text, "display") == "Before  after"
 
 
-def test_say_transformer_suppresses_incomplete_snippet_on_flush():
+def test_say_transformer_emits_incomplete_snippet_on_flush(caplog):
     transformer = SayTransformer("display")
+    text = 'Before \ue200say\ue202{"speech":"x"'
 
-    assert transformer.add('Before \ue200say\ue202{"speech":"x"') == "Before "
-    assert transformer.flush() == ""
+    assert transformer.add(text) == "Before "
+    with caplog.at_level(logging.WARNING, logger="pingpong.say_transform"):
+        assert transformer.flush() == '\ue200say\ue202{"speech":"x"'
+
+    assert "Emitting incomplete say snippet buffer as raw text" in caplog.text
+
+
+def test_say_transformer_emits_oversized_incomplete_buffer(caplog):
+    transformer = SayTransformer("display", max_buffer_chars=10)
+
+    with caplog.at_level(logging.WARNING, logger="pingpong.say_transform"):
+        assert transformer.add("Before \ue200unfinished tail") == (
+            "Before \ue200unfinished tail"
+        )
+
+    assert "Emitting oversized incomplete say snippet buffer as raw text" in caplog.text

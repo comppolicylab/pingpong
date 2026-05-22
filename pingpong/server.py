@@ -342,35 +342,24 @@ def _lecture_video_matches_assistant(
     )
 
 
-def _lecture_video_dual_text_enabled(
-    thread: models.Thread, assistant: models.Assistant | None
-) -> bool:
-    return (
-        thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
-        and assistant is not None
-        and assistant.use_latex
-    )
+def _lecture_video_dual_text_enabled(thread: models.Thread) -> bool:
+    return thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
 
 
-def _display_text_for_thread(
-    thread: models.Thread, assistant: models.Assistant | None, text: str | None
-) -> str | None:
-    if text is None:
-        return None
-    if not _lecture_video_dual_text_enabled(thread, assistant):
+def _display_text_for_thread(thread: models.Thread, text: str) -> str:
+    if not _lecture_video_dual_text_enabled(thread):
         return text
     return transform_say_text(text, "display")
 
 
 def _display_message_part_text_for_thread(
     thread: models.Thread,
-    assistant: models.Assistant | None,
     message: models.Message,
     part: models.MessagePart,
-) -> str | None:
+) -> str:
     if message.role != schemas.MessageRole.ASSISTANT:
         return part.text
-    return _display_text_for_thread(thread, assistant, part.text)
+    return _display_text_for_thread(thread, part.text)
 
 
 async def _lecture_video_availability(
@@ -4434,7 +4423,7 @@ async def get_thread(
                                 type="text",
                                 text=schemas.ThreadText(
                                     value=_display_message_part_text_for_thread(
-                                        thread, assistant, message, content
+                                        thread, message, content
                                     ),
                                     annotations=_annotations,
                                 ),
@@ -6279,7 +6268,7 @@ async def list_thread_messages(
                                 type="text",
                                 text=schemas.ThreadText(
                                     value=_display_message_part_text_for_thread(
-                                        thread, assistant, message, content
+                                        thread, message, content
                                     ),
                                     annotations=_annotations,
                                 ),
@@ -7736,9 +7725,7 @@ async def create_run(
                 or not asst.hide_web_search_actions,
                 show_mcp_server_call_details=is_supervisor
                 or not asst.hide_mcp_server_call_details,
-                lecture_video_dual_text_mode=_lecture_video_dual_text_enabled(
-                    thread, asst
-                ),
+                lecture_video_dual_text_mode=_lecture_video_dual_text_enabled(thread),
             )
         except Exception as e:
             logger.exception("Error running thread")
@@ -8338,9 +8325,7 @@ async def send_message(
                 tts_voice_id=tts_voice_id,
                 tts_api_key=tts_api_key,
                 tts_voice_settings=tts_voice_settings,
-                lecture_video_dual_text_mode=_lecture_video_dual_text_enabled(
-                    thread, asst
-                ),
+                lecture_video_dual_text_mode=_lecture_video_dual_text_enabled(thread),
                 user_assistant_messages_only=(
                     lecture_chat_prep.user_assistant_messages_only
                     if lecture_chat_prep is not None

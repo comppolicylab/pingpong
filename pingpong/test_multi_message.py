@@ -34,6 +34,7 @@ async def _create_handler_context(
     thread_external_id: str,
     run_id: int,
     run_external_id: str,
+    lecture_video_dual_text_mode: bool = False,
 ):
     base_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
 
@@ -85,6 +86,7 @@ async def _create_handler_context(
         thread_id=thread_id,
         assistant_id=assistant_id,
         user_id=user_id,
+        lecture_video_dual_text_mode=lecture_video_dual_text_mode,
     )
 
 
@@ -105,9 +107,8 @@ async def test_dual_text_stream_handler_stores_raw_say_snippet_and_streams_displ
         thread_external_id="thread-dual-text",
         run_id=5003,
         run_external_id="run-dual-text",
+        lecture_video_dual_text_mode=True,
     )
-    handler.lecture_video_dual_text_mode = True
-    handler._display_say_transformer = ai_module.SayTransformer("display")
     await handler.on_output_message_created(
         SimpleNamespace(
             id="msg-dual-text",
@@ -221,7 +222,9 @@ async def test_run_response_sends_say_speech_text_to_tts(db, monkeypatch):
             type="response.content_part.added",
             part=SimpleNamespace(type="output_text", text=""),
         ),
-        SimpleNamespace(type="response.output_text.delta", delta="Use " + raw_snippet),
+        SimpleNamespace(type="response.output_text.delta", delta="Use "),
+        SimpleNamespace(type="response.output_text.delta", delta=raw_snippet[:12]),
+        SimpleNamespace(type="response.output_text.delta", delta=raw_snippet[12:]),
         SimpleNamespace(
             type="response.content_part.done",
             part=SimpleNamespace(type="output_text", text=""),
@@ -305,6 +308,7 @@ async def test_run_response_sends_say_speech_text_to_tts(db, monkeypatch):
 
     spoken_text = "".join(text for text, _, _ in sent_tts_text)
     assert "Use x squared plus y squared." in spoken_text
+    assert all(text for text, _, _ in sent_tts_text)
     assert all("\ue200" not in text for text, _, _ in sent_tts_text)
     streamed_events = [
         orjson.loads(line)

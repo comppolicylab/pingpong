@@ -3767,7 +3767,13 @@ async def run_response(
             # Make cleanup safe even when the OpenAI stream fails before TTS setup runs.
             _tts_enabled = bool(tts_voice_id and tts_api_key)
             _tts_client: ElevenLabsStreamingTTS | None = None
-            _tts_sanitizer = StreamingMarkdownSanitizer() if _tts_enabled else None
+            _tts_sanitizer = (
+                StreamingMarkdownSanitizer(
+                    strip_latex_delimiters=lecture_video_dual_text_mode
+                )
+                if _tts_enabled
+                else None
+            )
             _tts_chunker = StreamingTTSChunker() if _tts_enabled else None
             _tts_say_transformer = (
                 SayTransformer("speech")
@@ -4105,18 +4111,19 @@ async def run_response(
                                         if _tts_say_transformer
                                         else event.delta
                                     )
-                                    for chunk in _tts_sanitizer.add(tts_delta):
-                                        try:
-                                            tts_chunks = _tts_chunker.add(chunk)
-                                            for tts_chunk in tts_chunks:
-                                                await _tts_client.send_text(
-                                                    tts_chunk,
+                                    if tts_delta:
+                                        for chunk in _tts_sanitizer.add(tts_delta):
+                                            try:
+                                                tts_chunks = _tts_chunker.add(chunk)
+                                                for tts_chunk in tts_chunks:
+                                                    await _tts_client.send_text(
+                                                        tts_chunk,
+                                                    )
+                                            except Exception:
+                                                logger.warning(
+                                                    "TTS send_text failed",
+                                                    exc_info=True,
                                                 )
-                                        except Exception:
-                                            logger.warning(
-                                                "TTS send_text failed",
-                                                exc_info=True,
-                                            )
                             case "response.output_text.annotation.added":
                                 match event.annotation["type"]:
                                     case "container_file_citation":
@@ -4652,15 +4659,7 @@ def format_instructions(
     """Format instructions for a prompt."""
 
     if use_latex:
-        instructions += (
-            "\n\n"
-            "---Formatting: LaTeX---\n"
-            "Use LaTeX with math mode delimiters when outputting "
-            "mathematical tokens. Use the single dollar sign $ with spaces "
-            "surrounding it to delimit "
-            "inline math. For block-level math, use double dollar signs $$ "
-            "with newlines before and after them as the opening and closing "
-            "delimiter. Do not use LaTeX inside backticks.\n\n"
+        diagram_formatting_instructions = (
             "---Formatting: Mermaid---\n"
             "When a diagram would make the answer clearer, use Mermaid. "
             "Wrap Mermaid diagrams in fenced code blocks with the language "
@@ -4687,16 +4686,19 @@ def format_instructions(
         if lecture_video_mode:
             instructions += (
                 "\n\n"
-                "---Lecture Video: Spoken and Written Output---\n"
-                "This section overrides the general LaTeX formatting rule above "
-                "for lecture-video responses and must always be followed in this "
-                "interactive video setting.\n"
+                "---Formatting: Lecture Video LaTeX---\n"
                 "Before producing the final answer, check whether any part of it "
                 "contains math, symbols, formulas, special characters, "
                 "notation, or any text that should be spoken differently from "
-                "how it should be displayed. If it does, you MUST emit that part as "
-                "a private-use `say` snippet instead of raw LaTeX or raw "
-                "symbolic text.\n"
+                "how it should be displayed. If it does, you MUST emit that part "
+                "as a private-use `say` snippet.\n"
+                "Use the `display` value for what the student should read. In "
+                "`display`, use the single dollar sign $ with spaces surrounding "
+                "it for inline math. For block-level math, use double dollar "
+                "signs $$ with newlines before and after them as the opening and "
+                "closing delimiter. Do not use LaTeX inside backticks.\n"
+                "Use the `speech` value for what the student should hear, written "
+                "as natural spoken language.\n"
                 "Do not output raw $...$ or $$...$$ math directly in normal "
                 "lecture-video answers. Do not output raw symbolic tokens like "
                 "variable names, operators, equations, inequalities, units, "
@@ -4731,7 +4733,20 @@ def format_instructions(
                 '\ue200say\ue202{"speech":"c","display":"$c$"}\ue201.\n'
                 "If you are deciding between raw LaTeX and a `say` snippet "
                 "in a lecture-video response, choose the `say` snippet.\n"
-                "Do not mention the snippet syntax to the user."
+                "Do not mention the snippet syntax to the user.\n\n"
+                + diagram_formatting_instructions
+            )
+        else:
+            instructions += (
+                "\n\n"
+                "---Formatting: LaTeX---\n"
+                "Use LaTeX with math mode delimiters when outputting "
+                "mathematical tokens. Use the single dollar sign $ with spaces "
+                "surrounding it to delimit "
+                "inline math. For block-level math, use double dollar signs $$ "
+                "with newlines before and after them as the opening and closing "
+                "delimiter. Do not use LaTeX inside backticks.\n\n"
+                + diagram_formatting_instructions
             )
 
     if use_image_descriptions:
@@ -5100,8 +5115,6 @@ async def export_threads_multiple_classes(
                     elif thread.version == 3:
                         display_say_snippets = (
                             thread.interaction_mode == InteractionMode.LECTURE_VIDEO
-                            and assistant is not None
-                            and assistant.use_latex
                         )
                         export_rows = await list_export_rows_v3(
                             session,
@@ -5337,8 +5350,6 @@ async def export_class_threads(
                 elif thread.version == 3:
                     display_say_snippets = (
                         thread.interaction_mode == InteractionMode.LECTURE_VIDEO
-                        and assistant is not None
-                        and assistant.use_latex
                     )
                     export_rows = await list_export_rows_v3(
                         session,
