@@ -49,8 +49,26 @@ const writePcm = (
 	});
 };
 
+const configureProcessor = (
+	processor: ReturnType<typeof createProcessor>,
+	options: { stopOnEmptyBuffer: boolean }
+) => {
+	processor.port.onmessage?.({
+		data: {
+			event: 'configure',
+			...options
+		}
+	});
+};
+
+const finishProcessor = (processor: ReturnType<typeof createProcessor>) => {
+	processor.port.onmessage?.({
+		data: { event: 'finish' }
+	});
+};
+
 const processOnce = (processor: ReturnType<typeof createProcessor>) => {
-	processor.process([], [[new Float32Array(128)]], {});
+	return processor.process([], [[new Float32Array(128)]], {});
 };
 
 const postedMessages = (processor: ReturnType<typeof createProcessor>) =>
@@ -102,5 +120,21 @@ describe('StreamProcessor worklet', () => {
 			offset: 128,
 			eventId: 'event-1'
 		});
+	});
+
+	it('keeps processing through empty gaps until explicitly finished', () => {
+		const processor = createProcessor();
+		configureProcessor(processor, { stopOnEmptyBuffer: false });
+
+		writePcm(processor, 128, 'track-1', 'event-1');
+		expect(processOnce(processor)).toBe(true);
+		expect(processOnce(processor)).toBe(true);
+		expect(postedMessages(processor).some((message) => message.event === 'stop')).toBe(false);
+
+		writePcm(processor, 128, 'track-1', 'event-1');
+		expect(processOnce(processor)).toBe(true);
+		finishProcessor(processor);
+		expect(processOnce(processor)).toBe(false);
+		expect(postedMessages(processor).some((message) => message.event === 'stop')).toBe(true);
 	});
 });

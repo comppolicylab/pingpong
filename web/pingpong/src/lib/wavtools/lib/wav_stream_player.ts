@@ -44,6 +44,7 @@ export type OnAudioPartEndedProcessor = (data: {
 export type OnPlaybackStoppedProcessor = () => void;
 interface WavStreamPlayerOptions {
 	sampleRate?: number;
+	stopOnEmptyBuffer?: boolean;
 	onAudioPartStarted?: OnAudioPartStartedProcessor;
 	onAudioPartEnded?: OnAudioPartEndedProcessor;
 	onPlaybackStopped?: OnPlaybackStoppedProcessor;
@@ -71,6 +72,7 @@ export class WavStreamPlayer {
 	private gainNode: GainNode | null;
 	private trackSampleOffsets: Record<string, TrackSampleOffset>;
 	private interruptedTrackIds: Record<string, boolean>;
+	private stopOnEmptyBuffer: boolean;
 	private onAudioPartStarted: OnAudioPartStartedProcessor | null;
 	private onAudioPartEnded: OnAudioPartEndedProcessor | null;
 	private onPlaybackStopped: OnPlaybackStoppedProcessor | null;
@@ -82,6 +84,7 @@ export class WavStreamPlayer {
 	 */
 	constructor({
 		sampleRate = 44100,
+		stopOnEmptyBuffer = true,
 		onAudioPartStarted,
 		onAudioPartEnded,
 		onPlaybackStopped
@@ -94,6 +97,7 @@ export class WavStreamPlayer {
 		this.gainNode = null;
 		this.trackSampleOffsets = {};
 		this.interruptedTrackIds = {};
+		this.stopOnEmptyBuffer = stopOnEmptyBuffer;
 		this.onAudioPartStarted = onAudioPartStarted || null;
 		this.onAudioPartEnded = onAudioPartEnded || null;
 		this.onPlaybackStopped = onPlaybackStopped || null;
@@ -184,6 +188,10 @@ export class WavStreamPlayer {
 		}
 		const streamNode = new AudioWorkletNode(this.context, 'stream_processor');
 		streamNode.connect(this.gainNode || this.context.destination);
+		streamNode.port.postMessage({
+			event: 'configure',
+			stopOnEmptyBuffer: this.stopOnEmptyBuffer
+		});
 		streamNode.port.onmessage = (e) => {
 			const { event } = e.data;
 			if (event === 'stop') {
@@ -250,6 +258,13 @@ export class WavStreamPlayer {
 		}
 		this.stream?.port.postMessage({ event: 'write', buffer, trackId, eventId });
 		return buffer;
+	}
+
+	/**
+	 * Signals that no more PCM chunks will be written.
+	 */
+	finish(): void {
+		this.stream?.port.postMessage({ event: 'finish' });
 	}
 
 	/**
