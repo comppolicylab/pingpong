@@ -313,6 +313,29 @@ def test_process_message_content_v3_transforms_assistant_say_snippets_for_displa
     )
 
 
+def test_process_message_content_v3_strips_assistant_followup_snippets():
+    raw_followups = (
+        '\ue200followups\ue202{"responses":["Can you show another example?"]}\ue201'
+    )
+    message = make_message(
+        role=schemas.MessageRole.ASSISTANT,
+        output_index=1,
+        created=NOW,
+        text="Visible answer." + raw_followups,
+        part_type=schemas.MessagePartType.OUTPUT_TEXT,
+    )
+
+    assert (
+        process_message_content_v3(
+            message,
+            file_names={},
+            class_id=10,
+            thread_id=20,
+        )
+        == "Visible answer."
+    )
+
+
 def test_process_message_content_v3_leaves_user_say_snippets_raw():
     raw_snippet = (
         "\ue200say\ue202"

@@ -127,15 +127,23 @@ async def test_dual_text_stream_handler_stores_raw_say_snippet_and_streams_displ
         '{"speech":"x squared plus y squared","display":"$ x^2 + y^2 $"}'
         "\ue201"
     )
+    raw_followups = (
+        "\ue200followups\ue202"
+        '{"responses":["Can you show another example?","What happens next?"]}'
+        "\ue201"
+    )
     await handler.on_output_text_delta(SimpleNamespace(delta="Use " + raw_snippet[:12]))
-    await handler.on_output_text_delta(SimpleNamespace(delta=raw_snippet[12:] + "."))
+    await handler.on_output_text_delta(
+        SimpleNamespace(delta=raw_snippet[12:] + "." + raw_followups[:18])
+    )
+    await handler.on_output_text_delta(SimpleNamespace(delta=raw_followups[18:]))
     await handler.on_output_text_part_done(SimpleNamespace(type="output_text", text=""))
 
     async with db.async_session() as session:
         saved_part = await session.get(models.MessagePart, message_part_id)
 
     assert saved_part is not None
-    assert saved_part.text == "Use " + raw_snippet + "."
+    assert saved_part.text == "Use " + raw_snippet + "." + raw_followups
 
     events = [
         orjson.loads(line) for line in handler.flush().splitlines() if line.strip()
@@ -147,6 +155,19 @@ async def test_dual_text_stream_handler_stores_raw_say_snippet_and_streams_displ
     )
     assert streamed_text == "Use $ x^2 + y^2 $."
     assert "\ue200" not in streamed_text
+    followup_events = [
+        event for event in events if event["type"] == "followup_suggestions"
+    ]
+    assert followup_events == [
+        {
+            "type": "followup_suggestions",
+            "message_id": str(handler.message_id),
+            "suggestions": [
+                "Can you show another example?",
+                "What happens next?",
+            ],
+        }
+    ]
 
 
 async def test_run_response_sends_say_speech_text_to_tts(db, monkeypatch):
@@ -204,6 +225,9 @@ async def test_run_response_sends_say_speech_text_to_tts(db, monkeypatch):
         '{"speech":"x squared plus y squared.","display":"$ x^2 + y^2 $"}'
         "\ue201"
     )
+    raw_followups = (
+        '\ue200followups\ue202{"responses":["Can you show another example?"]}\ue201'
+    )
     events = [
         SimpleNamespace(
             type="response.created",
@@ -224,7 +248,10 @@ async def test_run_response_sends_say_speech_text_to_tts(db, monkeypatch):
         ),
         SimpleNamespace(type="response.output_text.delta", delta="Use "),
         SimpleNamespace(type="response.output_text.delta", delta=raw_snippet[:12]),
-        SimpleNamespace(type="response.output_text.delta", delta=raw_snippet[12:]),
+        SimpleNamespace(
+            type="response.output_text.delta",
+            delta=raw_snippet[12:] + raw_followups,
+        ),
         SimpleNamespace(
             type="response.content_part.done",
             part=SimpleNamespace(type="output_text", text=""),
@@ -308,6 +335,7 @@ async def test_run_response_sends_say_speech_text_to_tts(db, monkeypatch):
 
     spoken_text = "".join(text for text, _, _ in sent_tts_text)
     assert "Use x squared plus y squared." in spoken_text
+    assert "Can you show another example?" not in spoken_text
     assert all(text for text, _, _ in sent_tts_text)
     assert all("\ue200" not in text for text, _, _ in sent_tts_text)
     streamed_events = [
@@ -322,6 +350,20 @@ async def test_run_response_sends_say_speech_text_to_tts(db, monkeypatch):
         if event["type"] == "message_delta"
     )
     assert streamed_text == "Use $ x^2 + y^2 $"
+    followup_events = [
+        event for event in streamed_events if event["type"] == "followup_suggestions"
+    ]
+    message_created_events = [
+        event for event in streamed_events if event["type"] == "message_created"
+    ]
+    assert message_created_events
+    assert followup_events == [
+        {
+            "type": "followup_suggestions",
+            "message_id": message_created_events[0]["message"]["id"],
+            "suggestions": ["Can you show another example?"],
+        }
+    ]
 
     async with db.async_session() as session:
         saved_part = await session.scalar(
@@ -331,7 +373,7 @@ async def test_run_response_sends_say_speech_text_to_tts(db, monkeypatch):
         )
 
     assert saved_part is not None
-    assert saved_part.text == "Use " + raw_snippet
+    assert saved_part.text == "Use " + raw_snippet + raw_followups
 
 
 async def _setup_handler_with_initial_message(db):

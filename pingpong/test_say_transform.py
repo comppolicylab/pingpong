@@ -33,6 +33,9 @@ def test_format_instructions_adds_say_contract_for_latex_lecture_video_only():
     assert '"speech":"a","display":"$a$"' in instructions
     assert '"speech"' in instructions
     assert '"display"' in instructions
+    assert "---Formatting: Lecture Video Follow-ups---" in instructions
+    assert "\ue200followups\ue202" in instructions
+    assert '"responses"' in instructions
 
 
 def test_format_instructions_does_not_add_say_contract_for_normal_latex_chat():
@@ -44,6 +47,7 @@ def test_format_instructions_does_not_add_say_contract_for_normal_latex_chat():
 
     assert "---Formatting: LaTeX---" in instructions
     assert "---Formatting: Lecture Video LaTeX---" not in instructions
+    assert "---Formatting: Lecture Video Follow-ups---" not in instructions
 
 
 def test_format_instructions_does_not_add_say_contract_without_latex():
@@ -55,6 +59,7 @@ def test_format_instructions_does_not_add_say_contract_without_latex():
 
     assert "---Formatting: LaTeX---" not in instructions
     assert "---Formatting: Lecture Video LaTeX---" not in instructions
+    assert "---Formatting: Lecture Video Follow-ups---" in instructions
 
 
 def test_transform_say_text_returns_display_string():

@@ -89,6 +89,10 @@ from pingpong.invite import (
     send_lti_registration_approved,
     send_lti_registration_rejected,
 )
+from pingpong.followup_transform import (
+    extract_followup_suggestions,
+    strip_followup_snippets,
+)
 from pingpong.lti.lti_course import (
     find_class_by_course_id,
     find_class_by_course_id_search_by_canvas_account_lti_guid,
@@ -349,7 +353,15 @@ def _lecture_video_dual_text_enabled(thread: models.Thread) -> bool:
 def _display_text_for_thread(thread: models.Thread, text: str) -> str:
     if not _lecture_video_dual_text_enabled(thread):
         return text
-    return transform_say_text(text, "display")
+    return transform_say_text(strip_followup_snippets(text), "display")
+
+
+def _followup_suggestions_for_thread(
+    thread: models.Thread, text: str | None
+) -> list[str]:
+    if not _lecture_video_dual_text_enabled(thread):
+        return []
+    return extract_followup_suggestions(text or "")
 
 
 def _display_message_part_text_for_thread(
@@ -360,6 +372,25 @@ def _display_message_part_text_for_thread(
     if message.role != schemas.MessageRole.ASSISTANT:
         return part.text
     return _display_text_for_thread(thread, part.text)
+
+
+def _append_followup_suggestions_for_thread(
+    thread: models.Thread,
+    message: models.Message,
+    part: models.MessagePart,
+    content: list[schemas.ThreadMessageContent],
+) -> None:
+    if message.role != schemas.MessageRole.ASSISTANT:
+        return
+    suggestions = _followup_suggestions_for_thread(thread, part.text)
+    if not suggestions:
+        return
+    content.append(
+        schemas.ThreadFollowupSuggestionsContentBlock(
+            type="followup_suggestions",
+            suggestions=suggestions,
+        )
+    )
 
 
 async def _lecture_video_availability(
@@ -4429,6 +4460,9 @@ async def get_thread(
                                 ),
                             )
                         )
+                        _append_followup_suggestions_for_thread(
+                            thread, message, content, _message.content
+                        )
 
             if not message.user_id:
                 thread_messages.append(_message)
@@ -6273,6 +6307,9 @@ async def list_thread_messages(
                                     annotations=_annotations,
                                 ),
                             )
+                        )
+                        _append_followup_suggestions_for_thread(
+                            thread, message, content, _message.content
                         )
 
             if not message.user_id:

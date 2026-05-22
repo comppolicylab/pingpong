@@ -265,6 +265,14 @@
 			(content) => content.type === 'text' && content.text.value.trim().length > 0
 		);
 
+	const getFollowupSuggestions = (message: api.OpenAIMessage) => {
+		const content = message.content.find(
+			(content): content is api.MessageContentFollowupSuggestions =>
+				content.type === 'followup_suggestions'
+		);
+		return content?.suggestions ?? [];
+	};
+
 	let latestMessageId = $derived(messages.at(-1)?.data.id ?? null);
 	let latestAssistantMessageId = $derived.by(() => {
 		const latestMessage = messages.at(-1)?.data;
@@ -284,6 +292,32 @@
 
 	const canLatchContinuePromptDecision = (message: Message) =>
 		isLatestStreamedAssistantResponse(message) && !waiting && !submitting;
+
+	const shouldShowFollowupSuggestions = (message: Message) =>
+		showInput &&
+		canSubmit &&
+		!disabled &&
+		!assistantDeleted &&
+		canViewAssistant &&
+		!waiting &&
+		!submitting &&
+		message.data.id === latestAssistantMessageId &&
+		getFollowupSuggestions(message.data).length > 0;
+
+	const submitFollowupSuggestion = (suggestion: string) => {
+		if (!onsubmit || waiting || submitting || disabled || !canSubmit) {
+			return;
+		}
+		onsubmit({
+			code_interpreter_file_ids: [],
+			file_search_file_ids: [],
+			vision_file_ids: [],
+			visionFileImageDescriptions: [],
+			optimisticVisionFiles: [],
+			message: suggestion,
+			callback: () => {}
+		});
+	};
 
 	const evaluateContinuePromptVisibility = () =>
 		showInput && showContinueWatchingPrompt && !!oncontinuewatching;
@@ -552,19 +586,48 @@
 							{/if}
 						{/if}
 					{/each}
+					{#if shouldShowFollowupSuggestions(message)}
+						<div class="mt-1 flex flex-col items-stretch" aria-live="polite">
+							{#each getFollowupSuggestions(message.data) as suggestion, i (suggestion)}
+								<button
+									type="button"
+									class="flex items-center gap-2 py-1.5 text-left text-sm text-gray-500 transition hover:text-gray-700 focus:outline-none {i >
+									0
+										? 'border-t border-gray-100'
+										: ''}"
+									onclick={() => submitFollowupSuggestion(suggestion)}
+								>
+									<svg
+										class="h-3.5 w-3.5 shrink-0 text-gray-400"
+										viewBox="0 0 24 24"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										aria-hidden="true"
+									>
+										<polyline points="15 10 20 15 15 20" />
+										<path d="M4 4v7a4 4 0 0 0 4 4h12" />
+									</svg>
+									<span>{suggestion}</span>
+								</button>
+							{/each}
+						</div>
+					{/if}
 					{#if shouldShowContinueWatchingPrompt(message)}
-						<div class="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2" aria-live="polite">
+						<div class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1" aria-live="polite">
 							<button
 								type="button"
-								class="inline-flex items-center gap-2 rounded-full bg-orange px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-dark focus:ring-2 focus:ring-orange focus:ring-offset-2 focus:outline-none"
+								class="inline-flex items-center gap-1.5 rounded-full bg-orange px-3 py-1 text-sm font-medium text-white transition hover:bg-orange-dark focus:outline-none"
 								onclick={() => void continueWatching(message)}
 							>
-								<PlaySolid class="h-3.5 w-3.5" />
+								<PlaySolid class="h-3 w-3" />
 								Continue watching
 							</button>
 							<button
 								type="button"
-								class="text-sm font-medium text-slate-500 transition hover:text-slate-800"
+								class="text-sm text-slate-500 transition hover:text-slate-700"
 								onclick={() => askAnotherQuestion(message)}
 							>
 								Ask another question
