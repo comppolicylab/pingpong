@@ -211,7 +211,7 @@
 			</button>
 
 			<div
-				class="min-w-0 flex-1 xl:-mt-4 xl:min-h-0 xl:self-stretch xl:overflow-y-auto xl:[scrollbar-width:thin]"
+				class="min-w-0 flex-1 xl:-mt-4 xl:min-h-0 xl:[scrollbar-width:thin] xl:self-stretch xl:overflow-y-auto"
 			>
 				<div class="xl:pt-12">
 					{#if activeQuestion}
