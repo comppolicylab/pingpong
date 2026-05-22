@@ -7669,8 +7669,7 @@ async def create_run(
             ):
                 if (
                     not thread.instructions
-                    and thread.interaction_mode
-                    != schemas.InteractionMode.LECTURE_VIDEO
+                    and thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO
                 ):
                     thread.instructions = format_instructions(
                         asst.instructions,
