@@ -31,9 +31,11 @@ export type BaseResponse = {
 export type Error = {
 	detail?: string;
 	error_code?: string;
+	field?: string;
 };
 
 type CodedErrorDetail = {
+	field?: string;
 	message?: string;
 	detail?: string;
 	error_code?: string;
@@ -117,7 +119,8 @@ export const expandResponse = <R extends BaseData>(
 				$status,
 				error: {
 					detail: detail.message ?? detail.detail,
-					error_code: detail.error_code ?? errorResponse.error_code
+					error_code: detail.error_code ?? errorResponse.error_code,
+					field: detail.field ?? errorResponse.field
 				} as Error,
 				data: null
 			};
@@ -1488,6 +1491,7 @@ export type CreateConnectorConfigRequest = {
 };
 
 export type UpdateConnectorConfigRequest = {
+	account_scope: string;
 	display_name: string;
 	host: string;
 	client_id: string;

@@ -7,7 +7,7 @@ import httpx
 import pytest
 from sqlalchemy import func, select
 
-from pingpong.connectors.core.base import OAuth2Connector
+from pingpong.connectors.core.base import OAuth2Connector, validate_public_host
 from pingpong.connectors.core.exceptions import ConnectorValidationError
 from pingpong.connectors.core.models import upsert_user_connector
 from pingpong.connectors.core.types import ConnectorTokens, ProviderIdentity
@@ -46,7 +46,10 @@ def user_connector() -> UserConnector:
     )
 
 
-def mock_token_probe_client(monkeypatch, responses: list[httpx.Response | Exception]):
+def mock_token_probe_client(
+    monkeypatch: pytest.MonkeyPatch,
+    responses: list[httpx.Response | Exception],
+) -> list[dict[str, Any]]:
     posts: list[dict[str, Any]] = []
 
     class FakeAsyncClient:
@@ -135,7 +138,7 @@ async def test_refresh_uses_scopeless_oauth_client() -> None:
 
 
 @pytest.mark.asyncio
-async def test_validate_credentials_accepts_auth_code_invalid_grant(
+async def test_validate_credentials_accepts_client_credentials_oauth_error(
     monkeypatch,
 ) -> None:
     posts = mock_token_probe_client(
@@ -157,10 +160,7 @@ async def test_validate_credentials_accepts_auth_code_invalid_grant(
 
     await ScopedConnector().validate_credentials(connector_config())
 
-    assert [post["data"]["grant_type"] for post in posts] == [
-        "client_credentials",
-        "authorization_code",
-    ]
+    assert [post["data"]["grant_type"] for post in posts] == ["client_credentials"]
 
 
 @pytest.mark.asyncio
@@ -199,6 +199,34 @@ async def test_validate_credentials_reports_network_errors_as_host_errors(
 
     assert exc.value.field == "host"
     assert exc.value.message == "Could not connect to this host."
+
+
+@pytest.mark.asyncio
+async def test_validate_credentials_reports_provider_errors_as_host_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mock_token_probe_client(
+        monkeypatch,
+        [
+            httpx.Response(500, content=b"server error"),
+            httpx.Response(500, content=b"server error"),
+        ],
+    )
+
+    with pytest.raises(ConnectorValidationError) as exc:
+        await ScopedConnector().validate_credentials(connector_config())
+
+    assert exc.value.field == "host"
+    assert exc.value.message == "Token endpoint returned HTTP 500."
+
+
+@pytest.mark.asyncio
+async def test_validate_public_host_rejects_localhost() -> None:
+    with pytest.raises(ConnectorValidationError) as exc:
+        await validate_public_host("localhost")
+
+    assert exc.value.field == "host"
+    assert exc.value.message == "Host must be a public HTTPS hostname."
 
 
 @pytest.mark.asyncio

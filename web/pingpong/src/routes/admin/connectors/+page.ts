@@ -9,9 +9,11 @@ export const load: PageLoad = async ({ fetch }) => {
 
 	const configs = configsResp.error ? [] : configsResp.data.configs;
 	const services = servicesResp.error ? [] : servicesResp.data.services;
+	const loadError = configsResp.error?.detail || servicesResp.error?.detail || null;
 
 	return {
 		connectorConfigs: configs,
-		connectorServices: services
+		connectorServices: services,
+		loadError
 	};
 };

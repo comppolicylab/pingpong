@@ -14,6 +14,7 @@
 		Modal,
 		P,
 		Select,
+		Spinner,
 		Table,
 		TableBody,
 		TableBodyCell,
@@ -28,6 +29,7 @@
 	export let data;
 	$: connectorConfigs = data.connectorConfigs;
 	$: connectorServices = data.connectorServices;
+	$: loadError = data.loadError;
 
 	$: isNewHeaderLayout = data.forceCollapsedLayout && data.forceShowSidebarButton;
 
@@ -66,6 +68,33 @@
 		enabled: true
 	};
 	let creating = false;
+	let createHostError = '';
+	let createCredentialsError = '';
+
+	const clearCreateHostError = () => {
+		createHostError = '';
+	};
+
+	const clearCreateCredentialsError = () => {
+		createCredentialsError = '';
+	};
+
+	const errorMessage = (err: unknown, fallback: string) => {
+		return err instanceof Error && err.message ? err.message : fallback;
+	};
+
+	const applyConnectorError = (error: api.Error, target: 'create' | 'edit', fallback: string) => {
+		const message = error.detail || fallback;
+		const field = error.field || error.error_code?.replace('connector_validation_', '');
+		if (field === 'host') {
+			if (target === 'create') createHostError = message;
+			else editHostError = message;
+		} else if (field === 'credentials') {
+			if (target === 'create') createCredentialsError = message;
+			else editCredentialsError = message;
+		}
+		sadToast(message);
+	};
 
 	const openCreateModal = () => {
 		createForm = {
@@ -77,6 +106,8 @@
 			client_secret: '',
 			enabled: true
 		};
+		createHostError = '';
+		createCredentialsError = '';
 		createModalOpen = true;
 	};
 
@@ -87,22 +118,30 @@
 			sadToast('Please select a service.');
 			return;
 		}
+		createHostError = '';
+		createCredentialsError = '';
 		creating = true;
-		const result = await api.createConnectorConfig(fetch, { ...createForm });
-		const response = api.expandResponse(result);
-		creating = false;
-		if (response.error) {
-			sadToast(response.error.detail || 'Failed to create connector.');
-			return;
+		try {
+			const result = await api.createConnectorConfig(fetch, { ...createForm });
+			const response = api.expandResponse(result);
+			if (response.error) {
+				applyConnectorError(response.error, 'create', 'Failed to create connector.');
+				return;
+			}
+			happyToast('Connector created.');
+			createModalOpen = false;
+			await invalidateAll();
+		} catch (err) {
+			sadToast(errorMessage(err, 'Failed to create connector.'));
+		} finally {
+			creating = false;
 		}
-		happyToast('Connector created.');
-		createModalOpen = false;
-		invalidateAll();
 	};
 
 	let editModalOpen = false;
 	let configToEdit: api.ConnectorConfig | null = null;
 	let editForm = {
+		account_scope: '',
 		display_name: '',
 		host: '',
 		client_id: '',
@@ -110,40 +149,61 @@
 		enabled: true
 	};
 	let editing = false;
+	let editHostError = '';
+	let editCredentialsError = '';
+
+	const clearEditHostError = () => {
+		editHostError = '';
+	};
+
+	const clearEditCredentialsError = () => {
+		editCredentialsError = '';
+	};
 
 	const openEditModal = (config: api.ConnectorConfig) => {
 		configToEdit = config;
 		editForm = {
+			account_scope: config.account_scope,
 			display_name: config.display_name,
 			host: config.host,
 			client_id: config.client_id,
 			client_secret: '',
 			enabled: config.enabled
 		};
+		editHostError = '';
+		editCredentialsError = '';
 		editModalOpen = true;
 	};
 
 	const handleEdit = async (event: Event) => {
 		event.preventDefault();
 		if (editing || !configToEdit) return;
+		editHostError = '';
+		editCredentialsError = '';
 		editing = true;
-		const result = await api.updateConnectorConfig(fetch, configToEdit.id, {
-			display_name: editForm.display_name,
-			host: editForm.host,
-			client_id: editForm.client_id,
-			client_secret: editForm.client_secret ? editForm.client_secret : null,
-			enabled: editForm.enabled
-		});
-		const response = api.expandResponse(result);
-		editing = false;
-		if (response.error) {
-			sadToast(response.error.detail || 'Failed to update connector.');
-			return;
+		try {
+			const result = await api.updateConnectorConfig(fetch, configToEdit.id, {
+				account_scope: editForm.account_scope,
+				display_name: editForm.display_name,
+				host: editForm.host,
+				client_id: editForm.client_id,
+				client_secret: editForm.client_secret ? editForm.client_secret : null,
+				enabled: editForm.enabled
+			});
+			const response = api.expandResponse(result);
+			if (response.error) {
+				applyConnectorError(response.error, 'edit', 'Failed to update connector.');
+				return;
+			}
+			happyToast('Connector updated.');
+			editModalOpen = false;
+			configToEdit = null;
+			await invalidateAll();
+		} catch (err) {
+			sadToast(errorMessage(err, 'Failed to update connector.'));
+		} finally {
+			editing = false;
 		}
-		happyToast('Connector updated.');
-		editModalOpen = false;
-		configToEdit = null;
-		invalidateAll();
 	};
 
 	$: serviceOptions = connectorServices.map((s) => ({ value: s.slug, name: s.display_name }));
@@ -189,6 +249,12 @@
 
 		<div class="flex flex-col gap-4">
 			<P>Configure connectors that let users link their accounts to external services.</P>
+
+			{#if loadError}
+				<div class="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+					{loadError}
+				</div>
+			{/if}
 
 			<Table class="w-full">
 				<TableHead class="rounded-2xl bg-blue-light-40 p-1 tracking-wide text-blue-dark-50">
@@ -294,14 +360,23 @@
 				id="connector-host"
 				placeholder="example.hosted.service.com"
 				bind:value={createForm.host}
+				oninput={clearCreateHostError}
 			/>
+			{#if createHostError}
+				<p class="text-sm text-red-700">{createHostError}</p>
+			{/if}
 		</div>
 
 		<div class="flex flex-col gap-2">
 			<Label for="connector-client-id" class="text-xs tracking-wide text-gray-600 uppercase"
 				>Client ID</Label
 			>
-			<Input id="connector-client-id" autocomplete="off" bind:value={createForm.client_id} />
+			<Input
+				id="connector-client-id"
+				autocomplete="off"
+				bind:value={createForm.client_id}
+				oninput={clearCreateCredentialsError}
+			/>
 		</div>
 
 		<div class="flex flex-col gap-2">
@@ -313,7 +388,11 @@
 				type="password"
 				autocomplete="new-password"
 				bind:value={createForm.client_secret}
+				oninput={clearCreateCredentialsError}
 			/>
+			{#if createCredentialsError}
+				<p class="text-sm text-red-700">{createCredentialsError}</p>
+			{/if}
 		</div>
 
 		<div class="flex items-center gap-3">
@@ -322,6 +401,9 @@
 		</div>
 
 		<div class="flex justify-end gap-3">
+			{#if creating}
+				<p class="self-center text-sm text-gray-600">Validating with provider...</p>
+			{/if}
 			<Button color="light" onclick={() => (createModalOpen = false)}>Cancel</Button>
 			<Button
 				class="rounded-full bg-orange text-white hover:bg-orange-dark"
@@ -334,7 +416,8 @@
 					!createForm.client_secret.trim()}
 				onclick={handleCreate}
 			>
-				{creating ? 'Creating…' : 'Create'}
+				{#if creating}<Spinner color="custom" customColor="fill-white" class="mr-2 h-4 w-4" />{/if}
+				{creating ? 'Creating...' : 'Create'}
 			</Button>
 		</div>
 	</div>
@@ -355,17 +438,31 @@
 		</div>
 
 		<div class="flex flex-col gap-2">
+			<Label for="edit-connector-tenant" class="text-xs tracking-wide text-gray-600 uppercase"
+				>Tenant</Label
+			>
+			<Input id="edit-connector-tenant" bind:value={editForm.account_scope} />
+		</div>
+
+		<div class="flex flex-col gap-2">
 			<Label for="edit-connector-host" class="text-xs tracking-wide text-gray-600 uppercase"
 				>Host</Label
 			>
-			<Input id="edit-connector-host" bind:value={editForm.host} />
+			<Input id="edit-connector-host" bind:value={editForm.host} oninput={clearEditHostError} />
+			{#if editHostError}
+				<p class="text-sm text-red-700">{editHostError}</p>
+			{/if}
 		</div>
 
 		<div class="flex flex-col gap-2">
 			<Label for="edit-connector-client-id" class="text-xs tracking-wide text-gray-600 uppercase"
 				>Client ID</Label
 			>
-			<Input id="edit-connector-client-id" bind:value={editForm.client_id} />
+			<Input
+				id="edit-connector-client-id"
+				bind:value={editForm.client_id}
+				oninput={clearEditCredentialsError}
+			/>
 		</div>
 
 		<div class="flex flex-col gap-2">
@@ -378,7 +475,11 @@
 				type="password"
 				placeholder="Leave blank to keep current secret"
 				bind:value={editForm.client_secret}
+				oninput={clearEditCredentialsError}
 			/>
+			{#if editCredentialsError}
+				<p class="text-sm text-red-700">{editCredentialsError}</p>
+			{/if}
 		</div>
 
 		<div class="flex items-center gap-3">
@@ -387,16 +488,21 @@
 		</div>
 
 		<div class="flex justify-end gap-3">
+			{#if editing}
+				<p class="self-center text-sm text-gray-600">Validating with provider...</p>
+			{/if}
 			<Button color="light" onclick={() => (editModalOpen = false)}>Cancel</Button>
 			<Button
 				class="rounded-full bg-orange text-white hover:bg-orange-dark"
 				disabled={editing ||
+					!editForm.account_scope.trim() ||
 					!editForm.display_name.trim() ||
 					!editForm.host.trim() ||
 					!editForm.client_id.trim()}
 				onclick={handleEdit}
 			>
-				{editing ? 'Saving…' : 'Save'}
+				{#if editing}<Spinner color="custom" customColor="fill-white" class="mr-2 h-4 w-4" />{/if}
+				{editing ? 'Saving...' : 'Save'}
 			</Button>
 		</div>
 	</div>

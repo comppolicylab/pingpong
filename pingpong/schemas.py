@@ -3069,8 +3069,8 @@ class SessionState(BaseModel):
 
 
 class ConnectorService(BaseModel):
-    slug: str
-    display_name: str
+    slug: str = Field(..., min_length=1, pattern=r"^[a-z0-9_-]+$")
+    display_name: str = Field(..., min_length=1)
 
 
 class ConnectorServices(BaseModel):
@@ -3104,13 +3104,52 @@ class CreateConnectorConfig(BaseModel):
     client_secret: str = Field(..., min_length=1)
     enabled: bool = True
 
+    @field_validator(
+        "service",
+        "account_scope",
+        "display_name",
+        "host",
+        "client_id",
+        "client_secret",
+    )
+    @classmethod
+    def strip_required_strings(cls, v: str) -> str:
+        value = v.strip()
+        if not value:
+            raise ValueError("field must not be empty after stripping whitespace")
+        return value
+
 
 class UpdateConnectorConfig(BaseModel):
+    account_scope: str = Field(..., min_length=1)
     display_name: str = Field(..., min_length=1)
     host: str = Field(..., min_length=1)
     client_id: str = Field(..., min_length=1)
-    client_secret: str | None = None
+    client_secret: str | None = Field(
+        default=None,
+        description="Set to null to keep the existing connector secret.",
+    )
     enabled: bool
+
+    @field_validator("account_scope", "display_name", "host", "client_id")
+    @classmethod
+    def strip_required_strings(cls, v: str) -> str:
+        value = v.strip()
+        if not value:
+            raise ValueError("field must not be empty after stripping whitespace")
+        return value
+
+    @field_validator("client_secret")
+    @classmethod
+    def strip_optional_secret(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        value = v.strip()
+        if not value:
+            raise ValueError(
+                "client_secret must not be empty after stripping whitespace"
+            )
+        return value
 
 
 class Support(BaseModel):

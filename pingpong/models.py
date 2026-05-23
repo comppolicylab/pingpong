@@ -1317,13 +1317,13 @@ class ConnectorConfig(Base):
     async def list_all(cls, session: AsyncSession) -> list["ConnectorConfig"]:
         stmt = select(ConnectorConfig)
         result = await session.execute(stmt)
-        return [row.ConnectorConfig for row in result]
+        return list(result.scalars().all())
 
     @classmethod
     async def get_by_id(
-        cls, session: AsyncSession, id: int
+        cls, session: AsyncSession, id_: int
     ) -> "ConnectorConfig | None":
-        stmt = select(ConnectorConfig).where(ConnectorConfig.id == id)
+        stmt = select(ConnectorConfig).where(ConnectorConfig.id == id_)
         result = await session.execute(stmt)
         return result.scalar_one_or_none()
 

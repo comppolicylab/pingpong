@@ -13251,7 +13251,7 @@ def _connector_validation_error_detail(
 ) -> dict[str, str]:
     return {
         "field": err.field,
-        "message": f"{err.field.title()}: {err.message}",
+        "message": err.message,
         "error_code": f"connector_validation_{err.field}",
     }
 
@@ -13269,7 +13269,7 @@ async def list_connector_services(request: StateRequest):
         )
         for c in all_connectors()
     ]
-    return {"services": services}
+    return schemas.ConnectorServices(services=services)
 
 
 @v1.get(
@@ -13279,7 +13279,7 @@ async def list_connector_services(request: StateRequest):
 )
 async def list_connector_configs(request: StateRequest):
     configs = await models.ConnectorConfig.list_all(request.state["db"])
-    return {"configs": configs}
+    return schemas.ConnectorConfigs(configs=configs)
 
 
 @v1.post(
@@ -13293,20 +13293,11 @@ async def create_connector_config(
 ):
     try:
         connector = get_connector(req.service)
-    except ConnectorNotRegistered:
+    except ConnectorNotRegistered as e:
         raise HTTPException(
             status_code=400,
             detail=f"Unknown connector service '{req.service}'.",
-        )
-
-    existing_config = await models.ConnectorConfig.get_by_service_and_account_scope(
-        request.state["db"], req.service, req.account_scope
-    )
-    if existing_config:
-        raise HTTPException(
-            status_code=409,
-            detail="A connector configuration already exists for this service and account scope.",
-        )
+        ) from e
 
     config_obj = models.ConnectorConfig(
         service=req.service,
@@ -13324,19 +13315,28 @@ async def create_connector_config(
         raise HTTPException(
             status_code=400,
             detail=_connector_validation_error_detail(e),
+        ) from e
+
+    existing_config = await models.ConnectorConfig.get_by_service_and_account_scope(
+        request.state["db"], req.service, req.account_scope
+    )
+    if existing_config:
+        raise HTTPException(
+            status_code=409,
+            detail="A connector configuration already exists for this service and account scope.",
         )
 
     request.state["db"].add(config_obj)
     try:
         await request.state["db"].flush()
-    except IntegrityError:
+    except IntegrityError as e:
         raise HTTPException(
             status_code=409,
             detail=(
                 "A connector configuration already exists for this service and "
                 "account scope."
             ),
-        )
+        ) from e
     return config_obj
 
 
@@ -13357,22 +13357,29 @@ async def update_connector_config(
         raise HTTPException(404, "Connector configuration not found.")
 
     host_changed = config_obj.host != req.host
+    scope_changed = config_obj.account_scope != req.account_scope
     client_id_changed = config_obj.client_id != req.client_id
     secret_provided = bool(req.client_secret)
     enabling_connector = not config_obj.enabled and req.enabled
     new_secret = req.client_secret if secret_provided else config_obj.client_secret
 
-    if host_changed or client_id_changed or secret_provided or enabling_connector:
+    if (
+        host_changed
+        or scope_changed
+        or client_id_changed
+        or secret_provided
+        or enabling_connector
+    ):
         try:
             connector = get_connector(config_obj.service)
-        except ConnectorNotRegistered:
+        except ConnectorNotRegistered as e:
             raise HTTPException(
                 status_code=400,
                 detail=f"Unknown connector service '{config_obj.service}'.",
-            )
+            ) from e
         probe = models.ConnectorConfig(
             service=config_obj.service,
-            account_scope=config_obj.account_scope,
+            account_scope=req.account_scope,
             display_name=req.display_name,
             host=req.host,
             client_id=req.client_id,
@@ -13385,8 +13392,9 @@ async def update_connector_config(
             raise HTTPException(
                 status_code=400,
                 detail=_connector_validation_error_detail(e),
-            )
+            ) from e
 
+    config_obj.account_scope = req.account_scope
     config_obj.display_name = req.display_name
     config_obj.host = req.host
     config_obj.client_id = req.client_id
@@ -13395,7 +13403,16 @@ async def update_connector_config(
     config_obj.enabled = req.enabled
 
     request.state["db"].add(config_obj)
-    await request.state["db"].flush()
+    try:
+        await request.state["db"].flush()
+    except IntegrityError as e:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "A connector configuration already exists for this service and "
+                "account scope."
+            ),
+        ) from e
     return config_obj
 
 

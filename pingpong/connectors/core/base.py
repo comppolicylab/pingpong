@@ -1,10 +1,14 @@
 from __future__ import annotations
 
-import logging
-import secrets
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import ipaddress
+import logging
+import secrets
+import socket
 from typing import TYPE_CHECKING, Any, ClassVar
+from urllib.parse import urlparse
 
 from authlib.integrations.httpx_client import AsyncOAuth2Client
 import httpx
@@ -28,6 +32,7 @@ class _TokenProbeResult:
     ok: bool = False
     credentials_accepted: bool = False
     invalid_client: bool = False
+    provider_error: bool = False
     message: str | None = None
 
 
@@ -50,9 +55,36 @@ def friendly_network_error(exc: BaseException) -> str:
         if any(m in text for m in dns_markers):
             return "Could not resolve this host."
         return "Could not connect to this host."
-    if isinstance(exc, httpx.HTTPError):
-        return "Could not reach this host."
     return "Could not reach this host."
+
+
+def _host_address_is_private(host: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return not ip.is_global
+
+
+async def validate_public_host(host: str) -> None:
+    hostname = (urlparse(f"//{host}").hostname or "").lower()
+    if not hostname:
+        raise ConnectorValidationError("host", "Host is required.")
+    if hostname == "localhost" or hostname.endswith(".localhost"):
+        raise ConnectorValidationError("host", "Host must be a public HTTPS hostname.")
+    if _host_address_is_private(hostname):
+        raise ConnectorValidationError("host", "Host must resolve to a public address.")
+
+    try:
+        infos = await asyncio.to_thread(socket.getaddrinfo, hostname, None)
+    except socket.gaierror:
+        return
+    for info in infos:
+        address = info[4][0]
+        if isinstance(address, str) and _host_address_is_private(address):
+            raise ConnectorValidationError(
+                "host", "Host must resolve to a public address."
+            )
 
 
 def generate_pkce_pair() -> PKCEPair:
@@ -305,6 +337,8 @@ class OAuth2Connector:
             raise ConnectorValidationError(
                 "credentials", cc_result.message or "Invalid client credentials."
             )
+        if cc_result.credentials_accepted:
+            return
 
         ac_result = await self._probe_token_endpoint(
             connector_config,
@@ -323,7 +357,9 @@ class OAuth2Connector:
             return
 
         raise ConnectorValidationError(
-            "credentials",
+            "host"
+            if cc_result.provider_error or ac_result.provider_error
+            else "credentials",
             ac_result.message
             or cc_result.message
             or "Could not verify the client credentials with the provider.",
@@ -354,7 +390,12 @@ class OAuth2Connector:
             async with httpx.AsyncClient(timeout=self.http_timeout_seconds) as client:
                 response = await client.post(token_url, data=body, auth=auth)
         except httpx.HTTPError as e:
-            logger.info("Token endpoint probe failed for %s: %s", token_url, e)
+            logger.info(
+                "Token endpoint probe failed for service=%s url=%s: %s",
+                self.slug,
+                token_url,
+                e,
+            )
             raise ConnectorValidationError("host", friendly_network_error(e)) from e
 
         try:
@@ -383,6 +424,7 @@ class OAuth2Connector:
         )
         return _TokenProbeResult(
             credentials_accepted=credentials_accepted,
+            provider_error=not credentials_accepted,
             message=description
             or (error_code if isinstance(error_code, str) else None)
             or f"Token endpoint returned HTTP {response.status_code}.",
