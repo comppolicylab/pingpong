@@ -1370,23 +1370,6 @@ class UserConnector(Base):
     last_used_at = Column(DateTime(timezone=True), nullable=True)
 
     @classmethod
-    async def get_for_user(
-        cls, session: AsyncSession, user_id: int
-    ) -> list["UserConnector"]:
-        stmt = (
-            select(UserConnector)
-            .where(UserConnector.user_id == user_id)
-            .order_by(UserConnector.service.asc(), UserConnector.id.asc())
-        )
-        return list(await session.scalars(stmt))
-
-    @classmethod
-    async def get_by_id(
-        cls, session: AsyncSession, connector_id: int
-    ) -> "UserConnector | None":
-        return await session.get(UserConnector, connector_id)
-
-    @classmethod
     async def get_for_user_connector_config(
         cls,
         session: AsyncSession,
