@@ -1313,6 +1313,31 @@ class ConnectorConfig(Base):
 
     user_connectors = relationship("UserConnector", back_populates="connector_config")
 
+    @classmethod
+    async def list_all(cls, session: AsyncSession) -> list["ConnectorConfig"]:
+        stmt = select(ConnectorConfig)
+        result = await session.execute(stmt)
+        return [row.ConnectorConfig for row in result]
+
+    @classmethod
+    async def get_by_id(
+        cls, session: AsyncSession, id: int
+    ) -> "ConnectorConfig | None":
+        stmt = select(ConnectorConfig).where(ConnectorConfig.id == id)
+        result = await session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    @classmethod
+    async def get_by_service_and_account_scope(
+        cls, session: AsyncSession, service: str, account_scope: str
+    ) -> "ConnectorConfig | None":
+        stmt = select(ConnectorConfig).where(
+            ConnectorConfig.service == service,
+            ConnectorConfig.account_scope == account_scope,
+        )
+        result = await session.execute(stmt)
+        return result.scalar_one_or_none()
+
 
 class UserConnector(Base):
     __tablename__ = "user_connectors"

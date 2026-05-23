@@ -3068,6 +3068,51 @@ class SessionState(BaseModel):
     agreement_id: int | None = None
 
 
+class ConnectorService(BaseModel):
+    slug: str
+    display_name: str
+
+
+class ConnectorServices(BaseModel):
+    services: list[ConnectorService]
+
+
+class ConnectorConfigSchema(BaseModel):
+    id: int
+    service: str
+    account_scope: str
+    display_name: str
+    host: str
+    client_id: str
+    enabled: bool
+    created: datetime
+    updated: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ConnectorConfigs(BaseModel):
+    configs: list[ConnectorConfigSchema]
+
+
+class CreateConnectorConfig(BaseModel):
+    service: str = Field(..., min_length=1)
+    account_scope: str = Field(..., min_length=1)
+    display_name: str = Field(..., min_length=1)
+    host: str = Field(..., min_length=1)
+    client_id: str = Field(..., min_length=1)
+    client_secret: str = Field(..., min_length=1)
+    enabled: bool = True
+
+
+class UpdateConnectorConfig(BaseModel):
+    display_name: str = Field(..., min_length=1)
+    host: str = Field(..., min_length=1)
+    client_id: str = Field(..., min_length=1)
+    client_secret: str | None = None
+    enabled: bool
+
+
 class Support(BaseModel):
     blurb: str
     can_post: bool

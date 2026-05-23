@@ -24,3 +24,16 @@ class TokenRefreshError(ConnectorError):
 
 class OAuthStateError(ConnectorError):
     """Raised when the OAuth2 state JWT fails to validate."""
+
+
+class ConnectorValidationError(ConnectorError):
+    """Raised when an admin-submitted connector configuration fails validation.
+
+    ``field`` names the part of the config that failed ("host" or "credentials")
+    so the API layer can surface a structured error to the UI.
+    """
+
+    def __init__(self, field: str, message: str) -> None:
+        self.field = field
+        self.message = message
+        super().__init__(f"{field}: {message}")

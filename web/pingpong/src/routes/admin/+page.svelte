@@ -146,6 +146,10 @@
 					<Button class="rounded-full bg-orange text-white hover:bg-orange-dark" href="/admin/lti"
 						>Manage LTI Registrations</Button
 					>
+					<Button
+						class="rounded-full bg-orange text-white hover:bg-orange-dark"
+						href="/admin/connectors">Manage Connectors</Button
+					>
 				{/if}
 				<Button class="rounded-full bg-orange text-white hover:bg-orange-dark" href="/admin/terms"
 					>Manage User Agreements</Button
