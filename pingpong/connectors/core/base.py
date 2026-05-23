@@ -77,8 +77,8 @@ async def validate_public_host(host: str) -> None:
 
     try:
         infos = await asyncio.to_thread(socket.getaddrinfo, hostname, None)
-    except socket.gaierror:
-        return
+    except socket.gaierror as e:
+        raise ConnectorValidationError("host", "Could not resolve this host.") from e
     for info in infos:
         address = info[4][0]
         if isinstance(address, str) and _host_address_is_private(address):
