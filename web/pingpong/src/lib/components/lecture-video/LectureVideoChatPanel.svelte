@@ -99,6 +99,11 @@
 	let chatInputRef: ChatInputHandle | null = $state(null);
 	const dismissedContinuePromptMessageIds = new SvelteSet<string>();
 	const continuePromptDecisionByMessageId = new SvelteMap<string, boolean>();
+	const starterQuestions = [
+		"What's the main idea of this lecture?",
+		'Give me a real-world example.',
+		"Quiz me on what's been covered so far."
+	];
 
 	type MCPContent = api.MCPServerCallItem | api.MCPListToolsCallItem;
 	type ContentBlock =
@@ -299,12 +304,9 @@
 	const getVisibleFollowupSuggestions = (message: Message) => {
 		if (
 			!showInput ||
-			!canSubmit ||
-			disabled ||
+			!canSubmitChatText ||
 			assistantDeleted ||
 			!canViewAssistant ||
-			waiting ||
-			submitting ||
 			message.data.id !== latestAssistantMessageId
 		) {
 			return [];
@@ -312,8 +314,13 @@
 		return getFollowupSuggestions(message.data);
 	};
 
-	const submitFollowupSuggestion = (suggestion: string) => {
-		if (!onsubmit || waiting || submitting || disabled || !canSubmit) {
+	let canShowStarterQuestions = $derived(showInput && !assistantDeleted && canViewAssistant);
+	let canSubmitChatText = $derived(
+		canShowStarterQuestions && canSubmit && !disabled && !waiting && !submitting
+	);
+
+	const submitChatText = (message: string) => {
+		if (!onsubmit || !canSubmitChatText) {
 			return;
 		}
 		onsubmit({
@@ -322,7 +329,7 @@
 			vision_file_ids: [],
 			visionFileImageDescriptions: [],
 			optimisticVisionFiles: [],
-			message: suggestion,
+			message,
 			callback: () => {}
 		});
 	};
@@ -429,14 +436,36 @@
 		{/if}
 		{#if !canFetchMore && messages.length === 0}
 			<div class="flex h-full min-h-48 items-center justify-center px-4 py-8">
-				<div class="flex max-w-sm flex-col items-center text-center">
+				<div class="flex w-full max-w-sm flex-col items-center text-center">
 					<div
 						class="mb-3 flex size-12 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-slate-400"
 					>
 						<MessageDotsOutline class="size-6" />
 					</div>
-					<h2 class="text-sm font-semibold text-slate-900">No messages yet</h2>
-					<p class="mt-1 text-sm text-slate-500">Ask a question to get started</p>
+					<h2 class="text-sm font-semibold text-slate-900">Ask about this lecture</h2>
+					<p class="mt-1 text-sm text-slate-500">Try a starter question or type your own.</p>
+					{#if canShowStarterQuestions}
+						<div
+							class="mt-4 flex w-full flex-col gap-1.5"
+							role="group"
+							aria-label="Starter questions"
+						>
+							{#each starterQuestions as question (question)}
+								<button
+									type="button"
+									class="group flex w-full items-center justify-between gap-2 rounded-full border border-slate-200 bg-white px-3.5 py-1.5 text-left text-sm text-slate-700 transition hover:border-sky-300 hover:bg-sky-50 hover:text-sky-800 focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-1 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+									disabled={!canSubmitChatText}
+									onclick={() => submitChatText(question)}
+								>
+									<span>{question}</span>
+									<ReplyOutline
+										class="size-3.5 shrink-0 -scale-x-100 text-slate-400 transition group-hover:text-sky-600"
+										aria-hidden="true"
+									/>
+								</button>
+							{/each}
+						</div>
+					{/if}
 				</div>
 			</div>
 		{/if}
@@ -608,8 +637,8 @@
 										0
 											? 'border-t border-gray-200'
 											: ''}"
-										disabled={waiting || submitting || disabled || !canSubmit}
-										onclick={() => submitFollowupSuggestion(suggestion)}
+										disabled={!canSubmitChatText}
+										onclick={() => submitChatText(suggestion)}
 									>
 										<ReplyOutline
 											class="h-3.5 w-3.5 shrink-0 -scale-x-100 text-gray-400 transition group-hover:text-gray-700"
