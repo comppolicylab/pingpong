@@ -51,8 +51,11 @@ class _StreamingSnippetJsonParser:
         self.escape = False
         self.unicode_escape: str | None = None
         self.display_speech_fallback = ""
+        self.display_speech_fallback_overflowed = False
         self.saw_content = False
+        self.saw_speech = False
         self.started_content = False
+        self.emitted_flush_signal = False
         self.invalid_reason: str | None = None
 
     @property
@@ -95,13 +98,14 @@ class _StreamingSnippetJsonParser:
             return self._invalidate("expected object key")
 
         if self.state == self._KEY:
-            decoded = self._feed_json_string_char(ch)
+            decoded, ended = self._feed_json_string_char(ch)
+            if decoded:
+                self.current_key += decoded
             if decoded is None:
                 return False
-            if decoded == "":
+            if ended:
                 self.state = self._AFTER_KEY
                 return False
-            self.current_key += decoded
             return False
 
         if self.state == self._AFTER_KEY:
@@ -122,8 +126,10 @@ class _StreamingSnippetJsonParser:
                 self.state = self._VALUE_STRING
                 if self.current_value_key == "content":
                     self.started_content = True
-                    return self.marker_name in FLUSH_MARKERS
+                    return self._should_flush_before_content()
                 return False
+            if self.current_value_key in {"content", "speech"}:
+                return self._invalidate("snippet speech/content values must be strings")
             if ch in "{[":
                 return self._invalidate("snippet JSON values must be strings")
             self.literal_buf = ch
@@ -131,19 +137,28 @@ class _StreamingSnippetJsonParser:
             return False
 
         if self.state == self._VALUE_STRING:
-            decoded = self._feed_json_string_char(ch)
+            decoded, ended = self._feed_json_string_char(ch)
+            if decoded:
+                self._consume_value_char(decoded, out)
             if decoded is None:
                 return False
-            if decoded == "":
+            if ended:
+                should_flush = (
+                    self.current_value_key == "speech"
+                    and self.started_content
+                    and self._should_flush_after_speech()
+                )
                 self.state = self._AFTER_VALUE
                 self.current_value_key = None
-                return False
-            self._consume_value_char(decoded, out)
+                return should_flush
             return False
 
         if self.state == self._VALUE_LITERAL:
             if ch in ",}":
-                if self.literal_buf.strip() not in {"null", "true", "false"}:
+                if (
+                    self.current_value_key in {"content", "speech"}
+                    or not self.literal_buf.strip()
+                ):
                     return self._invalidate("snippet JSON values must be strings")
                 self.current_value_key = None
                 if ch == ",":
@@ -152,7 +167,10 @@ class _StreamingSnippetJsonParser:
                     self.state = self._DONE
                 return False
             if ch.isspace():
-                if self.literal_buf.strip() not in {"null", "true", "false"}:
+                if (
+                    self.current_value_key in {"content", "speech"}
+                    or not self.literal_buf.strip()
+                ):
                     return self._invalidate("snippet JSON values must be strings")
                 self.current_value_key = None
                 self.state = self._AFTER_VALUE
@@ -174,76 +192,82 @@ class _StreamingSnippetJsonParser:
         return False
 
     def flush_output(self) -> str:
-        if self.target == "display" and not self.saw_content:
+        if (
+            self.target == "display"
+            and not self.saw_content
+            and not self.display_speech_fallback_overflowed
+        ):
             return self.display_speech_fallback
         return ""
 
-    def _feed_json_string_char(self, ch: str) -> str | None:
+    def _should_flush_before_content(self) -> bool:
+        if self.target != "speech" or self.marker_name not in FLUSH_MARKERS:
+            return False
+        if not self.saw_speech or self.emitted_flush_signal:
+            return False
+        self.emitted_flush_signal = True
+        return True
+
+    def _should_flush_after_speech(self) -> bool:
+        if self.target != "speech" or self.marker_name not in FLUSH_MARKERS:
+            return False
+        if not self.saw_speech or self.emitted_flush_signal:
+            return False
+        self.emitted_flush_signal = True
+        return True
+
+    def _feed_json_string_char(self, ch: str) -> tuple[str | None, bool]:
         if self.unicode_escape is not None:
             if ch.lower() not in "0123456789abcdef":
                 self._invalidate("invalid unicode escape")
-                return None
+                return None, False
             self.unicode_escape += ch
             if len(self.unicode_escape) == 4:
                 decoded = chr(int(self.unicode_escape, 16))
                 self.unicode_escape = None
                 self.escape = False
-                return decoded
-            return None
+                return decoded, False
+            return None, False
 
         if self.escape:
             self.escape = False
             match ch:
                 case '"':
-                    return '"'
+                    return '"', False
                 case "\\":
-                    return "\\"
+                    return "\\", False
                 case "/":
-                    return "/"
+                    return "/", False
                 case "b":
-                    return "\b"
+                    return "\b", False
                 case "f":
-                    return "\f"
+                    return "\f", False
                 case "n":
-                    return "\n"
+                    return "\n", False
                 case "r":
-                    return "\r"
+                    return "\r", False
                 case "t":
-                    if (
-                        self.current_value_key == "content"
-                        and self._looks_like_latex_escape(ch)
-                    ):
-                        return "\\" + ch
-                    return "\t"
+                    return "\t", False
                 case "u":
                     self.unicode_escape = ""
                     self.escape = True
-                    return None
+                    return None, False
                 case _:
-                    if (
-                        self.current_value_key == "content"
-                        and self._looks_like_latex_escape(ch)
-                    ):
-                        return "\\" + ch
+                    if self.current_value_key == "content":
+                        return "\\" + ch, False
                     self._invalidate("invalid string escape")
-                    return None
+                    return None, False
 
         if ch == "\\":
             self.escape = True
-            return None
+            return None, False
         if ch == '"':
-            return ""
-        return ch
-
-    def _looks_like_latex_escape(self, ch: str) -> bool:
-        # Models often emit LaTeX in JSON content as "\times" or "\frac"
-        # instead of JSON-escaping the slash. Be lenient only for display
-        # content, where preserving the backslash is more useful than decoding
-        # a JSON control escape such as \t or \f.
-        return ch.isalpha()
+            return "", True
+        return ch, False
 
     def _consume_value_char(self, ch: str, out: list[str]) -> None:
         if self.current_value_key == "speech":
+            self.saw_speech = True
             if self.target == "speech":
                 out.append(ch)
                 return
@@ -251,10 +275,10 @@ class _StreamingSnippetJsonParser:
                 self.display_speech_fallback += ch
                 if len(self.display_speech_fallback) > self.max_speech_buffer_chars:
                     logger.warning(
-                        "Speech fallback buffer exceeded cap; emitting as display"
+                        "Speech fallback buffer exceeded cap; dropping fallback"
                     )
-                    out.append(self.display_speech_fallback)
                     self.display_speech_fallback = ""
+                    self.display_speech_fallback_overflowed = True
             return
 
         if self.current_value_key == "content":
@@ -287,15 +311,15 @@ class PuaStreamTransformer:
     - ``followups`` — payload is buffered until the end marker, then parsed as
       JSON. Suggestions are collected via ``consume_followup_suggestions``.
 
-    Unknown markers pass through verbatim so downstream consumers can handle
-    them.
+    Unknown markers are dropped so raw private-use delimiters do not leak into
+    display or speech output.
     """
 
     _OUTSIDE = "outside"
     _MARKER = "marker"
     _SNIPPET_JSON = "snippet_json"
     _FOLLOWUP_PAYLOAD = "followup_payload"
-    _PASSTHROUGH = "passthrough"
+    _RECOVERING = "recovering"
 
     def __init__(
         self,
@@ -349,8 +373,8 @@ class PuaStreamTransformer:
             self._buffer = ""
             self._followup_buf = ""
             self._reset()
-        elif self._state == self._PASSTHROUGH:
-            out.append(self._buffer)
+        elif self._state == self._RECOVERING:
+            logger.warning("Dropping incomplete malformed snippet buffer")
             self._buffer = ""
             self._reset()
         return "".join(out)
@@ -374,8 +398,8 @@ class PuaStreamTransformer:
             return self._step_snippet_json(out)
         if self._state == self._FOLLOWUP_PAYLOAD:
             return self._step_followup(out)
-        if self._state == self._PASSTHROUGH:
-            return self._step_passthrough(out)
+        if self._state == self._RECOVERING:
+            return self._step_recovering()
         return False
 
     def _step_outside(self, out: list[str]) -> bool:
@@ -421,10 +445,8 @@ class PuaStreamTransformer:
             if self.target == "speech":
                 self._pending_flushes += 1
         else:
-            out.append(SAY_MARKER_START + self._marker_buf + SAY_MARKER_SEPARATOR)
-            self._marker_buf = ""
-            self._marker_name = None
-            self._state = self._PASSTHROUGH
+            logger.debug("Dropping snippet with unknown marker name: %s", marker_name)
+            self._drop_until_marker_end()
         return True
 
     def _step_snippet_json(self, out: list[str]) -> bool:
@@ -439,12 +461,22 @@ class PuaStreamTransformer:
             ch = self._buffer[0]
             self._buffer = self._buffer[1:]
 
+            if ch == SAY_MARKER_START and parser.done:
+                self._buffer = ch + self._buffer
+                self._reset()
+                return True
+
             if ch == SAY_MARKER_END and parser.done:
                 out.append(parser.flush_output())
                 self._reset()
                 return True
 
-            if ch == SAY_MARKER_END and not parser.in_string:
+            if ch == SAY_MARKER_END and parser.in_string:
+                logger.debug("Dropping malformed snippet JSON with embedded end marker")
+                self._recover_after_invalid()
+                return bool(self._buffer)
+
+            if ch == SAY_MARKER_END:
                 logger.debug("Dropping malformed snippet JSON before complete object")
                 self._reset()
                 return True
@@ -457,7 +489,7 @@ class PuaStreamTransformer:
                     "Dropping malformed snippet JSON: %s",
                     parser.invalid_reason,
                 )
-                self._drop_until_marker_end()
+                self._recover_after_invalid()
                 return bool(self._buffer)
 
         return False
@@ -466,8 +498,23 @@ class PuaStreamTransformer:
         end_idx = self._buffer.find(SAY_MARKER_END)
         if end_idx < 0:
             self._buffer = ""
+            self._state = self._RECOVERING
         else:
             self._buffer = self._buffer[end_idx + 1 :]
+            self._reset()
+
+    def _recover_after_invalid(self) -> None:
+        start_idx = self._buffer.find(SAY_MARKER_START)
+        end_idx = self._buffer.find(SAY_MARKER_END)
+        if start_idx < 0 and end_idx < 0:
+            self._buffer = ""
+            self._state = self._RECOVERING
+            return
+        if end_idx >= 0 and (start_idx < 0 or end_idx < start_idx):
+            self._buffer = self._buffer[end_idx + 1 :]
+            self._reset()
+            return
+        self._buffer = self._buffer[start_idx:]
         self._reset()
 
     def _step_followup(self, out: list[str]) -> bool:
@@ -498,16 +545,18 @@ class PuaStreamTransformer:
                 break
             self._followup_suggestions.append(suggestion)
 
-    def _step_passthrough(self, out: list[str]) -> bool:
+    def _step_recovering(self) -> bool:
         if not self._buffer:
             return False
+        start_idx = self._buffer.find(SAY_MARKER_START)
         end_idx = self._buffer.find(SAY_MARKER_END)
-        if end_idx < 0:
-            out.append(self._buffer)
+        if start_idx < 0 and end_idx < 0:
             self._buffer = ""
             return False
-        out.append(self._buffer[: end_idx + 1])
-        self._buffer = self._buffer[end_idx + 1 :]
+        if end_idx >= 0 and (start_idx < 0 or end_idx < start_idx):
+            self._buffer = self._buffer[end_idx + 1 :]
+        else:
+            self._buffer = self._buffer[start_idx:]
         self._reset()
         return True
 

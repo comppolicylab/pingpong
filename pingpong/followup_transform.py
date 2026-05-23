@@ -43,15 +43,20 @@ def strip_followup_snippets(text: str) -> str:
 
         separator_index = text.find(SAY_MARKER_SEPARATOR, start_index + 1)
         if separator_index < 0:
-            output_parts.append(text[start_index:])
-            break
-
-        end_index = text.find(SAY_MARKER_END, separator_index + 1)
-        if end_index < 0:
+            marker_prefix = text[start_index + 1 :].strip()
+            if marker_prefix and FOLLOWUP_MARKER_NAME.startswith(marker_prefix):
+                break
             output_parts.append(text[start_index:])
             break
 
         marker_name = text[start_index + 1 : separator_index].strip()
+        end_index = text.find(SAY_MARKER_END, separator_index + 1)
+        if end_index < 0:
+            if marker_name == FOLLOWUP_MARKER_NAME:
+                break
+            output_parts.append(text[start_index:])
+            break
+
         if marker_name == FOLLOWUP_MARKER_NAME:
             cursor = end_index + 1
             continue

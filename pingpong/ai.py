@@ -4785,7 +4785,9 @@ def format_instructions(
                 "`speech` must be a single-line JSON string of natural spoken "
                 "language. `content` must be the exact text the student should "
                 "read, using the LaTeX, symbol, or normal text formatting "
-                "rules above. Escape newlines as \\n inside JSON strings. If "
+                "rules above. The snippet payload must be valid JSON: escape "
+                "newlines as \\n and write LaTeX backslashes in `content` as "
+                "`\\\\`, for example `\\\\frac`, not `\\frac`. If "
                 "the spoken and visible forms are identical, you may omit "
                 "`content`, writing only:\n"
                 '\ue200say\ue202{"speech":"alpha"}\ue201\n'

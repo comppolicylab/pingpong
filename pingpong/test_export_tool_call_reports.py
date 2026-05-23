@@ -288,7 +288,11 @@ def test_process_message_content_v3_links_container_file_citations():
 
 
 def test_process_message_content_v3_transforms_assistant_say_snippets_for_display():
-    raw_snippet = "\ue200say\ue202x squared plus y squared\n$ x^2 + y^2 $\ue201"
+    raw_snippet = (
+        "\ue200say\ue202"
+        '{"speech":"x squared plus y squared","content":"$ x^2 + y^2 $"}'
+        "\ue201"
+    )
     message = make_message(
         role=schemas.MessageRole.ASSISTANT,
         output_index=1,
@@ -333,7 +337,11 @@ def test_process_message_content_v3_strips_assistant_followup_snippets():
 
 
 def test_process_message_content_v3_leaves_user_say_snippets_raw():
-    raw_snippet = "\ue200say\ue202x squared plus y squared\n$ x^2 + y^2 $\ue201"
+    raw_snippet = (
+        "\ue200say\ue202"
+        '{"speech":"x squared plus y squared","content":"$ x^2 + y^2 $"}'
+        "\ue201"
+    )
     message = make_message(
         role=schemas.MessageRole.USER,
         output_index=1,

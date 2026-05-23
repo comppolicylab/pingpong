@@ -17,7 +17,8 @@ def followup_payload(payload: str) -> str:
 
 def say_payload(speech: str, body: str) -> str:
     return (
-        f"{SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}{speech}\n{body}{SAY_MARKER_END}"
+        f"{SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}"
+        f'{{"speech":"{speech}","content":"{body}"}}{SAY_MARKER_END}'
     )
 
 
@@ -56,7 +57,13 @@ def test_extract_followup_suggestions_drops_malformed_json(caplog):
     assert "Dropping malformed followups snippet with invalid JSON" in caplog.text
 
 
-def test_strip_followup_snippets_keeps_incomplete_followup_marker():
+def test_strip_followup_snippets_drops_incomplete_followup_marker():
     text = f'Before {SAY_MARKER_START}followups{SAY_MARKER_SEPARATOR}{{"responses"'
 
-    assert strip_followup_snippets(text) == text
+    assert strip_followup_snippets(text) == "Before "
+
+
+def test_strip_followup_snippets_drops_truncated_followup_marker_prefix():
+    text = f"Before {SAY_MARKER_START}follow"
+
+    assert strip_followup_snippets(text) == "Before "

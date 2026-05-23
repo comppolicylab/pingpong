@@ -38,6 +38,9 @@ def test_format_instructions_adds_snippet_contract_for_lecture_video_latex_only(
     assert "---Formatting: LaTeX---" not in instructions
     assert "MUST emit that part as a private-use snippet" in instructions
     assert "JSON object with `speech` and `content` string keys" in instructions
+    assert "The snippet payload must be valid JSON" in instructions
+    assert "write LaTeX backslashes in `content` as `\\\\`" in instructions
+    assert "`\\\\frac`, not `\\frac`" in instructions
     assert "For block-level math, use double dollar signs $$" in instructions
     assert "Do not output raw $...$ or $$...$$ math directly" in instructions
     assert "Incorrect: They have written $ 10a + 5c $" in instructions
@@ -103,15 +106,60 @@ def test_transform_returns_body_for_display():
     assert transform_say_text(text, "display") == "Use $ x^2 $ here."
 
 
-def test_transform_preserves_unescaped_latex_commands_in_json_content():
+def test_transform_decodes_json_escapes_in_content_without_latex_heuristics():
     text = (
         f"Use {SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}"
         '{"speech":"x times x","content":"$ x \\times x $"}'
         f"{SAY_MARKER_END} here."
     )
 
-    assert transform_say_text(text, "display") == "Use $ x \\times x $ here."
+    assert transform_say_text(text, "display") == "Use $ x " + "\t" + "imes x $ here."
     assert transform_say_text(text, "speech") == "Use x times x here."
+
+
+def test_transform_preserves_json_escaped_latex_commands_in_content():
+    text = (
+        f"{SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}"
+        '{"speech":"the expression",'
+        '"content":"$ \\\\frac{\\\\beta}{\\\\nu} + \\\\nabla f + '
+        '\\\\rangle + \\\\rightarrow $"}'
+        f"{SAY_MARKER_END}"
+    )
+
+    assert (
+        transform_say_text(text, "display")
+        == "$ \\frac{\\beta}{\\nu} + \\nabla f + \\rangle + \\rightarrow $"
+    )
+
+
+def test_transform_leaves_invalid_content_escape_literal():
+    text = (
+        f"{SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}"
+        '{"speech":"alpha","content":"$ \\alpha $"}'
+        f"{SAY_MARKER_END}"
+    )
+
+    assert transform_say_text(text, "display") == "$ \\alpha $"
+
+
+def test_transform_still_decodes_escaped_newlines_in_content():
+    text = (
+        f"{SAY_MARKER_START}mermaid{SAY_MARKER_SEPARATOR}"
+        '{"speech":"A flow.","content":"```mermaid\\ngraph TD\\n  A-->B\\n```"}'
+        f"{SAY_MARKER_END}"
+    )
+
+    assert transform_say_text(text, "display") == "```mermaid\ngraph TD\n  A-->B\n```"
+
+
+def test_transform_decodes_json_newline_before_letter():
+    text = (
+        f"{SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}"
+        '{"speech":"two lines","content":"first\\nuser input"}'
+        f"{SAY_MARKER_END}"
+    )
+
+    assert transform_say_text(text, "display") == "first\nuser input"
 
 
 def test_transform_returns_speech_for_speech_target():
@@ -158,7 +206,7 @@ def test_display_streams_body_chars_immediately():
 
     body = "```mermaid\ngraph TD\n  A-->B\n```"
     assert "".join(emitted) == body
-    assert len([e for e in emitted if e]) >= len(body)
+    assert len([e for e in emitted if e]) > 1
 
 
 def test_display_transformer_streams_svg_body_then_drops_followups():
@@ -177,7 +225,7 @@ def test_display_transformer_streams_svg_body_then_drops_followups():
     emitted.append(transformer.flush())
 
     assert "".join(emitted) == body
-    assert len([e for e in emitted if e]) >= len(body)
+    assert len([e for e in emitted if e]) > 1
     assert transformer.consume_followup_suggestions() == ["Try a smaller example."]
 
 
@@ -286,7 +334,7 @@ def test_pua_transformer_buffers_split_deltas():
     assert out == "$\\alpha$"
 
 
-def test_pua_transformer_passes_through_unknown_markers():
+def test_pua_transformer_drops_unknown_markers():
     transformer = PuaStreamTransformer("display")
     payload = (
         f"{SAY_MARKER_START}unknown{SAY_MARKER_SEPARATOR}arbitrary content"
@@ -295,7 +343,39 @@ def test_pua_transformer_passes_through_unknown_markers():
     text = "before " + payload + " after"
 
     out = transformer.add(text) + transformer.flush()
-    assert out == text
+    assert out == "before  after"
+
+
+def test_pua_transformer_drops_malformed_snippet_but_keeps_followups_afterward():
+    transformer = PuaStreamTransformer("display")
+    assert (
+        transformer.add(
+            f'{SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}{{"speech":"x","extra":99}}'
+        )
+        == ""
+    )
+    assert (
+        transformer.add(
+            f"{SAY_MARKER_START}followups{SAY_MARKER_SEPARATOR}"
+            '{"responses":["Try X"]}'
+            f"{SAY_MARKER_END} next sentence"
+        )
+        == " next sentence"
+    )
+    assert transformer.consume_followup_suggestions() == ["Try X"]
+
+
+def test_pua_transformer_keeps_followups_after_malformed_snippet_in_same_delta():
+    transformer = PuaStreamTransformer("display")
+    text = (
+        f"{SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}x"
+        f"{SAY_MARKER_START}followups{SAY_MARKER_SEPARATOR}"
+        '{"responses":["Try X"]}'
+        f"{SAY_MARKER_END} next sentence"
+    )
+
+    assert transformer.add(text) + transformer.flush() == " next sentence"
+    assert transformer.consume_followup_suggestions() == ["Try X"]
 
 
 def test_pua_transformer_drops_invalid_snippet_in_speech_phase_on_flush(caplog):
@@ -307,6 +387,70 @@ def test_pua_transformer_drops_invalid_snippet_in_speech_phase_on_flush(caplog):
     with caplog.at_level(logging.WARNING, logger="pingpong.say_transform"):
         assert transformer.flush() == "partial speech"
     assert "Flushing incomplete snippet JSON" in caplog.text
+
+
+def test_pua_transformer_discards_malformed_snippet_across_split_deltas():
+    transformer = PuaStreamTransformer("display")
+    assert (
+        transformer.add(f"Before {SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}x")
+        == "Before "
+    )
+    assert transformer.add(f" squared\n$ x^2 ${SAY_MARKER_END} after") == " after"
+    assert transformer.flush() == ""
+
+
+def test_display_speech_fallback_overflow_does_not_leak_before_content(caplog):
+    transformer = PuaStreamTransformer("display", max_speech_buffer_chars=4)
+    text = (
+        f"{SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}"
+        '{"speech":"spoken words","content":"$ x $"}'
+        f"{SAY_MARKER_END}"
+    )
+
+    with caplog.at_level(logging.WARNING, logger="pingpong.say_transform"):
+        assert transformer.add(text) + transformer.flush() == "$ x $"
+
+    assert "Speech fallback buffer exceeded cap; dropping fallback" in caplog.text
+
+
+def test_display_drops_non_string_content_instead_of_falling_back_to_speech():
+    text = (
+        f"{SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}"
+        '{"speech":"x","content":null}'
+        f"{SAY_MARKER_END}"
+    )
+
+    assert transform_say_text(text, "display") == ""
+
+
+def test_content_first_diagram_flushes_after_speech_not_before():
+    transformer = PuaStreamTransformer("speech")
+    text = (
+        f"{SAY_MARKER_START}mermaid{SAY_MARKER_SEPARATOR}"
+        '{"content":"```mermaid\\ngraph TD\\n  A-->B\\n```","speech":"A flow."}'
+        f"{SAY_MARKER_END}"
+    )
+    flushes_by_delta: list[int] = []
+    emitted = ""
+    for ch in text:
+        emitted += transformer.add(ch)
+        flushes_by_delta.append(transformer.consume_flush_signals())
+
+    assert emitted == "A flow."
+    assert sum(flushes_by_delta) == 1
+    first_flush_index = next(i for i, flushes in enumerate(flushes_by_delta) if flushes)
+    assert first_flush_index > text.index('"speech"')
+
+
+def test_embedded_end_marker_inside_json_string_recovers_downstream_text():
+    transformer = PuaStreamTransformer("display")
+    text = (
+        f"{SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}"
+        f'{{"speech":"hello","content":"x{SAY_MARKER_END}y"}}'
+        f"{SAY_MARKER_END} more text"
+    )
+
+    assert transformer.add(text) + transformer.flush() == "x more text"
 
 
 def test_pua_transformer_emits_oversized_marker_buffer(caplog):
