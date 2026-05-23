@@ -1287,6 +1287,106 @@ class ExternalLogin(Base):
         return conflicts
 
 
+class ConnectorConfig(Base):
+    __tablename__ = "connector_configs"
+    __table_args__ = (
+        Index(
+            "uq_connector_configs_service_account_scope",
+            "service",
+            "account_scope",
+            unique=True,
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    service = Column(String, nullable=False)
+    account_scope = Column(String, nullable=False)
+    display_name = Column(String, nullable=False)
+    host = Column(String, nullable=False)
+    client_id = Column(String, nullable=False)
+    client_secret = Column(String, nullable=False)
+    enabled = Column(Boolean, nullable=False, server_default="true")
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    user_connectors = relationship("UserConnector", back_populates="connector_config")
+
+
+class UserConnector(Base):
+    __tablename__ = "user_connectors"
+    # Deliberate: NO ondelete="CASCADE" on user_id. Deleting via DB cascade
+    # would silently drop rows without going through the connector's revoke
+    # path, leaving upstream tokens valid on the provider side. The user
+    # deletion flow must iterate user.connectors, call revoke(), then delete.
+    __table_args__ = (
+        # Identity-aware connectors may store multiple rows for the same
+        # (user, connector_config) as long as each row has a distinct
+        # external_user_id. Connectors that cannot resolve a stable provider
+        # identity keep the one-row-per-config behavior.
+        Index(
+            "uq_user_connector_config_no_identity",
+            "user_id",
+            "connector_config_id",
+            unique=True,
+            postgresql_where=text("external_user_id IS NULL"),
+            sqlite_where=text("external_user_id IS NULL"),
+        ),
+        Index(
+            "uq_user_connector_config_identity",
+            "user_id",
+            "connector_config_id",
+            "external_user_id",
+            unique=True,
+            postgresql_where=text("external_user_id IS NOT NULL"),
+            sqlite_where=text("external_user_id IS NOT NULL"),
+        ),
+        Index("idx_user_connectors_user_id", "user_id"),
+        Index("idx_user_connectors_connector_config_id", "connector_config_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user = relationship("User", back_populates="connectors")
+    connector_config_id = Column(
+        Integer, ForeignKey("connector_configs.id"), nullable=False
+    )
+    connector_config = relationship("ConnectorConfig", back_populates="user_connectors")
+    service = Column(String, nullable=False)
+
+    access_token = Column(String, nullable=False)
+    refresh_token = Column(String, nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    scopes = Column(String, nullable=True)
+
+    external_user_id = Column(String, nullable=True)
+    external_identity = Column(JSON, nullable=True)
+
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+
+    @classmethod
+    async def get_for_user_connector_config(
+        cls,
+        session: AsyncSession,
+        user_id: int,
+        connector_config_id: int,
+        external_user_id: str | None = None,
+    ) -> "UserConnector | None":
+        stmt = select(UserConnector).where(
+            UserConnector.user_id == user_id,
+            UserConnector.connector_config_id == connector_config_id,
+            UserConnector.external_user_id.is_(None)
+            if external_user_id is None
+            else UserConnector.external_user_id == external_user_id,
+        )
+        return await session.scalar(stmt)
+
+
 user_merge_association = Table(
     "users_merged_users",
     Base.metadata,
@@ -1325,6 +1425,9 @@ class User(Base):
     )
     external_logins: Mapped[List["ExternalLogin"]] = relationship(
         "ExternalLogin", back_populates="user"
+    )
+    connectors: Mapped[List["UserConnector"]] = relationship(
+        "UserConnector", back_populates="user"
     )
     # Maps to classes in which the user has connected their LMS account
     lms_syncs: Mapped[List["Class"]] = relationship("Class", back_populates="lms_user")
