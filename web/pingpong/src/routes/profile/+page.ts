@@ -4,7 +4,6 @@ import * as api from '$lib/api';
 export const load: PageLoad = async ({ fetch }) => {
 	const subscriptionsResponse = await api.getActivitySummaries(fetch).then(api.expandResponse);
 	const externalLoginsResponse = await api.getExternalLogins(fetch).then(api.expandResponse);
-	const connectorsResponse = await api.getMyConnectors(fetch).then(api.expandResponse);
 
 	let subscriptions: api.ActivitySummarySubscription[] = [];
 	let subscriptionOpts: api.ActivitySummarySubscriptionAdvancedOpts = {
@@ -25,20 +24,9 @@ export const load: PageLoad = async ({ fetch }) => {
 		);
 	}
 
-	let connectors: api.ConnectorSummary[] = [];
-	let availableConnectors: api.ConnectorDefinition[] = [];
-	if (connectorsResponse.data) {
-		connectors = connectorsResponse.data.connectors;
-		availableConnectors = connectorsResponse.data.available.sort((a, b) =>
-			a.display_name.localeCompare(b.display_name)
-		);
-	}
-
 	return {
 		subscriptions,
 		subscriptionOpts,
-		externalLogins,
-		connectors,
-		availableConnectors
+		externalLogins
 	};
 };
