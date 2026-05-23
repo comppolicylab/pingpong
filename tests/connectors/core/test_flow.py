@@ -26,7 +26,7 @@ def fixed_now():
 class _FlowConnector(OAuth2Connector):
     slug = "flowtest"
     display_name = "Flow Test"
-    scopes: ClassVar[list[str]] = ["openid"]
+    scopes: ClassVar[tuple[str, ...]] = ("openid",)
     use_pkce = True
 
     def __init__(self) -> None:

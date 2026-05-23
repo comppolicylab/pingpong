@@ -52,6 +52,8 @@ class PanoptoDiscovery:
                 raise ConnectorError("Panopto host must not include a path or query")
             return parsed.netloc.rstrip("/")
         normalized = value.removeprefix("//").strip("/")
+        if not normalized:
+            raise ConnectorError("Panopto host is required")
         if "/" in normalized or "?" in normalized or "#" in normalized:
             raise ConnectorError("Panopto host must not include a path or query")
         return normalized

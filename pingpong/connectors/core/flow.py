@@ -96,6 +96,10 @@ async def complete_callback(
     pkce_verifier = decoded.get("pkce_verifier")
     if pkce_verifier is not None and not isinstance(pkce_verifier, str):
         raise ConnectorFlowError("bad_state", "OAuth state token has invalid PKCE")
+    if connector.use_pkce and not pkce_verifier:
+        raise ConnectorFlowError(
+            "bad_state", "OAuth state token is missing PKCE verifier"
+        )
     nonce = decoded.get("nonce")
     if nonce is not None and not isinstance(nonce, str):
         raise ConnectorFlowError("bad_state", "OAuth state token has invalid nonce")

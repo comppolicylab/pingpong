@@ -10,7 +10,7 @@ class PanoptoConnector(OAuth2Connector):
     slug = "panopto"
     display_name = "Panopto"
     icon = "/icons/panopto.svg"
-    scopes = ["openid", "api", "offline_access"]
+    scopes = ("openid", "api", "offline_access")
     use_pkce = False
 
     def __init__(self) -> None:

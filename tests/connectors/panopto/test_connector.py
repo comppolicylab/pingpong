@@ -1,8 +1,10 @@
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
 
+from pingpong.connectors.core.discovery import DiscoveryDocumentCache
 from pingpong.connectors.core.exceptions import ConnectorError
 from pingpong.connectors.panopto import (
     DISCOVERY_PATH,
@@ -117,6 +119,34 @@ async def test_discovery_is_cached_per_host(monkeypatch):
         == DISCOVERY_PAYLOAD["revocation_endpoint"]
     )
     assert len(calls) == 1
+
+
+async def test_discovery_cache_refreshes_after_ttl(monkeypatch):
+    refreshed_payload = {
+        **DISCOVERY_PAYLOAD,
+        "token_endpoint": "https://demo.hosted.panopto.com/Panopto/oauth2/connect/token-v2",
+    }
+    calls = _patch_client(
+        monkeypatch,
+        [
+            httpx.Response(200, json=DISCOVERY_PAYLOAD),
+            httpx.Response(200, json=refreshed_payload),
+        ],
+    )
+    now = datetime(2026, 5, 23, tzinfo=UTC)
+    cache = DiscoveryDocumentCache(
+        timeout=10,
+        ttl_seconds=60,
+        now=lambda: now,
+    )
+    url = f"https://demo.hosted.panopto.com{DISCOVERY_PATH}"
+
+    assert await cache.get(url) == DISCOVERY_PAYLOAD
+    now += timedelta(seconds=59)
+    assert await cache.get(url) == DISCOVERY_PAYLOAD
+    now += timedelta(seconds=1)
+    assert await cache.get(url) == refreshed_payload
+    assert calls == [url, url]
 
 
 async def test_missing_required_discovery_field_raises(monkeypatch):

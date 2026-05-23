@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 from authlib.integrations.httpx_client import AsyncOAuth2Client
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .exceptions import ConnectorNotConfigured
@@ -51,34 +52,57 @@ async def upsert_user_connector(
     tokens: ConnectorTokens,
     identity: ProviderIdentity | None = None,
 ) -> "UserConnector":
-    from pingpong.models import UserConnector
+    from pingpong.models import UserConnector, _get_upsert_stmt
 
     external_user_id = identity.external_user_id if identity else None
-    row = await UserConnector.get_for_user_connector_config(
-        session,
-        user_id,
-        connector_config.id,
+    values = dict(
+        user_id=user_id,
+        connector_config_id=connector_config.id,
+        service=connector_config.service,
+        access_token=tokens.access_token,
+        refresh_token=tokens.refresh_token,
+        expires_at=tokens.expires_at,
+        scopes=tokens.scopes,
         external_user_id=external_user_id,
+        external_identity=identity.external_identity if identity else None,
     )
-    if row is None:
-        row = UserConnector(
-            user_id=user_id,
-            connector_config_id=connector_config.id,
-            service=connector_config.service,
-            access_token=tokens.access_token,
-            refresh_token=tokens.refresh_token,
-            expires_at=tokens.expires_at,
-            scopes=tokens.scopes,
-            external_user_id=external_user_id,
-            external_identity=identity.external_identity if identity else None,
+
+    update_values = dict(
+        service=connector_config.service,
+        access_token=tokens.access_token,
+        expires_at=tokens.expires_at,
+        updated=func.now(),
+    )
+    if tokens.refresh_token is not None:
+        update_values["refresh_token"] = tokens.refresh_token
+    if tokens.scopes is not None:
+        update_values["scopes"] = tokens.scopes
+    if identity is not None and identity.external_identity is not None:
+        update_values["external_identity"] = identity.external_identity
+
+    insert_stmt = _get_upsert_stmt(session)(UserConnector).values(**values)
+    if external_user_id is None:
+        stmt = insert_stmt.on_conflict_do_update(
+            index_elements=[
+                UserConnector.user_id,
+                UserConnector.connector_config_id,
+            ],
+            index_where=UserConnector.external_user_id.is_(None),
+            set_=update_values,
         )
-        session.add(row)
     else:
-        apply_tokens(row, tokens)
-        row.external_user_id = external_user_id
-        row.external_identity = identity.external_identity if identity else None
-    await session.flush()
-    return row
+        stmt = insert_stmt.on_conflict_do_update(
+            index_elements=[
+                UserConnector.user_id,
+                UserConnector.connector_config_id,
+                UserConnector.external_user_id,
+            ],
+            index_where=UserConnector.external_user_id.is_not(None),
+            set_=update_values,
+        )
+    return await session.scalar(
+        stmt.returning(UserConnector).execution_options(populate_existing=True)
+    )
 
 
 async def client_for_user_connector(

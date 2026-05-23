@@ -1,18 +1,15 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict
-
-from pingpong.models import ConnectorConfig, UserConnector
-
-
-class ConnectorTypeModel(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+if TYPE_CHECKING:
+    from pingpong.models import ConnectorConfig, UserConnector
 
 
-class ConnectorTokens(ConnectorTypeModel):
+@dataclass
+class ConnectorTokens:
     access_token: str
     refresh_token: str | None
     expires_at: datetime | None
@@ -20,17 +17,20 @@ class ConnectorTokens(ConnectorTypeModel):
     raw: dict[str, Any] | None = None
 
 
-class ProviderIdentity(ConnectorTypeModel):
+@dataclass
+class ProviderIdentity:
     external_user_id: str | None
     external_identity: dict[str, Any] | None
 
 
-class PKCEPair(ConnectorTypeModel):
+@dataclass
+class PKCEPair:
     verifier: str
     method: str = "S256"
 
 
-class ConnectIntent(ConnectorTypeModel):
+@dataclass
+class ConnectIntent:
     url: str
     state: str
     nonce: str
@@ -38,7 +38,8 @@ class ConnectIntent(ConnectorTypeModel):
     connector_config: ConnectorConfig
 
 
-class CallbackResult(ConnectorTypeModel):
+@dataclass
+class CallbackResult:
     row: UserConnector
     connector_config: ConnectorConfig
     tokens: ConnectorTokens

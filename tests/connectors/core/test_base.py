@@ -29,7 +29,7 @@ def fixed_now():
 class _StubConnector(OAuth2Connector):
     slug = "stub"
     display_name = "Stub"
-    scopes: ClassVar[list[str]] = ["openid", "api"]
+    scopes: ClassVar[tuple[str, ...]] = ("openid", "api")
 
     def __init__(self, *, nowfn=fixed_now) -> None:
         super().__init__(nowfn=nowfn)

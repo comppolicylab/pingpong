@@ -123,8 +123,4 @@ def decode_state(token: str, nowfn: NowFn = utcnow) -> dict[str, Any]:
         )
         return payload
 
-    raise OAuthStateError(
-        f"OAuth state token signature invalid: {exc}"
-        if exc
-        else "OAuth state token invalid"
-    )
+    raise OAuthStateError("OAuth state token invalid") from exc

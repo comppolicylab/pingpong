@@ -26,7 +26,7 @@ def generate_pkce_pair() -> PKCEPair:
     return PKCEPair(verifier=secrets.token_urlsafe(64))
 
 
-def _scope_string(scopes: list[str]) -> str | None:
+def _scope_string(scopes: tuple[str, ...]) -> str | None:
     return " ".join(scopes) if scopes else None
 
 
@@ -34,7 +34,7 @@ class OAuth2Connector:
     slug: ClassVar[str] = ""
     display_name: ClassVar[str] = ""
     icon: ClassVar[str | None] = None
-    scopes: ClassVar[list[str]] = []
+    scopes: ClassVar[tuple[str, ...]] = ()
     use_pkce: ClassVar[bool] = True
     token_endpoint_auth_method: ClassVar[str] = "client_secret_post"
     revocation_endpoint_auth_method: ClassVar[str] = "client_secret_post"
@@ -124,7 +124,7 @@ class OAuth2Connector:
                     code_verifier=pkce_verifier,
                 )
             except Exception as e:
-                raise ConnectorError(f"Token exchange failed: {e}") from e
+                raise ConnectorError("Token exchange failed") from e
         return self._parse_token_response(payload)
 
     async def refresh(
@@ -137,7 +137,7 @@ class OAuth2Connector:
                 f"No refresh token stored for connector id={connector.id}"
             )
         token_url = await self.token_endpoint(connector_config)
-        async with self._oauth_client(connector_config) as client:
+        async with self._oauth_client(connector_config, include_scope=False) as client:
             try:
                 payload = await client.refresh_token(
                     token_url,
@@ -214,6 +214,9 @@ class OAuth2Connector:
             code_challenge_method=code_challenge_method,
         )
 
+    def token_dict(self, tokens: ConnectorTokens) -> dict[str, Any]:
+        return self._token_dict(tokens)
+
     def _oauth_client(
         self,
         connector_config: "ConnectorConfig",
@@ -221,13 +224,14 @@ class OAuth2Connector:
         redirect_uri: str | None = None,
         token: dict[str, Any] | None = None,
         code_challenge_method: str | None = None,
+        include_scope: bool = True,
     ) -> AsyncOAuth2Client:
         return AsyncOAuth2Client(
             client_id=connector_config.client_id,
             client_secret=connector_config.client_secret,
             token_endpoint_auth_method=self.token_endpoint_auth_method,
             revocation_endpoint_auth_method=self.revocation_endpoint_auth_method,
-            scope=_scope_string(self.scopes),
+            scope=_scope_string(self.scopes) if include_scope else None,
             redirect_uri=redirect_uri,
             token=token,
             code_challenge_method=code_challenge_method,

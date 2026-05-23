@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -8,21 +11,44 @@ import httpx
 from .exceptions import ConnectorError
 
 
+@dataclass(frozen=True)
+class DiscoveryCacheEntry:
+    payload: dict[str, Any]
+    fetched_at: datetime
+
+
 class DiscoveryDocumentCache:
-    def __init__(self, *, timeout: float) -> None:
+    def __init__(
+        self,
+        *,
+        timeout: float,
+        ttl_seconds: float = 3600.0,
+        now: Callable[[], datetime] | None = None,
+    ) -> None:
+        if ttl_seconds <= 0:
+            raise ValueError("Discovery cache TTL must be positive")
         self._timeout = timeout
-        self._cache: dict[str, dict[str, Any]] = {}
+        self._ttl = timedelta(seconds=ttl_seconds)
+        self._now = now or (lambda: datetime.now(UTC))
+        self._cache: dict[str, DiscoveryCacheEntry] = {}
         self._lock = asyncio.Lock()
 
     async def get(self, url: str, *, label: str = "Discovery") -> dict[str, Any]:
-        if url in self._cache:
-            return self._cache[url]
+        entry = self._cache.get(url)
+        if entry is not None and self._is_fresh(entry):
+            return entry.payload
         async with self._lock:
-            if url in self._cache:
-                return self._cache[url]
+            entry = self._cache.get(url)
+            if entry is not None and self._is_fresh(entry):
+                return entry.payload
             payload = await self._fetch(url, label=label)
-            self._cache[url] = payload
+            self._cache[url] = DiscoveryCacheEntry(
+                payload=payload, fetched_at=self._now()
+            )
             return payload
+
+    def _is_fresh(self, entry: DiscoveryCacheEntry) -> bool:
+        return self._now() - entry.fetched_at < self._ttl
 
     async def _fetch(self, url: str, *, label: str) -> dict[str, Any]:
         try:

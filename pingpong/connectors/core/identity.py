@@ -34,7 +34,7 @@ class IdentityConnector(Protocol):
         raise NotImplementedError
 
     @abstractmethod
-    def _oauth_client(
+    def oauth_client(
         self,
         connector_config: "ConnectorConfig",
         *,
@@ -43,7 +43,7 @@ class IdentityConnector(Protocol):
         raise NotImplementedError
 
     @abstractmethod
-    def _token_dict(self, tokens: ConnectorTokens) -> dict[str, Any]:
+    def token_dict(self, tokens: ConnectorTokens) -> dict[str, Any]:
         raise NotImplementedError
 
 
@@ -68,8 +68,8 @@ class ConnectorIdentityResolver:
                 tokens=tokens,
                 expected_nonce=expected_nonce,
             )
-        async with connector._oauth_client(
-            connector_config, token=connector._token_dict(tokens)
+        async with connector.oauth_client(
+            connector_config, token=connector.token_dict(tokens)
         ) as client:
             try:
                 response = await client.get(endpoint)
