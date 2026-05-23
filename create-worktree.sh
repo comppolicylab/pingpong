@@ -598,7 +598,7 @@ echo "Fetching latest authorization model from source store..."
 curl -sk \
   -H "${AUTH_HEADER}" \
   "${SOURCE_MODELS_URL}" \
-| jq '.authorization_models | sort_by(.created_at) | last' \
+| jq '.authorization_models[0]' \
 > "${MODEL_FILE}"
 
 echo "Writing authorization model to destination store..."
