@@ -1578,6 +1578,17 @@ def test_streaming_markdown_sanitizer_flushes_incomplete_markdown_best_effort():
     assert sanitizer.flush() == "an unfinished link"
 
 
+def test_streaming_markdown_sanitizer_drain_ready_preserves_incomplete_markdown():
+    sanitizer = elevenlabs_module.StreamingMarkdownSanitizer()
+
+    assert sanitizer.add("See [diagram ") == ["See "]
+    assert sanitizer.add("Diagram now.") == []
+    assert sanitizer.drain_ready() == []
+    assert sanitizer.add(" details](https://example.com) done.") == [
+        "diagram Diagram now. details done."
+    ]
+
+
 def test_streaming_markdown_sanitizer_can_strip_latex_delimiters():
     sanitizer = elevenlabs_module.StreamingMarkdownSanitizer(
         strip_latex_delimiters=True

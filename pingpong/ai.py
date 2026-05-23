@@ -24,8 +24,6 @@ from pingpong.files import (
     handle_create_file,
 )
 from pingpong.followup_transform import (
-    FOLLOWUP_MARKER_NAME,
-    FollowupTransformer,
     strip_followup_snippets,
 )
 from pingpong.invite import send_export_download, send_export_failed
@@ -33,10 +31,11 @@ from pingpong.log_utils import sanitize_for_log
 import pingpong.models as models
 from pingpong.prompt import replace_random_blocks
 from pingpong.say_transform import (
+    FOLLOWUP_MARKER_NAME,
+    PuaStreamTransformer,
     SAY_MARKER_END,
     SAY_MARKER_SEPARATOR,
     SAY_MARKER_START,
-    SayTransformer,
     transform_say_text,
 )
 from pingpong.schemas import (
@@ -1245,11 +1244,10 @@ class BufferedResponseStreamHandler:
         )
         self.lecture_video_dual_text_mode = lecture_video_dual_text_mode
         self.lecture_video_followups_mode = lecture_video_followups_mode
-        self._display_say_transformer = (
-            SayTransformer("display") if lecture_video_dual_text_mode else None
-        )
-        self._followup_transformer = (
-            FollowupTransformer() if lecture_video_followups_mode else None
+        self._display_transformer = (
+            PuaStreamTransformer("display")
+            if (lecture_video_dual_text_mode or lecture_video_followups_mode)
+            else None
         )
 
     def enqueue(self, data: Dict) -> None:
@@ -1319,10 +1317,10 @@ class BufferedResponseStreamHandler:
         if (
             not self.lecture_video_followups_mode
             or not self.message_id
-            or not self._followup_transformer
+            or not self._display_transformer
         ):
             return
-        suggestions = self._followup_transformer.consume_suggestions()
+        suggestions = self._display_transformer.consume_followup_suggestions()
         if not suggestions:
             return
         self.enqueue(
@@ -1497,14 +1495,9 @@ class BufferedResponseStreamHandler:
 
         await update_message_part_on_output_text_delta()
         display_delta = (
-            self._followup_transformer.add(data.delta)
-            if self._followup_transformer
+            self._display_transformer.add(data.delta)
+            if self._display_transformer
             else data.delta
-        )
-        display_delta = (
-            self._display_say_transformer.add(display_delta)
-            if self._display_say_transformer
-            else display_delta
         )
         self.enqueue_message_text_delta(display_delta)
 
@@ -1798,13 +1791,9 @@ class BufferedResponseStreamHandler:
             )
             return
 
-        display_delta = ""
-        if self._followup_transformer:
-            display_delta = self._followup_transformer.flush()
-        if self._display_say_transformer:
-            if display_delta:
-                display_delta = self._display_say_transformer.add(display_delta)
-            display_delta += self._display_say_transformer.flush()
+        display_delta = (
+            self._display_transformer.flush() if self._display_transformer else ""
+        )
         self.enqueue_message_text_delta(display_delta)
         self.enqueue_followup_suggestions()
         self.message_part_id = None
@@ -3807,22 +3796,80 @@ async def run_response(
                 else None
             )
             _tts_chunker = StreamingTTSChunker() if _tts_enabled else None
-            _tts_say_transformer = (
-                SayTransformer("speech")
-                if _tts_enabled and lecture_video_dual_text_mode
+            _tts_pua_transformer = (
+                PuaStreamTransformer("speech")
+                if _tts_enabled
+                and (lecture_video_dual_text_mode or lecture_video_followups_mode)
                 else None
             )
-            _tts_followup_transformer = (
-                FollowupTransformer()
-                if _tts_enabled and lecture_video_followups_mode
-                else None
-            )
+            _tts_has_unflushed_text = False
+
+            async def _tts_drain_flush_signals() -> None:
+                """Forward speech->body flush signals to ElevenLabs.
+
+                Triggered for svg/mermaid blocks so the speech plays
+                immediately rather than waiting for the long diagram body
+                that will produce no further TTS input.
+                """
+                nonlocal _tts_has_unflushed_text
+                if not _tts_pua_transformer or not _tts_client:
+                    return
+                pending = _tts_pua_transformer.consume_flush_signals()
+                if not pending:
+                    return
+                if _tts_sanitizer:
+                    for sanitized in _tts_sanitizer.drain_ready():
+                        if not _tts_chunker:
+                            continue
+                        for tts_chunk in _tts_chunker.add(sanitized):
+                            try:
+                                await _tts_send_text(tts_chunk)
+                            except Exception:
+                                logger.warning(
+                                    "TTS pre-flush send failed", exc_info=True
+                                )
+                if _tts_chunker:
+                    final_chunk = _tts_chunker.flush()
+                    if final_chunk:
+                        try:
+                            await _tts_send_text(final_chunk)
+                        except Exception:
+                            logger.warning(
+                                "TTS pre-flush chunker drain failed",
+                                exc_info=True,
+                            )
+                for _ in range(pending):
+                    if not _tts_has_unflushed_text:
+                        break
+                    try:
+                        await _tts_send_text(" ", flush=True)
+                    except Exception:
+                        logger.warning("TTS block flush failed", exc_info=True)
+
             _tts_audio_task: asyncio.Task | None = None
             _tts_audio_done = asyncio.Event()
             _tts_audio_ready = asyncio.Event()
             _tts_audio_chunk_idx = 0
             _tts_connect_task: asyncio.Task[ElevenLabsStreamingTTS] | None = None
             _tts_input_closed = False
+
+            async def _tts_send_text(
+                text: str,
+                *,
+                flush: bool = False,
+                try_trigger_generation: bool = False,
+            ) -> None:
+                nonlocal _tts_has_unflushed_text
+                assert _tts_client is not None
+                await _tts_client.send_text(
+                    text,
+                    flush=flush,
+                    try_trigger_generation=try_trigger_generation,
+                )
+                if flush:
+                    _tts_has_unflushed_text = False
+                elif text:
+                    _tts_has_unflushed_text = True
 
             async def _tts_cleanup() -> None:
                 nonlocal _tts_client, _tts_audio_task, _tts_connect_task
@@ -3998,21 +4045,15 @@ async def run_response(
 
                 async def _tts_finish_input() -> None:
                     if _tts_sanitizer and _tts_chunker and _tts_client:
-                        transformed_remaining = ""
-                        if _tts_followup_transformer:
-                            transformed_remaining = _tts_followup_transformer.flush()
-                        if _tts_say_transformer:
-                            if transformed_remaining:
-                                transformed_remaining = _tts_say_transformer.add(
-                                    transformed_remaining
-                                )
-                            transformed_remaining += _tts_say_transformer.flush()
+                        transformed_remaining = (
+                            _tts_pua_transformer.flush() if _tts_pua_transformer else ""
+                        )
                         if transformed_remaining:
                             for chunk in _tts_sanitizer.add(transformed_remaining):
                                 try:
                                     tts_chunks = _tts_chunker.add(chunk)
                                     for tts_chunk in tts_chunks:
-                                        await _tts_client.send_text(
+                                        await _tts_send_text(
                                             tts_chunk,
                                         )
                                 except Exception:
@@ -4025,7 +4066,7 @@ async def run_response(
                             try:
                                 tts_chunks = _tts_chunker.add(remaining)
                                 for chunk in tts_chunks:
-                                    await _tts_client.send_text(
+                                    await _tts_send_text(
                                         chunk,
                                     )
                             except Exception:
@@ -4036,7 +4077,7 @@ async def run_response(
                         final_chunk = _tts_chunker.flush()
                         if final_chunk:
                             try:
-                                await _tts_client.send_text(
+                                await _tts_send_text(
                                     final_chunk,
                                     flush=True,
                                 )
@@ -4152,21 +4193,16 @@ async def run_response(
                                 # Feed text to TTS accumulator
                                 if _tts_sanitizer and _tts_chunker and _tts_client:
                                     tts_delta = (
-                                        _tts_followup_transformer.add(event.delta)
-                                        if _tts_followup_transformer
+                                        _tts_pua_transformer.add(event.delta)
+                                        if _tts_pua_transformer
                                         else event.delta
-                                    )
-                                    tts_delta = (
-                                        _tts_say_transformer.add(tts_delta)
-                                        if _tts_say_transformer
-                                        else tts_delta
                                     )
                                     if tts_delta:
                                         for chunk in _tts_sanitizer.add(tts_delta):
                                             try:
                                                 tts_chunks = _tts_chunker.add(chunk)
                                                 for tts_chunk in tts_chunks:
-                                                    await _tts_client.send_text(
+                                                    await _tts_send_text(
                                                         tts_chunk,
                                                     )
                                             except Exception:
@@ -4174,6 +4210,7 @@ async def run_response(
                                                     "TTS send_text failed",
                                                     exc_info=True,
                                                 )
+                                    await _tts_drain_flush_signals()
                             case "response.output_text.annotation.added":
                                 match event.annotation["type"]:
                                     case "container_file_citation":
@@ -4736,72 +4773,121 @@ def format_instructions(
         if lecture_video_mode:
             instructions += (
                 "\n\n"
-                "---Formatting: Lecture Video LaTeX---\n"
+                "---Formatting: Lecture Video Dual Speech/Display Blocks---\n"
                 "Before producing the final answer, check whether any part of it "
                 "contains math, symbols, formulas, special characters, "
                 "notation, or any text that should be spoken differently from "
                 "how it should be displayed. If it does, you MUST emit that part "
-                "as a private-use `say` snippet.\n"
-                "Use the `display` value for what the student should read. In "
-                "`display`, use the single dollar sign $ with spaces surrounding "
-                "it for inline math. For block-level math, use double dollar "
-                "signs $$ with newlines before and after them as the opening and "
-                "closing delimiter. Do not use LaTeX inside backticks.\n"
-                "Use the `speech` value for what the student should hear, written "
-                "as natural spoken language.\n"
+                "as a private-use block.\n"
+                "A block payload is a compact JSON object with at least one "
+                "of `speech` or `content`. `speech` is the natural spoken "
+                "form. `content` is the exact visible form. Include both keys "
+                "when text should be spoken one way and displayed another way. "
+                "Use only `speech` when the spoken and visible forms are "
+                "identical. Use only `content` when something should be shown "
+                "but not spoken. Do not write an empty `speech` key for "
+                "show-only content; omit `speech` instead. Use a `say` block "
+                "for math, symbols, formulas, special characters, "
+                "abbreviations, notation, or any text that should be spelled "
+                "out for speech but displayed differently for reading. Use a "
+                "`mermaid` or `svg` block to wrap a Mermaid or SVG fenced "
+                "code block.\n"
+                "For math display, use the single dollar sign $ with spaces "
+                "surrounding it for inline math. For block-level math, use "
+                "double dollar signs $$ with newlines before and after them as "
+                "the opening and closing delimiter. Do not use LaTeX inside "
+                "backticks.\n"
+                "Write the spoken form as natural spoken language.\n"
                 "Do not output raw $...$ or $$...$$ math directly in normal "
                 "lecture-video answers. Do not output raw symbolic tokens like "
                 "variable names, operators, equations, inequalities, units, "
                 "abbreviations, or notation directly when their spoken form "
                 "differs from their written form. This includes short "
-                "single-symbol math like $a$ or $c$. Only leave text outside "
-                "a `say` snippet when the visible text is already exactly "
-                "natural and correct for speech as written.\n"
-                "Use a `say` snippet for math, symbols, formulas, special "
-                "characters, abbreviations, notation, or any text that should be "
-                "spelled out for speech but displayed differently for reading.\n"
-                "Use exactly this format, with U+E200 before `say`, U+E202 before "
-                "the JSON payload, and U+E201 after the JSON payload:\n"
-                '\ue200say\ue202{"speech":"a squared plus b squared equals c squared",'
-                '"display":"$$\\na^2 + b^2 = c^2\\n$$"}\ue201\n'
-                "The JSON payload must be valid and compact. `speech` is what the "
-                "student should hear. `display` is the exact text the student "
-                "should read, using the LaTeX, symbol, or normal text formatting "
-                "rules above.\n"
+                "single-symbol math like $ a $ or $ c $. Only leave text outside "
+                "a block when the visible text is already exactly natural "
+                "and correct for speech as written.\n"
+                "Use exactly this format, with U+E200 before the marker name "
+                "(`say`, `mermaid`, or `svg`), U+E202 after the marker name, a "
+                "compact JSON payload, and U+E201 to close:\n"
+                '\ue200say\ue202{"speech":"a squared plus b squared equals c '
+                'squared","content":"$$\\na^2 + b^2 = c^2\\n$$"}\ue201\n'
+                "`speech` must be a single-line JSON string of natural spoken "
+                "language. `content` must be the exact text the student should "
+                "read, using the LaTeX, symbol, or normal text formatting "
+                "rules above. The block payload must be valid JSON: escape "
+                "newlines as \\n and write LaTeX backslashes in `content` as "
+                "`\\\\`, for example `\\\\frac`, not `\\frac`. If "
+                "the spoken and visible forms are identical, omit `content`, "
+                "writing only:\n"
+                '\ue200say\ue202{"speech":"alpha"}\ue201\n'
+                "and the visible form falls back to `speech`. If content "
+                "should be displayed silently, omit `speech`, writing only:\n"
+                '\ue200say\ue202{"content":"$ x^2 $"}\ue201\n'
+                "Block syntax is not recursive. Block values must be "
+                "plain JSON strings only. Never put U+E200, U+E202, or U+E201 "
+                "inside the `speech` or `content` value of another block. A "
+                "block may not contain another block. If multiple spans "
+                "need blocks, close one block before opening the next. Do "
+                "not place blocks inside markdown links, emphasis, inline "
+                "code, or fenced code blocks; put the block outside those "
+                "markdown constructs.\n"
+                "Wrap only the smallest span that needs different speech and "
+                "display. Do not wrap a whole sentence or paragraph if only "
+                "one symbol, formula, diagram, or notation span needs special "
+                "handling. If a sentence contains multiple special spans, emit "
+                "multiple separate blocks with normal prose between them.\n"
+                "Before finalizing, check that every U+E200 has exactly one "
+                "marker, one U+E202, one valid compact JSON object, and one "
+                "matching U+E201; no block contains another U+E200; "
+                "`speech`, when present, has no newline; `say` blocks use "
+                "visible math only in `content`; content-only blocks are "
+                "used only when the content should be shown silently; and "
+                "`svg` and `mermaid` blocks put exactly one fenced code "
+                "block in `content`.\n"
+                "Incorrect: If "
+                '\ue200say\ue202{"speech":"If \ue200say\ue202x","content":"$ x $"}\ue201'
+                " is two.\n"
+                'Correct: If \ue200say\ue202{"speech":"x","content":"$ x $"}\ue201'
+                " is two.\n"
                 "Incorrect: They have written $ 10a + 5c $ and ask whether it "
                 "becomes $ 15ac $.\n"
                 "Correct: They have written "
                 '\ue200say\ue202{"speech":"ten a plus five c",'
-                '"display":"$ 10a + 5c $"}\ue201'
+                '"content":"$ 10a + 5c $"}\ue201'
                 " and ask whether it becomes "
                 '\ue200say\ue202{"speech":"fifteen a c",'
-                '"display":"$ 15ac $"}\ue201.\n'
-                "Incorrect: One has $a$, the other has $c$.\n"
+                '"content":"$ 15ac $"}\ue201.\n'
+                "Incorrect: One has $ a $, the other has $ c $.\n"
                 "Correct: One has "
-                '\ue200say\ue202{"speech":"a","display":"$a$"}\ue201'
+                '\ue200say\ue202{"speech":"a","content":"$ a $"}\ue201'
                 ", the other has "
-                '\ue200say\ue202{"speech":"c","display":"$c$"}\ue201.\n'
+                '\ue200say\ue202{"speech":"c","content":"$ c $"}\ue201.\n'
                 "When you output a Mermaid or SVG fenced code block in a "
                 "lecture-video response, you MUST wrap the entire fenced code "
-                "block in a `say` snippet. The `speech` value should be a short, "
-                "natural description of what the diagram shows, not the code. "
-                "The `display` value should be the exact fenced code block the "
-                "student should see. Use escaped newlines in the JSON string.\n"
+                "block in a `mermaid` or `svg` block (matching the language). "
+                "If the diagram should be spoken about, `speech` should be a "
+                "short, natural description of what the diagram shows, not the "
+                "code. If the diagram should be shown silently, omit `speech`. "
+                "`content` is the exact fenced code block the student should "
+                "see, with newlines escaped as \\n inside the JSON string.\n"
                 "Correct Mermaid diagram:\n"
-                '\ue200say\ue202{"speech":"Here is a simple flow from input to '
-                'output.","display":"```mermaid\\ngraph TD\\n    A[Input] --> '
-                'B[Output]\\n```"}\ue201\n'
+                '\ue200mermaid\ue202{"speech":"Here is a simple flow from input '
+                'to output.","content":"```mermaid\\ngraph TD\\n    A[Input] '
+                '--> B[Output]\\n```"}\ue201\n'
                 "Correct SVG diagram:\n"
-                '\ue200say\ue202{"speech":"Here is a simple yellow circle.",'
-                '"display":"```svg\\n<svg xmlns=\'http://www.w3.org/2000/svg\' '
+                '\ue200svg\ue202{"speech":"Here is a simple yellow circle.",'
+                '"content":"```svg\\n<svg xmlns=\'http://www.w3.org/2000/svg\' '
                 "viewBox='0 0 100 100'>\\n  <circle cx='50' cy='50' r='40' "
                 "fill='gold'/>\\n</svg>\\n```\"}\ue201\n"
-                "If Mermaid or SVG contains labels, formulas, symbols, or "
-                "notation, the spoken description must include the natural "
-                "spoken form of those labels or symbols.\n"
-                "If you are deciding between raw LaTeX and a `say` snippet "
-                "in a lecture-video response, choose the `say` snippet.\n"
-                "Do not mention the snippet syntax to the user.\n\n"
+                "Correct silent display-only math:\n"
+                '\ue200say\ue202{"content":"$ x^2 $"}\ue201\n'
+                "If a Mermaid or SVG block includes `speech` and contains "
+                "labels, formulas, symbols, or notation, the spoken "
+                "description must include the natural spoken form of those "
+                "labels or symbols.\n"
+                "If you are deciding between raw LaTeX and a block "
+                "in a lecture-video response, choose the block.\n"
+                "Do not mention the block syntax to the user.\n\n"
                 + diagram_formatting_instructions
             )
         else:
@@ -4905,14 +4991,14 @@ def format_instructions(
             f"{SAY_MARKER_START}{FOLLOWUP_MARKER_NAME}{SAY_MARKER_SEPARATOR}"
             '{"responses":["Can you explain that another way?",'
             f'"Show me a quick example from what we just covered."]}}{SAY_MARKER_END}\n'
-            "If no follow-up responses would help, omit the snippet or return "
+            "If no follow-up responses would help, omit the block or return "
             f"an empty array like {SAY_MARKER_START}{FOLLOWUP_MARKER_NAME}"
             f'{SAY_MARKER_SEPARATOR}{{"responses":[]}}{SAY_MARKER_END}. '
             "The JSON payload must be valid and compact. Include only the "
             "`responses` array with at most 3 strings. Do not duplicate the "
             "answer text or provide multiple phrasings of the same next step. "
             "Do not include answers, hints, clues, or narrowed choices for "
-            "restricted knowledge checks or quizzes. Do not mention the snippet "
+            "restricted knowledge checks or quizzes. Do not mention the block "
             "syntax to the user."
         )
 

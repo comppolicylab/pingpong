@@ -1511,7 +1511,7 @@ async def test_get_thread_transforms_lecture_video_say_history_after_latex_disab
 
     raw_snippet = (
         "\ue200say\ue202"
-        '{"speech":"x squared plus y squared","display":"$ x^2 + y^2 $"}'
+        '{"speech":"x squared plus y squared","content":"$ x^2 + y^2 $"}'
         "\ue201"
     )
     async with db.async_session() as session:

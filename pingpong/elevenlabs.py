@@ -388,6 +388,10 @@ class StreamingMarkdownSanitizer:
         self._pending += text
         return self._drain_ready()
 
+    def drain_ready(self) -> list[str]:
+        """Return currently safe text without clearing incomplete markdown state."""
+        return self._drain_ready()
+
     def flush(self) -> str | None:
         """Return any remaining text after best-effort markdown cleanup."""
         if not self._pending:

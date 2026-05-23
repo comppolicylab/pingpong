@@ -127,7 +127,7 @@ async def test_dual_text_stream_handler_stores_raw_say_snippet_and_streams_displ
 
     raw_snippet = (
         "\ue200say\ue202"
-        '{"speech":"x squared plus y squared","display":"$ x^2 + y^2 $"}'
+        '{"speech":"x squared plus y squared","content":"$ x^2 + y^2 $"}'
         "\ue201"
     )
     raw_followups = (
@@ -225,7 +225,7 @@ async def test_run_response_sends_say_speech_text_to_tts(db, monkeypatch):
 
     raw_snippet = (
         "\ue200say\ue202"
-        '{"speech":"x squared plus y squared.","display":"$ x^2 + y^2 $"}'
+        '{"speech":"x squared plus y squared.","content":"$ x^2 + y^2 $"}'
         "\ue201"
     )
     raw_followups = (
