@@ -1871,6 +1871,36 @@ async def test_preview_assistant_instructions_includes_latex_formatting(
 @with_user(123)
 @with_institution(1, "Test Institution")
 @with_authz(grants=[("user:123", "can_create_assistants", "class:1")])
+@pytest.mark.asyncio
+async def test_preview_assistant_instructions_includes_lecture_video_say_contract(
+    api, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_ = models.Class(id=1, name="Test Class", institution_id=institution.id)
+        session.add(class_)
+        await session.commit()
+
+    response = api.post(
+        "/api/v1/class/1/assistant_instructions",
+        json={
+            "instructions": "Be helpful",
+            "use_latex": True,
+            "interaction_mode": "lecture_video",
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    instructions_preview = response.json()["instructions_preview"]
+    assert (
+        "---Formatting: Lecture Video Dual Speech/Display Blocks---"
+        in instructions_preview
+    )
+
+
+@with_user(123)
+@with_institution(1, "Test Institution")
+@with_authz(grants=[("user:123", "can_create_assistants", "class:1")])
 async def test_preview_assistant_instructions_excludes_latex_formatting(
     api, db, institution, valid_user_token
 ):

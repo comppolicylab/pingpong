@@ -30,6 +30,13 @@ export type BaseResponse = {
  */
 export type Error = {
 	detail?: string;
+	error_code?: string;
+};
+
+type CodedErrorDetail = {
+	message?: string;
+	detail?: string;
+	error_code?: string;
 };
 
 export type ValidationError = {
@@ -102,6 +109,19 @@ export const expandResponse = <R extends BaseData>(
 			.join('\n'); // Join all error messages with newlines
 		return { $status, error: { detail: error } as Error, data: null };
 	} else if (isErrorResponse(r)) {
+		const errorResponse = r as Error;
+		const rawDetail = (r as { detail?: unknown }).detail;
+		if (rawDetail && typeof rawDetail === 'object' && !Array.isArray(rawDetail)) {
+			const detail = rawDetail as CodedErrorDetail;
+			return {
+				$status,
+				error: {
+					detail: detail.message ?? detail.detail,
+					error_code: detail.error_code ?? errorResponse.error_code
+				} as Error,
+				data: null
+			};
+		}
 		return { $status, error: r as Error, data: null };
 	} else {
 		return { $status, error: null, data: r as R };
@@ -200,7 +220,8 @@ const _fetch = async (
 	method: Method,
 	path: string,
 	headers?: Record<string, string>,
-	body?: string | FormData
+	body?: string | FormData,
+	signal?: AbortSignal
 ) => {
 	const full = fullPath(path);
 	const anonymousSessionToken = getAnonymousSessionToken();
@@ -225,7 +246,8 @@ const _fetch = async (
 		headers,
 		body,
 		credentials: 'include',
-		mode: 'cors'
+		mode: 'cors',
+		signal
 	});
 };
 
@@ -237,7 +259,8 @@ const _fetchJSON = async <R extends BaseData>(
 	method: Method,
 	path: string,
 	headers?: Record<string, string>,
-	body?: string | FormData
+	body?: string | FormData,
+	signal?: AbortSignal
 ): Promise<(R | Error | ValidationError) & BaseResponse> => {
 	const anonymousSessionToken = getAnonymousSessionToken();
 	if (anonymousSessionToken) {
@@ -247,7 +270,7 @@ const _fetchJSON = async <R extends BaseData>(
 			'X-Anonymous-Thread-Session': anonymousSessionToken
 		};
 	}
-	const res = await _fetch(f, method, path, headers, body);
+	const res = await _fetch(f, method, path, headers, body, signal);
 
 	let data: BaseData = {};
 
@@ -287,6 +310,12 @@ export const readErrorDetail = async (response: Response) => {
 				.join('\n');
 		}
 		if (payload?.detail && typeof payload.detail === 'object') {
+			if (typeof payload.detail.message === 'string') {
+				return payload.detail.message;
+			}
+			if (typeof payload.detail.detail === 'string') {
+				return payload.detail.detail;
+			}
 			return JSON.stringify(payload.detail);
 		}
 	} catch {
@@ -1572,19 +1601,81 @@ export type LectureVideoManifestV2 = {
 	word_level_transcription: LectureVideoManifestWordV2[];
 };
 
-export type LectureVideoManifest = LectureVideoManifestV1 | LectureVideoManifestV2;
+export type LectureVideoManifestWordV3 = {
+	id: string;
+	word: string;
+	start_offset_ms: number;
+	end_offset_ms: number;
+};
+
+export type LectureVideoManifestVideoDescriptionV3 = {
+	start_offset_ms: number;
+	end_offset_ms: number;
+	description: string;
+};
+
+export type LectureVideoManifestV3 = {
+	version: 3;
+	questions: LectureVideoManifestQuestion[];
+	word_level_transcription: LectureVideoManifestWordV3[];
+	video_descriptions: LectureVideoManifestVideoDescriptionV3[];
+};
+
+export type LectureVideoManifestSummaryCheckpointV4 = {
+	end_offset_ms: number;
+	summary: string;
+};
+
+export type LectureVideoManifestMomentContextV4 = {
+	center_offset_ms: number;
+	start_offset_ms: number;
+	end_offset_ms: number;
+	before: string;
+	at: string;
+	after: string;
+};
+
+export type LectureVideoManifestV4 = {
+	version: 4;
+	questions: LectureVideoManifestQuestion[];
+	word_level_transcription: LectureVideoManifestWordV3[];
+	summary_checkpoints: LectureVideoManifestSummaryCheckpointV4[];
+	moment_contexts: LectureVideoManifestMomentContextV4[];
+};
+
+export type LectureVideoManifest =
+	| LectureVideoManifestV1
+	| LectureVideoManifestV2
+	| LectureVideoManifestV3
+	| LectureVideoManifestV4;
 
 export type LectureVideoConfigResponse = {
 	lecture_video: LectureVideoSummary;
-	lecture_video_manifest: LectureVideoManifest;
+	lecture_video_manifest: LectureVideoManifest | null;
 	voice_id: string;
 	lecture_video_chat_available: boolean;
+	generation_prompt?: string | null;
+	video_description_duration_ms: number;
+	overwrite_manifest: boolean;
+	manifest_generation_status?: LectureVideoProcessingRunSummary | null;
+};
+
+export type LectureVideoProcessingRunSummary = {
+	state: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+	error_message?: string | null;
+	started_at?: string | null;
+	finished_at?: string | null;
 };
 
 export type LectureVideoEditorPolicyResponse = LectureVideoAssistantEditorPolicy;
 
 export type ValidateLectureVideoVoiceRequest = {
 	voice_id: string;
+	elevenlabs_stability: number;
+	elevenlabs_similarity_boost: number;
+	elevenlabs_use_speaker_boost: boolean;
+	elevenlabs_style: number;
+	elevenlabs_speed: number;
 };
 
 export type ValidateLectureVideoVoiceResponse = {
@@ -1616,6 +1707,11 @@ export type LectureVideoQuestionPrompt = {
 	options: LectureVideoOptionPrompt[];
 };
 
+export type LectureVideoQuestionMarker = {
+	id: number;
+	stop_offset_ms: number;
+};
+
 export type LectureVideoContinuation = {
 	option_id: number;
 	correct_option_id: number | null;
@@ -1630,6 +1726,7 @@ export type LectureVideoSessionController = {
 	has_control: boolean;
 	has_active_controller: boolean;
 	lease_expires_at: string | null;
+	lease_duration_ms: number | null;
 };
 
 export type LectureVideoSession = {
@@ -1640,6 +1737,7 @@ export type LectureVideoSession = {
 	latest_interaction_at: string | null;
 	current_question: LectureVideoQuestionPrompt | null;
 	current_continuation: LectureVideoContinuation | null;
+	question_markers: LectureVideoQuestionMarker[];
 	state_version: number;
 	controller: LectureVideoSessionController;
 };
@@ -1655,6 +1753,7 @@ export type LectureVideoControlReleaseResponse = {
 
 export type LectureVideoControlRenewResponse = {
 	lease_expires_at: string;
+	lease_duration_ms: number;
 };
 
 export type LectureVideoInteractionResponse = {
@@ -1998,6 +2097,27 @@ export const lectureVideoNarrationUrl = (
 };
 
 /**
+ * Build the URL for a lecture video WebVTT captions file.
+ */
+export const getLectureVideoCaptionsUrl = (classId: number, threadId: number): string => {
+	const base = fullPath(`class/${classId}/thread/${threadId}/lecture-video/captions.vtt`);
+	const queryParts: string[] = [];
+	const anonymousSessionToken = getAnonymousSessionToken();
+	const anonymousShareToken = getAnonymousShareToken();
+	if (anonymousSessionToken) {
+		queryParts.push(`anonymous_session_token=${encodeURIComponent(anonymousSessionToken)}`);
+	}
+	if (anonymousShareToken) {
+		queryParts.push(`anonymous_share_token=${encodeURIComponent(anonymousShareToken)}`);
+	}
+	const ltiSessionToken = getLTISessionToken();
+	if (ltiSessionToken) {
+		queryParts.push(`lti_session=${encodeURIComponent(ltiSessionToken)}`);
+	}
+	return queryParts.length > 0 ? `${base}?${queryParts.join('&')}` : base;
+};
+
+/**
  * Create a purpose-scoped credential for a class.
  */
 export const createClassCredential = async (
@@ -2093,6 +2213,11 @@ export type AssistantModels = {
 	models: AssistantModel[];
 	default_prompts?: AssistantDefaultPrompt[];
 	enforce_classic_assistants?: boolean;
+	lecture_video_defaults?: {
+		instructions: string;
+		generation_prompt: string;
+		can_generate_manifest: boolean;
+	} | null;
 };
 
 export type AssistantModelLite = {
@@ -2250,6 +2375,21 @@ export type Assistant = {
 	temperature: number | null;
 	reasoning_effort: number | null;
 	verbosity: number | null;
+	realtime_vad_mode: RealtimeVadMode | null;
+	realtime_eagerness: RealtimeEagerness | null;
+	realtime_vad_threshold: number | null;
+	realtime_vad_prefix_padding_ms: number | null;
+	realtime_vad_silence_duration_ms: number | null;
+	realtime_vad_idle_timeout_ms: number | null;
+	realtime_voice: RealtimeVoice | null;
+	realtime_speed: number | null;
+	realtime_noise_reduction: RealtimeNoiseReduction | null;
+	realtime_transcription_model: RealtimeTranscriptionModel | null;
+	elevenlabs_stability: number | null;
+	elevenlabs_similarity_boost: number | null;
+	elevenlabs_use_speaker_boost: boolean | null;
+	elevenlabs_style: number | null;
+	elevenlabs_speed: number | null;
 	tools: string;
 	class_id: number;
 	creator_id: number;
@@ -2335,6 +2475,22 @@ export type Tool = {
 	type: string;
 };
 
+export type RealtimeEagerness = 'low' | 'medium' | 'high' | 'auto';
+export type RealtimeVadMode = 'semantic_vad' | 'server_vad';
+export type RealtimeNoiseReduction = 'near_field' | 'far_field' | 'none';
+export type RealtimeTranscriptionModel = 'whisper-1' | 'gpt-realtime-whisper';
+export type RealtimeVoice =
+	| 'alloy'
+	| 'ash'
+	| 'ballad'
+	| 'coral'
+	| 'echo'
+	| 'sage'
+	| 'shimmer'
+	| 'verse'
+	| 'marin'
+	| 'cedar';
+
 /**
  * MCP Server authentication type.
  */
@@ -2374,10 +2530,28 @@ export type CreateAssistantRequest = {
 	lecture_video_id?: number | null;
 	lecture_video_manifest?: LectureVideoManifest | null;
 	voice_id?: string | null;
+	generation_prompt?: string | null;
+	video_description_duration_ms?: number | null;
+	overwrite_manifest?: boolean;
 	create_classic_assistant?: boolean;
 	temperature: number | null;
 	reasoning_effort: number | null;
 	verbosity: number | null;
+	realtime_vad_mode?: RealtimeVadMode;
+	realtime_eagerness?: RealtimeEagerness;
+	realtime_vad_threshold?: number | null;
+	realtime_vad_prefix_padding_ms?: number | null;
+	realtime_vad_silence_duration_ms?: number | null;
+	realtime_vad_idle_timeout_ms?: number | null;
+	realtime_voice?: RealtimeVoice;
+	realtime_speed?: number | null;
+	realtime_noise_reduction?: RealtimeNoiseReduction;
+	realtime_transcription_model?: RealtimeTranscriptionModel;
+	elevenlabs_stability?: number | null;
+	elevenlabs_similarity_boost?: number | null;
+	elevenlabs_use_speaker_boost?: boolean | null;
+	elevenlabs_style?: number | null;
+	elevenlabs_speed?: number | null;
 	tools: Tool[];
 	code_interpreter_file_ids: string[];
 	file_search_file_ids: string[];
@@ -2419,10 +2593,29 @@ export type UpdateAssistantRequest = {
 	lecture_video_id?: number | null;
 	lecture_video_manifest?: LectureVideoManifest | null;
 	voice_id?: string | null;
+	generation_prompt?: string | null;
+	video_description_duration_ms?: number | null;
+	regenerate_requested?: boolean;
+	overwrite_manifest?: boolean;
 	create_classic_assistant?: boolean;
 	temperature?: number | null;
 	reasoning_effort?: number | null;
 	verbosity?: number | null;
+	realtime_vad_mode?: RealtimeVadMode | null;
+	realtime_eagerness?: RealtimeEagerness | null;
+	realtime_vad_threshold?: number | null;
+	realtime_vad_prefix_padding_ms?: number | null;
+	realtime_vad_silence_duration_ms?: number | null;
+	realtime_vad_idle_timeout_ms?: number | null;
+	realtime_voice?: RealtimeVoice | null;
+	realtime_speed?: number | null;
+	realtime_noise_reduction?: RealtimeNoiseReduction | null;
+	realtime_transcription_model?: RealtimeTranscriptionModel | null;
+	elevenlabs_stability?: number | null;
+	elevenlabs_similarity_boost?: number | null;
+	elevenlabs_use_speaker_boost?: boolean | null;
+	elevenlabs_style?: number | null;
+	elevenlabs_speed?: number | null;
 	tools?: Tool[];
 	code_interpreter_file_ids?: string[];
 	file_search_file_ids?: string[];
@@ -2510,6 +2703,7 @@ export type AssistantInstructionsPreviewRequest = {
 	instructions: string;
 	use_latex: boolean;
 	disable_prompt_randomization: boolean;
+	interaction_mode?: 'chat' | 'voice' | 'lecture_video';
 };
 
 /**
@@ -2977,9 +3171,19 @@ export const removeClassUser = async (f: Fetcher, classId: number, userId: numbe
 /**
  * Export class threads.
  */
-export const exportThreads = async (f: Fetcher, classId: number) => {
+export type ExportThreadsOptions = {
+	last_activity_after?: string;
+	last_activity_before?: string;
+	assistant_ids?: number[];
+};
+
+export const exportThreads = async (
+	f: Fetcher,
+	classId: number,
+	options?: ExportThreadsOptions
+) => {
 	const url = `class/${classId}/export`;
-	return await GET<never, GenericStatus>(f, url);
+	return await POST<ExportThreadsOptions, GenericStatus>(f, url, options);
 };
 
 /**
@@ -3261,6 +3465,11 @@ export type MessageContentText = ContentSource & {
 	type: 'text';
 };
 
+export type MessageContentFollowupSuggestions = ContentSource & {
+	suggestions: string[];
+	type: 'followup_suggestions';
+};
+
 export type ImageFile = {
 	file_id: string;
 };
@@ -3366,6 +3575,7 @@ export type ReasoningCallItem = ContentSource & {
 export type Content =
 	| MessageContentImageFile
 	| MessageContentText
+	| MessageContentFollowupSuggestions
 	| MessageContentCode
 	| MessageContentCodeOutputImageFile
 	| MessageContentCodeOutputImageURL
@@ -3429,16 +3639,40 @@ export type ThreadWithMeta = {
 	lecture_video_matches_assistant?: boolean | null;
 	lecture_video_session?: LectureVideoSession | null;
 	lecture_video_tts_available?: boolean;
+	lecture_video_captions_available?: boolean;
 	recording: VoiceModeRecordingInfo | null;
 	has_more: boolean;
 };
 
 /**
  * Get a thread by ID.
+ * Pass controllerSessionId from lecture-video playback control refreshes so the
+ * returned lecture_video_session reflects that this client still has control.
  */
-export const getThread = async (f: Fetcher, classId: number, threadId: number) => {
+export const getThread = async (
+	f: Fetcher,
+	classId: number,
+	threadId: number,
+	controllerSessionId?: string,
+	signal?: AbortSignal
+) => {
 	const url = `class/${classId}/thread/${threadId}`;
-	return await GET<never, ThreadWithMeta>(f, url);
+	const headers: Record<string, string> = {};
+	const anonymousShareToken = getAnonymousShareToken();
+	if (anonymousShareToken) {
+		headers['X-Anonymous-Link-Share'] = anonymousShareToken;
+	}
+	if (controllerSessionId) {
+		headers['X-Lecture-Video-Controller-Session'] = controllerSessionId;
+	}
+	return await _fetchJSON<ThreadWithMeta>(
+		f,
+		'GET',
+		url,
+		Object.keys(headers).length ? headers : undefined,
+		undefined,
+		signal
+	);
 };
 
 export type CodeInterpreterMessages = {
@@ -3556,6 +3790,7 @@ export type NewThreadMessageRequest = {
 	vision_image_descriptions?: ImageProxy[];
 	timezone?: string;
 	generate_speech?: boolean;
+	lecture_video_playback_position_ms?: number;
 };
 
 /**
@@ -3581,6 +3816,12 @@ export type ThreadStreamMessageCreatedChunk = {
 	type: 'message_created';
 	role: 'user' | 'assistant';
 	message: OpenAIMessage;
+};
+
+export type ThreadStreamFollowupSuggestionsChunk = {
+	type: 'followup_suggestions';
+	message_id: string;
+	suggestions: string[];
 };
 
 export type ToolImageOutput = {
@@ -3797,6 +4038,7 @@ export type ThreadValidationError = {
 export type ThreadStreamChunk =
 	| ThreadStreamMessageDeltaChunk
 	| ThreadStreamMessageCreatedChunk
+	| ThreadStreamFollowupSuggestionsChunk
 	| ThreadStreamErrorChunk
 	| ThreadRunActiveErrorChunk
 	| ThreadPreSendErrorChunk

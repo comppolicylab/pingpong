@@ -36,10 +36,17 @@ export type OnAudioPartStartedProcessor = (data: {
 	eventId: string;
 	timestamp: number;
 }) => void;
+export type OnAudioPartEndedProcessor = (data: {
+	trackId: string;
+	eventId: string;
+	timestamp: number;
+}) => void;
 export type OnPlaybackStoppedProcessor = () => void;
 interface WavStreamPlayerOptions {
 	sampleRate?: number;
+	stopOnEmptyBuffer?: boolean;
 	onAudioPartStarted?: OnAudioPartStartedProcessor;
+	onAudioPartEnded?: OnAudioPartEndedProcessor;
 	onPlaybackStopped?: OnPlaybackStoppedProcessor;
 }
 
@@ -47,6 +54,7 @@ interface TrackSampleOffset {
 	trackId: string | null;
 	offset: number;
 	currentTime: number;
+	eventId?: string | null;
 }
 
 const TRACK_SAMPLE_OFFSET_TIMEOUT_MS = 250;
@@ -64,7 +72,9 @@ export class WavStreamPlayer {
 	private gainNode: GainNode | null;
 	private trackSampleOffsets: Record<string, TrackSampleOffset>;
 	private interruptedTrackIds: Record<string, boolean>;
+	private stopOnEmptyBuffer: boolean;
 	private onAudioPartStarted: OnAudioPartStartedProcessor | null;
+	private onAudioPartEnded: OnAudioPartEndedProcessor | null;
 	private onPlaybackStopped: OnPlaybackStoppedProcessor | null;
 
 	/**
@@ -74,7 +84,9 @@ export class WavStreamPlayer {
 	 */
 	constructor({
 		sampleRate = 44100,
+		stopOnEmptyBuffer = true,
 		onAudioPartStarted,
+		onAudioPartEnded,
 		onPlaybackStopped
 	}: WavStreamPlayerOptions = {}) {
 		this.scriptSrc = StreamProcessorSrc;
@@ -85,7 +97,9 @@ export class WavStreamPlayer {
 		this.gainNode = null;
 		this.trackSampleOffsets = {};
 		this.interruptedTrackIds = {};
+		this.stopOnEmptyBuffer = stopOnEmptyBuffer;
 		this.onAudioPartStarted = onAudioPartStarted || null;
+		this.onAudioPartEnded = onAudioPartEnded || null;
 		this.onPlaybackStopped = onPlaybackStopped || null;
 	}
 
@@ -174,20 +188,34 @@ export class WavStreamPlayer {
 		}
 		const streamNode = new AudioWorkletNode(this.context, 'stream_processor');
 		streamNode.connect(this.gainNode || this.context.destination);
+		// This is queued before any write messages, so the worklet sees this
+		// configuration before it can process streamed PCM.
+		streamNode.port.postMessage({
+			event: 'configure',
+			stopOnEmptyBuffer: this.stopOnEmptyBuffer
+		});
 		streamNode.port.onmessage = (e) => {
 			const { event } = e.data;
 			if (event === 'stop') {
-				streamNode.disconnect();
-				this.stream = null;
-				this.onPlaybackStopped?.();
+				this._handlePlaybackStopped(streamNode);
 			} else if (event === 'offset') {
-				const { requestId, trackId, offset } = e.data;
+				const { requestId, trackId, offset, eventId } = e.data;
 				const currentTime = offset / this.sampleRate;
-				this.trackSampleOffsets[requestId] = { trackId, offset, currentTime };
+				this.trackSampleOffsets[requestId] = {
+					trackId,
+					offset,
+					currentTime,
+					eventId
+				};
 			} else if (event === 'audio_part_started') {
 				const { trackId, eventId, timestamp } = e.data;
 				if (this.onAudioPartStarted) {
 					this.onAudioPartStarted({ trackId, eventId, timestamp });
+				}
+			} else if (event === 'audio_part_ended') {
+				const { trackId, eventId, timestamp } = e.data;
+				if (this.onAudioPartEnded) {
+					this.onAudioPartEnded({ trackId, eventId, timestamp });
 				}
 			}
 		};
@@ -197,6 +225,14 @@ export class WavStreamPlayer {
 		}
 		this.stream = streamNode;
 		return true;
+	}
+
+	private _handlePlaybackStopped(streamNode: AudioWorkletNode | null): void {
+		streamNode?.disconnect();
+		if (!streamNode || this.stream === streamNode) {
+			this.stream = null;
+		}
+		this.onPlaybackStopped?.();
 	}
 
 	/**
@@ -230,6 +266,17 @@ export class WavStreamPlayer {
 		}
 		this.stream?.port.postMessage({ event: 'write', buffer, trackId, eventId });
 		return buffer;
+	}
+
+	/**
+	 * Signals that no more PCM chunks will be written.
+	 */
+	finish(): void {
+		if (!this.stream) {
+			this._handlePlaybackStopped(null);
+			return;
+		}
+		this.stream.port.postMessage({ event: 'finish' });
 	}
 
 	/**

@@ -287,6 +287,81 @@ def test_process_message_content_v3_links_container_file_citations():
     )
 
 
+def test_process_message_content_v3_transforms_assistant_say_snippets_for_display():
+    raw_snippet = (
+        "\ue200say\ue202"
+        '{"speech":"x squared plus y squared","content":"$ x^2 + y^2 $"}'
+        "\ue201"
+    )
+    message = make_message(
+        role=schemas.MessageRole.ASSISTANT,
+        output_index=1,
+        created=NOW,
+        text="Use " + raw_snippet + ".",
+        part_type=schemas.MessagePartType.OUTPUT_TEXT,
+    )
+
+    assert (
+        process_message_content_v3(
+            message,
+            file_names={},
+            class_id=10,
+            thread_id=20,
+            display_say_snippets=True,
+        )
+        == "Use $ x^2 + y^2 $."
+    )
+
+
+def test_process_message_content_v3_strips_assistant_followup_snippets():
+    raw_followups = (
+        '\ue200followups\ue202{"responses":["Can you show another example?"]}\ue201'
+    )
+    message = make_message(
+        role=schemas.MessageRole.ASSISTANT,
+        output_index=1,
+        created=NOW,
+        text="Visible answer." + raw_followups,
+        part_type=schemas.MessagePartType.OUTPUT_TEXT,
+    )
+
+    assert (
+        process_message_content_v3(
+            message,
+            file_names={},
+            class_id=10,
+            thread_id=20,
+        )
+        == "Visible answer."
+    )
+
+
+def test_process_message_content_v3_leaves_user_say_snippets_raw():
+    raw_snippet = (
+        "\ue200say\ue202"
+        '{"speech":"x squared plus y squared","content":"$ x^2 + y^2 $"}'
+        "\ue201"
+    )
+    message = make_message(
+        role=schemas.MessageRole.USER,
+        output_index=1,
+        created=NOW,
+        text="Literal " + raw_snippet + ".",
+        part_type=schemas.MessagePartType.INPUT_TEXT,
+    )
+
+    assert (
+        process_message_content_v3(
+            message,
+            file_names={},
+            class_id=10,
+            thread_id=20,
+            display_say_snippets=True,
+        )
+        == "Literal " + raw_snippet + "."
+    )
+
+
 def test_process_message_content_v3_notes_user_uploads():
     message = models.Message(
         message_status=schemas.MessageStatus.COMPLETED,

@@ -1,8 +1,11 @@
 from functools import wraps
 import logging
-from typing import cast
+from typing import Any, cast
+
+from sqlalchemy import select
 
 from pingpong import models, schemas
+from pingpong.ai_models import get_reasoning_effort_map
 from pingpong.ai import (
     OpenAIClientType,
     get_openai_client_by_class_id,
@@ -10,10 +13,167 @@ from pingpong.ai import (
 )
 from pingpong.session import populate_request
 from pingpong.state_types import StateWebSocket
+from pingpong.log_utils import sanitize_for_log
 from .config import config
 
 browser_connection_logger = logging.getLogger("realtime_browser")
 openai_connection_logger = logging.getLogger("realtime_openai")
+
+VOICE_SESSION_ACTIVE_MESSAGE = (
+    "This voice session is already active in another connection."
+)
+VOICE_SESSION_FINAL_MESSAGE = (
+    "This voice session has already ended. Start a new thread to continue."
+)
+
+
+def _coerce_realtime_enum(enum_type, value, default):
+    if value is None:
+        return default
+    if isinstance(value, enum_type):
+        return value
+    return enum_type.__members__.get(value) or enum_type(value)
+
+
+def build_realtime_reasoning(assistant: models.Assistant) -> dict[str, str] | None:
+    reasoning_effort_map = get_reasoning_effort_map(assistant.model)
+    if not reasoning_effort_map:
+        return None
+
+    reasoning_effort = (
+        assistant.reasoning_effort if assistant.reasoning_effort is not None else 0
+    )
+    if reasoning_effort not in reasoning_effort_map:
+        raise ValueError(
+            f"Invalid realtime reasoning effort {reasoning_effort} for model {assistant.model}."
+        )
+
+    return {"effort": reasoning_effort_map[reasoning_effort]}
+
+
+def build_realtime_session(
+    assistant: models.Assistant, conversation_instructions: str
+) -> dict[str, Any]:
+    realtime_vad_mode = _coerce_realtime_enum(
+        schemas.RealtimeVadMode,
+        assistant.realtime_vad_mode,
+        schemas.RealtimeVadMode.SEMANTIC_VAD,
+    )
+    realtime_eagerness = _coerce_realtime_enum(
+        schemas.RealtimeEagerness,
+        assistant.realtime_eagerness,
+        schemas.RealtimeEagerness.AUTO,
+    )
+    realtime_voice = _coerce_realtime_enum(
+        schemas.RealtimeVoice,
+        assistant.realtime_voice,
+        schemas.RealtimeVoice.MARIN,
+    )
+    realtime_noise_reduction = _coerce_realtime_enum(
+        schemas.RealtimeNoiseReduction,
+        assistant.realtime_noise_reduction,
+        schemas.RealtimeNoiseReduction.FAR_FIELD,
+    )
+    realtime_transcription_model = _coerce_realtime_enum(
+        schemas.RealtimeTranscriptionModel,
+        assistant.realtime_transcription_model,
+        schemas.RealtimeTranscriptionModel.WHISPER_1,
+    )
+    turn_detection: dict[str, Any] = {
+        "create_response": True,
+        "type": realtime_vad_mode.value,
+        "interrupt_response": True,
+    }
+    if realtime_vad_mode == schemas.RealtimeVadMode.SEMANTIC_VAD:
+        turn_detection["eagerness"] = realtime_eagerness.value
+    else:
+        turn_detection["threshold"] = (
+            assistant.realtime_vad_threshold
+            if assistant.realtime_vad_threshold is not None
+            else 0.5
+        )
+        turn_detection["prefix_padding_ms"] = (
+            assistant.realtime_vad_prefix_padding_ms
+            if assistant.realtime_vad_prefix_padding_ms is not None
+            else 300
+        )
+        turn_detection["silence_duration_ms"] = (
+            assistant.realtime_vad_silence_duration_ms
+            if assistant.realtime_vad_silence_duration_ms is not None
+            else 500
+        )
+        if assistant.realtime_vad_idle_timeout_ms is not None:
+            turn_detection["idle_timeout_ms"] = assistant.realtime_vad_idle_timeout_ms
+    noise_reduction = (
+        None
+        if realtime_noise_reduction == schemas.RealtimeNoiseReduction.NONE
+        else {"type": realtime_noise_reduction.value}
+    )
+    session = {
+        "type": "realtime",
+        "audio": {
+            "input": {
+                "noise_reduction": noise_reduction,
+                "transcription": {
+                    "model": realtime_transcription_model.value,
+                    "language": "en",
+                },
+                "turn_detection": turn_detection,
+            },
+            "output": {
+                "voice": realtime_voice.value,
+                "speed": (
+                    assistant.realtime_speed
+                    if assistant.realtime_speed is not None
+                    else 1.0
+                ),
+            },
+        },
+        "instructions": conversation_instructions,
+        "output_modalities": ["audio"],
+        "tool_choice": "none",
+        "tools": [],
+    }
+    reasoning = build_realtime_reasoning(assistant)
+    if reasoning is not None:
+        session["reasoning"] = reasoning
+
+    return session
+
+
+def build_realtime_extra_headers(
+    browser_connection: StateWebSocket,
+) -> dict[str, str]:
+    safety_identifier = getattr(
+        browser_connection.state, "response_safety_identifier", None
+    )
+    if not isinstance(safety_identifier, str) or not safety_identifier:
+        return {}
+
+    return {"OpenAI-Safety-Identifier": safety_identifier}
+
+
+async def _thread_has_messages(db, thread_id: int) -> bool:
+    message_id = await db.scalar(
+        select(models.Message.id).where(models.Message.thread_id == thread_id).limit(1)
+    )
+    return message_id is not None
+
+
+async def _reject_realtime_session(
+    browser_connection: StateWebSocket, message: str
+) -> None:
+    await browser_connection.send_json(
+        {
+            "type": "error",
+            "error": {
+                "type": "invalid_request_error",
+                "code": "voice_session_unavailable",
+                "message": message,
+            },
+        }
+    )
+    await browser_connection.close()
 
 
 def ws_auth_middleware(func):
@@ -186,6 +346,64 @@ def ws_with_thread_assistant_prompt(func):
     return wrapper
 
 
+def ws_with_single_realtime_session(func):
+    @wraps(func)
+    async def wrapper(
+        browser_connection: StateWebSocket,
+        class_id: str,
+        thread_id: str,
+        *args,
+        **kwargs,
+    ):
+        thread_pk = int(thread_id)
+        # The row lock intentionally spans the websocket transaction so a second
+        # concurrent connection to the same unfinished voice session waits here.
+        thread = await models.Thread.get_by_id_with_assistant(
+            browser_connection.state["db"],
+            thread_pk,
+            for_update=True,
+            include_voice_mode_recording=True,
+        )
+        if thread is None:
+            await _reject_realtime_session(
+                browser_connection, "This voice session was not found."
+            )
+            return None
+
+        has_messages = await _thread_has_messages(
+            browser_connection.state["db"], thread.id
+        )
+        if thread.voice_mode_recording or has_messages:
+            existing_recording_id = (
+                thread.voice_mode_recording.recording_id
+                if thread.voice_mode_recording
+                else None
+            )
+            browser_connection_logger.warning(
+                "Rejecting realtime session for finalized thread. "
+                "thread_id=%s, existing_recording_id=%s, has_messages=%s",
+                thread.id,
+                sanitize_for_log(existing_recording_id, max_len=256),
+                has_messages,
+            )
+            await _reject_realtime_session(
+                browser_connection, VOICE_SESSION_FINAL_MESSAGE
+            )
+            return None
+
+        browser_connection.state["thread"] = thread
+        browser_connection.state["assistant"] = thread.assistant
+        browser_connection.state["conversation_instructions"] = (
+            inject_timestamp_to_instructions(
+                thread.instructions,
+                thread.timezone,
+            )
+        )
+        return await func(browser_connection, class_id, thread_id, *args, **kwargs)
+
+    return wrapper
+
+
 def ws_with_realtime_connection(func):
     @wraps(func)
     async def wrapper(browser_connection: StateWebSocket, *args, **kwargs):
@@ -194,36 +412,15 @@ def ws_with_realtime_connection(func):
         conversation_instructions: str = browser_connection.state[
             "conversation_instructions"
         ]
+        session = build_realtime_session(assistant, conversation_instructions)
+        extra_headers = build_realtime_extra_headers(browser_connection)
         try:
             async with openai_client.realtime.connect(
                 model=assistant.model,
+                extra_headers=extra_headers,
             ) as realtime_connection:
                 browser_connection.state["realtime_connection"] = realtime_connection
-                await realtime_connection.session.update(
-                    session={
-                        "type": "realtime",
-                        "audio": {
-                            "input": {
-                                "noise_reduction": {"type": "far_field"},
-                                "transcription": {
-                                    "model": "whisper-1",
-                                    "language": "en",
-                                },
-                                "turn_detection": {
-                                    "create_response": True,
-                                    "eagerness": "high",
-                                    "type": "semantic_vad",
-                                    "interrupt_response": False,
-                                },
-                            },
-                            "output": {"voice": "alloy", "speed": 1.15},
-                        },
-                        "instructions": conversation_instructions,
-                        "output_modalities": ["audio"],
-                        "tool_choice": "none",
-                        "tools": [],
-                    }
-                )
+                await realtime_connection.session.update(session=session)
                 if assistant.assistant_should_message_first:
                     await realtime_connection.response.create()
                 await func(browser_connection, *args, **kwargs)

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 import importlib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import orjson
 import pytest
 from sqlalchemy import select
 
+from pingpong import ai as ai_module
 from pingpong import models, schemas
 from pingpong.ai import BufferedResponseStreamHandler
 from pingpong.testutil import with_authz, with_user
@@ -31,6 +34,8 @@ async def _create_handler_context(
     thread_external_id: str,
     run_id: int,
     run_external_id: str,
+    lecture_video_dual_text_mode: bool = False,
+    lecture_video_followups_mode: bool = False,
 ):
     base_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
 
@@ -82,7 +87,297 @@ async def _create_handler_context(
         thread_id=thread_id,
         assistant_id=assistant_id,
         user_id=user_id,
+        lecture_video_dual_text_mode=lecture_video_dual_text_mode,
+        lecture_video_followups_mode=lecture_video_followups_mode,
     )
+
+
+async def test_dual_text_stream_handler_stores_raw_say_snippet_and_streams_display(
+    db,
+):
+    handler = await _create_handler_context(
+        db,
+        user_id=9003,
+        email="dual-text@test.dev",
+        class_id=3003,
+        class_name="Dual Text Class",
+        assistant_id=6003,
+        assistant_name="Dual Text Assistant",
+        assistant_external_id="asst-dual-text",
+        model="gpt-4o-mini",
+        thread_id=4003,
+        thread_external_id="thread-dual-text",
+        run_id=5003,
+        run_external_id="run-dual-text",
+        lecture_video_dual_text_mode=True,
+        lecture_video_followups_mode=True,
+    )
+    await handler.on_output_message_created(
+        SimpleNamespace(
+            id="msg-dual-text",
+            status=schemas.MessageStatus.IN_PROGRESS.value,
+            role="assistant",
+        )
+    )
+    await handler.on_output_text_part_created(
+        SimpleNamespace(type="output_text", text="")
+    )
+    message_part_id = handler.message_part_id
+    assert message_part_id is not None
+
+    raw_snippet = (
+        "\ue200say\ue202"
+        '{"speech":"x squared plus y squared","content":"$ x^2 + y^2 $"}'
+        "\ue201"
+    )
+    raw_followups = (
+        "\ue200followups\ue202"
+        '{"responses":["Can you show another example?","What happens next?"]}'
+        "\ue201"
+    )
+    await handler.on_output_text_delta(SimpleNamespace(delta="Use " + raw_snippet[:12]))
+    await handler.on_output_text_delta(
+        SimpleNamespace(delta=raw_snippet[12:] + "." + raw_followups[:18])
+    )
+    await handler.on_output_text_delta(SimpleNamespace(delta=raw_followups[18:]))
+    await handler.on_output_text_part_done(SimpleNamespace(type="output_text", text=""))
+
+    async with db.async_session() as session:
+        saved_part = await session.get(models.MessagePart, message_part_id)
+
+    assert saved_part is not None
+    assert saved_part.text == "Use " + raw_snippet + "." + raw_followups
+
+    events = [
+        orjson.loads(line) for line in handler.flush().splitlines() if line.strip()
+    ]
+    streamed_text = "".join(
+        event["delta"]["content"][0]["text"]["value"]
+        for event in events
+        if event["type"] == "message_delta"
+    )
+    assert streamed_text == "Use $ x^2 + y^2 $."
+    assert "\ue200" not in streamed_text
+    followup_events = [
+        event for event in events if event["type"] == "followup_suggestions"
+    ]
+    assert followup_events == [
+        {
+            "type": "followup_suggestions",
+            "message_id": str(handler.message_id),
+            "suggestions": [
+                "Can you show another example?",
+                "What happens next?",
+            ],
+        }
+    ]
+
+
+async def test_run_response_sends_say_speech_text_to_tts(db, monkeypatch):
+    sent_tts_text: list[tuple[str, bool, bool]] = []
+
+    class FakeTTS:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def connect(self):
+            pass
+
+        async def receive_audio(self):
+            if False:
+                yield ""
+
+        async def send_text(
+            self,
+            text: str,
+            *,
+            try_trigger_generation: bool = True,
+            flush: bool = False,
+        ):
+            sent_tts_text.append((text, try_trigger_generation, flush))
+
+        async def close_input(self):
+            pass
+
+        async def cleanup(self):
+            pass
+
+    class FakeResponseStream:
+        def __init__(self, events):
+            self._events = iter(events)
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            try:
+                return next(self._events)
+            except StopIteration:
+                raise StopAsyncIteration
+
+    class FakeAuthzDriver:
+        async def init(self):
+            pass
+
+        @asynccontextmanager
+        async def get_client(self):
+            yield AsyncMock()
+
+    raw_snippet = (
+        "\ue200say\ue202"
+        '{"speech":"x squared plus y squared.","content":"$ x^2 + y^2 $"}'
+        "\ue201"
+    )
+    raw_followups = (
+        '\ue200followups\ue202{"responses":["Can you show another example?"]}\ue201'
+    )
+    events = [
+        SimpleNamespace(
+            type="response.created",
+            response=SimpleNamespace(id="resp-dual-text", status="in_progress"),
+        ),
+        SimpleNamespace(
+            type="response.output_item.added",
+            item=SimpleNamespace(
+                type="message",
+                id="msg-dual-text-run",
+                status=schemas.MessageStatus.IN_PROGRESS.value,
+                role="assistant",
+            ),
+        ),
+        SimpleNamespace(
+            type="response.content_part.added",
+            part=SimpleNamespace(type="output_text", text=""),
+        ),
+        SimpleNamespace(type="response.output_text.delta", delta="Use "),
+        SimpleNamespace(type="response.output_text.delta", delta=raw_snippet[:12]),
+        SimpleNamespace(
+            type="response.output_text.delta",
+            delta=raw_snippet[12:] + raw_followups,
+        ),
+        SimpleNamespace(
+            type="response.content_part.done",
+            part=SimpleNamespace(type="output_text", text=""),
+        ),
+        SimpleNamespace(
+            type="response.output_item.done",
+            item=SimpleNamespace(
+                type="message",
+                id="msg-dual-text-run",
+                status=schemas.MessageStatus.COMPLETED.value,
+                role="assistant",
+            ),
+        ),
+        SimpleNamespace(
+            type="response.completed",
+            response=SimpleNamespace(
+                status=schemas.RunStatus.COMPLETED.value,
+                error=None,
+                incomplete_details=None,
+                output=[],
+            ),
+        ),
+    ]
+    fake_client = SimpleNamespace(
+        responses=SimpleNamespace(
+            create=AsyncMock(return_value=FakeResponseStream(events))
+        )
+    )
+    monkeypatch.setattr(ai_module, "ElevenLabsStreamingTTS", FakeTTS)
+    monkeypatch.setattr(ai_module.config.authz, "driver", FakeAuthzDriver())
+
+    base_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    async with db.async_session() as session:
+        class_ = models.Class(id=3004, name="Dual Text TTS Class", api_key="sk-test")
+        user = models.User(
+            id=9004,
+            email="dual-text-tts@test.dev",
+            state=schemas.UserState.VERIFIED,
+        )
+        assistant = models.Assistant(
+            id=6004,
+            name="Dual Text TTS Assistant",
+            class_id=3004,
+            assistant_id="asst-dual-text-tts",
+            model="gpt-4o-mini",
+            creator_id=9004,
+        )
+        thread = models.Thread(
+            id=4004,
+            thread_id="thread-dual-text-tts",
+            class_id=3004,
+            assistant_id=6004,
+            version=3,
+            tools_available="",
+            private=False,
+        )
+        run = models.Run(
+            id=5004,
+            run_id="run-dual-text-tts",
+            status=schemas.RunStatus.QUEUED,
+            thread_id=4004,
+            assistant_id=6004,
+            creator_id=9004,
+            model="gpt-4o-mini",
+            created=base_time,
+            updated=base_time,
+        )
+        session.add_all([class_, user, assistant, thread, run])
+        await session.commit()
+
+    chunks = []
+    async for chunk in ai_module.run_response(
+        fake_client,
+        run=run,
+        class_id="3004",
+        tts_voice_id="voice-id",
+        tts_api_key="tts-key",
+        lecture_video_dual_text_mode=True,
+        lecture_video_followups_mode=True,
+    ):
+        chunks.append(chunk)
+
+    spoken_text = "".join(text for text, _, _ in sent_tts_text)
+    assert "Use x squared plus y squared." in spoken_text
+    assert "Can you show another example?" not in spoken_text
+    assert all(text for text, _, _ in sent_tts_text)
+    assert all("\ue200" not in text for text, _, _ in sent_tts_text)
+    streamed_events = [
+        orjson.loads(line)
+        for chunk in chunks
+        for line in chunk.splitlines()
+        if line.strip()
+    ]
+    streamed_text = "".join(
+        event["delta"]["content"][0]["text"]["value"]
+        for event in streamed_events
+        if event["type"] == "message_delta"
+    )
+    assert streamed_text == "Use $ x^2 + y^2 $"
+    followup_events = [
+        event for event in streamed_events if event["type"] == "followup_suggestions"
+    ]
+    message_created_events = [
+        event for event in streamed_events if event["type"] == "message_created"
+    ]
+    assert message_created_events
+    assert followup_events == [
+        {
+            "type": "followup_suggestions",
+            "message_id": message_created_events[0]["message"]["id"],
+            "suggestions": ["Can you show another example?"],
+        }
+    ]
+
+    async with db.async_session() as session:
+        saved_part = await session.scalar(
+            select(models.MessagePart).where(
+                models.MessagePart.type == schemas.MessagePartType.OUTPUT_TEXT
+            )
+        )
+
+    assert saved_part is not None
+    assert saved_part.text == "Use " + raw_snippet + raw_followups
 
 
 async def _setup_handler_with_initial_message(db):
@@ -109,6 +404,71 @@ async def _setup_handler_with_initial_message(db):
     await handler.on_output_message_created(first_event)
     assert handler.message_id is not None
     return handler, 5001, handler.message_id
+
+
+async def test_container_file_citation_preserves_container_file_id(db, monkeypatch):
+    handler, _, _ = await _setup_handler_with_initial_message(db)
+    await handler.on_output_text_part_created(
+        SimpleNamespace(type="output_text", text="Generated a CSV.")
+    )
+    assert handler.message_part_id is not None
+
+    handler.openai_cli = SimpleNamespace(
+        containers=SimpleNamespace(
+            files=SimpleNamespace(
+                content=SimpleNamespace(
+                    retrieve=AsyncMock(
+                        return_value=SimpleNamespace(content=b"name,email\n")
+                    )
+                )
+            )
+        )
+    )
+
+    async def fake_handle_create_file(session, **_kwargs):
+        file = models.File(
+            file_id="file-uploaded-copy",
+            name="random_names_emails.csv",
+            content_type="text/csv",
+            class_id=handler.class_id,
+        )
+        session.add(file)
+        await session.flush()
+        return schemas.File(
+            id=file.id,
+            file_id=file.file_id,
+            name=file.name,
+            content_type=file.content_type,
+            private=True,
+            uploader_id=handler.user_id,
+            created=file.created,
+            updated=file.updated,
+        )
+
+    monkeypatch.setattr(ai_module, "handle_create_file", fake_handle_create_file)
+
+    await handler.on_output_text_container_file_citation_added(
+        {
+            "type": "container_file_citation",
+            "file_id": "cfile-original-container",
+            "container_id": "cntr-original",
+            "filename": "random_names_emails.csv",
+            "start_index": 10,
+            "end_index": 30,
+        },
+        annotation_index=0,
+    )
+
+    async with db.async_session() as session:
+        annotation = await session.scalar(
+            select(models.Annotation).where(
+                models.Annotation.message_part_id == handler.message_part_id
+            )
+        )
+
+    assert annotation is not None
+    assert annotation.file_id == "cfile-original-container"
+    assert annotation.file_object_id is not None
 
 
 async def _setup_handler_with_phase(db, phase: str):
@@ -285,6 +645,66 @@ async def _create_server_thread_alt(db, *, class_id: int, thread_id: int, run_id
         older_phase=schemas.MessagePhase.FINAL_ANSWER.value,
         newer_phase=schemas.MessagePhase.FINAL_ANSWER.value,
     )
+
+
+async def _create_lecture_video_thread_with_followup_message(
+    db, *, class_id: int, thread_id: int, run_id: int, assistant_id: int
+) -> None:
+    base_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    raw_followups = (
+        "\ue200followups\ue202"
+        '{"responses":["Can you show another example?","What happens next?"]}'
+        "\ue201"
+    )
+    async with db.async_session() as session:
+        class_ = models.Class(id=class_id, name=f"Class {class_id}", api_key="sk-test")
+        assistant = models.Assistant(
+            id=assistant_id,
+            name=f"Assistant {assistant_id}",
+            class_id=class_id,
+            assistant_id=f"asst-{assistant_id}",
+            model="gpt-4o-mini",
+        )
+        thread = models.Thread(
+            id=thread_id,
+            thread_id=f"thread-{thread_id}",
+            class_id=class_id,
+            assistant_id=assistant_id,
+            version=3,
+            tools_available="",
+            private=False,
+            interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+        )
+        run = models.Run(
+            id=run_id,
+            run_id=f"run-{run_id}",
+            status=schemas.RunStatus.COMPLETED,
+            thread_id=thread_id,
+            assistant_id=assistant_id,
+            created=base_time,
+            updated=base_time,
+        )
+        message = models.Message(
+            message_status=schemas.MessageStatus.COMPLETED,
+            run_id=run_id,
+            thread_id=thread_id,
+            assistant_id=assistant_id,
+            role=schemas.MessageRole.ASSISTANT,
+            output_index=1,
+            phase=schemas.MessagePhase.FINAL_ANSWER.value,
+            created=base_time,
+        )
+        session.add_all([class_, assistant, thread, run, message])
+        await session.flush()
+        session.add(
+            models.MessagePart(
+                type=schemas.MessagePartType.OUTPUT_TEXT,
+                message_id=message.id,
+                part_index=0,
+                text=f"Here is the answer. {raw_followups}",
+            )
+        )
+        await session.commit()
 
 
 async def _create_thread_with_phase_separated_assistant_messages(
@@ -1064,6 +1484,42 @@ async def test_list_thread_messages_deduplicates_extra_assistant_messages(
     assert len(messages) == 1
     assert messages[0]["output_index"] == 3
     assert messages[0]["run_id"] == str(run_id)
+
+
+@with_user(337)
+@with_authz(grants=[("user:337", "can_view", "thread:3141")])
+async def test_list_thread_messages_appends_followup_suggestions_from_stored_text(
+    api, db, valid_user_token
+):
+    class_id = 3041
+    thread_id = 3141
+    run_id = 3241
+    assistant_id = 3341
+    await _create_lecture_video_thread_with_followup_message(
+        db,
+        class_id=class_id,
+        thread_id=thread_id,
+        run_id=run_id,
+        assistant_id=assistant_id,
+    )
+
+    response = api.get(
+        f"/api/v1/class/{class_id}/thread/{thread_id}/messages",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    messages = response.json()["messages"]
+    assert messages[0]["content"] == [
+        {
+            "type": "text",
+            "text": {"value": "Here is the answer. ", "annotations": []},
+        },
+        {
+            "type": "followup_suggestions",
+            "suggestions": ["Can you show another example?", "What happens next?"],
+        },
+    ]
 
 
 @with_user(334)

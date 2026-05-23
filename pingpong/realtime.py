@@ -1,4 +1,5 @@
 import asyncio
+import binascii
 import base64
 from collections import deque
 import json
@@ -7,6 +8,8 @@ import struct
 from dataclasses import dataclass
 from heapq import heappop, heappush
 from typing import Awaitable, Callable, Literal, cast
+
+import pybase64
 from fastapi import WebSocketDisconnect
 from openai import OpenAIError
 from sqlalchemy import func
@@ -21,15 +24,20 @@ from pingpong.ai import (
 import pingpong.schemas as schemas
 from pingpong.log_utils import sanitize_for_log
 from pingpong.models import Thread, MessagePart, Message, Run
-from pingpong.realtime_recorder import RealtimeRecorder
+from pingpong.realtime_recorder import (
+    AUDIO_CHANNELS,
+    AUDIO_FRAME_RATE,
+    AUDIO_SAMPLE_WIDTH,
+    RealtimeRecorder,
+)
 from pingpong.websocket import (
     ws_auth_middleware,
     ws_check_realtime_permissions,
     ws_db_middleware,
     ws_parse_session_token,
+    ws_with_single_realtime_session,
     ws_with_openai_client,
     ws_with_realtime_connection,
-    ws_with_thread_assistant_prompt,
 )
 from pingpong.state_types import StateWebSocket
 
@@ -57,6 +65,148 @@ class ConversationChainItem:
     previous_item_id: str | None = UNSET_PREVIOUS_ITEM_ID
     transcription_text: str | None = None
     role: ConversationRole | None = None
+
+
+class RealtimeAssistantAudioTracker:
+    """Tracks generated assistant audio duration while playback can be truncated."""
+
+    _BYTES_PER_FRAME = AUDIO_SAMPLE_WIDTH * AUDIO_CHANNELS
+
+    def __init__(self):
+        self._lock = asyncio.Lock()
+        self._sample_counts_by_item_id: dict[str, int] = {}
+        self._event_end_sample_counts_by_item_id: dict[str, dict[str, int]] = {}
+        self._audio_done_item_ids: set[str] = set()
+
+    async def add_audio_delta(
+        self,
+        item_id: str | None,
+        event_id: str | None,
+        audio_bytes: bytes | None,
+    ) -> None:
+        if not item_id or audio_bytes is None:
+            return
+
+        sample_count = len(audio_bytes) // self._BYTES_PER_FRAME
+        async with self._lock:
+            item_sample_count = (
+                self._sample_counts_by_item_id.get(item_id, 0) + sample_count
+            )
+            self._sample_counts_by_item_id[item_id] = item_sample_count
+            if event_id:
+                self._event_end_sample_counts_by_item_id.setdefault(item_id, {})[
+                    event_id
+                ] = item_sample_count
+            browser_connection_logger.debug(
+                "Tracked realtime assistant audio delta item_id=%s event_id=%s "
+                "delta_samples=%s total_duration_ms=%s.",
+                sanitize_for_log(item_id, max_len=256),
+                sanitize_for_log(str(event_id), max_len=256),
+                sanitize_for_log(str(sample_count)),
+                sanitize_for_log(
+                    str(self._duration_ms_for_sample_count(item_sample_count))
+                ),
+            )
+
+    async def mark_audio_event_playback_ended(
+        self, item_id: str | None, event_id: str | None
+    ) -> None:
+        if not item_id or not event_id:
+            return
+
+        async with self._lock:
+            event_sample_counts = self._event_end_sample_counts_by_item_id.get(item_id)
+            if event_sample_counts is None:
+                return
+
+            event_sample_counts.pop(event_id, None)
+            if event_sample_counts:
+                return
+
+            self._event_end_sample_counts_by_item_id.pop(item_id, None)
+            self._forget_item_if_audio_is_done(item_id)
+
+    async def mark_item_audio_done(self, item_id: str | None) -> None:
+        if not item_id:
+            return
+
+        async with self._lock:
+            self._audio_done_item_ids.add(item_id)
+            self._forget_item_if_audio_is_done(item_id)
+
+    async def forget_item(self, item_id: str | None) -> None:
+        if not item_id:
+            return
+
+        async with self._lock:
+            self._forget_item(item_id)
+
+    async def clamp_truncate_audio_end_ms(
+        self, item_id: str, requested_audio_end_ms: int, event_id: str | None = None
+    ) -> int:
+        sanitized_item_id = sanitize_for_log(item_id, max_len=256)
+        sanitized_event_id = sanitize_for_log(str(event_id), max_len=256)
+        event_sample_count: int | None = None
+        async with self._lock:
+            sample_count = self._sample_counts_by_item_id.get(item_id)
+            if event_id:
+                event_sample_count = self._event_end_sample_counts_by_item_id.get(
+                    item_id, {}
+                ).get(event_id)
+                if event_sample_count is not None:
+                    sample_count = event_sample_count
+
+        if sample_count is None:
+            browser_connection_logger.warning(
+                "Received truncate for assistant item_id %s before any tracked audio duration.",
+                sanitized_item_id,
+            )
+            return requested_audio_end_ms
+
+        if event_id and event_sample_count is None:
+            browser_connection_logger.warning(
+                "Realtime truncate event_id=%s for item_id=%s had no tracked event boundary; "
+                "falling back to item duration.",
+                sanitized_event_id,
+                sanitized_item_id,
+            )
+
+        generated_duration_ms = self._duration_ms_for_sample_count(sample_count)
+        if requested_audio_end_ms <= generated_duration_ms:
+            browser_connection_logger.debug(
+                "Realtime truncate did not require clamping item_id=%s event_id=%s "
+                "requested_audio_end_ms=%s generated_duration_ms=%s.",
+                sanitized_item_id,
+                sanitized_event_id,
+                sanitize_for_log(str(requested_audio_end_ms)),
+                sanitize_for_log(str(generated_duration_ms)),
+            )
+            return requested_audio_end_ms
+
+        browser_connection_logger.warning(
+            "Clamping realtime truncate audio_end_ms for item_id %s from %s to %s.",
+            sanitized_item_id,
+            sanitize_for_log(str(requested_audio_end_ms)),
+            sanitize_for_log(str(generated_duration_ms)),
+        )
+        return generated_duration_ms
+
+    @staticmethod
+    def _duration_ms_for_sample_count(sample_count: int) -> int:
+        return (sample_count * 1000) // AUDIO_FRAME_RATE
+
+    def _forget_item_if_audio_is_done(self, item_id: str) -> None:
+        if item_id not in self._audio_done_item_ids:
+            return
+        if self._event_end_sample_counts_by_item_id.get(item_id):
+            return
+
+        self._forget_item(item_id)
+
+    def _forget_item(self, item_id: str) -> None:
+        self._sample_counts_by_item_id.pop(item_id, None)
+        self._event_end_sample_counts_by_item_id.pop(item_id, None)
+        self._audio_done_item_ids.discard(item_id)
 
 
 class ConversationItemOrderingBuffer:
@@ -579,6 +729,7 @@ async def enqueue_ready_thread_message_tasks(
 async def handle_browser_messages(
     browser_connection: StateWebSocket,
     realtime_connection: AsyncRealtimeConnection,
+    assistant_audio_tracker: RealtimeAssistantAudioTracker,
     realtime_recorder: RealtimeRecorder | None = None,
 ):
     try:
@@ -598,12 +749,48 @@ async def handle_browser_messages(
                         )
                     elif type == "conversation.item.truncate":
                         item_id = data.get("item_id")
+                        event_id = data.get("event_id")
                         audio_end_ms = data.get("audio_end_ms")
                         if item_id is None or audio_end_ms is None:
                             browser_connection_logger.exception(
                                 "Received conversation.item.truncate message without item_id or audio_end_ms"
                             )
                             continue
+                        if event_id is not None and not isinstance(event_id, str):
+                            browser_connection_logger.warning(
+                                "Received conversation.item.truncate message with invalid event_id: %s",
+                                sanitize_for_log(
+                                    json.dumps(data, sort_keys=True), max_len=512
+                                ),
+                            )
+                            event_id = None
+                        if not isinstance(audio_end_ms, int) or isinstance(
+                            audio_end_ms, bool
+                        ):
+                            browser_connection_logger.warning(
+                                "Received conversation.item.truncate message with invalid audio_end_ms: %s",
+                                sanitize_for_log(
+                                    json.dumps(data, sort_keys=True), max_len=512
+                                ),
+                            )
+                            continue
+                        requested_audio_end_ms = audio_end_ms
+                        audio_end_ms = max(
+                            0,
+                            await assistant_audio_tracker.clamp_truncate_audio_end_ms(
+                                item_id=item_id,
+                                event_id=event_id,
+                                requested_audio_end_ms=audio_end_ms,
+                            ),
+                        )
+                        browser_connection_logger.debug(
+                            "Forwarding browser truncate item_id=%s event_id=%s "
+                            "requested_audio_end_ms=%s forwarded_audio_end_ms=%s.",
+                            sanitize_for_log(item_id, max_len=256),
+                            sanitize_for_log(str(event_id), max_len=256),
+                            sanitize_for_log(str(requested_audio_end_ms)),
+                            sanitize_for_log(str(audio_end_ms)),
+                        )
                         # Truncate the audio buffer for the specified item
                         # NOTE: This does not impact the transcription process,
                         # which might affect the quality of the transcription.
@@ -612,6 +799,7 @@ async def handle_browser_messages(
                             content_index=0,
                             item_id=item_id,
                         )
+                        await assistant_audio_tracker.forget_item(item_id)
                         if realtime_recorder:
                             await realtime_recorder.stopped_playing_assistant_response(
                                 item_id=item_id,
@@ -641,6 +829,27 @@ async def handle_browser_messages(
                                 event_id=event_id,
                                 started_playing_at_ms=started_playing_at_ms,
                             )
+                        )
+                    elif type == "response.audio.delta.ended":
+                        item_id = data.get("item_id")
+                        event_id = data.get("event_id")
+                        if item_id is None or event_id is None:
+                            browser_connection_logger.warning(
+                                "Received response.audio.delta.ended message without item_id or event_id: %s",
+                                sanitize_for_log(
+                                    json.dumps(data, sort_keys=True), max_len=512
+                                ),
+                            )
+                            continue
+                        await assistant_audio_tracker.mark_audio_event_playback_ended(
+                            item_id=item_id,
+                            event_id=event_id,
+                        )
+                        if not realtime_recorder:
+                            continue
+                        await realtime_recorder.ended_playing_assistant_response_delta(
+                            item_id=item_id,
+                            event_id=event_id,
                         )
 
                 except json.JSONDecodeError as e:
@@ -688,6 +897,7 @@ async def handle_openai_events(
     openai_client: OpenAIClientType,
     thread: Thread,
     openai_task_queue: asyncio.Queue,
+    assistant_audio_tracker: RealtimeAssistantAudioTracker,
     realtime_recorder: RealtimeRecorder | None = None,
 ):
     initial_output_index = 0
@@ -795,6 +1005,19 @@ async def handle_openai_events(
                     )
                 case "response.output_audio.delta":
                     delta_audio_b64 = event.delta
+                    try:
+                        delta_audio_bytes = pybase64.b64decode(delta_audio_b64)
+                    except (binascii.Error, TypeError, ValueError) as e:
+                        openai_connection_logger.warning(
+                            "Failed to decode realtime assistant audio delta: %s",
+                            e,
+                        )
+                        continue
+                    await assistant_audio_tracker.add_audio_delta(
+                        item_id=event.item_id,
+                        event_id=event.event_id,
+                        audio_bytes=delta_audio_bytes,
+                    )
                     await browser_connection.send_json(
                         {
                             "type": "response.audio.delta",
@@ -805,10 +1028,14 @@ async def handle_openai_events(
                     )
                     if realtime_recorder:
                         await realtime_recorder.add_assistant_response_delta(
-                            b64_audio_chunk=delta_audio_b64,
+                            audio_chunk_bytes=delta_audio_bytes,
                             event_id=event.event_id,
                             item_id=event.item_id,
                         )
+                case "response.output_audio.done" | "response.audio.done":
+                    await assistant_audio_tracker.mark_item_audio_done(
+                        getattr(event, "item_id", None)
+                    )
                 case "input_audio_buffer.speech_started":
                     await browser_connection.send_json(
                         {
@@ -835,7 +1062,6 @@ async def handle_openai_events(
                     | "response.content_part.done"
                     | "response.text.delta"
                     | "response.text.done"
-                    | "response.output_audio.done"
                     | "response.output_text.delta"
                     | "response.output_text.done"
                     | "response.function_call_arguments.delta"
@@ -888,7 +1114,7 @@ async def process_queue_tasks(
 @ws_parse_session_token
 @ws_check_realtime_permissions
 @ws_with_openai_client
-@ws_with_thread_assistant_prompt
+@ws_with_single_realtime_session
 @ws_with_realtime_connection
 async def browser_realtime_websocket(
     browser_connection: StateWebSocket,
@@ -902,6 +1128,7 @@ async def browser_realtime_websocket(
     thread: Thread = browser_connection.state["thread"]
 
     openai_task_queue: NamedQueue = NamedQueue("openai_task_queue")
+    assistant_audio_tracker = RealtimeAssistantAudioTracker()
 
     realtime_recorder: RealtimeRecorder | None = None
     if thread.display_user_info:
@@ -918,6 +1145,7 @@ async def browser_realtime_websocket(
             handle_browser_messages(
                 browser_connection,
                 realtime_connection,
+                assistant_audio_tracker,
                 realtime_recorder,
             )
         )
@@ -930,6 +1158,7 @@ async def browser_realtime_websocket(
                 openai_client,
                 thread,
                 openai_task_queue,
+                assistant_audio_tracker,
                 realtime_recorder,
             )
         )

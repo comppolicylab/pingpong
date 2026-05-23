@@ -14,6 +14,11 @@
 		message: string;
 		callback: ({ success, errorMessage, message_sent }: CallbackParams) => void;
 	};
+
+	export type ChatInputHandle = {
+		addFiles: (selectedFiles: File[]) => void;
+		focus: () => void;
+	};
 </script>
 
 <script lang="ts">
@@ -155,6 +160,12 @@
 	 */
 	export let mimeType: MimeTypeLookupFn;
 
+	/**
+	 * Placeholder message for the input.
+	 * Defaults to "Ask me anything".
+	 */
+	export let placeholderMessage = 'Ask me anything';
+
 	// Input container
 	let containerRef: HTMLDivElement;
 	// Text area reference for fixing height.
@@ -281,8 +292,10 @@
 		if (!browser) {
 			return;
 		}
-		document.getElementById('message')?.focus();
+		realRef?.focus();
 	};
+
+	export const focus = focusMessage;
 
 	$: if (!loading || !uploading) {
 		focusMessage();
@@ -471,11 +484,10 @@
 	// Fix the height of the container when the file list changes.
 	const fixFileListHeight: Action<HTMLElement, FileUploadInfo[]> = () => {
 		const update = () => {
-			const el = document.getElementById('message');
-			if (!el) {
+			if (!realRef) {
 				return;
 			}
-			fixHeight(el as HTMLTextAreaElement);
+			fixHeight(realRef);
 		};
 		return { update };
 	};
@@ -705,7 +717,7 @@
 				name="message"
 				class="mt-1 w-full resize-none border-none bg-transparent p-0 !outline-hidden focus:ring-0"
 				placeholder={canSubmit
-					? 'Ask me anything'
+					? placeholderMessage
 					: assistantDeleted
 						? 'Read-only thread: the assistant associated with this thread is deleted.'
 						: canViewAssistant

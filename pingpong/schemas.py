@@ -34,6 +34,13 @@ from pydantic import (
 )
 
 from pingpong.authz.base import Relation
+from pingpong.elevenlabs_defaults import (
+    DEFAULT_ELEVENLABS_SIMILARITY_BOOST,
+    DEFAULT_ELEVENLABS_SPEED,
+    DEFAULT_ELEVENLABS_STABILITY,
+    DEFAULT_ELEVENLABS_STYLE,
+    DEFAULT_ELEVENLABS_USE_SPEAKER_BOOST,
+)
 from .gravatar import get_email_hash, get_gravatar_image
 
 
@@ -423,6 +430,42 @@ class InteractionMode(StrEnum):
     LECTURE_VIDEO = "lecture_video"
 
 
+class RealtimeEagerness(StrEnum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    AUTO = "auto"
+
+
+class RealtimeVadMode(StrEnum):
+    SEMANTIC_VAD = "semantic_vad"
+    SERVER_VAD = "server_vad"
+
+
+class RealtimeNoiseReduction(StrEnum):
+    NEAR_FIELD = "near_field"
+    FAR_FIELD = "far_field"
+    NONE = "none"
+
+
+class RealtimeTranscriptionModel(StrEnum):
+    WHISPER_1 = "whisper-1"
+    GPT_REALTIME_WHISPER = "gpt-realtime-whisper"
+
+
+class RealtimeVoice(StrEnum):
+    ALLOY = "alloy"
+    ASH = "ash"
+    BALLAD = "ballad"
+    CORAL = "coral"
+    ECHO = "echo"
+    SAGE = "sage"
+    SHIMMER = "shimmer"
+    VERSE = "verse"
+    MARIN = "marin"
+    CEDAR = "cedar"
+
+
 class LectureVideoStatus(StrEnum):
     UPLOADED = "uploaded"
     PROCESSING = "processing"
@@ -442,6 +485,7 @@ class LectureVideoNarrationStatus(StrEnum):
 
 
 class LectureVideoProcessingStage(StrEnum):
+    MANIFEST_GENERATION = "manifest_generation"
     NARRATION = "narration"
 
 
@@ -457,6 +501,7 @@ class LectureVideoProcessingCancelReason(StrEnum):
     ASSISTANT_DETACHED = "assistant_detached"
     ASSISTANT_DELETED = "assistant_deleted"
     LECTURE_VIDEO_DELETED = "lecture_video_deleted"
+    MANUAL_MANIFEST_REPLACED = "manual_manifest_replaced"
 
 
 class LectureVideoSessionState(StrEnum):
@@ -546,7 +591,163 @@ class LectureVideoManifestV2(LectureVideoManifestBase):
     )
 
 
-LectureVideoManifest: TypeAlias = LectureVideoManifestV1 | LectureVideoManifestV2
+class LectureVideoManifestWordV3(BaseModel):
+    id: str = Field(..., min_length=1)
+    word: str = Field(..., min_length=1)
+    start_offset_ms: int = Field(..., ge=0)
+    end_offset_ms: int = Field(..., ge=0)
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "LectureVideoManifestWordV3":
+        if self.end_offset_ms < self.start_offset_ms:
+            raise ValueError(
+                "end_offset_ms must be greater than or equal to start_offset_ms"
+            )
+        return self
+
+
+class LectureVideoManifestVideoDescriptionV3(BaseModel):
+    start_offset_ms: int = Field(..., ge=0)
+    end_offset_ms: int = Field(..., ge=0)
+    description: str = Field(..., min_length=1)
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "LectureVideoManifestVideoDescriptionV3":
+        if self.end_offset_ms < self.start_offset_ms:
+            raise ValueError(
+                "end_offset_ms must be greater than or equal to start_offset_ms"
+            )
+        return self
+
+
+class LectureVideoManifestSummaryCheckpointV4(BaseModel):
+    end_offset_ms: int = Field(..., ge=0)
+    summary: str = Field(..., min_length=1)
+
+    @field_validator("summary")
+    @classmethod
+    def strip_summary(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("summary must not be empty")
+        return value
+
+
+class LectureVideoManifestMomentContextV4(BaseModel):
+    center_offset_ms: int = Field(..., ge=0)
+    start_offset_ms: int = Field(..., ge=0)
+    end_offset_ms: int = Field(..., ge=0)
+    before: str = Field(..., min_length=1)
+    at: str = Field(..., min_length=1)
+    after: str = Field(..., min_length=1)
+
+    @field_validator("before", "at", "after")
+    @classmethod
+    def strip_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("context text must not be empty")
+        return value
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "LectureVideoManifestMomentContextV4":
+        if not self.start_offset_ms <= self.center_offset_ms <= self.end_offset_ms:
+            raise ValueError(
+                "start_offset_ms <= center_offset_ms <= end_offset_ms is required"
+            )
+        return self
+
+
+def normalize_lecture_video_manifest_v4_context_arrays(
+    summary_checkpoints: list[LectureVideoManifestSummaryCheckpointV4],
+    moment_contexts: list[LectureVideoManifestMomentContextV4],
+) -> tuple[
+    list[LectureVideoManifestSummaryCheckpointV4],
+    list[LectureVideoManifestMomentContextV4],
+]:
+    summary_checkpoints = sorted(
+        {
+            checkpoint.end_offset_ms: checkpoint for checkpoint in summary_checkpoints
+        }.values(),
+        key=lambda item: item.end_offset_ms,
+    )
+    moment_contexts = sorted(
+        {moment.center_offset_ms: moment for moment in moment_contexts}.values(),
+        key=lambda item: item.center_offset_ms,
+    )
+    if not summary_checkpoints:
+        raise ValueError("summary_checkpoints must not be empty")
+    if not moment_contexts:
+        raise ValueError("moment_contexts must not be empty")
+    return summary_checkpoints, moment_contexts
+
+
+class LectureVideoManifestV3(LectureVideoManifestBase):
+    version: Literal[3] = 3
+    word_level_transcription: list[LectureVideoManifestWordV3] = Field(
+        ..., min_length=1
+    )
+    video_descriptions: list[LectureVideoManifestVideoDescriptionV3] = Field(
+        ..., min_length=1
+    )
+
+    @model_validator(mode="after")
+    def order_video_descriptions(self) -> "LectureVideoManifestV3":
+        self.video_descriptions = sorted(
+            self.video_descriptions,
+            key=lambda item: (item.start_offset_ms, item.end_offset_ms),
+        )
+        return self
+
+
+class LectureVideoManifestV4(LectureVideoManifestBase):
+    version: Literal[4] = 4
+    word_level_transcription: list[LectureVideoManifestWordV3] = Field(
+        ..., min_length=1
+    )
+    summary_checkpoints: list[LectureVideoManifestSummaryCheckpointV4] = Field(
+        ..., min_length=1
+    )
+    moment_contexts: list[LectureVideoManifestMomentContextV4] = Field(
+        ..., min_length=1
+    )
+
+    @model_validator(mode="after")
+    def normalize_context_arrays(self) -> "LectureVideoManifestV4":
+        self.summary_checkpoints, self.moment_contexts = (
+            normalize_lecture_video_manifest_v4_context_arrays(
+                self.summary_checkpoints,
+                self.moment_contexts,
+            )
+        )
+        return self
+
+
+LectureVideoManifest: TypeAlias = (
+    LectureVideoManifestV1
+    | LectureVideoManifestV2
+    | LectureVideoManifestV3
+    | LectureVideoManifestV4
+)
+
+
+def _looks_like_lecture_video_manifest_v4(value: dict[str, Any]) -> bool:
+    return "summary_checkpoints" in value or "moment_contexts" in value
+
+
+def _looks_like_lecture_video_manifest_v3(value: dict[str, Any]) -> bool:
+    # video_descriptions is V3-only, so prefer that explicit marker before
+    # checking transcript word shape.
+    if "video_descriptions" in value:
+        return True
+    words = value.get("word_level_transcription")
+    if not isinstance(words, list):
+        return False
+    return any(
+        isinstance(word, dict)
+        and ("start_offset_ms" in word and "end_offset_ms" in word)
+        for word in words
+    )
 
 
 def _lecture_video_manifest_error_detail(exc: ValidationError) -> str:
@@ -561,7 +762,13 @@ def validate_lecture_video_manifest(
     lecture_video_manifest: LectureVideoManifest | Any | None,
 ) -> LectureVideoManifest | None:
     if lecture_video_manifest is None or isinstance(
-        lecture_video_manifest, (LectureVideoManifestV1, LectureVideoManifestV2)
+        lecture_video_manifest,
+        (
+            LectureVideoManifestV1,
+            LectureVideoManifestV2,
+            LectureVideoManifestV3,
+            LectureVideoManifestV4,
+        ),
     ):
         return lecture_video_manifest
     try:
@@ -570,7 +777,27 @@ def validate_lecture_video_manifest(
             if isinstance(lecture_video_manifest, dict)
             else None
         )
-        if version == 2:
+        if version == 4 or (
+            version is None
+            # V4 is inferred only from V4-only context fields. Explicit
+            # versioned payloads still validate against their own contract.
+            and isinstance(lecture_video_manifest, dict)
+            and _looks_like_lecture_video_manifest_v4(lecture_video_manifest)
+        ):
+            return LectureVideoManifestV4.model_validate(lecture_video_manifest)
+        if version == 3 or (
+            version is None
+            # Only infer V3 for legacy manifests without an explicit version;
+            # explicit versioned payloads should validate against that contract.
+            and isinstance(lecture_video_manifest, dict)
+            and _looks_like_lecture_video_manifest_v3(lecture_video_manifest)
+        ):
+            return LectureVideoManifestV3.model_validate(lecture_video_manifest)
+        if version == 2 or (
+            version is None
+            and isinstance(lecture_video_manifest, dict)
+            and "word_level_transcription" in lecture_video_manifest
+        ):
             return LectureVideoManifestV2.model_validate(lecture_video_manifest)
         return LectureVideoManifestV1.model_validate(lecture_video_manifest)
     except ValidationError as exc:
@@ -601,15 +828,41 @@ class LectureVideoAssistantEditorPolicy(BaseModel):
     message: str | None = None
 
 
+class LectureVideoProcessingRunSummary(BaseModel):
+    state: LectureVideoProcessingRunStatus
+    error_message: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+
 class LectureVideoConfigResponse(BaseModel):
     lecture_video: LectureVideoSummary
-    lecture_video_manifest: LectureVideoManifest
+    lecture_video_manifest: LectureVideoManifest | None = None
     voice_id: str
     lecture_video_chat_available: bool = False
+    generation_prompt: str | None = None
+    # The API intentionally allows non-UI-step values; only the editor slider
+    # snaps to 5-second increments.
+    video_description_duration_ms: int = Field(30000, ge=5000, le=300000)
+    overwrite_manifest: bool = False
+    manifest_generation_status: LectureVideoProcessingRunSummary | None = None
+
+
+class LectureVideoDefaults(BaseModel):
+    instructions: str
+    generation_prompt: str
+    can_generate_manifest: bool = False
 
 
 class ValidateLectureVideoVoiceRequest(BaseModel):
     voice_id: str
+    elevenlabs_stability: float = Field(DEFAULT_ELEVENLABS_STABILITY, ge=0.0, le=1.0)
+    elevenlabs_similarity_boost: float = Field(
+        DEFAULT_ELEVENLABS_SIMILARITY_BOOST, ge=0.0, le=1.0
+    )
+    elevenlabs_use_speaker_boost: bool = DEFAULT_ELEVENLABS_USE_SPEAKER_BOOST
+    elevenlabs_style: float = Field(DEFAULT_ELEVENLABS_STYLE, ge=0.0, le=1.0)
+    elevenlabs_speed: float = Field(DEFAULT_ELEVENLABS_SPEED, ge=0.7, le=1.2)
 
     @field_validator("voice_id")
     @classmethod
@@ -636,6 +889,11 @@ class LectureVideoQuestionPrompt(BaseModel):
     options: list[LectureVideoOptionPrompt]
 
 
+class LectureVideoQuestionMarker(BaseModel):
+    id: int
+    stop_offset_ms: int = Field(..., ge=0)
+
+
 class LectureVideoContinuation(BaseModel):
     option_id: int
     correct_option_id: int | None = None
@@ -650,6 +908,7 @@ class LectureVideoSessionController(BaseModel):
     has_control: bool = False
     has_active_controller: bool = False
     lease_expires_at: datetime | None = None
+    lease_duration_ms: int | None = Field(None, ge=0)
 
     @model_validator(mode="after")
     def validate_controller_state(self) -> "LectureVideoSessionController":
@@ -662,11 +921,19 @@ class LectureVideoSessionController(BaseModel):
                 raise ValueError(
                     "lease_expires_at must be null when there is no active controller"
                 )
+            if self.lease_duration_ms is not None:
+                raise ValueError(
+                    "lease_duration_ms must be null when there is no active controller"
+                )
             return self
 
         if self.lease_expires_at is None:
             raise ValueError(
                 "lease_expires_at is required when there is an active controller"
+            )
+        if self.lease_duration_ms is None:
+            raise ValueError(
+                "lease_duration_ms is required when there is an active controller"
             )
         return self
 
@@ -679,6 +946,7 @@ class LectureVideoSession(BaseModel):
     latest_interaction_at: datetime | None = None
     current_question: LectureVideoQuestionPrompt | None = None
     current_continuation: LectureVideoContinuation | None = None
+    question_markers: list[LectureVideoQuestionMarker] = Field(default_factory=list)
     state_version: int = Field(..., ge=1)
     controller: LectureVideoSessionController
 
@@ -702,6 +970,7 @@ class LectureVideoControlRenewRequest(BaseModel):
 
 class LectureVideoControlRenewResponse(BaseModel):
     lease_expires_at: datetime
+    lease_duration_ms: int = Field(..., ge=0)
 
 
 class LectureVideoInteractionRequestBase(BaseModel):
@@ -801,6 +1070,21 @@ class Assistant(BaseModel):
     temperature: float | None
     verbosity: int | None
     reasoning_effort: int | None
+    realtime_vad_mode: RealtimeVadMode | None = None
+    realtime_eagerness: RealtimeEagerness | None = None
+    realtime_vad_threshold: float | None = None
+    realtime_vad_prefix_padding_ms: int | None = None
+    realtime_vad_silence_duration_ms: int | None = None
+    realtime_vad_idle_timeout_ms: int | None = None
+    realtime_voice: RealtimeVoice | None = None
+    realtime_speed: float | None = None
+    realtime_noise_reduction: RealtimeNoiseReduction | None = None
+    realtime_transcription_model: RealtimeTranscriptionModel | None = None
+    elevenlabs_stability: float | None = None
+    elevenlabs_similarity_boost: float | None = None
+    elevenlabs_use_speaker_boost: bool | None = None
+    elevenlabs_style: float | None = None
+    elevenlabs_speed: float | None = None
     class_id: int
     creator_id: int
     locked: bool = False
@@ -842,14 +1126,23 @@ def temperature_validator(self):
 
 
 def lecture_video_validator_create_assistant(self):
+    overwrite_manifest = (
+        self.overwrite_manifest
+        if "overwrite_manifest" in self.model_fields_set
+        else False
+    )
     if self.interaction_mode == InteractionMode.LECTURE_VIDEO:
         if self.lecture_video_id is None:
             raise ValueError(
                 "Specifying a lecture_video_id is required for lecture video assistants."
             )
-        if self.lecture_video_manifest is None:
+        if overwrite_manifest and self.lecture_video_manifest is None:
             raise ValueError(
-                "Specifying a lecture_video_manifest is required for lecture video assistants."
+                "Specifying a lecture_video_manifest is required when overwriting a lecture video manifest."
+            )
+        if not overwrite_manifest and self.lecture_video_manifest is not None:
+            raise ValueError(
+                "lecture_video_manifest cannot be supplied when overwrite_manifest is false."
             )
         if not self.voice_id:
             raise ValueError(
@@ -859,6 +1152,9 @@ def lecture_video_validator_create_assistant(self):
         self.lecture_video_id is not None
         or self.lecture_video_manifest is not None
         or self.voice_id is not None
+        or self.generation_prompt is not None
+        or self.video_description_duration_ms is not None
+        or self.overwrite_manifest is not None
     ):
         raise ValueError(
             "Lecture video data can only be set for assistants in Lecture Video mode."
@@ -885,17 +1181,44 @@ def lecture_video_validator_update_assistant(self):
     lecture_video_id_present = "lecture_video_id" in self.model_fields_set
     lecture_video_manifest_present = "lecture_video_manifest" in self.model_fields_set
     voice_id_present = "voice_id" in self.model_fields_set
+    generation_prompt_present = "generation_prompt" in self.model_fields_set
+    video_description_duration_ms_present = (
+        "video_description_duration_ms" in self.model_fields_set
+    )
+    regenerate_requested_present = "regenerate_requested" in self.model_fields_set
+    overwrite_manifest_present = "overwrite_manifest" in self.model_fields_set
     lecture_video_payload_present = (
-        lecture_video_id_present or lecture_video_manifest_present or voice_id_present
+        lecture_video_id_present
+        or lecture_video_manifest_present
+        or voice_id_present
+        or generation_prompt_present
+        or video_description_duration_ms_present
+        or regenerate_requested_present
+        or overwrite_manifest_present
+    )
+    overwrite_manifest = (
+        self.overwrite_manifest if overwrite_manifest_present else False
     )
 
     if lecture_video_payload_present and self.lecture_video_id is None:
         raise ValueError(
             "Specifying a lecture_video_id is required when updating lecture video data."
         )
-    if lecture_video_payload_present and self.lecture_video_manifest is None:
+    if (
+        lecture_video_payload_present
+        and overwrite_manifest
+        and self.lecture_video_manifest is None
+    ):
         raise ValueError(
-            "Specifying a lecture_video_manifest is required when updating lecture video data."
+            "Specifying a lecture_video_manifest is required when overwriting a lecture video manifest."
+        )
+    if (
+        lecture_video_payload_present
+        and not overwrite_manifest
+        and self.lecture_video_manifest is not None
+    ):
+        raise ValueError(
+            "lecture_video_manifest cannot be supplied when overwrite_manifest is false."
         )
     if lecture_video_payload_present and not self.voice_id:
         raise ValueError(
@@ -996,10 +1319,34 @@ class CreateAssistant(BaseModel):
     temperature: float | None = Field(None, ge=0.0, le=2.0)
     reasoning_effort: int | None = Field(None, ge=-1, le=2)
     verbosity: int | None = Field(None, ge=0, le=2)
+    realtime_vad_mode: RealtimeVadMode = RealtimeVadMode.SEMANTIC_VAD
+    realtime_eagerness: RealtimeEagerness = RealtimeEagerness.AUTO
+    realtime_vad_threshold: float | None = Field(0.5, ge=0.0, le=1.0)
+    realtime_vad_prefix_padding_ms: int | None = Field(300, ge=0)
+    realtime_vad_silence_duration_ms: int | None = Field(500, ge=0)
+    realtime_vad_idle_timeout_ms: int | None = Field(None, ge=5000, le=30000)
+    realtime_voice: RealtimeVoice = RealtimeVoice.MARIN
+    realtime_speed: float = Field(1.0, ge=0.25, le=1.5)
+    realtime_noise_reduction: RealtimeNoiseReduction = RealtimeNoiseReduction.FAR_FIELD
+    realtime_transcription_model: RealtimeTranscriptionModel = (
+        RealtimeTranscriptionModel.WHISPER_1
+    )
+    elevenlabs_stability: float = Field(DEFAULT_ELEVENLABS_STABILITY, ge=0.0, le=1.0)
+    elevenlabs_similarity_boost: float = Field(
+        DEFAULT_ELEVENLABS_SIMILARITY_BOOST, ge=0.0, le=1.0
+    )
+    elevenlabs_use_speaker_boost: bool = DEFAULT_ELEVENLABS_USE_SPEAKER_BOOST
+    elevenlabs_style: float = Field(DEFAULT_ELEVENLABS_STYLE, ge=0.0, le=1.0)
+    elevenlabs_speed: float = Field(DEFAULT_ELEVENLABS_SPEED, ge=0.7, le=1.2)
     tools: list[ToolOption] = Field(default_factory=list)
     lecture_video_id: int | None = None
     lecture_video_manifest: LectureVideoManifest | None = None
     voice_id: str | None = None
+    generation_prompt: str | None = Field(None, max_length=20000)
+    # The API intentionally allows non-UI-step values; only the editor slider
+    # snaps to 5-second increments.
+    video_description_duration_ms: int | None = Field(None, ge=5000, le=300000)
+    overwrite_manifest: bool | None = None
     published: bool = False
     use_latex: bool = False
     use_image_descriptions: bool = False
@@ -1043,6 +1390,7 @@ class AssistantInstructionsPreviewRequest(BaseModel):
     instructions: str
     use_latex: bool = False
     disable_prompt_randomization: bool = False
+    interaction_mode: InteractionMode | None = None
 
 
 class AssistantInstructionsPreviewResponse(BaseModel):
@@ -1077,10 +1425,31 @@ class UpdateAssistant(BaseModel):
     lecture_video_id: int | None = None
     lecture_video_manifest: LectureVideoManifest | None = None
     voice_id: str | None = None
+    generation_prompt: str | None = Field(None, max_length=20000)
+    # The API intentionally allows non-UI-step values; only the editor slider
+    # snaps to 5-second increments.
+    video_description_duration_ms: int | None = Field(None, ge=5000, le=300000)
+    regenerate_requested: bool | None = None
+    overwrite_manifest: bool | None = None
     model: str | None = Field(None, min_length=2)
     temperature: float | None = Field(None, ge=0.0, le=2.0)
     reasoning_effort: int | None = Field(None, ge=-1, le=2)
     verbosity: int | None = Field(None, ge=0, le=2)
+    realtime_vad_mode: RealtimeVadMode | None = None
+    realtime_eagerness: RealtimeEagerness | None = None
+    realtime_vad_threshold: float | None = Field(None, ge=0.0, le=1.0)
+    realtime_vad_prefix_padding_ms: int | None = Field(None, ge=0)
+    realtime_vad_silence_duration_ms: int | None = Field(None, ge=0)
+    realtime_vad_idle_timeout_ms: int | None = Field(None, ge=5000, le=30000)
+    realtime_voice: RealtimeVoice | None = None
+    realtime_speed: float | None = Field(None, ge=0.25, le=1.5)
+    realtime_noise_reduction: RealtimeNoiseReduction | None = None
+    realtime_transcription_model: RealtimeTranscriptionModel | None = None
+    elevenlabs_stability: float | None = Field(None, ge=0.0, le=1.0)
+    elevenlabs_similarity_boost: float | None = Field(None, ge=0.0, le=1.0)
+    elevenlabs_use_speaker_boost: bool | None = None
+    elevenlabs_style: float | None = Field(None, ge=0.0, le=1.0)
+    elevenlabs_speed: float | None = Field(None, ge=0.7, le=1.2)
     tools: list[ToolOption] | None = None
     published: bool | None = None
     use_latex: bool | None = None
@@ -1394,6 +1763,7 @@ class NewThreadMessage(BaseModel):
     vision_image_descriptions: list[ImageProxy] = Field([])
     timezone: str | None = None
     generate_speech: bool | None = None
+    lecture_video_playback_position_ms: int | None = None
 
     _file_check = model_validator(mode="after")(file_validator)
 
@@ -1534,6 +1904,14 @@ class MultipleClassThreadExportRequest(BaseModel):
     user_emails: list[str] | None = None
     user_ids: list[int] | None = None
     include_user_emails: bool = False
+    last_activity_after: datetime | None = None
+    last_activity_before: datetime | None = None
+
+
+class ThreadExportRequest(BaseModel):
+    last_activity_after: datetime | None = None
+    last_activity_before: datetime | None = None
+    assistant_ids: list[int] | None = None
 
 
 class CreateUserInviteConfig(BaseModel):
@@ -2319,6 +2697,7 @@ class AssistantModels(BaseModel):
     models: list[AssistantModel]
     default_prompts: list[AssistantDefaultPrompt] = []
     enforce_classic_assistants: bool = False
+    lecture_video_defaults: LectureVideoDefaults | None = None
 
 
 class Classes(BaseModel):
@@ -2567,12 +2946,18 @@ class ThreadTextContentBlock(TextContentBlock):
     text: ThreadText
 
 
+class ThreadFollowupSuggestionsContentBlock(BaseModel):
+    type: Literal["followup_suggestions"]
+    suggestions: list[str]
+
+
 ThreadMessageContent: TypeAlias = Annotated[
     Union[
         ImageFileContentBlock,
         ImageURLContentBlock,
         ThreadTextContentBlock,
         RefusalContentBlock,
+        ThreadFollowupSuggestionsContentBlock,
     ],
     PropertyInfo(discriminator="type"),
 ]
@@ -2653,6 +3038,7 @@ class ThreadWithMeta(BaseModel):
     lecture_video_matches_assistant: bool | None = None
     lecture_video_session: LectureVideoSession | None = None
     lecture_video_tts_available: bool = False
+    lecture_video_captions_available: bool = False
     recording: VoiceModeRecording | None = None
     has_more: bool
 

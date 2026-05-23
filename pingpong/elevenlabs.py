@@ -1,14 +1,16 @@
 import logging
 import ssl
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Mapping
 from html import unescape
 import re
-from typing import Any
+from types import MappingProxyType
+from typing import Any, Final
 from urllib.parse import quote, urlencode
 
 import aiohttp
 import httpx
 import orjson
+from elevenlabs import VoiceSettings
 from elevenlabs.client import AsyncElevenLabs
 from elevenlabs.core.api_error import ApiError as ElevenLabsApiError
 from elevenlabs.core.request_options import RequestOptions
@@ -22,6 +24,13 @@ from pingpong.class_credential_validation import (
     ClassCredentialValidationUnavailableError,
     ClassCredentialVoiceValidationError,
 )
+from pingpong.elevenlabs_defaults import (
+    DEFAULT_ELEVENLABS_SIMILARITY_BOOST,
+    DEFAULT_ELEVENLABS_SPEED,
+    DEFAULT_ELEVENLABS_STABILITY,
+    DEFAULT_ELEVENLABS_STYLE,
+    DEFAULT_ELEVENLABS_USE_SPEAKER_BOOST,
+)
 from pingpong.log_utils import sanitize_for_log
 
 logger = logging.getLogger(__name__)
@@ -32,6 +41,16 @@ ELEVENLABS_VOICE_VALIDATION_SAMPLE_TEXT = (
 ELEVENLABS_VOICE_VALIDATION_OUTPUT_FORMAT = "opus_48000_32"
 ELEVENLABS_VOICE_VALIDATION_CONTENT_TYPE = "audio/ogg"
 ELEVENLABS_VOICE_SAMPLE_TEXT_HEADER = "X-PingPong-Voice-Sample-Text"
+ELEVENLABS_TTS_MODEL = "eleven_flash_v2_5"
+ELEVENLABS_TTS_VOICE_SETTINGS: Final[Mapping[str, Any]] = MappingProxyType(
+    {
+        "stability": DEFAULT_ELEVENLABS_STABILITY,
+        "use_speaker_boost": DEFAULT_ELEVENLABS_USE_SPEAKER_BOOST,
+        "similarity_boost": DEFAULT_ELEVENLABS_SIMILARITY_BOOST,
+        "style": DEFAULT_ELEVENLABS_STYLE,
+        "speed": DEFAULT_ELEVENLABS_SPEED,
+    }
+)
 ELEVENLABS_STREAMING_TTS_CONNECT_TIMEOUT = aiohttp.ClientWSTimeout(
     ws_receive=30.0,
     ws_close=10.0,
@@ -92,12 +111,15 @@ def _is_invalid_elevenlabs_voice_error(exc: ElevenLabsApiError) -> bool:
 async def synthesize_elevenlabs_voice_sample(
     api_key: str,
     voice_id: str,
+    *,
+    voice_settings: Mapping[str, Any] | None = None,
 ) -> tuple[str, str, bytes]:
     try:
         content_type, audio = await synthesize_elevenlabs_speech(
             api_key,
             voice_id,
             ELEVENLABS_VOICE_VALIDATION_SAMPLE_TEXT,
+            voice_settings=voice_settings,
             timeout_seconds=15,
         )
     except ClassCredentialValidationSSLError as exc:
@@ -122,6 +144,7 @@ async def synthesize_elevenlabs_speech(
     voice_id: str,
     text: str,
     *,
+    voice_settings: Mapping[str, Any] | None = None,
     timeout_seconds: int | None = None,
 ) -> tuple[str, bytes]:
     safe_voice_id = sanitize_for_log(voice_id)
@@ -136,7 +159,15 @@ async def synthesize_elevenlabs_speech(
             client.text_to_speech.convert(
                 voice_id=voice_id,
                 text=text,
+                model_id=ELEVENLABS_TTS_MODEL,
                 output_format=ELEVENLABS_VOICE_VALIDATION_OUTPUT_FORMAT,
+                voice_settings=VoiceSettings(
+                    **(
+                        ELEVENLABS_TTS_VOICE_SETTINGS
+                        if voice_settings is None
+                        else voice_settings
+                    )
+                ),
                 request_options=request_options,
             ),
         )
@@ -271,8 +302,9 @@ async def validate_elevenlabs_api_key(api_key: str) -> bool:
 # Streaming TTS via ElevenLabs WebSocket API
 # ---------------------------------------------------------------------------
 
-ELEVENLABS_STREAMING_TTS_MODEL = "eleven_turbo_v2_5"
+ELEVENLABS_STREAMING_TTS_MODEL = ELEVENLABS_TTS_MODEL
 ELEVENLABS_STREAMING_TTS_OUTPUT_FORMAT = "pcm_24000"
+ELEVENLABS_STREAMING_TTS_CHUNK_LENGTH_SCHEDULE = [50]
 
 _MARKDOWN_FENCE_RE = re.compile(r"```(?:[\w+-]+)?\s*([\s\S]*?)```")
 _MARKDOWN_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\([^)]+\)")
@@ -285,12 +317,14 @@ _MARKDOWN_CODE_RE = re.compile(r"`([^`]+)`")
 _MARKDOWN_STRIKE_RE = re.compile(r"~~(.*?)~~")
 _MARKDOWN_STRONG_RE = re.compile(r"(\*\*|__)(.*?)\1")
 _MARKDOWN_EMPHASIS_RE = re.compile(r"(?<!\w)(\*|_)([^*_]+?)\1(?!\w)")
+_MARKDOWN_LATEX_BLOCK_RE = re.compile(r"\$\$\s*([\s\S]*?)\s*\$\$")
+_MARKDOWN_LATEX_INLINE_RE = re.compile(r"\$\s*([^$\n]+?)\s*\$")
 _MARKDOWN_AUTOLINK_START_RE = re.compile(r"<(?:https?|mailto):", re.IGNORECASE)
 _MARKDOWN_WHITESPACE_RE = re.compile(r"[ \t]+")
 _MARKDOWN_BLANK_LINES_RE = re.compile(r"\n{3,}")
 
 
-def strip_markdown_for_tts(text: str) -> str:
+def strip_markdown_for_tts(text: str, *, strip_latex_delimiters: bool = False) -> str:
     """Reduce common Markdown formatting to cleaner spoken text."""
     if not text:
         return ""
@@ -315,6 +349,13 @@ def strip_markdown_for_tts(text: str) -> str:
     )
     plain_text = _MARKDOWN_STRONG_RE.sub(lambda match: match.group(2), plain_text)
     plain_text = _MARKDOWN_EMPHASIS_RE.sub(lambda match: match.group(2), plain_text)
+    if strip_latex_delimiters:
+        plain_text = _MARKDOWN_LATEX_BLOCK_RE.sub(
+            lambda match: match.group(1).strip(), plain_text
+        )
+        plain_text = _MARKDOWN_LATEX_INLINE_RE.sub(
+            lambda match: match.group(1).strip(), plain_text
+        )
     plain_text = plain_text.replace("```", "")
     plain_text = plain_text.replace("`", "")
     plain_text = plain_text.replace("![", "")
@@ -325,7 +366,7 @@ def strip_markdown_for_tts(text: str) -> str:
     plain_text = unescape(plain_text)
     plain_text = _MARKDOWN_WHITESPACE_RE.sub(" ", plain_text)
     plain_text = _MARKDOWN_BLANK_LINES_RE.sub("\n\n", plain_text)
-    return plain_text.strip()
+    return plain_text
 
 
 class StreamingMarkdownSanitizer:
@@ -336,8 +377,9 @@ class StreamingMarkdownSanitizer:
     Plain prose is passed through as soon as it is safe to speak.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, strip_latex_delimiters: bool = False) -> None:
         self._pending = ""
+        self.strip_latex_delimiters = strip_latex_delimiters
 
     def add(self, text: str) -> list[str]:
         """Append streamed text and return any snippets safe for TTS."""
@@ -346,11 +388,17 @@ class StreamingMarkdownSanitizer:
         self._pending += text
         return self._drain_ready()
 
+    def drain_ready(self) -> list[str]:
+        """Return currently safe text without clearing incomplete markdown state."""
+        return self._drain_ready()
+
     def flush(self) -> str | None:
         """Return any remaining text after best-effort markdown cleanup."""
         if not self._pending:
             return None
-        chunk = strip_markdown_for_tts(self._pending)
+        chunk = strip_markdown_for_tts(
+            self._pending, strip_latex_delimiters=self.strip_latex_delimiters
+        )
         self._pending = ""
         return chunk or None
 
@@ -360,7 +408,10 @@ class StreamingMarkdownSanitizer:
             safe_end = self._find_safe_prefix_end(self._pending)
             if safe_end <= 0:
                 break
-            chunk = strip_markdown_for_tts(self._pending[:safe_end])
+            chunk = strip_markdown_for_tts(
+                self._pending[:safe_end],
+                strip_latex_delimiters=self.strip_latex_delimiters,
+            )
             self._pending = self._pending[safe_end:]
             if chunk:
                 snippets.append(chunk)
@@ -480,6 +531,61 @@ class StreamingMarkdownSanitizer:
         return min(unresolved_starts) if unresolved_starts else len(text)
 
 
+class StreamingTTSChunker:
+    """Buffer streamed text until it is suitable to send to ElevenLabs TTS."""
+
+    # Mirrors elevenlabs.realtime_tts.text_chunker, including its asymmetric
+    # brace handling: "}" is a splitter, "{" is not.
+    _SPLITTERS = (
+        ".",
+        ",",
+        "?",
+        "!",
+        ";",
+        ":",
+        "\u2014",
+        "-",
+        "(",
+        ")",
+        "[",
+        "]",
+        "}",
+        " ",
+    )
+
+    def __init__(self) -> None:
+        self._pending = ""
+
+    def add(self, text: str) -> list[str]:
+        if not text:
+            return []
+
+        if self._pending.endswith(self._SPLITTERS):
+            chunk = self._with_trailing_space(self._pending)
+            self._pending = text
+            return [chunk]
+
+        if text.startswith(self._SPLITTERS):
+            output = self._pending + text[0]
+            self._pending = text[1:]
+            return [self._with_trailing_space(output)]
+
+        self._pending += text
+        return []
+
+    def flush(self) -> str | None:
+        if not self._pending:
+            return None
+
+        chunk = self._with_trailing_space(self._pending)
+        self._pending = ""
+        return chunk
+
+    @staticmethod
+    def _with_trailing_space(text: str) -> str:
+        return text if text.endswith(" ") else f"{text} "
+
+
 class ElevenLabsStreamingTTS:
     """WebSocket client for ElevenLabs streaming-input text-to-speech.
 
@@ -495,11 +601,15 @@ class ElevenLabsStreamingTTS:
         *,
         model_id: str = ELEVENLABS_STREAMING_TTS_MODEL,
         output_format: str = ELEVENLABS_STREAMING_TTS_OUTPUT_FORMAT,
+        voice_settings: Mapping[str, Any] | None = None,
     ) -> None:
         self._api_key = api_key
         self._voice_id = voice_id
         self._model_id = model_id
         self._output_format = output_format
+        self._voice_settings = dict(
+            ELEVENLABS_TTS_VOICE_SETTINGS if voice_settings is None else voice_settings
+        )
         self._session: aiohttp.ClientSession | None = None
         self._ws: aiohttp.ClientWebSocketResponse | None = None
 
@@ -525,9 +635,12 @@ class ElevenLabsStreamingTTS:
             await self._ws.send_json(
                 {
                     "text": " ",
-                    "voice_settings": {
-                        "stability": 0.5,
-                        "similarity_boost": 0.8,
+                    "try_trigger_generation": True,
+                    "voice_settings": self._voice_settings,
+                    "generation_config": {
+                        "chunk_length_schedule": (
+                            ELEVENLABS_STREAMING_TTS_CHUNK_LENGTH_SCHEDULE
+                        ),
                     },
                 }
             )
@@ -535,7 +648,13 @@ class ElevenLabsStreamingTTS:
             await self.cleanup()
             raise
 
-    async def send_text(self, text: str, *, flush: bool = False) -> None:
+    async def send_text(
+        self,
+        text: str,
+        *,
+        flush: bool = False,
+        try_trigger_generation: bool = False,
+    ) -> None:
         """Send a text chunk to be synthesized.
 
         *text* should ideally end with a space for optimal latency.
@@ -547,6 +666,8 @@ class ElevenLabsStreamingTTS:
         msg: dict[str, Any] = {"text": text}
         if flush:
             msg["flush"] = True
+        if try_trigger_generation:
+            msg["try_trigger_generation"] = True
         await self._ws.send_json(msg)
 
     async def close_input(self) -> None:

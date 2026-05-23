@@ -35,10 +35,20 @@ class StreamProcessor extends AudioWorkletProcessor {
     this.hasInterrupted = false;
     this.outputBuffers = [];
     this.bufferLength = 128;
-    this.write = { buffer: new Float32Array(this.bufferLength), trackId: null, eventId: null };
+    this.write = {
+      buffer: new Float32Array(this.bufferLength),
+      validSampleCount: 0,
+      trackId: null,
+      eventId: null,
+    };
     this.writeOffset = 0;
     this.trackSampleOffsets = {};
+    this.currentlyPlayingTrackId = null;
+    this.currentlyPlayingEventId = null;
     this.processedEventIds = new Set();
+    this.endedEventIds = new Set();
+    this.stopOnEmptyBuffer = true;
+    this.finishWhenDrained = false;
     this.port.onmessage = (event) => {
       if (event.data) {
         const payload = event.data;
@@ -54,17 +64,24 @@ class StreamProcessor extends AudioWorkletProcessor {
           payload.event === 'interrupt'
         ) {
           const requestId = payload.requestId;
-          const trackId = this.write.trackId;
-          const offset = this.trackSampleOffsets[trackId] || 0;
+          const trackId = this.currentlyPlayingTrackId;
+          const offset = trackId ? this.trackSampleOffsets[trackId] || 0 : 0;
           this.port.postMessage({
             event: 'offset',
             requestId,
             trackId,
             offset,
+            eventId: this.currentlyPlayingEventId,
           });
           if (payload.event === 'interrupt') {
             this.hasInterrupted = true;
           }
+        } else if (payload.event === 'configure') {
+          if (typeof payload.stopOnEmptyBuffer === 'boolean') {
+            this.stopOnEmptyBuffer = payload.stopOnEmptyBuffer;
+          }
+        } else if (payload.event === 'finish') {
+          this.finishWhenDrained = true;
         } else {
           throw new Error(\`Unhandled event "\${payload.event}"\`);
         }
@@ -73,20 +90,47 @@ class StreamProcessor extends AudioWorkletProcessor {
   }
 
   writeData(float32Array, trackId = null, eventId = null) {
+    if (
+      this.writeOffset > 0 &&
+      (this.write.trackId !== trackId || this.write.eventId !== eventId)
+    ) {
+      this.flushWriteBuffer();
+    }
     this.write.trackId = trackId;
     this.write.eventId = eventId;
     let { buffer } = this.write;
     let offset = this.writeOffset;
     for (let i = 0; i < float32Array.length; i++) {
       buffer[offset++] = float32Array[i];
+      this.write.validSampleCount++;
       if (offset >= buffer.length) {
         this.outputBuffers.push(this.write);
-        this.write = { buffer: new Float32Array(this.bufferLength), trackId, eventId };
+        this.write = {
+          buffer: new Float32Array(this.bufferLength),
+          validSampleCount: 0,
+          trackId,
+          eventId,
+        };
         buffer = this.write.buffer;
         offset = 0;
       }
     }
     this.writeOffset = offset;
+    return true;
+  }
+
+  flushWriteBuffer() {
+    if (this.writeOffset === 0) {
+      return false;
+    }
+    this.outputBuffers.push(this.write);
+    this.write = {
+      buffer: new Float32Array(this.bufferLength),
+      validSampleCount: 0,
+      trackId: null,
+      eventId: null,
+    };
+    this.writeOffset = 0;
     return true;
   }
 
@@ -99,17 +143,19 @@ class StreamProcessor extends AudioWorkletProcessor {
       return false;
     } else if (outputBuffers.length) {
       this.hasStarted = true;
-      const { buffer, trackId, eventId } = outputBuffers.shift();
+      const { buffer, validSampleCount, trackId, eventId } = outputBuffers.shift();
       const startTimestamp = Date.now();
       for (let i = 0; i < outputChannelData.length; i++) {
         outputChannelData[i] = buffer[i] || 0;
       }
+      this.currentlyPlayingTrackId = trackId;
+      this.currentlyPlayingEventId = eventId;
       if (trackId) {
         this.trackSampleOffsets[trackId] =
           this.trackSampleOffsets[trackId] || 0;
-        this.trackSampleOffsets[trackId] += buffer.length;
+        this.trackSampleOffsets[trackId] += validSampleCount;
       }
-      if (!this.processedEventIds.has(eventId)) {
+      if (eventId && !this.processedEventIds.has(eventId)) {
         this.port.postMessage({
             event: 'audio_part_started',
             trackId: trackId,
@@ -118,8 +164,28 @@ class StreamProcessor extends AudioWorkletProcessor {
         });
         this.processedEventIds.add(eventId);
       }
+      if (
+        eventId &&
+        !this.endedEventIds.has(eventId) &&
+        !outputBuffers.some((queued) => queued.eventId === eventId) &&
+        (this.writeOffset === 0 || this.write.eventId !== eventId)
+      ) {
+        this.port.postMessage({
+            event: 'audio_part_ended',
+            trackId: trackId,
+            eventId: eventId,
+            timestamp: Date.now(),
+        });
+        this.endedEventIds.add(eventId);
+      }
       return true;
     } else if (this.hasStarted) {
+      if (this.flushWriteBuffer()) {
+        return true;
+      }
+      if (!this.stopOnEmptyBuffer && !this.finishWhenDrained) {
+        return true;
+      }
       this.port.postMessage({ event: 'stop' });
       return false;
     } else {

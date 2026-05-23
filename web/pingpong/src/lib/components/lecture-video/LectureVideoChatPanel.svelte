@@ -1,20 +1,24 @@
 <script lang="ts">
 	import * as api from '$lib/api';
 	import { parseTextContent } from '$lib/content';
-	import { blur } from 'svelte/transition';
 	import { Button, Tooltip, Avatar, Accordion, AccordionItem } from 'flowbite-svelte';
 	import {
 		RefreshOutline,
 		CodeOutline,
 		ServerOutline,
 		TerminalOutline,
+		MessageDotsOutline,
 		VolumeUpSolid,
-		VolumeMuteSolid
+		VolumeMuteSolid,
+		PlaySolid,
+		ReplyOutline
 	} from 'flowbite-svelte-icons';
-	import { DoubleBounce } from 'svelte-loading-spinners';
 	import Logo from '$lib/components/Logo.svelte';
 	import Markdown from '$lib/components/Markdown.svelte';
-	import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
+	import ChatInput, {
+		type ChatInputHandle,
+		type ChatInputMessage
+	} from '$lib/components/ChatInput.svelte';
 	import FileCitation from '$lib/components/FileCitation.svelte';
 	import FilePlaceholder from '$lib/components/FilePlaceholder.svelte';
 	import FileSearchCallItem from '$lib/components/FileSearchCallItem.svelte';
@@ -24,6 +28,8 @@
 	import WebSearchCallItem from '$lib/components/WebSearchCallItem.svelte';
 	import { scroll } from '$lib/actions/scroll';
 	import type { Message } from '$lib/stores/thread';
+	import { tick } from 'svelte';
+	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
 	let {
 		classId,
@@ -31,6 +37,7 @@
 		messages,
 		canFetchMore,
 		showInput = true,
+		showContinueWatchingPrompt = true,
 		canSubmit,
 		disabled,
 		waiting,
@@ -54,14 +61,14 @@
 		ttsPlaying = false,
 		ttsAvailable = false,
 		onmutettstoggle,
-		ontextinput,
-		ontextpaste
+		oncontinuewatching
 	}: {
 		classId: number;
 		threadId: number;
 		messages: Message[];
 		canFetchMore: boolean;
 		showInput?: boolean;
+		showContinueWatchingPrompt?: boolean;
 		canSubmit: boolean;
 		disabled: boolean;
 		waiting: boolean;
@@ -85,11 +92,18 @@
 		ttsPlaying?: boolean;
 		ttsAvailable?: boolean;
 		onmutettstoggle?: () => void;
-		ontextinput?: (detail: { hasText: boolean }) => void;
-		ontextpaste?: (detail: { hasText: boolean }) => void;
+		oncontinuewatching?: () => Promise<boolean> | boolean;
 	} = $props();
 
 	let messagesContainer: HTMLDivElement | null = null;
+	let chatInputRef: ChatInputHandle | null = $state(null);
+	const dismissedContinuePromptMessageIds = new SvelteSet<string>();
+	const continuePromptDecisionByMessageId = new SvelteMap<string, boolean>();
+	const starterQuestions = [
+		"What's the main idea of this lecture?",
+		'Give me a real-world example.',
+		"Quiz me on what's been covered so far."
+	];
 
 	type MCPContent = api.MCPServerCallItem | api.MCPListToolsCallItem;
 	type ContentBlock =
@@ -233,6 +247,9 @@
 		return '';
 	};
 
+	const isLectureContextPending = (message: api.OpenAIMessage) =>
+		message.metadata?.lecture_context_pending === true;
+
 	const getThreadImageUrl = (fileId: string) =>
 		api.fullPath(`/class/${classId}/thread/${threadId}/image/${fileId}`);
 
@@ -248,6 +265,153 @@
 		}
 		return getThreadImageUrl(fileId);
 	};
+
+	const messageHasVisibleText = (message: api.OpenAIMessage) =>
+		message.content.some(
+			(content) => content.type === 'text' && content.text.value.trim().length > 0
+		);
+
+	const getFollowupSuggestions = (message: api.OpenAIMessage) => {
+		for (let i = message.content.length - 1; i >= 0; i -= 1) {
+			const content = message.content[i];
+			if (content.type === 'followup_suggestions') {
+				return content.suggestions;
+			}
+		}
+		return [];
+	};
+
+	let latestMessageId = $derived(messages.at(-1)?.data.id ?? null);
+	let latestAssistantMessageId = $derived.by(() => {
+		const latestMessage = messages.at(-1)?.data;
+		if (!latestMessage || latestMessage.role !== 'assistant') {
+			return null;
+		}
+		if (isLectureContextPending(latestMessage) || !messageHasVisibleText(latestMessage)) {
+			return null;
+		}
+		return latestMessage.id;
+	});
+
+	const isLatestStreamedAssistantResponse = (message: Message) =>
+		message.streamedInSession === true &&
+		message.data.id === latestMessageId &&
+		message.data.id === latestAssistantMessageId;
+
+	const canLatchContinuePromptDecision = (message: Message) =>
+		isLatestStreamedAssistantResponse(message) && !waiting && !submitting;
+
+	const getVisibleFollowupSuggestions = (message: Message) => {
+		if (
+			!showInput ||
+			!canSubmitChatText ||
+			assistantDeleted ||
+			!canViewAssistant ||
+			message.data.id !== latestAssistantMessageId
+		) {
+			return [];
+		}
+		return getFollowupSuggestions(message.data);
+	};
+
+	let canShowStarterQuestions = $derived(showInput && !assistantDeleted && canViewAssistant);
+	let canSubmitChatText = $derived(
+		canShowStarterQuestions && canSubmit && !disabled && !waiting && !submitting
+	);
+
+	const submitChatText = (message: string) => {
+		if (!onsubmit || !canSubmitChatText) {
+			return;
+		}
+		onsubmit({
+			code_interpreter_file_ids: [],
+			file_search_file_ids: [],
+			vision_file_ids: [],
+			visionFileImageDescriptions: [],
+			optimisticVisionFiles: [],
+			message,
+			callback: () => {}
+		});
+	};
+
+	const evaluateContinuePromptVisibility = () =>
+		showInput && showContinueWatchingPrompt && !!oncontinuewatching;
+
+	$effect(() => {
+		let cancelled = false;
+		const latestMessage = messages.at(-1);
+		const latestMessageId = latestMessage?.data.id ?? null;
+		const promptVisibilityAtEffectStart = evaluateContinuePromptVisibility();
+		if (!latestMessage || !canLatchContinuePromptDecision(latestMessage)) {
+			return () => {
+				cancelled = true;
+			};
+		}
+		void (async () => {
+			await tick();
+			if (cancelled) {
+				return;
+			}
+			const currentLatestMessage = messages.at(-1);
+			if (
+				!currentLatestMessage ||
+				currentLatestMessage.data.id !== latestMessageId ||
+				!canLatchContinuePromptDecision(currentLatestMessage)
+			) {
+				return;
+			}
+			if (!continuePromptDecisionByMessageId.has(latestMessageId)) {
+				continuePromptDecisionByMessageId.set(latestMessageId, promptVisibilityAtEffectStart);
+			}
+			for (const messageId of Array.from(continuePromptDecisionByMessageId.keys())) {
+				if (messageId !== latestMessageId) {
+					continuePromptDecisionByMessageId.delete(messageId);
+				}
+			}
+			for (const messageId of Array.from(dismissedContinuePromptMessageIds)) {
+				if (messageId !== latestMessageId) {
+					dismissedContinuePromptMessageIds.delete(messageId);
+				}
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	});
+
+	const shouldShowContinueWatchingPrompt = (message: Message) =>
+		evaluateContinuePromptVisibility() &&
+		isLatestStreamedAssistantResponse(message) &&
+		continuePromptDecisionByMessageId.get(message.data.id) === true &&
+		!dismissedContinuePromptMessageIds.has(message.data.id);
+
+	let continueWatchingPromptScrollKey = $derived.by(() => {
+		const latestMessage = messages.at(-1);
+		if (!latestMessage || !shouldShowContinueWatchingPrompt(latestMessage)) {
+			return null;
+		}
+		return `continue-watching-${latestMessage.data.id}`;
+	});
+
+	function dismissContinueWatchingPrompt(message: Message) {
+		dismissedContinuePromptMessageIds.add(message.data.id);
+	}
+
+	async function continueWatching(message: Message) {
+		try {
+			const didResume = (await oncontinuewatching?.()) ?? true;
+			if (didResume) {
+				dismissContinueWatchingPrompt(message);
+			}
+		} catch {
+			// Keep prompt visible so the user can retry.
+		}
+	}
+
+	function askAnotherQuestion(message: Message) {
+		dismissContinueWatchingPrompt(message);
+		chatInputRef?.focus();
+	}
 </script>
 
 <div
@@ -256,13 +420,53 @@
 	<div
 		class="min-h-0 flex-1 overflow-y-auto px-4 py-4"
 		bind:this={messagesContainer}
-		use:scroll={{ messages, threadId, streaming: submitting || waiting }}
+		use:scroll={{
+			messages,
+			threadId,
+			streaming: submitting || waiting,
+			tailContentKey: continueWatchingPromptScrollKey
+		}}
 	>
 		{#if canFetchMore}
 			<div class="mb-4 flex justify-center">
 				<Button size="sm" class="text-sky-600 hover:text-sky-800" onclick={fetchMoreMessages}>
 					<RefreshOutline class="me-2 h-3 w-3" /> Load earlier messages ...
 				</Button>
+			</div>
+		{/if}
+		{#if !canFetchMore && messages.length === 0}
+			<div class="flex h-full min-h-48 items-center justify-center px-4 py-8">
+				<div class="flex w-full max-w-sm flex-col items-center text-center">
+					<div
+						class="mb-3 flex size-12 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-slate-400"
+					>
+						<MessageDotsOutline class="size-6" />
+					</div>
+					<h2 class="text-sm font-semibold text-slate-900">Ask about this lecture</h2>
+					<p class="mt-1 text-sm text-slate-500">Try a starter question or type your own.</p>
+					{#if canShowStarterQuestions}
+						<div
+							class="mt-4 flex w-full flex-col gap-1.5"
+							role="group"
+							aria-label="Starter questions"
+						>
+							{#each starterQuestions as question (question)}
+								<button
+									type="button"
+									class="group flex w-full items-center justify-between gap-2 rounded-full border border-slate-200 bg-white px-3.5 py-1.5 text-left text-sm text-slate-700 transition hover:border-sky-300 hover:bg-sky-50 hover:text-sky-800 focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-1 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+									disabled={!canSubmitChatText}
+									onclick={() => submitChatText(question)}
+								>
+									<span>{question}</span>
+									<ReplyOutline
+										class="size-3.5 shrink-0 -scale-x-100 text-slate-400 transition group-hover:text-sky-600"
+										aria-hidden="true"
+									/>
+								</button>
+							{/each}
+						</div>
+					{/if}
+				</div>
 			</div>
 		{/if}
 		{#each messages as message (message.data.id)}
@@ -286,6 +490,9 @@
 					<Tooltip triggeredBy={`#short-timestamp-${message.data.id}`}>
 						{getMessageTimestamp(message.data.created_at)}
 					</Tooltip>
+					{#if isLectureContextPending(message.data)}
+						<p class="shimmer text-sm">Thinking</p>
+					{/if}
 					{#each groupMessageContent(message.data.content) as block (block.key)}
 						{#if block.type === 'mcp_group'}
 							<div class="my-3">
@@ -416,6 +623,52 @@
 							{/if}
 						{/if}
 					{/each}
+					{#each [{ key: message.data.id, suggestions: getVisibleFollowupSuggestions(message) }] as followupGroup (followupGroup.key)}
+						{#if followupGroup.suggestions.length > 0}
+							<div
+								class="mt-1 flex flex-col items-stretch"
+								role="group"
+								aria-label="Suggested follow-up responses"
+							>
+								{#each followupGroup.suggestions as suggestion, i (i)}
+									<button
+										type="button"
+										class="group flex items-center gap-1.5 py-1.5 text-left text-sm text-gray-500 transition hover:text-gray-700 focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-1 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60 {i >
+										0
+											? 'border-t border-gray-200'
+											: ''}"
+										disabled={!canSubmitChatText}
+										onclick={() => submitChatText(suggestion)}
+									>
+										<ReplyOutline
+											class="h-3.5 w-3.5 shrink-0 -scale-x-100 text-gray-400 transition group-hover:text-gray-700"
+											aria-hidden="true"
+										/>
+										<span>{suggestion}</span>
+									</button>
+								{/each}
+							</div>
+						{/if}
+					{/each}
+					{#if shouldShowContinueWatchingPrompt(message)}
+						<div class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1" aria-live="polite">
+							<button
+								type="button"
+								class="inline-flex items-center gap-1.5 rounded-full bg-orange px-3 py-1 text-sm font-medium text-white transition hover:bg-orange-dark focus:outline-none"
+								onclick={() => void continueWatching(message)}
+							>
+								<PlaySolid class="h-3 w-3" />
+								Continue watching
+							</button>
+							<button
+								type="button"
+								class="text-sm text-slate-500 transition hover:text-slate-700"
+								onclick={() => askAnotherQuestion(message)}
+							>
+								Ask another question
+							</button>
+						</div>
+					{/if}
 				</div>
 			</div>
 		{/each}
@@ -423,11 +676,6 @@
 	{#if showInput}
 		<div class="border-t border-slate-200 px-4 pt-1 pb-3">
 			<div class="relative mx-auto flex w-full max-w-4xl flex-col">
-				{#if waiting || submitting}
-					<div class="absolute -top-10 flex w-full justify-center" transition:blur={{ amount: 10 }}>
-						<DoubleBounce color="#0ea5e9" size="30" />
-					</div>
-				{/if}
 				{#if ttsAvailable}
 					<div class="flex items-center justify-end gap-2 px-1 pb-1">
 						<button
@@ -450,6 +698,7 @@
 					</div>
 				{/if}
 				<ChatInput
+					bind:this={chatInputRef}
 					{mimeType}
 					maxSize={0}
 					attachments={[]}
@@ -471,10 +720,9 @@
 					threadVersion={version}
 					assistantVersion={resolvedAssistantVersion}
 					bypassedSettingsSections={[]}
+					placeholderMessage="Ask about the lecture"
 					on:submit={(e) => onsubmit?.(e.detail)}
 					on:dismissError={() => ondismisserror?.()}
-					on:textinput={(e) => ontextinput?.(e.detail)}
-					on:textpaste={(e) => ontextpaste?.(e.detail)}
 				/>
 			</div>
 		</div>

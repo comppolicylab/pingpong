@@ -1195,3 +1195,54 @@ async def test_update_voice_assistant_switches_back_to_classic_when_requested(
     async with db.async_session() as session:
         updated = await models.Assistant.get_by_id(session, 11)
         assert updated.version == 2
+
+
+@with_user(123)
+@with_authz(grants=[("user:123", "can_edit", "assistant:11")])
+async def test_update_assistant_clears_realtime_transcription_model_outside_voice(
+    api, db, valid_user_token, monkeypatch
+):
+    async def fake_list_class_models(class_id: str, request, openai_client):  # type: ignore[no-untyped-def]
+        return _fake_class_models_response(model_type="chat")
+
+    server_module = importlib.import_module("pingpong.server")
+    monkeypatch.setattr(server_module, "list_class_models", fake_list_class_models)
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Voice Class",
+            term="Spring 2026",
+            api_key="sk-test",
+            private=False,
+        )
+        assistant = models.Assistant(
+            id=11,
+            name="Voice Assistant",
+            version=3,
+            instructions="You are a voice assistant.",
+            interaction_mode=schemas.InteractionMode.VOICE,
+            description="Voice assistant",
+            tools="[]",
+            model="gpt-4o-mini",
+            realtime_transcription_model=schemas.RealtimeTranscriptionModel.GPT_REALTIME_WHISPER,
+            class_id=class_.id,
+            creator_id=123,
+            use_latex=False,
+            use_image_descriptions=False,
+            locked=False,
+        )
+        session.add_all([class_, assistant])
+        await session.commit()
+
+    response = api.put(
+        "/api/v1/class/1/assistant/11",
+        json={"interaction_mode": "chat", "tools": None},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["realtime_transcription_model"] is None
+
+    async with db.async_session() as session:
+        updated = await models.Assistant.get_by_id(session, 11)
+        assert updated.realtime_transcription_model is None

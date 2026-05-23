@@ -31,7 +31,10 @@
 	import { DoubleBounce } from 'svelte-loading-spinners';
 	import Markdown from '$lib/components/Markdown.svelte';
 	import Logo from '$lib/components/Logo.svelte';
-	import ChatInput, { type ChatInputMessage } from '$lib/components/ChatInput.svelte';
+	import ChatInput, {
+		type ChatInputHandle,
+		type ChatInputMessage
+	} from '$lib/components/ChatInput.svelte';
 	import ChatDropOverlay from '$lib/components/ChatDropOverlay.svelte';
 	import AssistantVersionBadge from '$lib/components/AssistantVersionBadge.svelte';
 	import {
@@ -53,6 +56,7 @@
 		LinkOutline,
 		TerminalOutline
 	} from 'flowbite-svelte-icons';
+
 	import { parseTextContent } from '$lib/content';
 	import { ThreadManager, type Message } from '$lib/stores/thread';
 	import AttachmentDeletedPlaceholder from '$lib/components/AttachmentDeletedPlaceholder.svelte';
@@ -81,7 +85,12 @@
 	import LectureVideoView, {
 		type LectureVideoViewHandle
 	} from '$lib/components/lecture-video/LectureVideoView.svelte';
+	import { LECTURE_CHAT_TTS_VOLUME_SCALE } from '$lib/components/lecture-video/audio-levels';
 	import LectureVideoChatPanel from '$lib/components/lecture-video/LectureVideoChatPanel.svelte';
+
+	type ThreadPostMessage = ChatInputMessage & {
+		lecture_video_playback_position_ms?: number;
+	};
 
 	function formatLectureVideoTitle(filename: string | null | undefined): string | null {
 		if (!filename) return null;
@@ -146,19 +155,31 @@
 	$: threadRecording = data.threadRecording;
 	$: displayUserInfo = data.threadDisplayUserInfo;
 	$: threadLectureVideoMismatch = data.threadLectureVideoMismatch === true;
-	$: threadLectureVideoCompleted = data.threadLectureVideoCompleted === true;
 	$: threadIsCurrentUserParticipant =
 		expandedThreadData.data?.thread?.is_current_user_participant === true;
 	$: lectureVideoSession = expandedThreadData.data?.lecture_video_session ?? null;
 	$: threadLectureChatAvailable = lectureVideoSession?.lecture_video_chat_available === true;
+	$: threadLectureVideoCaptionsAvailable =
+		expandedThreadData.data?.lecture_video_captions_available === true;
+	$: lectureVideoCaptionsSrc = threadLectureVideoCaptionsAvailable
+		? api.getLectureVideoCaptionsUrl(classId, threadId)
+		: null;
 	$: lectureVideoTtsAvailable = expandedThreadData.data?.lecture_video_tts_available === true;
-	$: effectiveLectureVideoMismatch = threadLectureVideoMismatch;
-	$: effectiveLectureVideoAssistantMismatch = threadLectureVideoMismatch;
+	let runtimeLectureVideoAssistantMismatch = false;
+	let runtimeLectureVideoAssistantMismatchKey: string | null = null;
+	$: currentLectureVideoThreadKey = `${classId}:${threadId}`;
+	$: if (runtimeLectureVideoAssistantMismatchKey !== currentLectureVideoThreadKey) {
+		runtimeLectureVideoAssistantMismatch = false;
+		runtimeLectureVideoAssistantMismatchKey = currentLectureVideoThreadKey;
+	}
+	$: effectiveLectureVideoAssistantMismatch =
+		threadLectureVideoMismatch || runtimeLectureVideoAssistantMismatch;
+	$: effectiveLectureVideoMismatch = effectiveLectureVideoAssistantMismatch;
 	let lectureVideoViewRef: LectureVideoViewHandle | null = null;
-	let lectureChatHasDraft = false;
 	let lecturePlayerVolume = 1;
 	let liveLectureVideoSession: api.LectureVideoSession | null = null;
 	let lectureVideoSessionKey: string | null = null;
+	let startingReplacementLectureThread = false;
 	$: {
 		const nextKey = `${classId}:${threadId}:${lectureVideoSession?.state_version ?? 'none'}:${
 			lectureVideoSession?.state ?? 'none'
@@ -216,7 +237,6 @@
 			!$trashThreadFiles.includes(k) &&
 			(codeInterpreterAcceptedFiles ?? '').includes(v.content_type)
 	).length;
-	type ChatInputHandle = { addFiles: (selectedFiles: File[]) => void };
 	let chatInputRef: ChatInputHandle | null = null;
 	let dropOverlayVisible = false;
 	let dropDragCounter = 0;
@@ -241,7 +261,7 @@
 	$: waiting = threadMgr.waiting;
 	$: ttsPlaying = threadMgr.ttsPlaying;
 	$: if (data.threadInteractionMode === 'lecture_video') {
-		threadMgr.setTtsVolume(lecturePlayerVolume);
+		threadMgr.setTtsVolume(lecturePlayerVolume * LECTURE_CHAT_TTS_VOLUME_SCALE);
 	}
 	$: loading = threadMgr.loading;
 	$: canFetchMore = threadMgr.canFetchMore;
@@ -275,11 +295,8 @@
 	$: lectureChatCanSubmit =
 		canSubmit && threadIsCurrentUserParticipant && !assistantDeleted && canViewAssistant;
 	$: lectureChatInputDisabled =
-		!lectureChatCanSubmit ||
-		!!$navigating ||
-		!threadLectureChatAvailable ||
-		effectiveLectureVideoSession?.state === 'awaiting_answer' ||
-		effectiveLectureVideoSession?.state === 'completed';
+		!lectureChatCanSubmit || !!$navigating || !threadLectureChatAvailable;
+	$: lectureChatContinuePromptVisible = effectiveLectureVideoSession?.state !== 'awaiting_answer';
 	$: canDropUploadsIntoThread =
 		data.threadInteractionMode === 'chat' &&
 		assistantInteractionMode === 'chat' &&
@@ -677,8 +694,9 @@
 		vision_file_ids,
 		visionFileImageDescriptions,
 		optimisticVisionFiles,
+		lecture_video_playback_position_ms,
 		callback
-	}: ChatInputMessage) => {
+	}: ThreadPostMessage) => {
 		try {
 			await threadMgr.postMessage(
 				data.me.user!.id,
@@ -689,7 +707,8 @@
 				vision_file_ids,
 				visionFileImageDescriptions,
 				optimisticVisionFiles,
-				currentMessageAttachments
+				currentMessageAttachments,
+				lecture_video_playback_position_ms
 			);
 		} catch (e) {
 			callback({
@@ -706,7 +725,14 @@
 	};
 
 	const handleLectureChatSubmit = async (message: ChatInputMessage) => {
-		await postMessage(message);
+		const lectureVideoPlaybackPositionMs = lectureVideoViewRef?.getPlaybackPositionMs();
+		void lectureVideoViewRef?.pauseForChatSubmit();
+		await postMessage({
+			...message,
+			...(lectureVideoPlaybackPositionMs !== undefined
+				? { lecture_video_playback_position_ms: lectureVideoPlaybackPositionMs }
+				: {})
+		});
 	};
 
 	const handleLectureSessionChange = (e: CustomEvent<api.LectureVideoSession>) => {
@@ -717,11 +743,12 @@
 		threadMgr.interruptTts().catch(() => {});
 	};
 
-	const handleLectureChatDraftChange = ({ hasText }: { hasText: boolean }) => {
-		lectureChatHasDraft = hasText;
-		if (hasText) {
-			void lectureVideoViewRef?.pauseForChatInput();
-		}
+	const handleLectureNarrationPlaybackStarted = () => {
+		threadMgr.interruptTts().catch(() => {});
+	};
+
+	const handleLectureChatContinueWatching = async () => {
+		return (await lectureVideoViewRef?.continueWatchingAfterChat()) ?? false;
 	};
 
 	// Handle file upload
@@ -1056,7 +1083,8 @@
 		wavRecorder = new WavRecorder({ sampleRate: 24000, debug: true });
 		wavStreamPlayer = new WavStreamPlayer({
 			sampleRate: 24000,
-			onAudioPartStarted: onAudioPartStartedProcessor
+			onAudioPartStarted: onAudioPartStartedProcessor,
+			onAudioPartEnded: onAudioPartEndedProcessor
 		});
 		try {
 			await wavStreamPlayer.connect();
@@ -1101,6 +1129,38 @@
 	let startingAudioSession = false;
 	let audioSessionStarted = false;
 
+	const sendRealtimeBinary = (payload: ArrayBuffer): boolean => {
+		if (!socket || socket.readyState !== WebSocket.OPEN) {
+			return false;
+		}
+		socket.send(payload);
+		return true;
+	};
+
+	const sendRealtimeEvent = (payload: Record<string, unknown>): boolean => {
+		if (!socket || socket.readyState !== WebSocket.OPEN) {
+			return false;
+		}
+		socket.send(JSON.stringify(payload));
+		return true;
+	};
+
+	const sendTruncateForTrackSampleOffset = (
+		trackSampleOffset: Awaited<ReturnType<WavStreamPlayer['interrupt']>>
+	): boolean => {
+		if (!trackSampleOffset?.trackId || !wavStreamPlayer) {
+			return false;
+		}
+		const { trackId, offset, eventId } = trackSampleOffset;
+		const audioEndMs = Math.floor((offset / wavStreamPlayer.getSampleRate()) * 1000);
+		return sendRealtimeEvent({
+			type: 'conversation.item.truncate',
+			item_id: trackId,
+			event_id: eventId,
+			audio_end_ms: audioEndMs
+		});
+	};
+
 	/**
 	 * Process audio chunks.
 	 * This function sends the audio data to the server via WebSocket.
@@ -1109,7 +1169,7 @@
 	 * @param data.mono The mono audio data.
 	 */
 	const chunkProcessor = (data: { raw: ArrayBuffer; mono: ArrayBuffer }) => {
-		if (!socket || !audioSessionStarted) {
+		if (!audioSessionStarted) {
 			return;
 		}
 		const audio = new Uint8Array(data.mono);
@@ -1117,7 +1177,7 @@
 		const view = new DataView(buffer);
 		view.setFloat64(0, Date.now());
 		new Uint8Array(buffer, 8).set(audio);
-		socket.send(buffer);
+		sendRealtimeBinary(buffer);
 	};
 
 	/**
@@ -1131,14 +1191,31 @@
 		eventId: string;
 		timestamp: number;
 	}) => {
-		socket?.send(
-			JSON.stringify({
-				type: 'response.audio.delta.started',
-				item_id: data.trackId,
-				event_id: data.eventId,
-				started_playing_at: data.timestamp
-			})
-		);
+		sendRealtimeEvent({
+			type: 'response.audio.delta.started',
+			item_id: data.trackId,
+			event_id: data.eventId,
+			started_playing_at: data.timestamp
+		});
+	};
+
+	/**
+	 * Handle the end of an assistant message audio chunk playback.
+	 * @param data The data associated with the completed audio chunk.
+	 * @param data.trackId The ID of the track.
+	 * @param data.timestamp The timestamp of when the chunk ended.
+	 */
+	const onAudioPartEndedProcessor = (data: {
+		trackId: string;
+		eventId: string;
+		timestamp: number;
+	}) => {
+		sendRealtimeEvent({
+			type: 'response.audio.delta.ended',
+			item_id: data.trackId,
+			event_id: data.eventId,
+			ended_playing_at: data.timestamp
+		});
 	};
 
 	/**
@@ -1226,11 +1303,9 @@
 						sadToast('Failed to set up audio output to your speakers.');
 						return;
 					}
-					await wavStreamPlayer.interrupt();
 					const trackSampleOffset = await wavStreamPlayer.interrupt();
 					if (trackSampleOffset?.trackId) {
-						const { trackId, offset } = trackSampleOffset;
-						if (!socket) {
+						if (!socket || socket.readyState !== WebSocket.OPEN) {
 							sadToast('Error connecting with the server.');
 							return;
 						}
@@ -1238,13 +1313,7 @@
 							sadToast('Failed to set up audio output to your speakers.');
 							return;
 						}
-						socket.send(
-							JSON.stringify({
-								type: 'conversation.item.truncate',
-								item_id: trackId,
-								audio_end_ms: Math.floor((offset / wavStreamPlayer.getSampleRate()) * 1000)
-							})
-						);
+						sendTruncateForTrackSampleOffset(trackSampleOffset);
 					}
 					break;
 				}
@@ -1289,26 +1358,38 @@
 			return;
 		}
 		endingAudioSession = true;
-		if (socket) {
-			socket.close();
-			socket = null;
+		try {
+			if (wavStreamPlayer) {
+				try {
+					const trackSampleOffset = await wavStreamPlayer.interrupt();
+					sendTruncateForTrackSampleOffset(trackSampleOffset);
+				} catch (error) {
+					console.warn('Voice mode session-end interrupt failed.', error);
+				} finally {
+					wavStreamPlayer = null;
+				}
+			}
+			if (socket) {
+				socket.close();
+				socket = null;
+			}
+			audioDevices = [];
+			selectedAudioDevice = null;
+			if (wavRecorder) {
+				try {
+					await wavRecorder.quit();
+				} finally {
+					wavRecorder = null;
+				}
+			}
+			await invalidateAll();
+		} finally {
+			startingAudioSession = false;
+			audioSessionStarted = false;
+			openMicrophoneModal = false;
+			microphoneAccess = false;
+			endingAudioSession = false;
 		}
-		audioDevices = [];
-		selectedAudioDevice = null;
-		if (wavRecorder) {
-			await wavRecorder.quit();
-			wavRecorder = null;
-		}
-		if (wavStreamPlayer) {
-			await wavStreamPlayer.interrupt();
-			wavStreamPlayer = null;
-		}
-		await invalidateAll();
-		startingAudioSession = false;
-		audioSessionStarted = false;
-		openMicrophoneModal = false;
-		microphoneAccess = false;
-		endingAudioSession = false;
 	};
 
 	/*
@@ -1428,6 +1509,33 @@
 		}
 	};
 
+	function handleLectureVideoLessonUpdated() {
+		runtimeLectureVideoAssistantMismatch = true;
+		runtimeLectureVideoAssistantMismatchKey = currentLectureVideoThreadKey;
+	}
+
+	async function startReplacementLectureThread() {
+		if (startingReplacementLectureThread || !$assistantId || isAnonymousSession) return;
+
+		startingReplacementLectureThread = true;
+		try {
+			const newThreadOpts = api.explodeResponse(
+				await api.createLectureThread(fetch, classId, {
+					assistant_id: $assistantId,
+					timezone: userTimezone
+				})
+			);
+
+			await goto(resolve(`/group/${classId}/thread/${newThreadOpts.thread.id}`));
+		} catch (e) {
+			sadToast(
+				`Failed to start lesson. Error: ${errorMessage(e, 'We could not start a new lesson. Try again in a moment.')}`
+			);
+		} finally {
+			startingReplacementLectureThread = false;
+		}
+	}
+
 	afterNavigate(async () => {
 		await resetAudioSession();
 	});
@@ -1471,18 +1579,34 @@
 	ondrop={handleThreadDrop}
 >
 	{#if data.threadInteractionMode === 'lecture_video'}
-		{#key `${classId}:${threadId}:${lectureVideoSrc}:${threadLectureVideoCompleted}:${effectiveLectureVideoMismatch}`}
+		{#key `${classId}:${threadId}:${lectureVideoSrc}:${effectiveLectureVideoMismatch}`}
 			{#if effectiveLectureVideoMismatch}
 				<div class="flex h-full w-full items-center justify-center p-4">
 					<div
-						class="w-full max-w-2xl rounded-lg border border-amber-300 bg-amber-50 px-5 py-4 text-amber-900"
+						class="flex w-full max-w-2xl flex-col gap-4 rounded-2xl border border-orange/30 bg-orange-light px-6 py-5 text-slate-900 shadow-sm sm:flex-row sm:items-center sm:justify-between"
 					>
-						{#if effectiveLectureVideoAssistantMismatch}
-							This lecture video is no longer available for this thread because the assistant
-							configuration changed. Please start a new lecture thread.
-						{:else}
-							This lecture video could not be loaded. Please check your connection and try
-							refreshing the page.
+						<div class="flex flex-col gap-1">
+							<div class="text-base font-semibold text-slate-900">
+								This video lesson was updated
+							</div>
+							<div class="text-sm text-slate-700">
+								{isAnonymousSession
+									? 'Ask the lesson owner for a new shared session.'
+									: 'Start a fresh session to jump into the new version.'}
+							</div>
+						</div>
+						{#if !isAnonymousSession}
+							<button
+								type="button"
+								class="inline-flex shrink-0 items-center justify-center rounded-full bg-orange px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-dark focus:ring-2 focus:ring-orange focus:ring-offset-2 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+								disabled={startingReplacementLectureThread || !$assistantId}
+								onclick={startReplacementLectureThread}
+							>
+								{#if startingReplacementLectureThread}
+									<Spinner color="custom" customColor="fill-white" class="mr-2 h-4 w-4" />
+								{/if}
+								Start new lesson
+							</button>
 						{/if}
 					</div>
 				</div>
@@ -1492,23 +1616,29 @@
 					{classId}
 					{threadId}
 					{lectureVideoSrc}
+					captionsSrc={lectureVideoCaptionsSrc}
 					title={lectureVideoDisplayTitle}
 					canParticipate={threadIsCurrentUserParticipant}
+					showRefreshAction={!isAnonymousSession}
 					initialSession={lectureVideoSession}
 					bind:playerVolume={lecturePlayerVolume}
-					deferAutoContinueForChatDraft={lectureChatHasDraft}
 					chatAvailable={threadLectureChatAvailable}
 					on:sessionchange={handleLectureSessionChange}
 					on:playbackresumed={handleLecturePlaybackResumed}
+					on:narrationplaybackstarted={handleLectureNarrationPlaybackStarted}
+					on:lessonupdated={handleLectureVideoLessonUpdated}
 				>
-					{#snippet chat()}
+					{#snippet chat(lectureVideoAtEnd = false)}
 						{#if threadLectureChatAvailable}
 							<LectureVideoChatPanel
 								{classId}
 								{threadId}
 								messages={$messages}
 								canFetchMore={$canFetchMore}
-								showInput={effectiveLectureVideoSession?.state !== 'completed'}
+								showInput={effectiveLectureVideoSession?.state !== 'completed' ||
+									threadIsCurrentUserParticipant}
+								showContinueWatchingPrompt={lectureChatContinuePromptVisible &&
+									!(effectiveLectureVideoSession?.state === 'completed' && lectureVideoAtEnd)}
 								canSubmit={lectureChatCanSubmit}
 								disabled={lectureChatInputDisabled}
 								waiting={$waiting}
@@ -1531,8 +1661,7 @@
 								{fetchMoreMessages}
 								onsubmit={handleLectureChatSubmit}
 								ondismisserror={handleLectureChatDismissError}
-								ontextinput={handleLectureChatDraftChange}
-								ontextpaste={handleLectureChatDraftChange}
+								oncontinuewatching={handleLectureChatContinueWatching}
 								onmutettstoggle={() => {
 									threadMgr.setTtsMuted(!$ttsMuted);
 								}}

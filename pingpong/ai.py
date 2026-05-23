@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import logging
+from collections.abc import Mapping
 from fastapi import UploadFile
 import openai
 import orjson
@@ -22,29 +23,45 @@ from pingpong.files import (
     file_extension_to_mime_type,
     handle_create_file,
 )
+from pingpong.followup_transform import (
+    strip_followup_snippets,
+)
 from pingpong.invite import send_export_download, send_export_failed
 from pingpong.log_utils import sanitize_for_log
 import pingpong.models as models
 from pingpong.prompt import replace_random_blocks
+from pingpong.say_transform import (
+    FOLLOWUP_MARKER_NAME,
+    PuaStreamTransformer,
+    SAY_MARKER_END,
+    SAY_MARKER_SEPARATOR,
+    SAY_MARKER_START,
+    transform_say_text,
+)
 from pingpong.schemas import (
     APIKeyValidationResponse,
     AnnotationType,
     BufferedStreamHandlerToolCallState,
     CodeInterpreterOutputType,
     FileSearchToolAnnotationResult,
+    InteractionMode,
     MessagePhase,
+    MessagePartType,
     MessageRole,
     MessageStatus,
+    NewThreadMessage,
     ReasoningStatus,
     RunStatus,
     ThreadName,
-    NewThreadMessage,
-    MessagePartType,
     ToolCallStatus,
     ToolCallType,
     WebSearchActionType,
 )
-from pingpong.elevenlabs import ElevenLabsStreamingTTS, StreamingMarkdownSanitizer
+from pingpong.elevenlabs import (
+    ElevenLabsStreamingTTS,
+    StreamingMarkdownSanitizer,
+    StreamingTTSChunker,
+)
 from starlette.requests import ClientDisconnect
 from datetime import datetime, timezone
 from openai.types.beta.assistant_stream_event import (
@@ -160,11 +177,19 @@ from pingpong.now import NowFn, utcnow
 from pingpong.ai_error import get_details_from_api_error
 from pingpong.schemas import CodeInterpreterMessage, DownloadExport
 from pingpong.config import config
-from typing import Dict, Literal, Union, overload
+from typing import Any, Dict, Literal, Union, overload
 from sqlalchemy.ext.asyncio import AsyncSession
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 logger = logging.getLogger(__name__)
+
+CONTAINER_TTL_SECONDS = 19 * 60
+ANNOTATION_PRIORITY_TYPES = (
+    AnnotationType.CONTAINER_FILE_CITATION,
+    AnnotationType.FILE_CITATION,
+    AnnotationType.URL_CITATION,
+    AnnotationType.FILE_PATH,
+)
 
 
 def get_response_message_phase_value(phase: object) -> str | None:
@@ -598,7 +623,12 @@ class BufferedStreamHandler(openai.AsyncAssistantEventHandler):
 
 
 async def build_response_input_item_list(
-    session: AsyncSession, thread_id: int, uses_reasoning: bool = False
+    session: AsyncSession,
+    thread_id: int,
+    uses_reasoning: bool = False,
+    *,
+    current_run_id: int | None = None,
+    user_assistant_messages_only: bool = False,
 ) -> list[ResponseInputItemParam]:
     """Build a list of ResponseInputItem from a thread run step."""
     response_input_items: list[ResponseInputItemParam] = []
@@ -606,12 +636,65 @@ async def build_response_input_item_list(
     response_input_items_with_time: list[
         tuple[datetime, int, str, ResponseInputItemParam]
     ] = []
-    container_by_last_active_time: dict[int, datetime] = {}
+    container_by_last_active_time: dict[str, datetime] = {}
 
     def coerce_utc(value: datetime) -> datetime:
         return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
-    async for message in models.Thread.list_all_messages_gen(session, thread_id):
+    def update_container_last_active_time(
+        container_id: str | None,
+        *timestamps: datetime | None,
+    ) -> None:
+        if not container_id:
+            return
+        existing_time = container_by_last_active_time.get(container_id)
+        candidates = [coerce_utc(value) for value in timestamps if value is not None]
+        if existing_time is not None:
+            candidates.append(coerce_utc(existing_time))
+        if candidates:
+            container_by_last_active_time[container_id] = max(candidates)
+
+    def is_container_expired(container_id: str | None) -> bool:
+        if not container_id or container_id not in container_by_last_active_time:
+            return True
+        return (
+            utcnow() - container_by_last_active_time[container_id]
+        ).total_seconds() > CONTAINER_TTL_SECONDS
+
+    def is_container_file_citation_replayable(annotation: models.Annotation) -> bool:
+        return bool(
+            annotation.file_id and annotation.file_id.startswith("cfile_")
+        ) and (not is_container_expired(annotation.container_id))
+
+    tool_calls = [
+        tool_call
+        async for tool_call in models.Thread.list_all_tool_calls_gen(session, thread_id)
+    ]
+    for tool_call in tool_calls:
+        if tool_call.status == ToolCallStatus.INCOMPLETE:
+            continue
+        if tool_call.type != ToolCallType.CODE_INTERPRETER:
+            continue
+        update_container_last_active_time(
+            tool_call.container_id,
+            tool_call.created,
+            getattr(tool_call, "completed", None),
+        )
+
+    message_roles = (
+        [MessageRole.USER, MessageRole.ASSISTANT]
+        if user_assistant_messages_only
+        else None
+    )
+    if user_assistant_messages_only and current_run_id is not None:
+        messages = models.Thread.list_user_assistant_messages_with_run_developer_gen(
+            session, thread_id, current_run_id
+        )
+    else:
+        messages = models.Thread.list_all_messages_gen(
+            session, thread_id, roles=message_roles
+        )
+    async for message in messages:
         phase = get_response_message_phase_value(message.phase)
         content_list: list[ResponseInputMessageContentListParam] = []
         for content in message.content:
@@ -628,7 +711,31 @@ async def build_response_input_item_list(
                     )
                 case MessagePartType.OUTPUT_TEXT:
                     annotations: list[Annotation] = []
-                    for annotation in content.annotations:
+                    stored_annotations = list(content.annotations)
+                    present_annotation_types = {
+                        annotation.type
+                        for annotation in stored_annotations
+                        if annotation.type in ANNOTATION_PRIORITY_TYPES
+                        and (
+                            annotation.type != AnnotationType.CONTAINER_FILE_CITATION
+                            or is_container_file_citation_replayable(annotation)
+                        )
+                    }
+                    selected_annotation_type = next(
+                        (
+                            annotation_type
+                            for annotation_type in ANNOTATION_PRIORITY_TYPES
+                            if annotation_type in present_annotation_types
+                        ),
+                        None,
+                    )
+                    for annotation in stored_annotations:
+                        if (
+                            selected_annotation_type is not None
+                            and annotation.type in ANNOTATION_PRIORITY_TYPES
+                            and annotation.type != selected_annotation_type
+                        ):
+                            continue
                         match annotation.type:
                             case AnnotationType.FILE_CITATION:
                                 annotations.append(
@@ -642,7 +749,7 @@ async def build_response_input_item_list(
                             case AnnotationType.FILE_PATH:
                                 annotations.append(
                                     AnnotationFilePath(
-                                        file_path=annotation.file_path,
+                                        file_id=annotation.file_id,
                                         index=annotation.index or 0,
                                         type="file_path",
                                     )
@@ -658,27 +765,26 @@ async def build_response_input_item_list(
                                     )
                                 )
                             case AnnotationType.CONTAINER_FILE_CITATION:
-                                continue
-                                # The API currently rejects
-                                # container_file_citation as input
-                                #
-                                # annotations.append(
-                                #     AnnotationContainerFileCitation(
-                                #         file_id=annotation.file_id,
-                                #         container_id=annotation.container_id,
-                                #         filename=annotation.filename,
-                                #         start_index=annotation.start_index or 0,
-                                #         end_index=annotation.end_index or 0,
-                                #         type="container_file_citation",
-                                #         index=0,
-                                #     )
-                                # )
+                                if not is_container_file_citation_replayable(
+                                    annotation
+                                ):
+                                    continue
+                                annotations.append(
+                                    AnnotationContainerFileCitation(
+                                        file_id=annotation.file_id,
+                                        container_id=annotation.container_id,
+                                        filename=annotation.filename,
+                                        start_index=annotation.start_index or 0,
+                                        end_index=annotation.end_index or 0,
+                                        type="container_file_citation",
+                                    )
+                                )
                             case _:
                                 continue  # Skip unsupported annotation types
 
                     content_list.append(
                         ResponseOutputTextParam(
-                            text=content.text,
+                            text=strip_followup_snippets(content.text or ""),
                             annotations=annotations,
                             type="output_text",
                         )
@@ -722,244 +828,251 @@ async def build_response_input_item_list(
             )
         )
 
-    async for tool_call in models.Thread.list_all_tool_calls_gen(session, thread_id):
-        if tool_call.status == ToolCallStatus.INCOMPLETE:
-            continue
-        match tool_call.type:
-            case ToolCallType.CODE_INTERPRETER:
-                tool_call_outputs: list[Output] = []
-                for output in tool_call.outputs:
-                    match output.output_type:
-                        case CodeInterpreterOutputType.LOGS:
-                            tool_call_outputs.append(
-                                OutputLogs(logs=output.logs, type="logs")
-                            )
-                        case CodeInterpreterOutputType.IMAGE:
-                            tool_call_outputs.append(
-                                OutputImage(url=output.url, type="image")
-                            )
-                response_input_items_with_time.append(
-                    (
-                        tool_call.created,
-                        tool_call.output_index,
-                        "code_interpreter_call",
-                        ResponseCodeInterpreterToolCallParam(
-                            id=tool_call.tool_call_id,
-                            code=tool_call.code,
-                            container_id=tool_call.container_id,
-                            outputs=tool_call_outputs,
-                            status=ToolCallStatus(tool_call.status).value,
-                            type="code_interpreter_call",
-                        ),
-                    )
-                )
-
-                existing_time = container_by_last_active_time.get(
-                    tool_call.container_id
-                )
-                candidates: list[datetime] = []
-                if existing_time is not None:
-                    candidates.append(coerce_utc(existing_time))
-                if tool_call.created is not None:
-                    candidates.append(coerce_utc(tool_call.created))
-                if getattr(tool_call, "completed", None) is not None:
-                    candidates.append(coerce_utc(tool_call.completed))
-                if candidates:
-                    container_by_last_active_time[tool_call.container_id] = max(
-                        candidates
-                    )
-
-            case ToolCallType.FILE_SEARCH:
-                file_search_results: list[Result] = []
-                for result in tool_call.results:
-                    file_search_results.append(
-                        Result(
-                            attributes=json.loads(result.attributes)
-                            if result.attributes
-                            else {},
-                            file_id=result.file_id,
-                            filename=result.filename,
-                            score=result.score,
-                            text=result.text,
+    if not user_assistant_messages_only:
+        for tool_call in tool_calls:
+            if tool_call.status == ToolCallStatus.INCOMPLETE:
+                continue
+            match tool_call.type:
+                case ToolCallType.CODE_INTERPRETER:
+                    tool_call_outputs: list[Output] = []
+                    for output in tool_call.outputs:
+                        match output.output_type:
+                            case CodeInterpreterOutputType.LOGS:
+                                tool_call_outputs.append(
+                                    OutputLogs(logs=output.logs, type="logs")
+                                )
+                            case CodeInterpreterOutputType.IMAGE:
+                                tool_call_outputs.append(
+                                    OutputImage(url=output.url, type="image")
+                                )
+                    response_input_items_with_time.append(
+                        (
+                            tool_call.created,
+                            tool_call.output_index,
+                            "code_interpreter_call",
+                            ResponseCodeInterpreterToolCallParam(
+                                id=tool_call.tool_call_id,
+                                code=tool_call.code,
+                                container_id=tool_call.container_id,
+                                outputs=tool_call_outputs,
+                                status=ToolCallStatus(tool_call.status).value,
+                                type="code_interpreter_call",
+                            ),
                         )
                     )
-                response_input_items_with_time.append(
-                    (
+                    update_container_last_active_time(
+                        tool_call.container_id,
                         tool_call.created,
-                        tool_call.output_index,
-                        "file_search_call",
-                        ResponseFileSearchToolCallParam(
-                            id=tool_call.tool_call_id,
-                            queries=json.loads(tool_call.queries)
-                            if tool_call.queries
-                            else [],
-                            status=ToolCallStatus(tool_call.status).value,
-                            results=file_search_results,
-                            type="file_search_call",
-                        ),
+                        getattr(tool_call, "completed", None),
                     )
-                )
 
-            case ToolCallType.WEB_SEARCH:
-                action_rec = (
-                    tool_call.web_search_actions[0]
-                    if tool_call.web_search_actions
-                    else None
-                )
-
-                action = None
-                if action_rec:
-                    match action_rec.type:
-                        case WebSearchActionType.SEARCH:
-                            action = ActionSearch(
-                                type="search",
-                                query=action_rec.query or "",
+                case ToolCallType.FILE_SEARCH:
+                    file_search_results: list[Result] = []
+                    for result in tool_call.results:
+                        file_search_results.append(
+                            Result(
+                                attributes=json.loads(result.attributes)
+                                if result.attributes
+                                else {},
+                                file_id=result.file_id,
+                                filename=result.filename,
+                                score=result.score,
+                                text=result.text,
                             )
-                        case WebSearchActionType.OPEN_PAGE:
-                            action = ActionOpenPage(
-                                type="open_page",
-                                url=action_rec.url or "",
-                            )
-                        case WebSearchActionType.FIND:
-                            action = ActionFind(
-                                type="find",
-                                pattern=action_rec.pattern or "",
-                                url=action_rec.url or "",
-                            )
-                        case _:
-                            action = None
-
-                response_input_items_with_time.append(
-                    (
-                        tool_call.created,
-                        tool_call.output_index,
-                        "web_search_call",
-                        ResponseFunctionWebSearchParam(
-                            id=tool_call.tool_call_id,
-                            action=action,
-                            status=ToolCallStatus(tool_call.status).value,
-                            type="web_search_call",
-                        ),
-                    )
-                )
-
-            case ToolCallType.MCP_SERVER:
-                server_label = tool_call.mcp_server_label or (
-                    tool_call.mcp_server_tool.server_label
-                    if tool_call.mcp_server_tool
-                    else None
-                )
-                if not server_label:
-                    logger.warning(
-                        "Skipping MCP tool call %s due to missing server label.",
-                        tool_call.tool_call_id,
-                    )
-                    continue
-                try:
-                    error = json.loads(tool_call.error) if tool_call.error else None
-                except json.JSONDecodeError:
-                    error = {"message": tool_call.error}
-                response_input_items_with_time.append(
-                    (
-                        tool_call.created,
-                        tool_call.output_index,
-                        "mcp_call",
-                        McpCallParam(
-                            id=tool_call.tool_call_id,
-                            arguments=tool_call.mcp_arguments,
-                            name=tool_call.mcp_tool_name,
-                            server_label=server_label,
-                            type="mcp_call",
-                            approval_request_id=None,
-                            error=error,
-                            output=tool_call.mcp_output,
-                            status=ToolCallStatus(tool_call.status).value,
-                        ),
-                    )
-                )
-            case ToolCallType.MCP_LIST_TOOLS:
-                server_label = tool_call.mcp_server_label or (
-                    tool_call.mcp_server_tool.server_label
-                    if tool_call.mcp_server_tool
-                    else None
-                )
-                if not server_label:
-                    logger.warning(
-                        "Skipping MCP list tools call %s due to missing server label.",
-                        tool_call.tool_call_id,
-                    )
-                    continue
-                mcp_tools: list[McpListToolsToolParam] = []
-                for tool in tool_call.mcp_tools_listed:
-                    mcp_tools.append(
-                        McpListToolsToolParam(
-                            input_schema=json.loads(tool.input_schema)
-                            if tool.input_schema
-                            else {},
-                            name=tool.name,
-                            description=tool.description,
-                            annotations=json.loads(tool.annotations)
-                            if tool.annotations
-                            else {},
+                        )
+                    response_input_items_with_time.append(
+                        (
+                            tool_call.created,
+                            tool_call.output_index,
+                            "file_search_call",
+                            ResponseFileSearchToolCallParam(
+                                id=tool_call.tool_call_id,
+                                queries=json.loads(tool_call.queries)
+                                if tool_call.queries
+                                else [],
+                                status=ToolCallStatus(tool_call.status).value,
+                                results=file_search_results,
+                                type="file_search_call",
+                            ),
                         )
                     )
-                try:
-                    error = json.loads(tool_call.error) if tool_call.error else None
-                except json.JSONDecodeError:
-                    error = {"message": tool_call.error}
 
-                response_input_items_with_time.append(
-                    (
-                        tool_call.created,
-                        tool_call.output_index,
-                        "mcp_list_tools",
-                        McpListToolsParam(
-                            id=tool_call.tool_call_id,
-                            server_label=server_label,
-                            tools=mcp_tools,
-                            type="mcp_list_tools",
-                            error=error,
-                        ),
+                case ToolCallType.WEB_SEARCH:
+                    action_rec = (
+                        tool_call.web_search_actions[0]
+                        if tool_call.web_search_actions
+                        else None
+                    )
+
+                    action = None
+                    if action_rec:
+                        match action_rec.type:
+                            case WebSearchActionType.SEARCH:
+                                action = ActionSearch(
+                                    type="search",
+                                    query=action_rec.query or "",
+                                )
+                            case WebSearchActionType.OPEN_PAGE:
+                                action = ActionOpenPage(
+                                    type="open_page",
+                                    url=action_rec.url or "",
+                                )
+                            case WebSearchActionType.FIND:
+                                action = ActionFind(
+                                    type="find",
+                                    pattern=action_rec.pattern or "",
+                                    url=action_rec.url or "",
+                                )
+                            case _:
+                                action = None
+
+                    response_input_items_with_time.append(
+                        (
+                            tool_call.created,
+                            tool_call.output_index,
+                            "web_search_call",
+                            ResponseFunctionWebSearchParam(
+                                id=tool_call.tool_call_id,
+                                action=action,
+                                status=ToolCallStatus(tool_call.status).value,
+                                type="web_search_call",
+                            ),
+                        )
+                    )
+
+                case ToolCallType.MCP_SERVER:
+                    server_label = tool_call.mcp_server_label or (
+                        tool_call.mcp_server_tool.server_label
+                        if tool_call.mcp_server_tool
+                        else None
+                    )
+                    if not server_label:
+                        logger.warning(
+                            "Skipping MCP tool call %s due to missing server label.",
+                            tool_call.tool_call_id,
+                        )
+                        continue
+                    try:
+                        error = json.loads(tool_call.error) if tool_call.error else None
+                    except json.JSONDecodeError:
+                        error = {"message": tool_call.error}
+                    response_input_items_with_time.append(
+                        (
+                            tool_call.created,
+                            tool_call.output_index,
+                            "mcp_call",
+                            McpCallParam(
+                                id=tool_call.tool_call_id,
+                                arguments=tool_call.mcp_arguments,
+                                name=tool_call.mcp_tool_name,
+                                server_label=server_label,
+                                type="mcp_call",
+                                approval_request_id=None,
+                                error=error,
+                                output=tool_call.mcp_output,
+                                status=ToolCallStatus(tool_call.status).value,
+                            ),
+                        )
+                    )
+                case ToolCallType.MCP_LIST_TOOLS:
+                    server_label = tool_call.mcp_server_label or (
+                        tool_call.mcp_server_tool.server_label
+                        if tool_call.mcp_server_tool
+                        else None
+                    )
+                    if not server_label:
+                        logger.warning(
+                            "Skipping MCP list tools call %s due to missing server label.",
+                            tool_call.tool_call_id,
+                        )
+                        continue
+                    mcp_tools: list[McpListToolsToolParam] = []
+                    for tool in tool_call.mcp_tools_listed:
+                        mcp_tools.append(
+                            McpListToolsToolParam(
+                                input_schema=json.loads(tool.input_schema)
+                                if tool.input_schema
+                                else {},
+                                name=tool.name,
+                                description=tool.description,
+                                annotations=json.loads(tool.annotations)
+                                if tool.annotations
+                                else {},
+                            )
+                        )
+                    try:
+                        error = json.loads(tool_call.error) if tool_call.error else None
+                    except json.JSONDecodeError:
+                        error = {"message": tool_call.error}
+
+                    response_input_items_with_time.append(
+                        (
+                            tool_call.created,
+                            tool_call.output_index,
+                            "mcp_list_tools",
+                            McpListToolsParam(
+                                id=tool_call.tool_call_id,
+                                server_label=server_label,
+                                tools=mcp_tools,
+                                type="mcp_list_tools",
+                                error=error,
+                            ),
+                        )
+                    )
+
+        async for reasoning in models.Thread.list_all_reasoning_steps_gen(
+            session, thread_id
+        ):
+            summary_array: list[Summary] = []
+            for summary_step in reasoning.summary_parts:
+                summary_array.append(
+                    Summary(
+                        text=summary_step.summary_text,
+                        type="summary_text",
                     )
                 )
 
-    async for reasoning in models.Thread.list_all_reasoning_steps_gen(
-        session, thread_id
-    ):
-        summary_array: list[Summary] = []
-        for summary_step in reasoning.summary_parts:
-            summary_array.append(
-                Summary(
-                    text=summary_step.summary_text,
-                    type="summary_text",
+            content_array: list[Content] = []
+            for content_step in reasoning.content_parts:
+                content_array.append(
+                    Content(
+                        text=content_step.content_text,
+                        type="reasoning_text",
+                    )
+                )
+
+            response_input_items_with_time.append(
+                (
+                    reasoning.created,
+                    reasoning.output_index,
+                    "reasoning",
+                    ResponseReasoningItemParam(
+                        id=reasoning.reasoning_id,
+                        content=content_array if content_array else None,
+                        summary=summary_array if summary_array else [],
+                        encrypted_content=reasoning.encrypted_content,
+                        type="reasoning",
+                    ),
                 )
             )
 
-        content_array: list[Content] = []
-        for content_step in reasoning.content_parts:
-            content_array.append(
-                Content(
-                    text=content_step.content_text,
-                    type="reasoning_text",
-                )
-            )
+    def input_item_sort_key(
+        entry: tuple[datetime, int, str, ResponseInputItemParam],
+    ) -> tuple[int, int, datetime]:
+        created, output_index, item_type, item = entry
+        if (
+            user_assistant_messages_only
+            and current_run_id is not None
+            and item_type == "message"
+            and item.get("role") == MessageRole.DEVELOPER
+        ):
+            return (0, 0, created)
+        return (1, output_index, created)
 
-        response_input_items_with_time.append(
-            (
-                reasoning.created,
-                reasoning.output_index,
-                "reasoning",
-                ResponseReasoningItemParam(
-                    id=reasoning.reasoning_id,
-                    content=content_array if content_array else None,
-                    summary=summary_array if summary_array else [],
-                    encrypted_content=reasoning.encrypted_content,
-                    type="reasoning",
-                ),
-            )
-        )
-    # Sort by output index, falling back to created time for ties.
-    response_input_items_with_time.sort(key=lambda x: (x[1], x[0]))
+    # Sort by output index, falling back to created time for ties. Lecture-video
+    # runs that filter history explicitly prepend the current run developer
+    # context without encoding that ordering into messages.output_index.
+    response_input_items_with_time.sort(key=input_item_sort_key)
 
     def convert_to_message(
         item: ResponseCodeInterpreterToolCallParam, uses_reasoning: bool
@@ -991,11 +1104,7 @@ async def build_response_input_item_list(
         if not container_id:
             expired_ci_output_indices.add(output_index)
             continue
-        if (
-            container_id not in container_by_last_active_time
-            or (utcnow() - container_by_last_active_time[container_id]).total_seconds()
-            > 19 * 60
-        ):
+        if is_container_expired(container_id):
             expired_ci_output_indices.add(output_index)
 
     reasoning_output_indices_to_remove: set[int] = set()
@@ -1066,6 +1175,8 @@ class BufferedResponseStreamHandler:
         show_reasoning_summaries: bool | None = None,
         show_mcp_server_call_details: bool | None = None,
         *args,
+        lecture_video_dual_text_mode: bool = False,
+        lecture_video_followups_mode: bool = False,
         **kwargs,
     ):
         self.__buffer = io.BytesIO()
@@ -1131,6 +1242,13 @@ class BufferedResponseStreamHandler:
             if show_mcp_server_call_details is not None
             else True
         )
+        self.lecture_video_dual_text_mode = lecture_video_dual_text_mode
+        self.lecture_video_followups_mode = lecture_video_followups_mode
+        self._display_transformer = (
+            PuaStreamTransformer("display")
+            if (lecture_video_dual_text_mode or lecture_video_followups_mode)
+            else None
+        )
 
     def enqueue(self, data: Dict) -> None:
         self.__buffer.write(orjson.dumps(data))
@@ -1172,6 +1290,46 @@ class BufferedResponseStreamHandler:
 
     def enqueue_audio_error(self) -> None:
         self.enqueue({"type": "audio_error"})
+
+    def enqueue_message_text_delta(self, text: str) -> None:
+        if not text:
+            return
+        self.enqueue(
+            {
+                "type": "message_delta",
+                "delta": {
+                    "content": [
+                        {
+                            "index": 0,
+                            "type": "text",
+                            "text": {
+                                "value": text,
+                                "annotations": [],
+                            },
+                        },
+                    ],
+                    "role": None,
+                },
+            }
+        )
+
+    def enqueue_followup_suggestions(self) -> None:
+        if (
+            not self.lecture_video_followups_mode
+            or not self.message_id
+            or not self._display_transformer
+        ):
+            return
+        suggestions = self._display_transformer.consume_followup_suggestions()
+        if not suggestions:
+            return
+        self.enqueue(
+            {
+                "type": "followup_suggestions",
+                "message_id": str(self.message_id),
+                "suggestions": suggestions,
+            }
+        )
 
     async def on_response_created(self, data: ResponseCreatedEvent):
         if not self.run_id:
@@ -1336,24 +1494,12 @@ class BufferedResponseStreamHandler:
             await session.commit()
 
         await update_message_part_on_output_text_delta()
-        self.enqueue(
-            {
-                "type": "message_delta",
-                "delta": {
-                    "content": [
-                        {
-                            "index": 0,
-                            "type": "text",
-                            "text": {
-                                "value": data.delta,
-                                "annotations": [],
-                            },
-                        },
-                    ],
-                    "role": None,
-                },
-            }
+        display_delta = (
+            self._display_transformer.add(data.delta)
+            if self._display_transformer
+            else data.delta
         )
+        self.enqueue_message_text_delta(display_delta)
 
     async def on_output_text_container_file_citation_added(
         self, data: AnnotationContainerFileCitation, annotation_index: int | None = None
@@ -1445,7 +1591,7 @@ class BufferedResponseStreamHandler:
 
         annotation_data = {
             "type": AnnotationType.CONTAINER_FILE_CITATION,
-            "file_id": file.file_id,
+            "file_id": data["file_id"],
             "file_object_id": file.id if not file.vision_file_id else None,
             "vision_file_id": file.vision_file_id,
             "vision_file_object_id": file.id if file.vision_file_id else None,
@@ -1645,6 +1791,11 @@ class BufferedResponseStreamHandler:
             )
             return
 
+        display_delta = (
+            self._display_transformer.flush() if self._display_transformer else ""
+        )
+        self.enqueue_message_text_delta(display_delta)
+        self.enqueue_followup_suggestions()
         self.message_part_id = None
 
     async def on_output_message_done(self, data: ResponseOutputMessage):
@@ -3508,6 +3659,10 @@ async def run_response(
     response_safety_identifier: str | None = None,
     tts_voice_id: str | None = None,
     tts_api_key: str | None = None,
+    tts_voice_settings: Mapping[str, Any] | None = None,
+    user_assistant_messages_only: bool = False,
+    lecture_video_dual_text_mode: bool = False,
+    lecture_video_followups_mode: bool = False,
 ):
     is_canceled = False
     await config.authz.driver.init()
@@ -3554,6 +3709,8 @@ async def run_response(
                     session_,
                     thread_id=run.thread_id,
                     uses_reasoning=not isinstance(reasoning_settings, openai.NotGiven),
+                    current_run_id=run.id,
+                    user_assistant_messages_only=user_assistant_messages_only,
                 )
                 max_output_index = await models.Thread.get_max_output_sequence(
                     session_, run.thread_id
@@ -3631,14 +3788,114 @@ async def run_response(
             # Make cleanup safe even when the OpenAI stream fails before TTS setup runs.
             _tts_enabled = bool(tts_voice_id and tts_api_key)
             _tts_client: ElevenLabsStreamingTTS | None = None
-            _tts_sanitizer = StreamingMarkdownSanitizer() if _tts_enabled else None
+            _tts_sanitizer = (
+                StreamingMarkdownSanitizer(
+                    strip_latex_delimiters=lecture_video_dual_text_mode
+                )
+                if _tts_enabled
+                else None
+            )
+            _tts_chunker = StreamingTTSChunker() if _tts_enabled else None
+            _tts_pua_transformer = (
+                PuaStreamTransformer("speech")
+                if _tts_enabled
+                and (lecture_video_dual_text_mode or lecture_video_followups_mode)
+                else None
+            )
+            _tts_has_unflushed_text = False
+
+            async def _tts_drain_flush_signals() -> None:
+                """Forward speech->body flush signals to ElevenLabs.
+
+                Triggered for svg/mermaid blocks so the speech plays
+                immediately rather than waiting for the long diagram body
+                that will produce no further TTS input.
+                """
+                nonlocal _tts_has_unflushed_text
+                if not _tts_pua_transformer or not _tts_client:
+                    return
+                pending = _tts_pua_transformer.consume_flush_signals()
+                if not pending:
+                    return
+                if _tts_sanitizer:
+                    for sanitized in _tts_sanitizer.drain_ready():
+                        if not _tts_chunker:
+                            continue
+                        for tts_chunk in _tts_chunker.add(sanitized):
+                            try:
+                                await _tts_send_text(tts_chunk)
+                            except Exception:
+                                logger.warning(
+                                    "TTS pre-flush send failed", exc_info=True
+                                )
+                if _tts_chunker:
+                    final_chunk = _tts_chunker.flush()
+                    if final_chunk:
+                        try:
+                            await _tts_send_text(final_chunk)
+                        except Exception:
+                            logger.warning(
+                                "TTS pre-flush chunker drain failed",
+                                exc_info=True,
+                            )
+                for _ in range(pending):
+                    if not _tts_has_unflushed_text:
+                        break
+                    try:
+                        await _tts_send_text(" ", flush=True)
+                    except Exception:
+                        logger.warning("TTS block flush failed", exc_info=True)
+
             _tts_audio_task: asyncio.Task | None = None
             _tts_audio_done = asyncio.Event()
             _tts_audio_ready = asyncio.Event()
             _tts_audio_chunk_idx = 0
+            _tts_connect_task: asyncio.Task[ElevenLabsStreamingTTS] | None = None
+            _tts_input_closed = False
+
+            async def _tts_send_text(
+                text: str,
+                *,
+                flush: bool = False,
+                try_trigger_generation: bool = False,
+            ) -> None:
+                nonlocal _tts_has_unflushed_text
+                assert _tts_client is not None
+                await _tts_client.send_text(
+                    text,
+                    flush=flush,
+                    try_trigger_generation=try_trigger_generation,
+                )
+                if flush:
+                    _tts_has_unflushed_text = False
+                elif text:
+                    _tts_has_unflushed_text = True
 
             async def _tts_cleanup() -> None:
-                nonlocal _tts_client, _tts_audio_task
+                nonlocal _tts_client, _tts_audio_task, _tts_connect_task
+                if _tts_connect_task:
+                    connect_task = _tts_connect_task
+                    _tts_connect_task = None
+                    if not connect_task.done():
+                        connect_task.cancel()
+                    try:
+                        connected_client = await connect_task
+                    except asyncio.CancelledError:
+                        # Expected after explicitly canceling the connect task.
+                        pass
+                    except Exception:
+                        logger.warning("TTS connect cleanup failed", exc_info=True)
+                    else:
+                        if _tts_client is None:
+                            _tts_client = connected_client
+                        elif connected_client is not _tts_client:
+                            try:
+                                await connected_client.cleanup()
+                            except Exception:
+                                logger.warning(
+                                    "TTS orphaned connect cleanup failed",
+                                    exc_info=True,
+                                )
                 if _tts_audio_task and not _tts_audio_task.done():
                     _tts_audio_task.cancel()
                     try:
@@ -3660,6 +3917,33 @@ async def run_response(
                         _tts_client = None
 
             try:
+
+                async def _tts_connect() -> ElevenLabsStreamingTTS:
+                    assert tts_api_key is not None
+                    assert tts_voice_id is not None
+                    tts_client: ElevenLabsStreamingTTS | None = None
+                    try:
+                        tts_client = ElevenLabsStreamingTTS(
+                            tts_api_key,
+                            tts_voice_id,
+                            voice_settings=tts_voice_settings,
+                        )
+                        await tts_client.connect()
+                        return tts_client
+                    except asyncio.CancelledError:
+                        if tts_client is not None:
+                            try:
+                                await tts_client.cleanup()
+                            except Exception:
+                                logger.warning(
+                                    "TTS connect cancellation cleanup failed",
+                                    exc_info=True,
+                                )
+                        raise
+
+                if _tts_enabled:
+                    _tts_connect_task = asyncio.create_task(_tts_connect())
+
                 stream: AsyncStream[ResponseStreamEvent] = await cli.responses.create(
                     include=include_with,
                     input=input_items,
@@ -3700,6 +3984,8 @@ async def run_response(
                     anonymous_link_auth=anonymous_link_auth,
                     anonymous_session_id=anonymous_session_id,
                     anonymous_link_id=anonymous_link_id,
+                    lecture_video_dual_text_mode=lecture_video_dual_text_mode,
+                    lecture_video_followups_mode=lecture_video_followups_mode,
                 )
 
                 async def _tts_receive_audio(
@@ -3721,17 +4007,92 @@ async def run_response(
                     finally:
                         _tts_audio_done.set()
 
+                async def _tts_start_audio() -> None:
+                    nonlocal _tts_client, _tts_audio_task, _tts_connect_task
+                    if _tts_client is not None:
+                        return
+                    try:
+                        if _tts_connect_task:
+                            _tts_client = await _tts_connect_task
+                            _tts_connect_task = None
+                        else:
+                            assert tts_api_key is not None
+                            assert tts_voice_id is not None
+                            _tts_client = ElevenLabsStreamingTTS(
+                                tts_api_key,
+                                tts_voice_id,
+                                voice_settings=tts_voice_settings,
+                            )
+                            await _tts_client.connect()
+                        handler.enqueue_audio_started()
+                        _tts_audio_task = asyncio.create_task(
+                            _tts_receive_audio(_tts_client)
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Failed to start TTS streaming",
+                            exc_info=True,
+                        )
+                        if _tts_client is not None:
+                            try:
+                                await _tts_client.cleanup()
+                            except Exception:
+                                logger.warning(
+                                    "TTS cleanup after connect failure failed",
+                                    exc_info=True,
+                                )
+                        _tts_client = None
+
                 async def _tts_finish_input() -> None:
-                    if _tts_sanitizer and _tts_client:
+                    if _tts_sanitizer and _tts_chunker and _tts_client:
+                        transformed_remaining = (
+                            _tts_pua_transformer.flush() if _tts_pua_transformer else ""
+                        )
+                        if transformed_remaining:
+                            for chunk in _tts_sanitizer.add(transformed_remaining):
+                                try:
+                                    tts_chunks = _tts_chunker.add(chunk)
+                                    for tts_chunk in tts_chunks:
+                                        await _tts_send_text(
+                                            tts_chunk,
+                                        )
+                                except Exception:
+                                    logger.warning(
+                                        "TTS final transform flush failed",
+                                        exc_info=True,
+                                    )
                         remaining = _tts_sanitizer.flush()
                         if remaining:
                             try:
-                                await _tts_client.send_text(remaining, flush=True)
+                                tts_chunks = _tts_chunker.add(remaining)
+                                for chunk in tts_chunks:
+                                    await _tts_send_text(
+                                        chunk,
+                                    )
                             except Exception:
                                 logger.warning(
                                     "TTS final flush failed",
                                     exc_info=True,
                                 )
+                        final_chunk = _tts_chunker.flush()
+                        if final_chunk:
+                            try:
+                                await _tts_send_text(
+                                    final_chunk,
+                                    flush=True,
+                                )
+                            except Exception:
+                                logger.warning(
+                                    "TTS final flush failed",
+                                    exc_info=True,
+                                )
+
+                async def _tts_close_input() -> None:
+                    nonlocal _tts_input_closed
+                    if _tts_input_closed:
+                        return
+                    await _tts_finish_input()
+                    if _tts_client:
                         try:
                             await _tts_client.close_input()
                         except Exception:
@@ -3739,6 +4100,7 @@ async def run_response(
                                 "TTS close_input failed",
                                 exc_info=True,
                             )
+                    _tts_input_closed = True
 
                 stream_iter = stream.__aiter__()
                 openai_event_task = asyncio.create_task(stream_iter.__anext__())
@@ -3789,7 +4151,7 @@ async def run_response(
                                             event.item
                                         )
                                         if handler.force_stopped:
-                                            await _tts_finish_input()
+                                            await _tts_close_input()
                                             break
                                     case "code_interpreter_call":
                                         await handler.on_code_interpreter_tool_call_created(
@@ -3823,45 +4185,32 @@ async def run_response(
                                         )
                                         # Start TTS connection on first text part
                                         if _tts_enabled and not _tts_client:
-                                            try:
-                                                assert tts_api_key is not None
-                                                assert tts_voice_id is not None
-                                                _tts_client = ElevenLabsStreamingTTS(
-                                                    tts_api_key, tts_voice_id
-                                                )
-                                                await _tts_client.connect()
-                                                handler.enqueue_audio_started()
-                                                _tts_audio_task = asyncio.create_task(
-                                                    _tts_receive_audio(_tts_client)
-                                                )
-                                            except Exception:
-                                                logger.warning(
-                                                    "Failed to start TTS streaming",
-                                                    exc_info=True,
-                                                )
-                                                if _tts_client is not None:
-                                                    try:
-                                                        await _tts_client.cleanup()
-                                                    except Exception:
-                                                        logger.warning(
-                                                            "TTS cleanup after connect failure failed",
-                                                            exc_info=True,
-                                                        )
-                                                _tts_client = None
+                                            await _tts_start_audio()
                                     case _:
                                         pass
                             case "response.output_text.delta":
                                 await handler.on_output_text_delta(event)
                                 # Feed text to TTS accumulator
-                                if _tts_sanitizer and _tts_client:
-                                    for chunk in _tts_sanitizer.add(event.delta):
-                                        try:
-                                            await _tts_client.send_text(chunk)
-                                        except Exception:
-                                            logger.warning(
-                                                "TTS send_text failed",
-                                                exc_info=True,
-                                            )
+                                if _tts_sanitizer and _tts_chunker and _tts_client:
+                                    tts_delta = (
+                                        _tts_pua_transformer.add(event.delta)
+                                        if _tts_pua_transformer
+                                        else event.delta
+                                    )
+                                    if tts_delta:
+                                        for chunk in _tts_sanitizer.add(tts_delta):
+                                            try:
+                                                tts_chunks = _tts_chunker.add(chunk)
+                                                for tts_chunk in tts_chunks:
+                                                    await _tts_send_text(
+                                                        tts_chunk,
+                                                    )
+                                            except Exception:
+                                                logger.warning(
+                                                    "TTS send_text failed",
+                                                    exc_info=True,
+                                                )
+                                    await _tts_drain_flush_signals()
                             case "response.output_text.annotation.added":
                                 match event.annotation["type"]:
                                     case "container_file_citation":
@@ -3889,7 +4238,7 @@ async def run_response(
                                         await handler.on_output_text_part_done(
                                             event.part
                                         )
-                                        # Flush remaining text to TTS and close input
+                                        # Flush remaining text while keeping TTS open for later parts.
                                         await _tts_finish_input()
                                     case _:
                                         pass
@@ -3972,12 +4321,16 @@ async def run_response(
                                     case _:
                                         pass
                             case "response.completed":
+                                await _tts_close_input()
                                 await handler.on_response_completed(event)
                             case "response.incomplete":
+                                await _tts_close_input()
                                 await handler.on_response_completed(event)
                             case "response.failed":
+                                await _tts_close_input()
                                 await handler.on_response_completed(event)
                             case "error":
+                                await _tts_close_input()
                                 await handler.on_response_error(event)
                             case _:
                                 pass
@@ -4388,19 +4741,12 @@ def format_instructions(
     disable_prompt_randomization: bool = False,
     thread_id: str | None = None,
     user_id: int | None = None,
+    lecture_video_mode: bool = False,
 ) -> str:
     """Format instructions for a prompt."""
 
     if use_latex:
-        instructions += (
-            "\n\n"
-            "---Formatting: LaTeX---\n"
-            "Use LaTeX with math mode delimiters when outputting "
-            "mathematical tokens. Use the single dollar sign $ with spaces "
-            "surrounding it to delimit "
-            "inline math. For block-level math, use double dollar signs $$ "
-            "with newlines before and after them as the opening and closing "
-            "delimiter. Do not use LaTeX inside backticks.\n\n"
+        diagram_formatting_instructions = (
             "---Formatting: Mermaid---\n"
             "When a diagram would make the answer clearer, use Mermaid. "
             "Wrap Mermaid diagrams in fenced code blocks with the language "
@@ -4424,6 +4770,138 @@ def format_instructions(
             "foreignObject, or external assets inside SVG. Prefer simple inline "
             "styles or attributes and include a viewBox."
         )
+        if lecture_video_mode:
+            instructions += (
+                "\n\n"
+                "---Formatting: Lecture Video Dual Speech/Display Blocks---\n"
+                "Before producing the final answer, check whether any part of it "
+                "contains math, symbols, formulas, special characters, "
+                "notation, or any text that should be spoken differently from "
+                "how it should be displayed. If it does, you MUST emit that part "
+                "as a private-use block.\n"
+                "A block payload is a compact JSON object with at least one "
+                "of `speech` or `content`. `speech` is the natural spoken "
+                "form. `content` is the exact visible form. Include both keys "
+                "when text should be spoken one way and displayed another way. "
+                "Use only `speech` when the spoken and visible forms are "
+                "identical. Use only `content` when something should be shown "
+                "but not spoken. Do not write an empty `speech` key for "
+                "show-only content; omit `speech` instead. Use a `say` block "
+                "for math, symbols, formulas, special characters, "
+                "abbreviations, notation, or any text that should be spelled "
+                "out for speech but displayed differently for reading. Use a "
+                "`mermaid` or `svg` block to wrap a Mermaid or SVG fenced "
+                "code block.\n"
+                "For math display, use the single dollar sign $ with spaces "
+                "surrounding it for inline math. For block-level math, use "
+                "double dollar signs $$ with newlines before and after them as "
+                "the opening and closing delimiter. Do not use LaTeX inside "
+                "backticks.\n"
+                "Write the spoken form as natural spoken language.\n"
+                "Do not output raw $...$ or $$...$$ math directly in normal "
+                "lecture-video answers. Do not output raw symbolic tokens like "
+                "variable names, operators, equations, inequalities, units, "
+                "abbreviations, or notation directly when their spoken form "
+                "differs from their written form. This includes short "
+                "single-symbol math like $ a $ or $ c $. Only leave text outside "
+                "a block when the visible text is already exactly natural "
+                "and correct for speech as written.\n"
+                "Use exactly this format, with U+E200 before the marker name "
+                "(`say`, `mermaid`, or `svg`), U+E202 after the marker name, a "
+                "compact JSON payload, and U+E201 to close:\n"
+                '\ue200say\ue202{"speech":"a squared plus b squared equals c '
+                'squared","content":"$$\\na^2 + b^2 = c^2\\n$$"}\ue201\n'
+                "`speech` must be a single-line JSON string of natural spoken "
+                "language. `content` must be the exact text the student should "
+                "read, using the LaTeX, symbol, or normal text formatting "
+                "rules above. The block payload must be valid JSON: escape "
+                "newlines as \\n and write LaTeX backslashes in `content` as "
+                "`\\\\`, for example `\\\\frac`, not `\\frac`. If "
+                "the spoken and visible forms are identical, omit `content`, "
+                "writing only:\n"
+                '\ue200say\ue202{"speech":"alpha"}\ue201\n'
+                "and the visible form falls back to `speech`. If content "
+                "should be displayed silently, omit `speech`, writing only:\n"
+                '\ue200say\ue202{"content":"$ x^2 $"}\ue201\n'
+                "Block syntax is not recursive. Block values must be "
+                "plain JSON strings only. Never put U+E200, U+E202, or U+E201 "
+                "inside the `speech` or `content` value of another block. A "
+                "block may not contain another block. If multiple spans "
+                "need blocks, close one block before opening the next. Do "
+                "not place blocks inside markdown links, emphasis, inline "
+                "code, or fenced code blocks; put the block outside those "
+                "markdown constructs.\n"
+                "Wrap only the smallest span that needs different speech and "
+                "display. Do not wrap a whole sentence or paragraph if only "
+                "one symbol, formula, diagram, or notation span needs special "
+                "handling. If a sentence contains multiple special spans, emit "
+                "multiple separate blocks with normal prose between them.\n"
+                "Before finalizing, check that every U+E200 has exactly one "
+                "marker, one U+E202, one valid compact JSON object, and one "
+                "matching U+E201; no block contains another U+E200; "
+                "`speech`, when present, has no newline; `say` blocks use "
+                "visible math only in `content`; content-only blocks are "
+                "used only when the content should be shown silently; and "
+                "`svg` and `mermaid` blocks put exactly one fenced code "
+                "block in `content`.\n"
+                "Incorrect: If "
+                '\ue200say\ue202{"speech":"If \ue200say\ue202x","content":"$ x $"}\ue201'
+                " is two.\n"
+                'Correct: If \ue200say\ue202{"speech":"x","content":"$ x $"}\ue201'
+                " is two.\n"
+                "Incorrect: They have written $ 10a + 5c $ and ask whether it "
+                "becomes $ 15ac $.\n"
+                "Correct: They have written "
+                '\ue200say\ue202{"speech":"ten a plus five c",'
+                '"content":"$ 10a + 5c $"}\ue201'
+                " and ask whether it becomes "
+                '\ue200say\ue202{"speech":"fifteen a c",'
+                '"content":"$ 15ac $"}\ue201.\n'
+                "Incorrect: One has $ a $, the other has $ c $.\n"
+                "Correct: One has "
+                '\ue200say\ue202{"speech":"a","content":"$ a $"}\ue201'
+                ", the other has "
+                '\ue200say\ue202{"speech":"c","content":"$ c $"}\ue201.\n'
+                "When you output a Mermaid or SVG fenced code block in a "
+                "lecture-video response, you MUST wrap the entire fenced code "
+                "block in a `mermaid` or `svg` block (matching the language). "
+                "If the diagram should be spoken about, `speech` should be a "
+                "short, natural description of what the diagram shows, not the "
+                "code. If the diagram should be shown silently, omit `speech`. "
+                "`content` is the exact fenced code block the student should "
+                "see, with newlines escaped as \\n inside the JSON string.\n"
+                "Correct Mermaid diagram:\n"
+                '\ue200mermaid\ue202{"speech":"Here is a simple flow from input '
+                'to output.","content":"```mermaid\\ngraph TD\\n    A[Input] '
+                '--> B[Output]\\n```"}\ue201\n'
+                "Correct SVG diagram:\n"
+                '\ue200svg\ue202{"speech":"Here is a simple yellow circle.",'
+                '"content":"```svg\\n<svg xmlns=\'http://www.w3.org/2000/svg\' '
+                "viewBox='0 0 100 100'>\\n  <circle cx='50' cy='50' r='40' "
+                "fill='gold'/>\\n</svg>\\n```\"}\ue201\n"
+                "Correct silent display-only math:\n"
+                '\ue200say\ue202{"content":"$ x^2 $"}\ue201\n'
+                "If a Mermaid or SVG block includes `speech` and contains "
+                "labels, formulas, symbols, or notation, the spoken "
+                "description must include the natural spoken form of those "
+                "labels or symbols.\n"
+                "If you are deciding between raw LaTeX and a block "
+                "in a lecture-video response, choose the block.\n"
+                "Do not mention the block syntax to the user.\n\n"
+                + diagram_formatting_instructions
+            )
+        else:
+            instructions += (
+                "\n\n"
+                "---Formatting: LaTeX---\n"
+                "Use LaTeX with math mode delimiters when outputting "
+                "mathematical tokens. Use the single dollar sign $ with spaces "
+                "surrounding it to delimit "
+                "inline math. For block-level math, use double dollar signs $$ "
+                "with newlines before and after them as the opening and closing "
+                "delimiter. Do not use LaTeX inside backticks.\n\n"
+                + diagram_formatting_instructions
+            )
 
     if use_image_descriptions:
         instructions += (
@@ -4484,6 +4962,46 @@ def format_instructions(
             """
         )
 
+    if lecture_video_mode:
+        instructions += (
+            "\n\n"
+            "---Formatting: Lecture Video Follow-ups---\n"
+            "At the very end of your final answer, you may emit follow-up "
+            "responses that the student can select to continue the chat. Three "
+            "is the maximum, not a target. Return 0, 1, 2, or 3 responses "
+            "depending on what is genuinely useful. Prefer fewer responses when "
+            "the options would be repetitive, overlapping, or only weakly "
+            "helpful. Each response must be meaningfully distinct from the "
+            "others and written as a direct user message in the student's voice, "
+            "not as a question from the assistant.\n"
+            "Follow-up responses must obey the same content-control boundary as "
+            "your answer. They must only invite discussion of what the learner "
+            "has already encountered at or before the current point. Do not "
+            "include, preview, hint at, ask about, or steer toward content from "
+            "`After this moment`, `Upcoming Knowledge Check`, or any part of the "
+            "lecture the learner has not reached yet. Avoid next-step prompts "
+            'like "What should I look for next?" or "What happens next?" because '
+            "they point ahead of the current moment. If the learner has seen "
+            "very little so far, return 0 or 1 response rather than padding the "
+            "list. If several candidate responses would all mean roughly the "
+            "same thing, keep only the best one.\n"
+            "Use exactly this private-use format, with U+E200 before "
+            f"`{FOLLOWUP_MARKER_NAME}`, U+E202 before the JSON payload, and U+E201 "
+            "after the JSON payload:\n"
+            f"{SAY_MARKER_START}{FOLLOWUP_MARKER_NAME}{SAY_MARKER_SEPARATOR}"
+            '{"responses":["Can you explain that another way?",'
+            f'"Show me a quick example from what we just covered."]}}{SAY_MARKER_END}\n'
+            "If no follow-up responses would help, omit the block or return "
+            f"an empty array like {SAY_MARKER_START}{FOLLOWUP_MARKER_NAME}"
+            f'{SAY_MARKER_SEPARATOR}{{"responses":[]}}{SAY_MARKER_END}. '
+            "The JSON payload must be valid and compact. Include only the "
+            "`responses` array with at most 3 strings. Do not duplicate the "
+            "answer text or provide multiple phrasings of the same next step. "
+            "Do not include answers, hints, clues, or narrowed choices for "
+            "restricted knowledge checks or quizzes. Do not mention the block "
+            "syntax to the user."
+        )
+
     if (
         not disable_prompt_randomization
         and thread_id is not None
@@ -4507,7 +5025,15 @@ def inject_timestamp_to_instructions(
     instructions: str, timezone: str | None = None
 ) -> str:
     """Inject a timestamp into the instructions for the assistant."""
-    # Inject the current time into the instructions
+    return (
+        instructions
+        + "\n---Other context---\n"
+        + format_current_datetime_context(timezone)
+    )
+
+
+def format_current_datetime_context(timezone: str | None = None) -> str:
+    """Format the current date and time for model context."""
     if timezone:
         try:
             tz = ZoneInfo(timezone)
@@ -4521,8 +5047,7 @@ def inject_timestamp_to_instructions(
         tz = ZoneInfo("UTC")
 
     dt = datetime.now(tz)
-    return instructions + (
-        "\n---Other context---\n"
+    return (
         "The current date and time is "
         f"{dt.strftime('%Y-%m-%d %H:%M:%S')} ({dt.tzname()})."
     )
@@ -4557,11 +5082,37 @@ def export_user_identifier(thread: models.Thread, class_: models.Class) -> str:
     return ", ".join(user_hashes)
 
 
+def redact_share_token(share_token: str) -> str:
+    return f"...{share_token[-10:]}"
+
+
+def export_share_link_columns(thread: models.Thread) -> tuple[str, str]:
+    links = []
+    seen_link_keys: set[int | str] = set()
+    for user in thread.users:
+        if not user.anonymous_link:
+            continue
+
+        link_key = user.anonymous_link.id or user.anonymous_link.share_token
+        if link_key in seen_link_keys:
+            continue
+
+        seen_link_keys.add(link_key)
+        links.append(user.anonymous_link)
+
+    names = [link.name or "Shared Link" for link in links]
+    tokens = [redact_share_token(link.share_token) for link in links]
+    return ", ".join(names), ", ".join(tokens)
+
+
 async def export_class_threads_anonymized(
     cli: openai.AsyncClient,
     class_id: str,
     user_id: int,
     nowfn: NowFn = utcnow,
+    include_only_assistant_ids: list[int] | None = None,
+    last_activity_after: datetime | None = None,
+    last_activity_before: datetime | None = None,
 ) -> None:
     await export_class_threads(
         cli=cli,
@@ -4569,6 +5120,9 @@ async def export_class_threads_anonymized(
         user_id=user_id,
         nowfn=nowfn,
         include_user_emails=False,
+        include_only_assistant_ids=include_only_assistant_ids,
+        last_activity_after=last_activity_after,
+        last_activity_before=last_activity_before,
     )
 
 
@@ -4577,6 +5131,9 @@ async def export_class_threads_with_emails(
     class_id: str,
     user_id: int,
     nowfn: NowFn = utcnow,
+    include_only_assistant_ids: list[int] | None = None,
+    last_activity_after: datetime | None = None,
+    last_activity_before: datetime | None = None,
 ) -> None:
     await export_class_threads(
         cli=cli,
@@ -4584,6 +5141,9 @@ async def export_class_threads_with_emails(
         user_id=user_id,
         nowfn=nowfn,
         include_user_emails=True,
+        include_only_assistant_ids=include_only_assistant_ids,
+        last_activity_after=last_activity_after,
+        last_activity_before=last_activity_before,
     )
 
 
@@ -4593,7 +5153,10 @@ async def export_threads_multiple_classes(
     include_user_emails: bool = False,
     include_only_user_ids: list[int] | None = None,
     include_only_user_emails: list[str] | None = None,
+    include_only_assistant_ids: list[int] | None = None,
     nowfn: NowFn = utcnow,
+    last_activity_after: datetime | None = None,
+    last_activity_before: datetime | None = None,
 ) -> None:
     async with config.db.driver.async_session() as session:
         requestor = None
@@ -4624,6 +5187,8 @@ async def export_threads_multiple_classes(
                 [
                     "Class ID",
                     "Class Name",
+                    "Share Link Name",
+                    "Share Token",
                     "Assistant ID",
                     "Assistant Name",
                     "Role",
@@ -4645,6 +5210,9 @@ async def export_threads_multiple_classes(
                     class_id=int(class_.id),
                     desc=False,
                     include_only_user_ids=user_ids,
+                    include_only_assistant_ids=include_only_assistant_ids,
+                    last_activity_after=last_activity_after,
+                    last_activity_before=last_activity_before,
                 ):
                     (
                         assistant,
@@ -4662,6 +5230,7 @@ async def export_threads_multiple_classes(
                         user_hashes_str = thread.conversation_id
                     else:
                         user_hashes_str = export_user_identifier(thread, class_)
+                    share_link_names, share_tokens = export_share_link_columns(thread)
 
                     user_emails_str = "REDACTED"
                     if include_user_emails:
@@ -4677,6 +5246,8 @@ async def export_threads_multiple_classes(
                         [
                             class_.id,
                             class_.name,
+                            share_link_names,
+                            share_tokens,
                             assistant_id,
                             assistant_name,
                             "system_prompt",
@@ -4714,6 +5285,8 @@ async def export_threads_multiple_classes(
                                     [
                                         class_.id,
                                         class_.name,
+                                        share_link_names,
+                                        share_tokens,
                                         assistant_id,
                                         assistant_name,
                                         message.role,
@@ -4734,8 +5307,14 @@ async def export_threads_multiple_classes(
                                 break
                             after = messages.data[-1].id
                     elif thread.version == 3:
+                        display_say_snippets = (
+                            thread.interaction_mode == InteractionMode.LECTURE_VIDEO
+                        )
                         export_rows = await list_export_rows_v3(
-                            session, thread.id, file_names
+                            session,
+                            thread.id,
+                            file_names,
+                            display_say_snippets=display_say_snippets,
                         )
 
                         for role, created_at, content in export_rows:
@@ -4748,6 +5327,8 @@ async def export_threads_multiple_classes(
                                 [
                                     class_.id,
                                     class_.name,
+                                    share_link_names,
+                                    share_tokens,
                                     assistant_id,
                                     assistant_name,
                                     role,
@@ -4825,6 +5406,9 @@ async def export_class_threads(
     user_id: int,
     nowfn: NowFn = utcnow,
     include_user_emails: bool = False,
+    include_only_assistant_ids: list[int] | None = None,
+    last_activity_after: datetime | None = None,
+    last_activity_before: datetime | None = None,
 ) -> None:
     async with config.db.driver.async_session() as session:
         class_ = None
@@ -4847,6 +5431,8 @@ async def export_class_threads(
                 [
                     "Class ID",
                     "Class Name",
+                    "Share Link Name",
+                    "Share Token",
                     "Assistant ID",
                     "Assistant Name",
                     "Role",
@@ -4858,7 +5444,12 @@ async def export_class_threads(
             csvwriter.writerow(header)
 
             async for thread in models.Thread.get_thread_by_class_id(
-                session, class_id=int(class_id), desc=False
+                session,
+                class_id=int(class_id),
+                desc=False,
+                include_only_assistant_ids=include_only_assistant_ids,
+                last_activity_after=last_activity_after,
+                last_activity_before=last_activity_before,
             ):
                 (
                     assistant,
@@ -4874,6 +5465,7 @@ async def export_class_threads(
                     user_hashes_str = thread.conversation_id
                 else:
                     user_hashes_str = export_user_identifier(thread, class_)
+                share_link_names, share_tokens = export_share_link_columns(thread)
 
                 user_emails_str = "REDACTED"
                 if include_user_emails:
@@ -4889,6 +5481,8 @@ async def export_class_threads(
                     [
                         class_.id,
                         class_.name,
+                        share_link_names,
+                        share_tokens,
                         assistant_id,
                         assistant_name,
                         "system_prompt",
@@ -4926,6 +5520,8 @@ async def export_class_threads(
                                 [
                                     class_.id,
                                     class_.name,
+                                    share_link_names,
+                                    share_tokens,
                                     assistant_id,
                                     assistant_name,
                                     message.role,
@@ -4946,8 +5542,14 @@ async def export_class_threads(
                             break
                         after = messages.data[-1].id
                 elif thread.version == 3:
+                    display_say_snippets = (
+                        thread.interaction_mode == InteractionMode.LECTURE_VIDEO
+                    )
                     export_rows = await list_export_rows_v3(
-                        session, thread.id, file_names
+                        session,
+                        thread.id,
+                        file_names,
+                        display_say_snippets=display_say_snippets,
                     )
 
                     for role, created_at, content in export_rows:
@@ -4960,6 +5562,8 @@ async def export_class_threads(
                             [
                                 class_.id,
                                 class_.name,
+                                share_link_names,
+                                share_tokens,
                                 assistant_id,
                                 assistant_name,
                                 role,
@@ -5083,11 +5687,41 @@ def _format_message_uploads_v3(message: models.Message) -> str | None:
     return "\n".join(lines)
 
 
+def _export_message_part_text_v3(
+    message: models.Message,
+    part: models.MessagePart,
+    file_names: dict[str, str],
+    class_id: int,
+    thread_id: int,
+    display_say_snippets: bool,
+) -> str:
+    text = replace_annotations_in_text_v3(
+        part=part,
+        file_names=file_names,
+        class_id=class_id,
+        thread_id=thread_id,
+        message_id=message.id,
+    )
+    if (
+        message.role == MessageRole.ASSISTANT
+        and part.type == MessagePartType.OUTPUT_TEXT
+    ):
+        text = strip_followup_snippets(text or "")
+    if (
+        display_say_snippets
+        and message.role == MessageRole.ASSISTANT
+        and part.type == MessagePartType.OUTPUT_TEXT
+    ):
+        return transform_say_text(text, "display")
+    return text
+
+
 def process_message_content_v3(
     message: models.Message,
     file_names: dict[str, str],
     class_id: int,
     thread_id: int,
+    display_say_snippets: bool = False,
 ) -> str:
     """Process message content for CSV export. The end result is a single string with all the content combined.
     Images are replaced with their file names, and text is extracted from the content parts.
@@ -5098,12 +5732,13 @@ def process_message_content_v3(
         match part.type:
             case MessagePartType.INPUT_TEXT:
                 processed_content.append(
-                    replace_annotations_in_text_v3(
-                        part=part,
-                        file_names=file_names,
-                        class_id=class_id,
-                        thread_id=thread_id,
-                        message_id=message.id,
+                    _export_message_part_text_v3(
+                        message,
+                        part,
+                        file_names,
+                        class_id,
+                        thread_id,
+                        display_say_snippets,
                     )
                 )
             case MessagePartType.INPUT_IMAGE:
@@ -5112,12 +5747,13 @@ def process_message_content_v3(
                 )
             case MessagePartType.OUTPUT_TEXT:
                 processed_content.append(
-                    replace_annotations_in_text_v3(
-                        part=part,
-                        file_names=file_names,
-                        class_id=class_id,
-                        thread_id=thread_id,
-                        message_id=message.id,
+                    _export_message_part_text_v3(
+                        message,
+                        part,
+                        file_names,
+                        class_id,
+                        thread_id,
+                        display_say_snippets,
                     )
                 )
             case MessagePartType.REFUSAL:
@@ -5368,6 +6004,7 @@ def build_export_rows_v3(
     class_id: int,
     thread_id: int,
     file_names: dict[str, str],
+    display_say_snippets: bool = False,
 ) -> list[tuple[str, datetime, str]]:
     rows: list[tuple[int, datetime, str, str]] = []
 
@@ -5377,7 +6014,13 @@ def build_export_rows_v3(
                 message.output_index,
                 message.created,
                 _enum_value(message.role),
-                process_message_content_v3(message, file_names, class_id, thread_id),
+                process_message_content_v3(
+                    message,
+                    file_names,
+                    class_id,
+                    thread_id,
+                    display_say_snippets=display_say_snippets,
+                ),
             )
         )
 
@@ -5406,7 +6049,10 @@ def build_export_rows_v3(
 
 
 async def list_export_rows_v3(
-    session: AsyncSession, thread_id: int, file_names: dict[str, str]
+    session: AsyncSession,
+    thread_id: int,
+    file_names: dict[str, str],
+    display_say_snippets: bool = False,
 ) -> list[tuple[str, datetime, str]]:
     messages = [
         message
@@ -5432,6 +6078,7 @@ async def list_export_rows_v3(
         thread.class_id,
         thread_id,
         file_names,
+        display_say_snippets=display_say_snippets,
     )
 
 

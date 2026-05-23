@@ -41,6 +41,7 @@ export type Message = {
 	data: api.OpenAIMessage;
 	error: ApiError | null;
 	persisted: boolean;
+	streamedInSession?: boolean;
 };
 
 function getOutputIndexValue(message: api.OpenAIMessage): number | null {
@@ -193,6 +194,7 @@ export class ThreadManager {
 
 	#data: Writable<ThreadManagerState>;
 	#fetcher: api.Fetcher;
+	#streamedMessageIds = new Set<string>();
 
 	// -- TTS audio playback state --
 	#ttsPlayer: WavStreamPlayer | null = null;
@@ -257,37 +259,44 @@ export class ThreadManager {
 			const realMessages = ($data.data?.messages || []).map((message) => ({
 				data: withSourceMessageId(message),
 				error: null,
-				persisted: true
+				persisted: true,
+				streamedInSession: this.#streamedMessageIds.has(message.id)
 			}));
 			const ci_messages = ($data.data?.ci_messages || []).map((message) => ({
 				data: withSourceMessageId(message),
 				error: null,
-				persisted: true
+				persisted: true,
+				streamedInSession: this.#streamedMessageIds.has(message.id)
 			}));
 			const fs_messages = ($data.data?.fs_messages || []).map((message) => ({
 				data: withSourceMessageId(message),
 				error: null,
-				persisted: true
+				persisted: true,
+				streamedInSession: this.#streamedMessageIds.has(message.id)
 			}));
 			const ws_messages = ($data.data?.ws_messages || []).map((message) => ({
 				data: withSourceMessageId(message),
 				error: null,
-				persisted: true
+				persisted: true,
+				streamedInSession: this.#streamedMessageIds.has(message.id)
 			}));
 			const mcp_messages = ($data.data?.mcp_messages || []).map((message) => ({
 				data: withSourceMessageId(message),
 				error: null,
-				persisted: true
+				persisted: true,
+				streamedInSession: this.#streamedMessageIds.has(message.id)
 			}));
 			const reasoning_messages = ($data.data?.reasoning_messages || []).map((message) => ({
 				data: withSourceMessageId(message),
 				error: null,
-				persisted: true
+				persisted: true,
+				streamedInSession: this.#streamedMessageIds.has(message.id)
 			}));
 			const optimisticMessages = $data.optimistic.map((message) => ({
 				data: withSourceMessageId(message),
 				error: null,
-				persisted: false
+				persisted: false,
+				streamedInSession: false
 			}));
 
 			const allMessages = realMessages
@@ -335,6 +344,7 @@ export class ThreadManager {
 
 					const merged: Message = {
 						...base,
+						streamedInSession: group.some((message) => message.streamedInSession),
 						data: {
 							...base.data,
 							content: mergedContent
@@ -707,7 +717,8 @@ export class ThreadManager {
 		vision_file_ids?: string[],
 		vision_image_descriptions?: api.ImageProxy[],
 		optimisticVisionFiles?: api.OptimisticVisionFile[],
-		attachments?: api.ServerFile[]
+		attachments?: api.ServerFile[],
+		lecture_video_playback_position_ms?: number
 	) {
 		if (!message) {
 			callback({
@@ -756,8 +767,17 @@ export class ThreadManager {
 		const optimisticMessageContent = message + visionImageDescriptionsString;
 		const threadVersion = get(this.version);
 		const currentState = get(this.#data);
+		const isLectureVideoThread = currentState?.data?.thread?.interaction_mode === 'lecture_video';
 		const optimisticOutputIndex =
 			threadVersion === 3 ? this.#getNextOutputIndex(currentState) : undefined;
+		const optimisticAssistantMsgId = isLectureVideoThread
+			? `optimistic-assistant-${(Math.random() + 1).toString(36).substring(2)}`
+			: null;
+		const optimisticAssistantOutputIndex =
+			isLectureVideoThread && optimisticOutputIndex !== undefined
+				? optimisticOutputIndex + 1
+				: undefined;
+		const optimisticCreatedAt = Date.now() / 1000;
 		const optimistic: api.OpenAIMessage = {
 			id: optimisticMsgId,
 			role: 'user',
@@ -765,7 +785,7 @@ export class ThreadManager {
 				{ type: 'text', text: { value: optimisticMessageContent, annotations: [] } },
 				...optimisticImageContent
 			],
-			created_at: Math.floor(Date.now() / 1000),
+			created_at: optimisticCreatedAt,
 			metadata: {
 				user_id: fromUserId,
 				is_current_user: true,
@@ -793,20 +813,49 @@ export class ThreadManager {
 			output_index: optimisticOutputIndex,
 			attachments: (attachments || []).map((file) => ({ file_id: file.file_id, tools: [] }))
 		};
+		const optimisticAssistant: api.OpenAIMessage | null = optimisticAssistantMsgId
+			? {
+					id: optimisticAssistantMsgId,
+					role: 'assistant',
+					content: [],
+					// Keep the pending assistant placeholder after the user's optimistic message if
+					// consumers fall back to created_at ordering before output_index is available.
+					created_at: optimisticCreatedAt + 0.001,
+					metadata: {
+						lecture_context_pending: true
+					},
+					assistant_id: '',
+					file_search_file_ids: [],
+					code_interpreter_file_ids: [],
+					vision_file_ids: [],
+					run_id: null,
+					object: 'thread.message',
+					output_index: optimisticAssistantOutputIndex,
+					attachments: []
+				}
+			: null;
 
 		// Interrupt any active TTS playback from a previous response
-		await this.interruptTts();
+		const interruptTtsPromise = this.interruptTts().catch((err) => {
+			console.warn('TTS: interrupt before send failed', err);
+		});
 
 		this.#data.update((d) => ({
 			...d,
 			error: null,
-			optimistic: [...d.optimistic, optimistic],
+			optimistic: [
+				...d.optimistic,
+				optimistic,
+				...(optimisticAssistant ? [optimisticAssistant] : [])
+			],
 			submitting: true,
 			attachments: {
 				...d.attachments,
 				...attachments?.reduce((acc, file) => ({ ...acc, [file.file_id]: file }), {})
 			}
 		}));
+
+		await interruptTtsPromise;
 
 		const chunks = await api.postMessage(this.#fetcher, this.classId, this.threadId, {
 			message,
@@ -815,8 +864,9 @@ export class ThreadManager {
 			vision_file_ids,
 			vision_image_descriptions,
 			timezone: this.timezone,
-			...(currentState?.data?.thread?.interaction_mode === 'lecture_video'
-				? { generate_speech: !get(this.#ttsMuted) }
+			...(isLectureVideoThread ? { generate_speech: !get(this.#ttsMuted) } : {}),
+			...(lecture_video_playback_position_ms !== undefined
+				? { lecture_video_playback_position_ms }
 				: {})
 		});
 
@@ -831,7 +881,9 @@ export class ThreadManager {
 			if (e instanceof api.PresendError || e instanceof api.RunActiveError) {
 				this.#data.update((d) => ({
 					...d,
-					optimistic: d.optimistic.filter((msg) => msg.id !== optimisticMsgId),
+					optimistic: d.optimistic.filter(
+						(msg) => msg.id !== optimisticMsgId && msg.id !== optimisticAssistantMsgId
+					),
 					error: { detail: e.message, wasSent: false },
 					attachments: Object.keys(d.attachments).reduce(
 						(acc: Record<string, api.ServerFile>, key: string) => {
@@ -849,11 +901,13 @@ export class ThreadManager {
 			} else if (e instanceof api.StreamError) {
 				this.#data.update((d) => ({
 					...d,
+					optimistic: d.optimistic.filter((msg) => msg.id !== optimisticAssistantMsgId),
 					error: { detail: e.message, wasSent: true }
 				}));
 			} else {
 				this.#data.update((d) => ({
 					...d,
+					optimistic: d.optimistic.filter((msg) => msg.id !== optimisticAssistantMsgId),
 					error: { detail: errorMessage(e, 'Unknown error'), wasSent: true }
 				}));
 			}
@@ -875,6 +929,7 @@ export class ThreadManager {
 			for await (const chunk of chunks) {
 				await this.#handleStreamChunk(chunk, callback);
 			}
+			this.#clearLectureContextPending();
 		} catch (e) {
 			console.error('Error handling stream chunks', e);
 			// If stream was interrupted, stop any active TTS
@@ -922,6 +977,13 @@ export class ThreadManager {
 		return highest + 1;
 	}
 
+	#clearLectureContextPending() {
+		this.#data.update((d) => ({
+			...d,
+			optimistic: d.optimistic.filter((m) => m.metadata?.lecture_context_pending !== true)
+		}));
+	}
+
 	/**
 	 * Set the thread data.
 	 */
@@ -951,8 +1013,12 @@ export class ThreadManager {
 						created_at: createdAt,
 						output_index: outputIndex
 					};
+					if (message.role === 'assistant') {
+						this.#streamedMessageIds.add(message.id);
+					}
 					return {
 						...d,
+						optimistic: d.optimistic.filter((m) => m.metadata?.lecture_context_pending !== true),
 						data: {
 							...d.data!,
 							messages: [...(d.data?.messages || []), message]
@@ -963,7 +1029,11 @@ export class ThreadManager {
 			case 'message_delta':
 				this.#appendDelta(chunk.delta);
 				break;
+			case 'followup_suggestions':
+				this.#setFollowupSuggestions(chunk);
+				break;
 			case 'done':
+				this.#clearLectureContextPending();
 				break;
 			case 'error':
 				if (Array.isArray(chunk.detail)) {
@@ -1043,6 +1113,7 @@ export class ThreadManager {
 		try {
 			const player = new WavStreamPlayer({
 				sampleRate: 24000,
+				stopOnEmptyBuffer: false,
 				onPlaybackStopped: () => {
 					if (this.#ttsPlayer !== player) {
 						return;
@@ -1076,6 +1147,7 @@ export class ThreadManager {
 
 	#handleTtsDone() {
 		// Keep the speaker control visible until buffered audio fully drains.
+		this.#ttsPlayer?.finish();
 		this.#ttsTrackId = null;
 	}
 
@@ -1604,6 +1676,30 @@ export class ThreadManager {
 
 			for (const content of chunk.content) {
 				this.#mergeContent(lastMessage.content, content);
+			}
+
+			return { ...d };
+		});
+	}
+
+	#setFollowupSuggestions(chunk: api.ThreadStreamFollowupSuggestionsChunk) {
+		this.#data.update((d) => {
+			const messages = d.data?.messages || [];
+			const message = messages.find((candidate) => candidate.id === chunk.message_id);
+			if (!message) {
+				console.warn('Received follow-up suggestions for an unknown message.');
+				return d;
+			}
+
+			message.content = message.content.filter(
+				(content) => content.type !== 'followup_suggestions'
+			);
+			const suggestions = chunk.suggestions.map((suggestion) => suggestion.trim()).filter(Boolean);
+			if (suggestions.length > 0) {
+				message.content.push({
+					type: 'followup_suggestions',
+					suggestions
+				});
 			}
 
 			return { ...d };

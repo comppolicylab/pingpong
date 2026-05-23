@@ -1,0 +1,1761 @@
+import shutil
+import subprocess
+from types import SimpleNamespace
+from typing import cast
+
+from google.genai import types
+from pydantic import ValidationError
+import pytest
+
+import pingpong.lecture_video_manifest_generation as manifest_generation
+import pingpong.schemas as schemas
+
+
+def _generated_question() -> manifest_generation.GeneratedQuestion:
+    return manifest_generation.GeneratedQuestion(
+        id=1,
+        question_source="generated",
+        pause_after_word_id="w1",
+        pause_after_word="expression",
+        pause_at=1.0,
+        voice_over_intro="Try this.",
+        question_text="What should happen next?",
+        choices=[
+            manifest_generation.GeneratedChoice(
+                text="Combine like terms", misconception=None
+            ),
+            manifest_generation.GeneratedChoice(
+                text="Change every variable",
+                misconception="Confuses simplification with substitution.",
+            ),
+        ],
+        correct_answer="Combine like terms",
+        choice_feedback={
+            "Combine like terms": manifest_generation.GeneratedChoiceFeedback(
+                voice_over="Right.",
+                resume_at_word_id="w2",
+                resume_at_word="Next",
+                resume_at=1.5,
+            ),
+            "Change every variable": manifest_generation.GeneratedChoiceFeedback(
+                voice_over="Not quite.",
+                resume_at_word_id="w2",
+                resume_at_word="Next",
+                resume_at=1.5,
+            ),
+        },
+    )
+
+
+def _transcript() -> list[schemas.LectureVideoManifestWordV3]:
+    return [
+        schemas.LectureVideoManifestWordV3(
+            id="w1",
+            word="expression",
+            start_offset_ms=0,
+            end_offset_ms=1000,
+        ),
+        schemas.LectureVideoManifestWordV3(
+            id="w2",
+            word="Next",
+            start_offset_ms=1500,
+            end_offset_ms=2000,
+        ),
+    ]
+
+
+def _manifest_with_summary_checkpoint(
+    end_offset_ms: int,
+    summary: str,
+) -> schemas.LectureVideoManifestV4:
+    return schemas.LectureVideoManifestV4(
+        word_level_transcription=_transcript(),
+        summary_checkpoints=[
+            schemas.LectureVideoManifestSummaryCheckpointV4(
+                end_offset_ms=end_offset_ms,
+                summary=summary,
+            )
+        ],
+        moment_contexts=[
+            schemas.LectureVideoManifestMomentContextV4(
+                center_offset_ms=end_offset_ms,
+                start_offset_ms=0,
+                end_offset_ms=end_offset_ms,
+                before="Before this checkpoint.",
+                at="At this checkpoint.",
+                after="After this checkpoint.",
+            )
+        ],
+        questions=[
+            schemas.LectureVideoManifestQuestionV1(
+                type=schemas.LectureVideoQuestionType.SINGLE_SELECT,
+                question_text="Candidate?",
+                intro_text="Try this.",
+                stop_offset_ms=1000,
+                options=[
+                    schemas.LectureVideoManifestOptionV1(
+                        option_text="Combine like terms",
+                        post_answer_text="Right.",
+                        continue_offset_ms=1500,
+                        correct=True,
+                    ),
+                    schemas.LectureVideoManifestOptionV1(
+                        option_text="Change every variable",
+                        post_answer_text="Not quite.",
+                        continue_offset_ms=1500,
+                        correct=False,
+                    ),
+                ],
+            )
+        ],
+    )
+
+
+def test_prepare_lecture_video_audio_for_whisper_retries_until_under_target(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    sizes_by_bitrate = {"32k": 101, "24k": 90}
+    calls: list[list[str]] = []
+
+    monkeypatch.setattr(manifest_generation.shutil, "which", lambda _name: "/ffmpeg")
+    monkeypatch.setattr(manifest_generation, "_WHISPER_UPLOAD_TARGET_BYTES", 100)
+    monkeypatch.setattr(
+        manifest_generation, "_TRANSCRIPTION_AUDIO_BITRATES", ("32k", "24k")
+    )
+
+    def fake_run(args: list[str], **_kwargs):
+        calls.append(args)
+        bitrate = args[args.index("-b:a") + 1]
+        output_path = args[-1]
+        with open(output_path, "wb") as output_file:
+            output_file.write(b"x" * sizes_by_bitrate[bitrate])
+        return subprocess.CompletedProcess(args, 0)
+
+    monkeypatch.setattr(manifest_generation.subprocess, "run", fake_run)
+
+    prepared_path = manifest_generation._prepare_lecture_video_audio_for_whisper(
+        video_path="/tmp/lecture.mp4",
+        temp_dir=str(tmp_path),
+    )
+
+    assert prepared_path.endswith("lecture-video-transcription-24k.webm")
+    assert [call[call.index("-b:a") + 1] for call in calls] == ["32k", "24k"]
+    assert not (tmp_path / "lecture-video-transcription-32k.webm").exists()
+    assert (tmp_path / "lecture-video-transcription-24k.webm").stat().st_size == 90
+
+
+def test_prepare_lecture_video_audio_for_whisper_accepts_under_hard_limit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    sizes_by_bitrate = {"32k": 104, "24k": 103}
+
+    monkeypatch.setattr(manifest_generation.shutil, "which", lambda _name: "/ffmpeg")
+    monkeypatch.setattr(manifest_generation, "_WHISPER_UPLOAD_TARGET_BYTES", 100)
+    monkeypatch.setattr(manifest_generation, "_WHISPER_UPLOAD_MAX_BYTES", 105)
+    monkeypatch.setattr(
+        manifest_generation, "_TRANSCRIPTION_AUDIO_BITRATES", ("32k", "24k")
+    )
+
+    def fake_run(args: list[str], **_kwargs):
+        bitrate = args[args.index("-b:a") + 1]
+        output_path = args[-1]
+        with open(output_path, "wb") as output_file:
+            output_file.write(b"x" * sizes_by_bitrate[bitrate])
+        return subprocess.CompletedProcess(args, 0)
+
+    monkeypatch.setattr(manifest_generation.subprocess, "run", fake_run)
+
+    prepared_path = manifest_generation._prepare_lecture_video_audio_for_whisper(
+        video_path="/tmp/lecture.mp4",
+        temp_dir=str(tmp_path),
+    )
+
+    assert prepared_path.endswith("lecture-video-transcription-24k.webm")
+    assert not (tmp_path / "lecture-video-transcription-32k.webm").exists()
+    assert (tmp_path / "lecture-video-transcription-24k.webm").stat().st_size == 103
+
+
+@pytest.mark.asyncio
+async def test_transcribe_video_words_uses_prepared_audio_without_timestamp_rescale(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    prepared_audio_path = tmp_path / "prepared.webm"
+    prepared_audio_path.write_bytes(b"audio")
+    calls: list[dict] = []
+
+    async def fake_prepare(*, video_path: str, temp_dir: str) -> str:
+        assert video_path == "/tmp/lecture.mp4"
+        assert temp_dir == str(tmp_path)
+        return str(prepared_audio_path)
+
+    class FakeTranscriptions:
+        async def create(self, **kwargs):
+            calls.append(kwargs)
+            assert kwargs["file"].name == str(prepared_audio_path)
+            return SimpleNamespace(
+                words=[
+                    SimpleNamespace(
+                        id="w1",
+                        word="Hello",
+                        start=1.25,
+                        end=2.5,
+                    )
+                ],
+                segments=[],
+            )
+
+    fake_client = SimpleNamespace(
+        audio=SimpleNamespace(transcriptions=FakeTranscriptions())
+    )
+    monkeypatch.setattr(
+        manifest_generation,
+        "_prepare_lecture_video_audio_for_whisper_async",
+        fake_prepare,
+    )
+
+    words = await manifest_generation.transcribe_video_words(
+        "/tmp/lecture.mp4",
+        fake_client,
+        temp_dir=str(tmp_path),
+    )
+
+    assert calls[0]["model"] == "whisper-1"
+    assert calls[0]["timestamp_granularities"] == ["word", "segment"]
+    assert words == [
+        schemas.LectureVideoManifestWordV3(
+            id="w1",
+            word="Hello",
+            start_offset_ms=1250,
+            end_offset_ms=2500,
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_transcribe_video_words_skips_empty_words_with_context_warning(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    prepared_audio_path = tmp_path / "prepared.webm"
+    prepared_audio_path.write_bytes(b"audio")
+
+    async def fake_prepare(*, video_path: str, temp_dir: str) -> str:
+        return str(prepared_audio_path)
+
+    class FakeTranscriptions:
+        async def create(self, **_kwargs):
+            return SimpleNamespace(
+                words=[
+                    SimpleNamespace(id="w1", word="Fifteen", start=1.0, end=1.2),
+                    SimpleNamespace(id="w2", word="", start=1.2, end=1.3),
+                    SimpleNamespace(id="w3", word="increase", start=1.3, end=1.7),
+                ]
+            )
+
+    fake_client = SimpleNamespace(
+        audio=SimpleNamespace(transcriptions=FakeTranscriptions())
+    )
+    monkeypatch.setattr(
+        manifest_generation,
+        "_prepare_lecture_video_audio_for_whisper_async",
+        fake_prepare,
+    )
+
+    with caplog.at_level("WARNING", logger=manifest_generation.logger.name):
+        words = await manifest_generation.transcribe_video_words(
+            "/tmp/lecture.mp4",
+            fake_client,
+            temp_dir=str(tmp_path),
+        )
+
+    assert words == [
+        schemas.LectureVideoManifestWordV3(
+            id="w1",
+            word="Fifteen",
+            start_offset_ms=1000,
+            end_offset_ms=1200,
+        ),
+        schemas.LectureVideoManifestWordV3(
+            id="w3",
+            word="increase",
+            start_offset_ms=1300,
+            end_offset_ms=1700,
+        ),
+    ]
+    assert (
+        "Skipping empty OpenAI transcription word. index=1 "
+        "start_offset_ms=1200 end_offset_ms=1300 previous_word='Fifteen' "
+        "next_word='increase'"
+    ) in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_transcribe_video_words_augments_words_with_segment_punctuation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    prepared_audio_path = tmp_path / "prepared.webm"
+    prepared_audio_path.write_bytes(b"audio")
+
+    async def fake_prepare(*, video_path: str, temp_dir: str) -> str:
+        return str(prepared_audio_path)
+
+    class FakeTranscriptions:
+        async def create(self, **_kwargs):
+            return SimpleNamespace(
+                words=[
+                    SimpleNamespace(id="w1", word="Well", start=0.0, end=0.2),
+                    SimpleNamespace(id="w2", word="is", start=0.2, end=0.35),
+                    SimpleNamespace(id="w3", word="that", start=0.35, end=0.5),
+                    SimpleNamespace(id="w4", word="right", start=0.5, end=0.7),
+                    SimpleNamespace(id="w5", word="Next", start=1.2, end=1.5),
+                ],
+                segments=[
+                    SimpleNamespace(start=0.0, end=0.7, text=" Well, is that right?"),
+                    SimpleNamespace(start=1.2, end=1.5, text=" Next."),
+                ],
+            )
+
+    fake_client = SimpleNamespace(
+        audio=SimpleNamespace(transcriptions=FakeTranscriptions())
+    )
+    monkeypatch.setattr(
+        manifest_generation,
+        "_prepare_lecture_video_audio_for_whisper_async",
+        fake_prepare,
+    )
+
+    words = await manifest_generation.transcribe_video_words(
+        "/tmp/lecture.mp4",
+        fake_client,
+        temp_dir=str(tmp_path),
+    )
+
+    assert [word.word for word in words] == ["Well,", "is", "that", "right?", "Next."]
+
+
+def _quiz_with_context(
+    questions: list[manifest_generation.GeneratedQuestion] | None = None,
+) -> manifest_generation.GeneratedQuizWithVideoContext:
+    return manifest_generation.GeneratedQuizWithVideoContext(
+        video_summary="A short algebra lesson.",
+        summary_checkpoints=[
+            manifest_generation.GeneratedSummaryCheckpoint(
+                end_offset_ms=30000,
+                summary="The teacher introduces the expression.",
+            )
+        ],
+        moment_contexts=[
+            manifest_generation.GeneratedMomentContext(
+                center_offset_ms=0,
+                start_offset_ms=0,
+                end_offset_ms=30000,
+                before="The lesson is starting.",
+                at="The teacher writes an expression on the board.",
+                after="The teacher prepares the next step.",
+            )
+        ],
+        questions=questions or [_generated_question()],
+    )
+
+
+def test_generated_quiz_with_video_context_rejects_legacy_video_descriptions() -> None:
+    with pytest.raises(ValidationError, match="video_descriptions"):
+        manifest_generation.GeneratedQuizWithVideoContext.model_validate(
+            {
+                "video_summary": "A short algebra lesson.",
+                "questions": [_generated_question().model_dump()],
+                "video_descriptions": [
+                    {
+                        "start_offset_ms": 0,
+                        "end_offset_ms": 30000,
+                        "description": "Legacy V3 visual context.",
+                    }
+                ],
+            }
+        )
+
+
+def test_quiz_to_manifest_converts_generated_v4_context_arrays() -> None:
+    quiz = manifest_generation.GeneratedQuizWithVideoContext(
+        video_summary="A short algebra lesson.",
+        summary_checkpoints=[
+            manifest_generation.GeneratedSummaryCheckpoint(
+                end_offset_ms=30000,
+                summary="The teacher introduces the expression.",
+            )
+        ],
+        moment_contexts=[
+            manifest_generation.GeneratedMomentContext(
+                center_offset_ms=0,
+                start_offset_ms=0,
+                end_offset_ms=30000,
+                before="The lesson is starting.",
+                at="The teacher writes an expression on the board.",
+                after="The teacher prepares the next step.",
+            )
+        ],
+        questions=[_generated_question()],
+    )
+
+    manifest = manifest_generation._quiz_to_manifest(
+        quiz,
+        _transcript(),
+        video_duration_ms=30000,
+    )
+
+    assert isinstance(manifest, schemas.LectureVideoManifestV4)
+    assert manifest.summary_checkpoints[0].summary == (
+        "The teacher introduces the expression."
+    )
+    assert manifest.moment_contexts[0].at == (
+        "The teacher writes an expression on the board."
+    )
+    assert not hasattr(manifest, "video_descriptions")
+
+
+def test_quiz_to_manifest_falls_back_for_missing_required_context_offsets(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    quiz = manifest_generation.GeneratedQuizWithVideoContext(
+        video_summary="A short algebra lesson.",
+        summary_checkpoints=[
+            manifest_generation.GeneratedSummaryCheckpoint(
+                end_offset_ms=10000,
+                summary="The teacher has reached ten seconds.",
+            )
+        ],
+        moment_contexts=[
+            manifest_generation.GeneratedMomentContext(
+                center_offset_ms=10000,
+                start_offset_ms=0,
+                end_offset_ms=20000,
+                before="Before ten seconds.",
+                at="At ten seconds.",
+                after="After ten seconds.",
+            )
+        ],
+        questions=[_generated_question()],
+    )
+
+    with caplog.at_level("WARNING", logger=manifest_generation.logger.name):
+        manifest = manifest_generation._quiz_to_manifest(
+            quiz,
+            _transcript(),
+            video_duration_ms=30000,
+        )
+
+    assert isinstance(manifest, schemas.LectureVideoManifestV4)
+    assert [
+        checkpoint.end_offset_ms for checkpoint in manifest.summary_checkpoints
+    ] == [30000]
+    assert [moment.center_offset_ms for moment in manifest.moment_contexts] == [
+        0,
+        30000,
+    ]
+    assert [moment.start_offset_ms for moment in manifest.moment_contexts] == [
+        0,
+        15000,
+    ]
+    assert [moment.end_offset_ms for moment in manifest.moment_contexts] == [
+        15000,
+        30000,
+    ]
+    assert "missing required offset 30000ms" in caplog.text
+    assert "missing required center 0ms" in caplog.text
+
+
+def test_fallback_moment_context_clamps_to_known_video_duration() -> None:
+    [moment] = manifest_generation._fallback_moment_contexts(video_duration_ms=30000)
+
+    assert moment.center_offset_ms == 0
+    assert moment.start_offset_ms == 0
+    assert moment.end_offset_ms == 30000
+
+
+def test_quiz_to_manifest_normalizes_v4_context_arrays_to_description_cadence() -> None:
+    quiz = manifest_generation.GeneratedQuizWithVideoContext(
+        video_summary="A short algebra lesson.",
+        summary_checkpoints=[
+            manifest_generation.GeneratedSummaryCheckpoint(
+                end_offset_ms=30000,
+                summary="The teacher has reached thirty seconds.",
+            ),
+            manifest_generation.GeneratedSummaryCheckpoint(
+                end_offset_ms=10000,
+                summary="The teacher has reached ten seconds.",
+            ),
+        ],
+        moment_contexts=[
+            manifest_generation.GeneratedMomentContext(
+                center_offset_ms=10000,
+                start_offset_ms=0,
+                end_offset_ms=20000,
+                before="Before ten seconds.",
+                at="At ten seconds.",
+                after="After ten seconds.",
+            ),
+            manifest_generation.GeneratedMomentContext(
+                center_offset_ms=0,
+                start_offset_ms=0,
+                end_offset_ms=5000,
+                before="Before start.",
+                at="At start.",
+                after="After start.",
+            ),
+        ],
+        questions=[_generated_question()],
+    )
+
+    manifest = manifest_generation._quiz_to_manifest(
+        quiz,
+        _transcript(),
+        video_duration_ms=184166,
+        video_description_window_ms=5000,
+    )
+
+    assert [checkpoint.end_offset_ms for checkpoint in manifest.summary_checkpoints][
+        :6
+    ] == [
+        5000,
+        10000,
+        15000,
+        20000,
+        25000,
+        30000,
+    ]
+    assert manifest.summary_checkpoints[-1].end_offset_ms == 184166
+    assert [moment.center_offset_ms for moment in manifest.moment_contexts[:4]] == [
+        0,
+        5000,
+        10000,
+        15000,
+    ]
+    assert manifest.moment_contexts[-1].center_offset_ms == 184166
+    assert manifest.moment_contexts[-1].start_offset_ms == 181666
+    assert manifest.moment_contexts[-1].end_offset_ms == 184166
+    assert manifest.moment_contexts[0].start_offset_ms == 0
+    assert manifest.moment_contexts[0].end_offset_ms == 2500
+    assert manifest.moment_contexts[2].start_offset_ms == 7500
+    assert manifest.moment_contexts[2].end_offset_ms == 12500
+    assert manifest.moment_contexts[2].at == "At ten seconds."
+
+
+def test_build_generation_prompt_uses_custom_video_description_window() -> None:
+    prompt = manifest_generation.build_generation_prompt(
+        "Ask one question.",
+        video_duration_ms=20000,
+        video_description_window_ms=10000,
+    )
+
+    assert (
+        "Use a 10-second context cadence (10000ms): summary checkpoints and "
+        "moment_context centers follow this cadence."
+    ) in prompt
+    assert "exactly every 10 seconds" in prompt
+    assert (
+        "with a 10-second context cadence, center_offset_ms=20000 "
+        "must use start_offset_ms=15000 and end_offset_ms=25000"
+    ) in prompt
+    assert "plus a final context centered on the final video/request end" in prompt
+    assert "do not emit clip-relative offsets" not in prompt
+    assert "REQUIRED summary_checkpoints end_offset_ms values" not in prompt
+    assert "REQUIRED moment_contexts center/start/end triples" not in prompt
+    assert "FINAL VERIFICATION BEFORE OUTPUT:" in prompt
+    assert (
+        "Each summary must cover the whole lesson seen so far for that checkpoint"
+    ) in prompt
+    assert "QUALITY EXAMPLES:" in prompt
+    assert "Good summary_checkpoint:" in prompt
+    assert "Good moment_context:" in prompt
+    assert (
+        "Summaries are for cumulative conceptual memory. Moment contexts are "
+        "for narrow, timestamp-centered local state."
+    ) in prompt
+    assert "Do not use moment_contexts to preserve the full lesson narrative." in prompt
+    assert (
+        "Write moment contexts as concrete evidence from the transcript and video"
+        in prompt
+    )
+    assert (
+        'Do not use "after" to preview later lesson content beyond end_offset_ms.'
+        in prompt
+    )
+    assert "It should not summarize the whole lesson so far." in prompt
+    assert "Good teacher-posed question:" in prompt
+    assert "Good generated question:" in prompt
+    assert "generate the interactive question layer now" not in prompt
+    assert "prior cumulative summary" not in prompt
+    assert "```json" not in prompt
+    assert "FIELD DEFINITIONS:" not in prompt
+
+
+def test_build_generation_prompt_warns_against_clip_relative_offsets_for_chunks() -> (
+    None
+):
+    prompt = manifest_generation.build_generation_prompt(
+        "Ask one question.",
+        video_duration_ms=30000,
+        generation_start_ms=10000,
+        generation_end_ms=20000,
+        context_start_ms=5000,
+        context_end_ms=25000,
+        video_description_window_ms=10000,
+    )
+
+    assert (
+        "The provided media is a clipped excerpt, so do not emit "
+        "excerpt-relative offsets."
+    ) in prompt
+    assert (
+        'use the surrounding clip context when writing "before" and "after"'
+    ) in prompt
+    assert (
+        "The first required moment_context center is 10000ms. Include it even "
+        "when it equals generation_start_ms; boundary centers are required, "
+        "not optional."
+    ) in prompt
+    assert "fixed 10-second cadence" in prompt
+    assert "second-second" not in prompt
+    assert "seconds-second" not in prompt
+
+
+def test_build_generation_prompt_extends_prior_chunk_summary() -> None:
+    prompt = manifest_generation.build_generation_prompt(
+        "Ask one question.",
+        video_duration_ms=60000,
+        generation_start_ms=30000,
+        generation_end_ms=60000,
+        context_start_ms=0,
+        context_end_ms=60000,
+        has_previous_summary_checkpoint=True,
+    )
+
+    assert "PRIOR CUMULATIVE SUMMARY:" in prompt
+    assert "start from the supplied prior cumulative summary" in prompt
+    assert "Use it as the only source for lecture content before" in prompt
+    assert "The teacher introduces the expression" not in prompt
+
+
+def test_build_generation_prompt_uses_half_window_moment_context_bounds() -> None:
+    prompt = manifest_generation.build_generation_prompt(
+        "Ask one question.",
+        video_duration_ms=20000,
+        video_description_window_ms=5000,
+    )
+
+    assert (
+        "with a 5-second context cadence, center_offset_ms=10000 "
+        "must use start_offset_ms=7500 and end_offset_ms=12500"
+    ) in prompt
+    assert "REQUIRED summary_checkpoints end_offset_ms values" not in prompt
+    assert "REQUIRED moment_contexts center/start/end triples" not in prompt
+
+
+def test_generation_source_material_parts_include_transcript_and_prior_summary() -> (
+    None
+):
+    parts = manifest_generation._generation_source_material_parts(
+        transcript=_transcript(),
+        compact=False,
+        previous_summary_checkpoint=schemas.LectureVideoManifestSummaryCheckpointV4(
+            end_offset_ms=30000,
+            summary="The teacher introduces the expression and combines like terms.",
+        ),
+    )
+
+    assert len(parts) == 3
+    assert parts[0].text is not None
+    assert "PRIOR CUMULATIVE SUMMARY SOURCE DATA:" in parts[0].text
+    assert "summary_through_offset_ms: 30000" in parts[0].text
+    assert (
+        "The teacher introduces the expression and combines like terms."
+        in parts[0].text
+    )
+    assert "WORD-LEVEL TRANSCRIPT SOURCE DATA:" not in parts[0].text
+    assert parts[1].text is not None
+    assert "WORD-LEVEL TRANSCRIPT SOURCE DATA:" in parts[1].text
+    assert '"word": "expression"' in parts[1].text
+    assert "PRIOR CUMULATIVE SUMMARY SOURCE DATA:" not in parts[1].text
+    assert parts[2].text is not None
+    assert "prior cumulative summary source data" in parts[2].text
+    assert "generate the interactive question layer now" in parts[2].text
+    assert "return only the schema-valid JSON object" in parts[2].text
+
+
+def test_generation_source_material_parts_omit_prior_summary_part_when_absent() -> None:
+    parts = manifest_generation._generation_source_material_parts(
+        transcript=_transcript(),
+        compact=False,
+        previous_summary_checkpoint=None,
+    )
+
+    assert len(parts) == 2
+    assert parts[0].text is not None
+    assert "WORD-LEVEL TRANSCRIPT SOURCE DATA:" in parts[0].text
+    assert "PRIOR CUMULATIVE SUMMARY SOURCE DATA:" not in parts[0].text
+    assert parts[1].text is not None
+    assert "generate the interactive question layer now" in parts[1].text
+    assert "prior cumulative summary" not in parts[1].text
+
+
+def test_plan_manifest_generation_chunks_rebalances_short_tail() -> None:
+    chunks = manifest_generation._plan_manifest_generation_chunks(3_664_600)
+
+    assert [
+        (chunk.generation_start_ms, chunk.generation_end_ms) for chunk in chunks
+    ] == [
+        (0, 300_000),
+        (300_000, 600_000),
+        (600_000, 900_000),
+        (900_000, 1_200_000),
+        (1_200_000, 1_500_000),
+        (1_500_000, 1_800_000),
+        (1_800_000, 2_100_000),
+        (2_100_000, 2_400_000),
+        (2_400_000, 2_700_000),
+        (2_700_000, 3_000_000),
+        (3_000_000, 3_300_000),
+        (3_300_000, 3_480_000),
+        (3_480_000, 3_664_600),
+    ]
+    assert [(chunk.context_start_ms, chunk.context_end_ms) for chunk in chunks] == [
+        (0, 330_000),
+        (270_000, 630_000),
+        (570_000, 930_000),
+        (870_000, 1_230_000),
+        (1_170_000, 1_530_000),
+        (1_470_000, 1_830_000),
+        (1_770_000, 2_130_000),
+        (2_070_000, 2_430_000),
+        (2_370_000, 2_730_000),
+        (2_670_000, 3_030_000),
+        (2_970_000, 3_330_000),
+        (3_270_000, 3_510_000),
+        (3_450_000, 3_664_600),
+    ]
+
+
+def test_plan_manifest_generation_chunks_aligns_custom_window_boundaries() -> None:
+    chunks = manifest_generation._plan_manifest_generation_chunks(
+        700_000,
+        alignment_ms=35_000,
+    )
+
+    assert [
+        (chunk.generation_start_ms, chunk.generation_end_ms) for chunk in chunks
+    ] == [
+        (0, 280_000),
+        (280_000, 490_000),
+        (490_000, 700_000),
+    ]
+    assert all(chunk.generation_end_ms % 35_000 == 0 for chunk in chunks[:-1])
+
+
+def test_manifest_chunk_overlap_scales_to_half_context_cadence() -> None:
+    assert manifest_generation._manifest_chunk_overlap_ms(30_000) == 30_000
+    assert manifest_generation._manifest_chunk_overlap_ms(120_000) == 60_000
+
+
+def test_plan_manifest_generation_chunks_can_use_scaled_context_overlap() -> None:
+    video_description_window_ms = 120_000
+    chunks = manifest_generation._plan_manifest_generation_chunks(
+        700_000,
+        overlap_ms=manifest_generation._manifest_chunk_overlap_ms(
+            video_description_window_ms
+        ),
+        alignment_ms=video_description_window_ms,
+    )
+
+    assert [
+        (chunk.generation_start_ms, chunk.generation_end_ms) for chunk in chunks
+    ] == [
+        (0, 240_000),
+        (240_000, 480_000),
+        (480_000, 700_000),
+    ]
+    assert [(chunk.context_start_ms, chunk.context_end_ms) for chunk in chunks] == [
+        (0, 300_000),
+        (180_000, 540_000),
+        (420_000, 700_000),
+    ]
+
+
+def test_plan_manifest_generation_chunks_uses_single_chunk_under_limit() -> None:
+    chunks = manifest_generation._plan_manifest_generation_chunks(240_000)
+
+    assert chunks == [
+        manifest_generation.ManifestGenerationChunk(
+            generation_start_ms=0,
+            generation_end_ms=240_000,
+            context_start_ms=0,
+            context_end_ms=240_000,
+        )
+    ]
+
+
+def test_split_manifest_generation_chunk_adds_context_overlap() -> None:
+    chunks = manifest_generation._split_manifest_generation_chunk(
+        manifest_generation.ManifestGenerationChunk(
+            generation_start_ms=1_200_000,
+            generation_end_ms=2_400_000,
+            context_start_ms=1_170_000,
+            context_end_ms=2_430_000,
+        ),
+        video_duration_ms=3_000_000,
+    )
+
+    assert [
+        (chunk.generation_start_ms, chunk.generation_end_ms) for chunk in chunks
+    ] == [
+        (1_200_000, 1_800_000),
+        (1_800_000, 2_400_000),
+    ]
+    assert [(chunk.context_start_ms, chunk.context_end_ms) for chunk in chunks] == [
+        (1_170_000, 1_830_000),
+        (1_770_000, 2_430_000),
+    ]
+
+
+def test_should_split_manifest_chunk_error_accepts_provider_deadline() -> None:
+    exc = RuntimeError(
+        "503 UNAVAILABLE. Deadline expired before operation could complete."
+    )
+
+    assert manifest_generation._should_split_manifest_chunk_error(exc)
+
+
+async def test_upload_and_generate_manifest_threads_summary_between_top_level_chunks(
+    monkeypatch,
+) -> None:
+    captured_previous_offsets: list[int | None] = []
+
+    async def fake_ffprobe_duration_ms(_video_path: str) -> int:
+        return 600_000
+
+    async def fake_upload_and_generate_manifest_chunks(
+        *,
+        chunk: manifest_generation.ManifestGenerationChunk,
+        previous_summary_checkpoint: schemas.LectureVideoManifestSummaryCheckpointV4
+        | None,
+        **_kwargs: object,
+    ) -> list[schemas.LectureVideoManifestV4]:
+        captured_previous_offsets.append(
+            previous_summary_checkpoint.end_offset_ms
+            if previous_summary_checkpoint is not None
+            else None
+        )
+        return [
+            _manifest_with_summary_checkpoint(
+                chunk.generation_end_ms,
+                f"Summary through {chunk.generation_end_ms}ms.",
+            )
+        ]
+
+    async def fake_merge_chunk_manifests(
+        *,
+        chunk_manifests: list[schemas.LectureVideoManifestV4],
+        **_kwargs: object,
+    ) -> schemas.LectureVideoManifestV4:
+        return chunk_manifests[-1]
+
+    monkeypatch.setattr(
+        manifest_generation,
+        "_ffprobe_duration_ms",
+        fake_ffprobe_duration_ms,
+    )
+    monkeypatch.setattr(
+        manifest_generation,
+        "_upload_and_generate_manifest_chunks",
+        fake_upload_and_generate_manifest_chunks,
+    )
+    monkeypatch.setattr(
+        manifest_generation,
+        "_merge_chunk_manifests",
+        fake_merge_chunk_manifests,
+    )
+
+    await manifest_generation.upload_and_generate_manifest(
+        video_path="lecture.mp4",
+        gemini_client=object(),  # type: ignore[arg-type]
+        generation_prompt_content="Generate checks.",
+        transcript=_transcript(),
+        temp_dir="/tmp",
+        model="gemini-test",
+    )
+
+    assert captured_previous_offsets == [None, 300_000]
+
+
+async def test_upload_and_generate_manifest_chunks_threads_summary_through_split(
+    monkeypatch,
+) -> None:
+    captured: list[tuple[int, int, int | None]] = []
+
+    async def fake_upload_and_generate_manifest_chunk(
+        *,
+        chunk: manifest_generation.ManifestGenerationChunk,
+        previous_summary_checkpoint: schemas.LectureVideoManifestSummaryCheckpointV4
+        | None,
+        **_kwargs: object,
+    ) -> schemas.LectureVideoManifestV4:
+        captured.append(
+            (
+                chunk.generation_start_ms,
+                chunk.generation_end_ms,
+                previous_summary_checkpoint.end_offset_ms
+                if previous_summary_checkpoint is not None
+                else None,
+            )
+        )
+        if chunk.generation_start_ms == 0 and chunk.generation_end_ms == 600_000:
+            raise RuntimeError("503 UNAVAILABLE. Deadline expired.")
+        return _manifest_with_summary_checkpoint(
+            chunk.generation_end_ms,
+            f"Summary through {chunk.generation_end_ms}ms.",
+        )
+
+    monkeypatch.setattr(
+        manifest_generation,
+        "_upload_and_generate_manifest_chunk",
+        fake_upload_and_generate_manifest_chunk,
+    )
+
+    manifests = await manifest_generation._upload_and_generate_manifest_chunks(
+        video_path="lecture.mp4",
+        gemini_client=object(),  # type: ignore[arg-type]
+        generation_prompt_content="Generate checks.",
+        transcript=_transcript(),
+        video_duration_ms=600_000,
+        chunk=manifest_generation.ManifestGenerationChunk(
+            generation_start_ms=0,
+            generation_end_ms=600_000,
+            context_start_ms=0,
+            context_end_ms=600_000,
+        ),
+        temp_dir="/tmp",
+        model="gemini-test",
+    )
+
+    assert [
+        manifest.summary_checkpoints[-1].end_offset_ms for manifest in manifests
+    ] == [
+        300_000,
+        600_000,
+    ]
+    assert captured == [
+        (0, 600_000, None),
+        (0, 300_000, None),
+        (300_000, 600_000, 300_000),
+    ]
+
+
+async def test_generate_manifest_quiz_with_retries_handles_transient_provider_error(
+    monkeypatch,
+) -> None:
+    calls = 0
+    sleeps: list[float] = []
+
+    async def fake_generate_manifest_quiz(
+        _client,
+        *,
+        model,
+        prompt,
+        contents,
+        response_model,
+    ):  # type: ignore[no-untyped-def]
+        nonlocal calls
+        calls += 1
+        if calls < 3:
+            raise RuntimeError("500 INTERNAL. Internal error encountered.")
+        return response_model(questions=[_generated_question()])
+
+    async def fake_sleep(delay_seconds: float) -> None:
+        sleeps.append(delay_seconds)
+
+    monkeypatch.setattr(
+        manifest_generation.gemini_helpers,
+        "generate_manifest_quiz",
+        fake_generate_manifest_quiz,
+    )
+    monkeypatch.setattr(manifest_generation.asyncio, "sleep", fake_sleep)
+
+    quiz = await manifest_generation._generate_manifest_quiz_with_retries(
+        object(),  # type: ignore[arg-type]
+        model="gemini-test",
+        prompt="reconcile",
+        contents=[],
+        response_model=manifest_generation.ReconciledGeneratedQuiz,
+        request_label="test",
+    )
+
+    assert calls == 3
+    assert sleeps == [5.0, 10.0]
+    assert quiz.questions[0].question_text == "What should happen next?"
+
+
+def test_transcript_for_window_includes_context_overlap_words() -> None:
+    transcript = [
+        schemas.LectureVideoManifestWordV3(
+            id="before",
+            word="before",
+            start_offset_ms=990,
+            end_offset_ms=1000,
+        ),
+        schemas.LectureVideoManifestWordV3(
+            id="inside",
+            word="inside",
+            start_offset_ms=1500,
+            end_offset_ms=1600,
+        ),
+        schemas.LectureVideoManifestWordV3(
+            id="after",
+            word="after",
+            start_offset_ms=2500,
+            end_offset_ms=2600,
+        ),
+    ]
+
+    window = manifest_generation._transcript_for_window(
+        transcript,
+        start_offset_ms=1000,
+        end_offset_ms=2500,
+    )
+
+    assert [word.id for word in window] == ["before", "inside", "after"]
+
+
+async def test_merge_chunk_manifests_reconciles_questions_with_gemini(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+    chunk_one = schemas.LectureVideoManifestV4(
+        word_level_transcription=_transcript(),
+        summary_checkpoints=[
+            schemas.LectureVideoManifestSummaryCheckpointV4(
+                end_offset_ms=30000,
+                summary="The teacher writes an expression.",
+            )
+        ],
+        moment_contexts=[
+            schemas.LectureVideoManifestMomentContextV4(
+                center_offset_ms=0,
+                start_offset_ms=0,
+                end_offset_ms=15000,
+                before="Before start.",
+                at="At start.",
+                after="After start.",
+            )
+        ],
+        questions=[
+            schemas.LectureVideoManifestQuestionV1(
+                type=schemas.LectureVideoQuestionType.SINGLE_SELECT,
+                question_text="Candidate one?",
+                intro_text="Try this.",
+                stop_offset_ms=1000,
+                options=[
+                    schemas.LectureVideoManifestOptionV1(
+                        option_text="Combine like terms",
+                        post_answer_text="Right.",
+                        continue_offset_ms=1500,
+                        correct=True,
+                    ),
+                    schemas.LectureVideoManifestOptionV1(
+                        option_text="Change every variable",
+                        post_answer_text="Not quite.",
+                        continue_offset_ms=1500,
+                        correct=False,
+                    ),
+                ],
+            )
+        ],
+    )
+    chunk_two = schemas.LectureVideoManifestV4(
+        word_level_transcription=_transcript(),
+        summary_checkpoints=[
+            schemas.LectureVideoManifestSummaryCheckpointV4(
+                end_offset_ms=60000,
+                summary="The teacher points at the next step.",
+            )
+        ],
+        moment_contexts=[
+            schemas.LectureVideoManifestMomentContextV4(
+                center_offset_ms=60000,
+                start_offset_ms=45000,
+                end_offset_ms=60000,
+                before="Before end.",
+                at="At end.",
+                after="After end.",
+            )
+        ],
+        questions=[
+            schemas.LectureVideoManifestQuestionV1(
+                type=schemas.LectureVideoQuestionType.SINGLE_SELECT,
+                question_text="Candidate two?",
+                intro_text="Try this too.",
+                stop_offset_ms=1000,
+                options=[
+                    schemas.LectureVideoManifestOptionV1(
+                        option_text="Combine like terms",
+                        post_answer_text="Right.",
+                        continue_offset_ms=1500,
+                        correct=True,
+                    ),
+                    schemas.LectureVideoManifestOptionV1(
+                        option_text="Change every variable",
+                        post_answer_text="Not quite.",
+                        continue_offset_ms=1500,
+                        correct=False,
+                    ),
+                ],
+            )
+        ],
+    )
+
+    async def fake_generate_manifest_quiz(
+        _client,
+        *,
+        model,
+        prompt,
+        contents,
+        response_model,
+    ):  # type: ignore[no-untyped-def]
+        captured["model"] = model
+        captured["prompt"] = prompt
+        captured["contents"] = contents
+        captured["response_model"] = response_model
+        return manifest_generation.ReconciledGeneratedQuiz(
+            questions=[
+                manifest_generation.GeneratedQuestion(
+                    **{
+                        **_generated_question().model_dump(),
+                        "question_text": "Final reconciled question?",
+                    }
+                )
+            ]
+        )
+
+    monkeypatch.setattr(
+        manifest_generation.gemini_helpers,
+        "generate_manifest_quiz",
+        fake_generate_manifest_quiz,
+    )
+
+    manifest = await manifest_generation._merge_chunk_manifests(
+        gemini_client=object(),  # type: ignore[arg-type]
+        generation_prompt_content="Ask only 1 question.",
+        model="gemini-test",
+        chunk_manifests=[chunk_one, chunk_two],
+        full_transcript=_transcript(),
+        video_duration_ms=60000,
+    )
+
+    assert captured["response_model"] is manifest_generation.ReconciledGeneratedQuiz
+    assert "Ask only 1 question." in str(captured["prompt"])
+    contents = cast(list[types.Part], captured["contents"])
+    payload = contents[0].text
+    assert payload is not None
+    assert '"Candidate one?"' in payload
+    assert '"Candidate two?"' in payload
+    assert [question.question_text for question in manifest.questions] == [
+        "Final reconciled question?"
+    ]
+    assert [
+        checkpoint.end_offset_ms for checkpoint in manifest.summary_checkpoints
+    ] == [
+        30000,
+        60000,
+    ]
+
+
+async def test_merge_chunk_manifests_dedupes_and_sorts_v4_context_arrays(
+    monkeypatch,
+) -> None:
+    candidate_question = schemas.LectureVideoManifestQuestionV1(
+        type=schemas.LectureVideoQuestionType.SINGLE_SELECT,
+        question_text="Candidate?",
+        intro_text="Try this.",
+        stop_offset_ms=1000,
+        options=[
+            schemas.LectureVideoManifestOptionV1(
+                option_text="Combine like terms",
+                post_answer_text="Right.",
+                continue_offset_ms=1500,
+                correct=True,
+            ),
+            schemas.LectureVideoManifestOptionV1(
+                option_text="Change every variable",
+                post_answer_text="Not quite.",
+                continue_offset_ms=1500,
+                correct=False,
+            ),
+        ],
+    )
+    chunk_one = schemas.LectureVideoManifestV4(
+        word_level_transcription=_transcript(),
+        summary_checkpoints=[
+            schemas.LectureVideoManifestSummaryCheckpointV4(
+                end_offset_ms=60000,
+                summary="Later summary.",
+            ),
+            schemas.LectureVideoManifestSummaryCheckpointV4(
+                end_offset_ms=30000,
+                summary="First summary.",
+            ),
+        ],
+        moment_contexts=[
+            schemas.LectureVideoManifestMomentContextV4(
+                center_offset_ms=60000,
+                start_offset_ms=55000,
+                end_offset_ms=65000,
+                before="Before later.",
+                at="At later.",
+                after="After later.",
+            )
+        ],
+        questions=[candidate_question],
+    )
+    chunk_two = schemas.LectureVideoManifestV4(
+        word_level_transcription=_transcript(),
+        summary_checkpoints=[
+            schemas.LectureVideoManifestSummaryCheckpointV4(
+                end_offset_ms=30000,
+                summary="First summary replacement.",
+            )
+        ],
+        moment_contexts=[
+            schemas.LectureVideoManifestMomentContextV4(
+                center_offset_ms=0,
+                start_offset_ms=0,
+                end_offset_ms=5000,
+                before="Before start.",
+                at="At start.",
+                after="After start.",
+            ),
+            schemas.LectureVideoManifestMomentContextV4(
+                center_offset_ms=60000,
+                start_offset_ms=55000,
+                end_offset_ms=65000,
+                before="Before later replacement.",
+                at="At later replacement.",
+                after="After later replacement.",
+            ),
+        ],
+        questions=[candidate_question],
+    )
+
+    async def fake_generate_manifest_quiz(
+        _client,
+        *,
+        model,
+        prompt,
+        contents,
+        response_model,
+    ):  # type: ignore[no-untyped-def]
+        return manifest_generation.ReconciledGeneratedQuiz(
+            questions=[_generated_question()]
+        )
+
+    monkeypatch.setattr(
+        manifest_generation.gemini_helpers,
+        "generate_manifest_quiz",
+        fake_generate_manifest_quiz,
+    )
+
+    manifest = await manifest_generation._merge_chunk_manifests(
+        gemini_client=object(),  # type: ignore[arg-type]
+        generation_prompt_content="Ask only 1 question.",
+        model="gemini-test",
+        chunk_manifests=[chunk_one, chunk_two],
+        full_transcript=_transcript(),
+        video_duration_ms=60000,
+    )
+
+    assert isinstance(manifest, schemas.LectureVideoManifestV4)
+    assert [
+        checkpoint.end_offset_ms for checkpoint in manifest.summary_checkpoints
+    ] == [
+        30000,
+        60000,
+    ]
+    assert manifest.summary_checkpoints[0].summary == "First summary replacement."
+    assert [moment.center_offset_ms for moment in manifest.moment_contexts] == [
+        0,
+        30000,
+        60000,
+    ]
+    assert manifest.moment_contexts[2].at == "At later replacement."
+    assert manifest.moment_contexts[2].start_offset_ms == 45000
+    assert manifest.moment_contexts[2].end_offset_ms == 60000
+
+
+def test_quiz_to_manifest_reports_missing_choice_feedback() -> None:
+    quiz = _quiz_with_context(
+        [
+            manifest_generation.GeneratedQuestion(
+                id=1,
+                question_source="generated",
+                pause_after_word_id="w1",
+                pause_after_word="expression",
+                pause_at=1.0,
+                voice_over_intro="Try this.",
+                question_text="What should happen next?",
+                choices=[
+                    manifest_generation.GeneratedChoice(
+                        text="Combine like terms", misconception=None
+                    ),
+                    manifest_generation.GeneratedChoice(
+                        text="Change every variable",
+                        misconception="Confuses simplification with substitution.",
+                    ),
+                ],
+                correct_answer="Combine like terms",
+                choice_feedback={
+                    "Combine like terms": manifest_generation.GeneratedChoiceFeedback(
+                        voice_over="Right.",
+                        resume_at_word_id="w2",
+                        resume_at_word="Next",
+                        resume_at=1.5,
+                    ),
+                    "Change every variable ": manifest_generation.GeneratedChoiceFeedback(
+                        voice_over="Not quite.",
+                        resume_at_word_id="w2",
+                        resume_at_word="Next",
+                        resume_at=1.5,
+                    ),
+                },
+            )
+        ]
+    )
+
+    with pytest.raises(ValueError, match="feedback is missing"):
+        manifest_generation._quiz_to_manifest(
+            quiz,
+            [
+                schemas.LectureVideoManifestWordV3(
+                    id="w1",
+                    word="expression",
+                    start_offset_ms=0,
+                    end_offset_ms=1000,
+                ),
+                schemas.LectureVideoManifestWordV3(
+                    id="w2",
+                    word="Next",
+                    start_offset_ms=1500,
+                    end_offset_ms=2000,
+                ),
+            ],
+            video_duration_ms=30000,
+        )
+
+
+def test_quiz_to_manifest_uses_transcript_timestamps_for_question_offsets() -> None:
+    quiz = _quiz_with_context(
+        [
+            manifest_generation.GeneratedQuestion(
+                id=1,
+                question_source="generated",
+                pause_after_word_id="w1",
+                pause_after_word="expression",
+                pause_at=1.0,
+                voice_over_intro="Try this.",
+                question_text="What should happen next?",
+                choices=[
+                    manifest_generation.GeneratedChoice(
+                        text="Combine like terms", misconception=None
+                    ),
+                    manifest_generation.GeneratedChoice(
+                        text="Change every variable",
+                        misconception="Confuses simplification with substitution.",
+                    ),
+                ],
+                correct_answer="Combine like terms",
+                choice_feedback={
+                    "Combine like terms": manifest_generation.GeneratedChoiceFeedback(
+                        voice_over="Right.",
+                        resume_at_word_id="w2",
+                        resume_at_word="Next",
+                        resume_at=1.5,
+                    ),
+                    "Change every variable": manifest_generation.GeneratedChoiceFeedback(
+                        voice_over="Not quite.",
+                        resume_at_word_id="w2",
+                        resume_at_word="Next",
+                        resume_at=1.5,
+                    ),
+                },
+            )
+        ]
+    )
+
+    manifest = manifest_generation._quiz_to_manifest(
+        quiz,
+        [
+            schemas.LectureVideoManifestWordV3(
+                id="w1",
+                word="expression",
+                start_offset_ms=100,
+                end_offset_ms=1000,
+            ),
+            schemas.LectureVideoManifestWordV3(
+                id="w2",
+                word="Next",
+                start_offset_ms=1500,
+                end_offset_ms=2000,
+            ),
+        ],
+        video_duration_ms=30000,
+    )
+
+    question = manifest.questions[0]
+    assert question.stop_offset_ms == 1000
+    assert [option.continue_offset_ms for option in question.options] == [1500, 1500]
+
+
+def test_quiz_to_manifest_ignores_mismatched_model_timestamp(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    quiz = _quiz_with_context(
+        [
+            manifest_generation.GeneratedQuestion(
+                id=1,
+                question_source="generated",
+                pause_after_word_id="w1",
+                pause_after_word="expression",
+                pause_at=1.1,
+                voice_over_intro="Try this.",
+                question_text="What should happen next?",
+                choices=[
+                    manifest_generation.GeneratedChoice(
+                        text="Combine like terms", misconception=None
+                    ),
+                    manifest_generation.GeneratedChoice(
+                        text="Change every variable",
+                        misconception="Confuses simplification with substitution.",
+                    ),
+                ],
+                correct_answer="Combine like terms",
+                choice_feedback={
+                    "Combine like terms": manifest_generation.GeneratedChoiceFeedback(
+                        voice_over="Right.",
+                        resume_at_word_id="w2",
+                        resume_at_word="Next",
+                        resume_at=1.5,
+                    ),
+                    "Change every variable": manifest_generation.GeneratedChoiceFeedback(
+                        voice_over="Not quite.",
+                        resume_at_word_id="w2",
+                        resume_at_word="Next",
+                        resume_at=1.5,
+                    ),
+                },
+            )
+        ]
+    )
+
+    with caplog.at_level("WARNING", logger=manifest_generation.logger.name):
+        manifest = manifest_generation._quiz_to_manifest(
+            quiz,
+            [
+                schemas.LectureVideoManifestWordV3(
+                    id="w1",
+                    word="expression",
+                    start_offset_ms=100,
+                    end_offset_ms=1000,
+                ),
+                schemas.LectureVideoManifestWordV3(
+                    id="w2",
+                    word="Next",
+                    start_offset_ms=1500,
+                    end_offset_ms=2000,
+                ),
+            ],
+            video_duration_ms=30000,
+        )
+
+    assert manifest.questions[0].stop_offset_ms == 1000
+    assert "matched transcript with one mismatched field" in caplog.text
+
+
+def test_quiz_to_manifest_accepts_word_and_timestamp_when_id_is_wrong(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    question = _generated_question()
+    question.pause_after_word_id = "wrong-id"
+    question.pause_at = 1.0
+    quiz = _quiz_with_context([question])
+
+    with caplog.at_level("WARNING", logger=manifest_generation.logger.name):
+        manifest = manifest_generation._quiz_to_manifest(
+            quiz,
+            _transcript(),
+            video_duration_ms=30000,
+        )
+
+    assert manifest.questions[0].stop_offset_ms == 1000
+    assert "matched transcript with one mismatched field" in caplog.text
+
+
+def test_quiz_to_manifest_rejects_word_reference_with_fewer_than_two_matches() -> None:
+    question = _generated_question()
+    question.pause_after_word_id = "wrong-id"
+    question.pause_after_word = "wrong-word"
+    question.pause_at = 1.0
+    quiz = _quiz_with_context([question])
+
+    with pytest.raises(ValueError, match="did not match at least two"):
+        manifest_generation._quiz_to_manifest(
+            quiz,
+            _transcript(),
+            video_duration_ms=30000,
+        )
+
+
+async def test_ffprobe_duration_ms_logs_missing_binary_once(
+    monkeypatch, caplog
+) -> None:
+    def fake_run(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise FileNotFoundError("ffprobe")
+
+    manifest_generation._log_missing_ffprobe_once.cache_clear()
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    with caplog.at_level("WARNING"):
+        assert await manifest_generation._ffprobe_duration_ms("lecture.mp4") is None
+        assert await manifest_generation._ffprobe_duration_ms("lecture.mp4") is None
+
+    assert caplog.text.count("ffprobe is unavailable") == 1
+
+
+async def test_ffprobe_duration_ms_returns_none_on_probe_failure(monkeypatch) -> None:
+    def fake_run(*args, **kwargs):  # type: ignore[no-untyped-def]
+        assert args[0][0] == "/usr/local/bin/ffprobe"
+        assert kwargs["timeout"] == 30
+        raise subprocess.CalledProcessError(1, args[0], stderr="bad video")
+
+    monkeypatch.setattr(shutil, "which", lambda _name: "/usr/local/bin/ffprobe")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert await manifest_generation._ffprobe_duration_ms("lecture.mp4") is None
+
+
+async def test_upload_and_generate_manifest_requires_video_duration(
+    monkeypatch,
+) -> None:
+    async def fake_ffprobe_duration_ms(_video_path: str) -> None:
+        return None
+
+    async def fail_upload_video_to_gemini(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("Gemini upload should not run without video duration.")
+
+    monkeypatch.setattr(
+        manifest_generation,
+        "_ffprobe_duration_ms",
+        fake_ffprobe_duration_ms,
+    )
+    monkeypatch.setattr(
+        manifest_generation,
+        "upload_video_to_gemini",
+        fail_upload_video_to_gemini,
+    )
+
+    with pytest.raises(RuntimeError, match="valid video duration"):
+        await manifest_generation.upload_and_generate_manifest(
+            video_path="lecture.mp4",
+            gemini_client=object(),  # type: ignore[arg-type]
+            generation_prompt_content="Generate checks.",
+            transcript=_transcript(),
+            temp_dir="/tmp",
+        )
+
+
+async def test_generate_manifest_uses_uploaded_file_uri_without_refetch(
+    monkeypatch,
+) -> None:
+    class Files:
+        async def get(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+            raise AssertionError("generate_manifest should not refetch Gemini files")
+
+    class GeminiClient:
+        files = Files()
+
+    captured_contents = None
+
+    async def fake_ffprobe_duration_ms(_video_path: str) -> int:
+        return 30000
+
+    async def fake_generate_manifest_quiz(
+        _client,
+        *,
+        model,
+        prompt,
+        contents,
+        response_model,
+    ):  # type: ignore[no-untyped-def]
+        nonlocal captured_contents
+        captured_contents = contents
+        return response_model(
+            video_summary="A short algebra lesson.",
+            summary_checkpoints=[
+                manifest_generation.GeneratedSummaryCheckpoint(
+                    end_offset_ms=30000,
+                    summary="The teacher writes an expression on the board.",
+                )
+            ],
+            moment_contexts=[
+                manifest_generation.GeneratedMomentContext(
+                    center_offset_ms=0,
+                    start_offset_ms=0,
+                    end_offset_ms=15000,
+                    before="The lesson is starting.",
+                    at="The teacher writes an expression on the board.",
+                    after="The teacher prepares the next step.",
+                )
+            ],
+            questions=[
+                manifest_generation.GeneratedQuestion(
+                    id=1,
+                    question_source="generated",
+                    pause_after_word_id="w1",
+                    pause_after_word="expression",
+                    pause_at=1.0,
+                    voice_over_intro="Try this.",
+                    question_text="What should happen next?",
+                    choices=[
+                        manifest_generation.GeneratedChoice(
+                            text="Combine like terms", misconception=None
+                        ),
+                        manifest_generation.GeneratedChoice(
+                            text="Change every variable",
+                            misconception="Confuses simplification with substitution.",
+                        ),
+                    ],
+                    correct_answer="Combine like terms",
+                    choice_feedback={
+                        "Combine like terms": manifest_generation.GeneratedChoiceFeedback(
+                            voice_over="Right.",
+                            resume_at_word_id="w2",
+                            resume_at_word="Next",
+                            resume_at=1.5,
+                        ),
+                        "Change every variable": manifest_generation.GeneratedChoiceFeedback(
+                            voice_over="Not quite.",
+                            resume_at_word_id="w2",
+                            resume_at_word="Next",
+                            resume_at=1.5,
+                        ),
+                    },
+                )
+            ],
+        )
+
+    monkeypatch.setattr(
+        manifest_generation,
+        "_ffprobe_duration_ms",
+        fake_ffprobe_duration_ms,
+    )
+    monkeypatch.setattr(
+        manifest_generation.gemini_helpers,
+        "generate_manifest_quiz",
+        fake_generate_manifest_quiz,
+    )
+
+    await manifest_generation.generate_manifest(
+        video_path="lecture.mp4",
+        gemini_client=GeminiClient(),  # type: ignore[arg-type]
+        gemini_file=manifest_generation.GeminiFileRef(
+            name="files/abc",
+            uri="https://generativelanguage.googleapis.com/v1beta/files/abc",
+            mime_type="video/mp4",
+        ),
+        generation_prompt_content="Generate a quiz.",
+        transcript=[
+            schemas.LectureVideoManifestWordV3(
+                id="w1",
+                word="expression",
+                start_offset_ms=0,
+                end_offset_ms=1000,
+            ),
+            schemas.LectureVideoManifestWordV3(
+                id="w2",
+                word="Next",
+                start_offset_ms=1500,
+                end_offset_ms=2000,
+            ),
+        ],
+    )
+
+    assert captured_contents is not None
+    file_data = captured_contents[0].file_data
+    assert (
+        file_data.file_uri
+        == "https://generativelanguage.googleapis.com/v1beta/files/abc"
+    )
+    assert file_data.mime_type == "video/mp4"
+    source_part = captured_contents[1]
+    assert source_part.text is not None
+    assert "WORD-LEVEL TRANSCRIPT SOURCE DATA:" in source_part.text
+    assert '"word": "expression"' in source_part.text
+
+
+async def test_upload_and_generate_whole_manifest_deletes_gemini_upload_on_failure(
+    monkeypatch,
+) -> None:
+    calls: list[tuple[str, object]] = []
+
+    async def fake_upload_video_to_gemini(
+        video_path: str,
+        _client,
+    ) -> manifest_generation.GeminiFileRef:  # type: ignore[no-untyped-def]
+        calls.append(("upload", video_path))
+        return manifest_generation.GeminiFileRef(
+            name="files/test",
+            uri="https://generativelanguage.googleapis.com/v1beta/files/test",
+            mime_type="video/mp4",
+        )
+
+    async def fake_generate_manifest_from_gemini_file(
+        **kwargs: object,
+    ) -> schemas.LectureVideoManifestV3:
+        calls.append(("generate", kwargs["gemini_file"]))
+        raise RuntimeError("generation failed")
+
+    async def fake_delete_gemini_file(
+        name: str | None,
+        _client,
+    ) -> None:  # type: ignore[no-untyped-def]
+        calls.append(("delete", name))
+
+    monkeypatch.setattr(
+        manifest_generation,
+        "upload_video_to_gemini",
+        fake_upload_video_to_gemini,
+    )
+    monkeypatch.setattr(
+        manifest_generation,
+        "_generate_manifest_from_gemini_file",
+        fake_generate_manifest_from_gemini_file,
+    )
+    monkeypatch.setattr(
+        manifest_generation,
+        "delete_gemini_file",
+        fake_delete_gemini_file,
+    )
+
+    with pytest.raises(RuntimeError, match="generation failed"):
+        await manifest_generation._upload_and_generate_whole_manifest(
+            video_path="lecture.mp4",
+            gemini_client=object(),  # type: ignore[arg-type]
+            generation_prompt_content="Generate checks.",
+            transcript=_transcript(),
+            video_duration_ms=30000,
+            model="gemini-test",
+        )
+
+    assert [call[0] for call in calls] == ["upload", "generate", "delete"]
+    assert calls[-1] == ("delete", "files/test")

@@ -1,5 +1,11 @@
 <script lang="ts">
-	import { ChevronLeftOutline, ChevronRightOutline } from 'flowbite-svelte-icons';
+	import { errorMessage } from '$lib/errors';
+	import { sadToast } from '$lib/toast';
+	import {
+		ChevronLeftOutline,
+		ChevronRightOutline,
+		QuestionCircleOutline
+	} from 'flowbite-svelte-icons';
 	import LectureVideoQuestionCard from './LectureVideoQuestionCard.svelte';
 
 	type GalleryQuestion = { id: number; position: number; questionText: string };
@@ -21,9 +27,7 @@
 		answeringDisabled = false,
 		showContinue = false,
 		continueDisabled = false,
-		showHeading = true,
 		scrollToQuestionId = null,
-		active = true,
 		onselectOption,
 		oncontinue,
 		onscrollcomplete
@@ -53,21 +57,21 @@
 		answeringDisabled?: boolean;
 		showContinue?: boolean;
 		continueDisabled?: boolean;
-		showHeading?: boolean;
 		scrollToQuestionId: number | null;
-		active?: boolean;
-		onselectOption: (optionId: number) => void;
+		onselectOption: (optionId: number) => void | Promise<void>;
 		oncontinue?: () => void;
 		onscrollcomplete: () => void;
 	} = $props();
 
 	let requestedActiveIndex: number = $state(0);
+	let submittingQuestionId: number | null = $state(null);
+	let submittingOptionId: number | null = $state(null);
 
+	const ANSWER_SUBMISSION_TIMEOUT_MS = 30_000;
 	const navigationButtonClass =
-		'mt-4 inline-flex shrink-0 items-center justify-center rounded-full p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-300 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400';
+		'mt-4 xl:mt-12 inline-flex shrink-0 items-center justify-center rounded-full p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-300 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400';
 	const dotBaseClass =
 		'size-2.5 rounded-full transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-300';
-	const noop = () => {};
 	let continueCardProps = $derived({ showContinue, continueDisabled, oncontinue });
 
 	let hasCurrentPendingQuestion = $derived(
@@ -91,6 +95,10 @@
 	);
 	let atFirstQuestion = $derived(activeIndex === 0);
 	let atLastQuestion = $derived(activeIndex >= sortedQuestions.length - 1);
+	let answerSubmissionInFlight = $derived(submittingQuestionId !== null);
+	let activeSubmittingOptionId = $derived(
+		activeQuestion?.id === submittingQuestionId ? submittingOptionId : null
+	);
 
 	// Auto-navigate to active question when state changes
 	$effect(() => {
@@ -102,7 +110,6 @@
 
 	// Navigate to question from video marker click
 	$effect(() => {
-		if (!active) return;
 		if (scrollToQuestionId == null) return;
 		const idx = findQuestionIndex(scrollToQuestionId);
 		if (idx !== -1) {
@@ -125,7 +132,45 @@
 	}
 
 	function moveActiveIndex(offset: number) {
+		if (answerSubmissionInFlight) return;
 		requestedActiveIndex = activeIndex + offset;
+	}
+
+	function goToQuestionIndex(index: number) {
+		if (answerSubmissionInFlight) return;
+		requestedActiveIndex = index;
+	}
+
+	async function selectOption(optionId: number) {
+		if (!activeQuestion || submittingQuestionId !== null) return;
+
+		const questionId = activeQuestion.id;
+		submittingQuestionId = questionId;
+		submittingOptionId = optionId;
+		try {
+			await waitForSubmission(onselectOption(optionId));
+		} catch (error) {
+			sadToast(
+				`Failed to submit answer. Error: ${errorMessage(error, 'Please try again in a moment.')}`
+			);
+		} finally {
+			if (submittingQuestionId === questionId) {
+				submittingQuestionId = null;
+				submittingOptionId = null;
+			}
+		}
+	}
+
+	async function waitForSubmission(submission: void | Promise<void>): Promise<void> {
+		let timeoutId: ReturnType<typeof setTimeout> | undefined;
+		try {
+			timeoutId = setTimeout(() => {
+				sadToast('Still submitting answer. Please wait a moment before trying again.');
+			}, ANSWER_SUBMISSION_TIMEOUT_MS);
+			await Promise.resolve(submission);
+		} finally {
+			if (timeoutId) clearTimeout(timeoutId);
+		}
 	}
 
 	function dotClass(questionId: number, index: number): string {
@@ -151,19 +196,13 @@
 	}
 </script>
 
-<div class="flex flex-col gap-4 pt-5">
-	{#if showHeading}
-		<div>
-			<h2 class="text-base font-semibold text-slate-950">Comprehension Checks</h2>
-		</div>
-	{/if}
-
+<div class="flex flex-col gap-4 pt-5 xl:h-full xl:min-h-0 xl:gap-0 xl:pt-0">
 	<!-- Gallery area -->
 	{#if sortedQuestions.length > 0}
-		<div class="flex items-start gap-2 sm:gap-3">
+		<div class="flex items-start gap-2 sm:gap-3 xl:min-h-0 xl:flex-1">
 			<button
 				type="button"
-				disabled={atFirstQuestion}
+				disabled={atFirstQuestion || answerSubmissionInFlight}
 				onclick={() => moveActiveIndex(-1)}
 				aria-label="Previous question"
 				class={navigationButtonClass}
@@ -171,56 +210,56 @@
 				<ChevronLeftOutline class="size-5" />
 			</button>
 
-			<div class="min-w-0 flex-1">
-				{#if activeQuestion}
-					{#if activeAnsweredQuestion && !isCurrentFeedback}
-						<LectureVideoQuestionCard
-							position={activeQuestion.position}
-							questionText={activeQuestion.questionText}
-							options={activeAnsweredQuestion.options}
-							state="answered"
-							selectedOptionId={activeAnsweredQuestion.selectedOptionId}
-							correctOptionId={activeAnsweredQuestion.correctOptionId}
-							postAnswerText={activeAnsweredQuestion.postAnswerText}
-							expanded={true}
-							ontoggleExpand={noop}
-							onselectOption={noop}
-						/>
-					{:else if isCurrentAnswering && currentQuestion}
-						<LectureVideoQuestionCard
-							position={activeQuestion.position}
-							questionText={activeQuestion.questionText}
-							options={currentQuestion.options}
-							state="answering"
-							selectedOptionId={null}
-							correctOptionId={null}
-							postAnswerText={null}
-							expanded={false}
-							{answeringDisabled}
-							{onselectOption}
-							ontoggleExpand={noop}
-						/>
-					{:else if isCurrentFeedback && currentQuestion && currentContinuation}
-						<LectureVideoQuestionCard
-							position={activeQuestion.position}
-							questionText={activeQuestion.questionText}
-							options={currentQuestion.options}
-							state="feedback"
-							selectedOptionId={currentContinuation.option_id}
-							correctOptionId={currentContinuation.correct_option_id}
-							postAnswerText={currentContinuation.post_answer_text}
-							expanded={false}
-							onselectOption={noop}
-							ontoggleExpand={noop}
-							{...continueCardProps}
-						/>
+			<div
+				class="min-w-0 flex-1 xl:-mt-4 xl:min-h-0 xl:[scrollbar-width:thin] xl:self-stretch xl:overflow-y-auto"
+			>
+				<div class="xl:pt-12">
+					{#if activeQuestion}
+						{#if activeAnsweredQuestion && !isCurrentFeedback}
+							<LectureVideoQuestionCard
+								position={activeQuestion.position}
+								questionText={activeQuestion.questionText}
+								options={activeAnsweredQuestion.options}
+								state="answered"
+								selectedOptionId={activeAnsweredQuestion.selectedOptionId}
+								correctOptionId={activeAnsweredQuestion.correctOptionId}
+								postAnswerText={activeAnsweredQuestion.postAnswerText}
+								headerTrailing={dots}
+							/>
+						{:else if isCurrentAnswering && currentQuestion}
+							<LectureVideoQuestionCard
+								position={activeQuestion.position}
+								questionText={activeQuestion.questionText}
+								options={currentQuestion.options}
+								state="answering"
+								selectedOptionId={null}
+								correctOptionId={null}
+								postAnswerText={null}
+								{answeringDisabled}
+								submittingOptionId={activeSubmittingOptionId}
+								onselectOption={selectOption}
+								headerTrailing={dots}
+							/>
+						{:else if isCurrentFeedback && currentQuestion && currentContinuation}
+							<LectureVideoQuestionCard
+								position={activeQuestion.position}
+								questionText={activeQuestion.questionText}
+								options={currentQuestion.options}
+								state="feedback"
+								selectedOptionId={currentContinuation.option_id}
+								correctOptionId={currentContinuation.correct_option_id}
+								postAnswerText={currentContinuation.post_answer_text}
+								{...continueCardProps}
+								headerTrailing={dots}
+							/>
+						{/if}
 					{/if}
-				{/if}
+				</div>
 			</div>
 
 			<button
 				type="button"
-				disabled={atLastQuestion}
+				disabled={atLastQuestion || answerSubmissionInFlight}
 				onclick={() => moveActiveIndex(1)}
 				aria-label="Next question"
 				class={navigationButtonClass}
@@ -228,16 +267,35 @@
 				<ChevronRightOutline class="size-5" />
 			</button>
 		</div>
+	{:else}
+		<div class="flex min-h-48 flex-1 items-center justify-center px-4 py-8 xl:min-h-0">
+			<div class="flex max-w-sm flex-col items-center text-center">
+				<div
+					class="mb-3 flex size-12 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-slate-400"
+				>
+					<QuestionCircleOutline class="size-6" />
+				</div>
+				<h2 class="text-sm font-semibold text-slate-900">No comprehension checks yet</h2>
+				<p class="mt-1 max-w-72 text-sm text-slate-500">
+					Comprehension checks will appear here as you reach them in the lecture.
+				</p>
+			</div>
+		</div>
+	{/if}
+</div>
 
-		<div class="flex items-center justify-center gap-1.5">
+{#snippet dots()}
+	{#if sortedQuestions.length > 1}
+		<div class="flex shrink-0 items-center gap-1.5 pt-1">
 			{#each sortedQuestions as question, index (question.id)}
 				<button
 					type="button"
-					onclick={() => (requestedActiveIndex = index)}
+					disabled={answerSubmissionInFlight}
+					onclick={() => goToQuestionIndex(index)}
 					class="{dotBaseClass} {dotClass(question.id, index)}"
 					aria-label="Go to question {question.position}"
 				></button>
 			{/each}
 		</div>
 	{/if}
-</div>
+{/snippet}

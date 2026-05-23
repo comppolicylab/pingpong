@@ -203,3 +203,7 @@ saml/**/*.crt
 .codeql/
 
 !.greptile/config.json
+
+# Temp files
+temp/
+tmp/

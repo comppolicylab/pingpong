@@ -44,6 +44,7 @@ from sqlalchemy import (
     JSON,
     String,
     Table,
+    Text,
     and_,
     delete,
     select,
@@ -2104,6 +2105,67 @@ class LectureVideoNarrationStoredObject(Base):
     updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
 
 
+class LectureVideoPosterStoredObject(Base):
+    __tablename__ = "lecture_video_poster_stored_objects"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    key = Column(String, nullable=False, unique=True)
+    content_type = Column(String, nullable=False)
+    lecture_videos = relationship("LectureVideo", back_populates="poster_stored_object")
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(DateTime(timezone=True), onupdate=func.now())
+
+    @classmethod
+    async def create(
+        cls,
+        session: AsyncSession,
+        *,
+        key: str,
+        content_type: str,
+    ) -> "LectureVideoPosterStoredObject":
+        stored_object = LectureVideoPosterStoredObject(
+            key=key,
+            content_type=content_type,
+        )
+        session.add(stored_object)
+        await session.flush()
+        await session.refresh(stored_object)
+        return stored_object
+
+
+class LectureVideoCaptionStoredObject(Base):
+    __tablename__ = "lecture_video_caption_stored_objects"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    key = Column(String, nullable=False, unique=True)
+    content_type = Column(String, nullable=False)
+    content_length = Column(Integer, nullable=False, server_default="0")
+    lecture_videos = relationship(
+        "LectureVideo", back_populates="caption_stored_object"
+    )
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(DateTime(timezone=True), onupdate=func.now())
+
+    @classmethod
+    async def create(
+        cls,
+        session: AsyncSession,
+        *,
+        key: str,
+        content_type: str,
+        content_length: int,
+    ) -> "LectureVideoCaptionStoredObject":
+        stored_object = LectureVideoCaptionStoredObject(
+            key=key,
+            content_type=content_type,
+            content_length=content_length,
+        )
+        session.add(stored_object)
+        await session.flush()
+        await session.refresh(stored_object)
+        return stored_object
+
+
 # Single-select correctness gets its own storage so multi-select can use a
 # separate schema later without overloading the same table.
 lecture_video_question_single_select_correct_option_association = Table(
@@ -2146,6 +2208,32 @@ class LectureVideo(Base):
     stored_object = relationship(
         "LectureVideoStoredObject", back_populates="lecture_videos", uselist=False
     )
+    poster_stored_object_id = Column(
+        Integer,
+        ForeignKey(
+            "lecture_video_poster_stored_objects.id",
+            name="fk_lecture_videos_poster_stored_object_id",
+        ),
+        nullable=True,
+    )
+    poster_stored_object = relationship(
+        "LectureVideoPosterStoredObject",
+        back_populates="lecture_videos",
+        uselist=False,
+    )
+    caption_stored_object_id = Column(
+        Integer,
+        ForeignKey(
+            "lecture_video_caption_stored_objects.id",
+            name="fk_lecture_videos_caption_stored_object_id",
+        ),
+        nullable=True,
+    )
+    caption_stored_object = relationship(
+        "LectureVideoCaptionStoredObject",
+        back_populates="lecture_videos",
+        uselist=False,
+    )
     # Immutable provenance pointer to the immediate source snapshot when this
     # lecture video was cloned. This is intentionally not a live FK because
     # obsolete source snapshots are routinely hard-deleted after updates.
@@ -2166,6 +2254,16 @@ class LectureVideo(Base):
     voice_id = Column(String, nullable=True)
     manifest_data: Mapped[dict[str, Any] | None] = deferred(
         mapped_column(JSON, nullable=True)
+    )
+    transcript_data: Mapped[dict[str, Any] | None] = deferred(
+        mapped_column(JSON, nullable=True)
+    )
+    generation_prompt: Mapped[str | None] = deferred(mapped_column(Text, nullable=True))
+    video_description_duration_ms: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=30_000, server_default="30000"
+    )
+    manual_manifest: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
     )
     manifest_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     lecture_video_chat_available: Mapped[bool] = mapped_column(
@@ -2192,11 +2290,17 @@ class LectureVideo(Base):
         display_name: str | None = None,
         voice_id: str | None = None,
         manifest_data: dict[str, Any] | None = None,
+        transcript_data: dict[str, Any] | None = None,
+        generation_prompt: str | None = None,
+        video_description_duration_ms: int = 30_000,
+        manual_manifest: bool = False,
         manifest_version: int | None = None,
         lecture_video_chat_available: bool = False,
         source_lecture_video_id_snapshot: int | None = None,
         status: schemas.LectureVideoStatus = schemas.LectureVideoStatus.UPLOADED,
         error_message: str | None = None,
+        poster_stored_object_id: int | None = None,
+        caption_stored_object_id: int | None = None,
     ) -> "LectureVideo":
         lecture_video = LectureVideo(
             class_id=class_id,
@@ -2204,12 +2308,18 @@ class LectureVideo(Base):
             display_name=display_name,
             voice_id=voice_id,
             manifest_data=manifest_data,
+            transcript_data=transcript_data,
+            generation_prompt=generation_prompt,
+            video_description_duration_ms=video_description_duration_ms,
+            manual_manifest=manual_manifest,
             manifest_version=manifest_version,
             lecture_video_chat_available=lecture_video_chat_available,
             source_lecture_video_id_snapshot=source_lecture_video_id_snapshot,
             status=status,
             error_message=error_message,
             uploader_id=user_id,
+            poster_stored_object_id=poster_stored_object_id,
+            caption_stored_object_id=caption_stored_object_id,
         )
         session.add(lecture_video)
         await session.flush()
@@ -2223,7 +2333,44 @@ class LectureVideo(Base):
         stmt = (
             select(LectureVideo)
             .where(LectureVideo.id == id_)
+            .options(undefer(LectureVideo.generation_prompt))
             .options(selectinload(LectureVideo.stored_object))
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_id_with_transcript_data(
+        cls, session: AsyncSession, id_: int
+    ) -> Optional["LectureVideo"]:
+        stmt = (
+            select(LectureVideo)
+            .where(LectureVideo.id == id_)
+            .options(undefer(LectureVideo.generation_prompt))
+            .options(undefer(LectureVideo.transcript_data))
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_id_with_manifest_context(
+        cls, session: AsyncSession, id_: int
+    ) -> Optional["LectureVideo"]:
+        stmt = (
+            select(LectureVideo)
+            .where(LectureVideo.id == id_)
+            .options(undefer(LectureVideo.generation_prompt))
+            .options(undefer(LectureVideo.manifest_data))
+            .options(undefer(LectureVideo.transcript_data))
+            .options(selectinload(LectureVideo.stored_object))
+            .options(
+                selectinload(LectureVideo.questions).selectinload(
+                    LectureVideoQuestion.options
+                )
+            )
+            .options(
+                selectinload(LectureVideo.questions).selectinload(
+                    LectureVideoQuestion.correct_option
+                )
+            )
         )
         return await session.scalar(stmt)
 
@@ -2234,6 +2381,8 @@ class LectureVideo(Base):
         stmt = (
             select(LectureVideo)
             .where(LectureVideo.id == id_, LectureVideo.class_id == class_id)
+            .options(undefer(LectureVideo.manifest_data))
+            .options(undefer(LectureVideo.generation_prompt))
             .options(selectinload(LectureVideo.stored_object))
         )
         return await session.scalar(stmt)
@@ -2246,6 +2395,8 @@ class LectureVideo(Base):
             select(LectureVideo)
             .where(LectureVideo.id == id_)
             .options(undefer(LectureVideo.manifest_data))
+            .options(undefer(LectureVideo.transcript_data))
+            .options(undefer(LectureVideo.generation_prompt))
             .options(selectinload(LectureVideo.stored_object))
             .options(
                 selectinload(LectureVideo.questions).selectinload(
@@ -2355,11 +2506,17 @@ class LectureVideo(Base):
             # credentials, including ElevenLabs.
             voice_id=lecture_video.voice_id,
             manifest_data=lecture_video.manifest_data,
+            transcript_data=lecture_video.transcript_data,
+            generation_prompt=lecture_video.generation_prompt,
+            video_description_duration_ms=lecture_video.video_description_duration_ms,
+            manual_manifest=lecture_video.manual_manifest,
             manifest_version=lecture_video.manifest_version,
             lecture_video_chat_available=lecture_video.lecture_video_chat_available,
             source_lecture_video_id_snapshot=lecture_video.id,
             status=lecture_video.status,
             error_message=lecture_video.error_message,
+            poster_stored_object_id=lecture_video.poster_stored_object_id,
+            caption_stored_object_id=lecture_video.caption_stored_object_id,
         )
 
         option_map: dict[int, LectureVideoQuestionOption] = {}
@@ -2744,6 +2901,7 @@ def _thread_lecture_video_base_loaders() -> tuple[Load, ...]:
         ),
         selectinload(Thread.lecture_video).options(
             undefer(LectureVideo.manifest_data),
+            undefer(LectureVideo.transcript_data),
             selectinload(LectureVideo.stored_object),
             selectinload(LectureVideo.questions).options(
                 *_lecture_video_question_context_loaders()
@@ -3915,6 +4073,29 @@ class Assistant(Base):
     temperature = Column(Float, nullable=True)
     reasoning_effort = Column(Integer, nullable=True)
     verbosity = Column(Integer, nullable=True)
+    realtime_vad_mode = Column(SQLEnum(schemas.RealtimeVadMode), nullable=True)
+    realtime_eagerness = Column(
+        SQLEnum(schemas.RealtimeEagerness),
+        nullable=True,
+        default=schemas.RealtimeEagerness.AUTO,
+    )
+    realtime_vad_threshold = Column(Float, nullable=True)
+    realtime_vad_prefix_padding_ms = Column(Integer, nullable=True)
+    realtime_vad_silence_duration_ms = Column(Integer, nullable=True)
+    realtime_vad_idle_timeout_ms = Column(Integer, nullable=True)
+    realtime_voice = Column(SQLEnum(schemas.RealtimeVoice), nullable=True)
+    realtime_speed = Column(Float, nullable=True)
+    realtime_noise_reduction = Column(
+        SQLEnum(schemas.RealtimeNoiseReduction), nullable=True
+    )
+    realtime_transcription_model = Column(
+        SQLEnum(schemas.RealtimeTranscriptionModel), nullable=True
+    )
+    elevenlabs_stability = Column(Float, nullable=True)
+    elevenlabs_similarity_boost = Column(Float, nullable=True)
+    elevenlabs_use_speaker_boost = Column(Boolean, nullable=True)
+    elevenlabs_style = Column(Float, nullable=True)
+    elevenlabs_speed = Column(Float, nullable=True)
     assistant_should_message_first = Column(Boolean, server_default="false")
     should_record_user_information = Column(Boolean, server_default="false")
     disable_prompt_randomization = Column(
@@ -3977,6 +4158,8 @@ class Assistant(Base):
             selectinload(Assistant.mcp_server_tools),
             selectinload(Assistant.lecture_video).options(
                 undefer(LectureVideo.manifest_data),
+                undefer(LectureVideo.transcript_data),
+                undefer(LectureVideo.generation_prompt),
                 selectinload(LectureVideo.stored_object),
             ),
             selectinload(Assistant.lecture_video).selectinload(LectureVideo.questions),
@@ -4016,8 +4199,9 @@ class Assistant(Base):
             select(Assistant)
             .where(Assistant.id == int(id_))
             .options(
-                selectinload(Assistant.lecture_video).selectinload(
-                    LectureVideo.stored_object
+                selectinload(Assistant.lecture_video).options(
+                    undefer(LectureVideo.generation_prompt),
+                    selectinload(LectureVideo.stored_object),
                 )
             )
         )
@@ -4061,8 +4245,11 @@ class Assistant(Base):
             .options(selectinload(Assistant.code_interpreter_files))
             .options(selectinload(Assistant.mcp_server_tools))
             .options(
-                selectinload(Assistant.lecture_video).selectinload(
-                    LectureVideo.stored_object
+                selectinload(Assistant.lecture_video).options(
+                    undefer(LectureVideo.manifest_data),
+                    undefer(LectureVideo.transcript_data),
+                    undefer(LectureVideo.generation_prompt),
+                    selectinload(LectureVideo.stored_object),
                 )
             )
         )
@@ -4097,8 +4284,9 @@ class Assistant(Base):
             select(Assistant)
             .where(Assistant.class_id == int(class_id))
             .options(
-                selectinload(Assistant.lecture_video).selectinload(
-                    LectureVideo.stored_object
+                selectinload(Assistant.lecture_video).options(
+                    undefer(LectureVideo.generation_prompt),
+                    selectinload(LectureVideo.stored_object),
                 )
             )
         )
@@ -4155,6 +4343,29 @@ class Assistant(Base):
         params.pop("lecture_video_id", None)
         params.pop("lecture_video_manifest", None)
         params.pop("voice_id", None)
+        if data.interaction_mode != schemas.InteractionMode.VOICE:
+            for field in (
+                "realtime_vad_mode",
+                "realtime_eagerness",
+                "realtime_vad_threshold",
+                "realtime_vad_prefix_padding_ms",
+                "realtime_vad_silence_duration_ms",
+                "realtime_vad_idle_timeout_ms",
+                "realtime_voice",
+                "realtime_speed",
+                "realtime_noise_reduction",
+                "realtime_transcription_model",
+            ):
+                params[field] = None
+        if data.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
+            for field in (
+                "elevenlabs_stability",
+                "elevenlabs_similarity_boost",
+                "elevenlabs_use_speaker_boost",
+                "elevenlabs_style",
+                "elevenlabs_speed",
+            ):
+                params[field] = None
         params["tools"] = json.dumps(params["tools"])
         params["class_id"] = int(class_id)
         params["creator_id"] = int(user_id)
@@ -5744,6 +5955,36 @@ class VoiceModeRecording(Base):
         session.add(recording)
         await session.flush()
         return recording
+
+    @classmethod
+    async def create_or_replace_for_thread(
+        cls, session: AsyncSession, data: dict
+    ) -> tuple["VoiceModeRecording", str | None]:
+        await session.scalar(
+            select(Thread.id).where(Thread.id == data["thread_id"]).with_for_update()
+        )
+
+        stmt = (
+            select(VoiceModeRecording)
+            .where(VoiceModeRecording.thread_id == data["thread_id"])
+            .order_by(
+                VoiceModeRecording.created_at.desc(),
+                VoiceModeRecording.id.desc(),
+            )
+            .with_for_update()
+            .limit(1)
+        )
+        existing_recording = await session.scalar(stmt)
+        if existing_recording:
+            previous_recording_id = existing_recording.recording_id
+            existing_recording.recording_id = data["recording_id"]
+            existing_recording.duration = data["duration"]
+            session.add(existing_recording)
+            await session.flush()
+            return existing_recording, previous_recording_id
+
+        recording = await cls.create(session, data)
+        return recording, None
 
     @classmethod
     async def delete(cls, session: AsyncSession, id_: int) -> None:
@@ -7687,6 +7928,9 @@ class Thread(Base):
         class_id: int,
         desc: bool = True,
         include_only_user_ids: list[int] | None = None,
+        include_only_assistant_ids: list[int] | None = None,
+        last_activity_after: datetime | None = None,
+        last_activity_before: datetime | None = None,
     ) -> AsyncGenerator["Thread", None]:
         condition = Thread.class_id == int(class_id)
         if include_only_user_ids is not None:
@@ -7695,17 +7939,32 @@ class Thread(Base):
             condition = and_(
                 condition, Thread.users.any(User.id.in_(include_only_user_ids))
             )
+        if include_only_assistant_ids is not None:
+            if not include_only_assistant_ids:
+                return
+            condition = and_(
+                condition, Thread.assistant_id.in_(include_only_assistant_ids)
+            )
+        if last_activity_after:
+            condition = and_(condition, Thread.last_activity >= last_activity_after)
+        if last_activity_before:
+            condition = and_(condition, Thread.last_activity <= last_activity_before)
         stmt = (
             select(Thread)
-            .outerjoin(Thread.users)
             .options(
-                selectinload(Thread.users).load_only(
-                    User.id,
-                    User.created,
-                    User.display_name,
-                    User.first_name,
-                    User.last_name,
-                    User.email,
+                selectinload(Thread.users).options(
+                    load_only(
+                        User.id,
+                        User.created,
+                        User.anonymous_link_id,
+                        User.display_name,
+                        User.first_name,
+                        User.last_name,
+                        User.email,
+                    ),
+                    selectinload(User.anonymous_link).load_only(
+                        AnonymousLink.name, AnonymousLink.share_token
+                    ),
                 ),
             )
             .order_by(Thread.updated.desc() if desc else Thread.updated.asc())
@@ -8131,14 +8390,20 @@ class Thread(Base):
 
     @classmethod
     async def get_by_id_with_assistant(
-        cls, session: AsyncSession, thread_id: int
+        cls,
+        session: AsyncSession,
+        thread_id: int,
+        *,
+        for_update: bool = False,
+        include_voice_mode_recording: bool = False,
     ) -> "Thread":
         """Get a thread by its thread_id with the assistant eager loaded."""
-        stmt = (
-            select(Thread)
-            .options(joinedload(Thread.assistant))
-            .where(Thread.id == thread_id)
-        )
+        options = [joinedload(Thread.assistant)]
+        if include_voice_mode_recording:
+            options.append(selectinload(Thread.voice_mode_recording))
+        stmt = select(Thread).options(*options).where(Thread.id == thread_id)
+        if for_update:
+            stmt = stmt.with_for_update(of=Thread)
         result = await session.execute(stmt)
         thread = result.scalar()
         return thread
@@ -8180,10 +8445,45 @@ class Thread(Base):
         cls,
         session: AsyncSession,
         thread_id: int,
+        roles: Collection[schemas.MessageRole] | None = None,
+    ) -> AsyncGenerator["Message", None]:
+        filters = [Message.thread_id == thread_id]
+        if roles is not None:
+            filters.append(Message.role.in_(roles))
+        async for message in cls._list_messages_with_filters_gen(session, filters):
+            yield message
+
+    @classmethod
+    async def list_user_assistant_messages_with_run_developer_gen(
+        cls,
+        session: AsyncSession,
+        thread_id: int,
+        run_id: int,
+    ) -> AsyncGenerator["Message", None]:
+        filters = [
+            Message.thread_id == thread_id,
+            or_(
+                Message.role.in_(
+                    [schemas.MessageRole.USER, schemas.MessageRole.ASSISTANT]
+                ),
+                and_(
+                    Message.run_id == run_id,
+                    Message.role == schemas.MessageRole.DEVELOPER,
+                ),
+            ),
+        ]
+        async for message in cls._list_messages_with_filters_gen(session, filters):
+            yield message
+
+    @classmethod
+    async def _list_messages_with_filters_gen(
+        cls,
+        session: AsyncSession,
+        filters: Sequence[Any],
     ) -> AsyncGenerator["Message", None]:
         stmt = (
             select(Message)
-            .where(Message.thread_id == thread_id)
+            .where(*filters)
             .options(
                 selectinload(Message.content).selectinload(MessagePart.annotations),
                 selectinload(Message.file_search_attachments),

@@ -73,12 +73,16 @@
 	import { computeLatestIncidentTimestamps, filterLatestIncidentUpdates } from '$lib/statusUpdates';
 	import { tick } from 'svelte';
 	import { onDestroy } from 'svelte';
+	import { slide } from 'svelte/transition';
 	import WebSourceChip from '$lib/components/WebSourceChip.svelte';
 	import MCPServerModal from '$lib/components/MCPServerModal.svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	export let data;
-	const LECTURE_VIDEO_DEFAULT_INSTRUCTIONS = 'You are a lecture video assistant.';
-	const SUPPORTED_LECTURE_VIDEO_QUESTION_TYPES = new Set(['single_select']);
+	$: lectureVideoDefaultInstructions = data.lectureVideoDefaults?.instructions || '';
+	$: lectureVideoDefaultGenerationPrompt = data.lectureVideoDefaults?.generation_prompt || '';
+	const SUPPORTED_LECTURE_VIDEO_QUESTION_TYPES = new Set<api.LectureVideoQuestionType>([
+		'single_select'
+	]);
 	const DEFAULT_LECTURE_VIDEO_MANIFEST = {
 		version: 1,
 		questions: [
@@ -104,6 +108,15 @@
 			}
 		]
 	};
+	const DEFAULT_VIDEO_DESCRIPTION_DURATION_MS = 30_000;
+	const MIN_VIDEO_DESCRIPTION_DURATION_MS = 5_000;
+	const MAX_VIDEO_DESCRIPTION_DURATION_MS = 300_000;
+	const VIDEO_DESCRIPTION_DURATION_STEP_MS = 5_000;
+	const DEFAULT_ELEVENLABS_STABILITY = 0.5;
+	const DEFAULT_ELEVENLABS_SIMILARITY_BOOST = 0.8;
+	const DEFAULT_ELEVENLABS_USE_SPEAKER_BOOST = true;
+	const DEFAULT_ELEVENLABS_STYLE = 0.0;
+	const DEFAULT_ELEVENLABS_SPEED = 1.0;
 
 	type LectureVideoOptionInput = {
 		option_text: string;
@@ -123,7 +136,80 @@
 	type LectureVideoManifestInput = {
 		version?: number;
 		questions: LectureVideoQuestionInput[];
-		word_level_transcription?: { id: string; word: string; start: number; end: number }[];
+		word_level_transcription?: {
+			id: string;
+			word: string;
+			start?: number;
+			end?: number;
+			start_offset_ms?: number;
+			end_offset_ms?: number;
+		}[];
+		video_descriptions?: {
+			start_offset_ms: number;
+			end_offset_ms: number;
+			description: string;
+		}[];
+		summary_checkpoints?: {
+			end_offset_ms: number;
+			summary: string;
+		}[];
+		moment_contexts?: {
+			center_offset_ms: number;
+			start_offset_ms: number;
+			end_offset_ms: number;
+			before: string;
+			at: string;
+			after: string;
+		}[];
+	};
+
+	type LectureVideoSaveAffordances = {
+		regenerateHelperText: string;
+		regenerateButtonLabel: string;
+		saveButtonLabel: string;
+	};
+
+	const deriveLectureVideoSaveAffordances = ({
+		impliedRegeneration,
+		overwriteManifest,
+		saveTriggersGeneration,
+		regenerateRequested,
+		isCreating
+	}: {
+		impliedRegeneration: boolean;
+		overwriteManifest: boolean;
+		saveTriggersGeneration: boolean;
+		regenerateRequested: boolean;
+		isCreating: boolean;
+	}): LectureVideoSaveAffordances => {
+		if (impliedRegeneration && overwriteManifest) {
+			return {
+				regenerateHelperText: 'Your changes will re-create narration clips when you save.',
+				regenerateButtonLabel: 'Regenerate audio on save',
+				saveButtonLabel: 'Save'
+			};
+		}
+		if (impliedRegeneration) {
+			return {
+				regenerateHelperText:
+					'Your changes will regenerate the manifest and re-create narration clips when you save.',
+				regenerateButtonLabel: 'Regenerate on save',
+				saveButtonLabel: saveTriggersGeneration ? 'Save & generate' : 'Save'
+			};
+		}
+		if (overwriteManifest) {
+			return {
+				regenerateHelperText: 'Re-runs narration recreation for the current manifest.',
+				regenerateButtonLabel: 'Regenerate audio',
+				saveButtonLabel: regenerateRequested ? 'Save & regenerate audio' : 'Save'
+			};
+		}
+		return {
+			regenerateHelperText:
+				'Re-runs the knowledge check generation and re-creates all narration clips.',
+			regenerateButtonLabel: 'Regenerate manifest & audio',
+			saveButtonLabel: saveTriggersGeneration && isCreating ? 'Save & generate' : 'Save'
+		};
 	};
 
 	// Flag indicating whether we should check for changes before navigating away.
@@ -217,6 +303,18 @@
 	let lectureVideoManifestJson = '';
 	let lectureVideoChatUnavailable = false;
 	let hasSetLectureVideoManifest = false;
+	let generationPrompt = '';
+	let hasSetGenerationPrompt = false;
+	let videoDescriptionDurationMs =
+		data.lectureVideoConfig?.video_description_duration_ms ?? DEFAULT_VIDEO_DESCRIPTION_DURATION_MS;
+	let hasSetVideoDescriptionDuration = false;
+	let canGenerateLectureVideoManifest = data.lectureVideoDefaults?.can_generate_manifest ?? false;
+	$: canGenerateLectureVideoManifest = data.lectureVideoDefaults?.can_generate_manifest ?? false;
+	const effectiveOverwriteManifest = (storedOverwriteManifest?: boolean | null) =>
+		canGenerateLectureVideoManifest ? (storedOverwriteManifest ?? false) : true;
+	let overwriteManifest = effectiveOverwriteManifest(data.lectureVideoConfig?.overwrite_manifest);
+	let hasSetOverwriteManifest = false;
+	let regenerateRequested = false;
 	let currentVoiceId = data.lectureVideoConfig?.voice_id || '';
 	let voiceId = '';
 	let hasSetVoiceId = false;
@@ -227,17 +325,47 @@
 	let lastValidatedVoiceId = '';
 	let voiceRequiresValidation = false;
 	let voiceSampleCache: Record<string, { text: string; audioSrc: string }> = {};
+	const elevenlabsVoiceSettingsPayload = () => ({
+		elevenlabs_stability: elevenlabsStabilityValue,
+		elevenlabs_similarity_boost: elevenlabsSimilarityBoostValue,
+		elevenlabs_use_speaker_boost: elevenlabsUseSpeakerBoostValue,
+		elevenlabs_style: elevenlabsStyleValue,
+		elevenlabs_speed: elevenlabsSpeedValue
+	});
+	const voiceSampleCacheKey = (voiceId: string) =>
+		JSON.stringify({
+			voice_id: voiceId,
+			...elevenlabsVoiceSettingsPayload()
+		});
 	const revokeVoiceSampleAudioSrc = (audioSrc: string) => {
 		if (audioSrc.startsWith('blob:')) {
 			URL.revokeObjectURL(audioSrc);
 		}
 	};
-	const setVoiceSampleCacheEntry = (voiceId: string, text: string, audioSrc: string) => {
-		const existing = voiceSampleCache[voiceId];
+	const voiceIdFromSampleCacheKey = (cacheKey: string) => {
+		try {
+			const parsed = JSON.parse(cacheKey);
+			return typeof parsed.voice_id === 'string' ? parsed.voice_id : null;
+		} catch {
+			return null;
+		}
+	};
+	const setVoiceSampleCacheEntry = (cacheKey: string, text: string, audioSrc: string) => {
+		const existing = voiceSampleCache[cacheKey];
 		if (existing && existing.audioSrc !== audioSrc) {
 			revokeVoiceSampleAudioSrc(existing.audioSrc);
 		}
-		voiceSampleCache[voiceId] = { text, audioSrc };
+		const voiceId = voiceIdFromSampleCacheKey(cacheKey);
+		const nextCache = { ...voiceSampleCache, [cacheKey]: { text, audioSrc } };
+		if (voiceId !== null) {
+			for (const [candidateKey, sample] of Object.entries(voiceSampleCache)) {
+				if (candidateKey !== cacheKey && voiceIdFromSampleCacheKey(candidateKey) === voiceId) {
+					revokeVoiceSampleAudioSrc(sample.audioSrc);
+					delete nextCache[candidateKey];
+				}
+			}
+		}
+		voiceSampleCache = nextCache;
 	};
 	onDestroy(() => {
 		for (const sample of Object.values(voiceSampleCache)) {
@@ -288,7 +416,7 @@
 		if (candidate.version === 1) {
 			return true;
 		}
-		if (candidate.version === 2) {
+		if (candidate.version === 2 || candidate.version === 3 || candidate.version === 4) {
 			return !hasWordLevelTranscription;
 		}
 		if (candidate.word_level_transcription !== undefined) {
@@ -297,6 +425,14 @@
 
 		return null;
 	};
+
+	const isValidLectureVideoInterval = (start: unknown, end: unknown) =>
+		typeof start === 'number' &&
+		Number.isFinite(start) &&
+		start >= 0 &&
+		typeof end === 'number' &&
+		Number.isFinite(end) &&
+		end >= start;
 
 	// Keep this client-side validation aligned with pingpong/schemas.py:
 	// LectureVideoManifestV1, LectureVideoManifestQuestionV1, and LectureVideoManifestOptionV1.
@@ -315,10 +451,16 @@
 		}
 
 		const candidate = parsed as Partial<LectureVideoManifestInput>;
-		if (candidate.version !== undefined && candidate.version !== 1 && candidate.version !== 2) {
+		if (
+			candidate.version !== undefined &&
+			candidate.version !== 1 &&
+			candidate.version !== 2 &&
+			candidate.version !== 3 &&
+			candidate.version !== 4
+		) {
 			return {
 				manifest: null,
-				error: 'Lecture video manifest version must be 1 or 2.'
+				error: 'Lecture video manifest version must be 1, 2, 3, or 4.'
 			};
 		}
 		if (!Array.isArray(candidate.questions) || candidate.questions.length < 1) {
@@ -335,7 +477,7 @@
 			}
 			if (
 				typeof question.type !== 'string' ||
-				!SUPPORTED_LECTURE_VIDEO_QUESTION_TYPES.has(question.type)
+				!SUPPORTED_LECTURE_VIDEO_QUESTION_TYPES.has(question.type as api.LectureVideoQuestionType)
 			) {
 				return {
 					manifest: null,
@@ -402,8 +544,226 @@
 			}
 		}
 
+		const questions = candidate.questions.map((question) => ({
+			type: question.type as api.LectureVideoQuestionType,
+			question_text: question.question_text,
+			intro_text: question.intro_text,
+			stop_offset_ms: question.stop_offset_ms,
+			options: question.options.map((option) => ({
+				option_text: option.option_text,
+				post_answer_text: option.post_answer_text,
+				continue_offset_ms: option.continue_offset_ms,
+				correct: option.correct
+			}))
+		})) satisfies api.LectureVideoManifestQuestion[];
+
 		const hasWordLevelTranscription = candidate.word_level_transcription !== undefined;
+		const hasV3TranscriptShape =
+			Array.isArray(candidate.word_level_transcription) &&
+			candidate.word_level_transcription.some(
+				(word) =>
+					word && typeof word === 'object' && 'start_offset_ms' in word && 'end_offset_ms' in word
+			);
+		const shouldUseV3Manifest =
+			candidate.version === 3 ||
+			(candidate.version === undefined &&
+				(candidate.video_descriptions !== undefined || hasV3TranscriptShape));
+		const shouldUseV4Manifest =
+			candidate.version === 4 ||
+			(candidate.version === undefined &&
+				(candidate.summary_checkpoints !== undefined || candidate.moment_contexts !== undefined));
 		const shouldUseV2Manifest = candidate.version === 2 || hasWordLevelTranscription;
+
+		if (shouldUseV4Manifest) {
+			if (
+				!Array.isArray(candidate.word_level_transcription) ||
+				candidate.word_level_transcription.length < 1
+			) {
+				return {
+					manifest: null,
+					error: 'Lecture video manifest version 4 must include non-empty word_level_transcription.'
+				};
+			}
+			if (
+				!Array.isArray(candidate.summary_checkpoints) ||
+				candidate.summary_checkpoints.length < 1
+			) {
+				return {
+					manifest: null,
+					error: 'Lecture video manifest version 4 must include non-empty summary_checkpoints.'
+				};
+			}
+			if (!Array.isArray(candidate.moment_contexts) || candidate.moment_contexts.length < 1) {
+				return {
+					manifest: null,
+					error: 'Lecture video manifest version 4 must include non-empty moment_contexts.'
+				};
+			}
+
+			for (let index = 0; index < candidate.word_level_transcription.length; index += 1) {
+				const word = candidate.word_level_transcription[index];
+				if (
+					!word ||
+					typeof word !== 'object' ||
+					typeof word.id !== 'string' ||
+					word.id.length < 1 ||
+					typeof word.word !== 'string' ||
+					word.word.length < 1 ||
+					!isValidLectureVideoInterval(word.start_offset_ms, word.end_offset_ms)
+				) {
+					return {
+						manifest: null,
+						error: `word_level_transcription entry ${index + 1} is invalid.`
+					};
+				}
+			}
+
+			for (let index = 0; index < candidate.summary_checkpoints.length; index += 1) {
+				const checkpoint = candidate.summary_checkpoints[index];
+				if (
+					!checkpoint ||
+					typeof checkpoint !== 'object' ||
+					typeof checkpoint.summary !== 'string' ||
+					checkpoint.summary.trim().length < 1 ||
+					typeof checkpoint.end_offset_ms !== 'number' ||
+					!Number.isFinite(checkpoint.end_offset_ms) ||
+					checkpoint.end_offset_ms < 0
+				) {
+					return {
+						manifest: null,
+						error: `summary_checkpoints entry ${index + 1} is invalid.`
+					};
+				}
+			}
+
+			for (let index = 0; index < candidate.moment_contexts.length; index += 1) {
+				const moment = candidate.moment_contexts[index];
+				if (
+					!moment ||
+					typeof moment !== 'object' ||
+					typeof moment.before !== 'string' ||
+					moment.before.trim().length < 1 ||
+					typeof moment.at !== 'string' ||
+					moment.at.trim().length < 1 ||
+					typeof moment.after !== 'string' ||
+					moment.after.trim().length < 1 ||
+					!isValidLectureVideoInterval(moment.start_offset_ms, moment.end_offset_ms) ||
+					typeof moment.center_offset_ms !== 'number' ||
+					!Number.isFinite(moment.center_offset_ms) ||
+					moment.center_offset_ms < moment.start_offset_ms ||
+					moment.center_offset_ms > moment.end_offset_ms
+				) {
+					return {
+						manifest: null,
+						error: `moment_contexts entry ${index + 1} is invalid.`
+					};
+				}
+			}
+
+			const wordLevelTranscription = candidate.word_level_transcription.map((word) => ({
+				id: word.id,
+				word: word.word,
+				start_offset_ms: word.start_offset_ms as number,
+				end_offset_ms: word.end_offset_ms as number
+			})) satisfies api.LectureVideoManifestWordV3[];
+			const manifest = {
+				version: 4,
+				questions,
+				word_level_transcription: wordLevelTranscription,
+				summary_checkpoints: candidate.summary_checkpoints.map((checkpoint) => ({
+					end_offset_ms: checkpoint.end_offset_ms,
+					summary: checkpoint.summary.trim()
+				})),
+				moment_contexts: candidate.moment_contexts.map((moment) => ({
+					center_offset_ms: moment.center_offset_ms,
+					start_offset_ms: moment.start_offset_ms,
+					end_offset_ms: moment.end_offset_ms,
+					before: moment.before.trim(),
+					at: moment.at.trim(),
+					after: moment.after.trim()
+				}))
+			} satisfies api.LectureVideoManifestV4;
+
+			return {
+				manifest,
+				error: null
+			};
+		}
+
+		if (shouldUseV3Manifest) {
+			if (
+				!Array.isArray(candidate.word_level_transcription) ||
+				candidate.word_level_transcription.length < 1
+			) {
+				return {
+					manifest: null,
+					error: 'Lecture video manifest version 3 must include non-empty word_level_transcription.'
+				};
+			}
+			if (!Array.isArray(candidate.video_descriptions) || candidate.video_descriptions.length < 1) {
+				return {
+					manifest: null,
+					error: 'Lecture video manifest version 3 must include non-empty video_descriptions.'
+				};
+			}
+
+			for (let index = 0; index < candidate.word_level_transcription.length; index += 1) {
+				const word = candidate.word_level_transcription[index];
+				if (
+					!word ||
+					typeof word !== 'object' ||
+					typeof word.id !== 'string' ||
+					word.id.length < 1 ||
+					typeof word.word !== 'string' ||
+					word.word.length < 1 ||
+					!isValidLectureVideoInterval(word.start_offset_ms, word.end_offset_ms)
+				) {
+					return {
+						manifest: null,
+						error: `word_level_transcription entry ${index + 1} is invalid.`
+					};
+				}
+			}
+
+			for (let index = 0; index < candidate.video_descriptions.length; index += 1) {
+				const description = candidate.video_descriptions[index];
+				if (
+					!description ||
+					typeof description !== 'object' ||
+					typeof description.description !== 'string' ||
+					description.description.length < 1 ||
+					!isValidLectureVideoInterval(description.start_offset_ms, description.end_offset_ms)
+				) {
+					return {
+						manifest: null,
+						error: `video_descriptions entry ${index + 1} is invalid.`
+					};
+				}
+			}
+
+			const wordLevelTranscription = candidate.word_level_transcription.map((word) => ({
+				id: word.id,
+				word: word.word,
+				start_offset_ms: word.start_offset_ms as number,
+				end_offset_ms: word.end_offset_ms as number
+			})) satisfies api.LectureVideoManifestWordV3[];
+			const videoDescriptions = candidate.video_descriptions.map((description) => ({
+				start_offset_ms: description.start_offset_ms,
+				end_offset_ms: description.end_offset_ms,
+				description: description.description
+			})) satisfies api.LectureVideoManifestVideoDescriptionV3[];
+			const manifest = {
+				version: 3,
+				questions,
+				word_level_transcription: wordLevelTranscription,
+				video_descriptions: videoDescriptions
+			} satisfies api.LectureVideoManifestV3;
+
+			return {
+				manifest,
+				error: null
+			};
+		}
 
 		if (shouldUseV2Manifest) {
 			if (
@@ -425,13 +785,7 @@
 					word.id.length < 1 ||
 					typeof word.word !== 'string' ||
 					word.word.length < 1 ||
-					typeof word.start !== 'number' ||
-					!Number.isFinite(word.start) ||
-					word.start < 0 ||
-					typeof word.end !== 'number' ||
-					!Number.isFinite(word.end) ||
-					word.end < 0 ||
-					word.end < word.start
+					!isValidLectureVideoInterval(word.start, word.end)
 				) {
 					return {
 						manifest: null,
@@ -465,9 +819,85 @@
 		);
 		hasSetLectureVideoManifest = true;
 	}
+	$: if (!hasSetGenerationPrompt && !lectureVideoConfigLoadError) {
+		generationPrompt =
+			data.lectureVideoConfig?.generation_prompt || lectureVideoDefaultGenerationPrompt;
+		hasSetGenerationPrompt = true;
+	}
+	$: if (!hasSetVideoDescriptionDuration && !lectureVideoConfigLoadError) {
+		videoDescriptionDurationMs =
+			data.lectureVideoConfig?.video_description_duration_ms ??
+			DEFAULT_VIDEO_DESCRIPTION_DURATION_MS;
+		hasSetVideoDescriptionDuration = true;
+	}
+	$: if (!hasSetOverwriteManifest && !lectureVideoConfigLoadError) {
+		overwriteManifest = effectiveOverwriteManifest(data.lectureVideoConfig?.overwrite_manifest);
+		hasSetOverwriteManifest = true;
+	}
 	$: currentLectureVideoManifestNormalized = normalizeLectureVideoManifestForCompare(
 		stringifyLectureVideoManifest(data.lectureVideoConfig?.lecture_video_manifest)
 	);
+	$: originalGenerationPrompt =
+		data.lectureVideoConfig?.generation_prompt || lectureVideoDefaultGenerationPrompt;
+	$: originalVideoDescriptionDurationMs =
+		data.lectureVideoConfig?.video_description_duration_ms ?? DEFAULT_VIDEO_DESCRIPTION_DURATION_MS;
+	$: generationPromptEdited =
+		canGenerateLectureVideoManifest && generationPrompt !== lectureVideoDefaultGenerationPrompt;
+	$: generationPromptForSave = generationPromptEdited ? generationPrompt : null;
+	$: manifestGenerationStatus = data.lectureVideoConfig?.manifest_generation_status ?? null;
+	$: originalOverwriteManifest = effectiveOverwriteManifest(
+		data.lectureVideoConfig?.overwrite_manifest
+	);
+	$: manifestGenerationInFlight =
+		manifestGenerationStatus?.state === 'queued' || manifestGenerationStatus?.state === 'running';
+	$: lastManifestRunFailed = manifestGenerationStatus?.state === 'failed';
+	$: lectureVideoManifestChanged =
+		overwriteManifest &&
+		normalizeLectureVideoManifestForCompare(lectureVideoManifestJson) !==
+			currentLectureVideoManifestNormalized;
+	$: lectureVideoIdChanged =
+		(selectedLectureVideo?.id ?? null) !== (currentLectureVideo?.id ?? null);
+	$: lectureVideoVoiceChanged = voiceId.trim() !== currentVoiceId.trim();
+	$: generationPromptChanged =
+		canGenerateLectureVideoManifest && generationPrompt !== originalGenerationPrompt;
+	$: videoDescriptionDurationChanged =
+		canGenerateLectureVideoManifest &&
+		videoDescriptionDurationMs !== originalVideoDescriptionDurationMs;
+	$: lectureVideoGenerationTriggeredByFormChanges =
+		isLectureMode &&
+		canGenerateLectureVideoManifest &&
+		!overwriteManifest &&
+		(originalOverwriteManifest ||
+			lectureVideoIdChanged ||
+			generationPromptChanged ||
+			videoDescriptionDurationChanged ||
+			lastManifestRunFailed ||
+			!data.lectureVideoConfig?.lecture_video_manifest);
+	$: lectureVideoNarrationTriggeredByFormChanges =
+		isLectureMode && overwriteManifest && (lectureVideoManifestChanged || lectureVideoVoiceChanged);
+	$: lectureVideoRegenerationImpliedByFormChanges =
+		lectureVideoGenerationTriggeredByFormChanges || lectureVideoNarrationTriggeredByFormChanges;
+	$: canRegenerateLectureVideo = isLectureMode && !data.isCreating;
+	$: if (!canRegenerateLectureVideo && regenerateRequested) {
+		regenerateRequested = false;
+	}
+	$: lectureVideoRegenerateButtonPressed =
+		regenerateRequested || lectureVideoRegenerationImpliedByFormChanges;
+	$: lectureVideoSaveTriggersGeneration =
+		isLectureMode &&
+		canGenerateLectureVideoManifest &&
+		!overwriteManifest &&
+		(regenerateRequested || lectureVideoGenerationTriggeredByFormChanges);
+	$: lectureVideoSaveAffordances = deriveLectureVideoSaveAffordances({
+		impliedRegeneration: lectureVideoRegenerationImpliedByFormChanges,
+		overwriteManifest,
+		saveTriggersGeneration: isLectureMode && lectureVideoSaveTriggersGeneration,
+		regenerateRequested,
+		isCreating: data.isCreating
+	});
+	$: lectureVideoRegenerateHelperText = lectureVideoSaveAffordances.regenerateHelperText;
+	$: lectureVideoRegenerateButtonLabel = lectureVideoSaveAffordances.regenerateButtonLabel;
+	$: saveButtonLabel = lectureVideoSaveAffordances.saveButtonLabel;
 	$: lectureVideoChatUnavailable = (() => {
 		try {
 			const manifestState = lectureVideoChatUnavailableForManifest(
@@ -488,7 +918,7 @@
 	}
 	$: {
 		const trimmed = voiceId.trim();
-		const cached = voiceSampleCache[trimmed];
+		const cached = voiceSampleCache[voiceSampleCacheKey(trimmed)];
 		if (cached) {
 			voiceSampleAudioSrc = cached.audioSrc;
 			voiceSampleText = cached.text;
@@ -519,6 +949,9 @@
 	$: if (assistant?.use_latex !== undefined && assistant?.use_latex !== null && !hasSetUseLatex) {
 		useLatex = assistant?.use_latex;
 		hasSetUseLatex = true;
+	}
+	$: if (isLectureMode && !useLatex) {
+		useLatex = true;
 	}
 	let mcpServersLocal: MCPServerToolInput[] = [];
 	$: mcpServersFromRequest = data.mcpServers.slice();
@@ -956,6 +1389,101 @@
 		assistantShouldMessageFirst = assistant?.assistant_should_message_first;
 		hasSetAssistantShouldMessageFirst = true;
 	}
+	const realtimeEagernessOptions: { value: api.RealtimeEagerness; label: string }[] = [
+		{ value: 'auto', label: 'Auto' },
+		{ value: 'low', label: 'Low' },
+		{ value: 'medium', label: 'Medium' },
+		{ value: 'high', label: 'High' }
+	];
+	const realtimeVadModeOptions: { value: api.RealtimeVadMode; label: string }[] = [
+		{ value: 'server_vad', label: 'Normal' },
+		{ value: 'semantic_vad', label: 'Semantic' }
+	];
+	const realtimeNoiseReductionOptions: { value: api.RealtimeNoiseReduction; label: string }[] = [
+		{ value: 'none', label: 'Off' },
+		{ value: 'near_field', label: 'Near field' },
+		{ value: 'far_field', label: 'Far field' }
+	];
+	const realtimeVoiceOptions: { value: api.RealtimeVoice; label: string }[] = [
+		{ value: 'alloy', label: 'Alloy' },
+		{ value: 'ash', label: 'Ash' },
+		{ value: 'ballad', label: 'Ballad' },
+		{ value: 'cedar', label: 'Cedar (recommended)' },
+		{ value: 'coral', label: 'Coral' },
+		{ value: 'echo', label: 'Echo' },
+		{ value: 'marin', label: 'Marin (recommended)' },
+		{ value: 'sage', label: 'Sage' },
+		{ value: 'shimmer', label: 'Shimmer' },
+		{ value: 'verse', label: 'Verse' }
+	];
+	const realtimeVoicePreviewUrl = (voice: api.RealtimeVoice) =>
+		`https://cdn.openai.com/API/voice-previews/${voice}.flac`;
+	const realtimeTranscriptionModelOptions: {
+		value: api.RealtimeTranscriptionModel;
+		label: string;
+	}[] = [
+		{ value: 'whisper-1', label: 'Whisper 1' },
+		{ value: 'gpt-realtime-whisper', label: 'GPT Realtime Whisper' }
+	];
+	let realtimeVadModeValue: api.RealtimeVadMode = 'semantic_vad';
+	let realtimeEagernessValue: api.RealtimeEagerness = 'auto';
+	let realtimeVadThresholdValue = 0.5;
+	let realtimeVadPrefixPaddingSecondsValue = 0.3;
+	let realtimeVadSilenceDurationSecondsValue = 0.5;
+	let realtimeVadIdleTimeoutSecondsValue: number | null = null;
+	let realtimeVoiceValue: api.RealtimeVoice = 'marin';
+	let realtimeSpeedValue = 1.0;
+	let realtimeNoiseReductionValue: api.RealtimeNoiseReduction = 'far_field';
+	let realtimeTranscriptionModelValue: api.RealtimeTranscriptionModel = 'whisper-1';
+	let elevenlabsStabilityValue = DEFAULT_ELEVENLABS_STABILITY;
+	let elevenlabsSimilarityBoostValue = DEFAULT_ELEVENLABS_SIMILARITY_BOOST;
+	let elevenlabsUseSpeakerBoostValue = DEFAULT_ELEVENLABS_USE_SPEAKER_BOOST;
+	let elevenlabsStyleValue = DEFAULT_ELEVENLABS_STYLE;
+	let elevenlabsSpeedValue = DEFAULT_ELEVENLABS_SPEED;
+	const normalizeRealtimeVadIdleTimeoutSeconds = (value: string) => {
+		if (value === '') {
+			return null;
+		}
+		const seconds = Number(value);
+		if (!Number.isFinite(seconds)) {
+			return null;
+		}
+		return Math.min(30, Math.max(5, seconds));
+	};
+	let hasSetRealtimeEagerness = false;
+	$: if (
+		assistant?.realtime_eagerness !== undefined &&
+		assistant?.realtime_eagerness !== null &&
+		!hasSetRealtimeEagerness
+	) {
+		realtimeEagernessValue = assistant.realtime_eagerness;
+		hasSetRealtimeEagerness = true;
+	}
+	let hasSetRealtimeSettings = false;
+	$: if (assistant !== undefined && assistant !== null && !hasSetRealtimeSettings) {
+		realtimeVadModeValue = assistant.realtime_vad_mode ?? 'semantic_vad';
+		realtimeVadThresholdValue = assistant.realtime_vad_threshold ?? 0.5;
+		realtimeVadPrefixPaddingSecondsValue = (assistant.realtime_vad_prefix_padding_ms ?? 300) / 1000;
+		realtimeVadSilenceDurationSecondsValue =
+			(assistant.realtime_vad_silence_duration_ms ?? 500) / 1000;
+		realtimeVadIdleTimeoutSecondsValue =
+			assistant.realtime_vad_idle_timeout_ms === null ||
+			assistant.realtime_vad_idle_timeout_ms === undefined
+				? null
+				: assistant.realtime_vad_idle_timeout_ms / 1000;
+		realtimeVoiceValue = assistant.realtime_voice ?? 'marin';
+		realtimeSpeedValue = assistant.realtime_speed ?? 1.0;
+		realtimeNoiseReductionValue = assistant.realtime_noise_reduction ?? 'far_field';
+		realtimeTranscriptionModelValue = assistant.realtime_transcription_model ?? 'whisper-1';
+		elevenlabsStabilityValue = assistant.elevenlabs_stability ?? DEFAULT_ELEVENLABS_STABILITY;
+		elevenlabsSimilarityBoostValue =
+			assistant.elevenlabs_similarity_boost ?? DEFAULT_ELEVENLABS_SIMILARITY_BOOST;
+		elevenlabsUseSpeakerBoostValue =
+			assistant.elevenlabs_use_speaker_boost ?? DEFAULT_ELEVENLABS_USE_SPEAKER_BOOST;
+		elevenlabsStyleValue = assistant.elevenlabs_style ?? DEFAULT_ELEVENLABS_STYLE;
+		elevenlabsSpeedValue = assistant.elevenlabs_speed ?? DEFAULT_ELEVENLABS_SPEED;
+		hasSetRealtimeSettings = true;
+	}
 
 	let shouldRecordNameOrVoice = false;
 	let hasSetShouldRecordNameOrVoice = false;
@@ -1185,6 +1713,7 @@
 		} else if (mode === 'lecture_video') {
 			forcedAssistantVersion = 3;
 			convertToNextGen = null;
+			useLatex = true;
 		} else {
 			forcedAssistantVersion = null;
 		}
@@ -1208,6 +1737,9 @@
 			assistant?.instructions !== null
 		) {
 			instructions = assistant.instructions;
+			hasSetInstructions = true;
+		} else if (mode === 'lecture_video' && data.isCreating) {
+			instructions = lectureVideoDefaultInstructions;
 			hasSetInstructions = true;
 		} else {
 			await tick();
@@ -1347,6 +1879,70 @@
 			case 'reasoning_effort':
 				dirty = newValue !== oldValue;
 				break;
+			case 'realtime_eagerness':
+				dirty =
+					interactionMode === 'voice'
+						? newValue !== ((oldValue as api.RealtimeEagerness | null) ?? 'auto')
+						: false;
+				break;
+			case 'realtime_vad_mode':
+				dirty =
+					interactionMode === 'voice'
+						? newValue !== ((oldValue as api.RealtimeVadMode | null) ?? 'semantic_vad')
+						: false;
+				break;
+			case 'realtime_vad_threshold':
+				dirty = interactionMode === 'voice' ? newValue !== (oldValue ?? 0.5) : false;
+				break;
+			case 'realtime_vad_prefix_padding_ms':
+				dirty = interactionMode === 'voice' ? newValue !== (oldValue ?? 300) : false;
+				break;
+			case 'realtime_vad_silence_duration_ms':
+				dirty = interactionMode === 'voice' ? newValue !== (oldValue ?? 500) : false;
+				break;
+			case 'realtime_vad_idle_timeout_ms':
+				dirty = interactionMode === 'voice' ? newValue !== (oldValue ?? null) : false;
+				break;
+			case 'realtime_voice':
+				dirty =
+					interactionMode === 'voice'
+						? newValue !== ((oldValue as api.RealtimeVoice | null) ?? 'marin')
+						: false;
+				break;
+			case 'realtime_speed':
+				dirty = interactionMode === 'voice' ? newValue !== (oldValue ?? 1.0) : false;
+				break;
+			case 'realtime_noise_reduction':
+				dirty =
+					interactionMode === 'voice'
+						? newValue !== ((oldValue as api.RealtimeNoiseReduction | null) ?? 'far_field')
+						: false;
+				break;
+			case 'realtime_transcription_model':
+				dirty =
+					interactionMode === 'voice'
+						? newValue !== ((oldValue as api.RealtimeTranscriptionModel | null) ?? 'whisper-1')
+						: false;
+				break;
+			case 'elevenlabs_stability':
+				dirty = isLectureMode ? newValue !== (oldValue ?? DEFAULT_ELEVENLABS_STABILITY) : false;
+				break;
+			case 'elevenlabs_similarity_boost':
+				dirty = isLectureMode
+					? newValue !== (oldValue ?? DEFAULT_ELEVENLABS_SIMILARITY_BOOST)
+					: false;
+				break;
+			case 'elevenlabs_use_speaker_boost':
+				dirty = isLectureMode
+					? newValue !== (oldValue ?? DEFAULT_ELEVENLABS_USE_SPEAKER_BOOST)
+					: false;
+				break;
+			case 'elevenlabs_style':
+				dirty = isLectureMode ? newValue !== (oldValue ?? DEFAULT_ELEVENLABS_STYLE) : false;
+				break;
+			case 'elevenlabs_speed':
+				dirty = isLectureMode ? newValue !== (oldValue ?? DEFAULT_ELEVENLABS_SPEED) : false;
+				break;
 			case 'published':
 				dirty = newValue === undefined ? false : newValue !== !!oldValue;
 				break;
@@ -1392,7 +1988,7 @@
 		// Check if the new params are different from the loaded assistant.
 		// If the assistant is brand new, ignore simple checkboxes and dropdowns,
 		// and only check text entry fields.
-		const fields: Array<keyof api.CreateAssistantRequest & keyof api.Assistant> = data.assistantId
+		let fields: Array<keyof api.CreateAssistantRequest & keyof api.Assistant> = data.assistantId
 			? [
 					'name',
 					'description',
@@ -1407,11 +2003,32 @@
 					'disable_prompt_randomization',
 					'tools',
 					'temperature',
-					'reasoning_effort'
+					'reasoning_effort',
+					'realtime_eagerness',
+					'realtime_vad_mode',
+					'realtime_vad_threshold',
+					'realtime_vad_prefix_padding_ms',
+					'realtime_vad_silence_duration_ms',
+					'realtime_vad_idle_timeout_ms',
+					'realtime_voice',
+					'realtime_speed',
+					'realtime_noise_reduction',
+					'realtime_transcription_model',
+					'elevenlabs_stability',
+					'elevenlabs_similarity_boost',
+					'elevenlabs_use_speaker_boost',
+					'elevenlabs_style',
+					'elevenlabs_speed'
 				]
-			: isLectureMode
-				? ['name', 'description']
-				: ['name', 'description', 'instructions'];
+			: ['name', 'description', 'instructions'];
+		if (
+			data.isCreating &&
+			isLectureMode &&
+			normalizeNewlines(params.instructions || '') ===
+				normalizeNewlines(lectureVideoDefaultInstructions)
+		) {
+			fields = fields.filter((field) => field !== 'instructions');
+		}
 
 		const modifiedFields: string[] = [];
 		for (const field of fields) {
@@ -1449,10 +2066,28 @@
 			modifiedFields.push('lecture video');
 		}
 		if (
+			overwriteManifest &&
 			normalizeLectureVideoManifestForCompare(lectureVideoManifestJson) !==
-			currentLectureVideoManifestNormalized
+				currentLectureVideoManifestNormalized
 		) {
 			modifiedFields.push('lecture video manifest');
+		}
+		if (canGenerateLectureVideoManifest && generationPrompt !== originalGenerationPrompt) {
+			modifiedFields.push('generation prompt');
+		}
+		if (
+			canGenerateLectureVideoManifest &&
+			videoDescriptionDurationMs !== originalVideoDescriptionDurationMs
+		) {
+			modifiedFields.push('video description duration');
+		}
+		if (canRegenerateLectureVideo && regenerateRequested) {
+			modifiedFields.push(
+				overwriteManifest ? 'lecture video narration' : 'lecture video generation'
+			);
+		}
+		if (overwriteManifest !== originalOverwriteManifest) {
+			modifiedFields.push('lecture video manifest mode');
 		}
 		if (voiceId.trim() !== currentVoiceId.trim()) {
 			modifiedFields.push('voice id');
@@ -1475,9 +2110,6 @@
 		const formData = new FormData(form);
 		const body = Object.fromEntries(formData.entries());
 		const includeTooling = !isLectureMode;
-		const lectureModeInstructions = normalizeNewlines(
-			(assistant?.instructions || LECTURE_VIDEO_DEFAULT_INSTRUCTIONS).trim()
-		);
 
 		const tools: api.Tool[] = [];
 		const fileSearchCodeInterpreterUnusedFiles: number[] = [];
@@ -1522,16 +2154,10 @@
 			mcpServersForRequest = mcpServersLocal.map(cleanMcpServerForRequest);
 		}
 		const params = {
-			name: preventEdits ? assistant?.name || '' : body.name.toString(),
+			name: preventEdits ? assistant?.name || '' : assistantName,
 			interaction_mode: interactionMode,
-			description: preventEdits
-				? assistant?.description || ''
-				: normalizeNewlines(body.description.toString()),
-			instructions: preventEdits
-				? assistant?.instructions || ''
-				: isLectureMode
-					? lectureModeInstructions || LECTURE_VIDEO_DEFAULT_INSTRUCTIONS
-					: normalizeNewlines(body.instructions?.toString() || ''),
+			description: preventEdits ? assistant?.description || '' : normalizeNewlines(description),
+			instructions: preventEdits ? assistant?.instructions || '' : normalizeNewlines(instructions),
 			notes: preventEdits ? assistant?.notes || '' : normalizeNewlines(notes),
 			model: isLectureMode
 				? data.isCreating
@@ -1568,17 +2194,71 @@
 				: supportsVerbosity
 					? verbosityValue
 					: null,
+			realtime_eagerness:
+				interactionMode === 'voice'
+					? realtimeEagernessValue
+					: (assistant?.realtime_eagerness ?? undefined),
+			realtime_vad_mode:
+				interactionMode === 'voice'
+					? realtimeVadModeValue
+					: (assistant?.realtime_vad_mode ?? undefined),
+			realtime_vad_threshold:
+				interactionMode === 'voice'
+					? realtimeVadThresholdValue
+					: (assistant?.realtime_vad_threshold ?? undefined),
+			realtime_vad_prefix_padding_ms:
+				interactionMode === 'voice'
+					? Math.round(realtimeVadPrefixPaddingSecondsValue * 1000)
+					: (assistant?.realtime_vad_prefix_padding_ms ?? undefined),
+			realtime_vad_silence_duration_ms:
+				interactionMode === 'voice'
+					? Math.round(realtimeVadSilenceDurationSecondsValue * 1000)
+					: (assistant?.realtime_vad_silence_duration_ms ?? undefined),
+			realtime_vad_idle_timeout_ms:
+				interactionMode === 'voice'
+					? realtimeVadIdleTimeoutSecondsValue === null
+						? null
+						: Math.round(realtimeVadIdleTimeoutSecondsValue * 1000)
+					: (assistant?.realtime_vad_idle_timeout_ms ?? undefined),
+			realtime_voice:
+				interactionMode === 'voice' ? realtimeVoiceValue : (assistant?.realtime_voice ?? undefined),
+			realtime_speed:
+				interactionMode === 'voice' ? realtimeSpeedValue : (assistant?.realtime_speed ?? undefined),
+			realtime_noise_reduction:
+				interactionMode === 'voice'
+					? realtimeNoiseReductionValue
+					: (assistant?.realtime_noise_reduction ?? undefined),
+			realtime_transcription_model:
+				interactionMode === 'voice'
+					? realtimeTranscriptionModelValue
+					: (assistant?.realtime_transcription_model ?? undefined),
+			elevenlabs_stability: isLectureMode
+				? elevenlabsStabilityValue
+				: (assistant?.elevenlabs_stability ?? undefined),
+			elevenlabs_similarity_boost: isLectureMode
+				? elevenlabsSimilarityBoostValue
+				: (assistant?.elevenlabs_similarity_boost ?? undefined),
+			elevenlabs_use_speaker_boost: isLectureMode
+				? elevenlabsUseSpeakerBoostValue
+				: (assistant?.elevenlabs_use_speaker_boost ?? undefined),
+			elevenlabs_style: isLectureMode
+				? elevenlabsStyleValue
+				: (assistant?.elevenlabs_style ?? undefined),
+			elevenlabs_speed: isLectureMode
+				? elevenlabsSpeedValue
+				: (assistant?.elevenlabs_speed ?? undefined),
 			lecture_video_id: isLectureMode ? (selectedLectureVideo?.id ?? undefined) : undefined,
 			voice_id: isLectureMode ? voiceId.trim() : undefined,
+			generation_prompt: isLectureMode ? generationPrompt : undefined,
+			video_description_duration_ms: isLectureMode ? videoDescriptionDurationMs : undefined,
+			overwrite_manifest: isLectureMode ? overwriteManifest : undefined,
 			published: body.published?.toString() === 'on',
-			use_latex: isLectureMode
-				? (assistant?.use_latex ?? false)
-				: body.use_latex?.toString() === 'on',
+			use_latex: isLectureMode ? true : body.use_latex?.toString() === 'on',
 			use_image_descriptions: isLectureMode
 				? (assistant?.use_image_descriptions ?? false)
 				: body.use_image_descriptions?.toString() === 'on',
 			hide_prompt: isLectureMode
-				? (assistant?.hide_prompt ?? false)
+				? (assistant?.hide_prompt ?? true)
 				: body.hide_prompt?.toString() === 'on',
 			assistant_should_message_first: assistantShouldMessageFirst,
 			create_classic_assistant: createClassicAssistant,
@@ -1735,6 +2415,15 @@
 			selectedLectureVideo = { ...selectedLectureVideo, ...summary };
 		}
 	};
+	const syncManifestGenerationStatus = (status: api.LectureVideoProcessingRunSummary) => {
+		if (!data.lectureVideoConfig) {
+			return;
+		}
+		data.lectureVideoConfig = {
+			...data.lectureVideoConfig,
+			manifest_generation_status: status
+		};
+	};
 	$: canRefreshCurrentLectureVideoStatus =
 		!data.isCreating &&
 		!!data.assistantId &&
@@ -1773,6 +2462,12 @@
 			}
 
 			syncLectureVideoSummary(expanded.data.lecture_video);
+			data.lectureVideoConfig = expanded.data;
+			if (expanded.data.lecture_video_manifest) {
+				lectureVideoManifestJson = stringifyLectureVideoManifest(
+					expanded.data.lecture_video_manifest
+				);
+			}
 		} finally {
 			refreshingLectureVideoStatus = false;
 		}
@@ -1803,6 +2498,10 @@
 		}
 
 		syncLectureVideoSummary(expanded.data);
+		if (lastManifestRunFailed) {
+			syncManifestGenerationStatus({ state: 'queued' });
+			void refreshAssistantLectureVideoStatus();
+		}
 		happyToast('Lecture video processing retried');
 	};
 
@@ -1822,7 +2521,8 @@
 				fetch,
 				data.class.id,
 				{
-					voice_id: trimmedVoiceId
+					voice_id: trimmedVoiceId,
+					...elevenlabsVoiceSettingsPayload()
 				},
 				data.isCreating ? undefined : (data.assistantId ?? undefined)
 			);
@@ -1836,7 +2536,11 @@
 			const audioSrc = URL.createObjectURL(response.audio_blob);
 			voiceSampleText = response.sample_text;
 			voiceSampleAudioSrc = audioSrc;
-			setVoiceSampleCacheEntry(trimmedVoiceId, voiceSampleText, voiceSampleAudioSrc);
+			setVoiceSampleCacheEntry(
+				voiceSampleCacheKey(trimmedVoiceId),
+				voiceSampleText,
+				voiceSampleAudioSrc
+			);
 			lastValidatedVoiceId = trimmedVoiceId;
 			happyToast('Voice validated');
 		} catch (error) {
@@ -1858,8 +2562,9 @@
 
 		const result = await api.previewAssistantInstructions(fetch, data.class.id, {
 			instructions,
-			use_latex: useLatex,
-			disable_prompt_randomization: disablePromptRandomization
+			use_latex: isLectureMode ? true : useLatex,
+			disable_prompt_randomization: disablePromptRandomization,
+			interaction_mode: interactionMode
 		});
 		const expanded = api.expandResponse(result);
 
@@ -1963,9 +2668,17 @@
 				$loadingMessage = '';
 				return;
 			}
+			if (!canGenerateLectureVideoManifest && !overwriteManifest) {
+				sadToast('Please provide a lecture video manifest before saving.');
+				$loading = false;
+				$loadingMessage = '';
+				return;
+			}
 
-			const parsedManifest = parseLectureVideoManifest(lectureVideoManifestJson);
-			if (!parsedManifest.manifest || parsedManifest.error) {
+			const parsedManifest = overwriteManifest
+				? parseLectureVideoManifest(lectureVideoManifestJson)
+				: { manifest: null, error: null };
+			if (overwriteManifest && (!parsedManifest.manifest || parsedManifest.error)) {
 				sadToast(parsedManifest.error || 'Lecture video manifest is invalid.');
 				$loading = false;
 				$loadingMessage = '';
@@ -1986,22 +2699,39 @@
 				return;
 			}
 
-			const lectureVideoManifestChanged =
-				normalizeLectureVideoManifestForCompare(lectureVideoManifestJson) !==
-				currentLectureVideoManifestNormalized;
-			const lectureVideoIdChanged = selectedLectureVideoId !== (currentLectureVideo?.id ?? null);
-			const lectureVideoVoiceChanged = trimmedVoiceId !== currentVoiceId.trim();
+			const overwriteManifestChanged = overwriteManifest !== originalOverwriteManifest;
 			const lectureVideoFieldsChanged =
-				lectureVideoManifestChanged || lectureVideoIdChanged || lectureVideoVoiceChanged;
+				lectureVideoManifestChanged ||
+				lectureVideoIdChanged ||
+				lectureVideoVoiceChanged ||
+				generationPromptChanged ||
+				videoDescriptionDurationChanged ||
+				overwriteManifestChanged ||
+				(canRegenerateLectureVideo && regenerateRequested) ||
+				lastManifestRunFailed;
 
 			if (data.isCreating || lectureVideoFieldsChanged) {
 				params.lecture_video_id = selectedLectureVideoId;
-				params.lecture_video_manifest = parsedManifest.manifest;
+				params.lecture_video_manifest = parsedManifest.manifest ?? undefined;
 				params.voice_id = trimmedVoiceId;
+				params.generation_prompt = canGenerateLectureVideoManifest
+					? generationPromptForSave
+					: undefined;
+				params.video_description_duration_ms = canGenerateLectureVideoManifest
+					? videoDescriptionDurationMs
+					: undefined;
+				if (canRegenerateLectureVideo) {
+					params.regenerate_requested = regenerateRequested;
+				}
+				params.overwrite_manifest = overwriteManifest;
 			} else {
 				delete params.lecture_video_id;
 				delete params.lecture_video_manifest;
 				delete params.voice_id;
+				delete params.generation_prompt;
+				delete params.video_description_duration_ms;
+				delete params.regenerate_requested;
+				delete params.overwrite_manifest;
 			}
 		}
 
@@ -2531,30 +3261,6 @@
 				{/if}
 			</div>
 			<div class="col-span-2 mb-4">
-				<div class="flex items-center justify-between">
-					<Label for="lecture_video_manifest" class="mb-0">Lecture Video Manifest (JSON)</Label>
-				</div>
-				<Helper class="pb-1"
-					>Provide valid JSON with at least one question, supported question types, non-negative
-					offsets, at least two options per question, and exactly one correct option for
-					single-select questions.</Helper
-				>
-				{#if lectureVideoChatUnavailable}
-					<Helper class="pb-2 text-amber-700">
-						Lecture chat is only available for lecture videos with a version 2 manifest that
-						includes word-level transcription.
-					</Helper>
-				{/if}
-				<Textarea
-					id="lecture_video_manifest"
-					name="lecture_video_manifest"
-					rows={14}
-					bind:value={lectureVideoManifestJson}
-					disabled={preventEdits}
-					class="font-mono text-xs"
-				/>
-			</div>
-			<div class="col-span-2 mb-4">
 				<div class="flex items-center gap-2">
 					<Label for="voice_id">Voice ID</Label>
 					{#if voiceId.trim().length > 0 && (voiceId.trim() === lastValidatedVoiceId || voiceId.trim() === currentVoiceId.trim())}
@@ -2633,6 +3339,8 @@
 					disabled={preventEdits}
 				/>
 			</div>
+		{/if}
+		{#if !isLectureMode}
 			<div class="col-span-2 mb-4">
 				<Checkbox id="hide_prompt" name="hide_prompt" disabled={preventEdits} checked={hidePrompt}
 					>Hide Prompt</Checkbox
@@ -3146,19 +3854,345 @@
 						</div></span
 					>
 					<div class="flex flex-col gap-4 px-1">
-						{#if !isLectureMode}
+						{#if isLectureMode}
+							{@const haveInstructionsChanged =
+								normalizeNewlines(instructions) !==
+									normalizeNewlines(lectureVideoDefaultInstructions) &&
+								!!lectureVideoDefaultInstructions}
 							<div class="col-span-2 mb-1">
-								<Checkbox
-									id="assistant_should_message_first"
-									name="assistant_should_message_first"
+								<div class="flex flex-row items-end justify-between">
+									<div>
+										<div class="flex items-center gap-2">
+											<Label for="instructions" class="mb-0"
+												><div class="flex flex-row gap-1">
+													<div>Chat Instructions</div>
+													{#if haveInstructionsChanged}<div>&middot;</div>
+														<div class="text-gray-500">
+															Different from latest default prompt
+														</div>{/if}
+												</div></Label
+											>
+										</div>
+										<Helper class="pb-1"
+											>Used to generate responses to questions asked during lecture.</Helper
+										>
+									</div>
+									<div class="flex items-center gap-3 pb-1">
+										<button
+											type="button"
+											class="text-xs text-blue-800 hover:underline disabled:cursor-not-allowed disabled:text-gray-400 disabled:no-underline"
+											disabled={preventEdits ||
+												!haveInstructionsChanged ||
+												$loading ||
+												uploadingFSPrivate ||
+												uploadingCIPrivate}
+											onclick={() => {
+												instructions = lectureVideoDefaultInstructions;
+											}}>Switch to latest default</button
+										>
+										<Button
+											class="flex max-h-fit max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
+											onclick={previewInstructions}
+											type="button"
+											disabled={$loading || uploadingFSPrivate || uploadingCIPrivate}
+										>
+											Preview
+										</Button>
+									</div>
+								</div>
+								<Textarea
+									id="instructions"
+									name="instructions"
+									rows={6}
+									bind:value={instructions}
 									disabled={preventEdits}
-									bind:checked={assistantShouldMessageFirst}
-									>Assistant Should Message First</Checkbox
+								/>
+							</div>
+
+							{#if canGenerateLectureVideoManifest}
+								<hr />
+
+								<div class="col-span-2 mb-1">
+									<div class="flex items-end justify-between gap-3">
+										<div>
+											<div class="flex items-center gap-2">
+												<Label
+													for="generation_prompt"
+													class="mb-0 text-gray-800 contrast-100 grayscale-0"
+													><div class="flex flex-row gap-1">
+														<div>Generation Instructions</div>
+														{#if generationPromptEdited}<div>&middot;</div>
+															<div class="text-gray-500">Edited from default</div>{/if}
+													</div></Label
+												>
+											</div>
+											<Helper class="pb-1">Used to generate knowledge checks.</Helper>
+										</div>
+										<button
+											type="button"
+											class="pb-1 text-xs text-blue-800 hover:underline disabled:cursor-not-allowed disabled:text-gray-400 disabled:no-underline"
+											disabled={preventEdits ||
+												overwriteManifest ||
+												generationPrompt === lectureVideoDefaultGenerationPrompt}
+											onclick={() => {
+												generationPrompt = lectureVideoDefaultGenerationPrompt;
+											}}>Reset to default</button
+										>
+									</div>
+									<Textarea
+										id="generation_prompt"
+										name="generation_prompt"
+										rows={10}
+										bind:value={generationPrompt}
+										disabled={preventEdits || overwriteManifest}
+										class="text-sm"
+									/>
+								</div>
+
+								<div class="col-span-2 mb-1">
+									<div class="flex items-center justify-between gap-3">
+										<Label
+											for="video_description_duration_ms"
+											class="mb-0 text-gray-800 contrast-100 grayscale-0"
+											>Video Description Length</Label
+										>
+										<span class="text-sm font-medium text-gray-700"
+											>{videoDescriptionDurationMs / 1000} seconds</span
+										>
+									</div>
+									<Helper class="pb-1">
+										{overwriteManifest
+											? 'Available only when generating the manifest automatically.'
+											: 'Used for each generated visual description segment.'}
+									</Helper>
+									<Range
+										id="video_description_duration_ms"
+										name="video_description_duration_ms"
+										min={MIN_VIDEO_DESCRIPTION_DURATION_MS}
+										max={MAX_VIDEO_DESCRIPTION_DURATION_MS}
+										step={VIDEO_DESCRIPTION_DURATION_STEP_MS}
+										bind:value={videoDescriptionDurationMs}
+										disabled={preventEdits || overwriteManifest}
+										class="appearance-auto"
+									/>
+									<div class="mt-1 flex justify-between text-xs text-gray-500">
+										<span>{MIN_VIDEO_DESCRIPTION_DURATION_MS / 1000}s</span>
+										<span>{MAX_VIDEO_DESCRIPTION_DURATION_MS / 1000}s</span>
+									</div>
+								</div>
+							{/if}
+
+							<hr />
+
+							<div class="col-span-2 mb-1">
+								<div class="flex items-center justify-between gap-3">
+									<Label
+										for="lecture_video_manifest"
+										class="mb-0 text-gray-800 contrast-100 grayscale-0"
+										>Lecture Video Manifest</Label
+									>
+									{#if canGenerateLectureVideoManifest}
+										<Checkbox bind:checked={overwriteManifest} disabled={preventEdits}
+											>Overwrite manifest</Checkbox
+										>
+									{/if}
+								</div>
+								<Helper class="pb-1"
+									>{overwriteManifest
+										? 'Provide a custom manifest to use for this lecture video.'
+										: 'Preview the manifest for this lecture video.'}</Helper
 								>
-								<Helper
-									>Control whether the assistant should initiate the conversation. When checked,
-									users will be able to send their first message after the assistant responds.</Helper
-								>
+								{#if canGenerateLectureVideoManifest && originalOverwriteManifest && !overwriteManifest}
+									<Helper class="pb-1 text-yellow-700">
+										You previously provided a custom manifest for this lecture video. On save, your
+										custom manifest will be replaced.
+									</Helper>
+								{/if}
+								{#if canGenerateLectureVideoManifest}
+									<div class="mb-2 text-sm">
+										{#if manifestGenerationInFlight}
+											<span>Generating...</span>
+										{:else if lastManifestRunFailed}
+											<span class="text-red-700"
+												>Generation failed: {manifestGenerationStatus?.error_message ||
+													'Unknown error'}</span
+											>
+										{:else if manifestGenerationStatus?.finished_at}
+											<span
+												>Last generated {new Date(
+													manifestGenerationStatus.finished_at
+												).toLocaleString()}</span
+											>
+										{/if}
+									</div>
+								{/if}
+								{#if canRegenerateLectureVideo}
+									<div class="mb-2 flex flex-wrap items-center gap-3 text-sm text-gray-600">
+										<button
+											type="button"
+											class={`${lectureVideoRegenerateButtonPressed ? 'border-blue-300 bg-blue-100 font-semibold text-blue-800 shadow-inner shadow-blue-200' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'} rounded-lg border px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-70`}
+											disabled={preventEdits ||
+												manifestGenerationInFlight ||
+												lectureVideoRegenerationImpliedByFormChanges}
+											aria-pressed={lectureVideoRegenerateButtonPressed}
+											onclick={() => {
+												regenerateRequested = !regenerateRequested;
+											}}>{lectureVideoRegenerateButtonLabel}</button
+										>
+										<span class="text-xs text-gray-600">{lectureVideoRegenerateHelperText}</span>
+									</div>
+								{/if}
+								{#if lectureVideoChatUnavailable}
+									<Helper class="pb-2 text-yellow-700">
+										Provide a manifest with word-level transcription (Version 2 or 3) to enable
+										lecture chat.
+									</Helper>
+								{/if}
+								<Textarea
+									id="lecture_video_manifest"
+									name="lecture_video_manifest"
+									rows={14}
+									bind:value={lectureVideoManifestJson}
+									disabled={preventEdits || !overwriteManifest}
+									class="font-mono text-xs"
+								/>
+							</div>
+
+							<div class="col-span-2 mb-1">
+								<div class="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+									<div>
+										<div class="text-sm font-medium text-gray-900">ElevenLabs voice settings</div>
+										<Helper class="pb-1"
+											>Fine-tune the generated voice used for spoken lecture chat responses.</Helper
+										>
+									</div>
+									<Button
+										type="button"
+										color="light"
+										class="w-full shrink-0 sm:w-auto"
+										disabled={preventEdits || validatingVoiceId || voiceId.trim().length === 0}
+										onclick={validateLectureVideoVoice}>Preview Voice</Button
+									>
+								</div>
+
+								<div class="grid gap-4 md:grid-cols-2">
+									<div>
+										<div class="flex items-start justify-between gap-4">
+											<div>
+												<Label for="elevenlabs_stability">Stability</Label>
+												<Helper class="pb-1"
+													>Controls how consistent each generation sounds. Lower values can sound
+													more expressive but less predictable, while higher values can sound more
+													steady and restrained.</Helper
+												>
+											</div>
+											<Input
+												id="elevenlabs_stability"
+												name="elevenlabs_stability"
+												type="number"
+												min="0"
+												max="1"
+												step="0.05"
+												bind:value={elevenlabsStabilityValue}
+												disabled={preventEdits}
+												class="w-28 shrink-0"
+											/>
+										</div>
+									</div>
+
+									<div>
+										<div class="flex items-start justify-between gap-4">
+											<div>
+												<Label for="elevenlabs_similarity_boost">Similarity boost</Label>
+												<Helper class="pb-1"
+													>Controls how strongly the generated speech follows the selected voice.
+													Higher values can preserve identity better, but may emphasize flaws from
+													low-quality source audio.</Helper
+												>
+											</div>
+											<Input
+												id="elevenlabs_similarity_boost"
+												name="elevenlabs_similarity_boost"
+												type="number"
+												min="0"
+												max="1"
+												step="0.05"
+												bind:value={elevenlabsSimilarityBoostValue}
+												disabled={preventEdits}
+												class="w-28 shrink-0"
+											/>
+										</div>
+									</div>
+
+									<div>
+										<div class="flex items-start justify-between gap-4">
+											<div>
+												<Label for="elevenlabs_speed">Voice speed</Label>
+												<Helper class="pb-1"
+													>Adjusts speech pace from 0.7x to 1.2x. The default 1.0 leaves the
+													selected voice at its normal speed.</Helper
+												>
+											</div>
+											<Input
+												id="elevenlabs_speed"
+												name="elevenlabs_speed"
+												type="number"
+												min="0.7"
+												max="1.2"
+												step="0.05"
+												bind:value={elevenlabsSpeedValue}
+												disabled={preventEdits}
+												class="w-28 shrink-0"
+											/>
+										</div>
+									</div>
+
+									<div>
+										<div class="flex items-start justify-between gap-4">
+											<div>
+												<Label for="elevenlabs_style">Style exaggeration</Label>
+												<Helper class="pb-1"
+													>Amplifies the voice's original style, which can add latency when raised.
+													<b>We recommend keeping this setting at 0 at all times.</b></Helper
+												>
+											</div>
+											<Input
+												id="elevenlabs_style"
+												name="elevenlabs_style"
+												type="number"
+												min="0"
+												max="1"
+												step="0.05"
+												bind:value={elevenlabsStyleValue}
+												disabled={preventEdits}
+												class="w-28 shrink-0"
+											/>
+										</div>
+									</div>
+								</div>
+
+								<div class="mt-3">
+									<Checkbox
+										id="elevenlabs_use_speaker_boost"
+										name="elevenlabs_use_speaker_boost"
+										disabled={preventEdits}
+										bind:checked={elevenlabsUseSpeakerBoostValue}>Speaker boost</Checkbox
+									>
+									<Helper>Improves speaker similarity at a small latency cost.</Helper>
+								</div>
+
+								{#if validatingVoiceId}
+									<Helper class="pt-3">Generating voice preview...</Helper>
+								{/if}
+								{#if voiceValidationError}
+									<div class="pt-3 text-sm text-red-700">{voiceValidationError}</div>
+								{/if}
+								{#if voiceSampleAudioSrc}
+									<div class="pt-3">
+										<div class="mb-1 text-sm text-gray-700">Sample phrase: "{voiceSampleText}"</div>
+										<audio controls preload="auto" src={voiceSampleAudioSrc} class="w-full"></audio>
+									</div>
+								{/if}
 							</div>
 
 							<hr />
@@ -3196,11 +4230,522 @@
 								{/if}</Helper
 							>
 						</div>
-						{#if !isLectureMode}
+						{#if isLectureMode}
 							<hr />
+						{:else}
+							<div class="col-span-2 mb-1">
+								<Checkbox
+									id="assistant_should_message_first"
+									name="assistant_should_message_first"
+									disabled={preventEdits}
+									bind:checked={assistantShouldMessageFirst}
+									>Assistant Should Message First</Checkbox
+								>
+								<Helper
+									>Control whether the assistant should initiate the conversation. When checked,
+									users will be able to send their first message after the assistant responds.</Helper
+								>
+							</div>
+							<hr />
+
+							{#if interactionMode === 'voice'}
+								<div class="col-span-2 mb-1 flex items-start justify-between gap-6">
+									<div class="min-w-0">
+										<Label for="realtime_voice">Voice</Label>
+										<Helper class="pb-1"
+											>Select the voice used when generating audio. For the best quality, choose
+											Marin or Cedar.</Helper
+										>
+										<audio
+											controls
+											preload="none"
+											src={realtimeVoicePreviewUrl(realtimeVoiceValue)}
+											class="mt-2 w-full max-w-md"
+										></audio>
+									</div>
+									<select
+										id="realtime_voice"
+										name="realtime_voice"
+										class="block w-52 shrink-0 rounded-lg border border-gray-300 bg-gray-50 p-2.5 text-sm text-gray-900 focus:border-blue-500 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+										bind:value={realtimeVoiceValue}
+										disabled={preventEdits}
+									>
+										{#each realtimeVoiceOptions as option (option.value)}
+											<option value={option.value}>{option.label}</option>
+										{/each}
+									</select>
+								</div>
+
+								<div class="col-span-2 mb-1">
+									<div class="flex items-start justify-between gap-6">
+										<div>
+											<Label for="realtime_speed">Voice speed</Label>
+											<Helper class="pb-1"
+												>The speed of the model's spoken response as a multiple of the original
+												speed. 1.0 is the default speed. 0.25 is the minimum speed. 1.5 is the
+												maximum speed. It's also possible to prompt the model to speak faster or
+												slower.</Helper
+											>
+										</div>
+										<Badge
+											class="flex shrink-0 flex-row items-center gap-x-2 rounded-md border border-sky-400 bg-gradient-to-b from-sky-100 to-sky-200 px-2 py-0.5 text-xs text-sky-800 normal-case"
+										>
+											<div>{realtimeSpeedValue.toFixed(2)}x</div>
+										</Badge>
+									</div>
+									<Range
+										id="realtime_speed"
+										name="realtime_speed"
+										min="0.25"
+										max="1.5"
+										step="0.05"
+										bind:value={realtimeSpeedValue}
+										disabled={preventEdits}
+										class="appearance-auto"
+									/>
+								</div>
+
+								<div class="col-span-2 mb-1 flex items-start justify-between gap-6">
+									<div>
+										<Label for="realtime_noise_reduction">Microphone noise reduction</Label>
+										<Helper class="pb-1"
+											>Noise reduction applied to audio input. Near field is for close-talking
+											microphones such as headphones. Far field is for far-field microphones such as
+											laptop or conference room microphones.
+										</Helper>
+									</div>
+									<select
+										id="realtime_noise_reduction"
+										name="realtime_noise_reduction"
+										class="block w-40 shrink-0 rounded-lg border border-gray-300 bg-gray-50 p-2.5 text-sm text-gray-900 focus:border-blue-500 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+										bind:value={realtimeNoiseReductionValue}
+										disabled={preventEdits}
+									>
+										{#each realtimeNoiseReductionOptions as option (option.value)}
+											<option value={option.value}>{option.label}</option>
+										{/each}
+									</select>
+								</div>
+
+								<div class="col-span-2 mb-1 flex items-start justify-between gap-6">
+									<div>
+										<Label for="realtime_transcription_model">Transcription Model</Label>
+										<Helper class="pb-1"
+											>Whisper 1 keeps the existing transcription behavior. GPT Realtime Whisper
+											uses OpenAI's newer realtime transcription model for stronger transcription
+											quality.</Helper
+										>
+									</div>
+									<select
+										id="realtime_transcription_model"
+										name="realtime_transcription_model"
+										class="block w-56 shrink-0 rounded-lg border border-gray-300 bg-gray-50 p-2.5 text-sm text-gray-900 focus:border-blue-500 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+										bind:value={realtimeTranscriptionModelValue}
+										disabled={preventEdits}
+									>
+										{#each realtimeTranscriptionModelOptions as option (option.value)}
+											<option value={option.value}>{option.label}</option>
+										{/each}
+									</select>
+								</div>
+
+								<div class="col-span-2 mb-1 flex items-start justify-between gap-6">
+									<div>
+										<Label for="realtime_vad_mode">Automatic turn detection</Label>
+										<Helper class="pb-1"
+											>Choose how voice mode decides the user has finished speaking. <br /><br
+											/>Normal means that the model will detect the start and end of speech based on
+											audio volume and respond at the end of user speech. <br /><br />Semantic uses
+											a turn detection model (in conjunction with VAD) to semantically estimate
+											whether the user has finished speaking, then dynamically sets a timeout based
+											on this probability. For example, if user audio trails off with “uhhm”, the
+											model will score a low probability of turn end and wait longer for the user to
+											continue speaking. This can be useful for more natural conversations, but may
+											have a higher latency.</Helper
+										>
+									</div>
+									<ButtonGroup class="shrink-0">
+										{#each realtimeVadModeOptions as option (option.value)}
+											<RadioButton
+												value={option.value}
+												bind:group={realtimeVadModeValue}
+												disabled={preventEdits}
+												class={`${preventEdits ? 'hover:bg-transparent' : ''} ${realtimeVadModeValue === option.value ? '!border-blue-300 !bg-blue-100 font-semibold !text-blue-800 !shadow-blue-200' : ''} select-none`}
+												>{option.label}</RadioButton
+											>
+										{/each}
+									</ButtonGroup>
+								</div>
+
+								{#if realtimeVadModeValue === 'semantic_vad'}
+									<div
+										class="col-span-2 mb-1 flex items-start justify-between gap-6 overflow-hidden"
+										transition:slide={{ duration: 180 }}
+									>
+										<div>
+											<Label for="realtime_eagerness">Realtime eagerness</Label>
+											<Helper class="pb-1"
+												>Adjust how quickly or patiently the model waits to respond. Higher
+												eagerness means faster responses. Auto is equivalent to medium. Low waits up
+												to 8 seconds, medium waits up to 4 seconds, and high waits up to 2 seconds.</Helper
+											>
+										</div>
+										<select
+											id="realtime_eagerness"
+											name="realtime_eagerness"
+											class="block w-40 shrink-0 rounded-lg border border-gray-300 bg-gray-50 p-2.5 text-sm text-gray-900 focus:border-blue-500 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+											bind:value={realtimeEagernessValue}
+											disabled={preventEdits}
+										>
+											{#each realtimeEagernessOptions as option (option.value)}
+												<option value={option.value}>{option.label}</option>
+											{/each}
+										</select>
+									</div>
+								{:else}
+									<div
+										class="col-span-2 mb-1 grid grid-cols-2 gap-4 overflow-hidden"
+										transition:slide={{ duration: 180 }}
+									>
+										<div>
+											<Label for="realtime_vad_threshold">Activation threshold</Label>
+											<Helper class="pb-1"
+												>A higher threshold will require louder audio to activate the model, and
+												thus might perform better in noisy environments.</Helper
+											>
+											<Input
+												id="realtime_vad_threshold"
+												name="realtime_vad_threshold"
+												type="number"
+												min="0"
+												max="1"
+												step="0.05"
+												bind:value={realtimeVadThresholdValue}
+												disabled={preventEdits}
+											/>
+										</div>
+										<div>
+											<Label for="realtime_vad_prefix_padding_ms">Prefix padding</Label>
+											<Helper class="pb-1"
+												>Amount of audio to include before the turn detections marks as the point
+												where the user has started speaking, in seconds.</Helper
+											>
+											<Input
+												id="realtime_vad_prefix_padding_ms"
+												name="realtime_vad_prefix_padding_ms"
+												type="number"
+												min="0"
+												step="any"
+												value={realtimeVadPrefixPaddingSecondsValue}
+												disabled={preventEdits}
+												oninput={(event) => {
+													realtimeVadPrefixPaddingSecondsValue = Number(
+														(event.currentTarget as HTMLInputElement).value
+													);
+												}}
+											/>
+										</div>
+										<div>
+											<Label for="realtime_vad_silence_duration_ms">Silence duration</Label>
+											<Helper class="pb-1"
+												>Duration of silence to detect speech stop, in seconds. With shorter values
+												the model will respond more quickly, but may jump in on short pauses from
+												the user.</Helper
+											>
+											<Input
+												id="realtime_vad_silence_duration_ms"
+												name="realtime_vad_silence_duration_ms"
+												type="number"
+												min="0"
+												step="any"
+												value={realtimeVadSilenceDurationSecondsValue}
+												disabled={preventEdits}
+												oninput={(event) => {
+													realtimeVadSilenceDurationSecondsValue = Number(
+														(event.currentTarget as HTMLInputElement).value
+													);
+												}}
+											/>
+										</div>
+										<div>
+											<Label for="realtime_vad_idle_timeout_ms">Idle timeout</Label>
+											<Helper class="pb-1"
+												>Optional timeout after which a model response will be triggered
+												automatically. This is useful for situations in which a long pause from the
+												user is unexpected. The model will effectively prompt the user to continue
+												the conversation based on the current context. Use 5 to 30 seconds.</Helper
+											>
+											<Input
+												id="realtime_vad_idle_timeout_ms"
+												name="realtime_vad_idle_timeout_ms"
+												type="number"
+												min="5"
+												max="30"
+												step="any"
+												value={realtimeVadIdleTimeoutSecondsValue ?? ''}
+												disabled={preventEdits}
+												oninput={(event) => {
+													const value = (event.currentTarget as HTMLInputElement).value;
+													realtimeVadIdleTimeoutSecondsValue =
+														normalizeRealtimeVadIdleTimeoutSeconds(value);
+												}}
+											/>
+										</div>
+									</div>
+								{/if}
+								<hr />
+							{/if}
 						{/if}
 
 						{#if !isLectureMode}
+							{#if supportsReasoning}
+								<div class="flex flex-col">
+									<Label for="reasoning-effort">Reasoning effort</Label>
+									<Helper class="pb-1"
+										>Select your desired reasoning effort, which gives the model guidance on how
+										much time it should spend "reasoning" before creating a response to the prompt. {#if reasoningEffortLabels.length !== 1}You
+											can specify one of
+											{#each reasoningEffortLabels as label, idx (label)}
+												<span class="font-mono">{label}</span>{idx <
+												reasoningEffortLabels.length - 1
+													? ', '
+													: ''}
+											{/each} for this setting, where <span class="font-mono">low</span> will favor
+											speed, and
+											<span class="font-mono">high</span>
+											will favor more complete reasoning at the cost of slower responses. The default
+											value is <span class="font-mono">{defaultReasoningLabel}</span>.{/if}
+										{#if supportsTemperatureWithReasoningNone}Temperature controls become available
+											only when reasoning effort is set to <span class="font-mono">none</span
+											>.{/if}</Helper
+									>
+									{#if reasoningEffortLabels.length === 1}
+										<div
+											class="mt-2 flex flex-row items-center justify-between gap-x-4 rounded-lg border border-amber-400 bg-gradient-to-b from-amber-50 to-amber-100 p-3 text-amber-800"
+										>
+											<div class="flex flex-row items-center gap-x-3">
+												<LightbulbSolid size="md" class="shrink-0" />
+												<div class="flex flex-col text-xs">
+													<span class="font-bold"
+														>This model only supports <span class="font-mono"
+															>{reasoningEffortLabels[0]}</span
+														> reasoning effort</span
+													>
+													<span
+														>For other models, you can control how long the model spends thinking
+														using this setting.</span
+													>
+												</div>
+											</div>
+										</div>
+									{/if}
+								</div>
+								{#if reasoningEffortLabels.length !== 1}
+									<Range
+										id="reasoning-effort"
+										name="reasoning-effort"
+										min={reasoningEffortMin}
+										max={reasoningEffortMax}
+										bind:value={reasoningEffortValue}
+										step="1"
+										disabled={preventEdits}
+										class="appearance-auto"
+									/>
+									<div class="mt-2 flex flex-row justify-between">
+										{#if reasoningEffortLabels.length < 4}
+											{#each reasoningEffortLabels as label (label)}
+												<p class="text-sm">{label}</p>
+											{/each}
+										{:else if supportsNoneReasoningEffort}
+											<p class="text-sm">{reasoningEffortLabels[0]}</p>
+											<p class="ml-4 text-sm">{reasoningEffortLabels[1]}</p>
+											<p class="ml-2 text-sm">{reasoningEffortLabels[2]}</p>
+											<p class="text-sm">{reasoningEffortLabels[3]}</p>
+										{:else}
+											<p class="text-sm">{reasoningEffortLabels[0]}</p>
+											<p class="-ml-2 text-sm">{reasoningEffortLabels[1]}</p>
+											<p class="ml-1 text-sm">{reasoningEffortLabels[2]}</p>
+											<p class="text-sm">{reasoningEffortLabels[3]}</p>
+										{/if}
+									</div>
+								{/if}
+							{/if}
+							{#if supportsTemperatureForCurrentReasoning && !isLectureMode}
+								<div class="flex flex-col">
+									<Label for="temperature">Temperature</Label>
+									{#if interactionMode === 'voice'}
+										<Helper class="pb-1"
+											>Select the model's "temperature," a setting from 0.6 to 1.2 that controls how
+											creative or predictable the assistant's responses are. For audio models, a
+											temperature of 0.8 is highly recommended for best performance. You can change
+											this setting anytime.</Helper
+										>
+									{:else}
+										<Helper class="pb-1"
+											>Select the model's "temperature," a setting from 0 to 2 that controls how
+											creative or predictable the assistant's responses are. For reliable, focused
+											answers, choose a temperature closer to 0.2. For more varied or creative
+											responses, try a setting closer to 1. Avoid setting the temperature much above
+											1 unless you need very experimental responses, as it may lead to less
+											predictable and more random answers.</Helper
+										>
+									{/if}
+								</div>
+								<div class="mt-2 flex flex-row justify-between">
+									<div class="flex flex-row items-center gap-1 text-sm">
+										<ArrowLeftOutline />
+										<div>More focused</div>
+									</div>
+									<Badge
+										class="flex shrink-0 flex-row items-center gap-x-2 rounded-md border border-sky-400 bg-gradient-to-b from-sky-100 to-sky-200 px-2 py-0.5 text-xs text-sky-800 normal-case"
+									>
+										<div>Temperature: {temperatureValue.toFixed(1)}</div>
+									</Badge>
+									<div class="flex flex-row items-center gap-1 text-sm">
+										<div>More creative</div>
+										<ArrowRightOutline />
+									</div>
+								</div>
+								{#if interactionMode !== 'voice'}
+									<Range
+										id="temperature"
+										name="temperature"
+										min={minChatTemperature}
+										max={maxChatTemperature}
+										bind:value={temperatureValue}
+										step="0.1"
+										disabled={preventEdits}
+										onchange={checkForLargeTemperatureChat}
+										class="appearance-auto"
+									/>
+									<div class="mx-2 grid grid-cols-20 gap-0">
+										<button
+											type="button"
+											class="col-span-4 ml-1 flex flex-col items-center justify-start border-0 bg-transparent"
+											onclick={() => {
+												temperatureValue = defaultChatTemperature;
+												_temperatureValue = defaultChatTemperature;
+											}}
+											onkeydown={(e) => {
+												if (e.key === 'Enter' || e.key === ' ') {
+													temperatureValue = defaultChatTemperature;
+													_temperatureValue = defaultChatTemperature;
+												}
+											}}
+										>
+											<HeartSolid class="max-w-fit text-gray-500" />
+											<div class="mx-10 mt-1 text-center text-sm text-wrap">
+												Default (recommended)
+											</div>
+										</button>
+										<button
+											type="button"
+											class="col-span-4 col-start-6 flex flex-col items-center justify-start border-0 bg-transparent"
+											onclick={() => {
+												temperatureValue = 0.7;
+												_temperatureValue = 0.7;
+											}}
+											onkeydown={(e) => {
+												if (e.key === 'Enter' || e.key === ' ') {
+													temperatureValue = 0.7;
+													_temperatureValue = 0.7;
+												}
+											}}
+										>
+											<LightbulbSolid class="max-w-fit text-gray-500" />
+											<div class="mx-10 mt-1 text-center text-sm text-wrap">
+												Great for creative tasks and brainstorming
+											</div>
+										</button>
+										<div
+											class="col-span-9 col-start-12 -mr-2 -ml-2 h-6 h-fit rounded-md border border-amber-400 bg-gradient-to-b from-amber-100 to-amber-200 py-1 text-center text-sm text-amber-800"
+										>
+											Output may be unpredictable
+										</div>
+									</div>
+								{:else}
+									<Range
+										id="temperature"
+										name="temperature"
+										min={minAudioTemperature}
+										max={maxAudioTemperature}
+										bind:value={temperatureValue}
+										step="0.1"
+										disabled={preventEdits}
+										onchange={checkForLargeTemperatureAudio}
+										class="appearance-auto"
+									/>
+									<div class="mx-2 grid grid-cols-6 gap-0">
+										<button
+											type="button"
+											class="col-span-4 ml-1 flex flex-col items-center justify-start border-0 bg-transparent"
+											onclick={() => {
+												temperatureValue = defaultAudioTemperature;
+												_temperatureValue = defaultAudioTemperature;
+											}}
+											onkeydown={(e) => {
+												if (e.key === 'Enter' || e.key === ' ') {
+													temperatureValue = defaultAudioTemperature;
+													_temperatureValue = defaultAudioTemperature;
+												}
+											}}
+										>
+											<HeartSolid class="max-w-fit text-gray-500" />
+											<div class="mx-10 mt-1 text-center text-sm text-wrap">
+												Default (highly recommended)
+											</div>
+										</button>
+									</div>
+								{/if}
+							{/if}
+							{#if supportsVerbosity}
+								<div class="flex flex-col">
+									<Label for="verbosity">Verbosity</Label>
+									<Helper class="pb-1"
+										>Select your desired verbosity. Verbosity determines how many output tokens are
+										generated. Lowering the number of tokens reduces overall latency. While the
+										model's reasoning approach stays mostly the same, the model finds ways to answer
+										more concisely—which can either improve or diminish answer quality, depending on
+										your use case. Here are some scenarios for both ends of the verbosity spectrum:
+										<ol class="ml-7 list-disc">
+											<li class="my-1">
+												<span class="font-medium">High verbosity:</span> Use when you need the model to
+												provide thorough explanations of documents or perform extensive code refactoring.
+											</li>
+											<li class="my-1">
+												<span class="font-medium">Low verbosity:</span> Best for situations where you
+												want concise answers or simple code generation, such as SQL queries.
+											</li>
+										</ol>
+										Models before GPT-5 have used medium verbosity by default. With GPT-5, this option
+										is configurable as one of<span class="font-mono">high</span>,
+										<span class="font-mono">medium</span>, or <span class="font-mono">low</span>.
+										When generating code, <span class="font-mono">medium</span> and
+										<span class="font-mono">high</span>
+										verbosity levels yield longer, more structured code with inline explanations, while
+										<span class="font-mono">low</span>
+										verbosity produces shorter, more concise code with minimal commentary. The default
+										value is
+										<span class="font-mono">medium</span>.</Helper
+									>
+								</div>
+								<Range
+									id="verbosity"
+									name="verbosity"
+									min="0"
+									max="2"
+									bind:value={verbosityValue}
+									step="1"
+									disabled={preventEdits}
+									class="appearance-auto"
+								/>
+								<div class="mt-2 flex flex-row justify-between">
+									<p class="text-sm">low</p>
+									<p class="text-sm">medium</p>
+									<p class="text-sm">high</p>
+								</div>
+							{/if}
+							<hr />
 							<div class="col-span-2 mb-1">
 								<Checkbox
 									id="allow_user_file_uploads"
@@ -3244,6 +4789,7 @@
 								>
 							</div>
 							<hr />
+
 							<div class="col-span-2 mb-1">
 								<Checkbox
 									id="hide_file_search_queries"
@@ -3454,254 +5000,6 @@
 							<hr />
 						{/if}
 
-						{#if supportsReasoning && !isLectureMode}
-							<div class="flex flex-col">
-								<Label for="reasoning-effort">Reasoning effort</Label>
-								<Helper class="pb-1"
-									>Select your desired reasoning effort, which gives the model guidance on how much
-									time it should spend "reasoning" before creating a response to the prompt. {#if reasoningEffortLabels.length !== 1}You
-										can specify one of
-										{#each reasoningEffortLabels as label, idx (label)}
-											<span class="font-mono">{label}</span>{idx < reasoningEffortLabels.length - 1
-												? ','
-												: ''}
-										{/each}for this setting, where <span class="font-mono">low</span> will favor
-										speed, and
-										<span class="font-mono">high</span>
-										will favor more complete reasoning at the cost of slower responses. The default value
-										is <span class="font-mono">{defaultReasoningLabel}</span>.{/if}
-									{#if supportsTemperatureWithReasoningNone}Temperature controls become available
-										only when reasoning effort is set to <span class="font-mono">none</span
-										>.{/if}</Helper
-								>
-								{#if reasoningEffortLabels.length === 1}
-									<div
-										class="mt-2 flex flex-row items-center justify-between gap-x-4 rounded-lg border border-amber-400 bg-gradient-to-b from-amber-50 to-amber-100 p-3 text-amber-800"
-									>
-										<div class="flex flex-row items-center gap-x-3">
-											<LightbulbSolid size="md" class="shrink-0" />
-											<div class="flex flex-col text-xs">
-												<span class="font-bold"
-													>This model only supports <span class="font-mono"
-														>{reasoningEffortLabels[0]}</span
-													> reasoning effort</span
-												>
-												<span
-													>For other models, you can control how long the model spends thinking
-													using this setting.</span
-												>
-											</div>
-										</div>
-									</div>
-								{/if}
-							</div>
-							{#if reasoningEffortLabels.length !== 1}
-								<Range
-									id="reasoning-effort"
-									name="reasoning-effort"
-									min={reasoningEffortMin}
-									max={reasoningEffortMax}
-									bind:value={reasoningEffortValue}
-									step="1"
-									disabled={preventEdits}
-									class="appearance-auto"
-								/>
-								<div class="mt-2 flex flex-row justify-between">
-									{#if reasoningEffortLabels.length < 4}
-										{#each reasoningEffortLabels as label (label)}
-											<p class="text-sm">{label}</p>
-										{/each}
-									{:else if supportsNoneReasoningEffort}
-										<p class="text-sm">{reasoningEffortLabels[0]}</p>
-										<p class="ml-4 text-sm">{reasoningEffortLabels[1]}</p>
-										<p class="ml-2 text-sm">{reasoningEffortLabels[2]}</p>
-										<p class="text-sm">{reasoningEffortLabels[3]}</p>
-									{:else}
-										<p class="text-sm">{reasoningEffortLabels[0]}</p>
-										<p class="-ml-2 text-sm">{reasoningEffortLabels[1]}</p>
-										<p class="ml-1 text-sm">{reasoningEffortLabels[2]}</p>
-										<p class="text-sm">{reasoningEffortLabels[3]}</p>
-									{/if}
-								</div>
-							{/if}
-						{/if}
-						{#if supportsTemperatureForCurrentReasoning && !isLectureMode}
-							<div class="flex flex-col">
-								<Label for="temperature">Temperature</Label>
-								{#if interactionMode === 'voice'}
-									<Helper class="pb-1"
-										>Select the model's "temperature," a setting from 0.6 to 1.2 that controls how
-										creative or predictable the assistant's responses are. For audio models, a
-										temperature of 0.8 is highly recommended for best performance. You can change
-										this setting anytime.</Helper
-									>
-								{:else}
-									<Helper class="pb-1"
-										>Select the model's "temperature," a setting from 0 to 2 that controls how
-										creative or predictable the assistant's responses are. For reliable, focused
-										answers, choose a temperature closer to 0.2. For more varied or creative
-										responses, try a setting closer to 1. Avoid setting the temperature much above 1
-										unless you need very experimental responses, as it may lead to less predictable
-										and more random answers.</Helper
-									>
-								{/if}
-							</div>
-							<div class="mt-2 flex flex-row justify-between">
-								<div class="flex flex-row items-center gap-1 text-sm">
-									<ArrowLeftOutline />
-									<div>More focused</div>
-								</div>
-								<Badge
-									class="flex shrink-0 flex-row items-center gap-x-2 rounded-md border border-sky-400 bg-gradient-to-b from-sky-100 to-sky-200 px-2 py-0.5 text-xs text-sky-800 normal-case"
-								>
-									<div>Temperature: {temperatureValue.toFixed(1)}</div>
-								</Badge>
-								<div class="flex flex-row items-center gap-1 text-sm">
-									<div>More creative</div>
-									<ArrowRightOutline />
-								</div>
-							</div>
-							{#if interactionMode !== 'voice'}
-								<Range
-									id="temperature"
-									name="temperature"
-									min={minChatTemperature}
-									max={maxChatTemperature}
-									bind:value={temperatureValue}
-									step="0.1"
-									disabled={preventEdits}
-									onchange={checkForLargeTemperatureChat}
-									class="appearance-auto"
-								/>
-								<div class="mx-2 grid grid-cols-20 gap-0">
-									<button
-										type="button"
-										class="col-span-4 ml-1 flex flex-col items-center justify-start border-0 bg-transparent"
-										onclick={() => {
-											temperatureValue = defaultChatTemperature;
-											_temperatureValue = defaultChatTemperature;
-										}}
-										onkeydown={(e) => {
-											if (e.key === 'Enter' || e.key === ' ') {
-												temperatureValue = defaultChatTemperature;
-												_temperatureValue = defaultChatTemperature;
-											}
-										}}
-									>
-										<HeartSolid class="max-w-fit text-gray-500" />
-										<div class="mx-10 mt-1 text-center text-sm text-wrap">
-											Default (recommended)
-										</div>
-									</button>
-									<button
-										type="button"
-										class="col-span-4 col-start-6 flex flex-col items-center justify-start border-0 bg-transparent"
-										onclick={() => {
-											temperatureValue = 0.7;
-											_temperatureValue = 0.7;
-										}}
-										onkeydown={(e) => {
-											if (e.key === 'Enter' || e.key === ' ') {
-												temperatureValue = 0.7;
-												_temperatureValue = 0.7;
-											}
-										}}
-									>
-										<LightbulbSolid class="max-w-fit text-gray-500" />
-										<div class="mx-10 mt-1 text-center text-sm text-wrap">
-											Great for creative tasks and brainstorming
-										</div>
-									</button>
-									<div
-										class="col-span-9 col-start-12 -mr-2 -ml-2 h-6 h-fit rounded-md border border-amber-400 bg-gradient-to-b from-amber-100 to-amber-200 py-1 text-center text-sm text-amber-800"
-									>
-										Output may be unpredictable
-									</div>
-								</div>
-							{:else}
-								<Range
-									id="temperature"
-									name="temperature"
-									min={minAudioTemperature}
-									max={maxAudioTemperature}
-									bind:value={temperatureValue}
-									step="0.1"
-									disabled={preventEdits}
-									onchange={checkForLargeTemperatureAudio}
-									class="appearance-auto"
-								/>
-								<div class="mx-2 grid grid-cols-6 gap-0">
-									<button
-										type="button"
-										class="col-span-4 ml-1 flex flex-col items-center justify-start border-0 bg-transparent"
-										onclick={() => {
-											temperatureValue = defaultAudioTemperature;
-											_temperatureValue = defaultAudioTemperature;
-										}}
-										onkeydown={(e) => {
-											if (e.key === 'Enter' || e.key === ' ') {
-												temperatureValue = defaultAudioTemperature;
-												_temperatureValue = defaultAudioTemperature;
-											}
-										}}
-									>
-										<HeartSolid class="max-w-fit text-gray-500" />
-										<div class="mx-10 mt-1 text-center text-sm text-wrap">
-											Default (highly recommended)
-										</div>
-									</button>
-								</div>
-							{/if}
-						{/if}
-						{#if supportsVerbosity && !isLectureMode}
-							<div class="flex flex-col">
-								<Label for="verbosity">Verbosity</Label>
-								<Helper class="pb-1"
-									>Select your desired verbosity. Verbosity determines how many output tokens are
-									generated. Lowering the number of tokens reduces overall latency. While the
-									model's reasoning approach stays mostly the same, the model finds ways to answer
-									more concisely—which can either improve or diminish answer quality, depending on
-									your use case. Here are some scenarios for both ends of the verbosity spectrum:
-									<ol class="ml-7 list-disc">
-										<li class="my-1">
-											<span class="font-medium">High verbosity:</span> Use when you need the model to
-											provide thorough explanations of documents or perform extensive code refactoring.
-										</li>
-										<li class="my-1">
-											<span class="font-medium">Low verbosity:</span> Best for situations where you want
-											concise answers or simple code generation, such as SQL queries.
-										</li>
-									</ol>
-									Models before GPT-5 have used medium verbosity by default. With GPT-5, this option is
-									configurable as one of<span class="font-mono">high</span>,
-									<span class="font-mono">medium</span>, or <span class="font-mono">low</span>. When
-									generating code, <span class="font-mono">medium</span> and
-									<span class="font-mono">high</span>
-									verbosity levels yield longer, more structured code with inline explanations, while
-									<span class="font-mono">low</span>
-									verbosity produces shorter, more concise code with minimal commentary. The default value
-									is
-									<span class="font-mono">medium</span>.</Helper
-								>
-							</div>
-							<Range
-								id="verbosity"
-								name="verbosity"
-								min="0"
-								max="2"
-								bind:value={verbosityValue}
-								step="1"
-								disabled={preventEdits}
-								class="appearance-auto"
-							/>
-							<div class="mt-2 flex flex-row justify-between">
-								<p class="text-sm">low</p>
-								<p class="text-sm">medium</p>
-								<p class="text-sm">high</p>
-							</div>
-						{/if}
-						<hr />
-
 						{#if !data.isCreating || isLectureMode}
 							<div class="col-span-2 mb-1">
 								<span
@@ -3825,7 +5123,7 @@
 				class="border border-orange bg-orange text-white hover:bg-orange-dark"
 				type="submit"
 				disabled={$loading || uploadingFSPrivate || uploadingCIPrivate || uploadingLectureVideo}
-				>Save</Button
+				>{saveButtonLabel}</Button
 			>
 			<Button
 				disabled={$loading || uploadingFSPrivate || uploadingCIPrivate || uploadingLectureVideo}

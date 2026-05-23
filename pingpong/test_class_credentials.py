@@ -8,6 +8,7 @@ from elevenlabs.core.api_error import ApiError as ElevenLabsApiError
 from elevenlabs.errors import (
     UnprocessableEntityError as ElevenLabsUnprocessableEntityError,
 )
+from elevenlabs.realtime_tts import text_chunker
 from elevenlabs.types.http_validation_error import HttpValidationError
 import pytest
 from sqlalchemy import func, select
@@ -1054,6 +1055,31 @@ async def test_validate_class_credential_for_gemini_closes_async_and_sync_client
     ]
 
 
+def test_get_gemini_client_caches_by_api_key(monkeypatch):
+    events: list[tuple[str, str]] = []
+
+    class FakeClient:
+        def __init__(self, *, api_key):
+            events.append(("init", api_key))
+            self.api_key = api_key
+
+    gemini_module.get_gemini_client.cache_clear()
+    monkeypatch.setattr(gemini_module.genai, "Client", FakeClient)
+    try:
+        first = gemini_module.get_gemini_client("gemini-key")
+        second = gemini_module.get_gemini_client("gemini-key")
+        third = gemini_module.get_gemini_client("other-gemini-key")
+    finally:
+        gemini_module.get_gemini_client.cache_clear()
+
+    assert first is second
+    assert third is not first
+    assert events == [
+        ("init", "gemini-key"),
+        ("init", "other-gemini-key"),
+    ]
+
+
 def test_class_credential_validators_cover_all_providers():
     assert set(_CLASS_CREDENTIAL_VALIDATORS) == set(schemas.ClassCredentialProvider)
 
@@ -1137,7 +1163,15 @@ async def test_validate_class_credential_for_gemini_raises_unavailable_for_non_a
 async def test_synthesize_elevenlabs_voice_sample_maps_generic_voice_not_found_api_error(
     monkeypatch,
 ):
-    def fake_convert(*, voice_id, text, output_format, request_options=None):
+    def fake_convert(
+        *,
+        voice_id,
+        text,
+        model_id,
+        output_format,
+        voice_settings,
+        request_options=None,
+    ):
         raise ElevenLabsApiError(
             status_code=404,
             body={
@@ -1169,7 +1203,15 @@ async def test_synthesize_elevenlabs_voice_sample_maps_generic_voice_not_found_a
 async def test_synthesize_elevenlabs_speech_maps_invalid_voice_id_api_error(
     monkeypatch,
 ):
-    def fake_convert(*, voice_id, text, output_format, request_options=None):
+    def fake_convert(
+        *,
+        voice_id,
+        text,
+        model_id,
+        output_format,
+        voice_settings,
+        request_options=None,
+    ):
         raise ElevenLabsApiError(
             status_code=400,
             body={
@@ -1202,7 +1244,15 @@ async def test_synthesize_elevenlabs_speech_maps_invalid_voice_id_api_error(
 async def test_synthesize_elevenlabs_speech_maps_non_voice_unprocessable_entity_to_unavailable(
     monkeypatch,
 ):
-    def fake_convert(*, voice_id, text, output_format, request_options=None):
+    def fake_convert(
+        *,
+        voice_id,
+        text,
+        model_id,
+        output_format,
+        voice_settings,
+        request_options=None,
+    ):
         raise ElevenLabsUnprocessableEntityError(
             body=HttpValidationError(
                 detail=[
@@ -1240,10 +1290,20 @@ async def test_synthesize_elevenlabs_voice_sample_requests_direct_ogg_opus(monke
     async def fake_collect_audio_chunks(_audio_stream) -> bytes:
         return b"ogg-audio"
 
-    def fake_convert(*, voice_id, text, output_format, request_options=None):
+    def fake_convert(
+        *,
+        voice_id,
+        text,
+        model_id,
+        output_format,
+        voice_settings,
+        request_options=None,
+    ):
         seen["voice_id"] = voice_id
         seen["text"] = text
+        seen["model_id"] = model_id
         seen["output_format"] = output_format
+        seen["voice_settings"] = voice_settings
         seen["request_options"] = request_options
         return object()
 
@@ -1270,7 +1330,15 @@ async def test_synthesize_elevenlabs_voice_sample_requests_direct_ogg_opus(monke
         "api_key": "elevenlabs-key",
         "voice_id": "voice-123",
         "text": elevenlabs_module.ELEVENLABS_VOICE_VALIDATION_SAMPLE_TEXT,
+        "model_id": "eleven_flash_v2_5",
         "output_format": "opus_48000_32",
+        "voice_settings": elevenlabs_module.VoiceSettings(
+            stability=0.5,
+            use_speaker_boost=True,
+            similarity_boost=0.8,
+            style=0.0,
+            speed=1.0,
+        ),
         "request_options": {"timeout_in_seconds": 15},
     }
     assert sample_text == elevenlabs_module.ELEVENLABS_VOICE_VALIDATION_SAMPLE_TEXT
@@ -1278,11 +1346,67 @@ async def test_synthesize_elevenlabs_voice_sample_requests_direct_ogg_opus(monke
     assert audio == b"ogg-audio"
 
 
+async def test_synthesize_elevenlabs_voice_sample_forwards_custom_settings(monkeypatch):
+    seen: dict[str, object] = {}
+
+    async def fake_collect_audio_chunks(_audio_stream) -> bytes:
+        return b"ogg-audio"
+
+    def fake_convert(
+        *,
+        voice_id,
+        text,
+        model_id,
+        output_format,
+        voice_settings,
+        request_options=None,
+    ):
+        seen["voice_settings"] = voice_settings
+        return object()
+
+    class FakeClient:
+        def __init__(self, *, api_key):
+            self.text_to_speech = SimpleNamespace(convert=fake_convert)
+
+    monkeypatch.setattr(elevenlabs_module, "AsyncElevenLabs", FakeClient)
+    monkeypatch.setattr(
+        elevenlabs_module, "_collect_audio_chunks", fake_collect_audio_chunks
+    )
+
+    await elevenlabs_module.synthesize_elevenlabs_voice_sample(
+        api_key="elevenlabs-key",
+        voice_id="voice-123",
+        voice_settings={
+            "stability": 0.9,
+            "use_speaker_boost": False,
+            "similarity_boost": 0.4,
+            "style": 0.2,
+            "speed": 1.1,
+        },
+    )
+
+    assert seen["voice_settings"] == elevenlabs_module.VoiceSettings(
+        stability=0.9,
+        use_speaker_boost=False,
+        similarity_boost=0.4,
+        style=0.2,
+        speed=1.1,
+    )
+
+
 @pytest.mark.asyncio
 async def test_synthesize_elevenlabs_voice_sample_maps_httpx_timeout_to_unavailable(
     monkeypatch,
 ):
-    def fake_convert(*, voice_id, text, output_format, request_options=None):
+    def fake_convert(
+        *,
+        voice_id,
+        text,
+        model_id,
+        output_format,
+        voice_settings,
+        request_options=None,
+    ):
         assert request_options == {"timeout_in_seconds": 15}
         raise httpx.ReadTimeout("timed out")
 
@@ -1313,10 +1437,20 @@ async def test_synthesize_elevenlabs_speech_omits_request_options_without_timeou
     async def fake_collect_audio_chunks(_audio_stream) -> bytes:
         return b"ogg-audio"
 
-    def fake_convert(*, voice_id, text, output_format, request_options=None):
+    def fake_convert(
+        *,
+        voice_id,
+        text,
+        model_id,
+        output_format,
+        voice_settings,
+        request_options=None,
+    ):
         seen["voice_id"] = voice_id
         seen["text"] = text
+        seen["model_id"] = model_id
         seen["output_format"] = output_format
+        seen["voice_settings"] = voice_settings
         seen["request_options"] = request_options
         return object()
 
@@ -1340,7 +1474,15 @@ async def test_synthesize_elevenlabs_speech_omits_request_options_without_timeou
         "api_key": "elevenlabs-key",
         "voice_id": "voice-123",
         "text": "Narration text",
+        "model_id": "eleven_flash_v2_5",
         "output_format": "opus_48000_32",
+        "voice_settings": elevenlabs_module.VoiceSettings(
+            stability=0.5,
+            use_speaker_boost=True,
+            similarity_boost=0.8,
+            style=0.0,
+            speed=1.0,
+        ),
         "request_options": None,
     }
     assert content_type == "audio/ogg"
@@ -1377,10 +1519,27 @@ def test_strip_markdown_for_tts_removes_common_markdown_formatting():
     )
 
 
+def test_strip_markdown_for_tts_removes_latex_math_delimiters():
+    assert (
+        elevenlabs_module.strip_markdown_for_tts(
+            "One has $a$, the other has $c$. Also $$\n10a + 5c\n$$.",
+            strip_latex_delimiters=True,
+        )
+        == "One has a, the other has c. Also 10a + 5c."
+    )
+
+
+def test_strip_markdown_for_tts_preserves_currency_by_default():
+    assert (
+        elevenlabs_module.strip_markdown_for_tts("It costs $5.99 for the $10 bundle.")
+        == "It costs $5.99 for the $10 bundle."
+    )
+
+
 def test_streaming_markdown_sanitizer_sanitizes_markdown_across_streamed_deltas():
     sanitizer = elevenlabs_module.StreamingMarkdownSanitizer()
 
-    assert sanitizer.add("Here is **bold** and [a") == ["Here is bold and"]
+    assert sanitizer.add("Here is **bold** and [a") == ["Here is bold and "]
 
     flushed = sanitizer.add(" link](https://example.com).")
 
@@ -1393,10 +1552,18 @@ def test_streaming_markdown_sanitizer_streams_plain_prose_immediately():
     assert sanitizer.add("Hello, world.") == ["Hello, world."]
 
 
+def test_streaming_markdown_sanitizer_preserves_word_boundary_whitespace():
+    sanitizer = elevenlabs_module.StreamingMarkdownSanitizer()
+
+    assert sanitizer.add("Good") == ["Good"]
+    assert sanitizer.add(" morning") == [" morning"]
+    assert sanitizer.add("!") == ["!"]
+
+
 def test_streaming_markdown_sanitizer_strips_fenced_code_blocks_before_tts():
     sanitizer = elevenlabs_module.StreamingMarkdownSanitizer()
 
-    assert sanitizer.add("Example:\n```python\nprint('hello')\n") == ["Example:"]
+    assert sanitizer.add("Example:\n```python\nprint('hello')\n") == ["Example:\n"]
 
     flushed = sanitizer.add("```.")
 
@@ -1406,9 +1573,204 @@ def test_streaming_markdown_sanitizer_strips_fenced_code_blocks_before_tts():
 def test_streaming_markdown_sanitizer_flushes_incomplete_markdown_best_effort():
     sanitizer = elevenlabs_module.StreamingMarkdownSanitizer()
 
-    assert sanitizer.add("Here is [an unfinished link") == ["Here is"]
+    assert sanitizer.add("Here is [an unfinished link") == ["Here is "]
 
     assert sanitizer.flush() == "an unfinished link"
+
+
+def test_streaming_markdown_sanitizer_drain_ready_preserves_incomplete_markdown():
+    sanitizer = elevenlabs_module.StreamingMarkdownSanitizer()
+
+    assert sanitizer.add("See [diagram ") == ["See "]
+    assert sanitizer.add("Diagram now.") == []
+    assert sanitizer.drain_ready() == []
+    assert sanitizer.add(" details](https://example.com) done.") == [
+        "diagram Diagram now. details done."
+    ]
+
+
+def test_streaming_markdown_sanitizer_can_strip_latex_delimiters():
+    sanitizer = elevenlabs_module.StreamingMarkdownSanitizer(
+        strip_latex_delimiters=True
+    )
+
+    assert sanitizer.add("One has $a$.") == ["One has a."]
+
+
+def test_streaming_tts_chunker_buffers_partial_words_until_boundary():
+    chunker = elevenlabs_module.StreamingTTSChunker()
+
+    assert chunker.add("phon") == []
+    assert chunker.add("etic") == []
+    assert chunker.add(" words") == ["phonetic "]
+    assert chunker.flush() == "words "
+
+
+def test_streaming_tts_chunker_attaches_leading_punctuation_to_buffer():
+    chunker = elevenlabs_module.StreamingTTSChunker()
+
+    assert chunker.add("Hello") == []
+    assert chunker.add(", world") == ["Hello, "]
+    assert chunker.flush() == " world "
+
+
+def test_streaming_tts_chunker_emits_single_delta_with_safe_boundary():
+    chunker = elevenlabs_module.StreamingTTSChunker()
+
+    assert chunker.add("Hello, world.") == []
+    assert chunker.flush() == "Hello, world. "
+
+
+def test_streaming_tts_chunker_waits_for_next_delta_or_flush_after_internal_boundary():
+    chunker = elevenlabs_module.StreamingTTSChunker()
+
+    assert chunker.add("This is phon") == []
+    assert chunker.add("etic. Next") == []
+    assert chunker.flush() == "This is phonetic. Next "
+
+
+def test_streaming_tts_chunker_matches_elevenlabs_text_chunker():
+    cases = [
+        ["Sure", " \u2014", " it", "\u2019s"],
+        ["algebra", "ic", " expressions"],
+        ["correctly.\n\n", "The"],
+        ["this", ":", " you"],
+        ["terms", ",", " which"],
+        ["mistake", " \u2014", " turning"],
+        ["isn", "\u2019t", " valid", "."],
+        ["JSON", "{", "like"],
+        ["JSON", "}", "done"],
+    ]
+
+    for chunks in cases:
+        chunker = elevenlabs_module.StreamingTTSChunker()
+        emitted = []
+        for chunk in chunks:
+            emitted.extend(chunker.add(chunk))
+        final_chunk = chunker.flush()
+        if final_chunk is not None:
+            emitted.append(final_chunk)
+
+        assert emitted == list(text_chunker(iter(chunks)))
+
+
+async def test_elevenlabs_streaming_tts_sends_realtime_generation_payloads(monkeypatch):
+    sessions = []
+
+    class FakeWebSocket:
+        closed = False
+
+        def __init__(self):
+            self.sent_json = []
+
+        async def send_json(self, payload):
+            self.sent_json.append(payload)
+
+        async def close(self):
+            self.closed = True
+
+    class FakeSession:
+        def __init__(self, *, headers):
+            self.headers = headers
+            self.closed = False
+            self.websocket = FakeWebSocket()
+            self.url = None
+            self.timeout = None
+            sessions.append(self)
+
+        async def ws_connect(self, url, timeout):
+            self.url = url
+            self.timeout = timeout
+            return self.websocket
+
+        async def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(elevenlabs_module.aiohttp, "ClientSession", FakeSession)
+
+    tts = elevenlabs_module.ElevenLabsStreamingTTS(
+        "elevenlabs-key",
+        "voice-id",
+    )
+
+    await tts.connect()
+    await tts.send_text("Hello ", try_trigger_generation=True)
+    await tts.send_text("world ", flush=True)
+
+    session = sessions[0]
+    assert session.headers == {"xi-api-key": "elevenlabs-key"}
+    assert "model_id=eleven_flash_v2_5" in session.url
+    assert "output_format=pcm_24000" in session.url
+    assert session.websocket.sent_json == [
+        {
+            "text": " ",
+            "try_trigger_generation": True,
+            "voice_settings": {
+                "stability": 0.5,
+                "use_speaker_boost": True,
+                "similarity_boost": 0.8,
+                "style": 0.0,
+                "speed": 1.0,
+            },
+            "generation_config": {
+                "chunk_length_schedule": [50],
+            },
+        },
+        {
+            "text": "Hello ",
+            "try_trigger_generation": True,
+        },
+        {
+            "text": "world ",
+            "flush": True,
+        },
+    ]
+
+
+async def test_elevenlabs_streaming_tts_sends_custom_voice_settings(monkeypatch):
+    sessions = []
+
+    class FakeWebSocket:
+        def __init__(self):
+            self.sent_json = []
+
+        async def send_json(self, payload):
+            self.sent_json.append(payload)
+
+    class FakeSession:
+        def __init__(self, *, headers):
+            self.websocket = FakeWebSocket()
+            sessions.append(self)
+
+        async def ws_connect(self, url, timeout):
+            return self.websocket
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(elevenlabs_module.aiohttp, "ClientSession", FakeSession)
+
+    tts = elevenlabs_module.ElevenLabsStreamingTTS(
+        "elevenlabs-key",
+        "voice-id",
+        voice_settings={
+            "stability": 0.9,
+            "use_speaker_boost": False,
+            "similarity_boost": 0.4,
+            "style": 0.2,
+            "speed": 1.1,
+        },
+    )
+
+    await tts.connect()
+
+    assert sessions[0].websocket.sent_json[0]["voice_settings"] == {
+        "stability": 0.9,
+        "use_speaker_boost": False,
+        "similarity_boost": 0.4,
+        "style": 0.2,
+        "speed": 1.1,
+    }
 
 
 async def test_validate_elevenlabs_api_key_maps_client_construction_errors_to_unavailable(

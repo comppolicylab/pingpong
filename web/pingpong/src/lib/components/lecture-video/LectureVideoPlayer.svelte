@@ -1,9 +1,12 @@
 <script lang="ts">
 	import {
+		CaptionOutline,
+		CaptionSolid,
 		CheckOutline,
 		CloseOutline,
 		PauseSolid,
 		PlaySolid,
+		RefreshOutline,
 		VolumeDownSolid,
 		VolumeUpSolid,
 		VolumeMuteSolid
@@ -26,6 +29,7 @@
 
 	const PREVIEW_WIDTH = 224;
 	const PREVIEW_VIDEO_IDLE_DEACTIVATE_MS = 3000;
+	const QUESTION_PRESENTATION_CONTROLS_HIDE_MS = 2000;
 	const PREVIEW_VIDEO_SEEK_TOLERANCE_S = 0.15;
 	const PREVIEW_FRAME_REDRAW_EPSILON_S = 0.001;
 	const VOLUME_SLIDER_PADDING_PX = 5;
@@ -34,6 +38,8 @@
 	const MARKER_CLUSTER_THRESHOLD_PX = 28;
 	const MARKER_CLUSTER_COLLAPSE_DELAY_MS = 120;
 	const OVERLAY_TEXT_SHADOW = 'text-shadow: rgb(0 0 0) 0 0 2px;';
+	const CAPTION_CONTROL_GAP_PX = 12;
+	const CAPTIONS_PREFERENCE_STORAGE_KEY = 'pingpong:lecture-video:captions-enabled';
 
 	type QuestionMarker = {
 		id: number;
@@ -78,18 +84,23 @@
 
 	let {
 		src,
+		captionsSrc = null,
 		displayTitle = 'Lecture Video',
 		startOffsetMs = 0,
 		questionMarkers = [],
 		subtitleText = null,
 		disabled = false,
 		manualPlaybackPrompt = false,
+		allowFullSeek = false,
+		maxSeekOffsetMs = null,
 		activeQuestionIds = null,
+		questionPresentationVersion = 0,
 		furthestOffsetMs = null,
 		videoElement = $bindable(null),
 		previewVideoElement = $bindable(null),
 		currentTimeMs = $bindable(0),
 		paused = $bindable(true),
+		endedPlayback = $bindable(false),
 		effectiveVolume = $bindable(1),
 		ontimeupdate,
 		onseek,
@@ -102,18 +113,23 @@
 		onmanualplayrequest
 	}: {
 		src: string;
+		captionsSrc?: string | null;
 		displayTitle?: string;
 		startOffsetMs?: number;
 		questionMarkers?: QuestionMarker[];
 		subtitleText?: string | null;
 		disabled?: boolean;
 		manualPlaybackPrompt?: boolean;
+		allowFullSeek?: boolean;
+		maxSeekOffsetMs?: number | null;
 		activeQuestionIds?: number[] | null;
+		questionPresentationVersion?: number;
 		furthestOffsetMs?: number | null;
 		videoElement?: HTMLVideoElement | null;
 		previewVideoElement?: HTMLVideoElement | null;
 		currentTimeMs?: number;
 		paused?: boolean;
+		endedPlayback?: boolean;
 		effectiveVolume?: number;
 		ontimeupdate?: () => void;
 		onseek?: (toOffsetMs: number, fromOffsetMs: number) => void;
@@ -164,23 +180,67 @@
 	let keyboardActionOverlayUnmountTimeout: ReturnType<typeof setTimeout> | null = $state(null);
 	let mediaSessionRefreshTimeout: ReturnType<typeof setTimeout> | null = $state(null);
 	let previewVideoDeactivateTimeout: ReturnType<typeof setTimeout> | null = $state(null);
+	let questionPresentationHideTimeout: ReturnType<typeof setTimeout> | null = $state(null);
 	let snapshotCanvasElement: HTMLCanvasElement | null = $state(null);
 	let playerContainerElement: HTMLDivElement | null = $state(null);
 	let activeClusterKey: string | null = $state(null);
 	let clusterCollapseTimeout: ReturnType<typeof setTimeout> | null = $state(null);
+	let playbackCompleted = $state(false);
+	let captionsEnabled = $state(false);
+	let captionsTrackElement: HTMLTrackElement | null = $state(null);
+	let activeCaptionLines: string[] = $state([]);
+	let controlsOverlayHeight = $state(0);
+	// Non-reactive: tracks the last shown question without retriggering the effect.
+	let lastQuestionPresentationKey: string | null = null;
+	let lastCaptionsSrc: string | null = null;
+
+	function getStoredCaptionsPreference(): boolean {
+		if (typeof localStorage === 'undefined') return false;
+		try {
+			const storedPreference = localStorage.getItem(CAPTIONS_PREFERENCE_STORAGE_KEY);
+			if (storedPreference == null) return false;
+			return storedPreference === 'true';
+		} catch {
+			return false;
+		}
+	}
+
+	function storeCaptionsPreference(enabled: boolean) {
+		if (typeof localStorage === 'undefined') return;
+		try {
+			localStorage.setItem(CAPTIONS_PREFERENCE_STORAGE_KEY, String(enabled));
+		} catch {
+			// Ignore blocked or full browser storage; caption toggles should still work.
+		}
+	}
 
 	let effectiveOffsetMs = $derived(
 		draggingSeek ? (dragPreviewOffsetMs ?? currentTimeMs) : currentTimeMs
 	);
 	let progress = $derived(durationMs > 0 ? (effectiveOffsetMs / durationMs) * 100 : 0);
-	let seekLimitOffsetMs = $derived(Math.max(currentTimeMs, furthestOffsetMs ?? 0));
+	let unboundedSeekLimitOffsetMs = $derived(
+		allowFullSeek && durationMs > 0 ? durationMs : Math.max(currentTimeMs, furthestOffsetMs ?? 0)
+	);
+	let seekLimitOffsetMs = $derived(
+		maxSeekOffsetMs == null
+			? unboundedSeekLimitOffsetMs
+			: Math.min(unboundedSeekLimitOffsetMs, maxSeekOffsetMs)
+	);
 	let seekLimitProgress = $derived(
 		durationMs > 0 ? Math.min((seekLimitOffsetMs / durationMs) * 100, 100) : 0
 	);
+	let computedEndedPlayback = $derived(playbackCompleted);
+	$effect(() => {
+		endedPlayback = computedEndedPlayback;
+	});
 	let questionPendingControls = $derived(Boolean(activeQuestionIds?.length));
+	let questionPresentationKey = $derived(
+		activeQuestionIds?.[0] == null ? null : `${activeQuestionIds[0]}:${questionPresentationVersion}`
+	);
 	let visibleControls = $derived(
 		!manualPlaybackPrompt &&
-			(questionPendingControls || (!disabled && (!startedPlaybackOnce || showControls)))
+			(!disabled || questionPendingControls) &&
+			(endedPlayback || (!startedPlaybackOnce && !questionPendingControls) || showControls)
 	);
 	let visibleMarkers = $derived(
 		condensedMarkerMode && condensedMarkerIds.length > 0
@@ -240,6 +300,44 @@
 			: '--:-- / --:--'
 	);
 	let titleText = $derived(displayTitle.trim() || 'Lecture Video');
+	let questionControlsLocked = $derived(questionPendingControls && maxSeekOffsetMs == null);
+	let captionsAvailable = $derived(Boolean(captionsSrc));
+	let captionOverlayBottomPx = $derived(
+		visibleControls ? controlsOverlayHeight + CAPTION_CONTROL_GAP_PX : 20
+	);
+	let customCaptionsVisible = $derived(
+		startedPlaybackOnce &&
+			captionsAvailable &&
+			captionsEnabled &&
+			subtitleText == null &&
+			activeCaptionLines.length > 0
+	);
+	let activeCaptionText = $derived(activeCaptionLines.join(' '));
+	let balancedCaptionLines = $derived(balanceCaptionLines(activeCaptionText));
+
+	function balanceCaptionLines(text: string): string[] {
+		const normalizedText = text.replace(/\s+/g, ' ').trim();
+		if (normalizedText.length <= 48) return normalizedText ? [normalizedText] : [];
+
+		const words = normalizedText.split(' ');
+		if (words.length < 4) return [normalizedText];
+
+		let bestSplitIndex = 1;
+		let bestScore = Number.POSITIVE_INFINITY;
+		for (let splitIndex = 1; splitIndex < words.length; splitIndex += 1) {
+			const firstLine = words.slice(0, splitIndex).join(' ');
+			const secondLine = words.slice(splitIndex).join(' ');
+			const balanceScore = Math.abs(firstLine.length - secondLine.length);
+			const orphanPenalty = Math.min(firstLine.length, secondLine.length) < 16 ? 40 : 0;
+			const score = balanceScore + orphanPenalty;
+			if (score < bestScore) {
+				bestScore = score;
+				bestSplitIndex = splitIndex;
+			}
+		}
+
+		return [words.slice(0, bestSplitIndex).join(' '), words.slice(bestSplitIndex).join(' ')];
+	}
 
 	function markerDisplayLabel(marker: QuestionMarker): string {
 		const markerNumber = markerNumberById.get(marker.id);
@@ -302,6 +400,53 @@
 		} catch {
 			// Ignore browsers that partially expose MediaSession without position state support.
 		}
+	}
+
+	function getCaptionTextTrack(): TextTrack | null {
+		if (captionsTrackElement?.track) return captionsTrackElement.track;
+		if (!videoElement?.textTracks) return null;
+		for (const track of Array.from(videoElement.textTracks)) {
+			if (track.kind === 'captions') return track;
+		}
+		return null;
+	}
+
+	function syncCaptionTrackMode() {
+		const track = getCaptionTextTrack();
+		if (!track) return;
+		track.mode = captionsAvailable && captionsEnabled ? 'hidden' : 'disabled';
+		track.oncuechange = syncActiveCaptionLines;
+		syncActiveCaptionLines();
+	}
+
+	function cueText(cue: TextTrackCue): string | null {
+		if (typeof VTTCue !== 'undefined' && cue instanceof VTTCue) {
+			return cue.text.trim();
+		}
+		const maybeText = (cue as TextTrackCue & { text?: string }).text;
+		return typeof maybeText === 'string' ? maybeText.trim() : null;
+	}
+
+	function syncActiveCaptionLines() {
+		const track = getCaptionTextTrack();
+		if (!track || !captionsAvailable || !captionsEnabled || !track.activeCues) {
+			activeCaptionLines = [];
+			return;
+		}
+
+		const lines = Array.from(track.activeCues)
+			.map(cueText)
+			.filter((text): text is string => Boolean(text));
+		if (lines.join('\n') !== activeCaptionLines.join('\n')) {
+			activeCaptionLines = lines;
+		}
+	}
+
+	function toggleCaptions() {
+		if (!captionsAvailable) return;
+		captionsEnabled = !captionsEnabled;
+		storeCaptionsPreference(captionsEnabled);
+		syncCaptionTrackMode();
 	}
 
 	function syncMediaSessionState() {
@@ -371,6 +516,15 @@
 	});
 
 	$effect(() => {
+		if (captionsSrc !== lastCaptionsSrc) {
+			lastCaptionsSrc = captionsSrc;
+			captionsEnabled = captionsSrc ? getStoredCaptionsPreference() : false;
+			activeCaptionLines = [];
+		}
+		syncCaptionTrackMode();
+	});
+
+	$effect(() => {
 		if (previewVideoSrc !== lastPreviewVideoSrc) {
 			previewVideoReady = false;
 			previewVideoFrameReady = false;
@@ -381,11 +535,32 @@
 
 	$effect(() => {
 		if (questionPendingControls) {
+			if (questionPresentationKey !== lastQuestionPresentationKey) {
+				lastQuestionPresentationKey = questionPresentationKey;
+				showControls = true;
+				if (!disabled) {
+					scheduleQuestionPresentationHide();
+				}
+			}
+			if (disabled) {
+				clearQuestionPresentationHideTimeout();
+			} else if (
+				showControls &&
+				!questionPresentationHideTimeout &&
+				!pointerInsidePlayer &&
+				!draggingSeek &&
+				!draggingVolume &&
+				!seekPreviewVisible
+			) {
+				scheduleQuestionPresentationHide();
+			}
 			showVolumeSlider = false;
 			condensedMarkerMode = true;
 			condensedMarkerIds = [...activeQuestionIds!];
 			return;
 		}
+		lastQuestionPresentationKey = null;
+		clearQuestionPresentationHideTimeout();
 		if (!visibleControls) {
 			condensedMarkerMode = false;
 			condensedMarkerIds = [];
@@ -405,7 +580,17 @@
 		}
 	});
 
+	$effect(() => {
+		syncActiveCaptionLines();
+	});
+
 	$effect(() => () => clearClusterCollapseTimeout());
+	$effect(() => () => {
+		if (hideTimeout) {
+			clearTimeout(hideTimeout);
+		}
+		clearQuestionPresentationHideTimeout();
+	});
 
 	$effect(() => {
 		if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) {
@@ -433,6 +618,9 @@
 
 		setActionHandler('play', () => {
 			if (!videoElement || disabled || !videoElement.paused) return;
+			if (endedPlayback) {
+				setMainVideoCurrentTime(0);
+			}
 			void videoElement.play().catch(() => {});
 		});
 		setActionHandler('pause', () => {
@@ -469,8 +657,10 @@
 		if (videoElement) {
 			currentTimeMs = videoElement.currentTime * 1000;
 			paused = videoElement.paused;
+			playbackCompleted = videoElement.ended;
 		}
 		syncMediaSessionState();
+		syncActiveCaptionLines();
 		ontimeupdate?.();
 	}
 
@@ -478,6 +668,7 @@
 		if (!videoElement) return;
 		videoElement.currentTime = offsetMs / 1000;
 		currentTimeMs = offsetMs;
+		playbackCompleted = false;
 		syncMediaSessionPositionState();
 	}
 
@@ -489,6 +680,7 @@
 		if (videoElement) {
 			durationMs = videoElement.duration * 1000;
 			currentTimeMs = videoElement.currentTime * 1000;
+			playbackCompleted = videoElement.ended;
 		}
 		syncMediaSessionState();
 		oncanplay?.();
@@ -496,8 +688,11 @@
 
 	function handleEnded() {
 		if (videoElement) {
+			currentTimeMs = videoElement.currentTime * 1000;
 			paused = videoElement.paused;
 		}
+		playbackCompleted = true;
+		showControls = true;
 		syncMediaSessionState();
 		onended?.();
 	}
@@ -506,8 +701,10 @@
 		if (videoElement) {
 			paused = videoElement.paused;
 		}
-		showControls = true;
-		scheduleHide();
+		if (!questionPendingControls || questionPresentationKey !== lastQuestionPresentationKey) {
+			showControls = true;
+			scheduleHide();
+		}
 		syncMediaSessionState();
 		onpause?.();
 	}
@@ -515,6 +712,7 @@
 	function handlePlayEvent() {
 		if (videoElement) {
 			paused = videoElement.paused;
+			playbackCompleted = videoElement.ended;
 		}
 		startedPlaybackOnce = true;
 		showControls = true;
@@ -538,7 +736,12 @@
 	}
 
 	function togglePlayPause() {
-		if (disabled || questionPendingControls || !videoElement) return;
+		if (disabled || questionControlsLocked || !videoElement) return;
+		if (endedPlayback) {
+			setMainVideoCurrentTime(0);
+			void videoElement.play().catch(() => {});
+			return;
+		}
 		if (videoElement.paused) {
 			void videoElement.play().catch(() => {});
 			return;
@@ -634,14 +837,19 @@
 	}
 
 	function getSeekDetails(clientX: number, track: HTMLDivElement) {
-		if (disabled || questionPendingControls || !videoElement || durationMs <= 0) return;
+		if (disabled || questionControlsLocked || !videoElement || durationMs <= 0) return;
 
 		const rect = track.getBoundingClientRect();
 		const pointerOffsetPx = clamp(clientX - rect.left, 0, rect.width);
 		const clickRatio = clamp(pointerOffsetPx / rect.width, 0, 1);
 		const fromOffsetMs = dragStartOffsetMs ?? Math.round(videoElement.currentTime * 1000);
 		const requestedOffsetMs = Math.round(durationMs * clickRatio);
-		const allowedSeekOffsetMs = Math.max(fromOffsetMs, furthestOffsetMs ?? 0);
+		const unboundedAllowedSeekOffsetMs =
+			allowFullSeek && durationMs > 0 ? durationMs : Math.max(fromOffsetMs, furthestOffsetMs ?? 0);
+		const allowedSeekOffsetMs =
+			maxSeekOffsetMs == null
+				? unboundedAllowedSeekOffsetMs
+				: Math.min(unboundedAllowedSeekOffsetMs, maxSeekOffsetMs);
 		const locked = requestedOffsetMs > allowedSeekOffsetMs;
 
 		return {
@@ -808,7 +1016,7 @@
 	}
 
 	function previewSeek(offsetMs: number) {
-		if (disabled || questionPendingControls) return;
+		if (disabled || questionControlsLocked) return;
 		dragPreviewOffsetMs = offsetMs;
 	}
 
@@ -833,13 +1041,14 @@
 	}
 
 	function commitSeek(offsetMs: number, fromOffsetMs: number) {
-		if (disabled || questionPendingControls || !videoElement) return;
+		if (disabled || questionControlsLocked || !videoElement) return;
 		setMainVideoCurrentTime(offsetMs);
+		if (durationMs > 0 && offsetMs >= durationMs) return;
 		onseek?.(offsetMs, fromOffsetMs);
 	}
 
 	function handleSeekPointerDown(event: PointerEvent) {
-		if (event.button !== 0 || disabled || questionPendingControls) return;
+		if (event.button !== 0 || disabled || questionControlsLocked) return;
 
 		const track = event.currentTarget;
 		if (!(track instanceof HTMLDivElement) || !videoElement) return;
@@ -865,7 +1074,7 @@
 	function handleSeekPointerMove(event: PointerEvent) {
 		const track = event.currentTarget;
 		if (!(track instanceof HTMLDivElement)) return;
-		if (disabled || questionPendingControls) {
+		if (disabled || questionControlsLocked) {
 			if (draggingSeek) {
 				cancelSeekInteraction(track, event.pointerId, { syncToPlayback: true });
 			}
@@ -893,7 +1102,7 @@
 	function finishSeekDrag(event: PointerEvent) {
 		const track = event.currentTarget;
 		if (!(track instanceof HTMLDivElement)) return;
-		if (disabled || questionPendingControls) {
+		if (disabled || questionControlsLocked) {
 			cancelSeekInteraction(track, event.pointerId, { syncToPlayback: true });
 			return;
 		}
@@ -916,7 +1125,7 @@
 	function cancelSeekDrag(event: PointerEvent) {
 		const track = event.currentTarget;
 		if (!(track instanceof HTMLDivElement)) return;
-		if (disabled || questionPendingControls) {
+		if (disabled || questionControlsLocked) {
 			cancelSeekInteraction(track, event.pointerId, { syncToPlayback: true });
 			return;
 		}
@@ -943,6 +1152,29 @@
 		}, delayMs);
 	}
 
+	function clearQuestionPresentationHideTimeout() {
+		if (!questionPresentationHideTimeout) return;
+		clearTimeout(questionPresentationHideTimeout);
+		questionPresentationHideTimeout = null;
+	}
+
+	function scheduleQuestionPresentationHide() {
+		if (hideTimeout) {
+			clearTimeout(hideTimeout);
+			hideTimeout = null;
+		}
+		clearQuestionPresentationHideTimeout();
+		questionPresentationHideTimeout = setTimeout(() => {
+			questionPresentationHideTimeout = null;
+			if (!questionPendingControls) return;
+			if (disabled || pointerInsidePlayer || draggingSeek || draggingVolume || seekPreviewVisible) {
+				scheduleQuestionPresentationHide();
+				return;
+			}
+			showControls = false;
+		}, QUESTION_PRESENTATION_CONTROLS_HIDE_MS);
+	}
+
 	function handleMouseMove() {
 		if (disabled) return;
 		showControls = true;
@@ -960,9 +1192,17 @@
 		pointerInsidePlayer = false;
 		if (hideTimeout) {
 			clearTimeout(hideTimeout);
+			hideTimeout = null;
 		}
+		clearQuestionPresentationHideTimeout();
 		hoveringLockedSeek = false;
 		hideSeekPreview();
+		if (questionPendingControls) {
+			if (!disabled && showControls) {
+				scheduleQuestionPresentationHide();
+			}
+			return;
+		}
 		showControls = false;
 	}
 
@@ -1013,7 +1253,7 @@
 			return;
 		}
 		if (disabled || !videoElement) return;
-		showKeyboardIndicator(videoElement.paused ? 'play' : 'pause');
+		showKeyboardIndicator(endedPlayback || videoElement.paused ? 'play' : 'pause');
 		togglePlayPause();
 	}
 
@@ -1054,7 +1294,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
 	bind:this={playerContainerElement}
-	class="relative overflow-hidden rounded-3xl border border-slate-800/80 bg-black"
+	class="relative aspect-video overflow-hidden rounded-3xl border border-slate-800/80 bg-black xl:h-full xl:w-full"
 	onkeydown={handleKeydown}
 	onmousemove={handleMouseMove}
 	onmouseenter={handleMouseEnter}
@@ -1101,7 +1341,17 @@
 		onratechange={handleRateChange}
 		onerror={handleError}
 		onloadedmetadata={handleLoadedMetadata}
-	></video>
+	>
+		{#if captionsSrc}
+			<track
+				bind:this={captionsTrackElement}
+				kind="captions"
+				label="Captions"
+				src={captionsSrc}
+				onload={syncCaptionTrackMode}
+			/>
+		{/if}
+	</video>
 
 	{#if manualPlaybackPrompt}
 		<div class="absolute inset-0 z-10 flex items-center justify-center px-6">
@@ -1118,7 +1368,7 @@
 		</div>
 	{/if}
 
-	{#if visibleControls && subtitleText == null}
+	{#if !disabled && visibleControls && subtitleText == null}
 		<div
 			class="pointer-events-none absolute inset-x-0 top-4 z-[11] hidden justify-center px-4 sm:flex"
 		>
@@ -1141,8 +1391,26 @@
 		</div>
 	{/if}
 
+	{#if customCaptionsVisible}
+		<div
+			class="pointer-events-none absolute inset-x-0 z-[12] flex justify-center px-4 transition-[bottom] duration-200 ease-out"
+			style="bottom: {captionOverlayBottomPx}px;"
+		>
+			<div class="max-w-[64rem] px-2 text-center">
+				<div
+					class="inline-block max-w-full rounded bg-black/45 px-3 py-1 text-center text-sm leading-[1.4] font-medium text-white shadow-sm sm:text-base"
+				>
+					{#each balancedCaptionLines as captionLine, idx (idx)}
+						<div>{captionLine}</div>
+					{/each}
+				</div>
+			</div>
+		</div>
+	{/if}
+
 	{#if (!disabled || questionPendingControls) && !manualPlaybackPrompt}
 		<div
+			bind:clientHeight={controlsOverlayHeight}
 			class="pointer-events-none absolute inset-x-0 bottom-0 transition-opacity duration-200 ease-out select-none"
 			style="opacity: {visibleControls ? 1 : 0};"
 		>
@@ -1412,7 +1680,7 @@
 					</div>
 					<div class="relative mt-1.5 flex items-center gap-2">
 						<div
-							class="shrink-0 rounded-full bg-black/30 p-1 {questionPendingControls
+							class="shrink-0 rounded-full bg-black/30 p-1 {questionControlsLocked
 								? 'pointer-events-none invisible'
 								: 'pointer-events-auto'}"
 						>
@@ -1423,9 +1691,11 @@
 									e.stopPropagation();
 									togglePlayPause();
 								}}
-								aria-label={paused ? 'Play' : 'Pause'}
+								aria-label={endedPlayback ? 'Restart' : paused ? 'Play' : 'Pause'}
 							>
-								{#if paused}
+								{#if endedPlayback}
+									<RefreshOutline class="size-5 text-white" />
+								{:else if paused}
 									<PlaySolid class="size-6 translate-x-px text-white" />
 								{:else}
 									<PauseSolid class="size-6 text-white" />
@@ -1434,7 +1704,7 @@
 						</div>
 						<!-- svelte-ignore a11y_no_static_element_interactions -->
 						<div
-							class="relative shrink-0 rounded-full bg-black/30 p-1 {questionPendingControls
+							class="relative shrink-0 rounded-full bg-black/30 p-1 {questionControlsLocked
 								? 'pointer-events-none invisible'
 								: 'pointer-events-auto'}"
 							onmouseenter={() => {
@@ -1502,8 +1772,34 @@
 								</div>
 							</div>
 						</div>
+						{#if captionsAvailable}
+							<div
+								class="shrink-0 rounded-full bg-black/30 p-1 {questionControlsLocked
+									? 'pointer-events-none invisible'
+									: 'pointer-events-auto'}"
+							>
+								<button
+									class="flex h-8 w-8 items-center justify-center rounded-full text-white hover:bg-white/10 {captionsEnabled
+										? 'bg-white/15'
+										: ''}"
+									style="transition: background-color 0.2s;"
+									onclick={(e: MouseEvent) => {
+										e.stopPropagation();
+										toggleCaptions();
+									}}
+									aria-label={captionsEnabled ? 'Turn captions off' : 'Turn captions on'}
+									aria-pressed={captionsEnabled}
+								>
+									{#if captionsEnabled}
+										<CaptionSolid class="size-5 text-white" />
+									{:else}
+										<CaptionOutline class="size-5 text-white" />
+									{/if}
+								</button>
+							</div>
+						{/if}
 						<div
-							class="shrink-0 rounded-full bg-black/30 p-1 {questionPendingControls
+							class="shrink-0 rounded-full bg-black/30 p-1 {questionControlsLocked
 								? 'pointer-events-none invisible'
 								: 'pointer-events-auto'}"
 						>

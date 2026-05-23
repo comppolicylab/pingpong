@@ -62,6 +62,16 @@ from pingpong.migrations.m07_backfill_lecture_video_content_lengths import (
 from pingpong.migrations.m08_cleanup_invalid_lecture_video_schema_rows import (
     cleanup_invalid_lecture_video_schema_rows,
 )
+from pingpong.migrations.m09_backfill_lecture_video_posters import (
+    backfill_lecture_video_posters,
+)
+from pingpong.migrations.m10_backfill_lecture_video_captions import (
+    backfill_lecture_video_captions,
+    retranscribe_active_lecture_video_words,
+)
+from pingpong.migrations.m11_enable_latex_for_lecture_video_assistants import (
+    enable_latex_for_lecture_video_assistants,
+)
 from pingpong.now import _get_next_run_time, croner, utcnow
 from pingpong.schemas import LMSType, RunStatus
 from pingpong.lti.course_bridge import course_bridge_sync_all
@@ -1008,6 +1018,98 @@ def m08_cleanup_invalid_lecture_video_schema_rows() -> None:
                 )
 
     asyncio.run(_m08_cleanup_invalid_lecture_video_schema_rows())
+
+
+@db.command("m09_backfill_lecture_video_posters")
+def m09_backfill_lecture_video_posters() -> None:
+    async def _m09_backfill_lecture_video_posters() -> None:
+        async with config.db.driver.async_session() as session:
+            logger.info("Backfilling lecture video posters...")
+            extracted = await backfill_lecture_video_posters(session)
+            logger.info(
+                "Done! Backfilled posters for %s lecture videos.",
+                extracted,
+            )
+
+    asyncio.run(_m09_backfill_lecture_video_posters())
+
+
+@db.command("m10_backfill_lecture_video_captions")
+@click.option(
+    "--retranscribe-batch-size",
+    default=10,
+    type=click.IntRange(min=1),
+    help=(
+        "Number of ready lecture videos to retranscribe per batch. "
+        "Retranscription uses paid OpenAI Whisper requests for non-current videos."
+    ),
+)
+@click.option(
+    "--caption-batch-size",
+    default=50,
+    type=click.IntRange(min=1),
+    help="Number of active lecture videos to caption per batch.",
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    help=(
+        "Retranscribe lecture videos even when transcript data is already current; "
+        "this can incur OpenAI Whisper costs for every ready lecture video."
+    ),
+)
+def m10_backfill_lecture_video_captions(
+    retranscribe_batch_size: int,
+    caption_batch_size: int,
+    force: bool,
+) -> None:
+    async def _m10_backfill_lecture_video_captions() -> None:
+        async with config.db.driver.async_session() as session:
+            logger.warning(
+                "m10 caption backfill may make paid OpenAI Whisper requests for "
+                "ready lecture videos whose transcript data is not current."
+            )
+            logger.info(
+                "Retranscribing active assistant lecture video words with punctuation..."
+            )
+            retranscription_result = await retranscribe_active_lecture_video_words(
+                session, batch_size=retranscribe_batch_size, force=force
+            )
+            logger.info(
+                "Done! Retranscribed %s lecture videos. skipped=%s failed=%s",
+                retranscription_result.updated,
+                retranscription_result.skipped,
+                retranscription_result.failed,
+            )
+            logger.info(
+                "Backfilling lecture video captions for active assistant lecture videos..."
+            )
+            caption_result = await backfill_lecture_video_captions(
+                session, batch_size=caption_batch_size
+            )
+            logger.info(
+                "Done! Backfilled captions for %s lecture videos. skipped=%s failed=%s",
+                caption_result.created,
+                caption_result.skipped,
+                caption_result.failed,
+            )
+
+    asyncio.run(_m10_backfill_lecture_video_captions())
+
+
+@db.command("m11_enable_latex_for_lecture_video_assistants")
+def m11_enable_latex_for_lecture_video_assistants() -> None:
+    async def _m11_enable_latex_for_lecture_video_assistants() -> None:
+        async with config.db.driver.async_session() as session:
+            logger.info("Enabling LaTeX for lecture video assistants...")
+            updated = await enable_latex_for_lecture_video_assistants(session)
+            await session.commit()
+            logger.info(
+                "Done! Enabled LaTeX for %s lecture video assistants.",
+                updated,
+            )
+
+    asyncio.run(_m11_enable_latex_for_lecture_video_assistants())
 
 
 @db.command("m02_remove_responses_threads")

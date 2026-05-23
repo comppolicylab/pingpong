@@ -47,7 +47,7 @@ from openai.types.responses.response_output_text import AnnotationURLCitation
 from pydantic import PositiveInt, ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql import delete, func, update
+from sqlalchemy.sql import delete, func, select, update
 
 import pingpong.metrics as metrics
 import pingpong.models as models
@@ -77,6 +77,7 @@ from pingpong.class_credentials import (
     validate_class_credential,
 )
 from pingpong.elevenlabs import (
+    ELEVENLABS_TTS_VOICE_SETTINGS,
     ELEVENLABS_VOICE_SAMPLE_TEXT_HEADER,
     synthesize_elevenlabs_voice_sample,
 )
@@ -89,11 +90,16 @@ from pingpong.invite import (
     send_lti_registration_approved,
     send_lti_registration_rejected,
 )
+from pingpong.followup_transform import (
+    extract_followup_suggestions,
+    strip_followup_snippets,
+)
 from pingpong.lti.lti_course import (
     find_class_by_course_id,
     find_class_by_course_id_search_by_canvas_account_lti_guid,
 )
 from pingpong.realtime import browser_realtime_websocket
+from pingpong.say_transform import transform_say_text
 from pingpong.session import populate_request
 from pingpong.stats import (
     get_runs_with_multiple_assistant_messages_stats,
@@ -108,8 +114,9 @@ from pingpong.summary import send_class_summary_to_user_task
 from pingpong.video_store import VideoStoreError
 
 from . import (
-    lecture_video_chat,
     assistant_service,
+    lecture_video_chat,
+    lecture_video_manifest_generation,
     lecture_video_processing,
     lecture_video_runtime,
     lecture_video_service,
@@ -118,6 +125,7 @@ from .ai import (
     GetOpenAIClientException,
     export_class_threads_anonymized,
     export_threads_multiple_classes,
+    format_current_datetime_context,
     format_instructions,
     get_azure_model_deployment_name_equivalent,
     get_ci_messages_from_step,
@@ -212,6 +220,28 @@ from .vector_stores import (
 
 logger = logging.getLogger(__name__)
 responses_api_transition_logger = logging.getLogger("responses_api_transition")
+
+
+def _current_datetime_context_message(
+    *,
+    thread_id: int,
+    output_index: int,
+    timezone: str | None,
+) -> models.Message:
+    return models.Message(
+        thread_id=thread_id,
+        output_index=output_index,
+        message_status=schemas.MessageStatus.COMPLETED,
+        role=schemas.MessageRole.DEVELOPER,
+        is_hidden=True,
+        content=[
+            models.MessagePart(
+                part_index=0,
+                type=schemas.MessagePartType.INPUT_TEXT,
+                text=format_current_datetime_context(timezone),
+            )
+        ],
+    )
 
 
 def allowed_assistant_message_ids(
@@ -318,28 +348,173 @@ def _lecture_video_matches_assistant(
     )
 
 
-async def _lecture_video_tts_available(
+def _lecture_video_dual_text_enabled(thread: models.Thread) -> bool:
+    return thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
+
+
+def _lecture_video_followups_enabled(thread: models.Thread) -> bool:
+    # Intentionally mirrors _lecture_video_dual_text_enabled; both are gated on
+    # LECTURE_VIDEO mode. Keep these conditions in sync if either changes.
+    return thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
+
+
+def _build_run_instructions(
+    thread: models.Thread,
+    asst: models.Assistant,
+    user_id: int | None,
+) -> str | None:
+    """Return the effective instructions for a run or prompt inspection.
+
+    Lecture-video threads compute formatting fresh per run so that prompt
+    segment updates (say snippets, follow-ups, LaTeX/diagrams) take effect on
+    existing threads. Other modes continue to use the thread's stored
+    instructions verbatim.
+    """
+    if thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
+        # Random blocks remain stable because format_instructions seeds them
+        # from the thread and user ids instead of sampling per call.
+        return format_instructions(
+            asst.instructions or "",
+            use_latex=asst.use_latex,
+            use_image_descriptions=asst.use_image_descriptions,
+            disable_prompt_randomization=asst.disable_prompt_randomization,
+            thread_id=str(thread.id),
+            user_id=user_id,
+            lecture_video_mode=True,
+        )
+    return thread.instructions
+
+
+def _effective_thread_instructions(
+    thread: models.Thread,
+    assistant: models.Assistant | None,
+    user_id: int | None,
+) -> str | None:
+    if not assistant:
+        return thread.instructions
+    return _build_run_instructions(thread, assistant, user_id)
+
+
+def _ensure_lecture_video_thread_version(thread: models.Thread) -> None:
+    if (
+        thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
+        and thread.version != 3
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Lecture video threads must use next generation conversations.",
+        )
+
+
+async def _ensure_thread_instructions_migrated(
+    session: AsyncSession,
+    thread: models.Thread,
+    asst: models.Assistant,
+    user_id: int,
+) -> None:
+    if (
+        thread.instructions
+        or thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
+    ):
+        session.add(thread)
+        return
+
+    logger.info(
+        "Thread %s does not have instructions set, migrating from assistant instructions",
+        thread.id,
+    )
+    thread.instructions = format_instructions(
+        asst.instructions,
+        asst.use_latex,
+        asst.use_image_descriptions,
+        disable_prompt_randomization=asst.disable_prompt_randomization,
+        thread_id=thread.thread_id or str(thread.id),
+        user_id=user_id,
+    )
+    session.add(thread)
+    await session.flush()
+    await session.refresh(thread)
+
+
+def _display_text_for_thread(thread: models.Thread, text: str) -> str:
+    if _lecture_video_followups_enabled(thread):
+        text = strip_followup_snippets(text)
+    if _lecture_video_dual_text_enabled(thread):
+        text = transform_say_text(text, "display")
+    return text
+
+
+def _followup_suggestions_for_thread(
+    thread: models.Thread, text: str | None
+) -> list[str]:
+    if not _lecture_video_followups_enabled(thread):
+        return []
+    return extract_followup_suggestions(text or "")
+
+
+def _display_message_part_text_for_thread(
+    thread: models.Thread,
+    message: models.Message,
+    part: models.MessagePart,
+) -> str:
+    if message.role != schemas.MessageRole.ASSISTANT:
+        return part.text
+    return _display_text_for_thread(thread, part.text)
+
+
+def _append_followup_suggestions_for_thread(
+    thread: models.Thread,
+    message: models.Message,
+    part: models.MessagePart,
+    content: list[schemas.ThreadMessageContent],
+) -> None:
+    if message.role != schemas.MessageRole.ASSISTANT:
+        return
+    suggestions = _followup_suggestions_for_thread(thread, part.text)
+    if not suggestions:
+        return
+    content.append(
+        schemas.ThreadFollowupSuggestionsContentBlock(
+            type="followup_suggestions",
+            suggestions=suggestions,
+        )
+    )
+
+
+async def _lecture_video_availability(
     db: Any,
     thread: models.Thread,
-) -> bool:
+) -> tuple[bool, bool]:
     if (
         thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO
         or thread.lecture_video_id is None
     ):
-        return False
+        return False, False
 
-    lecture_video = await models.LectureVideo.get_by_id(db, thread.lecture_video_id)
-    if lecture_video is None or not (lecture_video.voice_id or "").strip():
-        return False
+    lecture_video_availability = await db.execute(
+        select(
+            models.LectureVideo.voice_id,
+            models.LectureVideo.caption_stored_object_id,
+        ).where(models.LectureVideo.id == thread.lecture_video_id)
+    )
+    lecture_video_row = lecture_video_availability.one_or_none()
+    if lecture_video_row is None:
+        return False, False
 
-    credential = await models.ClassCredential.get_by_class_id_and_purpose(
-        db,
-        int(thread.class_id),
-        schemas.ClassCredentialPurpose.LECTURE_VIDEO_NARRATION_TTS,
-    )
-    return bool(
-        credential and credential.api_key_obj and credential.api_key_obj.api_key
-    )
+    voice_id, caption_stored_object_id = lecture_video_row
+    captions_available = caption_stored_object_id is not None
+    tts_available = False
+    if (voice_id or "").strip():
+        credential = await models.ClassCredential.get_by_class_id_and_purpose(
+            db,
+            int(thread.class_id),
+            schemas.ClassCredentialPurpose.LECTURE_VIDEO_NARRATION_TTS,
+        )
+        tts_available = bool(
+            credential and credential.api_key_obj and credential.api_key_obj.api_key
+        )
+
+    return tts_available, captions_available
 
 
 def _raise_lecture_video_runtime_http_error(
@@ -350,6 +525,11 @@ def _raise_lecture_video_runtime_http_error(
     if isinstance(err, lecture_video_runtime.LectureVideoValidationError):
         raise HTTPException(status_code=422, detail=err.detail)
     if isinstance(err, lecture_video_runtime.LectureVideoConflictError):
+        if err.error_code is not None:
+            raise HTTPException(
+                status_code=409,
+                detail={"message": err.detail, "error_code": err.error_code},
+            )
         raise HTTPException(status_code=409, detail=err.detail)
     raise HTTPException(status_code=500, detail=err.detail)
 
@@ -3020,6 +3200,20 @@ def _get_lecture_video_provider_prerequisite_message(
     return "Lecture Video mode is in active development."
 
 
+async def _ensure_lecture_video_manifest_generation_configured(
+    session: AsyncSession,
+    class_id: int,
+) -> None:
+    lecture_video_context = await _get_class_lecture_video_provider_flags(
+        session, class_id
+    )
+    if not lecture_video_context["has_gemini_credential"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Configure a Gemini credential in Manage Group before generating a lecture video manifest.",
+        )
+
+
 async def _get_lecture_video_editor_policy(
     request: StateRequest,
     class_id: int,
@@ -3621,12 +3815,25 @@ async def list_class_models(
         for prompt_id in default_prompt_ids
         if prompt_id in DEFAULT_PROMPTS
     ]
+    lecture_video_context = await _get_class_lecture_video_provider_flags(
+        request.state["db"], int(class_id)
+    )
+    lecture_video_defaults = (
+        schemas.LectureVideoDefaults(
+            instructions=lecture_video_manifest_generation.DEFAULT_LECTURE_VIDEO_INSTRUCTIONS,
+            generation_prompt=lecture_video_manifest_generation.DEFAULT_GENERATION_PROMPT_CONTENT,
+            can_generate_manifest=lecture_video_context["has_gemini_credential"],
+        )
+        if lecture_video_context["lecture_video_enabled"]
+        else None
+    )
     return {
         "models": filtered,
         "default_prompts": default_prompts,
         "enforce_classic_assistants": isinstance(
             openai_client, openai.AsyncAzureOpenAI
         ),
+        "lecture_video_defaults": lecture_video_defaults,
     }
 
 
@@ -3757,8 +3964,11 @@ async def get_thread(
             thread, request.state["session"].user.id, is_supervisor
         )
 
+        effective_instructions = _effective_thread_instructions(
+            thread, assistant, request.state["session"].user.id
+        )
         can_view_prompt = False
-        if thread.instructions and assistant:
+        if effective_instructions and assistant:
             if not assistant.hide_prompt:
                 can_view_prompt = True
             else:
@@ -3772,13 +3982,15 @@ async def get_thread(
             thread, assistant
         )
         lecture_video_tts_available = False
+        lecture_video_captions_available = False
         lecture_video_session = None
         if thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
             lecture_video_can_participate = await can_participate_thread(request)
             thread.is_current_user_participant = lecture_video_can_participate
-            lecture_video_tts_available = await _lecture_video_tts_available(
-                request.state["db"], thread
-            )
+            (
+                lecture_video_tts_available,
+                lecture_video_captions_available,
+            ) = await _lecture_video_availability(request.state["db"], thread)
             lecture_video_session = await lecture_video_runtime.get_thread_session(
                 request.state["db"],
                 thread.id,
@@ -3806,10 +4018,11 @@ async def get_thread(
             "mcp_messages": [],
             "reasoning_messages": [],
             "attachments": all_files,
-            "instructions": thread.instructions if can_view_prompt else None,
+            "instructions": effective_instructions if can_view_prompt else None,
             "lecture_video_matches_assistant": lecture_video_matches_assistant,
             "lecture_video_session": lecture_video_session,
             "lecture_video_tts_available": lecture_video_tts_available,
+            "lecture_video_captions_available": lecture_video_captions_available,
             "recording": thread.voice_mode_recording
             if is_supervisor or is_current_user
             else None,
@@ -4331,10 +4544,15 @@ async def get_thread(
                             schemas.ThreadTextContentBlock(
                                 type="text",
                                 text=schemas.ThreadText(
-                                    value=content.text,
+                                    value=_display_message_part_text_for_thread(
+                                        thread, message, content
+                                    ),
                                     annotations=_annotations,
                                 ),
                             )
+                        )
+                        _append_followup_suggestions_for_thread(
+                            thread, message, content, _message.content
                         )
 
             if not message.user_id:
@@ -4370,8 +4588,11 @@ async def get_thread(
             thread, request.state["session"].user.id, is_supervisor
         )
 
+        effective_instructions = _effective_thread_instructions(
+            thread, assistant, request.state["session"].user.id
+        )
         can_view_prompt = False
-        if thread.instructions and assistant:
+        if effective_instructions and assistant:
             if not assistant.hide_prompt:
                 can_view_prompt = True
             else:
@@ -4385,13 +4606,15 @@ async def get_thread(
             thread, assistant
         )
         lecture_video_tts_available = False
+        lecture_video_captions_available = False
         lecture_video_session = None
         if thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
             lecture_video_can_participate = await can_participate_thread(request)
             thread.is_current_user_participant = lecture_video_can_participate
-            lecture_video_tts_available = await _lecture_video_tts_available(
-                request.state["db"], thread
-            )
+            (
+                lecture_video_tts_available,
+                lecture_video_captions_available,
+            ) = await _lecture_video_availability(request.state["db"], thread)
             lecture_video_session = await lecture_video_runtime.get_thread_session(
                 request.state["db"],
                 thread.id,
@@ -4421,7 +4644,7 @@ async def get_thread(
                 failed_at=None,
                 status=latest_run.status.value,
                 thread_id=str(thread_id),
-                instructions=thread.instructions or "",
+                instructions=latest_run.instructions or effective_instructions or "",
                 last_error=schemas.OpenAIRunError(
                     message=latest_run.error_message,
                     code=latest_run.error_code,
@@ -4446,11 +4669,12 @@ async def get_thread(
             "mcp_messages": mcp_messages,
             "reasoning_messages": reasoning_messages,
             "attachments": all_files,
-            "instructions": thread.instructions if can_view_prompt else None,
+            "instructions": effective_instructions if can_view_prompt else None,
             "lecture_video_id": thread.lecture_video_id,
             "lecture_video_matches_assistant": lecture_video_matches_assistant,
             "lecture_video_session": lecture_video_session,
             "lecture_video_tts_available": lecture_video_tts_available,
+            "lecture_video_captions_available": lecture_video_captions_available,
             "recording": thread.voice_mode_recording
             if is_supervisor or is_current_user
             else None,
@@ -4559,7 +4783,7 @@ async def get_thread_video(
     if not _lecture_video_matches_assistant(thread, assistant):
         raise HTTPException(
             status_code=409,
-            detail="This thread's lecture video no longer matches the assistant configuration.",
+            detail=lecture_video_runtime.MSG_LESSON_UPDATED,
         )
 
     lecture_video = await models.LectureVideo.get_by_id(
@@ -4660,6 +4884,101 @@ async def get_thread_video(
 
 
 @v1.get(
+    "/class/{class_id}/thread/{thread_id}/lecture-video/captions.vtt",
+    dependencies=[Depends(Authz("can_view", "thread:{thread_id}"))],
+    response_class=StreamingResponse,
+)
+async def get_thread_lecture_video_captions(
+    class_id: str,
+    thread_id: str,
+    request: StateRequest,
+):
+    if not config.video_store:
+        raise HTTPException(status_code=404, detail="No Video Store exists.")
+
+    thread = await models.Thread.get_by_id_for_class(
+        request.state["db"], int(class_id), int(thread_id)
+    )
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if (
+        thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO
+        or thread.lecture_video_id is None
+    ):
+        raise HTTPException(status_code=404, detail="Lecture video thread not found.")
+
+    assistant = (
+        await models.Assistant.get_by_id(request.state["db"], int(thread.assistant_id))
+        if thread.assistant_id
+        else None
+    )
+    if not _lecture_video_matches_assistant(thread, assistant):
+        raise HTTPException(
+            status_code=409,
+            detail=lecture_video_runtime.MSG_LESSON_UPDATED,
+        )
+
+    caption = await request.state["db"].scalar(
+        select(models.LectureVideoCaptionStoredObject)
+        .join(
+            models.LectureVideo,
+            models.LectureVideo.caption_stored_object_id
+            == models.LectureVideoCaptionStoredObject.id,
+        )
+        .where(models.LectureVideo.id == thread.lecture_video_id)
+    )
+    if caption is None:
+        raise HTTPException(status_code=404, detail="Captions not available.")
+
+    etag = f'"{caption.key}"'
+    normalized_etag = caption.key
+    etag_candidates = []
+    for candidate in request.headers.get("if-none-match", "").split(","):
+        normalized_candidate = candidate.strip()
+        if normalized_candidate.startswith("W/"):
+            normalized_candidate = normalized_candidate[2:].strip()
+        if (
+            len(normalized_candidate) >= 2
+            and normalized_candidate[0] == '"'
+            and normalized_candidate[-1] == '"'
+        ):
+            normalized_candidate = normalized_candidate[1:-1]
+        etag_candidates.append(normalized_candidate)
+    if "*" in etag_candidates or normalized_etag in etag_candidates:
+        return Response(
+            status_code=304,
+            headers={
+                "Cache-Control": "private, no-cache",
+                "ETag": etag,
+            },
+        )
+
+    try:
+        stream = await prefetch_stream(
+            config.video_store.store.stream_video_range(key=caption.key),
+            store_error=VideoStoreError,
+            logger=logger,
+            store_error_log="VideoStoreError while streaming lecture video captions; aborting stream.",
+            unexpected_error_log="Unexpected error while streaming lecture video captions",
+        )
+    except VideoStoreError as e:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unable to stream lecture video captions: {e.detail or str(e)}",
+        ) from e
+
+    return StreamingResponse(
+        stream,
+        media_type=caption.content_type or "text/vtt",
+        headers={
+            "Cache-Control": "private, no-cache",
+            "Content-Length": str(caption.content_length),
+            "ETag": etag,
+        },
+    )
+
+
+@v1.get(
     "/class/{class_id}/thread/{thread_id}/lecture-video/narration/{narration_id}",
     dependencies=[Depends(Authz("can_participate", "thread:{thread_id}"))],
     response_class=StreamingResponse,
@@ -4699,7 +5018,7 @@ async def get_thread_lecture_video_narration(
     ):
         raise HTTPException(
             status_code=409,
-            detail="This thread's lecture video no longer matches the assistant configuration.",
+            detail=lecture_video_runtime.MSG_LESSON_UPDATED,
         )
 
     if not lecture_video_runtime.narration_allowed_for_thread_state(
@@ -4832,7 +5151,10 @@ async def renew_lecture_video_control(
         )
     except lecture_video_runtime.LectureVideoRuntimeError as err:
         _raise_lecture_video_runtime_http_error(err)
-    return {"lease_expires_at": lease_expires_at}
+    return {
+        "lease_expires_at": lease_expires_at,
+        "lease_duration_ms": lecture_video_runtime.CONTROLLER_LEASE_DURATION_MS,
+    }
 
 
 @v1.post(
@@ -5179,13 +5501,46 @@ async def get_ci_messages(
     }
 
 
-@v1.get(
+def _validate_activity_range(after: datetime | None, before: datetime | None) -> None:
+    if after and before and after > before:
+        raise HTTPException(
+            status_code=400,
+            detail="Start date must be before end date",
+        )
+
+
+async def _validate_export_assistant_ids(
+    session: AsyncSession, class_id: int, assistant_ids: list[int] | None
+) -> list[int] | None:
+    if not assistant_ids:
+        return None
+
+    parsed_ids = list(dict.fromkeys(assistant_ids))
+    if any(id_ <= 0 for id_ in parsed_ids):
+        raise HTTPException(status_code=400, detail="Assistant IDs must be positive")
+
+    class_assistant_ids = {
+        assistant.id
+        for assistant in await models.Assistant.get_by_class_id(session, class_id)
+    }
+    invalid_ids = [id_ for id_ in parsed_ids if id_ not in class_assistant_ids]
+    if invalid_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="Assistant IDs must belong to this class",
+        )
+
+    return parsed_ids
+
+
+@v1.post(
     "/class/{class_id}/export",
     dependencies=[Depends(Authz("supervisor", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
 async def export_class_threads(
     class_id: str,
+    export_options: schemas.ThreadExportRequest,
     request: StateRequest,
     tasks: BackgroundTasks,
     openai_client: OpenAIClient,
@@ -5198,12 +5553,22 @@ async def export_class_threads(
             status_code=403,
             detail="Cannot export private classes",
         )
+    _validate_activity_range(
+        export_options.last_activity_after,
+        export_options.last_activity_before,
+    )
+    include_only_assistant_ids = await _validate_export_assistant_ids(
+        request.state["db"], int(class_id), export_options.assistant_ids
+    )
     tasks.add_task(
         safe_task,
         export_class_threads_anonymized,
         openai_client,
         class_id,
         request.state["session"].user.id,
+        include_only_assistant_ids=include_only_assistant_ids,
+        last_activity_after=export_options.last_activity_after,
+        last_activity_before=export_options.last_activity_before,
     )
     return {"status": "ok"}
 
@@ -5282,6 +5647,7 @@ async def export_class_threads_multiple_classes(
     request: StateRequest,
     tasks: BackgroundTasks,
 ):
+    _validate_activity_range(data.last_activity_after, data.last_activity_before)
     tasks.add_task(
         safe_task,
         export_threads_multiple_classes,
@@ -5290,6 +5656,8 @@ async def export_class_threads_multiple_classes(
         data.include_user_emails,
         data.user_ids,
         data.user_emails,
+        last_activity_after=data.last_activity_after,
+        last_activity_before=data.last_activity_before,
     )
     return {"status": "ok"}
 
@@ -6027,10 +6395,15 @@ async def list_thread_messages(
                             schemas.ThreadTextContentBlock(
                                 type="text",
                                 text=schemas.ThreadText(
-                                    value=content.text,
+                                    value=_display_message_part_text_for_thread(
+                                        thread, message, content
+                                    ),
                                     annotations=_annotations,
                                 ),
                             )
+                        )
+                        _append_followup_suggestions_for_thread(
+                            thread, message, content, _message.content
                         )
 
             if not message.user_id:
@@ -6692,7 +7065,7 @@ async def create_lecture_thread(
     if not assistant.lecture_video:
         raise HTTPException(
             status_code=400,
-            detail="This assistant does not have a lecture video attached. Unable to create Lecture Presentation",
+            detail="This assistant does not have a lecture video attached. Unable to create Lecture Lesson",
         )
     if assistant.lecture_video.status != schemas.LectureVideoStatus.READY:
         if assistant.lecture_video.status == schemas.LectureVideoStatus.FAILED:
@@ -6730,7 +7103,7 @@ async def create_lecture_thread(
     if anonymous_user:
         all_parties.append(anonymous_user)
     new_thread = {
-        "name": "Lecture Presentation",
+        "name": "Lecture Lesson",
         "class_id": int(class_id),
         "private": True if all_parties else False,
         "interaction_mode": "lecture_video",
@@ -6755,14 +7128,9 @@ async def create_lecture_thread(
     result: None | models.Thread = None
     try:
         result = await models.Thread.create(request.state["db"], new_thread)
-        result.instructions = format_instructions(
-            assistant.instructions,
-            assistant.use_latex,
-            assistant.use_image_descriptions,
-            disable_prompt_randomization=assistant.disable_prompt_randomization,
-            thread_id=result.id,
-            user_id=request.state["session"].user.id,
-        )
+        # Lecture-video formatting (say snippets, follow-ups, LaTeX/diagrams)
+        # is injected at OpenAI request time so prompt-segment updates apply to
+        # existing threads. Leave thread.instructions unset here.
         request.state["db"].add(result)
         await request.state["db"].flush()
         try:
@@ -7170,6 +7538,27 @@ async def create_thread(
                     )
                 part_index += 1
 
+            run_messages = [
+                _current_datetime_context_message(
+                    thread_id=thread_db_record.id,
+                    output_index=0,
+                    timezone=thread_db_record.timezone,
+                )
+            ]
+            if messageContentParts:
+                run_messages.append(
+                    models.Message(
+                        thread_id=thread_db_record.id,
+                        output_index=1,
+                        message_status=schemas.MessageStatus.COMPLETED,
+                        role=schemas.MessageRole.USER,
+                        user_id=request.state["session"].user.id,
+                        content=messageContentParts,
+                        file_search_attachments=file_search_files,
+                        code_interpreter_attachments=code_interpreter_files,
+                    )
+                )
+
             run = models.Run(
                 status=schemas.RunStatus.PENDING,
                 thread_id=thread_db_record.id,
@@ -7180,23 +7569,8 @@ async def create_thread(
                 reasoning_effort=assistant.reasoning_effort,
                 temperature=assistant.temperature,
                 tools_available=thread_db_record.tools_available,
-                instructions=inject_timestamp_to_instructions(
-                    thread_db_record.instructions, thread_db_record.timezone
-                ),
-                messages=[
-                    models.Message(
-                        thread_id=thread_db_record.id,
-                        output_index=0,
-                        message_status=schemas.MessageStatus.COMPLETED,
-                        role=schemas.MessageRole.USER,
-                        user_id=request.state["session"].user.id,
-                        content=messageContentParts,
-                        file_search_attachments=file_search_files,
-                        code_interpreter_attachments=code_interpreter_files,
-                    )
-                ]
-                if messageContentParts
-                else [],
+                instructions=thread_db_record.instructions,
+                messages=run_messages,
             )
 
             request.state["db"].add(run)
@@ -7322,6 +7696,8 @@ async def create_run(
             detail="We could not find the thread or assistant you specified. Please try again.",
         )
 
+    _ensure_lecture_video_thread_version(thread)
+
     if thread.version == 3:
         try:
             thread = await models.Thread.get_by_id(
@@ -7354,18 +7730,12 @@ async def create_run(
                     schemas.RunStatus.INCOMPLETE,
                 }
             ):
-                if not thread.instructions:
-                    thread.instructions = format_instructions(
-                        asst.instructions,
-                        asst.use_latex,
-                        asst.use_image_descriptions,
-                        disable_prompt_randomization=asst.disable_prompt_randomization,
-                        thread_id=str(thread.id),
-                        user_id=request.state["session"].user.id,
-                    )
-                    request.state["db"].add(thread)
-                    await request.state["db"].flush()
-                    await request.state["db"].refresh(thread)
+                await _ensure_thread_instructions_migrated(
+                    request.state["db"],
+                    thread,
+                    asst,
+                    request.state["session"].user.id,
+                )
 
                 run_to_complete = models.Run(
                     status=schemas.RunStatus.PENDING,
@@ -7376,8 +7746,8 @@ async def create_run(
                     reasoning_effort=asst.reasoning_effort,
                     temperature=asst.temperature,
                     tools_available=thread.tools_available,
-                    instructions=inject_timestamp_to_instructions(
-                        thread.instructions, req.timezone if req else thread.timezone
+                    instructions=_build_run_instructions(
+                        thread, asst, request.state["session"].user.id
                     ),
                     verbosity=asst.verbosity,
                 )
@@ -7474,6 +7844,8 @@ async def create_run(
                 or not asst.hide_web_search_actions,
                 show_mcp_server_call_details=is_supervisor
                 or not asst.hide_mcp_server_call_details,
+                lecture_video_dual_text_mode=_lecture_video_dual_text_enabled(thread),
+                lecture_video_followups_mode=_lecture_video_followups_enabled(thread),
             )
         except Exception as e:
             logger.exception("Error running thread")
@@ -7555,6 +7927,7 @@ async def send_message(
     mcp_tool_ids: list[int] = []
     try:
         thread = await models.Thread.get_by_id(request.state["db"], int(thread_id))
+        _ensure_lecture_video_thread_version(thread)
         if thread.tools_available and "mcp_server" in thread.tools_available:
             mcp_tool_ids = await models.Thread.get_mcp_tool_ids_by_thread_id(
                 request.state["db"], thread.id
@@ -7685,7 +8058,9 @@ async def send_message(
         lecture_chat_prep: lecture_video_chat.LectureChatTurnPreparation | None = None
 
         # When we reach 3 user messages, or if we failed to generate a title before, generate a new one. Only use the first 100 words of each user and assistant message to maintain a low token count.
-        if thread.user_message_ct == 3 or thread.name is None:
+        if thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO and (
+            thread.user_message_ct == 3 or thread.name is None
+        ):
             thread.name = await get_thread_conversation_name(
                 openai_client,
                 request.state["db"],
@@ -7781,25 +8156,12 @@ async def send_message(
         thread.last_activity = func.now()
         thread.user_message_ct += 1
 
-        # One-time migration for threads that don't have instructions set
-        if not thread.instructions:
-            logger.info(
-                "Thread %s does not have instructions set, migrating from assistant instructions",
-                thread.id,
-            )
-            thread.instructions = format_instructions(
-                asst.instructions,
-                asst.use_latex,
-                asst.use_image_descriptions,
-                disable_prompt_randomization=asst.disable_prompt_randomization,
-                thread_id=thread.thread_id or str(thread.id),
-                user_id=request.state["session"].user.id,
-            )
-            request.state["db"].add(thread)
-            await request.state["db"].flush()
-            await request.state["db"].refresh(thread)
-        else:
-            request.state["db"].add(thread)
+        await _ensure_thread_instructions_migrated(
+            request.state["db"],
+            thread,
+            asst,
+            request.state["session"].user.id,
+        )
 
         metrics.inbound_messages.inc(
             app=config.public_url,
@@ -7905,12 +8267,16 @@ async def send_message(
                     thread=thread,
                     user_id=request.state["session"].user.id,
                     prev_output_sequence=prev_output_sequence,
+                    lecture_video_playback_position_ms=(
+                        data.lecture_video_playback_position_ms
+                    ),
                 )
 
             # Resolve TTS credentials for lecture-video chat audio streaming.
             # Skip entirely when the client explicitly opted out of speech.
             tts_voice_id: str | None = None
             tts_api_key: str | None = None
+            tts_voice_settings: dict[str, Any] | None = None
             if (
                 data.generate_speech is not False
                 and thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
@@ -7930,6 +8296,9 @@ async def send_message(
                     if credential and credential.api_key_obj:
                         tts_voice_id = lecture_video.voice_id.strip()
                         tts_api_key = credential.api_key_obj.api_key
+                        tts_voice_settings = _elevenlabs_voice_settings_from_assistant(
+                            asst
+                        )
 
             show_reasoning_summaries = is_supervisor or (
                 asst and not asst.hide_reasoning_summaries
@@ -7973,14 +8342,19 @@ async def send_message(
                         )
                     )
                 part_index += 1
-            user_output_index = (
-                lecture_chat_prep.user_output_index
-                if lecture_chat_prep is not None
-                else prev_output_sequence + 1
-            )
-
-            run_messages = [
-                *(lecture_chat_prep.prepended_messages if lecture_chat_prep else []),
+            if lecture_chat_prep is not None:
+                user_output_index = lecture_chat_prep.user_output_index
+                run_messages = [*lecture_chat_prep.prepended_messages]
+            else:
+                user_output_index = prev_output_sequence + 2
+                run_messages = [
+                    _current_datetime_context_message(
+                        thread_id=thread.id,
+                        output_index=prev_output_sequence + 1,
+                        timezone=data.timezone if data.timezone else thread.timezone,
+                    )
+                ]
+            run_messages.append(
                 models.Message(
                     thread_id=thread.id,
                     output_index=user_output_index,
@@ -7991,8 +8365,8 @@ async def send_message(
                     content=messageContentParts,
                     file_search_attachments=file_search_files,
                     code_interpreter_attachments=code_interpreter_files,
-                ),
-            ]
+                )
+            )
 
             run_to_complete = models.Run(
                 status=schemas.RunStatus.PENDING,
@@ -8003,9 +8377,8 @@ async def send_message(
                 reasoning_effort=asst.reasoning_effort,
                 temperature=asst.temperature,
                 tools_available=thread.tools_available,
-                instructions=inject_timestamp_to_instructions(
-                    thread.instructions,
-                    data.timezone if data.timezone else thread.timezone,
+                instructions=_build_run_instructions(
+                    thread, asst, request.state["session"].user.id
                 ),
                 verbosity=asst.verbosity,
                 messages=run_messages,
@@ -8058,6 +8431,14 @@ async def send_message(
                 response_safety_identifier=request.state["response_safety_identifier"],
                 tts_voice_id=tts_voice_id,
                 tts_api_key=tts_api_key,
+                tts_voice_settings=tts_voice_settings,
+                lecture_video_dual_text_mode=_lecture_video_dual_text_enabled(thread),
+                lecture_video_followups_mode=_lecture_video_followups_enabled(thread),
+                user_assistant_messages_only=(
+                    lecture_chat_prep.user_assistant_messages_only
+                    if lecture_chat_prep is not None
+                    else False
+                ),
             )
         else:
             raise HTTPException(
@@ -8515,6 +8896,61 @@ async def upload_lecture_video_for_assistant(
     )
 
 
+@v1.get(
+    "/class/{class_id}/assistant/{assistant_id}/lecture-video/poster",
+    dependencies=[Depends(Authz("can_view", "assistant:{assistant_id}"))],
+    response_class=StreamingResponse,
+)
+async def get_assistant_lecture_video_poster(
+    class_id: str,
+    assistant_id: str,
+    request: StateRequest,
+):
+    if not config.video_store:
+        raise HTTPException(status_code=404, detail="No Video Store exists.")
+
+    assistant = await lecture_video_service.get_lecture_video_assistant_for_class(
+        request.state["db"], int(assistant_id), int(class_id)
+    )
+    if assistant.lecture_video_id is None:
+        raise HTTPException(status_code=404, detail="Lecture video not found.")
+
+    lecture_video = await models.LectureVideo.get_by_id(
+        request.state["db"], assistant.lecture_video_id
+    )
+    if lecture_video is None:
+        raise HTTPException(status_code=404, detail="Lecture video not found.")
+
+    if lecture_video.poster_stored_object_id is None:
+        raise HTTPException(status_code=404, detail="Poster not available.")
+
+    poster = await request.state["db"].get(
+        models.LectureVideoPosterStoredObject, lecture_video.poster_stored_object_id
+    )
+    if poster is None:
+        raise HTTPException(status_code=404, detail="Poster not available.")
+
+    try:
+        stream = await prefetch_stream(
+            config.video_store.store.stream_video_range(key=poster.key),
+            store_error=VideoStoreError,
+            logger=logger,
+            store_error_log="VideoStoreError while streaming lecture video poster; aborting stream.",
+            unexpected_error_log="Unexpected error while streaming lecture video poster",
+        )
+    except VideoStoreError as e:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unable to stream lecture video poster: {e.detail or str(e)}",
+        ) from e
+
+    return StreamingResponse(
+        stream,
+        media_type=poster.content_type or "image/webp",
+        headers={"Cache-Control": "private, max-age=86400"},
+    )
+
+
 @v1.delete(
     "/class/{class_id}/lecture-video/{lecture_video_id}",
     dependencies=[
@@ -8589,10 +9025,55 @@ class LectureVideoVoiceValidationError(ValueError):
     pass
 
 
+_ELEVENLABS_VOICE_SETTING_FIELDS = (
+    ("elevenlabs_stability", "stability"),
+    ("elevenlabs_similarity_boost", "similarity_boost"),
+    ("elevenlabs_use_speaker_boost", "use_speaker_boost"),
+    ("elevenlabs_style", "style"),
+    ("elevenlabs_speed", "speed"),
+)
+
+
+def _elevenlabs_voice_settings_from_assistant(
+    assistant: models.Assistant,
+) -> dict[str, Any]:
+    settings: dict[str, Any] = {}
+    for model_field, settings_key in _ELEVENLABS_VOICE_SETTING_FIELDS:
+        value = getattr(assistant, model_field)
+        settings[settings_key] = (
+            value if value is not None else ELEVENLABS_TTS_VOICE_SETTINGS[settings_key]
+        )
+    return settings
+
+
+def _elevenlabs_voice_settings_from_validation_request(
+    body: schemas.ValidateLectureVideoVoiceRequest | schemas.CreateAssistant,
+) -> dict[str, Any]:
+    return {
+        settings_key: getattr(body, model_field)
+        for model_field, settings_key in _ELEVENLABS_VOICE_SETTING_FIELDS
+    }
+
+
+def _elevenlabs_voice_settings_with_request_overrides(
+    assistant: models.Assistant,
+    body: schemas.UpdateAssistant,
+) -> dict[str, Any]:
+    settings = _elevenlabs_voice_settings_from_assistant(assistant)
+    for model_field, settings_key in _ELEVENLABS_VOICE_SETTING_FIELDS:
+        if model_field in body.model_fields_set:
+            value = getattr(body, model_field)
+            if value is not None:
+                settings[settings_key] = value
+    return settings
+
+
 async def _get_lecture_video_voice_sample_or_raise(
     class_id: int,
     request: StateRequest,
     voice_id: str,
+    *,
+    voice_settings: dict[str, Any] | None = None,
 ) -> tuple[str, str, bytes]:
     credential = await models.ClassCredential.get_by_class_id_and_purpose(
         request.state["db"],
@@ -8609,6 +9090,7 @@ async def _get_lecture_video_voice_sample_or_raise(
         return await synthesize_elevenlabs_voice_sample(
             credential.api_key_obj.api_key,
             voice_id,
+            voice_settings=voice_settings,
         )
     except ClassCredentialVoiceValidationError as exc:
         raise LectureVideoVoiceValidationError(str(exc)) from exc
@@ -8618,8 +9100,15 @@ async def validate_lecture_video_voice_id_or_raise(
     class_id: int,
     request: StateRequest,
     voice_id: str,
+    *,
+    voice_settings: dict[str, Any] | None = None,
 ) -> None:
-    await _get_lecture_video_voice_sample_or_raise(class_id, request, voice_id)
+    await _get_lecture_video_voice_sample_or_raise(
+        class_id,
+        request,
+        voice_id,
+        voice_settings=voice_settings,
+    )
 
 
 def _raise_http_for_lecture_video_voice_validation_error(exc: Exception) -> NoReturn:
@@ -8648,13 +9137,20 @@ async def _validate_lecture_video_voice_id(
     class_id: int,
     request: StateRequest,
     voice_id: str,
+    *,
+    voice_settings: dict[str, Any] | None = None,
 ) -> Response:
     try:
         (
             sample_text,
             content_type,
             audio,
-        ) = await _get_lecture_video_voice_sample_or_raise(class_id, request, voice_id)
+        ) = await _get_lecture_video_voice_sample_or_raise(
+            class_id,
+            request,
+            voice_id,
+            voice_settings=voice_settings,
+        )
     except (
         LectureVideoVoiceValidationError,
         ClassCredentialValidationSSLError,
@@ -8685,6 +9181,7 @@ async def get_class_lecture_video_editor_policy(
     "/class/{class_id}/assistant/{assistant_id}/lecture-video/config",
     dependencies=[Depends(Authz("can_edit", "assistant:{assistant_id}"))],
     response_model=schemas.LectureVideoConfigResponse,
+    response_model_exclude_unset=True,
 )
 async def get_assistant_lecture_video_config(
     class_id: str,
@@ -8697,37 +9194,58 @@ async def get_assistant_lecture_video_config(
     if assistant.lecture_video_id is None:
         raise HTTPException(404, "Lecture video not found.")
 
-    lecture_video = await models.LectureVideo.get_by_id_with_copy_context(
+    lecture_video = await models.LectureVideo.get_by_id_with_manifest_context(
         request.state["db"], assistant.lecture_video_id
     )
     if lecture_video is None:
         raise HTTPException(404, "Lecture video not found.")
 
-    try:
-        lecture_video_manifest = (
-            lecture_video_service.lecture_video_manifest_from_model(lecture_video)
-        )
-    except (ValidationError, ValueError) as e:
-        logger.warning(
-            "Stored lecture video manifest is invalid. assistant_id=%s lecture_video_id=%s",
-            assistant.id,
-            lecture_video.id,
-            exc_info=True,
-        )
-        raise HTTPException(409, "Stored lecture video manifest is invalid.") from e
+    lecture_video_manifest = None
+    if lecture_video.questions:
+        try:
+            lecture_video_manifest = (
+                lecture_video_service.lecture_video_manifest_from_model(lecture_video)
+            )
+        except (ValidationError, ValueError) as e:
+            logger.warning(
+                "Stored lecture video manifest is invalid. assistant_id=%s lecture_video_id=%s",
+                assistant.id,
+                lecture_video.id,
+                exc_info=True,
+            )
+            raise HTTPException(409, "Stored lecture video manifest is invalid.") from e
 
     lecture_video_chat_available = lecture_video_service.lecture_video_chat_metadata(
         lecture_video
     )
+    manifest_generation_status = (
+        await lecture_video_service.latest_processing_run_summary(
+            request.state["db"],
+            lecture_video.id,
+            schemas.LectureVideoProcessingStage.MANIFEST_GENERATION,
+        )
+    )
 
-    return {
+    response_lecture_video_manifest = (
+        lecture_video_manifest.model_dump(mode="json")
+        if lecture_video_manifest is not None
+        else None
+    )
+    response_kwargs: dict[str, Any] = {
         "lecture_video": await lecture_video_service.lecture_video_summary_from_model(
             request.state["db"], lecture_video
         ),
-        "lecture_video_manifest": lecture_video_manifest,
+        "lecture_video_manifest": response_lecture_video_manifest,
         "voice_id": lecture_video.voice_id or "",
         "lecture_video_chat_available": lecture_video_chat_available,
+        "video_description_duration_ms": lecture_video.video_description_duration_ms,
+        "overwrite_manifest": lecture_video.manual_manifest,
     }
+    if lecture_video.generation_prompt is not None:
+        response_kwargs["generation_prompt"] = lecture_video.generation_prompt
+    if manifest_generation_status is not None:
+        response_kwargs["manifest_generation_status"] = manifest_generation_status
+    return schemas.LectureVideoConfigResponse(**response_kwargs)
 
 
 @v1.post(
@@ -8754,7 +9272,7 @@ async def retry_assistant_lecture_video_processing(
     if lecture_video.status != schemas.LectureVideoStatus.FAILED:
         raise HTTPException(
             status_code=409,
-            detail="Lecture video retry is only available after narration processing fails.",
+            detail="Lecture video retry is only available after lecture video processing fails.",
         )
 
     claimed_for_retry = (
@@ -8765,25 +9283,61 @@ async def retry_assistant_lecture_video_processing(
     if not claimed_for_retry:
         raise HTTPException(
             status_code=409,
-            detail="Lecture video retry is only available after narration processing fails.",
+            detail="Lecture video retry is only available after lecture video processing fails.",
         )
 
-    audio_keys_to_delete = (
-        await lecture_video_processing.reset_failed_narrations_for_retry(
-            request.state["db"], lecture_video.id
-        )
-    )
     refreshed_lecture_video = await models.LectureVideo.get_by_id_with_copy_context(
         request.state["db"], lecture_video.id
     )
     if refreshed_lecture_video is None:
         raise HTTPException(404, "Lecture video not found.")
-    narration_run = await lecture_video_processing.queue_narration_processing_run(
-        request.state["db"],
-        refreshed_lecture_video,
-        assistant_id_at_start=assistant.id,
+
+    latest_failed_stage = await request.state["db"].scalar(
+        select(models.LectureVideoProcessingRun.stage)
+        .where(
+            models.LectureVideoProcessingRun.lecture_video_id_snapshot
+            == lecture_video.id,
+            models.LectureVideoProcessingRun.status
+            == schemas.LectureVideoProcessingRunStatus.FAILED,
+        )
+        .order_by(
+            models.LectureVideoProcessingRun.finished_at.desc().nulls_last(),
+            models.LectureVideoProcessingRun.id.desc(),
+        )
+        .limit(1)
     )
-    if narration_run is None:
+
+    needs_manifest_generation = (
+        latest_failed_stage == schemas.LectureVideoProcessingStage.MANIFEST_GENERATION
+        or (
+            not refreshed_lecture_video.manual_manifest
+            and len(refreshed_lecture_video.questions) == 0
+        )
+    )
+    audio_keys_to_delete: list[str] = []
+    if needs_manifest_generation:
+        await _ensure_lecture_video_manifest_generation_configured(
+            request.state["db"], int(class_id)
+        )
+        retry_run = (
+            await lecture_video_processing.queue_manifest_generation_processing_run(
+                request.state["db"],
+                refreshed_lecture_video,
+                assistant_id_at_start=assistant.id,
+            )
+        )
+    else:
+        audio_keys_to_delete = (
+            await lecture_video_processing.reset_failed_narrations_for_retry(
+                request.state["db"], lecture_video.id
+            )
+        )
+        retry_run = await lecture_video_processing.queue_narration_processing_run(
+            request.state["db"],
+            refreshed_lecture_video,
+            assistant_id_at_start=assistant.id,
+        )
+    if retry_run is None:
         raise HTTPException(
             status_code=409,
             detail="Lecture video retry is no longer available because the assistant or lecture video configuration changed.",
@@ -8826,6 +9380,7 @@ async def validate_class_lecture_video_voice(
         int(class_id),
         request,
         body.voice_id,
+        voice_settings=_elevenlabs_voice_settings_from_validation_request(body),
     )
 
 
@@ -8857,6 +9412,7 @@ async def validate_assistant_lecture_video_voice(
         int(class_id),
         request,
         body.voice_id,
+        voice_settings=_elevenlabs_voice_settings_from_validation_request(body),
     )
 
 
@@ -9285,6 +9841,16 @@ async def create_assistant(
     lecture_video_manifest = None
     lecture_video_voice_id = None
     lecture_video_voice_id_validated = False
+    lecture_video_generation_prompt = None
+    lecture_video_video_description_duration_ms = None
+    lecture_video_voice_settings = _elevenlabs_voice_settings_from_validation_request(
+        req
+    )
+    overwrite_lecture_video_manifest = (
+        bool(req.overwrite_manifest)
+        if "overwrite_manifest" in req.model_fields_set
+        else False
+    )
 
     if is_video:
         if req.lecture_video_id is None:
@@ -9292,15 +9858,27 @@ async def create_assistant(
                 status_code=400,
                 detail="Specifying a lecture_video_id is required for lecture video assistants.",
             )
-        if req.lecture_video_manifest is None:
+        if overwrite_lecture_video_manifest and req.lecture_video_manifest is None:
             raise HTTPException(
                 status_code=400,
-                detail="Specifying a lecture_video_manifest is required for lecture video assistants.",
+                detail="Specifying a lecture_video_manifest is required when overwriting a lecture video manifest.",
+            )
+        if (
+            not overwrite_lecture_video_manifest
+            and req.lecture_video_manifest is not None
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="lecture_video_manifest cannot be supplied when overwrite_manifest is false.",
             )
         if req.voice_id is None:
             raise HTTPException(
                 status_code=400,
                 detail="Specifying a voice_id is required for lecture video assistants.",
+            )
+        if not overwrite_lecture_video_manifest:
+            await _ensure_lecture_video_manifest_generation_configured(
+                request.state["db"], class_id_int
             )
 
         lecture_video = await models.LectureVideo.get_by_id_for_class(
@@ -9317,11 +9895,14 @@ async def create_assistant(
         lecture_video_object_id = lecture_video.id
         lecture_video_manifest = req.lecture_video_manifest
         lecture_video_voice_id = req.voice_id
+        lecture_video_generation_prompt = req.generation_prompt
+        lecture_video_video_description_duration_ms = req.video_description_duration_ms
         try:
             await validate_lecture_video_voice_id_or_raise(
                 class_id_int,
                 request,
                 lecture_video_voice_id,
+                voice_settings=lecture_video_voice_settings,
             )
         except (
             LectureVideoVoiceValidationError,
@@ -9334,6 +9915,9 @@ async def create_assistant(
         req.lecture_video_id is not None
         or req.lecture_video_manifest is not None
         or req.voice_id is not None
+        or req.generation_prompt is not None
+        or req.video_description_duration_ms is not None
+        or req.overwrite_manifest is not None
     ):
         raise HTTPException(
             status_code=400,
@@ -9381,18 +9965,6 @@ async def create_assistant(
                     else req.model
                 )
 
-            reasoning_effort_map = get_reasoning_effort_map(model_record.id)
-            reasoning_effort = (
-                reasoning_effort_map.get(req.reasoning_effort)
-                if req.reasoning_effort is not None
-                else None
-            )
-            reasoning_extra_body = (
-                {"reasoning_effort": reasoning_effort}
-                if reasoning_effort is not None
-                else {}
-            )
-
             # Set default temperature based on the interaction mode
             # This is to ensure that the temperature is set
             # appropriately for the mode.
@@ -9413,7 +9985,6 @@ async def create_assistant(
                 temperature=req.temperature,
                 metadata={"class_id": class_id, "creator_id": str(creator_id)},
                 tool_resources=tool_resources,
-                extra_body=reasoning_extra_body,
             )
         except openai.BadRequestError as e:
             raise HTTPException(
@@ -9443,6 +10014,9 @@ async def create_assistant(
         del req.lecture_video_id
         del req.lecture_video_manifest
         del req.voice_id
+        del req.generation_prompt
+        del req.video_description_duration_ms
+        del req.overwrite_manifest
 
         try:
             asst = await models.Assistant.create(
@@ -9459,7 +10033,7 @@ async def create_assistant(
             lecture_video_service.raise_if_lecture_video_assignment_conflict(e)
             raise
 
-        if is_video and lecture_video_manifest is not None:
+        if is_video:
             assert lecture_video is not None  # for mypy
             if lecture_video_voice_id is None:
                 raise HTTPException(400, "Lecture video voice is required.")
@@ -9469,6 +10043,7 @@ async def create_assistant(
                         class_id_int,
                         request,
                         lecture_video_voice_id,
+                        voice_settings=lecture_video_voice_settings,
                     )
                 except (
                     LectureVideoVoiceValidationError,
@@ -9476,17 +10051,39 @@ async def create_assistant(
                     ClassCredentialValidationUnavailableError,
                 ) as exc:
                     _raise_http_for_lecture_video_voice_validation_error(exc)
-            await lecture_video_service.persist_manifest(
-                request.state["db"],
-                lecture_video,
-                lecture_video_manifest,
-                voice_id=lecture_video_voice_id,
-            )
-            await lecture_video_processing.queue_narration_processing_run(
-                request.state["db"],
-                lecture_video,
-                assistant_id_at_start=asst.id,
-            )
+            lecture_video.voice_id = lecture_video_voice_id
+            lecture_video.generation_prompt = lecture_video_generation_prompt
+            if lecture_video_video_description_duration_ms is not None:
+                lecture_video.video_description_duration_ms = (
+                    lecture_video_video_description_duration_ms
+                )
+            if overwrite_lecture_video_manifest:
+                if lecture_video_manifest is None:
+                    raise HTTPException(400, "Lecture video manifest is required.")
+                await lecture_video_processing.cancel_manifest_generation_processing_runs(
+                    request.state["db"],
+                    lecture_video.id,
+                    schemas.LectureVideoProcessingCancelReason.MANUAL_MANIFEST_REPLACED,
+                )
+                await lecture_video_service.persist_manifest(
+                    request.state["db"],
+                    lecture_video,
+                    lecture_video_manifest,
+                    voice_id=lecture_video_voice_id,
+                    manual_manifest=True,
+                )
+                await lecture_video_processing.queue_narration_processing_run(
+                    request.state["db"],
+                    lecture_video,
+                    assistant_id_at_start=asst.id,
+                )
+            else:
+                lecture_video.manual_manifest = False
+                await lecture_video_processing.queue_manifest_generation_processing_run(
+                    request.state["db"],
+                    lecture_video,
+                    assistant_id_at_start=asst.id,
+                )
 
         # Delete private files uploaded but not attached to the assistant
         files_to_delete = await models.File.get_files_not_used_by_assistant(
@@ -9597,6 +10194,9 @@ async def preview_assistant_instructions(
             disable_prompt_randomization=req.disable_prompt_randomization,
             user_id=request.state["session"].user.id,
             thread_id=f"preview_{uuid.uuid4()}",
+            lecture_video_mode=(
+                req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
+            ),
         )
     }
 
@@ -10090,11 +10690,26 @@ async def update_assistant(
     lecture_video = asst.lecture_video
     lecture_video_manifest = None
     lecture_video_voice_id = None
+    lecture_video_generation_prompt = None
+    lecture_video_video_description_duration_ms = None
+    lecture_video_voice_settings = _elevenlabs_voice_settings_with_request_overrides(
+        asst, req
+    )
     lecture_video_voice_id_validated = False
+    regenerate_requested = bool(req.regenerate_requested)
+    overwrite_lecture_video_manifest = (
+        bool(req.overwrite_manifest)
+        if "overwrite_manifest" in req.model_fields_set
+        else False
+    )
     lecture_video_fields_present = (
         "lecture_video_id" in req.model_fields_set
         or "lecture_video_manifest" in req.model_fields_set
         or "voice_id" in req.model_fields_set
+        or "generation_prompt" in req.model_fields_set
+        or "video_description_duration_ms" in req.model_fields_set
+        or "regenerate_requested" in req.model_fields_set
+        or "overwrite_manifest" in req.model_fields_set
     )
 
     # Prevent updating existing assistants to lecture video mode
@@ -10122,15 +10737,31 @@ async def update_assistant(
                 status_code=400,
                 detail="Specifying a lecture_video_id is required when updating lecture video data.",
             )
-        if req.lecture_video_manifest is None:
+        if overwrite_lecture_video_manifest and req.lecture_video_manifest is None:
             raise HTTPException(
                 status_code=400,
-                detail="Specifying a lecture_video_manifest is required when updating lecture video data.",
+                detail="Specifying a lecture_video_manifest is required when overwriting a lecture video manifest.",
+            )
+        if (
+            not overwrite_lecture_video_manifest
+            and req.lecture_video_manifest is not None
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="lecture_video_manifest cannot be supplied when overwrite_manifest is false.",
             )
         if req.voice_id is None:
             raise HTTPException(
                 status_code=400,
                 detail="Specifying a voice_id is required when updating lecture video data.",
+            )
+        if (
+            "video_description_duration_ms" in req.model_fields_set
+            and req.video_description_duration_ms is None
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Lecture video description duration is required.",
             )
         lecture_video = await models.LectureVideo.get_by_id_for_class(
             request.state["db"], req.lecture_video_id, int(class_id)
@@ -10145,11 +10776,14 @@ async def update_assistant(
         )
         lecture_video_manifest = req.lecture_video_manifest
         lecture_video_voice_id = req.voice_id
+        lecture_video_generation_prompt = req.generation_prompt
+        lecture_video_video_description_duration_ms = req.video_description_duration_ms
         try:
             await validate_lecture_video_voice_id_or_raise(
                 int(class_id),
                 request,
                 lecture_video_voice_id,
+                voice_settings=lecture_video_voice_settings,
             )
         except (
             LectureVideoVoiceValidationError,
@@ -10321,7 +10955,6 @@ async def update_assistant(
         model_record and model_record.supports_tools_with_none_reasoning_effort
     )
 
-    new_reasoning_effort_body = None
     if "reasoning_effort" in req.model_fields_set:
         if (
             req.reasoning_effort is not None
@@ -10363,17 +10996,7 @@ async def update_assistant(
                     else "You cannot use tools when the reasoning effort is set to 'Minimal'. Please select a higher reasoning effort level."
                 ),
             )
-
-        reasoning_extra_body: dict[str, str | None] = (
-            {"reasoning_effort": reasoning_effort}
-            if reasoning_effort
-            else (
-                {"reasoning_effort": None} if asst.reasoning_effort is not None else {}
-            )
-        )
-        openai_update["extra_body"] = reasoning_extra_body
         asst.reasoning_effort = req.reasoning_effort
-        new_reasoning_effort_body = reasoning_extra_body
     else:
         if (
             asst.reasoning_effort is not None
@@ -10408,15 +11031,6 @@ async def update_assistant(
             )
         if model_record:
             reasoning_effort_map = get_reasoning_effort_map(model_record.id)
-            new_reasoning_effort_body = (
-                {"reasoning_effort": reasoning_effort_map.get(asst.reasoning_effort)}
-                if asst.reasoning_effort
-                else {}
-            )
-        else:
-            new_reasoning_effort_body = (
-                {"reasoning_effort": None} if asst.reasoning_effort else {}
-            )
 
     if (
         model_record
@@ -10565,6 +11179,53 @@ async def update_assistant(
                 400,
                 "The selected model does not support verbosity settings. Please remove the verbosity setting.",
             )
+
+    if "realtime_eagerness" in req.model_fields_set:
+        asst.realtime_eagerness = req.realtime_eagerness
+
+    if "realtime_vad_mode" in req.model_fields_set:
+        asst.realtime_vad_mode = req.realtime_vad_mode
+
+    if "realtime_vad_threshold" in req.model_fields_set:
+        asst.realtime_vad_threshold = req.realtime_vad_threshold
+
+    if "realtime_vad_prefix_padding_ms" in req.model_fields_set:
+        asst.realtime_vad_prefix_padding_ms = req.realtime_vad_prefix_padding_ms
+
+    if "realtime_vad_silence_duration_ms" in req.model_fields_set:
+        asst.realtime_vad_silence_duration_ms = req.realtime_vad_silence_duration_ms
+
+    if "realtime_vad_idle_timeout_ms" in req.model_fields_set:
+        asst.realtime_vad_idle_timeout_ms = req.realtime_vad_idle_timeout_ms
+
+    if "realtime_voice" in req.model_fields_set:
+        asst.realtime_voice = req.realtime_voice
+
+    if "realtime_speed" in req.model_fields_set:
+        asst.realtime_speed = req.realtime_speed
+
+    if "realtime_noise_reduction" in req.model_fields_set:
+        asst.realtime_noise_reduction = req.realtime_noise_reduction
+
+    if not uses_voice:
+        asst.realtime_transcription_model = None
+    elif "realtime_transcription_model" in req.model_fields_set:
+        asst.realtime_transcription_model = req.realtime_transcription_model
+
+    if "elevenlabs_stability" in req.model_fields_set:
+        asst.elevenlabs_stability = req.elevenlabs_stability
+
+    if "elevenlabs_similarity_boost" in req.model_fields_set:
+        asst.elevenlabs_similarity_boost = req.elevenlabs_similarity_boost
+
+    if "elevenlabs_use_speaker_boost" in req.model_fields_set:
+        asst.elevenlabs_use_speaker_boost = req.elevenlabs_use_speaker_boost
+
+    if "elevenlabs_style" in req.model_fields_set:
+        asst.elevenlabs_style = req.elevenlabs_style
+
+    if "elevenlabs_speed" in req.model_fields_set:
+        asst.elevenlabs_speed = req.elevenlabs_speed
 
     # Track whether we have an empty vector store to delete
     vector_store_id_to_delete = None
@@ -10993,8 +11654,6 @@ async def update_assistant(
 
     try:
         if lecture_video_fields_present and lecture_video is not None:
-            if lecture_video_manifest is None:
-                raise HTTPException(400, "Lecture video manifest is required.")
             if lecture_video_voice_id is None:
                 raise HTTPException(400, "Lecture video voice is required.")
             if not lecture_video_voice_id_validated:
@@ -11003,6 +11662,7 @@ async def update_assistant(
                         int(class_id),
                         request,
                         lecture_video_voice_id,
+                        voice_settings=lecture_video_voice_settings,
                     )
                 except (
                     LectureVideoVoiceValidationError,
@@ -11019,20 +11679,115 @@ async def update_assistant(
                     )
                 )
 
-            if not (
-                current_lecture_video is not None
-                and lecture_video_service.lecture_video_config_matches(
-                    current_lecture_video,
+            prompt_present = "generation_prompt" in req.model_fields_set
+            video_description_duration_ms_present = (
+                "video_description_duration_ms" in req.model_fields_set
+            )
+            # Manifest mode transitions:
+            # - manual -> manual: persist the supplied manifest only when it changed.
+            # - manual -> generated: clear manual mode and queue manifest generation.
+            # - generated -> manual: cancel generation and persist the supplied manifest.
+            # - generated -> generated: queue generation only for explicit retry,
+            #   failed/missing output, or generation prompt changes.
+            needs_manifest_generation = not overwrite_lecture_video_manifest and (
+                regenerate_requested
+                or lecture_video.manual_manifest
+                or await lecture_video_service.should_regenerate_manifest(
+                    request.state["db"],
                     lecture_video,
-                    lecture_video_manifest,
-                    lecture_video_voice_id,
+                    incoming_generation_prompt=lecture_video_generation_prompt,
+                    generation_prompt_present=prompt_present,
+                    incoming_video_description_duration_ms=(
+                        lecture_video_video_description_duration_ms
+                    ),
+                    video_description_duration_ms_present=(
+                        video_description_duration_ms_present
+                    ),
                 )
-            ):
-                target_lecture_video = lecture_video
-                if (
+            )
+            if needs_manifest_generation:
+                await _ensure_lecture_video_manifest_generation_configured(
+                    request.state["db"], int(class_id)
+                )
+            requested_voice_id = lecture_video_voice_id.strip()
+            voice_changed = (lecture_video.voice_id or "").strip() != requested_voice_id
+            manifest_changed = False
+            if overwrite_lecture_video_manifest:
+                if lecture_video_manifest is None:
+                    raise HTTPException(400, "Lecture video manifest is required.")
+                requested_video_description_duration_ms = (
+                    lecture_video.video_description_duration_ms
+                    if lecture_video_video_description_duration_ms is None
+                    else lecture_video_video_description_duration_ms
+                )
+                manifest_changed = not (
                     current_lecture_video is not None
-                    and current_lecture_video.id == lecture_video.id
-                ):
+                    and lecture_video_service.lecture_video_config_matches(
+                        current_lecture_video,
+                        lecture_video,
+                        lecture_video_manifest,
+                        lecture_video_voice_id,
+                        requested_video_description_duration_ms,
+                    )
+                )
+            overwrite_manifest_changed = (
+                current_lecture_video is not None
+                and current_lecture_video.manual_manifest
+                != overwrite_lecture_video_manifest
+            )
+            same_lecture_video = (
+                current_lecture_video is not None
+                and current_lecture_video.id == lecture_video.id
+            )
+            lecture_video_selection_changed = (
+                current_lecture_video is None
+                or current_lecture_video.id != lecture_video.id
+            )
+            lecture_video_content_changed = (
+                manifest_changed
+                or needs_manifest_generation
+                or regenerate_requested
+                or voice_changed
+            )
+            manual_manifest_takeover_only = (
+                overwrite_lecture_video_manifest
+                and overwrite_manifest_changed
+                and same_lecture_video
+                and not lecture_video_content_changed
+            )
+            should_touch_lecture_video = (
+                lecture_video_content_changed
+                or overwrite_manifest_changed
+                or lecture_video_selection_changed
+            )
+
+            if manual_manifest_takeover_only:
+                await lecture_video_processing.cancel_manifest_generation_processing_runs(
+                    request.state["db"],
+                    lecture_video.id,
+                    schemas.LectureVideoProcessingCancelReason.MANUAL_MANIFEST_REPLACED,
+                )
+                lecture_video.manual_manifest = True
+                if prompt_present:
+                    lecture_video.generation_prompt = lecture_video_generation_prompt
+                if video_description_duration_ms_present:
+                    if lecture_video_video_description_duration_ms is None:
+                        raise HTTPException(
+                            400, "Lecture video description duration is required."
+                        )
+                    lecture_video.video_description_duration_ms = (
+                        lecture_video_video_description_duration_ms
+                    )
+            elif should_touch_lecture_video:
+                if needs_manifest_generation and current_lecture_video is not None:
+                    await lecture_video_processing.cancel_manifest_generation_processing_runs(
+                        request.state["db"],
+                        current_lecture_video.id,
+                        schemas.LectureVideoProcessingCancelReason.ASSISTANT_DETACHED,
+                    )
+                target_lecture_video = lecture_video
+                if same_lecture_video:
+                    assert current_lecture_video is not None
                     target_lecture_video = (
                         await lecture_video_service.clone_lecture_video_snapshot(
                             request.state["db"], current_lecture_video
@@ -11047,17 +11802,88 @@ async def update_assistant(
                 if asst.lecture_video_id != target_lecture_video.id:
                     lecture_video_id_to_delete = asst.lecture_video_id
                 asst.lecture_video_id = target_lecture_video.id
-                await lecture_video_service.persist_manifest(
-                    request.state["db"],
-                    target_lecture_video,
-                    lecture_video_manifest,
-                    voice_id=lecture_video_voice_id,
-                )
-                await lecture_video_processing.queue_narration_processing_run(
-                    request.state["db"],
-                    target_lecture_video,
-                    assistant_id_at_start=asst.id,
-                )
+                request.state["db"].add(asst)
+                await request.state["db"].flush()
+                target_lecture_video.voice_id = lecture_video_voice_id
+                if prompt_present:
+                    target_lecture_video.generation_prompt = (
+                        lecture_video_generation_prompt
+                    )
+                if video_description_duration_ms_present:
+                    if lecture_video_video_description_duration_ms is None:
+                        raise HTTPException(
+                            400, "Lecture video description duration is required."
+                        )
+                    target_lecture_video.video_description_duration_ms = (
+                        lecture_video_video_description_duration_ms
+                    )
+                if overwrite_lecture_video_manifest:
+                    manual_manifest = cast(
+                        schemas.LectureVideoManifest, lecture_video_manifest
+                    )
+                    await lecture_video_processing.cancel_manifest_generation_processing_runs(
+                        request.state["db"],
+                        target_lecture_video.id,
+                        schemas.LectureVideoProcessingCancelReason.MANUAL_MANIFEST_REPLACED,
+                    )
+                    await lecture_video_service.persist_manifest(
+                        request.state["db"],
+                        target_lecture_video,
+                        manual_manifest,
+                        voice_id=lecture_video_voice_id,
+                        manual_manifest=True,
+                    )
+                if overwrite_lecture_video_manifest or (
+                    voice_changed and not needs_manifest_generation
+                ):
+                    if not overwrite_lecture_video_manifest:
+                        if same_lecture_video:
+                            assert current_lecture_video is not None
+                            manifest_source_lecture_video = current_lecture_video
+                        else:
+                            loaded_lecture_video = (
+                                await models.LectureVideo.get_by_id_with_copy_context(
+                                    request.state["db"], target_lecture_video.id
+                                )
+                            )
+                            if loaded_lecture_video is None:
+                                raise HTTPException(
+                                    status_code=404,
+                                    detail="Could not find the lecture video you specified. Please try again.",
+                                )
+                            manifest_source_lecture_video = loaded_lecture_video
+                        existing_manifest = (
+                            lecture_video_service.lecture_video_manifest_from_model(
+                                manifest_source_lecture_video
+                            )
+                        )
+                        await lecture_video_service.persist_manifest(
+                            request.state["db"],
+                            target_lecture_video,
+                            existing_manifest,
+                            voice_id=lecture_video_voice_id,
+                        )
+                    await lecture_video_processing.queue_narration_processing_run(
+                        request.state["db"],
+                        target_lecture_video,
+                        assistant_id_at_start=asst.id,
+                    )
+                elif needs_manifest_generation:
+                    target_lecture_video.manual_manifest = False
+                    if (
+                        current_lecture_video is None
+                        or target_lecture_video.id != current_lecture_video.id
+                    ):
+                        await lecture_video_processing.cancel_manifest_generation_processing_runs(
+                            request.state["db"],
+                            target_lecture_video.id,
+                            schemas.LectureVideoProcessingCancelReason.ASSISTANT_DETACHED,
+                        )
+                    await lecture_video_processing.queue_manifest_generation_processing_run(
+                        request.state["db"],
+                        target_lecture_video,
+                        assistant_id_at_start=asst.id,
+                    )
 
         await models.Thread.update_tools_available(
             request.state["db"],
@@ -11120,7 +11946,6 @@ async def update_assistant(
                             "creator_id": str(request.state["session"].user.id),
                         },
                         tool_resources=new_tool_resources,
-                        extra_body=new_reasoning_effort_body,
                     )
                     asst.assistant_id = new_asst.id
                     request.state["db"].add(asst)
@@ -11179,6 +12004,11 @@ async def update_assistant(
         try:
             # Cancel first in case the old lecture video is still kept alive by threads.
             await lecture_video_processing.cancel_narration_processing_runs(
+                request.state["db"],
+                lecture_video_id_to_delete,
+                schemas.LectureVideoProcessingCancelReason.ASSISTANT_DETACHED,
+            )
+            await lecture_video_processing.cancel_manifest_generation_processing_runs(
                 request.state["db"],
                 lecture_video_id_to_delete,
                 schemas.LectureVideoProcessingCancelReason.ASSISTANT_DETACHED,
@@ -11390,6 +12220,11 @@ async def delete_assistant(
         try:
             # Cancel first in case the lecture video is still kept alive by threads.
             await lecture_video_processing.cancel_narration_processing_runs(
+                request.state["db"],
+                lecture_video_id_to_delete,
+                schemas.LectureVideoProcessingCancelReason.ASSISTANT_DELETED,
+            )
+            await lecture_video_processing.cancel_manifest_generation_processing_runs(
                 request.state["db"],
                 lecture_video_id_to_delete,
                 schemas.LectureVideoProcessingCancelReason.ASSISTANT_DELETED,

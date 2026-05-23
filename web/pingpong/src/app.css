@@ -49,6 +49,55 @@
 	display: none !important;
 }
 
+.shimmer {
+	color: #4b5563;
+	animation-delay: 0s;
+	animation-duration: 2s;
+	animation-iteration-count: infinite;
+	animation-name: shimmer;
+}
+
+@supports ((background-clip: text) or (-webkit-background-clip: text)) {
+	.shimmer {
+		color: transparent;
+		-webkit-text-fill-color: transparent;
+		background-color: #4b5563;
+		background-image: linear-gradient(
+			to left,
+			#5d5d5d 0%,
+			#ffffffbf 40%,
+			#ffffffbf 60%,
+			#4b5563 100%
+		);
+		-webkit-background-clip: text;
+		background-clip: text;
+		background-position: -100% 0;
+		background-repeat: no-repeat;
+		background-size: 50% 200%;
+	}
+}
+
+@keyframes shimmer {
+	0% {
+		background-position: -100% 0;
+	}
+	100% {
+		background-position: 250% 0;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.shimmer {
+		animation: none;
+	}
+}
+
+.shimmer:hover {
+	-webkit-text-fill-color: #374151;
+	color: #374151;
+	background: none;
+}
+
 .markdown {
 	h1,
 	h2,

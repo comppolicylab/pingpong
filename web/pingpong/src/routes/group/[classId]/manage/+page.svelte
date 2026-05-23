@@ -203,6 +203,11 @@
 	let deleteModal = false;
 	let cloneModal = false;
 	let exportThreadsModal = false;
+	let exportThreadsRange: 'all' | 'filter' = 'all';
+	let exportThreadsStartDate = '';
+	let exportThreadsEndDate = '';
+	let exportThreadsAssistantScope: 'all' | 'filter' = 'all';
+	let exportThreadsSelectedAssistantIds: number[] = [];
 	let customSummaryModal = false;
 	let defaultDaysToSummarize = 7;
 	let daysToSummarize = defaultDaysToSummarize;
@@ -1127,12 +1132,84 @@
 		}
 	};
 
+	$: exportThreadsDateRangeInvalid =
+		exportThreadsRange === 'filter' &&
+		exportThreadsStartDate !== '' &&
+		exportThreadsEndDate !== '' &&
+		exportThreadsStartDate > exportThreadsEndDate;
+
+	$: exportThreadsFilterEmpty =
+		exportThreadsRange === 'filter' && !exportThreadsStartDate && !exportThreadsEndDate;
+
+	$: exportThreadsAssistantOptions = (data.exportAssistants || [])
+		.slice()
+		.sort((a, b) => a.name.localeCompare(b.name));
+
+	$: exportThreadsAssistantSelectionEmpty =
+		exportThreadsAssistantScope === 'filter' && exportThreadsSelectedAssistantIds.length === 0;
+
+	$: exportThreadsSummary =
+		exportThreadsRange === 'all'
+			? 'All threads'
+			: exportThreadsStartDate && exportThreadsEndDate
+				? `Active ${dayjs(exportThreadsStartDate).format('MMM D, YYYY')} – ${dayjs(exportThreadsEndDate).format('MMM D, YYYY')}`
+				: exportThreadsStartDate
+					? `Active from ${dayjs(exportThreadsStartDate).format('MMM D, YYYY')}`
+					: exportThreadsEndDate
+						? `Active up to ${dayjs(exportThreadsEndDate).format('MMM D, YYYY')}`
+						: 'Filter by date range';
+
+	$: exportThreadsAssistantSummary =
+		exportThreadsAssistantScope === 'all'
+			? 'All assistants'
+			: exportThreadsSelectedAssistantIds.length === 1
+				? '1 assistant'
+				: `${exportThreadsSelectedAssistantIds.length} assistants`;
+
+	const toggleExportAssistant = (assistantId: number, checked: boolean) => {
+		if (checked) {
+			exportThreadsSelectedAssistantIds = Array.from(
+				new Set([...exportThreadsSelectedAssistantIds, assistantId])
+			);
+		} else {
+			exportThreadsSelectedAssistantIds = exportThreadsSelectedAssistantIds.filter(
+				(id) => id !== assistantId
+			);
+		}
+	};
+
 	const exportThreads = async () => {
-		const result = await api.exportThreads(fetch, data.class.id);
+		if (exportThreadsDateRangeInvalid) {
+			sadToast('Start date must be before end date');
+			return;
+		}
+		if (exportThreadsAssistantSelectionEmpty) {
+			sadToast('Select at least one assistant, or pick "All assistants"');
+			return;
+		}
+
+		const options: api.ExportThreadsOptions = {};
+		if (exportThreadsRange === 'filter' && exportThreadsStartDate) {
+			options.last_activity_after = dayjs(exportThreadsStartDate).startOf('day').toISOString();
+		}
+		if (exportThreadsRange === 'filter' && exportThreadsEndDate) {
+			options.last_activity_before = dayjs(exportThreadsEndDate).endOf('day').toISOString();
+		}
+		if (exportThreadsAssistantScope === 'filter') {
+			options.assistant_ids = exportThreadsSelectedAssistantIds;
+		}
+
+		const result = await api.exportThreads(fetch, data.class.id, options);
 		const response = api.expandResponse(result);
 		if (response.error) {
 			sadToast(response.error.detail || 'An unknown error occurred');
 		} else {
+			exportThreadsModal = false;
+			exportThreadsRange = 'all';
+			exportThreadsStartDate = '';
+			exportThreadsEndDate = '';
+			exportThreadsAssistantScope = 'all';
+			exportThreadsSelectedAssistantIds = [];
 			happyToast("We've started exporting your threads. You'll receive an email when it's ready.");
 		}
 	};
@@ -1341,24 +1418,166 @@
 					<div>Delete group</div>
 				</DropdownItem>
 			</Dropdown>
-			<Modal bind:open={exportThreadsModal} size="xs" autoclose>
+			<Modal bind:open={exportThreadsModal} size="md">
 				<div class="px-2 text-center">
 					<EnvelopeOutline class="mx-auto mb-4 h-12 w-12 text-slate-500" />
-					<h3 class="mb-5 text-xl font-bold text-gray-900 dark:text-white">
-						Before we start exporting
-					</h3>
-					<p class="mb-5 text-sm text-gray-700 dark:text-gray-300">
-						Depending on the number of threads in your group, exporting may take a while. You'll
-						receive an email when your threads are ready to download.
+					<h3 class="mb-1 text-xl font-bold text-gray-900 dark:text-white">Export threads</h3>
+					<p class="mx-auto mb-5 w-5/6 text-sm text-gray-700 dark:text-gray-300">
+						Choose which threads to export. Exporting may take a while &mdash; you'll receive an
+						email when your threads are ready to download.
 						{#if presignedUrlExpiration}<span class="font-bold"
 								>The download link will be valid for {presignedUrlExpiration}.</span
 							>{/if}
 					</p>
+					<div class="mb-4 px-2">
+						<Accordion class="w-full text-left" flush>
+							<AccordionItem paddingFlush="py-2" open>
+								<span slot="header" class="mr-3 w-full">
+									<div class="flex w-full flex-row items-center justify-between space-x-2">
+										<div>Threads to include</div>
+										<div class="text-sm font-light">{exportThreadsSummary}</div>
+									</div>
+								</span>
+								<p class="mb-3 text-sm font-light text-gray-500">
+									Pick the set of threads to include in the export. Filtering includes all threads
+									that have had activity within the selected date range; all messages in matching
+									threads are exported.
+								</p>
+								<Radio name="exportThreadsRange" value="all" bind:group={exportThreadsRange}>
+									All threads
+								</Radio>
+								<Radio name="exportThreadsRange" value="filter" bind:group={exportThreadsRange}>
+									Filter by date range
+								</Radio>
+								{#if exportThreadsRange === 'filter'}
+									<div
+										class="mt-3 ml-7 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-gray-700 dark:bg-gray-800"
+									>
+										<div class="grid gap-3 sm:grid-cols-2">
+											<div>
+												<Label for="exportThreadsStartDate" class="mb-1 text-xs font-medium">
+													Active from
+												</Label>
+												<Input
+													id="exportThreadsStartDate"
+													type="date"
+													max={exportThreadsEndDate || undefined}
+													bind:value={exportThreadsStartDate}
+												/>
+											</div>
+											<div>
+												<Label for="exportThreadsEndDate" class="mb-1 text-xs font-medium">
+													Active until
+												</Label>
+												<Input
+													id="exportThreadsEndDate"
+													type="date"
+													min={exportThreadsStartDate || undefined}
+													bind:value={exportThreadsEndDate}
+												/>
+											</div>
+										</div>
+										{#if exportThreadsDateRangeInvalid}
+											<Helper class="mt-2" color="red">
+												"Active from" must be before "Active until".
+											</Helper>
+										{:else if exportThreadsFilterEmpty}
+											<Helper class="mt-2" color="red">
+												Set at least one date, or pick "All threads" above.
+											</Helper>
+										{:else}
+											<Helper class="mt-2">
+												Leave either field blank to leave that end of the window open.
+											</Helper>
+										{/if}
+									</div>
+								{/if}
+							</AccordionItem>
+							<AccordionItem paddingFlush="py-2">
+								<span slot="header" class="mr-3 w-full">
+									<div class="flex w-full flex-row items-center justify-between space-x-2">
+										<div>Assistants to include</div>
+										<div class="text-sm font-light">{exportThreadsAssistantSummary}</div>
+									</div>
+								</span>
+								<Radio
+									name="exportThreadsAssistantScope"
+									value="all"
+									bind:group={exportThreadsAssistantScope}
+								>
+									All assistants
+								</Radio>
+								<Radio
+									name="exportThreadsAssistantScope"
+									value="filter"
+									bind:group={exportThreadsAssistantScope}
+									disabled={exportThreadsAssistantOptions.length === 0}
+								>
+									Selected assistants
+								</Radio>
+								{#if exportThreadsAssistantScope === 'filter'}
+									<div
+										class="mt-3 ml-7 max-h-56 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-gray-700 dark:bg-gray-800"
+									>
+										<div class="mb-3 flex justify-end gap-2">
+											<Button
+												pill
+												size="xs"
+												color="alternative"
+												onclick={() =>
+													(exportThreadsSelectedAssistantIds = exportThreadsAssistantOptions.map(
+														(assistant) => assistant.id
+													))}
+											>
+												Select all
+											</Button>
+											<Button
+												pill
+												size="xs"
+												color="alternative"
+												onclick={() => (exportThreadsSelectedAssistantIds = [])}
+											>
+												Clear
+											</Button>
+										</div>
+										<div class="space-y-2">
+											{#each exportThreadsAssistantOptions as assistant (assistant.id)}
+												<Checkbox
+													id={`exportAssistant${assistant.id}`}
+													color="blue"
+													checked={exportThreadsSelectedAssistantIds.includes(assistant.id)}
+													onchange={(event) =>
+														toggleExportAssistant(assistant.id, event.currentTarget.checked)}
+												>
+													<span class="break-words">{assistant.name}</span>
+												</Checkbox>
+											{/each}
+										</div>
+										{#if exportThreadsAssistantSelectionEmpty}
+											<Helper class="mt-2" color="red">
+												Select at least one assistant, or pick "All assistants" above.
+											</Helper>
+										{/if}
+									</div>
+								{:else if exportThreadsAssistantOptions.length === 0}
+									<Helper class="mt-2">No assistants are available to filter by.</Helper>
+								{/if}
+							</AccordionItem>
+						</Accordion>
+					</div>
 					<div class="flex justify-center gap-4">
 						<Button pill color="alternative" onclick={() => (exportThreadsModal = false)}
 							>Cancel</Button
 						>
-						<Button pill outline color="blue" onclick={exportThreads}>Export threads</Button>
+						<Button
+							pill
+							outline
+							color="blue"
+							onclick={exportThreads}
+							disabled={exportThreadsDateRangeInvalid ||
+								exportThreadsFilterEmpty ||
+								exportThreadsAssistantSelectionEmpty}>Export threads</Button
+						>
 					</div>
 				</div>
 			</Modal>
