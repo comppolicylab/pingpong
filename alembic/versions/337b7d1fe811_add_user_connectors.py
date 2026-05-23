@@ -1,7 +1,7 @@
 """Add user_connectors table
 
 Revision ID: 337b7d1fe811
-Revises: b4f9d7e21c5a
+Revises: 7e6f23c1a9b4
 Create Date: 2026-04-18 18:00:00.000000
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 
 revision: str = "337b7d1fe811"
-down_revision: Union[str, None] = "b4f9d7e21c5a"
+down_revision: Union[str, None] = "7e6f23c1a9b4"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -26,12 +26,13 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("user_id", sa.Integer(), nullable=False),
         sa.Column("service", sa.String(), nullable=False),
-        sa.Column("tenant", sa.String(), nullable=True),
+        sa.Column("account_scope", sa.String(), nullable=True),
         sa.Column("access_token", sa.String(), nullable=False),
         sa.Column("refresh_token", sa.String(), nullable=True),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("scopes", sa.String(), nullable=True),
         sa.Column("external_user_id", sa.String(), nullable=True),
+        sa.Column("external_identity", sa.JSON(), nullable=True),
         sa.Column(
             "created",
             sa.DateTime(timezone=True),
@@ -56,33 +57,60 @@ def upgrade() -> None:
         "user_connectors",
         ["user_id"],
     )
-    # Two partial indexes instead of a plain UniqueConstraint so that
-    # NULL-tenant connectors are correctly deduplicated.  PostgreSQL treats
-    # each NULL as distinct in a standard unique index, so a plain
-    # UniqueConstraint("user_id", "service", "tenant") would allow duplicate
-    # (user_id, service, NULL) rows.  ``sqlite_where`` mirrors the predicate
-    # for dev/test parity — without it the partial index degenerates into a
-    # plain unique on (user_id, service[, tenant]) on SQLite.
+    # Partial indexes instead of plain UniqueConstraints so NULL account
+    # scopes and optional provider identities dedupe consistently across
+    # PostgreSQL and SQLite. Identity-aware connectors may store multiple
+    # rows for the same (user, service, account_scope) as long as each row
+    # has a distinct external_user_id. Connectors that cannot resolve a
+    # stable provider identity keep the previous one-row-per-scope behavior.
     op.create_index(
-        "uq_user_service_no_tenant",
+        "uq_user_connector_no_scope_no_identity",
         "user_connectors",
         ["user_id", "service"],
         unique=True,
-        postgresql_where=sa.text("tenant IS NULL"),
-        sqlite_where=sa.text("tenant IS NULL"),
+        postgresql_where=sa.text("account_scope IS NULL AND external_user_id IS NULL"),
+        sqlite_where=sa.text("account_scope IS NULL AND external_user_id IS NULL"),
     )
     op.create_index(
-        "uq_user_service_tenant",
+        "uq_user_connector_scope_no_identity",
         "user_connectors",
-        ["user_id", "service", "tenant"],
+        ["user_id", "service", "account_scope"],
         unique=True,
-        postgresql_where=sa.text("tenant IS NOT NULL"),
-        sqlite_where=sa.text("tenant IS NOT NULL"),
+        postgresql_where=sa.text(
+            "account_scope IS NOT NULL AND external_user_id IS NULL"
+        ),
+        sqlite_where=sa.text("account_scope IS NOT NULL AND external_user_id IS NULL"),
+    )
+    op.create_index(
+        "uq_user_connector_no_scope_identity",
+        "user_connectors",
+        ["user_id", "service", "external_user_id"],
+        unique=True,
+        postgresql_where=sa.text(
+            "account_scope IS NULL AND external_user_id IS NOT NULL"
+        ),
+        sqlite_where=sa.text("account_scope IS NULL AND external_user_id IS NOT NULL"),
+    )
+    op.create_index(
+        "uq_user_connector_scope_identity",
+        "user_connectors",
+        ["user_id", "service", "account_scope", "external_user_id"],
+        unique=True,
+        postgresql_where=sa.text(
+            "account_scope IS NOT NULL AND external_user_id IS NOT NULL"
+        ),
+        sqlite_where=sa.text(
+            "account_scope IS NOT NULL AND external_user_id IS NOT NULL"
+        ),
     )
 
 
 def downgrade() -> None:
-    op.drop_index("uq_user_service_tenant", table_name="user_connectors")
-    op.drop_index("uq_user_service_no_tenant", table_name="user_connectors")
+    op.drop_index("uq_user_connector_scope_identity", table_name="user_connectors")
+    op.drop_index("uq_user_connector_no_scope_identity", table_name="user_connectors")
+    op.drop_index("uq_user_connector_scope_no_identity", table_name="user_connectors")
+    op.drop_index(
+        "uq_user_connector_no_scope_no_identity", table_name="user_connectors"
+    )
     op.drop_index("idx_user_connectors_user_id", table_name="user_connectors")
     op.drop_table("user_connectors")

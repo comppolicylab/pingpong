@@ -1294,30 +1294,55 @@ class UserConnector(Base):
     # path, leaving upstream tokens valid on the provider side. The user
     # deletion flow must iterate user.connectors, call revoke(), then delete.
     __table_args__ = (
-        # Two partial indexes instead of a plain UniqueConstraint so that
-        # NULL-tenant connectors are correctly deduplicated.  PostgreSQL treats
-        # each NULL as distinct in a standard unique index, so a plain
-        # UniqueConstraint would allow duplicate (user_id, service, NULL) rows.
-        # ``sqlite_where`` mirrors the predicate for dev/test parity; without
-        # it the partial index degenerates into a plain unique on
-        # (user_id, service[, tenant]) on SQLite, which would reject a user
-        # connecting the same service to multiple tenants in tests.
+        # Partial indexes instead of plain UniqueConstraints so NULL account
+        # scopes and optional provider identities dedupe consistently across
+        # PostgreSQL and SQLite. Identity-aware connectors may store multiple
+        # rows for the same (user, service, account_scope) as long as each row
+        # has a distinct external_user_id. Connectors that cannot resolve a
+        # stable provider identity keep the previous one-row-per-scope behavior.
         Index(
-            "uq_user_service_no_tenant",
+            "uq_user_connector_no_scope_no_identity",
             "user_id",
             "service",
             unique=True,
-            postgresql_where=text("tenant IS NULL"),
-            sqlite_where=text("tenant IS NULL"),
+            postgresql_where=text("account_scope IS NULL AND external_user_id IS NULL"),
+            sqlite_where=text("account_scope IS NULL AND external_user_id IS NULL"),
         ),
         Index(
-            "uq_user_service_tenant",
+            "uq_user_connector_scope_no_identity",
             "user_id",
             "service",
-            "tenant",
+            "account_scope",
             unique=True,
-            postgresql_where=text("tenant IS NOT NULL"),
-            sqlite_where=text("tenant IS NOT NULL"),
+            postgresql_where=text(
+                "account_scope IS NOT NULL AND external_user_id IS NULL"
+            ),
+            sqlite_where=text("account_scope IS NOT NULL AND external_user_id IS NULL"),
+        ),
+        Index(
+            "uq_user_connector_no_scope_identity",
+            "user_id",
+            "service",
+            "external_user_id",
+            unique=True,
+            postgresql_where=text(
+                "account_scope IS NULL AND external_user_id IS NOT NULL"
+            ),
+            sqlite_where=text("account_scope IS NULL AND external_user_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_user_connector_scope_identity",
+            "user_id",
+            "service",
+            "account_scope",
+            "external_user_id",
+            unique=True,
+            postgresql_where=text(
+                "account_scope IS NOT NULL AND external_user_id IS NOT NULL"
+            ),
+            sqlite_where=text(
+                "account_scope IS NOT NULL AND external_user_id IS NOT NULL"
+            ),
         ),
         Index("idx_user_connectors_user_id", "user_id"),
     )
@@ -1326,7 +1351,7 @@ class UserConnector(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     user = relationship("User", back_populates="connectors")
     service = Column(String, nullable=False)
-    tenant = Column(String, nullable=True)
+    account_scope = Column(String, nullable=True)
 
     access_token = Column(String, nullable=False)
     refresh_token = Column(String, nullable=True)
@@ -1334,6 +1359,7 @@ class UserConnector(Base):
     scopes = Column(String, nullable=True)
 
     external_user_id = Column(String, nullable=True)
+    external_identity = Column(JSON, nullable=True)
 
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(
@@ -1359,19 +1385,23 @@ class UserConnector(Base):
         return await session.get(UserConnector, connector_id)
 
     @classmethod
-    async def get_for_user_service_tenant(
+    async def get_for_user_service_account_scope(
         cls,
         session: AsyncSession,
         user_id: int,
         service: str,
-        tenant: str | None,
+        account_scope: str | None,
+        external_user_id: str | None = None,
     ) -> "UserConnector | None":
         stmt = select(UserConnector).where(
             UserConnector.user_id == user_id,
             UserConnector.service == service,
-            UserConnector.tenant.is_(None)
-            if tenant is None
-            else UserConnector.tenant == tenant,
+            UserConnector.account_scope.is_(None)
+            if account_scope is None
+            else UserConnector.account_scope == account_scope,
+            UserConnector.external_user_id.is_(None)
+            if external_user_id is None
+            else UserConnector.external_user_id == external_user_id,
         )
         return await session.scalar(stmt)
 
