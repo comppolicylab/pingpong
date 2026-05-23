@@ -50,6 +50,7 @@ class _StreamingSnippetJsonParser:
         self.literal_buf = ""
         self.escape = False
         self.unicode_escape: str | None = None
+        self.pending_high_surrogate: int | None = None
         self.display_speech_fallback = ""
         self.display_speech_fallback_overflowed = False
         self.saw_content = False
@@ -93,6 +94,7 @@ class _StreamingSnippetJsonParser:
                 self.current_key = ""
                 self.escape = False
                 self.unicode_escape = None
+                self.pending_high_surrogate = None
                 self.state = self._KEY
                 return False
             return self._invalidate("expected object key")
@@ -123,6 +125,7 @@ class _StreamingSnippetJsonParser:
             if ch == '"':
                 self.escape = False
                 self.unicode_escape = None
+                self.pending_high_surrogate = None
                 self.state = self._VALUE_STRING
                 if self.current_value_key == "content":
                     self.saw_content = True
@@ -224,7 +227,7 @@ class _StreamingSnippetJsonParser:
                 return None, False
             self.unicode_escape += ch
             if len(self.unicode_escape) == 4:
-                decoded = chr(int(self.unicode_escape, 16))
+                decoded = self._decode_unicode_escape(int(self.unicode_escape, 16))
                 self.unicode_escape = None
                 self.escape = False
                 return decoded, False
@@ -232,6 +235,9 @@ class _StreamingSnippetJsonParser:
 
         if self.escape:
             self.escape = False
+            if self.pending_high_surrogate is not None and ch != "u":
+                self._invalidate("invalid unicode surrogate pair")
+                return None, False
             match ch:
                 case '"':
                     return '"', False
@@ -259,12 +265,42 @@ class _StreamingSnippetJsonParser:
                     self._invalidate("invalid string escape")
                     return None, False
 
+        if self.pending_high_surrogate is not None:
+            if ch != "\\":
+                self._invalidate("invalid unicode surrogate pair")
+                return None, False
+            self.escape = True
+            return None, False
+
         if ch == "\\":
             self.escape = True
             return None, False
         if ch == '"':
             return "", True
         return ch, False
+
+    def _decode_unicode_escape(self, code_unit: int) -> str | None:
+        if 0xD800 <= code_unit <= 0xDBFF:
+            if self.pending_high_surrogate is not None:
+                self._invalidate("invalid unicode surrogate pair")
+                return None
+            self.pending_high_surrogate = code_unit
+            return None
+
+        if 0xDC00 <= code_unit <= 0xDFFF:
+            if self.pending_high_surrogate is None:
+                self._invalidate("invalid unicode surrogate pair")
+                return None
+            high = self.pending_high_surrogate
+            self.pending_high_surrogate = None
+            code_point = 0x10000 + ((high - 0xD800) << 10) + (code_unit - 0xDC00)
+            return chr(code_point)
+
+        if self.pending_high_surrogate is not None:
+            self._invalidate("invalid unicode surrogate pair")
+            return None
+
+        return chr(code_unit)
 
     def _consume_value_char(self, ch: str, out: list[str]) -> None:
         if self.current_value_key == "speech":

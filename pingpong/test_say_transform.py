@@ -162,6 +162,38 @@ def test_transform_decodes_json_newline_before_letter():
     assert transform_say_text(text, "display") == "first\nuser input"
 
 
+def test_transform_combines_json_unicode_surrogate_pair():
+    text = (
+        f"{SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}"
+        '{"speech":"smile","content":"\\uD83D\\uDE00"}'
+        f"{SAY_MARKER_END}"
+    )
+
+    out = transform_say_text(text, "display")
+    assert out == "😀"
+    assert out.encode("utf-8") == b"\xf0\x9f\x98\x80"
+
+
+def test_transform_rejects_unpaired_unicode_high_surrogate():
+    text = (
+        f"before {SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}"
+        '{"speech":"smile","content":"\\uD83Dx"}'
+        f"{SAY_MARKER_END} after"
+    )
+
+    assert transform_say_text(text, "display") == "before  after"
+
+
+def test_transform_rejects_lone_unicode_low_surrogate():
+    text = (
+        f"before {SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}"
+        '{"speech":"smile","content":"\\uDE00"}'
+        f"{SAY_MARKER_END} after"
+    )
+
+    assert transform_say_text(text, "display") == "before  after"
+
+
 def test_transform_returns_speech_for_speech_target():
     text = "Use " + snippet("say", "x squared", "$ x^2 $") + " here."
 
