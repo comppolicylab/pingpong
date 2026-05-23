@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -24,3 +24,11 @@ class ProviderIdentity:
 class PKCEPair:
     verifier: str
     method: str = "S256"
+
+
+def expires_at_timestamp(expires_at: datetime | None) -> int | None:
+    if expires_at is None:
+        return None
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    return int(expires_at.timestamp())

@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from pingpong.now import NowFn, utcnow
 
-from .base import generate_pkce_pair
+from .base import OAuth2Connector, generate_pkce_pair
 from .exceptions import ConnectorFlowError
 from .models import load_connector_config_by_id, upsert_user_connector
 from .registry import get
@@ -16,8 +16,6 @@ from .types import ConnectorTokens, PKCEPair, ProviderIdentity
 
 if TYPE_CHECKING:
     from pingpong.models import ConnectorConfig, UserConnector
-
-    from .base import OAuth2Connector
 
 
 @dataclass
@@ -150,7 +148,7 @@ async def complete_callback(
 async def _load_available_connector_config(
     session: AsyncSession,
     *,
-    connector: "OAuth2Connector",
+    connector: OAuth2Connector,
     connector_config_id: int,
 ) -> "ConnectorConfig":
     connector_config = await load_connector_config_by_id(session, connector_config_id)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from abc import abstractmethod
 import asyncio
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
@@ -18,24 +19,32 @@ if TYPE_CHECKING:
 class IdentityConnector(Protocol):
     http_timeout_seconds: ClassVar[float]
 
+    @abstractmethod
     async def userinfo_endpoint(
         self, connector_config: "ConnectorConfig"
-    ) -> str | None: ...
+    ) -> str | None:
+        raise NotImplementedError
 
-    async def issuer(self, connector_config: "ConnectorConfig") -> str | None: ...
+    @abstractmethod
+    async def issuer(self, connector_config: "ConnectorConfig") -> str | None:
+        raise NotImplementedError
 
-    async def jwks_endpoint(
-        self, connector_config: "ConnectorConfig"
-    ) -> str | None: ...
+    @abstractmethod
+    async def jwks_endpoint(self, connector_config: "ConnectorConfig") -> str | None:
+        raise NotImplementedError
 
+    @abstractmethod
     def _oauth_client(
         self,
         connector_config: "ConnectorConfig",
         *,
         token: dict[str, Any] | None = None,
-    ) -> AsyncOAuth2Client: ...
+    ) -> AsyncOAuth2Client:
+        raise NotImplementedError
 
-    def _token_dict(self, tokens: ConnectorTokens) -> dict[str, Any]: ...
+    @abstractmethod
+    def _token_dict(self, tokens: ConnectorTokens) -> dict[str, Any]:
+        raise NotImplementedError
 
 
 class ConnectorIdentityResolver:

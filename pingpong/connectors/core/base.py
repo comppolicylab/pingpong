@@ -12,8 +12,7 @@ from pingpong.now import NowFn, utcnow
 
 from .exceptions import ConnectorError, TokenRefreshError
 from .identity import ConnectorIdentityResolver
-from .models import expires_at_timestamp
-from .types import ConnectorTokens, PKCEPair, ProviderIdentity
+from .types import ConnectorTokens, PKCEPair, ProviderIdentity, expires_at_timestamp
 
 if TYPE_CHECKING:
     from pingpong.models import ConnectorConfig, UserConnector

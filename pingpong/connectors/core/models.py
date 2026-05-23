@@ -7,7 +7,7 @@ from authlib.integrations.httpx_client import AsyncOAuth2Client
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .exceptions import ConnectorNotConfigured
-from .types import ConnectorTokens, ProviderIdentity
+from .types import ConnectorTokens, ProviderIdentity, expires_at_timestamp
 
 if TYPE_CHECKING:
     from pingpong.models import ConnectorConfig, UserConnector
@@ -121,11 +121,3 @@ def token_expired(connector: "UserConnector", *, now: datetime) -> bool:
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
     return expires_at - now <= timedelta(seconds=REFRESH_THRESHOLD_SECONDS)
-
-
-def expires_at_timestamp(expires_at: datetime | None) -> int | None:
-    if expires_at is None:
-        return None
-    if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=timezone.utc)
-    return int(expires_at.timestamp())
