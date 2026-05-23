@@ -38,6 +38,8 @@ class PanoptoConnector(OAuth2Connector):
     async def validate_host(self, connector_config: ConnectorConfig) -> None:
         try:
             doc = await self._discovery.document(connector_config)
+        except ConnectorValidationError:
+            raise
         except ConnectorError as e:
             logger.info(
                 "Panopto host validation failed for service=%s host=%s: %s",
