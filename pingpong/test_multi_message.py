@@ -340,7 +340,7 @@ async def test_run_response_sends_say_speech_text_to_tts(db, monkeypatch):
     spoken_text = "".join(text for text, _, _ in sent_tts_text)
     assert "Use x squared plus y squared." in spoken_text
     assert "Can you show another example?" not in spoken_text
-    assert all(text or flush for text, _, flush in sent_tts_text)
+    assert all(text for text, _, _ in sent_tts_text)
     assert all("\ue200" not in text for text, _, _ in sent_tts_text)
     streamed_events = [
         orjson.loads(line)

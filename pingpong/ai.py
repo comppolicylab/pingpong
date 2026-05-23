@@ -3842,7 +3842,7 @@ async def run_response(
                     if not _tts_has_unflushed_text:
                         break
                     try:
-                        await _tts_send_text("", flush=True)
+                        await _tts_send_text(" ", flush=True)
                     except Exception:
                         logger.warning("TTS block flush failed", exc_info=True)
 
@@ -4803,7 +4803,7 @@ def format_instructions(
                 "variable names, operators, equations, inequalities, units, "
                 "abbreviations, or notation directly when their spoken form "
                 "differs from their written form. This includes short "
-                "single-symbol math like $a$ or $c$. Only leave text outside "
+                "single-symbol math like $ a $ or $ c $. Only leave text outside "
                 "a block when the visible text is already exactly natural "
                 "and correct for speech as written.\n"
                 "Use exactly this format, with U+E200 before the marker name "
@@ -4822,7 +4822,7 @@ def format_instructions(
                 '\ue200say\ue202{"speech":"alpha"}\ue201\n'
                 "and the visible form falls back to `speech`. If content "
                 "should be displayed silently, omit `speech`, writing only:\n"
-                '\ue200say\ue202{"content":"$x^2$"}\ue201\n'
+                '\ue200say\ue202{"content":"$ x^2 $"}\ue201\n'
                 "Block syntax is not recursive. Block values must be "
                 "plain JSON strings only. Never put U+E200, U+E202, or U+E201 "
                 "inside the `speech` or `content` value of another block. A "
@@ -4845,9 +4845,9 @@ def format_instructions(
                 "`svg` and `mermaid` blocks put exactly one fenced code "
                 "block in `content`.\n"
                 "Incorrect: If "
-                '\ue200say\ue202{"speech":"If \ue200say\ue202x","content":"$x$"}\ue201'
+                '\ue200say\ue202{"speech":"If \ue200say\ue202x","content":"$ x $"}\ue201'
                 " is two.\n"
-                'Correct: If \ue200say\ue202{"speech":"x","content":"$x$"}\ue201'
+                'Correct: If \ue200say\ue202{"speech":"x","content":"$ x $"}\ue201'
                 " is two.\n"
                 "Incorrect: They have written $ 10a + 5c $ and ask whether it "
                 "becomes $ 15ac $.\n"
@@ -4857,11 +4857,11 @@ def format_instructions(
                 " and ask whether it becomes "
                 '\ue200say\ue202{"speech":"fifteen a c",'
                 '"content":"$ 15ac $"}\ue201.\n'
-                "Incorrect: One has $a$, the other has $c$.\n"
+                "Incorrect: One has $ a $, the other has $ c $.\n"
                 "Correct: One has "
-                '\ue200say\ue202{"speech":"a","content":"$a$"}\ue201'
+                '\ue200say\ue202{"speech":"a","content":"$ a $"}\ue201'
                 ", the other has "
-                '\ue200say\ue202{"speech":"c","content":"$c$"}\ue201.\n'
+                '\ue200say\ue202{"speech":"c","content":"$ c $"}\ue201.\n'
                 "When you output a Mermaid or SVG fenced code block in a "
                 "lecture-video response, you MUST wrap the entire fenced code "
                 "block in a `mermaid` or `svg` block (matching the language). "
@@ -4880,7 +4880,7 @@ def format_instructions(
                 "viewBox='0 0 100 100'>\\n  <circle cx='50' cy='50' r='40' "
                 "fill='gold'/>\\n</svg>\\n```\"}\ue201\n"
                 "Correct silent display-only math:\n"
-                '\ue200say\ue202{"content":"$x^2$"}\ue201\n'
+                '\ue200say\ue202{"content":"$ x^2 $"}\ue201\n'
                 "If a Mermaid or SVG block includes `speech` and contains "
                 "labels, formulas, symbols, or notation, the spoken "
                 "description must include the natural spoken form of those "

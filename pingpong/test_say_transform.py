@@ -60,10 +60,10 @@ def test_format_instructions_adds_block_contract_for_lecture_video_latex_only():
         '{"speech":"ten a plus five c","content":"$ 10a + 5c $"}'
         f"{SAY_MARKER_END}"
     ) in instructions
-    assert "Incorrect: One has $a$, the other has $c$." in instructions
+    assert "Incorrect: One has $ a $, the other has $ c $." in instructions
     assert (
         f"{SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}"
-        '{"speech":"a","content":"$a$"}'
+        '{"speech":"a","content":"$ a $"}'
         f"{SAY_MARKER_END}"
     ) in instructions
     assert "Correct Mermaid diagram:" in instructions
@@ -79,7 +79,7 @@ def test_format_instructions_adds_block_contract_for_lecture_video_latex_only():
     assert "Correct silent display-only math:" in instructions
     assert (
         f"{SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}"
-        '{"content":"$x^2$"}'
+        '{"content":"$ x^2 $"}'
         f"{SAY_MARKER_END}"
     ) in instructions
     assert "A block may not contain another block" in instructions
@@ -402,7 +402,7 @@ def test_pua_transformer_drops_unknown_markers():
     assert out == "before  after"
 
 
-def test_pua_transformer_drops_malformed_snippet_but_keeps_followups_afterward():
+def test_pua_transformer_flushes_complete_snippet_before_followups_afterward():
     transformer = PuaStreamTransformer("display")
     assert (
         transformer.add(
@@ -416,7 +416,7 @@ def test_pua_transformer_drops_malformed_snippet_but_keeps_followups_afterward()
             '{"responses":["Try X"]}'
             f"{SAY_MARKER_END} next sentence"
         )
-        == " next sentence"
+        == "x next sentence"
     )
     assert transformer.consume_followup_suggestions() == ["Try X"]
 
@@ -516,14 +516,52 @@ def test_embedded_end_marker_inside_json_string_recovers_downstream_text():
     assert transformer.add(text) + transformer.flush() == "x more text"
 
 
-def test_pua_transformer_emits_oversized_marker_buffer(caplog):
+def test_pua_transformer_drops_trailing_chars_after_complete_json(caplog):
+    transformer = PuaStreamTransformer("display")
+    text = (
+        f"Before {SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}"
+        '{"speech":"alpha"}oops'
+        f"{SAY_MARKER_END} after"
+    )
+
+    with caplog.at_level(logging.DEBUG, logger="pingpong.say_transform"):
+        assert transformer.add(text) + transformer.flush() == "Before  after"
+
+    assert "Dropping malformed snippet JSON after complete object" in caplog.text
+
+
+def test_pua_transformer_flushes_speech_fallback_before_new_marker():
+    transformer = PuaStreamTransformer("display")
+    text = (
+        f"{SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}"
+        '{"speech":"alpha"}'
+        f"{SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}"
+        '{"speech":"beta"}'
+        f"{SAY_MARKER_END}"
+    )
+
+    assert transformer.add(text) + transformer.flush() == "alphabeta"
+
+
+def test_pua_transformer_drops_oversized_marker_buffer(caplog):
     transformer = PuaStreamTransformer("display", max_marker_chars=4)
 
     with caplog.at_level(logging.WARNING, logger="pingpong.say_transform"):
         out = transformer.add(f"Before {SAY_MARKER_START}toolongmarker")
 
-    assert out.startswith("Before ")
+    assert out == "Before "
+    assert SAY_MARKER_START not in out
     assert "oversized marker name buffer" in caplog.text
+
+
+def test_pua_transformer_drops_incomplete_marker_on_flush(caplog):
+    transformer = PuaStreamTransformer("display")
+
+    assert transformer.add(f"Before {SAY_MARKER_START}say") == "Before "
+    with caplog.at_level(logging.WARNING, logger="pingpong.say_transform"):
+        assert transformer.flush() == ""
+
+    assert "Dropping incomplete snippet (marker phase)" in caplog.text
 
 
 def test_pua_transformer_drops_incomplete_followup_payload_on_flush(caplog):
@@ -533,4 +571,18 @@ def test_pua_transformer_drops_incomplete_followup_payload_on_flush(caplog):
     with caplog.at_level(logging.WARNING, logger="pingpong.say_transform"):
         assert transformer.flush() == ""
     assert "Dropping incomplete followups snippet buffer" in caplog.text
+    assert transformer.consume_followup_suggestions() == []
+
+
+def test_pua_transformer_recovers_after_followup_buffer_overflow():
+    transformer = PuaStreamTransformer("display", max_followup_buffer_chars=12)
+
+    assert (
+        transformer.add(
+            f'Before {SAY_MARKER_START}followups{SAY_MARKER_SEPARATOR}{{"responses":'
+        )
+        == "Before "
+    )
+    assert transformer.add(f'["leaked"]}}{SAY_MARKER_END} after') == " after"
+    assert transformer.flush() == ""
     assert transformer.consume_followup_suggestions() == []

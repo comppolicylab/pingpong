@@ -63,9 +63,7 @@ async def test_build_run_instructions_for_lecture_video_with_latex_includes_say_
 
     assert instructions is not None
     assert "Be helpful." in instructions
-    assert (
-        "---Formatting: Lecture Video Dual Speech/Display Snippets---" in instructions
-    )
+    assert "---Formatting: Lecture Video Dual Speech/Display Blocks---" in instructions
     assert "---Formatting: LaTeX---" not in instructions
     assert "---Formatting: Lecture Video Follow-ups---" in instructions
 
@@ -86,8 +84,7 @@ async def test_build_run_instructions_for_lecture_video_without_latex_skips_say_
     assert instructions is not None
     assert "Be helpful." in instructions
     assert (
-        "---Formatting: Lecture Video Dual Speech/Display Snippets---"
-        not in instructions
+        "---Formatting: Lecture Video Dual Speech/Display Blocks---" not in instructions
     )
     assert "---Formatting: LaTeX---" not in instructions
 

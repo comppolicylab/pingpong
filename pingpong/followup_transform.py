@@ -20,6 +20,10 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
+def _is_marker_name_char(ch: str) -> bool:
+    return ch.isalnum() or ch == "_"
+
+
 def strip_followup_snippets(text: str) -> str:
     """Remove followup snippets from `text`, preserving all other content.
 
@@ -41,19 +45,38 @@ def strip_followup_snippets(text: str) -> str:
         if start_index > cursor:
             output_parts.append(text[cursor:start_index])
 
-        separator_index = text.find(SAY_MARKER_SEPARATOR, start_index + 1)
-        if separator_index < 0:
-            marker_prefix = text[start_index + 1 :].strip()
-            if marker_prefix and FOLLOWUP_MARKER_NAME.startswith(marker_prefix):
+        marker_start = start_index + 1
+        separator_index = text.find(SAY_MARKER_SEPARATOR, marker_start)
+        next_start_index = text.find(SAY_MARKER_START, marker_start)
+        if separator_index < 0 or (
+            next_start_index >= 0 and next_start_index < separator_index
+        ):
+            marker_end = marker_start
+            while marker_end < len(text):
+                ch = text[marker_end]
+                if ch == SAY_MARKER_START or not _is_marker_name_char(ch):
+                    break
+                marker_end += 1
+            marker_name = text[marker_start:marker_end]
+            if marker_name and FOLLOWUP_MARKER_NAME.startswith(marker_name):
                 break
+            if next_start_index >= 0:
+                output_parts.append(text[start_index:next_start_index])
+                cursor = next_start_index
+                continue
             output_parts.append(text[start_index:])
             break
 
-        marker_name = text[start_index + 1 : separator_index].strip()
+        marker_name = text[marker_start:separator_index].strip()
         end_index = text.find(SAY_MARKER_END, separator_index + 1)
-        if end_index < 0:
+        next_start_index = text.find(SAY_MARKER_START, separator_index + 1)
+        if end_index < 0 or (next_start_index >= 0 and next_start_index < end_index):
             if marker_name == FOLLOWUP_MARKER_NAME:
                 break
+            if next_start_index >= 0:
+                output_parts.append(text[start_index:next_start_index])
+                cursor = next_start_index
+                continue
             output_parts.append(text[start_index:])
             break
 

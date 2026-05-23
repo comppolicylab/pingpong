@@ -1893,7 +1893,7 @@ async def test_preview_assistant_instructions_includes_lecture_video_say_contrac
     assert response.status_code == 200
     instructions_preview = response.json()["instructions_preview"]
     assert (
-        "---Formatting: Lecture Video Dual Speech/Display Snippets---"
+        "---Formatting: Lecture Video Dual Speech/Display Blocks---"
         in instructions_preview
     )
 

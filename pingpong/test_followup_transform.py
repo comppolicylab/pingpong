@@ -1,3 +1,4 @@
+import json
 import logging
 
 from pingpong.followup_transform import (
@@ -16,10 +17,8 @@ def followup_payload(payload: str) -> str:
 
 
 def say_payload(speech: str, body: str) -> str:
-    return (
-        f"{SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}"
-        f'{{"speech":"{speech}","content":"{body}"}}{SAY_MARKER_END}'
-    )
+    payload = json.dumps({"speech": speech, "content": body}, separators=(",", ":"))
+    return f"{SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}{payload}{SAY_MARKER_END}"
 
 
 def test_strip_followup_snippets_removes_private_payload():
@@ -65,5 +64,18 @@ def test_strip_followup_snippets_drops_incomplete_followup_marker():
 
 def test_strip_followup_snippets_drops_truncated_followup_marker_prefix():
     text = f"Before {SAY_MARKER_START}follow"
+
+    assert strip_followup_snippets(text) == "Before "
+
+
+def test_strip_followup_snippets_drops_incomplete_followup_name_token():
+    text = f'Before {SAY_MARKER_START}followups{{"responses"'
+
+    assert strip_followup_snippets(text) == "Before "
+
+
+def test_strip_followup_snippets_does_not_merge_across_next_marker():
+    say = say_payload("x squared", "$ x^2 $")
+    text = f"Before {SAY_MARKER_START}followups" + say + " after"
 
     assert strip_followup_snippets(text) == "Before "

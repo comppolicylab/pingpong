@@ -397,8 +397,7 @@ class PuaStreamTransformer:
                 out.append(self._buffer)
                 self._buffer = ""
         elif self._state == self._MARKER:
-            logger.warning("Flushing incomplete snippet (marker phase) as raw text")
-            out.append(SAY_MARKER_START + self._marker_buf + self._buffer)
+            logger.warning("Dropping incomplete snippet (marker phase)")
             self._buffer = ""
             self._reset()
         elif self._state == self._SNIPPET_JSON:
@@ -462,8 +461,8 @@ class PuaStreamTransformer:
             self._buffer = ""
             if len(self._marker_buf) > self.max_marker_chars:
                 logger.warning("Dropping snippet with oversized marker name buffer")
-                out.append(SAY_MARKER_START + self._marker_buf)
                 self._reset()
+                self._state = self._RECOVERING
                 return True
             return False
         self._marker_buf += self._buffer[:sep_idx]
@@ -502,6 +501,7 @@ class PuaStreamTransformer:
 
             if ch == SAY_MARKER_START and parser.done:
                 self._buffer = ch + self._buffer
+                out.append(parser.flush_output())
                 self._reset()
                 return True
 
@@ -519,6 +519,13 @@ class PuaStreamTransformer:
                 logger.debug("Dropping malformed snippet JSON before complete object")
                 self._reset()
                 return True
+
+            if parser.done:
+                if ch.isspace():
+                    continue
+                logger.debug("Dropping malformed snippet JSON after complete object")
+                self._recover_after_invalid()
+                return bool(self._buffer)
 
             should_flush = parser.feed(ch, out)
             if should_flush:
@@ -567,6 +574,7 @@ class PuaStreamTransformer:
                 logger.warning("Dropping oversized incomplete followups snippet buffer")
                 self._followup_buf = ""
                 self._reset()
+                self._state = self._RECOVERING
                 return True
             return False
         self._followup_buf += self._buffer[:end_idx]
