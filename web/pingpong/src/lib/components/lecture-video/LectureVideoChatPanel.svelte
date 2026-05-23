@@ -304,12 +304,9 @@
 	const getVisibleFollowupSuggestions = (message: Message) => {
 		if (
 			!showInput ||
-			!canSubmit ||
-			disabled ||
+			!canSubmitChatText ||
 			assistantDeleted ||
 			!canViewAssistant ||
-			waiting ||
-			submitting ||
 			message.data.id !== latestAssistantMessageId
 		) {
 			return [];
@@ -317,8 +314,13 @@
 		return getFollowupSuggestions(message.data);
 	};
 
+	let canShowStarterQuestions = $derived(showInput && !assistantDeleted && canViewAssistant);
+	let canSubmitChatText = $derived(
+		canShowStarterQuestions && canSubmit && !disabled && !waiting && !submitting
+	);
+
 	const submitChatText = (message: string) => {
-		if (!onsubmit || waiting || submitting || disabled || !canSubmit) {
+		if (!onsubmit || !canSubmitChatText) {
 			return;
 		}
 		onsubmit({
@@ -330,10 +332,6 @@
 			message,
 			callback: () => {}
 		});
-	};
-
-	const submitFollowupSuggestion = (suggestion: string) => {
-		submitChatText(suggestion);
 	};
 
 	const evaluateContinuePromptVisibility = () =>
@@ -446,22 +444,28 @@
 					</div>
 					<h2 class="text-sm font-semibold text-slate-900">Ask about this lecture</h2>
 					<p class="mt-1 text-sm text-slate-500">Try a starter question or type your own.</p>
-					<div class="mt-4 flex w-full max-w-sm flex-col gap-1.5">
-						{#each starterQuestions as question (question)}
-							<button
-								type="button"
-								class="group flex w-full items-center justify-between gap-2 rounded-full border border-slate-200 bg-white px-3.5 py-1.5 text-left text-sm text-slate-700 transition hover:border-sky-300 hover:bg-sky-50 hover:text-sky-800 focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-1 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
-								disabled={waiting || submitting || disabled || !canSubmit}
-								onclick={() => submitChatText(question)}
-							>
-								<span>{question}</span>
-								<ReplyOutline
-									class="size-3.5 shrink-0 -scale-x-100 text-slate-400 transition group-hover:text-sky-600"
-									aria-hidden="true"
-								/>
-							</button>
-						{/each}
-					</div>
+					{#if canShowStarterQuestions}
+						<div
+							class="mt-4 flex w-full flex-col gap-1.5"
+							role="group"
+							aria-label="Starter questions"
+						>
+							{#each starterQuestions as question (question)}
+								<button
+									type="button"
+									class="group flex w-full items-center justify-between gap-2 rounded-full border border-slate-200 bg-white px-3.5 py-1.5 text-left text-sm text-slate-700 transition hover:border-sky-300 hover:bg-sky-50 hover:text-sky-800 focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-1 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+									disabled={!canSubmitChatText}
+									onclick={() => submitChatText(question)}
+								>
+									<span>{question}</span>
+									<ReplyOutline
+										class="size-3.5 shrink-0 -scale-x-100 text-slate-400 transition group-hover:text-sky-600"
+										aria-hidden="true"
+									/>
+								</button>
+							{/each}
+						</div>
+					{/if}
 				</div>
 			</div>
 		{/if}
@@ -633,8 +637,8 @@
 										0
 											? 'border-t border-gray-200'
 											: ''}"
-										disabled={waiting || submitting || disabled || !canSubmit}
-										onclick={() => submitFollowupSuggestion(suggestion)}
+										disabled={!canSubmitChatText}
+										onclick={() => submitChatText(suggestion)}
 									>
 										<ReplyOutline
 											class="h-3.5 w-3.5 shrink-0 -scale-x-100 text-gray-400 transition group-hover:text-gray-700"
