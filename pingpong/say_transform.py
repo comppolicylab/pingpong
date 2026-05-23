@@ -125,6 +125,7 @@ class _StreamingSnippetJsonParser:
                 self.unicode_escape = None
                 self.state = self._VALUE_STRING
                 if self.current_value_key == "content":
+                    self.saw_content = True
                     self.started_content = True
                     return self._should_flush_before_content()
                 return False
@@ -305,8 +306,9 @@ class PuaStreamTransformer:
       ``content`` keys. The speech target streams ``speech`` string characters
       as they decode. The display target streams ``content`` string characters
       as they decode. If ``content`` is omitted, display falls back to
-      ``speech``. For ``svg`` and ``mermaid``, starting the ``content`` field
-      emits a flush signal so TTS can play speech before long silent content.
+      ``speech``. An empty ``content`` string is an explicit empty display. For
+      ``svg`` and ``mermaid``, starting the ``content`` field emits a flush
+      signal so TTS can play speech before long silent content.
 
     - ``followups`` — payload is buffered until the end marker, then parsed as
       JSON. Suggestions are collected via ``consume_followup_suggestions``.

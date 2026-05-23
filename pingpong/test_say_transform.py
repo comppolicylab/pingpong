@@ -423,6 +423,13 @@ def test_display_drops_non_string_content_instead_of_falling_back_to_speech():
     assert transform_say_text(text, "display") == ""
 
 
+def test_display_keeps_empty_content_instead_of_falling_back_to_speech():
+    text = snippet("say", "hello", "")
+
+    assert transform_say_text(text, "display") == ""
+    assert transform_say_text(text, "speech") == "hello"
+
+
 def test_content_first_diagram_flushes_after_speech_not_before():
     transformer = PuaStreamTransformer("speech")
     text = (
