@@ -3807,7 +3807,7 @@ async def run_response(
             async def _tts_drain_flush_signals() -> None:
                 """Forward speech->body flush signals to ElevenLabs.
 
-                Triggered for svg/mermaid snippets so the speech plays
+                Triggered for svg/mermaid blocks so the speech plays
                 immediately rather than waiting for the long diagram body
                 that will produce no further TTS input.
                 """
@@ -3818,8 +3818,9 @@ async def run_response(
                 if not pending:
                     return
                 if _tts_sanitizer:
-                    sanitized = _tts_sanitizer.flush()
-                    if sanitized and _tts_chunker:
+                    for sanitized in _tts_sanitizer.drain_ready():
+                        if not _tts_chunker:
+                            continue
                         for tts_chunk in _tts_chunker.add(sanitized):
                             try:
                                 await _tts_send_text(tts_chunk)
@@ -3843,7 +3844,7 @@ async def run_response(
                     try:
                         await _tts_send_text("", flush=True)
                     except Exception:
-                        logger.warning("TTS snippet flush failed", exc_info=True)
+                        logger.warning("TTS block flush failed", exc_info=True)
 
             _tts_audio_task: asyncio.Task | None = None
             _tts_audio_done = asyncio.Event()
@@ -4772,19 +4773,25 @@ def format_instructions(
         if lecture_video_mode:
             instructions += (
                 "\n\n"
-                "---Formatting: Lecture Video Dual Speech/Display Snippets---\n"
+                "---Formatting: Lecture Video Dual Speech/Display Blocks---\n"
                 "Before producing the final answer, check whether any part of it "
                 "contains math, symbols, formulas, special characters, "
                 "notation, or any text that should be spoken differently from "
                 "how it should be displayed. If it does, you MUST emit that part "
-                "as a private-use snippet.\n"
-                "A snippet payload is a compact JSON object with `speech` and "
-                "`content` string keys. `speech` is the natural spoken form. "
-                "`content` is the exact visible form. Use a `say` snippet for "
-                "math, symbols, formulas, special characters, abbreviations, "
-                "notation, or any text that should be spelled out for speech "
-                "but displayed differently for reading. Use a `mermaid` or "
-                "`svg` snippet to wrap a Mermaid or SVG fenced code block.\n"
+                "as a private-use block.\n"
+                "A block payload is a compact JSON object with at least one "
+                "of `speech` or `content`. `speech` is the natural spoken "
+                "form. `content` is the exact visible form. Include both keys "
+                "when text should be spoken one way and displayed another way. "
+                "Use only `speech` when the spoken and visible forms are "
+                "identical. Use only `content` when something should be shown "
+                "but not spoken. Do not write an empty `speech` key for "
+                "show-only content; omit `speech` instead. Use a `say` block "
+                "for math, symbols, formulas, special characters, "
+                "abbreviations, notation, or any text that should be spelled "
+                "out for speech but displayed differently for reading. Use a "
+                "`mermaid` or `svg` block to wrap a Mermaid or SVG fenced "
+                "code block.\n"
                 "For math display, use the single dollar sign $ with spaces "
                 "surrounding it for inline math. For block-level math, use "
                 "double dollar signs $$ with newlines before and after them as "
@@ -4797,7 +4804,7 @@ def format_instructions(
                 "abbreviations, or notation directly when their spoken form "
                 "differs from their written form. This includes short "
                 "single-symbol math like $a$ or $c$. Only leave text outside "
-                "a snippet when the visible text is already exactly natural "
+                "a block when the visible text is already exactly natural "
                 "and correct for speech as written.\n"
                 "Use exactly this format, with U+E200 before the marker name "
                 "(`say`, `mermaid`, or `svg`), U+E202 after the marker name, a "
@@ -4807,27 +4814,36 @@ def format_instructions(
                 "`speech` must be a single-line JSON string of natural spoken "
                 "language. `content` must be the exact text the student should "
                 "read, using the LaTeX, symbol, or normal text formatting "
-                "rules above. The snippet payload must be valid JSON: escape "
+                "rules above. The block payload must be valid JSON: escape "
                 "newlines as \\n and write LaTeX backslashes in `content` as "
                 "`\\\\`, for example `\\\\frac`, not `\\frac`. If "
-                "the spoken and visible forms are identical, you may omit "
-                "`content`, writing only:\n"
+                "the spoken and visible forms are identical, omit `content`, "
+                "writing only:\n"
                 '\ue200say\ue202{"speech":"alpha"}\ue201\n'
-                "and the visible form falls back to `speech`.\n"
-                "Snippet syntax is not recursive. Never put U+E200, U+E202, "
-                "or U+E201 inside the `speech` or `content` value of another "
-                "snippet. A snippet may not contain another snippet.\n"
+                "and the visible form falls back to `speech`. If content "
+                "should be displayed silently, omit `speech`, writing only:\n"
+                '\ue200say\ue202{"content":"$x^2$"}\ue201\n'
+                "Block syntax is not recursive. Block values must be "
+                "plain JSON strings only. Never put U+E200, U+E202, or U+E201 "
+                "inside the `speech` or `content` value of another block. A "
+                "block may not contain another block. If multiple spans "
+                "need blocks, close one block before opening the next. Do "
+                "not place blocks inside markdown links, emphasis, inline "
+                "code, or fenced code blocks; put the block outside those "
+                "markdown constructs.\n"
                 "Wrap only the smallest span that needs different speech and "
                 "display. Do not wrap a whole sentence or paragraph if only "
                 "one symbol, formula, diagram, or notation span needs special "
                 "handling. If a sentence contains multiple special spans, emit "
-                "multiple separate snippets with normal prose between them.\n"
+                "multiple separate blocks with normal prose between them.\n"
                 "Before finalizing, check that every U+E200 has exactly one "
                 "marker, one U+E202, one valid compact JSON object, and one "
-                "matching U+E201; no snippet contains another U+E200; "
-                "`speech` has no newline; `say` snippets use visible math only "
-                "in `content`; and `svg` and `mermaid` snippets put exactly "
-                "one fenced code block in `content`.\n"
+                "matching U+E201; no block contains another U+E200; "
+                "`speech`, when present, has no newline; `say` blocks use "
+                "visible math only in `content`; content-only blocks are "
+                "used only when the content should be shown silently; and "
+                "`svg` and `mermaid` blocks put exactly one fenced code "
+                "block in `content`.\n"
                 "Incorrect: If "
                 '\ue200say\ue202{"speech":"If \ue200say\ue202x","content":"$x$"}\ue201'
                 " is two.\n"
@@ -4848,11 +4864,12 @@ def format_instructions(
                 '\ue200say\ue202{"speech":"c","content":"$c$"}\ue201.\n'
                 "When you output a Mermaid or SVG fenced code block in a "
                 "lecture-video response, you MUST wrap the entire fenced code "
-                "block in a `mermaid` or `svg` snippet (matching the language). "
-                "`speech` should be a short, natural description of what the "
-                "diagram shows, not the code. `content` is the exact fenced "
-                "code block the student should see, with newlines escaped as "
-                "\\n inside the JSON string.\n"
+                "block in a `mermaid` or `svg` block (matching the language). "
+                "If the diagram should be spoken about, `speech` should be a "
+                "short, natural description of what the diagram shows, not the "
+                "code. If the diagram should be shown silently, omit `speech`. "
+                "`content` is the exact fenced code block the student should "
+                "see, with newlines escaped as \\n inside the JSON string.\n"
                 "Correct Mermaid diagram:\n"
                 '\ue200mermaid\ue202{"speech":"Here is a simple flow from input '
                 'to output.","content":"```mermaid\\ngraph TD\\n    A[Input] '
@@ -4862,12 +4879,15 @@ def format_instructions(
                 '"content":"```svg\\n<svg xmlns=\'http://www.w3.org/2000/svg\' '
                 "viewBox='0 0 100 100'>\\n  <circle cx='50' cy='50' r='40' "
                 "fill='gold'/>\\n</svg>\\n```\"}\ue201\n"
-                "If Mermaid or SVG contains labels, formulas, symbols, or "
-                "notation, the spoken description must include the natural "
-                "spoken form of those labels or symbols.\n"
-                "If you are deciding between raw LaTeX and a snippet "
-                "in a lecture-video response, choose the snippet.\n"
-                "Do not mention the snippet syntax to the user.\n\n"
+                "Correct silent display-only math:\n"
+                '\ue200say\ue202{"content":"$x^2$"}\ue201\n'
+                "If a Mermaid or SVG block includes `speech` and contains "
+                "labels, formulas, symbols, or notation, the spoken "
+                "description must include the natural spoken form of those "
+                "labels or symbols.\n"
+                "If you are deciding between raw LaTeX and a block "
+                "in a lecture-video response, choose the block.\n"
+                "Do not mention the block syntax to the user.\n\n"
                 + diagram_formatting_instructions
             )
         else:
@@ -4971,14 +4991,14 @@ def format_instructions(
             f"{SAY_MARKER_START}{FOLLOWUP_MARKER_NAME}{SAY_MARKER_SEPARATOR}"
             '{"responses":["Can you explain that another way?",'
             f'"Show me a quick example from what we just covered."]}}{SAY_MARKER_END}\n'
-            "If no follow-up responses would help, omit the snippet or return "
+            "If no follow-up responses would help, omit the block or return "
             f"an empty array like {SAY_MARKER_START}{FOLLOWUP_MARKER_NAME}"
             f'{SAY_MARKER_SEPARATOR}{{"responses":[]}}{SAY_MARKER_END}. '
             "The JSON payload must be valid and compact. Include only the "
             "`responses` array with at most 3 strings. Do not duplicate the "
             "answer text or provide multiple phrasings of the same next step. "
             "Do not include answers, hints, clues, or narrowed choices for "
-            "restricted knowledge checks or quizzes. Do not mention the snippet "
+            "restricted knowledge checks or quizzes. Do not mention the block "
             "syntax to the user."
         )
 

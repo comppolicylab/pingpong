@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class _StreamingSnippetJsonParser:
-    """Incrementally parse snippet JSON and stream selected string fields."""
+    """Incrementally parse block JSON and stream selected string fields."""
 
     _EXPECT_OBJECT_START = "expect_object_start"
     _EXPECT_KEY_OR_END = "expect_key_or_end"
@@ -330,21 +330,22 @@ class _StreamingSnippetJsonParser:
 
 
 class PuaStreamTransformer:
-    """Streaming transformer for PUA-delimited snippets.
+    """Streaming transformer for PUA-delimited blocks.
 
-    Snippet shape::
+    Block shape::
 
         \\ue200<marker>\\ue202{"speech":"spoken text","content":"visible text"}\\ue201
 
     Known markers:
 
-    - ``say``, ``svg``, ``mermaid`` — JSON snippets using common ``speech`` and
+    - ``say``, ``svg``, ``mermaid`` — JSON blocks using common ``speech`` and
       ``content`` keys. The speech target streams ``speech`` string characters
       as they decode. The display target streams ``content`` string characters
       as they decode. If ``content`` is omitted, display falls back to
-      ``speech``. An empty ``content`` string is an explicit empty display. For
-      ``svg`` and ``mermaid``, starting the ``content`` field emits a flush
-      signal so TTS can play speech before long silent content.
+      ``speech``. If ``speech`` is omitted, the speech target emits nothing.
+      An empty ``content`` string is an explicit empty display. For ``svg`` and
+      ``mermaid``, starting the ``content`` field emits a flush signal so TTS
+      can play speech before long silent content.
 
     - ``followups`` — payload is buffered until the end marker, then parsed as
       JSON. Suggestions are collected via ``consume_followup_suggestions``.

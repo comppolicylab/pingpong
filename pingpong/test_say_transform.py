@@ -21,24 +21,35 @@ def snippet(marker: str, speech: str, body: str | None = None) -> str:
     )
 
 
+def content_snippet(marker: str, body: str) -> str:
+    payload = {"content": body}
+    return (
+        f"{SAY_MARKER_START}{marker}{SAY_MARKER_SEPARATOR}"
+        f"{json.dumps(payload, separators=(',', ':'))}{SAY_MARKER_END}"
+    )
+
+
 def followup_snippet(payload: str) -> str:
     return f"{SAY_MARKER_START}followups{SAY_MARKER_SEPARATOR}{payload}{SAY_MARKER_END}"
 
 
-def test_format_instructions_adds_snippet_contract_for_lecture_video_latex_only():
+def test_format_instructions_adds_block_contract_for_lecture_video_latex_only():
     instructions = format_instructions(
         "Be helpful.",
         use_latex=True,
         lecture_video_mode=True,
     )
 
-    assert (
-        "---Formatting: Lecture Video Dual Speech/Display Snippets---" in instructions
-    )
+    assert "---Formatting: Lecture Video Dual Speech/Display Blocks---" in instructions
     assert "---Formatting: LaTeX---" not in instructions
-    assert "MUST emit that part as a private-use snippet" in instructions
-    assert "JSON object with `speech` and `content` string keys" in instructions
-    assert "The snippet payload must be valid JSON" in instructions
+    assert "MUST emit that part as a private-use block" in instructions
+    assert "JSON object with at least one of `speech` or `content`" in instructions
+    assert (
+        "Use only `content` when something should be shown but not spoken"
+        in instructions
+    )
+    assert "omit `speech` instead" in instructions
+    assert "The block payload must be valid JSON" in instructions
     assert "write LaTeX backslashes in `content` as `\\\\`" in instructions
     assert "`\\\\frac`, not `\\frac`" in instructions
     assert "For block-level math, use double dollar signs $$" in instructions
@@ -65,12 +76,20 @@ def test_format_instructions_adds_snippet_contract_for_lecture_video_latex_only(
         f"{SAY_MARKER_START}svg{SAY_MARKER_SEPARATOR}"
         '{"speech":"Here is a simple yellow circle.'
     ) in instructions
+    assert "Correct silent display-only math:" in instructions
+    assert (
+        f"{SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}"
+        '{"content":"$x^2$"}'
+        f"{SAY_MARKER_END}"
+    ) in instructions
+    assert "A block may not contain another block" in instructions
+    assert "Do not place blocks inside markdown links" in instructions
     assert "---Formatting: Lecture Video Follow-ups---" in instructions
     assert f"{SAY_MARKER_START}followups{SAY_MARKER_SEPARATOR}" in instructions
     assert '"responses"' in instructions
 
 
-def test_format_instructions_does_not_add_snippet_contract_for_normal_latex_chat():
+def test_format_instructions_does_not_add_block_contract_for_normal_latex_chat():
     instructions = format_instructions(
         "Be helpful.",
         use_latex=True,
@@ -79,13 +98,12 @@ def test_format_instructions_does_not_add_snippet_contract_for_normal_latex_chat
 
     assert "---Formatting: LaTeX---" in instructions
     assert (
-        "---Formatting: Lecture Video Dual Speech/Display Snippets---"
-        not in instructions
+        "---Formatting: Lecture Video Dual Speech/Display Blocks---" not in instructions
     )
     assert "---Formatting: Lecture Video Follow-ups---" not in instructions
 
 
-def test_format_instructions_does_not_add_snippet_contract_without_latex():
+def test_format_instructions_does_not_add_block_contract_without_latex():
     instructions = format_instructions(
         "Be helpful.",
         use_latex=False,
@@ -94,8 +112,7 @@ def test_format_instructions_does_not_add_snippet_contract_without_latex():
 
     assert "---Formatting: LaTeX---" not in instructions
     assert (
-        "---Formatting: Lecture Video Dual Speech/Display Snippets---"
-        not in instructions
+        "---Formatting: Lecture Video Dual Speech/Display Blocks---" not in instructions
     )
     assert "---Formatting: Lecture Video Follow-ups---" in instructions
 
@@ -104,6 +121,13 @@ def test_transform_returns_body_for_display():
     text = "Use " + snippet("say", "x squared", "$ x^2 $") + " here."
 
     assert transform_say_text(text, "display") == "Use $ x^2 $ here."
+
+
+def test_transform_accepts_content_only_snippet_for_silent_display():
+    text = "Show " + content_snippet("say", "$x^2$") + " only."
+
+    assert transform_say_text(text, "display") == "Show $x^2$ only."
+    assert transform_say_text(text, "speech") == "Show  only."
 
 
 def test_transform_decodes_json_escapes_in_content_without_latex_heuristics():
