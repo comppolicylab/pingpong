@@ -22,7 +22,6 @@ from pingpong.models import (
     MCPServerTool,
     User,
     UserClassRole,
-    UserConnector,
     UserInstitutionRole,
     _get_upsert_stmt,
     user_thread_association,
@@ -64,7 +63,7 @@ async def merge_db_operations(
     await merge_lms_users(session, new_user_id, old_user_id)
     await merge_lti_users(session, new_user_id, old_user_id)
     await merge_external_logins(session, new_user_id, old_user_id)
-    await merge_connectors(session, new_user_id, old_user_id)
+    # await merge_connectors(session, new_user_id, old_user_id)
     await merge_user_files(session, new_user_id, old_user_id)
 
 
@@ -373,6 +372,7 @@ async def merge_external_logins(
     await session.execute(delete_conflicting_stmt)
 
 
+'''
 async def merge_connectors(
     session: AsyncSession,
     new_user_id: int,
@@ -443,6 +443,7 @@ async def merge_connectors(
         .where(UserConnector.user_id == old_user_id)
         .values(user_id=new_user_id)
     )
+'''
 
 
 async def merge_user_files(

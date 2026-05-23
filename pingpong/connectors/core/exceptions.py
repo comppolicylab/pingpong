@@ -3,11 +3,19 @@ class ConnectorError(Exception):
 
 
 class ConnectorNotConfigured(ConnectorError):
-    """Raised when a connector or tenant has no configuration entry."""
+    """Raised when a connector or connector config cannot be used."""
 
 
 class ConnectorNotRegistered(ConnectorError):
     """Raised when looking up an unknown connector slug."""
+
+
+class ConnectorFlowError(ConnectorError):
+    """Raised when the OAuth connect/callback flow cannot continue."""
+
+    def __init__(self, code: str, message: str | None = None) -> None:
+        self.code = code
+        super().__init__(message or code)
 
 
 class TokenRefreshError(ConnectorError):

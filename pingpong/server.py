@@ -7,7 +7,6 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from math import ceil
 from typing import Annotated, Any, Literal, NoReturn, Union, cast
-from urllib.parse import urlencode
 
 import humanize
 import jwt
@@ -165,7 +164,10 @@ from .canvas import (
     decode_canvas_token,
     get_canvas_config,
 )
-from . import connectors as connectors_pkg
+
+# TODO(connectors): Re-enable connector routes after wiring them to the
+# ConnectorConfig-based connector flow.
+# from . import connectors as connectors_pkg
 from .config import config
 from .errors import sentry
 from .files import (
@@ -12698,6 +12700,10 @@ def _connector_callback_url(service: str) -> str:
     return config.url(f"/api/v1/connectors/{service}/callback")
 
 
+'''
+TODO(connectors): Re-enable these legacy connector routes after migrating
+them to the ConnectorConfig-based connector flow.
+
 def _connector_definition(
     connector: connectors_pkg.OAuth2Connector,
 ) -> schemas.ConnectorDefinition:
@@ -12928,6 +12934,7 @@ async def disconnect_connector(request: StateRequest, connector_id: int):
     await db.delete(row)
     await db.flush()
     return schemas.ConnectorDisconnectResponse()
+'''
 
 
 @v1.get(
