@@ -53,4 +53,30 @@ describe('WavStreamPlayer', () => {
 		await expect(pendingOffset).resolves.toBeNull();
 		expect(postMessage).toHaveBeenCalledTimes(1);
 	});
+
+	it('can signal that no more streaming audio will be added', () => {
+		const player = new WavStreamPlayer();
+		const postMessage = vi.fn();
+
+		(
+			player as unknown as {
+				stream: { port: { postMessage: (message: object) => void } };
+			}
+		).stream = {
+			port: { postMessage }
+		};
+
+		player.finish();
+
+		expect(postMessage).toHaveBeenCalledWith({ event: 'finish' });
+	});
+
+	it('stops playback when finish is called before a stream starts', () => {
+		const onPlaybackStopped = vi.fn();
+		const player = new WavStreamPlayer({ onPlaybackStopped });
+
+		player.finish();
+
+		expect(onPlaybackStopped).toHaveBeenCalledTimes(1);
+	});
 });

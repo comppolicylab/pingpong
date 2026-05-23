@@ -356,6 +356,84 @@ def _lecture_video_followups_enabled(thread: models.Thread) -> bool:
     return thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
 
 
+def _build_run_instructions(
+    thread: models.Thread,
+    asst: models.Assistant,
+    user_id: int | None,
+) -> str | None:
+    """Return the effective instructions for a run or prompt inspection.
+
+    Lecture-video threads compute formatting fresh per run so that prompt
+    segment updates (say snippets, follow-ups, LaTeX/diagrams) take effect on
+    existing threads. Other modes continue to use the thread's stored
+    instructions verbatim.
+    """
+    if thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
+        # Random blocks remain stable because format_instructions seeds them
+        # from the thread and user ids instead of sampling per call.
+        return format_instructions(
+            asst.instructions or "",
+            use_latex=asst.use_latex,
+            use_image_descriptions=asst.use_image_descriptions,
+            disable_prompt_randomization=asst.disable_prompt_randomization,
+            thread_id=str(thread.id),
+            user_id=user_id,
+            lecture_video_mode=True,
+        )
+    return thread.instructions
+
+
+def _effective_thread_instructions(
+    thread: models.Thread,
+    assistant: models.Assistant | None,
+    user_id: int | None,
+) -> str | None:
+    if not assistant:
+        return thread.instructions
+    return _build_run_instructions(thread, assistant, user_id)
+
+
+def _ensure_lecture_video_thread_version(thread: models.Thread) -> None:
+    if (
+        thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
+        and thread.version != 3
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Lecture video threads must use next generation conversations.",
+        )
+
+
+async def _ensure_thread_instructions_migrated(
+    session: AsyncSession,
+    thread: models.Thread,
+    asst: models.Assistant,
+    user_id: int,
+) -> None:
+    if (
+        thread.instructions
+        or thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
+    ):
+        session.add(thread)
+        return
+
+    logger.info(
+        "Thread %s does not have instructions set, migrating from assistant instructions",
+        thread.id,
+    )
+    thread.instructions = format_instructions(
+        asst.instructions,
+        asst.use_latex,
+        asst.use_image_descriptions,
+        disable_prompt_randomization=asst.disable_prompt_randomization,
+        thread_id=thread.thread_id or str(thread.id),
+        user_id=user_id,
+    )
+    session.add(thread)
+    await session.flush()
+    await session.refresh(thread)
+
+
 def _display_text_for_thread(thread: models.Thread, text: str) -> str:
     if _lecture_video_followups_enabled(thread):
         text = strip_followup_snippets(text)
@@ -3884,8 +3962,11 @@ async def get_thread(
             thread, request.state["session"].user.id, is_supervisor
         )
 
+        effective_instructions = _effective_thread_instructions(
+            thread, assistant, request.state["session"].user.id
+        )
         can_view_prompt = False
-        if thread.instructions and assistant:
+        if effective_instructions and assistant:
             if not assistant.hide_prompt:
                 can_view_prompt = True
             else:
@@ -3935,7 +4016,7 @@ async def get_thread(
             "mcp_messages": [],
             "reasoning_messages": [],
             "attachments": all_files,
-            "instructions": thread.instructions if can_view_prompt else None,
+            "instructions": effective_instructions if can_view_prompt else None,
             "lecture_video_matches_assistant": lecture_video_matches_assistant,
             "lecture_video_session": lecture_video_session,
             "lecture_video_tts_available": lecture_video_tts_available,
@@ -4505,8 +4586,11 @@ async def get_thread(
             thread, request.state["session"].user.id, is_supervisor
         )
 
+        effective_instructions = _effective_thread_instructions(
+            thread, assistant, request.state["session"].user.id
+        )
         can_view_prompt = False
-        if thread.instructions and assistant:
+        if effective_instructions and assistant:
             if not assistant.hide_prompt:
                 can_view_prompt = True
             else:
@@ -4558,7 +4642,7 @@ async def get_thread(
                 failed_at=None,
                 status=latest_run.status.value,
                 thread_id=str(thread_id),
-                instructions=thread.instructions or "",
+                instructions=latest_run.instructions or effective_instructions or "",
                 last_error=schemas.OpenAIRunError(
                     message=latest_run.error_message,
                     code=latest_run.error_code,
@@ -4583,7 +4667,7 @@ async def get_thread(
             "mcp_messages": mcp_messages,
             "reasoning_messages": reasoning_messages,
             "attachments": all_files,
-            "instructions": thread.instructions if can_view_prompt else None,
+            "instructions": effective_instructions if can_view_prompt else None,
             "lecture_video_id": thread.lecture_video_id,
             "lecture_video_matches_assistant": lecture_video_matches_assistant,
             "lecture_video_session": lecture_video_session,
@@ -7042,15 +7126,9 @@ async def create_lecture_thread(
     result: None | models.Thread = None
     try:
         result = await models.Thread.create(request.state["db"], new_thread)
-        result.instructions = format_instructions(
-            assistant.instructions,
-            assistant.use_latex,
-            assistant.use_image_descriptions,
-            disable_prompt_randomization=assistant.disable_prompt_randomization,
-            thread_id=result.id,
-            user_id=request.state["session"].user.id,
-            lecture_video_mode=True,
-        )
+        # Lecture-video formatting (say snippets, follow-ups, LaTeX/diagrams)
+        # is injected at OpenAI request time so prompt-segment updates apply to
+        # existing threads. Leave thread.instructions unset here.
         request.state["db"].add(result)
         await request.state["db"].flush()
         try:
@@ -7616,6 +7694,8 @@ async def create_run(
             detail="We could not find the thread or assistant you specified. Please try again.",
         )
 
+    _ensure_lecture_video_thread_version(thread)
+
     if thread.version == 3:
         try:
             thread = await models.Thread.get_by_id(
@@ -7648,22 +7728,12 @@ async def create_run(
                     schemas.RunStatus.INCOMPLETE,
                 }
             ):
-                if not thread.instructions:
-                    thread.instructions = format_instructions(
-                        asst.instructions,
-                        asst.use_latex,
-                        asst.use_image_descriptions,
-                        disable_prompt_randomization=asst.disable_prompt_randomization,
-                        thread_id=str(thread.id),
-                        user_id=request.state["session"].user.id,
-                        lecture_video_mode=(
-                            thread.interaction_mode
-                            == schemas.InteractionMode.LECTURE_VIDEO
-                        ),
-                    )
-                    request.state["db"].add(thread)
-                    await request.state["db"].flush()
-                    await request.state["db"].refresh(thread)
+                await _ensure_thread_instructions_migrated(
+                    request.state["db"],
+                    thread,
+                    asst,
+                    request.state["session"].user.id,
+                )
 
                 run_to_complete = models.Run(
                     status=schemas.RunStatus.PENDING,
@@ -7674,7 +7744,9 @@ async def create_run(
                     reasoning_effort=asst.reasoning_effort,
                     temperature=asst.temperature,
                     tools_available=thread.tools_available,
-                    instructions=thread.instructions,
+                    instructions=_build_run_instructions(
+                        thread, asst, request.state["session"].user.id
+                    ),
                     verbosity=asst.verbosity,
                 )
                 request.state["db"].add(run_to_complete)
@@ -7853,6 +7925,7 @@ async def send_message(
     mcp_tool_ids: list[int] = []
     try:
         thread = await models.Thread.get_by_id(request.state["db"], int(thread_id))
+        _ensure_lecture_video_thread_version(thread)
         if thread.tools_available and "mcp_server" in thread.tools_available:
             mcp_tool_ids = await models.Thread.get_mcp_tool_ids_by_thread_id(
                 request.state["db"], thread.id
@@ -8081,28 +8154,12 @@ async def send_message(
         thread.last_activity = func.now()
         thread.user_message_ct += 1
 
-        # One-time migration for threads that don't have instructions set
-        if not thread.instructions:
-            logger.info(
-                "Thread %s does not have instructions set, migrating from assistant instructions",
-                thread.id,
-            )
-            thread.instructions = format_instructions(
-                asst.instructions,
-                asst.use_latex,
-                asst.use_image_descriptions,
-                disable_prompt_randomization=asst.disable_prompt_randomization,
-                thread_id=thread.thread_id or str(thread.id),
-                user_id=request.state["session"].user.id,
-                lecture_video_mode=(
-                    thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
-                ),
-            )
-            request.state["db"].add(thread)
-            await request.state["db"].flush()
-            await request.state["db"].refresh(thread)
-        else:
-            request.state["db"].add(thread)
+        await _ensure_thread_instructions_migrated(
+            request.state["db"],
+            thread,
+            asst,
+            request.state["session"].user.id,
+        )
 
         metrics.inbound_messages.inc(
             app=config.public_url,
@@ -8318,7 +8375,9 @@ async def send_message(
                 reasoning_effort=asst.reasoning_effort,
                 temperature=asst.temperature,
                 tools_available=thread.tools_available,
-                instructions=thread.instructions,
+                instructions=_build_run_instructions(
+                    thread, asst, request.state["session"].user.id
+                ),
                 verbosity=asst.verbosity,
                 messages=run_messages,
             )

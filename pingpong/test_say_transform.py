@@ -1,3 +1,4 @@
+import json
 import logging
 
 from pingpong.ai import format_instructions
@@ -31,6 +32,11 @@ def test_format_instructions_adds_say_contract_for_latex_lecture_video_only():
     assert '"speech":"ten a plus five c"' in instructions
     assert "Incorrect: One has $a$, the other has $c$." in instructions
     assert '"speech":"a","display":"$a$"' in instructions
+    assert "MUST wrap the entire fenced code block in a `say` snippet" in instructions
+    assert "Correct Mermaid diagram:" in instructions
+    assert '"display":"```mermaid\\ngraph TD' in instructions
+    assert "Correct SVG diagram:" in instructions
+    assert '"display":"```svg\\n<svg' in instructions
     assert '"speech"' in instructions
     assert '"display"' in instructions
     assert "---Formatting: Lecture Video Follow-ups---" in instructions
@@ -78,6 +84,28 @@ def test_transform_say_text_falls_back_to_speech_when_display_missing():
     text = "Use " + say_payload('{"speech":"x squared"}') + " here."
 
     assert transform_say_text(text, "display") == "Use x squared here."
+
+
+def test_transform_say_text_can_wrap_svg_block_for_dual_display_and_speech():
+    svg_block = (
+        "```svg\n"
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>\n"
+        "  <circle cx='50' cy='50' r='40' fill='gold'/>\n"
+        "</svg>\n"
+        "```"
+    )
+    text = "Here: " + say_payload(
+        json.dumps(
+            {
+                "speech": "Here is a simple yellow circle.",
+                "display": svg_block,
+            },
+            separators=(",", ":"),
+        )
+    )
+
+    assert transform_say_text(text, "display") == "Here: " + svg_block
+    assert transform_say_text(text, "speech") == "Here: Here is a simple yellow circle."
 
 
 def test_say_transformer_buffers_split_deltas():

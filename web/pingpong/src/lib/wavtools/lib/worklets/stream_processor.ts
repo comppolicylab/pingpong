@@ -47,6 +47,8 @@ class StreamProcessor extends AudioWorkletProcessor {
     this.currentlyPlayingEventId = null;
     this.processedEventIds = new Set();
     this.endedEventIds = new Set();
+    this.stopOnEmptyBuffer = true;
+    this.finishWhenDrained = false;
     this.port.onmessage = (event) => {
       if (event.data) {
         const payload = event.data;
@@ -74,6 +76,12 @@ class StreamProcessor extends AudioWorkletProcessor {
           if (payload.event === 'interrupt') {
             this.hasInterrupted = true;
           }
+        } else if (payload.event === 'configure') {
+          if (typeof payload.stopOnEmptyBuffer === 'boolean') {
+            this.stopOnEmptyBuffer = payload.stopOnEmptyBuffer;
+          }
+        } else if (payload.event === 'finish') {
+          this.finishWhenDrained = true;
         } else {
           throw new Error(\`Unhandled event "\${payload.event}"\`);
         }
@@ -173,6 +181,9 @@ class StreamProcessor extends AudioWorkletProcessor {
       return true;
     } else if (this.hasStarted) {
       if (this.flushWriteBuffer()) {
+        return true;
+      }
+      if (!this.stopOnEmptyBuffer && !this.finishWhenDrained) {
         return true;
       }
       this.port.postMessage({ event: 'stop' });

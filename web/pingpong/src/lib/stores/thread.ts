@@ -1113,6 +1113,7 @@ export class ThreadManager {
 		try {
 			const player = new WavStreamPlayer({
 				sampleRate: 24000,
+				stopOnEmptyBuffer: false,
 				onPlaybackStopped: () => {
 					if (this.#ttsPlayer !== player) {
 						return;
@@ -1146,6 +1147,7 @@ export class ThreadManager {
 
 	#handleTtsDone() {
 		// Keep the speaker control visible until buffered audio fully drains.
+		this.#ttsPlayer?.finish();
 		this.#ttsTrackId = null;
 	}
 

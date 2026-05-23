@@ -6,7 +6,7 @@ from pingpong.migrations import m11_enable_latex_for_lecture_video_assistants as
 pytestmark = pytest.mark.asyncio
 
 
-async def test_enable_latex_for_lecture_video_assistants_backfills_thread_instructions(
+async def test_enable_latex_for_lecture_video_assistants_sets_use_latex_and_clears_threads(
     db,
 ):
     async with db.async_session() as session:
@@ -46,12 +46,10 @@ async def test_enable_latex_for_lecture_video_assistants_backfills_thread_instru
     assert assistant is not None
     assert assistant.use_latex is True
     assert thread is not None
-    assert thread.instructions.startswith("Old instructions")
-    assert "Changed assistant instructions." not in thread.instructions
-    assert "---Formatting: Lecture Video LaTeX---" in thread.instructions
+    assert thread.instructions is None
 
 
-async def test_enable_latex_for_lecture_video_assistants_only_updates_lv_threads(
+async def test_enable_latex_for_lecture_video_assistants_only_updates_lv_assistants(
     db,
 ):
     async with db.async_session() as session:
@@ -85,7 +83,10 @@ async def test_enable_latex_for_lecture_video_assistants_only_updates_lv_threads
     assert updated == 0
 
     async with db.async_session() as session:
+        assistant = await session.get(models.Assistant, 1)
         thread = await session.get(models.Thread, 1)
 
+    assert assistant is not None
+    assert assistant.use_latex is False
     assert thread is not None
     assert thread.instructions == "Chat instructions"
