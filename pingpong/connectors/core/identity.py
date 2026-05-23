@@ -156,24 +156,39 @@ class ConnectorIdentityResolver:
         alg = header.get("alg")
         if not isinstance(alg, str) or alg.lower() == "none":
             raise ConnectorError("ID token missing supported signing algorithm")
-        key_set = await self._load_jwks(jwks_uri, timeout=timeout)
         kid = header.get("kid")
+        key_set = await self._load_jwks(jwks_uri, timeout=timeout)
         if isinstance(kid, str):
-            for key in key_set.keys:
-                if key.key_id == kid:
-                    if key.algorithm_name != alg:
-                        raise ConnectorError("ID token key algorithm mismatch")
-                    return key
+            key = self._matching_key(key_set, kid=kid, alg=alg)
+            if key is not None:
+                return key
+
+            key_set = await self._load_jwks(
+                jwks_uri, timeout=timeout, force_refresh=True
+            )
+            key = self._matching_key(key_set, kid=kid, alg=alg)
+            if key is not None:
+                return key
             raise ConnectorError("ID token signing key not found in JWKS")
         if len(key_set.keys) == 1 and key_set.keys[0].algorithm_name == alg:
             return key_set.keys[0]
         raise ConnectorError("ID token missing kid")
 
-    async def _load_jwks(self, jwks_uri: str, *, timeout: float) -> PyJWKSet:
-        if jwks_uri in self._jwks_cache:
+    def _matching_key(self, key_set: PyJWKSet, *, kid: str, alg: str) -> PyJWK | None:
+        for key in key_set.keys:
+            if key.key_id == kid:
+                if key.algorithm_name != alg:
+                    raise ConnectorError("ID token key algorithm mismatch")
+                return key
+        return None
+
+    async def _load_jwks(
+        self, jwks_uri: str, *, timeout: float, force_refresh: bool = False
+    ) -> PyJWKSet:
+        if not force_refresh and jwks_uri in self._jwks_cache:
             return self._jwks_cache[jwks_uri]
         async with self._jwks_lock:
-            if jwks_uri in self._jwks_cache:
+            if not force_refresh and jwks_uri in self._jwks_cache:
                 return self._jwks_cache[jwks_uri]
             try:
                 async with httpx.AsyncClient(timeout=timeout) as client:

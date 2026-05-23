@@ -4,7 +4,11 @@ import httpx
 import pytest
 
 from pingpong.connectors.core.exceptions import ConnectorError
-from pingpong.connectors.panopto import DISCOVERY_PATH, PanoptoConnector
+from pingpong.connectors.panopto import (
+    DISCOVERY_PATH,
+    PanoptoConnector,
+    PanoptoDiscovery,
+)
 from pingpong.models import ConnectorConfig
 
 pytestmark = pytest.mark.asyncio
@@ -63,6 +67,33 @@ async def test_discovery_fetches_demo_host_endpoints(monkeypatch):
         == DISCOVERY_PAYLOAD["authorization_endpoint"]
     )
     assert calls == [f"https://demo.hosted.panopto.com{DISCOVERY_PATH}"]
+
+
+@pytest.mark.parametrize(
+    ("host", "expected"),
+    [
+        ("demo.hosted.panopto.com", "demo.hosted.panopto.com"),
+        ("https://demo.hosted.panopto.com", "demo.hosted.panopto.com"),
+        ("//demo.hosted.panopto.com", "demo.hosted.panopto.com"),
+        (" demo.hosted.panopto.com/ ", "demo.hosted.panopto.com"),
+    ],
+)
+async def test_normalize_host_accepts_host_values(host, expected):
+    assert PanoptoDiscovery.normalize_host(host) == expected
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "https://demo.hosted.panopto.com/path",
+        "demo.hosted.panopto.com/path",
+        "demo.hosted.panopto.com?tenant=demo",
+        "demo.hosted.panopto.com#fragment",
+    ],
+)
+async def test_normalize_host_rejects_paths_and_queries(host):
+    with pytest.raises(ConnectorError, match="path or query"):
+        PanoptoDiscovery.normalize_host(host)
 
 
 async def test_discovery_is_cached_per_host(monkeypatch):

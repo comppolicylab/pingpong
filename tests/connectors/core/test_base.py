@@ -382,6 +382,76 @@ async def test_fetch_identity_falls_back_to_validated_id_token(monkeypatch):
     jwks_client.get.assert_awaited_once_with("https://issuer.example/jwks")
 
 
+async def test_fetch_identity_refreshes_cached_jwks_on_kid_miss(monkeypatch):
+    old_secret = b"old-id-token-secret-for-tests-32-bytes"
+    new_secret = b"new-id-token-secret-for-tests-32-bytes"
+    exp = int((datetime.now(timezone.utc) + timedelta(hours=1)).timestamp())
+
+    old_id_token = jwt.encode(
+        {
+            "sub": "old-user",
+            "iss": "https://issuer.example",
+            "aud": "client-id",
+            "exp": exp,
+        },
+        old_secret,
+        algorithm="HS256",
+        headers={"kid": "old-key"},
+    )
+    new_id_token = jwt.encode(
+        {
+            "sub": "new-user",
+            "iss": "https://issuer.example",
+            "aud": "client-id",
+            "exp": exp,
+        },
+        new_secret,
+        algorithm="HS256",
+        headers={"kid": "new-key"},
+    )
+
+    client = MagicMock()
+    client.get = AsyncMock(
+        side_effect=[
+            _JsonResponse(_oct_jwks(old_secret, kid="old-key")),
+            _JsonResponse(_oct_jwks(new_secret, kid="new-key")),
+        ]
+    )
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=None)
+    monkeypatch.setattr(
+        "pingpong.connectors.core.identity.httpx.AsyncClient",
+        MagicMock(return_value=client),
+        raising=True,
+    )
+    connector = _IdTokenConnector()
+
+    old_identity = await connector.fetch_identity(
+        connector_config=_config(),
+        tokens=ConnectorTokens(
+            access_token="at",
+            refresh_token="rt",
+            expires_at=NOW + timedelta(hours=1),
+            scopes="openid api",
+            raw={"id_token": old_id_token},
+        ),
+    )
+    new_identity = await connector.fetch_identity(
+        connector_config=_config(),
+        tokens=ConnectorTokens(
+            access_token="at",
+            refresh_token="rt",
+            expires_at=NOW + timedelta(hours=1),
+            scopes="openid api",
+            raw={"id_token": new_id_token},
+        ),
+    )
+
+    assert old_identity.external_user_id == "old-user"
+    assert new_identity.external_user_id == "new-user"
+    assert client.get.await_count == 2
+
+
 async def test_fetch_identity_rejects_id_token_nonce_mismatch(monkeypatch):
     secret = b"id-token-secret-for-tests-32-bytes"
     id_token = jwt.encode(

@@ -11,6 +11,7 @@ from pingpong.connectors.core.discovery import (
     optional_string_field,
     require_string_field,
 )
+from pingpong.connectors.core.exceptions import ConnectorError
 
 DISCOVERY_PATH = "/Panopto/oauth2/.well-known/openid-configuration"
 DISCOVERY_LABEL = "Panopto OIDC discovery"
@@ -39,7 +40,18 @@ class PanoptoDiscovery:
 
     @staticmethod
     def normalize_host(host: str) -> str:
-        parsed = urlparse(host)
+        value = host.strip()
+        parsed = urlparse(value)
         if parsed.scheme and parsed.netloc:
+            if (
+                parsed.path not in ("", "/")
+                or parsed.params
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ConnectorError("Panopto host must not include a path or query")
             return parsed.netloc.rstrip("/")
-        return host.removeprefix("//").strip().strip("/")
+        normalized = value.removeprefix("//").strip("/")
+        if "/" in normalized or "?" in normalized or "#" in normalized:
+            raise ConnectorError("Panopto host must not include a path or query")
+        return normalized
