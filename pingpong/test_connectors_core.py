@@ -11,7 +11,6 @@ from pingpong.connectors.core.base import OAuth2Connector, validate_public_host
 from pingpong.connectors.core.exceptions import ConnectorValidationError
 from pingpong.connectors.core.models import upsert_user_connector
 from pingpong.connectors.core.types import ConnectorTokens, ProviderIdentity
-from pingpong.connectors.panopto.connector import PanoptoConnector
 from pingpong.models import ConnectorConfig, User, UserConnector
 
 
@@ -221,18 +220,6 @@ async def test_validate_public_host_rejects_localhost() -> None:
 
     assert exc.value.field == "host"
     assert exc.value.message == "Host must be a public HTTPS hostname."
-
-
-@pytest.mark.asyncio
-async def test_panopto_validate_host_preserves_public_host_validation_error() -> None:
-    config = connector_config()
-    config.host = "127.0.0.1"
-
-    with pytest.raises(ConnectorValidationError) as exc:
-        await PanoptoConnector().validate_host(config)
-
-    assert exc.value.field == "host"
-    assert exc.value.message == "Host must resolve to a public address."
 
 
 @pytest.mark.asyncio

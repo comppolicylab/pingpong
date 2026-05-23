@@ -301,6 +301,8 @@ class OAuth2Connector:
         """
         try:
             url = await self.token_endpoint(connector_config)
+        except ConnectorValidationError:
+            raise
         except ConnectorError as e:
             raise ConnectorValidationError("host", str(e)) from e
         if not url:
@@ -323,6 +325,8 @@ class OAuth2Connector:
         """
         try:
             token_url = await self.token_endpoint(connector_config)
+        except ConnectorValidationError:
+            raise
         except ConnectorError as e:
             raise ConnectorValidationError("host", str(e)) from e
 
@@ -414,8 +418,15 @@ class OAuth2Connector:
         ):
             return _TokenProbeResult(ok=True, credentials_accepted=True)
 
-        if error_code == "invalid_client" or response.status_code == 401:
+        if error_code == "invalid_client":
             return _TokenProbeResult(invalid_client=True, message=description)
+        if response.status_code == 401:
+            logger.warning(
+                "Unexpected token endpoint 401 for service=%s url=%s error=%s",
+                self.slug,
+                token_url,
+                error_code,
+            )
 
         # Any OAuth error other than invalid_client means the server authenticated
         # the client and then rejected the request for an unrelated reason.
