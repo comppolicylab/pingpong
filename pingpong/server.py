@@ -164,7 +164,6 @@ from .canvas import (
     decode_canvas_token,
     get_canvas_config,
 )
-
 from .config import config
 from .errors import sentry
 from .files import (
