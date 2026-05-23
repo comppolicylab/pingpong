@@ -48,7 +48,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import delete, func, select, update
 
-from pingpong.connectors import ConnectorValidationError, all_connectors, get_connector
 import pingpong.metrics as metrics
 import pingpong.models as models
 import pingpong.schemas as schemas
@@ -60,6 +59,12 @@ from pingpong.ai_models import (
     KNOWN_MODELS,
     get_reasoning_effort_map,
     supports_temperature_for_reasoning,
+)
+from pingpong.connectors import (
+    ConnectorNotRegistered,
+    ConnectorValidationError,
+    all_connectors,
+    get_connector,
 )
 from pingpong.artifacts import ArtifactStoreError
 from pingpong.audio_store import AudioStoreError
@@ -13241,6 +13246,16 @@ async def update_external_login_provider(
     return {"status": "ok"}
 
 
+def _connector_validation_error_detail(
+    err: ConnectorValidationError,
+) -> dict[str, str]:
+    return {
+        "field": err.field,
+        "message": f"{err.field.title()}: {err.message}",
+        "error_code": f"connector_validation_{err.field}",
+    }
+
+
 @v1.get(
     "/admin/connectors/services",
     dependencies=[Depends(Authz("admin"))],
@@ -13250,7 +13265,7 @@ async def list_connector_services(request: StateRequest):
     services = [
         schemas.ConnectorService(
             slug=c.slug,
-            display_name=c.display_name or c.slug.replace("_", " ").title(),
+            display_name=c.display_name,
         )
         for c in all_connectors()
     ]
@@ -13278,7 +13293,7 @@ async def create_connector_config(
 ):
     try:
         connector = get_connector(req.service)
-    except Exception:
+    except ConnectorNotRegistered:
         raise HTTPException(
             status_code=400,
             detail=f"Unknown connector service '{req.service}'.",
@@ -13308,10 +13323,7 @@ async def create_connector_config(
     except ConnectorValidationError as e:
         raise HTTPException(
             status_code=400,
-            detail={
-                "message": f"{e.field.title()}: {e.message}",
-                "error_code": f"connector_validation_{e.field}",
-            },
+            detail=_connector_validation_error_detail(e),
         )
 
     request.state["db"].add(config_obj)
@@ -13334,12 +13346,12 @@ async def create_connector_config(
     response_model=schemas.ConnectorConfigSchema,
 )
 async def update_connector_config(
-    connector_config_id: str,
+    connector_config_id: int,
     req: schemas.UpdateConnectorConfig,
     request: StateRequest,
 ):
     config_obj = await models.ConnectorConfig.get_by_id(
-        request.state["db"], int(connector_config_id)
+        request.state["db"], connector_config_id
     )
     if not config_obj:
         raise HTTPException(404, "Connector configuration not found.")
@@ -13347,12 +13359,13 @@ async def update_connector_config(
     host_changed = config_obj.host != req.host
     client_id_changed = config_obj.client_id != req.client_id
     secret_provided = bool(req.client_secret)
+    enabling_connector = not config_obj.enabled and req.enabled
     new_secret = req.client_secret if secret_provided else config_obj.client_secret
 
-    if host_changed or client_id_changed or secret_provided:
+    if host_changed or client_id_changed or secret_provided or enabling_connector:
         try:
             connector = get_connector(config_obj.service)
-        except Exception:
+        except ConnectorNotRegistered:
             raise HTTPException(
                 status_code=400,
                 detail=f"Unknown connector service '{config_obj.service}'.",
@@ -13371,7 +13384,7 @@ async def update_connector_config(
         except ConnectorValidationError as e:
             raise HTTPException(
                 status_code=400,
-                detail={"field": e.field, "message": e.message},
+                detail=_connector_validation_error_detail(e),
             )
 
     config_obj.display_name = req.display_name
