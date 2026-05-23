@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 
 from pingpong.models import ConnectorConfig
 
-from pingpong.connectors.core.base import HTTP_TIMEOUT_SECONDS
+from pingpong.connectors.core.base import HTTP_TIMEOUT_SECONDS, validate_public_host
 from pingpong.connectors.core.discovery import (
     DiscoveryDocumentCache,
     optional_string_field,
@@ -23,6 +23,7 @@ class PanoptoDiscovery:
 
     async def document(self, connector_config: ConnectorConfig) -> dict[str, Any]:
         host = self.normalize_host(connector_config.host)
+        await validate_public_host(host)
         url = f"https://{host}{DISCOVERY_PATH}"
         return await self._documents.get(url, label=DISCOVERY_LABEL)
 
@@ -43,6 +44,8 @@ class PanoptoDiscovery:
         value = host.strip()
         parsed = urlparse(value)
         if parsed.scheme and parsed.netloc:
+            if parsed.scheme != "https":
+                raise ConnectorError("Panopto host must use HTTPS")
             if (
                 parsed.path not in ("", "/")
                 or parsed.params

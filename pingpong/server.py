@@ -60,6 +60,12 @@ from pingpong.ai_models import (
     get_reasoning_effort_map,
     supports_temperature_for_reasoning,
 )
+from pingpong.connectors import (
+    ConnectorNotRegistered,
+    ConnectorValidationError,
+    all_connectors,
+    get_connector,
+)
 from pingpong.artifacts import ArtifactStoreError
 from pingpong.audio_store import AudioStoreError
 from pingpong.bg_tasks import safe_task
@@ -13238,6 +13244,178 @@ async def update_external_login_provider(
     request.state["db"].add(provider)
     await request.state["db"].flush()
     return {"status": "ok"}
+
+
+def _connector_validation_error_detail(
+    err: ConnectorValidationError,
+) -> dict[str, str]:
+    return {
+        "field": err.field,
+        "message": err.message,
+        "error_code": f"connector_validation_{err.field}",
+    }
+
+
+@v1.get(
+    "/admin/connectors/services",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.ConnectorServices,
+)
+async def list_connector_services(request: StateRequest):
+    services = [
+        schemas.ConnectorService(
+            slug=c.slug,
+            display_name=c.display_name,
+        )
+        for c in all_connectors()
+    ]
+    return schemas.ConnectorServices(services=services)
+
+
+@v1.get(
+    "/admin/connectors",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.ConnectorConfigs,
+)
+async def list_connector_configs(request: StateRequest):
+    configs = await models.ConnectorConfig.list_all(request.state["db"])
+    return schemas.ConnectorConfigs(configs=configs)
+
+
+@v1.post(
+    "/admin/connectors",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.ConnectorConfigSchema,
+)
+async def create_connector_config(
+    req: schemas.CreateConnectorConfig,
+    request: StateRequest,
+):
+    try:
+        connector = get_connector(req.service)
+    except ConnectorNotRegistered as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown connector service '{req.service}'.",
+        ) from e
+
+    config_obj = models.ConnectorConfig(
+        service=req.service,
+        account_scope=req.account_scope,
+        display_name=req.display_name,
+        host=req.host,
+        client_id=req.client_id,
+        client_secret=req.client_secret,
+        enabled=req.enabled,
+    )
+
+    try:
+        await connector.validate_config(config_obj)
+    except ConnectorValidationError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=_connector_validation_error_detail(e),
+        ) from e
+
+    existing_config = await models.ConnectorConfig.get_by_service_and_account_scope(
+        request.state["db"], req.service, req.account_scope
+    )
+    if existing_config:
+        raise HTTPException(
+            status_code=409,
+            detail="A connector configuration already exists for this service and account scope.",
+        )
+
+    request.state["db"].add(config_obj)
+    try:
+        await request.state["db"].flush()
+    except IntegrityError as e:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "A connector configuration already exists for this service and "
+                "account scope."
+            ),
+        ) from e
+    await request.state["db"].refresh(config_obj)
+    return config_obj
+
+
+@v1.put(
+    "/admin/connectors/{connector_config_id}",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.ConnectorConfigSchema,
+)
+async def update_connector_config(
+    connector_config_id: int,
+    req: schemas.UpdateConnectorConfig,
+    request: StateRequest,
+):
+    config_obj = await models.ConnectorConfig.get_by_id(
+        request.state["db"], connector_config_id
+    )
+    if not config_obj:
+        raise HTTPException(404, "Connector configuration not found.")
+
+    host_changed = config_obj.host != req.host
+    scope_changed = config_obj.account_scope != req.account_scope
+    client_id_changed = config_obj.client_id != req.client_id
+    secret_provided = bool(req.client_secret)
+    enabling_connector = not config_obj.enabled and req.enabled
+    new_secret = req.client_secret if secret_provided else config_obj.client_secret
+
+    if (
+        host_changed
+        or scope_changed
+        or client_id_changed
+        or secret_provided
+        or enabling_connector
+    ):
+        try:
+            connector = get_connector(config_obj.service)
+        except ConnectorNotRegistered as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown connector service '{config_obj.service}'.",
+            ) from e
+        probe = models.ConnectorConfig(
+            service=config_obj.service,
+            account_scope=req.account_scope,
+            display_name=req.display_name,
+            host=req.host,
+            client_id=req.client_id,
+            client_secret=new_secret,
+            enabled=req.enabled,
+        )
+        try:
+            await connector.validate_config(probe)
+        except ConnectorValidationError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=_connector_validation_error_detail(e),
+            ) from e
+
+    config_obj.account_scope = req.account_scope
+    config_obj.display_name = req.display_name
+    config_obj.host = req.host
+    config_obj.client_id = req.client_id
+    if secret_provided:
+        config_obj.client_secret = new_secret
+    config_obj.enabled = req.enabled
+
+    request.state["db"].add(config_obj)
+    try:
+        await request.state["db"].flush()
+    except IntegrityError as e:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "A connector configuration already exists for this service and "
+                "account scope."
+            ),
+        ) from e
+    await request.state["db"].refresh(config_obj)
+    return config_obj
 
 
 @v1.get(

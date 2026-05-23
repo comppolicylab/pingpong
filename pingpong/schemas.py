@@ -3068,6 +3068,90 @@ class SessionState(BaseModel):
     agreement_id: int | None = None
 
 
+class ConnectorService(BaseModel):
+    slug: str = Field(..., min_length=1, pattern=r"^[a-z0-9_-]+$")
+    display_name: str = Field(..., min_length=1)
+
+
+class ConnectorServices(BaseModel):
+    services: list[ConnectorService]
+
+
+class ConnectorConfigSchema(BaseModel):
+    id: int
+    service: str
+    account_scope: str
+    display_name: str
+    host: str
+    client_id: str
+    enabled: bool
+    created: datetime
+    updated: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ConnectorConfigs(BaseModel):
+    configs: list[ConnectorConfigSchema]
+
+
+class CreateConnectorConfig(BaseModel):
+    service: str = Field(..., min_length=1)
+    account_scope: str = Field(..., min_length=1)
+    display_name: str = Field(..., min_length=1)
+    host: str = Field(..., min_length=1)
+    client_id: str = Field(..., min_length=1)
+    client_secret: str = Field(..., min_length=1)
+    enabled: bool = True
+
+    @field_validator(
+        "service",
+        "account_scope",
+        "display_name",
+        "host",
+        "client_id",
+        "client_secret",
+    )
+    @classmethod
+    def strip_required_strings(cls, v: str) -> str:
+        value = v.strip()
+        if not value:
+            raise ValueError("field must not be empty after stripping whitespace")
+        return value
+
+
+class UpdateConnectorConfig(BaseModel):
+    account_scope: str = Field(..., min_length=1)
+    display_name: str = Field(..., min_length=1)
+    host: str = Field(..., min_length=1)
+    client_id: str = Field(..., min_length=1)
+    client_secret: str | None = Field(
+        default=None,
+        description="Set to null to keep the existing connector secret.",
+    )
+    enabled: bool
+
+    @field_validator("account_scope", "display_name", "host", "client_id")
+    @classmethod
+    def strip_required_strings(cls, v: str) -> str:
+        value = v.strip()
+        if not value:
+            raise ValueError("field must not be empty after stripping whitespace")
+        return value
+
+    @field_validator("client_secret")
+    @classmethod
+    def strip_optional_secret(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        value = v.strip()
+        if not value:
+            raise ValueError(
+                "client_secret must not be empty after stripping whitespace"
+            )
+        return value
+
+
 class Support(BaseModel):
     blurb: str
     can_post: bool

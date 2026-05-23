@@ -1,16 +1,21 @@
 from __future__ import annotations
 
+import asyncio
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+import ipaddress
 import logging
 import secrets
-from datetime import datetime, timedelta, timezone
+import socket
 from typing import TYPE_CHECKING, Any, ClassVar
+from urllib.parse import urlparse
 
 from authlib.integrations.httpx_client import AsyncOAuth2Client
 import httpx
 
 from pingpong.now import NowFn, utcnow
 
-from .exceptions import ConnectorError, TokenRefreshError
+from .exceptions import ConnectorError, ConnectorValidationError, TokenRefreshError
 from .identity import ConnectorIdentityResolver
 from .types import ConnectorTokens, PKCEPair, ProviderIdentity, expires_at_timestamp
 
@@ -20,6 +25,66 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 HTTP_TIMEOUT_SECONDS = 10.0
+
+
+@dataclass
+class _TokenProbeResult:
+    ok: bool = False
+    credentials_accepted: bool = False
+    invalid_client: bool = False
+    provider_error: bool = False
+    message: str | None = None
+
+
+def friendly_network_error(exc: BaseException) -> str:
+    """Translate an httpx exception into a short, user-facing message.
+
+    The full exception is meant to be logged separately by the caller.
+    """
+    if isinstance(exc, httpx.TimeoutException):
+        return "Connection to this host timed out."
+    if isinstance(exc, httpx.ConnectError):
+        text = str(exc).lower()
+        dns_markers = (
+            "errno 8",
+            "nodename",
+            "servname",
+            "name or service",
+            "name resolution",
+        )
+        if any(m in text for m in dns_markers):
+            return "Could not resolve this host."
+        return "Could not connect to this host."
+    return "Could not reach this host."
+
+
+def _host_address_is_private(host: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return not ip.is_global
+
+
+async def validate_public_host(host: str) -> None:
+    hostname = (urlparse(f"//{host}").hostname or "").lower()
+    if not hostname:
+        raise ConnectorValidationError("host", "Host is required.")
+    if hostname == "localhost" or hostname.endswith(".localhost"):
+        raise ConnectorValidationError("host", "Host must be a public HTTPS hostname.")
+    if _host_address_is_private(hostname):
+        raise ConnectorValidationError("host", "Host must resolve to a public address.")
+
+    try:
+        infos = await asyncio.to_thread(socket.getaddrinfo, hostname, None)
+    except socket.gaierror as e:
+        raise ConnectorValidationError("host", "Could not resolve this host.") from e
+    for info in infos:
+        address = info[4][0]
+        if isinstance(address, str) and _host_address_is_private(address):
+            raise ConnectorValidationError(
+                "host", "Host must resolve to a public address."
+            )
 
 
 def generate_pkce_pair() -> PKCEPair:
@@ -216,6 +281,165 @@ class OAuth2Connector:
 
     def token_dict(self, tokens: ConnectorTokens) -> dict[str, Any]:
         return self._token_dict(tokens)
+
+    async def validate_config(self, connector_config: "ConnectorConfig") -> None:
+        """Probe the upstream provider to confirm the config is usable.
+
+        Raises ConnectorValidationError(field=...) on the first failure.
+        Subclasses normally override validate_host(); the base
+        validate_credentials() works for any OIDC-style token endpoint.
+        """
+        await self.validate_host(connector_config)
+        await self.validate_credentials(connector_config)
+
+    async def validate_host(self, connector_config: "ConnectorConfig") -> None:
+        """Confirm the upstream host is reachable.
+
+        Default: resolve the token endpoint via the connector's discovery hook.
+        If a subclass uses an OIDC discovery document it should override this
+        to fetch and validate that document directly.
+        """
+        try:
+            url = await self.token_endpoint(connector_config)
+        except ConnectorValidationError:
+            raise
+        except ConnectorError as e:
+            raise ConnectorValidationError("host", str(e)) from e
+        if not url:
+            raise ConnectorValidationError(
+                "host", "Could not resolve a token endpoint for this host."
+            )
+
+    async def validate_credentials(self, connector_config: "ConnectorConfig") -> None:
+        """Probe the token endpoint to confirm client_id/client_secret are valid.
+
+        Strategy:
+          1. Try ``grant_type=client_credentials``. Success → credentials work.
+             ``invalid_client`` → credentials are wrong; bail out.
+             Any other OAuth error (``unsupported_grant_type`` etc.) → fall
+             through to the auth_code probe.
+          2. Try ``grant_type=authorization_code`` with a dummy code:
+             - ``invalid_grant`` means the credentials authenticated and only
+               the (intentionally bad) code was rejected → credentials OK.
+             - ``invalid_client`` → credentials are wrong.
+        """
+        try:
+            token_url = await self.token_endpoint(connector_config)
+        except ConnectorValidationError:
+            raise
+        except ConnectorError as e:
+            raise ConnectorValidationError("host", str(e)) from e
+
+        cc_result = await self._probe_token_endpoint(
+            connector_config,
+            token_url,
+            data={"grant_type": "client_credentials"},
+        )
+        if cc_result.ok:
+            return
+        if cc_result.invalid_client:
+            raise ConnectorValidationError(
+                "credentials", cc_result.message or "Invalid client credentials."
+            )
+        if cc_result.credentials_accepted:
+            return
+
+        ac_result = await self._probe_token_endpoint(
+            connector_config,
+            token_url,
+            data={
+                "grant_type": "authorization_code",
+                "code": "pingpong-validation-probe",
+                "redirect_uri": "https://invalid.local/validation-probe",
+            },
+        )
+        if ac_result.invalid_client:
+            raise ConnectorValidationError(
+                "credentials", ac_result.message or "Invalid client credentials."
+            )
+        if ac_result.credentials_accepted:
+            return
+
+        raise ConnectorValidationError(
+            "host"
+            if cc_result.provider_error or ac_result.provider_error
+            else "credentials",
+            ac_result.message
+            or cc_result.message
+            or "Could not verify the client credentials with the provider.",
+        )
+
+    async def _probe_token_endpoint(
+        self,
+        connector_config: "ConnectorConfig",
+        token_url: str,
+        *,
+        data: dict[str, str],
+    ) -> "_TokenProbeResult":
+        auth_method = self.token_endpoint_auth_method
+        if auth_method == "client_secret_basic":
+            auth: tuple[str, str] | None = (
+                connector_config.client_id,
+                connector_config.client_secret,
+            )
+            body = dict(data)
+        else:
+            auth = None
+            body = {
+                **data,
+                "client_id": connector_config.client_id,
+                "client_secret": connector_config.client_secret,
+            }
+        try:
+            async with httpx.AsyncClient(timeout=self.http_timeout_seconds) as client:
+                response = await client.post(token_url, data=body, auth=auth)
+        except httpx.HTTPError as e:
+            logger.info(
+                "Token endpoint probe failed for service=%s url=%s: %s",
+                self.slug,
+                token_url,
+                e,
+            )
+            raise ConnectorValidationError("host", friendly_network_error(e)) from e
+
+        try:
+            payload = response.json() if response.content else {}
+        except ValueError:
+            payload = {}
+        error_code = payload.get("error") if isinstance(payload, dict) else None
+        description = (
+            payload.get("error_description") if isinstance(payload, dict) else None
+        )
+
+        if (
+            response.is_success
+            and isinstance(payload, dict)
+            and payload.get("access_token")
+        ):
+            return _TokenProbeResult(ok=True, credentials_accepted=True)
+
+        if error_code == "invalid_client":
+            return _TokenProbeResult(invalid_client=True, message=description)
+        if response.status_code == 401:
+            logger.warning(
+                "Unexpected token endpoint 401 for service=%s url=%s error=%s",
+                self.slug,
+                token_url,
+                error_code,
+            )
+
+        # Any OAuth error other than invalid_client means the server authenticated
+        # the client and then rejected the request for an unrelated reason.
+        credentials_accepted = (
+            isinstance(error_code, str) and error_code != "invalid_client"
+        )
+        return _TokenProbeResult(
+            credentials_accepted=credentials_accepted,
+            provider_error=not credentials_accepted,
+            message=description
+            or (error_code if isinstance(error_code, str) else None)
+            or f"Token endpoint returned HTTP {response.status_code}.",
+        )
 
     def _oauth_client(
         self,

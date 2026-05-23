@@ -31,9 +31,11 @@ export type BaseResponse = {
 export type Error = {
 	detail?: string;
 	error_code?: string;
+	field?: string;
 };
 
 type CodedErrorDetail = {
+	field?: string;
 	message?: string;
 	detail?: string;
 	error_code?: string;
@@ -117,7 +119,8 @@ export const expandResponse = <R extends BaseData>(
 				$status,
 				error: {
 					detail: detail.message ?? detail.detail,
-					error_code: detail.error_code ?? errorResponse.error_code
+					error_code: detail.error_code ?? errorResponse.error_code,
+					field: detail.field ?? errorResponse.field
 				} as Error,
 				data: null
 			};
@@ -1450,6 +1453,83 @@ export const updateExternalLoginProvider = async (
 ) => {
 	const url = `admin/providers/${providerId}`;
 	return await PUT<ExternalLoginProviderUpdateRequest, GenericStatus>(f, url, data);
+};
+
+export type ConnectorService = {
+	slug: string;
+	display_name: string;
+};
+
+export type ConnectorServices = {
+	services: ConnectorService[];
+};
+
+export type ConnectorConfig = {
+	id: number;
+	service: string;
+	account_scope: string;
+	display_name: string;
+	host: string;
+	client_id: string;
+	enabled: boolean;
+	created: string;
+	updated: string;
+};
+
+export type ConnectorConfigs = {
+	configs: ConnectorConfig[];
+};
+
+export type CreateConnectorConfigRequest = {
+	service: string;
+	account_scope: string;
+	display_name: string;
+	host: string;
+	client_id: string;
+	client_secret: string;
+	enabled: boolean;
+};
+
+export type UpdateConnectorConfigRequest = {
+	account_scope: string;
+	display_name: string;
+	host: string;
+	client_id: string;
+	client_secret: string | null;
+	enabled: boolean;
+};
+
+/**
+ * List all registered connector services.
+ */
+export const getConnectorServices = async (f: Fetcher) => {
+	return await GET<never, ConnectorServices>(f, 'admin/connectors/services');
+};
+
+/**
+ * List all connector configurations.
+ */
+export const getConnectorConfigs = async (f: Fetcher) => {
+	return await GET<never, ConnectorConfigs>(f, 'admin/connectors');
+};
+
+/**
+ * Create a new connector configuration.
+ */
+export const createConnectorConfig = async (f: Fetcher, data: CreateConnectorConfigRequest) => {
+	return await POST<CreateConnectorConfigRequest, ConnectorConfig>(f, 'admin/connectors', data);
+};
+
+/**
+ * Update an existing connector configuration.
+ */
+export const updateConnectorConfig = async (
+	f: Fetcher,
+	connectorConfigId: number,
+	data: UpdateConnectorConfigRequest
+) => {
+	const url = `admin/connectors/${connectorConfigId}`;
+	return await PUT<UpdateConnectorConfigRequest, ConnectorConfig>(f, url, data);
 };
 
 /**
