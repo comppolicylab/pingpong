@@ -726,6 +726,7 @@ config = _load_config()
 # Configure logging, shutting up some noisy libraries
 logging.basicConfig(level=config.log_level)
 # Shut up some noisy libraries
+logging.getLogger("watchfiles").setLevel(logging.WARNING)
 logging.getLogger("azure.monitor.opentelemetry").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(
