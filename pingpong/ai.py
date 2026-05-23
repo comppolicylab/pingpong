@@ -3802,6 +3802,7 @@ async def run_response(
                 and (lecture_video_dual_text_mode or lecture_video_followups_mode)
                 else None
             )
+            _tts_has_unflushed_text = False
 
             async def _tts_drain_flush_signals() -> None:
                 """Forward speech->body flush signals to ElevenLabs.
@@ -3810,6 +3811,7 @@ async def run_response(
                 immediately rather than waiting for the long diagram body
                 that will produce no further TTS input.
                 """
+                nonlocal _tts_has_unflushed_text
                 if not _tts_pua_transformer or not _tts_client:
                     return
                 pending = _tts_pua_transformer.consume_flush_signals()
@@ -3820,7 +3822,7 @@ async def run_response(
                     if sanitized and _tts_chunker:
                         for tts_chunk in _tts_chunker.add(sanitized):
                             try:
-                                await _tts_client.send_text(tts_chunk)
+                                await _tts_send_text(tts_chunk)
                             except Exception:
                                 logger.warning(
                                     "TTS pre-flush send failed", exc_info=True
@@ -3829,15 +3831,17 @@ async def run_response(
                     final_chunk = _tts_chunker.flush()
                     if final_chunk:
                         try:
-                            await _tts_client.send_text(final_chunk)
+                            await _tts_send_text(final_chunk)
                         except Exception:
                             logger.warning(
                                 "TTS pre-flush chunker drain failed",
                                 exc_info=True,
                             )
                 for _ in range(pending):
+                    if not _tts_has_unflushed_text:
+                        break
                     try:
-                        await _tts_client.send_text("", flush=True)
+                        await _tts_send_text("", flush=True)
                     except Exception:
                         logger.warning("TTS snippet flush failed", exc_info=True)
 
@@ -3847,6 +3851,24 @@ async def run_response(
             _tts_audio_chunk_idx = 0
             _tts_connect_task: asyncio.Task[ElevenLabsStreamingTTS] | None = None
             _tts_input_closed = False
+
+            async def _tts_send_text(
+                text: str,
+                *,
+                flush: bool = False,
+                try_trigger_generation: bool = False,
+            ) -> None:
+                nonlocal _tts_has_unflushed_text
+                assert _tts_client is not None
+                await _tts_client.send_text(
+                    text,
+                    flush=flush,
+                    try_trigger_generation=try_trigger_generation,
+                )
+                if flush:
+                    _tts_has_unflushed_text = False
+                elif text:
+                    _tts_has_unflushed_text = True
 
             async def _tts_cleanup() -> None:
                 nonlocal _tts_client, _tts_audio_task, _tts_connect_task
@@ -4030,7 +4052,7 @@ async def run_response(
                                 try:
                                     tts_chunks = _tts_chunker.add(chunk)
                                     for tts_chunk in tts_chunks:
-                                        await _tts_client.send_text(
+                                        await _tts_send_text(
                                             tts_chunk,
                                         )
                                 except Exception:
@@ -4043,7 +4065,7 @@ async def run_response(
                             try:
                                 tts_chunks = _tts_chunker.add(remaining)
                                 for chunk in tts_chunks:
-                                    await _tts_client.send_text(
+                                    await _tts_send_text(
                                         chunk,
                                     )
                             except Exception:
@@ -4054,7 +4076,7 @@ async def run_response(
                         final_chunk = _tts_chunker.flush()
                         if final_chunk:
                             try:
-                                await _tts_client.send_text(
+                                await _tts_send_text(
                                     final_chunk,
                                     flush=True,
                                 )
@@ -4179,7 +4201,7 @@ async def run_response(
                                             try:
                                                 tts_chunks = _tts_chunker.add(chunk)
                                                 for tts_chunk in tts_chunks:
-                                                    await _tts_client.send_text(
+                                                    await _tts_send_text(
                                                         tts_chunk,
                                                     )
                                             except Exception:
