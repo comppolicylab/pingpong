@@ -13337,6 +13337,7 @@ async def create_connector_config(
                 "account scope."
             ),
         ) from e
+    await request.state["db"].refresh(config_obj)
     return config_obj
 
 
@@ -13413,6 +13414,7 @@ async def update_connector_config(
                 "account scope."
             ),
         ) from e
+    await request.state["db"].refresh(config_obj)
     return config_obj
 
 

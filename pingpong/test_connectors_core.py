@@ -148,13 +148,6 @@ async def test_validate_credentials_accepts_client_credentials_oauth_error(
                 400,
                 json={"error": "unsupported_grant_type"},
             ),
-            httpx.Response(
-                400,
-                json={
-                    "error": "invalid_grant",
-                    "error_description": "Authorization code is invalid",
-                },
-            ),
         ],
     )
 
