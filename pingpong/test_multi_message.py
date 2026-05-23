@@ -125,11 +125,7 @@ async def test_dual_text_stream_handler_stores_raw_say_snippet_and_streams_displ
     message_part_id = handler.message_part_id
     assert message_part_id is not None
 
-    raw_snippet = (
-        "\ue200say\ue202"
-        '{"speech":"x squared plus y squared","display":"$ x^2 + y^2 $"}'
-        "\ue201"
-    )
+    raw_snippet = "\ue200say\ue202x squared plus y squared\n$ x^2 + y^2 $\ue201"
     raw_followups = (
         "\ue200followups\ue202"
         '{"responses":["Can you show another example?","What happens next?"]}'
@@ -223,11 +219,7 @@ async def test_run_response_sends_say_speech_text_to_tts(db, monkeypatch):
         async def get_client(self):
             yield AsyncMock()
 
-    raw_snippet = (
-        "\ue200say\ue202"
-        '{"speech":"x squared plus y squared.","display":"$ x^2 + y^2 $"}'
-        "\ue201"
-    )
+    raw_snippet = "\ue200say\ue202x squared plus y squared.\n$ x^2 + y^2 $\ue201"
     raw_followups = (
         '\ue200followups\ue202{"responses":["Can you show another example?"]}\ue201'
     )

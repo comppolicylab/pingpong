@@ -1509,11 +1509,7 @@ async def test_get_thread_transforms_lecture_video_say_history_after_latex_disab
     thread_id = create_response.json()["thread"]["id"]
     await grant_thread_permissions(config, thread_id, 123)
 
-    raw_snippet = (
-        "\ue200say\ue202"
-        '{"speech":"x squared plus y squared","display":"$ x^2 + y^2 $"}'
-        "\ue201"
-    )
+    raw_snippet = "\ue200say\ue202x squared plus y squared\n$ x^2 + y^2 $\ue201"
     async with db.async_session() as session:
         run = models.Run(
             status=schemas.RunStatus.COMPLETED,

@@ -7,105 +7,549 @@ SAY_MARKER_START = "\ue200"
 SAY_MARKER_SEPARATOR = "\ue202"
 SAY_MARKER_END = "\ue201"
 
-SayTransformTarget = Literal["display", "speech"]
+SNIPPET_MARKERS = frozenset({"say", "svg", "mermaid"})
+FLUSH_MARKERS = frozenset({"svg", "mermaid"})
+FOLLOWUP_MARKER_NAME = "followups"
+MAX_FOLLOWUP_SUGGESTIONS = 3
+
+SUPPORTED_MARKERS = SNIPPET_MARKERS | {FOLLOWUP_MARKER_NAME}
+
+PuaStreamTarget = Literal["display", "speech"]
+SnippetTransformTarget = PuaStreamTarget
+
 logger = logging.getLogger(__name__)
 
 
-class SayTransformer:
-    """Streaming transformer for PUA-delimited `say` snippets."""
+class _StreamingSnippetJsonParser:
+    """Incrementally parse snippet JSON and stream selected string fields."""
 
-    def __init__(self, target: SayTransformTarget, *, max_buffer_chars: int = 4096):
+    _EXPECT_OBJECT_START = "expect_object_start"
+    _EXPECT_KEY_OR_END = "expect_key_or_end"
+    _KEY = "key"
+    _AFTER_KEY = "after_key"
+    _BEFORE_VALUE = "before_value"
+    _VALUE_STRING = "value_string"
+    _VALUE_LITERAL = "value_literal"
+    _AFTER_VALUE = "after_value"
+    _DONE = "done"
+    _INVALID = "invalid"
+
+    def __init__(
+        self,
+        *,
+        target: PuaStreamTarget,
+        marker_name: str,
+        max_speech_buffer_chars: int,
+    ):
         self.target = target
-        self._buffer_parts: list[str] = []
-        self.max_buffer_chars = max_buffer_chars
+        self.marker_name = marker_name
+        self.max_speech_buffer_chars = max_speech_buffer_chars
+        self.state = self._EXPECT_OBJECT_START
+        self.current_key = ""
+        self.current_value_key: str | None = None
+        self.literal_buf = ""
+        self.escape = False
+        self.unicode_escape: str | None = None
+        self.display_speech_fallback = ""
+        self.saw_content = False
+        self.started_content = False
+        self.invalid_reason: str | None = None
+
+    @property
+    def done(self) -> bool:
+        return self.state == self._DONE
+
+    @property
+    def invalid(self) -> bool:
+        return self.state == self._INVALID
+
+    @property
+    def in_string(self) -> bool:
+        return self.state in {self._KEY, self._VALUE_STRING}
+
+    def feed(self, ch: str, out: list[str]) -> bool:
+        """Consume one char. Return True when a TTS flush signal should fire."""
+        if self.invalid or self.done:
+            return False
+
+        if self.state == self._EXPECT_OBJECT_START:
+            if ch.isspace():
+                return False
+            if ch == "{":
+                self.state = self._EXPECT_KEY_OR_END
+                return False
+            return self._invalidate("expected JSON object")
+
+        if self.state == self._EXPECT_KEY_OR_END:
+            if ch.isspace():
+                return False
+            if ch == "}":
+                self.state = self._DONE
+                return False
+            if ch == '"':
+                self.current_key = ""
+                self.escape = False
+                self.unicode_escape = None
+                self.state = self._KEY
+                return False
+            return self._invalidate("expected object key")
+
+        if self.state == self._KEY:
+            decoded = self._feed_json_string_char(ch)
+            if decoded is None:
+                return False
+            if decoded == "":
+                self.state = self._AFTER_KEY
+                return False
+            self.current_key += decoded
+            return False
+
+        if self.state == self._AFTER_KEY:
+            if ch.isspace():
+                return False
+            if ch == ":":
+                self.state = self._BEFORE_VALUE
+                return False
+            return self._invalidate("expected ':' after object key")
+
+        if self.state == self._BEFORE_VALUE:
+            if ch.isspace():
+                return False
+            self.current_value_key = self.current_key
+            if ch == '"':
+                self.escape = False
+                self.unicode_escape = None
+                self.state = self._VALUE_STRING
+                if self.current_value_key == "content":
+                    self.started_content = True
+                    return self.marker_name in FLUSH_MARKERS
+                return False
+            if ch in "{[":
+                return self._invalidate("snippet JSON values must be strings")
+            self.literal_buf = ch
+            self.state = self._VALUE_LITERAL
+            return False
+
+        if self.state == self._VALUE_STRING:
+            decoded = self._feed_json_string_char(ch)
+            if decoded is None:
+                return False
+            if decoded == "":
+                self.state = self._AFTER_VALUE
+                self.current_value_key = None
+                return False
+            self._consume_value_char(decoded, out)
+            return False
+
+        if self.state == self._VALUE_LITERAL:
+            if ch in ",}":
+                if self.literal_buf.strip() not in {"null", "true", "false"}:
+                    return self._invalidate("snippet JSON values must be strings")
+                self.current_value_key = None
+                if ch == ",":
+                    self.state = self._EXPECT_KEY_OR_END
+                else:
+                    self.state = self._DONE
+                return False
+            if ch.isspace():
+                if self.literal_buf.strip() not in {"null", "true", "false"}:
+                    return self._invalidate("snippet JSON values must be strings")
+                self.current_value_key = None
+                self.state = self._AFTER_VALUE
+                return False
+            self.literal_buf += ch
+            return False
+
+        if self.state == self._AFTER_VALUE:
+            if ch.isspace():
+                return False
+            if ch == ",":
+                self.state = self._EXPECT_KEY_OR_END
+                return False
+            if ch == "}":
+                self.state = self._DONE
+                return False
+            return self._invalidate("expected ',' or '}' after object value")
+
+        return False
+
+    def flush_output(self) -> str:
+        if self.target == "display" and not self.saw_content:
+            return self.display_speech_fallback
+        return ""
+
+    def _feed_json_string_char(self, ch: str) -> str | None:
+        if self.unicode_escape is not None:
+            if ch.lower() not in "0123456789abcdef":
+                self._invalidate("invalid unicode escape")
+                return None
+            self.unicode_escape += ch
+            if len(self.unicode_escape) == 4:
+                decoded = chr(int(self.unicode_escape, 16))
+                self.unicode_escape = None
+                self.escape = False
+                return decoded
+            return None
+
+        if self.escape:
+            self.escape = False
+            match ch:
+                case '"':
+                    return '"'
+                case "\\":
+                    return "\\"
+                case "/":
+                    return "/"
+                case "b":
+                    return "\b"
+                case "f":
+                    return "\f"
+                case "n":
+                    return "\n"
+                case "r":
+                    return "\r"
+                case "t":
+                    if (
+                        self.current_value_key == "content"
+                        and self._looks_like_latex_escape(ch)
+                    ):
+                        return "\\" + ch
+                    return "\t"
+                case "u":
+                    self.unicode_escape = ""
+                    self.escape = True
+                    return None
+                case _:
+                    if (
+                        self.current_value_key == "content"
+                        and self._looks_like_latex_escape(ch)
+                    ):
+                        return "\\" + ch
+                    self._invalidate("invalid string escape")
+                    return None
+
+        if ch == "\\":
+            self.escape = True
+            return None
+        if ch == '"':
+            return ""
+        return ch
+
+    def _looks_like_latex_escape(self, ch: str) -> bool:
+        # Models often emit LaTeX in JSON content as "\times" or "\frac"
+        # instead of JSON-escaping the slash. Be lenient only for display
+        # content, where preserving the backslash is more useful than decoding
+        # a JSON control escape such as \t or \f.
+        return ch.isalpha()
+
+    def _consume_value_char(self, ch: str, out: list[str]) -> None:
+        if self.current_value_key == "speech":
+            if self.target == "speech":
+                out.append(ch)
+                return
+            if not self.saw_content:
+                self.display_speech_fallback += ch
+                if len(self.display_speech_fallback) > self.max_speech_buffer_chars:
+                    logger.warning(
+                        "Speech fallback buffer exceeded cap; emitting as display"
+                    )
+                    out.append(self.display_speech_fallback)
+                    self.display_speech_fallback = ""
+            return
+
+        if self.current_value_key == "content":
+            self.saw_content = True
+            if self.target == "display":
+                out.append(ch)
+
+    def _invalidate(self, reason: str) -> bool:
+        self.state = self._INVALID
+        self.invalid_reason = reason
+        return False
+
+
+class PuaStreamTransformer:
+    """Streaming transformer for PUA-delimited snippets.
+
+    Snippet shape::
+
+        \\ue200<marker>\\ue202{"speech":"spoken text","content":"visible text"}\\ue201
+
+    Known markers:
+
+    - ``say``, ``svg``, ``mermaid`` — JSON snippets using common ``speech`` and
+      ``content`` keys. The speech target streams ``speech`` string characters
+      as they decode. The display target streams ``content`` string characters
+      as they decode. If ``content`` is omitted, display falls back to
+      ``speech``. For ``svg`` and ``mermaid``, starting the ``content`` field
+      emits a flush signal so TTS can play speech before long silent content.
+
+    - ``followups`` — payload is buffered until the end marker, then parsed as
+      JSON. Suggestions are collected via ``consume_followup_suggestions``.
+
+    Unknown markers pass through verbatim so downstream consumers can handle
+    them.
+    """
+
+    _OUTSIDE = "outside"
+    _MARKER = "marker"
+    _SNIPPET_JSON = "snippet_json"
+    _FOLLOWUP_PAYLOAD = "followup_payload"
+    _PASSTHROUGH = "passthrough"
+
+    def __init__(
+        self,
+        target: PuaStreamTarget,
+        *,
+        max_marker_chars: int = 64,
+        max_speech_buffer_chars: int = 1024,
+        max_followup_buffer_chars: int = 4096,
+    ):
+        self.target = target
+        self.max_marker_chars = max_marker_chars
+        self.max_speech_buffer_chars = max_speech_buffer_chars
+        self.max_followup_buffer_chars = max_followup_buffer_chars
+        self._buffer = ""
+        self._state = self._OUTSIDE
+        self._marker_buf = ""
+        self._marker_name: str | None = None
+        self._json_parser: _StreamingSnippetJsonParser | None = None
+        self._followup_buf = ""
+        self._pending_flushes = 0
+        self._followup_suggestions: list[str] = []
 
     def add(self, text: str) -> str:
         if not text:
             return ""
-        self._buffer_parts.append(text)
-        buffer = "".join(self._buffer_parts)
-        output_parts: list[str] = []
-        cursor = 0
-
-        while cursor < len(buffer):
-            start_index = buffer.find(SAY_MARKER_START, cursor)
-            if start_index < 0:
-                output_parts.append(buffer[cursor:])
-                cursor = len(buffer)
-                break
-
-            if start_index > cursor:
-                output_parts.append(buffer[cursor:start_index])
-                cursor = start_index
-
-            separator_index = buffer.find(SAY_MARKER_SEPARATOR, start_index + 1)
-            if separator_index < 0:
-                break
-
-            end_index = buffer.find(SAY_MARKER_END, separator_index + 1)
-            if end_index < 0:
-                break
-
-            marker_name = buffer[start_index + 1 : separator_index].strip()
-            payload = buffer[separator_index + 1 : end_index]
-            if marker_name == "say":
-                transformed = _transform_payload(payload, self.target)
-                if transformed is not None:
-                    output_parts.append(transformed)
-            cursor = end_index + 1
-
-        if cursor >= len(buffer):
-            self._buffer_parts = []
-        else:
-            self._buffer_parts = [buffer[cursor:]]
-            if len(self._buffer_parts[0]) > self.max_buffer_chars:
-                logger.warning(
-                    "Emitting oversized incomplete say snippet buffer as raw text"
-                )
-                output_parts.append(self._buffer_parts[0])
-                self._buffer_parts = []
-
-        return "".join(output_parts)
+        self._buffer += text
+        out: list[str] = []
+        while self._advance(out):
+            pass
+        return "".join(out)
 
     def flush(self) -> str:
-        output = ""
-        buffer = "".join(self._buffer_parts)
-        if buffer:
-            if SAY_MARKER_START in buffer:
-                logger.warning("Emitting incomplete say snippet buffer as raw text")
-            output = buffer
-        self._buffer_parts = []
-        return output
+        out: list[str] = []
+        if self._state == self._OUTSIDE:
+            if self._buffer:
+                out.append(self._buffer)
+                self._buffer = ""
+        elif self._state == self._MARKER:
+            logger.warning("Flushing incomplete snippet (marker phase) as raw text")
+            out.append(SAY_MARKER_START + self._marker_buf + self._buffer)
+            self._buffer = ""
+            self._reset()
+        elif self._state == self._SNIPPET_JSON:
+            logger.warning("Flushing incomplete snippet JSON")
+            if self._json_parser:
+                out.append(self._json_parser.flush_output())
+            self._buffer = ""
+            self._reset()
+        elif self._state == self._FOLLOWUP_PAYLOAD:
+            logger.warning("Dropping incomplete followups snippet buffer")
+            self._buffer = ""
+            self._followup_buf = ""
+            self._reset()
+        elif self._state == self._PASSTHROUGH:
+            out.append(self._buffer)
+            self._buffer = ""
+            self._reset()
+        return "".join(out)
+
+    def consume_flush_signals(self) -> int:
+        n = self._pending_flushes
+        self._pending_flushes = 0
+        return n
+
+    def consume_followup_suggestions(self) -> list[str]:
+        suggestions = list(self._followup_suggestions)
+        self._followup_suggestions.clear()
+        return suggestions
+
+    def _advance(self, out: list[str]) -> bool:
+        if self._state == self._OUTSIDE:
+            return self._step_outside(out)
+        if self._state == self._MARKER:
+            return self._step_marker(out)
+        if self._state == self._SNIPPET_JSON:
+            return self._step_snippet_json(out)
+        if self._state == self._FOLLOWUP_PAYLOAD:
+            return self._step_followup(out)
+        if self._state == self._PASSTHROUGH:
+            return self._step_passthrough(out)
+        return False
+
+    def _step_outside(self, out: list[str]) -> bool:
+        idx = self._buffer.find(SAY_MARKER_START)
+        if idx < 0:
+            if self._buffer:
+                out.append(self._buffer)
+                self._buffer = ""
+            return False
+        if idx > 0:
+            out.append(self._buffer[:idx])
+        self._buffer = self._buffer[idx + 1 :]
+        self._state = self._MARKER
+        self._marker_buf = ""
+        return True
+
+    def _step_marker(self, out: list[str]) -> bool:
+        sep_idx = self._buffer.find(SAY_MARKER_SEPARATOR)
+        if sep_idx < 0:
+            self._marker_buf += self._buffer
+            self._buffer = ""
+            if len(self._marker_buf) > self.max_marker_chars:
+                logger.warning("Dropping snippet with oversized marker name buffer")
+                out.append(SAY_MARKER_START + self._marker_buf)
+                self._reset()
+                return True
+            return False
+        self._marker_buf += self._buffer[:sep_idx]
+        self._buffer = self._buffer[sep_idx + 1 :]
+        marker_name = self._marker_buf.strip()
+        if marker_name in SNIPPET_MARKERS:
+            self._marker_name = marker_name
+            self._json_parser = _StreamingSnippetJsonParser(
+                target=self.target,
+                marker_name=marker_name,
+                max_speech_buffer_chars=self.max_speech_buffer_chars,
+            )
+            self._state = self._SNIPPET_JSON
+        elif marker_name == FOLLOWUP_MARKER_NAME:
+            self._marker_name = marker_name
+            self._state = self._FOLLOWUP_PAYLOAD
+            self._followup_buf = ""
+            if self.target == "speech":
+                self._pending_flushes += 1
+        else:
+            out.append(SAY_MARKER_START + self._marker_buf + SAY_MARKER_SEPARATOR)
+            self._marker_buf = ""
+            self._marker_name = None
+            self._state = self._PASSTHROUGH
+        return True
+
+    def _step_snippet_json(self, out: list[str]) -> bool:
+        if not self._buffer:
+            return False
+        parser = self._json_parser
+        if parser is None:
+            self._reset()
+            return True
+
+        while self._buffer:
+            ch = self._buffer[0]
+            self._buffer = self._buffer[1:]
+
+            if ch == SAY_MARKER_END and parser.done:
+                out.append(parser.flush_output())
+                self._reset()
+                return True
+
+            if ch == SAY_MARKER_END and not parser.in_string:
+                logger.debug("Dropping malformed snippet JSON before complete object")
+                self._reset()
+                return True
+
+            should_flush = parser.feed(ch, out)
+            if should_flush:
+                self._pending_flushes += 1
+            if parser.invalid:
+                logger.debug(
+                    "Dropping malformed snippet JSON: %s",
+                    parser.invalid_reason,
+                )
+                self._drop_until_marker_end()
+                return bool(self._buffer)
+
+        return False
+
+    def _drop_until_marker_end(self) -> None:
+        end_idx = self._buffer.find(SAY_MARKER_END)
+        if end_idx < 0:
+            self._buffer = ""
+        else:
+            self._buffer = self._buffer[end_idx + 1 :]
+        self._reset()
+
+    def _step_followup(self, out: list[str]) -> bool:
+        if not self._buffer:
+            return False
+        end_idx = self._buffer.find(SAY_MARKER_END)
+        if end_idx < 0:
+            self._followup_buf += self._buffer
+            self._buffer = ""
+            if len(self._followup_buf) > self.max_followup_buffer_chars:
+                logger.warning("Dropping oversized incomplete followups snippet buffer")
+                self._followup_buf = ""
+                self._reset()
+                return True
+            return False
+        self._followup_buf += self._buffer[:end_idx]
+        self._buffer = self._buffer[end_idx + 1 :]
+        self._collect_followup_payload(self._followup_buf)
+        self._followup_buf = ""
+        self._reset()
+        return True
+
+    def _collect_followup_payload(self, payload: str) -> None:
+        for suggestion in _extract_followup_responses(payload):
+            if suggestion in self._followup_suggestions:
+                continue
+            if len(self._followup_suggestions) >= MAX_FOLLOWUP_SUGGESTIONS:
+                break
+            self._followup_suggestions.append(suggestion)
+
+    def _step_passthrough(self, out: list[str]) -> bool:
+        if not self._buffer:
+            return False
+        end_idx = self._buffer.find(SAY_MARKER_END)
+        if end_idx < 0:
+            out.append(self._buffer)
+            self._buffer = ""
+            return False
+        out.append(self._buffer[: end_idx + 1])
+        self._buffer = self._buffer[end_idx + 1 :]
+        self._reset()
+        return True
+
+    def _reset(self) -> None:
+        self._state = self._OUTSIDE
+        self._marker_buf = ""
+        self._marker_name = None
+        self._json_parser = None
 
 
-def transform_say_text(text: str, target: SayTransformTarget) -> str:
-    transformer = SayTransformer(target)
+SnippetTransformer = PuaStreamTransformer
+SayTransformer = PuaStreamTransformer
+
+
+def transform_say_text(text: str, target: PuaStreamTarget) -> str:
+    transformer = PuaStreamTransformer(target)
     return transformer.add(text) + transformer.flush()
 
 
-def _transform_payload(payload: str, target: SayTransformTarget) -> str | None:
+def _extract_followup_responses(payload: str) -> list[str]:
     try:
         data = json.loads(payload)
     except json.JSONDecodeError:
-        logger.debug("Dropping malformed say snippet with invalid JSON")
-        return None
+        logger.debug("Dropping malformed followups snippet with invalid JSON")
+        return []
 
     if not isinstance(data, dict):
-        logger.debug("Dropping malformed say snippet with non-object payload")
-        return None
+        logger.debug("Dropping malformed followups snippet with non-object payload")
+        return []
 
-    speech = data.get("speech")
-    if not isinstance(speech, str):
-        logger.debug("Dropping malformed say snippet with missing speech string")
-        return None
+    responses = data.get("responses")
+    if not isinstance(responses, list):
+        logger.debug("Dropping malformed followups snippet with missing responses list")
+        return []
 
-    if target == "speech":
-        return speech
-
-    display = data.get("display")
-    if display is None and "display" not in data:
-        return speech
-    if not isinstance(display, str):
-        logger.debug("Dropping malformed say snippet with missing display string")
-        return None
-    return display
+    suggestions: list[str] = []
+    for response in responses:
+        if not isinstance(response, str):
+            logger.debug("Dropping non-string followups response")
+            continue
+        suggestion = response.strip()
+        if not suggestion or suggestion in suggestions:
+            continue
+        suggestions.append(suggestion)
+    return suggestions
