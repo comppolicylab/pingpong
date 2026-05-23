@@ -1287,6 +1287,33 @@ class ExternalLogin(Base):
         return conflicts
 
 
+class ConnectorConfig(Base):
+    __tablename__ = "connector_configs"
+    __table_args__ = (
+        Index(
+            "uq_connector_configs_service_account_scope",
+            "service",
+            "account_scope",
+            unique=True,
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    service = Column(String, nullable=False)
+    account_scope = Column(String, nullable=False)
+    display_name = Column(String, nullable=False)
+    host = Column(String, nullable=False)
+    client_id = Column(String, nullable=False)
+    client_secret = Column(String, nullable=False)
+    enabled = Column(Boolean, nullable=False, server_default="true")
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    user_connectors = relationship("UserConnector", back_populates="connector_config")
+
+
 class UserConnector(Base):
     __tablename__ = "user_connectors"
     # Deliberate: NO ondelete="CASCADE" on user_id. Deleting via DB cascade
@@ -1294,64 +1321,39 @@ class UserConnector(Base):
     # path, leaving upstream tokens valid on the provider side. The user
     # deletion flow must iterate user.connectors, call revoke(), then delete.
     __table_args__ = (
-        # Partial indexes instead of plain UniqueConstraints so NULL account
-        # scopes and optional provider identities dedupe consistently across
-        # PostgreSQL and SQLite. Identity-aware connectors may store multiple
-        # rows for the same (user, service, account_scope) as long as each row
-        # has a distinct external_user_id. Connectors that cannot resolve a
-        # stable provider identity keep the previous one-row-per-scope behavior.
+        # Identity-aware connectors may store multiple rows for the same
+        # (user, connector_config) as long as each row has a distinct
+        # external_user_id. Connectors that cannot resolve a stable provider
+        # identity keep the one-row-per-config behavior.
         Index(
-            "uq_user_connector_no_scope_no_identity",
+            "uq_user_connector_config_no_identity",
             "user_id",
-            "service",
+            "connector_config_id",
             unique=True,
-            postgresql_where=text("account_scope IS NULL AND external_user_id IS NULL"),
-            sqlite_where=text("account_scope IS NULL AND external_user_id IS NULL"),
+            postgresql_where=text("external_user_id IS NULL"),
+            sqlite_where=text("external_user_id IS NULL"),
         ),
         Index(
-            "uq_user_connector_scope_no_identity",
+            "uq_user_connector_config_identity",
             "user_id",
-            "service",
-            "account_scope",
-            unique=True,
-            postgresql_where=text(
-                "account_scope IS NOT NULL AND external_user_id IS NULL"
-            ),
-            sqlite_where=text("account_scope IS NOT NULL AND external_user_id IS NULL"),
-        ),
-        Index(
-            "uq_user_connector_no_scope_identity",
-            "user_id",
-            "service",
+            "connector_config_id",
             "external_user_id",
             unique=True,
-            postgresql_where=text(
-                "account_scope IS NULL AND external_user_id IS NOT NULL"
-            ),
-            sqlite_where=text("account_scope IS NULL AND external_user_id IS NOT NULL"),
-        ),
-        Index(
-            "uq_user_connector_scope_identity",
-            "user_id",
-            "service",
-            "account_scope",
-            "external_user_id",
-            unique=True,
-            postgresql_where=text(
-                "account_scope IS NOT NULL AND external_user_id IS NOT NULL"
-            ),
-            sqlite_where=text(
-                "account_scope IS NOT NULL AND external_user_id IS NOT NULL"
-            ),
+            postgresql_where=text("external_user_id IS NOT NULL"),
+            sqlite_where=text("external_user_id IS NOT NULL"),
         ),
         Index("idx_user_connectors_user_id", "user_id"),
+        Index("idx_user_connectors_connector_config_id", "connector_config_id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     user = relationship("User", back_populates="connectors")
+    connector_config_id = Column(
+        Integer, ForeignKey("connector_configs.id"), nullable=False
+    )
+    connector_config = relationship("ConnectorConfig", back_populates="user_connectors")
     service = Column(String, nullable=False)
-    account_scope = Column(String, nullable=True)
 
     access_token = Column(String, nullable=False)
     refresh_token = Column(String, nullable=True)
@@ -1385,20 +1387,16 @@ class UserConnector(Base):
         return await session.get(UserConnector, connector_id)
 
     @classmethod
-    async def get_for_user_service_account_scope(
+    async def get_for_user_connector_config(
         cls,
         session: AsyncSession,
         user_id: int,
-        service: str,
-        account_scope: str | None,
+        connector_config_id: int,
         external_user_id: str | None = None,
     ) -> "UserConnector | None":
         stmt = select(UserConnector).where(
             UserConnector.user_id == user_id,
-            UserConnector.service == service,
-            UserConnector.account_scope.is_(None)
-            if account_scope is None
-            else UserConnector.account_scope == account_scope,
+            UserConnector.connector_config_id == connector_config_id,
             UserConnector.external_user_id.is_(None)
             if external_user_id is None
             else UserConnector.external_user_id == external_user_id,
