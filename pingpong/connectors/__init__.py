@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from .core.flow import CallbackResult, ConnectIntent, begin_connect, complete_callback
+from .core.flow import begin_connect, complete_callback
+from .core.types import CallbackResult, ConnectIntent
 from .core.registry import register
 from .panopto import PanoptoConnector as _PanoptoConnector
 

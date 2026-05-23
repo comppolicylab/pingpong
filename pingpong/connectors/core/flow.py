@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,27 +11,10 @@ from .exceptions import ConnectorFlowError
 from .models import load_connector_config_by_id, upsert_user_connector
 from .registry import get
 from .state import decode_state, encode_state, generate_nonce
-from .types import ConnectorTokens, PKCEPair, ProviderIdentity
+from .types import CallbackResult, ConnectIntent
 
 if TYPE_CHECKING:
-    from pingpong.models import ConnectorConfig, UserConnector
-
-
-@dataclass
-class ConnectIntent:
-    url: str
-    state: str
-    nonce: str
-    pkce: PKCEPair | None
-    connector_config: "ConnectorConfig"
-
-
-@dataclass
-class CallbackResult:
-    row: "UserConnector"
-    connector_config: "ConnectorConfig"
-    tokens: ConnectorTokens
-    identity: ProviderIdentity
+    from pingpong.models import ConnectorConfig
 
 
 async def begin_connect(

@@ -12,7 +12,7 @@ from .exceptions import (
     OAuthStateError,
     TokenRefreshError,
 )
-from .flow import CallbackResult, ConnectIntent, begin_connect, complete_callback
+from .flow import begin_connect, complete_callback
 from .models import (
     apply_tokens,
     client_for_user_connector,
@@ -21,7 +21,13 @@ from .models import (
 )
 from .registry import all_connectors, get, register
 from .state import decode_state, encode_state, generate_nonce
-from .types import ConnectorTokens, PKCEPair, ProviderIdentity
+from .types import (
+    CallbackResult,
+    ConnectorTokens,
+    ConnectIntent,
+    PKCEPair,
+    ProviderIdentity,
+)
 
 __all__ = [
     "ConnectorError",

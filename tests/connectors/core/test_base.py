@@ -323,7 +323,12 @@ async def test_fetch_identity_maps_userinfo_to_external_identity():
 async def test_fetch_identity_requires_userinfo_sub():
     _FakeOAuthClient.get_payload = {"email": "student@example.com"}
     connector = _StubConnector()
-    tokens = ConnectorTokens("at", "rt", None, None)
+    tokens = ConnectorTokens(
+        access_token="at",
+        refresh_token="rt",
+        expires_at=None,
+        scopes=None,
+    )
 
     with pytest.raises(ConnectorError, match="sub"):
         await connector.fetch_identity(connector_config=_config(), tokens=tokens)
@@ -410,7 +415,13 @@ async def test_fetch_identity_rejects_id_token_nonce_mismatch(monkeypatch):
 
 async def test_fetch_identity_without_userinfo_or_id_token_returns_none(monkeypatch):
     connector = _IdTokenConnector()
-    tokens = ConnectorTokens("at", "rt", None, None, raw={})
+    tokens = ConnectorTokens(
+        access_token="at",
+        refresh_token="rt",
+        expires_at=None,
+        scopes=None,
+        raw={},
+    )
 
     identity = await connector.fetch_identity(connector_config=_config(), tokens=tokens)
 
@@ -434,7 +445,12 @@ async def test_upsert_uses_user_config_and_external_user_id(db):
             session,
             user_id=user.id,
             connector_config=config,
-            tokens=ConnectorTokens("at", "rt", NOW + timedelta(hours=1), "openid api"),
+            tokens=ConnectorTokens(
+                access_token="at",
+                refresh_token="rt",
+                expires_at=NOW + timedelta(hours=1),
+                scopes="openid api",
+            ),
             identity=identity,
         )
 
@@ -448,7 +464,12 @@ async def test_upsert_uses_user_config_and_external_user_id(db):
             session,
             user_id=user.id,
             connector_config=config,
-            tokens=ConnectorTokens("at-2", None, None, None),
+            tokens=ConnectorTokens(
+                access_token="at-2",
+                refresh_token=None,
+                expires_at=None,
+                scopes=None,
+            ),
             identity=identity,
         )
         assert same.id == row.id
