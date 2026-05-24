@@ -69,9 +69,6 @@ from pingpong.migrations.m10_backfill_lecture_video_captions import (
     backfill_lecture_video_captions,
     retranscribe_active_lecture_video_words,
 )
-from pingpong.migrations.m11_enable_latex_for_lecture_video_assistants import (
-    enable_latex_for_lecture_video_assistants,
-)
 from pingpong.now import _get_next_run_time, croner, utcnow
 from pingpong.schemas import LMSType, RunStatus
 from pingpong.lti.course_bridge import course_bridge_sync_all
@@ -1095,21 +1092,6 @@ def m10_backfill_lecture_video_captions(
             )
 
     asyncio.run(_m10_backfill_lecture_video_captions())
-
-
-@db.command("m11_enable_latex_for_lecture_video_assistants")
-def m11_enable_latex_for_lecture_video_assistants() -> None:
-    async def _m11_enable_latex_for_lecture_video_assistants() -> None:
-        async with config.db.driver.async_session() as session:
-            logger.info("Enabling LaTeX for lecture video assistants...")
-            updated = await enable_latex_for_lecture_video_assistants(session)
-            await session.commit()
-            logger.info(
-                "Done! Enabled LaTeX for %s lecture video assistants.",
-                updated,
-            )
-
-    asyncio.run(_m11_enable_latex_for_lecture_video_assistants())
 
 
 @db.command("m02_remove_responses_threads")
