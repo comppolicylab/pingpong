@@ -1339,9 +1339,9 @@ async def test_send_message_creates_lecture_chat_run_with_hidden_context(
     ordered_messages = sorted(run.messages, key=lambda item: item.output_index)
     assert run.model == "gpt-4o-mini"
     assert run.tools_available == thread.tools_available
-    # Lecture-video formatting is injected fresh into run.instructions at
-    # OpenAI request time and is not stored on the thread.
-    assert not thread.instructions
+    # Thread instructions keep the stored assistant snapshot; run instructions
+    # add lecture-video formatting at runtime.
+    assert thread.instructions == "You are a lecture assistant."
     assert run.instructions is not None
     assert run.instructions.startswith("You are a lecture assistant.")
     assert "The current date and time is" not in run.instructions
@@ -1417,7 +1417,7 @@ async def test_send_message_creates_lecture_chat_run_with_hidden_context(
     ]
 )
 @pytest.mark.asyncio
-async def test_lecture_video_thread_instructions_unset_at_create_time(
+async def test_lecture_video_thread_instructions_store_snapshot_at_create_time(
     api, db, institution, valid_user_token
 ):
     async with db.async_session() as session:
@@ -1440,9 +1440,7 @@ async def test_lecture_video_thread_instructions_unset_at_create_time(
         thread = await models.Thread.get_by_id(session, response.json()["thread"]["id"])
 
     assert thread is not None
-    # Lecture-video formatting is injected at OpenAI request time, not baked
-    # into thread.instructions at create time.
-    assert not thread.instructions
+    assert thread.instructions == "You are a lecture assistant."
 
 
 @with_user(123)
@@ -1455,7 +1453,7 @@ async def test_lecture_video_thread_instructions_unset_at_create_time(
     ]
 )
 @pytest.mark.asyncio
-async def test_lecture_video_thread_instructions_unset_at_create_time_without_latex(
+async def test_lecture_video_thread_instructions_store_snapshot_at_create_time_without_latex(
     api, db, institution, valid_user_token
 ):
     async with db.async_session() as session:
@@ -1475,7 +1473,7 @@ async def test_lecture_video_thread_instructions_unset_at_create_time_without_la
         thread = await models.Thread.get_by_id(session, response.json()["thread"]["id"])
 
     assert thread is not None
-    assert not thread.instructions
+    assert thread.instructions == "You are a lecture assistant."
 
 
 @with_user(123)
