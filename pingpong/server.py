@@ -375,10 +375,8 @@ def _build_run_instructions(
     instructions verbatim.
     """
     if thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
-        # Random blocks remain stable because format_instructions seeds them
-        # from the thread and user ids instead of sampling per call.
         return format_instructions(
-            asst.instructions or "",
+            thread.instructions,
             use_latex=asst.use_latex,
             use_image_descriptions=asst.use_image_descriptions,
             disable_prompt_randomization=asst.disable_prompt_randomization,
@@ -416,28 +414,29 @@ async def _ensure_thread_instructions_migrated(
     asst: models.Assistant,
     user_id: int,
 ) -> None:
-    if (
-        thread.instructions
-        or thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
-    ):
+    if thread.instructions:
         session.add(thread)
         return
-
-    logger.info(
-        "Thread %s does not have instructions set, migrating from assistant instructions",
-        thread.id,
-    )
-    thread.instructions = format_instructions(
-        asst.instructions,
-        asst.use_latex,
-        asst.use_image_descriptions,
-        disable_prompt_randomization=asst.disable_prompt_randomization,
-        thread_id=thread.thread_id or str(thread.id),
-        user_id=user_id,
-    )
-    session.add(thread)
-    await session.flush()
-    await session.refresh(thread)
+    elif thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
+        thread.instructions = asst.instructions
+        session.add(thread)
+        return
+    else:
+        logger.info(
+            "Thread %s does not have instructions set, migrating from assistant instructions",
+            thread.id,
+        )
+        thread.instructions = format_instructions(
+            asst.instructions,
+            asst.use_latex,
+            asst.use_image_descriptions,
+            disable_prompt_randomization=asst.disable_prompt_randomization,
+            thread_id=thread.thread_id or str(thread.id),
+            user_id=user_id,
+        )
+        session.add(thread)
+        await session.flush()
+        await session.refresh(thread)
 
 
 def _display_text_for_thread(thread: models.Thread, text: str) -> str:
@@ -4648,7 +4647,7 @@ async def get_thread(
                 failed_at=None,
                 status=latest_run.status.value,
                 thread_id=str(thread_id),
-                instructions=latest_run.instructions or effective_instructions or "",
+                instructions=effective_instructions or "",
                 last_error=schemas.OpenAIRunError(
                     message=latest_run.error_message,
                     code=latest_run.error_code,
@@ -7122,7 +7121,7 @@ async def create_lecture_thread(
         "tools_available": json.dumps([]),
         "version": assistant.version,
         "last_activity": func.now(),
-        "instructions": None,
+        "instructions": assistant.instructions,
         "timezone": req.timezone,
         "lecture_video_id": lecture_video_id,
         "display_user_info": assistant.should_record_user_information
@@ -7132,9 +7131,6 @@ async def create_lecture_thread(
     result: None | models.Thread = None
     try:
         result = await models.Thread.create(request.state["db"], new_thread)
-        # Lecture-video formatting (say snippets, follow-ups, LaTeX/diagrams)
-        # is injected at OpenAI request time so prompt-segment updates apply to
-        # existing threads. Leave thread.instructions unset here.
         request.state["db"].add(result)
         await request.state["db"].flush()
         try:
