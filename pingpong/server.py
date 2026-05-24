@@ -375,8 +375,11 @@ def _build_run_instructions(
     instructions verbatim.
     """
     if thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
+        base_instructions = thread.instructions
+        if base_instructions is None:
+            base_instructions = asst.instructions or ""
         return format_instructions(
-            thread.instructions,
+            base_instructions,
             use_latex=asst.use_latex,
             use_image_descriptions=asst.use_image_descriptions,
             disable_prompt_randomization=asst.disable_prompt_randomization,
@@ -414,12 +417,18 @@ async def _ensure_thread_instructions_migrated(
     asst: models.Assistant,
     user_id: int,
 ) -> None:
-    if thread.instructions:
+    if thread.instructions is not None:
         session.add(thread)
         return
     elif thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
-        thread.instructions = asst.instructions
+        logger.info(
+            "Thread %s does not have instructions set, migrating from assistant instructions",
+            thread.id,
+        )
+        thread.instructions = asst.instructions or ""
         session.add(thread)
+        await session.flush()
+        await session.refresh(thread)
         return
     else:
         logger.info(

@@ -92,6 +92,25 @@ async def test_build_run_instructions_for_lecture_video_without_latex_skips_say_
     assert "---Formatting: Lecture Video Follow-ups---" in instructions
 
 
+async def test_build_run_instructions_for_lecture_video_normalizes_missing_thread_snapshot(
+    db,
+):
+    thread, assistant = await create_thread_and_assistant(
+        db,
+        interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+        thread_instructions=None,
+        assistant_instructions="Assistant fallback instructions.",
+        use_latex=True,
+    )
+
+    instructions = _build_run_instructions(thread, assistant, user_id=1)
+
+    assert instructions is not None
+    assert "Assistant fallback instructions." in instructions
+    assert "---Formatting: Lecture Video Dual Speech/Display Blocks---" in instructions
+    assert "---Formatting: Lecture Video Follow-ups---" in instructions
+
+
 async def test_build_run_instructions_for_non_lecture_video_uses_stored_instructions(
     db,
 ):
