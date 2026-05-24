@@ -54,15 +54,16 @@ async def test_build_run_instructions_for_lecture_video_with_latex_includes_say_
     thread, assistant = await create_thread_and_assistant(
         db,
         interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
-        thread_instructions=None,
-        assistant_instructions="Be helpful.",
+        thread_instructions="Stored lecture snapshot.",
+        assistant_instructions="Updated assistant instructions.",
         use_latex=True,
     )
 
     instructions = _build_run_instructions(thread, assistant, user_id=1)
 
     assert instructions is not None
-    assert "Be helpful." in instructions
+    assert "Stored lecture snapshot." in instructions
+    assert "Updated assistant instructions." not in instructions
     assert "---Formatting: Lecture Video Dual Speech/Display Blocks---" in instructions
     assert "---Formatting: LaTeX---" not in instructions
     assert "---Formatting: Lecture Video Follow-ups---" in instructions
@@ -74,19 +75,21 @@ async def test_build_run_instructions_for_lecture_video_without_latex_skips_say_
     thread, assistant = await create_thread_and_assistant(
         db,
         interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
-        thread_instructions=None,
-        assistant_instructions="Be helpful.",
+        thread_instructions="Stored lecture snapshot.",
+        assistant_instructions="Updated assistant instructions.",
         use_latex=False,
     )
 
     instructions = _build_run_instructions(thread, assistant, user_id=1)
 
     assert instructions is not None
-    assert "Be helpful." in instructions
+    assert "Stored lecture snapshot." in instructions
+    assert "Updated assistant instructions." not in instructions
     assert (
         "---Formatting: Lecture Video Dual Speech/Display Blocks---" not in instructions
     )
     assert "---Formatting: LaTeX---" not in instructions
+    assert "---Formatting: Lecture Video Follow-ups---" in instructions
 
 
 async def test_build_run_instructions_for_non_lecture_video_uses_stored_instructions(
