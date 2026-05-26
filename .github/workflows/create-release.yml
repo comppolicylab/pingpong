@@ -337,7 +337,7 @@ jobs:
 
       - name: Commit version bump
         if: ${{ steps.version-files.outputs.changed == 'true' }}
-        uses: iarekylew00t/verified-bot-commit@b17b2c2fe487f8465872a5f04be8076cbace39a6
+        uses: iarekylew00t/verified-bot-commit@5b4e8852dc472093935b8debcb81459bb79f7986
         with:
           message: 'release: ${{ steps.version.outputs.RELEASE_NAME }}'
           token: ${{ steps.app-token.outputs.token }}
