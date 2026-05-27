@@ -181,6 +181,11 @@
 	let lectureVideoSessionKey: string | null = null;
 	let startingReplacementLectureThread = false;
 	let lectureChatContinuePromptDismissedByPlayback = false;
+	let lectureChatContinuePromptDismissedThreadKey: string | null = null;
+	$: if (lectureChatContinuePromptDismissedThreadKey !== currentLectureVideoThreadKey) {
+		lectureChatContinuePromptDismissedByPlayback = false;
+		lectureChatContinuePromptDismissedThreadKey = currentLectureVideoThreadKey;
+	}
 	$: {
 		const nextKey = `${classId}:${threadId}:${lectureVideoSession?.state_version ?? 'none'}:${
 			lectureVideoSession?.state ?? 'none'
