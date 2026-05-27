@@ -1425,7 +1425,6 @@
 
 	function handlePlay() {
 		clearPendingVideoRetry();
-		dispatch('playbackresumed');
 		if (!videoElement) return;
 		if (questionReviewPlaybackAllowed) {
 			if (currentQuestion && currentTimeMs >= currentQuestion.stop_offset_ms) {
@@ -1440,6 +1439,7 @@
 			videoElement.pause();
 			return;
 		}
+		dispatch('playbackresumed');
 		if (suppressPlayInteraction) {
 			suppressPlayInteraction = false;
 			return;
