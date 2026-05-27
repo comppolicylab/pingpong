@@ -9100,6 +9100,112 @@ async def test_update_assistant_with_same_lecture_video_id_and_voice_only_clones
         ("user:123", "admin", "class:1"),
     ]
 )
+@pytest.mark.asyncio
+async def test_update_assistant_with_regenerate_audio_only_clones_existing_manifest(
+    api, db, institution, valid_user_token, monkeypatch
+):
+    patch_lecture_video_model_list(monkeypatch)
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Lecture Class",
+            institution_id=institution.id,
+            api_key="sk-test",
+        )
+        lecture_video = make_lecture_video(
+            class_.id,
+            "audio-only-regenerate.mp4",
+            filename="audio-only-regenerate.mp4",
+            status=schemas.LectureVideoStatus.UPLOADED.value,
+        )
+        session.add_all([class_, lecture_video])
+        await create_lecture_video_copy_credentials(session, class_.id)
+        await session.commit()
+        await session.refresh(lecture_video)
+
+    create_response = api.post(
+        "/api/v1/class/1/assistant",
+        json={
+            "name": "Lecture Assistant",
+            "instructions": "Guide the learner through the lecture.",
+            "description": "Lecture presentation assistant",
+            "interaction_mode": "lecture_video",
+            "model": "gpt-4o-mini",
+            "tools": [],
+            "lecture_video_id": lecture_video.id,
+            "lecture_video_manifest": lecture_video_manifest(
+                question_text="Keep this question?"
+            ),
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "overwrite_manifest": True,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+
+    async with db.async_session() as session:
+        created_video = await session.get(models.LectureVideo, lecture_video.id)
+        assert created_video is not None
+        created_video.manual_manifest = False
+        session.add(created_video)
+        await session.commit()
+
+    update_response = api.put(
+        "/api/v1/class/1/assistant/1",
+        json={
+            "lecture_video_id": lecture_video.id,
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "overwrite_manifest": False,
+            "regenerate_audio_requested": True,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert update_response.status_code == 200
+    regenerated_video_id = update_response.json()["lecture_video"]["id"]
+    assert regenerated_video_id != lecture_video.id
+
+    async with db.async_session() as session:
+        assistant = await session.get(models.Assistant, 1)
+        regenerated_video = await models.LectureVideo.get_by_id_with_copy_context(
+            session, regenerated_video_id
+        )
+        processing_runs = list(
+            (
+                await session.scalars(
+                    select(models.LectureVideoProcessingRun).order_by(
+                        models.LectureVideoProcessingRun.id.asc()
+                    )
+                )
+            ).all()
+        )
+
+    assert assistant is not None
+    assert assistant.lecture_video_id == regenerated_video_id
+    assert regenerated_video is not None
+    assert regenerated_video.source_lecture_video_id_snapshot == lecture_video.id
+    assert regenerated_video.manual_manifest is False
+    assert regenerated_video.questions[0].question_text == "Keep this question?"
+    assert len(processing_runs) == 2
+    assert processing_runs[0].lecture_video_id_snapshot == lecture_video.id
+    assert (
+        processing_runs[0].status == schemas.LectureVideoProcessingRunStatus.CANCELLED
+    )
+    assert processing_runs[1].lecture_video_id_snapshot == regenerated_video_id
+    assert processing_runs[1].stage == schemas.LectureVideoProcessingStage.NARRATION
+    assert processing_runs[1].status == schemas.LectureVideoProcessingRunStatus.QUEUED
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_assistants", "class:1"),
+        ("user:123", "can_edit", "assistant:1"),
+        ("user:123", "admin", "class:1"),
+    ]
+)
 async def test_update_assistant_with_same_lecture_video_config_is_a_no_op(
     api, db, institution, valid_user_token, monkeypatch
 ):

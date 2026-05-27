@@ -164,51 +164,40 @@
 	};
 
 	type LectureVideoSaveAffordances = {
-		regenerateHelperText: string;
-		regenerateButtonLabel: string;
+		audioRegenerateHelperText: string;
+		audioRegenerateButtonLabel: string;
+		manifestRegenerateHelperText: string;
+		manifestRegenerateButtonLabel: string;
 		saveButtonLabel: string;
 	};
 
 	const deriveLectureVideoSaveAffordances = ({
-		impliedRegeneration,
-		overwriteManifest,
 		saveTriggersGeneration,
-		regenerateRequested,
-		isCreating
+		audioRegenerationTriggered,
+		audioRegenerateRequested,
+		regenerateRequested
 	}: {
-		impliedRegeneration: boolean;
-		overwriteManifest: boolean;
 		saveTriggersGeneration: boolean;
+		audioRegenerationTriggered: boolean;
+		audioRegenerateRequested: boolean;
 		regenerateRequested: boolean;
-		isCreating: boolean;
 	}): LectureVideoSaveAffordances => {
-		if (impliedRegeneration && overwriteManifest) {
-			return {
-				regenerateHelperText: 'Your changes will re-create narration clips when you save.',
-				regenerateButtonLabel: 'Regenerate audio on save',
-				saveButtonLabel: 'Save'
-			};
-		}
-		if (impliedRegeneration) {
-			return {
-				regenerateHelperText:
-					'Your changes will regenerate the manifest and re-create narration clips when you save.',
-				regenerateButtonLabel: 'Regenerate on save',
-				saveButtonLabel: saveTriggersGeneration ? 'Save & generate' : 'Save'
-			};
-		}
-		if (overwriteManifest) {
-			return {
-				regenerateHelperText: 'Re-runs narration recreation for the current manifest.',
-				regenerateButtonLabel: 'Regenerate audio',
-				saveButtonLabel: regenerateRequested ? 'Save & regenerate audio' : 'Save'
-			};
-		}
+		const saveRegeneratesAudio = audioRegenerationTriggered || audioRegenerateRequested;
 		return {
-			regenerateHelperText:
-				'Re-runs the knowledge check generation and re-creates all narration clips.',
-			regenerateButtonLabel: 'Regenerate manifest & audio',
-			saveButtonLabel: saveTriggersGeneration && isCreating ? 'Save & generate' : 'Save'
+			audioRegenerateHelperText: audioRegenerationTriggered
+				? 'Your changes will re-create narration clips when you save.'
+				: 'Re-creates narration clips from the current manifest without generating a new manifest.',
+			audioRegenerateButtonLabel: 'Regenerate audio',
+			manifestRegenerateHelperText:
+				'Re-runs knowledge check generation and then re-creates narration clips.',
+			manifestRegenerateButtonLabel: 'Regenerate manifest & audio',
+			saveButtonLabel: saveTriggersGeneration
+				? 'Save & generate'
+				: saveRegeneratesAudio
+					? 'Save & regenerate audio'
+					: regenerateRequested
+						? 'Save & generate'
+						: 'Save'
 		};
 	};
 
@@ -315,6 +304,7 @@
 	let overwriteManifest = effectiveOverwriteManifest(data.lectureVideoConfig?.overwrite_manifest);
 	let hasSetOverwriteManifest = false;
 	let regenerateRequested = false;
+	let regenerateAudioRequested = false;
 	let currentVoiceId = data.lectureVideoConfig?.voice_id || '';
 	let voiceId = '';
 	let hasSetVoiceId = false;
@@ -873,30 +863,49 @@
 			videoDescriptionDurationChanged ||
 			lastManifestRunFailed ||
 			!data.lectureVideoConfig?.lecture_video_manifest);
-	$: lectureVideoNarrationTriggeredByFormChanges =
-		isLectureMode && overwriteManifest && (lectureVideoManifestChanged || lectureVideoVoiceChanged);
-	$: lectureVideoRegenerationImpliedByFormChanges =
-		lectureVideoGenerationTriggeredByFormChanges || lectureVideoNarrationTriggeredByFormChanges;
+	$: lectureVideoAudioTriggeredByFormChanges =
+		isLectureMode &&
+		!data.isCreating &&
+		!lectureVideoGenerationTriggeredByFormChanges &&
+		(lectureVideoVoiceChanged || (overwriteManifest && lectureVideoManifestChanged));
 	$: canRegenerateLectureVideo = isLectureMode && !data.isCreating;
 	$: if (!canRegenerateLectureVideo && regenerateRequested) {
 		regenerateRequested = false;
 	}
-	$: lectureVideoRegenerateButtonPressed =
-		regenerateRequested || lectureVideoRegenerationImpliedByFormChanges;
+	$: if (!canRegenerateLectureVideo && regenerateAudioRequested) {
+		regenerateAudioRequested = false;
+	}
+	$: if (overwriteManifest && regenerateRequested) {
+		regenerateRequested = false;
+	}
+	$: if (regenerateRequested && regenerateAudioRequested) {
+		regenerateAudioRequested = false;
+	}
+	$: if (lectureVideoGenerationTriggeredByFormChanges && regenerateAudioRequested) {
+		regenerateAudioRequested = false;
+	}
+	$: lectureVideoManifestRegenerateButtonPressed =
+		regenerateRequested || lectureVideoGenerationTriggeredByFormChanges;
+	$: lectureVideoAudioRegenerateButtonPressed =
+		regenerateAudioRequested || lectureVideoAudioTriggeredByFormChanges;
 	$: lectureVideoSaveTriggersGeneration =
 		isLectureMode &&
 		canGenerateLectureVideoManifest &&
 		!overwriteManifest &&
 		(regenerateRequested || lectureVideoGenerationTriggeredByFormChanges);
 	$: lectureVideoSaveAffordances = deriveLectureVideoSaveAffordances({
-		impliedRegeneration: lectureVideoRegenerationImpliedByFormChanges,
-		overwriteManifest,
 		saveTriggersGeneration: isLectureMode && lectureVideoSaveTriggersGeneration,
-		regenerateRequested,
-		isCreating: data.isCreating
+		audioRegenerationTriggered: lectureVideoAudioTriggeredByFormChanges,
+		audioRegenerateRequested: regenerateAudioRequested,
+		regenerateRequested
 	});
-	$: lectureVideoRegenerateHelperText = lectureVideoSaveAffordances.regenerateHelperText;
-	$: lectureVideoRegenerateButtonLabel = lectureVideoSaveAffordances.regenerateButtonLabel;
+	$: lectureVideoAudioRegenerateHelperText = lectureVideoSaveAffordances.audioRegenerateHelperText;
+	$: lectureVideoAudioRegenerateButtonLabel =
+		lectureVideoSaveAffordances.audioRegenerateButtonLabel;
+	$: lectureVideoManifestRegenerateHelperText =
+		lectureVideoSaveAffordances.manifestRegenerateHelperText;
+	$: lectureVideoManifestRegenerateButtonLabel =
+		lectureVideoSaveAffordances.manifestRegenerateButtonLabel;
 	$: saveButtonLabel = lectureVideoSaveAffordances.saveButtonLabel;
 	$: lectureVideoChatUnavailable = (() => {
 		try {
@@ -2082,9 +2091,10 @@
 			modifiedFields.push('video description duration');
 		}
 		if (canRegenerateLectureVideo && regenerateRequested) {
-			modifiedFields.push(
-				overwriteManifest ? 'lecture video narration' : 'lecture video generation'
-			);
+			modifiedFields.push('lecture video generation');
+		}
+		if (canRegenerateLectureVideo && regenerateAudioRequested) {
+			modifiedFields.push('lecture video narration');
 		}
 		if (overwriteManifest !== originalOverwriteManifest) {
 			modifiedFields.push('lecture video manifest mode');
@@ -2708,6 +2718,7 @@
 				videoDescriptionDurationChanged ||
 				overwriteManifestChanged ||
 				(canRegenerateLectureVideo && regenerateRequested) ||
+				(canRegenerateLectureVideo && regenerateAudioRequested) ||
 				lastManifestRunFailed;
 
 			if (data.isCreating || lectureVideoFieldsChanged) {
@@ -2722,6 +2733,7 @@
 					: undefined;
 				if (canRegenerateLectureVideo) {
 					params.regenerate_requested = regenerateRequested;
+					params.regenerate_audio_requested = regenerateAudioRequested;
 				}
 				params.overwrite_manifest = overwriteManifest;
 			} else {
@@ -2731,6 +2743,7 @@
 				delete params.generation_prompt;
 				delete params.video_description_duration_ms;
 				delete params.regenerate_requested;
+				delete params.regenerate_audio_requested;
 				delete params.overwrite_manifest;
 			}
 		}
@@ -4027,19 +4040,49 @@
 									</div>
 								{/if}
 								{#if canRegenerateLectureVideo}
-									<div class="mb-2 flex flex-wrap items-center gap-3 text-sm text-gray-600">
-										<button
-											type="button"
-											class={`${lectureVideoRegenerateButtonPressed ? 'border-blue-300 bg-blue-100 font-semibold text-blue-800 shadow-inner shadow-blue-200' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'} rounded-lg border px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-70`}
-											disabled={preventEdits ||
-												manifestGenerationInFlight ||
-												lectureVideoRegenerationImpliedByFormChanges}
-											aria-pressed={lectureVideoRegenerateButtonPressed}
-											onclick={() => {
-												regenerateRequested = !regenerateRequested;
-											}}>{lectureVideoRegenerateButtonLabel}</button
-										>
-										<span class="text-xs text-gray-600">{lectureVideoRegenerateHelperText}</span>
+									<div class="mb-2 flex flex-col gap-2 text-sm text-gray-600">
+										<div class="flex flex-wrap items-center gap-3">
+											<button
+												type="button"
+												class={`${lectureVideoAudioRegenerateButtonPressed ? 'border-blue-300 bg-blue-100 font-semibold text-blue-800 shadow-inner shadow-blue-200' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'} inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-70`}
+												disabled={preventEdits ||
+													manifestGenerationInFlight ||
+													lectureVideoAudioTriggeredByFormChanges ||
+													lectureVideoSaveTriggersGeneration ||
+													regenerateRequested}
+												aria-pressed={lectureVideoAudioRegenerateButtonPressed}
+												onclick={() => {
+													regenerateAudioRequested = !regenerateAudioRequested;
+												}}
+											>
+												<RefreshOutline class="h-3 w-3" />
+												<span>{lectureVideoAudioRegenerateButtonLabel}</span>
+											</button>
+											<span class="text-xs text-gray-600"
+												>{lectureVideoAudioRegenerateHelperText}</span
+											>
+										</div>
+										{#if canGenerateLectureVideoManifest && !overwriteManifest}
+											<div class="flex flex-wrap items-center gap-3">
+												<button
+													type="button"
+													class={`${lectureVideoManifestRegenerateButtonPressed ? 'border-blue-300 bg-blue-100 font-semibold text-blue-800 shadow-inner shadow-blue-200' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'} inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-70`}
+													disabled={preventEdits ||
+														manifestGenerationInFlight ||
+														lectureVideoGenerationTriggeredByFormChanges}
+													aria-pressed={lectureVideoManifestRegenerateButtonPressed}
+													onclick={() => {
+														regenerateRequested = !regenerateRequested;
+													}}
+												>
+													<RefreshOutline class="h-3 w-3" />
+													<span>{lectureVideoManifestRegenerateButtonLabel}</span>
+												</button>
+												<span class="text-xs text-gray-600"
+													>{lectureVideoManifestRegenerateHelperText}</span
+												>
+											</div>
+										{/if}
 									</div>
 								{/if}
 								{#if lectureVideoChatUnavailable}
