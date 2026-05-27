@@ -2627,6 +2627,7 @@ export type UpdateAssistantRequest = {
 	generation_prompt?: string | null;
 	video_description_duration_ms?: number | null;
 	regenerate_requested?: boolean;
+	regenerate_audio_requested?: boolean;
 	overwrite_manifest?: boolean;
 	create_classic_assistant?: boolean;
 	temperature?: number | null;

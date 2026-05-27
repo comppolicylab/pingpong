@@ -10706,6 +10706,7 @@ async def update_assistant(
     )
     lecture_video_voice_id_validated = False
     regenerate_requested = bool(req.regenerate_requested)
+    regenerate_audio_requested = bool(req.regenerate_audio_requested)
     overwrite_lecture_video_manifest = (
         bool(req.overwrite_manifest)
         if "overwrite_manifest" in req.model_fields_set
@@ -10718,6 +10719,7 @@ async def update_assistant(
         or "generation_prompt" in req.model_fields_set
         or "video_description_duration_ms" in req.model_fields_set
         or "regenerate_requested" in req.model_fields_set
+        or "regenerate_audio_requested" in req.model_fields_set
         or "overwrite_manifest" in req.model_fields_set
     )
 
@@ -11756,6 +11758,7 @@ async def update_assistant(
                 manifest_changed
                 or needs_manifest_generation
                 or regenerate_requested
+                or regenerate_audio_requested
                 or voice_changed
             )
             manual_manifest_takeover_only = (
@@ -11843,7 +11846,8 @@ async def update_assistant(
                         manual_manifest=True,
                     )
                 if overwrite_lecture_video_manifest or (
-                    voice_changed and not needs_manifest_generation
+                    (voice_changed or regenerate_audio_requested)
+                    and not needs_manifest_generation
                 ):
                     if not overwrite_lecture_video_manifest:
                         if same_lecture_video:

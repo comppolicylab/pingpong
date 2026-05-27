@@ -1186,6 +1186,9 @@ def lecture_video_validator_update_assistant(self):
         "video_description_duration_ms" in self.model_fields_set
     )
     regenerate_requested_present = "regenerate_requested" in self.model_fields_set
+    regenerate_audio_requested_present = (
+        "regenerate_audio_requested" in self.model_fields_set
+    )
     overwrite_manifest_present = "overwrite_manifest" in self.model_fields_set
     lecture_video_payload_present = (
         lecture_video_id_present
@@ -1194,6 +1197,7 @@ def lecture_video_validator_update_assistant(self):
         or generation_prompt_present
         or video_description_duration_ms_present
         or regenerate_requested_present
+        or regenerate_audio_requested_present
         or overwrite_manifest_present
     )
     overwrite_manifest = (
@@ -1430,6 +1434,7 @@ class UpdateAssistant(BaseModel):
     # snaps to 5-second increments.
     video_description_duration_ms: int | None = Field(None, ge=5000, le=300000)
     regenerate_requested: bool | None = None
+    regenerate_audio_requested: bool | None = None
     overwrite_manifest: bool | None = None
     model: str | None = Field(None, min_length=2)
     temperature: float | None = Field(None, ge=0.0, le=2.0)
