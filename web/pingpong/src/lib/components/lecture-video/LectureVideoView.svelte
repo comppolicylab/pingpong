@@ -1439,11 +1439,11 @@
 			videoElement.pause();
 			return;
 		}
-		dispatch('playbackresumed');
 		if (suppressPlayInteraction) {
 			suppressPlayInteraction = false;
 			return;
 		}
+		dispatch('playbackresumed');
 		if (!controllerSessionId || !playbackInteractionAllowed) return;
 		queuePlaybackInteraction('video_resumed');
 	}
