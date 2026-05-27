@@ -180,6 +180,7 @@
 	let liveLectureVideoSession: api.LectureVideoSession | null = null;
 	let lectureVideoSessionKey: string | null = null;
 	let startingReplacementLectureThread = false;
+	let lectureChatContinuePromptDismissedByPlayback = false;
 	$: {
 		const nextKey = `${classId}:${threadId}:${lectureVideoSession?.state_version ?? 'none'}:${
 			lectureVideoSession?.state ?? 'none'
@@ -296,7 +297,9 @@
 		canSubmit && threadIsCurrentUserParticipant && !assistantDeleted && canViewAssistant;
 	$: lectureChatInputDisabled =
 		!lectureChatCanSubmit || !!$navigating || !threadLectureChatAvailable;
-	$: lectureChatContinuePromptVisible = effectiveLectureVideoSession?.state !== 'awaiting_answer';
+	$: lectureChatContinuePromptVisible =
+		effectiveLectureVideoSession?.state !== 'awaiting_answer' &&
+		!lectureChatContinuePromptDismissedByPlayback;
 	$: canDropUploadsIntoThread =
 		data.threadInteractionMode === 'chat' &&
 		assistantInteractionMode === 'chat' &&
@@ -726,6 +729,7 @@
 
 	const handleLectureChatSubmit = async (message: ChatInputMessage) => {
 		const lectureVideoPlaybackPositionMs = lectureVideoViewRef?.getPlaybackPositionMs();
+		lectureChatContinuePromptDismissedByPlayback = false;
 		void lectureVideoViewRef?.pauseForChatSubmit();
 		await postMessage({
 			...message,
@@ -740,6 +744,7 @@
 	};
 
 	const handleLecturePlaybackResumed = () => {
+		lectureChatContinuePromptDismissedByPlayback = true;
 		threadMgr.interruptTts().catch(() => {});
 	};
 
