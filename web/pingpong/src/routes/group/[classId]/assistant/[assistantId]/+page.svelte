@@ -881,6 +881,9 @@
 	$: if (regenerateRequested && regenerateAudioRequested) {
 		regenerateAudioRequested = false;
 	}
+	$: if (lectureVideoGenerationTriggeredByFormChanges && regenerateAudioRequested) {
+		regenerateAudioRequested = false;
+	}
 	$: lectureVideoManifestRegenerateButtonPressed =
 		regenerateRequested || lectureVideoGenerationTriggeredByFormChanges;
 	$: lectureVideoAudioRegenerateButtonPressed =

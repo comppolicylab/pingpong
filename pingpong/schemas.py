@@ -1190,6 +1190,10 @@ def lecture_video_validator_update_assistant(self):
         "regenerate_audio_requested" in self.model_fields_set
     )
     overwrite_manifest_present = "overwrite_manifest" in self.model_fields_set
+    if self.regenerate_requested and self.regenerate_audio_requested:
+        raise ValueError(
+            "regenerate_requested and regenerate_audio_requested cannot both be true."
+        )
     lecture_video_payload_present = (
         lecture_video_id_present
         or lecture_video_manifest_present

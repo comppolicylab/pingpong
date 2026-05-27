@@ -105,6 +105,20 @@ def test_update_assistant_allows_non_step_video_description_duration() -> None:
     assert assistant.video_description_duration_ms == 7000
 
 
+def test_update_assistant_rejects_conflicting_regeneration_requests() -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        schemas.UpdateAssistant.model_validate(
+            {
+                "lecture_video_id": 1,
+                "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+                "regenerate_requested": True,
+                "regenerate_audio_requested": True,
+            }
+        )
+
+    assert "regenerate_requested and regenerate_audio_requested" in str(exc_info.value)
+
+
 def test_create_assistant_rejects_manifest_when_generation_mode_requested() -> None:
     with pytest.raises(ValidationError) as exc_info:
         schemas.CreateAssistant.model_validate(

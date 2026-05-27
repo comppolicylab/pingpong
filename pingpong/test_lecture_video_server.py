@@ -9100,6 +9100,7 @@ async def test_update_assistant_with_same_lecture_video_id_and_voice_only_clones
         ("user:123", "admin", "class:1"),
     ]
 )
+@pytest.mark.asyncio
 async def test_update_assistant_with_regenerate_audio_only_clones_existing_manifest(
     api, db, institution, valid_user_token, monkeypatch
 ):
@@ -9188,6 +9189,9 @@ async def test_update_assistant_with_regenerate_audio_only_clones_existing_manif
     assert regenerated_video.questions[0].question_text == "Keep this question?"
     assert len(processing_runs) == 2
     assert processing_runs[0].lecture_video_id_snapshot == lecture_video.id
+    assert (
+        processing_runs[0].status == schemas.LectureVideoProcessingRunStatus.CANCELLED
+    )
     assert processing_runs[1].lecture_video_id_snapshot == regenerated_video_id
     assert processing_runs[1].stage == schemas.LectureVideoProcessingStage.NARRATION
     assert processing_runs[1].status == schemas.LectureVideoProcessingRunStatus.QUEUED
