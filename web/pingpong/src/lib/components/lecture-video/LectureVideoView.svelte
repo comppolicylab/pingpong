@@ -1425,7 +1425,6 @@
 
 	function handlePlay() {
 		clearPendingVideoRetry();
-		dispatch('playbackresumed');
 		if (!videoElement) return;
 		if (questionReviewPlaybackAllowed) {
 			if (currentQuestion && currentTimeMs >= currentQuestion.stop_offset_ms) {
@@ -1444,6 +1443,7 @@
 			suppressPlayInteraction = false;
 			return;
 		}
+		dispatch('playbackresumed');
 		if (!controllerSessionId || !playbackInteractionAllowed) return;
 		queuePlaybackInteraction('video_resumed');
 	}
