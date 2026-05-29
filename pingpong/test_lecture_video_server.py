@@ -24,6 +24,7 @@ from pingpong import (
     class_credentials as class_credentials_module,
     copy as copy_module,
     elevenlabs as elevenlabs_module,
+    interactive_lesson_runtime,
     lecture_video_processing,
     lecture_video_runtime,
     lecture_video_service,
@@ -3870,11 +3871,12 @@ async def test_append_interaction_requires_for_update_locked_state(db, instituti
         )
 
         with pytest.raises(RuntimeError, match="FOR UPDATE before appending"):
-            await lecture_video_runtime._append_interaction(
+            await interactive_lesson_runtime.append_interaction(
                 session,
                 unlocked_state,
+                adapter=lecture_video_runtime._VIDEO_ADAPTER,
                 actor_user_id=None,
-                event_type=schemas.LectureVideoInteractionEventType.VIDEO_PAUSED,
+                event_type=schemas.InteractiveLessonInteractionEventType.LESSON_PAUSED,
                 offset_ms=500,
             )
 

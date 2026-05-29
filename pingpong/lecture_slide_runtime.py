@@ -110,7 +110,7 @@ def narration_allowed_for_thread_state(
     if state is None:
         return False
 
-    current_question = interactive_lesson_runtime._get_current_question(
+    current_question = interactive_lesson_runtime.get_current_question(
         thread, state, adapter=_SLIDE_ADAPTER
     )
     if (
@@ -151,28 +151,6 @@ def build_lecture_slide_session(
         request_actor_user_id=request_actor_user_id,
         now=now,
     )
-
-
-async def _build_lecture_slide_session_for_state(
-    state: models.LectureSlideThreadState,
-    *,
-    latest_interaction_at: datetime | None = None,
-    request_controller_session_id: str | None = None,
-    request_actor_user_id: int | None = None,
-    now: datetime | None = None,
-) -> schemas.InteractiveLessonSession:
-    return await interactive_lesson_runtime._build_interactive_lesson_session_for_state(
-        state,
-        adapter=_SLIDE_ADAPTER,
-        latest_interaction_at=latest_interaction_at,
-        request_controller_session_id=request_controller_session_id,
-        request_actor_user_id=request_actor_user_id,
-        now=now,
-    )
-
-
-def _get_unlocked_offset_ms(state: models.LectureSlideThreadState) -> int:
-    return interactive_lesson_runtime._get_unlocked_offset_ms(state)
 
 
 async def get_plausible_playback_offset_ms(
