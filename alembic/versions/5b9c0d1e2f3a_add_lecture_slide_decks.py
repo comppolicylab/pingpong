@@ -133,6 +133,30 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["uploader_id"], ["users.id"]),
         sa.PrimaryKeyConstraint("id"),
     )
+    op.create_index(
+        op.f("ix_lecture_slide_decks_class_id"),
+        "lecture_slide_decks",
+        ["class_id"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_lecture_slide_decks_continuous_narration_stored_object_id"),
+        "lecture_slide_decks",
+        ["continuous_narration_stored_object_id"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_lecture_slide_decks_source_stored_object_id"),
+        "lecture_slide_decks",
+        ["source_stored_object_id"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_lecture_slide_decks_uploader_id"),
+        "lecture_slide_decks",
+        ["uploader_id"],
+        unique=False,
+    )
 
     op.create_table(
         "lecture_slide_narrations",
@@ -151,6 +175,12 @@ def upgrade() -> None:
             name="fk_ls_narrations_stored_object_id",
         ),
         sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_index(
+        op.f("ix_lecture_slide_narrations_stored_object_id"),
+        "lecture_slide_narrations",
+        ["stored_object_id"],
+        unique=False,
     )
 
     op.create_table(
@@ -197,6 +227,12 @@ def upgrade() -> None:
         "lecture_slide_pages",
         ["lecture_slide_deck_id", "position"],
         unique=True,
+    )
+    op.create_index(
+        op.f("ix_lecture_slide_pages_image_stored_object_id"),
+        "lecture_slide_pages",
+        ["image_stored_object_id"],
+        unique=False,
     )
 
     op.create_table(
@@ -342,11 +378,35 @@ def downgrade() -> None:
     op.drop_table("lecture_slide_questions")
 
     op.drop_index(
+        op.f("ix_lecture_slide_pages_image_stored_object_id"),
+        table_name="lecture_slide_pages",
+    )
+    op.drop_index(
         "lecture_slide_page_position_idx",
         table_name="lecture_slide_pages",
     )
     op.drop_table("lecture_slide_pages")
 
+    op.drop_index(
+        op.f("ix_lecture_slide_narrations_stored_object_id"),
+        table_name="lecture_slide_narrations",
+    )
+    op.drop_index(
+        op.f("ix_lecture_slide_decks_uploader_id"),
+        table_name="lecture_slide_decks",
+    )
+    op.drop_index(
+        op.f("ix_lecture_slide_decks_source_stored_object_id"),
+        table_name="lecture_slide_decks",
+    )
+    op.drop_index(
+        op.f("ix_lecture_slide_decks_continuous_narration_stored_object_id"),
+        table_name="lecture_slide_decks",
+    )
+    op.drop_index(
+        op.f("ix_lecture_slide_decks_class_id"),
+        table_name="lecture_slide_decks",
+    )
     op.drop_table("lecture_slide_narrations")
     op.drop_table("lecture_slide_decks")
     op.drop_table("lecture_slide_narration_stored_objects")

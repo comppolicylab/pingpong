@@ -2931,6 +2931,9 @@ class LectureSlideSourceStoredObject(Base):
     original_filename = Column(String, nullable=False)
     content_type = Column(String, nullable=False)
     content_length = Column(Integer, nullable=False, server_default="0")
+    lecture_slide_decks = relationship(
+        "LectureSlideDeck", back_populates="source_stored_object"
+    )
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -2944,6 +2947,7 @@ class LectureSlideImageStoredObject(Base):
     content_length = Column(Integer, nullable=False, server_default="0")
     width_px = Column(Integer, nullable=False)
     height_px = Column(Integer, nullable=False)
+    pages = relationship("LectureSlidePage", back_populates="image_stored_object")
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -2956,6 +2960,10 @@ class LectureSlideNarrationStoredObject(Base):
     content_type = Column(String, nullable=False)
     content_length = Column(Integer, nullable=False, server_default="0")
     duration_ms = Column(Integer, nullable=True)
+    narrations = relationship("LectureSlideNarration", back_populates="stored_object")
+    continuous_narration_decks = relationship(
+        "LectureSlideDeck", back_populates="continuous_narration_stored_object"
+    )
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -2971,6 +2979,12 @@ class LectureSlideNarration(Base):
             name="fk_ls_narrations_stored_object_id",
         ),
         nullable=True,
+        index=True,
+    )
+    stored_object = relationship(
+        "LectureSlideNarrationStoredObject",
+        back_populates="narrations",
+        uselist=False,
     )
     status: Mapped[schemas.LectureSlideNarrationStatus] = mapped_column(
         SQLEnum(schemas.LectureSlideNarrationStatus),
@@ -2984,7 +2998,8 @@ class LectureSlideDeck(Base):
     __tablename__ = "lecture_slide_decks"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    class_id = Column(Integer, ForeignKey("classes.id"), nullable=False)
+    class_id = Column(Integer, ForeignKey("classes.id"), nullable=False, index=True)
+    class_ = relationship("Class", back_populates="lecture_slide_decks")
     source_stored_object_id = Column(
         Integer,
         ForeignKey(
@@ -2992,6 +3007,12 @@ class LectureSlideDeck(Base):
             name="fk_ls_decks_source_stored_object_id",
         ),
         nullable=False,
+        index=True,
+    )
+    source_stored_object = relationship(
+        "LectureSlideSourceStoredObject",
+        back_populates="lecture_slide_decks",
+        uselist=False,
     )
     continuous_narration_stored_object_id = Column(
         Integer,
@@ -3001,6 +3022,26 @@ class LectureSlideDeck(Base):
             ondelete="SET NULL",
         ),
         nullable=True,
+        index=True,
+    )
+    continuous_narration_stored_object = relationship(
+        "LectureSlideNarrationStoredObject",
+        back_populates="continuous_narration_decks",
+        uselist=False,
+    )
+    assistants = relationship("Assistant", back_populates="lecture_slide_deck")
+    threads = relationship("Thread", back_populates="lecture_slide_deck")
+    pages = relationship(
+        "LectureSlidePage",
+        back_populates="lecture_slide_deck",
+        cascade="all, delete-orphan",
+        order_by="LectureSlidePage.position",
+    )
+    questions = relationship(
+        "LectureSlideQuestion",
+        back_populates="lecture_slide_deck",
+        cascade="all, delete-orphan",
+        order_by="LectureSlideQuestion.position",
     )
     display_name = Column(String, nullable=False)
     voice_id = Column(String, nullable=True)
@@ -3018,7 +3059,7 @@ class LectureSlideDeck(Base):
         server_default=schemas.LectureSlideDeckStatus.UPLOADED.name,
     )
     error_message = Column(String, nullable=True)
-    uploader_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    uploader_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     source_lecture_slide_deck_id_snapshot = Column(Integer, nullable=True)
     slide_count = Column(Integer, nullable=False)
     total_duration_ms = Column(Integer, nullable=True)
@@ -3035,11 +3076,18 @@ class LectureSlidePage(Base):
         ForeignKey("lecture_slide_decks.id", ondelete="CASCADE"),
         nullable=False,
     )
+    lecture_slide_deck = relationship("LectureSlideDeck", back_populates="pages")
     position = Column(Integer, nullable=False)
     image_stored_object_id = Column(
         Integer,
         ForeignKey("lecture_slide_image_stored_objects.id", ondelete="SET NULL"),
         nullable=True,
+        index=True,
+    )
+    image_stored_object = relationship(
+        "LectureSlideImageStoredObject",
+        back_populates="pages",
+        uselist=False,
     )
     title = Column(Text, nullable=True)
     extracted_text = Column(Text, nullable=True)
@@ -3051,6 +3099,11 @@ class LectureSlidePage(Base):
         ForeignKey("lecture_slide_narrations.id", ondelete="SET NULL"),
         nullable=True,
         unique=True,
+    )
+    narration = relationship(
+        "LectureSlideNarration",
+        foreign_keys=[narration_id],
+        uselist=False,
     )
     start_offset_ms = Column(Integer, nullable=True)
     end_offset_ms = Column(Integer, nullable=True)
@@ -3076,6 +3129,7 @@ class LectureSlideQuestion(Base):
         ForeignKey("lecture_slide_decks.id", ondelete="CASCADE"),
         nullable=False,
     )
+    lecture_slide_deck = relationship("LectureSlideDeck", back_populates="questions")
     position = Column(Integer, nullable=False)
     slide_position = Column(Integer, nullable=False)
     slide_offset_ms = Column(Integer, nullable=False)
@@ -3096,6 +3150,17 @@ class LectureSlideQuestion(Base):
     correct_option = relationship(
         "LectureSlideQuestionOption",
         secondary=lecture_slide_question_single_select_correct_option_association,
+        uselist=False,
+    )
+    options = relationship(
+        "LectureSlideQuestionOption",
+        back_populates="question",
+        cascade="all, delete-orphan",
+        order_by="LectureSlideQuestionOption.position",
+    )
+    intro_narration = relationship(
+        "LectureSlideNarration",
+        foreign_keys=[intro_narration_id],
         uselist=False,
     )
 
@@ -3133,6 +3198,12 @@ class LectureSlideQuestionOption(Base):
         ),
         nullable=True,
         unique=True,
+    )
+    question = relationship("LectureSlideQuestion", back_populates="options")
+    post_narration = relationship(
+        "LectureSlideNarration",
+        foreign_keys=[post_narration_id],
+        uselist=False,
     )
 
     __table_args__ = (
@@ -4423,7 +4494,9 @@ class Assistant(Base):
         nullable=True,
         unique=True,
     )
-    lecture_slide_deck = relationship("LectureSlideDeck", uselist=False)
+    lecture_slide_deck = relationship(
+        "LectureSlideDeck", back_populates="assistants", uselist=False
+    )
     vector_store_id = Column(
         Integer,
         ForeignKey(
@@ -5288,6 +5361,7 @@ class Class(Base):
         back_populates="class_",
     )
     lecture_videos = relationship("LectureVideo", back_populates="class_")
+    lecture_slide_decks = relationship("LectureSlideDeck", back_populates="class_")
     term = Column(String)
     api_key = Column(String, nullable=True)
     api_key_id = Column(Integer, ForeignKey("api_keys.id"), nullable=True)
@@ -7692,7 +7766,9 @@ class Thread(Base):
         ),
         nullable=True,
     )
-    lecture_slide_deck = relationship("LectureSlideDeck", uselist=False)
+    lecture_slide_deck = relationship(
+        "LectureSlideDeck", back_populates="threads", uselist=False
+    )
     instructions = Column(String, nullable=True)
     timezone = Column(String, nullable=True)
     private = Column(Boolean)
