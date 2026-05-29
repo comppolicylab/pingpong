@@ -34,6 +34,7 @@ LectureSlideConflictError = interactive_lesson_runtime.InteractiveLessonConflict
 class LectureSlideAdapter:
     state_model: Any = models.LectureSlideThreadState
     interaction_model: Any = models.LectureSlideInteraction
+    state_enum: Any = schemas.InteractiveLessonSessionState
 
     async def get_thread_with_context(
         self, session: AsyncSession, thread_id: int
@@ -69,6 +70,12 @@ class LectureSlideAdapter:
 
     def matches_assistant(self, thread: models.Thread) -> bool:
         return lecture_slide_matches_assistant(thread)
+
+    def lesson_chat_available(self, asset: object) -> bool:
+        return False
+
+    def initial_state_fields(self) -> dict[str, Any]:
+        return {"last_chat_context_end_ms": 0}
 
     def to_storage_event(
         self, event_type: schemas.InteractiveLessonInteractionEventType
