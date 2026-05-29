@@ -428,6 +428,7 @@ class InteractionMode(StrEnum):
     CHAT = "chat"
     VOICE = "voice"
     LECTURE_VIDEO = "lecture_video"
+    LECTURE_SLIDES = "lecture_slides"
 
 
 class RealtimeEagerness(StrEnum):
@@ -637,6 +638,28 @@ class InteractiveLessonSession(BaseModel):
     controller: InteractiveLessonSessionController
 
 
+class InteractiveLessonControlAcquireResponse(BaseModel):
+    controller_session_id: str
+    interactive_lesson_session: InteractiveLessonSession
+
+
+class InteractiveLessonControlReleaseRequest(BaseModel):
+    controller_session_id: str = Field(..., min_length=1)
+
+
+class InteractiveLessonControlReleaseResponse(BaseModel):
+    interactive_lesson_session: InteractiveLessonSession
+
+
+class InteractiveLessonControlRenewRequest(BaseModel):
+    controller_session_id: str = Field(..., min_length=1)
+
+
+class InteractiveLessonControlRenewResponse(BaseModel):
+    lease_expires_at: datetime
+    lease_duration_ms: int = Field(..., ge=0)
+
+
 class InteractiveLessonInteractionRequestBase(BaseModel):
     controller_session_id: str = Field(..., min_length=1)
     expected_state_version: int = Field(..., ge=1)
@@ -697,6 +720,10 @@ InteractiveLessonInteractionRequest: TypeAlias = Annotated[
     ],
     PropertyInfo(discriminator="type"),
 ]
+
+
+class InteractiveLessonInteractionResponse(BaseModel):
+    interactive_lesson_session: InteractiveLessonSession
 
 
 class AnonymousLink(BaseModel):
