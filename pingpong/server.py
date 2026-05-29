@@ -120,6 +120,7 @@ from pingpong.video_store import VideoStoreError
 
 from . import (
     assistant_service,
+    lecture_slide_runtime,
     lecture_video_chat,
     lecture_video_manifest_generation,
     lecture_video_processing,
@@ -546,6 +547,23 @@ def _raise_lecture_video_runtime_http_error(
     raise HTTPException(status_code=500, detail=err.detail)
 
 
+def _raise_lecture_slide_runtime_http_error(
+    err: lecture_slide_runtime.LectureSlideRuntimeError,
+) -> NoReturn:
+    if isinstance(err, lecture_slide_runtime.LectureSlideNotFoundError):
+        raise HTTPException(status_code=404, detail=err.detail)
+    if isinstance(err, lecture_slide_runtime.LectureSlideValidationError):
+        raise HTTPException(status_code=422, detail=err.detail)
+    if isinstance(err, lecture_slide_runtime.LectureSlideConflictError):
+        if err.error_code is not None:
+            raise HTTPException(
+                status_code=409,
+                detail={"message": err.detail, "error_code": err.error_code},
+            )
+        raise HTTPException(status_code=409, detail=err.detail)
+    raise HTTPException(status_code=500, detail=err.detail)
+
+
 async def get_lecture_video_thread_or_404(
     db: Any, class_id: str, thread_id: str
 ) -> models.Thread:
@@ -556,6 +574,19 @@ async def get_lecture_video_thread_or_404(
         raise HTTPException(status_code=404, detail="Thread not found")
     if thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
         raise HTTPException(status_code=404, detail="Lecture video thread not found.")
+    return thread
+
+
+async def get_lecture_slide_thread_or_404(
+    db: Any, class_id: str, thread_id: str
+) -> models.Thread:
+    thread = await models.Thread.get_by_id_for_class_with_interaction_mode(
+        db, int(class_id), int(thread_id)
+    )
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if thread.interaction_mode != schemas.InteractionMode.LECTURE_SLIDE:
+        raise HTTPException(status_code=404, detail="Lecture slide thread not found.")
     return thread
 
 
@@ -5194,6 +5225,122 @@ async def post_lecture_video_interaction(
     except lecture_video_runtime.LectureVideoRuntimeError as err:
         _raise_lecture_video_runtime_http_error(err)
     return {"lecture_video_session": lecture_video_session}
+
+
+@v1.post(
+    "/class/{class_id}/thread/{thread_id}/lecture-slide/control/acquire",
+    dependencies=[Depends(Authz("can_participate", "thread:{thread_id}"))],
+    response_model=schemas.InteractiveLessonControlAcquireResponse,
+)
+async def acquire_lecture_slide_control(
+    class_id: str,
+    thread_id: str,
+    request: StateRequest,
+):
+    thread = await get_lecture_slide_thread_or_404(
+        request.state["db"], class_id, thread_id
+    )
+    try:
+        (
+            controller_session_id,
+            interactive_lesson_session,
+        ) = await lecture_slide_runtime.acquire_control(
+            request.state["db"],
+            thread.id,
+            request.state["session"].user.id,
+            nowfn=get_now_fn(request),
+        )
+    except lecture_slide_runtime.LectureSlideRuntimeError as err:
+        _raise_lecture_slide_runtime_http_error(err)
+
+    return {
+        "controller_session_id": controller_session_id,
+        "interactive_lesson_session": interactive_lesson_session,
+    }
+
+
+@v1.post(
+    "/class/{class_id}/thread/{thread_id}/lecture-slide/control/release",
+    dependencies=[Depends(Authz("can_participate", "thread:{thread_id}"))],
+    response_model=schemas.InteractiveLessonControlReleaseResponse,
+)
+async def release_lecture_slide_control(
+    class_id: str,
+    thread_id: str,
+    data: schemas.InteractiveLessonControlReleaseRequest,
+    request: StateRequest,
+):
+    thread = await get_lecture_slide_thread_or_404(
+        request.state["db"], class_id, thread_id
+    )
+    try:
+        interactive_lesson_session = await lecture_slide_runtime.release_control(
+            request.state["db"],
+            thread.id,
+            request.state["session"].user.id,
+            data.controller_session_id,
+            nowfn=get_now_fn(request),
+        )
+    except lecture_slide_runtime.LectureSlideRuntimeError as err:
+        _raise_lecture_slide_runtime_http_error(err)
+    return {"interactive_lesson_session": interactive_lesson_session}
+
+
+@v1.post(
+    "/class/{class_id}/thread/{thread_id}/lecture-slide/control/renew",
+    dependencies=[Depends(Authz("can_participate", "thread:{thread_id}"))],
+    response_model=schemas.InteractiveLessonControlRenewResponse,
+)
+async def renew_lecture_slide_control(
+    class_id: str,
+    thread_id: str,
+    data: schemas.InteractiveLessonControlRenewRequest,
+    request: StateRequest,
+):
+    thread = await get_lecture_slide_thread_or_404(
+        request.state["db"], class_id, thread_id
+    )
+    try:
+        lease_expires_at = await lecture_slide_runtime.renew_control(
+            request.state["db"],
+            thread.id,
+            request.state["session"].user.id,
+            data.controller_session_id,
+            nowfn=get_now_fn(request),
+        )
+    except lecture_slide_runtime.LectureSlideRuntimeError as err:
+        _raise_lecture_slide_runtime_http_error(err)
+    return {
+        "lease_expires_at": lease_expires_at,
+        "lease_duration_ms": lecture_slide_runtime.CONTROLLER_LEASE_DURATION_MS,
+    }
+
+
+@v1.post(
+    "/class/{class_id}/thread/{thread_id}/lecture-slide/interactions",
+    dependencies=[Depends(Authz("can_participate", "thread:{thread_id}"))],
+    response_model=schemas.InteractiveLessonInteractionResponse,
+)
+async def post_lecture_slide_interaction(
+    class_id: str,
+    thread_id: str,
+    data: schemas.InteractiveLessonInteractionRequest,
+    request: StateRequest,
+):
+    thread = await get_lecture_slide_thread_or_404(
+        request.state["db"], class_id, thread_id
+    )
+    try:
+        interactive_lesson_session = await lecture_slide_runtime.process_interaction(
+            request.state["db"],
+            thread.id,
+            request.state["session"].user.id,
+            data,
+            nowfn=get_now_fn(request),
+        )
+    except lecture_slide_runtime.LectureSlideRuntimeError as err:
+        _raise_lecture_slide_runtime_http_error(err)
+    return {"interactive_lesson_session": interactive_lesson_session}
 
 
 @v1.get(

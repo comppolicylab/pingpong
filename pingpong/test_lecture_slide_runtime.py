@@ -1,6 +1,9 @@
+import importlib
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import asc, select
 
 import pingpong.lecture_slide_runtime as lecture_slide_runtime
@@ -9,6 +12,7 @@ import pingpong.schemas as schemas
 from pingpong.testutil import with_institution
 
 pytestmark = pytest.mark.asyncio
+server_module = importlib.import_module("pingpong.server")
 
 
 def _slide_deck(
@@ -143,6 +147,16 @@ async def _list_slide_interactions(
     return list(result)
 
 
+def _server_request(session, user_id: int = 123):
+    return SimpleNamespace(
+        state={
+            "db": session,
+            "session": SimpleNamespace(user=SimpleNamespace(id=user_id)),
+        },
+        app=SimpleNamespace(state={}),
+    )
+
+
 @with_institution(11, "Test Institution")
 async def test_initialize_thread_state_and_acquire_control_for_lecture_slides(
     db, institution
@@ -180,6 +194,51 @@ async def test_initialize_thread_state_and_acquire_control_for_lecture_slides(
     assert [marker.id for marker in slide_session.question_markers] == [
         question.id for question in questions
     ]
+
+
+@with_institution(11, "Test Institution")
+async def test_acquire_lecture_slide_control_endpoint_uses_generic_lesson_session(
+    db, institution
+):
+    async with db.async_session() as session:
+        class_, _, _, thread, questions = await _create_slide_runtime_fixture(
+            session, institution
+        )
+        thread.interaction_mode = schemas.InteractionMode.LECTURE_SLIDE
+        await session.flush()
+
+        response = await server_module.acquire_lecture_slide_control(
+            str(class_.id),
+            str(thread.id),
+            _server_request(session),
+        )
+
+    assert response["controller_session_id"]
+    lesson_session = response["interactive_lesson_session"]
+    assert isinstance(lesson_session, schemas.InteractiveLessonSession)
+    assert lesson_session.controller.has_control is True
+    assert lesson_session.current_question is not None
+    assert lesson_session.current_question.id == questions[0].id
+
+
+@with_institution(11, "Test Institution")
+async def test_acquire_lecture_slide_control_endpoint_rejects_non_slide_thread(
+    db, institution
+):
+    async with db.async_session() as session:
+        class_, _, _, thread, _ = await _create_slide_runtime_fixture(
+            session, institution
+        )
+
+        with pytest.raises(HTTPException) as excinfo:
+            await server_module.acquire_lecture_slide_control(
+                str(class_.id),
+                str(thread.id),
+                _server_request(session),
+            )
+
+    assert excinfo.value.status_code == 404
+    assert excinfo.value.detail == "Lecture slide thread not found."
 
 
 @with_institution(11, "Test Institution")
