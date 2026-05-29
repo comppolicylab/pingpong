@@ -3297,6 +3297,41 @@ class LectureSlideThreadState(Base):
         await session.flush()
         return state
 
+    @classmethod
+    async def get_by_thread_id_with_context(
+        cls,
+        session: AsyncSession,
+        thread_id: int,
+        *,
+        for_update: bool = False,
+    ) -> "LectureSlideThreadState | None":
+        stmt = (
+            select(LectureSlideThreadState)
+            .where(LectureSlideThreadState.thread_id == thread_id)
+            .options(
+                selectinload(LectureSlideThreadState.thread).options(
+                    *_thread_lecture_slide_base_loaders()
+                ),
+                selectinload(LectureSlideThreadState.current_question).options(
+                    *_lecture_slide_question_context_loaders(
+                        include_correct_option=False
+                    )
+                ),
+                selectinload(LectureSlideThreadState.active_option).options(
+                    _lecture_slide_post_narration_loader()
+                ),
+            )
+        )
+        if for_update:
+            stmt = stmt.with_for_update()
+        state = await session.scalar(stmt)
+        if state is not None:
+            # Runtime writes rely on callers taking a row lock before they allocate the
+            # next interaction event_index. Mark the loaded instance so downstream code
+            # can assert that invariant close to the write path.
+            state._locked_for_interaction_append = for_update
+        return state
+
 
 class LectureSlideInteraction(Base):
     __tablename__ = "lecture_slide_interactions"
@@ -3387,6 +3422,80 @@ class LectureSlideInteraction(Base):
                 ).where(LectureSlideInteraction.thread_id == thread_id)
             )
         ) + 1
+
+    @classmethod
+    async def get_latest_created_by_thread_id(
+        cls, session: AsyncSession, thread_id: int
+    ) -> datetime | None:
+        stmt = (
+            select(LectureSlideInteraction.created)
+            .where(LectureSlideInteraction.thread_id == thread_id)
+            .order_by(desc(LectureSlideInteraction.event_index))
+            .limit(1)
+        )
+        return await session.scalar(stmt)
+
+
+def _lecture_slide_post_narration_loader() -> Load:
+    return selectinload(LectureSlideQuestionOption.post_narration).selectinload(
+        LectureSlideNarration.stored_object
+    )
+
+
+def _lecture_slide_question_context_loaders(
+    *, include_correct_option: bool = True
+) -> tuple[Load, ...]:
+    loaders: list[Load] = [
+        selectinload(LectureSlideQuestion.options).options(
+            _lecture_slide_post_narration_loader()
+        ),
+        selectinload(LectureSlideQuestion.intro_narration).selectinload(
+            LectureSlideNarration.stored_object
+        ),
+    ]
+    if include_correct_option:
+        loaders.append(selectinload(LectureSlideQuestion.correct_option))
+    return tuple(loaders)
+
+
+def _thread_lecture_slide_base_loaders() -> tuple[Load, ...]:
+    return (
+        selectinload(Thread.users).load_only(
+            User.id,
+            User.created,
+            User.anonymous_link_id,
+            User.first_name,
+            User.last_name,
+            User.display_name,
+            User.email,
+        ),
+        selectinload(Thread.assistant).load_only(
+            Assistant.id, Assistant.name, Assistant.lecture_slide_deck_id
+        ),
+        selectinload(Thread.lecture_slide_deck).options(
+            selectinload(LectureSlideDeck.questions).options(
+                *_lecture_slide_question_context_loaders()
+            ),
+        ),
+    )
+
+
+def _thread_lecture_slide_state_loader() -> Load:
+    return selectinload(Thread.lecture_slide_state).options(
+        selectinload(LectureSlideThreadState.current_question).options(
+            *_lecture_slide_question_context_loaders(include_correct_option=False)
+        ),
+        selectinload(LectureSlideThreadState.active_option).options(
+            _lecture_slide_post_narration_loader()
+        ),
+    )
+
+
+def _thread_lecture_slide_context_loaders() -> tuple[Load, ...]:
+    return (
+        *_thread_lecture_slide_base_loaders(),
+        _thread_lecture_slide_state_loader(),
+    )
 
 
 def _lecture_video_post_narration_loader() -> Load:
@@ -8191,6 +8300,17 @@ class Thread(Base):
             select(Thread)
             .where(Thread.id == int(id_))
             .options(*_thread_lecture_video_context_loaders())
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_id_with_lecture_slide_context(
+        cls, session: AsyncSession, id_: int
+    ) -> "Thread | None":
+        stmt = (
+            select(Thread)
+            .where(Thread.id == int(id_))
+            .options(*_thread_lecture_slide_context_loaders())
         )
         return await session.scalar(stmt)
 
