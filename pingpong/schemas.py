@@ -558,6 +558,147 @@ class InteractiveLessonInteractionEventType(StrEnum):
     SESSION_COMPLETED = "session_completed"
 
 
+class InteractiveLessonOptionPrompt(BaseModel):
+    id: int
+    option_text: str
+
+
+class InteractiveLessonQuestionPrompt(BaseModel):
+    id: int
+    type: str
+    question_text: str
+    intro_text: str
+    stop_offset_ms: int = Field(..., ge=0)
+    intro_narration_id: int | None = None
+    options: list[InteractiveLessonOptionPrompt]
+
+
+class InteractiveLessonQuestionMarker(BaseModel):
+    id: int
+    stop_offset_ms: int = Field(..., ge=0)
+
+
+class InteractiveLessonContinuation(BaseModel):
+    option_id: int
+    correct_option_id: int | None = None
+    post_answer_text: str | None = None
+    post_answer_narration_id: int | None = None
+    resume_offset_ms: int
+    next_question: InteractiveLessonQuestionPrompt | None = None
+    complete: bool = False
+
+
+class InteractiveLessonSessionController(BaseModel):
+    has_control: bool = False
+    has_active_controller: bool = False
+    lease_expires_at: datetime | None = None
+    lease_duration_ms: int | None = Field(None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_controller_state(self) -> "InteractiveLessonSessionController":
+        if not self.has_active_controller:
+            if self.has_control:
+                raise ValueError(
+                    "has_control must be false when there is no active controller"
+                )
+            if self.lease_expires_at is not None:
+                raise ValueError(
+                    "lease_expires_at must be null when there is no active controller"
+                )
+            if self.lease_duration_ms is not None:
+                raise ValueError(
+                    "lease_duration_ms must be null when there is no active controller"
+                )
+            return self
+
+        if self.lease_expires_at is None:
+            raise ValueError(
+                "lease_expires_at is required when there is an active controller"
+            )
+        if self.lease_duration_ms is None:
+            raise ValueError(
+                "lease_duration_ms is required when there is an active controller"
+            )
+        return self
+
+
+class InteractiveLessonSession(BaseModel):
+    state: InteractiveLessonSessionState
+    lesson_chat_available: bool = False
+    last_known_offset_ms: int | None = None
+    furthest_offset_ms: int | None = Field(None, ge=0)
+    latest_interaction_at: datetime | None = None
+    current_question: InteractiveLessonQuestionPrompt | None = None
+    current_continuation: InteractiveLessonContinuation | None = None
+    question_markers: list[InteractiveLessonQuestionMarker] = Field(
+        default_factory=list
+    )
+    state_version: int = Field(..., ge=1)
+    controller: InteractiveLessonSessionController
+
+
+class InteractiveLessonInteractionRequestBase(BaseModel):
+    controller_session_id: str = Field(..., min_length=1)
+    expected_state_version: int = Field(..., ge=1)
+    idempotency_key: str = Field(..., min_length=1, max_length=255)
+
+    @field_validator("idempotency_key")
+    @classmethod
+    def validate_idempotency_key(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("idempotency_key must not be empty")
+        return value
+
+
+class InteractiveLessonQuestionPresentedRequest(
+    InteractiveLessonInteractionRequestBase
+):
+    type: Literal["question_presented"]
+    question_id: int
+    offset_ms: int = Field(..., ge=0)
+
+
+class InteractiveLessonAnswerSubmittedRequest(InteractiveLessonInteractionRequestBase):
+    type: Literal["answer_submitted"]
+    question_id: int
+    option_id: int
+
+
+class InteractiveLessonResumedRequest(InteractiveLessonInteractionRequestBase):
+    type: Literal["lesson_resumed"]
+    offset_ms: int = Field(..., ge=0)
+
+
+class InteractiveLessonPausedRequest(InteractiveLessonInteractionRequestBase):
+    type: Literal["lesson_paused"]
+    offset_ms: int = Field(..., ge=0)
+
+
+class InteractiveLessonSeekedRequest(InteractiveLessonInteractionRequestBase):
+    type: Literal["lesson_seeked"]
+    from_offset_ms: int = Field(..., ge=0)
+    to_offset_ms: int = Field(..., ge=0)
+
+
+class InteractiveLessonEndedRequest(InteractiveLessonInteractionRequestBase):
+    type: Literal["lesson_ended"]
+    offset_ms: int = Field(..., ge=0)
+
+
+InteractiveLessonInteractionRequest: TypeAlias = Annotated[
+    Union[
+        InteractiveLessonQuestionPresentedRequest,
+        InteractiveLessonAnswerSubmittedRequest,
+        InteractiveLessonResumedRequest,
+        InteractiveLessonPausedRequest,
+        InteractiveLessonSeekedRequest,
+        InteractiveLessonEndedRequest,
+    ],
+    PropertyInfo(discriminator="type"),
+]
+
+
 class AnonymousLink(BaseModel):
     id: int
     name: str | None
