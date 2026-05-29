@@ -540,6 +540,24 @@ class LectureVideoInteractionEventType(StrEnum):
     SESSION_COMPLETED = "session_completed"
 
 
+class InteractiveLessonSessionState(StrEnum):
+    PLAYING = "playing"
+    AWAITING_ANSWER = "awaiting_answer"
+    AWAITING_POST_ANSWER_RESUME = "awaiting_post_answer_resume"
+    COMPLETED = "completed"
+
+
+class InteractiveLessonInteractionEventType(StrEnum):
+    SESSION_INITIALIZED = "session_initialized"
+    QUESTION_PRESENTED = "question_presented"
+    ANSWER_SUBMITTED = "answer_submitted"
+    LESSON_RESUMED = "lesson_resumed"
+    LESSON_PAUSED = "lesson_paused"
+    LESSON_SEEKED = "lesson_seeked"
+    LESSON_ENDED = "lesson_ended"
+    SESSION_COMPLETED = "session_completed"
+
+
 class AnonymousLink(BaseModel):
     id: int
     name: str | None

@@ -87,6 +87,10 @@ def generate_lecture_video_interaction_idempotency_key() -> str:
     return f"server-{uuid.uuid7()}"
 
 
+def generate_lecture_slide_interaction_idempotency_key() -> str:
+    return f"server-{uuid.uuid7()}"
+
+
 class AmbiguousExternalLoginLookupError(ValueError):
     def __init__(
         self,
@@ -3215,6 +3219,174 @@ class LectureSlideQuestionOption(Base):
         ),
         UniqueConstraint("question_id", "id"),
     )
+
+
+class LectureSlideThreadState(Base):
+    __tablename__ = "lecture_slide_thread_states"
+
+    thread_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("threads.id", ondelete="CASCADE"), primary_key=True
+    )
+    thread: Mapped["Thread"] = relationship(
+        "Thread", back_populates="lecture_slide_state", uselist=False
+    )
+    state: Mapped[schemas.InteractiveLessonSessionState] = mapped_column(
+        SQLEnum(schemas.InteractiveLessonSessionState),
+        nullable=False,
+        server_default=schemas.InteractiveLessonSessionState.PLAYING.name,
+    )
+    current_question_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("lecture_slide_questions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    active_option_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("lecture_slide_question_options.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    last_known_offset_ms: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
+    furthest_offset_ms: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
+    last_chat_context_end_ms: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    controller_session_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    controller_user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=True
+    )
+    controller_lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    current_question: Mapped["LectureSlideQuestion | None"] = relationship(
+        "LectureSlideQuestion", foreign_keys=[current_question_id]
+    )
+    active_option: Mapped["LectureSlideQuestionOption | None"] = relationship(
+        "LectureSlideQuestionOption", foreign_keys=[active_option_id]
+    )
+    controller_user: Mapped["User | None"] = relationship(
+        "User", foreign_keys=[controller_user_id]
+    )
+
+    @property
+    def normalized_controller_lease_expires_at(self) -> datetime | None:
+        lease_expires_at = self.controller_lease_expires_at
+        if lease_expires_at is not None and lease_expires_at.tzinfo is None:
+            return lease_expires_at.replace(tzinfo=timezone.utc)
+        return lease_expires_at
+
+    @classmethod
+    async def create(
+        cls, session: AsyncSession, data: dict
+    ) -> "LectureSlideThreadState":
+        state = LectureSlideThreadState(**data)
+        session.add(state)
+        await session.flush()
+        return state
+
+
+class LectureSlideInteraction(Base):
+    __tablename__ = "lecture_slide_interactions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    thread_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("threads.id", ondelete="CASCADE"), nullable=False
+    )
+    event_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    actor_user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=True
+    )
+    event_type: Mapped[schemas.InteractiveLessonInteractionEventType] = mapped_column(
+        SQLEnum(schemas.InteractiveLessonInteractionEventType), nullable=False
+    )
+    question_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("lecture_slide_questions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    option_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("lecture_slide_question_options.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    offset_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    from_offset_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    to_offset_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    idempotency_key: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        default=generate_lecture_slide_interaction_idempotency_key,
+    )
+    created: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    thread: Mapped["Thread"] = relationship(
+        "Thread", back_populates="lecture_slide_interactions"
+    )
+    actor: Mapped["User | None"] = relationship("User", foreign_keys=[actor_user_id])
+    question: Mapped["LectureSlideQuestion | None"] = relationship(
+        "LectureSlideQuestion", foreign_keys=[question_id]
+    )
+    option: Mapped["LectureSlideQuestionOption | None"] = relationship(
+        "LectureSlideQuestionOption", foreign_keys=[option_id]
+    )
+
+    __table_args__ = (
+        UniqueConstraint("thread_id", "event_index"),
+        UniqueConstraint("thread_id", "idempotency_key"),
+        Index("lecture_slide_interaction_thread_created_idx", "thread_id", "created"),
+    )
+
+    @classmethod
+    async def create(
+        cls, session: AsyncSession, data: dict
+    ) -> "LectureSlideInteraction":
+        payload = dict(data)
+        idempotency_key = payload.get("idempotency_key")
+        if not isinstance(idempotency_key, str) or not idempotency_key.strip():
+            payload["idempotency_key"] = cls.generate_idempotency_key()
+        interaction = LectureSlideInteraction(**payload)
+        session.add(interaction)
+        await session.flush()
+        return interaction
+
+    @staticmethod
+    def generate_idempotency_key() -> str:
+        return generate_lecture_slide_interaction_idempotency_key()
+
+    @classmethod
+    async def get_by_thread_and_idempotency_key(
+        cls, session: AsyncSession, thread_id: int, idempotency_key: str
+    ) -> "LectureSlideInteraction | None":
+        stmt = select(LectureSlideInteraction).where(
+            LectureSlideInteraction.thread_id == thread_id,
+            LectureSlideInteraction.idempotency_key == idempotency_key,
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_next_event_index(cls, session: AsyncSession, thread_id: int) -> int:
+        return (
+            await session.scalar(
+                select(
+                    func.coalesce(func.max(LectureSlideInteraction.event_index), 0)
+                ).where(LectureSlideInteraction.thread_id == thread_id)
+            )
+        ) + 1
 
 
 def _lecture_video_post_narration_loader() -> Load:
@@ -7744,6 +7916,18 @@ class Thread(Base):
         back_populates="thread",
         cascade="all, delete-orphan",
         order_by="LectureVideoInteraction.event_index",
+    )
+    lecture_slide_state: Mapped["LectureSlideThreadState | None"] = relationship(
+        "LectureSlideThreadState",
+        back_populates="thread",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    lecture_slide_interactions: Mapped[list["LectureSlideInteraction"]] = relationship(
+        "LectureSlideInteraction",
+        back_populates="thread",
+        cascade="all, delete-orphan",
+        order_by="LectureSlideInteraction.event_index",
     )
     lecture_video_id = Column(
         Integer,
