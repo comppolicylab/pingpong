@@ -221,7 +221,7 @@ export class ThreadManager {
 		classId: number,
 		threadId: number,
 		threadData: BaseResponse & (ThreadWithMeta | ApiError | api.ValidationError),
-		interactionMode: 'chat' | 'voice' | 'lecture_video' = 'chat',
+		interactionMode: api.InteractionMode = 'chat',
 		timezone?: string
 	) {
 		const expanded = api.expandResponse(threadData);
@@ -767,16 +767,16 @@ export class ThreadManager {
 		const optimisticMessageContent = message + visionImageDescriptionsString;
 		const threadVersion = get(this.version);
 		const currentState = get(this.#data);
-		const isLectureVideoThread = currentState?.data?.thread?.interaction_mode === 'lecture_video';
+		const isLessonThread =
+			currentState?.data?.thread?.interaction_mode === 'lecture_video' ||
+			currentState?.data?.thread?.interaction_mode === 'lecture_slides';
 		const optimisticOutputIndex =
 			threadVersion === 3 ? this.#getNextOutputIndex(currentState) : undefined;
-		const optimisticAssistantMsgId = isLectureVideoThread
+		const optimisticAssistantMsgId = isLessonThread
 			? `optimistic-assistant-${(Math.random() + 1).toString(36).substring(2)}`
 			: null;
 		const optimisticAssistantOutputIndex =
-			isLectureVideoThread && optimisticOutputIndex !== undefined
-				? optimisticOutputIndex + 1
-				: undefined;
+			isLessonThread && optimisticOutputIndex !== undefined ? optimisticOutputIndex + 1 : undefined;
 		const optimisticCreatedAt = Date.now() / 1000;
 		const optimistic: api.OpenAIMessage = {
 			id: optimisticMsgId,
@@ -864,7 +864,7 @@ export class ThreadManager {
 			vision_file_ids,
 			vision_image_descriptions,
 			timezone: this.timezone,
-			...(isLectureVideoThread ? { generate_speech: !get(this.#ttsMuted) } : {}),
+			...(isLessonThread ? { generate_speech: !get(this.#ttsMuted) } : {}),
 			...(lecture_video_playback_position_ms !== undefined
 				? { lecture_video_playback_position_ms }
 				: {})

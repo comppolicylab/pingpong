@@ -24,7 +24,7 @@ export const load: PageLoad = async ({ fetch, params }) => {
 
 	let threadModel = '';
 	let threadTools = '';
-	let threadInteractionMode: 'chat' | 'voice' | 'lecture_video' | null = null;
+	let threadInteractionMode: api.InteractionMode | null = null;
 	let threadRecording: api.VoiceModeRecordingInfo | null = null;
 	let threadDisplayUserInfo = false;
 	let threadLectureVideoMismatch = false;

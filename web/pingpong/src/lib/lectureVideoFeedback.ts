@@ -1,7 +1,10 @@
-import type { LectureVideoContinuation } from '$lib/api';
+type PostAnswerFeedbackContinuation = {
+	correct_option_id: number | null;
+	post_answer_text: string | null;
+} & Record<string, unknown>;
 
 export function hasVisiblePostAnswerFeedback(
-	continuation: LectureVideoContinuation | null
+	continuation: PostAnswerFeedbackContinuation | null
 ): boolean {
 	return (
 		continuation?.correct_option_id != null ||

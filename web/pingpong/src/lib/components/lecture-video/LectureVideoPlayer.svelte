@@ -11,6 +11,7 @@
 		VolumeUpSolid,
 		VolumeMuteSolid
 	} from 'flowbite-svelte-icons';
+	import type { Snippet } from 'svelte';
 	import { fade } from 'svelte/transition';
 
 	function formatTime(ms: number): string {
@@ -110,7 +111,10 @@
 		onpause,
 		onerror,
 		onquestionclick,
-		onmanualplayrequest
+		onmanualplayrequest,
+		mediaKind = 'video',
+		durationMsOverride = null,
+		visual = undefined
 	}: {
 		src: string;
 		captionsSrc?: string | null;
@@ -125,7 +129,7 @@
 		activeQuestionIds?: number[] | null;
 		questionPresentationVersion?: number;
 		furthestOffsetMs?: number | null;
-		videoElement?: HTMLVideoElement | null;
+		videoElement?: HTMLMediaElement | null;
 		previewVideoElement?: HTMLVideoElement | null;
 		currentTimeMs?: number;
 		paused?: boolean;
@@ -140,6 +144,9 @@
 		onerror?: (e: Event) => void;
 		onquestionclick?: (markerId: number) => void;
 		onmanualplayrequest?: () => void;
+		mediaKind?: 'video' | 'audio';
+		durationMsOverride?: number | null;
+		visual?: Snippet<[number]>;
 	} = $props();
 
 	let showControls = $state(false);
@@ -279,7 +286,7 @@
 	});
 	let seekBarActive = $derived(seekPreviewVisible || draggingSeek);
 	let knowledgeChecksVisible = $derived(!manualPlaybackPrompt && !seekBarActive);
-	let previewVideoSrc = $derived(previewVideoActivated ? src : undefined);
+	let previewVideoSrc = $derived(mediaKind === 'video' && previewVideoActivated ? src : undefined);
 	let previewVideoPreload: 'auto' | 'metadata' = $derived(
 		previewVideoActivated ? 'auto' : 'metadata'
 	);
@@ -678,7 +685,10 @@
 
 	function handleCanPlay() {
 		if (videoElement) {
-			durationMs = videoElement.duration * 1000;
+			durationMs =
+				durationMsOverride && durationMsOverride > 0
+					? durationMsOverride
+					: videoElement.duration * 1000;
 			currentTimeMs = videoElement.currentTime * 1000;
 			playbackCompleted = videoElement.ended;
 		}
@@ -962,7 +972,7 @@
 	}
 
 	function captureMainVideoSnapshot() {
-		captureSnapshotFromVideo(videoElement);
+		captureSnapshotFromVideo(videoElement instanceof HTMLVideoElement ? videoElement : null);
 	}
 
 	function showSeekPreview(pointerOffsetPx: number, offsetMs: number) {
@@ -1324,34 +1334,72 @@
 		</div>
 	{/if}
 
-	<!-- svelte-ignore a11y_media_has_caption -->
-	<video
-		bind:this={videoElement}
-		{src}
-		playsinline
-		preload="auto"
-		tabindex={0}
-		class="h-full w-full object-contain {disabled ? 'pointer-events-none' : ''}"
-		onclick={handleContainerClick}
-		ontimeupdate={handleTimeUpdate}
-		oncanplay={handleCanPlay}
-		onended={handleEnded}
-		onplay={handlePlayEvent}
-		onpause={handlePauseEvent}
-		onratechange={handleRateChange}
-		onerror={handleError}
-		onloadedmetadata={handleLoadedMetadata}
-	>
-		{#if captionsSrc}
-			<track
-				bind:this={captionsTrackElement}
-				kind="captions"
-				label="Captions"
-				src={captionsSrc}
-				onload={syncCaptionTrackMode}
-			/>
-		{/if}
-	</video>
+	{#if mediaKind === 'audio'}
+		<!-- svelte-ignore a11y_click_events_have_key_events -->
+		<div
+			class="h-full w-full {disabled ? 'pointer-events-none' : ''}"
+			role="button"
+			tabindex={0}
+			aria-label={paused ? 'Play' : 'Pause'}
+			onclick={handleContainerClick}
+		>
+			{#if visual}
+				{@render visual(currentTimeMs)}
+			{/if}
+		</div>
+		<audio
+			bind:this={videoElement}
+			{src}
+			preload="auto"
+			ontimeupdate={handleTimeUpdate}
+			oncanplay={handleCanPlay}
+			onended={handleEnded}
+			onplay={handlePlayEvent}
+			onpause={handlePauseEvent}
+			onratechange={handleRateChange}
+			onerror={handleError}
+			onloadedmetadata={handleLoadedMetadata}
+		>
+			{#if captionsSrc}
+				<track
+					bind:this={captionsTrackElement}
+					kind="captions"
+					label="Captions"
+					src={captionsSrc}
+					onload={syncCaptionTrackMode}
+				/>
+			{/if}
+		</audio>
+	{:else}
+		<!-- svelte-ignore a11y_media_has_caption -->
+		<video
+			bind:this={videoElement}
+			{src}
+			playsinline
+			preload="auto"
+			tabindex={0}
+			class="h-full w-full object-contain {disabled ? 'pointer-events-none' : ''}"
+			onclick={handleContainerClick}
+			ontimeupdate={handleTimeUpdate}
+			oncanplay={handleCanPlay}
+			onended={handleEnded}
+			onplay={handlePlayEvent}
+			onpause={handlePauseEvent}
+			onratechange={handleRateChange}
+			onerror={handleError}
+			onloadedmetadata={handleLoadedMetadata}
+		>
+			{#if captionsSrc}
+				<track
+					bind:this={captionsTrackElement}
+					kind="captions"
+					label="Captions"
+					src={captionsSrc}
+					onload={syncCaptionTrackMode}
+				/>
+			{/if}
+		</video>
+	{/if}
 
 	{#if manualPlaybackPrompt}
 		<div class="absolute inset-0 z-10 flex items-center justify-center px-6">
@@ -1603,22 +1651,26 @@
 								class="w-full overflow-hidden rounded-lg border border-slate-200/90 bg-slate-950 bg-clip-border shadow-xl"
 							>
 								<div class="relative aspect-video overflow-hidden bg-slate-900">
-									<canvas
-										bind:this={snapshotCanvasElement}
-										class="absolute inset-0 h-full w-full object-cover"
-									></canvas>
-									<video
-										bind:this={previewVideoElement}
-										src={previewVideoSrc}
-										playsinline
-										muted
-										preload={previewVideoPreload}
-										class="absolute inset-0 h-full w-full object-cover"
-										style="opacity: {previewVideoFrameReady ? 1 : 0};"
-										onloadedmetadata={handlePreviewVideoLoadedMetadata}
-										onloadeddata={markPreviewFrameReadyIfSynced}
-										onseeked={markPreviewFrameReadyIfSynced}
-									></video>
+									{#if mediaKind === 'audio' && visual}
+										{@render visual(previewDisplayOffsetMs)}
+									{:else}
+										<canvas
+											bind:this={snapshotCanvasElement}
+											class="absolute inset-0 h-full w-full object-cover"
+										></canvas>
+										<video
+											bind:this={previewVideoElement}
+											src={previewVideoSrc}
+											playsinline
+											muted
+											preload={previewVideoPreload}
+											class="absolute inset-0 h-full w-full object-cover"
+											style="opacity: {previewVideoFrameReady ? 1 : 0};"
+											onloadedmetadata={handlePreviewVideoLoadedMetadata}
+											onloadeddata={markPreviewFrameReadyIfSynced}
+											onseeked={markPreviewFrameReadyIfSynced}
+										></video>
+									{/if}
 								</div>
 							</div>
 							{#key previewTimeText}

@@ -1722,6 +1722,150 @@ export type LectureVideoSessionState =
 	| 'awaiting_post_answer_resume'
 	| 'completed';
 
+export type AssistantInteractionMode = 'chat' | 'voice' | 'lecture_video';
+export type InteractionMode = AssistantInteractionMode | 'lecture_slides';
+
+export type InteractiveLessonSessionState =
+	| 'playing'
+	| 'awaiting_answer'
+	| 'awaiting_post_answer_resume'
+	| 'completed';
+
+export type InteractiveLessonOptionPrompt = {
+	id: number;
+	option_text: string;
+	post_answer_text?: string | null;
+};
+
+export type InteractiveLessonQuestionPrompt = {
+	id: number;
+	type: string;
+	question_text: string;
+	intro_text: string;
+	stop_offset_ms: number;
+	intro_narration_id: number | null;
+	options: InteractiveLessonOptionPrompt[];
+};
+
+export type InteractiveLessonQuestionMarker = {
+	id: number;
+	stop_offset_ms: number;
+};
+
+export type InteractiveLessonContinuation = {
+	option_id: number;
+	correct_option_id: number | null;
+	post_answer_text: string | null;
+	post_answer_narration_id: number | null;
+	resume_offset_ms: number;
+	next_question: InteractiveLessonQuestionPrompt | null;
+	complete: boolean;
+};
+
+export type InteractiveLessonSessionController = {
+	has_control: boolean;
+	has_active_controller: boolean;
+	lease_expires_at: string | null;
+	lease_duration_ms: number | null;
+};
+
+export type InteractiveLessonSession = {
+	state: InteractiveLessonSessionState;
+	lesson_chat_available: boolean;
+	last_known_offset_ms: number | null;
+	furthest_offset_ms: number | null;
+	latest_interaction_at: string | null;
+	current_question: InteractiveLessonQuestionPrompt | null;
+	current_continuation: InteractiveLessonContinuation | null;
+	question_markers: InteractiveLessonQuestionMarker[];
+	state_version: number;
+	controller: InteractiveLessonSessionController;
+};
+
+export type InteractiveLessonControlAcquireResponse = {
+	controller_session_id: string;
+	interactive_lesson_session: InteractiveLessonSession;
+};
+
+export type InteractiveLessonControlReleaseResponse = {
+	interactive_lesson_session: InteractiveLessonSession;
+};
+
+export type InteractiveLessonControlRenewResponse = {
+	lease_expires_at: string;
+	lease_duration_ms: number;
+};
+
+export type InteractiveLessonInteractionResponse = {
+	interactive_lesson_session: InteractiveLessonSession;
+};
+
+export type InteractiveLessonInteractionRequestBase = {
+	controller_session_id: string;
+	expected_state_version: number;
+	idempotency_key: string;
+};
+
+export type InteractiveLessonQuestionPresentedRequest = InteractiveLessonInteractionRequestBase & {
+	type: 'question_presented';
+	question_id: number;
+	offset_ms: number;
+};
+
+export type InteractiveLessonAnswerSubmittedRequest = InteractiveLessonInteractionRequestBase & {
+	type: 'answer_submitted';
+	question_id: number;
+	option_id: number;
+};
+
+export type InteractiveLessonResumedRequest = InteractiveLessonInteractionRequestBase & {
+	type: 'lesson_resumed';
+	offset_ms: number;
+};
+
+export type InteractiveLessonPausedRequest = InteractiveLessonInteractionRequestBase & {
+	type: 'lesson_paused';
+	offset_ms: number;
+};
+
+export type InteractiveLessonSeekedRequest = InteractiveLessonInteractionRequestBase & {
+	type: 'lesson_seeked';
+	from_offset_ms: number;
+	to_offset_ms: number;
+};
+
+export type InteractiveLessonEndedRequest = InteractiveLessonInteractionRequestBase & {
+	type: 'lesson_ended';
+	offset_ms: number;
+};
+
+export type InteractiveLessonInteractionRequest =
+	| InteractiveLessonQuestionPresentedRequest
+	| InteractiveLessonAnswerSubmittedRequest
+	| InteractiveLessonResumedRequest
+	| InteractiveLessonPausedRequest
+	| InteractiveLessonSeekedRequest
+	| InteractiveLessonEndedRequest;
+
+export type LectureSlidePage = {
+	id: number;
+	position: number;
+	title?: string | null;
+	start_offset_ms?: number | null;
+	end_offset_ms?: number | null;
+	image_url?: string | null;
+	image_stored_object_id?: number | null;
+};
+
+export type LectureSlideDeckView = {
+	id: number;
+	display_name: string;
+	total_duration_ms?: number | null;
+	pages: LectureSlidePage[];
+	continuous_narration_url?: string | null;
+	captions_url?: string | null;
+};
+
 export type LectureVideoOptionPrompt = {
 	id: number;
 	option_text: string;
@@ -2148,6 +2292,81 @@ export const getLectureVideoCaptionsUrl = (classId: number, threadId: number): s
 	return queryParts.length > 0 ? `${base}?${queryParts.join('&')}` : base;
 };
 
+// Generic interactive lesson runtime API functions for lecture slides.
+
+export const acquireLectureSlideControl = async (f: Fetcher, classId: number, threadId: number) => {
+	const url = `class/${classId}/thread/${threadId}/lecture-slide/control/acquire`;
+	return await POST<never, InteractiveLessonControlAcquireResponse>(f, url);
+};
+
+export const releaseLectureSlideControl = async (
+	f: Fetcher,
+	classId: number,
+	threadId: number,
+	controllerSessionId: string
+) => {
+	const url = `class/${classId}/thread/${threadId}/lecture-slide/control/release`;
+	return await POST<{ controller_session_id: string }, InteractiveLessonControlReleaseResponse>(
+		f,
+		url,
+		{
+			controller_session_id: controllerSessionId
+		}
+	);
+};
+
+export const renewLectureSlideControl = async (
+	f: Fetcher,
+	classId: number,
+	threadId: number,
+	controllerSessionId: string
+) => {
+	const url = `class/${classId}/thread/${threadId}/lecture-slide/control/renew`;
+	return await POST<{ controller_session_id: string }, InteractiveLessonControlRenewResponse>(
+		f,
+		url,
+		{
+			controller_session_id: controllerSessionId
+		}
+	);
+};
+
+export const postLectureSlideInteraction = async (
+	f: Fetcher,
+	classId: number,
+	threadId: number,
+	body: InteractiveLessonInteractionRequest
+) => {
+	const url = `class/${classId}/thread/${threadId}/lecture-slide/interactions`;
+	return await POST<InteractiveLessonInteractionRequest, InteractiveLessonInteractionResponse>(
+		f,
+		url,
+		body
+	);
+};
+
+export const getLectureSlidePageImageUrl = (
+	classId: number,
+	threadId: number,
+	pageId: number
+): string => {
+	const base = fullPath(`class/${classId}/thread/${threadId}/lecture-slide/page/${pageId}/image`);
+	const queryParts: string[] = [];
+	const anonymousSessionToken = getAnonymousSessionToken();
+	const anonymousShareToken = getAnonymousShareToken();
+	if (anonymousSessionToken) {
+		queryParts.push(`anonymous_session_token=${encodeURIComponent(anonymousSessionToken)}`);
+	}
+	if (anonymousShareToken) {
+		queryParts.push(`anonymous_share_token=${encodeURIComponent(anonymousShareToken)}`);
+	}
+	const ltiSessionToken = getLTISessionToken();
+	if (ltiSessionToken) {
+		queryParts.push(`lti_session=${encodeURIComponent(ltiSessionToken)}`);
+	}
+	return queryParts.length > 0 ? `${base}?${queryParts.join('&')}` : base;
+};
+
 /**
  * Create a purpose-scoped credential for a class.
  */
@@ -2401,7 +2620,7 @@ export type Assistant = {
 	description: string | null;
 	notes: string | null;
 	instructions: string;
-	interaction_mode: 'chat' | 'voice' | 'lecture_video';
+	interaction_mode: AssistantInteractionMode;
 	model: string;
 	temperature: number | null;
 	reasoning_effort: number | null;
@@ -2557,7 +2776,7 @@ export type CreateAssistantRequest = {
 	instructions: string;
 	notes: string;
 	model: string;
-	interaction_mode: 'chat' | 'voice' | 'lecture_video';
+	interaction_mode: AssistantInteractionMode;
 	lecture_video_id?: number | null;
 	lecture_video_manifest?: LectureVideoManifest | null;
 	voice_id?: string | null;
@@ -2620,7 +2839,7 @@ export type UpdateAssistantRequest = {
 	instructions?: string;
 	notes?: string;
 	model?: string;
-	interaction_mode?: 'chat' | 'voice' | 'lecture_video';
+	interaction_mode?: AssistantInteractionMode;
 	lecture_video_id?: number | null;
 	lecture_video_manifest?: LectureVideoManifest | null;
 	voice_id?: string | null;
@@ -2735,7 +2954,7 @@ export type AssistantInstructionsPreviewRequest = {
 	instructions: string;
 	use_latex: boolean;
 	disable_prompt_randomization: boolean;
-	interaction_mode?: 'chat' | 'voice' | 'lecture_video';
+	interaction_mode?: AssistantInteractionMode;
 };
 
 /**
@@ -3321,7 +3540,7 @@ export type Thread = {
 	id: number;
 	name: string | null;
 	version: number;
-	interaction_mode: 'chat' | 'voice' | 'lecture_video';
+	interaction_mode: InteractionMode;
 	class_id: number;
 	assistant_names?: Record<number, string> | null;
 	assistant_id: number;
@@ -3672,6 +3891,8 @@ export type ThreadWithMeta = {
 	lecture_video_session?: LectureVideoSession | null;
 	lecture_video_tts_available?: boolean;
 	lecture_video_captions_available?: boolean;
+	lecture_slide_deck?: LectureSlideDeckView | null;
+	interactive_lesson_session?: InteractiveLessonSession | null;
 	recording: VoiceModeRecordingInfo | null;
 	has_more: boolean;
 };

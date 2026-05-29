@@ -15,6 +15,11 @@
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import * as api from '$lib/api';
 	import type {
+		InteractiveLessonSession,
+		InteractiveLessonSessionState,
+		InteractiveLessonQuestionPrompt,
+		InteractiveLessonQuestionMarker,
+		InteractiveLessonContinuation,
 		LectureVideoSession,
 		LectureVideoSessionState,
 		LectureVideoQuestionPrompt,
@@ -32,7 +37,7 @@
 	type QuestionMarkerState = 'upcoming' | 'correct' | 'incorrect';
 	type QuestionPresentationRollbackState = {
 		questionId: number;
-		sessionState: LectureVideoSessionState;
+		sessionState: LessonSessionState;
 		subtitleText: string | null;
 		offsetMs: number;
 		shouldResumePlayback: boolean;
@@ -47,6 +52,18 @@
 		action: InitErrorAction;
 	};
 	type LectureVideoSessionRefreshResult = 'refreshed' | 'lesson_updated' | 'failed';
+	type LessonMode = 'lecture_video' | 'lecture_slides';
+	type LessonSession = LectureVideoSession | InteractiveLessonSession;
+	type LessonSessionState = LectureVideoSessionState | InteractiveLessonSessionState;
+	type LessonQuestionPrompt = LectureVideoQuestionPrompt | InteractiveLessonQuestionPrompt;
+	type LessonQuestionMarker = LectureVideoQuestionMarker | InteractiveLessonQuestionMarker;
+	type LessonContinuation = LectureVideoContinuation | InteractiveLessonContinuation;
+	type LessonInteractionPayload = Record<string, unknown> & {
+		type: string;
+		controller_session_id: string;
+		expected_state_version: number;
+		idempotency_key: string;
+	};
 
 	let {
 		classId,
@@ -59,7 +76,11 @@
 		initialSession = null,
 		chatAvailable = false,
 		playerVolume = $bindable(1),
-		chat = undefined
+		chat = undefined,
+		lessonMode = 'lecture_video',
+		mediaKind = 'video',
+		durationMsOverride = null,
+		visual = undefined
 	}: {
 		classId: number;
 		threadId: number;
@@ -68,13 +89,17 @@
 		title?: string;
 		canParticipate?: boolean;
 		showRefreshAction?: boolean;
-		initialSession?: LectureVideoSession | null;
+		initialSession?: LessonSession | null;
 		chatAvailable?: boolean;
 		playerVolume?: number;
 		chat?: Snippet<[boolean]>;
+		lessonMode?: LessonMode;
+		mediaKind?: 'video' | 'audio';
+		durationMsOverride?: number | null;
+		visual?: Snippet<[number]>;
 	} = $props();
 	const dispatch = createEventDispatcher<{
-		sessionchange: LectureVideoSession;
+		sessionchange: LessonSession;
 		playbackresumed: void;
 		narrationplaybackstarted: void;
 		lessonupdated: void;
@@ -84,10 +109,10 @@
 	let controllerSessionId: string | null = $state(null);
 	let controllerLeaseObservedAtMs: number | null = $state(null);
 	let controllerLeaseDurationMs: number | null = $state(null);
-	let sessionState: LectureVideoSessionState = $state('playing');
+	let sessionState: LessonSessionState = $state('playing');
 	let stateVersion: number = $state(1);
-	let currentQuestion: LectureVideoQuestionPrompt | null = $state(null);
-	let currentContinuation: LectureVideoContinuation | null = $state(null);
+	let currentQuestion: LessonQuestionPrompt | null = $state(null);
+	let currentContinuation: LessonContinuation | null = $state(null);
 	let answeredQuestions = new SvelteMap<
 		number,
 		{
@@ -99,10 +124,10 @@
 	>();
 	let allQuestions: { id: number; position: number; questionText: string; stopOffsetMs: number }[] =
 		$state([]);
-	let sessionQuestionMarkers: LectureVideoQuestionMarker[] = $state([]);
+	let sessionQuestionMarkers: LessonQuestionMarker[] = $state([]);
 
 	// --- Player state ---
-	let videoElement: HTMLVideoElement | null = $state(null);
+	let videoElement: HTMLMediaElement | null = $state(null);
 	let currentTimeMs: number = $state(0);
 	let paused: boolean = $state(true);
 	let videoAtEnd: boolean = $state(false);
@@ -163,7 +188,7 @@
 	let autoContinueFailed = $state(false);
 	let expiredControlRecoveryInFlight = $state(false);
 	let controllerAcquireInFlight = $state(false);
-	let acquireControllerSessionInFlight: Promise<LectureVideoSession | null> | null = null;
+	let acquireControllerSessionInFlight: Promise<LessonSession | null> | null = null;
 	let controllerAcquireGeneration = 0;
 	let activePageRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
 	let initErrorCanRefresh = $derived(showRefreshAction && initError?.action === 'refresh');
@@ -183,15 +208,15 @@
 		continueDisabled: !canParticipate || postAnswerNarrationPending || autoContinueInFlight,
 		oncontinue: requestContinue
 	});
-	function hasVisibleQuestionPrompt(state: LectureVideoSessionState): boolean {
+	function hasVisibleQuestionPrompt(state: LessonSessionState): boolean {
 		return state === 'awaiting_answer' || state === 'awaiting_post_answer_resume';
 	}
 
-	function isCompletedSession(state: LectureVideoSessionState): boolean {
+	function isCompletedSession(state: LessonSessionState): boolean {
 		return state === 'completed';
 	}
 
-	function allowsPlaybackInteraction(state: LectureVideoSessionState): boolean {
+	function allowsPlaybackInteraction(state: LessonSessionState): boolean {
 		return state === 'playing' || state === 'completed';
 	}
 
@@ -201,8 +226,8 @@
 
 	function getActiveQuestionIds(
 		locked: boolean,
-		question: LectureVideoQuestionPrompt | null,
-		continuation: LectureVideoContinuation | null
+		question: LessonQuestionPrompt | null,
+		continuation: LessonContinuation | null
 	): number[] | null {
 		if (!locked || !question) {
 			return null;
@@ -253,7 +278,7 @@
 		hasQuestionPrompt && questionPlaybackLocked && currentQuestion != null && !playerDisabled
 	);
 	let questionReviewSeekLimitMs = $derived.by(() => {
-		const question: LectureVideoQuestionPrompt | null = currentQuestion;
+		const question: LessonQuestionPrompt | null = currentQuestion;
 		return questionReviewPlaybackAllowed && question ? question.stop_offset_ms : null;
 	});
 	let playerInteractionDisabled = $derived(
@@ -313,7 +338,7 @@
 		];
 	}
 
-	function isVideoAtEnd(media: HTMLVideoElement | null = videoElement): boolean {
+	function isVideoAtEnd(media: HTMLMediaElement | null = videoElement): boolean {
 		return !!(
 			media &&
 			(media.ended ||
@@ -354,7 +379,7 @@
 	}
 
 	function trackQuestion(
-		question: Pick<LectureVideoQuestionPrompt, 'id' | 'question_text' | 'stop_offset_ms'> | null
+		question: Pick<LessonQuestionPrompt, 'id' | 'question_text' | 'stop_offset_ms'> | null
 	) {
 		if (!question || allQuestions.some(({ id }) => id === question.id)) {
 			return;
@@ -696,6 +721,76 @@
 		);
 	}
 
+	function slideInteractionType(type: string): string {
+		switch (type) {
+			case 'video_paused':
+				return 'lesson_paused';
+			case 'video_resumed':
+				return 'lesson_resumed';
+			case 'video_seeked':
+				return 'lesson_seeked';
+			case 'video_ended':
+				return 'lesson_ended';
+			default:
+				return type;
+		}
+	}
+
+	function interactionPayloadForMode(payload: LessonInteractionPayload): LessonInteractionPayload {
+		if (lessonMode !== 'lecture_slides') return payload;
+		return { ...payload, type: slideInteractionType(payload.type) };
+	}
+
+	function responseSession(expanded: {
+		data?: {
+			lecture_video_session?: LectureVideoSession | null;
+			interactive_lesson_session?: InteractiveLessonSession | null;
+		} | null;
+	}): LessonSession | null {
+		return lessonMode === 'lecture_slides'
+			? (expanded.data?.interactive_lesson_session ?? null)
+			: (expanded.data?.lecture_video_session ?? null);
+	}
+
+	async function postLessonInteraction(payload: LessonInteractionPayload) {
+		const body = interactionPayloadForMode(payload);
+		return lessonMode === 'lecture_slides'
+			? api.expandResponse(
+					await api.postLectureSlideInteraction(
+						fetch,
+						classId,
+						threadId,
+						body as api.InteractiveLessonInteractionRequest
+					)
+				)
+			: api.expandResponse(
+					await api.postLectureVideoInteraction(
+						fetch,
+						classId,
+						threadId,
+						body as api.LectureVideoInteractionRequest
+					)
+				);
+	}
+
+	async function acquireLessonControl() {
+		return lessonMode === 'lecture_slides'
+			? api.expandResponse(await api.acquireLectureSlideControl(fetch, classId, threadId))
+			: api.expandResponse(await api.acquireLectureVideoControl(fetch, classId, threadId));
+	}
+
+	async function releaseLessonControl(sessionId: string) {
+		return lessonMode === 'lecture_slides'
+			? api.releaseLectureSlideControl(fetch, classId, threadId, sessionId)
+			: api.releaseLectureVideoControl(fetch, classId, threadId, sessionId);
+	}
+
+	async function renewLessonControl(sessionId: string) {
+		return lessonMode === 'lecture_slides'
+			? api.expandResponse(await api.renewLectureSlideControl(fetch, classId, threadId, sessionId))
+			: api.expandResponse(await api.renewLectureVideoControl(fetch, classId, threadId, sessionId));
+	}
+
 	async function refreshLectureVideoSession(
 		controllerSessionIdForRequest: string
 	): Promise<LectureVideoSessionRefreshResult> {
@@ -710,6 +805,7 @@
 				controllerSessionIdForRequest,
 				refreshController.signal
 			);
+			const expanded = api.expandResponse(response);
 			if (
 				refreshController.signal.aborted ||
 				controllerSessionId !== controllerSessionIdForRequest
@@ -717,16 +813,18 @@
 				return 'failed';
 			}
 
-			const expanded = api.expandResponse(response);
 			if (expanded.error) {
 				return 'failed';
 			}
-			if (expanded.data.lecture_video_matches_assistant === false) {
+			if (
+				lessonMode === 'lecture_video' &&
+				expanded.data.lecture_video_matches_assistant === false
+			) {
 				failClosedControl(MSG_LESSON_UPDATED, { action: null });
 				return 'lesson_updated';
 			}
 
-			const refreshedSession = expanded.data.lecture_video_session;
+			const refreshedSession = responseSession(expanded);
 			if (!refreshedSession) {
 				return 'failed';
 			}
@@ -779,7 +877,7 @@
 				}
 
 				try {
-					const response = await api.postLectureVideoInteraction(fetch, classId, threadId, {
+					const expanded = await postLessonInteraction({
 						type: interaction.type,
 						controller_session_id: interactionControllerSessionId,
 						expected_state_version: stateVersion,
@@ -790,7 +888,6 @@
 						return;
 					}
 
-					const expanded = api.expandResponse(response);
 					if (expanded.$status === 409) {
 						if (expanded.error?.detail === MSG_LESSON_UPDATED) {
 							failClosedControl(expanded.error.detail, { action: null });
@@ -822,7 +919,7 @@
 						return;
 					}
 
-					applySession(expanded.data.lecture_video_session);
+					applySession(responseSession(expanded)!);
 				} catch (error) {
 					if (controllerSessionId !== interactionControllerSessionId) {
 						return;
@@ -873,7 +970,7 @@
 		}
 	}
 
-	async function acquireControllerSession(): Promise<LectureVideoSession | null> {
+	async function acquireControllerSession(): Promise<LessonSession | null> {
 		if (acquireControllerSessionInFlight) {
 			return await acquireControllerSessionInFlight;
 		}
@@ -882,8 +979,7 @@
 		const acquirePromise = (async () => {
 			controllerAcquireInFlight = true;
 			try {
-				const response = await api.acquireLectureVideoControl(fetch, classId, threadId);
-				const expanded = api.expandResponse(response);
+				const expanded = await acquireLessonControl();
 				if (acquireGeneration !== controllerAcquireGeneration) {
 					return null;
 				}
@@ -895,8 +991,10 @@
 				}
 
 				controllerSessionId = expanded.data.controller_session_id;
-				applySession(expanded.data.lecture_video_session);
-				return expanded.data.lecture_video_session;
+				const session = responseSession(expanded);
+				if (!session) return null;
+				applySession(session);
+				return session;
 			} catch (error) {
 				if (acquireGeneration !== controllerAcquireGeneration) {
 					return null;
@@ -1010,16 +1108,15 @@
 
 		try {
 			if (shouldPostPause) {
-				const response = await api.postLectureVideoInteraction(fetch, classId, threadId, {
+				const expanded = await postLessonInteraction({
 					type: 'video_paused',
 					controller_session_id: cleanupSessionId,
 					expected_state_version: stateVersion,
 					idempotency_key: crypto.randomUUID(),
 					offset_ms: Math.round(currentTimeMs)
 				});
-				const expanded = api.expandResponse(response);
 				if (!expanded.error) {
-					applySession(expanded.data.lecture_video_session);
+					applySession(responseSession(expanded)!);
 				}
 			}
 		} catch {
@@ -1028,7 +1125,7 @@
 
 		try {
 			if (releaseControl) {
-				await api.releaseLectureVideoControl(fetch, classId, threadId, cleanupSessionId);
+				await releaseLessonControl(cleanupSessionId);
 			}
 		} catch {
 			// Best-effort cleanup during navigation/unload.
@@ -1107,13 +1204,7 @@
 			if (!controllerSessionId) return;
 			try {
 				const renewingControllerSessionId = controllerSessionId;
-				const response = await api.renewLectureVideoControl(
-					fetch,
-					classId,
-					threadId,
-					renewingControllerSessionId
-				);
-				const expanded = api.expandResponse(response);
+				const expanded = await renewLessonControl(renewingControllerSessionId);
 				if (expanded.error) {
 					if (isControllerLeaseExpiredError(expanded)) {
 						await recoverExpiredControl({ force: true });
@@ -1137,6 +1228,9 @@
 	async function reconstructFromHistory(
 		prefetchedInteractions: LectureVideoInteractionHistoryItem[] | null = null
 	): Promise<LectureVideoInteractionHistoryItem[]> {
+		if (lessonMode === 'lecture_slides') {
+			return [];
+		}
 		let interactions = prefetchedInteractions;
 		if (interactions == null) {
 			const historyResponse = await api.getLectureVideoHistory(fetch, classId, threadId);
@@ -1242,7 +1336,7 @@
 		return interactions;
 	}
 
-	function applySession(session: LectureVideoSession) {
+	function applySession(session: LessonSession) {
 		sessionState = session.state;
 		stateVersion = session.state_version;
 		currentQuestion = session.current_question;
@@ -1468,16 +1562,15 @@
 		}
 
 		try {
-			const response = await api.postLectureVideoInteraction(fetch, classId, threadId, payload);
+			const expanded = await postLessonInteraction(payload);
 			if (controllerSessionId !== seekControllerSessionId) {
 				return;
 			}
-			const expanded = api.expandResponse(response);
 			if (failClosedOnConflict(expanded)) {
 				return;
 			}
 			if (!expanded.error) {
-				applySession(expanded.data.lecture_video_session);
+				applySession(responseSession(expanded)!);
 				return;
 			}
 
@@ -1502,7 +1595,7 @@
 		const endedControllerSessionId = controllerSessionId;
 		if (!endedControllerSessionId) return;
 		try {
-			const response = await api.postLectureVideoInteraction(fetch, classId, threadId, {
+			const expanded = await postLessonInteraction({
 				type: 'video_ended',
 				controller_session_id: endedControllerSessionId,
 				expected_state_version: stateVersion,
@@ -1512,12 +1605,11 @@
 			if (controllerSessionId !== endedControllerSessionId) {
 				return;
 			}
-			const expanded = api.expandResponse(response);
 			if (failClosedOnConflict(expanded)) {
 				return;
 			}
 			if (!expanded.error) {
-				applySession(expanded.data.lecture_video_session);
+				applySession(responseSession(expanded)!);
 				return;
 			}
 
@@ -1572,6 +1664,10 @@
 		onComplete: () => void,
 		onChatAbort: () => void = onComplete
 	) {
+		if (lessonMode === 'lecture_slides') {
+			onComplete();
+			return;
+		}
 		stopNarrationPlayback();
 		dispatch('narrationplaybackstarted');
 		const playbackGeneration = narrationPlaybackGeneration;
@@ -1667,7 +1763,7 @@
 	async function postQuestionPresented(rollbackState?: QuestionPresentationRollbackState) {
 		if (!controllerSessionId || !currentQuestion) return;
 		try {
-			const response = await api.postLectureVideoInteraction(fetch, classId, threadId, {
+			const expanded = await postLessonInteraction({
 				type: 'question_presented',
 				controller_session_id: controllerSessionId,
 				expected_state_version: stateVersion,
@@ -1675,12 +1771,11 @@
 				question_id: currentQuestion.id,
 				offset_ms: currentQuestion.stop_offset_ms
 			});
-			const expanded = api.expandResponse(response);
 			if (failClosedOnConflict(expanded)) {
 				return;
 			}
 			if (!expanded.error) {
-				applySession(expanded.data.lecture_video_session);
+				applySession(responseSession(expanded)!);
 				return;
 			}
 		} catch {
@@ -1707,7 +1802,7 @@
 		pauseVideoForAnswerSubmission();
 
 		try {
-			const response = await api.postLectureVideoInteraction(fetch, classId, threadId, {
+			const expanded = await postLessonInteraction({
 				type: 'answer_submitted',
 				controller_session_id: controllerSessionId,
 				expected_state_version: stateVersion,
@@ -1715,7 +1810,6 @@
 				question_id: currentQuestion.id,
 				option_id: optionId
 			});
-			const expanded = api.expandResponse(response);
 			if (failClosedOnConflict(expanded)) {
 				return;
 			}
@@ -1730,14 +1824,14 @@
 				return;
 			}
 
-			const continuationAtAnswer = expanded.data.lecture_video_session.current_continuation;
+			const continuationAtAnswer = responseSession(expanded)?.current_continuation;
 			appendAnswerToHistory(
 				questionAtAnswer,
 				optionId,
 				continuationAtAnswer?.correct_option_id ?? null,
 				continuationAtAnswer?.post_answer_text ?? null
 			);
-			applySession(expanded.data.lecture_video_session);
+			applySession(responseSession(expanded)!);
 
 			// Record answer immediately so the marker updates
 			if (continuationAtAnswer) {
@@ -1822,14 +1916,13 @@
 		let expanded;
 		let optimisticPlayStarted = false;
 		try {
-			const response = await api.postLectureVideoInteraction(fetch, classId, threadId, {
+			expanded = await postLessonInteraction({
 				type: 'video_resumed',
 				controller_session_id: controllerSessionId,
 				expected_state_version: stateVersion,
 				idempotency_key: crypto.randomUUID(),
 				offset_ms: resumeOffsetMs
 			});
-			expanded = api.expandResponse(response);
 			optimisticPlayStarted = optimisticPlayPromise ? await optimisticPlayPromise : false;
 		} catch {
 			clearPendingVideoRetry();
@@ -1850,7 +1943,7 @@
 			return false;
 		}
 		if (!expanded.error) {
-			applySession(expanded.data.lecture_video_session);
+			applySession(responseSession(expanded)!);
 			questionPresentedForId = null;
 			subtitleText = null;
 
@@ -1968,6 +2061,9 @@
 						<LectureVideoPlayer
 							src={lectureVideoSrc}
 							{captionsSrc}
+							{mediaKind}
+							{durationMsOverride}
+							{visual}
 							displayTitle={sessionState === 'awaiting_answer'
 								? 'Answer the comprehension check to continue'
 								: title}
