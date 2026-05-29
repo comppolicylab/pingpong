@@ -158,6 +158,8 @@
 	$: threadIsCurrentUserParticipant =
 		expandedThreadData.data?.thread?.is_current_user_participant === true;
 	$: lectureVideoSession = expandedThreadData.data?.lecture_video_session ?? null;
+	$: lectureSlideDeck = expandedThreadData.data?.lecture_slide_deck ?? null;
+	$: lectureSlideSession = expandedThreadData.data?.interactive_lesson_session ?? null;
 	$: threadLectureChatAvailable = lectureVideoSession?.lecture_video_chat_available === true;
 	$: threadLectureVideoCaptionsAvailable =
 		expandedThreadData.data?.lecture_video_captions_available === true;
@@ -165,6 +167,45 @@
 		? api.getLectureVideoCaptionsUrl(classId, threadId)
 		: null;
 	$: lectureVideoTtsAvailable = expandedThreadData.data?.lecture_video_tts_available === true;
+	$: lectureSlidePages = ((lectureSlideDeck?.pages ?? []) as api.LectureSlidePage[])
+		.slice()
+		.sort((a: api.LectureSlidePage, b: api.LectureSlidePage) => a.position - b.position);
+	$: lectureSlideDurationMs = (() => {
+		if (lectureSlideDeck?.total_duration_ms && lectureSlideDeck.total_duration_ms > 0) {
+			return lectureSlideDeck.total_duration_ms;
+		}
+		const lastEnd = Math.max(
+			...lectureSlidePages.map((page: api.LectureSlidePage) => page.end_offset_ms ?? 0),
+			0
+		);
+		return lastEnd > 0 ? lastEnd : lectureSlidePages.length * 60_000;
+	})();
+	function lectureSlidePageAtOffset(offsetMs: number): api.LectureSlidePage | null {
+		if (lectureSlidePages.length === 0) return null;
+		const current = Math.max(0, Math.min(offsetMs, lectureSlideDurationMs));
+		return (
+			lectureSlidePages.find((page: api.LectureSlidePage, index: number) => {
+				const start =
+					page.start_offset_ms ??
+					Math.floor((index * lectureSlideDurationMs) / lectureSlidePages.length);
+				const end =
+					page.end_offset_ms ??
+					Math.floor(((index + 1) * lectureSlideDurationMs) / lectureSlidePages.length);
+				return current >= start && current < end;
+			}) ?? lectureSlidePages[lectureSlidePages.length - 1]
+		);
+	}
+	function lectureSlidePageImageUrl(page: api.LectureSlidePage): string | null {
+		return (
+			page.image_url ??
+			(page.image_stored_object_id
+				? api.getLectureSlidePageImageUrl(classId, threadId, page.id)
+				: null)
+		);
+	}
+	function lectureSlidePageIndex(page: api.LectureSlidePage): number {
+		return lectureSlidePages.findIndex((item: api.LectureSlidePage) => item.id === page.id);
+	}
 	let runtimeLectureVideoAssistantMismatch = false;
 	let runtimeLectureVideoAssistantMismatchKey: string | null = null;
 	$: currentLectureVideoThreadKey = `${classId}:${threadId}`;
@@ -176,10 +217,14 @@
 		threadLectureVideoMismatch || runtimeLectureVideoAssistantMismatch;
 	$: effectiveLectureVideoMismatch = effectiveLectureVideoAssistantMismatch;
 	let lectureVideoViewRef: LectureVideoViewHandle | null = null;
+	let lectureSlideViewRef: LectureVideoViewHandle | null = null;
 	let lecturePlayerVolume = 1;
 	let liveLectureVideoSession: api.LectureVideoSession | null = null;
+	let liveLectureSlideSession: api.InteractiveLessonSession | null = null;
 	let lectureVideoSessionKey: string | null = null;
+	let lectureSlideSessionKey: string | null = null;
 	let startingReplacementLectureThread = false;
+	// A thread has one lesson interaction mode, so this prompt state is shared by video and slides.
 	let lectureChatContinuePromptDismissedByPlayback = false;
 	let lectureChatContinuePromptDismissedThreadKey: string | null = null;
 	$: if (lectureChatContinuePromptDismissedThreadKey !== currentLectureVideoThreadKey) {
@@ -196,6 +241,17 @@
 		}
 	}
 	$: effectiveLectureVideoSession = liveLectureVideoSession ?? lectureVideoSession;
+	$: {
+		const nextKey = `${classId}:${threadId}:${lectureSlideSession?.state_version ?? 'none'}:${
+			lectureSlideSession?.state ?? 'none'
+		}`;
+		if (lectureSlideSessionKey !== nextKey) {
+			lectureSlideSessionKey = nextKey;
+			liveLectureSlideSession = lectureSlideSession;
+		}
+	}
+	$: effectiveLectureSlideSession = liveLectureSlideSession ?? lectureSlideSession;
+	$: threadLectureSlideChatAvailable = effectiveLectureSlideSession?.lesson_chat_available === true;
 	let trashThreadFiles = writable<string[]>([]);
 	let allFiles: Record<string, api.FileUploadInfo> = {};
 	$: threadAttachments = threadMgr.attachments;
@@ -266,7 +322,10 @@
 	$: ttsMuted = threadMgr.ttsMuted;
 	$: waiting = threadMgr.waiting;
 	$: ttsPlaying = threadMgr.ttsPlaying;
-	$: if (data.threadInteractionMode === 'lecture_video') {
+	$: if (
+		data.threadInteractionMode === 'lecture_video' ||
+		data.threadInteractionMode === 'lecture_slides'
+	) {
 		threadMgr.setTtsVolume(lecturePlayerVolume * LECTURE_CHAT_TTS_VOLUME_SCALE);
 	}
 	$: loading = threadMgr.loading;
@@ -288,7 +347,7 @@
 	let useLatex = false;
 	let useImageDescriptions = false;
 	let assistantVersion: number | null = null;
-	let assistantInteractionMode: 'voice' | 'chat' | 'lecture_video' | null = null;
+	let assistantInteractionMode: api.AssistantInteractionMode | null = null;
 	let allowUserFileUploads = true;
 	let allowUserImageUploads = true;
 	let lectureVideoDisplayTitle = 'Lecture Video';
@@ -304,6 +363,9 @@
 		!lectureChatCanSubmit || !!$navigating || !threadLectureChatAvailable;
 	$: lectureChatContinuePromptVisible =
 		effectiveLectureVideoSession?.state !== 'awaiting_answer' &&
+		!lectureChatContinuePromptDismissedByPlayback;
+	$: lectureSlideChatContinuePromptVisible =
+		effectiveLectureSlideSession?.state !== 'awaiting_answer' &&
 		!lectureChatContinuePromptDismissedByPlayback;
 	$: canDropUploadsIntoThread =
 		data.threadInteractionMode === 'chat' &&
@@ -744,8 +806,28 @@
 		});
 	};
 
-	const handleLectureSessionChange = (e: CustomEvent<api.LectureVideoSession>) => {
-		liveLectureVideoSession = e.detail;
+	const handleLectureSlideChatSubmit = async (message: ChatInputMessage) => {
+		const lectureSlidePlaybackPositionMs = lectureSlideViewRef?.getPlaybackPositionMs();
+		lectureChatContinuePromptDismissedByPlayback = false;
+		void lectureSlideViewRef?.pauseForChatSubmit();
+		await postMessage({
+			...message,
+			...(lectureSlidePlaybackPositionMs !== undefined
+				? { lecture_video_playback_position_ms: lectureSlidePlaybackPositionMs }
+				: {})
+		});
+	};
+
+	const handleLectureSessionChange = (
+		e: CustomEvent<api.LectureVideoSession | api.InteractiveLessonSession>
+	) => {
+		liveLectureVideoSession = e.detail as api.LectureVideoSession;
+	};
+
+	const handleLectureSlideSessionChange = (
+		e: CustomEvent<api.InteractiveLessonSession | api.LectureVideoSession>
+	) => {
+		liveLectureSlideSession = e.detail as api.InteractiveLessonSession;
 	};
 
 	const handleLecturePlaybackResumed = () => {
@@ -758,7 +840,11 @@
 	};
 
 	const handleLectureChatContinueWatching = async () => {
-		return (await lectureVideoViewRef?.continueWatchingAfterChat()) ?? false;
+		return (
+			(await lectureVideoViewRef?.continueWatchingAfterChat()) ??
+			(await lectureSlideViewRef?.continueWatchingAfterChat()) ??
+			false
+		);
 	};
 
 	// Handle file upload
@@ -1680,6 +1766,110 @@
 					{/snippet}
 				</LectureVideoView>
 			{/if}
+		{/key}
+	{:else if data.threadInteractionMode === 'lecture_slides'}
+		{#key `${classId}:${threadId}:${lectureSlideDeck?.continuous_narration_url ?? ''}`}
+			<LectureVideoView
+				bind:this={lectureSlideViewRef}
+				{classId}
+				{threadId}
+				lectureVideoSrc={lectureSlideDeck?.continuous_narration_url ?? ''}
+				captionsSrc={lectureSlideDeck?.captions_url ?? null}
+				title={threadMgr.thread?.name || 'Lecture Slides'}
+				canParticipate={threadIsCurrentUserParticipant}
+				initialSession={lectureSlideSession}
+				bind:playerVolume={lecturePlayerVolume}
+				chatAvailable={threadLectureSlideChatAvailable}
+				lessonMode="lecture_slides"
+				mediaKind="audio"
+				durationMsOverride={lectureSlideDurationMs}
+				on:sessionchange={handleLectureSlideSessionChange}
+				on:playbackresumed={handleLecturePlaybackResumed}
+			>
+				{#snippet visual(offsetMs)}
+					{@const visiblePage = lectureSlidePageAtOffset(offsetMs)}
+					{@const visiblePageIndex = visiblePage ? lectureSlidePageIndex(visiblePage) : -1}
+					{@const slideImageUrl = visiblePage ? lectureSlidePageImageUrl(visiblePage) : null}
+					<div class="flex h-full w-full items-center justify-center bg-black">
+						{#if visiblePage}
+							{#if slideImageUrl}
+								<img
+									src={slideImageUrl}
+									alt={visiblePage.title || `Slide ${visiblePageIndex + 1}`}
+									class="h-full w-full object-contain"
+								/>
+							{:else}
+								<div
+									class="flex aspect-video w-full max-w-5xl items-center justify-center bg-slate-100 px-8 text-center text-slate-800"
+								>
+									<div>
+										<div class="text-xs font-semibold tracking-widest text-slate-500 uppercase">
+											Slide {visiblePageIndex + 1}
+										</div>
+										<div class="mt-3 text-2xl font-semibold">
+											{visiblePage.title || lectureSlideDeck?.display_name || 'Lecture Slides'}
+										</div>
+									</div>
+								</div>
+							{/if}
+						{:else}
+							<div class="flex flex-col items-center gap-2 px-6 text-center text-slate-300">
+								<div class="text-sm font-semibold text-white">Slide content unavailable</div>
+								<div class="max-w-md text-sm text-slate-400">
+									This thread is in lecture slides mode, but the slide payload is not available yet.
+								</div>
+							</div>
+						{/if}
+						<div
+							class="absolute top-4 left-4 rounded-full bg-black/60 px-3 py-1 text-xs font-medium text-white"
+						>
+							{visiblePageIndex >= 0
+								? `Slide ${visiblePageIndex + 1} of ${lectureSlidePages.length}`
+								: 'Lecture Slides'}
+						</div>
+					</div>
+				{/snippet}
+				{#snippet chat(lectureSlideAtEnd = false)}
+					{#if threadLectureSlideChatAvailable}
+						<LectureVideoChatPanel
+							{classId}
+							{threadId}
+							messages={$messages}
+							canFetchMore={$canFetchMore}
+							showInput={effectiveLectureSlideSession?.state !== 'completed' ||
+								threadIsCurrentUserParticipant}
+							showContinueWatchingPrompt={lectureSlideChatContinuePromptVisible &&
+								!(effectiveLectureSlideSession?.state === 'completed' && lectureSlideAtEnd)}
+							canSubmit={lectureChatCanSubmit}
+							disabled={!lectureChatCanSubmit || !!$navigating || !threadLectureSlideChatAvailable}
+							waiting={$waiting}
+							submitting={$submitting}
+							ttsMuted={$ttsMuted}
+							ttsPlaying={$ttsPlaying}
+							ttsAvailable={false}
+							{threadManagerError}
+							{assistantDeleted}
+							{canViewAssistant}
+							{resolvedAssistantVersion}
+							version={$version}
+							{useLatex}
+							{userTimezone}
+							meName={data?.me?.user?.name || data?.me?.user?.email || 'Me'}
+							meImage={data?.me?.profile?.image_url || ''}
+							assistantId={$assistantId}
+							participants={$participants}
+							mimeType={data.uploadInfo.mimeType}
+							{fetchMoreMessages}
+							onsubmit={handleLectureSlideChatSubmit}
+							ondismisserror={handleLectureChatDismissError}
+							oncontinuewatching={handleLectureChatContinueWatching}
+							onmutettstoggle={() => {
+								threadMgr.setTtsMuted(!$ttsMuted);
+							}}
+						/>
+					{/if}
+				{/snippet}
+			</LectureVideoView>
 		{/key}
 	{:else}
 		<div
