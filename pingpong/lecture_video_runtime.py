@@ -65,6 +65,7 @@ _VIDEO_STORAGE_TO_EVENT = {
 class LectureVideoAdapter:
     state_model: Any = models.LectureVideoThreadState
     interaction_model: Any = models.LectureVideoInteraction
+    state_enum: Any = schemas.LectureVideoSessionState
 
     async def get_thread_with_context(
         self, session: AsyncSession, thread_id: int
@@ -102,6 +103,13 @@ class LectureVideoAdapter:
 
     def matches_assistant(self, thread: models.Thread) -> bool:
         return lecture_video_matches_assistant(thread)
+
+    def lesson_chat_available(self, asset: object) -> bool:
+        lecture_video = cast(models.LectureVideo, asset)
+        return lecture_video.lecture_video_chat_available
+
+    def initial_state_fields(self) -> dict[str, Any]:
+        return {"last_chat_context_end_ms": 0}
 
     def to_storage_event(
         self, event_type: schemas.InteractiveLessonInteractionEventType
@@ -156,18 +164,6 @@ def lecture_video_matches_assistant(thread: models.Thread | None) -> bool:
     )
 
 
-def _narration_id(
-    narration: models.LectureVideoNarration | None,
-) -> int | None:
-    if (
-        narration is None
-        or narration.status != schemas.LectureVideoNarrationStatus.READY
-        or narration.stored_object is None
-    ):
-        return None
-    return narration.id
-
-
 def narration_allowed_for_thread_state(
     thread: models.Thread, narration_id: int
 ) -> bool:
@@ -175,7 +171,7 @@ def narration_allowed_for_thread_state(
     if state is None:
         return False
 
-    current_question = interactive_lesson_runtime._get_current_question(
+    current_question = interactive_lesson_runtime.get_current_question(
         thread, state, adapter=_VIDEO_ADAPTER
     )
     if (
@@ -202,17 +198,6 @@ def _to_video_session(
     data = session.model_dump()
     data["lecture_video_chat_available"] = data.pop("lesson_chat_available")
     return schemas.LectureVideoSession.model_validate(data)
-
-
-def _to_interactive_event(
-    event_type: (
-        schemas.LectureVideoInteractionEventType
-        | schemas.InteractiveLessonInteractionEventType
-    ),
-) -> schemas.InteractiveLessonInteractionEventType:
-    if isinstance(event_type, schemas.InteractiveLessonInteractionEventType):
-        return event_type
-    return _VIDEO_STORAGE_TO_EVENT[event_type]
 
 
 def _to_interactive_request(
@@ -251,30 +236,6 @@ def build_lecture_video_session(
             now=now,
         )
     )
-
-
-async def _build_lecture_video_session_for_state(
-    state: models.LectureVideoThreadState,
-    *,
-    latest_interaction_at: datetime | None = None,
-    request_controller_session_id: str | None = None,
-    request_actor_user_id: int | None = None,
-    now: datetime | None = None,
-) -> schemas.LectureVideoSession:
-    return _to_video_session(
-        await interactive_lesson_runtime._build_interactive_lesson_session_for_state(
-            state,
-            adapter=_VIDEO_ADAPTER,
-            latest_interaction_at=latest_interaction_at,
-            request_controller_session_id=request_controller_session_id,
-            request_actor_user_id=request_actor_user_id,
-            now=now,
-        )
-    )
-
-
-def _get_unlocked_offset_ms(state: models.LectureVideoThreadState) -> int:
-    return interactive_lesson_runtime._get_unlocked_offset_ms(state)
 
 
 async def get_plausible_playback_offset_ms(
@@ -333,40 +294,6 @@ async def get_or_initialize_thread_state(
         models.LectureVideoThreadState,
         await interactive_lesson_runtime.get_or_initialize_thread_state(
             session, thread_id, adapter=_VIDEO_ADAPTER, for_update=for_update
-        ),
-    )
-
-
-async def _append_interaction(
-    session: AsyncSession,
-    state: models.LectureVideoThreadState,
-    *,
-    actor_user_id: int | None,
-    event_type: (
-        schemas.LectureVideoInteractionEventType
-        | schemas.InteractiveLessonInteractionEventType
-    ),
-    question_id: int | None = None,
-    option_id: int | None = None,
-    offset_ms: int | None = None,
-    from_offset_ms: int | None = None,
-    to_offset_ms: int | None = None,
-    idempotency_key: str | None = None,
-) -> models.LectureVideoInteraction:
-    return cast(
-        models.LectureVideoInteraction,
-        await interactive_lesson_runtime._append_interaction(
-            session,
-            state,
-            adapter=_VIDEO_ADAPTER,
-            actor_user_id=actor_user_id,
-            event_type=_to_interactive_event(event_type),
-            question_id=question_id,
-            option_id=option_id,
-            offset_ms=offset_ms,
-            from_offset_ms=from_offset_ms,
-            to_offset_ms=to_offset_ms,
-            idempotency_key=idempotency_key,
         ),
     )
 

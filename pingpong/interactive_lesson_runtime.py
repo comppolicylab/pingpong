@@ -35,7 +35,6 @@ MSG_SKIP_AHEAD_BLOCKED = (
 MSG_CANNOT_CONTINUE_FROM_HERE = (
     "The video cannot continue from here. Refresh the lesson and try again."
 )
-MSG_LESSON_ALREADY_COMPLETE = "This lesson is already complete."
 MSG_VIDEO_CANNOT_DO_THAT = (
     "The video cannot do that right now. Wait a moment, then try again."
 )
@@ -54,20 +53,38 @@ MSG_REFRESH_AND_RETRY = (
 class InteractiveLessonAdapter(Protocol):
     state_model: Any
     interaction_model: Any
+    state_enum: "LessonStateEnum"
 
     async def get_thread_with_context(
         self, session: AsyncSession, thread_id: int
-    ) -> models.Thread | None: ...
+    ) -> models.Thread | None:
+        pass
 
-    def get_asset(self, thread: models.Thread) -> object | None: ...
-    def get_questions(self, thread: models.Thread) -> Sequence["LessonQuestion"]: ...
-    def get_state(self, thread: models.Thread) -> "LessonState | None": ...
-    def set_state(self, thread: models.Thread, state: "LessonState") -> None: ...
-    def matches_assistant(self, thread: models.Thread) -> bool: ...
+    def get_asset(self, thread: models.Thread) -> object | None:
+        pass
+
+    def get_questions(self, thread: models.Thread) -> Sequence["LessonQuestion"]:
+        pass
+
+    def get_state(self, thread: models.Thread) -> "LessonState | None":
+        pass
+
+    def set_state(self, thread: models.Thread, state: "LessonState") -> None:
+        pass
+
+    def matches_assistant(self, thread: models.Thread) -> bool:
+        pass
+
+    def lesson_chat_available(self, asset: object) -> bool:
+        pass
+
+    def initial_state_fields(self) -> dict[str, Any]:
+        pass
 
     def to_storage_event(
         self, event_type: schemas.InteractiveLessonInteractionEventType
-    ) -> object: ...
+    ) -> object:
+        pass
 
 
 class LessonStateValue(Protocol):
@@ -155,7 +172,7 @@ class InteractiveLessonConflictError(InteractiveLessonRuntimeError):
 
 
 def _state_enum(adapter: InteractiveLessonAdapter) -> LessonStateEnum:
-    return adapter.state_model.__table__.c.state.type.enum_class
+    return adapter.state_enum
 
 
 def has_active_controller(state: LessonState, now: datetime | None = None) -> bool:
@@ -312,7 +329,7 @@ def build_interactive_lesson_session(
     return schemas.InteractiveLessonSession(
         state=schemas.InteractiveLessonSessionState(state.state.value),
         lesson_chat_available=bool(
-            asset and getattr(asset, "lecture_video_chat_available", False)
+            asset is not None and adapter.lesson_chat_available(asset)
         ),
         last_known_offset_ms=state.last_known_offset_ms,
         furthest_offset_ms=furthest_offset_ms,
@@ -368,8 +385,37 @@ async def _build_interactive_lesson_session_for_state(
     )
 
 
+def get_current_question(
+    thread: models.Thread, state: LessonState, *, adapter: InteractiveLessonAdapter
+) -> LessonQuestion | None:
+    return _get_current_question(thread, state, adapter=adapter)
+
+
+async def build_interactive_lesson_session_for_state(
+    state: LessonState,
+    *,
+    adapter: InteractiveLessonAdapter,
+    latest_interaction_at: datetime | None = None,
+    request_controller_session_id: str | None = None,
+    request_actor_user_id: int | None = None,
+    now: datetime | None = None,
+) -> schemas.InteractiveLessonSession:
+    return await _build_interactive_lesson_session_for_state(
+        state,
+        adapter=adapter,
+        latest_interaction_at=latest_interaction_at,
+        request_controller_session_id=request_controller_session_id,
+        request_actor_user_id=request_actor_user_id,
+        now=now,
+    )
+
+
 def _get_unlocked_offset_ms(state: LessonState) -> int:
     return max(state.last_known_offset_ms, state.furthest_offset_ms)
+
+
+def get_unlocked_offset_ms(state: LessonState) -> int:
+    return _get_unlocked_offset_ms(state)
 
 
 def _set_last_known_offset_ms(state: LessonState, offset_ms: int) -> None:
@@ -476,24 +522,20 @@ async def initialize_thread_state(
     )
     state_enum = _state_enum(adapter)
 
-    state = await adapter.state_model.create(
-        session,
-        {
-            "thread_id": thread.id,
-            "state": (
-                state_enum.PLAYING
-                if first_question is not None
-                else state_enum.COMPLETED
-            ),
-            "current_question_id": first_question.id
-            if first_question is not None
-            else None,
-            "last_known_offset_ms": 0,
-            "furthest_offset_ms": 0,
-            "last_chat_context_end_ms": 0,
-            "version": 1,
-        },
-    )
+    state_data = {
+        "thread_id": thread.id,
+        "state": (
+            state_enum.PLAYING if first_question is not None else state_enum.COMPLETED
+        ),
+        "current_question_id": first_question.id
+        if first_question is not None
+        else None,
+        "last_known_offset_ms": 0,
+        "furthest_offset_ms": 0,
+        "version": 1,
+    }
+    state_data.update(adapter.initial_state_fields())
+    state = await adapter.state_model.create(session, state_data)
     await adapter.interaction_model.create(
         session,
         {
@@ -631,6 +673,35 @@ async def _append_interaction(
             "to_offset_ms": to_offset_ms,
             "idempotency_key": effective_idempotency_key,
         },
+    )
+
+
+async def append_interaction(
+    session: AsyncSession,
+    state: LessonState,
+    *,
+    adapter: InteractiveLessonAdapter,
+    actor_user_id: int | None,
+    event_type: schemas.InteractiveLessonInteractionEventType,
+    question_id: int | None = None,
+    option_id: int | None = None,
+    offset_ms: int | None = None,
+    from_offset_ms: int | None = None,
+    to_offset_ms: int | None = None,
+    idempotency_key: str | None = None,
+) -> object:
+    return await _append_interaction(
+        session,
+        state,
+        adapter=adapter,
+        actor_user_id=actor_user_id,
+        event_type=event_type,
+        question_id=question_id,
+        option_id=option_id,
+        offset_ms=offset_ms,
+        from_offset_ms=from_offset_ms,
+        to_offset_ms=to_offset_ms,
+        idempotency_key=idempotency_key,
     )
 
 

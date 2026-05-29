@@ -50,6 +50,85 @@ server_module = importlib.import_module("pingpong.server")
 cli_module = importlib.import_module("pingpong.__main__")
 
 
+def test_lecture_video_session_schema_matches_interactive_lesson_session_shape():
+    interactive_fields = set(schemas.InteractiveLessonSession.model_fields)
+    video_fields = set(schemas.LectureVideoSession.model_fields)
+
+    assert interactive_fields - {"lesson_chat_available"} == video_fields - {
+        "lecture_video_chat_available"
+    }
+    assert "lesson_chat_available" in interactive_fields
+    assert "lecture_video_chat_available" in video_fields
+
+
+@pytest.mark.parametrize(
+    ("video_model", "interactive_model", "video_type", "interactive_type", "extra"),
+    [
+        (
+            schemas.LectureVideoQuestionPresentedRequest,
+            schemas.InteractiveLessonQuestionPresentedRequest,
+            "question_presented",
+            "question_presented",
+            {"question_id": 1, "offset_ms": 500},
+        ),
+        (
+            schemas.LectureVideoAnswerSubmittedRequest,
+            schemas.InteractiveLessonAnswerSubmittedRequest,
+            "answer_submitted",
+            "answer_submitted",
+            {"question_id": 1, "option_id": 2},
+        ),
+        (
+            schemas.LectureVideoResumedRequest,
+            schemas.InteractiveLessonResumedRequest,
+            "video_resumed",
+            "lesson_resumed",
+            {"offset_ms": 500},
+        ),
+        (
+            schemas.LectureVideoPausedRequest,
+            schemas.InteractiveLessonPausedRequest,
+            "video_paused",
+            "lesson_paused",
+            {"offset_ms": 500},
+        ),
+        (
+            schemas.LectureVideoSeekedRequest,
+            schemas.InteractiveLessonSeekedRequest,
+            "video_seeked",
+            "lesson_seeked",
+            {"from_offset_ms": 250, "to_offset_ms": 500},
+        ),
+        (
+            schemas.LectureVideoEndedRequest,
+            schemas.InteractiveLessonEndedRequest,
+            "video_ended",
+            "lesson_ended",
+            {"offset_ms": 500},
+        ),
+    ],
+)
+def test_lecture_video_interaction_request_matches_interactive_lesson_shape(
+    video_model, interactive_model, video_type, interactive_type, extra
+):
+    assert set(video_model.model_fields) == set(interactive_model.model_fields)
+
+    video_request = video_model(
+        type=video_type,
+        controller_session_id="controller-session",
+        expected_state_version=1,
+        idempotency_key="request-key",
+        **extra,
+    )
+    interactive_request = lecture_video_runtime._to_interactive_request(video_request)
+
+    assert isinstance(interactive_request, interactive_model)
+    assert interactive_request.type == interactive_type
+    assert interactive_request.model_dump(exclude={"type"}) == video_request.model_dump(
+        exclude={"type"}
+    )
+
+
 class FakeQueue:
     def __init__(self) -> None:
         self.items: list[object] = []
@@ -2144,6 +2223,7 @@ async def test_get_thread_lazily_initializes_legacy_lecture_video_runtime_state(
         )
         assert state is not None
         assert state.state == schemas.LectureVideoSessionState.PLAYING
+        assert state.last_chat_context_end_ms == 0
         interactions = await models.LectureVideoInteraction.list_by_thread_id(
             session, thread_id
         )
