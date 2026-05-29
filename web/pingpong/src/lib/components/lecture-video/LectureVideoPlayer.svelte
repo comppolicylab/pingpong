@@ -290,7 +290,7 @@
 	let previewVideoPreload: 'auto' | 'metadata' = $derived(
 		previewVideoActivated ? 'auto' : 'metadata'
 	);
-	let previewDisplayOffsetMs = $derived(dragPreviewOffsetMs ?? seekPreviewOffsetMs);
+	let previewDisplayOffsetMs = $derived(dragPreviewOffsetMs ?? seekPreviewOffsetMs ?? 0);
 	let previewTimeText = $derived(formatTime(previewDisplayOffsetMs));
 	let hoverPercent = $derived(durationMs > 0 ? (previewDisplayOffsetMs / durationMs) * 100 : 0);
 	let clampedPreviewX = $derived(
@@ -1298,6 +1298,15 @@
 			handleKeyboardMuteToggle();
 		}
 	}
+
+	function handleAudioSurfaceKeydown(event: KeyboardEvent) {
+		if (disabled) return;
+		if (event.key !== 'Enter' && event.key !== ' ') return;
+
+		event.preventDefault();
+		event.stopPropagation();
+		handleContainerClick();
+	}
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -1335,13 +1344,13 @@
 	{/if}
 
 	{#if mediaKind === 'audio'}
-		<!-- svelte-ignore a11y_click_events_have_key_events -->
 		<div
 			class="h-full w-full {disabled ? 'pointer-events-none' : ''}"
 			role="button"
 			tabindex={0}
 			aria-label={paused ? 'Play' : 'Pause'}
 			onclick={handleContainerClick}
+			onkeydown={handleAudioSurfaceKeydown}
 		>
 			{#if visual}
 				{@render visual(currentTimeMs)}

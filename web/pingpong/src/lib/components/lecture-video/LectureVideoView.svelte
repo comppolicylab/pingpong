@@ -58,12 +58,7 @@
 	type LessonQuestionPrompt = LectureVideoQuestionPrompt | InteractiveLessonQuestionPrompt;
 	type LessonQuestionMarker = LectureVideoQuestionMarker | InteractiveLessonQuestionMarker;
 	type LessonContinuation = LectureVideoContinuation | InteractiveLessonContinuation;
-	type LessonInteractionPayload = Record<string, unknown> & {
-		type: string;
-		controller_session_id: string;
-		expected_state_version: number;
-		idempotency_key: string;
-	};
+	type LessonInteractionPayload = api.LectureVideoInteractionRequest;
 
 	let {
 		classId,
@@ -721,24 +716,29 @@
 		);
 	}
 
-	function slideInteractionType(type: string): string {
-		switch (type) {
+	function lectureSlideInteractionPayload(
+		payload: LessonInteractionPayload
+	): api.InteractiveLessonInteractionRequest {
+		switch (payload.type) {
+			case 'question_presented':
+			case 'answer_submitted':
+				return payload;
 			case 'video_paused':
-				return 'lesson_paused';
+				return { ...payload, type: 'lesson_paused' };
 			case 'video_resumed':
-				return 'lesson_resumed';
+				return { ...payload, type: 'lesson_resumed' };
 			case 'video_seeked':
-				return 'lesson_seeked';
+				return { ...payload, type: 'lesson_seeked' };
 			case 'video_ended':
-				return 'lesson_ended';
-			default:
-				return type;
+				return { ...payload, type: 'lesson_ended' };
+			default: {
+				const unknownPayload = payload as { type: string };
+				if (unknownPayload.type.startsWith('video_')) {
+					console.warn(`Unhandled lecture slide interaction type: ${unknownPayload.type}`);
+				}
+				return unknownPayload as api.InteractiveLessonInteractionRequest;
+			}
 		}
-	}
-
-	function interactionPayloadForMode(payload: LessonInteractionPayload): LessonInteractionPayload {
-		if (lessonMode !== 'lecture_slides') return payload;
-		return { ...payload, type: slideInteractionType(payload.type) };
 	}
 
 	function responseSession(expanded: {
@@ -752,24 +752,36 @@
 			: (expanded.data?.lecture_video_session ?? null);
 	}
 
+	function applyResponseSession(
+		expanded: {
+			data?: {
+				lecture_video_session?: LectureVideoSession | null;
+				interactive_lesson_session?: InteractiveLessonSession | null;
+			} | null;
+		},
+		fallbackMessage = 'We could not update your lesson progress. Refresh the lesson to continue.'
+	): LessonSession | null {
+		const session = responseSession(expanded);
+		if (!session) {
+			failClosedControl(fallbackMessage);
+			return null;
+		}
+		applySession(session);
+		return session;
+	}
+
 	async function postLessonInteraction(payload: LessonInteractionPayload) {
-		const body = interactionPayloadForMode(payload);
 		return lessonMode === 'lecture_slides'
 			? api.expandResponse(
 					await api.postLectureSlideInteraction(
 						fetch,
 						classId,
 						threadId,
-						body as api.InteractiveLessonInteractionRequest
+						lectureSlideInteractionPayload(payload)
 					)
 				)
 			: api.expandResponse(
-					await api.postLectureVideoInteraction(
-						fetch,
-						classId,
-						threadId,
-						body as api.LectureVideoInteractionRequest
-					)
+					await api.postLectureVideoInteraction(fetch, classId, threadId, payload)
 				);
 	}
 
@@ -826,7 +838,8 @@
 
 			const refreshedSession = responseSession(expanded);
 			if (!refreshedSession) {
-				return 'failed';
+				console.warn('Lesson refresh response did not include a session.');
+				return 'refreshed';
 			}
 
 			applySession(refreshedSession);
@@ -919,7 +932,10 @@
 						return;
 					}
 
-					applySession(responseSession(expanded)!);
+					applyResponseSession(
+						expanded,
+						'We could not save your video progress. Refresh the lesson to continue.'
+					);
 				} catch (error) {
 					if (controllerSessionId !== interactionControllerSessionId) {
 						return;
@@ -1116,7 +1132,7 @@
 					offset_ms: Math.round(currentTimeMs)
 				});
 				if (!expanded.error) {
-					applySession(responseSession(expanded)!);
+					applyResponseSession(expanded);
 				}
 			}
 		} catch {
@@ -1570,7 +1586,14 @@
 				return;
 			}
 			if (!expanded.error) {
-				applySession(responseSession(expanded)!);
+				if (
+					!applyResponseSession(
+						expanded,
+						'We could not save your new video spot. Refresh the lesson to continue.'
+					)
+				) {
+					setVideoPosition(fromOffsetMs);
+				}
 				return;
 			}
 
@@ -1609,7 +1632,10 @@
 				return;
 			}
 			if (!expanded.error) {
-				applySession(responseSession(expanded)!);
+				applyResponseSession(
+					expanded,
+					'We could not mark this lesson complete. Refresh the lesson and try again.'
+				);
 				return;
 			}
 
@@ -1775,7 +1801,7 @@
 				return;
 			}
 			if (!expanded.error) {
-				applySession(responseSession(expanded)!);
+				applyResponseSession(expanded);
 				return;
 			}
 		} catch {
@@ -1824,14 +1850,19 @@
 				return;
 			}
 
-			const continuationAtAnswer = responseSession(expanded)?.current_continuation;
+			const session = responseSession(expanded);
+			if (!session) {
+				failClosedControl('We could not submit your answer. Refresh the lesson to continue.');
+				return;
+			}
+			const continuationAtAnswer = session.current_continuation;
 			appendAnswerToHistory(
 				questionAtAnswer,
 				optionId,
 				continuationAtAnswer?.correct_option_id ?? null,
 				continuationAtAnswer?.post_answer_text ?? null
 			);
-			applySession(responseSession(expanded)!);
+			applySession(session);
 
 			// Record answer immediately so the marker updates
 			if (continuationAtAnswer) {
@@ -1943,7 +1974,19 @@
 			return false;
 		}
 		if (!expanded.error) {
-			applySession(responseSession(expanded)!);
+			if (!applyResponseSession(expanded)) {
+				clearPendingVideoRetry();
+				resumeOffsetOnCanPlay = null;
+				questionPlaybackLocked = previousQuestionPlaybackLocked;
+				if (videoElement) {
+					if (!videoElement.paused) {
+						suppressPauseInteraction = true;
+						videoElement.pause();
+					}
+					setVideoPosition(previousOffsetMs);
+				}
+				return false;
+			}
 			questionPresentedForId = null;
 			subtitleText = null;
 

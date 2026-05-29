@@ -1,10 +1,10 @@
 type PostAnswerFeedbackContinuation = {
 	correct_option_id: number | null;
 	post_answer_text: string | null;
-} & Record<string, unknown>;
+};
 
-export function hasVisiblePostAnswerFeedback(
-	continuation: PostAnswerFeedbackContinuation | null
+export function hasVisiblePostAnswerFeedback<T extends PostAnswerFeedbackContinuation>(
+	continuation: T | null
 ): boolean {
 	return (
 		continuation?.correct_option_id != null ||

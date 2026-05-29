@@ -178,7 +178,7 @@
 			...lectureSlidePages.map((page: api.LectureSlidePage) => page.end_offset_ms ?? 0),
 			0
 		);
-		return lastEnd > 0 ? lastEnd : Math.max(lectureSlidePages.length, 1) * 60_000;
+		return lastEnd > 0 ? lastEnd : lectureSlidePages.length * 60_000;
 	})();
 	function lectureSlidePageAtOffset(offsetMs: number): api.LectureSlidePage | null {
 		if (lectureSlidePages.length === 0) return null;
@@ -224,6 +224,7 @@
 	let lectureVideoSessionKey: string | null = null;
 	let lectureSlideSessionKey: string | null = null;
 	let startingReplacementLectureThread = false;
+	// A thread has one lesson interaction mode, so this prompt state is shared by video and slides.
 	let lectureChatContinuePromptDismissedByPlayback = false;
 	let lectureChatContinuePromptDismissedThreadKey: string | null = null;
 	$: if (lectureChatContinuePromptDismissedThreadKey !== currentLectureVideoThreadKey) {
@@ -1767,106 +1768,109 @@
 			{/if}
 		{/key}
 	{:else if data.threadInteractionMode === 'lecture_slides'}
-		<LectureVideoView
-			bind:this={lectureSlideViewRef}
-			{classId}
-			{threadId}
-			lectureVideoSrc={lectureSlideDeck?.continuous_narration_url ?? ''}
-			captionsSrc={lectureSlideDeck?.captions_url ?? null}
-			title={threadMgr.thread?.name || 'Lecture Slides'}
-			canParticipate={threadIsCurrentUserParticipant}
-			initialSession={lectureSlideSession}
-			bind:playerVolume={lecturePlayerVolume}
-			chatAvailable={threadLectureSlideChatAvailable}
-			lessonMode="lecture_slides"
-			mediaKind="audio"
-			durationMsOverride={lectureSlideDurationMs}
-			on:sessionchange={handleLectureSlideSessionChange}
-			on:playbackresumed={handleLecturePlaybackResumed}
-		>
-			{#snippet visual(offsetMs)}
-				{@const visiblePage = lectureSlidePageAtOffset(offsetMs)}
-				{@const visiblePageIndex = visiblePage ? lectureSlidePageIndex(visiblePage) : -1}
-				<div class="flex h-full w-full items-center justify-center bg-black">
-					{#if visiblePage}
-						{#if lectureSlidePageImageUrl(visiblePage)}
-							<img
-								src={lectureSlidePageImageUrl(visiblePage) ?? ''}
-								alt={visiblePage.title || `Slide ${visiblePageIndex + 1}`}
-								class="h-full w-full object-contain"
-							/>
+		{#key `${classId}:${threadId}:${lectureSlideDeck?.continuous_narration_url ?? ''}`}
+			<LectureVideoView
+				bind:this={lectureSlideViewRef}
+				{classId}
+				{threadId}
+				lectureVideoSrc={lectureSlideDeck?.continuous_narration_url ?? ''}
+				captionsSrc={lectureSlideDeck?.captions_url ?? null}
+				title={threadMgr.thread?.name || 'Lecture Slides'}
+				canParticipate={threadIsCurrentUserParticipant}
+				initialSession={lectureSlideSession}
+				bind:playerVolume={lecturePlayerVolume}
+				chatAvailable={threadLectureSlideChatAvailable}
+				lessonMode="lecture_slides"
+				mediaKind="audio"
+				durationMsOverride={lectureSlideDurationMs}
+				on:sessionchange={handleLectureSlideSessionChange}
+				on:playbackresumed={handleLecturePlaybackResumed}
+			>
+				{#snippet visual(offsetMs)}
+					{@const visiblePage = lectureSlidePageAtOffset(offsetMs)}
+					{@const visiblePageIndex = visiblePage ? lectureSlidePageIndex(visiblePage) : -1}
+					{@const slideImageUrl = visiblePage ? lectureSlidePageImageUrl(visiblePage) : null}
+					<div class="flex h-full w-full items-center justify-center bg-black">
+						{#if visiblePage}
+							{#if slideImageUrl}
+								<img
+									src={slideImageUrl}
+									alt={visiblePage.title || `Slide ${visiblePageIndex + 1}`}
+									class="h-full w-full object-contain"
+								/>
+							{:else}
+								<div
+									class="flex aspect-video w-full max-w-5xl items-center justify-center bg-slate-100 px-8 text-center text-slate-800"
+								>
+									<div>
+										<div class="text-xs font-semibold tracking-widest text-slate-500 uppercase">
+											Slide {visiblePageIndex + 1}
+										</div>
+										<div class="mt-3 text-2xl font-semibold">
+											{visiblePage.title || lectureSlideDeck?.display_name || 'Lecture Slides'}
+										</div>
+									</div>
+								</div>
+							{/if}
 						{:else}
-							<div
-								class="flex aspect-video w-full max-w-5xl items-center justify-center bg-slate-100 px-8 text-center text-slate-800"
-							>
-								<div>
-									<div class="text-xs font-semibold tracking-widest text-slate-500 uppercase">
-										Slide {visiblePageIndex + 1}
-									</div>
-									<div class="mt-3 text-2xl font-semibold">
-										{visiblePage.title || lectureSlideDeck?.display_name || 'Lecture Slides'}
-									</div>
+							<div class="flex flex-col items-center gap-2 px-6 text-center text-slate-300">
+								<div class="text-sm font-semibold text-white">Slide content unavailable</div>
+								<div class="max-w-md text-sm text-slate-400">
+									This thread is in lecture slides mode, but the slide payload is not available yet.
 								</div>
 							</div>
 						{/if}
-					{:else}
-						<div class="flex flex-col items-center gap-2 px-6 text-center text-slate-300">
-							<div class="text-sm font-semibold text-white">Slide content unavailable</div>
-							<div class="max-w-md text-sm text-slate-400">
-								This thread is in lecture slides mode, but the slide payload is not available yet.
-							</div>
+						<div
+							class="absolute top-4 left-4 rounded-full bg-black/60 px-3 py-1 text-xs font-medium text-white"
+						>
+							{visiblePageIndex >= 0
+								? `Slide ${visiblePageIndex + 1} of ${lectureSlidePages.length}`
+								: 'Lecture Slides'}
 						</div>
-					{/if}
-					<div
-						class="absolute top-4 left-4 rounded-full bg-black/60 px-3 py-1 text-xs font-medium text-white"
-					>
-						{visiblePageIndex >= 0
-							? `Slide ${visiblePageIndex + 1} of ${lectureSlidePages.length}`
-							: 'Lecture Slides'}
 					</div>
-				</div>
-			{/snippet}
-			{#snippet chat(lectureSlideAtEnd = false)}
-				{#if threadLectureSlideChatAvailable}
-					<LectureVideoChatPanel
-						{classId}
-						{threadId}
-						messages={$messages}
-						canFetchMore={$canFetchMore}
-						showInput={effectiveLectureSlideSession?.state !== 'completed' ||
-							threadIsCurrentUserParticipant}
-						showContinueWatchingPrompt={lectureSlideChatContinuePromptVisible &&
-							!(effectiveLectureSlideSession?.state === 'completed' && lectureSlideAtEnd)}
-						canSubmit={lectureChatCanSubmit}
-						disabled={!lectureChatCanSubmit || !!$navigating || !threadLectureSlideChatAvailable}
-						waiting={$waiting}
-						submitting={$submitting}
-						ttsMuted={$ttsMuted}
-						ttsPlaying={$ttsPlaying}
-						ttsAvailable={false}
-						{threadManagerError}
-						{assistantDeleted}
-						{canViewAssistant}
-						{resolvedAssistantVersion}
-						version={$version}
-						{useLatex}
-						{userTimezone}
-						meName={data?.me?.user?.name || data?.me?.user?.email || 'Me'}
-						meImage={data?.me?.profile?.image_url || ''}
-						assistantId={$assistantId}
-						participants={$participants}
-						mimeType={data.uploadInfo.mimeType}
-						{fetchMoreMessages}
-						onsubmit={handleLectureSlideChatSubmit}
-						ondismisserror={handleLectureChatDismissError}
-						oncontinuewatching={handleLectureChatContinueWatching}
-						onmutettstoggle={() => {
-							threadMgr.setTtsMuted(!$ttsMuted);
-						}}
-					/>
-				{/if}
-			{/snippet}
-		</LectureVideoView>
+				{/snippet}
+				{#snippet chat(lectureSlideAtEnd = false)}
+					{#if threadLectureSlideChatAvailable}
+						<LectureVideoChatPanel
+							{classId}
+							{threadId}
+							messages={$messages}
+							canFetchMore={$canFetchMore}
+							showInput={effectiveLectureSlideSession?.state !== 'completed' ||
+								threadIsCurrentUserParticipant}
+							showContinueWatchingPrompt={lectureSlideChatContinuePromptVisible &&
+								!(effectiveLectureSlideSession?.state === 'completed' && lectureSlideAtEnd)}
+							canSubmit={lectureChatCanSubmit}
+							disabled={!lectureChatCanSubmit || !!$navigating || !threadLectureSlideChatAvailable}
+							waiting={$waiting}
+							submitting={$submitting}
+							ttsMuted={$ttsMuted}
+							ttsPlaying={$ttsPlaying}
+							ttsAvailable={false}
+							{threadManagerError}
+							{assistantDeleted}
+							{canViewAssistant}
+							{resolvedAssistantVersion}
+							version={$version}
+							{useLatex}
+							{userTimezone}
+							meName={data?.me?.user?.name || data?.me?.user?.email || 'Me'}
+							meImage={data?.me?.profile?.image_url || ''}
+							assistantId={$assistantId}
+							participants={$participants}
+							mimeType={data.uploadInfo.mimeType}
+							{fetchMoreMessages}
+							onsubmit={handleLectureSlideChatSubmit}
+							ondismisserror={handleLectureChatDismissError}
+							oncontinuewatching={handleLectureChatContinueWatching}
+							onmutettstoggle={() => {
+								threadMgr.setTtsMuted(!$ttsMuted);
+							}}
+						/>
+					{/if}
+				{/snippet}
+			</LectureVideoView>
+		{/key}
 	{:else}
 		<div
 			class={`messages-container min-h-0 grow overflow-y-auto py-2 ${
