@@ -2972,16 +2972,10 @@ class LectureSlideNarration(Base):
         ),
         nullable=True,
     )
-    status = Column(
-        SQLEnum(
-            "PENDING",
-            "PROCESSING",
-            "READY",
-            "FAILED",
-            name="lectureslidenarrationstatus",
-        ),
+    status: Mapped[schemas.LectureSlideNarrationStatus] = mapped_column(
+        SQLEnum(schemas.LectureSlideNarrationStatus),
         nullable=False,
-        server_default="PENDING",
+        server_default=schemas.LectureSlideNarrationStatus.PENDING.name,
     )
     error_message = Column(String, nullable=True)
 
@@ -3018,16 +3012,10 @@ class LectureSlideDeck(Base):
         mapped_column(JSON, nullable=True)
     )
     context_version = Column(Integer, nullable=True)
-    status = Column(
-        SQLEnum(
-            "UPLOADED",
-            "PROCESSING",
-            "READY",
-            "FAILED",
-            name="lectureslidedeckstatus",
-        ),
+    status: Mapped[schemas.LectureSlideDeckStatus] = mapped_column(
+        SQLEnum(schemas.LectureSlideDeckStatus),
         nullable=False,
-        server_default="UPLOADED",
+        server_default=schemas.LectureSlideDeckStatus.UPLOADED.name,
     )
     error_message = Column(String, nullable=True)
     uploader_id = Column(Integer, ForeignKey("users.id"), nullable=True)

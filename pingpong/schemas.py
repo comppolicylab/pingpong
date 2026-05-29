@@ -484,6 +484,20 @@ class LectureVideoNarrationStatus(StrEnum):
     FAILED = "failed"
 
 
+class LectureSlideDeckStatus(StrEnum):
+    UPLOADED = "uploaded"
+    PROCESSING = "processing"
+    READY = "ready"
+    FAILED = "failed"
+
+
+class LectureSlideNarrationStatus(StrEnum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    READY = "ready"
+    FAILED = "failed"
+
+
 class LectureVideoProcessingStage(StrEnum):
     MANIFEST_GENERATION = "manifest_generation"
     NARRATION = "narration"
