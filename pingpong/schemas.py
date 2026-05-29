@@ -477,6 +477,10 @@ class LectureVideoQuestionType(StrEnum):
     SINGLE_SELECT = "single_select"
 
 
+class LectureSlideQuestionType(StrEnum):
+    SINGLE_SELECT = "single_select"
+
+
 class LectureVideoNarrationStatus(StrEnum):
     PENDING = "pending"
     PROCESSING = "processing"

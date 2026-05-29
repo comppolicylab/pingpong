@@ -3134,7 +3134,7 @@ class LectureSlideQuestion(Base):
     slide_position = Column(Integer, nullable=False)
     slide_offset_ms = Column(Integer, nullable=False)
     stop_offset_ms = Column(Integer, nullable=False)
-    question_type = Column(String, nullable=False)
+    question_type = Column(SQLEnum(schemas.LectureSlideQuestionType), nullable=False)
     question_text = Column(String, nullable=False)
     intro_text = Column(String, nullable=False)
     intro_narration_id = Column(

@@ -28,6 +28,9 @@ lecture_slide_narration_status = sa.Enum(
     "FAILED",
     name="lectureslidenarrationstatus",
 )
+lecture_slide_question_type = sa.Enum(
+    "SINGLE_SELECT", name="lectureslidequestiontype"
+)
 
 
 def upgrade() -> None:
@@ -243,7 +246,7 @@ def upgrade() -> None:
         sa.Column("slide_position", sa.Integer(), nullable=False),
         sa.Column("slide_offset_ms", sa.Integer(), nullable=False),
         sa.Column("stop_offset_ms", sa.Integer(), nullable=False),
-        sa.Column("question_type", sa.String(), nullable=False),
+        sa.Column("question_type", lecture_slide_question_type, nullable=False),
         sa.Column("question_text", sa.String(), nullable=False),
         sa.Column("intro_text", sa.String(), nullable=False),
         sa.Column("intro_narration_id", sa.Integer(), nullable=True),
@@ -414,4 +417,5 @@ def downgrade() -> None:
     op.drop_table("lecture_slide_source_stored_objects")
 
     lecture_slide_narration_status.drop(op.get_bind(), checkfirst=True)
+    lecture_slide_question_type.drop(op.get_bind(), checkfirst=True)
     lecture_slide_deck_status.drop(op.get_bind(), checkfirst=True)
