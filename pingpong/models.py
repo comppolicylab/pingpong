@@ -2202,6 +2202,108 @@ class LectureVideoCaptionStoredObject(Base):
         return stored_object
 
 
+class LectureVideoMediaStoredObject(Base):
+    __tablename__ = "lecture_video_media_stored_objects"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    key = Column(String, nullable=False, unique=True)
+    original_filename = Column(String, nullable=True)
+    content_type = Column(String, nullable=False)
+    content_length = Column(Integer, nullable=False, server_default="0")
+    media_items = relationship("LectureVideoMedia", back_populates="stored_object")
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
+
+    @classmethod
+    async def create(
+        cls,
+        session: AsyncSession,
+        *,
+        key: str,
+        original_filename: str | None,
+        content_type: str,
+        content_length: int,
+    ) -> "LectureVideoMediaStoredObject":
+        stored_object = LectureVideoMediaStoredObject(
+            key=key,
+            original_filename=original_filename,
+            content_type=content_type,
+            content_length=content_length,
+        )
+        session.add(stored_object)
+        await session.flush()
+        await session.refresh(stored_object)
+        return stored_object
+
+
+class LectureVideoMedia(Base):
+    __tablename__ = "lecture_video_media"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    lecture_video_id = Column(
+        Integer, ForeignKey("lecture_videos.id", ondelete="CASCADE"), nullable=False
+    )
+    stored_object_id = Column(
+        Integer,
+        ForeignKey(
+            "lecture_video_media_stored_objects.id",
+            name="fk_lecture_video_media_stored_object_id",
+        ),
+        nullable=False,
+        index=True,
+    )
+    role = Column(SQLEnum(schemas.LectureVideoMediaRole), nullable=False, index=True)
+    position = Column(Integer, nullable=True)
+    lecture_video = relationship(
+        "LectureVideo",
+        back_populates="media_items",
+        foreign_keys=[lecture_video_id],
+    )
+    stored_object = relationship(
+        "LectureVideoMediaStoredObject",
+        back_populates="media_items",
+        uselist=False,
+    )
+    source_deck_lecture_videos = relationship(
+        "LectureVideo",
+        back_populates="source_deck_media",
+        foreign_keys="LectureVideo.source_deck_media_id",
+    )
+    hls_playlist_lecture_videos = relationship(
+        "LectureVideo",
+        back_populates="hls_playlist_media",
+        foreign_keys="LectureVideo.hls_playlist_media_id",
+    )
+    slides = relationship(
+        "LectureVideoSlide",
+        back_populates="image_media",
+        foreign_keys="LectureVideoSlide.image_media_id",
+    )
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
+
+    @classmethod
+    async def create(
+        cls,
+        session: AsyncSession,
+        *,
+        lecture_video_id: int,
+        stored_object_id: int,
+        role: schemas.LectureVideoMediaRole,
+        position: int | None = None,
+    ) -> "LectureVideoMedia":
+        media = LectureVideoMedia(
+            lecture_video_id=lecture_video_id,
+            stored_object_id=stored_object_id,
+            role=role,
+            position=position,
+        )
+        session.add(media)
+        await session.flush()
+        await session.refresh(media)
+        return media
+
+
 # Single-select correctness gets its own storage so multi-select can use a
 # separate schema later without overloading the same table.
 lecture_video_question_single_select_correct_option_association = Table(
@@ -2239,11 +2341,54 @@ class LectureVideo(Base):
             "lecture_video_stored_objects.id",
             name="fk_lecture_videos_stored_object_id_lecture_video_stored_object",
         ),
-        nullable=False,
+        nullable=True,
     )
     stored_object = relationship(
         "LectureVideoStoredObject", back_populates="lecture_videos", uselist=False
     )
+    source_kind = Column(
+        SQLEnum(schemas.LectureVideoSourceKind),
+        nullable=False,
+        server_default=schemas.LectureVideoSourceKind.UPLOADED_VIDEO.name,
+    )
+    playback_kind = Column(
+        SQLEnum(schemas.LectureVideoPlaybackKind),
+        nullable=False,
+        server_default=schemas.LectureVideoPlaybackKind.VIDEO_FILE.name,
+    )
+    source_deck_media_id = Column(
+        Integer,
+        ForeignKey(
+            "lecture_video_media.id",
+            ondelete="SET NULL",
+            name="fk_lecture_videos_source_deck_media_id",
+            use_alter=True,
+        ),
+        nullable=True,
+    )
+    source_deck_media = relationship(
+        "LectureVideoMedia",
+        back_populates="source_deck_lecture_videos",
+        foreign_keys=[source_deck_media_id],
+        uselist=False,
+    )
+    hls_playlist_media_id = Column(
+        Integer,
+        ForeignKey(
+            "lecture_video_media.id",
+            ondelete="SET NULL",
+            name="fk_lecture_videos_hls_playlist_media_id",
+            use_alter=True,
+        ),
+        nullable=True,
+    )
+    hls_playlist_media = relationship(
+        "LectureVideoMedia",
+        back_populates="hls_playlist_lecture_videos",
+        foreign_keys=[hls_playlist_media_id],
+        uselist=False,
+    )
+    duration_ms = Column(Integer, nullable=True)
     poster_stored_object_id = Column(
         Integer,
         ForeignKey(
@@ -2279,6 +2424,18 @@ class LectureVideo(Base):
     processing_runs = relationship(
         "LectureVideoProcessingRun",
         back_populates="lecture_video",
+    )
+    media_items = relationship(
+        "LectureVideoMedia",
+        back_populates="lecture_video",
+        cascade="all, delete-orphan",
+        foreign_keys="LectureVideoMedia.lecture_video_id",
+    )
+    slides = relationship(
+        "LectureVideoSlide",
+        back_populates="lecture_video",
+        cascade="all, delete-orphan",
+        order_by="LectureVideoSlide.position",
     )
     questions = relationship(
         "LectureVideoQuestion",
@@ -2321,10 +2478,19 @@ class LectureVideo(Base):
         session: AsyncSession,
         *,
         class_id: int | None,
-        stored_object_id: int,
+        stored_object_id: int | None = None,
         user_id: int | None,
         display_name: str | None = None,
         voice_id: str | None = None,
+        source_kind: schemas.LectureVideoSourceKind = (
+            schemas.LectureVideoSourceKind.UPLOADED_VIDEO
+        ),
+        playback_kind: schemas.LectureVideoPlaybackKind = (
+            schemas.LectureVideoPlaybackKind.VIDEO_FILE
+        ),
+        source_deck_media_id: int | None = None,
+        hls_playlist_media_id: int | None = None,
+        duration_ms: int | None = None,
         manifest_data: dict[str, Any] | None = None,
         transcript_data: dict[str, Any] | None = None,
         generation_prompt: str | None = None,
@@ -2338,9 +2504,19 @@ class LectureVideo(Base):
         poster_stored_object_id: int | None = None,
         caption_stored_object_id: int | None = None,
     ) -> "LectureVideo":
+        if (
+            source_kind == schemas.LectureVideoSourceKind.UPLOADED_VIDEO
+            and stored_object_id is None
+        ):
+            raise ValueError("Uploaded lecture videos require stored_object_id.")
         lecture_video = LectureVideo(
             class_id=class_id,
             stored_object_id=stored_object_id,
+            source_kind=source_kind,
+            playback_kind=playback_kind,
+            source_deck_media_id=source_deck_media_id,
+            hls_playlist_media_id=hls_playlist_media_id,
+            duration_ms=duration_ms,
             display_name=display_name,
             voice_id=voice_id,
             manifest_data=manifest_data,
@@ -2371,6 +2547,16 @@ class LectureVideo(Base):
             .where(LectureVideo.id == id_)
             .options(undefer(LectureVideo.generation_prompt))
             .options(selectinload(LectureVideo.stored_object))
+            .options(
+                selectinload(LectureVideo.source_deck_media).selectinload(
+                    LectureVideoMedia.stored_object
+                )
+            )
+            .options(
+                selectinload(LectureVideo.hls_playlist_media).selectinload(
+                    LectureVideoMedia.stored_object
+                )
+            )
         )
         return await session.scalar(stmt)
 
@@ -2398,6 +2584,22 @@ class LectureVideo(Base):
             .options(undefer(LectureVideo.transcript_data))
             .options(selectinload(LectureVideo.stored_object))
             .options(
+                selectinload(LectureVideo.source_deck_media).selectinload(
+                    LectureVideoMedia.stored_object
+                )
+            )
+            .options(
+                selectinload(LectureVideo.hls_playlist_media).selectinload(
+                    LectureVideoMedia.stored_object
+                )
+            )
+            .options(
+                selectinload(LectureVideo.media_items).selectinload(
+                    LectureVideoMedia.stored_object
+                )
+            )
+            .options(selectinload(LectureVideo.slides))
+            .options(
                 selectinload(LectureVideo.questions).selectinload(
                     LectureVideoQuestion.options
                 )
@@ -2420,6 +2622,16 @@ class LectureVideo(Base):
             .options(undefer(LectureVideo.manifest_data))
             .options(undefer(LectureVideo.generation_prompt))
             .options(selectinload(LectureVideo.stored_object))
+            .options(
+                selectinload(LectureVideo.source_deck_media).selectinload(
+                    LectureVideoMedia.stored_object
+                )
+            )
+            .options(
+                selectinload(LectureVideo.hls_playlist_media).selectinload(
+                    LectureVideoMedia.stored_object
+                )
+            )
         )
         return await session.scalar(stmt)
 
@@ -2434,6 +2646,22 @@ class LectureVideo(Base):
             .options(undefer(LectureVideo.transcript_data))
             .options(undefer(LectureVideo.generation_prompt))
             .options(selectinload(LectureVideo.stored_object))
+            .options(
+                selectinload(LectureVideo.source_deck_media).selectinload(
+                    LectureVideoMedia.stored_object
+                )
+            )
+            .options(
+                selectinload(LectureVideo.hls_playlist_media).selectinload(
+                    LectureVideoMedia.stored_object
+                )
+            )
+            .options(
+                selectinload(LectureVideo.media_items).selectinload(
+                    LectureVideoMedia.stored_object
+                )
+            )
+            .options(selectinload(LectureVideo.slides))
             .options(
                 selectinload(LectureVideo.questions).selectinload(
                     LectureVideoQuestion.options
@@ -2541,6 +2769,9 @@ class LectureVideo(Base):
             # target classes share the same AI provider and additional provider
             # credentials, including ElevenLabs.
             voice_id=lecture_video.voice_id,
+            source_kind=lecture_video.source_kind,
+            playback_kind=lecture_video.playback_kind,
+            duration_ms=lecture_video.duration_ms,
             manifest_data=lecture_video.manifest_data,
             transcript_data=lecture_video.transcript_data,
             generation_prompt=lecture_video.generation_prompt,
@@ -2554,6 +2785,44 @@ class LectureVideo(Base):
             poster_stored_object_id=lecture_video.poster_stored_object_id,
             caption_stored_object_id=lecture_video.caption_stored_object_id,
         )
+
+        media_map: dict[int, LectureVideoMedia] = {}
+        for media in sorted(
+            lecture_video.media_items,
+            key=lambda item: (item.position is None, item.position or 0, item.id),
+        ):
+            new_media = LectureVideoMedia(
+                lecture_video_id=new_lecture_video.id,
+                stored_object_id=media.stored_object_id,
+                role=media.role,
+                position=media.position,
+            )
+            session.add(new_media)
+            await session.flush()
+            media_map[media.id] = new_media
+
+        if lecture_video.source_deck_media_id is not None:
+            new_lecture_video.source_deck_media_id = media_map[
+                lecture_video.source_deck_media_id
+            ].id
+        if lecture_video.hls_playlist_media_id is not None:
+            new_lecture_video.hls_playlist_media_id = media_map[
+                lecture_video.hls_playlist_media_id
+            ].id
+
+        for slide in sorted(lecture_video.slides, key=lambda item: item.position):
+            new_slide = LectureVideoSlide(
+                lecture_video_id=new_lecture_video.id,
+                position=slide.position,
+                image_media_id=media_map[slide.image_media_id].id,
+                source_page_number=slide.source_page_number,
+                extracted_text=slide.extracted_text,
+                speaker_notes=slide.speaker_notes,
+                narration_text=slide.narration_text,
+                start_offset_ms=slide.start_offset_ms,
+                end_offset_ms=slide.end_offset_ms,
+            )
+            session.add(new_slide)
 
         option_map: dict[int, LectureVideoQuestionOption] = {}
 
@@ -2614,6 +2883,48 @@ class LectureVideo(Base):
         await session.flush()
         await session.refresh(new_lecture_video)
         return new_lecture_video
+
+
+class LectureVideoSlide(Base):
+    __tablename__ = "lecture_video_slides"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    lecture_video_id = Column(
+        Integer, ForeignKey("lecture_videos.id", ondelete="CASCADE"), nullable=False
+    )
+    position = Column(Integer, nullable=False)
+    image_media_id = Column(
+        Integer,
+        ForeignKey(
+            "lecture_video_media.id",
+            name="fk_lecture_video_slides_image_media_id",
+        ),
+        nullable=False,
+    )
+    source_page_number = Column(Integer, nullable=True)
+    extracted_text = Column(Text, nullable=True)
+    speaker_notes = Column(Text, nullable=True)
+    narration_text = Column(Text, nullable=True)
+    start_offset_ms = Column(Integer, nullable=True)
+    end_offset_ms = Column(Integer, nullable=True)
+    lecture_video = relationship("LectureVideo", back_populates="slides")
+    image_media = relationship(
+        "LectureVideoMedia",
+        back_populates="slides",
+        foreign_keys=[image_media_id],
+        uselist=False,
+    )
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(DateTime(timezone=True), index=True, onupdate=func.now())
+
+    __table_args__ = (
+        Index(
+            "lecture_video_slide_position_idx",
+            "lecture_video_id",
+            "position",
+            unique=True,
+        ),
+    )
 
 
 class LectureVideoProcessingRun(Base):

@@ -428,6 +428,14 @@ class InteractionMode(StrEnum):
     CHAT = "chat"
     VOICE = "voice"
     LECTURE_VIDEO = "lecture_video"
+    LECTURE_GENERATION = "lecture_generation"
+
+
+AssistantInteractionMode: TypeAlias = Literal[
+    InteractionMode.CHAT,
+    InteractionMode.VOICE,
+    InteractionMode.LECTURE_VIDEO,
+]
 
 
 class RealtimeEagerness(StrEnum):
@@ -484,9 +492,29 @@ class LectureVideoNarrationStatus(StrEnum):
     FAILED = "failed"
 
 
+class LectureVideoSourceKind(StrEnum):
+    UPLOADED_VIDEO = "uploaded_video"
+    GENERATED_SLIDE_DECK = "generated_slide_deck"
+
+
+class LectureVideoPlaybackKind(StrEnum):
+    VIDEO_FILE = "video_file"
+    HLS_AUDIO = "hls_audio"
+
+
+class LectureVideoMediaRole(StrEnum):
+    SOURCE_DECK = "source_deck"
+    SLIDE_IMAGE = "slide_image"
+    HLS_PLAYLIST = "hls_playlist"
+    HLS_SEGMENT = "hls_segment"
+
+
 class LectureVideoProcessingStage(StrEnum):
     MANIFEST_GENERATION = "manifest_generation"
     NARRATION = "narration"
+    SLIDE_EXTRACTION = "slide_extraction"
+    LECTURE_GENERATION = "lecture_generation"
+    HLS_AUDIO = "hls_audio"
 
 
 class LectureVideoProcessingRunStatus(StrEnum):
@@ -1322,7 +1350,7 @@ class CreateAssistant(BaseModel):
     instructions: str = Field(..., min_length=3)
     description: str
     notes: str | None = None
-    interaction_mode: InteractionMode = InteractionMode.CHAT
+    interaction_mode: AssistantInteractionMode = InteractionMode.CHAT
     model: str = Field(..., min_length=2)
     temperature: float | None = Field(None, ge=0.0, le=2.0)
     reasoning_effort: int | None = Field(None, ge=-1, le=2)
@@ -1429,7 +1457,7 @@ class UpdateAssistant(BaseModel):
     instructions: str | None = Field(None, min_length=3)
     description: str | None = None
     notes: str | None = None
-    interaction_mode: InteractionMode | None = None
+    interaction_mode: AssistantInteractionMode | None = None
     lecture_video_id: int | None = None
     lecture_video_manifest: LectureVideoManifest | None = None
     voice_id: str | None = None

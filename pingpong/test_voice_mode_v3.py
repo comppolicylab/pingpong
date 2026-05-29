@@ -427,6 +427,80 @@ def test_voice_model_capabilities_support_next_gen():
 
 @with_user(123)
 @with_authz(grants=[("user:123", "can_create_assistants", "class:1")])
+async def test_create_assistant_rejects_lecture_generation_mode(
+    api, db, valid_user_token
+):
+    async with db.async_session() as session:
+        session.add(
+            models.Class(
+                id=1,
+                name="Chat Class",
+                term="Spring 2026",
+                api_key="sk-test",
+                private=False,
+            )
+        )
+        await session.commit()
+
+    response = api.post(
+        "/api/v1/class/1/assistant",
+        json={
+            "name": "Generated Lecture Assistant",
+            "instructions": "You are helpful.",
+            "description": "Test assistant",
+            "interaction_mode": "lecture_generation",
+            "model": "gpt-4o-mini",
+            "tools": [],
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"] == ["body", "interaction_mode"]
+
+
+@with_user(123)
+@with_authz(grants=[("user:123", "can_edit", "assistant:11")])
+async def test_update_assistant_rejects_lecture_generation_mode(
+    api, db, valid_user_token
+):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Chat Class",
+            term="Spring 2026",
+            api_key="sk-test",
+            private=False,
+        )
+        assistant = models.Assistant(
+            id=11,
+            name="Assistant",
+            instructions="You are helpful.",
+            description="Assistant description",
+            interaction_mode=schemas.InteractionMode.CHAT,
+            model="gpt-4o-mini",
+            class_id=class_.id,
+            tools="[]",
+            creator_id=123,
+            published=None,
+            version=3,
+            locked=False,
+        )
+        session.add_all([class_, assistant])
+        await session.commit()
+
+    response = api.put(
+        "/api/v1/class/1/assistant/11",
+        json={"interaction_mode": "lecture_generation"},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"] == ["body", "interaction_mode"]
+
+
+@with_user(123)
+@with_authz(grants=[("user:123", "can_create_assistants", "class:1")])
 async def test_create_assistant_allows_gpt_5_4_temperature_with_reasoning_none(
     api, db, valid_user_token, monkeypatch
 ):
