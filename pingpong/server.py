@@ -585,7 +585,7 @@ async def get_lecture_slide_thread_or_404(
     )
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
-    if thread.interaction_mode != schemas.InteractionMode.LECTURE_SLIDE:
+    if thread.interaction_mode != schemas.InteractionMode.LECTURE_SLIDES:
         raise HTTPException(status_code=404, detail="Lecture slide thread not found.")
     return thread
 

@@ -204,7 +204,7 @@ async def test_acquire_lecture_slide_control_endpoint_uses_generic_lesson_sessio
         class_, _, _, thread, questions = await _create_slide_runtime_fixture(
             session, institution
         )
-        thread.interaction_mode = schemas.InteractionMode.LECTURE_SLIDE
+        thread.interaction_mode = schemas.InteractionMode.LECTURE_SLIDES
         await session.flush()
 
         response = await server_module.acquire_lecture_slide_control(

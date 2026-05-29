@@ -428,7 +428,7 @@ class InteractionMode(StrEnum):
     CHAT = "chat"
     VOICE = "voice"
     LECTURE_VIDEO = "lecture_video"
-    LECTURE_SLIDE = "lecture_slide"
+    LECTURE_SLIDES = "lecture_slides"
 
 
 class RealtimeEagerness(StrEnum):
