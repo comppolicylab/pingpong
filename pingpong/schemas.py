@@ -726,6 +726,24 @@ class InteractiveLessonInteractionResponse(BaseModel):
     interactive_lesson_session: InteractiveLessonSession
 
 
+class LectureSlidePageView(BaseModel):
+    id: int
+    position: int
+    start_offset_ms: int | None = Field(None, ge=0)
+    end_offset_ms: int | None = Field(None, ge=0)
+    image_url: str | None = None
+    image_stored_object_id: int | None = None
+
+
+class LectureSlideDeckView(BaseModel):
+    id: int
+    display_name: str
+    total_duration_ms: int | None = Field(None, ge=0)
+    pages: list[LectureSlidePageView] = Field(default_factory=list)
+    continuous_narration_url: str | None = None
+    captions_url: str | None = None
+
+
 class AnonymousLink(BaseModel):
     id: int
     name: str | None
@@ -3213,6 +3231,10 @@ class ThreadWithMeta(BaseModel):
     lecture_video_session: LectureVideoSession | None = None
     lecture_video_tts_available: bool = False
     lecture_video_captions_available: bool = False
+    lecture_slide_deck: LectureSlideDeckView | None = None
+    lecture_slide_tts_available: bool = False
+    lecture_slide_captions_available: bool = False
+    interactive_lesson_session: InteractiveLessonSession | None = None
     recording: VoiceModeRecording | None = None
     has_more: bool
 

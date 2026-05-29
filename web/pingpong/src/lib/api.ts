@@ -1850,7 +1850,6 @@ export type InteractiveLessonInteractionRequest =
 export type LectureSlidePage = {
 	id: number;
 	position: number;
-	title?: string | null;
 	start_offset_ms?: number | null;
 	end_offset_ms?: number | null;
 	image_url?: string | null;
@@ -2350,7 +2349,49 @@ export const getLectureSlidePageImageUrl = (
 	threadId: number,
 	pageId: number
 ): string => {
-	const base = fullPath(`class/${classId}/thread/${threadId}/lecture-slide/page/${pageId}/image`);
+	const base = fullPath(`class/${classId}/thread/${threadId}/lecture-slides/${pageId}/image`);
+	const queryParts: string[] = [];
+	const anonymousSessionToken = getAnonymousSessionToken();
+	const anonymousShareToken = getAnonymousShareToken();
+	if (anonymousSessionToken) {
+		queryParts.push(`anonymous_session_token=${encodeURIComponent(anonymousSessionToken)}`);
+	}
+	if (anonymousShareToken) {
+		queryParts.push(`anonymous_share_token=${encodeURIComponent(anonymousShareToken)}`);
+	}
+	const ltiSessionToken = getLTISessionToken();
+	if (ltiSessionToken) {
+		queryParts.push(`lti_session=${encodeURIComponent(ltiSessionToken)}`);
+	}
+	return queryParts.length > 0 ? `${base}?${queryParts.join('&')}` : base;
+};
+
+export const lectureSlideNarrationUrl = (
+	classId: number,
+	threadId: number,
+	narrationId: number
+): string => {
+	const base = fullPath(
+		`class/${classId}/thread/${threadId}/lecture-slides/narration/${narrationId}`
+	);
+	const queryParts: string[] = [];
+	const anonymousSessionToken = getAnonymousSessionToken();
+	const anonymousShareToken = getAnonymousShareToken();
+	if (anonymousSessionToken) {
+		queryParts.push(`anonymous_session_token=${encodeURIComponent(anonymousSessionToken)}`);
+	}
+	if (anonymousShareToken) {
+		queryParts.push(`anonymous_share_token=${encodeURIComponent(anonymousShareToken)}`);
+	}
+	const ltiSessionToken = getLTISessionToken();
+	if (ltiSessionToken) {
+		queryParts.push(`lti_session=${encodeURIComponent(ltiSessionToken)}`);
+	}
+	return queryParts.length > 0 ? `${base}?${queryParts.join('&')}` : base;
+};
+
+export const getLectureSlideCaptionsUrl = (classId: number, threadId: number): string => {
+	const base = fullPath(`class/${classId}/thread/${threadId}/lecture-slides/captions.vtt`);
 	const queryParts: string[] = [];
 	const anonymousSessionToken = getAnonymousSessionToken();
 	const anonymousShareToken = getAnonymousShareToken();
@@ -3892,6 +3933,8 @@ export type ThreadWithMeta = {
 	lecture_video_tts_available?: boolean;
 	lecture_video_captions_available?: boolean;
 	lecture_slide_deck?: LectureSlideDeckView | null;
+	lecture_slide_tts_available?: boolean;
+	lecture_slide_captions_available?: boolean;
 	interactive_lesson_session?: InteractiveLessonSession | null;
 	recording: VoiceModeRecordingInfo | null;
 	has_more: boolean;

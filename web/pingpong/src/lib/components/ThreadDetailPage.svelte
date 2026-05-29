@@ -167,6 +167,12 @@
 		? api.getLectureVideoCaptionsUrl(classId, threadId)
 		: null;
 	$: lectureVideoTtsAvailable = expandedThreadData.data?.lecture_video_tts_available === true;
+	$: lectureSlideTtsAvailable = expandedThreadData.data?.lecture_slide_tts_available === true;
+	$: threadLectureSlideCaptionsAvailable =
+		expandedThreadData.data?.lecture_slide_captions_available === true;
+	$: lectureSlideCaptionsSrc = threadLectureSlideCaptionsAvailable
+		? api.getLectureSlideCaptionsUrl(classId, threadId)
+		: null;
 	$: lectureSlidePages = ((lectureSlideDeck?.pages ?? []) as api.LectureSlidePage[])
 		.slice()
 		.sort((a: api.LectureSlidePage, b: api.LectureSlidePage) => a.position - b.position);
@@ -1774,7 +1780,7 @@
 				{classId}
 				{threadId}
 				lectureVideoSrc={lectureSlideDeck?.continuous_narration_url ?? ''}
-				captionsSrc={lectureSlideDeck?.captions_url ?? null}
+				captionsSrc={lectureSlideCaptionsSrc}
 				title={threadMgr.thread?.name || 'Lecture Slides'}
 				canParticipate={threadIsCurrentUserParticipant}
 				initialSession={lectureSlideSession}
@@ -1795,7 +1801,7 @@
 							{#if slideImageUrl}
 								<img
 									src={slideImageUrl}
-									alt={visiblePage.title || `Slide ${visiblePageIndex + 1}`}
+									alt={`Slide ${visiblePageIndex + 1}`}
 									class="h-full w-full object-contain"
 								/>
 							{:else}
@@ -1807,7 +1813,7 @@
 											Slide {visiblePageIndex + 1}
 										</div>
 										<div class="mt-3 text-2xl font-semibold">
-											{visiblePage.title || lectureSlideDeck?.display_name || 'Lecture Slides'}
+											{lectureSlideDeck?.display_name || 'Lecture Slides'}
 										</div>
 									</div>
 								</div>
@@ -1846,7 +1852,7 @@
 							submitting={$submitting}
 							ttsMuted={$ttsMuted}
 							ttsPlaying={$ttsPlaying}
-							ttsAvailable={false}
+							ttsAvailable={lectureSlideTtsAvailable}
 							{threadManagerError}
 							{assistantDeleted}
 							{canViewAssistant}

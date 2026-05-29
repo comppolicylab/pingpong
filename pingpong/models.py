@@ -2972,6 +2972,20 @@ class LectureSlideNarrationStoredObject(Base):
     updated = Column(DateTime(timezone=True), onupdate=func.now())
 
 
+class LectureSlideCaptionStoredObject(Base):
+    __tablename__ = "lecture_slide_caption_stored_objects"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    key = Column(String, nullable=False, unique=True)
+    content_type = Column(String, nullable=False)
+    content_length = Column(Integer, nullable=False, server_default="0")
+    lecture_slide_decks = relationship(
+        "LectureSlideDeck", back_populates="caption_stored_object"
+    )
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(DateTime(timezone=True), onupdate=func.now())
+
+
 class LectureSlideNarration(Base):
     __tablename__ = "lecture_slide_narrations"
 
@@ -2996,6 +3010,17 @@ class LectureSlideNarration(Base):
         server_default=schemas.LectureSlideNarrationStatus.PENDING.name,
     )
     error_message = Column(String, nullable=True)
+
+    @classmethod
+    async def get_by_id(
+        cls, session: AsyncSession, id_: int
+    ) -> "LectureSlideNarration | None":
+        stmt = (
+            select(LectureSlideNarration)
+            .where(LectureSlideNarration.id == int(id_))
+            .options(selectinload(LectureSlideNarration.stored_object))
+        )
+        return await session.scalar(stmt)
 
 
 class LectureSlideDeck(Base):
@@ -3033,6 +3058,20 @@ class LectureSlideDeck(Base):
         back_populates="continuous_narration_decks",
         uselist=False,
     )
+    caption_stored_object_id = Column(
+        Integer,
+        ForeignKey(
+            "lecture_slide_caption_stored_objects.id",
+            name="fk_ls_decks_caption_stored_object_id",
+        ),
+        nullable=True,
+        index=True,
+    )
+    caption_stored_object = relationship(
+        "LectureSlideCaptionStoredObject",
+        back_populates="lecture_slide_decks",
+        uselist=False,
+    )
     assistants = relationship("Assistant", back_populates="lecture_slide_deck")
     threads = relationship("Thread", back_populates="lecture_slide_deck")
     pages = relationship(
@@ -3057,6 +3096,9 @@ class LectureSlideDeck(Base):
         mapped_column(JSON, nullable=True)
     )
     context_version = Column(Integer, nullable=True)
+    lecture_slide_chat_available: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
     status: Mapped[schemas.LectureSlideDeckStatus] = mapped_column(
         SQLEnum(schemas.LectureSlideDeckStatus),
         nullable=False,
@@ -3473,6 +3515,13 @@ def _thread_lecture_slide_base_loaders() -> tuple[Load, ...]:
             Assistant.id, Assistant.name, Assistant.lecture_slide_deck_id
         ),
         selectinload(Thread.lecture_slide_deck).options(
+            undefer(LectureSlideDeck.transcript_data),
+            undefer(LectureSlideDeck.context_data),
+            selectinload(LectureSlideDeck.continuous_narration_stored_object),
+            selectinload(LectureSlideDeck.caption_stored_object),
+            selectinload(LectureSlideDeck.pages).selectinload(
+                LectureSlidePage.image_stored_object
+            ),
             selectinload(LectureSlideDeck.questions).options(
                 *_lecture_slide_question_context_loaders()
             ),

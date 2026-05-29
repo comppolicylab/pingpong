@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 ANONYMOUS_TOKEN_QUERY_PATH_ALLOWLIST = (
     re.compile(r"^/api/v1/class/[^/]+/thread/[^/]+/video$"),
     re.compile(r"^/api/v1/class/[^/]+/thread/[^/]+/lecture-video/narration/[^/]+$"),
+    re.compile(r"^/api/v1/class/[^/]+/thread/[^/]+/lecture-slides/narration/[^/]+$"),
 )
 
 

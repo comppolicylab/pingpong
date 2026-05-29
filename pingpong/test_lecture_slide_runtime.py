@@ -6,9 +6,11 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import asc, select
 
+import pingpong.lecture_slide_chat as lecture_slide_chat
 import pingpong.lecture_slide_runtime as lecture_slide_runtime
 import pingpong.models as models
 import pingpong.schemas as schemas
+from pingpong.config import config
 from pingpong.testutil import with_institution
 
 pytestmark = pytest.mark.asyncio
@@ -147,14 +149,60 @@ async def _list_slide_interactions(
     return list(result)
 
 
-def _server_request(session, user_id: int = 123):
+def _server_request(session, user_id: int = 123, *, headers: dict | None = None):
+    def url_for(name: str, **path_params):
+        params = "/".join(f"{key}-{value}" for key, value in path_params.items())
+        return f"http://testserver/{name}/{params}"
+
     return SimpleNamespace(
         state={
             "db": session,
             "session": SimpleNamespace(user=SimpleNamespace(id=user_id)),
         },
         app=SimpleNamespace(state={}),
+        headers=headers or {},
+        url_for=url_for,
     )
+
+
+def _slide_transcript_data() -> dict:
+    return {
+        "word_level_transcription": [
+            {
+                "id": "w1",
+                "word": "Hello",
+                "start_offset_ms": 0,
+                "end_offset_ms": 400,
+            },
+            {
+                "id": "w2",
+                "word": "slides",
+                "start_offset_ms": 400,
+                "end_offset_ms": 900,
+            },
+        ]
+    }
+
+
+def _slide_context_data() -> dict:
+    return {
+        "summary_checkpoints": [
+            {
+                "end_offset_ms": 5_000,
+                "summary": "The learner has seen the opening slide.",
+            }
+        ],
+        "moment_contexts": [
+            {
+                "center_offset_ms": 2_000,
+                "start_offset_ms": 1_000,
+                "end_offset_ms": 3_000,
+                "before": "The introduction begins.",
+                "at": "The current point explains the term.",
+                "after": "The lesson transitions to an example.",
+            }
+        ],
+    }
 
 
 @with_institution(11, "Test Institution")
@@ -470,3 +518,369 @@ async def test_append_interaction_requires_for_update_locked_slide_state(
                 event_type=schemas.InteractiveLessonInteractionEventType.LESSON_PAUSED,
                 offset_ms=500,
             )
+
+
+@with_institution(11, "Test Institution")
+async def test_lecture_slide_chat_context_matches_lecture_video_v4_sections(
+    db, institution
+):
+    async with db.async_session() as session:
+        _, deck, _, thread, questions = await _create_slide_runtime_fixture(
+            session, institution
+        )
+        deck.transcript_data = _slide_transcript_data()
+        deck.context_data = _slide_context_data()
+        deck.context_version = 4
+        state = models.LectureSlideThreadState(
+            thread=thread,
+            state=schemas.InteractiveLessonSessionState.PLAYING,
+            current_question=questions[0],
+            last_known_offset_ms=2_000,
+            furthest_offset_ms=5_000,
+            version=1,
+        )
+        session.add(state)
+        await session.flush()
+
+        context = lecture_slide_chat.lecture_slide_chat_context_from_model(deck)
+        assert context is not None
+        context_text = lecture_slide_chat._build_context_text(
+            thread,
+            state,
+            context,
+            playback_position_ms=2_000,
+            answered_knowledge_checks=None,
+        )
+
+    assert "## Lecture Context" in context_text
+    assert "Current offset: 2000ms" in context_text
+    assert "Furthest watched offset: 5000ms" in context_text
+    assert "### Lecture Summary So Far" in context_text
+    assert "### Current Moment Context" in context_text
+    assert "### Upcoming Knowledge Check" in context_text
+    assert "### Current Slide" not in context_text
+    assert "Extracted text:" not in context_text
+
+
+@with_institution(11, "Test Institution")
+async def test_lecture_slide_deck_view_exposes_pages_narration_and_captions(
+    db, institution
+):
+    async with db.async_session() as session:
+        class_, deck, _, thread, _ = await _create_slide_runtime_fixture(
+            session, institution
+        )
+        thread.interaction_mode = schemas.InteractionMode.LECTURE_SLIDES
+        narration = models.LectureSlideNarrationStoredObject(
+            key="slides/audio.ogg",
+            content_type="audio/ogg",
+            content_length=10,
+            duration_ms=10_000,
+        )
+        captions = models.LectureSlideCaptionStoredObject(
+            key="slides/captions.vtt",
+            content_type="text/vtt",
+            content_length=12,
+        )
+        image = models.LectureSlideImageStoredObject(
+            key="slides/page-1.png",
+            content_type="image/png",
+            content_length=5,
+            width_px=1280,
+            height_px=720,
+        )
+        page = models.LectureSlidePage(
+            lecture_slide_deck=deck,
+            position=1,
+            title="Terms",
+            image_stored_object=image,
+            start_offset_ms=0,
+            end_offset_ms=10_000,
+        )
+        deck.continuous_narration_stored_object = narration
+        deck.caption_stored_object = captions
+        session.add_all([narration, captions, image, page])
+        await session.flush()
+
+        loaded_thread = await models.Thread.get_by_id_with_lecture_slide_context(
+            session, thread.id
+        )
+        assert loaded_thread is not None
+        view = server_module._lecture_slide_deck_view(
+            _server_request(session),
+            loaded_thread,
+        )
+
+    assert view is not None
+    assert view.id == deck.id
+    assert view.display_name == "Test Slides"
+    assert view.continuous_narration_url is not None
+    assert view.captions_url is not None
+    assert len(view.pages) == 1
+    assert not hasattr(view.pages[0], "title")
+    assert view.pages[0].image_stored_object_id == image.id
+
+
+@with_institution(11, "Test Institution")
+async def test_lecture_slide_captions_endpoint_streams_stored_webvtt(
+    db, institution, monkeypatch
+):
+    class FakeVideoStore:
+        async def stream_video_range(self, *, key, start=None, end=None):
+            assert key == "slides/captions.vtt"
+            assert start is None
+            assert end is None
+            yield b"WEBVTT\n\nHello slides"
+
+    monkeypatch.setattr(config, "video_store", SimpleNamespace(store=FakeVideoStore()))
+
+    async with db.async_session() as session:
+        class_, deck, assistant, thread, _ = await _create_slide_runtime_fixture(
+            session, institution
+        )
+        thread.interaction_mode = schemas.InteractionMode.LECTURE_SLIDES
+        assistant.interaction_mode = schemas.InteractionMode.LECTURE_SLIDES
+        captions = models.LectureSlideCaptionStoredObject(
+            key="slides/captions.vtt",
+            content_type="text/vtt",
+            content_length=20,
+        )
+        deck.caption_stored_object = captions
+        session.add(captions)
+        await session.flush()
+
+        response = await server_module.get_thread_lecture_slide_captions(
+            str(class_.id),
+            str(thread.id),
+            _server_request(session),
+        )
+
+    assert response.status_code == 200
+    assert response.media_type == "text/vtt"
+    chunks = [chunk async for chunk in response.body_iterator]
+    body = b"".join(chunks).decode("utf-8")
+    assert body.startswith("WEBVTT")
+    assert "Hello slides" in body
+
+
+@with_institution(11, "Test Institution")
+async def test_lecture_slide_continuous_narration_endpoint_streams_audio(
+    db, institution, monkeypatch
+):
+    class FakeAudioStore:
+        async def get_file(self, key):
+            assert key == "slides/audio.ogg"
+            yield b"audio"
+
+    monkeypatch.setattr(
+        config,
+        "lecture_video_audio_store",
+        SimpleNamespace(store=FakeAudioStore()),
+    )
+
+    async with db.async_session() as session:
+        class_, deck, assistant, thread, _ = await _create_slide_runtime_fixture(
+            session, institution
+        )
+        thread.interaction_mode = schemas.InteractionMode.LECTURE_SLIDES
+        assistant.interaction_mode = schemas.InteractionMode.LECTURE_SLIDES
+        narration = models.LectureSlideNarrationStoredObject(
+            key="slides/audio.ogg",
+            content_type="audio/ogg",
+            content_length=5,
+            duration_ms=10_000,
+        )
+        deck.continuous_narration_stored_object = narration
+        session.add(narration)
+        await session.flush()
+
+        response = await server_module.get_thread_lecture_slide_continuous_narration(
+            str(class_.id),
+            str(thread.id),
+            _server_request(session),
+        )
+
+    chunks = [chunk async for chunk in response.body_iterator]
+    assert response.status_code == 200
+    assert response.media_type == "audio/ogg"
+    assert b"".join(chunks) == b"audio"
+
+
+@with_institution(11, "Test Institution")
+async def test_lecture_slide_question_narration_endpoint_streams_allowed_audio(
+    db, institution, monkeypatch
+):
+    class FakeAudioStore:
+        async def get_file(self, key):
+            assert key == "slides/question.ogg"
+            yield b"question-audio"
+
+    monkeypatch.setattr(
+        config,
+        "lecture_video_audio_store",
+        SimpleNamespace(store=FakeAudioStore()),
+    )
+
+    async with db.async_session() as session:
+        (
+            class_,
+            _deck,
+            assistant,
+            thread,
+            questions,
+        ) = await _create_slide_runtime_fixture(session, institution)
+        thread.interaction_mode = schemas.InteractionMode.LECTURE_SLIDES
+        assistant.interaction_mode = schemas.InteractionMode.LECTURE_SLIDES
+        stored_object = models.LectureSlideNarrationStoredObject(
+            key="slides/question.ogg",
+            content_type="audio/ogg",
+            content_length=14,
+            duration_ms=1_000,
+        )
+        narration = models.LectureSlideNarration(
+            stored_object=stored_object,
+            status=schemas.LectureSlideNarrationStatus.READY,
+        )
+        questions[0].intro_narration = narration
+        state = models.LectureSlideThreadState(
+            thread=thread,
+            state=schemas.InteractiveLessonSessionState.AWAITING_ANSWER,
+            current_question=questions[0],
+            last_known_offset_ms=questions[0].stop_offset_ms,
+            furthest_offset_ms=questions[0].stop_offset_ms,
+            version=1,
+        )
+        session.add_all([stored_object, narration, state])
+        await session.flush()
+
+        response = await server_module.get_thread_lecture_slide_narration(
+            str(class_.id),
+            str(thread.id),
+            narration.id,
+            _server_request(session),
+        )
+
+    chunks = [chunk async for chunk in response.body_iterator]
+    assert response.status_code == 200
+    assert response.media_type == "audio/ogg"
+    assert b"".join(chunks) == b"question-audio"
+
+
+@with_institution(11, "Test Institution")
+async def test_lecture_slide_page_image_endpoint_streams_from_video_store(
+    db, institution, monkeypatch
+):
+    class FakeVideoStore:
+        async def stream_video_range(self, *, key, start=None, end=None):
+            assert key == "slides/page-1.png"
+            assert start is None
+            assert end is None
+            yield b"image"
+
+    monkeypatch.setattr(config, "video_store", SimpleNamespace(store=FakeVideoStore()))
+
+    async with db.async_session() as session:
+        class_, deck, assistant, thread, _ = await _create_slide_runtime_fixture(
+            session, institution
+        )
+        thread.interaction_mode = schemas.InteractionMode.LECTURE_SLIDES
+        assistant.interaction_mode = schemas.InteractionMode.LECTURE_SLIDES
+        image = models.LectureSlideImageStoredObject(
+            key="slides/page-1.png",
+            content_type="image/png",
+            content_length=5,
+            width_px=1280,
+            height_px=720,
+        )
+        page = models.LectureSlidePage(
+            lecture_slide_deck=deck,
+            position=1,
+            title="Terms",
+            image_stored_object=image,
+            start_offset_ms=0,
+            end_offset_ms=10_000,
+        )
+        session.add_all([image, page])
+        await session.flush()
+
+        response = await server_module.get_thread_lecture_slide_page_image(
+            str(class_.id),
+            str(thread.id),
+            page.id,
+            _server_request(session),
+        )
+
+    chunks = [chunk async for chunk in response.body_iterator]
+    assert response.status_code == 200
+    assert response.media_type == "image/png"
+    assert b"".join(chunks) == b"image"
+
+
+@with_institution(11, "Test Institution")
+async def test_lecture_slide_session_uses_stored_chat_available_flag(db, institution):
+    async with db.async_session() as session:
+        _, deck, _, thread, _ = await _create_slide_runtime_fixture(
+            session, institution
+        )
+        deck.context_version = 4
+        deck.lecture_slide_chat_available = True
+        lesson_session = await lecture_slide_runtime.get_thread_session(
+            session,
+            thread.id,
+            request_actor_user_id=123,
+        )
+
+    assert lesson_session is not None
+    assert lesson_session.lesson_chat_available is True
+
+
+@with_institution(11, "Test Institution")
+async def test_prepare_lecture_slide_chat_turn_uses_video_context_shape(
+    db, institution
+):
+    async with db.async_session() as session:
+        (
+            class_,
+            deck,
+            assistant,
+            thread,
+            questions,
+        ) = await _create_slide_runtime_fixture(session, institution)
+        thread.interaction_mode = schemas.InteractionMode.LECTURE_SLIDES
+        assistant.interaction_mode = schemas.InteractionMode.LECTURE_SLIDES
+        deck.transcript_data = _slide_transcript_data()
+        deck.context_data = _slide_context_data()
+        deck.context_version = 4
+        deck.lecture_slide_chat_available = True
+        state = models.LectureSlideThreadState(
+            thread=thread,
+            state=schemas.InteractiveLessonSessionState.PLAYING,
+            current_question=questions[0],
+            last_known_offset_ms=2_000,
+            furthest_offset_ms=5_000,
+            version=1,
+        )
+        session.add(state)
+        await session.flush()
+
+        prep = await lecture_slide_chat.prepare_lecture_chat_turn(
+            request=_server_request(session),
+            class_id=str(class_.id),
+            thread=thread,
+            user_id=123,
+            prev_output_sequence=7,
+            lecture_video_playback_position_ms=2_000,
+        )
+        context_text = prep.prepended_messages[0].content[0].text
+
+    assert prep.user_output_index == 9
+    assert prep.user_assistant_messages_only is True
+    assert prep.prepended_messages[0].is_hidden is True
+    assert "## Lecture Context" in context_text
+    assert "Current offset: 2000ms" in context_text
+    assert "Furthest watched offset: 5000ms" in context_text
+    assert "### Lecture Summary So Far" in context_text
+    assert "### Current Moment Context" in context_text
+    assert "### Upcoming Knowledge Check" in context_text
+    assert "### Current Slide" not in context_text
+    assert "Extracted text:" not in context_text
