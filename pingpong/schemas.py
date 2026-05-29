@@ -477,7 +477,25 @@ class LectureVideoQuestionType(StrEnum):
     SINGLE_SELECT = "single_select"
 
 
+class LectureSlideQuestionType(StrEnum):
+    SINGLE_SELECT = "single_select"
+
+
 class LectureVideoNarrationStatus(StrEnum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    READY = "ready"
+    FAILED = "failed"
+
+
+class LectureSlideDeckStatus(StrEnum):
+    UPLOADED = "uploaded"
+    PROCESSING = "processing"
+    READY = "ready"
+    FAILED = "failed"
+
+
+class LectureSlideNarrationStatus(StrEnum):
     PENDING = "pending"
     PROCESSING = "processing"
     READY = "ready"
