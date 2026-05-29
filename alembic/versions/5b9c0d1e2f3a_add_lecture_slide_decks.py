@@ -28,9 +28,7 @@ lecture_slide_narration_status = sa.Enum(
     "FAILED",
     name="lectureslidenarrationstatus",
 )
-lecture_slide_question_type = sa.Enum(
-    "SINGLE_SELECT", name="lectureslidequestiontype"
-)
+lecture_slide_question_type = sa.Enum("SINGLE_SELECT", name="lectureslidequestiontype")
 
 
 def upgrade() -> None:
