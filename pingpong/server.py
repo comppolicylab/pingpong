@@ -120,6 +120,7 @@ from pingpong.video_store import VideoStoreError
 
 from . import (
     assistant_service,
+    lecture_slide_chat,
     lecture_slide_runtime,
     lecture_video_chat,
     lecture_video_manifest_generation,
@@ -528,6 +529,89 @@ async def _lecture_video_availability(
         )
 
     return tts_available, captions_available
+
+
+async def _lecture_slide_availability(
+    db: AsyncSession,
+    thread: models.Thread,
+) -> tuple[bool, bool]:
+    if (
+        thread.interaction_mode != schemas.InteractionMode.LECTURE_SLIDES
+        or thread.lecture_slide_deck_id is None
+    ):
+        return False, False
+
+    lecture_slide_availability = await db.execute(
+        select(
+            models.LectureSlideDeck.voice_id,
+            models.LectureSlideDeck.caption_stored_object_id,
+        ).where(models.LectureSlideDeck.id == thread.lecture_slide_deck_id)
+    )
+    lecture_slide_row = lecture_slide_availability.one_or_none()
+    if lecture_slide_row is None:
+        return False, False
+
+    voice_id, caption_stored_object_id = lecture_slide_row
+    captions_available = caption_stored_object_id is not None
+    tts_available = False
+    if (voice_id or "").strip():
+        credential = await models.ClassCredential.get_by_class_id_and_purpose(
+            db,
+            int(thread.class_id),
+            schemas.ClassCredentialPurpose.LECTURE_VIDEO_NARRATION_TTS,
+        )
+        tts_available = bool(
+            credential and credential.api_key_obj and credential.api_key_obj.api_key
+        )
+
+    return tts_available, captions_available
+
+
+def _lecture_slide_deck_view(
+    request: Any,
+    thread: models.Thread,
+) -> schemas.LectureSlideDeckView | None:
+    deck = thread.lecture_slide_deck
+    if deck is None:
+        return None
+
+    continuous_narration_url = None
+    if deck.continuous_narration_stored_object_id is not None:
+        continuous_narration_url = str(
+            request.url_for(
+                "get_thread_lecture_slide_continuous_narration",
+                class_id=str(thread.class_id),
+                thread_id=str(thread.id),
+            )
+        )
+
+    captions_url = None
+    if deck.caption_stored_object_id is not None:
+        captions_url = str(
+            request.url_for(
+                "get_thread_lecture_slide_captions",
+                class_id=str(thread.class_id),
+                thread_id=str(thread.id),
+            )
+        )
+
+    return schemas.LectureSlideDeckView(
+        id=deck.id,
+        display_name=deck.display_name,
+        total_duration_ms=deck.total_duration_ms,
+        continuous_narration_url=continuous_narration_url,
+        captions_url=captions_url,
+        pages=[
+            schemas.LectureSlidePageView(
+                id=page.id,
+                position=page.position,
+                start_offset_ms=page.start_offset_ms,
+                end_offset_ms=page.end_offset_ms,
+                image_stored_object_id=page.image_stored_object_id,
+            )
+            for page in sorted(deck.pages, key=lambda item: item.position)
+        ],
+    )
 
 
 def _raise_lecture_video_runtime_http_error(
@@ -4027,6 +4111,10 @@ async def get_thread(
         lecture_video_tts_available = False
         lecture_video_captions_available = False
         lecture_video_session = None
+        lecture_slide_deck = None
+        lecture_slide_tts_available = False
+        lecture_slide_captions_available = False
+        interactive_lesson_session = None
         if thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
             lecture_video_can_participate = await can_participate_thread(request)
             thread.is_current_user_participant = lecture_video_can_participate
@@ -4047,6 +4135,38 @@ async def get_thread(
                 ),
                 nowfn=get_now_fn(request),
             )
+        elif thread.interaction_mode == schemas.InteractionMode.LECTURE_SLIDES:
+            lecture_slide_can_participate = await can_participate_thread(request)
+            thread.is_current_user_participant = lecture_slide_can_participate
+            (
+                lecture_slide_tts_available,
+                lecture_slide_captions_available,
+            ) = await _lecture_slide_availability(request.state["db"], thread)
+            slide_thread = await models.Thread.get_by_id_with_lecture_slide_context(
+                request.state["db"], thread.id
+            )
+            if slide_thread is not None:
+                lecture_slide_deck = _lecture_slide_deck_view(request, slide_thread)
+                interactive_lesson_session = (
+                    await lecture_slide_runtime.get_thread_session(
+                        request.state["db"],
+                        slide_thread.id,
+                        request_controller_session_id=(
+                            request.headers.get(
+                                lecture_slide_runtime.CONTROLLER_SESSION_HEADER
+                            )
+                            or request.headers.get(
+                                lecture_video_runtime.CONTROLLER_SESSION_HEADER
+                            )
+                        ),
+                        request_actor_user_id=(
+                            request.state["session"].user.id
+                            if request.state["session"].user
+                            else None
+                        ),
+                        nowfn=get_now_fn(request),
+                    )
+                )
 
         return {
             "thread": thread,
@@ -4066,6 +4186,10 @@ async def get_thread(
             "lecture_video_session": lecture_video_session,
             "lecture_video_tts_available": lecture_video_tts_available,
             "lecture_video_captions_available": lecture_video_captions_available,
+            "lecture_slide_deck": lecture_slide_deck,
+            "lecture_slide_tts_available": lecture_slide_tts_available,
+            "lecture_slide_captions_available": lecture_slide_captions_available,
+            "interactive_lesson_session": interactive_lesson_session,
             "recording": thread.voice_mode_recording
             if is_supervisor or is_current_user
             else None,
@@ -4651,6 +4775,10 @@ async def get_thread(
         lecture_video_tts_available = False
         lecture_video_captions_available = False
         lecture_video_session = None
+        lecture_slide_deck = None
+        lecture_slide_tts_available = False
+        lecture_slide_captions_available = False
+        interactive_lesson_session = None
         if thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
             lecture_video_can_participate = await can_participate_thread(request)
             thread.is_current_user_participant = lecture_video_can_participate
@@ -4671,6 +4799,38 @@ async def get_thread(
                 ),
                 nowfn=get_now_fn(request),
             )
+        elif thread.interaction_mode == schemas.InteractionMode.LECTURE_SLIDES:
+            lecture_slide_can_participate = await can_participate_thread(request)
+            thread.is_current_user_participant = lecture_slide_can_participate
+            (
+                lecture_slide_tts_available,
+                lecture_slide_captions_available,
+            ) = await _lecture_slide_availability(request.state["db"], thread)
+            slide_thread = await models.Thread.get_by_id_with_lecture_slide_context(
+                request.state["db"], thread.id
+            )
+            if slide_thread is not None:
+                lecture_slide_deck = _lecture_slide_deck_view(request, slide_thread)
+                interactive_lesson_session = (
+                    await lecture_slide_runtime.get_thread_session(
+                        request.state["db"],
+                        slide_thread.id,
+                        request_controller_session_id=(
+                            request.headers.get(
+                                lecture_slide_runtime.CONTROLLER_SESSION_HEADER
+                            )
+                            or request.headers.get(
+                                lecture_video_runtime.CONTROLLER_SESSION_HEADER
+                            )
+                        ),
+                        request_actor_user_id=(
+                            request.state["session"].user.id
+                            if request.state["session"].user
+                            else None
+                        ),
+                        nowfn=get_now_fn(request),
+                    )
+                )
 
         if latest_run:
             last_run_db = schemas.OpenAIRun(
@@ -4718,6 +4878,10 @@ async def get_thread(
             "lecture_video_session": lecture_video_session,
             "lecture_video_tts_available": lecture_video_tts_available,
             "lecture_video_captions_available": lecture_video_captions_available,
+            "lecture_slide_deck": lecture_slide_deck,
+            "lecture_slide_tts_available": lecture_slide_tts_available,
+            "lecture_slide_captions_available": lecture_slide_captions_available,
+            "interactive_lesson_session": interactive_lesson_session,
             "recording": thread.voice_mode_recording
             if is_supervisor or is_current_user
             else None,
@@ -5019,6 +5183,317 @@ async def get_thread_lecture_video_captions(
             "ETag": etag,
         },
     )
+
+
+async def _get_lecture_slide_thread_with_deck_or_404(
+    db: AsyncSession,
+    class_id: str,
+    thread_id: str,
+) -> models.Thread:
+    thread = await models.Thread.get_by_id_with_lecture_slide_context(
+        db, int(thread_id)
+    )
+    if thread is None or thread.class_id != int(class_id):
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if (
+        thread.interaction_mode != schemas.InteractionMode.LECTURE_SLIDES
+        or thread.lecture_slide_deck is None
+    ):
+        raise HTTPException(status_code=404, detail="Lecture slide thread not found.")
+    if not lecture_slide_runtime.lecture_slide_matches_assistant(thread):
+        raise HTTPException(
+            status_code=409,
+            detail=lecture_slide_runtime.MSG_LESSON_UPDATED,
+        )
+    return thread
+
+
+@v1.get(
+    "/class/{class_id}/thread/{thread_id}/lecture-slides/audio",
+    dependencies=[Depends(Authz("can_view", "thread:{thread_id}"))],
+    response_class=StreamingResponse,
+)
+async def get_thread_lecture_slide_continuous_narration(
+    class_id: str,
+    thread_id: str,
+    request: StateRequest,
+):
+    if not config.lecture_video_audio_store:
+        raise HTTPException(
+            status_code=404, detail="No Lecture Video Audio Store exists."
+        )
+
+    thread = await _get_lecture_slide_thread_with_deck_or_404(
+        request.state["db"], class_id, thread_id
+    )
+    deck = cast(models.LectureSlideDeck, thread.lecture_slide_deck)
+    narration = deck.continuous_narration_stored_object
+    if narration is None:
+        raise HTTPException(
+            status_code=404, detail="Lecture slide narration not found."
+        )
+
+    try:
+        stream = await prefetch_stream(
+            config.lecture_video_audio_store.store.get_file(narration.key),
+            store_error=AudioStoreError,
+            logger=logger,
+            store_error_log="AudioStoreError while streaming lecture slide narration; aborting stream.",
+            unexpected_error_log="Unexpected error while streaming lecture slide narration",
+        )
+        return StreamingResponse(
+            stream,
+            media_type=narration.content_type or "application/octet-stream",
+            headers={"Content-Length": str(narration.content_length)},
+        )
+    except AudioStoreError as e:
+        raise HTTPException(
+            status_code=400,
+            detail="Unable to retrieve the lecture slide narration audio.",
+        ) from e
+    except Exception as e:
+        logger.exception(
+            "get_thread_lecture_slide_continuous_narration: Exception occurred"
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="An internal error occurred while retrieving the lecture slide narration.",
+        ) from e
+
+
+@v1.get(
+    "/class/{class_id}/thread/{thread_id}/lecture-slides/captions.vtt",
+    dependencies=[Depends(Authz("can_view", "thread:{thread_id}"))],
+    response_class=StreamingResponse,
+)
+async def get_thread_lecture_slide_captions(
+    class_id: str,
+    thread_id: str,
+    request: StateRequest,
+):
+    if not config.video_store:
+        raise HTTPException(status_code=404, detail="No Video Store exists.")
+
+    thread = await _get_lecture_slide_thread_with_deck_or_404(
+        request.state["db"], class_id, thread_id
+    )
+    deck = cast(models.LectureSlideDeck, thread.lecture_slide_deck)
+    caption = deck.caption_stored_object
+    if caption is None:
+        raise HTTPException(status_code=404, detail="Captions not available.")
+
+    etag = f'"{caption.key}"'
+    normalized_etag = caption.key
+    etag_candidates = []
+    for candidate in request.headers.get("if-none-match", "").split(","):
+        normalized_candidate = candidate.strip()
+        if normalized_candidate.startswith("W/"):
+            normalized_candidate = normalized_candidate[2:].strip()
+        if (
+            len(normalized_candidate) >= 2
+            and normalized_candidate[0] == '"'
+            and normalized_candidate[-1] == '"'
+        ):
+            normalized_candidate = normalized_candidate[1:-1]
+        etag_candidates.append(normalized_candidate)
+    if "*" in etag_candidates or normalized_etag in etag_candidates:
+        return Response(
+            status_code=304,
+            headers={
+                "Cache-Control": "private, no-cache",
+                "ETag": etag,
+            },
+        )
+
+    try:
+        stream = await prefetch_stream(
+            config.video_store.store.stream_video_range(key=caption.key),
+            store_error=VideoStoreError,
+            logger=logger,
+            store_error_log="VideoStoreError while streaming lecture slide captions; aborting stream.",
+            unexpected_error_log="Unexpected error while streaming lecture slide captions",
+        )
+    except VideoStoreError as e:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unable to stream lecture slide captions: {e.detail or str(e)}",
+        ) from e
+
+    return StreamingResponse(
+        stream,
+        media_type=caption.content_type or "text/vtt",
+        headers={
+            "Cache-Control": "private, no-cache",
+            "Content-Length": str(caption.content_length),
+            "ETag": etag,
+        },
+    )
+
+
+@v1.get(
+    "/class/{class_id}/thread/{thread_id}/lecture-slides/{page_id}/image",
+    dependencies=[Depends(Authz("can_view", "thread:{thread_id}"))],
+    response_class=StreamingResponse,
+)
+async def get_thread_lecture_slide_page_image(
+    class_id: str,
+    thread_id: str,
+    page_id: int,
+    request: StateRequest,
+):
+    if not config.video_store:
+        raise HTTPException(status_code=404, detail="No Video Store exists.")
+
+    thread = await _get_lecture_slide_thread_with_deck_or_404(
+        request.state["db"], class_id, thread_id
+    )
+    deck = cast(models.LectureSlideDeck, thread.lecture_slide_deck)
+    page = next((page for page in deck.pages if page.id == page_id), None)
+    if page is None or page.image_stored_object is None:
+        raise HTTPException(status_code=404, detail="Lecture slide image not found.")
+
+    image = page.image_stored_object
+    total_length = image.content_length
+    range_header = request.headers.get("range")
+    try:
+        start, end, is_partial = _parse_single_byte_range(range_header, total_length)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=416,
+            detail=str(e),
+            headers={
+                "Accept-Ranges": "bytes",
+                "Content-Range": f"bytes */{total_length}",
+            },
+        ) from e
+
+    try:
+        stream = await prefetch_stream(
+            config.video_store.store.stream_video_range(
+                key=image.key,
+                start=start,
+                end=end,
+            ),
+            store_error=VideoStoreError,
+            logger=logger,
+            store_error_log="VideoStoreError while streaming lecture slide image; aborting stream.",
+            unexpected_error_log="Unexpected error while streaming lecture slide image",
+        )
+        response_headers = {
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(
+                (end - start + 1)
+                if is_partial and start is not None and end is not None
+                else total_length
+            ),
+        }
+        status_code = 200
+        if is_partial and start is not None and end is not None:
+            response_headers["Content-Range"] = f"bytes {start}-{end}/{total_length}"
+            status_code = 206
+        return StreamingResponse(
+            stream,
+            status_code=status_code,
+            media_type=image.content_type or "image/png",
+            headers=response_headers,
+        )
+    except VideoStoreError as e:
+        if e.detail and "range" in e.detail.lower():
+            raise HTTPException(
+                status_code=416,
+                detail=e.detail,
+                headers={
+                    "Accept-Ranges": "bytes",
+                    "Content-Range": f"bytes */{total_length}",
+                },
+            ) from e
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unable to stream lecture slide image: {e.detail or str(e)}",
+        ) from e
+    except Exception as e:
+        logger.exception("get_thread_lecture_slide_page_image: Exception occurred")
+        raise HTTPException(
+            status_code=500,
+            detail="An internal error occurred while streaming the lecture slide image.",
+        ) from e
+
+
+@v1.get(
+    "/class/{class_id}/thread/{thread_id}/lecture-slides/narration/{narration_id}",
+    dependencies=[Depends(Authz("can_participate", "thread:{thread_id}"))],
+    response_class=StreamingResponse,
+)
+async def get_thread_lecture_slide_narration(
+    class_id: str,
+    thread_id: str,
+    narration_id: int,
+    request: StateRequest,
+):
+    if not config.lecture_video_audio_store:
+        raise HTTPException(
+            status_code=404, detail="No Lecture Video Audio Store exists."
+        )
+
+    thread = await _get_lecture_slide_thread_with_deck_or_404(
+        request.state["db"], class_id, thread_id
+    )
+    if thread.lecture_slide_state is None:
+        try:
+            state = await lecture_slide_runtime.get_or_initialize_thread_state(
+                request.state["db"], thread.id
+            )
+        except lecture_slide_runtime.LectureSlideRuntimeError as err:
+            _raise_lecture_slide_runtime_http_error(err)
+        narration_thread = state.thread
+    else:
+        narration_thread = thread
+
+    if not lecture_slide_runtime.narration_allowed_for_thread_state(
+        narration_thread, narration_id
+    ):
+        raise HTTPException(
+            status_code=404, detail="Lecture slide narration not found."
+        )
+
+    narration = await models.LectureSlideNarration.get_by_id(
+        request.state["db"], narration_id
+    )
+    if (
+        narration is None
+        or narration.status != schemas.LectureSlideNarrationStatus.READY
+        or narration.stored_object is None
+    ):
+        raise HTTPException(
+            status_code=404, detail="Lecture slide narration not found."
+        )
+
+    try:
+        stream = await prefetch_stream(
+            config.lecture_video_audio_store.store.get_file(
+                narration.stored_object.key
+            ),
+            store_error=AudioStoreError,
+            logger=logger,
+            store_error_log="AudioStoreError while streaming lecture slide narration; aborting stream.",
+            unexpected_error_log="Unexpected error while streaming lecture slide narration",
+        )
+        return StreamingResponse(
+            stream,
+            media_type=narration.stored_object.content_type
+            or "application/octet-stream",
+        )
+    except AudioStoreError as e:
+        raise HTTPException(
+            status_code=400,
+            detail="Unable to retrieve the lecture slide narration audio.",
+        ) from e
+    except Exception as e:
+        logger.exception("get_thread_lecture_slide_narration: Exception occurred")
+        raise HTTPException(
+            status_code=500,
+            detail="An internal error occurred while retrieving the lecture slide narration.",
+        ) from e
 
 
 @v1.get(
@@ -8211,12 +8686,13 @@ async def send_message(
                 status_code=403,
                 detail="You can't upload photos with this assistant. Remove the photos and try again.",
             )
-        lecture_chat_prep: lecture_video_chat.LectureChatTurnPreparation | None = None
+        lecture_chat_prep: Any | None = None
 
         # When we reach 3 user messages, or if we failed to generate a title before, generate a new one. Only use the first 100 words of each user and assistant message to maintain a low token count.
-        if thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO and (
-            thread.user_message_ct == 3 or thread.name is None
-        ):
+        if thread.interaction_mode not in {
+            schemas.InteractionMode.LECTURE_VIDEO,
+            schemas.InteractionMode.LECTURE_SLIDES,
+        } and (thread.user_message_ct == 3 or thread.name is None):
             thread.name = await get_thread_conversation_name(
                 openai_client,
                 request.state["db"],
@@ -8427,21 +8903,51 @@ async def send_message(
                         data.lecture_video_playback_position_ms
                     ),
                 )
+            elif thread.interaction_mode == schemas.InteractionMode.LECTURE_SLIDES:
+                lecture_chat_prep = await lecture_slide_chat.prepare_lecture_chat_turn(
+                    request=request,
+                    class_id=class_id,
+                    thread=thread,
+                    user_id=request.state["session"].user.id,
+                    prev_output_sequence=prev_output_sequence,
+                    lecture_video_playback_position_ms=(
+                        data.lecture_video_playback_position_ms
+                    ),
+                )
 
-            # Resolve TTS credentials for lecture-video chat audio streaming.
+            # Resolve TTS credentials for lecture chat audio streaming.
             # Skip entirely when the client explicitly opted out of speech.
             tts_voice_id: str | None = None
             tts_api_key: str | None = None
             tts_voice_settings: dict[str, Any] | None = None
-            if (
-                data.generate_speech is not False
-                and thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
-                and thread.lecture_video_id
-            ):
-                lecture_video = await models.LectureVideo.get_by_id(
-                    request.state["db"], thread.lecture_video_id
+            if data.generate_speech is not False and (
+                (
+                    thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
+                    and thread.lecture_video_id
                 )
-                if lecture_video and (lecture_video.voice_id or "").strip():
+                or (
+                    thread.interaction_mode == schemas.InteractionMode.LECTURE_SLIDES
+                    and thread.lecture_slide_deck_id
+                )
+            ):
+                lesson_voice_id: str | None = None
+                lecture_video = (
+                    await models.LectureVideo.get_by_id(
+                        request.state["db"], thread.lecture_video_id
+                    )
+                    if thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
+                    else None
+                )
+                if lecture_video is not None:
+                    lesson_voice_id = lecture_video.voice_id
+                elif thread.lecture_slide_deck_id is not None:
+                    lesson_voice_id = await request.state["db"].scalar(
+                        select(models.LectureSlideDeck.voice_id).where(
+                            models.LectureSlideDeck.id == thread.lecture_slide_deck_id
+                        )
+                    )
+                normalized_lesson_voice_id = (lesson_voice_id or "").strip()
+                if normalized_lesson_voice_id:
                     credential = (
                         await models.ClassCredential.get_by_class_id_and_purpose(
                             request.state["db"],
@@ -8450,7 +8956,7 @@ async def send_message(
                         )
                     )
                     if credential and credential.api_key_obj:
-                        tts_voice_id = lecture_video.voice_id.strip()
+                        tts_voice_id = normalized_lesson_voice_id
                         tts_api_key = credential.api_key_obj.api_key
                         tts_voice_settings = _elevenlabs_voice_settings_from_assistant(
                             asst

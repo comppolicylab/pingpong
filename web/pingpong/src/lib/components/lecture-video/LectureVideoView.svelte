@@ -1664,7 +1664,10 @@
 
 		const narrationSrcPromise = (async () => {
 			try {
-				const narrationUrl = api.lectureVideoNarrationUrl(classId, threadId, narrationId);
+				const narrationUrl =
+					lessonMode === 'lecture_slides'
+						? api.lectureSlideNarrationUrl(classId, threadId, narrationId)
+						: api.lectureVideoNarrationUrl(classId, threadId, narrationId);
 				const response = await fetch(narrationUrl);
 				if (!response.ok) {
 					throw new Error(`Failed to load narration ${narrationId}`);
@@ -1690,10 +1693,6 @@
 		onComplete: () => void,
 		onChatAbort: () => void = onComplete
 	) {
-		if (lessonMode === 'lecture_slides') {
-			onComplete();
-			return;
-		}
 		stopNarrationPlayback();
 		dispatch('narrationplaybackstarted');
 		const playbackGeneration = narrationPlaybackGeneration;
