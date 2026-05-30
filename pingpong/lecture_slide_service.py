@@ -1,4 +1,5 @@
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
@@ -22,6 +23,12 @@ LECTURE_SLIDE_DECK_ALREADY_ASSIGNED_DETAIL = (
     "This lecture slide deck is already attached to another assistant. "
     "Upload a new deck or copy the assistant instead."
 )
+
+
+@dataclass(frozen=True)
+class LectureSlidePageUpdateResult:
+    notes_changed: bool = False
+    narration_changed: bool = False
 
 
 def generate_source_store_key() -> str:
@@ -221,34 +228,48 @@ async def apply_lecture_slide_page_notes(
     session: AsyncSession,
     deck: models.LectureSlideDeck,
     notes: Iterable[schemas.LectureSlidePageNotes],
-) -> bool:
-    changed = False
+) -> LectureSlidePageUpdateResult:
+    notes_changed = False
+    narration_changed = False
     for note in notes:
         if note.position >= deck.slide_count:
             raise HTTPException(
                 status_code=400,
                 detail=f"Slide note position {note.position} is outside this deck.",
             )
-        value = (note.user_notes or "").strip() or None
+        user_notes = (note.user_notes or "").strip() or None
+        narration_text = (note.narration_text or "").strip() or None
         page = next(
             (page for page in deck.pages if page.position == note.position), None
         )
         if page is None:
+            if user_notes is None and narration_text is None:
+                continue
             page = models.LectureSlidePage(
                 lecture_slide_deck_id=deck.id,
                 position=note.position,
-                user_notes=value,
+                user_notes=user_notes,
+                narration_text=narration_text,
             )
             deck.pages.append(page)
             session.add(page)
-            changed = True
-        elif page.user_notes != value:
-            page.user_notes = value
+            notes_changed = notes_changed or user_notes is not None
+            narration_changed = narration_changed or narration_text is not None
+            continue
+        if page.user_notes != user_notes:
+            page.user_notes = user_notes
             session.add(page)
-            changed = True
-    if changed:
+            notes_changed = True
+        if page.narration_text != narration_text:
+            page.narration_text = narration_text
+            session.add(page)
+            narration_changed = True
+    if notes_changed or narration_changed:
         await session.flush()
-    return changed
+    return LectureSlidePageUpdateResult(
+        notes_changed=notes_changed,
+        narration_changed=narration_changed,
+    )
 
 
 async def clone_lecture_slide_deck_snapshot(

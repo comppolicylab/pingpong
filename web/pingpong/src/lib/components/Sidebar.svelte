@@ -19,7 +19,8 @@
 		InboxOutline,
 		OpenSidebarAltOutline,
 		CloseSidebarAltOutline,
-		ClapperboardPlayOutline
+		ClapperboardPlayOutline,
+		BookOpenOutline
 	} from 'flowbite-svelte-icons';
 
 	import {
@@ -90,7 +91,9 @@
 	$: assistants = [...(($page.data.assistants || []) as api.Assistant[])]
 		.filter(
 			(assistant: api.Assistant) =>
-				lectureVideoEnabled || assistant.interaction_mode !== 'lecture_video'
+				lectureVideoEnabled ||
+				(assistant.interaction_mode !== 'lecture_video' &&
+					assistant.interaction_mode !== 'lecture_slides')
 		)
 		.sort((a, b) => {
 			// First sort by endorsement.
@@ -475,6 +478,9 @@
 										{:else if assistant.interaction_mode === 'lecture_video'}
 											<ClapperboardPlayOutline size="sm" class="text-white" />
 											<Tooltip>Lecture Video mode assistant</Tooltip>
+										{:else if assistant.interaction_mode === 'lecture_slides'}
+											<BookOpenOutline size="sm" class="text-white" />
+											<Tooltip>Lecture Slides mode assistant</Tooltip>
 										{/if}
 									</svelte:fragment>
 								</SidebarItem>
@@ -537,6 +543,8 @@
 										<MicrophoneOutline size="sm" class="text-white" />
 									{:else if thread.interaction_mode === 'lecture_video'}
 										<ClapperboardPlayOutline size="sm" class="text-white" />
+									{:else if thread.interaction_mode === 'lecture_slides'}
+										<BookOpenOutline size="sm" class="text-white" />
 									{/if}
 								</svelte:fragment>
 

@@ -21,6 +21,7 @@
 		LockSolid,
 		MicrophoneOutline,
 		ClapperboardPlayOutline,
+		BookOpenOutline,
 		CirclePlusSolid,
 		MicrophoneSlashOutline,
 		BadgeCheckOutline,
@@ -113,7 +114,9 @@
 	$: isPrivate = data.class.private || false;
 	// Currently selected assistant.
 	$: assistants = ((data?.assistants || []) as Assistant[]).filter(
-		(asst: Assistant) => lectureVideoEnabled || asst.interaction_mode !== 'lecture_video'
+		(asst: Assistant) =>
+			lectureVideoEnabled ||
+			(asst.interaction_mode !== 'lecture_video' && asst.interaction_mode !== 'lecture_slides')
 	);
 	$: teachers = data?.supervisors || [];
 	$: courseAssistants = assistants.filter((asst: Assistant) => asst.endorsed);
@@ -124,20 +127,32 @@
 	);
 	$: otherAssistants = otherAssistantsAll.filter((asst: Assistant) => !asst.endorsed);
 	$: lessonAssistants = assistants.filter(
-		(asst: Assistant) => asst.interaction_mode === 'lecture_video'
+		(asst: Assistant) =>
+			asst.interaction_mode === 'lecture_video' || asst.interaction_mode === 'lecture_slides'
 	);
 	// In LV mode, lessons are surfaced in their own section at the top of the
 	// dropdown, so exclude them from the source-attribution sections to avoid
 	// listing the same assistant twice.
-	$: inLectureVideoMode = assistant.interaction_mode === 'lecture_video';
-	$: courseAssistantsForDropdown = inLectureVideoMode
-		? courseAssistants.filter((asst: Assistant) => asst.interaction_mode !== 'lecture_video')
+	$: inLectureLessonMode =
+		assistant.interaction_mode === 'lecture_video' ||
+		assistant.interaction_mode === 'lecture_slides';
+	$: courseAssistantsForDropdown = inLectureLessonMode
+		? courseAssistants.filter(
+				(asst: Assistant) =>
+					asst.interaction_mode !== 'lecture_video' && asst.interaction_mode !== 'lecture_slides'
+			)
 		: courseAssistants;
-	$: myAssistantsForDropdown = inLectureVideoMode
-		? myAssistants.filter((asst: Assistant) => asst.interaction_mode !== 'lecture_video')
+	$: myAssistantsForDropdown = inLectureLessonMode
+		? myAssistants.filter(
+				(asst: Assistant) =>
+					asst.interaction_mode !== 'lecture_video' && asst.interaction_mode !== 'lecture_slides'
+			)
 		: myAssistants;
-	$: otherAssistantsForDropdown = inLectureVideoMode
-		? otherAssistants.filter((asst: Assistant) => asst.interaction_mode !== 'lecture_video')
+	$: otherAssistantsForDropdown = inLectureLessonMode
+		? otherAssistants.filter(
+				(asst: Assistant) =>
+					asst.interaction_mode !== 'lecture_video' && asst.interaction_mode !== 'lecture_slides'
+			)
 		: otherAssistants;
 	let assistant = {} as Assistant;
 	$: assistantMeta = getAssistantMetadata(assistant);
@@ -565,7 +580,7 @@
 					<div class="flex flex-col items-center justify-center gap-1">
 						<div class="text-xl leading-tight font-medium md:text-4xl">{assistant.name}</div>
 					</div>
-					{#if !(data.isSharedAssistantPage || data.isSharedThreadPage) && assistant.interaction_mode !== 'lecture_video'}
+					{#if !(data.isSharedAssistantPage || data.isSharedThreadPage) && assistant.interaction_mode !== 'lecture_video' && assistant.interaction_mode !== 'lecture_slides'}
 						<div
 							class="flex flex-row items-center gap-1 text-xs font-normal text-gray-400 sm:text-sm"
 						>
@@ -592,7 +607,8 @@
 							type="button"
 						>
 							<span class="text-center text-xs font-normal">
-								{assistant.interaction_mode === 'lecture_video'
+								{assistant.interaction_mode === 'lecture_video' ||
+								assistant.interaction_mode === 'lecture_slides'
 									? 'Change lesson'
 									: 'Change assistant'}
 							</span>
@@ -603,8 +619,8 @@
 							classContainer="rounded-3xl lg:w-1/3 md:w-1/2 w-2/3 border border-gray-100 max-h-[40%] overflow-y-auto"
 							bind:open={assistantDropdownOpen}
 						>
-							<!-- Lessons (LV mode only) -->
-							{#if inLectureVideoMode && lessonAssistants.length > 0}
+							<!-- Lessons -->
+							{#if inLectureLessonMode && lessonAssistants.length > 0}
 								<DropdownItem
 									class="pointer-events-none pb-1 font-normal tracking-tight text-gray-400 normal-case select-none hover:bg-none"
 								>
@@ -619,11 +635,19 @@
 										<div class="flex max-w-full flex-row items-center justify-between gap-5">
 											<div class="flex w-10/12 flex-col gap-1">
 												<div class="text-sm leading-snug">
-													<ClapperboardPlayOutline
-														size="sm"
-														class="inline align-text-bottom text-gray-400"
-													/>
-													<Tooltip>Lecture Video mode assistant</Tooltip>
+													{#if asst.interaction_mode === 'lecture_slides'}
+														<BookOpenOutline
+															size="sm"
+															class="inline align-text-bottom text-gray-400"
+														/>
+														<Tooltip>Lecture Slides mode assistant</Tooltip>
+													{:else}
+														<ClapperboardPlayOutline
+															size="sm"
+															class="inline align-text-bottom text-gray-400"
+														/>
+														<Tooltip>Lecture Video mode assistant</Tooltip>
+													{/if}
 													{asst.name}
 												</div>
 												{#if asst.description}
@@ -674,6 +698,12 @@
 														class="inline align-text-bottom text-gray-400"
 													/>
 													<Tooltip>Lecture Video mode assistant</Tooltip>
+												{:else if asst.interaction_mode === 'lecture_slides'}
+													<BookOpenOutline
+														size="sm"
+														class="inline align-text-bottom text-gray-400"
+													/>
+													<Tooltip>Lecture Slides mode assistant</Tooltip>
 												{/if}
 												{asst.name}
 											</div>
@@ -725,6 +755,12 @@
 															class="inline align-text-bottom text-gray-400"
 														/>
 														<Tooltip>Lecture Video mode assistant</Tooltip>
+													{:else if asst.interaction_mode === 'lecture_slides'}
+														<BookOpenOutline
+															size="sm"
+															class="inline align-text-bottom text-gray-400"
+														/>
+														<Tooltip>Lecture Slides mode assistant</Tooltip>
 													{/if}
 													{asst.name}
 												</div>
@@ -776,6 +812,12 @@
 															class="inline align-text-bottom text-gray-400"
 														/>
 														<Tooltip>Lecture Video mode assistant</Tooltip>
+													{:else if asst.interaction_mode === 'lecture_slides'}
+														<BookOpenOutline
+															size="sm"
+															class="inline align-text-bottom text-gray-400"
+														/>
+														<Tooltip>Lecture Slides mode assistant</Tooltip>
 													{/if}
 													{asst.name}
 												</div>
@@ -835,9 +877,9 @@
 							</Button>
 						</div>
 					{/if}
-				{:else if assistant.interaction_mode === 'lecture_video'}
+				{:else if assistant.interaction_mode === 'lecture_video' || assistant.interaction_mode === 'lecture_slides'}
 					<div class="h-[5%] max-h-8"></div>
-					{#if lectureVideoPosterUrl && !lectureVideoPosterFailed}
+					{#if assistant.interaction_mode === 'lecture_video' && lectureVideoPosterUrl && !lectureVideoPosterFailed}
 						<div class="relative aspect-video w-full max-w-md overflow-hidden rounded-lg shadow-lg">
 							{#if !lectureVideoPosterLoaded}
 								<div class="flex h-full w-full items-center justify-center bg-blue-light-50">
@@ -855,15 +897,23 @@
 						</div>
 					{:else}
 						<div class="rounded-lg bg-blue-light-50 p-3">
-							<ClapperboardPlayOutline size="xl" class="text-blue-dark-40" />
+							{#if assistant.interaction_mode === 'lecture_slides'}
+								<BookOpenOutline size="xl" class="text-blue-dark-40" />
+							{:else}
+								<ClapperboardPlayOutline size="xl" class="text-blue-dark-40" />
+							{/if}
 						</div>
 					{/if}
 					<div class="flex min-w-2/5 flex-col items-center">
 						<p class="text-center text-sm font-semibold text-blue-dark-40 sm:text-xl">
-							Learn with Interactive Videos
+							{assistant.interaction_mode === 'lecture_slides'
+								? 'Learn with Interactive Slides'
+								: 'Learn with Interactive Videos'}
 						</p>
 						<p class="font-base max-w-65 text-center text-xs text-gray-600 sm:text-base">
-							Watch a video and ask and answer questions as you go.
+							{assistant.interaction_mode === 'lecture_slides'
+								? 'View slides and ask and answer questions as you go.'
+								: 'Watch a video and ask and answer questions as you go.'}
 						</p>
 					</div>
 					<div class="flex flex-row p-1.5">

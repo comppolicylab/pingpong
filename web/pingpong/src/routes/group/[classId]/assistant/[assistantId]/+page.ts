@@ -7,12 +7,14 @@ import type {
 	MCPServerToolInput,
 	LectureVideoAssistantEditorPolicy as LectureVideoEditorPolicy,
 	LectureVideoConfigResponse,
+	LectureSlideConfigResponse,
 	Error as ApiError
 } from '$lib/api';
 import {
 	getAssistantFiles,
 	getAssistantMCPServers,
 	getAssistantLectureVideoConfig,
+	getAssistantLectureSlideConfig,
 	getLectureVideoEditorPolicy,
 	expandResponse,
 	getModels
@@ -37,6 +39,8 @@ async function ensureModels(
 		instructions: string;
 		generation_prompt: string;
 		can_generate_manifest: boolean;
+		lecture_slide_generation_prompt: string;
+		lecture_slide_narration_prompt: string;
 	} | null;
 }> {
 	const cache = get(modelsPromptsStore)[classId];
@@ -123,6 +127,31 @@ async function loadAssistantLectureVideoConfig(
 			};
 }
 
+async function loadAssistantLectureSlideConfig(
+	fetchFn: typeof fetch,
+	classId: number,
+	assistantId: number
+): Promise<{
+	lectureSlideConfig: LectureSlideConfigResponse | null;
+	lectureSlideConfigLoadError: (ApiError & { $status: number }) | null;
+}> {
+	const response = await getAssistantLectureSlideConfig(fetchFn, classId, assistantId).then(
+		expandResponse
+	);
+	return response.error
+		? {
+				lectureSlideConfig: null,
+				lectureSlideConfigLoadError: {
+					$status: response.$status,
+					...response.error
+				}
+			}
+		: {
+				lectureSlideConfig: response.data,
+				lectureSlideConfigLoadError: null
+			};
+}
+
 async function loadLectureVideoEditorPolicy(
 	fetchFn: typeof fetch,
 	classId: number
@@ -151,6 +180,8 @@ export const load: PageLoad = async ({ params, fetch, parent }) => {
 	let mcpServers: MCPServerToolInput[] = [];
 	let lectureVideoConfig: LectureVideoConfigResponse | null = null;
 	let lectureVideoConfigLoadError: (ApiError & { $status: number }) | null = null;
+	let lectureSlideConfig: LectureSlideConfigResponse | null = null;
+	let lectureSlideConfigLoadError: (ApiError & { $status: number }) | null = null;
 
 	if (!isCreating) {
 		const assistants = parentData.assistants ?? [];
@@ -172,12 +203,21 @@ export const load: PageLoad = async ({ params, fetch, parent }) => {
 				);
 				lectureVideoConfig = lectureVideoConfigResult.lectureVideoConfig;
 				lectureVideoConfigLoadError = lectureVideoConfigResult.lectureVideoConfigLoadError;
+			} else if (assistant.interaction_mode === 'lecture_slides') {
+				const lectureSlideConfigResult = await loadAssistantLectureSlideConfig(
+					fetch,
+					classId,
+					assistant.id
+				);
+				lectureSlideConfig = lectureSlideConfigResult.lectureSlideConfig;
+				lectureSlideConfigLoadError = lectureSlideConfigResult.lectureSlideConfigLoadError;
 			}
 		}
 	}
 
 	const effectiveLectureVideoPolicy =
-		assistant?.interaction_mode === 'lecture_video'
+		assistant?.interaction_mode === 'lecture_video' ||
+		assistant?.interaction_mode === 'lecture_slides'
 			? {
 					...lectureVideoPolicy,
 					show_mode_in_assistant_editor: true
@@ -198,6 +238,8 @@ export const load: PageLoad = async ({ params, fetch, parent }) => {
 		lectureVideoPolicy: effectiveLectureVideoPolicy,
 		lectureVideoConfig,
 		lectureVideoConfigLoadError,
+		lectureSlideConfig,
+		lectureSlideConfigLoadError,
 		statusComponents: parentData.statusComponents ?? {}
 	};
 };

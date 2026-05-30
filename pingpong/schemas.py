@@ -1082,6 +1082,7 @@ class LectureSlideSummary(BaseModel):
 class LectureSlidePageNotes(BaseModel):
     position: int = Field(..., ge=0)
     user_notes: str | None = Field(None, max_length=20000)
+    narration_text: str | None = Field(None, max_length=20000)
 
 
 class LectureVideoAssistantEditorPolicy(BaseModel):
@@ -1123,6 +1124,8 @@ class LectureVideoDefaults(BaseModel):
     instructions: str
     generation_prompt: str
     can_generate_manifest: bool = False
+    lecture_slide_generation_prompt: str
+    lecture_slide_narration_prompt: str
 
 
 class ValidateLectureVideoVoiceRequest(BaseModel):

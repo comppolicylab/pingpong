@@ -3952,6 +3952,8 @@ async def list_class_models(
             instructions=lecture_video_manifest_generation.DEFAULT_LECTURE_VIDEO_INSTRUCTIONS,
             generation_prompt=lecture_video_manifest_generation.DEFAULT_GENERATION_PROMPT_CONTENT,
             can_generate_manifest=lecture_video_context["has_gemini_credential"],
+            lecture_slide_generation_prompt=lecture_slide_processing.DEFAULT_GENERATION_PROMPT_CONTENT,
+            lecture_slide_narration_prompt=lecture_slide_processing.DEFAULT_NARRATION_PROMPT,
         )
         if lecture_video_context["lecture_video_enabled"]
         else None
@@ -7692,18 +7694,46 @@ async def create_lecture_thread(
             detail="Could not find the assistant you specified. Please try again.",
         )
 
-    if assistant.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
+    if assistant.interaction_mode not in (
+        schemas.InteractionMode.LECTURE_VIDEO,
+        schemas.InteractionMode.LECTURE_SLIDES,
+    ):
         raise HTTPException(
             status_code=400,
-            detail="This assistant is not compatible with this thread creation endpoint. Provide a lecture_video assistant.",
+            detail="This assistant is not compatible with this thread creation endpoint. Provide a lecture video or lecture slides assistant.",
         )
 
-    if not assistant.lecture_video:
+    is_slide_lesson = (
+        assistant.interaction_mode == schemas.InteractionMode.LECTURE_SLIDES
+    )
+    if is_slide_lesson:
+        if not assistant.lecture_slide_deck:
+            raise HTTPException(
+                status_code=400,
+                detail="This assistant does not have lecture slides attached. Unable to create Lecture Lesson",
+            )
+        if assistant.lecture_slide_deck.status != schemas.LectureSlideDeckStatus.READY:
+            if (
+                assistant.lecture_slide_deck.status
+                == schemas.LectureSlideDeckStatus.FAILED
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "This assistant's lecture slide processing failed. "
+                        "Edit the assistant and retry."
+                    ),
+                )
+            raise HTTPException(
+                status_code=409,
+                detail="This assistant's lecture slides are not ready yet.",
+            )
+    elif not assistant.lecture_video:
         raise HTTPException(
             status_code=400,
             detail="This assistant does not have a lecture video attached. Unable to create Lecture Lesson",
         )
-    if assistant.lecture_video.status != schemas.LectureVideoStatus.READY:
+    elif assistant.lecture_video.status != schemas.LectureVideoStatus.READY:
         if assistant.lecture_video.status == schemas.LectureVideoStatus.FAILED:
             raise HTTPException(
                 status_code=409,
@@ -7717,7 +7747,8 @@ async def create_lecture_thread(
             detail="This assistant's lecture video is not ready yet.",
         )
 
-    lecture_video_id = assistant.lecture_video_id
+    lecture_video_id = None if is_slide_lesson else assistant.lecture_video_id
+    lecture_slide_deck_id = assistant.lecture_slide_deck_id if is_slide_lesson else None
 
     if assistant.version != 3:
         raise HTTPException(
@@ -7742,7 +7773,11 @@ async def create_lecture_thread(
         "name": "Lecture Lesson",
         "class_id": int(class_id),
         "private": True if all_parties else False,
-        "interaction_mode": "lecture_video",
+        "interaction_mode": (
+            schemas.InteractionMode.LECTURE_SLIDES
+            if is_slide_lesson
+            else schemas.InteractionMode.LECTURE_VIDEO
+        ),
         "users": all_parties,
         "thread_id": None,
         "anonymous_sessions": [anonymous_session] if anonymous_session else [],
@@ -7757,6 +7792,7 @@ async def create_lecture_thread(
         "instructions": assistant.instructions,
         "timezone": req.timezone,
         "lecture_video_id": lecture_video_id,
+        "lecture_slide_deck_id": lecture_slide_deck_id,
         "display_user_info": assistant.should_record_user_information
         and not class_.private,
     }
@@ -7767,9 +7803,16 @@ async def create_lecture_thread(
         request.state["db"].add(result)
         await request.state["db"].flush()
         try:
-            await lecture_video_runtime.initialize_thread_state(
-                request.state["db"], result.id
-            )
+            if is_slide_lesson:
+                await lecture_slide_runtime.initialize_thread_state(
+                    request.state["db"], result.id
+                )
+            else:
+                await lecture_video_runtime.initialize_thread_state(
+                    request.state["db"], result.id
+                )
+        except lecture_slide_runtime.LectureSlideRuntimeError as err:
+            _raise_lecture_slide_runtime_http_error(err)
         except lecture_video_runtime.LectureVideoRuntimeError as err:
             _raise_lecture_video_runtime_http_error(err)
         await request.state["db"].refresh(result)
@@ -7854,6 +7897,7 @@ async def create_thread(
 
     if assistant.interaction_mode in (
         schemas.InteractionMode.LECTURE_VIDEO,
+        schemas.InteractionMode.LECTURE_SLIDES,
         schemas.InteractionMode.VOICE,
     ):
         raise HTTPException(
@@ -12971,14 +13015,17 @@ async def update_assistant(
                     lecture_slide_narration_prompt
                 )
             notes_changed = False
+            narration_text_changed = False
             if notes_present:
-                notes_changed = (
+                page_update_result = (
                     await lecture_slide_service.apply_lecture_slide_page_notes(
                         request.state["db"],
                         target_lecture_slide_deck,
                         req.lecture_slide_page_notes or [],
                     )
                 )
+                notes_changed = page_update_result.notes_changed
+                narration_text_changed = page_update_result.narration_changed
 
             needs_full_processing = (
                 target_lecture_slide_deck.status
@@ -12991,12 +13038,14 @@ async def update_assistant(
             needs_narration_text = (
                 regenerate_narration_requested
                 or narration_prompt_changed
-                or notes_changed
+                or (notes_changed and not narration_text_changed)
             )
             needs_questions = (
                 regenerate_questions_requested or generation_prompt_changed
             )
             needs_audio = regenerate_audio_requested or voice_changed
+            if narration_text_changed:
+                needs_audio = True
 
             queued_run = None
             if needs_full_processing:

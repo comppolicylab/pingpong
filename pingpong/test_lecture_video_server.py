@@ -4809,7 +4809,7 @@ async def test_lecture_endpoint_rejects_non_lecture_video_assistant(
     assert response.status_code == 400
     assert (
         response.json()["detail"]
-        == "This assistant is not compatible with this thread creation endpoint. Provide a lecture_video assistant."
+        == "This assistant is not compatible with this thread creation endpoint. Provide a lecture video or lecture slides assistant."
     )
 
 
