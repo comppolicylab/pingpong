@@ -102,6 +102,7 @@ Output requirements:
 RUN_LEASE_DURATION = timedelta(minutes=10)
 RUN_LEASE_HEARTBEAT_INTERVAL = min(timedelta(minutes=1), RUN_LEASE_DURATION / 2)
 UNEXPECTED_WORKER_EXIT_ERROR_MESSAGE = "Lecture slide worker exited unexpectedly."
+LECTURE_SLIDE_AUDIO_CONTENT_TYPE = "audio/ogg"
 MAX_RUN_CREATE_RETRIES = 3
 OPENAI_GENERATION_MAX_ATTEMPTS = 3
 OPENAI_GENERATION_RETRY_DELAY_SECONDS = 5.0
@@ -817,6 +818,8 @@ async def _await_with_run_lease_heartbeat(
     lease_token: str,
     operation: Coroutine[Any, Any, Any],
 ) -> Any | None:
+    # Callers treat None as cancellation, so wrapped operations must return
+    # non-None values.
     task: asyncio.Task[Any] = asyncio.create_task(operation)
     try:
         while True:
@@ -1222,14 +1225,19 @@ async def _synthesize_slide_audio(
     api_key = await _get_elevenlabs_api_key(class_id)
     artifacts: list[SlideAudioArtifact] = []
     for page_id, page_position, narration_text in pages:
+        if not text_needs_audio(narration_text):
+            continue
         synthesis_result = await _await_with_run_lease_heartbeat(
             run_id,
             lease_token,
             synthesize_elevenlabs_speech(api_key, voice_id, narration_text),
         )
         if synthesis_result is None:
+            # Existing stored slide audio is retained on mid-run cancellation,
+            # matching lecture-video retry behavior.
             return None
-        content_type, audio = synthesis_result
+        _, audio = synthesis_result
+        content_type = LECTURE_SLIDE_AUDIO_CONTENT_TYPE
         duration_ms = audio_duration_ms(audio, content_type)
         store_key, content_length = await _store_audio(
             generate_slide_narration_store_key(),
@@ -2149,7 +2157,8 @@ async def _synthesize_knowledge_check_audio(
         )
         if synthesis_result is None:
             return
-        content_type, audio = synthesis_result
+        _, audio = synthesis_result
+        content_type = LECTURE_SLIDE_AUDIO_CONTENT_TYPE
         store_key, content_length = await _store_audio(
             generate_slide_narration_store_key(),
             content_type,
@@ -2202,7 +2211,7 @@ async def _persist_composite_artifacts(
             if page.narration_stored_object is not None
         ]
     combined_audio = await _combine_audio_objects(stored_objects)
-    content_type = stored_objects[0].content_type if stored_objects else "audio/ogg"
+    content_type = LECTURE_SLIDE_AUDIO_CONTENT_TYPE
     audio_key, audio_length = await _store_audio(
         generate_slide_continuous_narration_store_key(),
         content_type,

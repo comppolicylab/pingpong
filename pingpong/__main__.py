@@ -1545,6 +1545,7 @@ def run_lecture_video_worker(
     poll_interval: float,
     workers: int,
 ) -> None:
+    # Kept as a deployment-compatibility alias during the slide/video worker cutover.
     server = get_server(host=host, port=port)
 
     with sentry(), server.run_in_thread():

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from pingpong import lecture_slide_processing, models, schemas
+from pingpong.config import config
 from pingpong.now import utcnow
 
 pytestmark = pytest.mark.asyncio
@@ -248,6 +249,7 @@ async def test_generate_narration_text_requires_exact_slide_count(
     payload = json.dumps(captured["input"])
     assert "Generate narration for exactly 2 slides" in payload
     assert "Narration prompt" not in payload
+    assert captured["deleted_file_id"] == "file-pdf"
 
 
 async def test_generate_slide_manifest_uses_pdf_and_transcript_not_extracted_text(
@@ -541,6 +543,93 @@ async def test_transcribe_audio_words_enriches_punctuation_from_segments(tmp_pat
     assert [word.end_offset_ms for word in words] == [200, 500]
 
 
+async def test_synthesize_slide_audio_skips_empty_pages_and_stores_ogg_metadata(
+    db, monkeypatch
+):
+    await _create_class_and_deck(db, slide_count=3)
+    async with db.async_session() as session:
+        pages = [
+            models.LectureSlidePage(
+                lecture_slide_deck_id=1,
+                position=0,
+                narration_text="First narration.",
+            ),
+            models.LectureSlidePage(
+                lecture_slide_deck_id=1,
+                position=1,
+                narration_text="   ",
+            ),
+            models.LectureSlidePage(
+                lecture_slide_deck_id=1,
+                position=2,
+                narration_text="Final narration.",
+            ),
+        ]
+        run = models.LectureSlideProcessingRun(
+            lecture_slide_deck_id=1,
+            lecture_slide_deck_id_snapshot=1,
+            class_id=1,
+            stage=schemas.LectureSlideProcessingStage.NARRATION_AUDIO,
+            attempt_number=1,
+            status=schemas.LectureSlideProcessingRunStatus.RUNNING,
+            lease_token="lease",
+        )
+        session.add_all([*pages, run])
+        await session.commit()
+        page_ids = [page.id for page in pages]
+        run_id = run.id
+
+    requested_texts: list[str] = []
+    stored_content_types: list[str] = []
+
+    async def fake_get_elevenlabs_api_key(_class_id):
+        return "elevenlabs-key"
+
+    async def fake_synthesize_speech(_api_key, _voice_id, text):
+        requested_texts.append(text)
+        return "audio/mpeg", f"audio-{text}".encode("utf-8")
+
+    async def fake_store_audio(store_key, content_type, audio):
+        stored_content_types.append(content_type)
+        return store_key, len(audio)
+
+    monkeypatch.setattr(
+        lecture_slide_processing, "_get_elevenlabs_api_key", fake_get_elevenlabs_api_key
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing, "synthesize_elevenlabs_speech", fake_synthesize_speech
+    )
+    monkeypatch.setattr(lecture_slide_processing, "_store_audio", fake_store_audio)
+    monkeypatch.setattr(lecture_slide_processing, "audio_duration_ms", lambda *_: 100)
+
+    artifacts = await lecture_slide_processing._synthesize_slide_audio(
+        run_id, "lease", 1
+    )
+
+    assert requested_texts == ["First narration.", "Final narration."]
+    assert stored_content_types == ["audio/ogg", "audio/ogg"]
+    assert artifacts is not None
+    assert [artifact.page_id for artifact in artifacts] == [page_ids[0], page_ids[2]]
+    assert [artifact.content_type for artifact in artifacts] == [
+        "audio/ogg",
+        "audio/ogg",
+    ]
+    async with db.async_session() as session:
+        blank_page = await session.get(models.LectureSlidePage, page_ids[1])
+        first_page = await session.get(models.LectureSlidePage, page_ids[0])
+        assert blank_page is not None
+        assert blank_page.narration_id is None
+        assert blank_page.narration_stored_object_id is None
+        assert first_page is not None
+        assert first_page.narration_stored_object_id is not None
+        stored_object = await session.get(
+            models.LectureSlideNarrationStoredObject,
+            first_page.narration_stored_object_id,
+        )
+        assert stored_object is not None
+        assert stored_object.content_type == "audio/ogg"
+
+
 async def test_transcribe_and_persist_slide_audio_offsets_words(
     db, monkeypatch, tmp_path
 ):
@@ -615,6 +704,90 @@ async def test_transcribe_and_persist_slide_audio_offsets_words(
         assert [page.end_offset_ms for page in deck.pages] == [1000, 3000]
         assert deck.transcript_data is not None
         assert len(deck.transcript_data["word_level_transcription"]) == 2
+
+
+async def test_persist_composite_artifacts_stores_combined_audio_as_ogg(
+    db, monkeypatch
+):
+    await _create_class_and_deck(db, slide_count=2)
+    async with db.async_session() as session:
+        stored_objects = [
+            models.LectureSlideNarrationStoredObject(
+                key="slides/page-1.ogg",
+                content_type="audio/mpeg",
+                content_length=8,
+                duration_ms=100,
+            ),
+            models.LectureSlideNarrationStoredObject(
+                key="slides/page-2.ogg",
+                content_type="audio/mpeg",
+                content_length=8,
+                duration_ms=100,
+            ),
+        ]
+        pages = [
+            models.LectureSlidePage(
+                lecture_slide_deck_id=1,
+                position=0,
+                narration_stored_object=stored_objects[0],
+            ),
+            models.LectureSlidePage(
+                lecture_slide_deck_id=1,
+                position=1,
+                narration_stored_object=stored_objects[1],
+            ),
+        ]
+        run = models.LectureSlideProcessingRun(
+            lecture_slide_deck_id=1,
+            lecture_slide_deck_id_snapshot=1,
+            class_id=1,
+            stage=schemas.LectureSlideProcessingStage.COMPOSITE_ARTIFACTS,
+            attempt_number=1,
+            status=schemas.LectureSlideProcessingRunStatus.RUNNING,
+            lease_token="lease",
+        )
+        session.add_all([*stored_objects, *pages, run])
+        await session.commit()
+        run_id = run.id
+
+    class FakeVideoStore:
+        async def put(self, _key, _body, _content_type):
+            return None
+
+    stored_content_types: list[str] = []
+
+    async def fake_store_audio(store_key, content_type, audio):
+        stored_content_types.append(content_type)
+        return store_key, len(audio)
+
+    monkeypatch.setattr(config, "video_store", SimpleNamespace(store=FakeVideoStore()))
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "_combine_audio_objects",
+        lambda _stored_objects: _async_value(b"combined-ogg"),
+    )
+    monkeypatch.setattr(lecture_slide_processing, "_store_audio", fake_store_audio)
+    monkeypatch.setattr(lecture_slide_processing, "audio_duration_ms", lambda *_: 200)
+
+    await lecture_slide_processing._persist_composite_artifacts(
+        run_id,
+        "lease",
+        1,
+        [
+            schemas.LectureVideoManifestWordV3(
+                id="w1", word="hello", start_offset_ms=0, end_offset_ms=100
+            )
+        ],
+    )
+
+    assert stored_content_types == ["audio/ogg"]
+    async with db.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, 1
+        )
+        assert deck is not None
+        assert deck.continuous_narration_stored_object is not None
+        assert deck.continuous_narration_stored_object.content_type == "audio/ogg"
 
 
 async def test_claim_next_any_processing_run_returns_negative_id_for_older_video_run(
