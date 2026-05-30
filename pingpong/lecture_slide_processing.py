@@ -1219,14 +1219,15 @@ async def _synthesize_slide_audio(
         pages = [
             (page.id, page.position, page.narration_text or "")
             for page in sorted(deck.pages, key=lambda item: item.position)
+            if text_needs_audio(page.narration_text or "")
         ]
+    if not pages:
+        return []
     if not voice_id:
         raise RuntimeError("Lecture slide deck voice_id is required for narration.")
     api_key = await _get_elevenlabs_api_key(class_id)
     artifacts: list[SlideAudioArtifact] = []
     for page_id, page_position, narration_text in pages:
-        if not text_needs_audio(narration_text):
-            continue
         synthesis_result = await _await_with_run_lease_heartbeat(
             run_id,
             lease_token,
@@ -2135,12 +2136,12 @@ async def _synthesize_knowledge_check_audio(
         class_id = deck.class_id
         narration_items: list[tuple[int, str]] = []
         for question in deck.questions:
-            if question.intro_narration and question.intro_text:
+            if question.intro_narration and text_needs_audio(question.intro_text):
                 narration_items.append(
                     (question.intro_narration.id, question.intro_text)
                 )
             for option in question.options:
-                if option.post_narration and option.post_answer_text:
+                if option.post_narration and text_needs_audio(option.post_answer_text):
                     narration_items.append(
                         (option.post_narration.id, option.post_answer_text)
                     )
