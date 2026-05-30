@@ -651,12 +651,17 @@ async def test_synthesize_slide_audio_skips_empty_pages_and_stores_ogg_metadata(
         first_page = await session.get(models.LectureSlidePage, page_ids[0])
         assert blank_page is not None
         assert blank_page.narration_id is None
-        assert blank_page.narration_stored_object_id is None
         assert first_page is not None
-        assert first_page.narration_stored_object_id is not None
+        assert first_page.narration_id is not None
+        first_narration = await session.get(
+            models.LectureSlideNarration,
+            first_page.narration_id,
+        )
+        assert first_narration is not None
+        assert first_narration.stored_object_id is not None
         stored_object = await session.get(
             models.LectureSlideNarrationStoredObject,
-            first_page.narration_stored_object_id,
+            first_narration.stored_object_id,
         )
         assert stored_object is not None
         assert stored_object.content_type == "audio/ogg"
@@ -761,12 +766,18 @@ async def test_persist_composite_artifacts_stores_combined_audio_as_ogg(
             models.LectureSlidePage(
                 lecture_slide_deck_id=1,
                 position=0,
-                narration_stored_object=stored_objects[0],
+                narration=models.LectureSlideNarration(
+                    stored_object=stored_objects[0],
+                    status=schemas.LectureSlideNarrationStatus.READY,
+                ),
             ),
             models.LectureSlidePage(
                 lecture_slide_deck_id=1,
                 position=1,
-                narration_stored_object=stored_objects[1],
+                narration=models.LectureSlideNarration(
+                    stored_object=stored_objects[1],
+                    status=schemas.LectureSlideNarrationStatus.READY,
+                ),
             ),
         ]
         run = models.LectureSlideProcessingRun(

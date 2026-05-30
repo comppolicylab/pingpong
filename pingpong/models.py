@@ -2968,9 +2968,6 @@ class LectureSlideNarrationStoredObject(Base):
     continuous_narration_decks = relationship(
         "LectureSlideDeck", back_populates="continuous_narration_stored_object"
     )
-    page_narrations = relationship(
-        "LectureSlidePage", back_populates="narration_stored_object"
-    )
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -3140,14 +3137,9 @@ class LectureSlideDeck(Base):
                 )
             )
             .options(
-                selectinload(LectureSlideDeck.pages).selectinload(
-                    LectureSlidePage.narration
-                )
-            )
-            .options(
-                selectinload(LectureSlideDeck.pages).selectinload(
-                    LectureSlidePage.narration_stored_object
-                )
+                selectinload(LectureSlideDeck.pages)
+                .selectinload(LectureSlidePage.narration)
+                .selectinload(LectureSlideNarration.stored_object)
             )
             .options(
                 selectinload(LectureSlideDeck.questions).selectinload(
@@ -3359,22 +3351,6 @@ class LectureSlidePage(Base):
     narration = relationship(
         "LectureSlideNarration",
         foreign_keys=[narration_id],
-        uselist=False,
-    )
-    narration_stored_object_id = Column(
-        Integer,
-        ForeignKey(
-            "lecture_slide_narration_stored_objects.id",
-            name="fk_ls_pages_narration_stored_object_id",
-            ondelete="SET NULL",
-        ),
-        nullable=True,
-        index=True,
-    )
-    narration_stored_object = relationship(
-        "LectureSlideNarrationStoredObject",
-        foreign_keys=[narration_stored_object_id],
-        back_populates="page_narrations",
         uselist=False,
     )
     start_offset_ms = Column(Integer, nullable=True)

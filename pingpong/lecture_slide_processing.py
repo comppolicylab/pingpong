@@ -1342,7 +1342,6 @@ async def _synthesize_slide_audio(
             session.add(narration)
             await session.flush()
             page.narration_id = narration.id
-            page.narration_stored_object_id = stored_object.id
             session.add(page)
             await session.commit()
             artifacts.append(
@@ -2278,9 +2277,9 @@ async def _persist_composite_artifacts(
         if deck is None:
             return
         stored_objects = [
-            page.narration_stored_object
+            page.narration.stored_object
             for page in sorted(deck.pages, key=lambda item: item.position)
-            if page.narration_stored_object is not None
+            if page.narration is not None and page.narration.stored_object is not None
         ]
     combined_audio = await _combine_audio_objects(stored_objects)
     content_type = LECTURE_SLIDE_AUDIO_CONTENT_TYPE

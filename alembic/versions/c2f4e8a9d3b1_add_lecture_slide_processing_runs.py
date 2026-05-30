@@ -26,22 +26,6 @@ def upgrade() -> None:
     with op.batch_alter_table("lecture_slide_decks") as batch_op:
         batch_op.add_column(sa.Column("narration_prompt", sa.Text(), nullable=True))
 
-    with op.batch_alter_table("lecture_slide_pages") as batch_op:
-        batch_op.add_column(
-            sa.Column("narration_stored_object_id", sa.Integer(), nullable=True)
-        )
-        batch_op.create_index(
-            "ix_lecture_slide_pages_narration_stored_object_id",
-            ["narration_stored_object_id"],
-        )
-        batch_op.create_foreign_key(
-            "fk_ls_pages_narration_stored_object_id",
-            "lecture_slide_narration_stored_objects",
-            ["narration_stored_object_id"],
-            ["id"],
-            ondelete="SET NULL",
-        )
-
     op.create_table(
         "lecture_slide_processing_runs",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -174,14 +158,6 @@ def downgrade() -> None:
         table_name="lecture_slide_processing_runs",
     )
     op.drop_table("lecture_slide_processing_runs")
-
-    with op.batch_alter_table("lecture_slide_pages") as batch_op:
-        batch_op.drop_constraint(
-            "fk_ls_pages_narration_stored_object_id",
-            type_="foreignkey",
-        )
-        batch_op.drop_index("ix_lecture_slide_pages_narration_stored_object_id")
-        batch_op.drop_column("narration_stored_object_id")
 
     with op.batch_alter_table("lecture_slide_decks") as batch_op:
         batch_op.drop_column("narration_prompt")
