@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import { onDestroy, tick } from 'svelte';
-	import * as pdfjsLib from 'pdfjs-dist';
-	import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
+	import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
+	import pdfWorkerUrl from 'pdfjs-dist/legacy/build/pdf.worker.mjs?url';
 	import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist/types/src/pdf';
 
 	export let sourceUrl = '';
