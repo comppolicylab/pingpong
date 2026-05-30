@@ -760,6 +760,28 @@ class LectureSlidePageView(BaseModel):
     narration_text: str | None = None
 
 
+class LectureSlideQuestionOptionView(BaseModel):
+    id: int
+    option_text: str
+    post_answer_text: str | None = None
+    continue_slide_position: int | None = Field(None, ge=0)
+    continue_slide_offset_ms: int | None = Field(None, ge=0)
+    continue_offset_ms: int = Field(..., ge=0)
+    correct: bool = False
+
+
+class LectureSlideQuestionView(BaseModel):
+    id: int
+    position: int
+    slide_position: int = Field(..., ge=0)
+    slide_offset_ms: int = Field(..., ge=0)
+    stop_offset_ms: int = Field(..., ge=0)
+    type: LectureSlideQuestionType
+    question_text: str
+    intro_text: str
+    options: list[LectureSlideQuestionOptionView] = Field(default_factory=list)
+
+
 class LectureSlideDeckView(BaseModel):
     id: int
     display_name: str
@@ -1117,6 +1139,7 @@ class LectureSlideConfigResponse(BaseModel):
     generation_prompt: str | None = None
     narration_prompt: str | None = None
     pages: list["LectureSlidePageView"] = Field(default_factory=list)
+    questions: list["LectureSlideQuestionView"] = Field(default_factory=list)
     processing_status: LectureVideoProcessingRunSummary | None = None
 
 

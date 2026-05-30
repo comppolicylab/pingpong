@@ -1080,6 +1080,11 @@
 				(page.narration_text || '').trim().length > 0
 		) ||
 			(selectedLectureSlidePage.narration_text || '').trim().length > 0);
+	$: selectedLectureSlideQuestions = selectedLectureSlidePage
+		? (data.lectureSlideConfig?.questions || []).filter(
+				(question) => question.slide_position === selectedLectureSlidePage?.position
+			)
+		: [];
 	const goToAdjacentLectureSlide = (delta: number) => {
 		if (selectedLectureSlideIndex < 0) {
 			return;
@@ -3427,49 +3432,122 @@
 					</div>
 				</div>
 				{#if selectedLectureSlidePage}
-					<div class="min-h-0 flex-1 overflow-y-auto pr-1">
-						<div class="mb-4">
-							<Label for="slide_author_notes">Author Notes</Label>
-							<Helper class="pb-1"
-								>Instructor notes used when generating narration for this slide.</Helper
-							>
-							<Textarea
-								id="slide_author_notes"
-								rows={8}
-								value={selectedLectureSlidePage.user_notes || ''}
-								disabled={preventEdits}
-								oninput={(event) =>
-									updateLectureSlidePageDraft(
-										selectedLectureSlidePage.position,
-										'user_notes',
-										(event.target as HTMLTextAreaElement).value
-									)}
-							/>
-						</div>
-						<div class="mb-4">
-							<Label for="slide_narration_text">Narration</Label>
-							<Helper class="pb-1"
-								>Edit the spoken narration for this slide. Saving manual narration edits regenerates
-								audio.</Helper
-							>
-							{#if !selectedLectureSlideHasNarration}
-								<Alert color="blue" defaultClass="mb-3 p-3 text-sm">
-									Narration will become editable after it has been generated.
-								</Alert>
+					<div class="min-h-0 flex-1 overflow-hidden pr-1">
+						<Accordion class="w-full text-left" flush>
+							<AccordionItem paddingFlush="py-2" open>
+								<span slot="header" class="mr-3 w-full">
+									<div class="flex w-full flex-row items-center justify-between gap-2">
+										<div>Slide Content</div>
+										<div class="text-sm font-light text-gray-500">Notes and narration</div>
+									</div>
+								</span>
+								<div class="my-3 max-h-[calc(78vh-14rem)] overflow-y-auto pr-1">
+									<div>
+										<Label for="slide_author_notes">Author Notes</Label>
+										<Helper class="pb-1"
+											>Instructor notes used when generating narration for this slide.</Helper
+										>
+										<Textarea
+											id="slide_author_notes"
+											rows={8}
+											value={selectedLectureSlidePage.user_notes || ''}
+											disabled={preventEdits}
+											oninput={(event) =>
+												updateLectureSlidePageDraft(
+													selectedLectureSlidePage.position,
+													'user_notes',
+													(event.target as HTMLTextAreaElement).value
+												)}
+										/>
+									</div>
+									<div class="mt-4 mb-3">
+										<Label for="slide_narration_text">Narration</Label>
+										<Helper class="pb-1"
+											>Edit the spoken narration for this slide. Saving manual narration edits
+											regenerates audio.</Helper
+										>
+										{#if !selectedLectureSlideHasNarration}
+											<Alert color="blue" defaultClass="mb-3 p-3 text-sm">
+												Narration will become editable after it has been generated.
+											</Alert>
+										{/if}
+										<Textarea
+											id="slide_narration_text"
+											rows={12}
+											value={selectedLectureSlidePage.narration_text || ''}
+											disabled={preventEdits || !selectedLectureSlideHasNarration}
+											oninput={(event) =>
+												updateLectureSlidePageDraft(
+													selectedLectureSlidePage.position,
+													'narration_text',
+													(event.target as HTMLTextAreaElement).value
+												)}
+										/>
+									</div>
+								</div>
+							</AccordionItem>
+							{#if selectedLectureSlideQuestions.length > 0}
+								<AccordionItem paddingFlush="py-2">
+									<span slot="header" class="mr-3 w-full">
+										<div class="flex w-full flex-row items-center justify-between gap-2">
+											<div>Knowledge Checks</div>
+											<div class="text-sm font-light text-gray-500">
+												{selectedLectureSlideQuestions.length}
+												{selectedLectureSlideQuestions.length === 1 ? 'question' : 'questions'}
+											</div>
+										</div>
+									</span>
+									<div
+										class="my-3 flex max-h-[calc(78vh-14rem)] flex-col gap-3 overflow-y-auto pr-1"
+									>
+										{#each selectedLectureSlideQuestions as question, questionIndex (question.id)}
+											<div class="rounded-lg border border-gray-200 bg-gray-50 p-3">
+												<div class="mb-2 text-xs font-semibold text-gray-500 uppercase">
+													Question {questionIndex + 1}
+												</div>
+												<div class="text-sm font-semibold text-gray-900">
+													{question.question_text}
+												</div>
+												{#if question.intro_text}
+													<div class="mt-1 text-xs text-gray-600">{question.intro_text}</div>
+												{/if}
+												<div class="mt-3 flex flex-col gap-2">
+													{#each question.options as option (option.id)}
+														<div class="rounded-md border border-gray-200 bg-white p-2">
+															<div class="flex items-start justify-between gap-2">
+																<div class="text-sm text-gray-900">{option.option_text}</div>
+																{#if option.correct}
+																	<Badge
+																		class="flex shrink-0 flex-row items-center gap-1 rounded-md border border-green-300 bg-green-50 px-2 py-0.5 text-xs text-green-800 normal-case"
+																	>
+																		<CheckCircleOutline class="h-3.5 w-3.5" />
+																		<div>Correct</div>
+																	</Badge>
+																{/if}
+															</div>
+															{#if option.post_answer_text}
+																<div class="mt-1 text-xs text-gray-600">
+																	{option.post_answer_text}
+																</div>
+															{/if}
+														</div>
+													{/each}
+												</div>
+											</div>
+										{/each}
+									</div>
+								</AccordionItem>
+							{:else}
+								<div class="border-t border-gray-200 py-2 opacity-60">
+									<div
+										class="flex w-full cursor-not-allowed flex-row items-center justify-between gap-2 py-3 text-sm font-medium text-gray-500"
+									>
+										<div>Knowledge Checks</div>
+										<div class="font-light">No questions generated</div>
+									</div>
+								</div>
 							{/if}
-							<Textarea
-								id="slide_narration_text"
-								rows={12}
-								value={selectedLectureSlidePage.narration_text || ''}
-								disabled={preventEdits || !selectedLectureSlideHasNarration}
-								oninput={(event) =>
-									updateLectureSlidePageDraft(
-										selectedLectureSlidePage.position,
-										'narration_text',
-										(event.target as HTMLTextAreaElement).value
-									)}
-							/>
-						</div>
+						</Accordion>
 					</div>
 				{:else}
 					<div class="flex min-h-[320px] items-center justify-center text-sm text-gray-600">

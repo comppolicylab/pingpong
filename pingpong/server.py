@@ -9730,6 +9730,65 @@ async def get_assistant_lecture_slide_source(
 
 
 @v1.get(
+    "/class/{class_id}/assistant/{assistant_id}/lecture-slides/thumbnail",
+    dependencies=[Depends(Authz("can_view", "assistant:{assistant_id}"))],
+    response_class=StreamingResponse,
+)
+async def get_assistant_lecture_slide_thumbnail(
+    class_id: str,
+    assistant_id: str,
+    request: StateRequest,
+):
+    if not config.video_store:
+        raise HTTPException(status_code=404, detail="No Video Store exists.")
+
+    assistant = await lecture_slide_service.get_lecture_slide_assistant_for_class(
+        request.state["db"], int(assistant_id), int(class_id)
+    )
+    if assistant.lecture_slide_deck_id is None:
+        raise HTTPException(status_code=404, detail="Lecture slide deck not found.")
+
+    image_stored_object_id = await request.state["db"].scalar(
+        select(models.LectureSlidePage.image_stored_object_id)
+        .where(
+            models.LectureSlidePage.lecture_slide_deck_id
+            == assistant.lecture_slide_deck_id,
+            models.LectureSlidePage.image_stored_object_id.is_not(None),
+        )
+        .order_by(models.LectureSlidePage.position)
+        .limit(1)
+    )
+    if image_stored_object_id is None:
+        raise HTTPException(status_code=404, detail="Lecture slide thumbnail not found.")
+
+    image = await request.state["db"].get(
+        models.LectureSlideImageStoredObject, image_stored_object_id
+    )
+    if image is None:
+        raise HTTPException(status_code=404, detail="Lecture slide thumbnail not found.")
+
+    try:
+        stream = await prefetch_stream(
+            config.video_store.store.stream_video_range(key=image.key),
+            store_error=VideoStoreError,
+            logger=logger,
+            store_error_log="VideoStoreError while streaming lecture slide thumbnail; aborting stream.",
+            unexpected_error_log="Unexpected error while streaming lecture slide thumbnail",
+        )
+    except VideoStoreError as e:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unable to stream lecture slide thumbnail: {e.detail or str(e)}",
+        ) from e
+
+    return StreamingResponse(
+        stream,
+        media_type=image.content_type or "image/png",
+        headers={"Cache-Control": "private, max-age=86400"},
+    )
+
+
+@v1.get(
     "/class/{class_id}/assistant/{assistant_id}/lecture-video/poster",
     dependencies=[Depends(Authz("can_view", "assistant:{assistant_id}"))],
     response_class=StreamingResponse,
@@ -10119,6 +10178,37 @@ async def get_assistant_lecture_slide_config(
         )
         for page in sorted(deck.pages, key=lambda item: item.position)
     ]
+    questions = []
+    for question in sorted(deck.questions, key=lambda item: item.position):
+        correct_option_id = (
+            question.correct_option.id if question.correct_option is not None else None
+        )
+        questions.append(
+            schemas.LectureSlideQuestionView(
+                id=question.id,
+                position=question.position,
+                slide_position=question.slide_position,
+                slide_offset_ms=question.slide_offset_ms,
+                stop_offset_ms=question.stop_offset_ms,
+                type=question.question_type,
+                question_text=question.question_text,
+                intro_text=question.intro_text,
+                options=[
+                    schemas.LectureSlideQuestionOptionView(
+                        id=option.id,
+                        option_text=option.option_text,
+                        post_answer_text=option.post_answer_text,
+                        continue_slide_position=option.continue_slide_position,
+                        continue_slide_offset_ms=option.continue_slide_offset_ms,
+                        continue_offset_ms=option.continue_offset_ms,
+                        correct=option.id == correct_option_id,
+                    )
+                    for option in sorted(
+                        question.options, key=lambda item: item.position
+                    )
+                ],
+            )
+        )
     return schemas.LectureSlideConfigResponse(
         lecture_slide_deck=cast(
             schemas.LectureSlideSummary,
@@ -10128,6 +10218,7 @@ async def get_assistant_lecture_slide_config(
         generation_prompt=deck.generation_prompt,
         narration_prompt=deck.narration_prompt,
         pages=pages,
+        questions=questions,
         processing_status=processing_status,
     )
 
