@@ -1,7 +1,8 @@
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 import pingpong.schemas as schemas
 from pingpong import lecture_slide_service, models
+from pingpong.config import LocalAudioStoreSettings
 
 from .testutil import with_authz, with_institution, with_user
 
@@ -176,3 +177,282 @@ async def test_apply_lecture_slide_page_notes_handles_unloaded_pages(db, institu
     assert page is not None
     assert page.user_notes == "New notes"
     assert page.narration_text == "Narrate this."
+
+
+@with_institution(11, "Test Institution")
+async def test_clear_lecture_slide_page_narrations_deletes_unused_audio(
+    db, institution, config, monkeypatch, tmp_path
+):
+    narration_dir = tmp_path / "narrations"
+    monkeypatch.setattr(
+        config,
+        "lecture_video_audio_store",
+        LocalAudioStoreSettings(save_target=str(narration_dir)),
+    )
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        session.add(class_)
+        await session.flush()
+        source = await models.LectureSlideSourceStoredObject.create(
+            session,
+            key="lecture04.pdf",
+            original_filename="lecture04.pdf",
+            content_type="application/pdf",
+            content_length=128,
+        )
+        deck = await models.LectureSlideDeck.create(
+            session,
+            class_id=class_.id,
+            source_stored_object_id=source.id,
+            uploader_id=123,
+            display_name="lecture04.pdf",
+            slide_count=1,
+            voice_id="voice-test-id",
+        )
+        stored_object = models.LectureSlideNarrationStoredObject(
+            key="slide-1.ogg",
+            content_type="audio/ogg",
+            content_length=100,
+        )
+        session.add(stored_object)
+        await session.flush()
+        narration_dir.mkdir(parents=True, exist_ok=True)
+        (narration_dir / stored_object.key).write_bytes(b"slide-audio")
+        narration = models.LectureSlideNarration(
+            stored_object_id=stored_object.id,
+            status=schemas.LectureSlideNarrationStatus.READY,
+        )
+        session.add(narration)
+        await session.flush()
+        page = models.LectureSlidePage(
+            lecture_slide_deck_id=deck.id,
+            position=0,
+            narration_id=narration.id,
+            start_offset_ms=0,
+            end_offset_ms=100,
+        )
+        session.add(page)
+        await session.commit()
+
+        await lecture_slide_service.clear_lecture_slide_page_narrations(
+            session, deck.id
+        )
+        await session.commit()
+
+        page_after_clear = await session.get(models.LectureSlidePage, page.id)
+        page_after_clear_narration_id = (
+            page_after_clear.narration_id if page_after_clear else None
+        )
+        page_after_clear_start_offset_ms = (
+            page_after_clear.start_offset_ms if page_after_clear else None
+        )
+        page_after_clear_end_offset_ms = (
+            page_after_clear.end_offset_ms if page_after_clear else None
+        )
+        narration_count = await session.scalar(
+            select(func.count()).select_from(models.LectureSlideNarration)
+        )
+        stored_object_count = await session.scalar(
+            select(func.count()).select_from(models.LectureSlideNarrationStoredObject)
+        )
+
+    assert page_after_clear is not None
+    assert page_after_clear_narration_id is None
+    assert page_after_clear_start_offset_ms is None
+    assert page_after_clear_end_offset_ms is None
+    assert narration_count == 0
+    assert stored_object_count == 0
+    assert not (narration_dir / "slide-1.ogg").exists()
+
+
+@with_institution(11, "Test Institution")
+async def test_clear_lecture_slide_page_narrations_preserves_shared_audio(
+    db, institution, config, monkeypatch, tmp_path
+):
+    narration_dir = tmp_path / "narrations"
+    monkeypatch.setattr(
+        config,
+        "lecture_video_audio_store",
+        LocalAudioStoreSettings(save_target=str(narration_dir)),
+    )
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        session.add(class_)
+        await session.flush()
+        source = await models.LectureSlideSourceStoredObject.create(
+            session,
+            key="lecture04.pdf",
+            original_filename="lecture04.pdf",
+            content_type="application/pdf",
+            content_length=128,
+        )
+        first_deck = await models.LectureSlideDeck.create(
+            session,
+            class_id=class_.id,
+            source_stored_object_id=source.id,
+            uploader_id=123,
+            display_name="lecture04.pdf",
+            slide_count=1,
+            voice_id="voice-test-id",
+        )
+        second_deck = await models.LectureSlideDeck.create(
+            session,
+            class_id=class_.id,
+            source_stored_object_id=source.id,
+            uploader_id=123,
+            display_name="lecture04-copy.pdf",
+            slide_count=1,
+            voice_id="voice-test-id",
+        )
+        stored_object = models.LectureSlideNarrationStoredObject(
+            key="shared-slide.ogg",
+            content_type="audio/ogg",
+            content_length=100,
+        )
+        session.add(stored_object)
+        await session.flush()
+        narration_dir.mkdir(parents=True, exist_ok=True)
+        (narration_dir / stored_object.key).write_bytes(b"shared-audio")
+        first_narration = models.LectureSlideNarration(
+            stored_object_id=stored_object.id,
+            status=schemas.LectureSlideNarrationStatus.READY,
+        )
+        second_narration = models.LectureSlideNarration(
+            stored_object_id=stored_object.id,
+            status=schemas.LectureSlideNarrationStatus.READY,
+        )
+        session.add_all([first_narration, second_narration])
+        await session.flush()
+        second_narration_id = second_narration.id
+        session.add_all(
+            [
+                models.LectureSlidePage(
+                    lecture_slide_deck_id=first_deck.id,
+                    position=0,
+                    narration_id=first_narration.id,
+                ),
+                models.LectureSlidePage(
+                    lecture_slide_deck_id=second_deck.id,
+                    position=0,
+                    narration_id=second_narration.id,
+                ),
+            ]
+        )
+        await session.commit()
+
+        await lecture_slide_service.clear_lecture_slide_page_narrations(
+            session, first_deck.id
+        )
+        await session.commit()
+
+        remaining_narration_count = await session.scalar(
+            select(func.count()).select_from(models.LectureSlideNarration)
+        )
+        remaining_stored_object_count = await session.scalar(
+            select(func.count()).select_from(models.LectureSlideNarrationStoredObject)
+        )
+        second_page = await session.scalar(
+            select(models.LectureSlidePage).where(
+                models.LectureSlidePage.lecture_slide_deck_id == second_deck.id
+            )
+        )
+        second_page_narration_id = second_page.narration_id if second_page else None
+
+    assert remaining_narration_count == 1
+    assert remaining_stored_object_count == 1
+    assert second_page is not None
+    assert second_page_narration_id == second_narration_id
+    assert (narration_dir / "shared-slide.ogg").exists()
+
+
+@with_institution(11, "Test Institution")
+async def test_delete_unused_lecture_slide_deck_deletes_page_narration_audio(
+    db, institution, config, monkeypatch, tmp_path
+):
+    narration_dir = tmp_path / "narrations"
+    monkeypatch.setattr(
+        config,
+        "lecture_video_audio_store",
+        LocalAudioStoreSettings(save_target=str(narration_dir)),
+    )
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        session.add(class_)
+        await session.flush()
+        source = await models.LectureSlideSourceStoredObject.create(
+            session,
+            key="lecture04.pdf",
+            original_filename="lecture04.pdf",
+            content_type="application/pdf",
+            content_length=128,
+        )
+        deck = await models.LectureSlideDeck.create(
+            session,
+            class_id=class_.id,
+            source_stored_object_id=source.id,
+            uploader_id=123,
+            display_name="lecture04.pdf",
+            slide_count=1,
+            voice_id="voice-test-id",
+        )
+        stored_object = models.LectureSlideNarrationStoredObject(
+            key="deleted-deck-slide.ogg",
+            content_type="audio/ogg",
+            content_length=100,
+        )
+        session.add(stored_object)
+        await session.flush()
+        narration_dir.mkdir(parents=True, exist_ok=True)
+        (narration_dir / stored_object.key).write_bytes(b"slide-audio")
+        narration = models.LectureSlideNarration(
+            stored_object_id=stored_object.id,
+            status=schemas.LectureSlideNarrationStatus.READY,
+        )
+        session.add(narration)
+        await session.flush()
+        session.add(
+            models.LectureSlidePage(
+                lecture_slide_deck_id=deck.id,
+                position=0,
+                narration_id=narration.id,
+            )
+        )
+        await session.commit()
+
+        await lecture_slide_service.delete_lecture_slide_deck_if_unused(
+            session, deck.id
+        )
+        await session.commit()
+
+        remaining_deck_count = await session.scalar(
+            select(func.count()).select_from(models.LectureSlideDeck)
+        )
+        remaining_narration_count = await session.scalar(
+            select(func.count()).select_from(models.LectureSlideNarration)
+        )
+        remaining_stored_object_count = await session.scalar(
+            select(func.count()).select_from(models.LectureSlideNarrationStoredObject)
+        )
+
+    assert remaining_deck_count == 0
+    assert remaining_narration_count == 0
+    assert remaining_stored_object_count == 0
+    assert not (narration_dir / "deleted-deck-slide.ogg").exists()
