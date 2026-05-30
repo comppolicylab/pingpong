@@ -524,9 +524,7 @@ async def initialize_thread_state(
 
     state_data = {
         "thread_id": thread.id,
-        "state": (
-            state_enum.PLAYING if first_question is not None else state_enum.COMPLETED
-        ),
+        "state": state_enum.PLAYING,
         "current_question_id": first_question.id
         if first_question is not None
         else None,

@@ -17,7 +17,8 @@
 		RadioButton,
 		InputAddon,
 		Tooltip,
-		Spinner
+		Spinner,
+		Alert
 	} from 'flowbite-svelte';
 	import type {
 		Tool,
@@ -3445,27 +3446,30 @@
 									)}
 							/>
 						</div>
-						{#if selectedLectureSlideHasNarration}
-							<div class="mb-4">
-								<Label for="slide_narration_text">Narration</Label>
-								<Helper class="pb-1"
-									>Edit the spoken narration for this slide. Saving manual narration edits
-									regenerates audio.</Helper
-								>
-								<Textarea
-									id="slide_narration_text"
-									rows={12}
-									value={selectedLectureSlidePage.narration_text || ''}
-									disabled={preventEdits}
-									oninput={(event) =>
-										updateLectureSlidePageDraft(
-											selectedLectureSlidePage.position,
-											'narration_text',
-											(event.target as HTMLTextAreaElement).value
-										)}
-								/>
-							</div>
-						{/if}
+						<div class="mb-4">
+							<Label for="slide_narration_text">Narration</Label>
+							<Helper class="pb-1"
+								>Edit the spoken narration for this slide. Saving manual narration edits regenerates
+								audio.</Helper
+							>
+							{#if !selectedLectureSlideHasNarration}
+								<Alert color="blue" defaultClass="mb-3 p-3 text-sm">
+									Narration will become editable after it has been generated.
+								</Alert>
+							{/if}
+							<Textarea
+								id="slide_narration_text"
+								rows={12}
+								value={selectedLectureSlidePage.narration_text || ''}
+								disabled={preventEdits || !selectedLectureSlideHasNarration}
+								oninput={(event) =>
+									updateLectureSlidePageDraft(
+										selectedLectureSlidePage.position,
+										'narration_text',
+										(event.target as HTMLTextAreaElement).value
+									)}
+							/>
+						</div>
 					</div>
 				{:else}
 					<div class="flex min-h-[320px] items-center justify-center text-sm text-gray-600">
@@ -3539,11 +3543,6 @@
 							{#if interactionMode === 'lecture_video'}<ClapperboardPlaySolid
 									class="h-5 w-5"
 								/>{:else}<ClapperboardPlayOutline class="h-5 w-5" />{/if}Lecture Video mode
-							<div
-								class="flex flex-row items-center rounded-full border border-gray-300 px-3 py-1 text-xs font-normal text-gray-600"
-							>
-								Research Preview
-							</div>
 						</div></RadioButton
 					>
 					<RadioButton
@@ -3559,11 +3558,6 @@
 							{#if interactionMode === 'lecture_slides'}<BookOpenSolid
 									class="h-5 w-5"
 								/>{:else}<BookOpenOutline class="h-5 w-5" />{/if}Lecture Slides mode
-							<div
-								class="flex flex-row items-center rounded-full border border-gray-300 px-3 py-1 text-xs font-normal text-gray-600"
-							>
-								Research Preview
-							</div>
 						</div></RadioButton
 					>
 				{/if}

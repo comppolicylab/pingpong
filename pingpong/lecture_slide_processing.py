@@ -779,6 +779,19 @@ async def process_claimed_run(assignment: RunAssignment) -> None:
     await _process_claimed_slide_run(assignment.run_id, assignment.lease_token)
 
 
+async def _deck_has_slide_manifest(deck_id: int) -> bool:
+    async with config.db.driver.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id(session, deck_id)
+        if deck is None or deck.context_version != 4:
+            return False
+        question_count = await session.scalar(
+            select(func.count(models.LectureSlideQuestion.id)).where(
+                models.LectureSlideQuestion.lecture_slide_deck_id == deck_id
+            )
+        )
+        return bool(question_count)
+
+
 async def _process_claimed_slide_run(run_id: int, lease_token: str) -> None:
     try:
         async with config.db.driver.async_session() as session:
@@ -903,10 +916,12 @@ async def _process_claimed_slide_run(run_id: int, lease_token: str) -> None:
                 )
                 if transcript is None:
                     return
+                has_manifest = await _deck_has_slide_manifest(deck_id)
                 start_stage = (
                     schemas.LectureSlideProcessingStage.COMPOSITE_ARTIFACTS
                     if original_start_stage
                     == schemas.LectureSlideProcessingStage.NARRATION_AUDIO
+                    and has_manifest
                     else schemas.LectureSlideProcessingStage.MANIFEST_GENERATION
                 )
 

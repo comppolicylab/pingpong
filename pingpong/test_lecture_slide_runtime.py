@@ -17,6 +17,12 @@ pytestmark = pytest.mark.asyncio
 server_module = importlib.import_module("pingpong.server")
 
 
+async def test_send_message_allows_first_run_for_lecture_slide_threads():
+    thread = SimpleNamespace(interaction_mode=schemas.InteractionMode.LECTURE_SLIDES)
+
+    assert server_module._allows_first_message_without_prior_run(thread)
+
+
 def _slide_deck(
     class_: models.Class,
     source: models.LectureSlideSourceStoredObject,
@@ -387,7 +393,7 @@ async def test_process_lecture_slide_question_answer_and_resume(db, institution)
 
 
 @with_institution(11, "Test Institution")
-async def test_initialize_thread_state_completes_when_lecture_slides_have_no_questions(
+async def test_initialize_thread_state_plays_when_lecture_slides_have_no_questions(
     db, institution
 ):
     async with db.async_session() as session:
@@ -398,7 +404,7 @@ async def test_initialize_thread_state_completes_when_lecture_slides_have_no_que
         state = await lecture_slide_runtime.initialize_thread_state(session, thread.id)
         interactions = await _list_slide_interactions(session, thread.id)
 
-    assert state.state == schemas.InteractiveLessonSessionState.COMPLETED
+    assert state.state == schemas.InteractiveLessonSessionState.PLAYING
     assert state.current_question_id is None
     assert state.last_known_offset_ms == 0
     assert state.version == 1

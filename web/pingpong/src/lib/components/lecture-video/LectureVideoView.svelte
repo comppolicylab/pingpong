@@ -46,6 +46,7 @@
 	const ERROR_CONTROLLER_LEASE_EXPIRED = 'controller_lease_expired';
 	const CONTROL_RECOVERY_GRACE_MS = 1_000;
 	const ACTIVE_PAGE_RECOVERY_DEBOUNCE_MS = 150;
+	const COMPLETED_SEEK_TOLERANCE_MS = 2_000;
 	type InitErrorAction = 'refresh' | null;
 	type InitErrorState = {
 		detail: string;
@@ -268,6 +269,11 @@
 	let playbackInteractionAllowed = $derived(allowsPlaybackInteraction(sessionState));
 	let hasQuestionPrompt = $derived(hasVisibleQuestionPrompt(sessionState));
 	let isCompleted = $derived(isCompletedSession(sessionState));
+	let completedPlaybackReachedEnd = $derived(
+		durationMsOverride == null ||
+			durationMsOverride <= 0 ||
+			furthestOffsetMs >= durationMsOverride - COMPLETED_SEEK_TOLERANCE_MS
+	);
 	let visibleCurrentQuestion = $derived(hasQuestionPrompt ? currentQuestion : null);
 	let questionReviewPlaybackAllowed = $derived(
 		hasQuestionPrompt && questionPlaybackLocked && currentQuestion != null && !playerDisabled
@@ -2116,7 +2122,7 @@
 							{activeQuestionIds}
 							{questionPresentationVersion}
 							{furthestOffsetMs}
-							allowFullSeek={isCompleted && canParticipate}
+							allowFullSeek={isCompleted && canParticipate && completedPlaybackReachedEnd}
 							maxSeekOffsetMs={questionReviewSeekLimitMs}
 							manualPlaybackPrompt={playbackRequiresManualStart}
 							bind:videoElement

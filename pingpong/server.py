@@ -356,14 +356,23 @@ def _lecture_video_matches_assistant(
     )
 
 
-def _lecture_video_dual_text_enabled(thread: models.Thread) -> bool:
-    return thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
+def _is_lecture_lesson_mode(interaction_mode: schemas.InteractionMode | None) -> bool:
+    return interaction_mode in {
+        schemas.InteractionMode.LECTURE_VIDEO,
+        schemas.InteractionMode.LECTURE_SLIDES,
+    }
 
 
-def _lecture_video_followups_enabled(thread: models.Thread) -> bool:
-    # Intentionally mirrors _lecture_video_dual_text_enabled; both are gated on
-    # LECTURE_VIDEO mode. Keep these conditions in sync if either changes.
-    return thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
+def _lecture_lesson_dual_text_enabled(thread: models.Thread) -> bool:
+    return _is_lecture_lesson_mode(thread.interaction_mode)
+
+
+def _lecture_lesson_followups_enabled(thread: models.Thread) -> bool:
+    return _is_lecture_lesson_mode(thread.interaction_mode)
+
+
+def _allows_first_message_without_prior_run(thread: models.Thread) -> bool:
+    return _is_lecture_lesson_mode(thread.interaction_mode)
 
 
 def _build_run_instructions(
@@ -373,18 +382,18 @@ def _build_run_instructions(
 ) -> str | None:
     """Return the effective instructions for a run or prompt inspection.
 
-    Lecture-video threads compute formatting fresh per run so that prompt
+    Lecture lesson threads compute formatting fresh per run so that prompt
     segment updates (say snippets, follow-ups, LaTeX/diagrams) take effect on
     existing threads. Other modes continue to use the thread's stored
     instructions verbatim.
     """
-    if thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
+    if _is_lecture_lesson_mode(thread.interaction_mode):
         base_instructions = thread.instructions
         if base_instructions is None:
             base_instructions = asst.instructions or ""
         return format_instructions(
             base_instructions,
-            use_latex=asst.use_latex,
+            use_latex=True,
             use_image_descriptions=asst.use_image_descriptions,
             disable_prompt_randomization=asst.disable_prompt_randomization,
             thread_id=str(thread.id),
@@ -424,7 +433,7 @@ async def _ensure_thread_instructions_migrated(
     if thread.instructions is not None:
         session.add(thread)
         return
-    elif thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
+    elif _is_lecture_lesson_mode(thread.interaction_mode):
         logger.info(
             "Thread %s does not have instructions set, migrating from assistant instructions",
             thread.id,
@@ -453,9 +462,9 @@ async def _ensure_thread_instructions_migrated(
 
 
 def _display_text_for_thread(thread: models.Thread, text: str) -> str:
-    if _lecture_video_followups_enabled(thread):
+    if _lecture_lesson_followups_enabled(thread):
         text = strip_followup_snippets(text)
-    if _lecture_video_dual_text_enabled(thread):
+    if _lecture_lesson_dual_text_enabled(thread):
         text = transform_say_text(text, "display")
     return text
 
@@ -463,7 +472,7 @@ def _display_text_for_thread(thread: models.Thread, text: str) -> str:
 def _followup_suggestions_for_thread(
     thread: models.Thread, text: str | None
 ) -> list[str]:
-    if not _lecture_video_followups_enabled(thread):
+    if not _lecture_lesson_followups_enabled(thread):
         return []
     return extract_followup_suggestions(text or "")
 
@@ -3309,7 +3318,7 @@ def _get_lecture_video_provider_prerequisite_message(
                 "Configure an ElevenLabs credential in Manage Group to enable Lecture "
                 "Video mode."
             )
-        return "Lecture Video mode is in active development."
+        return "Lecture Video mode is in active development"
 
     if (
         not class_context["has_gemini_credential"]
@@ -3326,7 +3335,7 @@ def _get_lecture_video_provider_prerequisite_message(
             "Configure an ElevenLabs credential in Manage Group to enable Lecture "
             "Video mode."
         )
-    return "Lecture Video mode is in active development."
+    return "Lecture Video mode is in active development"
 
 
 async def _ensure_lecture_video_manifest_generation_configured(
@@ -8521,8 +8530,8 @@ async def create_run(
                 or not asst.hide_web_search_actions,
                 show_mcp_server_call_details=is_supervisor
                 or not asst.hide_mcp_server_call_details,
-                lecture_video_dual_text_mode=_lecture_video_dual_text_enabled(thread),
-                lecture_video_followups_mode=_lecture_video_followups_enabled(thread),
+                lecture_video_dual_text_mode=_lecture_lesson_dual_text_enabled(thread),
+                lecture_video_followups_mode=_lecture_lesson_followups_enabled(thread),
             )
         except Exception as e:
             logger.exception("Error running thread")
@@ -8675,10 +8684,7 @@ async def send_message(
                 request.state["db"], thread.id
             )
 
-            if (
-                not last_run
-                and thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO
-            ):
+            if not last_run and not _allows_first_message_without_prior_run(thread):
                 raise HTTPException(
                     status_code=500,
                     detail="We're having trouble fetching information about this conversation. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
@@ -9140,8 +9146,8 @@ async def send_message(
                 tts_voice_id=tts_voice_id,
                 tts_api_key=tts_api_key,
                 tts_voice_settings=tts_voice_settings,
-                lecture_video_dual_text_mode=_lecture_video_dual_text_enabled(thread),
-                lecture_video_followups_mode=_lecture_video_followups_enabled(thread),
+                lecture_video_dual_text_mode=_lecture_lesson_dual_text_enabled(thread),
+                lecture_video_followups_mode=_lecture_lesson_followups_enabled(thread),
                 user_assistant_messages_only=(
                     lecture_chat_prep.user_assistant_messages_only
                     if lecture_chat_prep is not None
@@ -10802,6 +10808,9 @@ async def create_assistant(
     uses_voice = req.interaction_mode == schemas.InteractionMode.VOICE
     is_video = req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
     is_slides = req.interaction_mode == schemas.InteractionMode.LECTURE_SLIDES
+    is_lesson_mode = is_video or is_slides
+    if is_lesson_mode:
+        req.use_latex = True
     lecture_video_object_id = None
     lecture_video_manifest = None
     lecture_video_voice_id = None
@@ -11225,13 +11234,13 @@ async def preview_assistant_instructions(
     return {
         "instructions_preview": format_instructions(
             req.instructions,
-            use_latex=req.use_latex,
+            use_latex=True
+            if _is_lecture_lesson_mode(req.interaction_mode)
+            else req.use_latex,
             disable_prompt_randomization=req.disable_prompt_randomization,
             user_id=request.state["session"].user.id,
             thread_id=f"preview_{uuid.uuid4()}",
-            lecture_video_mode=(
-                req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
-            ),
+            lecture_video_mode=_is_lecture_lesson_mode(req.interaction_mode),
         )
     }
 
@@ -11723,6 +11732,7 @@ async def update_assistant(
     uses_voice = interaction_mode == schemas.InteractionMode.VOICE
     is_video = interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
     is_slides = interaction_mode == schemas.InteractionMode.LECTURE_SLIDES
+    is_lesson_mode = is_video or is_slides
     lecture_video = asst.lecture_video
     lecture_video_manifest = None
     lecture_video_voice_id = None
@@ -12451,7 +12461,11 @@ async def update_assistant(
     if update_tool_resources:
         openai_update["tool_resources"] = tool_resources
 
-    if "use_latex" in req.model_fields_set and req.use_latex is not None:
+    if is_lesson_mode:
+        if not asst.use_latex:
+            update_instructions = True
+            asst.use_latex = True
+    elif "use_latex" in req.model_fields_set and req.use_latex is not None:
         update_instructions = True
         asst.use_latex = req.use_latex
 
