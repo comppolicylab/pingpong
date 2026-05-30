@@ -751,6 +751,105 @@ async def test_parse_responses_output_retries_transient_openai_failure(monkeypat
     assert narration_set.slides[0].narration_text == "Recovered."
 
 
+async def test_slide_manifest_chunk_planning_is_not_bound_by_duration():
+    total_duration_ms = 45 * 60 * 1000
+    page_ranges = [
+        {
+            "slide_position": 0,
+            "start_offset_ms": 0,
+            "end_offset_ms": total_duration_ms,
+        }
+    ]
+    transcript = [
+        schemas.LectureVideoManifestWordV3(
+            id="w1",
+            word="short",
+            start_offset_ms=0,
+            end_offset_ms=1000,
+        )
+    ]
+
+    chunks = lecture_slide_processing._plan_slide_manifest_generation_chunks(
+        total_duration_ms,
+        generation_prompt="Manifest prompt",
+        page_ranges=page_ranges,
+        transcript=transcript,
+    )
+
+    assert chunks == [
+        lecture_slide_processing.SlideManifestGenerationChunk(
+            generation_start_ms=0,
+            generation_end_ms=total_duration_ms,
+            context_start_ms=0,
+            context_end_ms=total_duration_ms,
+        )
+    ]
+
+
+async def test_slide_manifest_chunk_planning_splits_on_token_budget(monkeypatch):
+    total_duration_ms = 4000
+    page_ranges = [
+        {
+            "slide_position": index,
+            "start_offset_ms": index * 1000,
+            "end_offset_ms": (index + 1) * 1000,
+        }
+        for index in range(4)
+    ]
+    transcript = [
+        schemas.LectureVideoManifestWordV3(
+            id=f"slide-{index}-word-0",
+            word="dense " * 300,
+            start_offset_ms=index * 1000,
+            end_offset_ms=(index + 1) * 1000,
+        )
+        for index in range(4)
+    ]
+    fixed_request_tokens = (
+        lecture_slide_processing._slide_manifest_request_token_estimate(
+            generation_prompt="Manifest prompt",
+            page_ranges=[],
+            transcript=[],
+            total_duration_ms=total_duration_ms,
+        )
+    )
+    first_page_tokens = lecture_slide_processing._slide_manifest_source_token_estimate(
+        [page_ranges[0]],
+        [transcript[0]],
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "SLIDE_MANIFEST_INPUT_TOKEN_BUDGET",
+        fixed_request_tokens + first_page_tokens + 5,
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "SLIDE_MANIFEST_CHUNK_CONTEXT_OVERLAP_TOKENS",
+        0,
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "SLIDE_MANIFEST_MIN_CHUNK_SOURCE_TOKENS",
+        1,
+    )
+
+    chunks = lecture_slide_processing._plan_slide_manifest_generation_chunks(
+        total_duration_ms,
+        generation_prompt="Manifest prompt",
+        page_ranges=page_ranges,
+        transcript=transcript,
+    )
+
+    assert [
+        (chunk.generation_start_ms, chunk.generation_end_ms) for chunk in chunks
+    ] == [
+        (0, 1000),
+        (1000, 2000),
+        (2000, 3000),
+        (3000, 4000),
+    ]
+
+
 async def _async_value(value):
     return value
 
