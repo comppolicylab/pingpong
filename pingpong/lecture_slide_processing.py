@@ -937,7 +937,6 @@ async def _process_claimed_slide_run(run_id: int, lease_token: str) -> None:
                 )
                 if not await _ensure_run_can_continue(run_id, lease_token):
                     return
-                start_stage = schemas.LectureSlideProcessingStage.COMPOSITE_ARTIFACTS
 
             await _set_run_stage(
                 run_id,
