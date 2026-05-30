@@ -9759,13 +9759,17 @@ async def get_assistant_lecture_slide_thumbnail(
         .limit(1)
     )
     if image_stored_object_id is None:
-        raise HTTPException(status_code=404, detail="Lecture slide thumbnail not found.")
+        raise HTTPException(
+            status_code=404, detail="Lecture slide thumbnail not found."
+        )
 
     image = await request.state["db"].get(
         models.LectureSlideImageStoredObject, image_stored_object_id
     )
     if image is None:
-        raise HTTPException(status_code=404, detail="Lecture slide thumbnail not found.")
+        raise HTTPException(
+            status_code=404, detail="Lecture slide thumbnail not found."
+        )
 
     try:
         stream = await prefetch_stream(
