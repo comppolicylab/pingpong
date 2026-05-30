@@ -1876,12 +1876,37 @@ export type LectureSlidePageNotes = {
 	narration_text?: string | null;
 };
 
+export type LectureSlideQuestionType = 'single_select';
+
+export type LectureSlideQuestionOption = {
+	id: number;
+	option_text: string;
+	post_answer_text?: string | null;
+	continue_slide_position?: number | null;
+	continue_slide_offset_ms?: number | null;
+	continue_offset_ms: number;
+	correct: boolean;
+};
+
+export type LectureSlideQuestion = {
+	id: number;
+	position: number;
+	slide_position: number;
+	slide_offset_ms: number;
+	stop_offset_ms: number;
+	type: LectureSlideQuestionType;
+	question_text: string;
+	intro_text: string;
+	options: LectureSlideQuestionOption[];
+};
+
 export type LectureSlideConfigResponse = {
 	lecture_slide_deck: LectureSlideSummary;
 	voice_id: string;
 	generation_prompt?: string | null;
 	narration_prompt?: string | null;
 	pages: LectureSlidePage[];
+	questions: LectureSlideQuestion[];
 	processing_status?: LectureVideoProcessingRunSummary | null;
 };
 
@@ -2213,6 +2238,15 @@ export const retryAssistantLectureVideo = async (
 ) => {
 	const url = `class/${classId}/assistant/${assistantId}/lecture-video/retry`;
 	return await POST<never, LectureVideoSummary>(f, url);
+};
+
+export const retryAssistantLectureSlides = async (
+	f: Fetcher,
+	classId: number,
+	assistantId: number
+) => {
+	const url = `class/${classId}/assistant/${assistantId}/lecture-slides/retry`;
+	return await POST<never, LectureSlideSummary>(f, url);
 };
 
 /**

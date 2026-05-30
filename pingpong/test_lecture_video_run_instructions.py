@@ -1,7 +1,11 @@
 import pytest
 
 from pingpong import models, schemas
-from pingpong.server import _build_run_instructions
+from pingpong.server import (
+    _build_run_instructions,
+    _lecture_lesson_dual_text_enabled,
+    _lecture_lesson_followups_enabled,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -69,7 +73,7 @@ async def test_build_run_instructions_for_lecture_video_with_latex_includes_say_
     assert "---Formatting: Lecture Video Follow-ups---" in instructions
 
 
-async def test_build_run_instructions_for_lecture_video_without_latex_skips_say_contract(
+async def test_build_run_instructions_for_lecture_video_forces_latex_and_say_contract(
     db,
 ):
     thread, assistant = await create_thread_and_assistant(
@@ -85,9 +89,7 @@ async def test_build_run_instructions_for_lecture_video_without_latex_skips_say_
     assert instructions is not None
     assert "Stored lecture snapshot." in instructions
     assert "Updated assistant instructions." not in instructions
-    assert (
-        "---Formatting: Lecture Video Dual Speech/Display Blocks---" not in instructions
-    )
+    assert "---Formatting: Lecture Video Dual Speech/Display Blocks---" in instructions
     assert "---Formatting: LaTeX---" not in instructions
     assert "---Formatting: Lecture Video Follow-ups---" in instructions
 
@@ -109,6 +111,33 @@ async def test_build_run_instructions_for_lecture_video_normalizes_missing_threa
     assert "Assistant fallback instructions." in instructions
     assert "---Formatting: Lecture Video Dual Speech/Display Blocks---" in instructions
     assert "---Formatting: Lecture Video Follow-ups---" in instructions
+
+
+async def test_build_run_instructions_for_lecture_slides_uses_lecture_formatting(
+    db,
+):
+    thread, assistant = await create_thread_and_assistant(
+        db,
+        interaction_mode=schemas.InteractionMode.LECTURE_SLIDES,
+        thread_instructions="Stored slide snapshot.",
+        assistant_instructions="Updated assistant instructions.",
+        use_latex=False,
+    )
+
+    instructions = _build_run_instructions(thread, assistant, user_id=1)
+
+    assert instructions is not None
+    assert "Stored slide snapshot." in instructions
+    assert "Updated assistant instructions." not in instructions
+    assert "---Formatting: Lecture Video Dual Speech/Display Blocks---" in instructions
+    assert "---Formatting: Lecture Video Follow-ups---" in instructions
+
+
+async def test_lecture_slides_enable_dual_text_and_followups():
+    thread = models.Thread(interaction_mode=schemas.InteractionMode.LECTURE_SLIDES)
+
+    assert _lecture_lesson_dual_text_enabled(thread)
+    assert _lecture_lesson_followups_enabled(thread)
 
 
 async def test_build_run_instructions_for_non_lecture_video_uses_stored_instructions(

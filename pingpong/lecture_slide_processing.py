@@ -779,6 +779,19 @@ async def process_claimed_run(assignment: RunAssignment) -> None:
     await _process_claimed_slide_run(assignment.run_id, assignment.lease_token)
 
 
+async def _deck_has_slide_manifest(deck_id: int) -> bool:
+    async with config.db.driver.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id(session, deck_id)
+        if deck is None or deck.context_version != 4:
+            return False
+        question_count = await session.scalar(
+            select(func.count(models.LectureSlideQuestion.id)).where(
+                models.LectureSlideQuestion.lecture_slide_deck_id == deck_id
+            )
+        )
+        return bool(question_count)
+
+
 async def _process_claimed_slide_run(run_id: int, lease_token: str) -> None:
     try:
         async with config.db.driver.async_session() as session:
@@ -903,10 +916,12 @@ async def _process_claimed_slide_run(run_id: int, lease_token: str) -> None:
                 )
                 if transcript is None:
                     return
+                has_manifest = await _deck_has_slide_manifest(deck_id)
                 start_stage = (
                     schemas.LectureSlideProcessingStage.COMPOSITE_ARTIFACTS
                     if original_start_stage
                     == schemas.LectureSlideProcessingStage.NARRATION_AUDIO
+                    and has_manifest
                     else schemas.LectureSlideProcessingStage.MANIFEST_GENERATION
                 )
 
@@ -1451,6 +1466,9 @@ async def _persist_narration_text(
                 raise ValueError(f"Missing narration for slide {page.position}.")
             page.title = generated.title
             page.narration_text = generated.narration_text
+            page.narration_id = None
+            page.start_offset_ms = None
+            page.end_offset_ms = None
             session.add(page)
         await session.commit()
 
@@ -1471,7 +1489,7 @@ async def _synthesize_slide_audio(
         pages = [
             (page.id, page.position, page.narration_text or "")
             for page in sorted(deck.pages, key=lambda item: item.position)
-            if text_needs_audio(page.narration_text or "")
+            if page.narration_id is None and text_needs_audio(page.narration_text or "")
         ]
     if not pages:
         return []
@@ -1586,11 +1604,12 @@ async def _transcribe_and_persist_slide_audio(
     openai_client: openai.AsyncClient | openai.AsyncAzureOpenAI,
     temp_dir: str,
 ) -> list[schemas.LectureVideoManifestWordV3] | None:
-    words: list[schemas.LectureVideoManifestWordV3] = []
-    current_offset_ms = 0
-    page_timings: dict[int, tuple[int, int]] = {}
+    artifacts_by_page_id = {artifact.page_id: artifact for artifact in slide_audio}
+    transcribed_words_by_page_id: dict[
+        int, list[schemas.LectureVideoManifestWordV3]
+    ] = {}
     for artifact in sorted(slide_audio, key=lambda item: item.page_position):
-        slide_path = os.path.join(temp_dir, f"slide-{artifact.page_position}.audio")
+        slide_path = os.path.join(temp_dir, f"slide-{artifact.page_position}.ogg")
         Path(slide_path).write_bytes(artifact.audio)
         slide_words = await _await_with_run_lease_heartbeat(
             run_id,
@@ -1599,20 +1618,7 @@ async def _transcribe_and_persist_slide_audio(
         )
         if slide_words is None:
             return None
-        for word_index, word in enumerate(slide_words):
-            words.append(
-                schemas.LectureVideoManifestWordV3(
-                    id=f"slide-{artifact.page_position}-word-{word_index}",
-                    word=word.word,
-                    start_offset_ms=word.start_offset_ms + current_offset_ms,
-                    end_offset_ms=word.end_offset_ms + current_offset_ms,
-                )
-            )
-        page_timings[artifact.page_id] = (
-            current_offset_ms,
-            current_offset_ms + artifact.duration_ms,
-        )
-        current_offset_ms += artifact.duration_ms
+        transcribed_words_by_page_id[artifact.page_id] = slide_words
 
     async with config.db.driver.async_session() as session:
         run = await models.LectureSlideProcessingRun.get_by_id(session, run_id)
@@ -1626,11 +1632,71 @@ async def _transcribe_and_persist_slide_audio(
             or run.lease_token != lease_token
         ):
             return None
-        for page in deck.pages:
-            start, end = page_timings.get(page.id, (None, None))
-            page.start_offset_ms = start
-            page.end_offset_ms = end
+        old_transcript = []
+        if deck.transcript_data is not None:
+            raw_words = deck.transcript_data.get("word_level_transcription")
+            if isinstance(raw_words, list):
+                old_transcript = [
+                    schemas.LectureVideoManifestWordV3.model_validate(word)
+                    for word in raw_words
+                ]
+
+        words: list[schemas.LectureVideoManifestWordV3] = []
+        current_offset_ms = 0
+        for page in sorted(deck.pages, key=lambda item: item.position):
+            page_artifact = artifacts_by_page_id.get(page.id)
+            if page_artifact is not None:
+                duration_ms = page_artifact.duration_ms
+            elif (
+                page.narration is not None and page.narration.stored_object is not None
+            ):
+                duration_ms = page.narration.stored_object.duration_ms or 0
+            else:
+                duration_ms = 0
+
+            old_start_offset_ms = page.start_offset_ms
+            old_end_offset_ms = page.end_offset_ms
+            start_offset_ms = current_offset_ms if duration_ms > 0 else None
+            end_offset_ms = current_offset_ms + duration_ms if duration_ms > 0 else None
+
+            if page_artifact is not None and start_offset_ms is not None:
+                for word_index, word in enumerate(
+                    transcribed_words_by_page_id.get(page.id, [])
+                ):
+                    words.append(
+                        schemas.LectureVideoManifestWordV3(
+                            id=f"slide-{page_artifact.page_position}-word-{word_index}",
+                            word=word.word,
+                            start_offset_ms=word.start_offset_ms + start_offset_ms,
+                            end_offset_ms=word.end_offset_ms + start_offset_ms,
+                        )
+                    )
+            elif (
+                old_start_offset_ms is not None
+                and old_end_offset_ms is not None
+                and start_offset_ms is not None
+            ):
+                offset_delta_ms = start_offset_ms - old_start_offset_ms
+                for word in _transcript_for_slide_window(
+                    old_transcript,
+                    start_offset_ms=old_start_offset_ms,
+                    end_offset_ms=old_end_offset_ms,
+                ):
+                    words.append(
+                        word.model_copy(
+                            update={
+                                "start_offset_ms": word.start_offset_ms
+                                + offset_delta_ms,
+                                "end_offset_ms": word.end_offset_ms + offset_delta_ms,
+                            }
+                        )
+                    )
+
+            page.start_offset_ms = start_offset_ms
+            page.end_offset_ms = end_offset_ms
             session.add(page)
+            current_offset_ms += duration_ms
+
         deck.total_duration_ms = current_offset_ms
         deck.transcript_data = transcript_data_from_words(words)
         session.add(deck)

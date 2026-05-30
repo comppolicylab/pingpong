@@ -356,14 +356,23 @@ def _lecture_video_matches_assistant(
     )
 
 
-def _lecture_video_dual_text_enabled(thread: models.Thread) -> bool:
-    return thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
+def _is_lecture_lesson_mode(interaction_mode: schemas.InteractionMode | None) -> bool:
+    return interaction_mode in {
+        schemas.InteractionMode.LECTURE_VIDEO,
+        schemas.InteractionMode.LECTURE_SLIDES,
+    }
 
 
-def _lecture_video_followups_enabled(thread: models.Thread) -> bool:
-    # Intentionally mirrors _lecture_video_dual_text_enabled; both are gated on
-    # LECTURE_VIDEO mode. Keep these conditions in sync if either changes.
-    return thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
+def _lecture_lesson_dual_text_enabled(thread: models.Thread) -> bool:
+    return _is_lecture_lesson_mode(thread.interaction_mode)
+
+
+def _lecture_lesson_followups_enabled(thread: models.Thread) -> bool:
+    return _is_lecture_lesson_mode(thread.interaction_mode)
+
+
+def _allows_first_message_without_prior_run(thread: models.Thread) -> bool:
+    return _is_lecture_lesson_mode(thread.interaction_mode)
 
 
 def _build_run_instructions(
@@ -373,18 +382,18 @@ def _build_run_instructions(
 ) -> str | None:
     """Return the effective instructions for a run or prompt inspection.
 
-    Lecture-video threads compute formatting fresh per run so that prompt
+    Lecture lesson threads compute formatting fresh per run so that prompt
     segment updates (say snippets, follow-ups, LaTeX/diagrams) take effect on
     existing threads. Other modes continue to use the thread's stored
     instructions verbatim.
     """
-    if thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
+    if _is_lecture_lesson_mode(thread.interaction_mode):
         base_instructions = thread.instructions
         if base_instructions is None:
             base_instructions = asst.instructions or ""
         return format_instructions(
             base_instructions,
-            use_latex=asst.use_latex,
+            use_latex=True,
             use_image_descriptions=asst.use_image_descriptions,
             disable_prompt_randomization=asst.disable_prompt_randomization,
             thread_id=str(thread.id),
@@ -424,7 +433,7 @@ async def _ensure_thread_instructions_migrated(
     if thread.instructions is not None:
         session.add(thread)
         return
-    elif thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
+    elif _is_lecture_lesson_mode(thread.interaction_mode):
         logger.info(
             "Thread %s does not have instructions set, migrating from assistant instructions",
             thread.id,
@@ -453,9 +462,9 @@ async def _ensure_thread_instructions_migrated(
 
 
 def _display_text_for_thread(thread: models.Thread, text: str) -> str:
-    if _lecture_video_followups_enabled(thread):
+    if _lecture_lesson_followups_enabled(thread):
         text = strip_followup_snippets(text)
-    if _lecture_video_dual_text_enabled(thread):
+    if _lecture_lesson_dual_text_enabled(thread):
         text = transform_say_text(text, "display")
     return text
 
@@ -463,7 +472,7 @@ def _display_text_for_thread(thread: models.Thread, text: str) -> str:
 def _followup_suggestions_for_thread(
     thread: models.Thread, text: str | None
 ) -> list[str]:
-    if not _lecture_video_followups_enabled(thread):
+    if not _lecture_lesson_followups_enabled(thread):
         return []
     return extract_followup_suggestions(text or "")
 
@@ -3309,7 +3318,7 @@ def _get_lecture_video_provider_prerequisite_message(
                 "Configure an ElevenLabs credential in Manage Group to enable Lecture "
                 "Video mode."
             )
-        return "Lecture Video mode is in active development."
+        return "Lecture Video mode is in active development"
 
     if (
         not class_context["has_gemini_credential"]
@@ -3326,7 +3335,7 @@ def _get_lecture_video_provider_prerequisite_message(
             "Configure an ElevenLabs credential in Manage Group to enable Lecture "
             "Video mode."
         )
-    return "Lecture Video mode is in active development."
+    return "Lecture Video mode is in active development"
 
 
 async def _ensure_lecture_video_manifest_generation_configured(
@@ -8521,8 +8530,8 @@ async def create_run(
                 or not asst.hide_web_search_actions,
                 show_mcp_server_call_details=is_supervisor
                 or not asst.hide_mcp_server_call_details,
-                lecture_video_dual_text_mode=_lecture_video_dual_text_enabled(thread),
-                lecture_video_followups_mode=_lecture_video_followups_enabled(thread),
+                lecture_video_dual_text_mode=_lecture_lesson_dual_text_enabled(thread),
+                lecture_video_followups_mode=_lecture_lesson_followups_enabled(thread),
             )
         except Exception as e:
             logger.exception("Error running thread")
@@ -8675,10 +8684,7 @@ async def send_message(
                 request.state["db"], thread.id
             )
 
-            if (
-                not last_run
-                and thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO
-            ):
+            if not last_run and not _allows_first_message_without_prior_run(thread):
                 raise HTTPException(
                     status_code=500,
                     detail="We're having trouble fetching information about this conversation. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
@@ -9140,8 +9146,8 @@ async def send_message(
                 tts_voice_id=tts_voice_id,
                 tts_api_key=tts_api_key,
                 tts_voice_settings=tts_voice_settings,
-                lecture_video_dual_text_mode=_lecture_video_dual_text_enabled(thread),
-                lecture_video_followups_mode=_lecture_video_followups_enabled(thread),
+                lecture_video_dual_text_mode=_lecture_lesson_dual_text_enabled(thread),
+                lecture_video_followups_mode=_lecture_lesson_followups_enabled(thread),
                 user_assistant_messages_only=(
                     lecture_chat_prep.user_assistant_messages_only
                     if lecture_chat_prep is not None
@@ -9724,6 +9730,69 @@ async def get_assistant_lecture_slide_source(
 
 
 @v1.get(
+    "/class/{class_id}/assistant/{assistant_id}/lecture-slides/thumbnail",
+    dependencies=[Depends(Authz("can_view", "assistant:{assistant_id}"))],
+    response_class=StreamingResponse,
+)
+async def get_assistant_lecture_slide_thumbnail(
+    class_id: str,
+    assistant_id: str,
+    request: StateRequest,
+):
+    if not config.video_store:
+        raise HTTPException(status_code=404, detail="No Video Store exists.")
+
+    assistant = await lecture_slide_service.get_lecture_slide_assistant_for_class(
+        request.state["db"], int(assistant_id), int(class_id)
+    )
+    if assistant.lecture_slide_deck_id is None:
+        raise HTTPException(status_code=404, detail="Lecture slide deck not found.")
+
+    image_stored_object_id = await request.state["db"].scalar(
+        select(models.LectureSlidePage.image_stored_object_id)
+        .where(
+            models.LectureSlidePage.lecture_slide_deck_id
+            == assistant.lecture_slide_deck_id,
+            models.LectureSlidePage.image_stored_object_id.is_not(None),
+        )
+        .order_by(models.LectureSlidePage.position)
+        .limit(1)
+    )
+    if image_stored_object_id is None:
+        raise HTTPException(
+            status_code=404, detail="Lecture slide thumbnail not found."
+        )
+
+    image = await request.state["db"].get(
+        models.LectureSlideImageStoredObject, image_stored_object_id
+    )
+    if image is None:
+        raise HTTPException(
+            status_code=404, detail="Lecture slide thumbnail not found."
+        )
+
+    try:
+        stream = await prefetch_stream(
+            config.video_store.store.stream_video_range(key=image.key),
+            store_error=VideoStoreError,
+            logger=logger,
+            store_error_log="VideoStoreError while streaming lecture slide thumbnail; aborting stream.",
+            unexpected_error_log="Unexpected error while streaming lecture slide thumbnail",
+        )
+    except VideoStoreError as e:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unable to stream lecture slide thumbnail: {e.detail or str(e)}",
+        ) from e
+
+    return StreamingResponse(
+        stream,
+        media_type=image.content_type or "image/png",
+        headers={"Cache-Control": "private, max-age=86400"},
+    )
+
+
+@v1.get(
     "/class/{class_id}/assistant/{assistant_id}/lecture-video/poster",
     dependencies=[Depends(Authz("can_view", "assistant:{assistant_id}"))],
     response_class=StreamingResponse,
@@ -10113,6 +10182,37 @@ async def get_assistant_lecture_slide_config(
         )
         for page in sorted(deck.pages, key=lambda item: item.position)
     ]
+    questions = []
+    for question in sorted(deck.questions, key=lambda item: item.position):
+        correct_option_id = (
+            question.correct_option.id if question.correct_option is not None else None
+        )
+        questions.append(
+            schemas.LectureSlideQuestionView(
+                id=question.id,
+                position=question.position,
+                slide_position=question.slide_position,
+                slide_offset_ms=question.slide_offset_ms,
+                stop_offset_ms=question.stop_offset_ms,
+                type=question.question_type,
+                question_text=question.question_text,
+                intro_text=question.intro_text,
+                options=[
+                    schemas.LectureSlideQuestionOptionView(
+                        id=option.id,
+                        option_text=option.option_text,
+                        post_answer_text=option.post_answer_text,
+                        continue_slide_position=option.continue_slide_position,
+                        continue_slide_offset_ms=option.continue_slide_offset_ms,
+                        continue_offset_ms=option.continue_offset_ms,
+                        correct=option.id == correct_option_id,
+                    )
+                    for option in sorted(
+                        question.options, key=lambda item: item.position
+                    )
+                ],
+            )
+        )
     return schemas.LectureSlideConfigResponse(
         lecture_slide_deck=cast(
             schemas.LectureSlideSummary,
@@ -10122,6 +10222,7 @@ async def get_assistant_lecture_slide_config(
         generation_prompt=deck.generation_prompt,
         narration_prompt=deck.narration_prompt,
         pages=pages,
+        questions=questions,
         processing_status=processing_status,
     )
 
@@ -10228,6 +10329,76 @@ async def retry_assistant_lecture_video_processing(
     )
     return await lecture_video_service.lecture_video_summary_from_model(
         request.state["db"], refreshed_lecture_video_summary or refreshed_lecture_video
+    )
+
+
+@v1.post(
+    "/class/{class_id}/assistant/{assistant_id}/lecture-slides/retry",
+    dependencies=[Depends(Authz("can_edit", "assistant:{assistant_id}"))],
+    response_model=schemas.LectureSlideSummary,
+)
+async def retry_assistant_lecture_slide_processing(
+    class_id: str,
+    assistant_id: str,
+    request: StateRequest,
+):
+    assistant = await lecture_slide_service.get_lecture_slide_assistant_for_class(
+        request.state["db"], int(assistant_id), int(class_id)
+    )
+    if assistant.lecture_slide_deck_id is None:
+        raise HTTPException(404, "Lecture slide deck not found.")
+
+    deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+        request.state["db"], assistant.lecture_slide_deck_id
+    )
+    if deck is None or deck.class_id != int(class_id):
+        raise HTTPException(404, "Lecture slide deck not found.")
+    if deck.status != schemas.LectureSlideDeckStatus.FAILED:
+        raise HTTPException(
+            status_code=409,
+            detail="Lecture slide retry is only available after lecture slide processing fails.",
+        )
+
+    latest_failed_stage = await request.state["db"].scalar(
+        select(models.LectureSlideProcessingRun.stage)
+        .where(
+            models.LectureSlideProcessingRun.lecture_slide_deck_id_snapshot == deck.id,
+            models.LectureSlideProcessingRun.status
+            == schemas.LectureSlideProcessingRunStatus.FAILED,
+        )
+        .order_by(
+            models.LectureSlideProcessingRun.finished_at.desc().nulls_last(),
+            models.LectureSlideProcessingRun.id.desc(),
+        )
+        .limit(1)
+    )
+    if latest_failed_stage is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Lecture slide retry is only available after lecture slide processing fails.",
+        )
+
+    retry_stage = schemas.LectureSlideProcessingStage(latest_failed_stage)
+    if retry_stage == schemas.LectureSlideProcessingStage.NARRATION_TRANSCRIPTION:
+        retry_stage = schemas.LectureSlideProcessingStage.NARRATION_AUDIO
+
+    retry_run = await lecture_slide_processing.queue_lecture_slide_processing_run(
+        request.state["db"],
+        deck,
+        requested_by_assistant_id=assistant.id,
+        stage=retry_stage,
+    )
+    if retry_run is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Lecture slide retry is no longer available because the assistant or lecture slide configuration changed.",
+        )
+
+    refreshed_deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+        request.state["db"], deck.id
+    )
+    return await lecture_slide_service.lecture_slide_summary_from_model(
+        refreshed_deck or deck
     )
 
 
@@ -10732,6 +10903,9 @@ async def create_assistant(
     uses_voice = req.interaction_mode == schemas.InteractionMode.VOICE
     is_video = req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
     is_slides = req.interaction_mode == schemas.InteractionMode.LECTURE_SLIDES
+    is_lesson_mode = is_video or is_slides
+    if is_lesson_mode:
+        req.use_latex = True
     lecture_video_object_id = None
     lecture_video_manifest = None
     lecture_video_voice_id = None
@@ -11155,13 +11329,13 @@ async def preview_assistant_instructions(
     return {
         "instructions_preview": format_instructions(
             req.instructions,
-            use_latex=req.use_latex,
+            use_latex=True
+            if _is_lecture_lesson_mode(req.interaction_mode)
+            else req.use_latex,
             disable_prompt_randomization=req.disable_prompt_randomization,
             user_id=request.state["session"].user.id,
             thread_id=f"preview_{uuid.uuid4()}",
-            lecture_video_mode=(
-                req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
-            ),
+            lecture_video_mode=_is_lecture_lesson_mode(req.interaction_mode),
         )
     }
 
@@ -11653,6 +11827,7 @@ async def update_assistant(
     uses_voice = interaction_mode == schemas.InteractionMode.VOICE
     is_video = interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
     is_slides = interaction_mode == schemas.InteractionMode.LECTURE_SLIDES
+    is_lesson_mode = is_video or is_slides
     lecture_video = asst.lecture_video
     lecture_video_manifest = None
     lecture_video_voice_id = None
@@ -12381,7 +12556,11 @@ async def update_assistant(
     if update_tool_resources:
         openai_update["tool_resources"] = tool_resources
 
-    if "use_latex" in req.model_fields_set and req.use_latex is not None:
+    if is_lesson_mode:
+        if not asst.use_latex:
+            update_instructions = True
+            asst.use_latex = True
+    elif "use_latex" in req.model_fields_set and req.use_latex is not None:
         update_instructions = True
         asst.use_latex = req.use_latex
 
@@ -13027,13 +13206,11 @@ async def update_assistant(
                 notes_changed = page_update_result.notes_changed
                 narration_text_changed = page_update_result.narration_changed
 
-            needs_full_processing = (
-                target_lecture_slide_deck.status
-                in {
-                    schemas.LectureSlideDeckStatus.UPLOADED,
-                    schemas.LectureSlideDeckStatus.FAILED,
-                }
-                or not target_lecture_slide_deck.pages
+            needs_full_processing = target_lecture_slide_deck.status in {
+                schemas.LectureSlideDeckStatus.UPLOADED,
+                schemas.LectureSlideDeckStatus.FAILED,
+            } or not await lecture_slide_service.lecture_slide_deck_has_pages(
+                request.state["db"], target_lecture_slide_deck.id
             )
             needs_narration_text = (
                 regenerate_narration_requested
@@ -13046,6 +13223,10 @@ async def update_assistant(
             needs_audio = regenerate_audio_requested or voice_changed
             if narration_text_changed:
                 needs_audio = True
+            if regenerate_audio_requested or voice_changed:
+                await lecture_slide_service.clear_lecture_slide_page_narrations(
+                    request.state["db"], target_lecture_slide_deck.id
+                )
 
             queued_run = None
             if needs_full_processing:

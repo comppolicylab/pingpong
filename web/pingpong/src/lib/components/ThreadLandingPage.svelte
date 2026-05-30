@@ -156,19 +156,21 @@
 		: otherAssistants;
 	let assistant = {} as Assistant;
 	$: assistantMeta = getAssistantMetadata(assistant);
-	let lectureVideoPosterFailed = false;
-	let lectureVideoPosterLoaded = false;
-	let lectureVideoPosterAssistantId: number | undefined;
-	$: lectureVideoPosterUrl =
+	let lessonThumbnailFailed = false;
+	let lessonThumbnailLoaded = false;
+	let lessonThumbnailAssistantId: number | undefined;
+	$: lessonThumbnailUrl =
 		assistant.interaction_mode === 'lecture_video' && data?.class?.id && assistant.id
 			? `/api/v1/class/${data.class.id}/assistant/${assistant.id}/lecture-video/poster`
-			: '';
+			: assistant.interaction_mode === 'lecture_slides' && data?.class?.id && assistant.id
+				? `/api/v1/class/${data.class.id}/assistant/${assistant.id}/lecture-slides/thumbnail`
+				: '';
 	$: {
-		// Reset failure state when the selected assistant changes so we re-attempt the new poster.
-		if (lectureVideoPosterAssistantId !== assistant.id) {
-			lectureVideoPosterAssistantId = assistant.id;
-			lectureVideoPosterFailed = false;
-			lectureVideoPosterLoaded = false;
+		// Reset failure state when the selected assistant changes so we re-attempt the new thumbnail.
+		if (lessonThumbnailAssistantId !== assistant.id) {
+			lessonThumbnailAssistantId = assistant.id;
+			lessonThumbnailFailed = false;
+			lessonThumbnailLoaded = false;
 		}
 	}
 	// Whether billing is set up for the class (which controls everything).
@@ -879,20 +881,24 @@
 					{/if}
 				{:else if assistant.interaction_mode === 'lecture_video' || assistant.interaction_mode === 'lecture_slides'}
 					<div class="h-[5%] max-h-8"></div>
-					{#if assistant.interaction_mode === 'lecture_video' && lectureVideoPosterUrl && !lectureVideoPosterFailed}
+					{#if lessonThumbnailUrl && !lessonThumbnailFailed}
 						<div class="relative aspect-video w-full max-w-md overflow-hidden rounded-lg shadow-lg">
-							{#if !lectureVideoPosterLoaded}
+							{#if !lessonThumbnailLoaded}
 								<div class="flex h-full w-full items-center justify-center bg-blue-light-50">
-									<ClapperboardPlayOutline size="xl" class="text-blue-dark-40" />
+									{#if assistant.interaction_mode === 'lecture_slides'}
+										<BookOpenOutline size="xl" class="text-blue-dark-40" />
+									{:else}
+										<ClapperboardPlayOutline size="xl" class="text-blue-dark-40" />
+									{/if}
 								</div>
 							{/if}
 							<img
-								src={lectureVideoPosterUrl}
+								src={lessonThumbnailUrl}
 								alt=""
 								class="absolute inset-0 h-full w-full object-cover transition-opacity"
-								class:opacity-0={!lectureVideoPosterLoaded}
-								onload={() => (lectureVideoPosterLoaded = true)}
-								onerror={() => (lectureVideoPosterFailed = true)}
+								class:opacity-0={!lessonThumbnailLoaded}
+								onload={() => (lessonThumbnailLoaded = true)}
+								onerror={() => (lessonThumbnailFailed = true)}
 							/>
 						</div>
 					{:else}

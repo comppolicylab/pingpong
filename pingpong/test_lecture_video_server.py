@@ -862,7 +862,7 @@ def fake_class_models_response(model_id: str = "gpt-4o-mini") -> dict:
         "lecture_video": {
             "show_mode_in_assistant_editor": True,
             "can_select_mode_in_assistant_editor": True,
-            "message": "Lecture Video mode is in active development.",
+            "message": "Lecture Video mode is in active development",
         },
     }
 
@@ -3701,7 +3701,7 @@ async def test_lecture_video_answer_submitted_rejects_option_from_another_questi
 
 
 @with_institution(11, "Test Institution")
-async def test_initialize_thread_state_completes_when_lecture_video_has_no_questions(
+async def test_initialize_thread_state_plays_when_lecture_video_has_no_questions(
     db, institution
 ):
     async with db.async_session() as session:
@@ -3761,7 +3761,7 @@ async def test_initialize_thread_state_completes_when_lecture_video_has_no_quest
             session, thread.id
         )
 
-    assert state.state == schemas.LectureVideoSessionState.COMPLETED
+    assert state.state == schemas.LectureVideoSessionState.PLAYING
     assert state.current_question_id is None
     assert state.last_known_offset_ms == 0
     assert state.version == 1
