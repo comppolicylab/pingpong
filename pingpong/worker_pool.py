@@ -4,7 +4,7 @@ import signal
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from pingpong.errors import capture_exception_to_sentry
 
@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_WORKER_POLL_INTERVAL_SECONDS = 5.0
 DEFAULT_WORKER_SHUTDOWN_GRACE_SECONDS = 5.0
+RunKind = Literal["run", "slide", "video"]
 
 
 def _sentence_case(value: str) -> str:
@@ -26,6 +27,7 @@ def ignore_sigint_in_worker() -> None:
 
 @dataclass(frozen=True)
 class RunAssignment:
+    kind: RunKind
     run_id: int
     lease_token: str
 
@@ -39,6 +41,7 @@ class WorkerReady:
 @dataclass(frozen=True)
 class WorkerStarted:
     worker_slot: int
+    kind: RunKind
     run_id: int
     lease_token: str
 
@@ -46,6 +49,7 @@ class WorkerStarted:
 @dataclass(frozen=True)
 class WorkerCompleted:
     worker_slot: int
+    kind: RunKind
     run_id: int
     lease_token: str
 
@@ -53,6 +57,7 @@ class WorkerCompleted:
 @dataclass(frozen=True)
 class WorkerJobException:
     worker_slot: int
+    kind: RunKind
     run_id: int
     lease_token: str
     error_message: str
@@ -66,6 +71,7 @@ class WorkerSlotState:
     runner_id: str
     pid: int | None
     idle: bool = True
+    run_kind: RunKind | None = None
     run_id: int | None = None
     lease_token: str | None = None
 
@@ -77,8 +83,8 @@ class WorkerPoolManager:
         workers: int,
         worker_target: Callable[[int, Any, Any], None],
         process_context: Any,
-        claim_run_fn: Callable[[str], tuple[int, str] | None],
-        recover_run_fn: Callable[[int, str, str], bool],
+        claim_run_fn: Callable[[str], RunAssignment | None],
+        recover_run_fn: Callable[[RunAssignment, str], bool],
         build_runner_id_fn: Callable[[int, int | None], str],
         worker_label: str,
         unexpected_exit_error_message: str,
@@ -269,10 +275,11 @@ class WorkerPoolManager:
         if slot is None:
             return
         logger.info(
-            "%s acknowledged run. slot=%s pid=%s run_id=%s",
+            "%s acknowledged run. slot=%s pid=%s kind=%s run_id=%s",
             self.worker_label_display,
             event.worker_slot,
             slot.pid,
+            event.kind,
             event.run_id,
         )
 
@@ -280,13 +287,18 @@ class WorkerPoolManager:
         slot = self.worker_slots.get(event.worker_slot)
         if slot is None:
             return
-        if slot.run_id != event.run_id or slot.lease_token != event.lease_token:
+        if (
+            slot.run_kind != event.kind
+            or slot.run_id != event.run_id
+            or slot.lease_token != event.lease_token
+        ):
             return
         logger.info(
-            "%s finished assigned run. slot=%s pid=%s run_id=%s",
+            "%s finished assigned run. slot=%s pid=%s kind=%s run_id=%s",
             self.worker_label_display,
             event.worker_slot,
             slot.pid,
+            event.kind,
             event.run_id,
         )
         self._clear_assignment(slot)
@@ -295,21 +307,29 @@ class WorkerPoolManager:
         slot = self.worker_slots.get(event.worker_slot)
         if slot is None:
             return
-        if slot.run_id != event.run_id or slot.lease_token != event.lease_token:
+        if (
+            slot.run_kind != event.kind
+            or slot.run_id != event.run_id
+            or slot.lease_token != event.lease_token
+        ):
             return
         error_message = event.error_message or self.unexpected_exit_error_message
         logger.error(
-            "%s reported job exception. slot=%s pid=%s run_id=%s error=%s",
+            "%s reported job exception. slot=%s pid=%s kind=%s run_id=%s error=%s",
             self.worker_label_display,
             event.worker_slot,
             slot.pid,
+            event.kind,
             event.run_id,
             error_message,
         )
         self._recover_assignment(
             slot,
-            run_id=event.run_id,
-            lease_token=event.lease_token,
+            assignment=RunAssignment(
+                kind=event.kind,
+                run_id=event.run_id,
+                lease_token=event.lease_token,
+            ),
             error_message=error_message,
         )
 
@@ -322,11 +342,12 @@ class WorkerPoolManager:
 
             progress = True
             logger.warning(
-                "%s exited unexpectedly. slot=%s pid=%s exitcode=%s run_id=%s",
+                "%s exited unexpectedly. slot=%s pid=%s exitcode=%s kind=%s run_id=%s",
                 self.worker_label_display,
                 worker_slot,
                 slot.pid,
                 process.exitcode,
+                slot.run_kind,
                 slot.run_id,
             )
             self._recover_slot_assignment(
@@ -355,21 +376,21 @@ class WorkerPoolManager:
                 # in this pass should see the same empty queue as well.
                 break
 
-            run_id, lease_token = claim
+            assignment = claim
             logger.info(
-                "Assigning run to %s. slot=%s pid=%s runner_id=%s run_id=%s",
+                "Assigning run to %s. slot=%s pid=%s runner_id=%s kind=%s run_id=%s",
                 self.worker_label,
                 worker_slot,
                 slot.pid,
                 slot.runner_id,
-                run_id,
+                assignment.kind,
+                assignment.run_id,
             )
-            slot.run_id = run_id
-            slot.lease_token = lease_token
+            slot.run_kind = assignment.kind
+            slot.run_id = assignment.run_id
+            slot.lease_token = assignment.lease_token
             slot.idle = False
-            slot.assignment_queue.put(
-                RunAssignment(run_id=run_id, lease_token=lease_token)
-            )
+            slot.assignment_queue.put(assignment)
             progress = True
 
         return progress
@@ -380,12 +401,15 @@ class WorkerPoolManager:
         *,
         error_message: str,
     ) -> None:
-        if slot.run_id is None or slot.lease_token is None:
+        if slot.run_kind is None or slot.run_id is None or slot.lease_token is None:
             return
         self._recover_assignment(
             slot,
-            run_id=slot.run_id,
-            lease_token=slot.lease_token,
+            assignment=RunAssignment(
+                kind=slot.run_kind,
+                run_id=slot.run_id,
+                lease_token=slot.lease_token,
+            ),
             error_message=error_message,
         )
 
@@ -393,18 +417,22 @@ class WorkerPoolManager:
         self,
         slot: WorkerSlotState,
         *,
-        run_id: int,
-        lease_token: str,
+        assignment: RunAssignment,
         error_message: str,
     ) -> None:
         try:
-            self.recover_run_fn(run_id, lease_token, error_message)
+            self.recover_run_fn(assignment, error_message)
         finally:
-            if slot.run_id == run_id and slot.lease_token == lease_token:
+            if (
+                slot.run_kind == assignment.kind
+                and slot.run_id == assignment.run_id
+                and slot.lease_token == assignment.lease_token
+            ):
                 self._clear_assignment(slot)
 
     def _clear_assignment(self, slot: WorkerSlotState) -> None:
         slot.idle = True
+        slot.run_kind = None
         slot.run_id = None
         slot.lease_token = None
 

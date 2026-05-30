@@ -79,7 +79,7 @@ from .bg import get_server
 from .canvas import canvas_sync_all
 from .config import config
 from .errors import sentry
-from . import lecture_video_processing
+from . import lecture_slide_processing
 from .models import (
     APIKey,
     Assistant,
@@ -128,6 +128,11 @@ def export() -> None:
 
 @cli.group("lecture-video")
 def lecture_video() -> None:
+    pass
+
+
+@cli.group("lecture-processing")
+def lecture_processing() -> None:
     pass
 
 
@@ -1524,7 +1529,7 @@ FUNCTIONS_MAP: Dict[str, Callable] = {
 @click.option("--port", default=8001)
 @click.option(
     "--poll-interval",
-    default=lecture_video_processing.DEFAULT_WORKER_POLL_INTERVAL_SECONDS,
+    default=lecture_slide_processing.DEFAULT_WORKER_POLL_INTERVAL_SECONDS,
     type=click.FloatRange(min=0, min_open=True),
     show_default=True,
 )
@@ -1540,11 +1545,43 @@ def run_lecture_video_worker(
     poll_interval: float,
     workers: int,
 ) -> None:
+    # Kept as a deployment-compatibility alias during the slide/video worker cutover.
     server = get_server(host=host, port=port)
 
     with sentry(), server.run_in_thread():
         with contextlib.suppress(KeyboardInterrupt):
-            lecture_video_processing.run_narration_processing_worker_pool(
+            lecture_slide_processing.run_processing_worker_pool(
+                poll_interval_seconds=poll_interval,
+                workers=workers,
+            )
+
+
+@lecture_processing.command("run-worker")
+@click.option("--host", default="localhost")
+@click.option("--port", default=8001)
+@click.option(
+    "--poll-interval",
+    default=lecture_slide_processing.DEFAULT_WORKER_POLL_INTERVAL_SECONDS,
+    type=click.FloatRange(min=0, min_open=True),
+    show_default=True,
+)
+@click.option(
+    "--workers",
+    default=1,
+    type=click.IntRange(min=1),
+    show_default=True,
+)
+def run_lecture_processing_worker(
+    host: str,
+    port: int,
+    poll_interval: float,
+    workers: int,
+) -> None:
+    server = get_server(host=host, port=port)
+
+    with sentry(), server.run_in_thread():
+        with contextlib.suppress(KeyboardInterrupt):
+            lecture_slide_processing.run_processing_worker_pool(
                 poll_interval_seconds=poll_interval,
                 workers=workers,
             )

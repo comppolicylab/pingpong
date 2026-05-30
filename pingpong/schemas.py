@@ -508,7 +508,24 @@ class LectureVideoProcessingStage(StrEnum):
     NARRATION = "narration"
 
 
+class LectureSlideProcessingStage(StrEnum):
+    SLIDE_ASSET_EXTRACTION = "slide_asset_extraction"
+    NARRATION_TEXT = "narration_text"
+    NARRATION_AUDIO = "narration_audio"
+    NARRATION_TRANSCRIPTION = "narration_transcription"
+    MANIFEST_GENERATION = "manifest_generation"
+    COMPOSITE_ARTIFACTS = "composite_artifacts"
+
+
 class LectureVideoProcessingRunStatus(StrEnum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class LectureSlideProcessingRunStatus(StrEnum):
     QUEUED = "queued"
     RUNNING = "running"
     COMPLETED = "completed"
@@ -521,6 +538,12 @@ class LectureVideoProcessingCancelReason(StrEnum):
     ASSISTANT_DELETED = "assistant_deleted"
     LECTURE_VIDEO_DELETED = "lecture_video_deleted"
     MANUAL_MANIFEST_REPLACED = "manual_manifest_replaced"
+
+
+class LectureSlideProcessingCancelReason(StrEnum):
+    ASSISTANT_DETACHED = "assistant_detached"
+    ASSISTANT_DELETED = "assistant_deleted"
+    LECTURE_SLIDE_DECK_DELETED = "lecture_slide_deck_deleted"
 
 
 class LectureVideoSessionState(StrEnum):
