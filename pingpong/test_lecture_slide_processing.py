@@ -209,6 +209,71 @@ async def test_extract_slide_assets_from_pdf_cleans_empty_pdf_output_dir(
     assert not output_dir.exists()
 
 
+async def test_extract_and_store_slide_assets_replaces_existing_pages(
+    db, monkeypatch, tmp_path
+):
+    await _create_class_and_deck(db)
+    async with db.async_session() as session:
+        page = models.LectureSlidePage(
+            lecture_slide_deck_id=1,
+            position=0,
+            user_notes="Keep these notes.",
+        )
+        run = models.LectureSlideProcessingRun(
+            lecture_slide_deck_id=1,
+            lecture_slide_deck_id_snapshot=1,
+            class_id=1,
+            stage=schemas.LectureSlideProcessingStage.SLIDE_ASSET_EXTRACTION,
+            attempt_number=1,
+            status=schemas.LectureSlideProcessingRunStatus.RUNNING,
+            lease_token="lease",
+        )
+        session.add_all([page, run])
+        await session.commit()
+        run_id = run.id
+
+    asset_dir = tmp_path / "assets"
+    asset_dir.mkdir()
+    image_path = asset_dir / "slide.png"
+    image_path.write_bytes(b"replacement image")
+
+    class FakeVideoStore:
+        async def put(self, _key, _body, _content_type):
+            return None
+
+    monkeypatch.setattr(config, "video_store", SimpleNamespace(store=FakeVideoStore()))
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "extract_slide_assets_from_pdf",
+        lambda _pdf_path: [
+            lecture_slide_processing.ExtractedSlideAsset(
+                position=0,
+                image_path=str(image_path),
+                width_px=640,
+                height_px=480,
+                extracted_text="Replacement text.",
+            )
+        ],
+    )
+
+    await lecture_slide_processing._extract_and_store_slide_assets(
+        run_id,
+        "lease",
+        1,
+        str(tmp_path / "slides.pdf"),
+    )
+
+    async with db.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, 1
+        )
+        assert deck is not None
+        assert deck.slide_count == 1
+        assert len(deck.pages) == 1
+        assert deck.pages[0].extracted_text == "Replacement text."
+        assert deck.pages[0].user_notes == "Keep these notes."
+
+
 async def test_list_rendered_pdf_page_images_sorts_zero_padded_names(tmp_path):
     for filename in ("page-10.png", "page-02.png", "page-01.png"):
         (tmp_path / filename).write_bytes(b"")
@@ -428,6 +493,9 @@ async def test_generate_slide_manifest_uses_pdf_and_transcript_not_extracted_tex
     assert "QUALITY EXAMPLES:" in instructions
     assert "FINAL VERIFICATION BEFORE OUTPUT:" in instructions
     assert "SLIDE LESSON MANIFEST ADAPTATION:" in instructions
+    assert "0 <= slide_offset_ms <= end_offset_ms - start_offset_ms" in instructions
+    assert "Derive slide_offset_ms from stop_offset_ms" in instructions
+    assert "Transcript word ids include the slide number" in instructions
     assert captured["text_format"] is lecture_slide_processing.GeneratedSlideManifest
     assert captured["deleted_file_id"] == "file-pdf"
     payload = json.dumps(captured["input"])
@@ -536,6 +604,112 @@ async def test_generate_slide_manifest_rejects_multiple_correct_options(
             "assistant-chat-model",
             fake_client,
         )
+
+
+async def test_persist_slide_manifest_replaces_existing_questions(db):
+    await _create_class_and_deck(db)
+    async with db.async_session() as session:
+        old_question = models.LectureSlideQuestion(
+            lecture_slide_deck_id=1,
+            position=0,
+            slide_position=0,
+            slide_offset_ms=0,
+            stop_offset_ms=100,
+            question_type=schemas.LectureSlideQuestionType.SINGLE_SELECT,
+            question_text="Old question?",
+            intro_text="",
+            options=[
+                models.LectureSlideQuestionOption(
+                    position=0,
+                    option_text="Old option",
+                    post_answer_text="",
+                    continue_offset_ms=100,
+                )
+            ],
+        )
+        run = models.LectureSlideProcessingRun(
+            lecture_slide_deck_id=1,
+            lecture_slide_deck_id_snapshot=1,
+            class_id=1,
+            stage=schemas.LectureSlideProcessingStage.MANIFEST_GENERATION,
+            attempt_number=1,
+            status=schemas.LectureSlideProcessingRunStatus.RUNNING,
+            lease_token="lease",
+        )
+        session.add_all([old_question, run])
+        await session.commit()
+        run_id = run.id
+
+    manifest = lecture_slide_processing.GeneratedSlideManifest(
+        questions=[
+            lecture_slide_processing.GeneratedSlideQuestion(
+                slide_position=0,
+                slide_offset_ms=250,
+                stop_offset_ms=250,
+                question_text="New question?",
+                options=[
+                    lecture_slide_processing.GeneratedSlideChoice(
+                        option_text="Correct",
+                        continue_offset_ms=500,
+                        correct=True,
+                    ),
+                    lecture_slide_processing.GeneratedSlideChoice(
+                        option_text="Incorrect",
+                        continue_offset_ms=500,
+                        correct=False,
+                    ),
+                ],
+            )
+        ],
+        summary_checkpoints=[
+            schemas.LectureVideoManifestSummaryCheckpointV4(
+                end_offset_ms=500,
+                summary="The slide introduces the new topic.",
+            )
+        ],
+        moment_contexts=[
+            schemas.LectureVideoManifestMomentContextV4(
+                start_offset_ms=0,
+                center_offset_ms=250,
+                end_offset_ms=500,
+                before="The lesson starts.",
+                at="The question appears.",
+                after="The lesson continues.",
+            )
+        ],
+    )
+    transcript = [
+        schemas.LectureVideoManifestWordV3(
+            id="slide-0-word-0",
+            word="hello",
+            start_offset_ms=0,
+            end_offset_ms=100,
+        )
+    ]
+
+    await lecture_slide_processing._persist_slide_manifest(
+        run_id,
+        "lease",
+        1,
+        manifest,
+        transcript,
+    )
+
+    async with db.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, 1
+        )
+        assert deck is not None
+        assert deck.context_version == 4
+        assert deck.transcript_data is not None
+        assert len(deck.questions) == 1
+        assert deck.questions[0].question_text == "New question?"
+        assert [option.option_text for option in deck.questions[0].options] == [
+            "Correct",
+            "Incorrect",
+        ]
+        assert deck.questions[0].correct_option is not None
+        assert deck.questions[0].correct_option.option_text == "Correct"
 
 
 async def test_parse_responses_output_retries_transient_openai_failure(monkeypatch):

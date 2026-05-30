@@ -25,6 +25,14 @@ server {
         try_files $uri $uri/ $uri.html /index.html;
     }
 
+    location ~* \.mjs$ {
+        types {
+            application/javascript mjs;
+        }
+        expires 30d;
+        add_header Cache-Control "public";
+    }
+
     location ~* \.(?:css|js|jpg|svg|png|woff|woff2|ttf)$ {
         expires 30d;
         add_header Cache-Control "public";
