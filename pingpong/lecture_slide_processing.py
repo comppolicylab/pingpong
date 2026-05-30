@@ -1174,6 +1174,7 @@ async def _generate_narration_text(
             return None
         prompt = deck.narration_prompt or DEFAULT_NARRATION_PROMPT
         slide_count = deck.slide_count
+        author_comments_guidance = _slide_author_comments_guidance_text(deck.pages)
         response_model = _generated_slide_narration_set_model(slide_count)
 
     file_id = await _await_with_run_lease_heartbeat(
@@ -1199,10 +1200,9 @@ async def _generate_narration_text(
                             {"type": "input_file", "file_id": file_id},
                             {
                                 "type": "input_text",
-                                "text": (
-                                    f"Generate narration for exactly {slide_count} "
-                                    "slides. Use zero-based "
-                                    "slide_position values."
+                                "text": _build_narration_generation_user_message(
+                                    slide_count,
+                                    author_comments_guidance,
                                 ),
                             },
                         ],
@@ -1212,6 +1212,45 @@ async def _generate_narration_text(
         )
     finally:
         await _delete_openai_file_quietly(openai_client, file_id)
+
+
+def _slide_author_comments_guidance_text(
+    pages: Sequence[models.LectureSlidePage],
+) -> str | None:
+    comments: list[dict[str, object]] = []
+    for page in sorted(pages, key=lambda item: item.position):
+        user_notes = (page.user_notes or "").strip()
+        if not user_notes:
+            continue
+        comments.append(
+            {
+                "slide_position": page.position,
+                "author_comments": user_notes,
+            }
+        )
+    if not comments:
+        return None
+    return (
+        "AUTHOR COMMENTS BY SLIDE:\n"
+        "Use these as additional per-slide guidance when writing narration. "
+        "They may include instructor intent, emphasis, or clarification, but "
+        "do not quote them mechanically unless that is natural for spoken "
+        "lecture narration.\n\n"
+        f"{json.dumps(comments, indent=2)}"
+    )
+
+
+def _build_narration_generation_user_message(
+    slide_count: int,
+    author_comments_guidance: str | None,
+) -> str:
+    message = (
+        f"Generate narration for exactly {slide_count} slides. Use zero-based "
+        "slide_position values."
+    )
+    if author_comments_guidance:
+        message = f"{message}\n\n{author_comments_guidance}"
+    return message
 
 
 async def _persist_narration_text(

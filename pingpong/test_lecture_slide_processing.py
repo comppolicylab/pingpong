@@ -195,6 +195,20 @@ async def test_generate_narration_text_requires_exact_slide_count(
 ):
     await _create_class_and_deck(db, slide_count=2)
     async with db.async_session() as session:
+        session.add_all(
+            [
+                models.LectureSlidePage(
+                    lecture_slide_deck_id=1,
+                    position=0,
+                    user_notes="Emphasize the setup before introducing the result.",
+                ),
+                models.LectureSlidePage(
+                    lecture_slide_deck_id=1,
+                    position=1,
+                    user_notes="Mention this is a common exam misconception.",
+                ),
+            ]
+        )
         run = models.LectureSlideProcessingRun(
             lecture_slide_deck_id=1,
             lecture_slide_deck_id_snapshot=1,
@@ -263,6 +277,9 @@ async def test_generate_narration_text_requires_exact_slide_count(
     assert slides_schema["maxItems"] == 2
     payload = json.dumps(captured["input"])
     assert "Generate narration for exactly 2 slides" in payload
+    assert "AUTHOR COMMENTS BY SLIDE" in payload
+    assert "Emphasize the setup before introducing the result." in payload
+    assert "Mention this is a common exam misconception." in payload
     assert "Narration prompt" not in payload
     assert captured["deleted_file_id"] == "file-pdf"
 
