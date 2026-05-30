@@ -667,6 +667,68 @@ async def test_synthesize_slide_audio_skips_empty_pages_and_stores_ogg_metadata(
         assert stored_object.content_type == "audio/ogg"
 
 
+async def test_synthesize_slide_audio_deletes_uploaded_audio_when_db_lookup_raises(
+    db, monkeypatch
+):
+    await _create_class_and_deck(db)
+    async with db.async_session() as session:
+        page = models.LectureSlidePage(
+            lecture_slide_deck_id=1,
+            position=0,
+            narration_text="Narration.",
+        )
+        run = models.LectureSlideProcessingRun(
+            lecture_slide_deck_id=1,
+            lecture_slide_deck_id_snapshot=1,
+            class_id=1,
+            stage=schemas.LectureSlideProcessingStage.NARRATION_AUDIO,
+            attempt_number=1,
+            status=schemas.LectureSlideProcessingRunStatus.RUNNING,
+            lease_token="lease",
+        )
+        session.add_all([page, run])
+        await session.commit()
+        run_id = run.id
+
+    async def fake_get_elevenlabs_api_key(_class_id):
+        return "elevenlabs-key"
+
+    async def fake_synthesize_speech(_api_key, _voice_id, _text):
+        return "audio/mpeg", b"audio"
+
+    async def fake_store_audio(store_key, _content_type, _audio):
+        return store_key, 5
+
+    async def fake_delete_audio_key(key):
+        deleted_keys.append(key)
+
+    async def fake_get_by_id(_cls, _session, _id):
+        raise RuntimeError("db lookup failed")
+
+    deleted_keys: list[str] = []
+    monkeypatch.setattr(
+        lecture_slide_processing, "_get_elevenlabs_api_key", fake_get_elevenlabs_api_key
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing, "synthesize_elevenlabs_speech", fake_synthesize_speech
+    )
+    monkeypatch.setattr(lecture_slide_processing, "_store_audio", fake_store_audio)
+    monkeypatch.setattr(lecture_slide_processing, "audio_duration_ms", lambda *_: 100)
+    monkeypatch.setattr(
+        lecture_slide_processing, "_delete_audio_key_quietly", fake_delete_audio_key
+    )
+    monkeypatch.setattr(
+        models.LectureSlideProcessingRun,
+        "get_by_id",
+        classmethod(fake_get_by_id),
+    )
+
+    with pytest.raises(RuntimeError, match="db lookup failed"):
+        await lecture_slide_processing._synthesize_slide_audio(run_id, "lease", 1)
+
+    assert deleted_keys
+
+
 async def test_transcribe_and_persist_slide_audio_offsets_words(
     db, monkeypatch, tmp_path
 ):
@@ -831,6 +893,164 @@ async def test_persist_composite_artifacts_stores_combined_audio_as_ogg(
         assert deck is not None
         assert deck.continuous_narration_stored_object is not None
         assert deck.continuous_narration_stored_object.content_type == "audio/ogg"
+
+
+async def test_synthesize_knowledge_check_audio_deletes_uploaded_audio_when_db_lookup_raises(
+    db, monkeypatch
+):
+    await _create_class_and_deck(db)
+    async with db.async_session() as session:
+        narration = models.LectureSlideNarration(
+            status=schemas.LectureSlideNarrationStatus.PENDING
+        )
+        question = models.LectureSlideQuestion(
+            lecture_slide_deck_id=1,
+            position=0,
+            slide_position=0,
+            slide_offset_ms=0,
+            stop_offset_ms=1000,
+            question_type=schemas.LectureSlideQuestionType.SINGLE_SELECT,
+            question_text="Question?",
+            intro_text="Intro narration.",
+            intro_narration=narration,
+        )
+        run = models.LectureSlideProcessingRun(
+            lecture_slide_deck_id=1,
+            lecture_slide_deck_id_snapshot=1,
+            class_id=1,
+            stage=schemas.LectureSlideProcessingStage.MANIFEST_GENERATION,
+            attempt_number=1,
+            status=schemas.LectureSlideProcessingRunStatus.RUNNING,
+            lease_token="lease",
+        )
+        session.add_all([question, run])
+        await session.commit()
+        run_id = run.id
+
+    async def fake_get_elevenlabs_api_key(_class_id):
+        return "elevenlabs-key"
+
+    async def fake_synthesize_speech(_api_key, _voice_id, _text):
+        return "audio/mpeg", b"audio"
+
+    async def fake_store_audio(store_key, _content_type, _audio):
+        return store_key, 5
+
+    async def fake_delete_audio_key(key):
+        deleted_keys.append(key)
+
+    async def fake_get_by_id(_cls, _session, _id):
+        raise RuntimeError("db lookup failed")
+
+    deleted_keys: list[str] = []
+    monkeypatch.setattr(
+        lecture_slide_processing, "_get_elevenlabs_api_key", fake_get_elevenlabs_api_key
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing, "synthesize_elevenlabs_speech", fake_synthesize_speech
+    )
+    monkeypatch.setattr(lecture_slide_processing, "_store_audio", fake_store_audio)
+    monkeypatch.setattr(lecture_slide_processing, "audio_duration_ms", lambda *_: 100)
+    monkeypatch.setattr(
+        lecture_slide_processing, "_delete_audio_key_quietly", fake_delete_audio_key
+    )
+    monkeypatch.setattr(
+        models.LectureSlideProcessingRun,
+        "get_by_id",
+        classmethod(fake_get_by_id),
+    )
+
+    with pytest.raises(RuntimeError, match="db lookup failed"):
+        await lecture_slide_processing._synthesize_knowledge_check_audio(
+            run_id, "lease", 1
+        )
+
+    assert deleted_keys
+
+
+async def test_persist_composite_artifacts_deletes_uploads_when_db_lookup_raises(
+    db, monkeypatch
+):
+    await _create_class_and_deck(db)
+    async with db.async_session() as session:
+        stored_object = models.LectureSlideNarrationStoredObject(
+            key="slides/page-1.ogg",
+            content_type="audio/ogg",
+            content_length=8,
+            duration_ms=100,
+        )
+        page = models.LectureSlidePage(
+            lecture_slide_deck_id=1,
+            position=0,
+            narration=models.LectureSlideNarration(
+                stored_object=stored_object,
+                status=schemas.LectureSlideNarrationStatus.READY,
+            ),
+        )
+        run = models.LectureSlideProcessingRun(
+            lecture_slide_deck_id=1,
+            lecture_slide_deck_id_snapshot=1,
+            class_id=1,
+            stage=schemas.LectureSlideProcessingStage.COMPOSITE_ARTIFACTS,
+            attempt_number=1,
+            status=schemas.LectureSlideProcessingRunStatus.RUNNING,
+            lease_token="lease",
+        )
+        session.add_all([stored_object, page, run])
+        await session.commit()
+        run_id = run.id
+
+    class FakeVideoStore:
+        async def put(self, key, _body, _content_type):
+            caption_keys.append(key)
+
+        async def delete(self, key):
+            deleted_caption_keys.append(key)
+
+    async def fake_store_audio(store_key, _content_type, _audio):
+        audio_keys.append(store_key)
+        return store_key, 12
+
+    async def fake_delete_audio_key(key):
+        deleted_audio_keys.append(key)
+
+    async def fake_get_by_id(_cls, _session, _id):
+        raise RuntimeError("db lookup failed")
+
+    audio_keys: list[str] = []
+    caption_keys: list[str] = []
+    deleted_audio_keys: list[str] = []
+    deleted_caption_keys: list[str] = []
+    monkeypatch.setattr(config, "video_store", SimpleNamespace(store=FakeVideoStore()))
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "_combine_audio_objects",
+        lambda _stored_objects: _async_value(b"combined-ogg"),
+    )
+    monkeypatch.setattr(lecture_slide_processing, "_store_audio", fake_store_audio)
+    monkeypatch.setattr(
+        lecture_slide_processing, "_delete_audio_key_quietly", fake_delete_audio_key
+    )
+    monkeypatch.setattr(
+        models.LectureSlideProcessingRun,
+        "get_by_id",
+        classmethod(fake_get_by_id),
+    )
+
+    with pytest.raises(RuntimeError, match="db lookup failed"):
+        await lecture_slide_processing._persist_composite_artifacts(
+            run_id,
+            "lease",
+            1,
+            [
+                schemas.LectureVideoManifestWordV3(
+                    id="w1", word="hello", start_offset_ms=0, end_offset_ms=100
+                )
+            ],
+        )
+
+    assert deleted_audio_keys == audio_keys
+    assert deleted_caption_keys == caption_keys
 
 
 async def test_claim_next_any_processing_run_returns_negative_id_for_older_video_run(

@@ -1316,45 +1316,49 @@ async def _synthesize_slide_audio(
             content_type,
             audio,
         )
-        async with config.db.driver.async_session() as session:
-            run = await models.LectureSlideProcessingRun.get_by_id(session, run_id)
-            page = await session.get(models.LectureSlidePage, page_id)
-            if (
-                run is None
-                or page is None
-                or run.status != schemas.LectureSlideProcessingRunStatus.RUNNING
-                or run.lease_token != lease_token
-            ):
-                await _delete_audio_key_quietly(store_key)
-                return None
-            stored_object = models.LectureSlideNarrationStoredObject(
-                key=store_key,
-                content_type=content_type,
-                content_length=content_length,
-                duration_ms=duration_ms,
-            )
-            session.add(stored_object)
-            await session.flush()
-            narration = models.LectureSlideNarration(
-                stored_object_id=stored_object.id,
-                status=schemas.LectureSlideNarrationStatus.READY,
-            )
-            session.add(narration)
-            await session.flush()
-            page.narration_id = narration.id
-            session.add(page)
-            await session.commit()
-            artifacts.append(
-                SlideAudioArtifact(
-                    page_id=page_id,
-                    page_position=page_position,
+        try:
+            async with config.db.driver.async_session() as session:
+                run = await models.LectureSlideProcessingRun.get_by_id(session, run_id)
+                page = await session.get(models.LectureSlidePage, page_id)
+                if (
+                    run is None
+                    or page is None
+                    or run.status != schemas.LectureSlideProcessingRunStatus.RUNNING
+                    or run.lease_token != lease_token
+                ):
+                    await _delete_audio_key_quietly(store_key)
+                    return None
+                stored_object = models.LectureSlideNarrationStoredObject(
+                    key=store_key,
                     content_type=content_type,
-                    audio=audio,
+                    content_length=content_length,
                     duration_ms=duration_ms,
-                    store_key=store_key,
-                    stored_object_id=stored_object.id,
                 )
+                session.add(stored_object)
+                await session.flush()
+                narration = models.LectureSlideNarration(
+                    stored_object_id=stored_object.id,
+                    status=schemas.LectureSlideNarrationStatus.READY,
+                )
+                session.add(narration)
+                await session.flush()
+                page.narration_id = narration.id
+                session.add(page)
+                await session.commit()
+        except Exception:
+            await _delete_audio_key_quietly(store_key)
+            raise
+        artifacts.append(
+            SlideAudioArtifact(
+                page_id=page_id,
+                page_position=page_position,
+                content_type=content_type,
+                audio=audio,
+                duration_ms=duration_ms,
+                store_key=store_key,
+                stored_object_id=stored_object.id,
             )
+        )
     return artifacts
 
 
@@ -2236,32 +2240,36 @@ async def _synthesize_knowledge_check_audio(
             audio,
         )
         duration_ms = audio_duration_ms(audio, content_type)
-        async with config.db.driver.async_session() as session:
-            run = await models.LectureSlideProcessingRun.get_by_id(session, run_id)
-            narration = await models.LectureSlideNarration.get_by_id(
-                session, narration_id
-            )
-            if (
-                run is None
-                or narration is None
-                or run.status != schemas.LectureSlideProcessingRunStatus.RUNNING
-                or run.lease_token != lease_token
-            ):
-                await _delete_audio_key_quietly(store_key)
-                return
-            stored_object = models.LectureSlideNarrationStoredObject(
-                key=store_key,
-                content_type=content_type,
-                content_length=content_length,
-                duration_ms=duration_ms,
-            )
-            session.add(stored_object)
-            await session.flush()
-            narration.stored_object_id = stored_object.id
-            narration.status = schemas.LectureSlideNarrationStatus.READY
-            narration.error_message = None
-            session.add(narration)
-            await session.commit()
+        try:
+            async with config.db.driver.async_session() as session:
+                run = await models.LectureSlideProcessingRun.get_by_id(session, run_id)
+                narration = await models.LectureSlideNarration.get_by_id(
+                    session, narration_id
+                )
+                if (
+                    run is None
+                    or narration is None
+                    or run.status != schemas.LectureSlideProcessingRunStatus.RUNNING
+                    or run.lease_token != lease_token
+                ):
+                    await _delete_audio_key_quietly(store_key)
+                    return
+                stored_object = models.LectureSlideNarrationStoredObject(
+                    key=store_key,
+                    content_type=content_type,
+                    content_length=content_length,
+                    duration_ms=duration_ms,
+                )
+                session.add(stored_object)
+                await session.flush()
+                narration.stored_object_id = stored_object.id
+                narration.status = schemas.LectureSlideNarrationStatus.READY
+                narration.error_message = None
+                session.add(narration)
+                await session.commit()
+        except Exception:
+            await _delete_audio_key_quietly(store_key)
+            raise
 
 
 async def _persist_composite_artifacts(
@@ -2297,40 +2305,47 @@ async def _persist_composite_artifacts(
         caption_key, io.BytesIO(caption_bytes), "text/vtt"
     )
 
-    async with config.db.driver.async_session() as session:
-        run = await models.LectureSlideProcessingRun.get_by_id(session, run_id)
-        deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
-            session, deck_id
-        )
-        if (
-            run is None
-            or deck is None
-            or run.status != schemas.LectureSlideProcessingRunStatus.RUNNING
-            or run.lease_token != lease_token
-        ):
-            await _delete_audio_key_quietly(audio_key)
-            if config.video_store:
-                with contextlib.suppress(Exception):
-                    await config.video_store.store.delete(caption_key)
-            return
-        duration_ms = audio_duration_ms(combined_audio, content_type)
-        audio_stored_object = models.LectureSlideNarrationStoredObject(
-            key=audio_key,
-            content_type=content_type,
-            content_length=audio_length,
-            duration_ms=duration_ms,
-        )
-        caption_stored_object = models.LectureSlideCaptionStoredObject(
-            key=caption_key,
-            content_type="text/vtt",
-            content_length=len(caption_bytes),
-        )
-        session.add_all([audio_stored_object, caption_stored_object])
-        await session.flush()
-        deck.continuous_narration_stored_object_id = audio_stored_object.id
-        deck.caption_stored_object_id = caption_stored_object.id
-        session.add(deck)
-        await session.commit()
+    try:
+        async with config.db.driver.async_session() as session:
+            run = await models.LectureSlideProcessingRun.get_by_id(session, run_id)
+            deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+                session, deck_id
+            )
+            if (
+                run is None
+                or deck is None
+                or run.status != schemas.LectureSlideProcessingRunStatus.RUNNING
+                or run.lease_token != lease_token
+            ):
+                await _delete_audio_key_quietly(audio_key)
+                if config.video_store:
+                    with contextlib.suppress(Exception):
+                        await config.video_store.store.delete(caption_key)
+                return
+            duration_ms = audio_duration_ms(combined_audio, content_type)
+            audio_stored_object = models.LectureSlideNarrationStoredObject(
+                key=audio_key,
+                content_type=content_type,
+                content_length=audio_length,
+                duration_ms=duration_ms,
+            )
+            caption_stored_object = models.LectureSlideCaptionStoredObject(
+                key=caption_key,
+                content_type="text/vtt",
+                content_length=len(caption_bytes),
+            )
+            session.add_all([audio_stored_object, caption_stored_object])
+            await session.flush()
+            deck.continuous_narration_stored_object_id = audio_stored_object.id
+            deck.caption_stored_object_id = caption_stored_object.id
+            session.add(deck)
+            await session.commit()
+    except Exception:
+        await _delete_audio_key_quietly(audio_key)
+        if config.video_store:
+            with contextlib.suppress(Exception):
+                await config.video_store.store.delete(caption_key)
+        raise
 
 
 async def _combine_audio_objects(
