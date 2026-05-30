@@ -846,6 +846,8 @@ async def _await_with_run_lease_heartbeat(
                 try:
                     await task
                 except asyncio.CancelledError:
+                    # Task was just cancelled via task.cancel(); ignore the expected
+                    # CancelledError from awaiting it so the outer logic can proceed.
                     pass
                 return None
     except Exception:
@@ -854,6 +856,7 @@ async def _await_with_run_lease_heartbeat(
             try:
                 await task
             except asyncio.CancelledError:
+                # Task was cancelled as part of cleanup; suppress the expected CancelledError.
                 pass
         raise
 
