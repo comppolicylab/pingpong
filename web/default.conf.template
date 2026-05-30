@@ -25,7 +25,7 @@ server {
         try_files $uri $uri/ $uri.html /index.html;
     }
 
-    location ~* \.(?:css|js|jpg|svg|png|woff|woff2|ttf)$ {
+    location ~* \.(?:css|js|jpg|svg|png|woff|woff2|ttf|mjs)$ {
         expires 30d;
         add_header Cache-Control "public";
     }

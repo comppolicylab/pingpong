@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Literal, TypeVar, TypedDict, cast
 
 import openai
+from openai.types import Reasoning
 import uuid_utils as uuid
 from openai.types.audio import TranscriptionWord
 from openai.types.responses.response_input_param import ResponseInputParam
@@ -213,6 +214,19 @@ SLIDE LESSON MANIFEST ADAPTATION:
   stop_offset_ms, continue_offset_ms, summary_checkpoints, and moment_contexts.
 - Use slide_offset_ms as the offset within the visible slide where the question
   appears.
+- Keep each question's slide_offset_ms inside the selected slide's timing
+  range: 0 <= slide_offset_ms <= end_offset_ms - start_offset_ms for that slide.
+  The question's stop_offset_ms must also stay between that slide's
+  start_offset_ms and end_offset_ms. If a question falls on a slide boundary,
+  use the boundary timestamp exactly or assign it to the next slide instead of
+  placing it a few milliseconds outside the slide.
+- Derive slide_offset_ms from stop_offset_ms minus the selected slide's
+  start_offset_ms. Derive continue_slide_offset_ms the same way from
+  continue_offset_ms when you provide slide coordinates. Do not estimate slide
+  offsets independently.
+- Transcript word ids include the slide number, such as slide-17-word-3. Use
+  that slide number as a sanity check when choosing pause and resume points, but
+  do not emit word-id fields in the JSON.
 - Options use option_text, post_answer_text, continue_offset_ms, correct, and
   optional continue_slide_position / continue_slide_offset_ms when the resume
   point is naturally described in slide coordinates.
@@ -1239,7 +1253,6 @@ async def _extract_and_store_slide_assets(
                     )
                 )
             deck.slide_count = len(assets)
-            session.add(deck)
             await session.commit()
     finally:
         cleanup_extracted_slide_assets(assets)
@@ -2438,7 +2451,6 @@ async def _persist_slide_manifest(
         deck.context_version = 4
         deck.lecture_slide_chat_available = bool(transcript)
         deck.transcript_data = transcript_data_from_words(transcript)
-        session.add(deck)
         await session.commit()
 
 
@@ -2639,6 +2651,9 @@ async def _parse_responses_output(
                 instructions=instructions,
                 input=input_messages,
                 text_format=response_model,
+                reasoning=Reasoning(effort="high", summary=None),
+                service_tier="priority",
+                store=False,
             )
             if response.output_parsed is None:
                 raise RuntimeError("OpenAI Responses parse returned no parsed output.")
