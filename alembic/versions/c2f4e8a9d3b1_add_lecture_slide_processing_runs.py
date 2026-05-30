@@ -158,6 +158,29 @@ def downgrade() -> None:
         table_name="lecture_slide_processing_runs",
     )
     op.drop_table("lecture_slide_processing_runs")
+    sa.Enum(
+        "ASSISTANT_DETACHED",
+        "ASSISTANT_DELETED",
+        "LECTURE_SLIDE_DECK_DELETED",
+        name="lectureslideprocessingcancelreason",
+    ).drop(op.get_bind(), checkfirst=True)
+    sa.Enum(
+        "QUEUED",
+        "RUNNING",
+        "COMPLETED",
+        "FAILED",
+        "CANCELLED",
+        name="lectureslideprocessingrunstatus",
+    ).drop(op.get_bind(), checkfirst=True)
+    sa.Enum(
+        "SLIDE_ASSET_EXTRACTION",
+        "NARRATION_TEXT",
+        "NARRATION_AUDIO",
+        "NARRATION_TRANSCRIPTION",
+        "MANIFEST_GENERATION",
+        "COMPOSITE_ARTIFACTS",
+        name="lectureslideprocessingstage",
+    ).drop(op.get_bind(), checkfirst=True)
 
     with op.batch_alter_table("lecture_slide_decks") as batch_op:
         batch_op.drop_column("narration_prompt")
