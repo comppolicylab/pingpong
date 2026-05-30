@@ -2215,6 +2215,15 @@ export const retryAssistantLectureVideo = async (
 	return await POST<never, LectureVideoSummary>(f, url);
 };
 
+export const retryAssistantLectureSlides = async (
+	f: Fetcher,
+	classId: number,
+	assistantId: number
+) => {
+	const url = `class/${classId}/assistant/${assistantId}/lecture-slides/retry`;
+	return await POST<never, LectureSlideSummary>(f, url);
+};
+
 /**
  * Load the lecture-video editor policy for a class.
  */

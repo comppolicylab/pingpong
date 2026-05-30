@@ -2730,6 +2730,35 @@
 		}
 	};
 
+	const retryLectureSlideProcessing = async () => {
+		if (data.isCreating || !data.assistantId || !currentLectureSlideDeck) {
+			return;
+		}
+
+		let response;
+		try {
+			response = await api.retryAssistantLectureSlides(fetch, data.class.id, data.assistantId);
+		} catch (error) {
+			sadToast(
+				`Could not retry lecture slide processing:\n${
+					error instanceof Error ? error.message : error?.toString() || 'Unknown error'
+				}`
+			);
+			return;
+		}
+		const expanded = api.expandResponse(response);
+		if (expanded.error || !expanded.data) {
+			sadToast(
+				`Could not retry lecture slide processing:\n${expanded.error?.detail || 'Unknown error'}`
+			);
+			return;
+		}
+
+		syncLectureSlideSummary(expanded.data);
+		void refreshAssistantLectureSlideStatus();
+		happyToast('Lecture slide processing retried');
+	};
+
 	const syncLectureVideoSummary = (summary: api.LectureVideoSummary) => {
 		currentLectureVideo = { ...(currentLectureVideo || summary), ...summary };
 		if (selectedLectureVideo?.id === summary.id) {
@@ -3840,6 +3869,11 @@
 								</div>
 							</div>
 							<div class="flex items-center gap-2">
+								{#if !data.isCreating && data.assistantId && currentLectureSlideDeck && selectedLectureSlideDeck?.id === currentLectureSlideDeck.id && currentLectureSlideDeck.status === 'failed'}
+									<Button color="light" size="xs" onclick={retryLectureSlideProcessing}>
+										Retry
+									</Button>
+								{/if}
 								<Button
 									type="button"
 									color="light"

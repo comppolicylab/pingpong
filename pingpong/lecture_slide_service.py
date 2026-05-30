@@ -29,6 +29,7 @@ LECTURE_SLIDE_DECK_ALREADY_ASSIGNED_DETAIL = (
 class LectureSlidePageUpdateResult:
     notes_changed: bool = False
     narration_changed: bool = False
+    narration_changed_positions: frozenset[int] = frozenset()
 
 
 def generate_source_store_key() -> str:
@@ -231,7 +232,20 @@ async def apply_lecture_slide_page_notes(
 ) -> LectureSlidePageUpdateResult:
     notes_changed = False
     narration_changed = False
-    for note in notes:
+    narration_changed_positions: set[int] = set()
+    notes_by_position = {note.position: note for note in notes}
+    pages_by_position = {
+        page.position: page
+        for page in (
+            await session.scalars(
+                select(models.LectureSlidePage).where(
+                    models.LectureSlidePage.lecture_slide_deck_id == deck.id,
+                    models.LectureSlidePage.position.in_(notes_by_position),
+                )
+            )
+        ).all()
+    }
+    for note in notes_by_position.values():
         if note.position >= deck.slide_count:
             raise HTTPException(
                 status_code=400,
@@ -239,9 +253,7 @@ async def apply_lecture_slide_page_notes(
             )
         user_notes = (note.user_notes or "").strip() or None
         narration_text = (note.narration_text or "").strip() or None
-        page = next(
-            (page for page in deck.pages if page.position == note.position), None
-        )
+        page = pages_by_position.get(note.position)
         if page is None:
             if user_notes is None and narration_text is None:
                 continue
@@ -251,10 +263,11 @@ async def apply_lecture_slide_page_notes(
                 user_notes=user_notes,
                 narration_text=narration_text,
             )
-            deck.pages.append(page)
             session.add(page)
             notes_changed = notes_changed or user_notes is not None
             narration_changed = narration_changed or narration_text is not None
+            if narration_text is not None:
+                narration_changed_positions.add(note.position)
             continue
         if page.user_notes != user_notes:
             page.user_notes = user_notes
@@ -262,13 +275,37 @@ async def apply_lecture_slide_page_notes(
             notes_changed = True
         if page.narration_text != narration_text:
             page.narration_text = narration_text
+            page.narration_id = None
+            page.start_offset_ms = None
+            page.end_offset_ms = None
             session.add(page)
             narration_changed = True
+            narration_changed_positions.add(note.position)
     if notes_changed or narration_changed:
         await session.flush()
     return LectureSlidePageUpdateResult(
         notes_changed=notes_changed,
         narration_changed=narration_changed,
+        narration_changed_positions=frozenset(narration_changed_positions),
+    )
+
+
+async def lecture_slide_deck_has_pages(session: AsyncSession, deck_id: int) -> bool:
+    page_id = await session.scalar(
+        select(models.LectureSlidePage.id)
+        .where(models.LectureSlidePage.lecture_slide_deck_id == deck_id)
+        .limit(1)
+    )
+    return page_id is not None
+
+
+async def clear_lecture_slide_page_narrations(
+    session: AsyncSession, deck_id: int
+) -> None:
+    await session.execute(
+        update(models.LectureSlidePage)
+        .where(models.LectureSlidePage.lecture_slide_deck_id == deck_id)
+        .values(narration_id=None, start_offset_ms=None, end_offset_ms=None)
     )
 
 

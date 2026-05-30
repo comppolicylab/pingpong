@@ -1,5 +1,6 @@
 import json
 from datetime import timedelta
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -700,6 +701,77 @@ async def test_synthesize_slide_audio_skips_empty_pages_and_stores_ogg_metadata(
         assert stored_object.content_type == "audio/ogg"
 
 
+async def test_synthesize_slide_audio_skips_pages_with_existing_narration(
+    db, monkeypatch
+):
+    await _create_class_and_deck(db, slide_count=2)
+    async with db.async_session() as session:
+        stored_object = models.LectureSlideNarrationStoredObject(
+            key="slides/page-0.ogg",
+            content_type="audio/ogg",
+            content_length=5,
+            duration_ms=1000,
+        )
+        pages = [
+            models.LectureSlidePage(
+                lecture_slide_deck_id=1,
+                position=0,
+                narration_text="Existing narration.",
+                narration=models.LectureSlideNarration(
+                    stored_object=stored_object,
+                    status=schemas.LectureSlideNarrationStatus.READY,
+                ),
+            ),
+            models.LectureSlidePage(
+                lecture_slide_deck_id=1,
+                position=1,
+                narration_text="Changed narration.",
+            ),
+        ]
+        run = models.LectureSlideProcessingRun(
+            lecture_slide_deck_id=1,
+            lecture_slide_deck_id_snapshot=1,
+            class_id=1,
+            stage=schemas.LectureSlideProcessingStage.NARRATION_AUDIO,
+            attempt_number=1,
+            status=schemas.LectureSlideProcessingRunStatus.RUNNING,
+            lease_token="lease",
+        )
+        session.add_all([stored_object, *pages, run])
+        await session.commit()
+        changed_page_id = pages[1].id
+        run_id = run.id
+
+    requested_texts: list[str] = []
+
+    async def fake_get_elevenlabs_api_key(_class_id):
+        return "elevenlabs-key"
+
+    async def fake_synthesize_speech(_api_key, _voice_id, text):
+        requested_texts.append(text)
+        return "audio/mpeg", f"audio-{text}".encode("utf-8")
+
+    async def fake_store_audio(store_key, _content_type, audio):
+        return store_key, len(audio)
+
+    monkeypatch.setattr(
+        lecture_slide_processing, "_get_elevenlabs_api_key", fake_get_elevenlabs_api_key
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing, "synthesize_elevenlabs_speech", fake_synthesize_speech
+    )
+    monkeypatch.setattr(lecture_slide_processing, "_store_audio", fake_store_audio)
+    monkeypatch.setattr(lecture_slide_processing, "audio_duration_ms", lambda *_: 500)
+
+    artifacts = await lecture_slide_processing._synthesize_slide_audio(
+        run_id, "lease", 1
+    )
+
+    assert requested_texts == ["Changed narration."]
+    assert artifacts is not None
+    assert [artifact.page_id for artifact in artifacts] == [changed_page_id]
+
+
 async def test_synthesize_slide_audio_deletes_uploaded_audio_when_db_lookup_raises(
     db, monkeypatch
 ):
@@ -836,6 +908,174 @@ async def test_transcribe_and_persist_slide_audio_offsets_words(
         assert [page.end_offset_ms for page in deck.pages] == [1000, 3000]
         assert deck.transcript_data is not None
         assert len(deck.transcript_data["word_level_transcription"]) == 2
+
+
+async def test_transcribe_and_persist_slide_audio_reuses_unchanged_slide_words(
+    db, monkeypatch, tmp_path
+):
+    await _create_class_and_deck(db, slide_count=2)
+    async with db.async_session() as session:
+        unchanged_stored_object = models.LectureSlideNarrationStoredObject(
+            key="slides/page-1.ogg",
+            content_type="audio/ogg",
+            content_length=5,
+            duration_ms=1000,
+        )
+        pages = [
+            models.LectureSlidePage(
+                lecture_slide_deck_id=1,
+                position=0,
+                start_offset_ms=0,
+                end_offset_ms=1000,
+            ),
+            models.LectureSlidePage(
+                lecture_slide_deck_id=1,
+                position=1,
+                narration=models.LectureSlideNarration(
+                    stored_object=unchanged_stored_object,
+                    status=schemas.LectureSlideNarrationStatus.READY,
+                ),
+                start_offset_ms=1000,
+                end_offset_ms=2000,
+            ),
+        ]
+        run = models.LectureSlideProcessingRun(
+            lecture_slide_deck_id=1,
+            lecture_slide_deck_id_snapshot=1,
+            class_id=1,
+            stage=schemas.LectureSlideProcessingStage.NARRATION_TRANSCRIPTION,
+            attempt_number=1,
+            status=schemas.LectureSlideProcessingRunStatus.RUNNING,
+            lease_token="lease",
+        )
+        deck = await session.get(models.LectureSlideDeck, 1)
+        assert deck is not None
+        deck.total_duration_ms = 2000
+        deck.transcript_data = lecture_slide_processing.transcript_data_from_words(
+            [
+                schemas.LectureVideoManifestWordV3(
+                    id="slide-0-word-0",
+                    word="old",
+                    start_offset_ms=100,
+                    end_offset_ms=300,
+                ),
+                schemas.LectureVideoManifestWordV3(
+                    id="slide-1-word-0",
+                    word="unchanged",
+                    start_offset_ms=1100,
+                    end_offset_ms=1300,
+                ),
+            ]
+        )
+        session.add_all([unchanged_stored_object, *pages, run, deck])
+        await session.commit()
+        changed_page_id = pages[0].id
+        run_id = run.id
+
+    async def fake_transcribe_audio_words(_path, _client):
+        return [
+            schemas.LectureVideoManifestWordV3(
+                id="w",
+                word="new",
+                start_offset_ms=0,
+                end_offset_ms=500,
+            )
+        ]
+
+    monkeypatch.setattr(
+        lecture_slide_processing, "transcribe_audio_words", fake_transcribe_audio_words
+    )
+
+    words = await lecture_slide_processing._transcribe_and_persist_slide_audio(
+        run_id,
+        "lease",
+        1,
+        [
+            lecture_slide_processing.SlideAudioArtifact(
+                page_id=changed_page_id,
+                page_position=0,
+                content_type="audio/ogg",
+                audio=b"audio-1",
+                duration_ms=1500,
+                store_key="a1",
+                stored_object_id=1,
+            )
+        ],
+        SimpleNamespace(),
+        str(tmp_path),
+    )
+
+    assert [
+        (word.word, word.start_offset_ms, word.end_offset_ms) for word in words or []
+    ] == [
+        ("new", 0, 500),
+        ("unchanged", 1600, 1800),
+    ]
+    async with db.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, 1
+        )
+        assert deck is not None
+        assert deck.total_duration_ms == 2500
+        assert [page.start_offset_ms for page in deck.pages] == [0, 1500]
+        assert [page.end_offset_ms for page in deck.pages] == [1500, 2500]
+
+
+async def test_transcribe_and_persist_slide_audio_uses_supported_temp_extension(
+    db, monkeypatch, tmp_path
+):
+    await _create_class_and_deck(db)
+    async with db.async_session() as session:
+        page = models.LectureSlidePage(lecture_slide_deck_id=1, position=0)
+        run = models.LectureSlideProcessingRun(
+            lecture_slide_deck_id=1,
+            lecture_slide_deck_id_snapshot=1,
+            class_id=1,
+            stage=schemas.LectureSlideProcessingStage.NARRATION_TRANSCRIPTION,
+            attempt_number=1,
+            status=schemas.LectureSlideProcessingRunStatus.RUNNING,
+            lease_token="lease",
+        )
+        session.add_all([page, run])
+        await session.commit()
+        page_id = page.id
+        run_id = run.id
+
+    seen_paths: list[str] = []
+
+    async def fake_transcribe_audio_words(path, _client):
+        seen_paths.append(path)
+        return [
+            schemas.LectureVideoManifestWordV3(
+                id="w", word="hello", start_offset_ms=0, end_offset_ms=100
+            )
+        ]
+
+    monkeypatch.setattr(
+        lecture_slide_processing, "transcribe_audio_words", fake_transcribe_audio_words
+    )
+
+    words = await lecture_slide_processing._transcribe_and_persist_slide_audio(
+        run_id,
+        "lease",
+        1,
+        [
+            lecture_slide_processing.SlideAudioArtifact(
+                page_id=page_id,
+                page_position=0,
+                content_type="audio/ogg",
+                audio=b"audio",
+                duration_ms=100,
+                store_key="a1",
+                stored_object_id=1,
+            )
+        ],
+        SimpleNamespace(),
+        str(tmp_path),
+    )
+
+    assert words is not None
+    assert [Path(path).suffix for path in seen_paths] == [".ogg"]
 
 
 async def test_persist_composite_artifacts_stores_combined_audio_as_ogg(

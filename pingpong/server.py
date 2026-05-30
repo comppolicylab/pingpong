@@ -10232,6 +10232,76 @@ async def retry_assistant_lecture_video_processing(
 
 
 @v1.post(
+    "/class/{class_id}/assistant/{assistant_id}/lecture-slides/retry",
+    dependencies=[Depends(Authz("can_edit", "assistant:{assistant_id}"))],
+    response_model=schemas.LectureSlideSummary,
+)
+async def retry_assistant_lecture_slide_processing(
+    class_id: str,
+    assistant_id: str,
+    request: StateRequest,
+):
+    assistant = await lecture_slide_service.get_lecture_slide_assistant_for_class(
+        request.state["db"], int(assistant_id), int(class_id)
+    )
+    if assistant.lecture_slide_deck_id is None:
+        raise HTTPException(404, "Lecture slide deck not found.")
+
+    deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+        request.state["db"], assistant.lecture_slide_deck_id
+    )
+    if deck is None or deck.class_id != int(class_id):
+        raise HTTPException(404, "Lecture slide deck not found.")
+    if deck.status != schemas.LectureSlideDeckStatus.FAILED:
+        raise HTTPException(
+            status_code=409,
+            detail="Lecture slide retry is only available after lecture slide processing fails.",
+        )
+
+    latest_failed_stage = await request.state["db"].scalar(
+        select(models.LectureSlideProcessingRun.stage)
+        .where(
+            models.LectureSlideProcessingRun.lecture_slide_deck_id_snapshot == deck.id,
+            models.LectureSlideProcessingRun.status
+            == schemas.LectureSlideProcessingRunStatus.FAILED,
+        )
+        .order_by(
+            models.LectureSlideProcessingRun.finished_at.desc().nulls_last(),
+            models.LectureSlideProcessingRun.id.desc(),
+        )
+        .limit(1)
+    )
+    if latest_failed_stage is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Lecture slide retry is only available after lecture slide processing fails.",
+        )
+
+    retry_stage = schemas.LectureSlideProcessingStage(latest_failed_stage)
+    if retry_stage == schemas.LectureSlideProcessingStage.NARRATION_TRANSCRIPTION:
+        retry_stage = schemas.LectureSlideProcessingStage.NARRATION_AUDIO
+
+    retry_run = await lecture_slide_processing.queue_lecture_slide_processing_run(
+        request.state["db"],
+        deck,
+        requested_by_assistant_id=assistant.id,
+        stage=retry_stage,
+    )
+    if retry_run is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Lecture slide retry is no longer available because the assistant or lecture slide configuration changed.",
+        )
+
+    refreshed_deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+        request.state["db"], deck.id
+    )
+    return await lecture_slide_service.lecture_slide_summary_from_model(
+        refreshed_deck or deck
+    )
+
+
+@v1.post(
     "/class/{class_id}/lecture-video/voice/validate",
     dependencies=[
         Depends(Authz("can_create_assistants", "class:{class_id}")),
@@ -13027,13 +13097,11 @@ async def update_assistant(
                 notes_changed = page_update_result.notes_changed
                 narration_text_changed = page_update_result.narration_changed
 
-            needs_full_processing = (
-                target_lecture_slide_deck.status
-                in {
-                    schemas.LectureSlideDeckStatus.UPLOADED,
-                    schemas.LectureSlideDeckStatus.FAILED,
-                }
-                or not target_lecture_slide_deck.pages
+            needs_full_processing = target_lecture_slide_deck.status in {
+                schemas.LectureSlideDeckStatus.UPLOADED,
+                schemas.LectureSlideDeckStatus.FAILED,
+            } or not await lecture_slide_service.lecture_slide_deck_has_pages(
+                request.state["db"], target_lecture_slide_deck.id
             )
             needs_narration_text = (
                 regenerate_narration_requested
@@ -13046,6 +13114,10 @@ async def update_assistant(
             needs_audio = regenerate_audio_requested or voice_changed
             if narration_text_changed:
                 needs_audio = True
+            if regenerate_audio_requested or voice_changed:
+                await lecture_slide_service.clear_lecture_slide_page_narrations(
+                    request.state["db"], target_lecture_slide_deck.id
+                )
 
             queued_run = None
             if needs_full_processing:
