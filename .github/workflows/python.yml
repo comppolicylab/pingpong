@@ -33,6 +33,12 @@ jobs:
           python-version: 3.11.6
         id: py
 
+      - name: Install PDF rendering tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y poppler-utils
+          pdftoppm -v
+
       - name: Get requirements
         working-directory: ${{env.wd}}
         run: |
