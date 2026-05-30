@@ -110,18 +110,6 @@ OPENAI_GENERATION_RETRY_DELAY_SECONDS = 5.0
 SLIDE_MANIFEST_CHUNK_DURATION_MS = 5 * 60 * 1000
 SLIDE_MANIFEST_CHUNK_OVERLAP_MS = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS
 SLIDE_MANIFEST_CHUNK_MIN_SPLIT_MS = 60 * 1000
-_ACTIVE_RUN_STATUSES = (
-    schemas.LectureSlideProcessingRunStatus.QUEUED,
-    schemas.LectureSlideProcessingRunStatus.RUNNING,
-)
-_STAGE_SEQUENCE = (
-    schemas.LectureSlideProcessingStage.SLIDE_ASSET_EXTRACTION,
-    schemas.LectureSlideProcessingStage.NARRATION_TEXT,
-    schemas.LectureSlideProcessingStage.NARRATION_AUDIO,
-    schemas.LectureSlideProcessingStage.NARRATION_TRANSCRIPTION,
-    schemas.LectureSlideProcessingStage.MANIFEST_GENERATION,
-    schemas.LectureSlideProcessingStage.COMPOSITE_ARTIFACTS,
-)
 
 
 class GeneratedSlideNarration(BaseModel):
@@ -832,14 +820,18 @@ async def _await_with_run_lease_heartbeat(
                 return await task
             if not await _ensure_run_can_continue(run_id, lease_token):
                 task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
+                try:
                     await task
+                except asyncio.CancelledError:
+                    pass
                 return None
     except Exception:
         if not task.done():
             task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
+            try:
                 await task
+            except asyncio.CancelledError:
+                pass
         raise
 
 
