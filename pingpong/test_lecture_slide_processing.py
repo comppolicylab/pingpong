@@ -1053,7 +1053,7 @@ async def test_persist_composite_artifacts_deletes_uploads_when_db_lookup_raises
     assert deleted_caption_keys == caption_keys
 
 
-async def test_claim_next_any_processing_run_returns_negative_id_for_older_video_run(
+async def test_claim_next_any_processing_run_returns_video_assignment_for_older_video_run(
     db,
 ):
     async with db.async_session() as session:
@@ -1105,5 +1105,5 @@ async def test_claim_next_any_processing_run_returns_negative_id_for_older_video
     )
 
     assert claimed is not None
-    run_id, _lease_token = claimed
-    assert run_id < 0
+    assert claimed.kind == "video"
+    assert claimed.run_id == video_run.id

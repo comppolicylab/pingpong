@@ -92,8 +92,8 @@ class NarrationWorkerPoolManager(WorkerPoolManager):
         poll_interval_seconds: float = DEFAULT_WORKER_POLL_INTERVAL_SECONDS,
         shutdown_grace_seconds: float = DEFAULT_WORKER_SHUTDOWN_GRACE_SECONDS,
         process_context: Any | None = None,
-        claim_run_fn: Callable[[str], tuple[int, str] | None] | None = None,
-        recover_run_fn: Callable[[int, str, str], bool] | None = None,
+        claim_run_fn: Callable[[str], RunAssignment | None] | None = None,
+        recover_run_fn: Callable[[RunAssignment, str], bool] | None = None,
         sleep_fn: Callable[[float], None] = time.sleep,
         time_fn: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -118,21 +118,24 @@ class NarrationWorkerPoolManager(WorkerPoolManager):
             self.async_runner = asyncio.Runner()
         return self.async_runner
 
-    def _claim_next_processing_run_sync(self, runner_id: str) -> tuple[int, str] | None:
-        return self._ensure_async_runner().run(
+    def _claim_next_processing_run_sync(self, runner_id: str) -> RunAssignment | None:
+        claimed = self._ensure_async_runner().run(
             _claim_next_processing_run(leased_by=runner_id)
         )
+        if claimed is None:
+            return None
+        run_id, lease_token = claimed
+        return RunAssignment(kind="video", run_id=run_id, lease_token=lease_token)
 
     def _recover_failed_processing_run_sync(
         self,
-        run_id: int,
-        lease_token: str,
+        assignment: RunAssignment,
         error_message: str,
     ) -> bool:
         return self._ensure_async_runner().run(
             recover_failed_processing_run(
-                run_id,
-                lease_token,
+                assignment.run_id,
+                assignment.lease_token,
                 error_message=error_message,
             )
         )
@@ -190,6 +193,7 @@ def _worker_process_main(
                 result_queue.put(
                     WorkerStarted(
                         worker_slot=worker_slot,
+                        kind=assignment.kind,
                         run_id=assignment.run_id,
                         lease_token=assignment.lease_token,
                     )
@@ -218,6 +222,7 @@ def _worker_process_main(
                     result_queue.put(
                         WorkerJobException(
                             worker_slot=worker_slot,
+                            kind=assignment.kind,
                             run_id=assignment.run_id,
                             lease_token=assignment.lease_token,
                             error_message=str(exc)
@@ -234,6 +239,7 @@ def _worker_process_main(
                     result_queue.put(
                         WorkerCompleted(
                             worker_slot=worker_slot,
+                            kind=assignment.kind,
                             run_id=assignment.run_id,
                             lease_token=assignment.lease_token,
                         )
@@ -246,8 +252,8 @@ def run_narration_processing_worker_pool(
     poll_interval_seconds: float = DEFAULT_WORKER_POLL_INTERVAL_SECONDS,
     shutdown_grace_seconds: float = DEFAULT_WORKER_SHUTDOWN_GRACE_SECONDS,
     process_context: Any | None = None,
-    claim_run_fn: Callable[[str], tuple[int, str] | None] | None = None,
-    recover_run_fn: Callable[[int, str, str], bool] | None = None,
+    claim_run_fn: Callable[[str], RunAssignment | None] | None = None,
+    recover_run_fn: Callable[[RunAssignment, str], bool] | None = None,
     sleep_fn: Callable[[float], None] = time.sleep,
     time_fn: Callable[[], float] = time.monotonic,
 ) -> None:

@@ -6283,16 +6283,31 @@ def test_worker_process_main_raises_type_error_for_unexpected_assignment(
 
 def test_worker_pool_manager_uses_generic_labels_and_recovery(caplog):
     fake_context = FakeProcessContext()
-    recoveries: list[tuple[int, str, str]] = []
-    claims = iter([(41, "lease-41"), None])
+    recoveries: list[tuple[str, int, str, str]] = []
+    claims = iter(
+        [
+            lecture_video_processing.RunAssignment(
+                kind="run", run_id=41, lease_token="lease-41"
+            ),
+            None,
+        ]
+    )
 
     manager = lecture_video_processing.WorkerPoolManager(
         workers=1,
         worker_target=lambda *_args: None,
         process_context=fake_context,
         claim_run_fn=lambda _runner_id: next(claims),
-        recover_run_fn=lambda run_id, lease_token, error_message: (
-            recoveries.append((run_id, lease_token, error_message)) or True
+        recover_run_fn=lambda assignment, error_message: (
+            recoveries.append(
+                (
+                    assignment.kind,
+                    assignment.run_id,
+                    assignment.lease_token,
+                    error_message,
+                )
+            )
+            or True
         ),
         build_runner_id_fn=lambda worker_slot, pid: f"custom:{worker_slot}:{pid}",
         worker_label="custom worker",
@@ -6306,6 +6321,7 @@ def test_worker_pool_manager_uses_generic_labels_and_recovery(caplog):
         manager.results_queue.put(
             lecture_video_processing.WorkerJobException(
                 worker_slot=0,
+                kind="run",
                 run_id=41,
                 lease_token="lease-41",
                 error_message="",
@@ -6319,7 +6335,7 @@ def test_worker_pool_manager_uses_generic_labels_and_recovery(caplog):
         manager.worker_slots[0].assignment_queue.puts[0],
         lecture_video_processing.RunAssignment,
     )
-    assert recoveries == [(41, "lease-41", "custom exit")]
+    assert recoveries == [("run", 41, "lease-41", "custom exit")]
     assert manager.worker_slots[0].idle is True
     assert manager.worker_slots[0].run_id is None
     assert manager.worker_slots[0].lease_token is None
@@ -6330,7 +6346,17 @@ def test_worker_pool_manager_uses_generic_labels_and_recovery(caplog):
 
 def test_narration_worker_pool_manager_assigns_runs_to_idle_workers():
     fake_context = FakeProcessContext()
-    claims = iter([(11, "lease-11"), (12, "lease-12"), None])
+    claims = iter(
+        [
+            lecture_video_processing.RunAssignment(
+                kind="video", run_id=11, lease_token="lease-11"
+            ),
+            lecture_video_processing.RunAssignment(
+                kind="video", run_id=12, lease_token="lease-12"
+            ),
+            None,
+        ]
+    )
 
     manager = lecture_video_processing.NarrationWorkerPoolManager(
         workers=3,
@@ -6357,15 +6383,25 @@ def test_narration_worker_pool_manager_assigns_runs_to_idle_workers():
 def test_narration_worker_pool_manager_recovers_job_exception_and_keeps_worker_idle():
     fake_context = FakeProcessContext()
     recoveries: list[tuple[int, str, str]] = []
-    claims = iter([(21, "lease-21"), None])
+    claims = iter(
+        [
+            lecture_video_processing.RunAssignment(
+                kind="video", run_id=21, lease_token="lease-21"
+            ),
+            None,
+        ]
+    )
 
     manager = lecture_video_processing.NarrationWorkerPoolManager(
         workers=1,
         poll_interval_seconds=0.25,
         process_context=fake_context,
         claim_run_fn=lambda _runner_id: next(claims),
-        recover_run_fn=lambda run_id, lease_token, error_message: (
-            recoveries.append((run_id, lease_token, error_message)) or True
+        recover_run_fn=lambda assignment, error_message: (
+            recoveries.append(
+                (assignment.run_id, assignment.lease_token, error_message)
+            )
+            or True
         ),
     )
 
@@ -6374,6 +6410,7 @@ def test_narration_worker_pool_manager_recovers_job_exception_and_keeps_worker_i
     manager.results_queue.put(
         lecture_video_processing.WorkerJobException(
             worker_slot=0,
+            kind="video",
             run_id=21,
             lease_token="lease-21",
             error_message="boom",
@@ -6391,7 +6428,14 @@ def test_narration_worker_pool_manager_recovers_job_exception_and_keeps_worker_i
 
 def test_narration_worker_pool_manager_clears_assignment_if_job_recovery_raises():
     fake_context = FakeProcessContext()
-    claims = iter([(22, "lease-22"), None])
+    claims = iter(
+        [
+            lecture_video_processing.RunAssignment(
+                kind="video", run_id=22, lease_token="lease-22"
+            ),
+            None,
+        ]
+    )
 
     manager = lecture_video_processing.NarrationWorkerPoolManager(
         workers=1,
@@ -6406,6 +6450,7 @@ def test_narration_worker_pool_manager_clears_assignment_if_job_recovery_raises(
     manager.results_queue.put(
         lecture_video_processing.WorkerJobException(
             worker_slot=0,
+            kind="video",
             run_id=22,
             lease_token="lease-22",
             error_message="boom",
@@ -6423,15 +6468,26 @@ def test_narration_worker_pool_manager_clears_assignment_if_job_recovery_raises(
 def test_narration_worker_pool_manager_recovers_dead_worker_and_respawns():
     fake_context = FakeProcessContext()
     recoveries: list[tuple[int, str, str]] = []
-    claims = iter([(31, "lease-31"), None, None])
+    claims = iter(
+        [
+            lecture_video_processing.RunAssignment(
+                kind="video", run_id=31, lease_token="lease-31"
+            ),
+            None,
+            None,
+        ]
+    )
 
     manager = lecture_video_processing.NarrationWorkerPoolManager(
         workers=1,
         poll_interval_seconds=0.25,
         process_context=fake_context,
         claim_run_fn=lambda _runner_id: next(claims),
-        recover_run_fn=lambda run_id, lease_token, error_message: (
-            recoveries.append((run_id, lease_token, error_message)) or True
+        recover_run_fn=lambda assignment, error_message: (
+            recoveries.append(
+                (assignment.run_id, assignment.lease_token, error_message)
+            )
+            or True
         ),
     )
 
@@ -6457,7 +6513,14 @@ def test_narration_worker_pool_manager_recovers_dead_worker_and_respawns():
 
 def test_narration_worker_pool_manager_clears_assignment_if_dead_worker_recovery_raises():
     fake_context = FakeProcessContext()
-    claims = iter([(32, "lease-32"), None])
+    claims = iter(
+        [
+            lecture_video_processing.RunAssignment(
+                kind="video", run_id=32, lease_token="lease-32"
+            ),
+            None,
+        ]
+    )
 
     manager = lecture_video_processing.NarrationWorkerPoolManager(
         workers=1,
@@ -6506,14 +6569,24 @@ def test_narration_worker_pool_manager_shutdown_terminates_only_stuck_workers():
 def test_narration_worker_pool_manager_shutdown_recovers_busy_assignments_before_terminate():
     fake_context = FakeProcessContext()
     recoveries: list[tuple[int, str, str]] = []
-    claims = iter([(41, "lease-41"), None])
+    claims = iter(
+        [
+            lecture_video_processing.RunAssignment(
+                kind="video", run_id=41, lease_token="lease-41"
+            ),
+            None,
+        ]
+    )
     manager = lecture_video_processing.NarrationWorkerPoolManager(
         workers=1,
         poll_interval_seconds=0.25,
         process_context=fake_context,
         claim_run_fn=lambda _runner_id: next(claims),
-        recover_run_fn=lambda run_id, lease_token, error_message: (
-            recoveries.append((run_id, lease_token, error_message)) or True
+        recover_run_fn=lambda assignment, error_message: (
+            recoveries.append(
+                (assignment.run_id, assignment.lease_token, error_message)
+            )
+            or True
         ),
         shutdown_grace_seconds=1.0,
     )
@@ -6545,14 +6618,24 @@ def test_narration_worker_pool_manager_shutdown_recovers_busy_assignments_before
 def test_narration_worker_pool_manager_shutdown_drains_queued_worker_job_exception():
     fake_context = FakeProcessContext()
     recoveries: list[tuple[int, str, str]] = []
-    claims = iter([(51, "lease-51"), None])
+    claims = iter(
+        [
+            lecture_video_processing.RunAssignment(
+                kind="video", run_id=51, lease_token="lease-51"
+            ),
+            None,
+        ]
+    )
     manager = lecture_video_processing.NarrationWorkerPoolManager(
         workers=1,
         poll_interval_seconds=0.25,
         process_context=fake_context,
         claim_run_fn=lambda _runner_id: next(claims),
-        recover_run_fn=lambda run_id, lease_token, error_message: (
-            recoveries.append((run_id, lease_token, error_message)) or True
+        recover_run_fn=lambda assignment, error_message: (
+            recoveries.append(
+                (assignment.run_id, assignment.lease_token, error_message)
+            )
+            or True
         ),
         shutdown_grace_seconds=1.0,
     )
@@ -6564,6 +6647,7 @@ def test_narration_worker_pool_manager_shutdown_drains_queued_worker_job_excepti
     manager.results_queue.put(
         lecture_video_processing.WorkerJobException(
             worker_slot=0,
+            kind="video",
             run_id=51,
             lease_token="lease-51",
             error_message="boom",

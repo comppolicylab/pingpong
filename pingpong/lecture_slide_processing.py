@@ -279,8 +279,8 @@ class LectureSlideWorkerPoolManager(WorkerPoolManager):
         poll_interval_seconds: float = DEFAULT_WORKER_POLL_INTERVAL_SECONDS,
         shutdown_grace_seconds: float = DEFAULT_WORKER_SHUTDOWN_GRACE_SECONDS,
         process_context: Any | None = None,
-        claim_run_fn: Callable[[str], tuple[int, str] | None] | None = None,
-        recover_run_fn: Callable[[int, str, str], bool] | None = None,
+        claim_run_fn: Callable[[str], RunAssignment | None] | None = None,
+        recover_run_fn: Callable[[RunAssignment, str], bool] | None = None,
         sleep_fn: Callable[[float], None] = time.sleep,
         time_fn: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -305,21 +305,19 @@ class LectureSlideWorkerPoolManager(WorkerPoolManager):
             self.async_runner = asyncio.Runner()
         return self.async_runner
 
-    def _claim_next_processing_run_sync(self, runner_id: str) -> tuple[int, str] | None:
+    def _claim_next_processing_run_sync(self, runner_id: str) -> RunAssignment | None:
         return self._ensure_async_runner().run(
             claim_next_any_processing_run(leased_by=runner_id)
         )
 
     def _recover_failed_processing_run_sync(
         self,
-        run_id: int,
-        lease_token: str,
+        assignment: RunAssignment,
         error_message: str,
     ) -> bool:
         return self._ensure_async_runner().run(
-            recover_failed_processing_run(
-                run_id,
-                lease_token,
+            recover_failed_processing_assignment(
+                assignment,
                 error_message=error_message,
             )
         )
@@ -354,8 +352,8 @@ def run_processing_worker_pool(
     poll_interval_seconds: float = DEFAULT_WORKER_POLL_INTERVAL_SECONDS,
     shutdown_grace_seconds: float = DEFAULT_WORKER_SHUTDOWN_GRACE_SECONDS,
     process_context: Any | None = None,
-    claim_run_fn: Callable[[str], tuple[int, str] | None] | None = None,
-    recover_run_fn: Callable[[int, str, str], bool] | None = None,
+    claim_run_fn: Callable[[str], RunAssignment | None] | None = None,
+    recover_run_fn: Callable[[RunAssignment, str], bool] | None = None,
     sleep_fn: Callable[[float], None] = time.sleep,
     time_fn: Callable[[], float] = time.monotonic,
 ) -> None:
@@ -394,14 +392,13 @@ def _worker_process_main(worker_slot: int, assignment_queue, result_queue) -> No
                 result_queue.put(
                     WorkerStarted(
                         worker_slot=worker_slot,
+                        kind=assignment.kind,
                         run_id=assignment.run_id,
                         lease_token=assignment.lease_token,
                     )
                 )
                 try:
-                    runner.run(
-                        process_claimed_run(assignment.run_id, assignment.lease_token)
-                    )
+                    runner.run(process_claimed_run(assignment))
                 except Exception as exc:
                     logger.exception(
                         "Lecture processing worker failed. run_id=%s slot=%s pid=%s",
@@ -419,6 +416,7 @@ def _worker_process_main(worker_slot: int, assignment_queue, result_queue) -> No
                     result_queue.put(
                         WorkerJobException(
                             worker_slot=worker_slot,
+                            kind=assignment.kind,
                             run_id=assignment.run_id,
                             lease_token=assignment.lease_token,
                             error_message=str(exc)
@@ -429,6 +427,7 @@ def _worker_process_main(worker_slot: int, assignment_queue, result_queue) -> No
                     result_queue.put(
                         WorkerCompleted(
                             worker_slot=worker_slot,
+                            kind=assignment.kind,
                             run_id=assignment.run_id,
                             lease_token=assignment.lease_token,
                         )
@@ -568,7 +567,7 @@ async def claim_next_processing_run(
 async def claim_next_any_processing_run(
     *,
     leased_by: str | None = None,
-) -> tuple[int, str] | None:
+) -> RunAssignment | None:
     async with config.db.driver.async_session() as session:
         now = utcnow()
         slide_result = await session.execute(
@@ -615,19 +614,44 @@ async def claim_next_any_processing_run(
         )
         if claimed_video is not None:
             run_id, lease_token = claimed_video
-            return -run_id, lease_token
-        return await claim_next_processing_run(leased_by=leased_by)
+            return RunAssignment(kind="video", run_id=run_id, lease_token=lease_token)
+        claimed_slide = await claim_next_processing_run(leased_by=leased_by)
+        if claimed_slide is None:
+            return None
+        run_id, lease_token = claimed_slide
+        return RunAssignment(kind="slide", run_id=run_id, lease_token=lease_token)
 
     claimed_slide = await claim_next_processing_run(leased_by=leased_by)
     if claimed_slide is not None:
-        return claimed_slide
+        run_id, lease_token = claimed_slide
+        return RunAssignment(kind="slide", run_id=run_id, lease_token=lease_token)
     claimed_video = await lecture_video_processing._claim_next_processing_run(
         leased_by=leased_by
     )
     if claimed_video is None:
         return None
     run_id, lease_token = claimed_video
-    return -run_id, lease_token
+    return RunAssignment(kind="video", run_id=run_id, lease_token=lease_token)
+
+
+async def recover_failed_processing_assignment(
+    assignment: RunAssignment,
+    *,
+    error_message: str = UNEXPECTED_WORKER_EXIT_ERROR_MESSAGE,
+) -> bool:
+    if assignment.kind == "video":
+        return await lecture_video_processing.recover_failed_processing_run(
+            assignment.run_id,
+            assignment.lease_token,
+            error_message=error_message,
+        )
+    if assignment.kind != "slide":
+        return False
+    return await recover_failed_processing_run(
+        assignment.run_id,
+        assignment.lease_token,
+        error_message=error_message,
+    )
 
 
 async def recover_failed_processing_run(
@@ -636,12 +660,6 @@ async def recover_failed_processing_run(
     *,
     error_message: str = UNEXPECTED_WORKER_EXIT_ERROR_MESSAGE,
 ) -> bool:
-    if run_id < 0:
-        return await lecture_video_processing.recover_failed_processing_run(
-            -run_id,
-            lease_token,
-            error_message=error_message,
-        )
     async with config.db.driver.async_session() as session:
         run = await models.LectureSlideProcessingRun.get_by_id(session, run_id)
         if run is None:
@@ -671,11 +689,16 @@ async def recover_failed_processing_run(
         return True
 
 
-async def process_claimed_run(run_id: int, lease_token: str) -> None:
-    if run_id < 0:
-        await lecture_video_processing._process_claimed_run(-run_id, lease_token)
+async def process_claimed_run(assignment: RunAssignment) -> None:
+    if assignment.kind == "video":
+        await lecture_video_processing._process_claimed_run(
+            assignment.run_id,
+            assignment.lease_token,
+        )
         return
-    await _process_claimed_slide_run(run_id, lease_token)
+    if assignment.kind != "slide":
+        return
+    await _process_claimed_slide_run(assignment.run_id, assignment.lease_token)
 
 
 async def _process_claimed_slide_run(run_id: int, lease_token: str) -> None:
