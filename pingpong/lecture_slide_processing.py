@@ -439,8 +439,16 @@ async def queue_lecture_slide_processing_run(
     deck: models.LectureSlideDeck,
     *,
     requested_by_assistant_id: int | None = None,
+    stage: schemas.LectureSlideProcessingStage = (
+        schemas.LectureSlideProcessingStage.SLIDE_ASSET_EXTRACTION
+    ),
 ) -> models.LectureSlideProcessingRun | None:
     if deck.status == schemas.LectureSlideDeckStatus.FAILED:
+        deck.status = schemas.LectureSlideDeckStatus.PROCESSING
+    if (
+        deck.status == schemas.LectureSlideDeckStatus.READY
+        and stage != schemas.LectureSlideProcessingStage.SLIDE_ASSET_EXTRACTION
+    ):
         deck.status = schemas.LectureSlideDeckStatus.PROCESSING
     if deck.status not in {
         schemas.LectureSlideDeckStatus.UPLOADED,
@@ -474,7 +482,7 @@ async def queue_lecture_slide_processing_run(
                     lecture_slide_deck_id_snapshot=deck.id,
                     class_id=deck.class_id,
                     assistant_id_at_start=requested_by_assistant_id,
-                    stage=schemas.LectureSlideProcessingStage.SLIDE_ASSET_EXTRACTION,
+                    stage=stage,
                     attempt_number=attempt_number,
                     status=schemas.LectureSlideProcessingRunStatus.QUEUED,
                 )
@@ -500,6 +508,76 @@ async def queue_lecture_slide_processing_run(
 
     assert last_error is not None
     raise last_error
+
+
+async def queue_narration_text_processing_run(
+    session: AsyncSession,
+    deck: models.LectureSlideDeck,
+    *,
+    requested_by_assistant_id: int | None = None,
+) -> models.LectureSlideProcessingRun | None:
+    return await queue_lecture_slide_processing_run(
+        session,
+        deck,
+        requested_by_assistant_id=requested_by_assistant_id,
+        stage=schemas.LectureSlideProcessingStage.NARRATION_TEXT,
+    )
+
+
+async def queue_audio_processing_run(
+    session: AsyncSession,
+    deck: models.LectureSlideDeck,
+    *,
+    requested_by_assistant_id: int | None = None,
+) -> models.LectureSlideProcessingRun | None:
+    return await queue_lecture_slide_processing_run(
+        session,
+        deck,
+        requested_by_assistant_id=requested_by_assistant_id,
+        stage=schemas.LectureSlideProcessingStage.NARRATION_AUDIO,
+    )
+
+
+async def queue_manifest_generation_processing_run(
+    session: AsyncSession,
+    deck: models.LectureSlideDeck,
+    *,
+    requested_by_assistant_id: int | None = None,
+) -> models.LectureSlideProcessingRun | None:
+    return await queue_lecture_slide_processing_run(
+        session,
+        deck,
+        requested_by_assistant_id=requested_by_assistant_id,
+        stage=schemas.LectureSlideProcessingStage.MANIFEST_GENERATION,
+    )
+
+
+async def cancel_processing_runs(
+    session: AsyncSession,
+    deck_id: int,
+    cancel_reason: schemas.LectureSlideProcessingCancelReason,
+) -> None:
+    now = utcnow()
+    await session.execute(
+        update(models.LectureSlideProcessingRun)
+        .where(
+            models.LectureSlideProcessingRun.lecture_slide_deck_id_snapshot == deck_id,
+            models.LectureSlideProcessingRun.status.in_(
+                [
+                    schemas.LectureSlideProcessingRunStatus.QUEUED,
+                    schemas.LectureSlideProcessingRunStatus.RUNNING,
+                ]
+            ),
+        )
+        .values(
+            status=schemas.LectureSlideProcessingRunStatus.CANCELLED,
+            cancel_reason=cancel_reason,
+            finished_at=now,
+            lease_token=None,
+            leased_by=None,
+            lease_expires_at=None,
+        )
+    )
 
 
 def _claimable_processing_run_condition(now) -> Any:
@@ -715,104 +793,159 @@ async def _process_claimed_slide_run(run_id: int, lease_token: str) -> None:
                 return
             deck_id = run.lecture_slide_deck_id
             class_id = run.class_id
+            start_stage = schemas.LectureSlideProcessingStage(run.stage)
+            original_start_stage = start_stage
 
         openai_client = None
         with tempfile.TemporaryDirectory(prefix="pingpong_ls_") as temp_dir:
-            pdf_path = await _download_source_pdf(
-                run_id, lease_token, deck_id, temp_dir
-            )
-            if pdf_path is None:
-                return
-            await _set_run_stage(
-                run_id,
-                lease_token,
+            needs_pdf = start_stage in {
                 schemas.LectureSlideProcessingStage.SLIDE_ASSET_EXTRACTION,
-            )
-            await _extract_and_store_slide_assets(
-                run_id, lease_token, deck_id, pdf_path
-            )
-            if not await _ensure_run_can_continue(run_id, lease_token):
-                return
+                schemas.LectureSlideProcessingStage.NARRATION_TEXT,
+                schemas.LectureSlideProcessingStage.MANIFEST_GENERATION,
+            }
+            pdf_path = None
+            if needs_pdf:
+                pdf_path = await _download_source_pdf(
+                    run_id, lease_token, deck_id, temp_dir
+                )
+                if pdf_path is None:
+                    return
 
-            async with config.db.driver.async_session() as session:
-                openai_client = await get_openai_client_by_class_id(session, class_id)
-                responses_model = await _get_responses_model_for_run(
-                    session,
+            needs_openai = start_stage in {
+                schemas.LectureSlideProcessingStage.SLIDE_ASSET_EXTRACTION,
+                schemas.LectureSlideProcessingStage.NARRATION_TEXT,
+                schemas.LectureSlideProcessingStage.NARRATION_AUDIO,
+                schemas.LectureSlideProcessingStage.NARRATION_TRANSCRIPTION,
+                schemas.LectureSlideProcessingStage.MANIFEST_GENERATION,
+            }
+            responses_model = None
+            if needs_openai:
+                async with config.db.driver.async_session() as session:
+                    openai_client = await get_openai_client_by_class_id(
+                        session, class_id
+                    )
+                    responses_model = await _get_responses_model_for_run(
+                        session,
+                        run_id,
+                        deck_id,
+                    )
+
+            transcript: list[schemas.LectureVideoManifestWordV3] | None = None
+
+            if (
+                start_stage
+                == schemas.LectureSlideProcessingStage.SLIDE_ASSET_EXTRACTION
+            ):
+                assert pdf_path is not None
+                await _set_run_stage(
                     run_id,
+                    lease_token,
+                    schemas.LectureSlideProcessingStage.SLIDE_ASSET_EXTRACTION,
+                )
+                await _extract_and_store_slide_assets(
+                    run_id, lease_token, deck_id, pdf_path
+                )
+                if not await _ensure_run_can_continue(run_id, lease_token):
+                    return
+                start_stage = schemas.LectureSlideProcessingStage.NARRATION_TEXT
+
+            if start_stage == schemas.LectureSlideProcessingStage.NARRATION_TEXT:
+                assert pdf_path is not None
+                assert openai_client is not None
+                assert responses_model is not None
+                await _set_run_stage(
+                    run_id,
+                    lease_token,
+                    schemas.LectureSlideProcessingStage.NARRATION_TEXT,
+                )
+                narration_set = await _generate_narration_text(
+                    run_id,
+                    lease_token,
                     deck_id,
+                    pdf_path,
+                    responses_model,
+                    openai_client,
+                )
+                if narration_set is None:
+                    return
+                await _persist_narration_text(
+                    run_id, lease_token, deck_id, narration_set
+                )
+                if not await _ensure_run_can_continue(run_id, lease_token):
+                    return
+                start_stage = schemas.LectureSlideProcessingStage.NARRATION_AUDIO
+
+            if start_stage == schemas.LectureSlideProcessingStage.NARRATION_AUDIO:
+                assert openai_client is not None
+                await _set_run_stage(
+                    run_id,
+                    lease_token,
+                    schemas.LectureSlideProcessingStage.NARRATION_AUDIO,
+                )
+                slide_audio = await _synthesize_slide_audio(
+                    run_id, lease_token, deck_id
+                )
+                if slide_audio is None:
+                    return
+
+                await _set_run_stage(
+                    run_id,
+                    lease_token,
+                    schemas.LectureSlideProcessingStage.NARRATION_TRANSCRIPTION,
+                )
+                transcript = await _transcribe_and_persist_slide_audio(
+                    run_id,
+                    lease_token,
+                    deck_id,
+                    slide_audio,
+                    openai_client,
+                    temp_dir,
+                )
+                if transcript is None:
+                    return
+                start_stage = (
+                    schemas.LectureSlideProcessingStage.COMPOSITE_ARTIFACTS
+                    if original_start_stage
+                    == schemas.LectureSlideProcessingStage.NARRATION_AUDIO
+                    else schemas.LectureSlideProcessingStage.MANIFEST_GENERATION
                 )
 
-            await _set_run_stage(
-                run_id,
-                lease_token,
-                schemas.LectureSlideProcessingStage.NARRATION_TEXT,
-            )
-            narration_set = await _generate_narration_text(
-                run_id,
-                lease_token,
-                deck_id,
-                pdf_path,
-                responses_model,
-                openai_client,
-            )
-            if narration_set is None:
-                return
-            await _persist_narration_text(run_id, lease_token, deck_id, narration_set)
-            if not await _ensure_run_can_continue(run_id, lease_token):
-                return
-
-            await _set_run_stage(
-                run_id,
-                lease_token,
-                schemas.LectureSlideProcessingStage.NARRATION_AUDIO,
-            )
-            slide_audio = await _synthesize_slide_audio(run_id, lease_token, deck_id)
-            if slide_audio is None:
-                return
-
-            await _set_run_stage(
-                run_id,
-                lease_token,
-                schemas.LectureSlideProcessingStage.NARRATION_TRANSCRIPTION,
-            )
-            transcript = await _transcribe_and_persist_slide_audio(
-                run_id,
-                lease_token,
-                deck_id,
-                slide_audio,
-                openai_client,
-                temp_dir,
-            )
-            if transcript is None:
-                return
-
-            await _set_run_stage(
-                run_id,
-                lease_token,
-                schemas.LectureSlideProcessingStage.MANIFEST_GENERATION,
-            )
-            manifest = await _generate_slide_manifest(
-                run_id,
-                lease_token,
-                deck_id,
-                pdf_path,
-                transcript,
-                responses_model,
-                openai_client,
-            )
-            if manifest is None:
-                return
-            await _persist_slide_manifest(
-                run_id, lease_token, deck_id, manifest, transcript
-            )
-            if not await _ensure_run_can_continue(run_id, lease_token):
-                return
+            if start_stage == schemas.LectureSlideProcessingStage.MANIFEST_GENERATION:
+                if transcript is None:
+                    transcript = await _load_slide_transcript_for_processing(deck_id)
+                assert pdf_path is not None
+                assert openai_client is not None
+                assert responses_model is not None
+                await _set_run_stage(
+                    run_id,
+                    lease_token,
+                    schemas.LectureSlideProcessingStage.MANIFEST_GENERATION,
+                )
+                manifest = await _generate_slide_manifest(
+                    run_id,
+                    lease_token,
+                    deck_id,
+                    pdf_path,
+                    transcript,
+                    responses_model,
+                    openai_client,
+                )
+                if manifest is None:
+                    return
+                await _persist_slide_manifest(
+                    run_id, lease_token, deck_id, manifest, transcript
+                )
+                if not await _ensure_run_can_continue(run_id, lease_token):
+                    return
+                start_stage = schemas.LectureSlideProcessingStage.COMPOSITE_ARTIFACTS
 
             await _set_run_stage(
                 run_id,
                 lease_token,
                 schemas.LectureSlideProcessingStage.COMPOSITE_ARTIFACTS,
             )
+            if transcript is None:
+                transcript = await _load_slide_transcript_for_processing(deck_id)
             await _synthesize_knowledge_check_audio(run_id, lease_token, deck_id)
             await _persist_composite_artifacts(run_id, lease_token, deck_id, transcript)
             await _mark_run_completed(run_id, lease_token)
@@ -823,6 +956,23 @@ async def _process_claimed_slide_run(run_id: int, lease_token: str) -> None:
             lease_token,
             error_message=_user_safe_processing_error_message(exc),
         )
+
+
+async def _load_slide_transcript_for_processing(
+    deck_id: int,
+) -> list[schemas.LectureVideoManifestWordV3]:
+    async with config.db.driver.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, deck_id
+        )
+        if deck is None or deck.transcript_data is None:
+            raise RuntimeError("Lecture slide transcript is required for this update.")
+        words = deck.transcript_data.get("word_level_transcription")
+        if not isinstance(words, list):
+            raise RuntimeError("Lecture slide transcript is invalid.")
+        return [
+            schemas.LectureVideoManifestWordV3.model_validate(word) for word in words
+        ]
 
 
 async def _await_with_run_lease_heartbeat(
@@ -1036,6 +1186,9 @@ async def _extract_and_store_slide_assets(
             ):
                 return
 
+            existing_user_notes = {
+                page.position: page.user_notes for page in deck.pages if page.user_notes
+            }
             await session.execute(
                 delete(models.LectureSlidePage).where(
                     models.LectureSlidePage.lecture_slide_deck_id == deck.id
@@ -1068,6 +1221,7 @@ async def _extract_and_store_slide_assets(
                         position=asset.position,
                         image_stored_object_id=image_stored_object.id,
                         extracted_text=asset.extracted_text,
+                        user_notes=existing_user_notes.get(asset.position),
                     )
                 )
             deck.slide_count = len(assets)

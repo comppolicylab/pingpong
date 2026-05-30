@@ -121,7 +121,9 @@ from pingpong.video_store import VideoStoreError
 from . import (
     assistant_service,
     lecture_slide_chat,
+    lecture_slide_processing,
     lecture_slide_runtime,
+    lecture_slide_service,
     lecture_video_chat,
     lecture_video_manifest_generation,
     lecture_video_processing,
@@ -9558,6 +9560,125 @@ async def upload_lecture_video_for_assistant(
     )
 
 
+@v1.post(
+    "/class/{class_id}/lecture-slides",
+    dependencies=[Depends(Authz("admin", "class:{class_id}"))],
+    response_model=schemas.LectureSlideSummary,
+)
+async def create_lecture_slide_deck(
+    class_id: str,
+    request: StateRequest,
+    upload: UploadFile,
+):
+    deck = await lecture_slide_service.create_lecture_slide_deck(
+        request.state["db"],
+        class_id=int(class_id),
+        uploader_id=request.state["session"].user.id,
+        upload=upload,
+    )
+    return await lecture_slide_service.lecture_slide_summary_from_model(deck)
+
+
+@v1.post(
+    "/class/{class_id}/assistant/{assistant_id}/lecture-slides/upload",
+    dependencies=[Depends(Authz("can_edit", "assistant:{assistant_id}"))],
+    response_model=schemas.LectureSlideSummary,
+)
+async def upload_lecture_slide_deck_for_assistant(
+    class_id: str,
+    assistant_id: str,
+    request: StateRequest,
+    upload: UploadFile,
+):
+    await lecture_slide_service.get_lecture_slide_assistant_for_class(
+        request.state["db"], int(assistant_id), int(class_id)
+    )
+    deck = await lecture_slide_service.create_lecture_slide_deck(
+        request.state["db"],
+        class_id=int(class_id),
+        uploader_id=request.state["session"].user.id,
+        upload=upload,
+    )
+    return await lecture_slide_service.lecture_slide_summary_from_model(deck)
+
+
+async def _stream_lecture_slide_source_pdf(
+    deck: models.LectureSlideDeck,
+) -> StreamingResponse:
+    if not config.video_store:
+        raise HTTPException(status_code=404, detail="No Video Store exists.")
+    if deck.source_stored_object is None:
+        raise HTTPException(status_code=404, detail="Lecture slide source not found.")
+
+    source = deck.source_stored_object
+    try:
+        stream = await prefetch_stream(
+            config.video_store.store.stream_video_range(key=source.key),
+            store_error=VideoStoreError,
+            logger=logger,
+            store_error_log="VideoStoreError while streaming lecture slide source PDF; aborting stream.",
+            unexpected_error_log="Unexpected error while streaming lecture slide source PDF",
+        )
+    except VideoStoreError as e:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unable to stream lecture slide source PDF: {e.detail or str(e)}",
+        ) from e
+
+    return StreamingResponse(
+        stream,
+        media_type=source.content_type or "application/pdf",
+        headers={
+            "Cache-Control": "private, max-age=86400",
+            "Content-Disposition": f'inline; filename="{source.original_filename}"',
+        },
+    )
+
+
+@v1.get(
+    "/class/{class_id}/lecture-slides/{lecture_slide_deck_id}/source",
+    dependencies=[Depends(Authz("can_view", "class:{class_id}"))],
+    response_class=StreamingResponse,
+)
+async def get_owned_lecture_slide_source(
+    class_id: str,
+    lecture_slide_deck_id: str,
+    request: StateRequest,
+):
+    deck = await models.LectureSlideDeck.get_by_id_for_class(
+        request.state["db"], int(lecture_slide_deck_id), int(class_id)
+    )
+    if deck is None:
+        raise HTTPException(status_code=404, detail="Lecture slide deck not found.")
+    lecture_slide_service.ensure_lecture_slide_deck_uploaded_by_user(
+        deck, request.state["session"].user.id
+    )
+    return await _stream_lecture_slide_source_pdf(deck)
+
+
+@v1.get(
+    "/class/{class_id}/assistant/{assistant_id}/lecture-slides/source",
+    dependencies=[Depends(Authz("can_edit", "assistant:{assistant_id}"))],
+    response_class=StreamingResponse,
+)
+async def get_assistant_lecture_slide_source(
+    class_id: str,
+    assistant_id: str,
+    request: StateRequest,
+):
+    assistant = await lecture_slide_service.get_lecture_slide_assistant_for_class(
+        request.state["db"], int(assistant_id), int(class_id)
+    )
+    if assistant.lecture_slide_deck_id is None:
+        raise HTTPException(status_code=404, detail="Lecture slide deck not found.")
+    deck = await models.LectureSlideDeck.get_by_id_for_class(
+        request.state["db"], assistant.lecture_slide_deck_id, int(class_id)
+    )
+    if deck is None:
+        raise HTTPException(status_code=404, detail="Lecture slide deck not found.")
+    return await _stream_lecture_slide_source_pdf(deck)
+
+
 @v1.get(
     "/class/{class_id}/assistant/{assistant_id}/lecture-video/poster",
     dependencies=[Depends(Authz("can_view", "assistant:{assistant_id}"))],
@@ -9908,6 +10029,57 @@ async def get_assistant_lecture_video_config(
     if manifest_generation_status is not None:
         response_kwargs["manifest_generation_status"] = manifest_generation_status
     return schemas.LectureVideoConfigResponse(**response_kwargs)
+
+
+@v1.get(
+    "/class/{class_id}/assistant/{assistant_id}/lecture-slides/config",
+    dependencies=[Depends(Authz("can_edit", "assistant:{assistant_id}"))],
+    response_model=schemas.LectureSlideConfigResponse,
+    response_model_exclude_unset=True,
+)
+async def get_assistant_lecture_slide_config(
+    class_id: str,
+    assistant_id: str,
+    request: StateRequest,
+):
+    assistant = await lecture_slide_service.get_lecture_slide_assistant_for_class(
+        request.state["db"], int(assistant_id), int(class_id)
+    )
+    if assistant.lecture_slide_deck_id is None:
+        raise HTTPException(404, "Lecture slide deck not found.")
+
+    deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+        request.state["db"], assistant.lecture_slide_deck_id
+    )
+    if deck is None or deck.class_id != int(class_id):
+        raise HTTPException(404, "Lecture slide deck not found.")
+
+    processing_status = await lecture_slide_service.latest_processing_run_summary(
+        request.state["db"], deck.id
+    )
+    pages = [
+        schemas.LectureSlidePageView(
+            id=page.id,
+            position=page.position,
+            start_offset_ms=page.start_offset_ms,
+            end_offset_ms=page.end_offset_ms,
+            image_stored_object_id=page.image_stored_object_id,
+            user_notes=page.user_notes,
+            narration_text=page.narration_text,
+        )
+        for page in sorted(deck.pages, key=lambda item: item.position)
+    ]
+    return schemas.LectureSlideConfigResponse(
+        lecture_slide_deck=cast(
+            schemas.LectureSlideSummary,
+            await lecture_slide_service.lecture_slide_summary_from_model(deck),
+        ),
+        voice_id=deck.voice_id or "",
+        generation_prompt=deck.generation_prompt,
+        narration_prompt=deck.narration_prompt,
+        pages=pages,
+        processing_status=processing_status,
+    )
 
 
 @v1.post(
@@ -10275,7 +10447,11 @@ async def create_assistant(
     # TODO: Introduce lecture_video type in AssistantModelDict.type
     _interaction_mode = (
         schemas.InteractionMode.CHAT
-        if req.interaction_mode is schemas.InteractionMode.LECTURE_VIDEO
+        if req.interaction_mode
+        in {
+            schemas.InteractionMode.LECTURE_VIDEO,
+            schemas.InteractionMode.LECTURE_SLIDES,
+        }
         else req.interaction_mode
     )
 
@@ -10364,8 +10540,11 @@ async def create_assistant(
                 detail=f"Model {req.model} is not available for use.",
             )
 
-    # Only admins can create an assistant in Lecture video mode
-    if req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
+    # Only admins can create assistants in lecture lesson modes.
+    if req.interaction_mode in {
+        schemas.InteractionMode.LECTURE_VIDEO,
+        schemas.InteractionMode.LECTURE_SLIDES,
+    }:
         if not await request.state["authz"].test(
             f"user:{creator_id}",
             "admin",
@@ -10373,7 +10552,7 @@ async def create_assistant(
         ):
             raise HTTPException(
                 status_code=403,
-                detail="Only class administrators can create assistants in Lecture video mode.",
+                detail="Only class administrators can create assistants in lecture lesson modes.",
             )
     if req.published:
         if not await request.state["authz"].test(
@@ -10392,13 +10571,19 @@ async def create_assistant(
         request.state["db"], class_id_int, deleted_private_files
     )
 
-    # Check Azure compatibility for lecture video mode
-    if req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO and (
-        class_.api_key_obj and class_.api_key_obj.provider == "azure"
+    # Check Azure compatibility for lecture lesson modes.
+    if (
+        req.interaction_mode
+        in {
+            schemas.InteractionMode.LECTURE_VIDEO,
+            schemas.InteractionMode.LECTURE_SLIDES,
+        }
+        and class_.api_key_obj
+        and class_.api_key_obj.provider == "azure"
     ):
         raise HTTPException(
             status_code=400,
-            detail="Assistants in Lecture video mode do not support Azure OpenAI. Please select a different interaction mode or use another group.",
+            detail="Assistants in lecture lesson modes do not support Azure OpenAI. Please select a different interaction mode or use another group.",
         )
     if req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
         lecture_video_context = await _get_class_lecture_video_provider_flags(
@@ -10415,8 +10600,11 @@ async def create_assistant(
     if req.interaction_mode == schemas.InteractionMode.VOICE:
         # Voice mode assistants are only supported in version 2
         assistant_version = 2
-    elif req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
-        # Lecture video assistants require Version 3
+    elif req.interaction_mode in {
+        schemas.InteractionMode.LECTURE_VIDEO,
+        schemas.InteractionMode.LECTURE_SLIDES,
+    }:
+        # Lecture lesson assistants require Version 3
         assistant_version = 3
     else:
         if (
@@ -10499,6 +10687,7 @@ async def create_assistant(
     vector_store_object_id = None
     uses_voice = req.interaction_mode == schemas.InteractionMode.VOICE
     is_video = req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
+    is_slides = req.interaction_mode == schemas.InteractionMode.LECTURE_SLIDES
     lecture_video_object_id = None
     lecture_video_manifest = None
     lecture_video_voice_id = None
@@ -10513,6 +10702,12 @@ async def create_assistant(
         if "overwrite_manifest" in req.model_fields_set
         else False
     )
+    lecture_slide_deck_object_id = None
+    lecture_slide_deck = None
+    lecture_slide_voice_id = None
+    lecture_slide_generation_prompt = None
+    lecture_slide_narration_prompt = None
+    lecture_slide_page_notes = req.lecture_slide_page_notes
 
     if is_video:
         if req.lecture_video_id is None:
@@ -10573,18 +10768,61 @@ async def create_assistant(
         ) as exc:
             _raise_http_for_lecture_video_voice_validation_error(exc)
         lecture_video_voice_id_validated = True
-    elif (
+    elif not is_slides and (
         req.lecture_video_id is not None
         or req.lecture_video_manifest is not None
+        or req.lecture_slide_deck_id is not None
+        or req.lecture_slide_page_notes
         or req.voice_id is not None
         or req.generation_prompt is not None
+        or req.narration_prompt is not None
         or req.video_description_duration_ms is not None
         or req.overwrite_manifest is not None
     ):
         raise HTTPException(
             status_code=400,
-            detail="Lecture video data can only be set for assistants in Lecture Video mode.",
+            detail="Lecture lesson data can only be set for assistants in Lecture Video or Lecture Slides mode.",
         )
+
+    if is_slides:
+        if req.lecture_slide_deck_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Specifying a lecture_slide_deck_id is required for lecture slide assistants.",
+            )
+        if req.voice_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Specifying a voice_id is required for lecture slide assistants.",
+            )
+        lecture_slide_deck = await models.LectureSlideDeck.get_by_id_for_class(
+            request.state["db"], req.lecture_slide_deck_id, class_id_int
+        )
+        if not lecture_slide_deck:
+            raise HTTPException(
+                status_code=404,
+                detail="Could not find the lecture slide deck you specified. Please try again.",
+            )
+        await lecture_slide_service.ensure_lecture_slide_deck_is_unassigned(
+            request.state["db"], lecture_slide_deck.id
+        )
+        lecture_slide_deck_object_id = lecture_slide_deck.id
+        lecture_slide_voice_id = req.voice_id
+        lecture_slide_generation_prompt = req.generation_prompt
+        lecture_slide_narration_prompt = req.narration_prompt
+        try:
+            await validate_lecture_video_voice_id_or_raise(
+                class_id_int,
+                request,
+                lecture_slide_voice_id,
+                voice_settings=lecture_video_voice_settings,
+            )
+        except (
+            LectureVideoVoiceValidationError,
+            ClassCredentialValidationSSLError,
+            ClassCredentialValidationUnavailableError,
+        ) as exc:
+            _raise_http_for_lecture_video_voice_validation_error(exc)
 
     if req.file_search_file_ids:
         if len(req.file_search_file_ids) > 1000:
@@ -10675,8 +10913,11 @@ async def create_assistant(
         del req.mcp_servers
         del req.lecture_video_id
         del req.lecture_video_manifest
+        del req.lecture_slide_deck_id
+        del req.lecture_slide_page_notes
         del req.voice_id
         del req.generation_prompt
+        del req.narration_prompt
         del req.video_description_duration_ms
         del req.overwrite_manifest
 
@@ -10689,10 +10930,12 @@ async def create_assistant(
                 assistant_id=new_asst.id if new_asst else None,
                 vector_store_id=vector_store_object_id,
                 lecture_video_id=lecture_video_object_id,
+                lecture_slide_deck_id=lecture_slide_deck_object_id,
                 version=assistant_version,
             )
         except IntegrityError as e:
             lecture_video_service.raise_if_lecture_video_assignment_conflict(e)
+            lecture_slide_service.raise_if_lecture_slide_assignment_conflict(e)
             raise
 
         if is_video:
@@ -10746,6 +10989,22 @@ async def create_assistant(
                     lecture_video,
                     assistant_id_at_start=asst.id,
                 )
+
+        if is_slides:
+            assert lecture_slide_deck is not None
+            if lecture_slide_voice_id is None:
+                raise HTTPException(400, "Lecture slide voice is required.")
+            lecture_slide_deck.voice_id = lecture_slide_voice_id
+            lecture_slide_deck.generation_prompt = lecture_slide_generation_prompt
+            lecture_slide_deck.narration_prompt = lecture_slide_narration_prompt
+            await lecture_slide_service.apply_lecture_slide_page_notes(
+                request.state["db"], lecture_slide_deck, lecture_slide_page_notes
+            )
+            await lecture_slide_processing.queue_lecture_slide_processing_run(
+                request.state["db"],
+                lecture_slide_deck,
+                requested_by_assistant_id=asst.id,
+            )
 
         # Delete private files uploaded but not attached to the assistant
         files_to_delete = await models.File.get_files_not_used_by_assistant(
@@ -11349,6 +11608,7 @@ async def update_assistant(
     update_instructions = False
     uses_voice = interaction_mode == schemas.InteractionMode.VOICE
     is_video = interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
+    is_slides = interaction_mode == schemas.InteractionMode.LECTURE_SLIDES
     lecture_video = asst.lecture_video
     lecture_video_manifest = None
     lecture_video_voice_id = None
@@ -11365,15 +11625,34 @@ async def update_assistant(
         if "overwrite_manifest" in req.model_fields_set
         else False
     )
-    lecture_video_fields_present = (
+    lecture_video_specific_fields_present = (
         "lecture_video_id" in req.model_fields_set
         or "lecture_video_manifest" in req.model_fields_set
-        or "voice_id" in req.model_fields_set
-        or "generation_prompt" in req.model_fields_set
         or "video_description_duration_ms" in req.model_fields_set
         or "regenerate_requested" in req.model_fields_set
-        or "regenerate_audio_requested" in req.model_fields_set
         or "overwrite_manifest" in req.model_fields_set
+    )
+    shared_lecture_fields_present = (
+        "voice_id" in req.model_fields_set
+        or "generation_prompt" in req.model_fields_set
+        or "regenerate_audio_requested" in req.model_fields_set
+    )
+    lecture_video_fields_present = lecture_video_specific_fields_present or (
+        is_video and shared_lecture_fields_present
+    )
+    lecture_slide_deck = asst.lecture_slide_deck
+    lecture_slide_voice_id = None
+    lecture_slide_generation_prompt = None
+    lecture_slide_narration_prompt = None
+    lecture_slide_specific_fields_present = (
+        "lecture_slide_deck_id" in req.model_fields_set
+        or "lecture_slide_page_notes" in req.model_fields_set
+        or "narration_prompt" in req.model_fields_set
+        or "regenerate_narration_requested" in req.model_fields_set
+        or "regenerate_questions_requested" in req.model_fields_set
+    )
+    lecture_slide_fields_present = lecture_slide_specific_fields_present or (
+        is_slides and shared_lecture_fields_present
     )
 
     # Prevent updating existing assistants to lecture video mode
@@ -11382,12 +11661,30 @@ async def update_assistant(
             status_code=400,
             detail="Cannot convert existing assistants to Lecture Video mode. Please create a new assistant.",
         )
+    if is_slides and asst.interaction_mode != schemas.InteractionMode.LECTURE_SLIDES:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot convert existing assistants to Lecture Slides mode. Please create a new assistant.",
+        )
 
     # Prevent changing lecture video assistants to other interaction modes
     if not is_video and asst.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
         raise HTTPException(
             status_code=400,
             detail="Assistants in Lecture Video mode cannot be switched to another interaction mode. Please create a new assistant.",
+        )
+    if (
+        not is_slides
+        and asst.interaction_mode == schemas.InteractionMode.LECTURE_SLIDES
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Assistants in Lecture Slides mode cannot be switched to another interaction mode. Please create a new assistant.",
+        )
+    if lecture_video_fields_present and lecture_slide_fields_present:
+        raise HTTPException(
+            status_code=400,
+            detail="Lecture video data and lecture slide data cannot be updated together.",
         )
 
     if lecture_video_fields_present:
@@ -11456,6 +11753,49 @@ async def update_assistant(
         ) as exc:
             _raise_http_for_lecture_video_voice_validation_error(exc)
         lecture_video_voice_id_validated = True
+    if lecture_slide_fields_present:
+        if not is_slides:
+            raise HTTPException(
+                status_code=400,
+                detail="Lecture slide data can only be set for assistants in Lecture Slides mode.",
+            )
+        if req.lecture_slide_deck_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Specifying a lecture_slide_deck_id is required when updating lecture slide data.",
+            )
+        if req.voice_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Specifying a voice_id is required when updating lecture slide data.",
+            )
+        lecture_slide_deck = await models.LectureSlideDeck.get_by_id_for_class(
+            request.state["db"], req.lecture_slide_deck_id, int(class_id)
+        )
+        if not lecture_slide_deck:
+            raise HTTPException(
+                status_code=404,
+                detail="Could not find the lecture slide deck you specified. Please try again.",
+            )
+        await lecture_slide_service.ensure_lecture_slide_deck_is_unassigned(
+            request.state["db"], lecture_slide_deck.id, exclude_assistant_id=asst.id
+        )
+        lecture_slide_voice_id = req.voice_id
+        lecture_slide_generation_prompt = req.generation_prompt
+        lecture_slide_narration_prompt = req.narration_prompt
+        try:
+            await validate_lecture_video_voice_id_or_raise(
+                int(class_id),
+                request,
+                lecture_slide_voice_id,
+                voice_settings=lecture_video_voice_settings,
+            )
+        except (
+            LectureVideoVoiceValidationError,
+            ClassCredentialValidationSSLError,
+            ClassCredentialValidationUnavailableError,
+        ) as exc:
+            _raise_http_for_lecture_video_voice_validation_error(exc)
     convert_to_next_gen_requested = (
         "convert_to_next_gen" in req.model_fields_set
         and req.convert_to_next_gen is not None
@@ -11464,13 +11804,13 @@ async def update_assistant(
         "convert_to_next_gen" in req.model_fields_set
         and req.convert_to_next_gen is True
     )
-    if (
-        convert_to_next_gen_requested
-        and interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
-    ):
+    if convert_to_next_gen_requested and interaction_mode in {
+        schemas.InteractionMode.LECTURE_VIDEO,
+        schemas.InteractionMode.LECTURE_SLIDES,
+    }:
         raise HTTPException(
             status_code=400,
-            detail="Assistant version conversions are not supported in Lecture Video mode.",
+            detail="Assistant version conversions are not supported in lecture lesson modes.",
         )
 
     # Reinforce assistant version defaults:
@@ -11484,7 +11824,7 @@ async def update_assistant(
                 detail="Next-Gen assistants are not available for your AI Provider.",
             )
         asst.version = 2
-    elif is_video:
+    elif is_video or is_slides:
         asst.version = 3
     else:
         has_openai_key = bool(
@@ -11520,7 +11860,11 @@ async def update_assistant(
     # TODO: Introduce lecture_video type in AssistantModelDict.type
     _interaction_mode = (
         schemas.InteractionMode.CHAT
-        if interaction_mode is schemas.InteractionMode.LECTURE_VIDEO
+        if interaction_mode
+        in {
+            schemas.InteractionMode.LECTURE_VIDEO,
+            schemas.InteractionMode.LECTURE_SLIDES,
+        }
         else interaction_mode
     )
 
@@ -11747,10 +12091,10 @@ async def update_assistant(
             "The selected model does not support Web Search. Please select a different model or remove the Web Search tool.",
         )
 
-    if uses_web_search and is_video:
+    if uses_web_search and (is_video or is_slides):
         raise HTTPException(
             400,
-            detail="Assistants in Lecture Video mode do not support Web Search capabilities. Please remove the Web Search tool or create a new assistant without Lecture Video mode.",
+            detail="Assistants in lecture lesson modes do not support Web Search capabilities. Please remove the Web Search tool or create a new assistant without a lecture lesson mode.",
         )
 
     uses_mcp_server = False
@@ -11774,10 +12118,10 @@ async def update_assistant(
             "The selected model does not support MCP Servers. Please select a different model or remove the MCP Server tool.",
         )
 
-    if uses_mcp_server and is_video:
+    if uses_mcp_server and (is_video or is_slides):
         raise HTTPException(
             400,
-            detail="Assistants in Lecture Video mode do not support MCP Server tools. Please remove the MCP Server tool or create a new assistant without Lecture Video mode.",
+            detail="Assistants in lecture lesson modes do not support MCP Server tools. Please remove the MCP Server tool or create a new assistant without a lecture lesson mode.",
         )
 
     existing_mcp_by_label = {}
@@ -11894,6 +12238,7 @@ async def update_assistant(
     # Track whether we have an empty vector store to delete
     vector_store_id_to_delete = None
     lecture_video_id_to_delete = None
+    lecture_slide_deck_id_to_delete = None
 
     try:
         # ------------------- Code Interpreter -------------------
@@ -11911,10 +12256,10 @@ async def update_assistant(
                         status_code=400,
                         detail="Code interpreter is not supported in Voice mode.",
                     )
-                if is_video:
+                if is_video or is_slides:
                     raise HTTPException(
                         status_code=400,
-                        detail="Code interpreter is not supported in Lecture Video mode.",
+                        detail="Code interpreter is not supported in lecture lesson modes.",
                     )
                 tool_resources["code_interpreter"] = {
                     "file_ids": req.code_interpreter_file_ids
@@ -11939,10 +12284,10 @@ async def update_assistant(
                         status_code=400,
                         detail="File search is not supported in Voice mode.",
                     )
-                if is_video:
+                if is_video or is_slides:
                     raise HTTPException(
                         status_code=400,
-                        detail="File search is not supported in Lecture Video mode.",
+                        detail="File search is not supported in lecture lesson modes.",
                     )
                 # Files will need to be stored in a vector store
                 if asst.vector_store_id:
@@ -12551,6 +12896,149 @@ async def update_assistant(
                         assistant_id_at_start=asst.id,
                     )
 
+        if lecture_slide_fields_present and lecture_slide_deck is not None:
+            if lecture_slide_voice_id is None:
+                raise HTTPException(400, "Lecture slide voice is required.")
+
+            current_lecture_slide_deck = None
+            if asst.lecture_slide_deck_id is not None:
+                current_lecture_slide_deck = (
+                    await models.LectureSlideDeck.get_by_id_with_processing_context(
+                        request.state["db"], asst.lecture_slide_deck_id
+                    )
+                )
+
+            same_lecture_slide_deck = (
+                current_lecture_slide_deck is not None
+                and current_lecture_slide_deck.id == lecture_slide_deck.id
+            )
+            prompt_present = "generation_prompt" in req.model_fields_set
+            narration_prompt_present = "narration_prompt" in req.model_fields_set
+            notes_present = "lecture_slide_page_notes" in req.model_fields_set
+            requested_voice_id = lecture_slide_voice_id.strip()
+            voice_changed = (
+                lecture_slide_deck.voice_id or ""
+            ).strip() != requested_voice_id
+            generation_prompt_changed = (
+                prompt_present
+                and lecture_slide_generation_prompt
+                != lecture_slide_deck.generation_prompt
+            )
+            narration_prompt_changed = (
+                narration_prompt_present
+                and lecture_slide_narration_prompt
+                != lecture_slide_deck.narration_prompt
+            )
+            regenerate_narration_requested = bool(req.regenerate_narration_requested)
+            regenerate_questions_requested = bool(req.regenerate_questions_requested)
+
+            target_lecture_slide_deck = lecture_slide_deck
+            should_clone_current = same_lecture_slide_deck and (
+                voice_changed
+                or generation_prompt_changed
+                or narration_prompt_changed
+                or notes_present
+                or regenerate_narration_requested
+                or regenerate_questions_requested
+                or regenerate_audio_requested
+            )
+            if should_clone_current:
+                assert current_lecture_slide_deck is not None
+                await lecture_slide_processing.cancel_processing_runs(
+                    request.state["db"],
+                    current_lecture_slide_deck.id,
+                    schemas.LectureSlideProcessingCancelReason.ASSISTANT_DETACHED,
+                )
+                target_lecture_slide_deck = (
+                    await lecture_slide_service.clone_lecture_slide_deck_snapshot(
+                        request.state["db"], current_lecture_slide_deck
+                    )
+                )
+
+            if asst.lecture_slide_deck_id != target_lecture_slide_deck.id:
+                lecture_slide_deck_id_to_delete = asst.lecture_slide_deck_id
+            asst.lecture_slide_deck_id = target_lecture_slide_deck.id
+            request.state["db"].add(asst)
+            await request.state["db"].flush()
+
+            target_lecture_slide_deck.voice_id = lecture_slide_voice_id
+            if prompt_present:
+                target_lecture_slide_deck.generation_prompt = (
+                    lecture_slide_generation_prompt
+                )
+            if narration_prompt_present:
+                target_lecture_slide_deck.narration_prompt = (
+                    lecture_slide_narration_prompt
+                )
+            notes_changed = False
+            if notes_present:
+                notes_changed = (
+                    await lecture_slide_service.apply_lecture_slide_page_notes(
+                        request.state["db"],
+                        target_lecture_slide_deck,
+                        req.lecture_slide_page_notes or [],
+                    )
+                )
+
+            needs_full_processing = (
+                target_lecture_slide_deck.status
+                in {
+                    schemas.LectureSlideDeckStatus.UPLOADED,
+                    schemas.LectureSlideDeckStatus.FAILED,
+                }
+                or not target_lecture_slide_deck.pages
+            )
+            needs_narration_text = (
+                regenerate_narration_requested
+                or narration_prompt_changed
+                or notes_changed
+            )
+            needs_questions = (
+                regenerate_questions_requested or generation_prompt_changed
+            )
+            needs_audio = regenerate_audio_requested or voice_changed
+
+            queued_run = None
+            if needs_full_processing:
+                queued_run = (
+                    await lecture_slide_processing.queue_lecture_slide_processing_run(
+                        request.state["db"],
+                        target_lecture_slide_deck,
+                        requested_by_assistant_id=asst.id,
+                    )
+                )
+            elif needs_narration_text:
+                queued_run = (
+                    await lecture_slide_processing.queue_narration_text_processing_run(
+                        request.state["db"],
+                        target_lecture_slide_deck,
+                        requested_by_assistant_id=asst.id,
+                    )
+                )
+            elif needs_questions:
+                queued_run = await lecture_slide_processing.queue_manifest_generation_processing_run(
+                    request.state["db"],
+                    target_lecture_slide_deck,
+                    requested_by_assistant_id=asst.id,
+                )
+            elif needs_audio:
+                queued_run = await lecture_slide_processing.queue_audio_processing_run(
+                    request.state["db"],
+                    target_lecture_slide_deck,
+                    requested_by_assistant_id=asst.id,
+                )
+
+            if queued_run is None and (
+                needs_full_processing
+                or needs_narration_text
+                or needs_questions
+                or needs_audio
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Lecture slide processing could not be queued for the current deck state.",
+                )
+
         await models.Thread.update_tools_available(
             request.state["db"],
             asst.id,
@@ -12563,6 +13051,7 @@ async def update_assistant(
         await request.state["db"].refresh(asst)
     except IntegrityError as e:
         lecture_video_service.raise_if_lecture_video_assignment_conflict(e)
+        lecture_slide_service.raise_if_lecture_slide_assignment_conflict(e)
         raise
 
     if not asst.instructions:
@@ -12689,6 +13178,23 @@ async def update_assistant(
                 "Failed to delete old lecture video after assistant update. assistant_id=%s lecture_video_id=%s",
                 asst.id,
                 lecture_video_id_to_delete,
+            )
+    if lecture_slide_deck_id_to_delete is not None:
+        try:
+            await lecture_slide_processing.cancel_processing_runs(
+                request.state["db"],
+                lecture_slide_deck_id_to_delete,
+                schemas.LectureSlideProcessingCancelReason.ASSISTANT_DETACHED,
+            )
+            await lecture_slide_service.delete_lecture_slide_deck_if_unused(
+                request.state["db"],
+                lecture_slide_deck_id_to_delete,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to delete old lecture slide deck after assistant update. assistant_id=%s lecture_slide_deck_id=%s",
+                asst.id,
+                lecture_slide_deck_id_to_delete,
             )
     loaded_assistant = await models.Assistant.get_by_id_with_lecture_video(
         request.state["db"], asst.id
@@ -12826,6 +13332,7 @@ async def delete_assistant(
     # Detach the vector store from the assistant and delete it
     vector_store_obj_id = None
     lecture_video_id_to_delete = asst.lecture_video_id
+    lecture_slide_deck_id_to_delete = asst.lecture_slide_deck_id
     if asst.vector_store_id:
         vector_store_id = asst.vector_store_id
         asst.vector_store_id = None
@@ -12905,6 +13412,23 @@ async def delete_assistant(
                 "Failed to delete lecture video after assistant delete. assistant_id=%s lecture_video_id=%s",
                 asst.id,
                 lecture_video_id_to_delete,
+            )
+    if lecture_slide_deck_id_to_delete is not None:
+        try:
+            await lecture_slide_processing.cancel_processing_runs(
+                request.state["db"],
+                lecture_slide_deck_id_to_delete,
+                schemas.LectureSlideProcessingCancelReason.ASSISTANT_DELETED,
+            )
+            await lecture_slide_service.delete_lecture_slide_deck_if_unused(
+                request.state["db"],
+                lecture_slide_deck_id_to_delete,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to delete lecture slide deck after assistant delete. assistant_id=%s lecture_slide_deck_id=%s",
+                asst.id,
+                lecture_slide_deck_id_to_delete,
             )
     return {"status": "ok"}
 

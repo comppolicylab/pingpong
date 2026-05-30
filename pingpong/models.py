@@ -2941,6 +2941,27 @@ class LectureSlideSourceStoredObject(Base):
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), onupdate=func.now())
 
+    @classmethod
+    async def create(
+        cls,
+        session: AsyncSession,
+        *,
+        key: str,
+        original_filename: str,
+        content_type: str,
+        content_length: int,
+    ) -> "LectureSlideSourceStoredObject":
+        stored_object = LectureSlideSourceStoredObject(
+            key=key,
+            original_filename=original_filename,
+            content_type=content_type,
+            content_length=content_length,
+        )
+        session.add(stored_object)
+        await session.flush()
+        await session.refresh(stored_object)
+        return stored_object
+
 
 class LectureSlideImageStoredObject(Base):
     __tablename__ = "lecture_slide_image_stored_objects"
@@ -3116,6 +3137,87 @@ class LectureSlideDeck(Base):
     total_duration_ms = Column(Integer, nullable=True)
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), onupdate=func.now())
+
+    @classmethod
+    async def create(
+        cls,
+        session: AsyncSession,
+        *,
+        class_id: int,
+        source_stored_object_id: int,
+        uploader_id: int | None,
+        display_name: str,
+        slide_count: int,
+        voice_id: str | None = None,
+        generation_prompt: str | None = None,
+        narration_prompt: str | None = None,
+        transcript_data: dict[str, Any] | None = None,
+        context_data: dict[str, Any] | None = None,
+        context_version: int | None = None,
+        lecture_slide_chat_available: bool = False,
+        status: schemas.LectureSlideDeckStatus = schemas.LectureSlideDeckStatus.UPLOADED,
+        error_message: str | None = None,
+        source_lecture_slide_deck_id_snapshot: int | None = None,
+        total_duration_ms: int | None = None,
+        continuous_narration_stored_object_id: int | None = None,
+        caption_stored_object_id: int | None = None,
+    ) -> "LectureSlideDeck":
+        deck = LectureSlideDeck(
+            class_id=class_id,
+            source_stored_object_id=source_stored_object_id,
+            uploader_id=uploader_id,
+            display_name=display_name,
+            voice_id=voice_id,
+            generation_prompt=generation_prompt,
+            narration_prompt=narration_prompt,
+            transcript_data=transcript_data,
+            context_data=context_data,
+            context_version=context_version,
+            lecture_slide_chat_available=lecture_slide_chat_available,
+            status=status,
+            error_message=error_message,
+            source_lecture_slide_deck_id_snapshot=source_lecture_slide_deck_id_snapshot,
+            slide_count=slide_count,
+            total_duration_ms=total_duration_ms,
+            continuous_narration_stored_object_id=continuous_narration_stored_object_id,
+            caption_stored_object_id=caption_stored_object_id,
+        )
+        session.add(deck)
+        await session.flush()
+        await session.refresh(deck)
+        return deck
+
+    @classmethod
+    async def get_by_id(
+        cls, session: AsyncSession, id_: int
+    ) -> Optional["LectureSlideDeck"]:
+        stmt = (
+            select(LectureSlideDeck)
+            .where(LectureSlideDeck.id == int(id_))
+            .options(undefer(LectureSlideDeck.generation_prompt))
+            .options(undefer(LectureSlideDeck.narration_prompt))
+            .options(selectinload(LectureSlideDeck.source_stored_object))
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_id_for_class(
+        cls, session: AsyncSession, id_: int, class_id: int
+    ) -> Optional["LectureSlideDeck"]:
+        stmt = (
+            select(LectureSlideDeck)
+            .where(
+                LectureSlideDeck.id == int(id_),
+                LectureSlideDeck.class_id == int(class_id),
+            )
+            .options(undefer(LectureSlideDeck.generation_prompt))
+            .options(undefer(LectureSlideDeck.narration_prompt))
+            .options(undefer(LectureSlideDeck.transcript_data))
+            .options(undefer(LectureSlideDeck.context_data))
+            .options(selectinload(LectureSlideDeck.source_stored_object))
+            .options(selectinload(LectureSlideDeck.pages))
+        )
+        return await session.scalar(stmt)
 
     @classmethod
     async def get_by_id_with_processing_context(
@@ -5076,6 +5178,15 @@ class Assistant(Base):
             .selectinload(LectureVideoQuestion.options)
             .selectinload(LectureVideoQuestionOption.post_narration)
             .selectinload(LectureVideoNarration.stored_object),
+            selectinload(Assistant.lecture_slide_deck).options(
+                undefer(LectureSlideDeck.generation_prompt),
+                undefer(LectureSlideDeck.narration_prompt),
+                undefer(LectureSlideDeck.transcript_data),
+                undefer(LectureSlideDeck.context_data),
+                selectinload(LectureSlideDeck.source_stored_object),
+                selectinload(LectureSlideDeck.pages),
+                selectinload(LectureSlideDeck.questions),
+            ),
         )
 
     @classmethod
@@ -5100,7 +5211,13 @@ class Assistant(Base):
                 selectinload(Assistant.lecture_video).options(
                     undefer(LectureVideo.generation_prompt),
                     selectinload(LectureVideo.stored_object),
-                )
+                ),
+                selectinload(Assistant.lecture_slide_deck).options(
+                    undefer(LectureSlideDeck.generation_prompt),
+                    undefer(LectureSlideDeck.narration_prompt),
+                    selectinload(LectureSlideDeck.source_stored_object),
+                    selectinload(LectureSlideDeck.pages),
+                ),
             )
         )
         return await session.scalar(stmt)
@@ -5114,6 +5231,21 @@ class Assistant(Base):
         exclude_assistant_id: int | None = None,
     ) -> Optional["Assistant"]:
         stmt = select(Assistant).where(Assistant.lecture_video_id == lecture_video_id)
+        if exclude_assistant_id is not None:
+            stmt = stmt.where(Assistant.id != exclude_assistant_id)
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_lecture_slide_deck_id(
+        cls,
+        session: AsyncSession,
+        lecture_slide_deck_id: int,
+        *,
+        exclude_assistant_id: int | None = None,
+    ) -> Optional["Assistant"]:
+        stmt = select(Assistant).where(
+            Assistant.lecture_slide_deck_id == lecture_slide_deck_id
+        )
         if exclude_assistant_id is not None:
             stmt = stmt.where(Assistant.id != exclude_assistant_id)
         return await session.scalar(stmt)
@@ -5148,6 +5280,22 @@ class Assistant(Base):
                     undefer(LectureVideo.transcript_data),
                     undefer(LectureVideo.generation_prompt),
                     selectinload(LectureVideo.stored_object),
+                )
+            )
+            .options(
+                selectinload(Assistant.lecture_slide_deck).options(
+                    undefer(LectureSlideDeck.generation_prompt),
+                    undefer(LectureSlideDeck.narration_prompt),
+                    undefer(LectureSlideDeck.transcript_data),
+                    undefer(LectureSlideDeck.context_data),
+                    selectinload(LectureSlideDeck.source_stored_object),
+                    selectinload(LectureSlideDeck.pages),
+                    selectinload(LectureSlideDeck.questions).selectinload(
+                        LectureSlideQuestion.options
+                    ),
+                    selectinload(LectureSlideDeck.questions).selectinload(
+                        LectureSlideQuestion.correct_option
+                    ),
                 )
             )
         )
@@ -5185,7 +5333,13 @@ class Assistant(Base):
                 selectinload(Assistant.lecture_video).options(
                     undefer(LectureVideo.generation_prompt),
                     selectinload(LectureVideo.stored_object),
-                )
+                ),
+                selectinload(Assistant.lecture_slide_deck).options(
+                    undefer(LectureSlideDeck.generation_prompt),
+                    undefer(LectureSlideDeck.narration_prompt),
+                    selectinload(LectureSlideDeck.source_stored_object),
+                    selectinload(LectureSlideDeck.pages),
+                ),
             )
         )
         result = await session.execute(stmt)
@@ -5234,12 +5388,15 @@ class Assistant(Base):
         assistant_id: str | None = None,
         vector_store_id: int | None = None,
         lecture_video_id: int | None = None,
+        lecture_slide_deck_id: int | None = None,
         version: int = 1,
     ) -> "Assistant":
         params = data.model_dump()
         code_interpreter_file_ids = params.pop("code_interpreter_file_ids", [])
         params.pop("lecture_video_id", None)
         params.pop("lecture_video_manifest", None)
+        params.pop("lecture_slide_deck_id", None)
+        params.pop("lecture_slide_page_notes", None)
         params.pop("voice_id", None)
         if data.interaction_mode != schemas.InteractionMode.VOICE:
             for field in (
@@ -5255,7 +5412,10 @@ class Assistant(Base):
                 "realtime_transcription_model",
             ):
                 params[field] = None
-        if data.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
+        if data.interaction_mode not in {
+            schemas.InteractionMode.LECTURE_VIDEO,
+            schemas.InteractionMode.LECTURE_SLIDES,
+        }:
             for field in (
                 "elevenlabs_stability",
                 "elevenlabs_similarity_boost",
@@ -5273,6 +5433,7 @@ class Assistant(Base):
         params["use_image_descriptions"] = data.use_image_descriptions
         params["vector_store_id"] = vector_store_id
         params["lecture_video_id"] = lecture_video_id
+        params["lecture_slide_deck_id"] = lecture_slide_deck_id
         params["version"] = version
 
         assistant = Assistant(**params)

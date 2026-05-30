@@ -756,6 +756,8 @@ class LectureSlidePageView(BaseModel):
     end_offset_ms: int | None = Field(None, ge=0)
     image_url: str | None = None
     image_stored_object_id: int | None = None
+    user_notes: str | None = None
+    narration_text: str | None = None
 
 
 class LectureSlideDeckView(BaseModel):
@@ -1067,6 +1069,21 @@ class LectureVideoSummary(BaseModel):
     error_message: str | None = None
 
 
+class LectureSlideSummary(BaseModel):
+    id: int
+    filename: str
+    size: int
+    content_type: str
+    status: LectureSlideDeckStatus
+    error_message: str | None = None
+    slide_count: int
+
+
+class LectureSlidePageNotes(BaseModel):
+    position: int = Field(..., ge=0)
+    user_notes: str | None = Field(None, max_length=20000)
+
+
 class LectureVideoAssistantEditorPolicy(BaseModel):
     show_mode_in_assistant_editor: bool = False
     can_select_mode_in_assistant_editor: bool = False
@@ -1091,6 +1108,15 @@ class LectureVideoConfigResponse(BaseModel):
     video_description_duration_ms: int = Field(30000, ge=5000, le=300000)
     overwrite_manifest: bool = False
     manifest_generation_status: LectureVideoProcessingRunSummary | None = None
+
+
+class LectureSlideConfigResponse(BaseModel):
+    lecture_slide_deck: LectureSlideSummary
+    voice_id: str
+    generation_prompt: str | None = None
+    narration_prompt: str | None = None
+    pages: list["LectureSlidePageView"] = Field(default_factory=list)
+    processing_status: LectureVideoProcessingRunSummary | None = None
 
 
 class LectureVideoDefaults(BaseModel):
@@ -1353,6 +1379,7 @@ class Assistant(BaseModel):
     created: datetime
     updated: datetime | None
     lecture_video: LectureVideoSummary | None = None
+    lecture_slide_deck: LectureSlideSummary | None = None
     share_links: list[AnonymousLink] | None = None
 
     model_config = ConfigDict(
@@ -1393,32 +1420,63 @@ def lecture_video_validator_create_assistant(self):
             raise ValueError(
                 "Specifying a voice_id is required for lecture video assistants."
             )
+        if self.lecture_slide_deck_id is not None:
+            raise ValueError(
+                "Lecture slide data cannot be set for assistants in Lecture Video mode."
+            )
+    elif self.interaction_mode == InteractionMode.LECTURE_SLIDES:
+        if self.lecture_slide_deck_id is None:
+            raise ValueError(
+                "Specifying a lecture_slide_deck_id is required for lecture slide assistants."
+            )
+        if not self.voice_id:
+            raise ValueError(
+                "Specifying a voice_id is required for lecture slide assistants."
+            )
+        if self.lecture_video_id is not None or self.lecture_video_manifest is not None:
+            raise ValueError(
+                "Lecture video data cannot be set for assistants in Lecture Slides mode."
+            )
+        if (
+            self.video_description_duration_ms is not None
+            or self.overwrite_manifest is not None
+        ):
+            raise ValueError(
+                "Lecture video manifest controls cannot be set for assistants in Lecture Slides mode."
+            )
     elif (
         self.lecture_video_id is not None
         or self.lecture_video_manifest is not None
+        or self.lecture_slide_deck_id is not None
+        or self.lecture_slide_page_notes
         or self.voice_id is not None
         or self.generation_prompt is not None
+        or self.narration_prompt is not None
         or self.video_description_duration_ms is not None
         or self.overwrite_manifest is not None
     ):
         raise ValueError(
-            "Lecture video data can only be set for assistants in Lecture Video mode."
+            "Lecture lesson data can only be set for assistants in Lecture Video or Lecture Slides mode."
         )
-    if self.interaction_mode == InteractionMode.LECTURE_VIDEO and (
+    if self.interaction_mode in {
+        InteractionMode.LECTURE_VIDEO,
+        InteractionMode.LECTURE_SLIDES,
+    } and (
         (self.code_interpreter_file_ids and len(self.code_interpreter_file_ids) > 0)
         or (self.file_search_file_ids and len(self.file_search_file_ids) > 0)
         or (self.tools and len(self.tools) > 0)
         or (len(self.mcp_servers) > 0)
     ):
         raise ValueError(
-            "Lecture video assistants cannot be created with tools. "
+            "Lecture lesson assistants cannot be created with tools. "
             "Please remove all tools or select a different interaction mode."
         )
     if (
-        self.interaction_mode == InteractionMode.LECTURE_VIDEO
+        self.interaction_mode
+        in {InteractionMode.LECTURE_VIDEO, InteractionMode.LECTURE_SLIDES}
         and self.create_classic_assistant
     ):
-        raise ValueError("Lecture Video assistants should be next-gen")
+        raise ValueError("Lecture lesson assistants should be next-gen")
     return self
 
 
@@ -1435,24 +1493,56 @@ def lecture_video_validator_update_assistant(self):
         "regenerate_audio_requested" in self.model_fields_set
     )
     overwrite_manifest_present = "overwrite_manifest" in self.model_fields_set
+    lecture_slide_deck_id_present = "lecture_slide_deck_id" in self.model_fields_set
+    narration_prompt_present = "narration_prompt" in self.model_fields_set
+    lecture_slide_page_notes_present = (
+        "lecture_slide_page_notes" in self.model_fields_set
+    )
+    regenerate_narration_requested_present = (
+        "regenerate_narration_requested" in self.model_fields_set
+    )
+    regenerate_questions_requested_present = (
+        "regenerate_questions_requested" in self.model_fields_set
+    )
     if self.regenerate_requested and self.regenerate_audio_requested:
         raise ValueError(
             "regenerate_requested and regenerate_audio_requested cannot both be true."
         )
-    lecture_video_payload_present = (
+    lecture_video_specific_payload_present = (
         lecture_video_id_present
         or lecture_video_manifest_present
-        or voice_id_present
-        or generation_prompt_present
         or video_description_duration_ms_present
         or regenerate_requested_present
-        or regenerate_audio_requested_present
         or overwrite_manifest_present
+    )
+    lecture_slide_specific_payload_present = (
+        lecture_slide_deck_id_present
+        or narration_prompt_present
+        or lecture_slide_page_notes_present
+        or regenerate_narration_requested_present
+        or regenerate_questions_requested_present
+    )
+    shared_lecture_payload_present = (
+        voice_id_present
+        or generation_prompt_present
+        or regenerate_audio_requested_present
+    )
+    lecture_video_payload_present = lecture_video_specific_payload_present or (
+        self.interaction_mode == InteractionMode.LECTURE_VIDEO
+        and shared_lecture_payload_present
+    )
+    lecture_slide_payload_present = lecture_slide_specific_payload_present or (
+        self.interaction_mode == InteractionMode.LECTURE_SLIDES
+        and shared_lecture_payload_present
     )
     overwrite_manifest = (
         self.overwrite_manifest if overwrite_manifest_present else False
     )
 
+    if lecture_video_payload_present and lecture_slide_payload_present:
+        raise ValueError(
+            "Lecture video data and lecture slide data cannot be updated together."
+        )
     if lecture_video_payload_present and self.lecture_video_id is None:
         raise ValueError(
             "Specifying a lecture_video_id is required when updating lecture video data."
@@ -1477,25 +1567,37 @@ def lecture_video_validator_update_assistant(self):
         raise ValueError(
             "Specifying a voice_id is required when updating lecture video data."
         )
+    if lecture_slide_payload_present and self.lecture_slide_deck_id is None:
+        raise ValueError(
+            "Specifying a lecture_slide_deck_id is required when updating lecture slide data."
+        )
+    if lecture_slide_payload_present and not self.voice_id:
+        raise ValueError(
+            "Specifying a voice_id is required when updating lecture slide data."
+        )
 
     if not self.interaction_mode:
         return self
-    if self.interaction_mode == InteractionMode.LECTURE_VIDEO and (
+    if self.interaction_mode in {
+        InteractionMode.LECTURE_VIDEO,
+        InteractionMode.LECTURE_SLIDES,
+    } and (
         (self.code_interpreter_file_ids and len(self.code_interpreter_file_ids) > 0)
         or (self.file_search_file_ids and len(self.file_search_file_ids) > 0)
         or (self.tools and len(self.tools) > 0)
         or (self.mcp_servers and len(self.mcp_servers) > 0)
     ):
         raise ValueError(
-            "Lecture video assistants cannot be updated with tools. "
+            "Lecture lesson assistants cannot be updated with tools. "
             "Please remove all tools or select a different interaction mode."
         )
     if (
-        self.interaction_mode == InteractionMode.LECTURE_VIDEO
+        self.interaction_mode
+        in {InteractionMode.LECTURE_VIDEO, InteractionMode.LECTURE_SLIDES}
         and self.convert_to_next_gen is not None
     ):
         raise ValueError(
-            "Cannot switch to or from next-gen for Lecture video assistants."
+            "Cannot switch to or from next-gen for Lecture lesson assistants."
         )
     return self
 
@@ -1594,8 +1696,11 @@ class CreateAssistant(BaseModel):
     tools: list[ToolOption] = Field(default_factory=list)
     lecture_video_id: int | None = None
     lecture_video_manifest: LectureVideoManifest | None = None
+    lecture_slide_deck_id: int | None = None
+    lecture_slide_page_notes: list[LectureSlidePageNotes] = Field(default_factory=list)
     voice_id: str | None = None
     generation_prompt: str | None = Field(None, max_length=20000)
+    narration_prompt: str | None = Field(None, max_length=20000)
     # The API intentionally allows non-UI-step values; only the editor slider
     # snaps to 5-second increments.
     video_description_duration_ms: int | None = Field(None, ge=5000, le=300000)
@@ -1677,12 +1782,17 @@ class UpdateAssistant(BaseModel):
     interaction_mode: InteractionMode | None = None
     lecture_video_id: int | None = None
     lecture_video_manifest: LectureVideoManifest | None = None
+    lecture_slide_deck_id: int | None = None
+    lecture_slide_page_notes: list[LectureSlidePageNotes] | None = None
     voice_id: str | None = None
     generation_prompt: str | None = Field(None, max_length=20000)
+    narration_prompt: str | None = Field(None, max_length=20000)
     # The API intentionally allows non-UI-step values; only the editor slider
     # snaps to 5-second increments.
     video_description_duration_ms: int | None = Field(None, ge=5000, le=300000)
     regenerate_requested: bool | None = None
+    regenerate_narration_requested: bool | None = None
+    regenerate_questions_requested: bool | None = None
     regenerate_audio_requested: bool | None = None
     overwrite_manifest: bool | None = None
     model: str | None = Field(None, min_length=2)
