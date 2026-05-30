@@ -1113,6 +1113,8 @@ def extract_slide_assets_from_pdf(pdf_path: str) -> list[ExtractedSlideAsset]:
                     extracted_text=text or None,
                 )
             )
+        if not assets:
+            shutil.rmtree(output_dir, ignore_errors=True)
         return assets
     except Exception:
         shutil.rmtree(output_dir, ignore_errors=True)

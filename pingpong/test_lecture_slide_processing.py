@@ -175,6 +175,39 @@ async def test_extract_slide_assets_from_pdf_reads_text_and_dimensions(tmp_path)
     assert "Hello Slides" in (assets[0].extracted_text or "")
 
 
+async def test_extract_slide_assets_from_pdf_cleans_empty_pdf_output_dir(
+    monkeypatch, tmp_path
+):
+    pdf_path = tmp_path / "empty.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\n%%EOF\n")
+    output_dir = tmp_path / "extracted"
+
+    def fake_mkdtemp(prefix):
+        output_dir.mkdir()
+        return str(output_dir)
+
+    monkeypatch.setattr(
+        lecture_slide_processing.tempfile,
+        "mkdtemp",
+        fake_mkdtemp,
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing.subprocess,
+        "run",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "PdfReader",
+        lambda path: SimpleNamespace(pages=[]),
+    )
+
+    assets = lecture_slide_processing.extract_slide_assets_from_pdf(str(pdf_path))
+
+    assert assets == []
+    assert not output_dir.exists()
+
+
 async def test_list_rendered_pdf_page_images_sorts_zero_padded_names(tmp_path):
     for filename in ("page-10.png", "page-02.png", "page-01.png"):
         (tmp_path / filename).write_bytes(b"")
