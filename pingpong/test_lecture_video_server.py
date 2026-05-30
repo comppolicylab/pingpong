@@ -6687,8 +6687,8 @@ def test_run_lecture_video_worker_cli_starts_health_server_and_passes_pool_setti
 
     monkeypatch.setattr(cli_module, "get_server", fake_get_server)
     monkeypatch.setattr(
-        lecture_video_processing,
-        "run_narration_processing_worker_pool",
+        cli_module.lecture_slide_processing,
+        "run_processing_worker_pool",
         fake_worker_pool,
     )
 

@@ -2968,6 +2968,9 @@ class LectureSlideNarrationStoredObject(Base):
     continuous_narration_decks = relationship(
         "LectureSlideDeck", back_populates="continuous_narration_stored_object"
     )
+    page_narrations = relationship(
+        "LectureSlidePage", back_populates="narration_stored_object"
+    )
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -3074,6 +3077,10 @@ class LectureSlideDeck(Base):
     )
     assistants = relationship("Assistant", back_populates="lecture_slide_deck")
     threads = relationship("Thread", back_populates="lecture_slide_deck")
+    processing_runs = relationship(
+        "LectureSlideProcessingRun",
+        back_populates="lecture_slide_deck",
+    )
     pages = relationship(
         "LectureSlidePage",
         back_populates="lecture_slide_deck",
@@ -3089,6 +3096,7 @@ class LectureSlideDeck(Base):
     display_name = Column(String, nullable=False)
     voice_id = Column(String, nullable=True)
     generation_prompt: Mapped[str | None] = deferred(mapped_column(Text, nullable=True))
+    narration_prompt: Mapped[str | None] = deferred(mapped_column(Text, nullable=True))
     transcript_data: Mapped[dict[str, Any] | None] = deferred(
         mapped_column(JSON, nullable=True)
     )
@@ -3111,6 +3119,208 @@ class LectureSlideDeck(Base):
     total_duration_ms = Column(Integer, nullable=True)
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), onupdate=func.now())
+
+    @classmethod
+    async def get_by_id_with_processing_context(
+        cls, session: AsyncSession, id_: int
+    ) -> Optional["LectureSlideDeck"]:
+        stmt = (
+            select(LectureSlideDeck)
+            .where(LectureSlideDeck.id == int(id_))
+            .options(undefer(LectureSlideDeck.generation_prompt))
+            .options(undefer(LectureSlideDeck.narration_prompt))
+            .options(undefer(LectureSlideDeck.transcript_data))
+            .options(undefer(LectureSlideDeck.context_data))
+            .options(selectinload(LectureSlideDeck.source_stored_object))
+            .options(selectinload(LectureSlideDeck.continuous_narration_stored_object))
+            .options(selectinload(LectureSlideDeck.caption_stored_object))
+            .options(
+                selectinload(LectureSlideDeck.pages).selectinload(
+                    LectureSlidePage.image_stored_object
+                )
+            )
+            .options(
+                selectinload(LectureSlideDeck.pages).selectinload(
+                    LectureSlidePage.narration
+                )
+            )
+            .options(
+                selectinload(LectureSlideDeck.pages).selectinload(
+                    LectureSlidePage.narration_stored_object
+                )
+            )
+            .options(
+                selectinload(LectureSlideDeck.questions).selectinload(
+                    LectureSlideQuestion.options
+                )
+            )
+            .options(
+                selectinload(LectureSlideDeck.questions).selectinload(
+                    LectureSlideQuestion.correct_option
+                )
+            )
+            .options(
+                selectinload(LectureSlideDeck.questions)
+                .selectinload(LectureSlideQuestion.intro_narration)
+                .selectinload(LectureSlideNarration.stored_object)
+            )
+            .options(
+                selectinload(LectureSlideDeck.questions)
+                .selectinload(LectureSlideQuestion.options)
+                .selectinload(LectureSlideQuestionOption.post_narration)
+                .selectinload(LectureSlideNarration.stored_object)
+            )
+        )
+        return await session.scalar(stmt)
+
+
+class LectureSlideProcessingRun(Base):
+    __tablename__ = "lecture_slide_processing_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    lecture_slide_deck_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("lecture_slide_decks.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    lecture_slide_deck: Mapped[Optional["LectureSlideDeck"]] = relationship(
+        "LectureSlideDeck", back_populates="processing_runs"
+    )
+    lecture_slide_deck_id_snapshot: Mapped[int] = mapped_column(
+        Integer, nullable=False, index=True
+    )
+    class_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    assistant_id_at_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    stage: Mapped[schemas.LectureSlideProcessingStage] = mapped_column(
+        SQLEnum(schemas.LectureSlideProcessingStage),
+        nullable=False,
+    )
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[schemas.LectureSlideProcessingRunStatus] = mapped_column(
+        SQLEnum(schemas.LectureSlideProcessingRunStatus),
+        nullable=False,
+        server_default=schemas.LectureSlideProcessingRunStatus.QUEUED.name,
+    )
+    error_message: Mapped[str | None] = mapped_column(String, nullable=True)
+    cancel_reason: Mapped[schemas.LectureSlideProcessingCancelReason | None] = (
+        mapped_column(
+            SQLEnum(schemas.LectureSlideProcessingCancelReason),
+            nullable=True,
+        )
+    )
+    lease_token: Mapped[str | None] = mapped_column(String, nullable=True)
+    leased_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True, onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index(
+            "lecture_slide_processing_runs_active_idx",
+            "lecture_slide_deck_id_snapshot",
+            unique=True,
+            sqlite_where=text("status IN ('QUEUED', 'RUNNING')"),
+            postgresql_where=text("status IN ('QUEUED', 'RUNNING')"),
+        ),
+        Index(
+            "lecture_slide_processing_runs_status_stage_lease_idx",
+            "status",
+            "stage",
+            "lease_expires_at",
+        ),
+        Index(
+            "lecture_slide_processing_runs_snapshot_attempt_idx",
+            "lecture_slide_deck_id_snapshot",
+            "attempt_number",
+            unique=True,
+        ),
+    )
+
+    @classmethod
+    async def create(
+        cls,
+        session: AsyncSession,
+        *,
+        lecture_slide_deck_id: int | None,
+        lecture_slide_deck_id_snapshot: int,
+        class_id: int,
+        assistant_id_at_start: int | None,
+        stage: schemas.LectureSlideProcessingStage,
+        attempt_number: int,
+        status: schemas.LectureSlideProcessingRunStatus = (
+            schemas.LectureSlideProcessingRunStatus.QUEUED
+        ),
+    ) -> "LectureSlideProcessingRun":
+        run = LectureSlideProcessingRun(
+            lecture_slide_deck_id=lecture_slide_deck_id,
+            lecture_slide_deck_id_snapshot=lecture_slide_deck_id_snapshot,
+            class_id=class_id,
+            assistant_id_at_start=assistant_id_at_start,
+            stage=stage,
+            attempt_number=attempt_number,
+            status=status,
+        )
+        session.add(run)
+        await session.flush()
+        await session.refresh(run)
+        return run
+
+    @classmethod
+    async def get_by_id(
+        cls, session: AsyncSession, id_: int
+    ) -> "LectureSlideProcessingRun | None":
+        stmt = select(LectureSlideProcessingRun).where(
+            LectureSlideProcessingRun.id == int(id_)
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_latest_attempt_number(
+        cls,
+        session: AsyncSession,
+        lecture_slide_deck_id_snapshot: int,
+    ) -> int:
+        stmt = select(func.max(LectureSlideProcessingRun.attempt_number)).where(
+            LectureSlideProcessingRun.lecture_slide_deck_id_snapshot
+            == lecture_slide_deck_id_snapshot,
+        )
+        value = await session.scalar(stmt)
+        return int(value or 0)
+
+    @classmethod
+    async def get_non_terminal_by_snapshot(
+        cls,
+        session: AsyncSession,
+        lecture_slide_deck_id_snapshot: int,
+    ) -> "LectureSlideProcessingRun | None":
+        stmt = (
+            select(LectureSlideProcessingRun)
+            .where(
+                LectureSlideProcessingRun.lecture_slide_deck_id_snapshot
+                == lecture_slide_deck_id_snapshot,
+                LectureSlideProcessingRun.status.in_(
+                    [
+                        schemas.LectureSlideProcessingRunStatus.QUEUED,
+                        schemas.LectureSlideProcessingRunStatus.RUNNING,
+                    ]
+                ),
+            )
+            .order_by(LectureSlideProcessingRun.created.asc())
+        )
+        return (await session.scalars(stmt)).one_or_none()
 
 
 class LectureSlidePage(Base):
@@ -3149,6 +3359,22 @@ class LectureSlidePage(Base):
     narration = relationship(
         "LectureSlideNarration",
         foreign_keys=[narration_id],
+        uselist=False,
+    )
+    narration_stored_object_id = Column(
+        Integer,
+        ForeignKey(
+            "lecture_slide_narration_stored_objects.id",
+            name="fk_ls_pages_narration_stored_object_id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        index=True,
+    )
+    narration_stored_object = relationship(
+        "LectureSlideNarrationStoredObject",
+        foreign_keys=[narration_stored_object_id],
+        back_populates="page_narrations",
         uselist=False,
     )
     start_offset_ms = Column(Integer, nullable=True)

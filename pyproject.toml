@@ -41,6 +41,7 @@ dependencies = [
     "pydantic-settings~=2.14.1",
     "pydub ~= 0.25.1",
     "pyjwt~=2.13.0",
+    "pymupdf~=1.27.2.3",
     "python-glowplug ~= 0.3.12",
     "python3-saml ~= 1.16.0",
     "pytz~=2026.2",
