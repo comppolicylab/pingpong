@@ -30,7 +30,8 @@
 		CheckCircleOutline,
 		ExclamationCircleOutline,
 		InfoCircleOutline,
-		RefreshOutline
+		RefreshOutline,
+		FilePdfOutline
 	} from 'flowbite-svelte-icons';
 	import ConfirmationModal from '$lib/components/ConfirmationModal.svelte';
 	import type { Assistant, AppUser } from '$lib/api';
@@ -54,8 +55,8 @@
 	export let shareable = false;
 	export let classOptions: { id: number; name: string; term: string }[] = [];
 	export let currentClassId: number;
-	export let lectureVideoRefreshing = false;
-	export let onRefreshLectureVideo: (() => void) | null = null;
+	export let lectureMediaRefreshing = false;
+	export let onRefreshLectureMedia: (() => void) | null = null;
 
 	let sharedAssistantModalOpen = false;
 	let qualtricsCodeModalOpen = false;
@@ -547,16 +548,16 @@
 				>
 					{assistant.lecture_video.status.charAt(0).toUpperCase() +
 						assistant.lecture_video.status.slice(1)}
-					{#if onRefreshLectureVideo}
+					{#if onRefreshLectureMedia}
 						<button
 							type="button"
 							class="rounded-full p-0.5 text-blue-dark-30 hover:text-blue-dark-50 disabled:cursor-not-allowed disabled:opacity-50"
-							onclick={() => onRefreshLectureVideo?.()}
-							disabled={lectureVideoRefreshing}
+							onclick={() => onRefreshLectureMedia?.()}
+							disabled={lectureMediaRefreshing}
 							aria-label="Refresh lecture video status"
 							title="Refresh lecture video status"
 						>
-							{#if lectureVideoRefreshing}
+							{#if lectureMediaRefreshing}
 								<Spinner color="custom" customColor="fill-blue-800" class="h-3 w-3" />
 							{:else}
 								<RefreshOutline class="h-3 w-3" />
@@ -567,6 +568,40 @@
 			</div>
 			{#if assistant.lecture_video.error_message}
 				<div class="text-red-700">{assistant.lecture_video.error_message}</div>
+			{/if}
+		</div>
+	{/if}
+	{#if assistant.interaction_mode === 'lecture_slides' && assistant.lecture_slide_deck}
+		<div class="mb-3 flex flex-col gap-1 text-xs">
+			<div class="flex items-center gap-2">
+				<FilePdfOutline class="h-4 w-4 text-blue-dark-40" />
+				<span class="font-medium text-blue-dark-40 uppercase">Lecture slides</span>
+				<span
+					class="border-blue-dark-20 inline-flex items-center gap-1 rounded-full border bg-white px-2 py-0.5 font-semibold text-blue-dark-40"
+				>
+					{assistant.lecture_slide_deck.status.charAt(0).toUpperCase() +
+						assistant.lecture_slide_deck.status.slice(1)}
+					{#if onRefreshLectureMedia}
+						<button
+							type="button"
+							class="rounded-full p-0.5 text-blue-dark-30 hover:text-blue-dark-50 disabled:cursor-not-allowed disabled:opacity-50"
+							onclick={() => onRefreshLectureMedia?.()}
+							disabled={lectureMediaRefreshing}
+							aria-label="Refresh lecture slide status"
+							title="Refresh lecture slide status"
+						>
+							{#if lectureMediaRefreshing}
+								<Spinner color="custom" customColor="fill-blue-800" class="h-3 w-3" />
+							{:else}
+								<RefreshOutline class="h-3 w-3" />
+							{/if}
+						</button>
+					{/if}
+				</span>
+				<span class="text-gray-500">{assistant.lecture_slide_deck.slide_count} slides</span>
+			</div>
+			{#if assistant.lecture_slide_deck.error_message}
+				<div class="text-red-700">{assistant.lecture_slide_deck.error_message}</div>
 			{/if}
 		</div>
 	{/if}

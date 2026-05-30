@@ -53,6 +53,9 @@
 		MicrophoneSolid,
 		ArchiveOutline,
 		FileVideoOutline,
+		FilePdfOutline,
+		BookOpenOutline,
+		BookOpenSolid,
 		ClapperboardPlaySolid,
 		ClapperboardPlayOutline,
 		CheckCircleOutline,
@@ -76,10 +79,15 @@
 	import { slide } from 'svelte/transition';
 	import WebSourceChip from '$lib/components/WebSourceChip.svelte';
 	import MCPServerModal from '$lib/components/MCPServerModal.svelte';
+	import PdfPageViewer from '$lib/components/PdfPageViewer.svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	export let data;
 	$: lectureVideoDefaultInstructions = data.lectureVideoDefaults?.instructions || '';
 	$: lectureVideoDefaultGenerationPrompt = data.lectureVideoDefaults?.generation_prompt || '';
+	$: lectureSlideDefaultGenerationPrompt =
+		data.lectureVideoDefaults?.lecture_slide_generation_prompt || '';
+	$: lectureSlideDefaultNarrationPrompt =
+		data.lectureVideoDefaults?.lecture_slide_narration_prompt || '';
 	const SUPPORTED_LECTURE_VIDEO_QUESTION_TYPES = new Set<api.LectureVideoQuestionType>([
 		'single_select'
 	]);
@@ -217,7 +225,7 @@
 		assistantName = assistant.name;
 		hasSetAssistantName = true;
 	}
-	let interactionMode: 'chat' | 'voice' | 'lecture_video';
+	let interactionMode: api.InteractionMode;
 	$: if (
 		assistant?.interaction_mode !== undefined &&
 		assistant?.interaction_mode !== null &&
@@ -233,14 +241,27 @@
 	) {
 		interactionMode = 'chat';
 	}
-	$: isLectureMode = interactionMode === 'lecture_video';
+	$: isLectureVideoMode = interactionMode === 'lecture_video';
+	$: isLectureSlideMode = interactionMode === 'lecture_slides';
+	$: isLectureMode = isLectureVideoMode || isLectureSlideMode;
 	$: isEditingLectureAssistant =
+		!data.isCreating &&
+		((assistant?.interaction_mode || null) === 'lecture_video' ||
+			(assistant?.interaction_mode || null) === 'lecture_slides');
+	$: isEditingLectureVideoAssistant =
 		!data.isCreating && (assistant?.interaction_mode || null) === 'lecture_video';
-	$: lectureVideoConfigLoadError = isEditingLectureAssistant
+	$: isEditingLectureSlideAssistant =
+		!data.isCreating && (assistant?.interaction_mode || null) === 'lecture_slides';
+	$: lectureVideoConfigLoadError = isEditingLectureVideoAssistant
 		? (data.lectureVideoConfigLoadError ?? null)
+		: null;
+	$: lectureSlideConfigLoadError = isEditingLectureSlideAssistant
+		? (data.lectureSlideConfigLoadError ?? null)
 		: null;
 	$: lectureVideoConfigLoadErrorMessage =
 		lectureVideoConfigLoadError?.detail || 'Could not load lecture video configuration.';
+	$: lectureSlideConfigLoadErrorMessage =
+		lectureSlideConfigLoadError?.detail || 'Could not load lecture slide configuration.';
 	const defaultLectureVideoPolicy: LectureVideoEditorPolicy = {
 		show_mode_in_assistant_editor: false,
 		can_select_mode_in_assistant_editor: false,
@@ -254,7 +275,9 @@
 	$: lectureModeTooltipText =
 		lectureVideoPolicy.message || 'Lecture Video mode is not available for this class yet.';
 	$: canUploadLectureVideo =
-		!preventEdits && isLectureMode && (data.isCreating || !!data.assistantId);
+		!preventEdits && isLectureVideoMode && (data.isCreating || !!data.assistantId);
+	$: canUploadLectureSlides =
+		!preventEdits && isLectureSlideMode && (data.isCreating || !!data.assistantId);
 	$: modelInteractionMode = isLectureMode ? 'chat' : interactionMode;
 	let description = '';
 	let hasSetDescription = false;
@@ -289,6 +312,26 @@
 	let uploadingLectureVideo = false;
 	let refreshingLectureVideoStatus = false;
 	let canRefreshCurrentLectureVideoStatus = false;
+	let currentLectureSlideDeck: api.LectureSlideSummary | null =
+		data.lectureSlideConfig?.lecture_slide_deck || null;
+	let selectedLectureSlideDeck: api.LectureSlideSummary | null = currentLectureSlideDeck;
+	let lectureSlideDraftIds = new SvelteSet<number>();
+	let uploadingLectureSlides = false;
+	let refreshingLectureSlideStatus = false;
+	let canRefreshCurrentLectureSlideStatus = false;
+	let lectureSlideEditorOpen = false;
+	let selectedLectureSlidePosition = 0;
+	let lectureSlidePageDrafts: api.LectureSlidePageNotes[] = [];
+	let hasSetLectureSlidePageDrafts = false;
+	let slideGenerationPrompt =
+		data.lectureSlideConfig?.generation_prompt || lectureSlideDefaultGenerationPrompt;
+	let hasSetSlideGenerationPrompt = false;
+	let slideNarrationPrompt =
+		data.lectureSlideConfig?.narration_prompt || lectureSlideDefaultNarrationPrompt;
+	let hasSetSlideNarrationPrompt = false;
+	let regenerateSlideNarrationRequested = false;
+	let regenerateSlideQuestionsRequested = false;
+	let regenerateSlideAudioRequested = false;
 	let lectureVideoManifestJson = '';
 	let lectureVideoChatUnavailable = false;
 	let hasSetLectureVideoManifest = false;
@@ -305,7 +348,7 @@
 	let hasSetOverwriteManifest = false;
 	let regenerateRequested = false;
 	let regenerateAudioRequested = false;
-	let currentVoiceId = data.lectureVideoConfig?.voice_id || '';
+	let currentVoiceId = data.lectureVideoConfig?.voice_id || data.lectureSlideConfig?.voice_id || '';
 	let voiceId = '';
 	let hasSetVoiceId = false;
 	let validatingVoiceId = false;
@@ -854,7 +897,7 @@
 		canGenerateLectureVideoManifest &&
 		videoDescriptionDurationMs !== originalVideoDescriptionDurationMs;
 	$: lectureVideoGenerationTriggeredByFormChanges =
-		isLectureMode &&
+		isLectureVideoMode &&
 		canGenerateLectureVideoManifest &&
 		!overwriteManifest &&
 		(originalOverwriteManifest ||
@@ -864,11 +907,11 @@
 			lastManifestRunFailed ||
 			!data.lectureVideoConfig?.lecture_video_manifest);
 	$: lectureVideoAudioTriggeredByFormChanges =
-		isLectureMode &&
+		isLectureVideoMode &&
 		!data.isCreating &&
 		!lectureVideoGenerationTriggeredByFormChanges &&
 		(lectureVideoVoiceChanged || (overwriteManifest && lectureVideoManifestChanged));
-	$: canRegenerateLectureVideo = isLectureMode && !data.isCreating;
+	$: canRegenerateLectureVideo = isLectureVideoMode && !data.isCreating;
 	$: if (!canRegenerateLectureVideo && regenerateRequested) {
 		regenerateRequested = false;
 	}
@@ -889,12 +932,12 @@
 	$: lectureVideoAudioRegenerateButtonPressed =
 		regenerateAudioRequested || lectureVideoAudioTriggeredByFormChanges;
 	$: lectureVideoSaveTriggersGeneration =
-		isLectureMode &&
+		isLectureVideoMode &&
 		canGenerateLectureVideoManifest &&
 		!overwriteManifest &&
 		(regenerateRequested || lectureVideoGenerationTriggeredByFormChanges);
 	$: lectureVideoSaveAffordances = deriveLectureVideoSaveAffordances({
-		saveTriggersGeneration: isLectureMode && lectureVideoSaveTriggersGeneration,
+		saveTriggersGeneration: isLectureVideoMode && lectureVideoSaveTriggersGeneration,
 		audioRegenerationTriggered: lectureVideoAudioTriggeredByFormChanges,
 		audioRegenerateRequested: regenerateAudioRequested,
 		regenerateRequested
@@ -906,7 +949,22 @@
 		lectureVideoSaveAffordances.manifestRegenerateHelperText;
 	$: lectureVideoManifestRegenerateButtonLabel =
 		lectureVideoSaveAffordances.manifestRegenerateButtonLabel;
-	$: saveButtonLabel = lectureVideoSaveAffordances.saveButtonLabel;
+	$: lectureSlideSaveTriggersProcessing =
+		isLectureSlideMode &&
+		(data.isCreating ||
+			lectureSlideDeckIdChanged ||
+			lectureSlidePagesChanged ||
+			lectureSlideVoiceChanged ||
+			slideGenerationPromptChanged ||
+			slideNarrationPromptChanged ||
+			regenerateSlideNarrationRequested ||
+			regenerateSlideQuestionsRequested ||
+			regenerateSlideAudioRequested);
+	$: saveButtonLabel = isLectureSlideMode
+		? lectureSlideSaveTriggersProcessing
+			? 'Save & generate'
+			: 'Save'
+		: lectureVideoSaveAffordances.saveButtonLabel;
 	$: lectureVideoChatUnavailable = (() => {
 		try {
 			const manifestState = lectureVideoChatUnavailableForManifest(
@@ -943,6 +1001,93 @@
 		voiceId.trim().length > 0 &&
 		voiceId.trim() !== currentVoiceId.trim() &&
 		voiceId.trim() !== lastValidatedVoiceId;
+	$: if (!hasSetLectureSlidePageDrafts && !lectureSlideConfigLoadError) {
+		lectureSlidePageDrafts = (data.lectureSlideConfig?.pages || []).map((page) => ({
+			position: page.position,
+			user_notes: page.user_notes || '',
+			narration_text: page.narration_text || ''
+		}));
+		hasSetLectureSlidePageDrafts = true;
+	}
+	$: if (!hasSetSlideGenerationPrompt && !lectureSlideConfigLoadError) {
+		slideGenerationPrompt =
+			data.lectureSlideConfig?.generation_prompt || lectureSlideDefaultGenerationPrompt;
+		hasSetSlideGenerationPrompt = true;
+	}
+	$: if (!hasSetSlideNarrationPrompt && !lectureSlideConfigLoadError) {
+		slideNarrationPrompt =
+			data.lectureSlideConfig?.narration_prompt || lectureSlideDefaultNarrationPrompt;
+		hasSetSlideNarrationPrompt = true;
+	}
+	$: lectureSlidePages = Array.from(
+		{ length: selectedLectureSlideDeck?.slide_count || lectureSlidePageDrafts.length || 0 },
+		(_, position) =>
+			lectureSlidePageDrafts.find((page) => page.position === position) || {
+				position,
+				user_notes: '',
+				narration_text: ''
+			}
+	);
+	$: if (
+		lectureSlidePages.length > 0 &&
+		!lectureSlidePages.some((page) => page.position === selectedLectureSlidePosition)
+	) {
+		selectedLectureSlidePosition = lectureSlidePages[0].position;
+	}
+	$: selectedLectureSlidePage =
+		lectureSlidePages.find((page) => page.position === selectedLectureSlidePosition) ||
+		lectureSlidePages[0] ||
+		null;
+	$: currentLectureSlidePagesNormalized = JSON.stringify(
+		(data.lectureSlideConfig?.pages || []).map((page) => ({
+			position: page.position,
+			user_notes: page.user_notes || '',
+			narration_text: page.narration_text || ''
+		}))
+	);
+	$: lectureSlidePagesChanged =
+		JSON.stringify(lectureSlidePageDrafts) !== currentLectureSlidePagesNormalized;
+	$: lectureSlideDeckIdChanged =
+		(selectedLectureSlideDeck?.id ?? null) !== (currentLectureSlideDeck?.id ?? null);
+	$: originalSlideGenerationPrompt =
+		data.lectureSlideConfig?.generation_prompt || lectureSlideDefaultGenerationPrompt;
+	$: originalSlideNarrationPrompt =
+		data.lectureSlideConfig?.narration_prompt || lectureSlideDefaultNarrationPrompt;
+	$: slideGenerationPromptChanged = slideGenerationPrompt !== originalSlideGenerationPrompt;
+	$: slideNarrationPromptChanged = slideNarrationPrompt !== originalSlideNarrationPrompt;
+	$: lectureSlideVoiceChanged = voiceId.trim() !== currentVoiceId.trim();
+	$: lectureSlideSourceUrl =
+		selectedLectureSlideDeck && data.class?.id
+			? api.lectureSlideSourceUrl(
+					data.class.id,
+					selectedLectureSlideDeck.id,
+					data.isCreating ? null : data.assistantId
+				)
+			: '';
+	$: selectedLectureSlideIndex = lectureSlidePages.findIndex(
+		(page) => page.position === selectedLectureSlidePosition
+	);
+	$: selectedLectureSlideLabel =
+		selectedLectureSlideIndex >= 0
+			? `Slide ${selectedLectureSlideIndex + 1} of ${lectureSlidePages.length}`
+			: 'No slide selected';
+	$: selectedLectureSlideHasNarration =
+		!!selectedLectureSlidePage &&
+		((data.lectureSlideConfig?.pages || []).some(
+			(page) =>
+				page.position === selectedLectureSlidePage?.position &&
+				(page.narration_text || '').trim().length > 0
+		) ||
+			(selectedLectureSlidePage.narration_text || '').trim().length > 0);
+	const goToAdjacentLectureSlide = (delta: number) => {
+		if (selectedLectureSlideIndex < 0) {
+			return;
+		}
+		const next = lectureSlidePages[selectedLectureSlideIndex + delta];
+		if (next) {
+			selectedLectureSlidePosition = next.position;
+		}
+	};
 	let hidePrompt = data.isCreating;
 	let hasSetHidePrompt = false;
 	$: if (
@@ -1716,10 +1861,10 @@
 
 	const changeInteractionMode = async (evt: Event) => {
 		const target = evt.target as HTMLInputElement;
-		const mode = target.value as 'chat' | 'voice' | 'lecture_video';
+		const mode = target.value as api.InteractionMode;
 		if (mode === 'voice') {
 			forcedAssistantVersion = 2;
-		} else if (mode === 'lecture_video') {
+		} else if (mode === 'lecture_video' || mode === 'lecture_slides') {
 			forcedAssistantVersion = 3;
 			convertToNextGen = null;
 			useLatex = true;
@@ -1736,7 +1881,7 @@
 		} else if (mode === 'voice') {
 			temperatureValue = defaultAudioTemperature;
 			_temperatureValue = defaultAudioTemperature;
-		} else if (mode === 'chat' || mode === 'lecture_video') {
+		} else if (mode === 'chat' || mode === 'lecture_video' || mode === 'lecture_slides') {
 			temperatureValue = defaultChatTemperature;
 			_temperatureValue = defaultChatTemperature;
 		}
@@ -1747,7 +1892,7 @@
 		) {
 			instructions = assistant.instructions;
 			hasSetInstructions = true;
-		} else if (mode === 'lecture_video' && data.isCreating) {
+		} else if ((mode === 'lecture_video' || mode === 'lecture_slides') && data.isCreating) {
 			instructions = lectureVideoDefaultInstructions;
 			hasSetInstructions = true;
 		} else {
@@ -1775,7 +1920,11 @@
 		if (interactionMode === 'voice') {
 			temperatureValue = defaultAudioTemperature;
 			_temperatureValue = defaultAudioTemperature;
-		} else if (interactionMode === 'chat' || interactionMode === 'lecture_video') {
+		} else if (
+			interactionMode === 'chat' ||
+			interactionMode === 'lecture_video' ||
+			interactionMode === 'lecture_slides'
+		) {
 			temperatureValue = defaultChatTemperature;
 			_temperatureValue = defaultChatTemperature;
 		}
@@ -2102,6 +2251,29 @@
 		if (voiceId.trim() !== currentVoiceId.trim()) {
 			modifiedFields.push('voice id');
 		}
+		const selectedLectureSlideDeckId = selectedLectureSlideDeck?.id ?? null;
+		const currentLectureSlideDeckId = currentLectureSlideDeck?.id ?? null;
+		if (selectedLectureSlideDeckId !== currentLectureSlideDeckId) {
+			modifiedFields.push('lecture slides');
+		}
+		if (lectureSlidePagesChanged) {
+			modifiedFields.push('lecture slide content');
+		}
+		if (slideGenerationPromptChanged) {
+			modifiedFields.push('question generation prompt');
+		}
+		if (slideNarrationPromptChanged) {
+			modifiedFields.push('narration prompt');
+		}
+		if (regenerateSlideNarrationRequested) {
+			modifiedFields.push('lecture slide narration');
+		}
+		if (regenerateSlideQuestionsRequested) {
+			modifiedFields.push('lecture slide questions');
+		}
+		if (regenerateSlideAudioRequested) {
+			modifiedFields.push('lecture slide audio');
+		}
 
 		return modifiedFields;
 	};
@@ -2110,6 +2282,8 @@
 		api.UpdateAssistantRequest & {
 			lecture_video_id?: number;
 			lecture_video_manifest?: api.LectureVideoManifest;
+			lecture_slide_deck_id?: number;
+			lecture_slide_page_notes?: api.LectureSlidePageNotes[];
 			voice_id?: string;
 		};
 
@@ -2257,11 +2431,20 @@
 			elevenlabs_speed: isLectureMode
 				? elevenlabsSpeedValue
 				: (assistant?.elevenlabs_speed ?? undefined),
-			lecture_video_id: isLectureMode ? (selectedLectureVideo?.id ?? undefined) : undefined,
+			lecture_video_id: isLectureVideoMode ? (selectedLectureVideo?.id ?? undefined) : undefined,
+			lecture_slide_deck_id: isLectureSlideMode
+				? (selectedLectureSlideDeck?.id ?? undefined)
+				: undefined,
+			lecture_slide_page_notes: isLectureSlideMode ? lectureSlidePageDrafts : undefined,
 			voice_id: isLectureMode ? voiceId.trim() : undefined,
-			generation_prompt: isLectureMode ? generationPrompt : undefined,
-			video_description_duration_ms: isLectureMode ? videoDescriptionDurationMs : undefined,
-			overwrite_manifest: isLectureMode ? overwriteManifest : undefined,
+			generation_prompt: isLectureVideoMode
+				? generationPrompt
+				: isLectureSlideMode
+					? slideGenerationPrompt
+					: undefined,
+			narration_prompt: isLectureSlideMode ? slideNarrationPrompt : undefined,
+			video_description_duration_ms: isLectureVideoMode ? videoDescriptionDurationMs : undefined,
+			overwrite_manifest: isLectureVideoMode ? overwriteManifest : undefined,
 			published: body.published?.toString() === 'on',
 			use_latex: isLectureMode ? true : body.use_latex?.toString() === 'on',
 			use_image_descriptions: isLectureMode
@@ -2417,6 +2600,134 @@
 		}
 		await uploadLectureVideoDraft(file);
 		target.value = '';
+	};
+
+	const uploadLectureSlideDraft = async (file: File) => {
+		uploadingLectureSlides = true;
+		try {
+			const uploadInfo =
+				data.isCreating || !data.assistantId
+					? api.uploadLectureSlides(fetch, data.class.id, file)
+					: api.uploadAssistantLectureSlides(fetch, data.class.id, data.assistantId, file);
+			let uploadedLectureSlides;
+			try {
+				uploadedLectureSlides = await uploadInfo.promise;
+			} catch (error) {
+				const detail =
+					typeof error === 'object' &&
+					error !== null &&
+					'error' in error &&
+					typeof error.error === 'object' &&
+					error.error !== null &&
+					'detail' in error.error &&
+					typeof error.error.detail === 'string'
+						? error.error.detail
+						: error instanceof Error
+							? error.message
+							: 'Unknown error';
+				sadToast(`Could not upload lecture slides:\n${detail}`);
+				return;
+			}
+			if ('error' in uploadedLectureSlides) {
+				sadToast(
+					`Could not upload lecture slides:\n${uploadedLectureSlides.error.detail || 'Unknown error'}`
+				);
+				return;
+			}
+			lectureSlideDraftIds.add(uploadedLectureSlides.id);
+			selectedLectureSlideDeck = uploadedLectureSlides;
+			lectureSlidePageDrafts = Array.from(
+				{ length: uploadedLectureSlides.slide_count },
+				(_, position) => ({
+					position,
+					user_notes: '',
+					narration_text: ''
+				})
+			);
+			selectedLectureSlidePosition = 0;
+			happyToast('Lecture slides uploaded');
+		} catch (error) {
+			sadToast(
+				`Could not upload lecture slides:\n${
+					error instanceof Error ? error.message : 'Unknown error'
+				}`
+			);
+		} finally {
+			uploadingLectureSlides = false;
+		}
+	};
+
+	const handleLectureSlideFileChange = async (event: Event) => {
+		const target = event.target as HTMLInputElement;
+		const file = target.files?.[0];
+		if (!file) {
+			return;
+		}
+		await uploadLectureSlideDraft(file);
+		target.value = '';
+	};
+
+	const updateLectureSlidePageDraft = (
+		position: number,
+		field: 'user_notes' | 'narration_text',
+		value: string
+	) => {
+		const existing = lectureSlidePageDrafts.find((page) => page.position === position);
+		const next = existing || { position, user_notes: '', narration_text: '' };
+		lectureSlidePageDrafts = [
+			...lectureSlidePageDrafts.filter((page) => page.position !== position),
+			{ ...next, [field]: value }
+		].sort((left, right) => left.position - right.position);
+	};
+
+	const syncLectureSlideSummary = (summary: api.LectureSlideSummary) => {
+		currentLectureSlideDeck = { ...(currentLectureSlideDeck || summary), ...summary };
+		if (selectedLectureSlideDeck?.id === summary.id) {
+			selectedLectureSlideDeck = { ...selectedLectureSlideDeck, ...summary };
+		}
+	};
+
+	$: canRefreshCurrentLectureSlideStatus =
+		!data.isCreating &&
+		!!data.assistantId &&
+		!!currentLectureSlideDeck &&
+		selectedLectureSlideDeck?.id === currentLectureSlideDeck.id;
+
+	const refreshAssistantLectureSlideStatus = async () => {
+		if (
+			data.isCreating ||
+			!data.assistantId ||
+			!currentLectureSlideDeck ||
+			refreshingLectureSlideStatus
+		) {
+			return;
+		}
+
+		refreshingLectureSlideStatus = true;
+		try {
+			const response = await api.getAssistantLectureSlideConfig(
+				fetch,
+				data.class.id,
+				data.assistantId
+			);
+			const expanded = api.expandResponse(response);
+			if (expanded.error || !expanded.data?.lecture_slide_deck) {
+				sadToast(
+					`Could not refresh lecture slide status:\n${expanded.error?.detail || 'Unknown error'}`
+				);
+				return;
+			}
+
+			syncLectureSlideSummary(expanded.data.lecture_slide_deck);
+			data.lectureSlideConfig = expanded.data;
+			lectureSlidePageDrafts = expanded.data.pages.map((page) => ({
+				position: page.position,
+				user_notes: page.user_notes || '',
+				narration_text: page.narration_text || ''
+			}));
+		} finally {
+			refreshingLectureSlideStatus = false;
+		}
 	};
 
 	const syncLectureVideoSummary = (summary: api.LectureVideoSummary) => {
@@ -2748,6 +3059,67 @@
 			}
 		}
 
+		if (params.interaction_mode === 'lecture_slides') {
+			if (uploadingLectureSlides) {
+				sadToast('Please wait for the lecture slide upload to finish before saving.');
+				$loading = false;
+				$loadingMessage = '';
+				return;
+			}
+
+			const selectedLectureSlideDeckId = selectedLectureSlideDeck?.id ?? null;
+			if (!selectedLectureSlideDeckId) {
+				sadToast('Please upload lecture slides before saving.');
+				$loading = false;
+				$loadingMessage = '';
+				return;
+			}
+
+			const trimmedVoiceId = voiceId.trim();
+			if (!trimmedVoiceId) {
+				sadToast('Please provide a voice ID before saving.');
+				$loading = false;
+				$loadingMessage = '';
+				return;
+			}
+			if (trimmedVoiceId !== currentVoiceId.trim() && trimmedVoiceId !== lastValidatedVoiceId) {
+				sadToast('Please validate the changed voice ID before saving.');
+				$loading = false;
+				$loadingMessage = '';
+				return;
+			}
+
+			const lectureSlideFieldsChanged =
+				lectureSlideDeckIdChanged ||
+				lectureSlidePagesChanged ||
+				lectureSlideVoiceChanged ||
+				slideGenerationPromptChanged ||
+				slideNarrationPromptChanged ||
+				regenerateSlideNarrationRequested ||
+				regenerateSlideQuestionsRequested ||
+				regenerateSlideAudioRequested;
+
+			if (data.isCreating || lectureSlideFieldsChanged) {
+				params.lecture_slide_deck_id = selectedLectureSlideDeckId;
+				params.lecture_slide_page_notes = lectureSlidePageDrafts;
+				params.voice_id = trimmedVoiceId;
+				params.generation_prompt = slideGenerationPrompt;
+				params.narration_prompt = slideNarrationPrompt;
+				params.regenerate_narration_requested = regenerateSlideNarrationRequested;
+				params.regenerate_questions_requested = regenerateSlideQuestionsRequested;
+				params.regenerate_audio_requested = regenerateSlideAudioRequested;
+			} else {
+				delete params.lecture_slide_deck_id;
+				delete params.lecture_slide_page_notes;
+				delete params.voice_id;
+				delete params.generation_prompt;
+				delete params.narration_prompt;
+				delete params.regenerate_narration_requested;
+				delete params.regenerate_questions_requested;
+				delete params.regenerate_audio_requested;
+			}
+		}
+
 		if (params.file_search_file_ids.length > fileSearchMetadata.max_count) {
 			sadToast(`You can only select up to ${fileSearchMetadata.max_count} files for File Search.`);
 			$loading = false;
@@ -2944,6 +3316,26 @@
 			</div>
 		</div>
 	{/if}
+	{#if lectureSlideConfigLoadError}
+		<div class="col-span-2 mb-4 rounded-lg border border-red-300 bg-red-50 p-4 text-red-900">
+			<div class="flex items-start gap-3">
+				<ExclamationCircleOutline class="mt-0.5 h-6 w-6 shrink-0 text-red-600" />
+				<div>
+					<div class="text-sm font-semibold">Lecture slide configuration could not be loaded</div>
+					<div class="mt-1 text-sm">
+						PingPong could not load this assistant&apos;s current lecture slide settings. To repair
+						this assistant, upload a replacement PDF, enter a valid voice ID, then save.
+					</div>
+					<div class="mt-2 text-sm">{lectureSlideConfigLoadErrorMessage}</div>
+					{#if lectureSlideConfigLoadError.$status}
+						<div class="mt-1 text-xs text-red-700">
+							HTTP {lectureSlideConfigLoadError.$status}
+						</div>
+					{/if}
+				</div>
+			</div>
+		</div>
+	{/if}
 	<Modal
 		title="Assistant Prompt Preview"
 		size="lg"
@@ -2963,6 +3355,104 @@
 			on:close={() => resetDraftMCPServerAndCloseModal()}
 		/>
 	{/if}
+
+	<Modal
+		size="xl"
+		bind:open={lectureSlideEditorOpen}
+		onclose={() => (lectureSlideEditorOpen = false)}
+	>
+		<slot name="header">
+			<Heading tag="h3" class="font-serif text-2xl font-medium text-blue-dark-40">
+				Edit Lecture Slides
+			</Heading>
+		</slot>
+		<div
+			class="grid max-h-[78vh] gap-4 overflow-hidden lg:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]"
+		>
+			<div class="min-h-[420px] overflow-hidden rounded-lg border border-gray-200 bg-gray-100">
+				{#if lectureSlideSourceUrl && selectedLectureSlidePage}
+					<PdfPageViewer
+						sourceUrl={lectureSlideSourceUrl}
+						pageNumber={selectedLectureSlidePage.position + 1}
+						slideLabel={selectedLectureSlideLabel}
+						previousDisabled={selectedLectureSlideIndex <= 0}
+						nextDisabled={selectedLectureSlideIndex < 0 ||
+							selectedLectureSlideIndex >= lectureSlidePages.length - 1}
+						onPrevious={() => goToAdjacentLectureSlide(-1)}
+						onNext={() => goToAdjacentLectureSlide(1)}
+					/>
+				{:else}
+					<div class="flex h-full min-h-[420px] items-center justify-center text-sm text-gray-600">
+						No slide source is available.
+					</div>
+				{/if}
+			</div>
+			<div class="flex min-h-0 flex-col overflow-hidden">
+				<div class="mb-3 flex items-center justify-between gap-3 border-b border-gray-200 pb-3">
+					<div>
+						<div class="text-sm font-semibold text-gray-900">{selectedLectureSlideLabel}</div>
+						<div class="text-xs text-gray-500">
+							{selectedLectureSlideDeck?.filename || 'Lecture slides'}
+						</div>
+					</div>
+				</div>
+				{#if selectedLectureSlidePage}
+					<div class="min-h-0 flex-1 overflow-y-auto pr-1">
+						<div class="mb-4">
+							<Label for="slide_author_notes">Author Notes</Label>
+							<Helper class="pb-1"
+								>Instructor notes used when generating narration for this slide.</Helper
+							>
+							<Textarea
+								id="slide_author_notes"
+								rows={8}
+								value={selectedLectureSlidePage.user_notes || ''}
+								disabled={preventEdits}
+								oninput={(event) =>
+									updateLectureSlidePageDraft(
+										selectedLectureSlidePage.position,
+										'user_notes',
+										(event.target as HTMLTextAreaElement).value
+									)}
+							/>
+						</div>
+						{#if selectedLectureSlideHasNarration}
+							<div class="mb-4">
+								<Label for="slide_narration_text">Narration</Label>
+								<Helper class="pb-1"
+									>Edit the spoken narration for this slide. Saving manual narration edits
+									regenerates audio.</Helper
+								>
+								<Textarea
+									id="slide_narration_text"
+									rows={12}
+									value={selectedLectureSlidePage.narration_text || ''}
+									disabled={preventEdits}
+									oninput={(event) =>
+										updateLectureSlidePageDraft(
+											selectedLectureSlidePage.position,
+											'narration_text',
+											(event.target as HTMLTextAreaElement).value
+										)}
+								/>
+							</div>
+						{/if}
+					</div>
+				{:else}
+					<div class="flex min-h-[320px] items-center justify-center text-sm text-gray-600">
+						Upload slides to edit slide content.
+					</div>
+				{/if}
+			</div>
+		</div>
+		<svelte:fragment slot="footer">
+			<div class="flex w-full justify-end">
+				<Button type="button" color="light" onclick={() => (lectureSlideEditorOpen = false)}>
+					Done
+				</Button>
+			</div>
+		</svelte:fragment>
+	</Modal>
 
 	<form onsubmit={submitForm} bind:this={assistantForm}>
 		<div class="mb-4">
@@ -3027,11 +3517,36 @@
 							</div>
 						</div></RadioButton
 					>
+					<RadioButton
+						value="lecture_slides"
+						bind:group={interactionMode}
+						disabled={lectureDisabled}
+						onchange={changeInteractionMode}
+						class={`${lectureDisabled ? 'cursor-not-allowed !bg-gray-100 !text-gray-400 shadow-inner hover:bg-transparent' : ''} ${interactionMode === 'lecture_slides' ? '!border-blue-300 !bg-blue-100 font-semibold !text-blue-800 !shadow-blue-200' : ''} select-none`}
+						><div
+							id="lecture-slides-admin-tooltip"
+							class="-mx-3 -my-2 flex flex-row items-center gap-2 px-3 py-2"
+						>
+							{#if interactionMode === 'lecture_slides'}<BookOpenSolid
+									class="h-5 w-5"
+								/>{:else}<BookOpenOutline class="h-5 w-5" />{/if}Lecture Slides mode
+							<div
+								class="flex flex-row items-center rounded-full border border-gray-300 px-3 py-1 text-xs font-normal text-gray-600"
+							>
+								Research Preview
+							</div>
+						</div></RadioButton
+					>
 				{/if}
 			</ButtonGroup>
 			{#if showLectureModeOption && chatModelCount !== 0 && lectureVideoPolicy.message}
 				<Tooltip
 					triggeredBy="#lecture-video-admin-tooltip"
+					class="z-100 text-sm font-light"
+					arrow={false}>{lectureModeTooltipText}</Tooltip
+				>
+				<Tooltip
+					triggeredBy="#lecture-slides-admin-tooltip"
 					class="z-100 text-sm font-light"
 					arrow={false}>{lectureModeTooltipText}</Tooltip
 				>
@@ -3187,92 +3702,188 @@
 			/>
 		</div>
 		{#if isLectureMode}
-			<div class="col-span-2 mb-4">
-				<Label for="lecture_video_upload">Lecture Video</Label>
-				<Helper class="pb-1"
-					>Upload the video that students will watch and answer questions about.</Helper
-				>
-				{#if selectedLectureVideo && !uploadingLectureVideo}
-					<div
-						class="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-4 py-3"
+			{#if isLectureVideoMode}
+				<div class="col-span-2 mb-4">
+					<Label for="lecture_video_upload">Lecture Video</Label>
+					<Helper class="pb-1"
+						>Upload the video that students will watch and answer questions about.</Helper
 					>
-						<div class="flex items-center gap-3">
-							<div
-								class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-100"
-							>
-								<FileVideoOutline class="h-5 w-5 text-blue-600" />
-							</div>
-							<div>
-								<div class="text-sm font-medium text-gray-900">
-									{selectedLectureVideo.filename}
+					{#if selectedLectureVideo && !uploadingLectureVideo}
+						<div
+							class="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-4 py-3"
+						>
+							<div class="flex items-center gap-3">
+								<div
+									class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-100"
+								>
+									<FileVideoOutline class="h-5 w-5 text-blue-600" />
 								</div>
-								<div class="inline-flex items-center gap-1 text-xs text-gray-500">
-									{selectedLectureVideo.status.charAt(0).toUpperCase() +
-										selectedLectureVideo.status.slice(1)}
-									{#if canRefreshCurrentLectureVideoStatus}
-										<button
-											type="button"
-											class="rounded-full p-0.5 text-gray-500 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
-											onclick={() => void refreshAssistantLectureVideoStatus()}
-											disabled={refreshingLectureVideoStatus}
-											aria-label="Refresh lecture video status"
-											title="Refresh lecture video status"
-										>
-											{#if refreshingLectureVideoStatus}
-												<Spinner color="gray" class="h-3 w-3" />
-											{:else}
-												<RefreshOutline class="h-3 w-3" />
-											{/if}
-										</button>
+								<div>
+									<div class="text-sm font-medium text-gray-900">
+										{selectedLectureVideo.filename}
+									</div>
+									<div class="inline-flex items-center gap-1 text-xs text-gray-500">
+										{selectedLectureVideo.status.charAt(0).toUpperCase() +
+											selectedLectureVideo.status.slice(1)}
+										{#if canRefreshCurrentLectureVideoStatus}
+											<button
+												type="button"
+												class="rounded-full p-0.5 text-gray-500 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+												onclick={() => void refreshAssistantLectureVideoStatus()}
+												disabled={refreshingLectureVideoStatus}
+												aria-label="Refresh lecture video status"
+												title="Refresh lecture video status"
+											>
+												{#if refreshingLectureVideoStatus}
+													<Spinner color="gray" class="h-3 w-3" />
+												{:else}
+													<RefreshOutline class="h-3 w-3" />
+												{/if}
+											</button>
+										{/if}
+									</div>
+									{#if selectedLectureVideo.error_message}
+										<div class="text-xs text-red-600">{selectedLectureVideo.error_message}</div>
 									{/if}
 								</div>
-								{#if selectedLectureVideo.error_message}
-									<div class="text-xs text-red-600">{selectedLectureVideo.error_message}</div>
-								{/if}
 							</div>
+							{#if canUploadLectureVideo || (!data.isCreating && data.assistantId && currentLectureVideo && selectedLectureVideo?.id === currentLectureVideo.id && currentLectureVideo.status === 'failed')}
+								<div class="flex items-center gap-2">
+									{#if !data.isCreating && data.assistantId && currentLectureVideo && selectedLectureVideo?.id === currentLectureVideo.id && currentLectureVideo.status === 'failed'}
+										<Button color="light" size="xs" onclick={retryLectureVideoProcessing}>
+											Retry
+										</Button>
+									{/if}
+									{#if canUploadLectureVideo}
+										<label
+											class="cursor-pointer rounded-lg px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-200"
+										>
+											Replace
+											<input
+												type="file"
+												accept="video/*"
+												class="hidden"
+												onchange={handleLectureVideoFileChange}
+											/>
+										</label>
+									{/if}
+								</div>
+							{/if}
 						</div>
-						{#if canUploadLectureVideo || (!data.isCreating && data.assistantId && currentLectureVideo && selectedLectureVideo?.id === currentLectureVideo.id && currentLectureVideo.status === 'failed')}
+					{:else}
+						<ButtonGroup class="w-full md:w-auto">
+							<InputAddon>
+								<FileVideoOutline class="h-6 w-6" />
+							</InputAddon>
+							<Input
+								id="lecture_video_upload"
+								type="file"
+								accept="video/*"
+								disabled={!canUploadLectureVideo || uploadingLectureVideo}
+								onchange={handleLectureVideoFileChange}
+								defaultClass="block w-full disabled:cursor-not-allowed disabled:opacity-50 rtl:text-right"
+							/>
+						</ButtonGroup>
+						{#if uploadingLectureVideo}
+							<Helper class="pt-1">Uploading...</Helper>
+						{/if}
+					{/if}
+				</div>
+			{/if}
+			{#if isLectureSlideMode}
+				<div class="col-span-2 mb-4">
+					<Label for="lecture_slide_upload">Lecture Slides</Label>
+					<Helper class="pb-1"
+						>Upload the PDF students will view and hear narrated as a lesson.</Helper
+					>
+					{#if selectedLectureSlideDeck && !uploadingLectureSlides}
+						<div
+							class="flex flex-col gap-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+						>
+							<div class="flex items-center gap-3">
+								<div
+									class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-100"
+								>
+									<FilePdfOutline class="h-5 w-5 text-blue-600" />
+								</div>
+								<div>
+									<div class="text-sm font-medium text-gray-900">
+										{selectedLectureSlideDeck.filename}
+									</div>
+									<div class="inline-flex items-center gap-1 text-xs text-gray-500">
+										{selectedLectureSlideDeck.status.charAt(0).toUpperCase() +
+											selectedLectureSlideDeck.status.slice(1)}
+										<span>&middot;</span>
+										<span>{selectedLectureSlideDeck.slide_count} slides</span>
+										{#if canRefreshCurrentLectureSlideStatus}
+											<button
+												type="button"
+												class="rounded-full p-0.5 text-gray-500 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+												onclick={() => void refreshAssistantLectureSlideStatus()}
+												disabled={refreshingLectureSlideStatus}
+												aria-label="Refresh lecture slide status"
+												title="Refresh lecture slide status"
+											>
+												{#if refreshingLectureSlideStatus}
+													<Spinner color="gray" class="h-3 w-3" />
+												{:else}
+													<RefreshOutline class="h-3 w-3" />
+												{/if}
+											</button>
+										{/if}
+									</div>
+									{#if selectedLectureSlideDeck.error_message}
+										<div class="text-xs text-red-600">
+											{selectedLectureSlideDeck.error_message}
+										</div>
+									{/if}
+								</div>
+							</div>
 							<div class="flex items-center gap-2">
-								{#if !data.isCreating && data.assistantId && currentLectureVideo && selectedLectureVideo?.id === currentLectureVideo.id && currentLectureVideo.status === 'failed'}
-									<Button color="light" size="xs" onclick={retryLectureVideoProcessing}>
-										Retry
-									</Button>
-								{/if}
-								{#if canUploadLectureVideo}
+								<Button
+									type="button"
+									color="light"
+									size="xs"
+									disabled={!selectedLectureSlideDeck}
+									onclick={() => (lectureSlideEditorOpen = true)}
+								>
+									Edit Slides
+								</Button>
+								{#if canUploadLectureSlides}
 									<label
 										class="cursor-pointer rounded-lg px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-200"
 									>
 										Replace
 										<input
 											type="file"
-											accept="video/*"
+											accept="application/pdf,.pdf"
 											class="hidden"
-											onchange={handleLectureVideoFileChange}
+											onchange={handleLectureSlideFileChange}
 										/>
 									</label>
 								{/if}
 							</div>
+						</div>
+					{:else}
+						<ButtonGroup class="w-full md:w-auto">
+							<InputAddon>
+								<FilePdfOutline class="h-6 w-6" />
+							</InputAddon>
+							<Input
+								id="lecture_slide_upload"
+								type="file"
+								accept="application/pdf,.pdf"
+								disabled={!canUploadLectureSlides || uploadingLectureSlides}
+								onchange={handleLectureSlideFileChange}
+								defaultClass="block w-full disabled:cursor-not-allowed disabled:opacity-50 rtl:text-right"
+							/>
+						</ButtonGroup>
+						{#if uploadingLectureSlides}
+							<Helper class="pt-1">Uploading...</Helper>
 						{/if}
-					</div>
-				{:else}
-					<ButtonGroup class="w-full md:w-auto">
-						<InputAddon>
-							<FileVideoOutline class="h-6 w-6" />
-						</InputAddon>
-						<Input
-							id="lecture_video_upload"
-							type="file"
-							accept="video/*"
-							disabled={!canUploadLectureVideo || uploadingLectureVideo}
-							onchange={handleLectureVideoFileChange}
-							defaultClass="block w-full disabled:cursor-not-allowed disabled:opacity-50 rtl:text-right"
-						/>
-					</ButtonGroup>
-					{#if uploadingLectureVideo}
-						<Helper class="pt-1">Uploading...</Helper>
 					{/if}
-				{/if}
-			</div>
+				</div>
+			{/if}
 			<div class="col-span-2 mb-4">
 				<div class="flex items-center gap-2">
 					<Label for="voice_id">Voice ID</Label>
@@ -3922,184 +4533,283 @@
 								/>
 							</div>
 
-							{#if canGenerateLectureVideoManifest}
-								<hr />
+							{#if isLectureVideoMode}
+								{#if canGenerateLectureVideoManifest}
+									<hr />
 
-								<div class="col-span-2 mb-1">
-									<div class="flex items-end justify-between gap-3">
-										<div>
-											<div class="flex items-center gap-2">
-												<Label
-													for="generation_prompt"
-													class="mb-0 text-gray-800 contrast-100 grayscale-0"
-													><div class="flex flex-row gap-1">
-														<div>Generation Instructions</div>
-														{#if generationPromptEdited}<div>&middot;</div>
-															<div class="text-gray-500">Edited from default</div>{/if}
-													</div></Label
-												>
+									<div class="col-span-2 mb-1">
+										<div class="flex items-end justify-between gap-3">
+											<div>
+												<div class="flex items-center gap-2">
+													<Label
+														for="generation_prompt"
+														class="mb-0 text-gray-800 contrast-100 grayscale-0"
+														><div class="flex flex-row gap-1">
+															<div>Generation Instructions</div>
+															{#if generationPromptEdited}<div>&middot;</div>
+																<div class="text-gray-500">Edited from default</div>{/if}
+														</div></Label
+													>
+												</div>
+												<Helper class="pb-1">Used to generate knowledge checks.</Helper>
 											</div>
-											<Helper class="pb-1">Used to generate knowledge checks.</Helper>
+											<button
+												type="button"
+												class="pb-1 text-xs text-blue-800 hover:underline disabled:cursor-not-allowed disabled:text-gray-400 disabled:no-underline"
+												disabled={preventEdits ||
+													overwriteManifest ||
+													generationPrompt === lectureVideoDefaultGenerationPrompt}
+												onclick={() => {
+													generationPrompt = lectureVideoDefaultGenerationPrompt;
+												}}>Reset to default</button
+											>
 										</div>
-										<button
-											type="button"
-											class="pb-1 text-xs text-blue-800 hover:underline disabled:cursor-not-allowed disabled:text-gray-400 disabled:no-underline"
-											disabled={preventEdits ||
-												overwriteManifest ||
-												generationPrompt === lectureVideoDefaultGenerationPrompt}
-											onclick={() => {
-												generationPrompt = lectureVideoDefaultGenerationPrompt;
-											}}>Reset to default</button
-										>
+										<Textarea
+											id="generation_prompt"
+											name="generation_prompt"
+											rows={10}
+											bind:value={generationPrompt}
+											disabled={preventEdits || overwriteManifest}
+											class="text-sm"
+										/>
 									</div>
-									<Textarea
-										id="generation_prompt"
-										name="generation_prompt"
-										rows={10}
-										bind:value={generationPrompt}
-										disabled={preventEdits || overwriteManifest}
-										class="text-sm"
-									/>
-								</div>
+
+									<div class="col-span-2 mb-1">
+										<div class="flex items-center justify-between gap-3">
+											<Label
+												for="video_description_duration_ms"
+												class="mb-0 text-gray-800 contrast-100 grayscale-0"
+												>Video Description Length</Label
+											>
+											<span class="text-sm font-medium text-gray-700"
+												>{videoDescriptionDurationMs / 1000} seconds</span
+											>
+										</div>
+										<Helper class="pb-1">
+											{overwriteManifest
+												? 'Available only when generating the manifest automatically.'
+												: 'Used for each generated visual description segment.'}
+										</Helper>
+										<Range
+											id="video_description_duration_ms"
+											name="video_description_duration_ms"
+											min={MIN_VIDEO_DESCRIPTION_DURATION_MS}
+											max={MAX_VIDEO_DESCRIPTION_DURATION_MS}
+											step={VIDEO_DESCRIPTION_DURATION_STEP_MS}
+											bind:value={videoDescriptionDurationMs}
+											disabled={preventEdits || overwriteManifest}
+											class="appearance-auto"
+										/>
+										<div class="mt-1 flex justify-between text-xs text-gray-500">
+											<span>{MIN_VIDEO_DESCRIPTION_DURATION_MS / 1000}s</span>
+											<span>{MAX_VIDEO_DESCRIPTION_DURATION_MS / 1000}s</span>
+										</div>
+									</div>
+								{/if}
+
+								<hr />
 
 								<div class="col-span-2 mb-1">
 									<div class="flex items-center justify-between gap-3">
 										<Label
-											for="video_description_duration_ms"
+											for="lecture_video_manifest"
 											class="mb-0 text-gray-800 contrast-100 grayscale-0"
-											>Video Description Length</Label
+											>Lecture Video Manifest</Label
 										>
-										<span class="text-sm font-medium text-gray-700"
-											>{videoDescriptionDurationMs / 1000} seconds</span
-										>
-									</div>
-									<Helper class="pb-1">
-										{overwriteManifest
-											? 'Available only when generating the manifest automatically.'
-											: 'Used for each generated visual description segment.'}
-									</Helper>
-									<Range
-										id="video_description_duration_ms"
-										name="video_description_duration_ms"
-										min={MIN_VIDEO_DESCRIPTION_DURATION_MS}
-										max={MAX_VIDEO_DESCRIPTION_DURATION_MS}
-										step={VIDEO_DESCRIPTION_DURATION_STEP_MS}
-										bind:value={videoDescriptionDurationMs}
-										disabled={preventEdits || overwriteManifest}
-										class="appearance-auto"
-									/>
-									<div class="mt-1 flex justify-between text-xs text-gray-500">
-										<span>{MIN_VIDEO_DESCRIPTION_DURATION_MS / 1000}s</span>
-										<span>{MAX_VIDEO_DESCRIPTION_DURATION_MS / 1000}s</span>
-									</div>
-								</div>
-							{/if}
-
-							<hr />
-
-							<div class="col-span-2 mb-1">
-								<div class="flex items-center justify-between gap-3">
-									<Label
-										for="lecture_video_manifest"
-										class="mb-0 text-gray-800 contrast-100 grayscale-0"
-										>Lecture Video Manifest</Label
-									>
-									{#if canGenerateLectureVideoManifest}
-										<Checkbox bind:checked={overwriteManifest} disabled={preventEdits}
-											>Overwrite manifest</Checkbox
-										>
-									{/if}
-								</div>
-								<Helper class="pb-1"
-									>{overwriteManifest
-										? 'Provide a custom manifest to use for this lecture video.'
-										: 'Preview the manifest for this lecture video.'}</Helper
-								>
-								{#if canGenerateLectureVideoManifest && originalOverwriteManifest && !overwriteManifest}
-									<Helper class="pb-1 text-yellow-700">
-										You previously provided a custom manifest for this lecture video. On save, your
-										custom manifest will be replaced.
-									</Helper>
-								{/if}
-								{#if canGenerateLectureVideoManifest}
-									<div class="mb-2 text-sm">
-										{#if manifestGenerationInFlight}
-											<span>Generating...</span>
-										{:else if lastManifestRunFailed}
-											<span class="text-red-700"
-												>Generation failed: {manifestGenerationStatus?.error_message ||
-													'Unknown error'}</span
-											>
-										{:else if manifestGenerationStatus?.finished_at}
-											<span
-												>Last generated {new Date(
-													manifestGenerationStatus.finished_at
-												).toLocaleString()}</span
+										{#if canGenerateLectureVideoManifest}
+											<Checkbox bind:checked={overwriteManifest} disabled={preventEdits}
+												>Overwrite manifest</Checkbox
 											>
 										{/if}
 									</div>
-								{/if}
-								{#if canRegenerateLectureVideo}
+									<Helper class="pb-1"
+										>{overwriteManifest
+											? 'Provide a custom manifest to use for this lecture video.'
+											: 'Preview the manifest for this lecture video.'}</Helper
+									>
+									{#if canGenerateLectureVideoManifest && originalOverwriteManifest && !overwriteManifest}
+										<Helper class="pb-1 text-yellow-700">
+											You previously provided a custom manifest for this lecture video. On save,
+											your custom manifest will be replaced.
+										</Helper>
+									{/if}
+									{#if canGenerateLectureVideoManifest}
+										<div class="mb-2 text-sm">
+											{#if manifestGenerationInFlight}
+												<span>Generating...</span>
+											{:else if lastManifestRunFailed}
+												<span class="text-red-700"
+													>Generation failed: {manifestGenerationStatus?.error_message ||
+														'Unknown error'}</span
+												>
+											{:else if manifestGenerationStatus?.finished_at}
+												<span
+													>Last generated {new Date(
+														manifestGenerationStatus.finished_at
+													).toLocaleString()}</span
+												>
+											{/if}
+										</div>
+									{/if}
+									{#if canRegenerateLectureVideo}
+										<div class="mb-2 flex flex-col gap-2 text-sm text-gray-600">
+											<div class="flex flex-wrap items-center gap-3">
+												<button
+													type="button"
+													class={`${lectureVideoAudioRegenerateButtonPressed ? 'border-blue-300 bg-blue-100 font-semibold text-blue-800 shadow-inner shadow-blue-200' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'} inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-70`}
+													disabled={preventEdits ||
+														manifestGenerationInFlight ||
+														lectureVideoAudioTriggeredByFormChanges ||
+														lectureVideoSaveTriggersGeneration ||
+														regenerateRequested}
+													aria-pressed={lectureVideoAudioRegenerateButtonPressed}
+													onclick={() => {
+														regenerateAudioRequested = !regenerateAudioRequested;
+													}}
+												>
+													<RefreshOutline class="h-3 w-3" />
+													<span>{lectureVideoAudioRegenerateButtonLabel}</span>
+												</button>
+												<span class="text-xs text-gray-600"
+													>{lectureVideoAudioRegenerateHelperText}</span
+												>
+											</div>
+											{#if canGenerateLectureVideoManifest && !overwriteManifest}
+												<div class="flex flex-wrap items-center gap-3">
+													<button
+														type="button"
+														class={`${lectureVideoManifestRegenerateButtonPressed ? 'border-blue-300 bg-blue-100 font-semibold text-blue-800 shadow-inner shadow-blue-200' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'} inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-70`}
+														disabled={preventEdits ||
+															manifestGenerationInFlight ||
+															lectureVideoGenerationTriggeredByFormChanges}
+														aria-pressed={lectureVideoManifestRegenerateButtonPressed}
+														onclick={() => {
+															regenerateRequested = !regenerateRequested;
+														}}
+													>
+														<RefreshOutline class="h-3 w-3" />
+														<span>{lectureVideoManifestRegenerateButtonLabel}</span>
+													</button>
+													<span class="text-xs text-gray-600"
+														>{lectureVideoManifestRegenerateHelperText}</span
+													>
+												</div>
+											{/if}
+										</div>
+									{/if}
+									{#if lectureVideoChatUnavailable}
+										<Helper class="pb-2 text-yellow-700">
+											Provide a manifest with word-level transcription (Version 2 or 3) to enable
+											lecture chat.
+										</Helper>
+									{/if}
+									<Textarea
+										id="lecture_video_manifest"
+										name="lecture_video_manifest"
+										rows={14}
+										bind:value={lectureVideoManifestJson}
+										disabled={preventEdits || !overwriteManifest}
+										class="font-mono text-xs"
+									/>
+								</div>
+							{/if}
+
+							{#if isLectureSlideMode}
+								<hr />
+								<div class="col-span-2 mb-1">
+									<Label for="slide_generation_prompt" class="mb-0 text-gray-800"
+										>Question Generation Instructions</Label
+									>
+									<Helper class="pb-1"
+										>Used to generate knowledge checks for the slide lesson.</Helper
+									>
+									<Textarea
+										id="slide_generation_prompt"
+										name="slide_generation_prompt"
+										rows={6}
+										bind:value={slideGenerationPrompt}
+										disabled={preventEdits}
+										class="text-sm"
+									/>
+								</div>
+								<div class="col-span-2 mb-1">
+									<Label for="slide_narration_prompt" class="mb-0 text-gray-800"
+										>Narration Instructions</Label
+									>
+									<Helper class="pb-1"
+										>Used to generate narration from each slide and author notes.</Helper
+									>
+									<Textarea
+										id="slide_narration_prompt"
+										name="slide_narration_prompt"
+										rows={6}
+										bind:value={slideNarrationPrompt}
+										disabled={preventEdits}
+										class="text-sm"
+									/>
+								</div>
+								{#if !data.isCreating}
 									<div class="mb-2 flex flex-col gap-2 text-sm text-gray-600">
 										<div class="flex flex-wrap items-center gap-3">
 											<button
 												type="button"
-												class={`${lectureVideoAudioRegenerateButtonPressed ? 'border-blue-300 bg-blue-100 font-semibold text-blue-800 shadow-inner shadow-blue-200' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'} inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-70`}
+												class={`${regenerateSlideAudioRequested || lectureSlideVoiceChanged || lectureSlidePagesChanged ? 'border-blue-300 bg-blue-100 font-semibold text-blue-800 shadow-inner shadow-blue-200' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'} inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-70`}
 												disabled={preventEdits ||
-													manifestGenerationInFlight ||
-													lectureVideoAudioTriggeredByFormChanges ||
-													lectureVideoSaveTriggersGeneration ||
-													regenerateRequested}
-												aria-pressed={lectureVideoAudioRegenerateButtonPressed}
+													lectureSlideVoiceChanged ||
+													lectureSlidePagesChanged}
+												aria-pressed={regenerateSlideAudioRequested ||
+													lectureSlideVoiceChanged ||
+													lectureSlidePagesChanged}
 												onclick={() => {
-													regenerateAudioRequested = !regenerateAudioRequested;
+													regenerateSlideAudioRequested = !regenerateSlideAudioRequested;
 												}}
 											>
 												<RefreshOutline class="h-3 w-3" />
-												<span>{lectureVideoAudioRegenerateButtonLabel}</span>
+												<span>Regenerate audio</span>
 											</button>
 											<span class="text-xs text-gray-600"
-												>{lectureVideoAudioRegenerateHelperText}</span
+												>Re-creates narration audio from the current narration text.</span
 											>
 										</div>
-										{#if canGenerateLectureVideoManifest && !overwriteManifest}
-											<div class="flex flex-wrap items-center gap-3">
-												<button
-													type="button"
-													class={`${lectureVideoManifestRegenerateButtonPressed ? 'border-blue-300 bg-blue-100 font-semibold text-blue-800 shadow-inner shadow-blue-200' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'} inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-70`}
-													disabled={preventEdits ||
-														manifestGenerationInFlight ||
-														lectureVideoGenerationTriggeredByFormChanges}
-													aria-pressed={lectureVideoManifestRegenerateButtonPressed}
-													onclick={() => {
-														regenerateRequested = !regenerateRequested;
-													}}
-												>
-													<RefreshOutline class="h-3 w-3" />
-													<span>{lectureVideoManifestRegenerateButtonLabel}</span>
-												</button>
-												<span class="text-xs text-gray-600"
-													>{lectureVideoManifestRegenerateHelperText}</span
-												>
-											</div>
-										{/if}
+										<div class="flex flex-wrap items-center gap-3">
+											<button
+												type="button"
+												class={`${regenerateSlideNarrationRequested || slideNarrationPromptChanged ? 'border-blue-300 bg-blue-100 font-semibold text-blue-800 shadow-inner shadow-blue-200' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'} inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-70`}
+												disabled={preventEdits || slideNarrationPromptChanged}
+												aria-pressed={regenerateSlideNarrationRequested ||
+													slideNarrationPromptChanged}
+												onclick={() => {
+													regenerateSlideNarrationRequested = !regenerateSlideNarrationRequested;
+												}}
+											>
+												<RefreshOutline class="h-3 w-3" />
+												<span>Regenerate narration</span>
+											</button>
+											<span class="text-xs text-gray-600"
+												>Re-runs slide narration text generation and then audio.</span
+											>
+										</div>
+										<div class="flex flex-wrap items-center gap-3">
+											<button
+												type="button"
+												class={`${regenerateSlideQuestionsRequested || slideGenerationPromptChanged ? 'border-blue-300 bg-blue-100 font-semibold text-blue-800 shadow-inner shadow-blue-200' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'} inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-70`}
+												disabled={preventEdits || slideGenerationPromptChanged}
+												aria-pressed={regenerateSlideQuestionsRequested ||
+													slideGenerationPromptChanged}
+												onclick={() => {
+													regenerateSlideQuestionsRequested = !regenerateSlideQuestionsRequested;
+												}}
+											>
+												<RefreshOutline class="h-3 w-3" />
+												<span>Regenerate questions</span>
+											</button>
+											<span class="text-xs text-gray-600"
+												>Re-runs generated knowledge checks for the slides.</span
+											>
+										</div>
 									</div>
 								{/if}
-								{#if lectureVideoChatUnavailable}
-									<Helper class="pb-2 text-yellow-700">
-										Provide a manifest with word-level transcription (Version 2 or 3) to enable
-										lecture chat.
-									</Helper>
-								{/if}
-								<Textarea
-									id="lecture_video_manifest"
-									name="lecture_video_manifest"
-									rows={14}
-									bind:value={lectureVideoManifestJson}
-									disabled={preventEdits || !overwriteManifest}
-									class="font-mono text-xs"
-								/>
-							</div>
+							{/if}
 
 							<div class="col-span-2 mb-1">
 								<div class="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">

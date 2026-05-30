@@ -1854,6 +1854,35 @@ export type LectureSlidePage = {
 	end_offset_ms?: number | null;
 	image_url?: string | null;
 	image_stored_object_id?: number | null;
+	user_notes?: string | null;
+	narration_text?: string | null;
+};
+
+export type LectureSlideStatus = 'uploaded' | 'processing' | 'ready' | 'failed';
+
+export type LectureSlideSummary = {
+	id: number;
+	filename: string;
+	size: number;
+	content_type: string;
+	status: LectureSlideStatus;
+	error_message?: string | null;
+	slide_count: number;
+};
+
+export type LectureSlidePageNotes = {
+	position: number;
+	user_notes?: string | null;
+	narration_text?: string | null;
+};
+
+export type LectureSlideConfigResponse = {
+	lecture_slide_deck: LectureSlideSummary;
+	voice_id: string;
+	generation_prompt?: string | null;
+	narration_prompt?: string | null;
+	pages: LectureSlidePage[];
+	processing_status?: LectureVideoProcessingRunSummary | null;
 };
 
 export type LectureSlideDeckView = {
@@ -2126,6 +2155,56 @@ export const getAssistantLectureVideoConfig = async (
 	const url = `class/${classId}/assistant/${assistantId}/lecture-video/config`;
 	return await GET<never, LectureVideoConfigResponse>(f, url);
 };
+
+/**
+ * Upload lecture slides for a new assistant.
+ */
+export const uploadLectureSlides = (
+	_f: Fetcher,
+	classId: number,
+	file: File,
+	opts?: UploadOptions
+) => {
+	const url = fullPath(`class/${classId}/lecture-slides`);
+	return _doUpload<LectureSlideSummary>(url, file, opts);
+};
+
+/**
+ * Upload lecture slides while editing an assistant.
+ */
+export const uploadAssistantLectureSlides = (
+	_f: Fetcher,
+	classId: number,
+	assistantId: number,
+	file: File,
+	opts?: UploadOptions
+) => {
+	const url = fullPath(`class/${classId}/assistant/${assistantId}/lecture-slides/upload`);
+	return _doUpload<LectureSlideSummary>(url, file, opts);
+};
+
+/**
+ * Load the persisted lecture-slide config for an assistant.
+ */
+export const getAssistantLectureSlideConfig = async (
+	f: Fetcher,
+	classId: number,
+	assistantId: number
+) => {
+	const url = `class/${classId}/assistant/${assistantId}/lecture-slides/config`;
+	return await GET<never, LectureSlideConfigResponse>(f, url);
+};
+
+export const lectureSlideSourceUrl = (
+	classId: number,
+	lectureSlideDeckId: number,
+	assistantId?: number | null
+) =>
+	fullPath(
+		assistantId
+			? `class/${classId}/assistant/${assistantId}/lecture-slides/source`
+			: `class/${classId}/lecture-slides/${lectureSlideDeckId}/source`
+	);
 
 export const retryAssistantLectureVideo = async (
 	f: Fetcher,
@@ -2508,6 +2587,8 @@ export type AssistantModels = {
 		instructions: string;
 		generation_prompt: string;
 		can_generate_manifest: boolean;
+		lecture_slide_generation_prompt: string;
+		lecture_slide_narration_prompt: string;
 	} | null;
 };
 
@@ -2661,7 +2742,7 @@ export type Assistant = {
 	description: string | null;
 	notes: string | null;
 	instructions: string;
-	interaction_mode: AssistantInteractionMode;
+	interaction_mode: InteractionMode;
 	model: string;
 	temperature: number | null;
 	reasoning_effort: number | null;
@@ -2703,6 +2784,7 @@ export type Assistant = {
 	hide_mcp_server_call_details: boolean | null;
 	endorsed: boolean | null;
 	lecture_video?: LectureVideoSummary | null;
+	lecture_slide_deck?: LectureSlideSummary | null;
 	created: string;
 	updated: string | null;
 	share_links: AnonymousLink[] | null;
@@ -2817,11 +2899,14 @@ export type CreateAssistantRequest = {
 	instructions: string;
 	notes: string;
 	model: string;
-	interaction_mode: AssistantInteractionMode;
+	interaction_mode: InteractionMode;
 	lecture_video_id?: number | null;
 	lecture_video_manifest?: LectureVideoManifest | null;
+	lecture_slide_deck_id?: number | null;
+	lecture_slide_page_notes?: LectureSlidePageNotes[];
 	voice_id?: string | null;
 	generation_prompt?: string | null;
+	narration_prompt?: string | null;
 	video_description_duration_ms?: number | null;
 	overwrite_manifest?: boolean;
 	create_classic_assistant?: boolean;
@@ -2880,13 +2965,18 @@ export type UpdateAssistantRequest = {
 	instructions?: string;
 	notes?: string;
 	model?: string;
-	interaction_mode?: AssistantInteractionMode;
+	interaction_mode?: InteractionMode;
 	lecture_video_id?: number | null;
 	lecture_video_manifest?: LectureVideoManifest | null;
+	lecture_slide_deck_id?: number | null;
+	lecture_slide_page_notes?: LectureSlidePageNotes[] | null;
 	voice_id?: string | null;
 	generation_prompt?: string | null;
+	narration_prompt?: string | null;
 	video_description_duration_ms?: number | null;
 	regenerate_requested?: boolean;
+	regenerate_narration_requested?: boolean;
+	regenerate_questions_requested?: boolean;
 	regenerate_audio_requested?: boolean;
 	overwrite_manifest?: boolean;
 	create_classic_assistant?: boolean;
@@ -2995,7 +3085,7 @@ export type AssistantInstructionsPreviewRequest = {
 	instructions: string;
 	use_latex: boolean;
 	disable_prompt_randomization: boolean;
-	interaction_mode?: AssistantInteractionMode;
+	interaction_mode?: InteractionMode;
 };
 
 /**

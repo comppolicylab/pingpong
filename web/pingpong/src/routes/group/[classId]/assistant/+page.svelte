@@ -67,7 +67,7 @@
 	let copyPermissionLoading: Record<number, boolean> = {};
 	let copyPermissionError: Record<number, string> = {};
 	let assistants: Assistant[] = [];
-	let lectureVideoRefreshingIds = new Set<number>();
+	let lectureMediaRefreshingIds = new Set<number>();
 	const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
 	const classOptions = (data.classes || []).map((c) => ({
 		id: c.id,
@@ -205,23 +205,23 @@
 	const sortAssistantsByName = (items: Assistant[]) =>
 		[...items].sort((a, b) => a.name.localeCompare(b.name));
 
-	const refreshLectureVideoAssistant = async (assistantId: number) => {
-		if (lectureVideoRefreshingIds.has(assistantId)) {
+	const refreshLectureMediaAssistant = async (assistantId: number) => {
+		if (lectureMediaRefreshingIds.has(assistantId)) {
 			return;
 		}
 
 		const assistant = assistants.find((candidate) => candidate.id === assistantId);
-		if (!assistant?.lecture_video) {
+		if (!assistant?.lecture_video && !assistant?.lecture_slide_deck) {
 			return;
 		}
 
-		lectureVideoRefreshingIds = new Set([...lectureVideoRefreshingIds, assistantId]);
+		lectureMediaRefreshingIds = new Set([...lectureMediaRefreshingIds, assistantId]);
 		try {
 			const response = await api.getAssistants(fetch, data.class.id);
 			const expanded = api.expandResponse(response);
 			if (expanded.error || !expanded.data) {
 				sadToast(
-					`Could not refresh lecture video status:\n${expanded.error?.detail || 'Unknown error'}`
+					`Could not refresh lecture media status:\n${expanded.error?.detail || 'Unknown error'}`
 				);
 				return;
 			}
@@ -229,9 +229,9 @@
 			assistants = sortAssistantsByName(expanded.data.assistants);
 			creators = expanded.data.creators;
 		} finally {
-			const nextRefreshingIds = new SvelteSet(lectureVideoRefreshingIds);
+			const nextRefreshingIds = new SvelteSet(lectureMediaRefreshingIds);
 			nextRefreshingIds.delete(assistantId);
-			lectureVideoRefreshingIds = nextRefreshingIds;
+			lectureMediaRefreshingIds = nextRefreshingIds;
 		}
 	};
 	$: assistants = data?.assistants || [];
@@ -284,8 +284,8 @@
 					creator={creators[assistant.creator_id]}
 					editable={data.editableAssistants.has(assistant.id)}
 					currentClassId={data.class.id}
-					lectureVideoRefreshing={lectureVideoRefreshingIds.has(assistant.id)}
-					onRefreshLectureVideo={() => void refreshLectureVideoAssistant(assistant.id)}
+					lectureMediaRefreshing={lectureMediaRefreshingIds.has(assistant.id)}
+					onRefreshLectureMedia={() => void refreshLectureMediaAssistant(assistant.id)}
 					{classOptions}
 				/>
 			{:else}
@@ -304,8 +304,8 @@
 					editable={data.editableAssistants.has(assistant.id)}
 					shareable={data.grants.canShareAssistants && !!assistant.published}
 					currentClassId={data.class.id}
-					lectureVideoRefreshing={lectureVideoRefreshingIds.has(assistant.id)}
-					onRefreshLectureVideo={() => void refreshLectureVideoAssistant(assistant.id)}
+					lectureMediaRefreshing={lectureMediaRefreshingIds.has(assistant.id)}
+					onRefreshLectureMedia={() => void refreshLectureMediaAssistant(assistant.id)}
 					{classOptions}
 				/>
 			{:else}
