@@ -14,10 +14,12 @@ import time
 from collections.abc import Callable, Coroutine, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
+from functools import cache
 from pathlib import Path
 from typing import Any, Literal, TypeVar, TypedDict, cast
 
 import openai
+import tiktoken
 from openai.types import Reasoning
 import uuid_utils as uuid
 from openai.types.audio import TranscriptionWord
@@ -108,9 +110,21 @@ LECTURE_SLIDE_AUDIO_CONTENT_TYPE = "audio/ogg"
 MAX_RUN_CREATE_RETRIES = 3
 OPENAI_GENERATION_MAX_ATTEMPTS = 3
 OPENAI_GENERATION_RETRY_DELAY_SECONDS = 5.0
-SLIDE_MANIFEST_CHUNK_DURATION_MS = 5 * 60 * 1000
-SLIDE_MANIFEST_CHUNK_OVERLAP_MS = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS
+GPT_5_4_CONTEXT_WINDOW_TOKENS = 1_000_000
+GPT_5_4_MAX_OUTPUT_TOKENS = 128_000
+SLIDE_MANIFEST_FIXED_INPUT_TOKEN_RESERVE = 100_000
+SLIDE_MANIFEST_TOKEN_SAFETY_MARGIN = 50_000
+SLIDE_MANIFEST_INPUT_TOKEN_BUDGET = (
+    GPT_5_4_CONTEXT_WINDOW_TOKENS
+    - GPT_5_4_MAX_OUTPUT_TOKENS
+    - SLIDE_MANIFEST_FIXED_INPUT_TOKEN_RESERVE
+    - SLIDE_MANIFEST_TOKEN_SAFETY_MARGIN
+)
+SLIDE_MANIFEST_CHUNK_CONTEXT_OVERLAP_TOKENS = 10_000
 SLIDE_MANIFEST_CHUNK_MIN_SPLIT_MS = 60 * 1000
+SLIDE_MANIFEST_MIN_CHUNK_SOURCE_TOKENS = 25_000
+SLIDE_MANIFEST_TOKENIZER_MODEL = "gpt-5.4"
+SLIDE_MANIFEST_TOKENIZER_FALLBACK_ENCODING = "o200k_base"
 
 
 class GeneratedSlideNarration(BaseModel):
@@ -1815,10 +1829,136 @@ def _page_ranges_for_slide_window(
     ]
 
 
+@cache
+def _slide_manifest_tokenizer() -> tiktoken.Encoding:
+    try:
+        return tiktoken.encoding_for_model(SLIDE_MANIFEST_TOKENIZER_MODEL)
+    except KeyError:
+        return tiktoken.get_encoding(SLIDE_MANIFEST_TOKENIZER_FALLBACK_ENCODING)
+
+
+def _count_text_tokens(text: str) -> int:
+    return len(_slide_manifest_tokenizer().encode(text))
+
+
+def _slide_manifest_request_token_estimate(
+    *,
+    generation_prompt: str,
+    page_ranges: list[SlidePageRange],
+    transcript: list[schemas.LectureVideoManifestWordV3],
+    total_duration_ms: int | None,
+    chunk: SlideManifestGenerationChunk | None = None,
+) -> int:
+    generation_start_ms = chunk.generation_start_ms if chunk is not None else None
+    generation_end_ms = chunk.generation_end_ms if chunk is not None else None
+    context_start_ms = chunk.context_start_ms if chunk is not None else None
+    context_end_ms = chunk.context_end_ms if chunk is not None else None
+    request_text = "\n\n".join(
+        [
+            _build_slide_manifest_generation_instructions(
+                generation_prompt,
+                total_duration_ms=total_duration_ms,
+                generation_start_ms=generation_start_ms,
+                generation_end_ms=generation_end_ms,
+                context_start_ms=context_start_ms,
+                context_end_ms=context_end_ms,
+            ),
+            _slide_timing_source_text(page_ranges),
+            _generation_transcript_source_text(transcript, compact=False),
+            _slide_generation_final_task_text(),
+        ]
+    )
+    return _count_text_tokens(request_text)
+
+
+def _slide_manifest_source_token_estimate(
+    page_ranges: list[SlidePageRange],
+    transcript: list[schemas.LectureVideoManifestWordV3],
+) -> int:
+    return _count_text_tokens(
+        "\n\n".join(
+            [
+                _slide_timing_source_text(page_ranges),
+                _generation_transcript_source_text(transcript, compact=False),
+            ]
+        )
+    )
+
+
+def _slide_manifest_chunk_source_token_budget(
+    *,
+    generation_prompt: str,
+    total_duration_ms: int,
+) -> int:
+    fixed_request_tokens = _slide_manifest_request_token_estimate(
+        generation_prompt=generation_prompt,
+        page_ranges=[],
+        transcript=[],
+        total_duration_ms=total_duration_ms,
+    )
+    return max(0, SLIDE_MANIFEST_INPUT_TOKEN_BUDGET - fixed_request_tokens)
+
+
+def _word_token_estimate(word: schemas.LectureVideoManifestWordV3) -> int:
+    return _count_text_tokens(
+        json.dumps(
+            {
+                "id": word.id,
+                "word": word.word,
+                "start": word.start_offset_ms / 1000,
+                "end": word.end_offset_ms / 1000,
+            }
+        )
+    )
+
+
+def _slide_manifest_context_window_for_token_overlap(
+    transcript: list[schemas.LectureVideoManifestWordV3],
+    *,
+    generation_start_ms: int,
+    generation_end_ms: int,
+    total_duration_ms: int,
+) -> tuple[int, int]:
+    if SLIDE_MANIFEST_CHUNK_CONTEXT_OVERLAP_TOKENS <= 0:
+        return generation_start_ms, generation_end_ms
+
+    context_start_ms = generation_start_ms
+    tokens_so_far = 0
+    for word in reversed(transcript):
+        if word.end_offset_ms > generation_start_ms:
+            continue
+        tokens_so_far += _word_token_estimate(word)
+        context_start_ms = word.start_offset_ms
+        if tokens_so_far >= SLIDE_MANIFEST_CHUNK_CONTEXT_OVERLAP_TOKENS:
+            break
+
+    context_end_ms = generation_end_ms
+    tokens_so_far = 0
+    for word in transcript:
+        if word.start_offset_ms < generation_end_ms:
+            continue
+        tokens_so_far += _word_token_estimate(word)
+        context_end_ms = word.end_offset_ms
+        if tokens_so_far >= SLIDE_MANIFEST_CHUNK_CONTEXT_OVERLAP_TOKENS:
+            break
+
+    return max(0, context_start_ms), min(total_duration_ms, context_end_ms)
+
+
 def _plan_slide_manifest_generation_chunks(
     total_duration_ms: int,
+    *,
+    generation_prompt: str,
+    page_ranges: list[SlidePageRange],
+    transcript: list[schemas.LectureVideoManifestWordV3],
 ) -> list[SlideManifestGenerationChunk]:
-    if total_duration_ms <= SLIDE_MANIFEST_CHUNK_DURATION_MS:
+    full_request_tokens = _slide_manifest_request_token_estimate(
+        generation_prompt=generation_prompt,
+        page_ranges=page_ranges,
+        transcript=transcript,
+        total_duration_ms=total_duration_ms,
+    )
+    if full_request_tokens <= SLIDE_MANIFEST_INPUT_TOKEN_BUDGET:
         return [
             SlideManifestGenerationChunk(
                 generation_start_ms=0,
@@ -1827,27 +1967,77 @@ def _plan_slide_manifest_generation_chunks(
                 context_end_ms=total_duration_ms,
             )
         ]
+
+    timed_page_ranges = [
+        page_range
+        for page_range in sorted(page_ranges, key=lambda item: item["slide_position"])
+        if page_range["start_offset_ms"] is not None
+        and page_range["end_offset_ms"] is not None
+    ]
+    if not timed_page_ranges:
+        return [
+            SlideManifestGenerationChunk(
+                generation_start_ms=0,
+                generation_end_ms=total_duration_ms,
+                context_start_ms=0,
+                context_end_ms=total_duration_ms,
+            )
+        ]
+
+    source_budget = _slide_manifest_chunk_source_token_budget(
+        generation_prompt=generation_prompt,
+        total_duration_ms=total_duration_ms,
+    )
+    chunk_source_budget = max(
+        SLIDE_MANIFEST_MIN_CHUNK_SOURCE_TOKENS,
+        source_budget - (SLIDE_MANIFEST_CHUNK_CONTEXT_OVERLAP_TOKENS * 2),
+    )
     chunks: list[SlideManifestGenerationChunk] = []
-    generation_start_ms = 0
-    while generation_start_ms < total_duration_ms:
-        generation_end_ms = min(
-            generation_start_ms + SLIDE_MANIFEST_CHUNK_DURATION_MS,
-            total_duration_ms,
+    current_page_ranges: list[SlidePageRange] = []
+    current_token_estimate = 0
+
+    def append_chunk(chunk_page_ranges: list[SlidePageRange]) -> None:
+        generation_start_ms = cast(int, chunk_page_ranges[0]["start_offset_ms"])
+        generation_end_ms = cast(int, chunk_page_ranges[-1]["end_offset_ms"])
+        context_start_ms, context_end_ms = (
+            _slide_manifest_context_window_for_token_overlap(
+                transcript,
+                generation_start_ms=generation_start_ms,
+                generation_end_ms=generation_end_ms,
+                total_duration_ms=total_duration_ms,
+            )
         )
         chunks.append(
             SlideManifestGenerationChunk(
                 generation_start_ms=generation_start_ms,
                 generation_end_ms=generation_end_ms,
-                context_start_ms=max(
-                    0, generation_start_ms - SLIDE_MANIFEST_CHUNK_OVERLAP_MS
-                ),
-                context_end_ms=min(
-                    total_duration_ms,
-                    generation_end_ms + SLIDE_MANIFEST_CHUNK_OVERLAP_MS,
-                ),
+                context_start_ms=context_start_ms,
+                context_end_ms=context_end_ms,
             )
         )
-        generation_start_ms = generation_end_ms
+
+    for page_range in timed_page_ranges:
+        start_offset_ms = cast(int, page_range["start_offset_ms"])
+        end_offset_ms = cast(int, page_range["end_offset_ms"])
+        page_transcript = _transcript_for_slide_window(
+            transcript,
+            start_offset_ms=start_offset_ms,
+            end_offset_ms=end_offset_ms,
+        )
+        page_token_estimate = _slide_manifest_source_token_estimate(
+            [page_range], page_transcript
+        )
+        if (
+            current_page_ranges
+            and current_token_estimate + page_token_estimate > chunk_source_budget
+        ):
+            append_chunk(current_page_ranges)
+            current_page_ranges = []
+            current_token_estimate = 0
+        current_page_ranges.append(page_range)
+        current_token_estimate += page_token_estimate
+    if current_page_ranges:
+        append_chunk(current_page_ranges)
     return chunks
 
 
@@ -1855,22 +2045,55 @@ def _split_slide_manifest_generation_chunk(
     chunk: SlideManifestGenerationChunk,
     *,
     total_duration_ms: int,
+    transcript: list[schemas.LectureVideoManifestWordV3] | None = None,
 ) -> list[SlideManifestGenerationChunk]:
     split_ms = chunk.generation_start_ms + chunk.generation_duration_ms // 2
+    if transcript:
+        chunk_words = [
+            word
+            for word in transcript
+            if word.end_offset_ms >= chunk.generation_start_ms
+            and word.start_offset_ms <= chunk.generation_end_ms
+        ]
+        total_tokens = sum(_word_token_estimate(word) for word in chunk_words)
+        if total_tokens > 0:
+            midpoint_tokens = total_tokens / 2
+            tokens_so_far = 0
+            for word in chunk_words:
+                tokens_so_far += _word_token_estimate(word)
+                if tokens_so_far >= midpoint_tokens:
+                    split_ms = word.end_offset_ms
+                    break
+    if split_ms <= chunk.generation_start_ms or split_ms >= chunk.generation_end_ms:
+        split_ms = chunk.generation_start_ms + chunk.generation_duration_ms // 2
+    first_context_start_ms, first_context_end_ms = (
+        _slide_manifest_context_window_for_token_overlap(
+            transcript or [],
+            generation_start_ms=chunk.generation_start_ms,
+            generation_end_ms=split_ms,
+            total_duration_ms=total_duration_ms,
+        )
+    )
+    second_context_start_ms, second_context_end_ms = (
+        _slide_manifest_context_window_for_token_overlap(
+            transcript or [],
+            generation_start_ms=split_ms,
+            generation_end_ms=chunk.generation_end_ms,
+            total_duration_ms=total_duration_ms,
+        )
+    )
     return [
         SlideManifestGenerationChunk(
             generation_start_ms=chunk.generation_start_ms,
             generation_end_ms=split_ms,
-            context_start_ms=chunk.context_start_ms,
-            context_end_ms=min(
-                total_duration_ms, split_ms + SLIDE_MANIFEST_CHUNK_OVERLAP_MS
-            ),
+            context_start_ms=min(chunk.context_start_ms, first_context_start_ms),
+            context_end_ms=max(split_ms, first_context_end_ms),
         ),
         SlideManifestGenerationChunk(
             generation_start_ms=split_ms,
             generation_end_ms=chunk.generation_end_ms,
-            context_start_ms=max(0, split_ms - SLIDE_MANIFEST_CHUNK_OVERLAP_MS),
-            context_end_ms=chunk.context_end_ms,
+            context_start_ms=min(split_ms, second_context_start_ms),
+            context_end_ms=max(chunk.context_end_ms, second_context_end_ms),
         ),
     ]
 
@@ -2097,7 +2320,12 @@ async def _generate_slide_manifest_with_optional_chunks(
             transcript=transcript,
             total_duration_ms=None,
         )
-    chunks = _plan_slide_manifest_generation_chunks(total_duration_ms)
+    chunks = _plan_slide_manifest_generation_chunks(
+        total_duration_ms,
+        generation_prompt=generation_prompt,
+        page_ranges=page_ranges,
+        transcript=transcript,
+    )
     if len(chunks) == 1:
         try:
             return await _generate_slide_manifest_for_window(
@@ -2116,7 +2344,9 @@ async def _generate_slide_manifest_with_optional_chunks(
             ):
                 raise
             chunks = _split_slide_manifest_generation_chunk(
-                chunks[0], total_duration_ms=total_duration_ms
+                chunks[0],
+                total_duration_ms=total_duration_ms,
+                transcript=transcript,
             )
     if len(chunks) == 1:
         raise RuntimeError("Slide manifest chunk planning did not split.")
@@ -2177,7 +2407,9 @@ async def _generate_slide_manifest_chunks(
         ):
             raise
         child_chunks = _split_slide_manifest_generation_chunk(
-            chunk, total_duration_ms=total_duration_ms
+            chunk,
+            total_duration_ms=total_duration_ms,
+            transcript=transcript,
         )
         logger.info(
             "Splitting lecture slide manifest chunk after context limit. "

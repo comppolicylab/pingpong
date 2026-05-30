@@ -49,6 +49,7 @@ dependencies = [
     "sentry-sdk~=2.60.0",
     "sqlalchemy [asyncio] ~= 2.0.46",
     "starlette ~= 0.52.1",
+    "tiktoken~=0.13.0",
     "tqdm ~= 4.67.3",
     "uuid-utils~=0.16.0",
     "uvicorn~=0.47.0",
