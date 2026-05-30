@@ -175,6 +175,21 @@ async def test_extract_slide_assets_from_pdf_reads_text_and_dimensions(tmp_path)
     assert "Hello Slides" in (assets[0].extracted_text or "")
 
 
+async def test_list_rendered_pdf_page_images_sorts_zero_padded_names(tmp_path):
+    for filename in ("page-10.png", "page-02.png", "page-01.png"):
+        (tmp_path / filename).write_bytes(b"")
+
+    image_paths = lecture_slide_processing._list_rendered_pdf_page_images(
+        str(tmp_path), 3
+    )
+
+    assert [path.split("/")[-1] for path in image_paths] == [
+        "page-01.png",
+        "page-02.png",
+        "page-10.png",
+    ]
+
+
 async def test_generate_narration_text_requires_exact_slide_count(
     db, monkeypatch, tmp_path
 ):

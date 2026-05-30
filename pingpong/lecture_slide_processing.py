@@ -8,6 +8,7 @@ import os
 import secrets
 import shutil
 import socket
+import subprocess
 import tempfile
 import time
 from collections.abc import Callable, Coroutine, Mapping, Sequence
@@ -17,12 +18,12 @@ from pathlib import Path
 from typing import Any, Literal, TypeVar, TypedDict, cast
 
 import openai
-import fitz
 import uuid_utils as uuid
 from openai.types.audio import TranscriptionWord
 from openai.types.responses.response_input_param import ResponseInputParam
 from pydantic import BaseModel, ConfigDict, Field, create_model
 from pydub import AudioSegment
+from pypdf import PdfReader
 from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1062,25 +1063,64 @@ def extract_slide_assets_from_pdf(pdf_path: str) -> list[ExtractedSlideAsset]:
     output_dir = tempfile.mkdtemp(prefix="pingpong_ls_extract_")
     try:
         assets: list[ExtractedSlideAsset] = []
-        with fitz.open(pdf_path) as document:
-            for page_index, page in enumerate(document):
-                pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
-                image_path = os.path.join(output_dir, f"page-{page_index + 1}.png")
-                pixmap.save(image_path)
-                text = page.get_text("text").strip()
-                assets.append(
-                    ExtractedSlideAsset(
-                        position=page_index,
-                        image_path=image_path,
-                        width_px=pixmap.width,
-                        height_px=pixmap.height,
-                        extracted_text=text or None,
-                    )
+        output_prefix = os.path.join(output_dir, "page")
+        try:
+            subprocess.run(
+                ["pdftoppm", "-png", "-r", "144", pdf_path, output_prefix],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except FileNotFoundError as exc:
+            raise RuntimeError(
+                "pdftoppm is required to render lecture slide PDF pages."
+            ) from exc
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(
+                f"pdftoppm failed while rendering lecture slide PDF: {exc.stderr.strip()}"
+            ) from exc
+
+        reader = PdfReader(pdf_path)
+        image_paths = _list_rendered_pdf_page_images(output_dir, len(reader.pages))
+        for page_index, page in enumerate(reader.pages):
+            image_path = image_paths[page_index]
+            width_px, height_px = _read_png_dimensions(image_path)
+            text = (page.extract_text() or "").strip()
+            assets.append(
+                ExtractedSlideAsset(
+                    position=page_index,
+                    image_path=image_path,
+                    width_px=width_px,
+                    height_px=height_px,
+                    extracted_text=text or None,
                 )
+            )
         return assets
     except Exception:
         shutil.rmtree(output_dir, ignore_errors=True)
         raise
+
+
+def _list_rendered_pdf_page_images(output_dir: str, expected_count: int) -> list[str]:
+    image_paths = sorted(
+        Path(output_dir).glob("page-*.png"),
+        key=lambda path: int(path.stem.removeprefix("page-")),
+    )
+    if len(image_paths) != expected_count:
+        raise RuntimeError(
+            f"pdftoppm rendered {len(image_paths)} slide images; expected {expected_count}."
+        )
+    return [str(path) for path in image_paths]
+
+
+def _read_png_dimensions(image_path: str) -> tuple[int, int]:
+    with open(image_path, "rb") as image_file:
+        header = image_file.read(24)
+    if len(header) < 24 or header[:8] != b"\x89PNG\r\n\x1a\n":
+        raise RuntimeError(f"Rendered slide image is not a valid PNG: {image_path}")
+    width = int.from_bytes(header[16:20], "big")
+    height = int.from_bytes(header[20:24], "big")
+    return width, height
 
 
 def cleanup_extracted_slide_assets(assets: Sequence[ExtractedSlideAsset]) -> None:
