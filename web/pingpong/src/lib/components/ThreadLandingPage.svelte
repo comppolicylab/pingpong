@@ -46,6 +46,7 @@
 	 * Application data.
 	 */
 	export let data;
+	$: openAllLinksInNewTab = data.openAllLinksInNewTab;
 	$: lectureVideoEnabled = data?.lectureVideoEnabled ?? true;
 	$: conversationId = $page.url.searchParams.get('conversation_id');
 
@@ -1018,8 +1019,11 @@
 									ontouchstart={showModeratorsModal}>Moderators</Button
 								> <span class="font-semibold">cannot</span> see this thread or your name. For more
 								information, please review
-								<a href={resolve('/privacy-policy')} rel="noopener noreferrer" class="underline"
-									>PingPong's privacy statement</a
+								<a
+									href={resolve('/privacy-policy')}
+									rel="noopener noreferrer"
+									target={openAllLinksInNewTab ? '_blank' : undefined}
+									class="underline">PingPong's privacy statement</a
 								>. Assistants can make mistakes. Check important info.</Span
 							>
 						</div>
@@ -1038,8 +1042,11 @@
 									<span class="font-semibold"
 										>your full name, and listen to a recording of your conversation</span
 									>. For more information, please review
-									<a href={resolve('/privacy-policy')} rel="noopener noreferrer" class="underline"
-										>PingPong's privacy statement</a
+									<a
+										href={resolve('/privacy-policy')}
+										rel="noopener noreferrer"
+										target={openAllLinksInNewTab ? '_blank' : undefined}
+										class="underline">PingPong's privacy statement</a
 									>. Assistants can make mistakes. Check important info.</Span
 								>
 							</div>
@@ -1055,8 +1062,11 @@
 										ontouchstart={showModeratorsModal}>Moderators</Button
 									> can see this thread and <span class="font-semibold">your full name</span>. For
 									more information, please review
-									<a href={resolve('/privacy-policy')} rel="noopener noreferrer" class="underline"
-										>PingPong's privacy statement</a
+									<a
+										href={resolve('/privacy-policy')}
+										rel="noopener noreferrer"
+										target={openAllLinksInNewTab ? '_blank' : undefined}
+										class="underline">PingPong's privacy statement</a
 									>. Assistants can make mistakes. Check important info.</Span
 								>
 							</div>
@@ -1072,8 +1082,11 @@
 									onclick={showModeratorsModal}
 									ontouchstart={showModeratorsModal}>Moderators</Button
 								> can see this thread but not your name. For more information, please review
-								<a href={resolve('/privacy-policy')} rel="noopener noreferrer" class="underline"
-									>PingPong's privacy statement</a
+								<a
+									href={resolve('/privacy-policy')}
+									rel="noopener noreferrer"
+									target={openAllLinksInNewTab ? '_blank' : undefined}
+									class="underline">PingPong's privacy statement</a
 								>. Assistants can make mistakes. Check important info.</Span
 							>
 						</div>
