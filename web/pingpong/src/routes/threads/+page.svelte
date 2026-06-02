@@ -3,7 +3,6 @@
 	import * as api from '$lib/api';
 	import dayjs from '$lib/time';
 	import { Select, Button } from 'flowbite-svelte';
-	import AssistantVersionBadge from '$lib/components/AssistantVersionBadge.svelte';
 	import { page } from '$app/stores';
 	import { resolve } from '$app/paths';
 	import { getValue, updateSearch } from '$lib/urlstate';
@@ -132,7 +131,6 @@
 								<h4 class="eyebrow eyebrow-dark shrink truncate">
 									{Object.values(thread.assistant_names || { 1: 'Unknown Assistant' }).join(', ')}
 								</h4>
-								<AssistantVersionBadge version={thread.version} extraClasses="shrink-0" />
 							</div>
 							<div class="pt-2 pb-2 text-lg font-light">
 								{thread.name || 'New Conversation'}

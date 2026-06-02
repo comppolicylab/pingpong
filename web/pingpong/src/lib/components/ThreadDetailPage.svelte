@@ -36,7 +36,6 @@
 		type ChatInputMessage
 	} from '$lib/components/ChatInput.svelte';
 	import ChatDropOverlay from '$lib/components/ChatDropOverlay.svelte';
-	import AssistantVersionBadge from '$lib/components/AssistantVersionBadge.svelte';
 	import {
 		RefreshOutline,
 		CodeOutline,
@@ -1921,9 +1920,6 @@
 						>
 							<span class="flex items-center gap-2">
 								{getName(message.data)}
-								{#if message.data.role !== 'user' && !assistantDeleted}
-									<AssistantVersionBadge version={$version} extraClasses="shrink-0" />
-								{/if}
 							</span>
 							<span
 								class="ml-1 text-xs font-normal text-gray-500 hover:underline"
