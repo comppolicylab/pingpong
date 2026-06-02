@@ -48,6 +48,11 @@
 	export let data;
 	$: lectureVideoEnabled = data?.lectureVideoEnabled ?? true;
 	$: conversationId = $page.url.searchParams.get('conversation_id');
+
+	const viewQuerySuffix = () => {
+		const view = $page.url.searchParams.get('view');
+		return view ? `?view=${encodeURIComponent(view)}` : '';
+	};
 	let chatInputRef: ChatInputHandle | null = null;
 	let dropOverlayVisible = false;
 	let dropDragCounter = 0;
@@ -387,7 +392,9 @@
 			$loading = false;
 			if (hasAnonymousSessionToken()) {
 				await goto(
-					resolve(`/group/${$page.params.classId}/shared/thread/${newThreadOpts.thread.id}`)
+					resolve(
+						`/group/${$page.params.classId}/shared/thread/${newThreadOpts.thread.id}${viewQuerySuffix()}`
+					)
 				);
 			} else {
 				await goto(resolve(`/group/${$page.params.classId}/thread/${newThreadOpts.thread.id}`));
@@ -419,7 +426,9 @@
 			$loading = false;
 			if (hasAnonymousSessionToken()) {
 				await goto(
-					resolve(`/group/${$page.params.classId}/shared/thread/${newThreadOpts.thread.id}`)
+					resolve(
+						`/group/${$page.params.classId}/shared/thread/${newThreadOpts.thread.id}${viewQuerySuffix()}`
+					)
 				);
 			} else {
 				await goto(resolve(`/group/${$page.params.classId}/thread/${newThreadOpts.thread.id}`));
@@ -469,7 +478,9 @@
 			$loading = false;
 			if (hasAnonymousSessionToken()) {
 				await goto(
-					resolve(`/group/${$page.params.classId}/shared/thread/${newThreadOpts.thread.id}`)
+					resolve(
+						`/group/${$page.params.classId}/shared/thread/${newThreadOpts.thread.id}${viewQuerySuffix()}`
+					)
 				);
 			} else {
 				await goto(resolve(`/group/${$page.params.classId}/thread/${newThreadOpts.thread.id}`));
@@ -532,7 +543,9 @@
 			form.callback({ success: true, errorMessage: null, message_sent: true });
 			if (hasAnonymousSessionToken()) {
 				await goto(
-					resolve(`/group/${$page.params.classId}/shared/thread/${newThreadOpts.thread.id}`)
+					resolve(
+						`/group/${$page.params.classId}/shared/thread/${newThreadOpts.thread.id}${viewQuerySuffix()}`
+					)
 				);
 			} else {
 				await goto(resolve(`/group/${$page.params.classId}/thread/${newThreadOpts.thread.id}`));
@@ -577,7 +590,7 @@
 			<Modal title="Group Moderators" bind:open={showModerators} autoclose outsideclose>
 				<ModeratorsTable moderators={teachers} />
 			</Modal>
-			<div class="flex h-full w-full flex-col items-center justify-center gap-4 overflow-auto">
+			<div class="flex h-full w-full flex-col items-center justify-center gap-4 overflow-auto px-5">
 				<div class="flex w-full flex-col items-center gap-2 text-center md:w-2/3 lg:w-1/2">
 					<div class="flex flex-col items-center justify-center gap-1">
 						<div class="text-xl leading-tight font-medium md:text-4xl">{assistant.name}</div>

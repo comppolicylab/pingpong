@@ -8,6 +8,7 @@
 
 	export let data;
 	export let isNewHeaderLayout: boolean = false;
+	export let simpleView: boolean = false;
 
 	$: forceCollapsedLayout = data.forceCollapsedLayout;
 	$: isCollapsedSidebarOpen = $appMenuOpen && isNewHeaderLayout;
@@ -16,9 +17,11 @@
 </script>
 
 <div
-	class={`main-panel absolute top-24 left-0 z-10 mr-4 ml-4 h-[calc(100%-6rem)] w-[calc(100%-2rem)] overflow-hidden ${$appMenuTransitionsEnabled ? 'transition-all' : ''} print:!static print:!top-0 print:!left-0 print:!z-auto print:!m-0 print:!h-auto print:!w-full print:!overflow-visible print:!p-0 ${
-		!forceCollapsedLayout ? 'lg:static lg:h-full' : ''
-	}`}
+	class={simpleView
+		? 'main-panel relative z-10 h-full w-full overflow-hidden'
+		: `main-panel absolute top-24 left-0 z-10 mr-4 ml-4 h-[calc(100%-6rem)] w-[calc(100%-2rem)] overflow-hidden ${$appMenuTransitionsEnabled ? 'transition-all' : ''} print:!static print:!top-0 print:!left-0 print:!z-auto print:!m-0 print:!h-auto print:!w-full print:!overflow-visible print:!p-0 ${
+				!forceCollapsedLayout ? 'lg:static lg:h-full' : ''
+			}`}
 	class:left-80={isCollapsedSidebarOpen}
 	class:ml-0={isCollapsedSidebarOpen}
 	class:md:w-[calc(100%-2rem-20rem)]={isCollapsedSidebarOpen}
@@ -44,10 +47,10 @@
 		{/if}
 		<div
 			class={`h-full overflow-y-auto bg-white ${$appMenuTransitionsEnabled ? 'transition-all' : ''} print:!h-auto print:!overflow-visible print:!rounded-none print:!bg-transparent`}
-			class:rounded-tl-4xl={isNewHeaderLayout}
-			class:rounded-t-4xl={!isNewHeaderLayout || !hasHeaderComponent}
+			class:rounded-tl-4xl={!simpleView && isNewHeaderLayout}
+			class:rounded-t-4xl={!simpleView && (!isNewHeaderLayout || !hasHeaderComponent)}
 			class:md:rounded-tl-none={$appMenuOpen && isNewHeaderLayout && hasHeaderComponent}
-			class:rounded-b-4xl={isNewHeaderLayout}
+			class:rounded-b-4xl={!simpleView && isNewHeaderLayout}
 		>
 			{#if isNewHeaderLayout}
 				<div class="mx-auto h-full max-w-screen-2xl">

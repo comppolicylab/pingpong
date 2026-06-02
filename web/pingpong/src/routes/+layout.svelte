@@ -33,10 +33,19 @@
 	$: forceCollapsedLayout = data.forceCollapsedLayout;
 	$: forceShowSidebarButton = data.forceShowSidebarButton;
 	$: isNewHeaderLayout = forceCollapsedLayout && forceShowSidebarButton;
+
+	$: simpleView = data.simpleView;
+	$: if (typeof document !== 'undefined') {
+		document.body.classList.toggle('simple-view', simpleView);
+	}
 </script>
 
 <SvelteToast />
-{#if showSidebar}
+{#if simpleView}
+	<Main {data} {simpleView}>
+		<slot />
+	</Main>
+{:else if showSidebar}
 	<div
 		class="flex h-full w-full md:h-[calc(100vh-3rem)] {isNewHeaderLayout
 			? 'md:gap-4'

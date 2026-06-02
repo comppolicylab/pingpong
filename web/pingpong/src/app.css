@@ -28,6 +28,15 @@
 	}
 }
 
+body.simple-view {
+	background: white !important;
+}
+body.simple-view > div {
+	margin: 0 !important;
+	max-width: none !important;
+	height: 100vh !important;
+}
+
 .katex-display {
 	display: block;
 	width: 100%;
