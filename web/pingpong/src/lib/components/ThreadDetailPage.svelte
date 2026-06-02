@@ -3,6 +3,7 @@
 	import { beforeNavigate, goto, invalidateAll, afterNavigate } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import * as api from '$lib/api';
+	import disagreementProjectIcon from '$lib/assets/disagreementproject.png';
 	import {
 		getAnonymousSessionToken,
 		getAnonymousShareToken,
@@ -129,6 +130,7 @@
 	$: threadName = threadMgr.thread?.name || 'Thread';
 	$: groupName = data.class?.name || `Group ${classId}`;
 	$: threadLink = `${$page.url.origin}/group/${classId}/thread/${threadId}`;
+	$: assistantIconSrc = data.disagreementProjectView ? disagreementProjectIcon : '';
 	$: lectureVideoSrc = (() => {
 		const base = api.fullPath(`/class/${classId}/thread/${threadId}/video`);
 		const anonymousSessionToken = getAnonymousSessionToken();
@@ -1757,6 +1759,7 @@
 								{userTimezone}
 								meName={data?.me?.user?.name || data?.me?.user?.email || 'Me'}
 								meImage={data?.me?.profile?.image_url || ''}
+								{assistantIconSrc}
 								assistantId={$assistantId}
 								participants={$participants}
 								mimeType={data.uploadInfo.mimeType}
@@ -1862,6 +1865,7 @@
 							{userTimezone}
 							meName={data?.me?.user?.name || data?.me?.user?.email || 'Me'}
 							meImage={data?.me?.profile?.image_url || ''}
+							{assistantIconSrc}
 							assistantId={$assistantId}
 							participants={$participants}
 							mimeType={data.uploadInfo.mimeType}
@@ -1911,6 +1915,12 @@
 					<div class="shrink-0">
 						{#if message.data.role === 'user'}
 							<Avatar size="sm" src={getImage(message.data)} />
+						{:else if assistantIconSrc}
+							<img
+								src={assistantIconSrc}
+								alt="Disagreement Project"
+								class="size-8 rounded-full object-cover"
+							/>
 						{:else}
 							<Logo size={8} />
 						{/if}

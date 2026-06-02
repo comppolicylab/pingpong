@@ -101,9 +101,13 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
 	const isSharedAssistantPage = sharedAssistantPattern.test(url.pathname);
 	const isSharedThreadPage = sharedThreadPattern.test(url.pathname);
 
+	const requestedView = url.searchParams.get('view');
+	const sharedPageCanUseSimpleView = isSharedAssistantPage || isSharedThreadPage;
+	const disagreementProjectView =
+		sharedPageCanUseSimpleView && requestedView === 'disagreementproject';
 	// Only shared pages can opt into the simple view.
 	const simpleView =
-		(isSharedAssistantPage || isSharedThreadPage) && url.searchParams.get('view') === 'simple';
+		sharedPageCanUseSimpleView && (requestedView === 'simple' || disagreementProjectView);
 
 	if (url.pathname === LOGIN) {
 		// If the user is logged in, go to the forward page.
@@ -343,6 +347,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
 		isSharedAssistantPage,
 		isSharedThreadPage,
 		simpleView,
+		disagreementProjectView,
 		statusComponents,
 		hasNonComponentIncidents,
 		isAnonymous
