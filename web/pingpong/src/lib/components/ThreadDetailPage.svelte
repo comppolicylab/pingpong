@@ -102,6 +102,7 @@
 	export let data;
 
 	let userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+	$: openAllLinksInNewTab = data.openAllLinksInNewTab;
 	$: routeClassId = parseInt($page.params.classId ?? '');
 	$: routeThreadId = parseInt($page.params.threadId ?? '');
 	$: expandedThreadData = api.expandResponse(data.threadData);
@@ -2529,6 +2530,7 @@
 										more information, please review <a
 											href={resolve('/privacy-policy')}
 											rel="noopener noreferrer"
+											target={openAllLinksInNewTab ? '_blank' : undefined}
 											class="underline">PingPong's privacy statement</a
 										>.&nbsp;
 									{/if}Assistants can make mistakes. Check important info.</Span
@@ -2551,6 +2553,7 @@
 												<a
 													href={resolve('/privacy-policy')}
 													rel="noopener noreferrer"
+													target={openAllLinksInNewTab ? '_blank' : undefined}
 													class="underline">PingPong's privacy statement</a
 												>.&nbsp;Assistants can make mistakes. Check important info.</Span
 											>
@@ -2570,6 +2573,7 @@
 												<a
 													href={resolve('/privacy-policy')}
 													rel="noopener noreferrer"
+													target={openAllLinksInNewTab ? '_blank' : undefined}
 													class="underline">PingPong's privacy statement</a
 												>.&nbsp;Assistants can make mistakes. Check important info.</Span
 											>
@@ -2586,6 +2590,7 @@
 										{#if isCurrentUser}For more information, please review <a
 												href={resolve('/privacy-policy')}
 												rel="noopener noreferrer"
+												target={openAllLinksInNewTab ? '_blank' : undefined}
 												class="underline">PingPong's privacy statement</a
 											>.&nbsp;
 										{/if}Assistants can make mistakes. Check important info.</Span
