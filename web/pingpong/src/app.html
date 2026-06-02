@@ -18,8 +18,9 @@
 		<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
 		<script>
 			try {
+				const view = new URLSearchParams(location.search).get('view');
 				if (
-					new URLSearchParams(location.search).get('view') === 'simple' &&
+					(view === 'simple' || view === 'disagreementproject') &&
 					location.pathname.indexOf('/shared/') !== -1
 				) {
 					document.documentElement.classList.add('simple-view');

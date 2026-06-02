@@ -51,6 +51,7 @@
 		userTimezone,
 		meName,
 		meImage,
+		assistantIconSrc = '',
 		assistantId,
 		participants,
 		mimeType,
@@ -82,6 +83,7 @@
 		userTimezone: string;
 		meName: string;
 		meImage: string;
+		assistantIconSrc?: string;
 		assistantId: number | null;
 		participants: api.ThreadParticipants;
 		mimeType: api.MimeTypeLookupFn;
@@ -474,6 +476,12 @@
 				<div class="shrink-0">
 					{#if message.data.role === 'user'}
 						<Avatar size="sm" src={getImage(message.data)} />
+					{:else if assistantIconSrc}
+						<img
+							src={assistantIconSrc}
+							alt="Disagreement Project"
+							class="size-8 rounded-full object-cover"
+						/>
 					{:else}
 						<Logo size={8} />
 					{/if}
