@@ -2534,7 +2534,7 @@
 											href={resolve('/privacy-policy')}
 											rel="noopener noreferrer"
 											class="underline">PingPong's privacy statement</a
-										>.
+										>.&nbsp;
 									{/if}Assistants can make mistakes. Check important info.</Span
 								>
 							{:else if !$published}
@@ -2556,7 +2556,7 @@
 													href={resolve('/privacy-policy')}
 													rel="noopener noreferrer"
 													class="underline">PingPong's privacy statement</a
-												>. Assistants can make mistakes. Check important info.</Span
+												>.&nbsp;Assistants can make mistakes. Check important info.</Span
 											>
 										</div>
 									{:else}
@@ -2575,7 +2575,7 @@
 													href={resolve('/privacy-policy')}
 													rel="noopener noreferrer"
 													class="underline">PingPong's privacy statement</a
-												>. Assistants can make mistakes. Check important info.</Span
+												>.&nbsp;Assistants can make mistakes. Check important info.</Span
 											>
 										</div>
 									{/if}
@@ -2591,7 +2591,7 @@
 												href={resolve('/privacy-policy')}
 												rel="noopener noreferrer"
 												class="underline">PingPong's privacy statement</a
-											>.
+											>.&nbsp;
 										{/if}Assistants can make mistakes. Check important info.</Span
 									>
 								{/if}
@@ -2616,7 +2616,7 @@
 											> can see this thread and
 											<span class="font-semibold"
 												>{isCurrentUser ? 'your' : "the user's"} full name</span
-											>.{/if}{/if} Assistants can make mistakes. Check important info.</Span
+											>.{/if}{/if}&nbsp;Assistants can make mistakes. Check important info.</Span
 								>
 							{/if}
 						</div>

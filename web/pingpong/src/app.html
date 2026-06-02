@@ -16,6 +16,28 @@
 		/>
 		<link rel="stylesheet" href="%sveltekit.assets%/default.min.css" />
 		<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+		<script>
+			try {
+				if (
+					new URLSearchParams(location.search).get('view') === 'simple' &&
+					location.pathname.indexOf('/shared/') !== -1
+				) {
+					document.documentElement.classList.add('simple-view');
+				}
+			} catch (e) {}
+		</script>
+		<style>
+			html.simple-view #loading-screen {
+				background: #ffffff !important;
+			}
+			html.simple-view #loading-screen img {
+				display: none !important;
+			}
+			html.simple-view #loading-screen-spinner {
+				border-color: rgba(0, 0, 0, 0.1) !important;
+				border-top-color: #fc624d !important;
+			}
+		</style>
 		%sveltekit.head%
 	</head>
 	<body
