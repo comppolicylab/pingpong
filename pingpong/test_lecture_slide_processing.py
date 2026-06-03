@@ -854,6 +854,76 @@ async def _async_value(value):
     return value
 
 
+async def test_combine_audio_objects_uses_ffmpeg_stream_copy(monkeypatch):
+    downloaded_keys: list[str] = []
+    commands: list[list[str]] = []
+    concat_files: list[str] = []
+
+    class FakeAudioStore:
+        async def get_file(self, key):
+            downloaded_keys.append(key)
+            yield key.encode("utf-8")
+            yield b"-audio"
+
+    def fake_run(command, *, capture_output, text):
+        commands.append(command)
+        concat_files.append(Path(command[command.index("-i") + 1]).read_text())
+        Path(command[-1]).write_bytes(b"combined-audio")
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(
+        config, "lecture_video_audio_store", SimpleNamespace(store=FakeAudioStore())
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing.shutil, "which", lambda _name: "ffmpeg"
+    )
+    monkeypatch.setattr(lecture_slide_processing.subprocess, "run", fake_run)
+
+    result = await lecture_slide_processing._combine_audio_objects(
+        [SimpleNamespace(key="first.ogg"), SimpleNamespace(key="second.ogg")]
+    )
+
+    assert result == b"combined-audio"
+    assert downloaded_keys == ["first.ogg", "second.ogg"]
+    assert len(commands) == 1
+    assert commands[0][commands[0].index("-c") + 1] == "copy"
+    assert "file '" in concat_files[0]
+    assert "input-0.ogg" in concat_files[0]
+    assert "input-1.ogg" in concat_files[0]
+
+
+async def test_combine_audio_objects_reencodes_when_stream_copy_fails(monkeypatch):
+    commands: list[list[str]] = []
+
+    class FakeAudioStore:
+        async def get_file(self, key):
+            yield key.encode("utf-8")
+
+    def fake_run(command, *, capture_output, text):
+        commands.append(command)
+        if len(commands) == 1:
+            return SimpleNamespace(returncode=1, stderr="copy failed")
+        Path(command[-1]).write_bytes(b"reencoded-audio")
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(
+        config, "lecture_video_audio_store", SimpleNamespace(store=FakeAudioStore())
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing.shutil, "which", lambda _name: "ffmpeg"
+    )
+    monkeypatch.setattr(lecture_slide_processing.subprocess, "run", fake_run)
+
+    result = await lecture_slide_processing._combine_audio_objects(
+        [SimpleNamespace(key="first.ogg")]
+    )
+
+    assert result == b"reencoded-audio"
+    assert len(commands) == 2
+    assert commands[0][commands[0].index("-c") + 1] == "copy"
+    assert commands[1][commands[1].index("-c:a") + 1] == "libopus"
+
+
 async def test_transcribe_audio_words_enriches_punctuation_from_segments(tmp_path):
     class FakeTranscriptions:
         async def create(self, **_kwargs):
@@ -1411,6 +1481,9 @@ async def test_persist_composite_artifacts_stores_combined_audio_as_ogg(
         stored_content_types.append(content_type)
         return store_key, len(audio)
 
+    def fail_audio_duration(*_args):
+        pytest.fail("composite artifact duration should use page narration durations")
+
     monkeypatch.setattr(config, "video_store", SimpleNamespace(store=FakeVideoStore()))
     monkeypatch.setattr(
         lecture_slide_processing,
@@ -1418,7 +1491,9 @@ async def test_persist_composite_artifacts_stores_combined_audio_as_ogg(
         lambda _stored_objects: _async_value(b"combined-ogg"),
     )
     monkeypatch.setattr(lecture_slide_processing, "_store_audio", fake_store_audio)
-    monkeypatch.setattr(lecture_slide_processing, "audio_duration_ms", lambda *_: 200)
+    monkeypatch.setattr(
+        lecture_slide_processing, "audio_duration_ms", fail_audio_duration
+    )
 
     await lecture_slide_processing._persist_composite_artifacts(
         run_id,
@@ -1439,6 +1514,7 @@ async def test_persist_composite_artifacts_stores_combined_audio_as_ogg(
         assert deck is not None
         assert deck.continuous_narration_stored_object is not None
         assert deck.continuous_narration_stored_object.content_type == "audio/ogg"
+        assert deck.continuous_narration_stored_object.duration_ms == 200
 
 
 async def test_synthesize_knowledge_check_audio_deletes_uploaded_audio_when_db_lookup_raises(
