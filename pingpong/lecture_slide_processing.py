@@ -107,6 +107,7 @@ RUN_LEASE_DURATION = timedelta(minutes=10)
 RUN_LEASE_HEARTBEAT_INTERVAL = min(timedelta(minutes=1), RUN_LEASE_DURATION / 2)
 UNEXPECTED_WORKER_EXIT_ERROR_MESSAGE = "Lecture slide worker exited unexpectedly."
 LECTURE_SLIDE_AUDIO_CONTENT_TYPE = "audio/ogg"
+FFMPEG_CONCAT_TIMEOUT_SECONDS = 300
 MAX_RUN_CREATE_RETRIES = 3
 OPENAI_GENERATION_MAX_ATTEMPTS = 3
 OPENAI_GENERATION_RETRY_DELAY_SECONDS = 5.0
@@ -2780,6 +2781,7 @@ async def _persist_composite_artifacts(
             for page in sorted(deck.pages, key=lambda item: item.position)
             if page.narration is not None and page.narration.stored_object is not None
         ]
+        duration_ms = _total_stored_audio_duration_ms(stored_objects)
     combined_audio = await _combine_audio_objects(stored_objects)
     content_type = LECTURE_SLIDE_AUDIO_CONTENT_TYPE
     audio_key, audio_length = await _store_audio(
@@ -2813,7 +2815,6 @@ async def _persist_composite_artifacts(
                     with contextlib.suppress(Exception):
                         await config.video_store.store.delete(caption_key)
                 return
-            duration_ms = audio_duration_ms(combined_audio, content_type)
             audio_stored_object = models.LectureSlideNarrationStoredObject(
                 key=audio_key,
                 content_type=content_type,
@@ -2842,30 +2843,134 @@ async def _persist_composite_artifacts(
 async def _combine_audio_objects(
     stored_objects: Sequence[models.LectureSlideNarrationStoredObject],
 ) -> bytes:
+    """Combine stored Ogg/Opus narration objects without decoding them in Python."""
     if not stored_objects:
         return b""
-    chunks: list[bytes] = []
     if not config.lecture_video_audio_store:
         raise RuntimeError("Lecture video audio store is not configured.")
-    for stored_object in stored_objects:
-        data = bytearray()
-        async for chunk in config.lecture_video_audio_store.store.get_file(
-            stored_object.key
-        ):
-            data.extend(chunk)
-        chunks.append(bytes(data))
-    try:
-        combined = AudioSegment.empty()
-        for audio_data in chunks:
-            combined += AudioSegment.from_file(io.BytesIO(audio_data))
-        output = io.BytesIO()
-        combined.export(output, format="ogg")
-        return output.getvalue()
-    except Exception:
-        logger.warning(
-            "Falling back to byte concatenation for slide audio.", exc_info=True
+    ffmpeg_path = shutil.which("ffmpeg")
+    if ffmpeg_path is None:
+        raise RuntimeError("ffmpeg is required for lecture slide audio concatenation.")
+
+    with tempfile.TemporaryDirectory() as temp_dir_name:
+        temp_dir = Path(temp_dir_name)
+        input_paths: list[Path] = []
+        for index, stored_object in enumerate(stored_objects):
+            input_path = temp_dir / f"input-{index}.ogg"
+            with input_path.open("wb") as file:
+                async for chunk in config.lecture_video_audio_store.store.get_file(
+                    stored_object.key
+                ):
+                    file.write(chunk)
+            input_paths.append(input_path)
+
+        output_path = temp_dir / "combined.ogg"
+        try:
+            await asyncio.to_thread(
+                _run_ffmpeg_concat,
+                ffmpeg_path,
+                input_paths,
+                output_path,
+                stream_copy=True,
+            )
+        except RuntimeError:
+            logger.warning(
+                "ffmpeg stream-copy concat failed; retrying with Opus re-encode.",
+                exc_info=True,
+            )
+            await asyncio.to_thread(
+                _run_ffmpeg_concat,
+                ffmpeg_path,
+                input_paths,
+                output_path,
+                stream_copy=False,
+            )
+        return output_path.read_bytes()
+
+
+def _total_stored_audio_duration_ms(
+    stored_objects: Sequence[models.LectureSlideNarrationStoredObject],
+) -> int:
+    """Return the sum of required stored narration durations."""
+    missing_duration_keys = [
+        stored_object.key
+        for stored_object in stored_objects
+        if stored_object.duration_ms is None
+    ]
+    if missing_duration_keys:
+        raise RuntimeError(
+            "Lecture slide narration duration is missing for stored object(s): "
+            + ", ".join(missing_duration_keys)
         )
-        return b"".join(chunks)
+    return sum(cast(int, stored_object.duration_ms) for stored_object in stored_objects)
+
+
+def _run_ffmpeg_concat(
+    ffmpeg_path: str,
+    input_paths: Sequence[Path],
+    output_path: Path,
+    *,
+    stream_copy: bool,
+) -> None:
+    """Run ffmpeg concat, preferring stream-copy unless re-encode is requested."""
+    concat_path = output_path.with_suffix(".txt")
+    concat_path.write_text(
+        "".join(f"file '{_escape_ffmpeg_concat_path(path)}'\n" for path in input_paths)
+    )
+    codec_args = (
+        ["-c", "copy"]
+        if stream_copy
+        else ["-c:a", "libopus", "-b:a", "64k", "-application", "voip"]
+    )
+    command = [
+        ffmpeg_path,
+        "-y",
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        str(concat_path),
+        *codec_args,
+        str(output_path),
+    ]
+    try:
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=FFMPEG_CONCAT_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        output = _subprocess_timeout_output(exc)
+        raise RuntimeError(
+            f"ffmpeg concat timed out after {FFMPEG_CONCAT_TIMEOUT_SECONDS} seconds"
+            f"{output}"
+        ) from exc
+    if completed.returncode != 0:
+        stderr = completed.stderr.strip()
+        raise RuntimeError(f"ffmpeg concat failed: {stderr or completed.returncode}")
+
+
+def _subprocess_timeout_output(exc: subprocess.TimeoutExpired) -> str:
+    """Format captured subprocess output for timeout errors."""
+    output_parts: list[str] = []
+    if exc.stdout:
+        stdout = exc.stdout.decode() if isinstance(exc.stdout, bytes) else exc.stdout
+        output_parts.append(f"stdout={stdout.strip()}")
+    if exc.stderr:
+        stderr = exc.stderr.decode() if isinstance(exc.stderr, bytes) else exc.stderr
+        output_parts.append(f"stderr={stderr.strip()}")
+    return f" ({'; '.join(output_parts)})" if output_parts else ""
+
+
+def _escape_ffmpeg_concat_path(path: Path) -> str:
+    """Escape a path for ffmpeg's single-quoted concat demuxer syntax."""
+    return path.as_posix().replace("\\", "\\\\").replace("'", "'\\''")
 
 
 async def _parse_responses_output(
