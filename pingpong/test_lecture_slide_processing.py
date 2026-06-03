@@ -865,9 +865,10 @@ async def test_combine_audio_objects_uses_ffmpeg_stream_copy(monkeypatch):
             yield key.encode("utf-8")
             yield b"-audio"
 
-    def fake_run(command, *, capture_output, text):
+    def fake_run(command, *, capture_output, text, timeout):
         commands.append(command)
         concat_files.append(Path(command[command.index("-i") + 1]).read_text())
+        assert timeout == lecture_slide_processing.FFMPEG_CONCAT_TIMEOUT_SECONDS
         Path(command[-1]).write_bytes(b"combined-audio")
         return SimpleNamespace(returncode=0, stderr="")
 
@@ -899,7 +900,7 @@ async def test_combine_audio_objects_reencodes_when_stream_copy_fails(monkeypatc
         async def get_file(self, key):
             yield key.encode("utf-8")
 
-    def fake_run(command, *, capture_output, text):
+    def fake_run(command, *, capture_output, text, timeout):
         commands.append(command)
         if len(commands) == 1:
             return SimpleNamespace(returncode=1, stderr="copy failed")
@@ -922,6 +923,70 @@ async def test_combine_audio_objects_reencodes_when_stream_copy_fails(monkeypatc
     assert len(commands) == 2
     assert commands[0][commands[0].index("-c") + 1] == "copy"
     assert commands[1][commands[1].index("-c:a") + 1] == "libopus"
+    assert commands[1][commands[1].index("-b:a") + 1] == "64k"
+    assert commands[1][commands[1].index("-application") + 1] == "voip"
+
+
+async def test_combine_audio_objects_requires_ffmpeg(monkeypatch):
+    monkeypatch.setattr(
+        config, "lecture_video_audio_store", SimpleNamespace(store=SimpleNamespace())
+    )
+    monkeypatch.setattr(lecture_slide_processing.shutil, "which", lambda _name: None)
+
+    with pytest.raises(
+        RuntimeError,
+        match="ffmpeg is required for lecture slide audio concatenation",
+    ):
+        await lecture_slide_processing._combine_audio_objects(
+            [SimpleNamespace(key="first.ogg")]
+        )
+
+
+async def test_combine_audio_objects_reencodes_when_stream_copy_times_out(monkeypatch):
+    commands: list[list[str]] = []
+
+    class FakeAudioStore:
+        async def get_file(self, key):
+            yield key.encode("utf-8")
+
+    def fake_run(command, *, capture_output, text, timeout):
+        commands.append(command)
+        if len(commands) == 1:
+            raise lecture_slide_processing.subprocess.TimeoutExpired(
+                command, timeout, stderr=b"stalled"
+            )
+        Path(command[-1]).write_bytes(b"reencoded-audio")
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(
+        config, "lecture_video_audio_store", SimpleNamespace(store=FakeAudioStore())
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing.shutil, "which", lambda _name: "ffmpeg"
+    )
+    monkeypatch.setattr(lecture_slide_processing.subprocess, "run", fake_run)
+
+    result = await lecture_slide_processing._combine_audio_objects(
+        [SimpleNamespace(key="first.ogg")]
+    )
+
+    assert result == b"reencoded-audio"
+    assert len(commands) == 2
+    assert commands[0][commands[0].index("-c") + 1] == "copy"
+    assert commands[1][commands[1].index("-c:a") + 1] == "libopus"
+
+
+async def test_total_stored_audio_duration_requires_every_duration():
+    with pytest.raises(
+        RuntimeError,
+        match="Lecture slide narration duration is missing",
+    ):
+        lecture_slide_processing._total_stored_audio_duration_ms(
+            [
+                SimpleNamespace(key="ready.ogg", duration_ms=100),
+                SimpleNamespace(key="missing.ogg", duration_ms=None),
+            ]
+        )
 
 
 async def test_transcribe_audio_words_enriches_punctuation_from_segments(tmp_path):

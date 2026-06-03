@@ -107,6 +107,7 @@ RUN_LEASE_DURATION = timedelta(minutes=10)
 RUN_LEASE_HEARTBEAT_INTERVAL = min(timedelta(minutes=1), RUN_LEASE_DURATION / 2)
 UNEXPECTED_WORKER_EXIT_ERROR_MESSAGE = "Lecture slide worker exited unexpectedly."
 LECTURE_SLIDE_AUDIO_CONTENT_TYPE = "audio/ogg"
+FFMPEG_CONCAT_TIMEOUT_SECONDS = 300
 MAX_RUN_CREATE_RETRIES = 3
 OPENAI_GENERATION_MAX_ATTEMPTS = 3
 OPENAI_GENERATION_RETRY_DELAY_SECONDS = 5.0
@@ -2780,9 +2781,7 @@ async def _persist_composite_artifacts(
             for page in sorted(deck.pages, key=lambda item: item.position)
             if page.narration is not None and page.narration.stored_object is not None
         ]
-        duration_ms = sum(
-            stored_object.duration_ms or 0 for stored_object in stored_objects
-        )
+        duration_ms = _total_stored_audio_duration_ms(stored_objects)
     combined_audio = await _combine_audio_objects(stored_objects)
     content_type = LECTURE_SLIDE_AUDIO_CONTENT_TYPE
     audio_key, audio_length = await _store_audio(
@@ -2844,6 +2843,7 @@ async def _persist_composite_artifacts(
 async def _combine_audio_objects(
     stored_objects: Sequence[models.LectureSlideNarrationStoredObject],
 ) -> bytes:
+    """Combine stored Ogg/Opus narration objects without decoding them in Python."""
     if not stored_objects:
         return b""
     if not config.lecture_video_audio_store:
@@ -2888,6 +2888,23 @@ async def _combine_audio_objects(
         return output_path.read_bytes()
 
 
+def _total_stored_audio_duration_ms(
+    stored_objects: Sequence[models.LectureSlideNarrationStoredObject],
+) -> int:
+    """Return the sum of required stored narration durations."""
+    missing_duration_keys = [
+        stored_object.key
+        for stored_object in stored_objects
+        if stored_object.duration_ms is None
+    ]
+    if missing_duration_keys:
+        raise RuntimeError(
+            "Lecture slide narration duration is missing for stored object(s): "
+            + ", ".join(missing_duration_keys)
+        )
+    return sum(cast(int, stored_object.duration_ms) for stored_object in stored_objects)
+
+
 def _run_ffmpeg_concat(
     ffmpeg_path: str,
     input_paths: Sequence[Path],
@@ -2895,11 +2912,16 @@ def _run_ffmpeg_concat(
     *,
     stream_copy: bool,
 ) -> None:
+    """Run ffmpeg concat, preferring stream-copy unless re-encode is requested."""
     concat_path = output_path.with_suffix(".txt")
     concat_path.write_text(
         "".join(f"file '{_escape_ffmpeg_concat_path(path)}'\n" for path in input_paths)
     )
-    codec_args = ["-c", "copy"] if stream_copy else ["-c:a", "libopus"]
+    codec_args = (
+        ["-c", "copy"]
+        if stream_copy
+        else ["-c:a", "libopus", "-b:a", "64k", "-application", "voip"]
+    )
     command = [
         ffmpeg_path,
         "-y",
@@ -2916,13 +2938,38 @@ def _run_ffmpeg_concat(
         *codec_args,
         str(output_path),
     ]
-    completed = subprocess.run(command, capture_output=True, text=True)
+    try:
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=FFMPEG_CONCAT_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        output = _subprocess_timeout_output(exc)
+        raise RuntimeError(
+            f"ffmpeg concat timed out after {FFMPEG_CONCAT_TIMEOUT_SECONDS} seconds"
+            f"{output}"
+        ) from exc
     if completed.returncode != 0:
         stderr = completed.stderr.strip()
         raise RuntimeError(f"ffmpeg concat failed: {stderr or completed.returncode}")
 
 
+def _subprocess_timeout_output(exc: subprocess.TimeoutExpired) -> str:
+    """Format captured subprocess output for timeout errors."""
+    output_parts: list[str] = []
+    if exc.stdout:
+        stdout = exc.stdout.decode() if isinstance(exc.stdout, bytes) else exc.stdout
+        output_parts.append(f"stdout={stdout.strip()}")
+    if exc.stderr:
+        stderr = exc.stderr.decode() if isinstance(exc.stderr, bytes) else exc.stderr
+        output_parts.append(f"stderr={stderr.strip()}")
+    return f" ({'; '.join(output_parts)})" if output_parts else ""
+
+
 def _escape_ffmpeg_concat_path(path: Path) -> str:
+    """Escape a path for ffmpeg's single-quoted concat demuxer syntax."""
     return path.as_posix().replace("\\", "\\\\").replace("'", "'\\''")
 
 
