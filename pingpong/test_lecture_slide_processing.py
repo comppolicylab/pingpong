@@ -970,7 +970,6 @@ async def test_filter_slide_questions_keeps_non_final_chunk_end_boundary():
         page_ranges=page_ranges,
         start_offset_ms=0,
         end_offset_ms=1000,
-        is_final_chunk=False,
     )
     second_chunk_questions = (
         lecture_slide_processing._filter_slide_questions_for_window(
@@ -978,7 +977,6 @@ async def test_filter_slide_questions_keeps_non_final_chunk_end_boundary():
             page_ranges=page_ranges,
             start_offset_ms=1000,
             end_offset_ms=2000,
-            is_final_chunk=True,
         )
     )
 

@@ -2175,7 +2175,6 @@ def _filter_slide_questions_for_window(
     page_ranges: list[SlidePageRange],
     start_offset_ms: int,
     end_offset_ms: int,
-    is_final_chunk: bool,
 ) -> list[GeneratedSlideQuestion]:
     page_range_by_position = {
         int(page_range["slide_position"]): page_range for page_range in page_ranges
@@ -2573,7 +2572,6 @@ async def _generate_slide_manifest_for_window(
                     page_ranges=page_ranges,
                     start_offset_ms=chunk.generation_start_ms,
                     end_offset_ms=chunk.generation_end_ms,
-                    is_final_chunk=chunk.generation_end_ms == total_duration_ms,
                 )
             }
         )
