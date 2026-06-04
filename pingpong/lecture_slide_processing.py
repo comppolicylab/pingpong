@@ -85,6 +85,9 @@ class SlideQuestionPauseOffsets(TypedDict):
     stop_offset_ms: int
 
 
+OptionalSlideQuestionPauseOffsets = SlideQuestionPauseOffsets | None
+
+
 DEFAULT_NARRATION_PROMPT = """You are the instructor giving a lecture from this PDF slide deck.
 
 Critical rules:
@@ -226,9 +229,17 @@ def _build_slide_manifest_generation_instructions(
     )
     if generation_start_ms is not None and generation_end_ms is not None:
         context_scope = "the requested generation window"
+        generation_window_interval_text = (
+            f"offsets greater than {generation_start_ms}ms and less than or equal "
+            f"to {generation_end_ms}ms"
+        )
+        if generation_start_ms == 0:
+            generation_window_interval_text = (
+                f"offsets from 0ms through {generation_end_ms}ms"
+            )
         summary_scope = (
-            f"from {generation_start_ms}ms through each end_offset_ms in the "
-            "requested generation window"
+            f"through each end_offset_ms in the requested generation window "
+            f"({generation_window_interval_text})"
         )
         initial_context_guidance = (
             "- If the requested generation window starts at 0ms, include the "
@@ -247,7 +258,7 @@ def _build_slide_manifest_generation_instructions(
 
 GENERATION WINDOW:
 This is one chunk from a longer slide lesson.{context_range_text}
-Generate questions, summary_checkpoints, and moment_contexts only for offsets from {generation_start_ms}ms through {generation_end_ms}ms.
+Generate questions, summary_checkpoints, and moment_contexts only for {generation_window_interval_text}.
 Use surrounding context to avoid boundary artifacts, but keep generated offsets inside the requested generation window.
 """
 
@@ -271,13 +282,14 @@ QUESTIONS:
 - Not every slide needs a question. Add questions only after slides with a clear, useful concept check.
 - A question appears between slides, after the selected slide finishes.
 - For each question, set slide_position to the zero-based slide after which the question should appear.
+- A slide is eligible for a question only when its timing source row has both start_offset_ms and end_offset_ms.
 - Use question_text for the concise on-screen prompt.
 - Use intro_text for a short spoken cue before the question appears. It may be empty when no cue is needed.
 - Each question's options array uses option_text, post_answer_text, and correct.
 - Exactly one option must have correct=true for every question.
 - Keep answer choices concise, plausible, and focused on likely misconceptions.
 - Keep post_answer_text to one or two natural spoken sentences.
-- If a generation window is provided, create questions only after slides whose end_offset_ms is inside that window.
+- If a generation window is provided, create questions only after slides whose end_offset_ms is inside that same requested generation window.
 
 SUMMARY CHECKPOINTS:
 - Generate summary_checkpoints at a fixed {context_cadence_text}-second cadence, plus the final lesson or request end if it is not already on that cadence.
@@ -1879,6 +1891,15 @@ def _page_ranges_for_slide_window(
     ]
 
 
+def _timed_slide_page_ranges(page_ranges: list[SlidePageRange]) -> list[SlidePageRange]:
+    return [
+        page_range
+        for page_range in page_ranges
+        if page_range["start_offset_ms"] is not None
+        and page_range["end_offset_ms"] is not None
+    ]
+
+
 @cache
 def _slide_manifest_tokenizer() -> tiktoken.Encoding:
     try:
@@ -2161,14 +2182,17 @@ def _filter_slide_questions_for_window(
     }
     filtered: list[GeneratedSlideQuestion] = []
     for question in questions:
-        stop_offset_ms = _slide_question_pause_offsets(
+        pause_offsets = _slide_question_pause_offsets(
             question,
             page_range_by_position=page_range_by_position,
-        )["stop_offset_ms"]
-        if start_offset_ms <= stop_offset_ms and (
-            stop_offset_ms < end_offset_ms
-            or (is_final_chunk and stop_offset_ms <= end_offset_ms)
-        ):
+        )
+        if pause_offsets is None:
+            continue
+        stop_offset_ms = pause_offsets["stop_offset_ms"]
+        if (
+            (start_offset_ms == 0 and stop_offset_ms >= start_offset_ms)
+            or stop_offset_ms > start_offset_ms
+        ) and stop_offset_ms <= end_offset_ms:
             filtered.append(question)
     return filtered
 
@@ -2177,7 +2201,7 @@ def _slide_question_pause_offsets(
     question: GeneratedSlideQuestion,
     *,
     page_range_by_position: Mapping[int, SlidePageRange],
-) -> SlideQuestionPauseOffsets:
+) -> OptionalSlideQuestionPauseOffsets:
     page_range = page_range_by_position.get(question.slide_position)
     if page_range is None:
         raise ValueError(
@@ -2187,10 +2211,7 @@ def _slide_question_pause_offsets(
     page_start_ms = page_range["start_offset_ms"]
     page_end_ms = page_range["end_offset_ms"]
     if page_start_ms is None or page_end_ms is None:
-        raise ValueError(
-            "Generated slide question requires slide timing boundaries. "
-            f"slide_position={question.slide_position}"
-        )
+        return None
     return {
         "slide_offset_ms": max(page_end_ms - page_start_ms, 0),
         "stop_offset_ms": page_end_ms,
@@ -2206,11 +2227,14 @@ def _validate_generated_slide_manifest(
     page_range_by_position = {
         int(page_range["slide_position"]): page_range for page_range in page_ranges
     }
+    valid_questions: list[GeneratedSlideQuestion] = []
     for question in manifest.questions:
         pause_offsets = _slide_question_pause_offsets(
             question,
             page_range_by_position=page_range_by_position,
         )
+        if pause_offsets is None:
+            continue
         if (
             total_duration_ms is not None
             and pause_offsets["stop_offset_ms"] > total_duration_ms
@@ -2221,7 +2245,8 @@ def _validate_generated_slide_manifest(
             raise ValueError(
                 "Generated slide question must have exactly one correct option."
             )
-    return manifest
+        valid_questions.append(question)
+    return manifest.model_copy(update={"questions": valid_questions})
 
 
 def _normalize_slide_manifest_context(
@@ -2503,6 +2528,7 @@ async def _generate_slide_manifest_for_window(
             start_offset_ms=chunk.context_start_ms,
             end_offset_ms=chunk.context_end_ms,
         )
+    chunk_page_ranges = _timed_slide_page_ranges(chunk_page_ranges)
     manifest = await _parse_responses_output(
         openai_client,
         model=model,
@@ -2650,16 +2676,21 @@ async def _persist_slide_manifest(
         page_range_by_position = {
             int(page_range["slide_position"]): page_range for page_range in page_ranges
         }
-        question_pause_offsets_by_position = [
-            _slide_question_pause_offsets(
+        question_pause_offsets_by_position: list[
+            tuple[GeneratedSlideQuestion, SlideQuestionPauseOffsets]
+        ] = []
+        for question in manifest.questions:
+            pause_offsets = _slide_question_pause_offsets(
                 question,
                 page_range_by_position=page_range_by_position,
             )
-            for question in manifest.questions
-        ]
+            if pause_offsets is None:
+                continue
+            question_pause_offsets_by_position.append((question, pause_offsets))
 
-        for question_position, question in enumerate(manifest.questions):
-            pause_offsets = question_pause_offsets_by_position[question_position]
+        for question_position, (question, pause_offsets) in enumerate(
+            question_pause_offsets_by_position
+        ):
             question_row = models.LectureSlideQuestion(
                 lecture_slide_deck_id=deck.id,
                 position=question_position,
@@ -2730,9 +2761,7 @@ async def _persist_slide_manifest(
                         for option in question.options
                     ],
                 )
-                for question, pause_offsets in zip(
-                    manifest.questions, question_pause_offsets_by_position
-                )
+                for question, pause_offsets in question_pause_offsets_by_position
             ],
             word_level_transcription=transcript,
             summary_checkpoints=manifest.summary_checkpoints,

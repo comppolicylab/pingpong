@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 class MoveLectureSlideQuestionsToSlideEndsResult:
     updated: int = 0
     skipped: int = 0
+    skipped_question_ids: tuple[int, ...] = ()
 
 
 def _nearest_slide_page(
@@ -29,6 +30,8 @@ def _nearest_slide_page(
     for page in timed_pages:
         assert page.start_offset_ms is not None
         assert page.end_offset_ms is not None
+        # Boundaries belong to the earlier slide so questions already at the end
+        # of page N are not migrated to page N+1.
         if page.start_offset_ms <= question.stop_offset_ms <= page.end_offset_ms:
             return page
 
@@ -76,6 +79,7 @@ async def move_lecture_slide_questions_to_slide_ends(
 
     updated = 0
     skipped = 0
+    skipped_question_ids: list[int] = []
     for question in questions:
         deck = question.lecture_slide_deck
         page = _nearest_slide_page(
@@ -83,6 +87,8 @@ async def move_lecture_slide_questions_to_slide_ends(
         )
         if page is None or page.start_offset_ms is None or page.end_offset_ms is None:
             skipped += 1
+            if question.id is not None:
+                skipped_question_ids.append(question.id)
             logger.warning(
                 "Skipping lecture slide question without usable slide timing. "
                 "question_id=%s deck_id=%s slide_position=%s",
@@ -118,8 +124,14 @@ async def move_lecture_slide_questions_to_slide_ends(
             updated += 1
 
     logger.info(
-        "Moved lecture slide questions to slide ends. updated=%s skipped=%s",
+        "Moved lecture slide questions to slide ends. updated=%s skipped=%s "
+        "skipped_question_ids=%s",
         updated,
         skipped,
+        skipped_question_ids,
     )
-    return MoveLectureSlideQuestionsToSlideEndsResult(updated=updated, skipped=skipped)
+    return MoveLectureSlideQuestionsToSlideEndsResult(
+        updated=updated,
+        skipped=skipped,
+        skipped_question_ids=tuple(skipped_question_ids),
+    )

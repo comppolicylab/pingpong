@@ -907,6 +907,148 @@ async def test_slide_manifest_chunk_planning_splits_on_token_budget(monkeypatch)
     ]
 
 
+async def test_slide_manifest_generation_window_prompt_matches_filter_contract():
+    instructions = (
+        lecture_slide_processing._build_slide_manifest_generation_instructions(
+            "Manifest prompt",
+            total_duration_ms=2000,
+            generation_start_ms=1000,
+            generation_end_ms=2000,
+            context_start_ms=500,
+            context_end_ms=2000,
+        )
+    )
+
+    assert (
+        "offsets greater than 1000ms and less than or equal to 2000ms" in instructions
+    )
+    assert (
+        "create questions only after slides whose end_offset_ms is inside that same "
+        "requested generation window"
+    ) in instructions
+    assert "from 1000ms through 2000ms" not in instructions
+
+
+async def test_filter_slide_questions_keeps_non_final_chunk_end_boundary():
+    questions = [
+        lecture_slide_processing.GeneratedSlideQuestion(
+            slide_position=0,
+            question_text="Boundary?",
+            options=[
+                lecture_slide_processing.GeneratedSlideChoice(
+                    option_text="Yes",
+                    correct=True,
+                ),
+                lecture_slide_processing.GeneratedSlideChoice(
+                    option_text="No",
+                    correct=False,
+                ),
+            ],
+        ),
+        lecture_slide_processing.GeneratedSlideQuestion(
+            slide_position=1,
+            question_text="Next?",
+            options=[
+                lecture_slide_processing.GeneratedSlideChoice(
+                    option_text="Yes",
+                    correct=True,
+                ),
+                lecture_slide_processing.GeneratedSlideChoice(
+                    option_text="No",
+                    correct=False,
+                ),
+            ],
+        ),
+    ]
+    page_ranges = [
+        {"slide_position": 0, "start_offset_ms": 0, "end_offset_ms": 1000},
+        {"slide_position": 1, "start_offset_ms": 1000, "end_offset_ms": 2000},
+    ]
+
+    first_chunk_questions = lecture_slide_processing._filter_slide_questions_for_window(
+        questions,
+        page_ranges=page_ranges,
+        start_offset_ms=0,
+        end_offset_ms=1000,
+        is_final_chunk=False,
+    )
+    second_chunk_questions = (
+        lecture_slide_processing._filter_slide_questions_for_window(
+            questions,
+            page_ranges=page_ranges,
+            start_offset_ms=1000,
+            end_offset_ms=2000,
+            is_final_chunk=True,
+        )
+    )
+
+    assert [question.slide_position for question in first_chunk_questions] == [0]
+    assert [question.slide_position for question in second_chunk_questions] == [1]
+
+
+async def test_validate_slide_manifest_skips_untimed_slide_questions():
+    manifest = lecture_slide_processing.GeneratedSlideManifest(
+        questions=[
+            lecture_slide_processing.GeneratedSlideQuestion(
+                slide_position=0,
+                question_text="Untimed?",
+                options=[
+                    lecture_slide_processing.GeneratedSlideChoice(
+                        option_text="Yes",
+                        correct=True,
+                    ),
+                    lecture_slide_processing.GeneratedSlideChoice(
+                        option_text="No",
+                        correct=False,
+                    ),
+                ],
+            ),
+            lecture_slide_processing.GeneratedSlideQuestion(
+                slide_position=1,
+                question_text="Timed?",
+                options=[
+                    lecture_slide_processing.GeneratedSlideChoice(
+                        option_text="Yes",
+                        correct=True,
+                    ),
+                    lecture_slide_processing.GeneratedSlideChoice(
+                        option_text="No",
+                        correct=False,
+                    ),
+                ],
+            ),
+        ],
+        summary_checkpoints=[
+            schemas.LectureVideoManifestSummaryCheckpointV4(
+                end_offset_ms=2000,
+                summary="The timed slide explains the concept.",
+            )
+        ],
+        moment_contexts=[
+            schemas.LectureVideoManifestMomentContextV4(
+                start_offset_ms=1000,
+                center_offset_ms=1500,
+                end_offset_ms=2000,
+                before="The slide starts.",
+                at="The concept is visible.",
+                after="The slide ends.",
+            )
+        ],
+    )
+    page_ranges = [
+        {"slide_position": 0, "start_offset_ms": None, "end_offset_ms": None},
+        {"slide_position": 1, "start_offset_ms": 1000, "end_offset_ms": 2000},
+    ]
+
+    validated = lecture_slide_processing._validate_generated_slide_manifest(
+        manifest,
+        page_ranges=page_ranges,
+        total_duration_ms=2000,
+    )
+
+    assert [question.slide_position for question in validated.questions] == [1]
+
+
 async def _async_value(value):
     return value
 

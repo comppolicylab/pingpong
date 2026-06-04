@@ -1110,9 +1110,10 @@ def m11_move_lecture_slide_questions_to_slide_ends() -> None:
             result = await move_lecture_slide_questions_to_slide_ends(session)
             await session.commit()
             logger.info(
-                "Done! moved=%s skipped=%s",
+                "Done! updated=%s skipped=%s skipped_question_ids=%s",
                 result.updated,
                 result.skipped,
+                list(result.skipped_question_ids),
             )
 
     asyncio.run(_m11_move_lecture_slide_questions_to_slide_ends())
