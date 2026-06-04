@@ -3077,7 +3077,6 @@ class OpenAIRun(BaseModel):
     last_error: OpenAIRunError | None
     metadata: dict[str, str]
     model: str
-    moderation: dict[str, Any] | None = None
     object: Literal["thread.run"]
     status: (
         Literal["queued"]
