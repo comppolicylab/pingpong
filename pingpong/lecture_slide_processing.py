@@ -2719,22 +2719,20 @@ async def _persist_slide_manifest(
                     type=schemas.LectureVideoQuestionType.SINGLE_SELECT,
                     question_text=question.question_text,
                     intro_text=question.intro_text,
-                    stop_offset_ms=question_pause_offsets_by_position[
-                        question_position
-                    ]["stop_offset_ms"],
+                    stop_offset_ms=pause_offsets["stop_offset_ms"],
                     options=[
                         schemas.LectureVideoManifestOptionV1(
                             option_text=option.option_text,
                             post_answer_text=option.post_answer_text,
-                            continue_offset_ms=question_pause_offsets_by_position[
-                                question_position
-                            ]["stop_offset_ms"],
+                            continue_offset_ms=pause_offsets["stop_offset_ms"],
                             correct=option.correct,
                         )
                         for option in question.options
                     ],
                 )
-                for question in manifest.questions
+                for question, pause_offsets in zip(
+                    manifest.questions, question_pause_offsets_by_position
+                )
             ],
             word_level_transcription=transcript,
             summary_checkpoints=manifest.summary_checkpoints,

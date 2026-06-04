@@ -49,7 +49,9 @@ def _nearest_slide_page(
             abs(question.stop_offset_ms - page.end_offset_ms),
         )
 
-    return min(timed_pages, key=distance_to_question) if timed_pages else positioned_page
+    return (
+        min(timed_pages, key=distance_to_question) if timed_pages else positioned_page
+    )
 
 
 async def move_lecture_slide_questions_to_slide_ends(
@@ -79,11 +81,7 @@ async def move_lecture_slide_questions_to_slide_ends(
         page = _nearest_slide_page(
             question, sorted(deck.pages, key=lambda item: item.position)
         )
-        if (
-            page is None
-            or page.start_offset_ms is None
-            or page.end_offset_ms is None
-        ):
+        if page is None or page.start_offset_ms is None or page.end_offset_ms is None:
             skipped += 1
             logger.warning(
                 "Skipping lecture slide question without usable slide timing. "

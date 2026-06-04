@@ -603,14 +603,34 @@ async def test_generate_slide_manifest_rejects_multiple_correct_options(
         )
 
 
-async def test_persist_slide_manifest_replaces_existing_questions(db):
+async def test_persist_slide_manifest_replaces_existing_questions(db, monkeypatch):
     await _create_class_and_deck(db)
+    captured_context: dict[str, schemas.LectureVideoManifestV4] = {}
+    original_stored_context_extras = lecture_slide_processing._stored_context_extras
+
+    def capture_stored_context_extras(
+        manifest: schemas.LectureVideoManifestV4,
+    ) -> dict[str, object]:
+        captured_context["manifest"] = manifest
+        return original_stored_context_extras(manifest)
+
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "_stored_context_extras",
+        capture_stored_context_extras,
+    )
     async with db.async_session() as session:
-        page = models.LectureSlidePage(
+        first_page = models.LectureSlidePage(
             lecture_slide_deck_id=1,
             position=0,
             start_offset_ms=0,
             end_offset_ms=500,
+        )
+        second_page = models.LectureSlidePage(
+            lecture_slide_deck_id=1,
+            position=1,
+            start_offset_ms=500,
+            end_offset_ms=1200,
         )
         old_question = models.LectureSlideQuestion(
             lecture_slide_deck_id=1,
@@ -639,7 +659,7 @@ async def test_persist_slide_manifest_replaces_existing_questions(db):
             status=schemas.LectureSlideProcessingRunStatus.RUNNING,
             lease_token="lease",
         )
-        session.add_all([page, old_question, run])
+        session.add_all([first_page, second_page, old_question, run])
         await session.commit()
         run_id = run.id
 
@@ -658,7 +678,21 @@ async def test_persist_slide_manifest_replaces_existing_questions(db):
                         correct=False,
                     ),
                 ],
-            )
+            ),
+            lecture_slide_processing.GeneratedSlideQuestion(
+                slide_position=1,
+                question_text="Follow-up question?",
+                options=[
+                    lecture_slide_processing.GeneratedSlideChoice(
+                        option_text="Second correct",
+                        correct=True,
+                    ),
+                    lecture_slide_processing.GeneratedSlideChoice(
+                        option_text="Second incorrect",
+                        correct=False,
+                    ),
+                ],
+            ),
         ],
         summary_checkpoints=[
             schemas.LectureVideoManifestSummaryCheckpointV4(
@@ -701,10 +735,13 @@ async def test_persist_slide_manifest_replaces_existing_questions(db):
         assert deck is not None
         assert deck.context_version == 4
         assert deck.transcript_data is not None
-        assert len(deck.questions) == 1
+        assert len(deck.questions) == 2
         assert deck.questions[0].question_text == "New question?"
         assert deck.questions[0].slide_offset_ms == 500
         assert deck.questions[0].stop_offset_ms == 500
+        assert deck.questions[1].question_text == "Follow-up question?"
+        assert deck.questions[1].slide_offset_ms == 700
+        assert deck.questions[1].stop_offset_ms == 1200
         assert [option.option_text for option in deck.questions[0].options] == [
             "Correct",
             "Incorrect",
@@ -713,8 +750,23 @@ async def test_persist_slide_manifest_replaces_existing_questions(db):
             500,
             500,
         ]
+        assert [option.continue_offset_ms for option in deck.questions[1].options] == [
+            1200,
+            1200,
+        ]
         assert deck.questions[0].correct_option is not None
         assert deck.questions[0].correct_option.option_text == "Correct"
+
+    captured_manifest = captured_context["manifest"]
+    assert [question.stop_offset_ms for question in captured_manifest.questions] == [
+        500,
+        1200,
+    ]
+    assert [
+        option.continue_offset_ms
+        for question in captured_manifest.questions
+        for option in question.options
+    ] == [500, 500, 1200, 1200]
 
 
 async def test_parse_responses_output_retries_transient_openai_failure(monkeypatch):
