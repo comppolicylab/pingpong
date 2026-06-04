@@ -77,6 +77,13 @@ from pingpong.log_utils import sanitize_for_log
 
 logger = logging.getLogger(__name__)
 
+
+class _UnsetType:
+    pass
+
+
+_UNSET = _UnsetType()
+
 _BILLING_DEFAULT_API_KEY_PROVIDERS = [
     schemas.AIProvider.OPENAI.value,
     schemas.AIProvider.AZURE.value,
@@ -8112,6 +8119,7 @@ class Run(Base):
     error_code = Column(String, nullable=True)
     error_message = Column(String, nullable=True)
     incomplete_reason = Column(String, nullable=True)
+    moderation = Column(JSON, nullable=True)
 
     tool_calls = relationship(
         "ToolCall",
@@ -8291,19 +8299,20 @@ class Run(Base):
         error_code: str | None,
         error_message: str | None,
         incomplete_reason: str | None,
+        moderation: dict[str, Any] | None | _UnsetType = _UNSET,
         completed: bool = True,
     ) -> None:
-        stmt = (
-            update(Run)
-            .where(Run.id == id)
-            .values(
-                status=status,
-                error_code=error_code,
-                error_message=error_message,
-                incomplete_reason=incomplete_reason,
-                completed=func.now() if completed else None,
-            )
-        )
+        values: dict[str, Any] = {
+            "status": status,
+            "error_code": error_code,
+            "error_message": error_message,
+            "incomplete_reason": incomplete_reason,
+            "completed": func.now() if completed else None,
+        }
+        if moderation is not _UNSET:
+            values["moderation"] = moderation
+
+        stmt = update(Run).where(Run.id == id).values(**values)
         await session.execute(stmt)
 
     @classmethod
