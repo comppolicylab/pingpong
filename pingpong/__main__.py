@@ -72,6 +72,9 @@ from pingpong.migrations.m10_backfill_lecture_video_captions import (
 from pingpong.migrations.m11_move_lecture_slide_questions_to_slide_ends import (
     move_lecture_slide_questions_to_slide_ends,
 )
+from pingpong.migrations.m12_upload_lecture_slide_sources_to_openai import (
+    upload_lecture_slide_sources_to_openai,
+)
 from pingpong.now import _get_next_run_time, croner, utcnow
 from pingpong.schemas import LMSType, RunStatus
 from pingpong.lti.course_bridge import course_bridge_sync_all
@@ -1117,6 +1120,23 @@ def m11_move_lecture_slide_questions_to_slide_ends() -> None:
             )
 
     asyncio.run(_m11_move_lecture_slide_questions_to_slide_ends())
+
+
+@db.command("m12_upload_lecture_slide_sources_to_openai")
+def m12_upload_lecture_slide_sources_to_openai() -> None:
+    async def _m12_upload_lecture_slide_sources_to_openai() -> None:
+        async with config.db.driver.async_session() as session:
+            logger.info("Uploading lecture slide source PDFs to OpenAI...")
+            result = await upload_lecture_slide_sources_to_openai(session)
+            await session.commit()
+            logger.info(
+                "Done! uploaded=%s skipped=%s failed=%s",
+                result.uploaded,
+                result.skipped,
+                result.failed,
+            )
+
+    asyncio.run(_m12_upload_lecture_slide_sources_to_openai())
 
 
 @db.command("m02_remove_responses_threads")
