@@ -8112,6 +8112,7 @@ class Run(Base):
     error_code = Column(String, nullable=True)
     error_message = Column(String, nullable=True)
     incomplete_reason = Column(String, nullable=True)
+    moderation = Column(JSON, nullable=True)
 
     tool_calls = relationship(
         "ToolCall",
@@ -8291,6 +8292,7 @@ class Run(Base):
         error_code: str | None,
         error_message: str | None,
         incomplete_reason: str | None,
+        moderation: dict[str, Any] | None = None,
         completed: bool = True,
     ) -> None:
         stmt = (
@@ -8301,6 +8303,7 @@ class Run(Base):
                 error_code=error_code,
                 error_message=error_message,
                 incomplete_reason=incomplete_reason,
+                moderation=moderation,
                 completed=func.now() if completed else None,
             )
         )

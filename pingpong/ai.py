@@ -183,6 +183,17 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 logger = logging.getLogger(__name__)
 
+
+def _openai_model_to_json(data: Any) -> dict[str, Any] | None:
+    if data is None:
+        return None
+    if hasattr(data, "model_dump"):
+        return data.model_dump(mode="json")
+    if isinstance(data, dict):
+        return data
+    return json.loads(orjson.dumps(data))
+
+
 CONTAINER_TTL_SECONDS = 19 * 60
 ANNOTATION_PRIORITY_TYPES = (
     AnnotationType.CONTAINER_FILE_CITATION,
@@ -3395,6 +3406,7 @@ class BufferedResponseStreamHandler:
         response_error_code: str | None = None,
         response_error_message: str | None = None,
         response_incomplete_reason: str | None = None,
+        response_moderation: dict[str, Any] | None = None,
         send_error_message_only_if_active: bool = False,
         restore_to_pending_if_queued: bool = False,
     ):
@@ -3416,6 +3428,7 @@ class BufferedResponseStreamHandler:
                 error_code: str | None,
                 error_message: str | None,
                 incomplete_reason: str | None,
+                moderation: dict[str, Any] | None,
             ):
                 if self.run_id:
                     await models.Run.mark_as_status(
@@ -3425,6 +3438,7 @@ class BufferedResponseStreamHandler:
                         error_code=error_code,
                         error_message=error_message,
                         incomplete_reason=incomplete_reason,
+                        moderation=moderation,
                     )
                     await session_.commit()
 
@@ -3482,6 +3496,7 @@ class BufferedResponseStreamHandler:
                 response_error_code,
                 response_error_message,
                 response_incomplete_reason,
+                response_moderation,
             )
             self.run_id = None
             self.run_status = None
@@ -3554,6 +3569,7 @@ class BufferedResponseStreamHandler:
             response_incomplete_reason=data.response.incomplete_details.reason
             if data.response.incomplete_details
             else None,
+            response_moderation=_openai_model_to_json(data.response.moderation),
         )
 
     async def on_response_error(self, data: ResponseErrorEvent) -> None:
@@ -3949,6 +3965,7 @@ async def run_response(
                     input=input_items,
                     instructions=run.instructions,
                     model=run.model,
+                    moderation={"model": "omni-moderation-latest"},
                     parallel_tool_calls=True,
                     reasoning=reasoning_settings,
                     safety_identifier=safety_identifier_setting,
