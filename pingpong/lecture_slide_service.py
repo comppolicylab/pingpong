@@ -1,7 +1,9 @@
+import asyncio
 import logging
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 import humanize
 import uuid_utils as uuid
@@ -99,6 +101,7 @@ async def create_lecture_slide_deck(
             status_code=400,
             detail="Lecture slides must be a readable PDF file.",
         ) from exc
+
     if slide_count < 1:
         raise HTTPException(
             status_code=400,
@@ -156,6 +159,56 @@ async def create_lecture_slide_deck(
             status_code=500,
             detail="An unexpected error occurred while saving the lecture slides. Please try again later.",
         ) from exc
+
+
+async def ensure_lecture_slide_source_input_file(
+    session: AsyncSession,
+    openai_client: Any,
+    deck: models.LectureSlideDeck,
+) -> models.File:
+    source = deck.source_stored_object
+    if source is None:
+        raise RuntimeError("Lecture slide source object is not loaded.")
+    if source.openai_file_object_id is not None:
+        file = await models.File.get_by_id(session, source.openai_file_object_id)
+        if file is not None:
+            return file
+    if not config.video_store:
+        raise HTTPException(
+            status_code=503, detail="Video store not configured or unavailable."
+        )
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf") as temp_file:
+        async for chunk in config.video_store.store.stream_video(source.key):
+            await asyncio.to_thread(temp_file.write, chunk)
+        await asyncio.to_thread(temp_file.flush)
+        temp_file.seek(0)
+        uploaded_file = await openai_client.files.create(
+            file=temp_file,
+            purpose="user_data",
+        )
+
+    file_id = getattr(uploaded_file, "id", None)
+    if not file_id and isinstance(uploaded_file, dict):
+        file_id = uploaded_file.get("id")
+    if not file_id:
+        raise RuntimeError("OpenAI did not return a file id for lecture slide PDF.")
+
+    file = await models.File.create(
+        session,
+        {
+            "file_id": str(file_id),
+            "private": True,
+            "uploader_id": deck.uploader_id,
+            "name": source.original_filename,
+            "content_type": source.content_type,
+        },
+        class_id=deck.class_id,
+    )
+    source.openai_file_object_id = file.id
+    session.add(source)
+    await session.flush()
+    return file
 
 
 async def ensure_lecture_slide_deck_is_unassigned(

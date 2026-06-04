@@ -190,27 +190,6 @@ def _slide_transcript_data() -> dict:
     }
 
 
-def _slide_context_data() -> dict:
-    return {
-        "summary_checkpoints": [
-            {
-                "end_offset_ms": 5_000,
-                "summary": "The learner has seen the opening slide.",
-            }
-        ],
-        "moment_contexts": [
-            {
-                "center_offset_ms": 2_000,
-                "start_offset_ms": 1_000,
-                "end_offset_ms": 3_000,
-                "before": "The introduction begins.",
-                "at": "The current point explains the term.",
-                "after": "The lesson transitions to an example.",
-            }
-        ],
-    }
-
-
 @with_institution(11, "Test Institution")
 async def test_initialize_thread_state_and_acquire_control_for_lecture_slides(
     db, institution
@@ -535,7 +514,7 @@ async def test_lecture_slide_chat_context_matches_lecture_video_v4_sections(
             session, institution
         )
         deck.transcript_data = _slide_transcript_data()
-        deck.context_data = _slide_context_data()
+        deck.context_data = {}
         deck.context_version = 4
         state = models.LectureSlideThreadState(
             thread=thread,
@@ -553,7 +532,6 @@ async def test_lecture_slide_chat_context_matches_lecture_video_v4_sections(
         context_text = lecture_slide_chat._build_context_text(
             thread,
             state,
-            context,
             playback_position_ms=2_000,
             answered_knowledge_checks=None,
         )
@@ -561,8 +539,8 @@ async def test_lecture_slide_chat_context_matches_lecture_video_v4_sections(
     assert "## Lecture Context" in context_text
     assert "Current offset: 2000ms" in context_text
     assert "Furthest watched offset: 5000ms" in context_text
-    assert "### Lecture Summary So Far" in context_text
-    assert "### Current Moment Context" in context_text
+    assert "### Lecture Summary So Far" not in context_text
+    assert "### Current Moment Context" not in context_text
     assert "### Upcoming Knowledge Check" in context_text
     assert "### Current Slide" not in context_text
     assert "Extracted text:" not in context_text
@@ -855,9 +833,26 @@ async def test_prepare_lecture_slide_chat_turn_uses_video_context_shape(
         thread.interaction_mode = schemas.InteractionMode.LECTURE_SLIDES
         assistant.interaction_mode = schemas.InteractionMode.LECTURE_SLIDES
         deck.transcript_data = _slide_transcript_data()
-        deck.context_data = _slide_context_data()
+        deck.context_data = {}
         deck.context_version = 4
         deck.lecture_slide_chat_available = True
+        input_file = models.File(
+            file_id="pdf-file-id",
+            name="test-slides.pdf",
+            content_type="application/pdf",
+            private=True,
+        )
+        session.add(input_file)
+        await session.flush()
+        assert deck.source_stored_object is not None
+        deck.source_stored_object.openai_file_object_id = input_file.id
+        page = models.LectureSlidePage(
+            lecture_slide_deck=deck,
+            position=0,
+            narration_text="This slide introduces the core idea.",
+            start_offset_ms=0,
+            end_offset_ms=1_000,
+        )
         state = models.LectureSlideThreadState(
             thread=thread,
             state=schemas.InteractiveLessonSessionState.PLAYING,
@@ -866,27 +861,189 @@ async def test_prepare_lecture_slide_chat_turn_uses_video_context_shape(
             furthest_offset_ms=5_000,
             version=1,
         )
-        session.add(state)
+        session.add_all([page, state])
         await session.flush()
 
         prep = await lecture_slide_chat.prepare_lecture_chat_turn(
             request=_server_request(session),
+            openai_client=SimpleNamespace(files=SimpleNamespace()),
             class_id=str(class_.id),
             thread=thread,
             user_id=123,
             prev_output_sequence=7,
             lecture_video_playback_position_ms=2_000,
         )
-        context_text = prep.prepended_messages[0].content[0].text
+        lesson_context_message = prep.prepended_messages[0]
+        file_message = prep.prepended_messages[1]
+        context_message = prep.prepended_messages[2]
+        lesson_context_text = lesson_context_message.content[0].text
+        file_note = file_message.content[1].text
+        context_text = context_message.content[0].text
 
-    assert prep.user_output_index == 9
+    assert prep.user_output_index == 11
     assert prep.user_assistant_messages_only is True
-    assert prep.prepended_messages[0].is_hidden is True
+    assert lesson_context_message.is_hidden is True
+    assert lesson_context_message.role == schemas.MessageRole.DEVELOPER
+    assert "## Lecture Slide Narrations" in lesson_context_text
+    assert "This slide introduces the core idea." in lesson_context_text
+    assert "## Lecture Knowledge Checks" in lesson_context_text
+    assert "What is shown on this slide?" in lesson_context_text
+    assert "What comes next?" in lesson_context_text
+    assert "A clear example" in lesson_context_text
+    assert file_message.is_hidden is False
+    assert file_message.role == schemas.MessageRole.USER
+    assert file_message.content[0].type == schemas.MessagePartType.INPUT_FILE
+    assert file_message.content[0].input_file is not None
+    assert file_message.content[0].input_file.file_id == "pdf-file-id"
+    assert "visual source of truth" in file_note
+    assert context_message.is_hidden is True
     assert "## Lecture Context" in context_text
     assert "Current offset: 2000ms" in context_text
     assert "Furthest watched offset: 5000ms" in context_text
-    assert "### Lecture Summary So Far" in context_text
-    assert "### Current Moment Context" in context_text
+    assert "### Lecture Summary So Far" not in context_text
+    assert "### Current Moment Context" not in context_text
     assert "### Upcoming Knowledge Check" in context_text
     assert "### Current Slide" not in context_text
     assert "Extracted text:" not in context_text
+
+
+@with_institution(11, "Test Institution")
+async def test_prepare_lecture_slide_chat_turn_adds_dynamic_context_without_recreating_initial_messages(
+    db, institution
+):
+    async with db.async_session() as session:
+        (
+            class_,
+            deck,
+            assistant,
+            thread,
+            questions,
+        ) = await _create_slide_runtime_fixture(session, institution)
+        thread.interaction_mode = schemas.InteractionMode.LECTURE_SLIDES
+        assistant.interaction_mode = schemas.InteractionMode.LECTURE_SLIDES
+        deck.transcript_data = _slide_transcript_data()
+        deck.context_data = {}
+        deck.context_version = 4
+        deck.lecture_slide_chat_available = True
+        deck.slide_count = 2
+        pages = [
+            models.LectureSlidePage(
+                lecture_slide_deck=deck,
+                position=0,
+                narration_text="The first slide introduces the core idea.",
+                start_offset_ms=0,
+                end_offset_ms=1_000,
+            ),
+            models.LectureSlidePage(
+                lecture_slide_deck=deck,
+                position=1,
+                narration_text="The second slide shows how to apply it.",
+                start_offset_ms=1_000,
+                end_offset_ms=2_000,
+            ),
+        ]
+        state = models.LectureSlideThreadState(
+            thread=thread,
+            state=schemas.InteractiveLessonSessionState.PLAYING,
+            current_question=questions[0],
+            last_known_offset_ms=2_000,
+            furthest_offset_ms=5_000,
+            version=1,
+        )
+        existing_run = models.Run(
+            thread=thread,
+            status=schemas.RunStatus.COMPLETED,
+        )
+        previous_context_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        previous_context_message = models.Message(
+            thread=thread,
+            run=existing_run,
+            output_index=19,
+            message_status=schemas.MessageStatus.COMPLETED,
+            role=schemas.MessageRole.DEVELOPER,
+            is_hidden=True,
+            created=previous_context_time,
+            content=[
+                models.MessagePart(
+                    part_index=0,
+                    type=schemas.MessagePartType.INPUT_TEXT,
+                    text=(
+                        "## Lecture Context\n\n"
+                        "Status: Viewing the lecture slides\n"
+                        "Current offset: 1000ms\n"
+                        "Furthest watched offset: 5000ms"
+                    ),
+                )
+            ],
+        )
+        existing_message = models.Message(
+            thread=thread,
+            run=existing_run,
+            output_index=20,
+            message_status=schemas.MessageStatus.COMPLETED,
+            role=schemas.MessageRole.USER,
+            user_id=123,
+            content=[
+                models.MessagePart(
+                    part_index=0,
+                    type=schemas.MessagePartType.INPUT_TEXT,
+                    text="I already started this lesson.",
+                )
+            ],
+        )
+        older_answered_interaction = models.LectureSlideInteraction(
+            thread=thread,
+            event_index=1,
+            event_type=schemas.InteractiveLessonInteractionEventType.ANSWER_SUBMITTED,
+            question=questions[1],
+            option=questions[1].correct_option,
+            offset_ms=1_000,
+            created=previous_context_time - timedelta(seconds=1),
+        )
+        answered_interaction = models.LectureSlideInteraction(
+            thread=thread,
+            event_index=2,
+            event_type=schemas.InteractiveLessonInteractionEventType.ANSWER_SUBMITTED,
+            question=questions[0],
+            option=questions[0].correct_option,
+            offset_ms=1_000,
+            created=previous_context_time + timedelta(seconds=1),
+        )
+        session.add_all(
+            [
+                *pages,
+                state,
+                existing_run,
+                previous_context_message,
+                existing_message,
+                older_answered_interaction,
+                answered_interaction,
+            ]
+        )
+        await session.flush()
+
+        prep = await lecture_slide_chat.prepare_lecture_chat_turn(
+            request=_server_request(session),
+            openai_client=SimpleNamespace(files=SimpleNamespace()),
+            class_id=str(class_.id),
+            thread=thread,
+            user_id=123,
+            prev_output_sequence=20,
+            lecture_video_playback_position_ms=2_000,
+        )
+        context_message = prep.prepended_messages[0]
+        context_text = context_message.content[0].text
+
+    assert prep.user_output_index == 22
+    assert [message.role for message in prep.prepended_messages] == [
+        schemas.MessageRole.DEVELOPER,
+    ]
+    assert context_message.output_index == 21
+    assert "## Lecture Context" in context_text
+    assert "Status: Viewing the lecture slides" in context_text
+    assert "Current offset: 2000ms" in context_text
+    assert "Furthest watched offset: 5000ms" in context_text
+    assert "### Knowledge Checks Answered" in context_text
+    assert "What is shown on this slide?" in context_text
+    assert "Student selected `A clear example`." in context_text
+    assert "Student selected `Continue`." not in context_text

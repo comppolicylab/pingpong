@@ -11,29 +11,16 @@ from sqlalchemy.orm import selectinload
 
 import pingpong.models as models
 import pingpong.schemas as schemas
-from pingpong import lecture_slide_runtime
+from pingpong import lecture_slide_runtime, lecture_slide_service
 
 logger = logging.getLogger(__name__)
 
 LECTURE_SLIDE_CHAT_UNAVAILABLE_NOTE = (
-    "Lecture chat is only available for lecture slides with generated context "
+    "Lecture chat is only available for lecture slides with generated narration "
     "and word-level transcription."
 )
 
 _V3_TRANSCRIPT_ADAPTER = TypeAdapter(list[schemas.LectureVideoManifestWordV3])
-_SUMMARY_CHECKPOINTS_ADAPTER = TypeAdapter(
-    list[schemas.LectureVideoManifestSummaryCheckpointV4]
-)
-_MOMENT_CONTEXTS_ADAPTER = TypeAdapter(
-    list[schemas.LectureVideoManifestMomentContextV4]
-)
-
-
-@dataclass
-class LectureSlideChatContext:
-    word_level_transcription: list[schemas.LectureVideoManifestWordV3]
-    summary_checkpoints: list[schemas.LectureVideoManifestSummaryCheckpointV4]
-    moment_contexts: list[schemas.LectureVideoManifestMomentContextV4]
 
 
 @dataclass
@@ -41,6 +28,7 @@ class LectureSlideChatTurnPreparation:
     prepended_messages: list[models.Message]
     user_output_index: int
     user_assistant_messages_only: bool = True
+    include_developer_messages: bool = True
 
 
 def _words_from_transcript_data(
@@ -60,33 +48,11 @@ def _words_from_transcript_data(
 
 def lecture_slide_chat_context_from_model(
     deck: models.LectureSlideDeck,
-) -> LectureSlideChatContext | None:
+) -> list[schemas.LectureVideoManifestWordV3] | None:
     if deck.context_version != 4:
         return None
     transcript = transcript_from_model(deck)
-    context_data = deck.context_data if isinstance(deck.context_data, dict) else None
-    if transcript is None or context_data is None:
-        return None
-
-    summary_checkpoints = _SUMMARY_CHECKPOINTS_ADAPTER.validate_python(
-        context_data.get("summary_checkpoints") or []
-    )
-    moment_contexts = _MOMENT_CONTEXTS_ADAPTER.validate_python(
-        context_data.get("moment_contexts") or []
-    )
-    summary_checkpoints, moment_contexts = (
-        schemas.normalize_lecture_video_manifest_v4_context_arrays(
-            summary_checkpoints,
-            moment_contexts,
-        )
-    )
-    if not summary_checkpoints and not moment_contexts:
-        return None
-    return LectureSlideChatContext(
-        word_level_transcription=transcript,
-        summary_checkpoints=summary_checkpoints,
-        moment_contexts=moment_contexts,
-    )
+    return transcript or None
 
 
 def transcript_from_model(
@@ -206,10 +172,19 @@ def _format_upcoming_knowledge_check(
 async def _build_answered_knowledge_checks_markdown(
     session: AsyncSession,
     thread_id: int,
+    *,
+    since_created: datetime | None = None,
 ) -> str | None:
+    filters = [
+        models.LectureSlideInteraction.thread_id == thread_id,
+        models.LectureSlideInteraction.event_type
+        == schemas.InteractiveLessonInteractionEventType.ANSWER_SUBMITTED,
+    ]
+    if since_created is not None:
+        filters.append(models.LectureSlideInteraction.created > since_created)
     interactions = await session.scalars(
         select(models.LectureSlideInteraction)
-        .where(models.LectureSlideInteraction.thread_id == thread_id)
+        .where(*filters)
         .options(
             selectinload(models.LectureSlideInteraction.question).options(
                 selectinload(models.LectureSlideQuestion.options),
@@ -221,11 +196,6 @@ async def _build_answered_knowledge_checks_markdown(
     )
     answer_lines: list[str] = []
     for interaction in interactions:
-        if (
-            interaction.event_type
-            != schemas.InteractiveLessonInteractionEventType.ANSWER_SUBMITTED
-        ):
-            continue
         question = interaction.question
         option = interaction.option
         if question is None or option is None:
@@ -243,42 +213,142 @@ async def _build_answered_knowledge_checks_markdown(
     return "\n".join(answer_lines) if answer_lines else None
 
 
-def _select_summary_checkpoint(
-    checkpoints: list[schemas.LectureVideoManifestSummaryCheckpointV4],
-    furthest_offset_ms: int,
-) -> schemas.LectureVideoManifestSummaryCheckpointV4 | None:
-    selected = None
-    for checkpoint in checkpoints:
-        if checkpoint.end_offset_ms <= furthest_offset_ms:
-            selected = checkpoint
-        else:
-            break
-    return selected
+async def _get_latest_lecture_context_created(
+    session: AsyncSession,
+    thread_id: int,
+) -> datetime | None:
+    return await session.scalar(
+        select(models.Message.created)
+        .join(models.MessagePart, models.MessagePart.message_id == models.Message.id)
+        .where(
+            models.Message.thread_id == thread_id,
+            models.Message.role == schemas.MessageRole.DEVELOPER,
+            models.MessagePart.type == schemas.MessagePartType.INPUT_TEXT,
+            models.MessagePart.text.like("## Lecture Context%"),
+        )
+        .order_by(models.Message.output_index.desc(), models.Message.created.desc())
+        .limit(1)
+    )
 
 
-def _select_moment_context(
-    moments: list[schemas.LectureVideoManifestMomentContextV4],
-    playback_position_ms: int,
-) -> schemas.LectureVideoManifestMomentContextV4 | None:
-    selected = None
-    for moment in moments:
-        if moment.center_offset_ms <= playback_position_ms:
-            selected = moment
-        else:
-            break
-    return selected
+def _format_slide_narrations(deck: models.LectureSlideDeck) -> str:
+    lines = [
+        "## Lecture Slide Narrations",
+    ]
+    for page in sorted(deck.pages, key=lambda item: item.position):
+        narration_text = (page.narration_text or "").strip()
+        if not narration_text:
+            continue
+        lines.extend(
+            [
+                "",
+                f"### Slide {page.position + 1}",
+                "",
+                narration_text,
+            ]
+        )
+    return "\n".join(lines)
 
 
-def _format_moment_context(
-    moment: schemas.LectureVideoManifestMomentContextV4,
-) -> str:
-    return (
-        f"Before this moment ({moment.start_offset_ms}-{moment.center_offset_ms}ms):\n"
-        f"{moment.before}\n\n"
-        f"At this moment ({moment.center_offset_ms}ms):\n"
-        f"{moment.at}\n\n"
-        f"After this moment ({moment.center_offset_ms}-{moment.end_offset_ms}ms):\n"
-        f"{moment.after}"
+def _format_all_knowledge_checks(deck: models.LectureSlideDeck) -> str:
+    lines = ["## Lecture Knowledge Checks"]
+    questions = sorted(deck.questions, key=lambda item: item.position)
+    if not questions:
+        lines.extend(["", "None."])
+        return "\n".join(lines)
+    for question in questions:
+        lines.extend(
+            [
+                "",
+                _format_knowledge_check_prompt(
+                    question,
+                    prefix=f"At {question.stop_offset_ms}ms:",
+                ),
+            ]
+        )
+    return "\n".join(lines)
+
+
+def _format_initial_lecture_developer_context(deck: models.LectureSlideDeck) -> str:
+    return "\n\n".join(
+        [
+            "## Lecture Slide Lesson Context",
+            _format_slide_narrations(deck),
+            _format_all_knowledge_checks(deck),
+        ]
+    )
+
+
+async def _thread_has_messages(session: AsyncSession, thread_id: int) -> bool:
+    existing_message_id = await session.scalar(
+        select(models.Message.id).where(models.Message.thread_id == thread_id).limit(1)
+    )
+    return existing_message_id is not None
+
+
+def _build_lecture_developer_context_message(
+    *,
+    slide_thread: models.Thread,
+    output_index: int,
+) -> models.Message | None:
+    deck = slide_thread.lecture_slide_deck
+    if deck is None:
+        return None
+    return models.Message(
+        thread_id=slide_thread.id,
+        output_index=output_index,
+        message_status=schemas.MessageStatus.COMPLETED,
+        role=schemas.MessageRole.DEVELOPER,
+        is_hidden=True,
+        content=[
+            models.MessagePart(
+                part_index=0,
+                type=schemas.MessagePartType.INPUT_TEXT,
+                text=_format_initial_lecture_developer_context(deck),
+            )
+        ],
+    )
+
+
+async def _build_initial_lecture_file_message(
+    *,
+    session: AsyncSession,
+    openai_client: Any,
+    slide_thread: models.Thread,
+    user_id: int,
+    output_index: int,
+) -> models.Message | None:
+    deck = slide_thread.lecture_slide_deck
+    if deck is None or deck.source_stored_object is None:
+        return None
+    input_file = await lecture_slide_service.ensure_lecture_slide_source_input_file(
+        session,
+        openai_client,
+        deck,
+    )
+    return models.Message(
+        thread_id=slide_thread.id,
+        output_index=output_index,
+        message_status=schemas.MessageStatus.COMPLETED,
+        role=schemas.MessageRole.USER,
+        is_hidden=False,
+        user_id=user_id,
+        content=[
+            models.MessagePart(
+                part_index=0,
+                type=schemas.MessagePartType.INPUT_FILE,
+                input_file_object_id=input_file.id,
+                input_file=input_file,
+            ),
+            models.MessagePart(
+                part_index=1,
+                type=schemas.MessagePartType.INPUT_TEXT,
+                text=(
+                    "Use the attached PDF slide deck as the visual source of "
+                    "truth for this lecture conversation."
+                ),
+            ),
+        ],
     )
 
 
@@ -340,21 +410,12 @@ async def _validate_playback_position(
 def _build_context_text(
     thread: models.Thread,
     state: models.LectureSlideThreadState,
-    chat_context: LectureSlideChatContext,
     *,
     playback_position_ms: int,
     answered_knowledge_checks: str | None,
 ) -> str:
     current_question = _get_current_question(thread, state)
     furthest_offset_ms = max(state.furthest_offset_ms, playback_position_ms, 0)
-    summary_checkpoint = _select_summary_checkpoint(
-        chat_context.summary_checkpoints,
-        furthest_offset_ms,
-    )
-    moment_context = _select_moment_context(
-        chat_context.moment_contexts,
-        playback_position_ms,
-    )
     current_knowledge_check = None
     if (
         state.state == schemas.InteractiveLessonSessionState.AWAITING_ANSWER
@@ -381,21 +442,6 @@ def _build_context_text(
         f"Current offset: {playback_position_ms}ms",
         f"Furthest watched offset: {furthest_offset_ms}ms",
     ]
-    _append_context_section(
-        lines,
-        "Lecture Summary So Far",
-        (
-            f"Through {summary_checkpoint.end_offset_ms}ms:\n"
-            f"{summary_checkpoint.summary}"
-            if summary_checkpoint is not None
-            else None
-        ),
-    )
-    _append_context_section(
-        lines,
-        "Current Moment Context",
-        _format_moment_context(moment_context) if moment_context is not None else None,
-    )
     _append_context_section(lines, "Current Knowledge Check", current_knowledge_check)
     _append_context_section(lines, "Upcoming Knowledge Check", upcoming_knowledge_check)
     _append_context_section(
@@ -407,6 +453,7 @@ def _build_context_text(
 async def prepare_lecture_chat_turn(
     *,
     request: Any,
+    openai_client: Any,
     class_id: str,
     thread: models.Thread,
     user_id: int,
@@ -426,7 +473,7 @@ async def prepare_lecture_chat_turn(
 
     deck = slide_thread.lecture_slide_deck
     try:
-        chat_context = (
+        transcript = (
             lecture_slide_chat_context_from_model(deck) if deck is not None else None
         )
     except (ValidationError, ValueError) as exc:
@@ -439,7 +486,7 @@ async def prepare_lecture_chat_turn(
             status_code=409,
             detail=LECTURE_SLIDE_CHAT_UNAVAILABLE_NOTE,
         ) from exc
-    if chat_context is None:
+    if transcript is None:
         raise HTTPException(
             status_code=409,
             detail=LECTURE_SLIDE_CHAT_UNAVAILABLE_NOTE,
@@ -451,25 +498,43 @@ async def prepare_lecture_chat_turn(
         slide_state,
         lecture_video_playback_position_ms,
     )
-    answered_knowledge_checks = await _build_answered_knowledge_checks_markdown(
+    previous_context_created = await _get_latest_lecture_context_created(
         request.state["db"], slide_thread.id
     )
+    answered_knowledge_checks = await _build_answered_knowledge_checks_markdown(
+        request.state["db"],
+        slide_thread.id,
+        since_created=previous_context_created,
+    )
+    prepended_messages = []
+    if not await _thread_has_messages(request.state["db"], slide_thread.id):
+        developer_context_message = _build_lecture_developer_context_message(
+            slide_thread=slide_thread,
+            output_index=0,
+        )
+        if developer_context_message is not None:
+            prepended_messages.append(developer_context_message)
+        initial_file_message = await _build_initial_lecture_file_message(
+            session=request.state["db"],
+            openai_client=openai_client,
+            slide_thread=slide_thread,
+            user_id=user_id,
+            output_index=1,
+        )
+        if initial_file_message is not None:
+            prepended_messages.append(initial_file_message)
+
     context_text = _build_context_text(
         slide_thread,
         slide_state,
-        chat_context,
         playback_position_ms=playback_position_ms,
         answered_knowledge_checks=answered_knowledge_checks,
     )
-
-    slide_state.last_chat_context_end_ms = playback_position_ms
-    request.state["db"].add(slide_state)
-
-    return LectureSlideChatTurnPreparation(
-        prepended_messages=[
+    if context_text.strip():
+        prepended_messages.append(
             models.Message(
                 thread_id=slide_thread.id,
-                output_index=prev_output_sequence + 1,
+                output_index=prev_output_sequence + 1 + len(prepended_messages),
                 message_status=schemas.MessageStatus.COMPLETED,
                 role=schemas.MessageRole.DEVELOPER,
                 is_hidden=True,
@@ -481,7 +546,14 @@ async def prepare_lecture_chat_turn(
                     )
                 ],
             )
-        ],
-        user_output_index=prev_output_sequence + 2,
+        )
+
+    slide_state.last_chat_context_end_ms = playback_position_ms
+    request.state["db"].add(slide_state)
+
+    return LectureSlideChatTurnPreparation(
+        prepended_messages=prepended_messages,
+        user_output_index=prev_output_sequence + 1 + len(prepended_messages),
         user_assistant_messages_only=True,
+        include_developer_messages=True,
     )

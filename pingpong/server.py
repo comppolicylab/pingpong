@@ -8958,6 +8958,7 @@ async def send_message(
             elif thread.interaction_mode == schemas.InteractionMode.LECTURE_SLIDES:
                 lecture_chat_prep = await lecture_slide_chat.prepare_lecture_chat_turn(
                     request=request,
+                    openai_client=openai_client,
                     class_id=class_id,
                     thread=thread,
                     user_id=request.state["session"].user.id,
@@ -9150,6 +9151,11 @@ async def send_message(
                 lecture_video_followups_mode=_lecture_lesson_followups_enabled(thread),
                 user_assistant_messages_only=(
                     lecture_chat_prep.user_assistant_messages_only
+                    if lecture_chat_prep is not None
+                    else False
+                ),
+                include_developer_messages=(
+                    getattr(lecture_chat_prep, "include_developer_messages", False)
                     if lecture_chat_prep is not None
                     else False
                 ),

@@ -3762,6 +3762,7 @@ class ToolCallStatus(StrEnum):
 class MessagePartType(StrEnum):
     INPUT_TEXT = "input_text"
     INPUT_IMAGE = "input_image"
+    INPUT_FILE = "input_file"
     OUTPUT_TEXT = "output_text"
     REFUSAL = "refusal"
 

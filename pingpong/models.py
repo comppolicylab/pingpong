@@ -2935,6 +2935,19 @@ class LectureSlideSourceStoredObject(Base):
     original_filename = Column(String, nullable=False)
     content_type = Column(String, nullable=False)
     content_length = Column(Integer, nullable=False, server_default="0")
+    openai_file_object_id = Column(
+        Integer,
+        ForeignKey(
+            "files.id",
+            name="fk_ls_source_openai_file_object_id",
+            ondelete="SET NULL",
+            use_alter=True,
+        ),
+        nullable=True,
+    )
+    openai_file = relationship(
+        "File", back_populates="lecture_slide_input_sources", uselist=False
+    )
     lecture_slide_decks = relationship(
         "LectureSlideDeck", back_populates="source_stored_object"
     )
@@ -4265,6 +4278,17 @@ class File(Base):
     input_images = relationship(
         "MessagePart",
         back_populates="input_image_file",
+        foreign_keys="MessagePart.input_image_file_object_id",
+    )
+    input_files = relationship(
+        "MessagePart",
+        back_populates="input_file",
+        foreign_keys="MessagePart.input_file_object_id",
+    )
+    lecture_slide_input_sources = relationship(
+        "LectureSlideSourceStoredObject",
+        back_populates="openai_file",
+        foreign_keys="LectureSlideSourceStoredObject.openai_file_object_id",
     )
     message_attachments_file_search = relationship(
         "Message",
@@ -4655,6 +4679,12 @@ class File(Base):
             ),
             select(MessagePart.input_image_file_object_id).where(
                 MessagePart.input_image_file_object_id == id_
+            ),
+            select(MessagePart.input_file_object_id).where(
+                MessagePart.input_file_object_id == id_
+            ),
+            select(LectureSlideSourceStoredObject.openai_file_object_id).where(
+                LectureSlideSourceStoredObject.openai_file_object_id == id_
             ),
         ]
 
@@ -7833,7 +7863,19 @@ class MessagePart(Base):
         Integer, ForeignKey("files.id", ondelete="SET NULL"), nullable=True
     )
     input_image_file = relationship(
-        "File", back_populates="input_images", uselist=False
+        "File",
+        back_populates="input_images",
+        foreign_keys=[input_image_file_object_id],
+        uselist=False,
+    )
+    input_file_object_id = Column(
+        Integer, ForeignKey("files.id", ondelete="SET NULL"), nullable=True
+    )
+    input_file = relationship(
+        "File",
+        back_populates="input_files",
+        foreign_keys=[input_file_object_id],
+        uselist=False,
     )
 
     refusal = Column(String, nullable=True)
@@ -9555,7 +9597,12 @@ class Thread(Base):
         session: AsyncSession,
         thread_id: int,
         run_id: int,
+        *,
+        include_developer_messages: bool = False,
     ) -> AsyncGenerator["Message", None]:
+        developer_filters = [Message.run_id == run_id]
+        if include_developer_messages:
+            developer_filters = []
         filters = [
             Message.thread_id == thread_id,
             or_(
@@ -9563,8 +9610,8 @@ class Thread(Base):
                     [schemas.MessageRole.USER, schemas.MessageRole.ASSISTANT]
                 ),
                 and_(
-                    Message.run_id == run_id,
                     Message.role == schemas.MessageRole.DEVELOPER,
+                    *developer_filters,
                 ),
             ),
         ]
@@ -9582,6 +9629,7 @@ class Thread(Base):
             .where(*filters)
             .options(
                 selectinload(Message.content).selectinload(MessagePart.annotations),
+                selectinload(Message.content).selectinload(MessagePart.input_file),
                 selectinload(Message.file_search_attachments),
                 selectinload(Message.code_interpreter_attachments),
             )

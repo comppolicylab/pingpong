@@ -45,10 +45,8 @@ from pingpong.errors import capture_exception_to_sentry, sentry
 from pingpong.elevenlabs import synthesize_elevenlabs_speech
 from pingpong.lecture_video_manifest_generation import (
     DEFAULT_GENERATION_PROMPT_CONTENT,
-    DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
     _augment_manifest_words_with_segment_text,
     _generation_transcript_source_text,
-    _normalize_v4_context_arrays,
 )
 from pingpong.lecture_video_service import (
     TRANSCRIPT_DATA_VERSION,
@@ -191,12 +189,6 @@ class GeneratedSlideManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     questions: list[GeneratedSlideQuestion] = Field(default_factory=list)
-    summary_checkpoints: list[schemas.LectureVideoManifestSummaryCheckpointV4] = Field(
-        ..., min_length=1
-    )
-    moment_contexts: list[schemas.LectureVideoManifestMomentContextV4] = Field(
-        ..., min_length=1
-    )
 
 
 def _build_slide_manifest_generation_instructions(
@@ -208,27 +200,13 @@ def _build_slide_manifest_generation_instructions(
     context_start_ms: int | None = None,
     context_end_ms: int | None = None,
 ) -> str:
-    context_window_ms = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS
-    context_window_seconds = context_window_ms / 1000
-    context_half_window_ms = context_window_ms // 2
-    context_half_window_seconds = context_half_window_ms / 1000
-    context_cadence_text = f"{context_window_seconds:g}"
-    context_half_window_text = f"{context_half_window_seconds:g}"
     duration_text = (
         f"\nThe combined slide narration duration is {total_duration_ms} milliseconds."
         if total_duration_ms is not None
         else ""
     )
     generation_window_text = ""
-    context_scope = "the whole slide lesson"
-    summary_scope = "from the beginning through each end_offset_ms"
-    initial_context_guidance = (
-        "- Include an initial moment_context with start_offset_ms=0, "
-        "center_offset_ms=0, and end_offset_ms="
-        f"{context_half_window_ms} when that offset is within the lesson duration."
-    )
     if generation_start_ms is not None and generation_end_ms is not None:
-        context_scope = "the requested generation window"
         generation_window_interval_text = (
             f"offsets greater than {generation_start_ms}ms and less than or equal "
             f"to {generation_end_ms}ms"
@@ -237,17 +215,6 @@ def _build_slide_manifest_generation_instructions(
             generation_window_interval_text = (
                 f"offsets from 0ms through {generation_end_ms}ms"
             )
-        summary_scope = (
-            f"through each end_offset_ms in the requested generation window "
-            f"({generation_window_interval_text})"
-        )
-        initial_context_guidance = (
-            "- If the requested generation window starts at 0ms, include the "
-            "initial moment_context with start_offset_ms=0, center_offset_ms=0, "
-            f"and end_offset_ms={context_half_window_ms}. If the requested "
-            "generation window starts later, start with the first fixed-cadence "
-            "center inside the requested generation window."
-        )
         context_range_text = (
             f" The supplied context covers offsets {context_start_ms}ms through "
             f"{context_end_ms}ms."
@@ -258,7 +225,7 @@ def _build_slide_manifest_generation_instructions(
 
 GENERATION WINDOW:
 This is one chunk from a longer slide lesson.{context_range_text}
-Generate questions, summary_checkpoints, and moment_contexts only for {generation_window_interval_text}.
+Generate questions only for {generation_window_interval_text}.
 Use surrounding context to avoid boundary artifacts, but keep generated offsets inside the requested generation window.
 """
 
@@ -275,8 +242,6 @@ GENERATION GUIDANCE SPECIFIC TO THIS LESSON:
 YOUR TASK:
 Create a JSON object with these top-level fields:
 - questions: optional multiple-choice comprehension checks placed after selected slides.
-- summary_checkpoints: cumulative summaries ordered by increasing end_offset_ms.
-- moment_contexts: local context windows ordered by increasing center_offset_ms.
 
 QUESTIONS:
 - Not every slide needs a question. Add questions only after slides with a clear, useful concept check.
@@ -291,20 +256,6 @@ QUESTIONS:
 - Keep post_answer_text to one or two natural spoken sentences.
 - If a generation window is provided, create questions only after slides whose end_offset_ms is inside that same requested generation window.
 
-SUMMARY CHECKPOINTS:
-- Generate summary_checkpoints at a fixed {context_cadence_text}-second cadence, plus the final lesson or request end if it is not already on that cadence.
-- Each summary uses end_offset_ms and summary.
-- Each summary must be cumulative over {summary_scope}.
-- Later summaries must preserve earlier concepts that are still needed to understand the lesson.
-
-MOMENT CONTEXTS:
-- Generate moment_contexts centered at a fixed {context_cadence_text}-second cadence, plus a final context centered on the final lesson or request end if it is not already on that cadence.
-- Each moment_context uses start_offset_ms, center_offset_ms, end_offset_ms, before, at, and after.
-- Use absolute millisecond offsets from the combined narration timeline.
-- Each moment_context must describe only what happens near center_offset_ms within {context_scope}.
-- Moment context windows should extend about {context_half_window_text} seconds on each side of center_offset_ms, clamped to the lesson or request boundaries.
-{initial_context_guidance}
-- For every moment_context, enforce start_offset_ms <= center_offset_ms <= end_offset_ms.
 - Use concrete evidence from the PDF and transcript. Do not invent unsupported facts.
 
 OUTPUT FORMAT:
@@ -2248,29 +2199,6 @@ def _validate_generated_slide_manifest(
     return manifest.model_copy(update={"questions": valid_questions})
 
 
-def _normalize_slide_manifest_context(
-    manifest: GeneratedSlideManifest,
-    *,
-    total_duration_ms: int | None,
-    generation_start_ms: int | None = None,
-    generation_end_ms: int | None = None,
-) -> GeneratedSlideManifest:
-    summary_checkpoints, moment_contexts = _normalize_v4_context_arrays(
-        summary_checkpoints=manifest.summary_checkpoints,
-        moment_contexts=manifest.moment_contexts,
-        video_duration_ms=total_duration_ms or generation_end_ms,
-        generation_start_ms=generation_start_ms,
-        generation_end_ms=generation_end_ms,
-        video_description_window_ms=DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
-    )
-    return manifest.model_copy(
-        update={
-            "summary_checkpoints": summary_checkpoints,
-            "moment_contexts": moment_contexts,
-        }
-    )
-
-
 def _is_context_limit_error(exc: Exception) -> bool:
     error_text = str(exc).lower()
     return any(
@@ -2575,12 +2503,6 @@ async def _generate_slide_manifest_for_window(
                 )
             }
         )
-    manifest = _normalize_slide_manifest_context(
-        manifest,
-        total_duration_ms=total_duration_ms,
-        generation_start_ms=generation_start_ms,
-        generation_end_ms=generation_end_ms,
-    )
     return _validate_generated_slide_manifest(
         manifest,
         page_ranges=page_ranges,
@@ -2593,26 +2515,11 @@ def _merge_slide_chunk_manifests(
     *,
     total_duration_ms: int,
 ) -> GeneratedSlideManifest:
-    summary_checkpoints, moment_contexts = _normalize_v4_context_arrays(
-        summary_checkpoints=[
-            checkpoint
-            for manifest in chunk_manifests
-            for checkpoint in manifest.summary_checkpoints
-        ],
-        moment_contexts=[
-            moment
-            for manifest in chunk_manifests
-            for moment in manifest.moment_contexts
-        ],
-        video_duration_ms=total_duration_ms,
-        video_description_window_ms=DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
-    )
+    _ = total_duration_ms
     return GeneratedSlideManifest(
         questions=[
             question for manifest in chunk_manifests for question in manifest.questions
-        ],
-        summary_checkpoints=summary_checkpoints,
-        moment_contexts=moment_contexts,
+        ]
     )
 
 
@@ -2741,31 +2648,7 @@ async def _persist_slide_manifest(
                     await session.flush()
                     option_row.post_narration_id = post_narration.id
 
-        v4_context = schemas.LectureVideoManifestV4(
-            version=4,
-            questions=[
-                schemas.LectureVideoManifestQuestionV1(
-                    type=schemas.LectureVideoQuestionType.SINGLE_SELECT,
-                    question_text=question.question_text,
-                    intro_text=question.intro_text,
-                    stop_offset_ms=pause_offsets["stop_offset_ms"],
-                    options=[
-                        schemas.LectureVideoManifestOptionV1(
-                            option_text=option.option_text,
-                            post_answer_text=option.post_answer_text,
-                            continue_offset_ms=pause_offsets["stop_offset_ms"],
-                            correct=option.correct,
-                        )
-                        for option in question.options
-                    ],
-                )
-                for question, pause_offsets in question_pause_offsets_by_position
-            ],
-            word_level_transcription=transcript,
-            summary_checkpoints=manifest.summary_checkpoints,
-            moment_contexts=manifest.moment_contexts,
-        )
-        deck.context_data = _stored_context_extras(v4_context)
+        deck.context_data = {}
         deck.context_version = 4
         deck.lecture_slide_chat_available = bool(transcript)
         deck.transcript_data = transcript_data_from_words(transcript)
@@ -3105,16 +2988,6 @@ def transcript_data_from_words(
     return {
         "version": TRANSCRIPT_DATA_VERSION,
         "word_level_transcription": [word.model_dump() for word in words],
-    }
-
-
-def _stored_context_extras(manifest: schemas.LectureVideoManifestV4) -> dict[str, Any]:
-    return {
-        "version": manifest.version,
-        "summary_checkpoints": [
-            checkpoint.model_dump() for checkpoint in manifest.summary_checkpoints
-        ],
-        "moment_contexts": [moment.model_dump() for moment in manifest.moment_contexts],
     }
 
 
