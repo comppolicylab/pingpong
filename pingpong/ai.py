@@ -184,6 +184,13 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 logger = logging.getLogger(__name__)
 
 
+class _UnsetType:
+    pass
+
+
+_UNSET = _UnsetType()
+
+
 def _openai_model_to_json(data: Any) -> dict[str, Any] | None:
     if data is None:
         return None
@@ -191,7 +198,7 @@ def _openai_model_to_json(data: Any) -> dict[str, Any] | None:
         return data.model_dump(mode="json")
     if isinstance(data, dict):
         return data
-    return json.loads(orjson.dumps(data))
+    raise TypeError(f"Unsupported OpenAI model JSON payload: {type(data).__name__}")
 
 
 CONTAINER_TTL_SECONDS = 19 * 60
@@ -3406,7 +3413,7 @@ class BufferedResponseStreamHandler:
         response_error_code: str | None = None,
         response_error_message: str | None = None,
         response_incomplete_reason: str | None = None,
-        response_moderation: dict[str, Any] | None = None,
+        response_moderation: dict[str, Any] | None | _UnsetType = _UNSET,
         send_error_message_only_if_active: bool = False,
         restore_to_pending_if_queued: bool = False,
     ):
@@ -3428,9 +3435,12 @@ class BufferedResponseStreamHandler:
                 error_code: str | None,
                 error_message: str | None,
                 incomplete_reason: str | None,
-                moderation: dict[str, Any] | None,
+                moderation: dict[str, Any] | None | _UnsetType,
             ):
                 if self.run_id:
+                    kwargs: dict[str, Any] = {}
+                    if moderation is not _UNSET:
+                        kwargs["moderation"] = moderation
                     await models.Run.mark_as_status(
                         session_,
                         self.run_id,
@@ -3438,7 +3448,7 @@ class BufferedResponseStreamHandler:
                         error_code=error_code,
                         error_message=error_message,
                         incomplete_reason=incomplete_reason,
-                        moderation=moderation,
+                        **kwargs,
                     )
                     await session_.commit()
 
@@ -3558,6 +3568,12 @@ class BufferedResponseStreamHandler:
                 elif item.type == "mcp_call" and self.tool_calls.get(item.id):
                     await self.on_mcp_tool_call_done(item)
 
+        cleanup_kwargs: dict[str, Any] = {}
+        if data.response.moderation is not None:
+            cleanup_kwargs["response_moderation"] = _openai_model_to_json(
+                data.response.moderation
+            )
+
         await self.cleanup(
             run_status=RunStatus(data.response.status),
             response_error_code=data.response.error.code
@@ -3569,7 +3585,7 @@ class BufferedResponseStreamHandler:
             response_incomplete_reason=data.response.incomplete_details.reason
             if data.response.incomplete_details
             else None,
-            response_moderation=_openai_model_to_json(data.response.moderation),
+            **cleanup_kwargs,
         )
 
     async def on_response_error(self, data: ResponseErrorEvent) -> None:
