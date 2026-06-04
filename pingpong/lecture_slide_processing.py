@@ -49,7 +49,6 @@ from pingpong.lecture_video_manifest_generation import (
     _augment_manifest_words_with_segment_text,
     _generation_transcript_source_text,
     _normalize_v4_context_arrays,
-    build_generation_prompt,
 )
 from pingpong.lecture_video_service import (
     TRANSCRIPT_DATA_VERSION,
@@ -81,6 +80,14 @@ class SlidePageRange(TypedDict):
     end_offset_ms: int | None
 
 
+class SlideQuestionPauseOffsets(TypedDict):
+    slide_offset_ms: int
+    stop_offset_ms: int
+
+
+OptionalSlideQuestionPauseOffsets = SlideQuestionPauseOffsets | None
+
+
 DEFAULT_NARRATION_PROMPT = """You are the instructor giving a lecture from this PDF slide deck.
 
 Critical rules:
@@ -95,8 +102,9 @@ For each slide:
 1. Explain the slide's main point in a clear instructor voice.
 2. Connect it briefly to the previous slide when that helps the lecture flow.
 3. Highlight important definitions, steps, diagrams, equations, or contrasts visible on the slide.
-4. Use natural spoken language suitable for text-to-speech.
-5. Keep the narration focused and proportional to the slide's density: usually 30 to 90 seconds of spoken content, shorter for simple transition slides.
+4. When the slide naturally leads to a later knowledge check, end with a concise takeaway or setup that supports that style; do not force this on transition or low-substance slides.
+5. Use natural spoken language suitable for text-to-speech.
+6. Keep the narration focused and proportional to the slide's density: usually 30 to 90 seconds of spoken content, shorter for simple transition slides.
 
 Output requirements:
 - Return one narration item per slide.
@@ -168,17 +176,12 @@ class GeneratedSlideChoice(BaseModel):
     option_text: str = Field(..., min_length=1)
     post_answer_text: str = ""
     correct: bool
-    continue_slide_position: int | None = Field(None, ge=0)
-    continue_slide_offset_ms: int | None = Field(None, ge=0)
-    continue_offset_ms: int = Field(..., ge=0)
 
 
 class GeneratedSlideQuestion(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     slide_position: int = Field(..., ge=0)
-    slide_offset_ms: int = Field(..., ge=0)
-    stop_offset_ms: int = Field(..., ge=0)
     question_text: str = Field(..., min_length=1)
     intro_text: str = ""
     options: list[GeneratedSlideChoice] = Field(..., min_length=2)
@@ -205,49 +208,107 @@ def _build_slide_manifest_generation_instructions(
     context_start_ms: int | None = None,
     context_end_ms: int | None = None,
 ) -> str:
-    video_instructions = build_generation_prompt(
-        content_section,
-        video_duration_ms=total_duration_ms,
-        generation_start_ms=generation_start_ms,
-        generation_end_ms=generation_end_ms,
-        context_start_ms=context_start_ms,
-        context_end_ms=context_end_ms,
-        video_description_window_ms=DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
+    context_window_ms = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS
+    context_window_seconds = context_window_ms / 1000
+    context_half_window_ms = context_window_ms // 2
+    context_half_window_seconds = context_half_window_ms / 1000
+    context_cadence_text = f"{context_window_seconds:g}"
+    context_half_window_text = f"{context_half_window_seconds:g}"
+    duration_text = (
+        f"\nThe combined slide narration duration is {total_duration_ms} milliseconds."
+        if total_duration_ms is not None
+        else ""
     )
-    return f"""{video_instructions}
+    generation_window_text = ""
+    context_scope = "the whole slide lesson"
+    summary_scope = "from the beginning through each end_offset_ms"
+    initial_context_guidance = (
+        "- Include an initial moment_context with start_offset_ms=0, "
+        "center_offset_ms=0, and end_offset_ms="
+        f"{context_half_window_ms} when that offset is within the lesson duration."
+    )
+    if generation_start_ms is not None and generation_end_ms is not None:
+        context_scope = "the requested generation window"
+        generation_window_interval_text = (
+            f"offsets greater than {generation_start_ms}ms and less than or equal "
+            f"to {generation_end_ms}ms"
+        )
+        if generation_start_ms == 0:
+            generation_window_interval_text = (
+                f"offsets from 0ms through {generation_end_ms}ms"
+            )
+        summary_scope = (
+            f"through each end_offset_ms in the requested generation window "
+            f"({generation_window_interval_text})"
+        )
+        initial_context_guidance = (
+            "- If the requested generation window starts at 0ms, include the "
+            "initial moment_context with start_offset_ms=0, center_offset_ms=0, "
+            f"and end_offset_ms={context_half_window_ms}. If the requested "
+            "generation window starts later, start with the first fixed-cadence "
+            "center inside the requested generation window."
+        )
+        context_range_text = (
+            f" The supplied context covers offsets {context_start_ms}ms through "
+            f"{context_end_ms}ms."
+            if context_start_ms is not None and context_end_ms is not None
+            else ""
+        )
+        generation_window_text = f"""
 
-SLIDE LESSON MANIFEST ADAPTATION:
-- Treat the attached PDF as the visible lesson media and the word-level transcript
-  as the generated narration timeline for the slide lesson.
-- Use the PDF, slide timing source data, and transcript together. Do not rely on
-  extracted slide text.
-- The output schema is GeneratedSlideManifest. Do not emit lecture-video word-ID
-  fields such as pause_after_word_id, pause_after_word, resume_at_word_id, or
-  resume_at_word.
-- Use zero-based slide_position values from the supplied slide timing ranges.
-- Use absolute millisecond offsets from the combined narration timeline for
-  stop_offset_ms, continue_offset_ms, summary_checkpoints, and moment_contexts.
-- Use slide_offset_ms as the offset within the visible slide where the question
-  appears.
-- Keep each question's slide_offset_ms inside the selected slide's timing
-  range: 0 <= slide_offset_ms <= end_offset_ms - start_offset_ms for that slide.
-  The question's stop_offset_ms must also stay between that slide's
-  start_offset_ms and end_offset_ms. If a question falls on a slide boundary,
-  use the boundary timestamp exactly or assign it to the next slide instead of
-  placing it a few milliseconds outside the slide.
-- Derive slide_offset_ms from stop_offset_ms minus the selected slide's
-  start_offset_ms. Derive continue_slide_offset_ms the same way from
-  continue_offset_ms when you provide slide coordinates. Do not estimate slide
-  offsets independently.
-- Transcript word ids include the slide number, such as slide-17-word-3. Use
-  that slide number as a sanity check when choosing pause and resume points, but
-  do not emit word-id fields in the JSON.
-- Options use option_text, post_answer_text, continue_offset_ms, correct, and
-  optional continue_slide_position / continue_slide_offset_ms when the resume
-  point is naturally described in slide coordinates.
+GENERATION WINDOW:
+This is one chunk from a longer slide lesson.{context_range_text}
+Generate questions, summary_checkpoints, and moment_contexts only for {generation_window_interval_text}.
+Use surrounding context to avoid boundary artifacts, but keep generated offsets inside the requested generation window.
+"""
+
+    return f"""You are an expert educational content designer creating an interactive slide lesson from a PDF deck.
+
+You will be given the PDF, slide timing source data, and word-level narration transcript source data.{duration_text}
+{generation_window_text}
+
+Use the PDF, slide timing source data, and transcript together. The PDF is the visual source of truth; the transcript is the spoken narration timeline.
+
+GENERATION GUIDANCE SPECIFIC TO THIS LESSON:
+{content_section.strip() or DEFAULT_GENERATION_PROMPT_CONTENT}
+
+YOUR TASK:
+Create a JSON object with these top-level fields:
+- questions: optional multiple-choice comprehension checks placed after selected slides.
+- summary_checkpoints: cumulative summaries ordered by increasing end_offset_ms.
+- moment_contexts: local context windows ordered by increasing center_offset_ms.
+
+QUESTIONS:
+- Not every slide needs a question. Add questions only after slides with a clear, useful concept check.
+- A question appears between slides, after the selected slide finishes.
+- For each question, set slide_position to the zero-based slide after which the question should appear.
+- A slide is eligible for a question only when its timing source row has both start_offset_ms and end_offset_ms.
+- Use question_text for the concise on-screen prompt.
+- Use intro_text for a short spoken cue before the question appears. It may be empty when no cue is needed.
+- Each question's options array uses option_text, post_answer_text, and correct.
 - Exactly one option must have correct=true for every question.
-- If a generation window is provided, create questions only inside that window,
-  but use the surrounding context window to avoid boundary artifacts.
+- Keep answer choices concise, plausible, and focused on likely misconceptions.
+- Keep post_answer_text to one or two natural spoken sentences.
+- If a generation window is provided, create questions only after slides whose end_offset_ms is inside that same requested generation window.
+
+SUMMARY CHECKPOINTS:
+- Generate summary_checkpoints at a fixed {context_cadence_text}-second cadence, plus the final lesson or request end if it is not already on that cadence.
+- Each summary uses end_offset_ms and summary.
+- Each summary must be cumulative over {summary_scope}.
+- Later summaries must preserve earlier concepts that are still needed to understand the lesson.
+
+MOMENT CONTEXTS:
+- Generate moment_contexts centered at a fixed {context_cadence_text}-second cadence, plus a final context centered on the final lesson or request end if it is not already on that cadence.
+- Each moment_context uses start_offset_ms, center_offset_ms, end_offset_ms, before, at, and after.
+- Use absolute millisecond offsets from the combined narration timeline.
+- Each moment_context must describe only what happens near center_offset_ms within {context_scope}.
+- Moment context windows should extend about {context_half_window_text} seconds on each side of center_offset_ms, clamped to the lesson or request boundaries.
+{initial_context_guidance}
+- For every moment_context, enforce start_offset_ms <= center_offset_ms <= end_offset_ms.
+- Use concrete evidence from the PDF and transcript. Do not invent unsupported facts.
+
+OUTPUT FORMAT:
+Return a single JSON object matching the requested schema. Do not include any text outside the JSON.
 """
 
 
@@ -1830,6 +1891,15 @@ def _page_ranges_for_slide_window(
     ]
 
 
+def _timed_slide_page_ranges(page_ranges: list[SlidePageRange]) -> list[SlidePageRange]:
+    return [
+        page_range
+        for page_range in page_ranges
+        if page_range["start_offset_ms"] is not None
+        and page_range["end_offset_ms"] is not None
+    ]
+
+
 @cache
 def _slide_manifest_tokenizer() -> tiktoken.Encoding:
     try:
@@ -2102,19 +2172,49 @@ def _split_slide_manifest_generation_chunk(
 def _filter_slide_questions_for_window(
     questions: list[GeneratedSlideQuestion],
     *,
+    page_ranges: list[SlidePageRange],
     start_offset_ms: int,
     end_offset_ms: int,
-    is_final_chunk: bool,
 ) -> list[GeneratedSlideQuestion]:
-    return [
-        question
-        for question in questions
-        if start_offset_ms <= question.stop_offset_ms
-        and (
-            question.stop_offset_ms < end_offset_ms
-            or (is_final_chunk and question.stop_offset_ms <= end_offset_ms)
+    page_range_by_position = {
+        int(page_range["slide_position"]): page_range for page_range in page_ranges
+    }
+    filtered: list[GeneratedSlideQuestion] = []
+    for question in questions:
+        pause_offsets = _slide_question_pause_offsets(
+            question,
+            page_range_by_position=page_range_by_position,
         )
-    ]
+        if pause_offsets is None:
+            continue
+        stop_offset_ms = pause_offsets["stop_offset_ms"]
+        if (
+            (start_offset_ms == 0 and stop_offset_ms >= start_offset_ms)
+            or stop_offset_ms > start_offset_ms
+        ) and stop_offset_ms <= end_offset_ms:
+            filtered.append(question)
+    return filtered
+
+
+def _slide_question_pause_offsets(
+    question: GeneratedSlideQuestion,
+    *,
+    page_range_by_position: Mapping[int, SlidePageRange],
+) -> OptionalSlideQuestionPauseOffsets:
+    page_range = page_range_by_position.get(question.slide_position)
+    if page_range is None:
+        raise ValueError(
+            f"Generated slide question references unknown slide_position "
+            f"{question.slide_position}."
+        )
+    page_start_ms = page_range["start_offset_ms"]
+    page_end_ms = page_range["end_offset_ms"]
+    if page_start_ms is None or page_end_ms is None:
+        return None
+    return {
+        "slide_offset_ms": max(page_end_ms - page_start_ms, 0),
+        "stop_offset_ms": page_end_ms,
+    }
 
 
 def _validate_generated_slide_manifest(
@@ -2126,30 +2226,17 @@ def _validate_generated_slide_manifest(
     page_range_by_position = {
         int(page_range["slide_position"]): page_range for page_range in page_ranges
     }
+    valid_questions: list[GeneratedSlideQuestion] = []
     for question in manifest.questions:
-        page_range = page_range_by_position.get(question.slide_position)
-        if page_range is None:
-            raise ValueError(
-                f"Generated slide question references unknown slide_position "
-                f"{question.slide_position}."
-            )
-        page_start_ms = page_range["start_offset_ms"]
-        page_end_ms = page_range["end_offset_ms"]
-        if page_start_ms is not None and page_end_ms is not None:
-            page_duration_ms = max(page_end_ms - page_start_ms, 0)
-            if question.slide_offset_ms > page_duration_ms:
-                raise ValueError(
-                    "Generated slide question has slide_offset_ms outside the "
-                    f"slide duration. slide_position={question.slide_position}"
-                )
-            if not page_start_ms <= question.stop_offset_ms <= page_end_ms:
-                raise ValueError(
-                    "Generated slide question has stop_offset_ms outside its "
-                    f"slide range. slide_position={question.slide_position}"
-                )
+        pause_offsets = _slide_question_pause_offsets(
+            question,
+            page_range_by_position=page_range_by_position,
+        )
+        if pause_offsets is None:
+            continue
         if (
             total_duration_ms is not None
-            and question.stop_offset_ms > total_duration_ms
+            and pause_offsets["stop_offset_ms"] > total_duration_ms
         ):
             raise ValueError("Generated slide question pause point exceeds duration.")
         correct_count = sum(1 for option in question.options if option.correct)
@@ -2157,36 +2244,8 @@ def _validate_generated_slide_manifest(
             raise ValueError(
                 "Generated slide question must have exactly one correct option."
             )
-        for option in question.options:
-            if (
-                total_duration_ms is not None
-                and option.continue_offset_ms > total_duration_ms
-            ):
-                raise ValueError(
-                    "Generated slide option resume point exceeds duration."
-                )
-            if option.continue_slide_position is not None:
-                continue_page_range = page_range_by_position.get(
-                    option.continue_slide_position
-                )
-                if continue_page_range is None:
-                    raise ValueError(
-                        "Generated slide option references unknown "
-                        f"continue_slide_position {option.continue_slide_position}."
-                    )
-                if option.continue_slide_offset_ms is not None:
-                    continue_start_ms = continue_page_range["start_offset_ms"]
-                    continue_end_ms = continue_page_range["end_offset_ms"]
-                    if continue_start_ms is not None and continue_end_ms is not None:
-                        continue_duration_ms = max(
-                            continue_end_ms - continue_start_ms, 0
-                        )
-                        if option.continue_slide_offset_ms > continue_duration_ms:
-                            raise ValueError(
-                                "Generated slide option has continue_slide_offset_ms "
-                                "outside the slide duration."
-                            )
-    return manifest
+        valid_questions.append(question)
+    return manifest.model_copy(update={"questions": valid_questions})
 
 
 def _normalize_slide_manifest_context(
@@ -2468,6 +2527,7 @@ async def _generate_slide_manifest_for_window(
             start_offset_ms=chunk.context_start_ms,
             end_offset_ms=chunk.context_end_ms,
         )
+    chunk_page_ranges = _timed_slide_page_ranges(chunk_page_ranges)
     manifest = await _parse_responses_output(
         openai_client,
         model=model,
@@ -2509,9 +2569,9 @@ async def _generate_slide_manifest_for_window(
             update={
                 "questions": _filter_slide_questions_for_window(
                     manifest.questions,
+                    page_ranges=page_ranges,
                     start_offset_ms=chunk.generation_start_ms,
                     end_offset_ms=chunk.generation_end_ms,
-                    is_final_chunk=chunk.generation_end_ms == total_duration_ms,
                 )
             }
         )
@@ -2603,13 +2663,38 @@ async def _persist_slide_manifest(
         )
         await session.flush()
 
-        for question_position, question in enumerate(manifest.questions):
+        page_ranges: list[SlidePageRange] = [
+            {
+                "slide_position": page.position,
+                "start_offset_ms": page.start_offset_ms,
+                "end_offset_ms": page.end_offset_ms,
+            }
+            for page in sorted(deck.pages, key=lambda item: item.position)
+        ]
+        page_range_by_position = {
+            int(page_range["slide_position"]): page_range for page_range in page_ranges
+        }
+        question_pause_offsets_by_position: list[
+            tuple[GeneratedSlideQuestion, SlideQuestionPauseOffsets]
+        ] = []
+        for question in manifest.questions:
+            pause_offsets = _slide_question_pause_offsets(
+                question,
+                page_range_by_position=page_range_by_position,
+            )
+            if pause_offsets is None:
+                continue
+            question_pause_offsets_by_position.append((question, pause_offsets))
+
+        for question_position, (question, pause_offsets) in enumerate(
+            question_pause_offsets_by_position
+        ):
             question_row = models.LectureSlideQuestion(
                 lecture_slide_deck_id=deck.id,
                 position=question_position,
                 slide_position=question.slide_position,
-                slide_offset_ms=question.slide_offset_ms,
-                stop_offset_ms=question.stop_offset_ms,
+                slide_offset_ms=pause_offsets["slide_offset_ms"],
+                stop_offset_ms=pause_offsets["stop_offset_ms"],
                 question_type=schemas.LectureSlideQuestionType.SINGLE_SELECT,
                 question_text=question.question_text,
                 intro_text=question.intro_text,
@@ -2633,9 +2718,9 @@ async def _persist_slide_manifest(
                     position=option_position,
                     option_text=option.option_text,
                     post_answer_text=option.post_answer_text,
-                    continue_slide_position=option.continue_slide_position,
-                    continue_slide_offset_ms=option.continue_slide_offset_ms,
-                    continue_offset_ms=option.continue_offset_ms,
+                    continue_slide_position=question.slide_position,
+                    continue_slide_offset_ms=pause_offsets["slide_offset_ms"],
+                    continue_offset_ms=pause_offsets["stop_offset_ms"],
                 )
                 session.add(option_row)
                 option_rows.append((option, option_row))
@@ -2663,18 +2748,18 @@ async def _persist_slide_manifest(
                     type=schemas.LectureVideoQuestionType.SINGLE_SELECT,
                     question_text=question.question_text,
                     intro_text=question.intro_text,
-                    stop_offset_ms=question.stop_offset_ms,
+                    stop_offset_ms=pause_offsets["stop_offset_ms"],
                     options=[
                         schemas.LectureVideoManifestOptionV1(
                             option_text=option.option_text,
                             post_answer_text=option.post_answer_text,
-                            continue_offset_ms=option.continue_offset_ms,
+                            continue_offset_ms=pause_offsets["stop_offset_ms"],
                             correct=option.correct,
                         )
                         for option in question.options
                     ],
                 )
-                for question in manifest.questions
+                for question, pause_offsets in question_pause_offsets_by_position
             ],
             word_level_transcription=transcript,
             summary_checkpoints=manifest.summary_checkpoints,

@@ -418,21 +418,17 @@ async def test_generate_slide_manifest_uses_pdf_and_transcript_not_extracted_tex
                     questions=[
                         lecture_slide_processing.GeneratedSlideQuestion(
                             slide_position=0,
-                            slide_offset_ms=0,
-                            stop_offset_ms=1000,
                             question_text="What is shown?",
                             intro_text="Try this.",
                             options=[
                                 lecture_slide_processing.GeneratedSlideChoice(
                                     option_text="Slides",
                                     post_answer_text="Right.",
-                                    continue_offset_ms=1000,
                                     correct=True,
                                 ),
                                 lecture_slide_processing.GeneratedSlideChoice(
                                     option_text="Video",
                                     post_answer_text="Not quite.",
-                                    continue_offset_ms=1000,
                                     correct=False,
                                 ),
                             ],
@@ -489,13 +485,18 @@ async def test_generate_slide_manifest_uses_pdf_and_transcript_not_extracted_tex
     assert captured["model"] == "assistant-chat-model"
     instructions = str(captured["instructions"])
     assert "Manifest prompt" in instructions
-    assert "TO-DO's FOR SUCCESSFUL QUIZ-GENERATION" in instructions
-    assert "QUALITY EXAMPLES:" in instructions
-    assert "FINAL VERIFICATION BEFORE OUTPUT:" in instructions
-    assert "SLIDE LESSON MANIFEST ADAPTATION:" in instructions
-    assert "0 <= slide_offset_ms <= end_offset_ms - start_offset_ms" in instructions
-    assert "Derive slide_offset_ms from stop_offset_ms" in instructions
-    assert "Transcript word ids include the slide number" in instructions
+    assert "YOUR TASK:" in instructions
+    assert "QUESTIONS:" in instructions
+    assert "Not every slide needs a question" in instructions
+    assert "A question appears between slides" in instructions
+    assert "set slide_position to the zero-based slide after which" in instructions
+    assert (
+        "Each question's options array uses option_text, post_answer_text, and correct"
+        in instructions
+    )
+    assert "pause_after_word_id" not in instructions
+    assert "stop_offset_ms" not in instructions
+    assert "continue_offset_ms" not in instructions
     assert captured["text_format"] is lecture_slide_processing.GeneratedSlideManifest
     assert captured["deleted_file_id"] == "file-pdf"
     payload = json.dumps(captured["input"])
@@ -540,18 +541,14 @@ async def test_generate_slide_manifest_rejects_multiple_correct_options(
                     questions=[
                         lecture_slide_processing.GeneratedSlideQuestion(
                             slide_position=0,
-                            slide_offset_ms=0,
-                            stop_offset_ms=1000,
                             question_text="What is shown?",
                             options=[
                                 lecture_slide_processing.GeneratedSlideChoice(
                                     option_text="Slides",
-                                    continue_offset_ms=1000,
                                     correct=True,
                                 ),
                                 lecture_slide_processing.GeneratedSlideChoice(
                                     option_text="Also slides",
-                                    continue_offset_ms=1000,
                                     correct=True,
                                 ),
                             ],
@@ -606,9 +603,35 @@ async def test_generate_slide_manifest_rejects_multiple_correct_options(
         )
 
 
-async def test_persist_slide_manifest_replaces_existing_questions(db):
+async def test_persist_slide_manifest_replaces_existing_questions(db, monkeypatch):
     await _create_class_and_deck(db)
+    captured_context: dict[str, schemas.LectureVideoManifestV4] = {}
+    original_stored_context_extras = lecture_slide_processing._stored_context_extras
+
+    def capture_stored_context_extras(
+        manifest: schemas.LectureVideoManifestV4,
+    ) -> dict[str, object]:
+        captured_context["manifest"] = manifest
+        return original_stored_context_extras(manifest)
+
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "_stored_context_extras",
+        capture_stored_context_extras,
+    )
     async with db.async_session() as session:
+        first_page = models.LectureSlidePage(
+            lecture_slide_deck_id=1,
+            position=0,
+            start_offset_ms=0,
+            end_offset_ms=500,
+        )
+        second_page = models.LectureSlidePage(
+            lecture_slide_deck_id=1,
+            position=1,
+            start_offset_ms=500,
+            end_offset_ms=1200,
+        )
         old_question = models.LectureSlideQuestion(
             lecture_slide_deck_id=1,
             position=0,
@@ -636,7 +659,7 @@ async def test_persist_slide_manifest_replaces_existing_questions(db):
             status=schemas.LectureSlideProcessingRunStatus.RUNNING,
             lease_token="lease",
         )
-        session.add_all([old_question, run])
+        session.add_all([first_page, second_page, old_question, run])
         await session.commit()
         run_id = run.id
 
@@ -644,22 +667,32 @@ async def test_persist_slide_manifest_replaces_existing_questions(db):
         questions=[
             lecture_slide_processing.GeneratedSlideQuestion(
                 slide_position=0,
-                slide_offset_ms=250,
-                stop_offset_ms=250,
                 question_text="New question?",
                 options=[
                     lecture_slide_processing.GeneratedSlideChoice(
                         option_text="Correct",
-                        continue_offset_ms=500,
                         correct=True,
                     ),
                     lecture_slide_processing.GeneratedSlideChoice(
                         option_text="Incorrect",
-                        continue_offset_ms=500,
                         correct=False,
                     ),
                 ],
-            )
+            ),
+            lecture_slide_processing.GeneratedSlideQuestion(
+                slide_position=1,
+                question_text="Follow-up question?",
+                options=[
+                    lecture_slide_processing.GeneratedSlideChoice(
+                        option_text="Second correct",
+                        correct=True,
+                    ),
+                    lecture_slide_processing.GeneratedSlideChoice(
+                        option_text="Second incorrect",
+                        correct=False,
+                    ),
+                ],
+            ),
         ],
         summary_checkpoints=[
             schemas.LectureVideoManifestSummaryCheckpointV4(
@@ -702,14 +735,38 @@ async def test_persist_slide_manifest_replaces_existing_questions(db):
         assert deck is not None
         assert deck.context_version == 4
         assert deck.transcript_data is not None
-        assert len(deck.questions) == 1
+        assert len(deck.questions) == 2
         assert deck.questions[0].question_text == "New question?"
+        assert deck.questions[0].slide_offset_ms == 500
+        assert deck.questions[0].stop_offset_ms == 500
+        assert deck.questions[1].question_text == "Follow-up question?"
+        assert deck.questions[1].slide_offset_ms == 700
+        assert deck.questions[1].stop_offset_ms == 1200
         assert [option.option_text for option in deck.questions[0].options] == [
             "Correct",
             "Incorrect",
         ]
+        assert [option.continue_offset_ms for option in deck.questions[0].options] == [
+            500,
+            500,
+        ]
+        assert [option.continue_offset_ms for option in deck.questions[1].options] == [
+            1200,
+            1200,
+        ]
         assert deck.questions[0].correct_option is not None
         assert deck.questions[0].correct_option.option_text == "Correct"
+
+    captured_manifest = captured_context["manifest"]
+    assert [question.stop_offset_ms for question in captured_manifest.questions] == [
+        500,
+        1200,
+    ]
+    assert [
+        option.continue_offset_ms
+        for question in captured_manifest.questions
+        for option in question.options
+    ] == [500, 500, 1200, 1200]
 
 
 async def test_parse_responses_output_retries_transient_openai_failure(monkeypatch):
@@ -848,6 +905,146 @@ async def test_slide_manifest_chunk_planning_splits_on_token_budget(monkeypatch)
         (2000, 3000),
         (3000, 4000),
     ]
+
+
+async def test_slide_manifest_generation_window_prompt_matches_filter_contract():
+    instructions = (
+        lecture_slide_processing._build_slide_manifest_generation_instructions(
+            "Manifest prompt",
+            total_duration_ms=2000,
+            generation_start_ms=1000,
+            generation_end_ms=2000,
+            context_start_ms=500,
+            context_end_ms=2000,
+        )
+    )
+
+    assert (
+        "offsets greater than 1000ms and less than or equal to 2000ms" in instructions
+    )
+    assert (
+        "create questions only after slides whose end_offset_ms is inside that same "
+        "requested generation window"
+    ) in instructions
+    assert "from 1000ms through 2000ms" not in instructions
+
+
+async def test_filter_slide_questions_keeps_non_final_chunk_end_boundary():
+    questions = [
+        lecture_slide_processing.GeneratedSlideQuestion(
+            slide_position=0,
+            question_text="Boundary?",
+            options=[
+                lecture_slide_processing.GeneratedSlideChoice(
+                    option_text="Yes",
+                    correct=True,
+                ),
+                lecture_slide_processing.GeneratedSlideChoice(
+                    option_text="No",
+                    correct=False,
+                ),
+            ],
+        ),
+        lecture_slide_processing.GeneratedSlideQuestion(
+            slide_position=1,
+            question_text="Next?",
+            options=[
+                lecture_slide_processing.GeneratedSlideChoice(
+                    option_text="Yes",
+                    correct=True,
+                ),
+                lecture_slide_processing.GeneratedSlideChoice(
+                    option_text="No",
+                    correct=False,
+                ),
+            ],
+        ),
+    ]
+    page_ranges = [
+        {"slide_position": 0, "start_offset_ms": 0, "end_offset_ms": 1000},
+        {"slide_position": 1, "start_offset_ms": 1000, "end_offset_ms": 2000},
+    ]
+
+    first_chunk_questions = lecture_slide_processing._filter_slide_questions_for_window(
+        questions,
+        page_ranges=page_ranges,
+        start_offset_ms=0,
+        end_offset_ms=1000,
+    )
+    second_chunk_questions = (
+        lecture_slide_processing._filter_slide_questions_for_window(
+            questions,
+            page_ranges=page_ranges,
+            start_offset_ms=1000,
+            end_offset_ms=2000,
+        )
+    )
+
+    assert [question.slide_position for question in first_chunk_questions] == [0]
+    assert [question.slide_position for question in second_chunk_questions] == [1]
+
+
+async def test_validate_slide_manifest_skips_untimed_slide_questions():
+    manifest = lecture_slide_processing.GeneratedSlideManifest(
+        questions=[
+            lecture_slide_processing.GeneratedSlideQuestion(
+                slide_position=0,
+                question_text="Untimed?",
+                options=[
+                    lecture_slide_processing.GeneratedSlideChoice(
+                        option_text="Yes",
+                        correct=True,
+                    ),
+                    lecture_slide_processing.GeneratedSlideChoice(
+                        option_text="No",
+                        correct=False,
+                    ),
+                ],
+            ),
+            lecture_slide_processing.GeneratedSlideQuestion(
+                slide_position=1,
+                question_text="Timed?",
+                options=[
+                    lecture_slide_processing.GeneratedSlideChoice(
+                        option_text="Yes",
+                        correct=True,
+                    ),
+                    lecture_slide_processing.GeneratedSlideChoice(
+                        option_text="No",
+                        correct=False,
+                    ),
+                ],
+            ),
+        ],
+        summary_checkpoints=[
+            schemas.LectureVideoManifestSummaryCheckpointV4(
+                end_offset_ms=2000,
+                summary="The timed slide explains the concept.",
+            )
+        ],
+        moment_contexts=[
+            schemas.LectureVideoManifestMomentContextV4(
+                start_offset_ms=1000,
+                center_offset_ms=1500,
+                end_offset_ms=2000,
+                before="The slide starts.",
+                at="The concept is visible.",
+                after="The slide ends.",
+            )
+        ],
+    )
+    page_ranges = [
+        {"slide_position": 0, "start_offset_ms": None, "end_offset_ms": None},
+        {"slide_position": 1, "start_offset_ms": 1000, "end_offset_ms": 2000},
+    ]
+
+    validated = lecture_slide_processing._validate_generated_slide_manifest(
+        manifest,
+        page_ranges=page_ranges,
+        total_duration_ms=2000,
+    )
+
+    assert [question.slide_position for question in validated.questions] == [1]
 
 
 async def _async_value(value):
