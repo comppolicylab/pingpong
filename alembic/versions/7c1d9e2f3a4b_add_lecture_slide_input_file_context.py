@@ -1,7 +1,7 @@
 """Add lecture slide input file context
 
 Revision ID: 7c1d9e2f3a4b
-Revises: c2f4e8a9d3b1
+Revises: 6e1f8c9a4d2b
 Create Date: 2026-06-04 00:00:00.000000
 
 """
@@ -14,7 +14,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "7c1d9e2f3a4b"
-down_revision: Union[str, None] = "c2f4e8a9d3b1"
+down_revision: Union[str, None] = "6e1f8c9a4d2b"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
