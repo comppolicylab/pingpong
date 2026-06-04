@@ -890,7 +890,7 @@ async def test_prepare_lecture_slide_chat_turn_uses_video_context_shape(
     assert "What is shown on this slide?" in lesson_context_text
     assert "What comes next?" in lesson_context_text
     assert "A clear example" in lesson_context_text
-    assert file_message.is_hidden is False
+    assert file_message.is_hidden is True
     assert file_message.role == schemas.MessageRole.USER
     assert file_message.content[0].type == schemas.MessagePartType.INPUT_FILE
     assert file_message.content[0].input_file is not None
@@ -905,6 +905,64 @@ async def test_prepare_lecture_slide_chat_turn_uses_video_context_shape(
     assert "### Upcoming Knowledge Check" in context_text
     assert "### Current Slide" not in context_text
     assert "Extracted text:" not in context_text
+
+
+@with_institution(11, "Test Institution")
+async def test_prepare_lecture_slide_chat_turn_skips_initial_file_message_without_uploaded_file(
+    db, institution
+):
+    async with db.async_session() as session:
+        (
+            class_,
+            deck,
+            assistant,
+            thread,
+            questions,
+        ) = await _create_slide_runtime_fixture(session, institution)
+        thread.interaction_mode = schemas.InteractionMode.LECTURE_SLIDES
+        assistant.interaction_mode = schemas.InteractionMode.LECTURE_SLIDES
+        deck.transcript_data = _slide_transcript_data()
+        deck.context_data = {}
+        deck.context_version = 4
+        deck.lecture_slide_chat_available = True
+        page = models.LectureSlidePage(
+            lecture_slide_deck=deck,
+            position=0,
+            narration_text="This slide introduces the core idea.",
+            start_offset_ms=0,
+            end_offset_ms=1_000,
+        )
+        state = models.LectureSlideThreadState(
+            thread=thread,
+            state=schemas.InteractiveLessonSessionState.PLAYING,
+            current_question=questions[0],
+            last_known_offset_ms=2_000,
+            furthest_offset_ms=5_000,
+            version=1,
+        )
+        session.add_all([page, state])
+        await session.commit()
+        class_id = class_.id
+        thread_id = thread.id
+
+    async with db.async_session() as session:
+        prep = await lecture_slide_chat.prepare_lecture_chat_turn(
+            request=_server_request(session),
+            openai_client=SimpleNamespace(files=SimpleNamespace()),
+            class_id=str(class_id),
+            thread=SimpleNamespace(id=thread_id),
+            user_id=123,
+            prev_output_sequence=-1,
+            lecture_video_playback_position_ms=2_000,
+        )
+
+    assert prep.user_output_index == 2
+    assert [message.role for message in prep.prepended_messages] == [
+        schemas.MessageRole.DEVELOPER,
+        schemas.MessageRole.DEVELOPER,
+    ]
+    assert "## Lecture Slide Narrations" in prep.prepended_messages[0].content[0].text
+    assert "## Lecture Context" in prep.prepended_messages[1].content[0].text
 
 
 @with_institution(11, "Test Institution")

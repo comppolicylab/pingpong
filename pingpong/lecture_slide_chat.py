@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 
 import pingpong.models as models
 import pingpong.schemas as schemas
-from pingpong import lecture_slide_runtime, lecture_slide_service
+from pingpong import lecture_slide_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -313,7 +313,6 @@ def _build_lecture_developer_context_message(
 async def _build_initial_lecture_file_message(
     *,
     session: AsyncSession,
-    openai_client: Any,
     slide_thread: models.Thread,
     user_id: int,
     output_index: int,
@@ -321,17 +320,18 @@ async def _build_initial_lecture_file_message(
     deck = slide_thread.lecture_slide_deck
     if deck is None or deck.source_stored_object is None:
         return None
-    input_file = await lecture_slide_service.ensure_lecture_slide_source_input_file(
-        session,
-        openai_client,
-        deck,
-    )
+    source = deck.source_stored_object
+    if source.openai_file_object_id is None:
+        return None
+    input_file = await models.File.get_by_id(session, source.openai_file_object_id)
+    if input_file is None:
+        return None
     return models.Message(
         thread_id=slide_thread.id,
         output_index=output_index,
         message_status=schemas.MessageStatus.COMPLETED,
         role=schemas.MessageRole.USER,
-        is_hidden=False,
+        is_hidden=True,
         user_id=user_id,
         content=[
             models.MessagePart(
@@ -516,7 +516,6 @@ async def prepare_lecture_chat_turn(
             prepended_messages.append(developer_context_message)
         initial_file_message = await _build_initial_lecture_file_message(
             session=request.state["db"],
-            openai_client=openai_client,
             slide_thread=slide_thread,
             user_id=user_id,
             output_index=1,

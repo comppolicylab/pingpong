@@ -1427,6 +1427,19 @@ async def test_build_response_input_item_list_can_build_user_assistant_messages_
             thread_id=thread_id,
             current_run_id=current_run_id,
             user_assistant_messages_only=True,
+        )
+
+    assert [item["role"] for item in items] == ["developer", "user", "user"]
+    assert items[0]["content"][0]["text"] == "Dynamic lecture context"
+    assert items[1]["content"][0]["type"] == "input_image"
+    assert items[2]["content"][0]["text"] == "What is happening here?"
+
+    async with db.async_session() as session:
+        items = await build_response_input_item_list(
+            session,
+            thread_id=thread_id,
+            current_run_id=current_run_id,
+            user_assistant_messages_only=True,
             include_developer_messages=True,
         )
 

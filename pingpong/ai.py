@@ -1072,10 +1072,17 @@ async def build_response_input_item_list(
 
     def input_item_sort_key(
         entry: tuple[datetime, int, str, ResponseInputItemParam],
-    ) -> tuple[int, datetime]:
+    ) -> tuple[int, int, datetime]:
         created, output_index, item_type, item = entry
-        _ = item_type, item
-        return (output_index, created)
+        if (
+            user_assistant_messages_only
+            and current_run_id is not None
+            and not include_developer_messages
+            and item_type == "message"
+            and item.get("role") == MessageRole.DEVELOPER
+        ):
+            return (0, 0, created)
+        return (1, output_index, created)
 
     # Sort by output index, falling back to created time for ties.
     response_input_items_with_time.sort(key=input_item_sort_key)

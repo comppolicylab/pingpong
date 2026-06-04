@@ -3834,6 +3834,7 @@ def _thread_lecture_slide_base_loaders() -> tuple[Load, ...]:
         selectinload(Thread.lecture_slide_deck).options(
             undefer(LectureSlideDeck.transcript_data),
             undefer(LectureSlideDeck.context_data),
+            selectinload(LectureSlideDeck.source_stored_object),
             selectinload(LectureSlideDeck.continuous_narration_stored_object),
             selectinload(LectureSlideDeck.caption_stored_object),
             selectinload(LectureSlideDeck.pages).selectinload(
