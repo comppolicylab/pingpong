@@ -69,6 +69,9 @@ from pingpong.migrations.m10_backfill_lecture_video_captions import (
     backfill_lecture_video_captions,
     retranscribe_active_lecture_video_words,
 )
+from pingpong.migrations.m11_move_lecture_slide_questions_to_slide_ends import (
+    move_lecture_slide_questions_to_slide_ends,
+)
 from pingpong.now import _get_next_run_time, croner, utcnow
 from pingpong.schemas import LMSType, RunStatus
 from pingpong.lti.course_bridge import course_bridge_sync_all
@@ -1097,6 +1100,22 @@ def m10_backfill_lecture_video_captions(
             )
 
     asyncio.run(_m10_backfill_lecture_video_captions())
+
+
+@db.command("m11_move_lecture_slide_questions_to_slide_ends")
+def m11_move_lecture_slide_questions_to_slide_ends() -> None:
+    async def _m11_move_lecture_slide_questions_to_slide_ends() -> None:
+        async with config.db.driver.async_session() as session:
+            logger.info("Moving lecture slide questions to slide ends...")
+            result = await move_lecture_slide_questions_to_slide_ends(session)
+            await session.commit()
+            logger.info(
+                "Done! moved=%s skipped=%s",
+                result.updated,
+                result.skipped,
+            )
+
+    asyncio.run(_m11_move_lecture_slide_questions_to_slide_ends())
 
 
 @db.command("m02_remove_responses_threads")

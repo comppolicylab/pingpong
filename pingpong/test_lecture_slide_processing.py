@@ -418,21 +418,17 @@ async def test_generate_slide_manifest_uses_pdf_and_transcript_not_extracted_tex
                     questions=[
                         lecture_slide_processing.GeneratedSlideQuestion(
                             slide_position=0,
-                            slide_offset_ms=0,
-                            stop_offset_ms=1000,
                             question_text="What is shown?",
                             intro_text="Try this.",
                             options=[
                                 lecture_slide_processing.GeneratedSlideChoice(
                                     option_text="Slides",
                                     post_answer_text="Right.",
-                                    continue_offset_ms=1000,
                                     correct=True,
                                 ),
                                 lecture_slide_processing.GeneratedSlideChoice(
                                     option_text="Video",
                                     post_answer_text="Not quite.",
-                                    continue_offset_ms=1000,
                                     correct=False,
                                 ),
                             ],
@@ -489,13 +485,18 @@ async def test_generate_slide_manifest_uses_pdf_and_transcript_not_extracted_tex
     assert captured["model"] == "assistant-chat-model"
     instructions = str(captured["instructions"])
     assert "Manifest prompt" in instructions
-    assert "TO-DO's FOR SUCCESSFUL QUIZ-GENERATION" in instructions
-    assert "QUALITY EXAMPLES:" in instructions
-    assert "FINAL VERIFICATION BEFORE OUTPUT:" in instructions
-    assert "SLIDE LESSON MANIFEST ADAPTATION:" in instructions
-    assert "0 <= slide_offset_ms <= end_offset_ms - start_offset_ms" in instructions
-    assert "Derive slide_offset_ms from stop_offset_ms" in instructions
-    assert "Transcript word ids include the slide number" in instructions
+    assert "YOUR TASK:" in instructions
+    assert "QUESTIONS:" in instructions
+    assert "Not every slide needs a question" in instructions
+    assert "A question appears between slides" in instructions
+    assert "set slide_position to the zero-based slide after which" in instructions
+    assert (
+        "Each question's options array uses option_text, post_answer_text, and correct"
+        in instructions
+    )
+    assert "pause_after_word_id" not in instructions
+    assert "stop_offset_ms" not in instructions
+    assert "continue_offset_ms" not in instructions
     assert captured["text_format"] is lecture_slide_processing.GeneratedSlideManifest
     assert captured["deleted_file_id"] == "file-pdf"
     payload = json.dumps(captured["input"])
@@ -540,18 +541,14 @@ async def test_generate_slide_manifest_rejects_multiple_correct_options(
                     questions=[
                         lecture_slide_processing.GeneratedSlideQuestion(
                             slide_position=0,
-                            slide_offset_ms=0,
-                            stop_offset_ms=1000,
                             question_text="What is shown?",
                             options=[
                                 lecture_slide_processing.GeneratedSlideChoice(
                                     option_text="Slides",
-                                    continue_offset_ms=1000,
                                     correct=True,
                                 ),
                                 lecture_slide_processing.GeneratedSlideChoice(
                                     option_text="Also slides",
-                                    continue_offset_ms=1000,
                                     correct=True,
                                 ),
                             ],
@@ -609,6 +606,12 @@ async def test_generate_slide_manifest_rejects_multiple_correct_options(
 async def test_persist_slide_manifest_replaces_existing_questions(db):
     await _create_class_and_deck(db)
     async with db.async_session() as session:
+        page = models.LectureSlidePage(
+            lecture_slide_deck_id=1,
+            position=0,
+            start_offset_ms=0,
+            end_offset_ms=500,
+        )
         old_question = models.LectureSlideQuestion(
             lecture_slide_deck_id=1,
             position=0,
@@ -636,7 +639,7 @@ async def test_persist_slide_manifest_replaces_existing_questions(db):
             status=schemas.LectureSlideProcessingRunStatus.RUNNING,
             lease_token="lease",
         )
-        session.add_all([old_question, run])
+        session.add_all([page, old_question, run])
         await session.commit()
         run_id = run.id
 
@@ -644,18 +647,14 @@ async def test_persist_slide_manifest_replaces_existing_questions(db):
         questions=[
             lecture_slide_processing.GeneratedSlideQuestion(
                 slide_position=0,
-                slide_offset_ms=250,
-                stop_offset_ms=250,
                 question_text="New question?",
                 options=[
                     lecture_slide_processing.GeneratedSlideChoice(
                         option_text="Correct",
-                        continue_offset_ms=500,
                         correct=True,
                     ),
                     lecture_slide_processing.GeneratedSlideChoice(
                         option_text="Incorrect",
-                        continue_offset_ms=500,
                         correct=False,
                     ),
                 ],
@@ -704,9 +703,15 @@ async def test_persist_slide_manifest_replaces_existing_questions(db):
         assert deck.transcript_data is not None
         assert len(deck.questions) == 1
         assert deck.questions[0].question_text == "New question?"
+        assert deck.questions[0].slide_offset_ms == 500
+        assert deck.questions[0].stop_offset_ms == 500
         assert [option.option_text for option in deck.questions[0].options] == [
             "Correct",
             "Incorrect",
+        ]
+        assert [option.continue_offset_ms for option in deck.questions[0].options] == [
+            500,
+            500,
         ]
         assert deck.questions[0].correct_option is not None
         assert deck.questions[0].correct_option.option_text == "Correct"
