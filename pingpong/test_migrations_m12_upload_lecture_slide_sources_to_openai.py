@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from pingpong import models
+from pingpong import lecture_slide_service, models, schemas
 from pingpong.migrations import m12_upload_lecture_slide_sources_to_openai as migration
 from pingpong.models import file_class_association
 
@@ -42,7 +42,9 @@ async def test_upload_lecture_slide_sources_to_openai_uploads_unlinked_sources(
         return SimpleNamespace(files=files)
 
     monkeypatch.setattr(
-        migration, "get_openai_client_by_class_id", fake_get_openai_client_by_class_id
+        lecture_slide_service,
+        "get_openai_client_by_class_id",
+        fake_get_openai_client_by_class_id,
     )
 
     async with db.async_session() as session:
@@ -162,3 +164,136 @@ async def test_upload_lecture_slide_sources_to_openai_skips_without_video_store(
         result = await migration.upload_lecture_slide_sources_to_openai(session)
 
     assert result == migration.UploadLectureSlideSourcesToOpenAIResult()
+
+
+async def test_upload_lecture_slide_sources_to_openai_bumps_started_slide_lessons(
+    db, config, monkeypatch
+):
+    monkeypatch.setattr(config, "video_store", None)
+
+    async with db.async_session() as session:
+        institution = models.Institution(id=1, name="Test Institution")
+        user = models.User(id=123, email="owner@example.com")
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        file = models.File(
+            file_id="existing-openai-file",
+            name="slides.pdf",
+            content_type="application/pdf",
+            private=True,
+            uploader_id=user.id,
+        )
+        source = models.LectureSlideSourceStoredObject(
+            key="slides.pdf",
+            original_filename="slides.pdf",
+            content_type="application/pdf",
+            content_length=16,
+            openai_file=file,
+        )
+        deck = models.LectureSlideDeck(
+            class_=class_,
+            source_stored_object=source,
+            uploader_id=user.id,
+            display_name="slides.pdf",
+            status="ready",
+            slide_count=1,
+            context_version=4,
+            lecture_slide_chat_available=True,
+        )
+        page = models.LectureSlidePage(
+            lecture_slide_deck=deck,
+            position=1,
+            narration_text="Opening narration.",
+        )
+        assistant = models.Assistant(
+            id=1,
+            name="Slide Assistant",
+            class_=class_,
+            interaction_mode="LECTURE_SLIDES",
+            version=3,
+            lecture_slide_deck=deck,
+            instructions="You are a slide assistant.",
+            model="gpt-4o-mini",
+            tools="[]",
+            use_latex=False,
+            use_image_descriptions=False,
+            hide_prompt=False,
+        )
+        thread = models.Thread(
+            id=1,
+            name="Started Slide Lesson",
+            version=3,
+            thread_id="thread-started-slide",
+            class_=class_,
+            assistant=assistant,
+            interaction_mode="LECTURE_SLIDES",
+            lecture_slide_deck=deck,
+            private=False,
+            display_user_info=False,
+            tools_available="[]",
+        )
+        run = models.Run(
+            thread=thread,
+            status=schemas.RunStatus.COMPLETED,
+            tools_available="[]",
+        )
+        message = models.Message(
+            thread=thread,
+            run=run,
+            output_index=1,
+            role=schemas.MessageRole.USER,
+            message_status=schemas.MessageStatus.COMPLETED,
+        )
+        session.add_all(
+            [
+                institution,
+                user,
+                class_,
+                file,
+                source,
+                deck,
+                page,
+                assistant,
+                thread,
+                run,
+                message,
+            ]
+        )
+        await session.commit()
+        old_deck_id = deck.id
+        thread_id = thread.id
+        assistant_id = assistant.id
+        file_object_id = file.id
+
+    async with db.async_session() as session:
+        result = await migration.upload_lecture_slide_sources_to_openai(session)
+
+    assert result == migration.UploadLectureSlideSourcesToOpenAIResult(
+        version_bumped=1,
+    )
+
+    async with db.async_session() as session:
+        assistant = await session.get(models.Assistant, assistant_id)
+        thread = await session.get(models.Thread, thread_id)
+        assert assistant is not None
+        assert thread is not None
+        assert assistant.lecture_slide_deck_id != old_deck_id
+        assert thread.lecture_slide_deck_id == old_deck_id
+
+        cloned_deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session,
+            assistant.lecture_slide_deck_id,
+        )
+        assert cloned_deck is not None
+        assert cloned_deck.source_lecture_slide_deck_id_snapshot == old_deck_id
+        assert cloned_deck.source_stored_object is not None
+        assert cloned_deck.source_stored_object.openai_file_object_id == file_object_id
+        assert cloned_deck.context_version == 4
+        assert cloned_deck.lecture_slide_chat_available is True
+        assert [page.narration_text for page in cloned_deck.pages] == [
+            "Opening narration."
+        ]

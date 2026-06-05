@@ -1,12 +1,14 @@
 import logging
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 import pingpong.models as models
-from pingpong.ai import GetOpenAIClientException, get_openai_client_by_class_id
+import pingpong.schemas as schemas
+from pingpong import lecture_slide_service
+from pingpong.ai import GetOpenAIClientException
 from pingpong.config import config
 from pingpong.video_store import VideoStoreError
 
@@ -20,15 +22,7 @@ class UploadLectureSlideSourcesToOpenAIResult:
     uploaded: int = 0
     skipped: int = 0
     failed: int = 0
-
-
-async def _read_source_pdf_bytes(key: str) -> bytes:
-    if not config.video_store:
-        raise RuntimeError("Video store not configured.")
-    chunks = []
-    async for chunk in config.video_store.store.stream_video(key):
-        chunks.append(chunk)
-    return b"".join(chunks)
+    version_bumped: int = 0
 
 
 async def _upload_source_to_openai(
@@ -44,43 +38,38 @@ async def _upload_source_to_openai(
         )
         return None
     deck = decks[0]
-    openai_client = await get_openai_client_by_class_id(session, deck.class_id)
-    source_bytes = await _read_source_pdf_bytes(source.key)
-    uploaded_file = await openai_client.files.create(
-        file=(source.original_filename, source_bytes, source.content_type),
-        purpose="user_data",
-    )
-    file_id = getattr(uploaded_file, "id", None)
-    if not file_id and isinstance(uploaded_file, dict):
-        file_id = uploaded_file.get("id")
-    if not file_id:
-        raise RuntimeError("OpenAI did not return a file id for lecture slide PDF.")
-
-    file = await models.File.create(
+    return await lecture_slide_service.upload_lecture_slide_source_to_openai(
         session,
-        {
-            "file_id": str(file_id),
-            "private": True,
-            "uploader_id": deck.uploader_id,
-            "name": source.original_filename,
-            "content_type": source.content_type,
-        },
+        source,
         class_id=deck.class_id,
+        uploader_id=deck.uploader_id,
     )
-    source.openai_file_object_id = file.id
-    session.add(source)
-    return file
 
 
 async def upload_lecture_slide_sources_to_openai(
     session: AsyncSession,
 ) -> UploadLectureSlideSourcesToOpenAIResult:
-    if not config.video_store:
+    if config.video_store:
+        uploaded, skipped, failed = await _upload_unlinked_sources(session)
+    else:
         logger.warning(
             "No video store configured; skipping lecture slide source OpenAI upload."
         )
-        return UploadLectureSlideSourcesToOpenAIResult()
+        uploaded = 0
+        skipped = 0
+        failed = 0
 
+    version_bumped = await _bump_lecture_slide_decks_for_existing_threads(session)
+
+    return UploadLectureSlideSourcesToOpenAIResult(
+        uploaded=uploaded,
+        skipped=skipped,
+        failed=failed,
+        version_bumped=version_bumped,
+    )
+
+
+async def _upload_unlinked_sources(session: AsyncSession) -> tuple[int, int, int]:
     uploaded = 0
     skipped = 0
     failed = 0
@@ -166,8 +155,70 @@ async def upload_lecture_slide_sources_to_openai(
         skipped,
         failed,
     )
-    return UploadLectureSlideSourcesToOpenAIResult(
-        uploaded=uploaded,
-        skipped=skipped,
-        failed=failed,
+    return uploaded, skipped, failed
+
+
+async def _bump_lecture_slide_decks_for_existing_threads(
+    session: AsyncSession,
+) -> int:
+    assistant_deck_rows = (
+        await session.execute(
+            select(models.Assistant.id, models.Assistant.lecture_slide_deck_id)
+            .join(
+                models.Thread,
+                and_(
+                    models.Thread.assistant_id == models.Assistant.id,
+                    models.Thread.lecture_slide_deck_id
+                    == models.Assistant.lecture_slide_deck_id,
+                ),
+            )
+            .join(models.Message, models.Message.thread_id == models.Thread.id)
+            .where(
+                models.Assistant.interaction_mode
+                == schemas.InteractionMode.LECTURE_SLIDES,
+                models.Assistant.lecture_slide_deck_id.is_not(None),
+            )
+            .distinct()
+            .order_by(models.Assistant.id.asc())
+        )
+    ).all()
+
+    bumped = 0
+    for assistant_id, deck_id in assistant_deck_rows:
+        if deck_id is None:
+            continue
+        assistant = await session.get(models.Assistant, assistant_id)
+        deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, deck_id
+        )
+        if assistant is None or deck is None:
+            logger.warning(
+                "Skipping lecture slide deck version bump with missing row. "
+                "assistant_id=%s deck_id=%s",
+                assistant_id,
+                deck_id,
+            )
+            continue
+
+        cloned_deck = await lecture_slide_service.clone_lecture_slide_deck_snapshot(
+            session,
+            deck,
+        )
+        cloned_deck_id = cloned_deck.id
+        assistant.lecture_slide_deck_id = cloned_deck.id
+        session.add(assistant)
+        await session.commit()
+        session.expunge_all()
+        bumped += 1
+        logger.info(
+            "Bumped lecture slide deck for existing threads. assistant_id=%s old_deck_id=%s new_deck_id=%s",
+            assistant_id,
+            deck_id,
+            cloned_deck_id,
+        )
+
+    logger.info(
+        "Finished bumping lecture slide deck versions for existing threads. version_bumped=%s",
+        bumped,
     )
+    return bumped

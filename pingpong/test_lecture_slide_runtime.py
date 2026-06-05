@@ -866,7 +866,6 @@ async def test_prepare_lecture_slide_chat_turn_uses_video_context_shape(
 
         prep = await lecture_slide_chat.prepare_lecture_chat_turn(
             request=_server_request(session),
-            openai_client=SimpleNamespace(files=SimpleNamespace()),
             class_id=str(class_.id),
             thread=thread,
             user_id=123,
@@ -948,7 +947,6 @@ async def test_prepare_lecture_slide_chat_turn_skips_initial_file_message_withou
     async with db.async_session() as session:
         prep = await lecture_slide_chat.prepare_lecture_chat_turn(
             request=_server_request(session),
-            openai_client=SimpleNamespace(files=SimpleNamespace()),
             class_id=str(class_id),
             thread=SimpleNamespace(id=thread_id),
             user_id=123,
@@ -1082,7 +1080,6 @@ async def test_prepare_lecture_slide_chat_turn_adds_dynamic_context_without_recr
 
         prep = await lecture_slide_chat.prepare_lecture_chat_turn(
             request=_server_request(session),
-            openai_client=SimpleNamespace(files=SimpleNamespace()),
             class_id=str(class_.id),
             thread=thread,
             user_id=123,

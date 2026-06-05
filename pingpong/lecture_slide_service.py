@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import pingpong.models as models
 import pingpong.schemas as schemas
+from pingpong.ai import get_openai_client_by_class_id
 from pingpong.config import config
 from pingpong.lecture_video_service import get_original_filename, get_upload_size
 from pingpong.video_store import VideoStoreError
@@ -34,6 +35,62 @@ class LectureSlidePageUpdateResult:
 
 def generate_source_store_key() -> str:
     return f"ls_source_{uuid.uuid7()}.pdf"
+
+
+async def _read_source_pdf_bytes(key: str) -> bytes:
+    if not config.video_store:
+        raise RuntimeError("Video store not configured.")
+    chunks = []
+    async for chunk in config.video_store.store.stream_video(key):
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _uploaded_openai_file_id(uploaded_file: object) -> str:
+    file_id = getattr(uploaded_file, "id", None)
+    if not file_id and isinstance(uploaded_file, dict):
+        file_id = uploaded_file.get("id")
+    if not file_id:
+        raise RuntimeError("OpenAI did not return a file id for lecture slide PDF.")
+    return str(file_id)
+
+
+async def upload_lecture_slide_source_to_openai(
+    session: AsyncSession,
+    source: models.LectureSlideSourceStoredObject,
+    *,
+    class_id: int,
+    uploader_id: int,
+    source_bytes: bytes | None = None,
+) -> models.File:
+    if source_bytes is None:
+        source_bytes = await _read_source_pdf_bytes(source.key)
+
+    openai_client = await get_openai_client_by_class_id(session, class_id)
+    uploaded_file = await openai_client.files.create(
+        file=(source.original_filename, source_bytes, source.content_type),
+        purpose="user_data",
+    )
+    file_id = _uploaded_openai_file_id(uploaded_file)
+
+    try:
+        file = await models.File.create(
+            session,
+            {
+                "file_id": file_id,
+                "private": True,
+                "uploader_id": uploader_id,
+                "name": source.original_filename,
+                "content_type": source.content_type,
+            },
+            class_id=class_id,
+        )
+        source.openai_file_object_id = file.id
+        session.add(source)
+        return file
+    except Exception:
+        await openai_client.files.delete(file_id)
+        raise
 
 
 async def lecture_slide_summary_from_model(
@@ -99,7 +156,6 @@ async def create_lecture_slide_deck(
             status_code=400,
             detail="Lecture slides must be a readable PDF file.",
         ) from exc
-
     if slide_count < 1:
         raise HTTPException(
             status_code=400,
@@ -110,6 +166,9 @@ async def create_lecture_slide_deck(
     original_filename = get_original_filename(upload, store_key)
 
     try:
+        upload.file.seek(0)
+        source_bytes = upload.file.read()
+        upload.file.seek(0)
         await config.video_store.store.put(store_key, upload.file, "application/pdf")
     except VideoStoreError as exc:
         raise HTTPException(
@@ -140,6 +199,13 @@ async def create_lecture_slide_deck(
             slide_count=slide_count,
         )
         deck.source_stored_object = stored_object
+        await upload_lecture_slide_source_to_openai(
+            session,
+            stored_object,
+            class_id=class_id,
+            uploader_id=uploader_id,
+            source_bytes=source_bytes,
+        )
         return deck
     except Exception as exc:
         try:

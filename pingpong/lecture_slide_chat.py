@@ -233,7 +233,7 @@ async def _get_latest_lecture_context_created(
 
 def _format_slide_narrations(deck: models.LectureSlideDeck) -> str:
     lines = [
-        "## Lecture Slide Narrations",
+        "### Lecture Slide Narrations",
     ]
     for page in sorted(deck.pages, key=lambda item: item.position):
         narration_text = (page.narration_text or "").strip()
@@ -251,7 +251,7 @@ def _format_slide_narrations(deck: models.LectureSlideDeck) -> str:
 
 
 def _format_all_knowledge_checks(deck: models.LectureSlideDeck) -> str:
-    lines = ["## Lecture Knowledge Checks"]
+    lines = ["### Lecture Knowledge Checks"]
     questions = sorted(deck.questions, key=lambda item: item.position)
     if not questions:
         lines.extend(["", "None."])
@@ -453,7 +453,6 @@ def _build_context_text(
 async def prepare_lecture_chat_turn(
     *,
     request: Any,
-    openai_client: Any,
     class_id: str,
     thread: models.Thread,
     user_id: int,

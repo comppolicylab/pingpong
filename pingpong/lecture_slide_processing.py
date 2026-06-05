@@ -2359,10 +2359,7 @@ async def _generate_slide_manifest_with_optional_chunks(
                 chunk=chunk,
             )
         )
-    return _merge_slide_chunk_manifests(
-        chunk_manifests,
-        total_duration_ms=total_duration_ms,
-    )
+    return _merge_slide_chunk_manifests(chunk_manifests)
 
 
 async def _generate_slide_manifest_chunks(
@@ -2512,10 +2509,7 @@ async def _generate_slide_manifest_for_window(
 
 def _merge_slide_chunk_manifests(
     chunk_manifests: list[GeneratedSlideManifest],
-    *,
-    total_duration_ms: int,
 ) -> GeneratedSlideManifest:
-    _ = total_duration_ms
     return GeneratedSlideManifest(
         questions=[
             question for manifest in chunk_manifests for question in manifest.questions
