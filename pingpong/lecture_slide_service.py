@@ -68,7 +68,7 @@ async def upload_lecture_slide_source_to_openai(
     source: models.LectureSlideSourceStoredObject,
     *,
     class_id: int,
-    uploader_id: int,
+    uploader_id: int | None,
     source_bytes: bytes | None = None,
 ) -> models.File:
     if source_bytes is None:

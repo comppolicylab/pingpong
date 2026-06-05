@@ -292,8 +292,58 @@ async def test_list_rendered_pdf_page_images_sorts_zero_padded_names(tmp_path):
     ]
 
 
+async def test_get_or_upload_openai_input_pdf_reuses_source_file(db, monkeypatch):
+    deck = await _create_class_and_deck(db)
+    async with db.async_session() as session:
+        file = await models.File.create(
+            session,
+            {
+                "file_id": "file-existing-slide-source",
+                "private": True,
+                "name": "slides.pdf",
+                "content_type": "application/pdf",
+            },
+            class_id=deck.class_id,
+        )
+        source = await session.get(
+            models.LectureSlideSourceStoredObject, deck.source_stored_object_id
+        )
+        assert source is not None
+        source.openai_file_object_id = file.id
+        run = models.LectureSlideProcessingRun(
+            lecture_slide_deck_id=deck.id,
+            lecture_slide_deck_id_snapshot=deck.id,
+            class_id=deck.class_id,
+            stage=schemas.LectureSlideProcessingStage.NARRATION_TEXT,
+            attempt_number=1,
+            status=schemas.LectureSlideProcessingRunStatus.RUNNING,
+            lease_token="lease",
+        )
+        session.add_all([source, run])
+        await session.commit()
+        run_id = run.id
+
+    async def fail_upload(*_args, **_kwargs):
+        raise AssertionError("should not upload an already linked slide source")
+
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "upload_lecture_slide_source_to_openai",
+        fail_upload,
+    )
+
+    file_id = await lecture_slide_processing._get_or_upload_openai_input_pdf(
+        run_id,
+        "lease",
+        deck.id,
+        "/missing/slides.pdf",
+    )
+
+    assert file_id == "file-existing-slide-source"
+
+
 async def test_generate_narration_text_requires_exact_slide_count(
-    db, monkeypatch, tmp_path
+    db,
 ):
     await _create_class_and_deck(db, slide_count=2)
     async with db.async_session() as session:
@@ -345,24 +395,13 @@ async def test_generate_narration_text_requires_exact_slide_count(
                 )
             )
 
-    class FakeFiles:
-        async def delete(self, file_id):
-            captured["deleted_file_id"] = file_id
-
-    fake_client = SimpleNamespace(responses=FakeResponses(), files=FakeFiles())
-    monkeypatch.setattr(
-        lecture_slide_processing,
-        "_upload_openai_input_pdf",
-        lambda _client, _path: _async_value("file-pdf"),
-    )
-    pdf_path = tmp_path / "slides.pdf"
-    pdf_path.write_bytes(b"%PDF-1.4")
+    fake_client = SimpleNamespace(responses=FakeResponses())
 
     narration_set = await lecture_slide_processing._generate_narration_text(
         run_id,
         "lease",
         1,
-        str(pdf_path),
+        "file-pdf",
         "assistant-chat-model",
         fake_client,
     )
@@ -383,11 +422,10 @@ async def test_generate_narration_text_requires_exact_slide_count(
     assert "Emphasize the setup before introducing the result." in payload
     assert "Mention this is a common exam misconception." in payload
     assert "Narration prompt" not in payload
-    assert captured["deleted_file_id"] == "file-pdf"
 
 
 async def test_generate_slide_manifest_uses_pdf_and_transcript_not_extracted_text(
-    db, monkeypatch, tmp_path
+    db,
 ):
     await _create_class_and_deck(db)
     async with db.async_session() as session:
@@ -440,29 +478,18 @@ async def test_generate_slide_manifest_uses_pdf_and_transcript_not_extracted_tex
                 )
             )
 
-    class FakeFiles:
-        async def delete(self, file_id):
-            captured["deleted_file_id"] = file_id
-
-    fake_client = SimpleNamespace(responses=FakeResponses(), files=FakeFiles())
-    monkeypatch.setattr(
-        lecture_slide_processing,
-        "_upload_openai_input_pdf",
-        lambda _client, _path: _async_value("file-pdf"),
-    )
+    fake_client = SimpleNamespace(responses=FakeResponses())
     transcript = [
         schemas.LectureVideoManifestWordV3(
             id="w1", word="transcript-token", start_offset_ms=0, end_offset_ms=500
         )
     ]
-    pdf_path = tmp_path / "slides.pdf"
-    pdf_path.write_bytes(b"%PDF-1.4")
 
     manifest = await lecture_slide_processing._generate_slide_manifest(
         run_id,
         "lease",
         1,
-        str(pdf_path),
+        "file-pdf",
         transcript,
         "assistant-chat-model",
         fake_client,
@@ -487,7 +514,6 @@ async def test_generate_slide_manifest_uses_pdf_and_transcript_not_extracted_tex
     assert "stop_offset_ms" not in instructions
     assert "continue_offset_ms" not in instructions
     assert captured["text_format"] is lecture_slide_processing.GeneratedSlideManifest
-    assert captured["deleted_file_id"] == "file-pdf"
     payload = json.dumps(captured["input"])
     assert "file-pdf" in payload
     assert "transcript-token" in payload
@@ -500,7 +526,7 @@ async def test_generate_slide_manifest_uses_pdf_and_transcript_not_extracted_tex
 
 
 async def test_generate_slide_manifest_rejects_multiple_correct_options(
-    db, monkeypatch, tmp_path
+    db,
 ):
     await _create_class_and_deck(db)
     async with db.async_session() as session:
@@ -546,30 +572,18 @@ async def test_generate_slide_manifest_rejects_multiple_correct_options(
                 )
             )
 
-    class FakeFiles:
-        async def delete(self, _file_id):
-            return None
-
-    fake_client = SimpleNamespace(responses=FakeResponses(), files=FakeFiles())
-    monkeypatch.setattr(
-        lecture_slide_processing,
-        "_upload_openai_input_pdf",
-        lambda _client, _path: _async_value("file-pdf"),
-    )
+    fake_client = SimpleNamespace(responses=FakeResponses())
     transcript = [
         schemas.LectureVideoManifestWordV3(
             id="w1", word="token", start_offset_ms=0, end_offset_ms=1000
         )
     ]
-    pdf_path = tmp_path / "slides.pdf"
-    pdf_path.write_bytes(b"%PDF-1.4")
-
     with pytest.raises(ValueError, match="exactly one correct"):
         await lecture_slide_processing._generate_slide_manifest(
             run_id,
             "lease",
             1,
-            str(pdf_path),
+            "file-pdf",
             transcript,
             "assistant-chat-model",
             fake_client,
