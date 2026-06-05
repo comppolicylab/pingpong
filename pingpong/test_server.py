@@ -1893,8 +1893,7 @@ async def test_preview_assistant_instructions_includes_lecture_video_say_contrac
     assert response.status_code == 200
     instructions_preview = response.json()["instructions_preview"]
     assert (
-        "---Formatting: Lecture Video Dual Speech/Display Blocks---"
-        in instructions_preview
+        "---Formatting: Lecture Dual Speech/Display Blocks---" in instructions_preview
     )
 
 
@@ -1922,8 +1921,7 @@ async def test_preview_assistant_instructions_for_lecture_slides_forces_latex_fo
     assert response.status_code == 200
     instructions_preview = response.json()["instructions_preview"]
     assert (
-        "---Formatting: Lecture Video Dual Speech/Display Blocks---"
-        in instructions_preview
+        "---Formatting: Lecture Dual Speech/Display Blocks---" in instructions_preview
     )
     assert "---Formatting: Mermaid---" in instructions_preview
 

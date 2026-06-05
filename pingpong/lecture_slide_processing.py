@@ -44,6 +44,7 @@ from pingpong.config import config
 from pingpong.errors import capture_exception_to_sentry, sentry
 from pingpong.elevenlabs import synthesize_elevenlabs_speech
 from pingpong.lecture_video_manifest_generation import (
+    DEFAULT_LECTURE_INSTRUCTIONS,
     DEFAULT_GENERATION_PROMPT_CONTENT,
     _augment_manifest_words_with_segment_text,
     _generation_transcript_source_text,
@@ -85,6 +86,85 @@ class SlideQuestionPauseOffsets(TypedDict):
 
 OptionalSlideQuestionPauseOffsets = SlideQuestionPauseOffsets | None
 
+
+LECTURE_SLIDES_CONTENT_SECTION = """### Context Provided
+At the start of a lecture slide chat, the learner's first question may be preceded by developer message **hidden from the learner** and titled **"## Lecture Slide Lesson Context"**. Carefully use it as the source for the generated slide narration.
+
+The structure within the "Lecture Slide Lesson Context" matches this format:
+
+-----BEGIN LECTURE SLIDE LESSON CONTEXT-----
+
+## Lecture Slide Lesson Context
+
+### Lecture Slide Narrations
+
+### Slide 1
+The generated narration for slide 1.
+
+### Slide 2
+
+The generated narration for slide 2.
+
+...
+
+-----END LECTURE SLIDE LESSON CONTEXT-----
+
+# Source PDF Slide Deck
+If available, the source PDF slide deck is attached in a user message **hidden from the learner** after the hidden developer message titled "## Lecture Slide Lesson Context" as the visual source of truth for the lecture conversation. Use it to ground answers about slide visuals, text, diagrams, equations, and layout.
+
+Each turn, the learner's question is preceded by a developer message **hidden from the learner** and titled **"## Lecture Context"**. Carefully read the entire message before answering, as it presents the latest state and history of the learning session.
+
+The structure within the "Lecture Context" matches this format:
+
+-----BEGIN LECTURE CONTEXT-----
+
+## Lecture Slide Lesson Context
+
+### Lecture Slide Narrations
+
+## Lecture Context
+- **Status:** Indicates the learner’s present activity. One of:
+    - *Viewing the lecture slides*
+    - *Answering Knowledge Check #{n}*
+    - *Just answered Knowledge Check #{n}*
+    - *Finished the lecture slides*
+- **Current offset:** How far into the video the learner is currently, in milliseconds.
+- **Furthest watched offset:** How far into the video the learner has watched so far, in milliseconds. The learner may have paused or rewound the video.
+
+### Current Knowledge Check
+If the learner is currently working on a Knowledge Check, this section lists:
+- The question text.
+- Each option, marked as (correct), (incorrect), or (unknown).
+- Feedback displayed after each choice.
+
+### Upcoming Knowledge Check
+If a Knowledge Check is approaching, this section provides:
+- When it will occur (offset).
+- The exact question and its options (with correct/incorrect/unknown labels and feedback), but **do not use, reveal, or discuss the content or answer until the student has seen it.**
+  You may reference generally that a related question is coming.
+
+### Knowledge Checks Answered
+Chronological list of previous Knowledge Check interactions, each showing:
+- When it occurred, which question was asked, and what option the student selected.
+- How each option was marked and what feedback was given.
+- Use this to reinforce prior correct answers or gently revisit mistakes.
+
+-----END LECTURE CONTEXT-----
+
+The learner's own question immediately follows this developer message.
+"""
+
+
+DEFAULT_LECTURE_SLIDE_INSTRUCTIONS = DEFAULT_LECTURE_INSTRUCTIONS.safe_substitute(
+    {
+        "lecture_type": "slides",
+        "activity_lesson": "narrating the slides",
+        "context_provided_text": LECTURE_SLIDES_CONTENT_SECTION,
+        "context_array_scope": "'Current Knowledge Check', or past 'Knowledge Checks Answered'",
+        "content_array_scope_2": "'Upcoming Knowledge Check'",
+        "notes_text": "Under no circumstances should you provide or explain information from 'Upcoming Knowledge Check' until it has actually appeared in a past Knowledge Check.",
+    }
+)
 
 DEFAULT_NARRATION_PROMPT = """You are the instructor giving a lecture from this PDF slide deck.
 
