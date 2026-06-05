@@ -680,9 +680,7 @@ async def apply_lecture_slide_question_drafts(
         for question_input in question_inputs
     )
     if not questions_are_timed:
-        await session.refresh(deck, attribute_names=["context_data"])
-        previous_context_data = deck.context_data or {}
-        context_data = dict(previous_context_data)
+        context_data = dict(deck.context_data or {})
         previous_payload = context_data.get(
             schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY
         )
@@ -841,16 +839,14 @@ async def apply_lecture_slide_question_drafts(
         changed = True
         audio_changed = True
 
-    await session.refresh(deck, attribute_names=["context_data"])
-    previous_context_data = deck.context_data or {}
-    context_data = dict(previous_context_data)
+    context_data = dict(deck.context_data or {})
     if requires_question_generation:
         context_data[schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY] = (
             manual_question_payload
         )
     else:
         context_data.pop(schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY, None)
-    if context_data != previous_context_data:
+    if context_data != (deck.context_data or {}):
         deck.context_data = context_data
         session.add(deck)
         changed = True

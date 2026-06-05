@@ -3205,6 +3205,15 @@ class LectureSlideDeck(Base):
         session.add(deck)
         await session.flush()
         await session.refresh(deck)
+        await session.refresh(
+            deck,
+            attribute_names=[
+                "generation_prompt",
+                "narration_prompt",
+                "transcript_data",
+                "context_data",
+            ],
+        )
         return deck
 
     @classmethod
@@ -3216,6 +3225,7 @@ class LectureSlideDeck(Base):
             .where(LectureSlideDeck.id == int(id_))
             .options(undefer(LectureSlideDeck.generation_prompt))
             .options(undefer(LectureSlideDeck.narration_prompt))
+            .options(undefer(LectureSlideDeck.context_data))
             .options(selectinload(LectureSlideDeck.source_stored_object))
         )
         return await session.scalar(stmt)

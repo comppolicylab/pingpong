@@ -13306,11 +13306,7 @@ async def update_assistant(
                     manual_question_payload = await lecture_slide_service.lecture_slide_deck_question_context_payload(
                         request.state["db"], target_lecture_slide_deck.id
                     )
-                await request.state["db"].refresh(
-                    target_lecture_slide_deck, attribute_names=["context_data"]
-                )
-                previous_context_data = target_lecture_slide_deck.context_data or {}
-                context_data = dict(previous_context_data)
+                context_data = dict(target_lecture_slide_deck.context_data or {})
                 if manual_question_payload:
                     context_data[schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY] = (
                         manual_question_payload
@@ -13319,7 +13315,7 @@ async def update_assistant(
                     context_data.pop(
                         schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY, None
                     )
-                if context_data != previous_context_data:
+                if context_data != (target_lecture_slide_deck.context_data or {}):
                     target_lecture_slide_deck.context_data = context_data
                     request.state["db"].add(target_lecture_slide_deck)
 

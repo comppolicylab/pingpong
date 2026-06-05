@@ -486,7 +486,7 @@ async def test_apply_lecture_slide_page_notes_deletes_replaced_narration_audio(
 
 
 @with_institution(11, "Test Institution")
-async def test_apply_lecture_slide_question_drafts_handles_unloaded_context_data(
+async def test_apply_lecture_slide_question_drafts_uses_model_loaded_context_data(
     db, institution
 ):
     async with db.async_session() as session:
@@ -522,7 +522,7 @@ async def test_apply_lecture_slide_question_drafts_handles_unloaded_context_data
     async with db.async_session() as session:
         deck = await models.LectureSlideDeck.get_by_id(session, deck_id)
         assert deck is not None
-        assert "context_data" not in deck.__dict__
+        assert "context_data" in deck.__dict__
 
         result = await lecture_slide_service.apply_lecture_slide_question_drafts(
             session,
@@ -558,6 +558,50 @@ async def test_apply_lecture_slide_question_drafts_handles_unloaded_context_data
             }
         ]
     }
+
+
+@with_institution(11, "Test Institution")
+async def test_clone_lecture_slide_deck_snapshot_returns_loaded_context_data(
+    db, institution
+):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        session.add(class_)
+        await session.flush()
+        source = await models.LectureSlideSourceStoredObject.create(
+            session,
+            key="lecture04.pdf",
+            original_filename="lecture04.pdf",
+            content_type="application/pdf",
+            content_length=128,
+        )
+        deck = await models.LectureSlideDeck.create(
+            session,
+            class_id=class_.id,
+            source_stored_object_id=source.id,
+            uploader_id=123,
+            display_name="lecture04.pdf",
+            slide_count=1,
+            voice_id="voice-test-id",
+            context_data={"manual_questions": []},
+        )
+        loaded_deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, deck.id
+        )
+        assert loaded_deck is not None
+
+        cloned_deck = await lecture_slide_service.clone_lecture_slide_deck_snapshot(
+            session, loaded_deck
+        )
+        await session.flush()
+
+    assert "context_data" in cloned_deck.__dict__
+    assert cloned_deck.context_data == {"manual_questions": []}
 
 
 @with_institution(11, "Test Institution")
