@@ -230,24 +230,6 @@
 		}
 	};
 
-	const lectureSlideQuestionToDraft = (
-		question: api.LectureSlideQuestion
-	): LectureSlideQuestionDraft => ({
-		id: question.id,
-		client_id: nextLectureSlideQuestionDraftId(),
-		mode: 'complete',
-		slide_position: question.slide_position,
-		question_text: question.question_text,
-		intro_text: question.intro_text || '',
-		options: question.options.map((option) => ({
-			id: option.id,
-			client_id: nextLectureSlideQuestionDraftId(),
-			option_text: option.option_text,
-			post_answer_text: option.post_answer_text || '',
-			correct: option.correct
-		}))
-	});
-
 	const lectureSlideQuestionInputToDraft = (
 		question: api.LectureSlideQuestionInput
 	): LectureSlideQuestionDraft => ({
@@ -266,9 +248,9 @@
 		}))
 	});
 
-	const currentLectureSlideQuestionDraftInputs = () =>
-		data.lectureSlideConfig?.question_drafts ||
-		(data.lectureSlideConfig?.questions || []).map((question) => ({
+	const currentLectureSlideQuestionDraftInputs = (lectureSlideConfig = data.lectureSlideConfig) =>
+		lectureSlideConfig?.question_drafts ||
+		(lectureSlideConfig?.questions || []).map((question) => ({
 			id: question.id,
 			mode: 'complete' as api.LectureSlideQuestionDraftMode,
 			slide_position: question.slide_position,
@@ -1223,7 +1205,9 @@
 		hasSetLectureSlidePageDrafts = true;
 	}
 	$: if (!hasSetLectureSlideQuestionDrafts && !lectureSlideConfigLoadError) {
-		hydrateLectureSlideQuestionDrafts(currentLectureSlideQuestionDraftInputs());
+		hydrateLectureSlideQuestionDrafts(
+			currentLectureSlideQuestionDraftInputs(data.lectureSlideConfig)
+		);
 	}
 	$: if (!hasSetSlideGenerationPrompt && !lectureSlideConfigLoadError) {
 		slideGenerationPrompt =
@@ -1265,7 +1249,9 @@
 		JSON.stringify(lectureSlidePageDrafts) !== currentLectureSlidePagesNormalized;
 	$: currentLectureSlideQuestionsNormalized = JSON.stringify(
 		sortLectureSlideQuestionComparables(
-			currentLectureSlideQuestionDraftInputs().map(lectureSlideQuestionInputComparable)
+			currentLectureSlideQuestionDraftInputs(data.lectureSlideConfig).map(
+				lectureSlideQuestionInputComparable
+			)
 		)
 	);
 	$: lectureSlideQuestionsNormalized = JSON.stringify(
