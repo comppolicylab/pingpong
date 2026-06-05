@@ -9153,6 +9153,11 @@ async def send_message(
                     if lecture_chat_prep is not None
                     else False
                 ),
+                include_developer_messages=(
+                    getattr(lecture_chat_prep, "include_developer_messages", False)
+                    if lecture_chat_prep is not None
+                    else False
+                ),
             )
         else:
             raise HTTPException(

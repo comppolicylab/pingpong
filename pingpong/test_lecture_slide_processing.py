@@ -434,22 +434,6 @@ async def test_generate_slide_manifest_uses_pdf_and_transcript_not_extracted_tex
                             ],
                         )
                     ],
-                    summary_checkpoints=[
-                        schemas.LectureVideoManifestSummaryCheckpointV4(
-                            end_offset_ms=1000,
-                            summary="The slide introduces the topic.",
-                        )
-                    ],
-                    moment_contexts=[
-                        schemas.LectureVideoManifestMomentContextV4(
-                            start_offset_ms=0,
-                            center_offset_ms=500,
-                            end_offset_ms=1000,
-                            before="The lesson begins.",
-                            at="The slide is being discussed.",
-                            after="The lesson continues.",
-                        )
-                    ],
                 )
             )
 
@@ -490,6 +474,8 @@ async def test_generate_slide_manifest_uses_pdf_and_transcript_not_extracted_tex
     assert "Not every slide needs a question" in instructions
     assert "A question appears between slides" in instructions
     assert "set slide_position to the zero-based slide after which" in instructions
+    assert "summary_checkpoints" not in instructions
+    assert "moment_contexts" not in instructions
     assert (
         "Each question's options array uses option_text, post_answer_text, and correct"
         in instructions
@@ -507,7 +493,7 @@ async def test_generate_slide_manifest_uses_pdf_and_transcript_not_extracted_tex
     assert "return only the schema-valid JSON object" in payload
     assert "Manifest prompt" not in payload
     assert "DO NOT SEND EXTRACTED TEXT" not in payload
-    assert [moment.center_offset_ms for moment in manifest.moment_contexts] == [0, 1000]
+    assert len(manifest.questions) == 1
 
 
 async def test_generate_slide_manifest_rejects_multiple_correct_options(
@@ -554,22 +540,6 @@ async def test_generate_slide_manifest_rejects_multiple_correct_options(
                             ],
                         )
                     ],
-                    summary_checkpoints=[
-                        schemas.LectureVideoManifestSummaryCheckpointV4(
-                            end_offset_ms=1000,
-                            summary="The slide introduces the topic.",
-                        )
-                    ],
-                    moment_contexts=[
-                        schemas.LectureVideoManifestMomentContextV4(
-                            start_offset_ms=0,
-                            center_offset_ms=0,
-                            end_offset_ms=1000,
-                            before="The lesson begins.",
-                            at="The slide is being discussed.",
-                            after="The lesson continues.",
-                        )
-                    ],
                 )
             )
 
@@ -605,20 +575,6 @@ async def test_generate_slide_manifest_rejects_multiple_correct_options(
 
 async def test_persist_slide_manifest_replaces_existing_questions(db, monkeypatch):
     await _create_class_and_deck(db)
-    captured_context: dict[str, schemas.LectureVideoManifestV4] = {}
-    original_stored_context_extras = lecture_slide_processing._stored_context_extras
-
-    def capture_stored_context_extras(
-        manifest: schemas.LectureVideoManifestV4,
-    ) -> dict[str, object]:
-        captured_context["manifest"] = manifest
-        return original_stored_context_extras(manifest)
-
-    monkeypatch.setattr(
-        lecture_slide_processing,
-        "_stored_context_extras",
-        capture_stored_context_extras,
-    )
     async with db.async_session() as session:
         first_page = models.LectureSlidePage(
             lecture_slide_deck_id=1,
@@ -694,22 +650,6 @@ async def test_persist_slide_manifest_replaces_existing_questions(db, monkeypatc
                 ],
             ),
         ],
-        summary_checkpoints=[
-            schemas.LectureVideoManifestSummaryCheckpointV4(
-                end_offset_ms=500,
-                summary="The slide introduces the new topic.",
-            )
-        ],
-        moment_contexts=[
-            schemas.LectureVideoManifestMomentContextV4(
-                start_offset_ms=0,
-                center_offset_ms=250,
-                end_offset_ms=500,
-                before="The lesson starts.",
-                at="The question appears.",
-                after="The lesson continues.",
-            )
-        ],
     )
     transcript = [
         schemas.LectureVideoManifestWordV3(
@@ -734,6 +674,7 @@ async def test_persist_slide_manifest_replaces_existing_questions(db, monkeypatc
         )
         assert deck is not None
         assert deck.context_version == 4
+        assert deck.context_data == {}
         assert deck.transcript_data is not None
         assert len(deck.questions) == 2
         assert deck.questions[0].question_text == "New question?"
@@ -756,17 +697,15 @@ async def test_persist_slide_manifest_replaces_existing_questions(db, monkeypatc
         ]
         assert deck.questions[0].correct_option is not None
         assert deck.questions[0].correct_option.option_text == "Correct"
-
-    captured_manifest = captured_context["manifest"]
-    assert [question.stop_offset_ms for question in captured_manifest.questions] == [
-        500,
-        1200,
-    ]
-    assert [
-        option.continue_offset_ms
-        for question in captured_manifest.questions
-        for option in question.options
-    ] == [500, 500, 1200, 1200]
+        assert [question.stop_offset_ms for question in deck.questions] == [
+            500,
+            1200,
+        ]
+        assert [
+            option.continue_offset_ms
+            for question in deck.questions
+            for option in question.options
+        ] == [500, 500, 1200, 1200]
 
 
 async def test_parse_responses_output_retries_transient_openai_failure(monkeypatch):
@@ -1015,22 +954,6 @@ async def test_validate_slide_manifest_skips_untimed_slide_questions():
                     ),
                 ],
             ),
-        ],
-        summary_checkpoints=[
-            schemas.LectureVideoManifestSummaryCheckpointV4(
-                end_offset_ms=2000,
-                summary="The timed slide explains the concept.",
-            )
-        ],
-        moment_contexts=[
-            schemas.LectureVideoManifestMomentContextV4(
-                start_offset_ms=1000,
-                center_offset_ms=1500,
-                end_offset_ms=2000,
-                before="The slide starts.",
-                at="The concept is visible.",
-                after="The slide ends.",
-            )
         ],
     )
     page_ranges = [

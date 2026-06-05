@@ -398,11 +398,39 @@ async def test_build_response_input_item_list_replays_developer_and_system_messa
             ],
             created=utcnow() - timedelta(minutes=2, seconds=30),
         )
-        user_message = models.Message(
+        input_file = models.File(
+            file_id="lecture-slide-pdf-file-id",
+            name="slides.pdf",
+            content_type="application/pdf",
+            private=True,
+        )
+        session.add(input_file)
+        await session.flush()
+        file_message = models.Message(
             message_status=schemas.MessageStatus.COMPLETED,
             run_id=run.id,
             thread_id=thread.id,
             output_index=4,
+            role=schemas.MessageRole.USER,
+            content=[
+                models.MessagePart(
+                    part_index=0,
+                    type=schemas.MessagePartType.INPUT_FILE,
+                    input_file_object_id=input_file.id,
+                ),
+                models.MessagePart(
+                    part_index=1,
+                    type=schemas.MessagePartType.INPUT_TEXT,
+                    text="Slide narrations",
+                ),
+            ],
+            created=utcnow() - timedelta(minutes=2, seconds=15),
+        )
+        user_message = models.Message(
+            message_status=schemas.MessageStatus.COMPLETED,
+            run_id=run.id,
+            thread_id=thread.id,
+            output_index=5,
             role=schemas.MessageRole.USER,
             content=[
                 models.MessagePart(
@@ -417,7 +445,7 @@ async def test_build_response_input_item_list_replays_developer_and_system_messa
             message_status=schemas.MessageStatus.COMPLETED,
             run_id=run.id,
             thread_id=thread.id,
-            output_index=5,
+            output_index=6,
             role=schemas.MessageRole.ASSISTANT,
             content=[
                 models.MessagePart(
@@ -434,6 +462,7 @@ async def test_build_response_input_item_list_replays_developer_and_system_messa
                 developer_message,
                 system_message,
                 hidden_image_message,
+                file_message,
                 user_message,
                 assistant_message,
             ]
@@ -450,13 +479,17 @@ async def test_build_response_input_item_list_replays_developer_and_system_messa
         "system",
         "user",
         "user",
+        "user",
         "assistant",
     ]
     assert items[0]["content"][0]["type"] == "input_text"
     assert items[1]["content"][0]["type"] == "input_text"
     assert items[2]["content"][0]["type"] == "input_image"
-    assert items[3]["content"][0]["type"] == "input_text"
-    assert items[4]["content"][0]["type"] == "output_text"
+    assert items[3]["content"][0]["type"] == "input_file"
+    assert items[3]["content"][0]["file_id"] == "lecture-slide-pdf-file-id"
+    assert items[3]["content"][1]["type"] == "input_text"
+    assert items[4]["content"][0]["type"] == "input_text"
+    assert items[5]["content"][0]["type"] == "output_text"
 
 
 @pytest.mark.asyncio
@@ -1316,14 +1349,14 @@ async def test_build_response_input_item_list_can_build_user_assistant_messages_
             message_status=schemas.MessageStatus.COMPLETED,
             run_id=prior_run.id,
             thread_id=thread.id,
-            output_index=1,
+            output_index=0,
             role=schemas.MessageRole.DEVELOPER,
             is_hidden=True,
             content=[
                 models.MessagePart(
                     part_index=0,
                     type=schemas.MessagePartType.INPUT_TEXT,
-                    text="Prior lecture context",
+                    text="Stable lesson context",
                 )
             ],
             created=utcnow() - timedelta(minutes=3),
@@ -1339,7 +1372,7 @@ async def test_build_response_input_item_list_can_build_user_assistant_messages_
                 models.MessagePart(
                     part_index=0,
                     type=schemas.MessagePartType.INPUT_TEXT,
-                    text="Current lecture context",
+                    text="Dynamic lecture context",
                 )
             ],
             created=utcnow() - timedelta(minutes=2),
@@ -1364,7 +1397,7 @@ async def test_build_response_input_item_list_can_build_user_assistant_messages_
             message_status=schemas.MessageStatus.COMPLETED,
             run_id=current_run.id,
             thread_id=thread.id,
-            output_index=4,
+            output_index=6,
             role=schemas.MessageRole.USER,
             content=[
                 models.MessagePart(
@@ -1397,9 +1430,29 @@ async def test_build_response_input_item_list_can_build_user_assistant_messages_
         )
 
     assert [item["role"] for item in items] == ["developer", "user", "user"]
-    assert items[0]["content"][0]["text"] == "Current lecture context"
+    assert items[0]["content"][0]["text"] == "Dynamic lecture context"
     assert items[1]["content"][0]["type"] == "input_image"
     assert items[2]["content"][0]["text"] == "What is happening here?"
+
+    async with db.async_session() as session:
+        items = await build_response_input_item_list(
+            session,
+            thread_id=thread_id,
+            current_run_id=current_run_id,
+            user_assistant_messages_only=True,
+            include_developer_messages=True,
+        )
+
+    assert [item["role"] for item in items] == [
+        "developer",
+        "user",
+        "developer",
+        "user",
+    ]
+    assert items[0]["content"][0]["text"] == "Stable lesson context"
+    assert items[1]["content"][0]["type"] == "input_image"
+    assert items[2]["content"][0]["text"] == "Dynamic lecture context"
+    assert items[3]["content"][0]["text"] == "What is happening here?"
 
 
 def test_get_known_response_message_phase_returns_known_phase_only():

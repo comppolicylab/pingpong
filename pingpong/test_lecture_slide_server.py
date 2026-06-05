@@ -1,10 +1,124 @@
+import io
+from types import SimpleNamespace
+
+from fastapi import UploadFile
+from pypdf import PdfWriter
 from sqlalchemy import func, select
 
 import pingpong.schemas as schemas
 from pingpong import lecture_slide_service, models
+from pingpong.models import file_class_association
 from pingpong.config import LocalAudioStoreSettings
 
 from .testutil import with_authz, with_institution, with_user
+
+
+class FakeLectureSlideStore:
+    def __init__(self):
+        self.stored_files: dict[str, bytes] = {}
+        self.deleted_keys: list[str] = []
+
+    async def put(self, key: str, file, content_type: str):
+        self.stored_files[key] = file.read()
+
+    async def delete(self, key: str):
+        self.deleted_keys.append(key)
+
+
+class FakeOpenAIFiles:
+    def __init__(self):
+        self.created_files = []
+        self.deleted_file_ids: list[str] = []
+
+    async def create(self, *, file, purpose: str):
+        self.created_files.append((file, purpose))
+        return SimpleNamespace(id=f"file-{len(self.created_files)}")
+
+    async def delete(self, file_id: str):
+        self.deleted_file_ids.append(file_id)
+
+
+def _one_page_pdf_upload(filename: str = "slides.pdf") -> tuple[UploadFile, bytes]:
+    writer = PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    pdf = io.BytesIO()
+    writer.write(pdf)
+    pdf_bytes = pdf.getvalue()
+    return (
+        UploadFile(file=io.BytesIO(pdf_bytes), filename=filename, size=len(pdf_bytes)),
+        pdf_bytes,
+    )
+
+
+@with_institution(11, "Test Institution")
+async def test_create_lecture_slide_deck_uploads_source_pdf_to_openai(
+    db, config, monkeypatch, institution
+):
+    store = FakeLectureSlideStore()
+    files = FakeOpenAIFiles()
+    monkeypatch.setattr(config, "video_store", SimpleNamespace(store=store))
+    monkeypatch.setattr(
+        lecture_slide_service,
+        "generate_source_store_key",
+        lambda: "ls_source_test.pdf",
+    )
+
+    async def fake_get_openai_client_by_class_id(session, class_id: int):
+        assert class_id == 1
+        return SimpleNamespace(files=files)
+
+    monkeypatch.setattr(
+        lecture_slide_service,
+        "get_openai_client_by_class_id",
+        fake_get_openai_client_by_class_id,
+    )
+    upload, pdf_bytes = _one_page_pdf_upload()
+
+    async with db.async_session() as session:
+        user = models.User(id=123, email="owner@example.com")
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        session.add_all([user, class_])
+        await session.flush()
+
+        deck = await lecture_slide_service.create_lecture_slide_deck(
+            session,
+            class_id=class_.id,
+            uploader_id=user.id,
+            upload=upload,
+        )
+        await session.commit()
+        source_id = deck.source_stored_object_id
+
+    assert store.stored_files == {"ls_source_test.pdf": pdf_bytes}
+    assert files.created_files == [
+        (("slides.pdf", pdf_bytes, "application/pdf"), "user_data")
+    ]
+    assert files.deleted_file_ids == []
+
+    async with db.async_session() as session:
+        source = await session.get(models.LectureSlideSourceStoredObject, source_id)
+        assert source is not None
+        assert source.openai_file_object_id is not None
+        file = await session.get(models.File, source.openai_file_object_id)
+        assert file is not None
+        assert file.file_id == "file-1"
+        assert file.name == "slides.pdf"
+        assert file.content_type == "application/pdf"
+        assert file.private is True
+        assert file.uploader_id == 123
+        class_ids = (
+            await session.execute(
+                file_class_association.select().where(
+                    file_class_association.c.file_id == file.id
+                )
+            )
+        ).mappings()
+        assert [row["class_id"] for row in class_ids] == [1]
 
 
 @with_user(123)

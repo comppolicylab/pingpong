@@ -134,6 +134,7 @@ from openai.types.responses.response_output_message_param import (
     ResponseOutputMessageParam,
 )
 from openai.types.responses.response_input_image_param import ResponseInputImageParam
+from openai.types.responses.response_input_file_param import ResponseInputFileParam
 from openai.types.responses.response_input_text_param import ResponseInputTextParam
 from openai.types.responses.response_output_message_param import (
     ResponseOutputTextParam,
@@ -647,6 +648,7 @@ async def build_response_input_item_list(
     *,
     current_run_id: int | None = None,
     user_assistant_messages_only: bool = False,
+    include_developer_messages: bool = False,
 ) -> list[ResponseInputItemParam]:
     """Build a list of ResponseInputItem from a thread run step."""
     response_input_items: list[ResponseInputItemParam] = []
@@ -706,7 +708,10 @@ async def build_response_input_item_list(
     )
     if user_assistant_messages_only and current_run_id is not None:
         messages = models.Thread.list_user_assistant_messages_with_run_developer_gen(
-            session, thread_id, current_run_id
+            session,
+            thread_id,
+            current_run_id,
+            include_developer_messages=include_developer_messages,
         )
     else:
         messages = models.Thread.list_all_messages_gen(
@@ -725,6 +730,15 @@ async def build_response_input_item_list(
                     content_list.append(
                         ResponseInputImageParam(
                             file_id=content.input_image_file_id, type="input_image"
+                        )
+                    )
+                case MessagePartType.INPUT_FILE:
+                    if content.input_file is None:
+                        continue
+                    content_list.append(
+                        ResponseInputFileParam(
+                            file_id=content.input_file.file_id,
+                            type="input_file",
                         )
                     )
                 case MessagePartType.OUTPUT_TEXT:
@@ -1081,15 +1095,14 @@ async def build_response_input_item_list(
         if (
             user_assistant_messages_only
             and current_run_id is not None
+            and not include_developer_messages
             and item_type == "message"
             and item.get("role") == MessageRole.DEVELOPER
         ):
             return (0, 0, created)
         return (1, output_index, created)
 
-    # Sort by output index, falling back to created time for ties. Lecture-video
-    # runs that filter history explicitly prepend the current run developer
-    # context without encoding that ordering into messages.output_index.
+    # Sort by output index, falling back to created time for ties.
     response_input_items_with_time.sort(key=input_item_sort_key)
 
     def convert_to_message(
@@ -3693,6 +3706,7 @@ async def run_response(
     tts_api_key: str | None = None,
     tts_voice_settings: Mapping[str, Any] | None = None,
     user_assistant_messages_only: bool = False,
+    include_developer_messages: bool = False,
     lecture_video_dual_text_mode: bool = False,
     lecture_video_followups_mode: bool = False,
 ):
@@ -3743,6 +3757,7 @@ async def run_response(
                     uses_reasoning=not isinstance(reasoning_settings, openai.NotGiven),
                     current_run_id=run.id,
                     user_assistant_messages_only=user_assistant_messages_only,
+                    include_developer_messages=include_developer_messages,
                 )
                 max_output_index = await models.Thread.get_max_output_sequence(
                     session_, run.thread_id
