@@ -3030,8 +3030,7 @@ async def _parse_responses_output(
                 instructions=instructions,
                 input=input_messages,
                 text_format=response_model,
-                reasoning=Reasoning(effort="high", summary=None),
-                service_tier="priority",
+                reasoning=Reasoning(effort="medium", summary=None),
                 store=False,
             )
             if response.output_parsed is None:
