@@ -441,6 +441,72 @@ async def test_get_or_upload_openai_input_pdf_uploads_when_source_has_no_file(
         assert source.openai_file_object_id == captured["file_object_id"]
 
 
+async def test_get_or_upload_openai_input_pdf_warns_on_dangling_source_file(
+    db, monkeypatch, tmp_path, caplog
+):
+    deck = await _create_class_and_deck(db)
+    pdf_path = tmp_path / "slides.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4")
+    async with db.async_session() as session:
+        source = await session.get(
+            models.LectureSlideSourceStoredObject, deck.source_stored_object_id
+        )
+        assert source is not None
+        source.openai_file_object_id = 999
+        run = models.LectureSlideProcessingRun(
+            lecture_slide_deck_id=deck.id,
+            lecture_slide_deck_id_snapshot=deck.id,
+            class_id=deck.class_id,
+            stage=schemas.LectureSlideProcessingStage.NARRATION_TEXT,
+            attempt_number=1,
+            status=schemas.LectureSlideProcessingRunStatus.RUNNING,
+            lease_token="lease",
+        )
+        session.add_all([source, run])
+        await session.commit()
+        run_id = run.id
+
+    async def fake_upload(
+        session,
+        source,
+        *,
+        class_id,
+        uploader_id,
+        source_bytes,
+    ):
+        file = await models.File.create(
+            session,
+            {
+                "file_id": "file-recovered-slide-source",
+                "private": True,
+                "uploader_id": uploader_id,
+                "name": source.original_filename,
+                "content_type": source.content_type,
+            },
+            class_id=class_id,
+        )
+        source.openai_file_object_id = file.id
+        session.add(source)
+        return file
+
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "upload_lecture_slide_source_to_openai",
+        fake_upload,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        file_id = await lecture_slide_processing._get_or_upload_openai_input_pdf(
+            run_id,
+            "lease",
+            deck.id,
+            str(pdf_path),
+        )
+
+    assert file_id == "file-recovered-slide-source"
+    assert "stale OpenAI file object pointer" in caplog.text
+
+
 async def test_get_or_upload_openai_input_pdf_reuploads_stale_openai_file(
     db, monkeypatch, tmp_path, caplog
 ):
