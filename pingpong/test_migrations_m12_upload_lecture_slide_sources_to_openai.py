@@ -267,7 +267,6 @@ async def test_upload_lecture_slide_sources_to_openai_does_not_bump_without_uplo
         old_deck_id = deck.id
         thread_id = thread.id
         assistant_id = assistant.id
-        file_object_id = file.id
 
     async with db.async_session() as session:
         result = await migration.upload_lecture_slide_sources_to_openai(session)

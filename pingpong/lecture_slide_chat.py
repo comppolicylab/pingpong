@@ -250,31 +250,11 @@ def _format_slide_narrations(deck: models.LectureSlideDeck) -> str:
     return "\n".join(lines)
 
 
-def _format_all_knowledge_checks(deck: models.LectureSlideDeck) -> str:
-    lines = ["### Lecture Knowledge Checks"]
-    questions = sorted(deck.questions, key=lambda item: item.position)
-    if not questions:
-        lines.extend(["", "None."])
-        return "\n".join(lines)
-    for question in questions:
-        lines.extend(
-            [
-                "",
-                _format_knowledge_check_prompt(
-                    question,
-                    prefix=f"At {question.stop_offset_ms}ms:",
-                ),
-            ]
-        )
-    return "\n".join(lines)
-
-
 def _format_initial_lecture_developer_context(deck: models.LectureSlideDeck) -> str:
     return "\n\n".join(
         [
             "## Lecture Slide Lesson Context",
             _format_slide_narrations(deck),
-            _format_all_knowledge_checks(deck),
         ]
     )
 
