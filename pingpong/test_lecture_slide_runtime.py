@@ -885,10 +885,10 @@ async def test_prepare_lecture_slide_chat_turn_uses_video_context_shape(
     assert lesson_context_message.role == schemas.MessageRole.DEVELOPER
     assert "## Lecture Slide Narrations" in lesson_context_text
     assert "This slide introduces the core idea." in lesson_context_text
-    assert "## Lecture Knowledge Checks" in lesson_context_text
-    assert "What is shown on this slide?" in lesson_context_text
-    assert "What comes next?" in lesson_context_text
-    assert "A clear example" in lesson_context_text
+    assert "## Lecture Knowledge Checks" not in lesson_context_text
+    assert "What is shown on this slide?" not in lesson_context_text
+    assert "What comes next?" not in lesson_context_text
+    assert "A clear example" not in lesson_context_text
     assert file_message.is_hidden is True
     assert file_message.role == schemas.MessageRole.USER
     assert file_message.content[0].type == schemas.MessagePartType.INPUT_FILE
