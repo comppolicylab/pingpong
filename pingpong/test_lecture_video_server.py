@@ -1238,7 +1238,7 @@ async def test_get_thread_returns_lecture_video_session(
     data = response.json()
     assert data["instructions"] is not None
     assert data["instructions"].startswith("You are a lecture assistant.")
-    assert "---Formatting: Lecture Video Follow-ups---" in data["instructions"]
+    assert "---Formatting: Lecture Follow-ups---" in data["instructions"]
     session_data = data["lecture_video_session"]
     assert session_data["state"] == "playing"
     assert session_data["last_known_offset_ms"] == 0

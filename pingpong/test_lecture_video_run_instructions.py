@@ -68,9 +68,9 @@ async def test_build_run_instructions_for_lecture_video_with_latex_includes_say_
     assert instructions is not None
     assert "Stored lecture snapshot." in instructions
     assert "Updated assistant instructions." not in instructions
-    assert "---Formatting: Lecture Video Dual Speech/Display Blocks---" in instructions
+    assert "---Formatting: Lecture Dual Speech/Display Blocks---" in instructions
     assert "---Formatting: LaTeX---" not in instructions
-    assert "---Formatting: Lecture Video Follow-ups---" in instructions
+    assert "---Formatting: Lecture Follow-ups---" in instructions
 
 
 async def test_build_run_instructions_for_lecture_video_forces_latex_and_say_contract(
@@ -89,9 +89,9 @@ async def test_build_run_instructions_for_lecture_video_forces_latex_and_say_con
     assert instructions is not None
     assert "Stored lecture snapshot." in instructions
     assert "Updated assistant instructions." not in instructions
-    assert "---Formatting: Lecture Video Dual Speech/Display Blocks---" in instructions
+    assert "---Formatting: Lecture Dual Speech/Display Blocks---" in instructions
     assert "---Formatting: LaTeX---" not in instructions
-    assert "---Formatting: Lecture Video Follow-ups---" in instructions
+    assert "---Formatting: Lecture Follow-ups---" in instructions
 
 
 async def test_build_run_instructions_for_lecture_video_normalizes_missing_thread_snapshot(
@@ -109,8 +109,8 @@ async def test_build_run_instructions_for_lecture_video_normalizes_missing_threa
 
     assert instructions is not None
     assert "Assistant fallback instructions." in instructions
-    assert "---Formatting: Lecture Video Dual Speech/Display Blocks---" in instructions
-    assert "---Formatting: Lecture Video Follow-ups---" in instructions
+    assert "---Formatting: Lecture Dual Speech/Display Blocks---" in instructions
+    assert "---Formatting: Lecture Follow-ups---" in instructions
 
 
 async def test_build_run_instructions_for_lecture_slides_uses_lecture_formatting(
@@ -129,8 +129,8 @@ async def test_build_run_instructions_for_lecture_slides_uses_lecture_formatting
     assert instructions is not None
     assert "Stored slide snapshot." in instructions
     assert "Updated assistant instructions." not in instructions
-    assert "---Formatting: Lecture Video Dual Speech/Display Blocks---" in instructions
-    assert "---Formatting: Lecture Video Follow-ups---" in instructions
+    assert "---Formatting: Lecture Dual Speech/Display Blocks---" in instructions
+    assert "---Formatting: Lecture Follow-ups---" in instructions
 
 
 async def test_lecture_slides_enable_dual_text_and_followups():

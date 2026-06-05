@@ -4821,7 +4821,7 @@ def format_instructions(
         if lecture_video_mode:
             instructions += (
                 "\n\n"
-                "---Formatting: Lecture Video Dual Speech/Display Blocks---\n"
+                "---Formatting: Lecture Dual Speech/Display Blocks---\n"
                 "Before producing the final answer, check whether any part of it "
                 "contains math, symbols, formulas, special characters, "
                 "notation, or any text that should be spoken differently from "
@@ -5013,7 +5013,7 @@ def format_instructions(
     if lecture_video_mode:
         instructions += (
             "\n\n"
-            "---Formatting: Lecture Video Follow-ups---\n"
+            "---Formatting: Lecture Follow-ups---\n"
             "At the very end of your final answer, you may emit follow-up "
             "responses that the student can select to continue the chat. Three "
             "is the maximum, not a target. Return 0, 1, 2, or 3 responses "

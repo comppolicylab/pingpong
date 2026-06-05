@@ -39,6 +39,7 @@ async function ensureModels(
 		instructions: string;
 		generation_prompt: string;
 		can_generate_manifest: boolean;
+		lecture_slides_instructions: string;
 		lecture_slide_generation_prompt: string;
 		lecture_slide_narration_prompt: string;
 	} | null;

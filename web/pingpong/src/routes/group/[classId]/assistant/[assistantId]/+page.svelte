@@ -89,6 +89,7 @@
 		data.lectureVideoDefaults?.lecture_slide_generation_prompt || '';
 	$: lectureSlideDefaultNarrationPrompt =
 		data.lectureVideoDefaults?.lecture_slide_narration_prompt || '';
+	$: lectureSlideDefaultInstructions = data.lectureVideoDefaults?.lecture_slides_instructions || '';
 	const SUPPORTED_LECTURE_VIDEO_QUESTION_TYPES = new Set<api.LectureVideoQuestionType>([
 		'single_select'
 	]);
@@ -1899,7 +1900,9 @@
 			instructions = assistant.instructions;
 			hasSetInstructions = true;
 		} else if ((mode === 'lecture_video' || mode === 'lecture_slides') && data.isCreating) {
-			instructions = lectureVideoDefaultInstructions;
+			instructions = isLectureVideoMode
+				? lectureVideoDefaultInstructions
+				: lectureSlideDefaultInstructions;
 			hasSetInstructions = true;
 		} else {
 			await tick();
@@ -2189,7 +2192,9 @@
 			data.isCreating &&
 			isLectureMode &&
 			normalizeNewlines(params.instructions || '') ===
-				normalizeNewlines(lectureVideoDefaultInstructions)
+				normalizeNewlines(
+					isLectureVideoMode ? lectureVideoDefaultInstructions : lectureSlideDefaultInstructions
+				)
 		) {
 			fields = fields.filter((field) => field !== 'instructions');
 		}
@@ -4587,8 +4592,14 @@
 						{#if isLectureMode}
 							{@const haveInstructionsChanged =
 								normalizeNewlines(instructions) !==
-									normalizeNewlines(lectureVideoDefaultInstructions) &&
-								!!lectureVideoDefaultInstructions}
+									normalizeNewlines(
+										isLectureVideoMode
+											? lectureVideoDefaultInstructions
+											: lectureSlideDefaultInstructions
+									) &&
+								!!(isLectureVideoMode
+									? lectureVideoDefaultInstructions
+									: lectureSlideDefaultInstructions)}
 							<div class="col-span-2 mb-1">
 								<div class="flex flex-row items-end justify-between">
 									<div>
@@ -4617,7 +4628,9 @@
 												uploadingFSPrivate ||
 												uploadingCIPrivate}
 											onclick={() => {
-												instructions = lectureVideoDefaultInstructions;
+												instructions = isLectureVideoMode
+													? lectureVideoDefaultInstructions
+													: lectureSlideDefaultInstructions;
 											}}>Switch to latest default</button
 										>
 										<Button

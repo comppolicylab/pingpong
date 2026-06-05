@@ -40,7 +40,7 @@ def test_format_instructions_adds_block_contract_for_lecture_video_latex_only():
         lecture_video_mode=True,
     )
 
-    assert "---Formatting: Lecture Video Dual Speech/Display Blocks---" in instructions
+    assert "---Formatting: Lecture Dual Speech/Display Blocks---" in instructions
     assert "---Formatting: LaTeX---" not in instructions
     assert "MUST emit that part as a private-use block" in instructions
     assert "JSON object with at least one of `speech` or `content`" in instructions
@@ -84,7 +84,7 @@ def test_format_instructions_adds_block_contract_for_lecture_video_latex_only():
     ) in instructions
     assert "A block may not contain another block" in instructions
     assert "Do not place blocks inside markdown links" in instructions
-    assert "---Formatting: Lecture Video Follow-ups---" in instructions
+    assert "---Formatting: Lecture Follow-ups---" in instructions
     assert f"{SAY_MARKER_START}followups{SAY_MARKER_SEPARATOR}" in instructions
     assert '"responses"' in instructions
 
@@ -97,10 +97,8 @@ def test_format_instructions_does_not_add_block_contract_for_normal_latex_chat()
     )
 
     assert "---Formatting: LaTeX---" in instructions
-    assert (
-        "---Formatting: Lecture Video Dual Speech/Display Blocks---" not in instructions
-    )
-    assert "---Formatting: Lecture Video Follow-ups---" not in instructions
+    assert "---Formatting: Lecture Dual Speech/Display Blocks---" not in instructions
+    assert "---Formatting: Lecture Follow-ups---" not in instructions
 
 
 def test_format_instructions_does_not_add_block_contract_without_latex():
@@ -111,10 +109,8 @@ def test_format_instructions_does_not_add_block_contract_without_latex():
     )
 
     assert "---Formatting: LaTeX---" not in instructions
-    assert (
-        "---Formatting: Lecture Video Dual Speech/Display Blocks---" not in instructions
-    )
-    assert "---Formatting: Lecture Video Follow-ups---" in instructions
+    assert "---Formatting: Lecture Dual Speech/Display Blocks---" not in instructions
+    assert "---Formatting: Lecture Follow-ups---" in instructions
 
 
 def test_transform_returns_body_for_display():

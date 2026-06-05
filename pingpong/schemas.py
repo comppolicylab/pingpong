@@ -1147,6 +1147,7 @@ class LectureVideoDefaults(BaseModel):
     instructions: str
     generation_prompt: str
     can_generate_manifest: bool = False
+    lecture_slides_instructions: str
     lecture_slide_generation_prompt: str
     lecture_slide_narration_prompt: str
 
