@@ -50,7 +50,9 @@ async def upload_lecture_slide_sources_to_openai(
     session: AsyncSession,
 ) -> UploadLectureSlideSourcesToOpenAIResult:
     if config.video_store:
-        uploaded, skipped, failed = await _upload_unlinked_sources(session)
+        uploaded, skipped, failed, uploaded_source_ids = await _upload_unlinked_sources(
+            session
+        )
     else:
         logger.warning(
             "No video store configured; skipping lecture slide source OpenAI upload."
@@ -58,8 +60,12 @@ async def upload_lecture_slide_sources_to_openai(
         uploaded = 0
         skipped = 0
         failed = 0
+        uploaded_source_ids = set()
 
-    version_bumped = await _bump_lecture_slide_decks_for_existing_threads(session)
+    version_bumped = await _bump_lecture_slide_decks_for_existing_threads(
+        session,
+        uploaded_source_ids,
+    )
 
     return UploadLectureSlideSourcesToOpenAIResult(
         uploaded=uploaded,
@@ -69,10 +75,13 @@ async def upload_lecture_slide_sources_to_openai(
     )
 
 
-async def _upload_unlinked_sources(session: AsyncSession) -> tuple[int, int, int]:
+async def _upload_unlinked_sources(
+    session: AsyncSession,
+) -> tuple[int, int, int, set[int]]:
     uploaded = 0
     skipped = 0
     failed = 0
+    uploaded_source_ids: set[int] = set()
     last_processed_id = 0
 
     while True:
@@ -138,6 +147,7 @@ async def _upload_unlinked_sources(session: AsyncSession) -> tuple[int, int, int
                 skipped += 1
             else:
                 uploaded += 1
+                uploaded_source_ids.add(source_id)
                 logger.info(
                     "Uploaded lecture slide source to OpenAI. source_id=%s key=%s file_id=%s",
                     source.id,
@@ -155,12 +165,19 @@ async def _upload_unlinked_sources(session: AsyncSession) -> tuple[int, int, int
         skipped,
         failed,
     )
-    return uploaded, skipped, failed
+    return uploaded, skipped, failed, uploaded_source_ids
 
 
 async def _bump_lecture_slide_decks_for_existing_threads(
     session: AsyncSession,
+    uploaded_source_ids: set[int],
 ) -> int:
+    if not uploaded_source_ids:
+        logger.info(
+            "Finished bumping lecture slide deck versions for existing threads. version_bumped=0"
+        )
+        return 0
+
     assistant_deck_rows = (
         await session.execute(
             select(models.Assistant.id, models.Assistant.lecture_slide_deck_id)
@@ -173,10 +190,17 @@ async def _bump_lecture_slide_decks_for_existing_threads(
                 ),
             )
             .join(models.Message, models.Message.thread_id == models.Thread.id)
+            .join(
+                models.LectureSlideDeck,
+                models.LectureSlideDeck.id == models.Assistant.lecture_slide_deck_id,
+            )
             .where(
                 models.Assistant.interaction_mode
                 == schemas.InteractionMode.LECTURE_SLIDES,
                 models.Assistant.lecture_slide_deck_id.is_not(None),
+                models.LectureSlideDeck.source_stored_object_id.in_(
+                    uploaded_source_ids
+                ),
             )
             .distinct()
             .order_by(models.Assistant.id.asc())
