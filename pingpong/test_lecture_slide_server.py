@@ -486,6 +486,125 @@ async def test_apply_lecture_slide_page_notes_deletes_replaced_narration_audio(
 
 
 @with_institution(11, "Test Institution")
+async def test_apply_lecture_slide_question_drafts_uses_model_loaded_context_data(
+    db, institution
+):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        session.add(class_)
+        await session.flush()
+        source = await models.LectureSlideSourceStoredObject.create(
+            session,
+            key="lecture04.pdf",
+            original_filename="lecture04.pdf",
+            content_type="application/pdf",
+            content_length=128,
+        )
+        deck = await models.LectureSlideDeck.create(
+            session,
+            class_id=class_.id,
+            source_stored_object_id=source.id,
+            uploader_id=123,
+            display_name="lecture04.pdf",
+            slide_count=1,
+            voice_id="voice-test-id",
+        )
+        session.add(models.LectureSlidePage(lecture_slide_deck_id=deck.id, position=0))
+        await session.commit()
+        deck_id = deck.id
+        class_id = class_.id
+
+    async with db.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id(session, deck_id)
+        assert deck is not None
+        assert "context_data" in deck.__dict__
+
+        result = await lecture_slide_service.apply_lecture_slide_question_drafts(
+            session,
+            deck,
+            [
+                schemas.LectureSlideQuestionInput(
+                    mode=schemas.LectureSlideQuestionDraftMode.PARTIAL,
+                    slide_position=0,
+                    question_text="Ask about the main point.",
+                    options=[],
+                )
+            ],
+        )
+        await session.commit()
+
+    async with db.async_session() as session:
+        refreshed_deck = await models.LectureSlideDeck.get_by_id_for_class(
+            session, deck_id, class_id
+        )
+
+    assert result.requires_question_generation is True
+    assert result.questions_changed is True
+    assert refreshed_deck is not None
+    assert refreshed_deck.context_data == {
+        schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY: [
+            {
+                "id": None,
+                "mode": schemas.LectureSlideQuestionDraftMode.PARTIAL.value,
+                "slide_position": 0,
+                "question_text": "Ask about the main point.",
+                "intro_text": "",
+                "options": [],
+            }
+        ]
+    }
+
+
+@with_institution(11, "Test Institution")
+async def test_clone_lecture_slide_deck_snapshot_returns_loaded_context_data(
+    db, institution
+):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        session.add(class_)
+        await session.flush()
+        source = await models.LectureSlideSourceStoredObject.create(
+            session,
+            key="lecture04.pdf",
+            original_filename="lecture04.pdf",
+            content_type="application/pdf",
+            content_length=128,
+        )
+        deck = await models.LectureSlideDeck.create(
+            session,
+            class_id=class_.id,
+            source_stored_object_id=source.id,
+            uploader_id=123,
+            display_name="lecture04.pdf",
+            slide_count=1,
+            voice_id="voice-test-id",
+            context_data={"manual_questions": []},
+        )
+        loaded_deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, deck.id
+        )
+        assert loaded_deck is not None
+
+        cloned_deck = await lecture_slide_service.clone_lecture_slide_deck_snapshot(
+            session, loaded_deck
+        )
+        await session.flush()
+
+    assert "context_data" in cloned_deck.__dict__
+    assert cloned_deck.context_data == {"manual_questions": []}
+
+
+@with_institution(11, "Test Institution")
 async def test_clear_lecture_slide_page_narrations_deletes_unused_audio(
     db, institution, config, monkeypatch, tmp_path
 ):
