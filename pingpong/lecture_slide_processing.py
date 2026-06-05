@@ -1581,6 +1581,16 @@ async def _get_or_upload_openai_input_pdf(
     deck_id: int,
     pdf_path: str,
 ) -> str | None:
+    async def _openai_file_exists(
+        session: AsyncSession, class_id: int, file_id: str
+    ) -> bool:
+        openai_client = await get_openai_client_by_class_id(session, class_id)
+        try:
+            await openai_client.files.retrieve(file_id)
+        except openai.NotFoundError:
+            return False
+        return True
+
     async def _resolve() -> str | None:
         async with config.db.driver.async_session() as session:
             deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
@@ -1603,8 +1613,28 @@ async def _get_or_upload_openai_input_pdf(
                 file = await models.File.get_by_id(
                     session, source.openai_file_object_id
                 )
-                if file is not None and file.file_id:
-                    return str(file.file_id)
+                if file is None or not file.file_id:
+                    logger.warning(
+                        "Lecture slide source has stale OpenAI file object pointer. "
+                        "deck_id=%s source_id=%s file_object_id=%s has_file=%s",
+                        deck.id,
+                        source.id,
+                        source.openai_file_object_id,
+                        file is not None,
+                    )
+                else:
+                    file_id = str(file.file_id)
+                    if await _openai_file_exists(session, deck.class_id, file_id):
+                        return file_id
+                    logger.warning(
+                        "Cached lecture slide OpenAI file is missing upstream; "
+                        "re-uploading source PDF. deck_id=%s source_id=%s file_id=%s",
+                        deck.id,
+                        source.id,
+                        file_id,
+                    )
+                    source.openai_file_object_id = None
+                    session.add(source)
 
             source_bytes = await asyncio.to_thread(Path(pdf_path).read_bytes)
             file = await upload_lecture_slide_source_to_openai(

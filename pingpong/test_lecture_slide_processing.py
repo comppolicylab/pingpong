@@ -1,8 +1,12 @@
+import asyncio
 import json
+import logging
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
+import openai
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -45,6 +49,16 @@ def _minimal_pdf(text: str) -> bytes:
         f"startxref\n{xref_offset}\n%%EOF\n".encode("ascii")
     )
     return bytes(output)
+
+
+def _openai_not_found_error(file_id: str) -> openai.NotFoundError:
+    request = httpx.Request("GET", f"https://api.openai.com/v1/files/{file_id}")
+    response = httpx.Response(404, request=request)
+    return openai.NotFoundError(
+        f"No file found with id '{file_id}'.",
+        response=response,
+        body={"error": {"message": "not found"}},
+    )
 
 
 def _deck(
@@ -294,6 +308,7 @@ async def test_list_rendered_pdf_page_images_sorts_zero_padded_names(tmp_path):
 
 async def test_get_or_upload_openai_input_pdf_reuses_source_file(db, monkeypatch):
     deck = await _create_class_and_deck(db)
+    retrieved_file_ids: list[str] = []
     async with db.async_session() as session:
         file = await models.File.create(
             session,
@@ -326,10 +341,20 @@ async def test_get_or_upload_openai_input_pdf_reuses_source_file(db, monkeypatch
     async def fail_upload(*_args, **_kwargs):
         raise AssertionError("should not upload an already linked slide source")
 
+    class FakeFiles:
+        async def retrieve(self, file_id):
+            retrieved_file_ids.append(file_id)
+            return SimpleNamespace(id=file_id)
+
     monkeypatch.setattr(
         lecture_slide_processing,
         "upload_lecture_slide_source_to_openai",
         fail_upload,
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "get_openai_client_by_class_id",
+        lambda _session, _class_id: _async_value(SimpleNamespace(files=FakeFiles())),
     )
 
     file_id = await lecture_slide_processing._get_or_upload_openai_input_pdf(
@@ -340,6 +365,211 @@ async def test_get_or_upload_openai_input_pdf_reuses_source_file(db, monkeypatch
     )
 
     assert file_id == "file-existing-slide-source"
+    assert retrieved_file_ids == ["file-existing-slide-source"]
+
+
+async def test_get_or_upload_openai_input_pdf_uploads_when_source_has_no_file(
+    db, monkeypatch, tmp_path
+):
+    deck = await _create_class_and_deck(db)
+    pdf_path = tmp_path / "slides.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4")
+    captured: dict[str, object] = {}
+    async with db.async_session() as session:
+        run = models.LectureSlideProcessingRun(
+            lecture_slide_deck_id=deck.id,
+            lecture_slide_deck_id_snapshot=deck.id,
+            class_id=deck.class_id,
+            stage=schemas.LectureSlideProcessingStage.NARRATION_TEXT,
+            attempt_number=1,
+            status=schemas.LectureSlideProcessingRunStatus.RUNNING,
+            lease_token="lease",
+        )
+        session.add(run)
+        await session.commit()
+        run_id = run.id
+
+    async def fake_upload(
+        session,
+        source,
+        *,
+        class_id,
+        uploader_id,
+        source_bytes,
+    ):
+        captured["class_id"] = class_id
+        captured["uploader_id"] = uploader_id
+        captured["source_bytes"] = source_bytes
+        file = await models.File.create(
+            session,
+            {
+                "file_id": "file-uploaded-slide-source",
+                "private": True,
+                "uploader_id": uploader_id,
+                "name": source.original_filename,
+                "content_type": source.content_type,
+            },
+            class_id=class_id,
+        )
+        source.openai_file_object_id = file.id
+        session.add(source)
+        captured["file_object_id"] = file.id
+        return file
+
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "upload_lecture_slide_source_to_openai",
+        fake_upload,
+    )
+
+    file_id = await lecture_slide_processing._get_or_upload_openai_input_pdf(
+        run_id,
+        "lease",
+        deck.id,
+        str(pdf_path),
+    )
+
+    assert file_id == "file-uploaded-slide-source"
+    assert captured["class_id"] == deck.class_id
+    assert captured["uploader_id"] is None
+    assert captured["source_bytes"] == b"%PDF-1.4"
+    async with db.async_session() as session:
+        source = await session.get(
+            models.LectureSlideSourceStoredObject, deck.source_stored_object_id
+        )
+        assert source is not None
+        assert source.openai_file_object_id == captured["file_object_id"]
+
+
+async def test_get_or_upload_openai_input_pdf_reuploads_stale_openai_file(
+    db, monkeypatch, tmp_path, caplog
+):
+    deck = await _create_class_and_deck(db)
+    pdf_path = tmp_path / "slides.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4")
+    async with db.async_session() as session:
+        old_file = await models.File.create(
+            session,
+            {
+                "file_id": "file-stale-slide-source",
+                "private": True,
+                "name": "slides.pdf",
+                "content_type": "application/pdf",
+            },
+            class_id=deck.class_id,
+        )
+        source = await session.get(
+            models.LectureSlideSourceStoredObject, deck.source_stored_object_id
+        )
+        assert source is not None
+        source.openai_file_object_id = old_file.id
+        run = models.LectureSlideProcessingRun(
+            lecture_slide_deck_id=deck.id,
+            lecture_slide_deck_id_snapshot=deck.id,
+            class_id=deck.class_id,
+            stage=schemas.LectureSlideProcessingStage.NARRATION_TEXT,
+            attempt_number=1,
+            status=schemas.LectureSlideProcessingRunStatus.RUNNING,
+            lease_token="lease",
+        )
+        session.add_all([source, run])
+        await session.commit()
+        run_id = run.id
+
+    class FakeFiles:
+        async def retrieve(self, file_id):
+            raise _openai_not_found_error(file_id)
+
+    async def fake_upload(
+        session,
+        source,
+        *,
+        class_id,
+        uploader_id,
+        source_bytes,
+    ):
+        file = await models.File.create(
+            session,
+            {
+                "file_id": "file-new-slide-source",
+                "private": True,
+                "uploader_id": uploader_id,
+                "name": source.original_filename,
+                "content_type": source.content_type,
+            },
+            class_id=class_id,
+        )
+        source.openai_file_object_id = file.id
+        session.add(source)
+        return file
+
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "get_openai_client_by_class_id",
+        lambda _session, _class_id: _async_value(SimpleNamespace(files=FakeFiles())),
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "upload_lecture_slide_source_to_openai",
+        fake_upload,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        file_id = await lecture_slide_processing._get_or_upload_openai_input_pdf(
+            run_id,
+            "lease",
+            deck.id,
+            str(pdf_path),
+        )
+
+    assert file_id == "file-new-slide-source"
+    assert "missing upstream" in caplog.text
+    async with db.async_session() as session:
+        source = await session.get(
+            models.LectureSlideSourceStoredObject, deck.source_stored_object_id
+        )
+        assert source is not None
+        assert source.openai_file_object_id != old_file.id
+
+
+async def test_upload_lecture_slide_source_to_openai_cleans_up_on_cancellation(
+    db, monkeypatch
+):
+    deck = await _create_class_and_deck(db)
+    deleted_file_ids: list[str] = []
+
+    class FakeFiles:
+        async def create(self, **_kwargs):
+            return SimpleNamespace(id="file-cancelled-upload")
+
+        async def delete(self, file_id):
+            deleted_file_ids.append(file_id)
+
+    async def fail_file_create(*_args, **_kwargs):
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(
+        lecture_slide_service,
+        "get_openai_client_by_class_id",
+        lambda _session, _class_id: _async_value(SimpleNamespace(files=FakeFiles())),
+    )
+    monkeypatch.setattr(lecture_slide_service.models.File, "create", fail_file_create)
+
+    async with db.async_session() as session:
+        source = await session.get(
+            models.LectureSlideSourceStoredObject, deck.source_stored_object_id
+        )
+        assert source is not None
+        with pytest.raises(asyncio.CancelledError):
+            await lecture_slide_service.upload_lecture_slide_source_to_openai(
+                session,
+                source,
+                class_id=deck.class_id,
+                uploader_id=None,
+                source_bytes=b"%PDF-1.4",
+            )
+
+    assert deleted_file_ids == ["file-cancelled-upload"]
 
 
 async def test_generate_narration_text_requires_exact_slide_count(
