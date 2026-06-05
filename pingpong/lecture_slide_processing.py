@@ -54,6 +54,7 @@ from pingpong.lecture_video_service import (
     TRANSCRIPT_DATA_VERSION,
     lecture_video_words_to_webvtt,
 )
+from pingpong.lecture_slide_service import upload_lecture_slide_source_to_openai
 from pingpong.now import utcnow
 from pingpong.worker_pool import (
     DEFAULT_WORKER_POLL_INTERVAL_SECONDS,
@@ -1090,6 +1091,7 @@ async def _process_claimed_slide_run(run_id: int, lease_token: str) -> None:
                     )
 
             transcript: list[schemas.LectureVideoManifestWordV3] | None = None
+            openai_input_file_id: str | None = None
 
             if (
                 start_stage
@@ -1112,6 +1114,11 @@ async def _process_claimed_slide_run(run_id: int, lease_token: str) -> None:
                 assert pdf_path is not None
                 assert openai_client is not None
                 assert responses_model is not None
+                openai_input_file_id = await _get_or_upload_openai_input_pdf(
+                    run_id, lease_token, deck_id, pdf_path
+                )
+                if openai_input_file_id is None:
+                    return
                 await _set_run_stage(
                     run_id,
                     lease_token,
@@ -1121,7 +1128,7 @@ async def _process_claimed_slide_run(run_id: int, lease_token: str) -> None:
                     run_id,
                     lease_token,
                     deck_id,
-                    pdf_path,
+                    openai_input_file_id,
                     responses_model,
                     openai_client,
                 )
@@ -1177,6 +1184,12 @@ async def _process_claimed_slide_run(run_id: int, lease_token: str) -> None:
                 assert pdf_path is not None
                 assert openai_client is not None
                 assert responses_model is not None
+                if openai_input_file_id is None:
+                    openai_input_file_id = await _get_or_upload_openai_input_pdf(
+                        run_id, lease_token, deck_id, pdf_path
+                    )
+                    if openai_input_file_id is None:
+                        return
                 await _set_run_stage(
                     run_id,
                     lease_token,
@@ -1186,7 +1199,7 @@ async def _process_claimed_slide_run(run_id: int, lease_token: str) -> None:
                     run_id,
                     lease_token,
                     deck_id,
-                    pdf_path,
+                    openai_input_file_id,
                     transcript,
                     responses_model,
                     openai_client,
@@ -1562,40 +1575,90 @@ def cleanup_extracted_slide_assets(assets: Sequence[ExtractedSlideAsset]) -> Non
         shutil.rmtree(output_dir, ignore_errors=True)
 
 
-async def _upload_openai_input_pdf(
-    openai_client: openai.AsyncClient | openai.AsyncAzureOpenAI,
+async def _get_or_upload_openai_input_pdf(
+    run_id: int,
+    lease_token: str,
+    deck_id: int,
     pdf_path: str,
-) -> str:
-    with open(pdf_path, "rb") as pdf_file:
-        uploaded_file = await openai_client.files.create(
-            file=pdf_file,
-            purpose="user_data",
-        )
-    file_id = getattr(uploaded_file, "id", None)
-    if not file_id and isinstance(uploaded_file, dict):
-        file_id = uploaded_file.get("id")
-    if not file_id:
-        raise RuntimeError("OpenAI did not return a file id for lecture slide PDF.")
-    return str(file_id)
+) -> str | None:
+    async def _openai_file_exists(
+        session: AsyncSession, class_id: int, file_id: str
+    ) -> bool:
+        openai_client = await get_openai_client_by_class_id(session, class_id)
+        try:
+            await openai_client.files.retrieve(file_id)
+        except openai.NotFoundError:
+            return False
+        return True
 
+    async def _resolve() -> str | None:
+        async with config.db.driver.async_session() as session:
+            deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+                session, deck_id
+            )
+            if deck is None:
+                run = await models.LectureSlideProcessingRun.get_by_id(session, run_id)
+                if run is not None and run.lease_token == lease_token:
+                    await _mark_run_cancelled(
+                        session,
+                        run,
+                        schemas.LectureSlideProcessingCancelReason.LECTURE_SLIDE_DECK_DELETED,
+                    )
+                    await session.commit()
+                return None
+            source = deck.source_stored_object
+            if source is None:
+                raise RuntimeError("Lecture slide source object is not loaded.")
+            if source.openai_file_object_id is not None:
+                file = await models.File.get_by_id(
+                    session, source.openai_file_object_id
+                )
+                if file is None or not file.file_id:
+                    logger.warning(
+                        "Lecture slide source has stale OpenAI file object pointer. "
+                        "deck_id=%s source_id=%s file_object_id=%s has_file=%s",
+                        deck.id,
+                        source.id,
+                        source.openai_file_object_id,
+                        file is not None,
+                    )
+                else:
+                    file_id = str(file.file_id)
+                    if await _openai_file_exists(session, deck.class_id, file_id):
+                        return file_id
+                    logger.warning(
+                        "Cached lecture slide OpenAI file is missing upstream; "
+                        "re-uploading source PDF. deck_id=%s source_id=%s file_id=%s",
+                        deck.id,
+                        source.id,
+                        file_id,
+                    )
+                    source.openai_file_object_id = None
+                    session.add(source)
 
-async def _delete_openai_file_quietly(
-    openai_client: openai.AsyncClient | openai.AsyncAzureOpenAI,
-    file_id: str,
-) -> None:
-    try:
-        await openai_client.files.delete(file_id)
-    except Exception:
-        logger.exception(
-            "Failed to delete uploaded lecture slide PDF file_id=%s", file_id
-        )
+            source_bytes = await asyncio.to_thread(Path(pdf_path).read_bytes)
+            file = await upload_lecture_slide_source_to_openai(
+                session,
+                source,
+                class_id=deck.class_id,
+                uploader_id=deck.uploader_id,
+                source_bytes=source_bytes,
+            )
+            await session.commit()
+            return str(file.file_id)
+
+    return await _await_with_run_lease_heartbeat(
+        run_id,
+        lease_token,
+        _resolve(),
+    )
 
 
 async def _generate_narration_text(
     run_id: int,
     lease_token: str,
     deck_id: int,
-    pdf_path: str,
+    file_id: str,
     responses_model: str,
     openai_client: openai.AsyncClient | openai.AsyncAzureOpenAI,
 ) -> GeneratedSlideNarrationSet | None:
@@ -1610,41 +1673,31 @@ async def _generate_narration_text(
         author_comments_guidance = _slide_author_comments_guidance_text(deck.pages)
         response_model = _generated_slide_narration_set_model(slide_count)
 
-    file_id = await _await_with_run_lease_heartbeat(
+    return await _await_with_run_lease_heartbeat(
         run_id,
         lease_token,
-        _upload_openai_input_pdf(openai_client, pdf_path),
+        _parse_responses_output(
+            openai_client,
+            model=responses_model,
+            instructions=prompt,
+            response_model=response_model,
+            input_messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_file", "file_id": file_id},
+                        {
+                            "type": "input_text",
+                            "text": _build_narration_generation_user_message(
+                                slide_count,
+                                author_comments_guidance,
+                            ),
+                        },
+                    ],
+                }
+            ],
+        ),
     )
-    if file_id is None:
-        return None
-    try:
-        return await _await_with_run_lease_heartbeat(
-            run_id,
-            lease_token,
-            _parse_responses_output(
-                openai_client,
-                model=responses_model,
-                instructions=prompt,
-                response_model=response_model,
-                input_messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "input_file", "file_id": file_id},
-                            {
-                                "type": "input_text",
-                                "text": _build_narration_generation_user_message(
-                                    slide_count,
-                                    author_comments_guidance,
-                                ),
-                            },
-                        ],
-                    }
-                ],
-            ),
-        )
-    finally:
-        await _delete_openai_file_quietly(openai_client, file_id)
 
 
 def _slide_author_comments_guidance_text(
@@ -2459,7 +2512,7 @@ async def _generate_slide_manifest(
     run_id: int,
     lease_token: str,
     deck_id: int,
-    pdf_path: str,
+    file_id: str,
     transcript: list[schemas.LectureVideoManifestWordV3],
     responses_model: str,
     openai_client: openai.AsyncClient | openai.AsyncAzureOpenAI,
@@ -2490,31 +2543,21 @@ async def _generate_slide_manifest(
         transcript=transcript,
     )
 
-    file_id = await _await_with_run_lease_heartbeat(
+    return await _await_with_run_lease_heartbeat(
         run_id,
         lease_token,
-        _upload_openai_input_pdf(openai_client, pdf_path),
+        _generate_slide_manifest_with_optional_chunks(
+            openai_client=openai_client,
+            model=responses_model,
+            file_id=file_id,
+            generation_prompt=prompt,
+            page_ranges=page_ranges,
+            transcript=transcript,
+            total_duration_ms=total_duration_ms,
+            manual_questions=manual_questions,
+            question_requests=question_requests,
+        ),
     )
-    if file_id is None:
-        return None
-    try:
-        return await _await_with_run_lease_heartbeat(
-            run_id,
-            lease_token,
-            _generate_slide_manifest_with_optional_chunks(
-                openai_client=openai_client,
-                model=responses_model,
-                file_id=file_id,
-                generation_prompt=prompt,
-                page_ranges=page_ranges,
-                transcript=transcript,
-                total_duration_ms=total_duration_ms,
-                manual_questions=manual_questions,
-                question_requests=question_requests,
-            ),
-        )
-    finally:
-        await _delete_openai_file_quietly(openai_client, file_id)
 
 
 async def _generate_slide_manifest_with_optional_chunks(

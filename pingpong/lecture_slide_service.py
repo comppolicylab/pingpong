@@ -1,3 +1,4 @@
+import contextlib
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -68,7 +69,7 @@ async def upload_lecture_slide_source_to_openai(
     source: models.LectureSlideSourceStoredObject,
     *,
     class_id: int,
-    uploader_id: int,
+    uploader_id: int | None,
     source_bytes: bytes | None = None,
 ) -> models.File:
     if source_bytes is None:
@@ -96,8 +97,9 @@ async def upload_lecture_slide_source_to_openai(
         source.openai_file_object_id = file.id
         session.add(source)
         return file
-    except Exception:
-        await openai_client.files.delete(file_id)
+    except BaseException:
+        with contextlib.suppress(Exception):
+            await openai_client.files.delete(file_id)
         raise
 
 
