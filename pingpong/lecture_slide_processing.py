@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import pingpong.models as models
 import pingpong.schemas as schemas
+from pingpong import lecture_slide_service
 from pingpong import lecture_video_processing
 from pingpong.ai import get_openai_client_by_class_id
 from pingpong.class_credential_validation import (
@@ -314,18 +315,18 @@ Use surrounding context to avoid boundary artifacts, but keep generated offsets 
         {question.slide_position for question in manual_questions or []}
     )
     partial_question_positions = sorted(
-        {
+        [
             question.slide_position
             for question in question_requests or []
             if question.mode == schemas.LectureSlideQuestionDraftMode.PARTIAL
-        }
+        ]
     )
     marker_question_positions = sorted(
-        {
+        [
             question.slide_position
             for question in question_requests or []
             if question.mode == schemas.LectureSlideQuestionDraftMode.MARKER
-        }
+        ]
     )
     manual_question_guidance = ""
     if manual_question_positions:
@@ -344,9 +345,11 @@ INSTRUCTOR QUESTION REQUESTS:
 The instructor requested model-completed questions after these zero-based slide positions.
 - Partial question drafts to complete: {partial_question_positions}
 - Marker-only required questions to create: {marker_question_positions}
-You must include exactly one question after each of those slide positions in your output unless that slide is outside the generation window.
+You must include exactly one distinct question for each requested entry unless that slide is outside the generation window.
+These requested entries are required minimums, not an exclusive list of allowed question locations.
+You may generate additional questions at other useful slide breakpoints that were not selected by the instructor.
 Use any provided partial prompt, narration, options, feedback, or correct-answer hints as constraints, and fill missing details.
-Do not create more than one question after the same requested slide position.
+Do not generate additional unrequested questions after instructor-selected slide positions.
 """
 
     return f"""You are an expert educational content designer creating an interactive slide lesson from a PDF deck.
@@ -2778,6 +2781,25 @@ def _merge_slide_chunk_manifests(
     )
 
 
+def _generated_slide_question_to_input(
+    question: GeneratedSlideQuestion,
+) -> schemas.LectureSlideQuestionInput:
+    return schemas.LectureSlideQuestionInput(
+        mode=schemas.LectureSlideQuestionDraftMode.COMPLETE,
+        slide_position=question.slide_position,
+        question_text=question.question_text,
+        intro_text=question.intro_text,
+        options=[
+            schemas.LectureSlideQuestionOptionInput(
+                option_text=option.option_text,
+                post_answer_text=option.post_answer_text,
+                correct=option.correct,
+            )
+            for option in question.options
+        ],
+    )
+
+
 async def _persist_slide_manifest(
     run_id: int,
     lease_token: str,
@@ -2810,33 +2832,6 @@ async def _persist_slide_manifest(
             ],
         ]
 
-        await session.execute(
-            delete(
-                models.lecture_slide_question_single_select_correct_option_association
-            ).where(
-                models.lecture_slide_question_single_select_correct_option_association.c.question_id.in_(
-                    select(models.LectureSlideQuestion.id).where(
-                        models.LectureSlideQuestion.lecture_slide_deck_id == deck.id
-                    )
-                )
-            )
-        )
-        await session.execute(
-            delete(models.LectureSlideQuestionOption).where(
-                models.LectureSlideQuestionOption.question_id.in_(
-                    select(models.LectureSlideQuestion.id).where(
-                        models.LectureSlideQuestion.lecture_slide_deck_id == deck.id
-                    )
-                )
-            )
-        )
-        await session.execute(
-            delete(models.LectureSlideQuestion).where(
-                models.LectureSlideQuestion.lecture_slide_deck_id == deck.id
-            )
-        )
-        await session.flush()
-
         page_ranges: list[SlidePageRange] = [
             {
                 "slide_position": page.position,
@@ -2863,60 +2858,14 @@ async def _persist_slide_manifest(
                 continue
             question_pause_offsets_by_position.append((question, pause_offsets))
 
-        for question_position, (question, pause_offsets) in enumerate(
-            question_pause_offsets_by_position
-        ):
-            question_row = models.LectureSlideQuestion(
-                lecture_slide_deck_id=deck.id,
-                position=question_position,
-                slide_position=question.slide_position,
-                slide_offset_ms=pause_offsets["slide_offset_ms"],
-                stop_offset_ms=pause_offsets["stop_offset_ms"],
-                question_type=schemas.LectureSlideQuestionType.SINGLE_SELECT,
-                question_text=question.question_text,
-                intro_text=question.intro_text,
-            )
-            session.add(question_row)
-            await session.flush()
-            if text_needs_audio(question.intro_text):
-                intro_narration = models.LectureSlideNarration(
-                    status=schemas.LectureSlideNarrationStatus.PENDING,
-                )
-                session.add(intro_narration)
-                await session.flush()
-                question_row.intro_narration_id = intro_narration.id
-
-            option_rows: list[
-                tuple[GeneratedSlideChoice, models.LectureSlideQuestionOption]
-            ] = []
-            for option_position, option in enumerate(question.options):
-                option_row = models.LectureSlideQuestionOption(
-                    question_id=question_row.id,
-                    position=option_position,
-                    option_text=option.option_text,
-                    post_answer_text=option.post_answer_text,
-                    continue_slide_position=question.slide_position,
-                    continue_slide_offset_ms=pause_offsets["slide_offset_ms"],
-                    continue_offset_ms=pause_offsets["stop_offset_ms"],
-                )
-                session.add(option_row)
-                option_rows.append((option, option_row))
-            await session.flush()
-            for option, option_row in option_rows:
-                if option.correct:
-                    await session.execute(
-                        models.lecture_slide_question_single_select_correct_option_association.insert().values(
-                            question_id=question_row.id,
-                            option_id=option_row.id,
-                        )
-                    )
-                if text_needs_audio(option.post_answer_text):
-                    post_narration = models.LectureSlideNarration(
-                        status=schemas.LectureSlideNarrationStatus.PENDING,
-                    )
-                    session.add(post_narration)
-                    await session.flush()
-                    option_row.post_narration_id = post_narration.id
+        await lecture_slide_service.apply_lecture_slide_question_drafts(
+            session,
+            deck,
+            [
+                _generated_slide_question_to_input(question)
+                for question, _pause_offsets in question_pause_offsets_by_position
+            ],
+        )
 
         context_data = dict(deck.context_data or {})
         context_data.pop(schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY, None)

@@ -1186,6 +1186,7 @@ class LectureSlideConfigResponse(BaseModel):
     narration_prompt: str | None = None
     pages: list["LectureSlidePageView"] = Field(default_factory=list)
     questions: list["LectureSlideQuestionView"] = Field(default_factory=list)
+    question_drafts: list["LectureSlideQuestionInput"] = Field(default_factory=list)
     processing_status: LectureVideoProcessingRunSummary | None = None
 
 

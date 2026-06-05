@@ -10219,6 +10219,35 @@ async def get_assistant_lecture_slide_config(
                 ],
             )
         )
+    raw_question_drafts = (deck.context_data or {}).get(
+        schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY
+    )
+    question_drafts = (
+        [
+            schemas.LectureSlideQuestionInput.model_validate(question)
+            for question in raw_question_drafts
+        ]
+        if isinstance(raw_question_drafts, list)
+        else [
+            schemas.LectureSlideQuestionInput(
+                id=question.id,
+                mode=schemas.LectureSlideQuestionDraftMode.COMPLETE,
+                slide_position=question.slide_position,
+                question_text=question.question_text,
+                intro_text=question.intro_text,
+                options=[
+                    schemas.LectureSlideQuestionOptionInput(
+                        id=option.id,
+                        option_text=option.option_text,
+                        post_answer_text=option.post_answer_text,
+                        correct=option.correct,
+                    )
+                    for option in question.options
+                ],
+            )
+            for question in questions
+        ]
+    )
     return schemas.LectureSlideConfigResponse(
         lecture_slide_deck=cast(
             schemas.LectureSlideSummary,
@@ -10229,6 +10258,7 @@ async def get_assistant_lecture_slide_config(
         narration_prompt=deck.narration_prompt,
         pages=pages,
         questions=questions,
+        question_drafts=question_drafts,
         processing_status=processing_status,
     )
 
@@ -13263,15 +13293,31 @@ async def update_assistant(
                 await lecture_slide_service.reset_lecture_slide_question_narrations(
                     request.state["db"], target_lecture_slide_deck.id
                 )
-            if needs_questions and questions_present:
-                context_data = dict(target_lecture_slide_deck.context_data or {})
-                context_data[schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY] = (
-                    lecture_slide_service.lecture_slide_question_context_payload(
-                        req.lecture_slide_questions or []
+            if needs_questions:
+                if questions_present:
+                    manual_question_payload = (
+                        lecture_slide_service.lecture_slide_question_context_payload(
+                            req.lecture_slide_questions or []
+                        )
                     )
-                )
-                target_lecture_slide_deck.context_data = context_data
-                request.state["db"].add(target_lecture_slide_deck)
+                elif regenerate_questions_requested:
+                    manual_question_payload = []
+                else:
+                    manual_question_payload = await lecture_slide_service.lecture_slide_deck_question_context_payload(
+                        request.state["db"], target_lecture_slide_deck.id
+                    )
+                context_data = dict(target_lecture_slide_deck.context_data or {})
+                if manual_question_payload:
+                    context_data[schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY] = (
+                        manual_question_payload
+                    )
+                else:
+                    context_data.pop(
+                        schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY, None
+                    )
+                if context_data != (target_lecture_slide_deck.context_data or {}):
+                    target_lecture_slide_deck.context_data = context_data
+                    request.state["db"].add(target_lecture_slide_deck)
 
             queued_run = None
             if needs_full_processing:

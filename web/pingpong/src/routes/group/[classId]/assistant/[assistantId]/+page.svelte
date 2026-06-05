@@ -248,6 +248,53 @@
 		}))
 	});
 
+	const lectureSlideQuestionInputToDraft = (
+		question: api.LectureSlideQuestionInput
+	): LectureSlideQuestionDraft => ({
+		id: question.id,
+		client_id: nextLectureSlideQuestionDraftId(),
+		mode: question.mode || 'complete',
+		slide_position: question.slide_position,
+		question_text: question.question_text,
+		intro_text: question.intro_text || '',
+		options: question.options.map((option) => ({
+			id: option.id,
+			client_id: nextLectureSlideQuestionDraftId(),
+			option_text: option.option_text,
+			post_answer_text: option.post_answer_text || '',
+			correct: option.correct
+		}))
+	});
+
+	const currentLectureSlideQuestionDraftInputs = () =>
+		data.lectureSlideConfig?.question_drafts ||
+		(data.lectureSlideConfig?.questions || []).map((question) => ({
+			id: question.id,
+			mode: 'complete' as api.LectureSlideQuestionDraftMode,
+			slide_position: question.slide_position,
+			question_text: question.question_text,
+			intro_text: question.intro_text || '',
+			options: question.options.map((option) => ({
+				id: option.id,
+				option_text: option.option_text,
+				post_answer_text: option.post_answer_text || '',
+				correct: option.correct
+			}))
+		}));
+
+	const hydrateLectureSlideQuestionDrafts = (questions: api.LectureSlideQuestionInput[]) => {
+		const selectedQuestion = lectureSlideQuestionDrafts.find(
+			(question) => question.client_id === selectedLectureSlideQuestionClientId
+		);
+		const nextDrafts = questions.map(lectureSlideQuestionInputToDraft);
+		lectureSlideQuestionDrafts = nextDrafts;
+		selectedLectureSlideQuestionClientId =
+			selectedQuestion?.id == null
+				? null
+				: nextDrafts.find((question) => question.id === selectedQuestion.id)?.client_id || null;
+		hasSetLectureSlideQuestionDrafts = true;
+	};
+
 	const lectureSlideQuestionDraftToInput = (
 		question: LectureSlideQuestionDraft
 	): api.LectureSlideQuestionInput => ({
@@ -290,8 +337,8 @@
 				: left.slide_position - right.slide_position
 		);
 
-	const lectureSlideQuestionFromServerComparable = (question: api.LectureSlideQuestion) => ({
-		mode: 'complete',
+	const lectureSlideQuestionInputComparable = (question: api.LectureSlideQuestionInput) => ({
+		mode: question.mode || 'complete',
 		slide_position: question.slide_position,
 		question_text: question.question_text.trim(),
 		intro_text: (question.intro_text || '').trim(),
@@ -1176,10 +1223,7 @@
 		hasSetLectureSlidePageDrafts = true;
 	}
 	$: if (!hasSetLectureSlideQuestionDrafts && !lectureSlideConfigLoadError) {
-		lectureSlideQuestionDrafts = (data.lectureSlideConfig?.questions || []).map(
-			lectureSlideQuestionToDraft
-		);
-		hasSetLectureSlideQuestionDrafts = true;
+		hydrateLectureSlideQuestionDrafts(currentLectureSlideQuestionDraftInputs());
 	}
 	$: if (!hasSetSlideGenerationPrompt && !lectureSlideConfigLoadError) {
 		slideGenerationPrompt =
@@ -1221,7 +1265,7 @@
 		JSON.stringify(lectureSlidePageDrafts) !== currentLectureSlidePagesNormalized;
 	$: currentLectureSlideQuestionsNormalized = JSON.stringify(
 		sortLectureSlideQuestionComparables(
-			(data.lectureSlideConfig?.questions || []).map(lectureSlideQuestionFromServerComparable)
+			currentLectureSlideQuestionDraftInputs().map(lectureSlideQuestionInputComparable)
 		)
 	);
 	$: lectureSlideQuestionsNormalized = JSON.stringify(
@@ -3041,6 +3085,7 @@
 			);
 			lectureSlideQuestionDrafts = [];
 			selectedLectureSlideQuestionClientId = null;
+			hasSetLectureSlideQuestionDrafts = true;
 			selectedLectureSlidePosition = 0;
 			happyToast('Lecture slides uploaded');
 		} catch (error) {
@@ -3122,6 +3167,7 @@
 				user_notes: page.user_notes || '',
 				narration_text: page.narration_text || ''
 			}));
+			hydrateLectureSlideQuestionDrafts(expanded.data.question_drafts || []);
 		} finally {
 			refreshingLectureSlideStatus = false;
 		}
@@ -3534,13 +3580,19 @@
 				regenerateSlideNarrationRequested ||
 				regenerateSlideQuestionsRequested ||
 				regenerateSlideAudioRequested;
+			const shouldSubmitLectureSlideQuestions =
+				data.isCreating || lectureSlideDeckIdChanged || lectureSlideQuestionsChanged;
 
 			if (data.isCreating || lectureSlideFieldsChanged) {
 				params.lecture_slide_deck_id = selectedLectureSlideDeckId;
 				params.lecture_slide_page_notes = lectureSlidePageDrafts;
-				params.lecture_slide_questions = lectureSlideQuestionDrafts.map(
-					lectureSlideQuestionDraftToInput
-				);
+				if (shouldSubmitLectureSlideQuestions) {
+					params.lecture_slide_questions = lectureSlideQuestionDrafts.map(
+						lectureSlideQuestionDraftToInput
+					);
+				} else {
+					delete params.lecture_slide_questions;
+				}
 				params.voice_id = trimmedVoiceId;
 				params.generation_prompt = slideGenerationPrompt;
 				params.narration_prompt = slideNarrationPrompt;

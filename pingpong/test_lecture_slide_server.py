@@ -134,13 +134,15 @@ async def test_retry_lecture_slide_endpoint_queues_processing_after_failure(
     api, db, institution, valid_user_token
 ):
     async with db.async_session() as session:
-        class_ = models.Class(
-            id=1,
-            name="Test Class",
-            institution_id=institution.id,
-            api_key="test-key",
-        )
-        session.add(class_)
+        class_ = await session.get(models.Class, 1)
+        if class_ is None:
+            class_ = models.Class(
+                id=1,
+                name="Test Class",
+                institution_id=institution.id,
+                api_key="test-key",
+            )
+            session.add(class_)
         await session.flush()
         source = await models.LectureSlideSourceStoredObject.create(
             session,
@@ -222,6 +224,96 @@ async def test_retry_lecture_slide_endpoint_queues_processing_after_failure(
     assert runs[1].attempt_number == 2
 
 
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "admin", "class:1"),
+        ("user:123", "can_create_assistants", "class:1"),
+        ("user:123", "can_edit", "assistant:1"),
+    ]
+)
+async def test_lecture_slide_config_returns_pending_question_drafts(
+    api, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        session.add(class_)
+        await session.flush()
+        source = await models.LectureSlideSourceStoredObject.create(
+            session,
+            key="lecture04.pdf",
+            original_filename="lecture04.pdf",
+            content_type="application/pdf",
+            content_length=128,
+        )
+        deck = await models.LectureSlideDeck.create(
+            session,
+            class_id=class_.id,
+            source_stored_object_id=source.id,
+            uploader_id=123,
+            display_name="lecture04.pdf",
+            slide_count=2,
+            voice_id="voice-test-id",
+            context_data={
+                schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY: [
+                    {
+                        "mode": schemas.LectureSlideQuestionDraftMode.PARTIAL.value,
+                        "slide_position": 0,
+                        "question_text": "Use this prompt.",
+                        "intro_text": "",
+                        "options": [],
+                    },
+                    {
+                        "mode": schemas.LectureSlideQuestionDraftMode.MARKER.value,
+                        "slide_position": 1,
+                        "question_text": "",
+                        "intro_text": "",
+                        "options": [],
+                    },
+                ]
+            },
+        )
+        session.add(
+            models.Assistant(
+                id=1,
+                name="Physics Slides",
+                class_id=class_.id,
+                interaction_mode=schemas.InteractionMode.LECTURE_SLIDES,
+                version=3,
+                lecture_slide_deck_id=deck.id,
+                instructions="You are a lecture assistant.",
+                model="gpt-4o-mini",
+                tools="[]",
+                use_latex=False,
+                use_image_descriptions=False,
+                hide_prompt=False,
+            )
+        )
+        await session.commit()
+
+    response = api.get(
+        "/api/v1/class/1/assistant/1/lecture-slides/config",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["questions"] == []
+    assert [
+        (question["mode"], question["slide_position"], question["question_text"])
+        for question in body["question_drafts"]
+    ] == [
+        ("partial", 0, "Use this prompt."),
+        ("marker", 1, ""),
+    ]
+
+
 @with_institution(11, "Test Institution")
 async def test_apply_lecture_slide_page_notes_handles_unloaded_pages(db, institution):
     async with db.async_session() as session:
@@ -291,6 +383,106 @@ async def test_apply_lecture_slide_page_notes_handles_unloaded_pages(db, institu
     assert page is not None
     assert page.user_notes == "New notes"
     assert page.narration_text == "Narrate this."
+
+
+@with_institution(11, "Test Institution")
+async def test_apply_lecture_slide_page_notes_deletes_replaced_narration_audio(
+    db, institution, config, monkeypatch, tmp_path
+):
+    narration_dir = tmp_path / "narrations"
+    monkeypatch.setattr(
+        config,
+        "lecture_video_audio_store",
+        LocalAudioStoreSettings(save_target=str(narration_dir)),
+    )
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        session.add(class_)
+        await session.flush()
+        source = await models.LectureSlideSourceStoredObject.create(
+            session,
+            key="lecture04.pdf",
+            original_filename="lecture04.pdf",
+            content_type="application/pdf",
+            content_length=128,
+        )
+        deck = await models.LectureSlideDeck.create(
+            session,
+            class_id=class_.id,
+            source_stored_object_id=source.id,
+            uploader_id=123,
+            display_name="lecture04.pdf",
+            slide_count=1,
+            voice_id="voice-test-id",
+        )
+        stored_object = models.LectureSlideNarrationStoredObject(
+            key="edited-slide.ogg",
+            content_type="audio/ogg",
+            content_length=100,
+        )
+        session.add(stored_object)
+        await session.flush()
+        narration_dir.mkdir(parents=True, exist_ok=True)
+        (narration_dir / stored_object.key).write_bytes(b"slide-audio")
+        narration = models.LectureSlideNarration(
+            stored_object_id=stored_object.id,
+            status=schemas.LectureSlideNarrationStatus.READY,
+        )
+        session.add(narration)
+        await session.flush()
+        page = models.LectureSlidePage(
+            lecture_slide_deck_id=deck.id,
+            position=0,
+            narration_text="Old narration.",
+            narration_id=narration.id,
+            start_offset_ms=0,
+            end_offset_ms=100,
+        )
+        session.add(page)
+        await session.commit()
+        deck_id = deck.id
+
+    async with db.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id(session, deck_id)
+        assert deck is not None
+        result = await lecture_slide_service.apply_lecture_slide_page_notes(
+            session,
+            deck,
+            [
+                schemas.LectureSlidePageNotes(
+                    position=0,
+                    narration_text="New narration.",
+                )
+            ],
+        )
+        await session.commit()
+        page_after_edit = await session.scalar(
+            select(models.LectureSlidePage).where(
+                models.LectureSlidePage.lecture_slide_deck_id == deck_id,
+                models.LectureSlidePage.position == 0,
+            )
+        )
+        narration_count = await session.scalar(
+            select(func.count()).select_from(models.LectureSlideNarration)
+        )
+        stored_object_count = await session.scalar(
+            select(func.count()).select_from(models.LectureSlideNarrationStoredObject)
+        )
+
+    assert result.narration_changed is True
+    assert page_after_edit is not None
+    assert page_after_edit.narration_id is None
+    assert page_after_edit.start_offset_ms is None
+    assert page_after_edit.end_offset_ms is None
+    assert narration_count == 0
+    assert stored_object_count == 0
+    assert not (narration_dir / "edited-slide.ogg").exists()
 
 
 @with_institution(11, "Test Institution")

@@ -31,6 +31,7 @@
 	let currentSourceUrl = '';
 	let loadToken = 0;
 	let thumbnails: Record<number, string> = {};
+	let renderInProgress: Promise<void> | null = null;
 
 	const questionSequence = (clientId: string) => {
 		const sequence = Number(clientId.replace('lecture-slide-question-draft-', ''));
@@ -55,33 +56,50 @@
 
 	const renderThumbnails = async (doc: PDFDocumentProxy) => {
 		const token = loadToken;
-		for (const page of pages) {
-			if (token !== loadToken) {
-				return;
+		if (renderInProgress) {
+			await renderInProgress;
+			if (token === loadToken) {
+				await renderThumbnails(doc);
 			}
-			if (thumbnails[page.position]) {
-				continue;
-			}
-			const pageNumber = Math.min(Math.max(page.position + 1, 1), doc.numPages);
-			try {
-				const pdfPage = await doc.getPage(pageNumber);
-				const base = pdfPage.getViewport({ scale: 1 });
-				const scale = THUMB_WIDTH / base.width;
-				const viewport = pdfPage.getViewport({ scale });
-				const canvas = document.createElement('canvas');
-				canvas.width = Math.floor(viewport.width);
-				canvas.height = Math.floor(viewport.height);
-				const context = canvas.getContext('2d');
-				if (!context) {
-					continue;
-				}
-				await pdfPage.render({ canvas, canvasContext: context, viewport }).promise;
+			return;
+		}
+		const renderPromise = (async () => {
+			for (const page of pages) {
 				if (token !== loadToken) {
 					return;
 				}
-				thumbnails = { ...thumbnails, [page.position]: canvas.toDataURL('image/png') };
-			} catch {
-				// Skip thumbnails that fail to render; the label fallback is shown instead.
+				if (thumbnails[page.position]) {
+					continue;
+				}
+				const pageNumber = Math.min(Math.max(page.position + 1, 1), doc.numPages);
+				try {
+					const pdfPage = await doc.getPage(pageNumber);
+					const base = pdfPage.getViewport({ scale: 1 });
+					const scale = THUMB_WIDTH / base.width;
+					const viewport = pdfPage.getViewport({ scale });
+					const canvas = document.createElement('canvas');
+					canvas.width = Math.floor(viewport.width);
+					canvas.height = Math.floor(viewport.height);
+					const context = canvas.getContext('2d');
+					if (!context) {
+						continue;
+					}
+					await pdfPage.render({ canvas, canvasContext: context, viewport }).promise;
+					if (token !== loadToken) {
+						return;
+					}
+					thumbnails = { ...thumbnails, [page.position]: canvas.toDataURL('image/png') };
+				} catch {
+					// Skip thumbnails that fail to render; the label fallback is shown instead.
+				}
+			}
+		})();
+		renderInProgress = renderPromise;
+		try {
+			await renderPromise;
+		} finally {
+			if (renderInProgress === renderPromise) {
+				renderInProgress = null;
 			}
 		}
 	};
@@ -90,9 +108,13 @@
 		const token = ++loadToken;
 		currentSourceUrl = url;
 		thumbnails = {};
-		if (pdfDocument) {
-			await pdfDocument.destroy();
-			pdfDocument = null;
+		const previousDocument = pdfDocument;
+		pdfDocument = null;
+		if (previousDocument) {
+			await previousDocument.destroy();
+		}
+		if (token !== loadToken) {
+			return;
 		}
 		if (!url) {
 			return;

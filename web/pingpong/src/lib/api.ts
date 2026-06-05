@@ -1924,6 +1924,7 @@ export type LectureSlideConfigResponse = {
 	narration_prompt?: string | null;
 	pages: LectureSlidePage[];
 	questions: LectureSlideQuestion[];
+	question_drafts: LectureSlideQuestionInput[];
 	processing_status?: LectureVideoProcessingRunSummary | null;
 };
 

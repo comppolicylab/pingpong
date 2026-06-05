@@ -308,6 +308,7 @@ async def apply_lecture_slide_page_notes(
     notes_changed = False
     narration_changed = False
     narration_changed_positions: set[int] = set()
+    old_narration_ids: list[int] = []
     notes_by_position = {note.position: note for note in notes}
     pages_by_position = {
         page.position: page
@@ -349,6 +350,8 @@ async def apply_lecture_slide_page_notes(
             session.add(page)
             notes_changed = True
         if page.narration_text != narration_text:
+            if page.narration_id is not None:
+                old_narration_ids.append(page.narration_id)
             page.narration_text = narration_text
             page.narration_id = None
             page.start_offset_ms = None
@@ -358,6 +361,10 @@ async def apply_lecture_slide_page_notes(
             narration_changed_positions.add(note.position)
     if notes_changed or narration_changed:
         await session.flush()
+    audio_keys = await _delete_lecture_slide_narrations_if_unused(
+        session, old_narration_ids
+    )
+    await _delete_lecture_slide_audio_keys_quietly(audio_keys)
     return LectureSlidePageUpdateResult(
         notes_changed=notes_changed,
         narration_changed=narration_changed,
@@ -373,12 +380,14 @@ def _question_input_payload(
     question: schemas.LectureSlideQuestionInput,
 ) -> dict[str, object]:
     return {
+        "id": question.id,
         "mode": question.mode.value,
         "slide_position": question.slide_position,
         "question_text": question.question_text.strip(),
         "intro_text": question.intro_text.strip(),
         "options": [
             {
+                "id": option.id,
                 "option_text": option.option_text.strip(),
                 "post_answer_text": option.post_answer_text.strip(),
                 "correct": option.correct,
@@ -403,11 +412,14 @@ def _question_model_payload(
 ) -> dict[str, object]:
     correct_option_id = question.correct_option.id if question.correct_option else None
     return {
+        "id": question.id,
+        "mode": schemas.LectureSlideQuestionDraftMode.COMPLETE.value,
         "slide_position": question.slide_position,
         "question_text": question.question_text,
         "intro_text": question.intro_text,
         "options": [
             {
+                "id": option.id,
                 "option_text": option.option_text,
                 "post_answer_text": option.post_answer_text,
                 "correct": option.id == correct_option_id,
@@ -424,6 +436,22 @@ def lecture_slide_question_model_context_payload(
         _question_model_payload(question)
         for question in sorted(questions, key=lambda item: item.position)
     ]
+
+
+async def lecture_slide_deck_question_context_payload(
+    session: AsyncSession,
+    deck_id: int,
+) -> list[dict[str, object]]:
+    questions = (
+        await session.scalars(
+            select(models.LectureSlideQuestion)
+            .where(models.LectureSlideQuestion.lecture_slide_deck_id == deck_id)
+            .options(selectinload(models.LectureSlideQuestion.options))
+            .options(selectinload(models.LectureSlideQuestion.correct_option))
+            .order_by(models.LectureSlideQuestion.position)
+        )
+    ).all()
+    return lecture_slide_question_model_context_payload(questions)
 
 
 async def _reset_narration_for_text(
@@ -469,15 +497,44 @@ async def _apply_question_option_drafts(
     audio_changed = False
     old_narration_ids: list[int] = []
     old_stored_object_rows: list[tuple[int, str]] = []
-    existing_options = {
-        option.position: option
-        for option in sorted(question.options, key=lambda item: item.position)
+    existing_option_rows = list(
+        (
+            await session.scalars(
+                select(models.LectureSlideQuestionOption)
+                .where(models.LectureSlideQuestionOption.question_id == question.id)
+                .options(
+                    selectinload(
+                        models.LectureSlideQuestionOption.post_narration
+                    ).selectinload(models.LectureSlideNarration.stored_object)
+                )
+                .order_by(models.LectureSlideQuestionOption.position)
+            )
+        ).all()
+    )
+    remaining_options = {option.id: option for option in existing_option_rows}
+    existing_options_by_position = {
+        option.position: option for option in existing_option_rows
     }
+    for temp_position, existing_option in enumerate(existing_option_rows, start=1):
+        existing_option.position = -temp_position
+        session.add(existing_option)
+    if existing_option_rows:
+        await session.flush()
+    option_input_ids = {option.id for option in options if option.id is not None}
     option_rows: list[tuple[models.LectureSlideQuestionOption, bool]] = []
     for option_position, option in enumerate(options):
         option_text = option.option_text.strip()
         post_answer_text = option.post_answer_text.strip()
-        option_row = existing_options.pop(option_position, None)
+        option_row = (
+            remaining_options.pop(option.id, None) if option.id is not None else None
+        )
+        if option_row is None:
+            fallback_option = existing_options_by_position.get(option_position)
+            if (
+                fallback_option is not None
+                and fallback_option.id not in option_input_ids
+            ):
+                option_row = remaining_options.pop(fallback_option.id, None)
         if option_row is None:
             option_row = models.LectureSlideQuestionOption(
                 question_id=question.id,
@@ -533,7 +590,7 @@ async def _apply_question_option_drafts(
             session.add(option_row)
         option_rows.append((option_row, option.correct))
 
-    for removed_option in existing_options.values():
+    for removed_option in remaining_options.values():
         if removed_option.post_narration_id is not None:
             old_narration_ids.append(removed_option.post_narration_id)
         await session.delete(removed_option)
@@ -541,8 +598,13 @@ async def _apply_question_option_drafts(
         audio_changed = True
 
     await session.flush()
-    existing_correct_option_id = (
-        question.correct_option.id if question.correct_option is not None else None
+    existing_correct_option_id = await session.scalar(
+        select(
+            models.lecture_slide_question_single_select_correct_option_association.c.option_id
+        ).where(
+            models.lecture_slide_question_single_select_correct_option_association.c.question_id
+            == question.id
+        )
     )
     next_correct_option_id = next(
         (option_row.id for option_row, is_correct in option_rows if is_correct),
@@ -576,39 +638,44 @@ async def apply_lecture_slide_question_drafts(
 ) -> LectureSlideQuestionUpdateResult:
     question_inputs = list(questions)
     complete_question_inputs = [
-        question
-        for question in question_inputs
-        if _is_complete_question_input(question)
+        question_input
+        for question_input in question_inputs
+        if _is_complete_question_input(question_input)
     ]
     requires_question_generation = len(complete_question_inputs) != len(question_inputs)
-    for question in question_inputs:
-        if question.slide_position >= deck.slide_count:
+    for question_input in question_inputs:
+        if question_input.slide_position >= deck.slide_count:
             raise HTTPException(
                 status_code=400,
-                detail=f"Question slide position {question.slide_position} is outside this deck.",
+                detail=f"Question slide position {question_input.slide_position} is outside this deck.",
             )
 
     manual_question_payload = lecture_slide_question_context_payload(question_inputs)
-    pages_by_position = {
-        page.position: page
-        for page in (
-            await session.scalars(
-                select(models.LectureSlidePage).where(
-                    models.LectureSlidePage.lecture_slide_deck_id == deck.id,
-                    models.LectureSlidePage.position.in_(
-                        [question.slide_position for question in question_inputs]
+    pages_by_position = (
+        {
+            page.position: page
+            for page in (
+                await session.scalars(
+                    select(models.LectureSlidePage).where(
+                        models.LectureSlidePage.lecture_slide_deck_id == deck.id,
+                        models.LectureSlidePage.position.in_(
+                            [
+                                question_input.slide_position
+                                for question_input in question_inputs
+                            ]
+                        ),
                     )
-                    if question_inputs
-                    else True,
                 )
-            )
-        ).all()
-    }
+            ).all()
+        }
+        if question_inputs
+        else {}
+    )
     questions_are_timed = all(
-        (page := pages_by_position.get(question.slide_position)) is not None
+        (page := pages_by_position.get(question_input.slide_position)) is not None
         and page.start_offset_ms is not None
         and page.end_offset_ms is not None
-        for question in question_inputs
+        for question_input in question_inputs
     )
     if not questions_are_timed:
         context_data = dict(deck.context_data or {})
@@ -627,16 +694,15 @@ async def apply_lecture_slide_question_drafts(
         return LectureSlideQuestionUpdateResult(
             questions_changed=previous_payload != manual_question_payload,
             audio_changed=False,
-            requires_question_generation=requires_question_generation,
+            requires_question_generation=True,
         )
 
     old_narration_ids: list[int] = []
     old_stored_object_rows: list[tuple[int, str]] = []
     changed = False
     audio_changed = False
-    existing_questions = {
-        question.position: question
-        for question in (
+    existing_question_rows = list(
+        (
             await session.scalars(
                 select(models.LectureSlideQuestion)
                 .where(models.LectureSlideQuestion.lecture_slide_deck_id == deck.id)
@@ -655,6 +721,18 @@ async def apply_lecture_slide_question_drafts(
                 .order_by(models.LectureSlideQuestion.position)
             )
         ).all()
+    )
+    remaining_questions = {question.id: question for question in existing_question_rows}
+    existing_questions_by_position = {
+        question.position: question for question in existing_question_rows
+    }
+    for temp_position, existing_question in enumerate(existing_question_rows, start=1):
+        existing_question.position = -temp_position
+        session.add(existing_question)
+    if existing_question_rows:
+        await session.flush()
+    question_input_ids = {
+        question.id for question in complete_question_inputs if question.id is not None
     }
 
     for question_position, question_input in enumerate(complete_question_inputs):
@@ -663,7 +741,18 @@ async def apply_lecture_slide_question_drafts(
         stop_offset_ms = page.end_offset_ms or 0
         question_text = question_input.question_text.strip()
         intro_text = question_input.intro_text.strip()
-        question = existing_questions.pop(question_position, None)
+        question = (
+            remaining_questions.pop(question_input.id, None)
+            if question_input.id is not None
+            else None
+        )
+        if question is None:
+            fallback_question = existing_questions_by_position.get(question_position)
+            if (
+                fallback_question is not None
+                and fallback_question.id not in question_input_ids
+            ):
+                question = remaining_questions.pop(fallback_question.id, None)
         question_changed = False
         if question is None:
             question = models.LectureSlideQuestion(
@@ -738,7 +827,7 @@ async def apply_lecture_slide_question_drafts(
         old_narration_ids.extend(deleted_narration_ids)
         old_stored_object_rows.extend(deleted_stored_object_rows)
 
-    for removed_question in existing_questions.values():
+    for removed_question in remaining_questions.values():
         if removed_question.intro_narration_id is not None:
             old_narration_ids.append(removed_question.intro_narration_id)
         for option in removed_question.options:

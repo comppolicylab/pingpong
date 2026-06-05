@@ -4,7 +4,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from pingpong import lecture_slide_processing, models, schemas
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
+
+from pingpong import lecture_slide_processing, lecture_slide_service, models, schemas
 from pingpong.config import config
 from pingpong.now import utcnow
 
@@ -574,7 +577,7 @@ async def test_generate_slide_manifest_rejects_multiple_correct_options(
 
 
 async def test_persist_slide_manifest_replaces_existing_questions(db, monkeypatch):
-    await _create_class_and_deck(db)
+    await _create_class_and_deck(db, slide_count=2)
     async with db.async_session() as session:
         first_page = models.LectureSlidePage(
             lecture_slide_deck_id=1,
@@ -709,7 +712,7 @@ async def test_persist_slide_manifest_replaces_existing_questions(db, monkeypatc
 
 
 async def test_persist_slide_manifest_includes_manual_questions_from_context(db):
-    await _create_class_and_deck(db)
+    await _create_class_and_deck(db, slide_count=2)
     manual_question = {
         "slide_position": 0,
         "question_text": "Instructor question?",
@@ -815,6 +818,338 @@ async def test_persist_slide_manifest_includes_manual_questions_from_context(db)
         assert deck.questions[0].options[0].post_narration is not None
         assert deck.questions[0].correct_option is not None
         assert deck.questions[0].correct_option.option_text == "Instructor correct"
+
+
+async def test_persist_slide_manifest_preserves_unchanged_manual_question_rows(db):
+    await _create_class_and_deck(db)
+    manual_question = {
+        "slide_position": 0,
+        "question_text": "Instructor question?",
+        "intro_text": "Answer this instructor question.",
+        "options": [
+            {
+                "option_text": "Instructor correct",
+                "post_answer_text": "Correct.",
+                "correct": True,
+            },
+            {
+                "option_text": "Instructor incorrect",
+                "post_answer_text": "Try again.",
+                "correct": False,
+            },
+        ],
+    }
+    async with db.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, 1
+        )
+        assert deck is not None
+        deck.context_data = {
+            schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY: [manual_question]
+        }
+        intro_narration = models.LectureSlideNarration(
+            status=schemas.LectureSlideNarrationStatus.READY
+        )
+        question = models.LectureSlideQuestion(
+            lecture_slide_deck_id=1,
+            position=0,
+            slide_position=0,
+            slide_offset_ms=500,
+            stop_offset_ms=500,
+            question_type=schemas.LectureSlideQuestionType.SINGLE_SELECT,
+            question_text="Instructor question?",
+            intro_text="Answer this instructor question.",
+            intro_narration=intro_narration,
+            options=[
+                models.LectureSlideQuestionOption(
+                    position=0,
+                    option_text="Instructor correct",
+                    post_answer_text="Correct.",
+                    continue_slide_position=0,
+                    continue_slide_offset_ms=500,
+                    continue_offset_ms=500,
+                ),
+                models.LectureSlideQuestionOption(
+                    position=1,
+                    option_text="Instructor incorrect",
+                    post_answer_text="Try again.",
+                    continue_slide_position=0,
+                    continue_slide_offset_ms=500,
+                    continue_offset_ms=500,
+                ),
+            ],
+        )
+        first_page = models.LectureSlidePage(
+            lecture_slide_deck_id=1,
+            position=0,
+            start_offset_ms=0,
+            end_offset_ms=500,
+        )
+        run = models.LectureSlideProcessingRun(
+            lecture_slide_deck_id=1,
+            lecture_slide_deck_id_snapshot=1,
+            class_id=1,
+            stage=schemas.LectureSlideProcessingStage.MANIFEST_GENERATION,
+            attempt_number=1,
+            status=schemas.LectureSlideProcessingRunStatus.RUNNING,
+            lease_token="lease",
+        )
+        session.add_all([deck, first_page, question, run])
+        await session.flush()
+        await session.execute(
+            models.lecture_slide_question_single_select_correct_option_association.insert().values(
+                question_id=question.id,
+                option_id=question.options[0].id,
+            )
+        )
+        question_id = question.id
+        intro_narration_id = intro_narration.id
+        run_id = run.id
+        await session.commit()
+
+    await lecture_slide_processing._persist_slide_manifest(
+        run_id,
+        "lease",
+        1,
+        lecture_slide_processing.GeneratedSlideManifest(questions=[]),
+        [],
+    )
+
+    async with db.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, 1
+        )
+        assert deck is not None
+        assert deck.context_data == {}
+        assert len(deck.questions) == 1
+        assert deck.questions[0].id == question_id
+        assert deck.questions[0].intro_narration_id == intro_narration_id
+        assert deck.questions[0].intro_narration is not None
+        assert deck.questions[0].intro_narration.status == (
+            schemas.LectureSlideNarrationStatus.READY
+        )
+
+
+async def test_apply_question_drafts_requires_generation_when_pages_are_untimed(db):
+    await _create_class_and_deck(db)
+    async with db.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, 1
+        )
+        assert deck is not None
+        page = models.LectureSlidePage(lecture_slide_deck_id=1, position=0)
+        old_question = models.LectureSlideQuestion(
+            lecture_slide_deck_id=1,
+            position=0,
+            slide_position=0,
+            slide_offset_ms=0,
+            stop_offset_ms=100,
+            question_type=schemas.LectureSlideQuestionType.SINGLE_SELECT,
+            question_text="Old question?",
+            intro_text="",
+        )
+        session.add_all([page, old_question])
+        await session.flush()
+
+        result = await lecture_slide_service.apply_lecture_slide_question_drafts(
+            session,
+            deck,
+            [
+                schemas.LectureSlideQuestionInput(
+                    slide_position=0,
+                    question_text="New question?",
+                    options=[
+                        schemas.LectureSlideQuestionOptionInput(
+                            option_text="Correct",
+                            correct=True,
+                        ),
+                        schemas.LectureSlideQuestionOptionInput(
+                            option_text="Incorrect",
+                            correct=False,
+                        ),
+                    ],
+                )
+            ],
+        )
+
+        assert result.requires_question_generation
+        assert result.questions_changed
+        assert deck.context_data == {
+            schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY: [
+                {
+                    "id": None,
+                    "mode": "complete",
+                    "slide_position": 0,
+                    "question_text": "New question?",
+                    "intro_text": "",
+                    "options": [
+                        {
+                            "id": None,
+                            "option_text": "Correct",
+                            "post_answer_text": "",
+                            "correct": True,
+                        },
+                        {
+                            "id": None,
+                            "option_text": "Incorrect",
+                            "post_answer_text": "",
+                            "correct": False,
+                        },
+                    ],
+                }
+            ]
+        }
+        assert (
+            await session.scalar(
+                select(models.LectureSlideQuestion.question_text).where(
+                    models.LectureSlideQuestion.id == old_question.id
+                )
+            )
+        ) == "Old question?"
+
+
+async def test_apply_question_drafts_matches_questions_and_options_by_id(db):
+    await _create_class_and_deck(db, slide_count=2)
+    async with db.async_session() as session:
+        session.add_all(
+            [
+                models.LectureSlidePage(
+                    lecture_slide_deck_id=1,
+                    position=0,
+                    start_offset_ms=0,
+                    end_offset_ms=500,
+                ),
+                models.LectureSlidePage(
+                    lecture_slide_deck_id=1,
+                    position=1,
+                    start_offset_ms=500,
+                    end_offset_ms=1000,
+                ),
+            ]
+        )
+        intro_narration = models.LectureSlideNarration(
+            status=schemas.LectureSlideNarrationStatus.READY
+        )
+        option_narration = models.LectureSlideNarration(
+            status=schemas.LectureSlideNarrationStatus.READY
+        )
+        question = models.LectureSlideQuestion(
+            lecture_slide_deck_id=1,
+            position=0,
+            slide_position=0,
+            slide_offset_ms=500,
+            stop_offset_ms=500,
+            question_type=schemas.LectureSlideQuestionType.SINGLE_SELECT,
+            question_text="Existing question?",
+            intro_text="Existing intro.",
+            intro_narration=intro_narration,
+            options=[
+                models.LectureSlideQuestionOption(
+                    position=0,
+                    option_text="First",
+                    post_answer_text="First feedback.",
+                    post_narration=option_narration,
+                    continue_slide_position=0,
+                    continue_slide_offset_ms=500,
+                    continue_offset_ms=500,
+                ),
+                models.LectureSlideQuestionOption(
+                    position=1,
+                    option_text="Second",
+                    post_answer_text="Second feedback.",
+                    continue_slide_position=0,
+                    continue_slide_offset_ms=500,
+                    continue_offset_ms=500,
+                ),
+            ],
+        )
+        session.add(question)
+        await session.flush()
+        await session.execute(
+            models.lecture_slide_question_single_select_correct_option_association.insert().values(
+                question_id=question.id,
+                option_id=question.options[0].id,
+            )
+        )
+        question_id = question.id
+        first_option_id = question.options[0].id
+        second_option_id = question.options[1].id
+        intro_narration_id = intro_narration.id
+        option_narration_id = option_narration.id
+
+        deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, 1
+        )
+        assert deck is not None
+        result = await lecture_slide_service.apply_lecture_slide_question_drafts(
+            session,
+            deck,
+            [
+                schemas.LectureSlideQuestionInput(
+                    slide_position=0,
+                    question_text="Inserted question?",
+                    intro_text="Inserted intro.",
+                    options=[
+                        schemas.LectureSlideQuestionOptionInput(
+                            option_text="Inserted correct",
+                            correct=True,
+                        ),
+                        schemas.LectureSlideQuestionOptionInput(
+                            option_text="Inserted incorrect",
+                            correct=False,
+                        ),
+                    ],
+                ),
+                schemas.LectureSlideQuestionInput(
+                    id=question_id,
+                    slide_position=1,
+                    question_text="Existing question?",
+                    intro_text="Existing intro.",
+                    options=[
+                        schemas.LectureSlideQuestionOptionInput(
+                            id=second_option_id,
+                            option_text="Second",
+                            post_answer_text="Second feedback.",
+                            correct=True,
+                        ),
+                        schemas.LectureSlideQuestionOptionInput(
+                            id=first_option_id,
+                            option_text="First",
+                            post_answer_text="First feedback.",
+                            correct=False,
+                        ),
+                    ],
+                ),
+            ],
+        )
+        await session.commit()
+
+    assert result.questions_changed is True
+    async with db.async_session() as session:
+        questions = (
+            await session.scalars(
+                select(models.LectureSlideQuestion)
+                .where(models.LectureSlideQuestion.lecture_slide_deck_id == 1)
+                .options(selectinload(models.LectureSlideQuestion.options))
+                .options(selectinload(models.LectureSlideQuestion.correct_option))
+                .order_by(models.LectureSlideQuestion.position)
+            )
+        ).all()
+
+    assert len(questions) == 2
+    inserted_question, existing_question = questions
+    assert inserted_question.id != question_id
+    assert existing_question.id == question_id
+    assert existing_question.position == 1
+    assert existing_question.slide_position == 1
+    assert existing_question.intro_narration_id == intro_narration_id
+    assert [option.id for option in existing_question.options] == [
+        second_option_id,
+        first_option_id,
+    ]
+    assert existing_question.options[1].post_narration_id == option_narration_id
+    assert existing_question.correct_option is not None
+    assert existing_question.correct_option.id == second_option_id
 
 
 async def test_parse_responses_output_retries_transient_openai_failure(monkeypatch):
@@ -975,6 +1310,42 @@ async def test_slide_manifest_generation_window_prompt_matches_filter_contract()
         "requested generation window"
     ) in instructions
     assert "from 1000ms through 2000ms" not in instructions
+
+
+async def test_slide_manifest_question_request_prompt_allows_unmarked_questions():
+    instructions = (
+        lecture_slide_processing._build_slide_manifest_generation_instructions(
+            "Manifest prompt",
+            total_duration_ms=3000,
+            question_requests=[
+                schemas.LectureSlideQuestionInput(
+                    mode=schemas.LectureSlideQuestionDraftMode.PARTIAL,
+                    slide_position=1,
+                    question_text="Start from this prompt.",
+                ),
+                schemas.LectureSlideQuestionInput(
+                    mode=schemas.LectureSlideQuestionDraftMode.MARKER,
+                    slide_position=2,
+                ),
+                schemas.LectureSlideQuestionInput(
+                    mode=schemas.LectureSlideQuestionDraftMode.MARKER,
+                    slide_position=2,
+                ),
+            ],
+        )
+    )
+
+    assert "Partial question drafts to complete: [1]" in instructions
+    assert "Marker-only required questions to create: [2, 2]" in instructions
+    assert "required minimums, not an exclusive list" in instructions
+    assert (
+        "You may generate additional questions at other useful slide breakpoints "
+        "that were not selected by the instructor."
+    ) in instructions
+    assert (
+        "Do not generate additional unrequested questions after "
+        "instructor-selected slide positions."
+    ) in instructions
 
 
 async def test_filter_slide_questions_keeps_non_final_chunk_end_boundary():
