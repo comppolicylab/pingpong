@@ -482,6 +482,12 @@ class LectureSlideQuestionType(StrEnum):
     SINGLE_SELECT = "single_select"
 
 
+class LectureSlideQuestionDraftMode(StrEnum):
+    COMPLETE = "complete"
+    PARTIAL = "partial"
+    MARKER = "marker"
+
+
 class LectureVideoNarrationStatus(StrEnum):
     PENDING = "pending"
     PROCESSING = "processing"
@@ -1107,6 +1113,46 @@ class LectureSlidePageNotes(BaseModel):
     narration_text: str | None = Field(None, max_length=20000)
 
 
+LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY = "manual_questions"
+
+
+class LectureSlideQuestionOptionInput(BaseModel):
+    id: int | None = None
+    option_text: str = Field("", max_length=2000)
+    post_answer_text: str = Field("", max_length=5000)
+    correct: bool
+
+
+class LectureSlideQuestionInput(BaseModel):
+    id: int | None = None
+    mode: LectureSlideQuestionDraftMode = LectureSlideQuestionDraftMode.COMPLETE
+    slide_position: int = Field(..., ge=0)
+    question_text: str = Field("", max_length=5000)
+    intro_text: str = Field("", max_length=5000)
+    options: list[LectureSlideQuestionOptionInput] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_options(self):
+        if self.mode == LectureSlideQuestionDraftMode.MARKER:
+            return self
+        if self.mode == LectureSlideQuestionDraftMode.PARTIAL:
+            return self
+        if not self.question_text.strip():
+            raise ValueError("Complete lecture slide questions need question text.")
+        if len(self.options) < 2:
+            raise ValueError(
+                "Complete lecture slide questions need at least two answer options."
+            )
+        if any(not option.option_text.strip() for option in self.options):
+            raise ValueError("Complete lecture slide question options need text.")
+        correct_count = sum(1 for option in self.options if option.correct)
+        if correct_count != 1:
+            raise ValueError(
+                "Single-select lecture slide questions must have exactly one correct option."
+            )
+        return self
+
+
 class LectureVideoAssistantEditorPolicy(BaseModel):
     show_mode_in_assistant_editor: bool = False
     can_select_mode_in_assistant_editor: bool = False
@@ -1447,7 +1493,7 @@ def lecture_video_validator_create_assistant(self):
             raise ValueError(
                 "Specifying a voice_id is required for lecture video assistants."
             )
-        if self.lecture_slide_deck_id is not None:
+        if self.lecture_slide_deck_id is not None or self.lecture_slide_questions:
             raise ValueError(
                 "Lecture slide data cannot be set for assistants in Lecture Video mode."
             )
@@ -1476,6 +1522,7 @@ def lecture_video_validator_create_assistant(self):
         or self.lecture_video_manifest is not None
         or self.lecture_slide_deck_id is not None
         or self.lecture_slide_page_notes
+        or self.lecture_slide_questions
         or self.voice_id is not None
         or self.generation_prompt is not None
         or self.narration_prompt is not None
@@ -1525,6 +1572,7 @@ def lecture_video_validator_update_assistant(self):
     lecture_slide_page_notes_present = (
         "lecture_slide_page_notes" in self.model_fields_set
     )
+    lecture_slide_questions_present = "lecture_slide_questions" in self.model_fields_set
     regenerate_narration_requested_present = (
         "regenerate_narration_requested" in self.model_fields_set
     )
@@ -1546,6 +1594,7 @@ def lecture_video_validator_update_assistant(self):
         lecture_slide_deck_id_present
         or narration_prompt_present
         or lecture_slide_page_notes_present
+        or lecture_slide_questions_present
         or regenerate_narration_requested_present
         or regenerate_questions_requested_present
     )
@@ -1725,6 +1774,9 @@ class CreateAssistant(BaseModel):
     lecture_video_manifest: LectureVideoManifest | None = None
     lecture_slide_deck_id: int | None = None
     lecture_slide_page_notes: list[LectureSlidePageNotes] = Field(default_factory=list)
+    lecture_slide_questions: list[LectureSlideQuestionInput] = Field(
+        default_factory=list
+    )
     voice_id: str | None = None
     generation_prompt: str | None = Field(None, max_length=20000)
     narration_prompt: str | None = Field(None, max_length=20000)
@@ -1811,6 +1863,7 @@ class UpdateAssistant(BaseModel):
     lecture_video_manifest: LectureVideoManifest | None = None
     lecture_slide_deck_id: int | None = None
     lecture_slide_page_notes: list[LectureSlidePageNotes] | None = None
+    lecture_slide_questions: list[LectureSlideQuestionInput] | None = None
     voice_id: str | None = None
     generation_prompt: str | None = Field(None, max_length=20000)
     narration_prompt: str | None = Field(None, max_length=20000)

@@ -13,7 +13,7 @@ jobs:
     name: Test Python
     permissions:
       contents: read
-    timeout-minutes: 10
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     env:
       wd: ./

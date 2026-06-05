@@ -1877,6 +1877,7 @@ export type LectureSlidePageNotes = {
 };
 
 export type LectureSlideQuestionType = 'single_select';
+export type LectureSlideQuestionDraftMode = 'complete' | 'partial' | 'marker';
 
 export type LectureSlideQuestionOption = {
 	id: number;
@@ -1885,6 +1886,13 @@ export type LectureSlideQuestionOption = {
 	continue_slide_position?: number | null;
 	continue_slide_offset_ms?: number | null;
 	continue_offset_ms: number;
+	correct: boolean;
+};
+
+export type LectureSlideQuestionOptionInput = {
+	id?: number | null;
+	option_text: string;
+	post_answer_text: string;
 	correct: boolean;
 };
 
@@ -1898,6 +1906,15 @@ export type LectureSlideQuestion = {
 	question_text: string;
 	intro_text: string;
 	options: LectureSlideQuestionOption[];
+};
+
+export type LectureSlideQuestionInput = {
+	id?: number | null;
+	mode?: LectureSlideQuestionDraftMode;
+	slide_position: number;
+	question_text: string;
+	intro_text: string;
+	options: LectureSlideQuestionOptionInput[];
 };
 
 export type LectureSlideConfigResponse = {
@@ -2939,6 +2956,7 @@ export type CreateAssistantRequest = {
 	lecture_video_manifest?: LectureVideoManifest | null;
 	lecture_slide_deck_id?: number | null;
 	lecture_slide_page_notes?: LectureSlidePageNotes[];
+	lecture_slide_questions?: LectureSlideQuestionInput[];
 	voice_id?: string | null;
 	generation_prompt?: string | null;
 	narration_prompt?: string | null;
@@ -3005,6 +3023,7 @@ export type UpdateAssistantRequest = {
 	lecture_video_manifest?: LectureVideoManifest | null;
 	lecture_slide_deck_id?: number | null;
 	lecture_slide_page_notes?: LectureSlidePageNotes[] | null;
+	lecture_slide_questions?: LectureSlideQuestionInput[] | null;
 	voice_id?: string | null;
 	generation_prompt?: string | null;
 	narration_prompt?: string | null;

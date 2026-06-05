@@ -10,6 +10,7 @@ from pypdf import PdfReader
 from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 import pingpong.models as models
 import pingpong.schemas as schemas
@@ -31,6 +32,13 @@ class LectureSlidePageUpdateResult:
     notes_changed: bool = False
     narration_changed: bool = False
     narration_changed_positions: frozenset[int] = frozenset()
+
+
+@dataclass(frozen=True)
+class LectureSlideQuestionUpdateResult:
+    questions_changed: bool = False
+    audio_changed: bool = False
+    requires_question_generation: bool = False
 
 
 def generate_source_store_key() -> str:
@@ -357,6 +365,417 @@ async def apply_lecture_slide_page_notes(
     )
 
 
+def _text_needs_audio(text: str | None) -> bool:
+    return bool((text or "").strip())
+
+
+def _question_input_payload(
+    question: schemas.LectureSlideQuestionInput,
+) -> dict[str, object]:
+    return {
+        "mode": question.mode.value,
+        "slide_position": question.slide_position,
+        "question_text": question.question_text.strip(),
+        "intro_text": question.intro_text.strip(),
+        "options": [
+            {
+                "option_text": option.option_text.strip(),
+                "post_answer_text": option.post_answer_text.strip(),
+                "correct": option.correct,
+            }
+            for option in question.options
+        ],
+    }
+
+
+def lecture_slide_question_context_payload(
+    questions: Iterable[schemas.LectureSlideQuestionInput],
+) -> list[dict[str, object]]:
+    return [_question_input_payload(question) for question in questions]
+
+
+def _is_complete_question_input(question: schemas.LectureSlideQuestionInput) -> bool:
+    return question.mode == schemas.LectureSlideQuestionDraftMode.COMPLETE
+
+
+def _question_model_payload(
+    question: models.LectureSlideQuestion,
+) -> dict[str, object]:
+    correct_option_id = question.correct_option.id if question.correct_option else None
+    return {
+        "slide_position": question.slide_position,
+        "question_text": question.question_text,
+        "intro_text": question.intro_text,
+        "options": [
+            {
+                "option_text": option.option_text,
+                "post_answer_text": option.post_answer_text,
+                "correct": option.id == correct_option_id,
+            }
+            for option in sorted(question.options, key=lambda item: item.position)
+        ],
+    }
+
+
+def lecture_slide_question_model_context_payload(
+    questions: Iterable[models.LectureSlideQuestion],
+) -> list[dict[str, object]]:
+    return [
+        _question_model_payload(question)
+        for question in sorted(questions, key=lambda item: item.position)
+    ]
+
+
+async def _reset_narration_for_text(
+    session: AsyncSession,
+    narration: models.LectureSlideNarration | None,
+    text: str,
+) -> tuple[
+    models.LectureSlideNarration | None,
+    bool,
+    list[int],
+    list[tuple[int, str]],
+]:
+    if not _text_needs_audio(text):
+        return None, narration is not None, [narration.id] if narration else [], []
+    if narration is None:
+        narration = models.LectureSlideNarration(
+            status=schemas.LectureSlideNarrationStatus.PENDING,
+        )
+        session.add(narration)
+        await session.flush()
+        return narration, True, [], []
+    stored_object_row = (
+        [(narration.stored_object_id, narration.stored_object.key)]
+        if narration.stored_object_id is not None
+        and narration.stored_object is not None
+        else []
+    )
+    narration.stored_object_id = None
+    narration.status = schemas.LectureSlideNarrationStatus.PENDING
+    narration.error_message = None
+    session.add(narration)
+    return narration, True, [], stored_object_row
+
+
+async def _apply_question_option_drafts(
+    session: AsyncSession,
+    question: models.LectureSlideQuestion,
+    options: list[schemas.LectureSlideQuestionOptionInput],
+    *,
+    question_changed: bool,
+) -> tuple[bool, bool, list[int], list[tuple[int, str]]]:
+    changed = question_changed
+    audio_changed = False
+    old_narration_ids: list[int] = []
+    old_stored_object_rows: list[tuple[int, str]] = []
+    existing_options = {
+        option.position: option
+        for option in sorted(question.options, key=lambda item: item.position)
+    }
+    option_rows: list[tuple[models.LectureSlideQuestionOption, bool]] = []
+    for option_position, option in enumerate(options):
+        option_text = option.option_text.strip()
+        post_answer_text = option.post_answer_text.strip()
+        option_row = existing_options.pop(option_position, None)
+        if option_row is None:
+            option_row = models.LectureSlideQuestionOption(
+                question_id=question.id,
+                position=option_position,
+                option_text=option_text,
+                post_answer_text=post_answer_text,
+                continue_slide_position=question.slide_position,
+                continue_slide_offset_ms=question.slide_offset_ms,
+                continue_offset_ms=question.stop_offset_ms,
+            )
+            session.add(option_row)
+            await session.flush()
+            changed = True
+            if _text_needs_audio(post_answer_text):
+                post_narration = models.LectureSlideNarration(
+                    status=schemas.LectureSlideNarrationStatus.PENDING,
+                )
+                session.add(post_narration)
+                await session.flush()
+                option_row.post_narration_id = post_narration.id
+                audio_changed = True
+        else:
+            if option_row.position != option_position:
+                option_row.position = option_position
+                changed = True
+            if option_row.option_text != option_text:
+                option_row.option_text = option_text
+                changed = True
+            if option_row.post_answer_text != post_answer_text:
+                (
+                    narration,
+                    narration_changed,
+                    deleted_narration_ids,
+                    deleted_stored_object_rows,
+                ) = await _reset_narration_for_text(
+                    session, option_row.post_narration, post_answer_text
+                )
+                option_row.post_answer_text = post_answer_text
+                option_row.post_narration_id = narration.id if narration else None
+                old_narration_ids.extend(deleted_narration_ids)
+                old_stored_object_rows.extend(deleted_stored_object_rows)
+                changed = True
+                audio_changed = audio_changed or narration_changed
+            if option_row.continue_slide_position != question.slide_position:
+                option_row.continue_slide_position = question.slide_position
+                changed = True
+            if option_row.continue_slide_offset_ms != question.slide_offset_ms:
+                option_row.continue_slide_offset_ms = question.slide_offset_ms
+                changed = True
+            if option_row.continue_offset_ms != question.stop_offset_ms:
+                option_row.continue_offset_ms = question.stop_offset_ms
+                changed = True
+            session.add(option_row)
+        option_rows.append((option_row, option.correct))
+
+    for removed_option in existing_options.values():
+        if removed_option.post_narration_id is not None:
+            old_narration_ids.append(removed_option.post_narration_id)
+        await session.delete(removed_option)
+        changed = True
+        audio_changed = True
+
+    await session.flush()
+    existing_correct_option_id = (
+        question.correct_option.id if question.correct_option is not None else None
+    )
+    next_correct_option_id = next(
+        (option_row.id for option_row, is_correct in option_rows if is_correct),
+        None,
+    )
+    if existing_correct_option_id != next_correct_option_id:
+        changed = True
+    await session.execute(
+        delete(
+            models.lecture_slide_question_single_select_correct_option_association
+        ).where(
+            models.lecture_slide_question_single_select_correct_option_association.c.question_id
+            == question.id
+        )
+    )
+    for option_row, is_correct in option_rows:
+        if is_correct:
+            await session.execute(
+                models.lecture_slide_question_single_select_correct_option_association.insert().values(
+                    question_id=question.id,
+                    option_id=option_row.id,
+                )
+            )
+    return changed, audio_changed, old_narration_ids, old_stored_object_rows
+
+
+async def apply_lecture_slide_question_drafts(
+    session: AsyncSession,
+    deck: models.LectureSlideDeck,
+    questions: Iterable[schemas.LectureSlideQuestionInput],
+) -> LectureSlideQuestionUpdateResult:
+    question_inputs = list(questions)
+    complete_question_inputs = [
+        question
+        for question in question_inputs
+        if _is_complete_question_input(question)
+    ]
+    requires_question_generation = len(complete_question_inputs) != len(question_inputs)
+    for question in question_inputs:
+        if question.slide_position >= deck.slide_count:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Question slide position {question.slide_position} is outside this deck.",
+            )
+
+    manual_question_payload = lecture_slide_question_context_payload(question_inputs)
+    pages_by_position = {
+        page.position: page
+        for page in (
+            await session.scalars(
+                select(models.LectureSlidePage).where(
+                    models.LectureSlidePage.lecture_slide_deck_id == deck.id,
+                    models.LectureSlidePage.position.in_(
+                        [question.slide_position for question in question_inputs]
+                    )
+                    if question_inputs
+                    else True,
+                )
+            )
+        ).all()
+    }
+    questions_are_timed = all(
+        (page := pages_by_position.get(question.slide_position)) is not None
+        and page.start_offset_ms is not None
+        and page.end_offset_ms is not None
+        for question in question_inputs
+    )
+    if not questions_are_timed:
+        context_data = dict(deck.context_data or {})
+        previous_payload = context_data.get(
+            schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY
+        )
+        if manual_question_payload:
+            context_data[schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY] = (
+                manual_question_payload
+            )
+        else:
+            context_data.pop(schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY, None)
+        deck.context_data = context_data
+        session.add(deck)
+        await session.flush()
+        return LectureSlideQuestionUpdateResult(
+            questions_changed=previous_payload != manual_question_payload,
+            audio_changed=False,
+            requires_question_generation=requires_question_generation,
+        )
+
+    old_narration_ids: list[int] = []
+    old_stored_object_rows: list[tuple[int, str]] = []
+    changed = False
+    audio_changed = False
+    existing_questions = {
+        question.position: question
+        for question in (
+            await session.scalars(
+                select(models.LectureSlideQuestion)
+                .where(models.LectureSlideQuestion.lecture_slide_deck_id == deck.id)
+                .options(selectinload(models.LectureSlideQuestion.options))
+                .options(selectinload(models.LectureSlideQuestion.correct_option))
+                .options(
+                    selectinload(
+                        models.LectureSlideQuestion.intro_narration
+                    ).selectinload(models.LectureSlideNarration.stored_object)
+                )
+                .options(
+                    selectinload(models.LectureSlideQuestion.options)
+                    .selectinload(models.LectureSlideQuestionOption.post_narration)
+                    .selectinload(models.LectureSlideNarration.stored_object)
+                )
+                .order_by(models.LectureSlideQuestion.position)
+            )
+        ).all()
+    }
+
+    for question_position, question_input in enumerate(complete_question_inputs):
+        page = pages_by_position[question_input.slide_position]
+        slide_offset_ms = (page.end_offset_ms or 0) - (page.start_offset_ms or 0)
+        stop_offset_ms = page.end_offset_ms or 0
+        question_text = question_input.question_text.strip()
+        intro_text = question_input.intro_text.strip()
+        question = existing_questions.pop(question_position, None)
+        question_changed = False
+        if question is None:
+            question = models.LectureSlideQuestion(
+                lecture_slide_deck_id=deck.id,
+                position=question_position,
+                slide_position=question_input.slide_position,
+                slide_offset_ms=slide_offset_ms,
+                stop_offset_ms=stop_offset_ms,
+                question_type=schemas.LectureSlideQuestionType.SINGLE_SELECT,
+                question_text=question_text,
+                intro_text=intro_text,
+            )
+            session.add(question)
+            await session.flush()
+            changed = True
+            question_changed = True
+            if _text_needs_audio(intro_text):
+                intro_narration = models.LectureSlideNarration(
+                    status=schemas.LectureSlideNarrationStatus.PENDING,
+                )
+                session.add(intro_narration)
+                await session.flush()
+                question.intro_narration_id = intro_narration.id
+                audio_changed = True
+        else:
+            if question.position != question_position:
+                question.position = question_position
+                question_changed = True
+            if question.slide_position != question_input.slide_position:
+                question.slide_position = question_input.slide_position
+                question_changed = True
+            if question.slide_offset_ms != slide_offset_ms:
+                question.slide_offset_ms = slide_offset_ms
+                question_changed = True
+            if question.stop_offset_ms != stop_offset_ms:
+                question.stop_offset_ms = stop_offset_ms
+                question_changed = True
+            if question.question_text != question_text:
+                question.question_text = question_text
+                question_changed = True
+            if question.intro_text != intro_text:
+                (
+                    narration,
+                    narration_changed,
+                    deleted_narration_ids,
+                    deleted_stored_object_rows,
+                ) = await _reset_narration_for_text(
+                    session, question.intro_narration, intro_text
+                )
+                question.intro_text = intro_text
+                question.intro_narration_id = narration.id if narration else None
+                old_narration_ids.extend(deleted_narration_ids)
+                old_stored_object_rows.extend(deleted_stored_object_rows)
+                question_changed = True
+                audio_changed = audio_changed or narration_changed
+            changed = changed or question_changed
+            session.add(question)
+
+        (
+            options_changed,
+            options_audio_changed,
+            deleted_narration_ids,
+            deleted_stored_object_rows,
+        ) = await _apply_question_option_drafts(
+            session,
+            question,
+            question_input.options,
+            question_changed=question_changed,
+        )
+        changed = changed or options_changed
+        audio_changed = audio_changed or options_audio_changed
+        old_narration_ids.extend(deleted_narration_ids)
+        old_stored_object_rows.extend(deleted_stored_object_rows)
+
+    for removed_question in existing_questions.values():
+        if removed_question.intro_narration_id is not None:
+            old_narration_ids.append(removed_question.intro_narration_id)
+        for option in removed_question.options:
+            if option.post_narration_id is not None:
+                old_narration_ids.append(option.post_narration_id)
+        await session.delete(removed_question)
+        changed = True
+        audio_changed = True
+
+    context_data = dict(deck.context_data or {})
+    if requires_question_generation:
+        context_data[schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY] = (
+            manual_question_payload
+        )
+    else:
+        context_data.pop(schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY, None)
+    if context_data != (deck.context_data or {}):
+        deck.context_data = context_data
+        session.add(deck)
+        changed = True
+
+    await session.flush()
+    audio_keys = await _delete_lecture_slide_narrations_if_unused(
+        session, old_narration_ids
+    )
+    stored_object_keys = await _delete_lecture_slide_narration_stored_objects_if_unused(
+        session,
+        old_stored_object_rows,
+    )
+    await _delete_lecture_slide_audio_keys_quietly([*audio_keys, *stored_object_keys])
+    return LectureSlideQuestionUpdateResult(
+        questions_changed=changed,
+        audio_changed=audio_changed,
+        requires_question_generation=requires_question_generation,
+    )
+
+
 async def lecture_slide_deck_has_pages(session: AsyncSession, deck_id: int) -> bool:
     page_id = await session.scalar(
         select(models.LectureSlidePage.id)
@@ -386,6 +805,80 @@ async def clear_lecture_slide_page_narrations(
     )
     audio_keys = await _delete_lecture_slide_narrations_if_unused(
         session, narration_ids
+    )
+    await _delete_lecture_slide_audio_keys_quietly(audio_keys)
+
+
+async def reset_lecture_slide_question_narrations(
+    session: AsyncSession, deck_id: int
+) -> None:
+    narration_ids = list(
+        dict.fromkeys(
+            [
+                *(
+                    await session.scalars(
+                        select(models.LectureSlideQuestion.intro_narration_id).where(
+                            models.LectureSlideQuestion.lecture_slide_deck_id
+                            == deck_id,
+                            models.LectureSlideQuestion.intro_narration_id.is_not(None),
+                        )
+                    )
+                ).all(),
+                *(
+                    await session.scalars(
+                        select(models.LectureSlideQuestionOption.post_narration_id)
+                        .join(
+                            models.LectureSlideQuestion,
+                            models.LectureSlideQuestion.id
+                            == models.LectureSlideQuestionOption.question_id,
+                        )
+                        .where(
+                            models.LectureSlideQuestion.lecture_slide_deck_id
+                            == deck_id,
+                            models.LectureSlideQuestionOption.post_narration_id.is_not(
+                                None
+                            ),
+                        )
+                    )
+                ).all(),
+            ]
+        )
+    )
+    if not narration_ids:
+        return
+
+    stored_object_rows = list(
+        (
+            await session.execute(
+                select(
+                    models.LectureSlideNarration.stored_object_id,
+                    models.LectureSlideNarrationStoredObject.key,
+                )
+                .join(
+                    models.LectureSlideNarrationStoredObject,
+                    models.LectureSlideNarrationStoredObject.id
+                    == models.LectureSlideNarration.stored_object_id,
+                )
+                .where(models.LectureSlideNarration.id.in_(narration_ids))
+            )
+        ).all()
+    )
+    await session.execute(
+        update(models.LectureSlideNarration)
+        .where(models.LectureSlideNarration.id.in_(narration_ids))
+        .values(
+            stored_object_id=None,
+            status=schemas.LectureSlideNarrationStatus.PENDING,
+            error_message=None,
+        )
+    )
+    audio_keys = await _delete_lecture_slide_narration_stored_objects_if_unused(
+        session,
+        [
+            (stored_object_id, key)
+            for stored_object_id, key in stored_object_rows
+            if stored_object_id is not None
+        ],
     )
     await _delete_lecture_slide_audio_keys_quietly(audio_keys)
 

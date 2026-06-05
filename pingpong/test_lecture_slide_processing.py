@@ -708,6 +708,115 @@ async def test_persist_slide_manifest_replaces_existing_questions(db, monkeypatc
         ] == [500, 500, 1200, 1200]
 
 
+async def test_persist_slide_manifest_includes_manual_questions_from_context(db):
+    await _create_class_and_deck(db)
+    manual_question = {
+        "slide_position": 0,
+        "question_text": "Instructor question?",
+        "intro_text": "Answer this instructor question.",
+        "options": [
+            {
+                "option_text": "Instructor correct",
+                "post_answer_text": "Correct.",
+                "correct": True,
+            },
+            {
+                "option_text": "Instructor incorrect",
+                "post_answer_text": "Try again.",
+                "correct": False,
+            },
+        ],
+    }
+    async with db.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, 1
+        )
+        assert deck is not None
+        deck.context_data = {
+            schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY: [manual_question]
+        }
+        first_page = models.LectureSlidePage(
+            lecture_slide_deck_id=1,
+            position=0,
+            start_offset_ms=0,
+            end_offset_ms=500,
+        )
+        second_page = models.LectureSlidePage(
+            lecture_slide_deck_id=1,
+            position=1,
+            start_offset_ms=500,
+            end_offset_ms=1200,
+        )
+        run = models.LectureSlideProcessingRun(
+            lecture_slide_deck_id=1,
+            lecture_slide_deck_id_snapshot=1,
+            class_id=1,
+            stage=schemas.LectureSlideProcessingStage.MANIFEST_GENERATION,
+            attempt_number=1,
+            status=schemas.LectureSlideProcessingRunStatus.RUNNING,
+            lease_token="lease",
+        )
+        session.add_all([deck, first_page, second_page, run])
+        await session.commit()
+        run_id = run.id
+
+    manifest = lecture_slide_processing.GeneratedSlideManifest(
+        questions=[
+            lecture_slide_processing.GeneratedSlideQuestion(
+                slide_position=0,
+                question_text="Generated duplicate?",
+                options=[
+                    lecture_slide_processing.GeneratedSlideChoice(
+                        option_text="Generated correct",
+                        correct=True,
+                    ),
+                    lecture_slide_processing.GeneratedSlideChoice(
+                        option_text="Generated incorrect",
+                        correct=False,
+                    ),
+                ],
+            ),
+            lecture_slide_processing.GeneratedSlideQuestion(
+                slide_position=1,
+                question_text="Generated follow-up?",
+                options=[
+                    lecture_slide_processing.GeneratedSlideChoice(
+                        option_text="Follow-up correct",
+                        correct=True,
+                    ),
+                    lecture_slide_processing.GeneratedSlideChoice(
+                        option_text="Follow-up incorrect",
+                        correct=False,
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    await lecture_slide_processing._persist_slide_manifest(
+        run_id,
+        "lease",
+        1,
+        manifest,
+        [],
+    )
+
+    async with db.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, 1
+        )
+        assert deck is not None
+        assert deck.context_data == {}
+        assert [question.question_text for question in deck.questions] == [
+            "Instructor question?",
+            "Generated follow-up?",
+        ]
+        assert deck.questions[0].intro_narration is not None
+        assert deck.questions[0].options[0].post_narration is not None
+        assert deck.questions[0].correct_option is not None
+        assert deck.questions[0].correct_option.option_text == "Instructor correct"
+
+
 async def test_parse_responses_output_retries_transient_openai_failure(monkeypatch):
     attempts = 0
 
