@@ -154,7 +154,7 @@ async def handle_delete_file(
         GenericStatus: Status of the operation
     """
     int_file_id = int(file_id)  # ensure just in case
-    file = await File.get_by_id(session, int_file_id)
+    file = await File.get_by_id_with_delete_context(session, int_file_id)
     if not file:
         raise FileNotFoundException()
     remote_file_id = file.file_id
