@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import pingpong.models as models
 import pingpong.schemas as schemas
+from pingpong import lecture_slide_service
 from pingpong import lecture_video_processing
 from pingpong.ai import get_openai_client_by_class_id
 from pingpong.class_credential_validation import (
@@ -275,6 +276,8 @@ def _build_slide_manifest_generation_instructions(
     content_section: str,
     *,
     total_duration_ms: int | None,
+    manual_questions: list[GeneratedSlideQuestion] | None = None,
+    question_requests: list[schemas.LectureSlideQuestionInput] | None = None,
     generation_start_ms: int | None = None,
     generation_end_ms: int | None = None,
     context_start_ms: int | None = None,
@@ -308,11 +311,53 @@ This is one chunk from a longer slide lesson.{context_range_text}
 Generate questions only for {generation_window_interval_text}.
 Use surrounding context to avoid boundary artifacts, but keep generated offsets inside the requested generation window.
 """
+    manual_question_positions = sorted(
+        {question.slide_position for question in manual_questions or []}
+    )
+    partial_question_positions = sorted(
+        [
+            question.slide_position
+            for question in question_requests or []
+            if question.mode == schemas.LectureSlideQuestionDraftMode.PARTIAL
+        ]
+    )
+    marker_question_positions = sorted(
+        [
+            question.slide_position
+            for question in question_requests or []
+            if question.mode == schemas.LectureSlideQuestionDraftMode.MARKER
+        ]
+    )
+    manual_question_guidance = ""
+    if manual_question_positions:
+        manual_question_guidance = f"""
+
+COMPLETE INSTRUCTOR-AUTHORED QUESTIONS:
+The request includes instructor-authored questions after these zero-based slide positions: {manual_question_positions}.
+These questions will be inserted separately. Do not repeat, rephrase, replace, or generate additional questions after those slide positions.
+You may generate questions at other useful slide breakpoints.
+"""
+    question_request_guidance = ""
+    if partial_question_positions or marker_question_positions:
+        question_request_guidance = f"""
+
+INSTRUCTOR QUESTION REQUESTS:
+The instructor requested model-completed questions after these zero-based slide positions.
+- Partial question drafts to complete: {partial_question_positions}
+- Marker-only required questions to create: {marker_question_positions}
+You must include exactly one distinct question for each requested entry unless that slide is outside the generation window.
+These requested entries are required minimums, not an exclusive list of allowed question locations.
+You may generate additional questions at other useful slide breakpoints that were not selected by the instructor.
+Use any provided partial prompt, narration, options, feedback, or correct-answer hints as constraints, and fill missing details.
+Do not generate additional unrequested questions after instructor-selected slide positions.
+"""
 
     return f"""You are an expert educational content designer creating an interactive slide lesson from a PDF deck.
 
 You will be given the PDF, slide timing source data, and word-level narration transcript source data.{duration_text}
 {generation_window_text}
+{manual_question_guidance}
+{question_request_guidance}
 
 Use the PDF, slide timing source data, and transcript together. The PDF is the visual source of truth; the transcript is the spoken narration timeline.
 
@@ -357,6 +402,86 @@ def _slide_generation_final_task_text() -> str:
         "Based on the PDF, slide timing source data, and word-level transcript "
         "source data above, generate the interactive slide lesson manifest now. "
         "Follow the instructions and return only the schema-valid JSON object."
+    )
+
+
+def _manual_slide_questions_from_context(
+    context_data: Mapping[str, Any] | None,
+) -> list[GeneratedSlideQuestion]:
+    question_inputs = _manual_slide_question_inputs_from_context(context_data)
+    return [
+        GeneratedSlideQuestion(
+            slide_position=question.slide_position,
+            question_text=question.question_text,
+            intro_text=question.intro_text,
+            options=[
+                GeneratedSlideChoice(
+                    option_text=option.option_text,
+                    post_answer_text=option.post_answer_text,
+                    correct=option.correct,
+                )
+                for option in question.options
+            ],
+        )
+        for question in question_inputs
+        if question.mode == schemas.LectureSlideQuestionDraftMode.COMPLETE
+    ]
+
+
+def _manual_slide_question_inputs_from_context(
+    context_data: Mapping[str, Any] | None,
+) -> list[schemas.LectureSlideQuestionInput]:
+    if not context_data:
+        return []
+    raw_questions = context_data.get(schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY)
+    if not isinstance(raw_questions, list):
+        return []
+    questions: list[schemas.LectureSlideQuestionInput] = []
+    for raw_question in raw_questions:
+        questions.append(schemas.LectureSlideQuestionInput.model_validate(raw_question))
+    return questions
+
+
+def _manual_slide_questions_source_text(
+    complete_questions: list[GeneratedSlideQuestion],
+    question_requests: list[schemas.LectureSlideQuestionInput] | None = None,
+) -> str | None:
+    partial_questions = [
+        question
+        for question in question_requests or []
+        if question.mode == schemas.LectureSlideQuestionDraftMode.PARTIAL
+    ]
+    marker_questions = [
+        question
+        for question in question_requests or []
+        if question.mode == schemas.LectureSlideQuestionDraftMode.MARKER
+    ]
+    if not complete_questions and not partial_questions and not marker_questions:
+        return None
+    payload: dict[str, object] = {}
+    if complete_questions:
+        payload["complete_questions_to_preserve"] = [
+            question.model_dump() for question in complete_questions
+        ]
+    if partial_questions:
+        payload["partial_questions_to_complete"] = [
+            question.model_dump(mode="json") for question in partial_questions
+        ]
+    if marker_questions:
+        payload["required_question_markers"] = [
+            {
+                "slide_position": question.slide_position,
+            }
+            for question in marker_questions
+        ]
+    return (
+        "INSTRUCTOR QUESTION SOURCE DATA:\n"
+        "This data was added by the instructor before generation. Preserve complete "
+        "questions exactly. For partial questions, keep the instructor-provided "
+        "details and fill in missing prompt, narration, answer choices, feedback, "
+        "and correct answer as needed. For required_question_markers, create one "
+        "useful question after each listed slide_position.\n\n"
+        f"{json.dumps(payload, indent=2)}"
     )
 
 
@@ -1949,6 +2074,8 @@ def _slide_manifest_request_token_estimate(
     page_ranges: list[SlidePageRange],
     transcript: list[schemas.LectureVideoManifestWordV3],
     total_duration_ms: int | None,
+    manual_questions: list[GeneratedSlideQuestion] | None = None,
+    question_requests: list[schemas.LectureSlideQuestionInput] | None = None,
     chunk: SlideManifestGenerationChunk | None = None,
 ) -> int:
     generation_start_ms = chunk.generation_start_ms if chunk is not None else None
@@ -1960,6 +2087,8 @@ def _slide_manifest_request_token_estimate(
             _build_slide_manifest_generation_instructions(
                 generation_prompt,
                 total_duration_ms=total_duration_ms,
+                manual_questions=manual_questions,
+                question_requests=question_requests,
                 generation_start_ms=generation_start_ms,
                 generation_end_ms=generation_end_ms,
                 context_start_ms=context_start_ms,
@@ -1967,6 +2096,10 @@ def _slide_manifest_request_token_estimate(
             ),
             _slide_timing_source_text(page_ranges),
             _generation_transcript_source_text(transcript, compact=False),
+            _manual_slide_questions_source_text(
+                manual_questions or [], question_requests
+            )
+            or "",
             _slide_generation_final_task_text(),
         ]
     )
@@ -1991,12 +2124,16 @@ def _slide_manifest_chunk_source_token_budget(
     *,
     generation_prompt: str,
     total_duration_ms: int,
+    manual_questions: list[GeneratedSlideQuestion] | None = None,
+    question_requests: list[schemas.LectureSlideQuestionInput] | None = None,
 ) -> int:
     fixed_request_tokens = _slide_manifest_request_token_estimate(
         generation_prompt=generation_prompt,
         page_ranges=[],
         transcript=[],
         total_duration_ms=total_duration_ms,
+        manual_questions=manual_questions,
+        question_requests=question_requests,
     )
     return max(0, SLIDE_MANIFEST_INPUT_TOKEN_BUDGET - fixed_request_tokens)
 
@@ -2053,12 +2190,16 @@ def _plan_slide_manifest_generation_chunks(
     generation_prompt: str,
     page_ranges: list[SlidePageRange],
     transcript: list[schemas.LectureVideoManifestWordV3],
+    manual_questions: list[GeneratedSlideQuestion] | None = None,
+    question_requests: list[schemas.LectureSlideQuestionInput] | None = None,
 ) -> list[SlideManifestGenerationChunk]:
     full_request_tokens = _slide_manifest_request_token_estimate(
         generation_prompt=generation_prompt,
         page_ranges=page_ranges,
         transcript=transcript,
         total_duration_ms=total_duration_ms,
+        manual_questions=manual_questions,
+        question_requests=question_requests,
     )
     if full_request_tokens <= SLIDE_MANIFEST_INPUT_TOKEN_BUDGET:
         return [
@@ -2089,6 +2230,8 @@ def _plan_slide_manifest_generation_chunks(
     source_budget = _slide_manifest_chunk_source_token_budget(
         generation_prompt=generation_prompt,
         total_duration_ms=total_duration_ms,
+        manual_questions=manual_questions,
+        question_requests=question_requests,
     )
     chunk_source_budget = max(
         SLIDE_MANIFEST_MIN_CHUNK_SOURCE_TOKENS,
@@ -2329,6 +2472,10 @@ async def _generate_slide_manifest(
             return None
         prompt = deck.generation_prompt or DEFAULT_GENERATION_PROMPT_CONTENT
         total_duration_ms = deck.total_duration_ms
+        question_requests = _manual_slide_question_inputs_from_context(
+            deck.context_data
+        )
+        manual_questions = _manual_slide_questions_from_context(deck.context_data)
         page_ranges: list[SlidePageRange] = [
             {
                 "slide_position": page.position,
@@ -2362,6 +2509,8 @@ async def _generate_slide_manifest(
                 page_ranges=page_ranges,
                 transcript=transcript,
                 total_duration_ms=total_duration_ms,
+                manual_questions=manual_questions,
+                question_requests=question_requests,
             ),
         )
     finally:
@@ -2377,6 +2526,8 @@ async def _generate_slide_manifest_with_optional_chunks(
     page_ranges: list[SlidePageRange],
     transcript: list[schemas.LectureVideoManifestWordV3],
     total_duration_ms: int | None,
+    manual_questions: list[GeneratedSlideQuestion] | None = None,
+    question_requests: list[schemas.LectureSlideQuestionInput] | None = None,
 ) -> GeneratedSlideManifest:
     if total_duration_ms is None:
         return await _generate_slide_manifest_for_window(
@@ -2387,12 +2538,16 @@ async def _generate_slide_manifest_with_optional_chunks(
             page_ranges=page_ranges,
             transcript=transcript,
             total_duration_ms=None,
+            manual_questions=manual_questions,
+            question_requests=question_requests,
         )
     chunks = _plan_slide_manifest_generation_chunks(
         total_duration_ms,
         generation_prompt=generation_prompt,
         page_ranges=page_ranges,
         transcript=transcript,
+        manual_questions=manual_questions,
+        question_requests=question_requests,
     )
     if len(chunks) == 1:
         try:
@@ -2404,6 +2559,8 @@ async def _generate_slide_manifest_with_optional_chunks(
                 page_ranges=page_ranges,
                 transcript=transcript,
                 total_duration_ms=total_duration_ms,
+                manual_questions=manual_questions,
+                question_requests=question_requests,
             )
         except Exception as exc:
             if (
@@ -2437,6 +2594,8 @@ async def _generate_slide_manifest_with_optional_chunks(
                 transcript=transcript,
                 total_duration_ms=total_duration_ms,
                 chunk=chunk,
+                manual_questions=manual_questions,
+                question_requests=question_requests,
             )
         )
     return _merge_slide_chunk_manifests(chunk_manifests)
@@ -2452,6 +2611,8 @@ async def _generate_slide_manifest_chunks(
     transcript: list[schemas.LectureVideoManifestWordV3],
     total_duration_ms: int,
     chunk: SlideManifestGenerationChunk,
+    manual_questions: list[GeneratedSlideQuestion] | None = None,
+    question_requests: list[schemas.LectureSlideQuestionInput] | None = None,
 ) -> list[GeneratedSlideManifest]:
     try:
         manifest = await _generate_slide_manifest_for_window(
@@ -2463,6 +2624,8 @@ async def _generate_slide_manifest_chunks(
             transcript=transcript,
             total_duration_ms=total_duration_ms,
             chunk=chunk,
+            manual_questions=manual_questions,
+            question_requests=question_requests,
         )
         return [manifest]
     except Exception as exc:
@@ -2495,6 +2658,8 @@ async def _generate_slide_manifest_chunks(
                     transcript=transcript,
                     total_duration_ms=total_duration_ms,
                     chunk=child_chunk,
+                    manual_questions=manual_questions,
+                    question_requests=question_requests,
                 )
             )
         return manifests
@@ -2509,6 +2674,8 @@ async def _generate_slide_manifest_for_window(
     page_ranges: list[SlidePageRange],
     transcript: list[schemas.LectureVideoManifestWordV3],
     total_duration_ms: int | None,
+    manual_questions: list[GeneratedSlideQuestion] | None = None,
+    question_requests: list[schemas.LectureSlideQuestionInput] | None = None,
     chunk: SlideManifestGenerationChunk | None = None,
 ) -> GeneratedSlideManifest:
     chunk_transcript = transcript
@@ -2539,6 +2706,8 @@ async def _generate_slide_manifest_for_window(
         instructions=_build_slide_manifest_generation_instructions(
             generation_prompt,
             total_duration_ms=total_duration_ms,
+            manual_questions=manual_questions,
+            question_requests=question_requests,
             generation_start_ms=generation_start_ms,
             generation_end_ms=generation_end_ms,
             context_start_ms=context_start_ms,
@@ -2561,6 +2730,21 @@ async def _generate_slide_manifest_for_window(
                             compact=False,
                         ),
                     },
+                    *(
+                        [
+                            {
+                                "type": "input_text",
+                                "text": manual_question_source_text,
+                            }
+                        ]
+                        if (
+                            manual_question_source_text
+                            := _manual_slide_questions_source_text(
+                                manual_questions or [], question_requests
+                            )
+                        )
+                        else []
+                    ),
                     {
                         "type": "input_text",
                         "text": _slide_generation_final_task_text(),
@@ -2597,6 +2781,25 @@ def _merge_slide_chunk_manifests(
     )
 
 
+def _generated_slide_question_to_input(
+    question: GeneratedSlideQuestion,
+) -> schemas.LectureSlideQuestionInput:
+    return schemas.LectureSlideQuestionInput(
+        mode=schemas.LectureSlideQuestionDraftMode.COMPLETE,
+        slide_position=question.slide_position,
+        question_text=question.question_text,
+        intro_text=question.intro_text,
+        options=[
+            schemas.LectureSlideQuestionOptionInput(
+                option_text=option.option_text,
+                post_answer_text=option.post_answer_text,
+                correct=option.correct,
+            )
+            for option in question.options
+        ],
+    )
+
+
 async def _persist_slide_manifest(
     run_id: int,
     lease_token: str,
@@ -2616,33 +2819,18 @@ async def _persist_slide_manifest(
             or run.lease_token != lease_token
         ):
             return
-
-        await session.execute(
-            delete(
-                models.lecture_slide_question_single_select_correct_option_association
-            ).where(
-                models.lecture_slide_question_single_select_correct_option_association.c.question_id.in_(
-                    select(models.LectureSlideQuestion.id).where(
-                        models.LectureSlideQuestion.lecture_slide_deck_id == deck.id
-                    )
-                )
-            )
-        )
-        await session.execute(
-            delete(models.LectureSlideQuestionOption).where(
-                models.LectureSlideQuestionOption.question_id.in_(
-                    select(models.LectureSlideQuestion.id).where(
-                        models.LectureSlideQuestion.lecture_slide_deck_id == deck.id
-                    )
-                )
-            )
-        )
-        await session.execute(
-            delete(models.LectureSlideQuestion).where(
-                models.LectureSlideQuestion.lecture_slide_deck_id == deck.id
-            )
-        )
-        await session.flush()
+        manual_questions = _manual_slide_questions_from_context(deck.context_data)
+        manual_question_positions = {
+            question.slide_position for question in manual_questions
+        }
+        manifest_questions = [
+            *manual_questions,
+            *[
+                question
+                for question in manifest.questions
+                if question.slide_position not in manual_question_positions
+            ],
+        ]
 
         page_ranges: list[SlidePageRange] = [
             {
@@ -2658,7 +2846,10 @@ async def _persist_slide_manifest(
         question_pause_offsets_by_position: list[
             tuple[GeneratedSlideQuestion, SlideQuestionPauseOffsets]
         ] = []
-        for question in manifest.questions:
+        for question in sorted(
+            manifest_questions,
+            key=lambda item: item.slide_position,
+        ):
             pause_offsets = _slide_question_pause_offsets(
                 question,
                 page_range_by_position=page_range_by_position,
@@ -2667,62 +2858,18 @@ async def _persist_slide_manifest(
                 continue
             question_pause_offsets_by_position.append((question, pause_offsets))
 
-        for question_position, (question, pause_offsets) in enumerate(
-            question_pause_offsets_by_position
-        ):
-            question_row = models.LectureSlideQuestion(
-                lecture_slide_deck_id=deck.id,
-                position=question_position,
-                slide_position=question.slide_position,
-                slide_offset_ms=pause_offsets["slide_offset_ms"],
-                stop_offset_ms=pause_offsets["stop_offset_ms"],
-                question_type=schemas.LectureSlideQuestionType.SINGLE_SELECT,
-                question_text=question.question_text,
-                intro_text=question.intro_text,
-            )
-            session.add(question_row)
-            await session.flush()
-            if text_needs_audio(question.intro_text):
-                intro_narration = models.LectureSlideNarration(
-                    status=schemas.LectureSlideNarrationStatus.PENDING,
-                )
-                session.add(intro_narration)
-                await session.flush()
-                question_row.intro_narration_id = intro_narration.id
+        await lecture_slide_service.apply_lecture_slide_question_drafts(
+            session,
+            deck,
+            [
+                _generated_slide_question_to_input(question)
+                for question, _pause_offsets in question_pause_offsets_by_position
+            ],
+        )
 
-            option_rows: list[
-                tuple[GeneratedSlideChoice, models.LectureSlideQuestionOption]
-            ] = []
-            for option_position, option in enumerate(question.options):
-                option_row = models.LectureSlideQuestionOption(
-                    question_id=question_row.id,
-                    position=option_position,
-                    option_text=option.option_text,
-                    post_answer_text=option.post_answer_text,
-                    continue_slide_position=question.slide_position,
-                    continue_slide_offset_ms=pause_offsets["slide_offset_ms"],
-                    continue_offset_ms=pause_offsets["stop_offset_ms"],
-                )
-                session.add(option_row)
-                option_rows.append((option, option_row))
-            await session.flush()
-            for option, option_row in option_rows:
-                if option.correct:
-                    await session.execute(
-                        models.lecture_slide_question_single_select_correct_option_association.insert().values(
-                            question_id=question_row.id,
-                            option_id=option_row.id,
-                        )
-                    )
-                if text_needs_audio(option.post_answer_text):
-                    post_narration = models.LectureSlideNarration(
-                        status=schemas.LectureSlideNarrationStatus.PENDING,
-                    )
-                    session.add(post_narration)
-                    await session.flush()
-                    option_row.post_narration_id = post_narration.id
-
-        deck.context_data = {}
+        context_data = dict(deck.context_data or {})
+        context_data.pop(schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY, None)
+        deck.context_data = context_data
         deck.context_version = 4
         deck.lecture_slide_chat_available = bool(transcript)
         deck.transcript_data = transcript_data_from_words(transcript)
@@ -2744,12 +2891,22 @@ async def _synthesize_knowledge_check_audio(
         class_id = deck.class_id
         narration_items: list[tuple[int, str]] = []
         for question in deck.questions:
-            if question.intro_narration and text_needs_audio(question.intro_text):
+            if (
+                question.intro_narration
+                and text_needs_audio(question.intro_text)
+                and question.intro_narration.status
+                != schemas.LectureSlideNarrationStatus.READY
+            ):
                 narration_items.append(
                     (question.intro_narration.id, question.intro_text)
                 )
             for option in question.options:
-                if option.post_narration and text_needs_audio(option.post_answer_text):
+                if (
+                    option.post_narration
+                    and text_needs_audio(option.post_answer_text)
+                    and option.post_narration.status
+                    != schemas.LectureSlideNarrationStatus.READY
+                ):
                     narration_items.append(
                         (option.post_narration.id, option.post_answer_text)
                     )

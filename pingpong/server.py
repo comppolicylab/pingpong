@@ -10219,6 +10219,35 @@ async def get_assistant_lecture_slide_config(
                 ],
             )
         )
+    raw_question_drafts = (deck.context_data or {}).get(
+        schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY
+    )
+    question_drafts = (
+        [
+            schemas.LectureSlideQuestionInput.model_validate(question)
+            for question in raw_question_drafts
+        ]
+        if isinstance(raw_question_drafts, list)
+        else [
+            schemas.LectureSlideQuestionInput(
+                id=question.id,
+                mode=schemas.LectureSlideQuestionDraftMode.COMPLETE,
+                slide_position=question.slide_position,
+                question_text=question.question_text,
+                intro_text=question.intro_text,
+                options=[
+                    schemas.LectureSlideQuestionOptionInput(
+                        id=option.id,
+                        option_text=option.option_text,
+                        post_answer_text=option.post_answer_text,
+                        correct=option.correct,
+                    )
+                    for option in question.options
+                ],
+            )
+            for question in questions
+        ]
+    )
     return schemas.LectureSlideConfigResponse(
         lecture_slide_deck=cast(
             schemas.LectureSlideSummary,
@@ -10229,6 +10258,7 @@ async def get_assistant_lecture_slide_config(
         narration_prompt=deck.narration_prompt,
         pages=pages,
         questions=questions,
+        question_drafts=question_drafts,
         processing_status=processing_status,
     )
 
@@ -10932,6 +10962,7 @@ async def create_assistant(
     lecture_slide_generation_prompt = None
     lecture_slide_narration_prompt = None
     lecture_slide_page_notes = req.lecture_slide_page_notes
+    lecture_slide_questions = req.lecture_slide_questions
 
     if is_video:
         if req.lecture_video_id is None:
@@ -10997,6 +11028,7 @@ async def create_assistant(
         or req.lecture_video_manifest is not None
         or req.lecture_slide_deck_id is not None
         or req.lecture_slide_page_notes
+        or req.lecture_slide_questions
         or req.voice_id is not None
         or req.generation_prompt is not None
         or req.narration_prompt is not None
@@ -11139,6 +11171,7 @@ async def create_assistant(
         del req.lecture_video_manifest
         del req.lecture_slide_deck_id
         del req.lecture_slide_page_notes
+        del req.lecture_slide_questions
         del req.voice_id
         del req.generation_prompt
         del req.narration_prompt
@@ -11223,6 +11256,9 @@ async def create_assistant(
             lecture_slide_deck.narration_prompt = lecture_slide_narration_prompt
             await lecture_slide_service.apply_lecture_slide_page_notes(
                 request.state["db"], lecture_slide_deck, lecture_slide_page_notes
+            )
+            await lecture_slide_service.apply_lecture_slide_question_drafts(
+                request.state["db"], lecture_slide_deck, lecture_slide_questions
             )
             await lecture_slide_processing.queue_lecture_slide_processing_run(
                 request.state["db"],
@@ -11872,6 +11908,7 @@ async def update_assistant(
     lecture_slide_specific_fields_present = (
         "lecture_slide_deck_id" in req.model_fields_set
         or "lecture_slide_page_notes" in req.model_fields_set
+        or "lecture_slide_questions" in req.model_fields_set
         or "narration_prompt" in req.model_fields_set
         or "regenerate_narration_requested" in req.model_fields_set
         or "regenerate_questions_requested" in req.model_fields_set
@@ -13144,6 +13181,7 @@ async def update_assistant(
             prompt_present = "generation_prompt" in req.model_fields_set
             narration_prompt_present = "narration_prompt" in req.model_fields_set
             notes_present = "lecture_slide_page_notes" in req.model_fields_set
+            questions_present = "lecture_slide_questions" in req.model_fields_set
             requested_voice_id = lecture_slide_voice_id.strip()
             voice_changed = (
                 lecture_slide_deck.voice_id or ""
@@ -13167,6 +13205,7 @@ async def update_assistant(
                 or generation_prompt_changed
                 or narration_prompt_changed
                 or notes_present
+                or questions_present
                 or regenerate_narration_requested
                 or regenerate_questions_requested
                 or regenerate_audio_requested
@@ -13201,6 +13240,8 @@ async def update_assistant(
                 )
             notes_changed = False
             narration_text_changed = False
+            question_audio_changed = False
+            question_generation_requested_by_draft = False
             if notes_present:
                 page_update_result = (
                     await lecture_slide_service.apply_lecture_slide_page_notes(
@@ -13211,6 +13252,18 @@ async def update_assistant(
                 )
                 notes_changed = page_update_result.notes_changed
                 narration_text_changed = page_update_result.narration_changed
+            if questions_present:
+                question_update_result = (
+                    await lecture_slide_service.apply_lecture_slide_question_drafts(
+                        request.state["db"],
+                        target_lecture_slide_deck,
+                        req.lecture_slide_questions or [],
+                    )
+                )
+                question_audio_changed = question_update_result.audio_changed
+                question_generation_requested_by_draft = (
+                    question_update_result.requires_question_generation
+                )
 
             needs_full_processing = target_lecture_slide_deck.status in {
                 schemas.LectureSlideDeckStatus.UPLOADED,
@@ -13224,15 +13277,47 @@ async def update_assistant(
                 or (notes_changed and not narration_text_changed)
             )
             needs_questions = (
-                regenerate_questions_requested or generation_prompt_changed
+                regenerate_questions_requested
+                or generation_prompt_changed
+                or question_generation_requested_by_draft
             )
-            needs_audio = regenerate_audio_requested or voice_changed
+            needs_audio = (
+                regenerate_audio_requested or voice_changed or question_audio_changed
+            )
             if narration_text_changed:
                 needs_audio = True
             if regenerate_audio_requested or voice_changed:
                 await lecture_slide_service.clear_lecture_slide_page_narrations(
                     request.state["db"], target_lecture_slide_deck.id
                 )
+                await lecture_slide_service.reset_lecture_slide_question_narrations(
+                    request.state["db"], target_lecture_slide_deck.id
+                )
+            if needs_questions:
+                if questions_present:
+                    manual_question_payload = (
+                        lecture_slide_service.lecture_slide_question_context_payload(
+                            req.lecture_slide_questions or []
+                        )
+                    )
+                elif regenerate_questions_requested:
+                    manual_question_payload = []
+                else:
+                    manual_question_payload = await lecture_slide_service.lecture_slide_deck_question_context_payload(
+                        request.state["db"], target_lecture_slide_deck.id
+                    )
+                context_data = dict(target_lecture_slide_deck.context_data or {})
+                if manual_question_payload:
+                    context_data[schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY] = (
+                        manual_question_payload
+                    )
+                else:
+                    context_data.pop(
+                        schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY, None
+                    )
+                if context_data != (target_lecture_slide_deck.context_data or {}):
+                    target_lecture_slide_deck.context_data = context_data
+                    request.state["db"].add(target_lecture_slide_deck)
 
             queued_run = None
             if needs_full_processing:

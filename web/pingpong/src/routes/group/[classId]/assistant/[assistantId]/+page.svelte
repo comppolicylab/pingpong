@@ -17,8 +17,7 @@
 		RadioButton,
 		InputAddon,
 		Tooltip,
-		Spinner,
-		Alert
+		Spinner
 	} from 'flowbite-svelte';
 	import type {
 		Tool,
@@ -61,7 +60,14 @@
 		ClapperboardPlayOutline,
 		CheckCircleOutline,
 		ExclamationCircleOutline,
-		RefreshOutline
+		RefreshOutline,
+		PlusOutline,
+		TrashBinOutline,
+		QuestionCircleOutline,
+		CheckOutline,
+		ClipboardCheckOutline,
+		WandMagicSparklesOutline,
+		MapPinAltOutline
 	} from 'flowbite-svelte-icons';
 	import MultiSelectWithUpload from '$lib/components/MultiSelectWithUpload.svelte';
 	import { writable, type Writable } from 'svelte/store';
@@ -81,6 +87,7 @@
 	import WebSourceChip from '$lib/components/WebSourceChip.svelte';
 	import MCPServerModal from '$lib/components/MCPServerModal.svelte';
 	import PdfPageViewer from '$lib/components/PdfPageViewer.svelte';
+	import LectureSlideFilmstrip from '$lib/components/LectureSlideFilmstrip.svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	export let data;
 	$: lectureVideoDefaultInstructions = data.lectureVideoDefaults?.instructions || '';
@@ -127,6 +134,13 @@
 	const DEFAULT_ELEVENLABS_USE_SPEAKER_BOOST = true;
 	const DEFAULT_ELEVENLABS_STYLE = 0.0;
 	const DEFAULT_ELEVENLABS_SPEED = 1.0;
+	let lectureSlideQuestionDraftCounter = 0;
+	const nextLectureSlideQuestionDraftId = () =>
+		`lecture-slide-question-draft-${lectureSlideQuestionDraftCounter++}`;
+	const lectureSlideQuestionDraftSequence = (clientId: string) => {
+		const sequence = Number(clientId.replace('lecture-slide-question-draft-', ''));
+		return Number.isFinite(sequence) ? sequence : 0;
+	};
 
 	type LectureVideoOptionInput = {
 		option_text: string;
@@ -171,6 +185,181 @@
 			at: string;
 			after: string;
 		}[];
+	};
+
+	type LectureSlideQuestionDraftOption = api.LectureSlideQuestionOptionInput & {
+		client_id: string;
+	};
+
+	type LectureSlideQuestionDraft = Omit<api.LectureSlideQuestionInput, 'options'> & {
+		client_id: string;
+		mode: api.LectureSlideQuestionDraftMode;
+		options: LectureSlideQuestionDraftOption[];
+	};
+
+	const lectureSlideQuestionModeDetails: Record<
+		api.LectureSlideQuestionDraftMode,
+		{
+			label: string;
+			tagline: string;
+			description: string;
+			result: string;
+			icon: typeof ClipboardCheckOutline;
+		}
+	> = {
+		complete: {
+			label: 'Full question',
+			tagline: 'You write it',
+			description: 'Write the prompt, narration, answers, and correct choice.',
+			result: 'Saved exactly as written. The model will not add another question here.',
+			icon: ClipboardCheckOutline
+		},
+		partial: {
+			label: 'Draft for model',
+			tagline: 'You start, AI finishes',
+			description: 'Add any prompt, narration, answer, or correct-answer hints you have.',
+			result: 'The model will keep your hints and fill in the missing details.',
+			icon: WandMagicSparklesOutline
+		},
+		marker: {
+			label: 'Marker only',
+			tagline: 'AI writes it',
+			description: 'Only choose the slide break where a question belongs.',
+			result: 'The model will add a question at this slide break.',
+			icon: MapPinAltOutline
+		}
+	};
+
+	const lectureSlideQuestionInputToDraft = (
+		question: api.LectureSlideQuestionInput
+	): LectureSlideQuestionDraft => ({
+		id: question.id,
+		client_id: nextLectureSlideQuestionDraftId(),
+		mode: question.mode || 'complete',
+		slide_position: question.slide_position,
+		question_text: question.question_text,
+		intro_text: question.intro_text || '',
+		options: question.options.map((option) => ({
+			id: option.id,
+			client_id: nextLectureSlideQuestionDraftId(),
+			option_text: option.option_text,
+			post_answer_text: option.post_answer_text || '',
+			correct: option.correct
+		}))
+	});
+
+	const currentLectureSlideQuestionDraftInputs = (lectureSlideConfig = data.lectureSlideConfig) =>
+		lectureSlideConfig?.question_drafts ||
+		(lectureSlideConfig?.questions || []).map((question) => ({
+			id: question.id,
+			mode: 'complete' as api.LectureSlideQuestionDraftMode,
+			slide_position: question.slide_position,
+			question_text: question.question_text,
+			intro_text: question.intro_text || '',
+			options: question.options.map((option) => ({
+				id: option.id,
+				option_text: option.option_text,
+				post_answer_text: option.post_answer_text || '',
+				correct: option.correct
+			}))
+		}));
+
+	const hydrateLectureSlideQuestionDrafts = (questions: api.LectureSlideQuestionInput[]) => {
+		const selectedQuestion = lectureSlideQuestionDrafts.find(
+			(question) => question.client_id === selectedLectureSlideQuestionClientId
+		);
+		const nextDrafts = questions.map(lectureSlideQuestionInputToDraft);
+		lectureSlideQuestionDrafts = nextDrafts;
+		selectedLectureSlideQuestionClientId =
+			selectedQuestion?.id == null
+				? null
+				: nextDrafts.find((question) => question.id === selectedQuestion.id)?.client_id || null;
+		hasSetLectureSlideQuestionDrafts = true;
+	};
+
+	const lectureSlideQuestionDraftToInput = (
+		question: LectureSlideQuestionDraft
+	): api.LectureSlideQuestionInput => ({
+		id: question.id,
+		mode: question.mode,
+		slide_position: question.slide_position,
+		question_text: question.mode === 'marker' ? '' : question.question_text.trim(),
+		intro_text: question.mode === 'marker' ? '' : question.intro_text.trim(),
+		options:
+			question.mode === 'marker'
+				? []
+				: question.options.map((option) => ({
+						id: option.id,
+						option_text: option.option_text.trim(),
+						post_answer_text: option.post_answer_text.trim(),
+						correct: option.correct
+					}))
+	});
+
+	const lectureSlideQuestionComparable = (question: LectureSlideQuestionDraft) => ({
+		mode: question.mode,
+		slide_position: question.slide_position,
+		question_text: question.question_text.trim(),
+		intro_text: question.intro_text.trim(),
+		options: question.options.map((option) => ({
+			option_text: option.option_text.trim(),
+			post_answer_text: option.post_answer_text.trim(),
+			correct: option.correct
+		}))
+	});
+
+	const sortLectureSlideQuestionComparables = <
+		T extends { slide_position: number; question_text: string }
+	>(
+		questions: T[]
+	) =>
+		[...questions].sort((left, right) =>
+			left.slide_position === right.slide_position
+				? JSON.stringify(left).localeCompare(JSON.stringify(right))
+				: left.slide_position - right.slide_position
+		);
+
+	const lectureSlideQuestionInputComparable = (question: api.LectureSlideQuestionInput) => ({
+		mode: question.mode || 'complete',
+		slide_position: question.slide_position,
+		question_text: question.question_text.trim(),
+		intro_text: (question.intro_text || '').trim(),
+		options: question.options.map((option) => ({
+			option_text: option.option_text.trim(),
+			post_answer_text: (option.post_answer_text || '').trim(),
+			correct: option.correct
+		}))
+	});
+
+	const validateLectureSlideQuestionDrafts = (questions: LectureSlideQuestionDraft[]) => {
+		const sortedQuestions = [...questions].sort((left, right) =>
+			left.slide_position === right.slide_position
+				? lectureSlideQuestionDraftSequence(left.client_id) -
+					lectureSlideQuestionDraftSequence(right.client_id)
+				: left.slide_position - right.slide_position
+		);
+		for (let index = 0; index < sortedQuestions.length; index += 1) {
+			const question = sortedQuestions[index];
+			if (question.mode !== 'complete') {
+				continue;
+			}
+			if (!question.question_text.trim()) {
+				return `Question ${index + 1} needs question text.`;
+			}
+			if (question.options.length < 2) {
+				return `Question ${index + 1} needs at least two answer options.`;
+			}
+			const correctCount = question.options.filter((option) => option.correct).length;
+			if (correctCount !== 1) {
+				return `Question ${index + 1} needs exactly one correct answer.`;
+			}
+			for (let optionIndex = 0; optionIndex < question.options.length; optionIndex += 1) {
+				if (!question.options[optionIndex].option_text.trim()) {
+					return `Question ${index + 1}, option ${optionIndex + 1} needs answer text.`;
+				}
+			}
+		}
+		return null;
 	};
 
 	type LectureVideoSaveAffordances = {
@@ -325,6 +514,9 @@
 	let selectedLectureSlidePosition = 0;
 	let lectureSlidePageDrafts: api.LectureSlidePageNotes[] = [];
 	let hasSetLectureSlidePageDrafts = false;
+	let lectureSlideQuestionDrafts: LectureSlideQuestionDraft[] = [];
+	let selectedLectureSlideQuestionClientId: string | null = null;
+	let hasSetLectureSlideQuestionDrafts = false;
 	let slideGenerationPrompt =
 		data.lectureSlideConfig?.generation_prompt || lectureSlideDefaultGenerationPrompt;
 	let hasSetSlideGenerationPrompt = false;
@@ -956,6 +1148,7 @@
 		(data.isCreating ||
 			lectureSlideDeckIdChanged ||
 			lectureSlidePagesChanged ||
+			lectureSlideQuestionsChanged ||
 			lectureSlideVoiceChanged ||
 			slideGenerationPromptChanged ||
 			slideNarrationPromptChanged ||
@@ -1011,6 +1204,11 @@
 		}));
 		hasSetLectureSlidePageDrafts = true;
 	}
+	$: if (!hasSetLectureSlideQuestionDrafts && !lectureSlideConfigLoadError) {
+		hydrateLectureSlideQuestionDrafts(
+			currentLectureSlideQuestionDraftInputs(data.lectureSlideConfig)
+		);
+	}
 	$: if (!hasSetSlideGenerationPrompt && !lectureSlideConfigLoadError) {
 		slideGenerationPrompt =
 			data.lectureSlideConfig?.generation_prompt || lectureSlideDefaultGenerationPrompt;
@@ -1049,6 +1247,20 @@
 	);
 	$: lectureSlidePagesChanged =
 		JSON.stringify(lectureSlidePageDrafts) !== currentLectureSlidePagesNormalized;
+	$: currentLectureSlideQuestionsNormalized = JSON.stringify(
+		sortLectureSlideQuestionComparables(
+			currentLectureSlideQuestionDraftInputs(data.lectureSlideConfig).map(
+				lectureSlideQuestionInputComparable
+			)
+		)
+	);
+	$: lectureSlideQuestionsNormalized = JSON.stringify(
+		sortLectureSlideQuestionComparables(
+			lectureSlideQuestionDrafts.map(lectureSlideQuestionComparable)
+		)
+	);
+	$: lectureSlideQuestionsChanged =
+		lectureSlideQuestionsNormalized !== currentLectureSlideQuestionsNormalized;
 	$: lectureSlideDeckIdChanged =
 		(selectedLectureSlideDeck?.id ?? null) !== (currentLectureSlideDeck?.id ?? null);
 	$: originalSlideGenerationPrompt =
@@ -1082,17 +1294,212 @@
 		) ||
 			(selectedLectureSlidePage.narration_text || '').trim().length > 0);
 	$: selectedLectureSlideQuestions = selectedLectureSlidePage
-		? (data.lectureSlideConfig?.questions || []).filter(
+		? orderedLectureSlideQuestions.filter(
 				(question) => question.slide_position === selectedLectureSlidePage?.position
 			)
 		: [];
+	$: selectedLectureSlideQuestion =
+		lectureSlideQuestionDrafts.find(
+			(question) => question.client_id === selectedLectureSlideQuestionClientId
+		) || null;
+	$: orderedLectureSlideQuestions = [...lectureSlideQuestionDrafts].sort((left, right) =>
+		left.slide_position === right.slide_position
+			? lectureSlideQuestionDraftSequence(left.client_id) -
+				lectureSlideQuestionDraftSequence(right.client_id)
+			: left.slide_position - right.slide_position
+	);
+	const lectureSlideQuestionNumber = (questionClientId: string | null | undefined) =>
+		orderedLectureSlideQuestions.findIndex((question) => question.client_id === questionClientId) +
+		1;
+	$: selectedLectureSlideQuestionNumber = lectureSlideQuestionNumber(
+		selectedLectureSlideQuestion?.client_id
+	);
+	$: selectedLectureSlideQuestionModeDetails = selectedLectureSlideQuestion
+		? lectureSlideQuestionModeDetails[selectedLectureSlideQuestion.mode]
+		: null;
+	const selectLectureSlide = (position: number) => {
+		selectedLectureSlidePosition = position;
+		selectedLectureSlideQuestionClientId = null;
+	};
+	const selectLectureSlideQuestion = (question: LectureSlideQuestionDraft) => {
+		selectedLectureSlidePosition = question.slide_position;
+		selectedLectureSlideQuestionClientId = question.client_id;
+	};
 	const goToAdjacentLectureSlide = (delta: number) => {
 		if (selectedLectureSlideIndex < 0) {
 			return;
 		}
 		const next = lectureSlidePages[selectedLectureSlideIndex + delta];
 		if (next) {
-			selectedLectureSlidePosition = next.position;
+			selectLectureSlide(next.position);
+		}
+	};
+
+	const addLectureSlideQuestion = (
+		slidePosition = selectedLectureSlidePosition,
+		mode: api.LectureSlideQuestionDraftMode = 'complete'
+	) => {
+		const question: LectureSlideQuestionDraft = {
+			id: null,
+			client_id: nextLectureSlideQuestionDraftId(),
+			mode,
+			slide_position: slidePosition,
+			question_text: '',
+			intro_text: '',
+			options:
+				mode === 'complete'
+					? [
+							{
+								id: null,
+								client_id: nextLectureSlideQuestionDraftId(),
+								option_text: '',
+								post_answer_text: '',
+								correct: true
+							},
+							{
+								id: null,
+								client_id: nextLectureSlideQuestionDraftId(),
+								option_text: '',
+								post_answer_text: '',
+								correct: false
+							}
+						]
+					: []
+		};
+		lectureSlideQuestionDrafts = [...lectureSlideQuestionDrafts, question].sort((left, right) =>
+			left.slide_position === right.slide_position
+				? lectureSlideQuestionDraftSequence(left.client_id) -
+					lectureSlideQuestionDraftSequence(right.client_id)
+				: left.slide_position - right.slide_position
+		);
+		selectLectureSlideQuestion(question);
+	};
+
+	const setLectureSlideQuestionMode = (
+		questionClientId: string,
+		mode: api.LectureSlideQuestionDraftMode
+	) => {
+		lectureSlideQuestionDrafts = lectureSlideQuestionDrafts.map((question) => {
+			if (question.client_id !== questionClientId) {
+				return question;
+			}
+			if (mode === 'complete') {
+				const hasSingleCorrectOption =
+					question.options.filter((option) => option.correct).length === 1;
+				const existingOptions = question.options.map((option, index) => ({
+					...option,
+					correct: hasSingleCorrectOption ? option.correct : index === 0
+				}));
+				return {
+					...question,
+					mode,
+					options: [
+						...existingOptions,
+						...Array.from({ length: Math.max(0, 2 - existingOptions.length) }, (_, index) => ({
+							id: null,
+							client_id: nextLectureSlideQuestionDraftId(),
+							option_text: '',
+							post_answer_text: '',
+							correct: existingOptions.length === 0 && index === 0
+						}))
+					]
+				};
+			}
+			return { ...question, mode };
+		});
+	};
+
+	const updateLectureSlideQuestionDraft = (
+		questionClientId: string,
+		field: 'question_text' | 'intro_text',
+		value: string
+	) => {
+		lectureSlideQuestionDrafts = lectureSlideQuestionDrafts.map((question) =>
+			question.client_id === questionClientId ? { ...question, [field]: value } : question
+		);
+	};
+
+	const updateLectureSlideQuestionOptionDraft = (
+		questionClientId: string,
+		optionClientId: string,
+		field: 'option_text' | 'post_answer_text',
+		value: string
+	) => {
+		lectureSlideQuestionDrafts = lectureSlideQuestionDrafts.map((question) =>
+			question.client_id === questionClientId
+				? {
+						...question,
+						options: question.options.map((option) =>
+							option.client_id === optionClientId ? { ...option, [field]: value } : option
+						)
+					}
+				: question
+		);
+	};
+
+	const setLectureSlideQuestionCorrectOption = (
+		questionClientId: string,
+		optionClientId: string
+	) => {
+		lectureSlideQuestionDrafts = lectureSlideQuestionDrafts.map((question) =>
+			question.client_id === questionClientId
+				? {
+						...question,
+						options: question.options.map((option) => ({
+							...option,
+							correct: option.client_id === optionClientId
+						}))
+					}
+				: question
+		);
+	};
+
+	const addLectureSlideQuestionOption = (questionClientId: string) => {
+		lectureSlideQuestionDrafts = lectureSlideQuestionDrafts.map((question) =>
+			question.client_id === questionClientId
+				? {
+						...question,
+						options: [
+							...question.options,
+							{
+								id: null,
+								client_id: nextLectureSlideQuestionDraftId(),
+								option_text: '',
+								post_answer_text: '',
+								correct: false
+							}
+						]
+					}
+				: question
+		);
+	};
+
+	const removeLectureSlideQuestionOption = (questionClientId: string, optionClientId: string) => {
+		lectureSlideQuestionDrafts = lectureSlideQuestionDrafts.map((question) => {
+			if (question.client_id !== questionClientId || question.options.length <= 2) {
+				return question;
+			}
+			const removedOption = question.options.find((option) => option.client_id === optionClientId);
+			const nextOptions = question.options.filter((option) => option.client_id !== optionClientId);
+			if (removedOption?.correct && nextOptions.length > 0) {
+				nextOptions[0] = { ...nextOptions[0], correct: true };
+			}
+			return { ...question, options: nextOptions };
+		});
+	};
+
+	const removeLectureSlideQuestion = (questionClientId: string) => {
+		const removedQuestion = lectureSlideQuestionDrafts.find(
+			(question) => question.client_id === questionClientId
+		);
+		lectureSlideQuestionDrafts = lectureSlideQuestionDrafts.filter(
+			(question) => question.client_id !== questionClientId
+		);
+		if (selectedLectureSlideQuestionClientId === questionClientId) {
+			selectedLectureSlideQuestionClientId = null;
+			if (removedQuestion) {
+				selectedLectureSlidePosition = removedQuestion.slide_position;
+			}
 		}
 	};
 	let hidePrompt = data.isCreating;
@@ -2270,6 +2677,9 @@
 		if (lectureSlidePagesChanged) {
 			modifiedFields.push('lecture slide content');
 		}
+		if (lectureSlideQuestionsChanged) {
+			modifiedFields.push('lecture slide questions');
+		}
 		if (slideGenerationPromptChanged) {
 			modifiedFields.push('question generation prompt');
 		}
@@ -2295,6 +2705,7 @@
 			lecture_video_manifest?: api.LectureVideoManifest;
 			lecture_slide_deck_id?: number;
 			lecture_slide_page_notes?: api.LectureSlidePageNotes[];
+			lecture_slide_questions?: api.LectureSlideQuestionInput[];
 			voice_id?: string;
 		};
 
@@ -2447,6 +2858,9 @@
 				? (selectedLectureSlideDeck?.id ?? undefined)
 				: undefined,
 			lecture_slide_page_notes: isLectureSlideMode ? lectureSlidePageDrafts : undefined,
+			lecture_slide_questions: isLectureSlideMode
+				? lectureSlideQuestionDrafts.map(lectureSlideQuestionDraftToInput)
+				: undefined,
 			voice_id: isLectureMode ? voiceId.trim() : undefined,
 			generation_prompt: isLectureVideoMode
 				? generationPrompt
@@ -2655,6 +3069,9 @@
 					narration_text: ''
 				})
 			);
+			lectureSlideQuestionDrafts = [];
+			selectedLectureSlideQuestionClientId = null;
+			hasSetLectureSlideQuestionDrafts = true;
 			selectedLectureSlidePosition = 0;
 			happyToast('Lecture slides uploaded');
 		} catch (error) {
@@ -2736,6 +3153,7 @@
 				user_notes: page.user_notes || '',
 				narration_text: page.narration_text || ''
 			}));
+			hydrateLectureSlideQuestionDrafts(expanded.data.question_drafts || []);
 		} finally {
 			refreshingLectureSlideStatus = false;
 		}
@@ -3128,20 +3546,39 @@
 				$loadingMessage = '';
 				return;
 			}
+			const lectureSlideQuestionError = validateLectureSlideQuestionDrafts(
+				lectureSlideQuestionDrafts
+			);
+			if (lectureSlideQuestionError) {
+				sadToast(lectureSlideQuestionError);
+				$loading = false;
+				$loadingMessage = '';
+				return;
+			}
 
 			const lectureSlideFieldsChanged =
 				lectureSlideDeckIdChanged ||
 				lectureSlidePagesChanged ||
+				lectureSlideQuestionsChanged ||
 				lectureSlideVoiceChanged ||
 				slideGenerationPromptChanged ||
 				slideNarrationPromptChanged ||
 				regenerateSlideNarrationRequested ||
 				regenerateSlideQuestionsRequested ||
 				regenerateSlideAudioRequested;
+			const shouldSubmitLectureSlideQuestions =
+				data.isCreating || lectureSlideDeckIdChanged || lectureSlideQuestionsChanged;
 
 			if (data.isCreating || lectureSlideFieldsChanged) {
 				params.lecture_slide_deck_id = selectedLectureSlideDeckId;
 				params.lecture_slide_page_notes = lectureSlidePageDrafts;
+				if (shouldSubmitLectureSlideQuestions) {
+					params.lecture_slide_questions = lectureSlideQuestionDrafts.map(
+						lectureSlideQuestionDraftToInput
+					);
+				} else {
+					delete params.lecture_slide_questions;
+				}
 				params.voice_id = trimmedVoiceId;
 				params.generation_prompt = slideGenerationPrompt;
 				params.narration_prompt = slideNarrationPrompt;
@@ -3151,6 +3588,7 @@
 			} else {
 				delete params.lecture_slide_deck_id;
 				delete params.lecture_slide_page_notes;
+				delete params.lecture_slide_questions;
 				delete params.voice_id;
 				delete params.generation_prompt;
 				delete params.narration_prompt;
@@ -3402,164 +3840,526 @@
 		onclose={() => (lectureSlideEditorOpen = false)}
 	>
 		<slot name="header">
-			<Heading tag="h3" class="font-serif text-2xl font-medium text-blue-dark-40">
-				Edit Lecture Slides
-			</Heading>
-		</slot>
-		<div
-			class="grid max-h-[78vh] gap-4 overflow-hidden lg:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]"
-		>
-			<div class="min-h-[420px] overflow-hidden rounded-lg border border-gray-200 bg-gray-100">
-				{#if lectureSlideSourceUrl && selectedLectureSlidePage}
-					<PdfPageViewer
-						sourceUrl={lectureSlideSourceUrl}
-						pageNumber={selectedLectureSlidePage.position + 1}
-						slideLabel={selectedLectureSlideLabel}
-						previousDisabled={selectedLectureSlideIndex <= 0}
-						nextDisabled={selectedLectureSlideIndex < 0 ||
-							selectedLectureSlideIndex >= lectureSlidePages.length - 1}
-						onPrevious={() => goToAdjacentLectureSlide(-1)}
-						onNext={() => goToAdjacentLectureSlide(1)}
-					/>
-				{:else}
-					<div class="flex h-full min-h-[420px] items-center justify-center text-sm text-gray-600">
-						No slide source is available.
-					</div>
-				{/if}
+			<div class="space-y-1">
+				<Heading tag="h3" class="font-serif text-2xl font-medium text-blue-dark-40">
+					Edit Lecture Slides
+				</Heading>
+				<p class="text-sm text-gray-500">
+					Review each slide, fine-tune narration, and add knowledge checks between slides.
+				</p>
 			</div>
-			<div class="flex min-h-0 flex-col overflow-hidden">
-				<div class="mb-3 flex items-center justify-between gap-3 border-b border-gray-200 pb-3">
-					<div>
-						<div class="text-sm font-semibold text-gray-900">{selectedLectureSlideLabel}</div>
-						<div class="text-xs text-gray-500">
-							{selectedLectureSlideDeck?.filename || 'Lecture slides'}
+		</slot>
+		<div class="flex max-h-[80vh] min-h-[560px] flex-col overflow-hidden">
+			<div
+				class="grid min-h-0 flex-1 border-y border-gray-200 lg:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]"
+			>
+				<div class="flex min-h-[420px] overflow-hidden bg-gray-50 lg:border-r lg:border-gray-200">
+					{#if lectureSlideSourceUrl && selectedLectureSlidePage}
+						<PdfPageViewer
+							sourceUrl={lectureSlideSourceUrl}
+							pageNumber={selectedLectureSlidePage.position + 1}
+							slideLabel={selectedLectureSlideLabel}
+							previousDisabled={selectedLectureSlideIndex <= 0}
+							nextDisabled={selectedLectureSlideIndex < 0 ||
+								selectedLectureSlideIndex >= lectureSlidePages.length - 1}
+							onPrevious={() => goToAdjacentLectureSlide(-1)}
+							onNext={() => goToAdjacentLectureSlide(1)}
+						/>
+					{:else}
+						<div
+							class="flex h-full min-h-[420px] w-full items-center justify-center text-sm text-gray-500"
+						>
+							No slide source is available.
 						</div>
-					</div>
+					{/if}
 				</div>
-				{#if selectedLectureSlidePage}
-					<div class="min-h-0 flex-1 overflow-hidden pr-1">
-						<Accordion class="w-full text-left" flush>
-							<AccordionItem paddingFlush="py-2" open>
-								<span slot="header" class="mr-3 w-full">
-									<div class="flex w-full flex-row items-center justify-between gap-2">
-										<div>Slide Content</div>
-										<div class="text-sm font-light text-gray-500">Notes and narration</div>
-									</div>
-								</span>
-								<div class="my-3 max-h-[calc(78vh-14rem)] overflow-y-auto pr-1">
-									<div>
-										<Label for="slide_author_notes">Author Notes</Label>
-										<Helper class="pb-1"
-											>Instructor notes used when generating narration for this slide.</Helper
-										>
-										<Textarea
-											id="slide_author_notes"
-											rows={8}
-											value={selectedLectureSlidePage.user_notes || ''}
-											disabled={preventEdits}
-											oninput={(event) =>
-												updateLectureSlidePageDraft(
-													selectedLectureSlidePage.position,
-													'user_notes',
-													(event.target as HTMLTextAreaElement).value
-												)}
-										/>
-									</div>
-									<div class="mt-4 mb-3">
-										<Label for="slide_narration_text">Narration</Label>
-										<Helper class="pb-1"
-											>Edit the spoken narration for this slide. Saving manual narration edits
-											regenerates audio.</Helper
-										>
-										{#if !selectedLectureSlideHasNarration}
-											<Alert color="blue" defaultClass="mb-3 p-3 text-sm">
-												Narration will become editable after it has been generated.
-											</Alert>
-										{/if}
-										<Textarea
-											id="slide_narration_text"
-											rows={12}
-											value={selectedLectureSlidePage.narration_text || ''}
-											disabled={preventEdits || !selectedLectureSlideHasNarration}
-											oninput={(event) =>
-												updateLectureSlidePageDraft(
-													selectedLectureSlidePage.position,
-													'narration_text',
-													(event.target as HTMLTextAreaElement).value
-												)}
-										/>
-									</div>
+				<div class="flex min-h-0 flex-col overflow-hidden bg-white">
+					<div class="flex items-center justify-between gap-3 border-b border-gray-200 px-5 py-4">
+						<div class="flex min-w-0 items-center gap-2.5">
+							<span
+								class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg {selectedLectureSlideQuestion
+									? 'bg-gray-900 text-white'
+									: 'bg-gray-100 text-gray-600'}"
+							>
+								{#if selectedLectureSlideQuestion}
+									<QuestionCircleOutline class="h-5 w-5" />
+								{:else}
+									<FilePdfOutline class="h-5 w-5" />
+								{/if}
+							</span>
+							<div class="min-w-0">
+								<div class="truncate text-sm font-semibold text-gray-900">
+									{#if selectedLectureSlideQuestion}
+										Q{selectedLectureSlideQuestionNumber}: after slide {selectedLectureSlideQuestion.slide_position +
+											1}
+									{:else}
+										{selectedLectureSlideLabel}
+									{/if}
 								</div>
-							</AccordionItem>
-							{#if selectedLectureSlideQuestions.length > 0}
-								<AccordionItem paddingFlush="py-2">
-									<span slot="header" class="mr-3 w-full">
-										<div class="flex w-full flex-row items-center justify-between gap-2">
-											<div>Knowledge Checks</div>
-											<div class="text-sm font-light text-gray-500">
-												{selectedLectureSlideQuestions.length}
-												{selectedLectureSlideQuestions.length === 1 ? 'question' : 'questions'}
-											</div>
-										</div>
-									</span>
-									<div
-										class="my-3 flex max-h-[calc(78vh-14rem)] flex-col gap-3 overflow-y-auto pr-1"
-									>
-										{#each selectedLectureSlideQuestions as question, questionIndex (question.id)}
-											<div class="rounded-lg border border-gray-200 bg-gray-50 p-3">
-												<div class="mb-2 text-xs font-semibold text-gray-500 uppercase">
-													Question {questionIndex + 1}
-												</div>
-												<div class="text-sm font-semibold text-gray-900">
-													{question.question_text}
-												</div>
-												{#if question.intro_text}
-													<div class="mt-1 text-xs text-gray-600">{question.intro_text}</div>
+								<div class="truncate text-xs text-gray-500">
+									{selectedLectureSlideDeck?.filename || 'Lecture slides'}
+								</div>
+							</div>
+						</div>
+						{#if selectedLectureSlidePage && !selectedLectureSlideQuestion}
+							<button
+								type="button"
+								disabled={preventEdits}
+								onclick={() => addLectureSlideQuestion(selectedLectureSlidePage?.position ?? 0)}
+								class="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900/20 disabled:cursor-not-allowed disabled:opacity-50"
+							>
+								<PlusOutline class="h-3.5 w-3.5" />
+								Add question
+							</button>
+						{/if}
+					</div>
+					{#if selectedLectureSlideQuestion}
+						<div class="min-h-0 flex-1 overflow-y-auto">
+							<div class="space-y-5 px-5 py-5">
+								<div class="space-y-2.5">
+									<div class="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+										How should this question be handled?
+									</div>
+									<div class="grid gap-2 sm:grid-cols-3">
+										{#each Object.entries(lectureSlideQuestionModeDetails) as [mode, details] (mode)}
+											{@const Icon = details.icon}
+											{@const isActive = selectedLectureSlideQuestion.mode === mode}
+											<button
+												type="button"
+												disabled={preventEdits}
+												aria-pressed={isActive}
+												class="group relative flex flex-col gap-2 rounded-xl border p-3 text-left transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900/15 disabled:cursor-not-allowed disabled:opacity-60 {isActive
+													? 'border-gray-900 bg-gray-50 shadow-sm'
+													: 'border-gray-200 bg-white hover:border-gray-400 hover:shadow-sm'}"
+												onclick={() =>
+													setLectureSlideQuestionMode(
+														selectedLectureSlideQuestion.client_id,
+														mode as api.LectureSlideQuestionDraftMode
+													)}
+											>
+												<span
+													class="flex h-8 w-8 items-center justify-center rounded-lg transition-colors {isActive
+														? 'bg-gray-900 text-white'
+														: 'bg-gray-100 text-gray-500 group-hover:bg-gray-200'}"
+												>
+													<Icon class="h-4 w-4" />
+												</span>
+												<span class="block">
+													<span class="block text-sm font-semibold text-gray-900"
+														>{details.label}</span
+													>
+													<span class="mt-0.5 block text-[11px] font-medium text-gray-400"
+														>{details.tagline}</span
+													>
+												</span>
+												{#if isActive}
+													<span
+														class="absolute right-2 top-2 flex h-4 w-4 items-center justify-center rounded-full bg-gray-900 text-white"
+													>
+														<CheckOutline class="h-2.5 w-2.5" />
+													</span>
 												{/if}
-												<div class="mt-3 flex flex-col gap-2">
-													{#each question.options as option (option.id)}
-														<div class="rounded-md border border-gray-200 bg-white p-2">
-															<div class="flex items-start justify-between gap-2">
-																<div class="text-sm text-gray-900">{option.option_text}</div>
-																{#if option.correct}
-																	<Badge
-																		class="flex shrink-0 flex-row items-center gap-1 rounded-md border border-green-300 bg-green-50 px-2 py-0.5 text-xs text-green-800 normal-case"
-																	>
-																		<CheckCircleOutline class="h-3.5 w-3.5" />
-																		<div>Correct</div>
-																	</Badge>
-																{/if}
-															</div>
-															{#if option.post_answer_text}
-																<div class="mt-1 text-xs text-gray-600">
-																	{option.post_answer_text}
-																</div>
-															{/if}
-														</div>
-													{/each}
-												</div>
-											</div>
+											</button>
 										{/each}
 									</div>
-								</AccordionItem>
-							{:else}
-								<div class="border-t border-gray-200 py-2 opacity-60">
+									{#if selectedLectureSlideQuestionModeDetails}
+										{@const ResultIcon = selectedLectureSlideQuestionModeDetails.icon}
+										<div
+											class="flex items-start gap-2 rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600"
+										>
+											<ResultIcon class="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+											<span>{selectedLectureSlideQuestionModeDetails.result}</span>
+										</div>
+									{/if}
+								</div>
+								{#if selectedLectureSlideQuestion.mode === 'marker'}
+									<div class="rounded-lg border border-dashed border-gray-300 bg-white p-4">
+										<div class="text-sm font-semibold text-gray-900">
+											Question marker after slide {selectedLectureSlideQuestion.slide_position + 1}
+										</div>
+										<p class="mt-1 text-sm text-gray-500">
+											No prompt, narration, answers, or correct answer are needed. On save, the
+											model will generate one complete question for this slide break.
+										</p>
+									</div>
+								{:else}
+									<div class="space-y-1.5">
+										<Label
+											for="slide_question_text"
+											class="text-xs font-semibold uppercase text-gray-500"
+										>
+											Question prompt{selectedLectureSlideQuestion.mode === 'partial'
+												? ' hint'
+												: ''}
+										</Label>
+										<Textarea
+											id="slide_question_text"
+											rows={2}
+											placeholder={selectedLectureSlideQuestion.mode === 'partial'
+												? 'Optional: start the question and let the model finish it.'
+												: 'What do you want to ask after this slide?'}
+											class="resize-none rounded-lg border-gray-300 text-base font-medium text-gray-900 focus:border-gray-900 focus:ring-gray-900"
+											value={selectedLectureSlideQuestion.question_text}
+											disabled={preventEdits}
+											oninput={(event) =>
+												updateLectureSlideQuestionDraft(
+													selectedLectureSlideQuestion.client_id,
+													'question_text',
+													(event.target as HTMLTextAreaElement).value
+												)}
+										/>
+									</div>
+									<div class="space-y-1.5">
+										<Label
+											for="slide_question_intro_text"
+											class="text-xs font-semibold uppercase text-gray-500"
+										>
+											Spoken intro{selectedLectureSlideQuestion.mode === 'partial' ? ' hint' : ''}
+										</Label>
+										<Textarea
+											id="slide_question_intro_text"
+											rows={3}
+											placeholder={selectedLectureSlideQuestion.mode === 'partial'
+												? 'Optional: give the model a narration cue to preserve.'
+												: 'Optional narration spoken right before the question.'}
+											class="resize-none rounded-lg border-gray-300 text-sm focus:border-gray-900 focus:ring-gray-900"
+											value={selectedLectureSlideQuestion.intro_text}
+											disabled={preventEdits}
+											oninput={(event) =>
+												updateLectureSlideQuestionDraft(
+													selectedLectureSlideQuestion.client_id,
+													'intro_text',
+													(event.target as HTMLTextAreaElement).value
+												)}
+										/>
+										<Helper class="text-xs text-gray-400"
+											>Saving narration changes regenerates this question's audio.</Helper
+										>
+									</div>
+									<div class="space-y-2.5">
+										<div class="flex items-end justify-between">
+											<div>
+												<div class="text-xs font-semibold uppercase text-gray-500">
+													Answers{selectedLectureSlideQuestion.mode === 'partial' ? ' / hints' : ''}
+												</div>
+												<div class="text-xs text-gray-400">
+													{selectedLectureSlideQuestion.mode === 'partial'
+														? 'Optional: add answer hints or mark a correct-answer hint.'
+														: 'Tap the circle to mark the correct one.'}
+												</div>
+											</div>
+											<Button
+												type="button"
+												color="light"
+												size="xs"
+												class="gap-1 rounded-lg border-gray-300"
+												disabled={preventEdits}
+												onclick={() =>
+													addLectureSlideQuestionOption(selectedLectureSlideQuestion.client_id)}
+											>
+												<PlusOutline class="h-3.5 w-3.5" />
+												Add
+											</Button>
+										</div>
+										{#if selectedLectureSlideQuestion.options.length > 0}
+											<div class="space-y-2.5">
+												{#each selectedLectureSlideQuestion.options as option, optionIndex (option.client_id)}
+													<div
+														class="group relative rounded-lg border p-3 transition-all duration-150 {option.correct
+															? 'border-gray-900 bg-gray-50'
+															: 'border-gray-200 bg-white hover:border-gray-400'}"
+													>
+														{#if option.correct}
+															<span
+																class="absolute -top-2 left-9 rounded bg-gray-900 px-2 py-0.5 text-[10px] font-semibold leading-none text-white"
+															>
+																Correct
+															</span>
+														{/if}
+														<div class="flex items-start gap-3">
+															<button
+																type="button"
+																role="radio"
+																aria-checked={option.correct}
+																aria-label={`Mark option ${optionIndex + 1} as correct`}
+																disabled={preventEdits}
+																onclick={() =>
+																	setLectureSlideQuestionCorrectOption(
+																		selectedLectureSlideQuestion.client_id,
+																		option.client_id
+																	)}
+																class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 transition disabled:cursor-not-allowed {option.correct
+																	? 'border-gray-900 bg-gray-900 text-white'
+																	: 'border-gray-300 text-transparent hover:border-gray-700 hover:text-gray-700'}"
+															>
+																<CheckOutline class="h-3.5 w-3.5" />
+															</button>
+															<div class="min-w-0 flex-1 space-y-2">
+																<input
+																	id={`slide_question_option_${option.client_id}`}
+																	value={option.option_text}
+																	placeholder={`Answer option ${optionIndex + 1}`}
+																	disabled={preventEdits}
+																	class="w-full border-0 border-b border-transparent bg-transparent p-0 pb-1 text-sm font-medium text-gray-900 placeholder:font-normal placeholder:text-gray-400 focus:border-gray-700 focus:outline-none focus:ring-0 disabled:cursor-not-allowed"
+																	oninput={(event) =>
+																		updateLectureSlideQuestionOptionDraft(
+																			selectedLectureSlideQuestion.client_id,
+																			option.client_id,
+																			'option_text',
+																			(event.target as HTMLInputElement).value
+																		)}
+																/>
+																<textarea
+																	id={`slide_question_feedback_${option.client_id}`}
+																	rows={2}
+																	value={option.post_answer_text}
+																	placeholder="Spoken feedback when this answer is chosen (optional)"
+																	disabled={preventEdits}
+																	class="w-full resize-none rounded-lg bg-gray-50 px-2.5 py-1.5 text-xs text-gray-600 placeholder:text-gray-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-gray-700 disabled:cursor-not-allowed"
+																	oninput={(event) =>
+																		updateLectureSlideQuestionOptionDraft(
+																			selectedLectureSlideQuestion.client_id,
+																			option.client_id,
+																			'post_answer_text',
+																			(event.target as HTMLTextAreaElement).value
+																		)}
+																></textarea>
+															</div>
+															<button
+																type="button"
+																class="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-gray-400 opacity-0 transition hover:bg-gray-100 hover:text-red-600 focus:opacity-100 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-0"
+																disabled={preventEdits ||
+																	selectedLectureSlideQuestion.options.length <= 2}
+																aria-label={`Remove option ${optionIndex + 1}`}
+																title={`Remove option ${optionIndex + 1}`}
+																onclick={() =>
+																	removeLectureSlideQuestionOption(
+																		selectedLectureSlideQuestion.client_id,
+																		option.client_id
+																	)}
+															>
+																<TrashBinOutline class="h-4 w-4" />
+															</button>
+														</div>
+													</div>
+												{/each}
+											</div>
+										{:else}
+											<button
+												type="button"
+												disabled={preventEdits}
+												onclick={() =>
+													addLectureSlideQuestionOption(selectedLectureSlideQuestion.client_id)}
+												class="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-4 text-sm font-medium text-gray-700 transition hover:border-gray-500 hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+											>
+												<PlusOutline class="h-4 w-4" />
+												Add an answer hint
+											</button>
+										{/if}
+									</div>
+								{/if}
+							</div>
+							<div
+								class="sticky bottom-0 z-10 flex items-center justify-between border-t border-gray-200 bg-white px-5 py-4"
+							>
+								<Button
+									type="button"
+									color="light"
+									size="sm"
+									class="gap-1.5 rounded-lg border-gray-300"
+									onclick={() => selectLectureSlide(selectedLectureSlideQuestion.slide_position)}
+								>
+									<ArrowLeftOutline class="h-4 w-4" />
+									Back to slide
+								</Button>
+								<Button
+									type="button"
+									color="red"
+									size="sm"
+									class="gap-1.5"
+									disabled={preventEdits}
+									onclick={() =>
+										removeLectureSlideQuestion(selectedLectureSlideQuestion?.client_id || '')}
+								>
+									<TrashBinOutline class="h-4 w-4" />
+									Delete question
+								</Button>
+							</div>
+						</div>
+					{:else if selectedLectureSlidePage}
+						<div class="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
+							<div class="space-y-1.5">
+								<Label
+									for="slide_author_notes"
+									class="text-xs font-semibold uppercase text-gray-500"
+								>
+									Author notes
+								</Label>
+								<Textarea
+									id="slide_author_notes"
+									rows={6}
+									placeholder="Instructor notes used when generating narration for this slide."
+									class="resize-none rounded-lg border-gray-300 text-sm focus:border-gray-900 focus:ring-gray-900"
+									value={selectedLectureSlidePage.user_notes || ''}
+									disabled={preventEdits}
+									oninput={(event) =>
+										updateLectureSlidePageDraft(
+											selectedLectureSlidePage.position,
+											'user_notes',
+											(event.target as HTMLTextAreaElement).value
+										)}
+								/>
+							</div>
+							<div class="space-y-1.5">
+								<Label
+									for="slide_narration_text"
+									class="text-xs font-semibold uppercase text-gray-500"
+								>
+									Narration
+								</Label>
+								{#if !selectedLectureSlideHasNarration}
 									<div
-										class="flex w-full cursor-not-allowed flex-row items-center justify-between gap-2 py-3 text-sm font-medium text-gray-500"
+										class="mb-1 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600"
 									>
-										<div>Knowledge Checks</div>
-										<div class="font-light">No questions generated</div>
+										Narration will become editable after it has been generated.
+									</div>
+								{/if}
+								<Textarea
+									id="slide_narration_text"
+									rows={9}
+									placeholder="The spoken narration for this slide."
+									class="resize-none rounded-lg border-gray-300 text-sm focus:border-gray-900 focus:ring-gray-900"
+									value={selectedLectureSlidePage.narration_text || ''}
+									disabled={preventEdits || !selectedLectureSlideHasNarration}
+									oninput={(event) =>
+										updateLectureSlidePageDraft(
+											selectedLectureSlidePage.position,
+											'narration_text',
+											(event.target as HTMLTextAreaElement).value
+										)}
+								/>
+								<Helper class="text-xs text-gray-400"
+									>Saving manual narration edits regenerates audio.</Helper
+								>
+							</div>
+							<div class="space-y-3 border-t border-gray-200 pt-4">
+								<div class="flex items-center justify-between">
+									<div class="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+										Questions after this slide
+									</div>
+									{#if selectedLectureSlideQuestions.length > 0}
+										<span
+											class="flex h-5 min-w-5 items-center justify-center rounded-full bg-gray-900 px-1.5 text-[11px] font-semibold text-white"
+										>
+											{selectedLectureSlideQuestions.length}
+										</span>
+									{/if}
+								</div>
+								{#if selectedLectureSlideQuestions.length > 0}
+									<div class="space-y-2">
+										{#each selectedLectureSlideQuestions as question (question.client_id)}
+											{@const questionNumber = lectureSlideQuestionNumber(question.client_id)}
+											{@const questionMode = lectureSlideQuestionModeDetails[question.mode]}
+											{@const QIcon = questionMode.icon}
+											<button
+												type="button"
+												class="group flex w-full items-center gap-3 rounded-xl border border-gray-200 bg-white p-2.5 text-left transition-all duration-150 hover:border-gray-400 hover:shadow-sm"
+												onclick={() => selectLectureSlideQuestion(question)}
+											>
+												<span
+													class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-xs font-semibold text-gray-700"
+												>
+													Q{questionNumber}
+												</span>
+												<span class="min-w-0 flex-1">
+													<span
+														class="flex items-center gap-1.5 text-[11px] font-semibold text-gray-500"
+													>
+														<QIcon class="h-3 w-3" />
+														{questionMode.label}
+													</span>
+													<span class="mt-0.5 block truncate text-sm text-gray-900"
+														>{question.question_text ||
+															(question.mode === 'marker'
+																? 'Marker only — the model will write this'
+																: 'Untitled question')}</span
+													>
+												</span>
+												<ArrowRightOutline
+													class="h-4 w-4 shrink-0 text-gray-300 transition-transform duration-150 group-hover:translate-x-0.5 group-hover:text-gray-500"
+												/>
+											</button>
+										{/each}
+									</div>
+								{/if}
+								<div class="space-y-2">
+									<div class="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+										{selectedLectureSlideQuestions.length > 0 ? 'Add another' : 'Add a question'}
+									</div>
+									<div class="grid gap-2 sm:grid-cols-3">
+										{#each Object.entries(lectureSlideQuestionModeDetails) as [mode, details] (mode)}
+											{@const AddIcon = details.icon}
+											<button
+												type="button"
+												disabled={preventEdits}
+												title={details.description}
+												onclick={() =>
+													addLectureSlideQuestion(
+														selectedLectureSlidePage?.position ?? 0,
+														mode as api.LectureSlideQuestionDraftMode
+													)}
+												class="group relative flex flex-col gap-2 rounded-xl border border-gray-200 bg-white p-3 text-left transition-all duration-150 hover:border-gray-400 hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900/15 disabled:cursor-not-allowed disabled:opacity-60"
+											>
+												<span
+													class="flex h-8 w-8 items-center justify-center rounded-lg bg-gray-100 text-gray-500 transition-colors group-hover:bg-gray-200"
+												>
+													<AddIcon class="h-4 w-4" />
+												</span>
+												<span class="block">
+													<span class="block text-sm font-semibold text-gray-900"
+														>{details.label}</span
+													>
+													<span class="mt-0.5 block text-[11px] font-medium text-gray-400"
+														>{details.tagline}</span
+													>
+												</span>
+												<PlusOutline
+													class="absolute right-2.5 top-2.5 h-3.5 w-3.5 text-gray-300 transition-colors group-hover:text-gray-600"
+												/>
+											</button>
+										{/each}
 									</div>
 								</div>
-							{/if}
-						</Accordion>
-					</div>
-				{:else}
-					<div class="flex min-h-[320px] items-center justify-center text-sm text-gray-600">
-						Upload slides to edit slide content.
-					</div>
-				{/if}
+							</div>
+						</div>
+					{:else}
+						<div class="flex min-h-[320px] items-center justify-center text-sm text-gray-500">
+							Upload slides to edit slide content.
+						</div>
+					{/if}
+				</div>
 			</div>
+			{#if lectureSlidePages.length > 0}
+				<div class="border-b border-gray-200 bg-white px-4 pb-2 pt-3">
+					<div class="flex items-center justify-between px-1 pb-1.5">
+						<span class="text-xs font-semibold uppercase text-gray-500">Slides</span>
+						<span class="text-xs text-gray-400">
+							{lectureSlidePages.length}
+							{lectureSlidePages.length === 1 ? 'slide' : 'slides'}
+						</span>
+					</div>
+					<LectureSlideFilmstrip
+						sourceUrl={lectureSlideSourceUrl}
+						pages={lectureSlidePages}
+						questions={lectureSlideQuestionDrafts}
+						selectedPosition={selectedLectureSlidePosition}
+						selectedQuestionClientId={selectedLectureSlideQuestionClientId}
+						onSelectSlide={selectLectureSlide}
+						onSelectQuestion={selectLectureSlideQuestion}
+						onAddQuestion={preventEdits ? null : (position) => addLectureSlideQuestion(position)}
+					/>
+				</div>
+			{/if}
 		</div>
 		<svelte:fragment slot="footer">
 			<div class="flex w-full justify-end">

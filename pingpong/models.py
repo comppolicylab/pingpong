@@ -5435,6 +5435,7 @@ class Assistant(Base):
         params.pop("lecture_video_manifest", None)
         params.pop("lecture_slide_deck_id", None)
         params.pop("lecture_slide_page_notes", None)
+        params.pop("lecture_slide_questions", None)
         params.pop("narration_prompt", None)
         params.pop("voice_id", None)
         if data.interaction_mode != schemas.InteractionMode.VOICE:
