@@ -51,7 +51,7 @@
 	},
 	"type": "module",
 	"dependencies": {
-		"@sentry/sveltekit": "^10.55.0",
+		"@sentry/sveltekit": "^10.56.0",
 		"@zerodevx/svelte-toast": "^0.9.6",
 		"dayjs": "^1.11.21",
 		"dotenv": "^17.4.2",
@@ -59,7 +59,7 @@
 		"highlight.js": "^11.11.1",
 		"isomorphic-dompurify": "^3.15.0",
 		"katex": "^0.17.0",
-		"marked": "^18.0.4",
+		"marked": "^18.0.5",
 		"marked-highlight": "^2.2.4",
 		"mermaid": "^11.15.0",
 		"pdfjs-dist": "^5.7.284",
