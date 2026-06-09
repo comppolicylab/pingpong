@@ -1,6 +1,6 @@
 <script lang="ts">
 	import * as api from '$lib/api';
-	import { parseTextContent } from '$lib/content';
+	import { groupMessageContent, parseTextContent } from '$lib/content';
 	import { Button, Tooltip, Avatar } from 'flowbite-svelte';
 	import {
 		RefreshOutline,
@@ -107,97 +107,6 @@
 		'Give me a real-world example.',
 		"Quiz me on what's been covered so far."
 	];
-
-	type MCPContent = api.MCPServerCallItem | api.MCPListToolsCallItem;
-	type ContentBlock =
-		| { type: 'content'; key: string; content: api.Content }
-		| { type: 'mcp_group'; key: string; serverLabel: string; items: MCPContent[] }
-		| { type: 'ci_group'; key: string; items: api.Content[]; isLast: boolean };
-
-	const isMCPContent = (content: api.Content): content is MCPContent => {
-		return content.type === 'mcp_server_call' || content.type === 'mcp_list_tools_call';
-	};
-
-	// Code-interpreter steps that should be collected under a single "Ran analysis" block.
-	const isCodeInterpreterContent = (content: api.Content) => {
-		return (
-			content.type === 'code' ||
-			content.type === 'code_output_logs' ||
-			content.type === 'code_output_image_file' ||
-			content.type === 'code_output_image_url' ||
-			content.type === 'code_interpreter_call_placeholder'
-		);
-	};
-
-	const getMCPServerKey = (content: MCPContent) => {
-		return content.server_label || content.server_name || 'mcp';
-	};
-
-	const groupMessageContent = (contents: api.Content[]): ContentBlock[] => {
-		const blocks: ContentBlock[] = [];
-		let index = 0;
-		// Ordinal of each code-interpreter analysis within this message. Keyed by ordinal
-		// rather than array position so the block keeps a stable identity when its
-		// placeholder is swapped for the fetched result items (which reorders/resizes
-		// the content array) — otherwise the component would be recreated and its open
-		// accordion would snap shut.
-		let ciGroupOrdinal = 0;
-
-		while (index < contents.length) {
-			const content = contents[index];
-
-			if (isCodeInterpreterContent(content)) {
-				const items: api.Content[] = [content];
-				let cursor = index + 1;
-				while (cursor < contents.length && isCodeInterpreterContent(contents[cursor])) {
-					items.push(contents[cursor]);
-					cursor += 1;
-				}
-				blocks.push({ type: 'ci_group', key: `ci-group-${ciGroupOrdinal}`, items, isLast: false });
-				ciGroupOrdinal += 1;
-				index = cursor;
-				continue;
-			}
-
-			if (!isMCPContent(content)) {
-				blocks.push({ type: 'content', key: `content-${index}`, content });
-				index += 1;
-				continue;
-			}
-
-			const serverKey = getMCPServerKey(content);
-			const items: MCPContent[] = [content];
-			let cursor = index + 1;
-			while (cursor < contents.length) {
-				const next = contents[cursor];
-				if (!isMCPContent(next) || getMCPServerKey(next) !== serverKey) {
-					break;
-				}
-				items.push(next);
-				cursor += 1;
-			}
-
-			if (items.length > 1) {
-				const label = items[0].server_name || items[0].server_label || 'MCP server';
-				blocks.push({
-					type: 'mcp_group',
-					key: `mcp-group-${serverKey}-${index}`,
-					serverLabel: label,
-					items
-				});
-			} else {
-				blocks.push({ type: 'content', key: `content-${index}`, content });
-			}
-
-			index = cursor;
-		}
-
-		const lastBlock = blocks[blocks.length - 1];
-		if (lastBlock?.type === 'ci_group') {
-			lastBlock.isLast = true;
-		}
-		return blocks;
-	};
 
 	function isFileCitation(a: api.TextAnnotation): a is api.TextAnnotationFileCitation {
 		return a.type === 'file_citation' && a.text === 'responses_v3';

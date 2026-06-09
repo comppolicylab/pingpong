@@ -5,6 +5,7 @@
 	type GroupState = {
 		open: boolean;
 		loading: boolean;
+		fetching: boolean;
 		requested: string[];
 	};
 
@@ -13,7 +14,7 @@
 	const getGroupStore = (key: string) => {
 		let store = groupStores.get(key);
 		if (!store) {
-			store = writable({ open: false, loading: false, requested: [] });
+			store = writable({ open: false, loading: false, fetching: false, requested: [] });
 			groupStores.set(key, store);
 		}
 		return store;
@@ -21,6 +22,7 @@
 </script>
 
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import { slide } from 'svelte/transition';
 	import { ChevronDownOutline, CodeOutline } from 'flowbite-svelte-icons';
 	import { Spinner } from 'flowbite-svelte';
@@ -41,8 +43,38 @@
 	export let onFetch: (run_id: string, step_id: string) => Promise<unknown>;
 
 	let groupState = getGroupStore(stateKey);
+	let previousStateKey: string | null = null;
+	let previousOpen: boolean | null = null;
+	let loadingDelayTimeout: ReturnType<typeof setTimeout> | null = null;
+	let destroyed = false;
+
+	const clearLoadingDelay = () => {
+		if (loadingDelayTimeout) {
+			clearTimeout(loadingDelayTimeout);
+			loadingDelayTimeout = null;
+		}
+	};
+
+	$: {
+		if (previousStateKey && previousStateKey !== stateKey) {
+			groupStores.delete(previousStateKey);
+			previousOpen = null;
+		}
+		previousStateKey = stateKey;
+	}
 	$: groupState = getGroupStore(stateKey);
 	$: open = forceOpen || $groupState.open;
+	$: {
+		if (forceOpen) {
+			if (previousOpen === null) {
+				previousOpen = $groupState.open;
+			}
+		} else if (previousOpen !== null) {
+			const restoredOpen = previousOpen;
+			groupState.update((state) => ({ ...state, open: restoredOpen }));
+			previousOpen = null;
+		}
+	}
 
 	$: placeholders = items.filter(
 		(item): item is api.CodeInterpreterCallPlaceholder =>
@@ -50,14 +82,32 @@
 	);
 	$: hasPlaceholders = placeholders.length > 0;
 
-	// Loading state for the in-flight fetch, surfaced next to the "Ran analysis" label.
-	// Enforce a minimum visible duration so a near-instant (e.g. cached) response doesn't
-	// flash the spinner and vanish, which reads as a jarring flicker.
-	const MIN_LOADING_MS = 450;
+	// Delay the spinner for quick cached responses; once visible, keep it long enough to read.
+	const LOADING_INDICATOR_DELAY_MS = 150;
+	const MIN_VISIBLE_LOADING_MS = 300;
 	const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+	const contentKey = (item: api.Content, i: number) => {
+		if (item.type === 'code_interpreter_call_placeholder') {
+			return `${item.type}:${item.run_id}:${item.step_id}`;
+		}
+		if (item.type === 'code_output_image_file') {
+			return `${item.type}:${item.image_file.file_id}:${item.source_message_id ?? i}`;
+		}
+		if (item.type === 'code_output_image_url') {
+			return `${item.type}:${item.url}:${item.source_message_id ?? i}`;
+		}
+		if (item.type === 'code') {
+			return `${item.type}:${item.source_message_id ?? ''}:${item.code}`;
+		}
+		if (item.type === 'code_output_logs') {
+			return `${item.type}:${item.source_message_id ?? ''}:${item.logs}`;
+		}
+		return `${item.type}:${item.source_message_id ?? i}`;
+	};
+
 	const requestResults = async () => {
-		if ($groupState.loading) {
+		if ($groupState.fetching) {
 			return;
 		}
 		const pending = placeholders.filter(
@@ -70,18 +120,26 @@
 		const pendingKeys = pending.map(
 			(placeholder) => `${placeholder.run_id}:${placeholder.step_id}`
 		);
+		const revealAfterLoad = !forceOpen;
 		groupState.update((state) => ({
 			...state,
-			loading: true,
+			fetching: true,
 			requested: Array.from(new Set([...state.requested, ...pendingKeys]))
 		}));
+		let loadingShownAt: number | null = null;
+		loadingDelayTimeout = setTimeout(() => {
+			loadingShownAt = Date.now();
+			groupState.update((state) => ({ ...state, loading: true }));
+			loadingDelayTimeout = null;
+		}, LOADING_INDICATOR_DELAY_MS);
 		try {
-			await Promise.all([
-				delay(MIN_LOADING_MS),
-				...pending.map((placeholder) => onFetch(placeholder.run_id, placeholder.step_id))
-			]);
-			// Reveal the results once they've loaded.
-			groupState.update((state) => ({ ...state, open: true }));
+			await Promise.all(
+				pending.map((placeholder) => onFetch(placeholder.run_id, placeholder.step_id))
+			);
+			if (revealAfterLoad) {
+				// Reveal the results once they've loaded for a user-triggered load.
+				groupState.update((state) => ({ ...state, open: true }));
+			}
 		} catch {
 			// The parent surfaces the error; allow the user to retry the fetch.
 			groupState.update((state) => ({
@@ -89,7 +147,14 @@
 				requested: state.requested.filter((key) => !pendingKeys.includes(key))
 			}));
 		} finally {
-			groupState.update((state) => ({ ...state, loading: false }));
+			clearLoadingDelay();
+			if (loadingShownAt !== null) {
+				const elapsed = Date.now() - loadingShownAt;
+				await delay(Math.max(0, MIN_VISIBLE_LOADING_MS - elapsed));
+			}
+			if (!destroyed) {
+				groupState.update((state) => ({ ...state, fetching: false, loading: false }));
+			}
 		}
 	};
 
@@ -107,6 +172,12 @@
 	$: if (forceOpen && hasPlaceholders) {
 		requestResults();
 	}
+
+	onDestroy(() => {
+		destroyed = true;
+		clearLoadingDelay();
+		groupStores.delete(stateKey);
+	});
 </script>
 
 <div class="my-2">
@@ -127,7 +198,7 @@
 
 	{#if open}
 		<div class="mt-2 ml-2 border-l border-gray-200 pl-4" transition:slide={{ duration: 250 }}>
-			{#each items as item, i (i)}
+			{#each items as item, i (contentKey(item, i))}
 				{#if item.type === 'code'}
 					<CodeInterpreterCallItem label="Ran Code Interpreter code" icon="code" {forceOpen}>
 						<pre class="font-mono text-xs whitespace-pre-wrap text-gray-700">{item.code}</pre>
