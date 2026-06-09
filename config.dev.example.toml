@@ -1,0 +1,58 @@
+log_level = "INFO"
+public_url = "http://localhost:5173/"
+development = true
+
+[artifact_store]
+type = "local"
+save_target = "./thread_exports"
+
+[file_store]
+type = "local"
+save_target = "./files"
+
+[video_store]
+type = "local"
+save_target = "./videos"
+
+[audio_store]
+type = "local"
+save_target = "./voice_mode_recordings"
+
+[lecture_video_audio_store]
+type = "local"
+save_target = "./lecture_video_narrations"
+
+[db]
+engine = "postgres"
+host = "db"
+user = "pingpong"
+password = "pingpong"
+database = "pingpong"
+
+[auth]
+autopromote_on_login = true
+
+[[auth.authn_methods]]
+# Supported authentication methods.
+# Configs for magic links and SSO go here.
+method = "magic_link"
+name = "Other"
+expiry = 86400
+
+[[auth.secret_keys]]
+key = "set-a-secret-key-here"
+
+[authz]
+type = "openfga"
+scheme = "https"
+host = "authz"
+store = "pingpong"
+cfg = "./pingpong/authz/authz.fga.json"
+key = "add-a-secret-key-here"
+verify_ssl = false
+
+[email]
+type = "mock"
+
+[lms]
+lms_instances = []

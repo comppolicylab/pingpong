@@ -168,6 +168,8 @@ cython_debug/
 config.*.toml
 config.json
 config.*.json
+!config.local.example.toml
+!config.dev.example.toml
 .db/
 !.db/.gitkeep
 cert/

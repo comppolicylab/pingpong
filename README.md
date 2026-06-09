@@ -22,10 +22,13 @@ The easiest way to run the DB and OpenFGA is through Docker.
 
 ### Quick setup
 
-First, get access to the `config.dev.toml` file and put it in the root of your repo.
+First, use the `config.dev.example.toml` file as a template to create a `config.dev.toml` file in the root of the repo.
 
-> [!CAUTION]
-> **Do not** proceed with the Quick Setup before getting access to `config.dev.toml`. The Quick Setup script below will fail if you do so.
+```
+cp config.dev.example.toml config.dev.toml
+```
+
+Then, customize the file to your needs.
 
 Assuming you have a Docker environment available,
 the easiest way to start up development services is with the following script:
@@ -48,36 +51,10 @@ This makes development tedious if you need to make changes to the Python code.
 To run the Python API outside of Docker,
 first stop the `pingpong-srv-1` container in Docker (but keep the DB and authz containers running).
 
-Next, create a file in the root of the repo named `config.local.toml`.
-You can customize this file how you want, but the basic settings you need are:
+Next, use the `config.local.example.toml` file as a template to create a `config.local.toml` file in the root of the repo.
 
 ```toml
-log_level = "DEBUG"
-public_url = "http://localhost:5173"
-development = true
-
-[db]
-engine = "postgres"
-host = "localhost"
-user = "pingpong"
-password = "pingpong"
-database = "pingpong"
-
-[auth]
-
-[[auth.secret_keys]]
-key = "not actually a secret!"
-
-[authz]
-type = "openfga"
-scheme = "http"
-host = "localhost"
-store = "pingpong"
-cfg = "./pingpong/authz/authz.fga.json"
-key = "devkey"
-
-[email]
-type = "mock"
+cp config.local.example.toml config.local.toml
 ```
 
 Then, run the following command to start the dev server:
