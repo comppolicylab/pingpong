@@ -12,6 +12,7 @@ export const scroll = (el: HTMLDivElement, params: ScrollParams) => {
 	const programmaticScrollEpsilon = 2;
 	const programmaticScrollTimeoutMs = 1500;
 	const bottomSettleWindowMs = 2500;
+	const userExpansionSuppressMs = 15000;
 	let lastScrollTop = el.scrollTop;
 	let userPausedAutoScroll = false;
 	let isProgrammaticScroll = false;
@@ -25,6 +26,7 @@ export const scroll = (el: HTMLDivElement, params: ScrollParams) => {
 	let currentThreadId = params.threadId;
 	let isStreaming = params.streaming;
 	let preserveBottomUntil = Date.now() + bottomSettleWindowMs;
+	let suppressGrowthAnchorUntil = 0;
 
 	const clearProgrammaticScrollTimeout = () => {
 		if (programmaticScrollTimeout !== null) {
@@ -51,6 +53,7 @@ export const scroll = (el: HTMLDivElement, params: ScrollParams) => {
 	const getBottomScrollTop = () => Math.max(0, el.scrollHeight - el.clientHeight);
 	const wasNearKnownBottom = () => lastKnownScrollHeight - lastScrollTop - el.clientHeight < 80;
 	const isSettlingAtBottom = () => Date.now() < preserveBottomUntil;
+	const isGrowthAnchorSuppressed = () => Date.now() < suppressGrowthAnchorUntil;
 	const shouldPreserveBottomAnchor = () =>
 		!userPausedAutoScroll && (isProgrammaticScroll || wasNearKnownBottom() || isSettlingAtBottom());
 
@@ -184,6 +187,11 @@ export const scroll = (el: HTMLDivElement, params: ScrollParams) => {
 
 	const reanchorAfterGrowth = () => {
 		const scrollHeightIncreased = el.scrollHeight > lastKnownScrollHeight;
+		if (scrollHeightIncreased && isGrowthAnchorSuppressed()) {
+			lastKnownScrollHeight = el.scrollHeight;
+			lastScrollTop = el.scrollTop;
+			return false;
+		}
 		if (!scrollHeightIncreased || !shouldPreserveBottomAnchor()) {
 			return false;
 		}
@@ -212,12 +220,23 @@ export const scroll = (el: HTMLDivElement, params: ScrollParams) => {
 			completeProgrammaticScroll();
 		}
 	};
+	const onUserContentExpansion = () => {
+		suppressGrowthAnchorUntil = Date.now() + userExpansionSuppressMs;
+		preserveBottomUntil = 0;
+		clearProgrammaticScrollTimeout();
+		cancelSettledScroll();
+		isProgrammaticScroll = false;
+		targetScrollTop = null;
+		lastScrollTop = el.scrollTop;
+		lastKnownScrollHeight = el.scrollHeight;
+	};
 
 	el.addEventListener('scroll', onScroll, { passive: true });
 	if (scrollEndSupported) {
 		el.addEventListener('scrollend', onScrollEnd);
 	}
 	el.addEventListener('load', onDescendantLoad, true);
+	el.addEventListener('pp:user-content-expansion', onUserContentExpansion);
 	mutationObserver.observe(el, {
 		childList: true,
 		subtree: true,
@@ -276,6 +295,7 @@ export const scroll = (el: HTMLDivElement, params: ScrollParams) => {
 			mutationObserver.disconnect();
 			el.removeEventListener('load', onDescendantLoad, true);
 			el.removeEventListener('scroll', onScroll);
+			el.removeEventListener('pp:user-content-expansion', onUserContentExpansion);
 			if (scrollEndSupported) {
 				el.removeEventListener('scrollend', onScrollEnd);
 			}

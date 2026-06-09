@@ -158,7 +158,10 @@
 		}
 	};
 
-	const toggle = () => {
+	const toggle = (event: MouseEvent) => {
+		event.currentTarget?.dispatchEvent(
+			new CustomEvent('pp:user-content-expansion', { bubbles: true })
+		);
 		// While results are still placeholders, a click kicks off the fetch and the
 		// accordion opens itself once they arrive — rather than opening onto a spinner.
 		if (hasPlaceholders) {
@@ -171,6 +174,15 @@
 	// Eagerly fetch results when forced open (e.g. the print view) so they're visible.
 	$: if (forceOpen && hasPlaceholders) {
 		requestResults();
+	}
+
+	$: if (!hasPlaceholders && ($groupState.loading || $groupState.fetching)) {
+		groupState.update((state) => ({
+			...state,
+			open: true,
+			loading: false,
+			fetching: false
+		}));
 	}
 
 	onDestroy(() => {
