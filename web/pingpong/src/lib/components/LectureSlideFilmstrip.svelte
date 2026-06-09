@@ -111,7 +111,7 @@
 		const previousDocument = pdfDocument;
 		pdfDocument = null;
 		if (previousDocument) {
-			await previousDocument.destroy();
+			await previousDocument.loadingTask.destroy();
 		}
 		if (token !== loadToken) {
 			return;
@@ -123,7 +123,7 @@
 			const loadingTask = pdfjsLib.getDocument({ url, withCredentials: true });
 			const doc = await loadingTask.promise;
 			if (token !== loadToken) {
-				await doc.destroy();
+				await doc.loadingTask.destroy();
 				return;
 			}
 			pdfDocument = doc;
@@ -143,7 +143,7 @@
 
 	onDestroy(() => {
 		loadToken += 1;
-		void pdfDocument?.destroy();
+		void pdfDocument?.loadingTask.destroy();
 		pdfDocument = null;
 	});
 </script>

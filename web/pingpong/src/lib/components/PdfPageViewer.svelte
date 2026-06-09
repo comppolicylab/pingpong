@@ -31,7 +31,7 @@
 		renderTask?.cancel();
 		renderTask = null;
 		if (pdfDocument) {
-			await pdfDocument.destroy();
+			await pdfDocument.loadingTask.destroy();
 			pdfDocument = null;
 		}
 	};
@@ -111,7 +111,7 @@
 			const loadingTask = pdfjsLib.getDocument({ url, withCredentials: true });
 			const document = await loadingTask.promise;
 			if (token !== loadToken) {
-				await document.destroy();
+				await document.loadingTask.destroy();
 				return;
 			}
 			pdfDocument = document;
