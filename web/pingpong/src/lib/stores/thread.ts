@@ -645,7 +645,7 @@ export class ThreadManager {
 	}
 
 	async fetchCodeInterpreterResult(run_id: string, step_id: string) {
-		this.#data.update((d) => ({ ...d, error: null, waiting: true }));
+		this.#data.update((d) => ({ ...d, error: null }));
 		try {
 			const result = await api.getCIMessages(
 				this.#fetcher,
@@ -675,16 +675,14 @@ export class ThreadManager {
 									message.metadata.step_id === step_id
 								);
 							})
-					},
-					waiting: false
+					}
 				};
 			});
 			return result;
 		} catch (e) {
 			this.#data.update((d) => ({
 				...d,
-				error: { detail: errorMessage(e, 'Unknown error'), wasSent: true },
-				waiting: false
+				error: { detail: errorMessage(e, 'Unknown error'), wasSent: true }
 			}));
 			throw e;
 		}

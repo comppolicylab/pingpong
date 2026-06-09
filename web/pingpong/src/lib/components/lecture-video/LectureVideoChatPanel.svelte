@@ -1,12 +1,10 @@
 <script lang="ts">
 	import * as api from '$lib/api';
 	import { parseTextContent } from '$lib/content';
-	import { Button, Tooltip, Avatar, Accordion, AccordionItem } from 'flowbite-svelte';
+	import { Button, Tooltip, Avatar } from 'flowbite-svelte';
 	import {
 		RefreshOutline,
-		CodeOutline,
 		ServerOutline,
-		TerminalOutline,
 		MessageDotsOutline,
 		VolumeUpSolid,
 		VolumeMuteSolid,
@@ -19,6 +17,7 @@
 		type ChatInputHandle,
 		type ChatInputMessage
 	} from '$lib/components/ChatInput.svelte';
+	import CodeInterpreterGroup from '$lib/components/CodeInterpreterGroup.svelte';
 	import FileCitation from '$lib/components/FileCitation.svelte';
 	import FilePlaceholder from '$lib/components/FilePlaceholder.svelte';
 	import FileSearchCallItem from '$lib/components/FileSearchCallItem.svelte';
@@ -56,6 +55,7 @@
 		participants,
 		mimeType,
 		fetchMoreMessages,
+		fetchCodeInterpreterResult,
 		onsubmit,
 		ondismisserror,
 		ttsMuted = false,
@@ -88,6 +88,7 @@
 		participants: api.ThreadParticipants;
 		mimeType: api.MimeTypeLookupFn;
 		fetchMoreMessages: () => Promise<void>;
+		fetchCodeInterpreterResult: (run_id: string, step_id: string) => Promise<unknown>;
 		onsubmit?: (message: ChatInputMessage) => void;
 		ondismisserror?: () => void;
 		ttsMuted?: boolean;
@@ -110,10 +111,22 @@
 	type MCPContent = api.MCPServerCallItem | api.MCPListToolsCallItem;
 	type ContentBlock =
 		| { type: 'content'; key: string; content: api.Content }
-		| { type: 'mcp_group'; key: string; serverLabel: string; items: MCPContent[] };
+		| { type: 'mcp_group'; key: string; serverLabel: string; items: MCPContent[] }
+		| { type: 'ci_group'; key: string; items: api.Content[]; isLast: boolean };
 
 	const isMCPContent = (content: api.Content): content is MCPContent => {
 		return content.type === 'mcp_server_call' || content.type === 'mcp_list_tools_call';
+	};
+
+	// Code-interpreter steps that should be collected under a single "Ran analysis" block.
+	const isCodeInterpreterContent = (content: api.Content) => {
+		return (
+			content.type === 'code' ||
+			content.type === 'code_output_logs' ||
+			content.type === 'code_output_image_file' ||
+			content.type === 'code_output_image_url' ||
+			content.type === 'code_interpreter_call_placeholder'
+		);
 	};
 
 	const getMCPServerKey = (content: MCPContent) => {
@@ -123,9 +136,29 @@
 	const groupMessageContent = (contents: api.Content[]): ContentBlock[] => {
 		const blocks: ContentBlock[] = [];
 		let index = 0;
+		// Ordinal of each code-interpreter analysis within this message. Keyed by ordinal
+		// rather than array position so the block keeps a stable identity when its
+		// placeholder is swapped for the fetched result items (which reorders/resizes
+		// the content array) — otherwise the component would be recreated and its open
+		// accordion would snap shut.
+		let ciGroupOrdinal = 0;
 
 		while (index < contents.length) {
 			const content = contents[index];
+
+			if (isCodeInterpreterContent(content)) {
+				const items: api.Content[] = [content];
+				let cursor = index + 1;
+				while (cursor < contents.length && isCodeInterpreterContent(contents[cursor])) {
+					items.push(contents[cursor]);
+					cursor += 1;
+				}
+				blocks.push({ type: 'ci_group', key: `ci-group-${ciGroupOrdinal}`, items, isLast: false });
+				ciGroupOrdinal += 1;
+				index = cursor;
+				continue;
+			}
+
 			if (!isMCPContent(content)) {
 				blocks.push({ type: 'content', key: `content-${index}`, content });
 				index += 1;
@@ -159,6 +192,10 @@
 			index = cursor;
 		}
 
+		const lastBlock = blocks[blocks.length - 1];
+		if (lastBlock?.type === 'ci_group') {
+			lastBlock.isLast = true;
+		}
 		return blocks;
 	};
 
@@ -520,6 +557,16 @@
 									{/each}
 								</div>
 							</div>
+						{:else if block.type === 'ci_group'}
+							<CodeInterpreterGroup
+								stateKey={`${message.data.run_id ?? message.data.id}:${block.key}`}
+								items={block.items}
+								streaming={isLatestStreamedAssistantResponse(message) &&
+									(submitting || waiting) &&
+									block.isLast}
+								imageUrl={(fileId) => getCodeInterpreterImageUrl(message.data, fileId)}
+								onFetch={fetchCodeInterpreterResult}
+							/>
 						{:else}
 							{@const content = block.content}
 							{#if content.type === 'text'}
@@ -563,18 +610,6 @@
 										{/each}
 									</div>
 								{/if}
-							{:else if content.type === 'code'}
-								<Accordion flush>
-									<AccordionItem>
-										<span slot="header">
-											<div class="flex flex-row items-center space-x-2">
-												<div><CodeOutline size="lg" /></div>
-												<div>Code Interpreter Code</div>
-											</div>
-										</span>
-										<pre style="white-space: pre-wrap;" class="text-black">{content.code}</pre>
-									</AccordionItem>
-								</Accordion>
 							{:else if content.type === 'file_search_call'}
 								<FileSearchCallItem {content} />
 							{:else if content.type === 'web_search_call'}
@@ -585,36 +620,6 @@
 								<MCPListToolsCallItem {content} />
 							{:else if content.type === 'reasoning'}
 								<ReasoningCallItem {content} />
-							{:else if content.type === 'code_output_image_file'}
-								<div class="w-full leading-6">
-									<img
-										class="img-attachment m-auto"
-										src={getCodeInterpreterImageUrl(message.data, content.image_file.file_id)}
-										alt="Attachment generated by the assistant"
-									/>
-								</div>
-							{:else if content.type === 'code_output_image_url'}
-								<div class="w-full leading-6">
-									<img
-										class="img-attachment m-auto"
-										src={content.url}
-										alt="Attachment generated by the assistant"
-									/>
-								</div>
-							{:else if content.type === 'code_output_logs'}
-								<Accordion flush>
-									<AccordionItem>
-										<span slot="header">
-											<div class="flex flex-row items-center space-x-2">
-												<div><TerminalOutline size="lg" /></div>
-												<div>Output Logs</div>
-											</div>
-										</span>
-										<div class="w-full leading-6">
-											<pre style="white-space: pre-wrap;" class="text-black">{content.logs}</pre>
-										</div>
-									</AccordionItem>
-								</Accordion>
 							{:else if content.type === 'image_file'}
 								<div class="w-full leading-6">
 									<img
