@@ -13,7 +13,7 @@ A web app that helps students out with class assignments and logistics.
 You need these things to use the app locally.
  - Postgres Database
  - OpenFGA Authz server
- - Python / Poetry to run the API
+ - Python / uv to run the API
  - Pnpm to run the FrontEnd.
  - OpenAI API Key (for using the app)
 
@@ -22,15 +22,18 @@ The easiest way to run the DB and OpenFGA is through Docker.
 
 ### Quick setup
 
-First, get access to the `config.dev.toml` file and put it in the root of your repo.
+First, use the `config.dev.example.toml` file as a template to create a `config.dev.toml` file in the root of the repo.
 
-> [!CAUTION]
-> **Do not** proceed with the Quick Setup before getting access to `config.dev.toml`. The Quick Setup script below will fail if you do so.
+```bash
+cp config.dev.example.toml config.dev.toml
+```
+
+Then, customize the file to your needs.
 
 Assuming you have a Docker environment available,
 the easiest way to start up development services is with the following script:
 
-```
+```bash
 ./start-dev-docker.sh
 ```
 
@@ -48,42 +51,16 @@ This makes development tedious if you need to make changes to the Python code.
 To run the Python API outside of Docker,
 first stop the `pingpong-srv-1` container in Docker (but keep the DB and authz containers running).
 
-Next, create a file in the root of the repo named `config.local.toml`.
-You can customize this file how you want, but the basic settings you need are:
+Next, use the `config.local.example.toml` file as a template to create a `config.local.toml` file in the root of the repo.
 
-```toml
-log_level = "DEBUG"
-public_url = "http://localhost:5173"
-development = true
-
-[db]
-engine = "postgres"
-host = "localhost"
-user = "pingpong"
-password = "pingpong"
-database = "pingpong"
-
-[auth]
-
-[[auth.secret_keys]]
-key = "not actually a secret!"
-
-[authz]
-type = "openfga"
-scheme = "http"
-host = "localhost"
-store = "pingpong"
-cfg = "./pingpong/authz/authz.fga.json"
-key = "devkey"
-
-[email]
-type = "mock"
+```bash
+cp config.local.example.toml config.local.toml
 ```
 
 Then, run the following command to start the dev server:
 
-```
-CONFIG_PATH=config.local.toml poetry run fastapi dev pingpong --port 8000 --host 0.0.0.0 --reload
+```bash
+CONFIG_PATH=config.local.toml uv run fastapi dev pingpong --port 8000 --host 0.0.0.0 --reload
 ```
 
 This will start a `uvicorn` server that will automatically reload with code changes as you make them.
@@ -114,14 +91,14 @@ All of the login emails will be sent to `joenudell@testdomain.com`, so you can e
 ## Adding new DB Migrations
 If you need to modify the database, make your changes in the SQLAlchemy code, then run:
 
-```
-poetry run alembic revision --autogenerate -m "<description of change>"
+```bash
+uv run alembic revision --autogenerate -m "<description of change>"
 ```
 
 Verify the migration is correct, check it into the repo, and apply it to the database by running:
 
-```
-poetry run python -m pingpong db migrate
+```bash
+uv run python -m pingpong db migrate
 ```
 
 ## Authz
@@ -145,15 +122,15 @@ You can follow the instructions to install a local instance of [canvas-lms](http
 
 ## Backend / API
 
-We use `Python 3.11` and [`Poetry`](https://python-poetry.org/) for package management.
+We use `Python 3.11` and [`uv`](https://docs.astral.sh/uv/) for package management.
 
 If you want to develop outside of a container using a live-reload server, do the following:
 
-Run `poetry install --with dev` to install dependencies.
+Run `uv sync` to install dependencies.
 
 The following command runs the API in development mode:
-```
-poetry run uvicorn pingpong:server --port 8000 --workers 1 --reload
+```bash
+uv run uvicorn pingpong:server --port 8000 --workers 1 --reload
 ```
 
 NOTE: in development the API uses a mock email sender that prints emails to the console rather than sending them.
@@ -167,7 +144,7 @@ You can use another config file if you want to customize your setup,
 such as `config.local.toml` which will not be tracked:
 
 ```
-CONFIG_PATH=config.local.toml poetry run python ...
+CONFIG_PATH=config.local.toml uv run python ...
 ```
 
 ## Frontend / UI
