@@ -186,6 +186,13 @@ export class ThreadManager {
 	timezone?: string;
 
 	/**
+	 * Optional callback returning assistant setting overrides to apply to each
+	 * posted message's run. Used by the assistant editor's test panel so that
+	 * unsaved settings are used when generating responses.
+	 */
+	getRunSettingsOverrides: (() => api.RunSettingsOverrides | null) | null = null;
+
+	/**
 	 * The thread instructions, if any.
 	 */
 	instructions: Readable<string | null>;
@@ -857,6 +864,7 @@ export class ThreadManager {
 
 		await interruptTtsPromise;
 
+		const runSettingsOverrides = this.getRunSettingsOverrides?.() ?? null;
 		const chunks = await api.postMessage(this.#fetcher, this.classId, this.threadId, {
 			message,
 			file_search_file_ids,
@@ -867,7 +875,8 @@ export class ThreadManager {
 			...(isLessonThread ? { generate_speech: !get(this.#ttsMuted) } : {}),
 			...(lecture_video_playback_position_ms !== undefined
 				? { lecture_video_playback_position_ms }
-				: {})
+				: {}),
+			...(runSettingsOverrides ? { run_settings_overrides: runSettingsOverrides } : {})
 		});
 
 		this.attachments = derived(this.#data, ($data) => {

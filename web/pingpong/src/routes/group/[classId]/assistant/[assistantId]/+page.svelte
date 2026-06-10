@@ -70,7 +70,7 @@
 		MapPinAltOutline
 	} from 'flowbite-svelte-icons';
 	import MultiSelectWithUpload from '$lib/components/MultiSelectWithUpload.svelte';
-	import { writable, type Writable } from 'svelte/store';
+	import { writable, type Readable, type Writable } from 'svelte/store';
 	import { loading, loadingMessage } from '$lib/stores/general';
 	import ModelDropdownOptions from '$lib/components/ModelDropdownOptions.svelte';
 	import DropdownContainer from '$lib/components/DropdownContainer.svelte';
@@ -81,13 +81,14 @@
 	import StatusErrors from '$lib/components/StatusErrors.svelte';
 	import { page } from '$app/stores';
 	import { computeLatestIncidentTimestamps, filterLatestIncidentUpdates } from '$lib/statusUpdates';
-	import { tick } from 'svelte';
+	import { getContext, tick } from 'svelte';
 	import { onDestroy } from 'svelte';
 	import { slide } from 'svelte/transition';
 	import WebSourceChip from '$lib/components/WebSourceChip.svelte';
 	import MCPServerModal from '$lib/components/MCPServerModal.svelte';
 	import PdfPageViewer from '$lib/components/PdfPageViewer.svelte';
 	import LectureSlideFilmstrip from '$lib/components/LectureSlideFilmstrip.svelte';
+	import AssistantTestPanel from '$lib/components/AssistantTestPanel.svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	export let data;
 	$: lectureVideoDefaultInstructions = data.lectureVideoDefaults?.instructions || '';
@@ -2712,6 +2713,51 @@
 	/**
 	 * Parse data from the assistants form into API request params.
 	 */
+	// --- Split-screen test panel ---
+	// Lets editors chat with the assistant using the current (unsaved) form
+	// settings, so prompt and model changes can be tried before saving.
+	let testPanelOpen = false;
+	let testPanelTopOffset = 16;
+	const headerHeightStore: Readable<number> | undefined = getContext('headerHeightStore');
+	headerHeightStore?.subscribe((value) => {
+		testPanelTopOffset = (value ?? 0) + 16;
+	});
+	$: canShowTestPanel =
+		!data.isCreating &&
+		!!data.assistantId &&
+		!preventEdits &&
+		interactionMode === 'chat' &&
+		assistantVersion === 3;
+	$: if (!canShowTestPanel) {
+		testPanelOpen = false;
+	}
+	$: testPanelUserId = data.me?.user?.id ?? 0;
+
+	const getTestRunSettingsOverrides = (): api.RunSettingsOverrides => ({
+		instructions: normalizeNewlines(instructions),
+		model: selectedModel,
+		temperature: supportsTemperatureForCurrentReasoning ? temperatureValue : null,
+		reasoning_effort: supportsReasoning ? reasoningEffortValue : null,
+		verbosity: supportsVerbosity ? verbosityValue : null
+	});
+
+	const getTestToolsAvailable = (): api.Tool[] => {
+		const tools: api.Tool[] = [];
+		if (fileSearchToolSelect && supportsFileSearch && !lowestReasoningDisablesTools) {
+			tools.push({ type: 'file_search' });
+		}
+		if (codeInterpreterToolSelect && supportsCodeInterpreter && !lowestReasoningDisablesTools) {
+			tools.push({ type: 'code_interpreter' });
+		}
+		if (webSearchToolSelect && supportsWebSearch && !lowestReasoningDisablesTools) {
+			tools.push({ type: 'web_search' });
+		}
+		if (mcpServerToolSelect && supportsMCPServer && !lowestReasoningDisablesTools) {
+			tools.push({ type: 'mcp_server' });
+		}
+		return tools;
+	};
+
 	const parseFormData = (form: HTMLFormElement): AssistantFormRequest => {
 		const formData = new FormData(form);
 		const body = Object.fromEntries(formData.entries());
@@ -3714,7 +3760,7 @@
 	});
 </script>
 
-<div class="w-full p-12 pt-6">
+<div class={`w-full p-12 pt-6 ${testPanelOpen ? 'lg:pr-[29rem]' : ''}`}>
 	<div class="flex flex-row justify-between">
 		<Heading tag="h2" class="mb-6 font-serif text-3xl font-medium text-blue-dark-40">
 			{#if data.isCreating}
@@ -3726,7 +3772,19 @@
 			{/if}
 		</Heading>
 		{#if !data.isCreating && !preventEdits}
-			<div class="flex shrink-0 items-start">
+			<div class="flex shrink-0 items-start gap-4">
+				{#if canShowTestPanel}
+					<Button
+						pill
+						size="sm"
+						class="hidden border border-blue-dark-40 bg-white text-blue-dark-40 hover:bg-blue-dark-40 hover:text-white lg:flex"
+						type="button"
+						onclick={() => (testPanelOpen = !testPanelOpen)}
+					>
+						<MessageDotsOutline class="me-2 h-4 w-4" />
+						{testPanelOpen ? 'Hide test panel' : 'Test assistant'}
+					</Button>
+				{/if}
 				<Button
 					pill
 					size="sm"
@@ -6807,4 +6865,21 @@
 			>
 		</div>
 	</form>
+	{#if testPanelOpen && canShowTestPanel}
+		<div
+			class="fixed right-6 bottom-6 z-30 hidden w-[26rem] lg:block"
+			style={`top: ${testPanelTopOffset}px`}
+		>
+			<AssistantTestPanel
+				classId={data.class.id}
+				assistantId={data.assistantId ?? 0}
+				userId={testPanelUserId}
+				assistantName={assistantName || 'Assistant'}
+				{useLatex}
+				getRunSettingsOverrides={getTestRunSettingsOverrides}
+				getToolsAvailable={getTestToolsAvailable}
+				on:close={() => (testPanelOpen = false)}
+			/>
+		</div>
+	{/if}
 </div>

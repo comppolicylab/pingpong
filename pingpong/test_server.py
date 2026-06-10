@@ -2228,3 +2228,204 @@ async def test_create_thread_rejects_voice_assistant(
         response.json()["detail"]
         == "This assistant requires a dedicated thread creation endpoint."
     )
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+    ]
+)
+async def test_create_test_thread_requires_assistant_editor(
+    api, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        assistant = models.Assistant(
+            id=1,
+            name="Chat Assistant",
+            instructions="Be helpful",
+            description="",
+            class_id=1,
+            interaction_mode=schemas.InteractionMode.CHAT,
+            model="gpt-4o-mini",
+            tools="[]",
+            version=3,
+        )
+        session.add_all([class_, assistant])
+        await session.commit()
+
+    response = api.post(
+        f"/api/v1/class/{class_.id}/thread",
+        json={"assistant_id": 1, "message": "hello", "is_test": True},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert response.status_code == 403
+    assert (
+        response.json()["detail"]
+        == "You do not have permission to test this assistant."
+    )
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_edit", "assistant:1"),
+    ]
+)
+async def test_create_thread_overrides_rejected_for_classic_assistant(
+    api, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        assistant = models.Assistant(
+            id=1,
+            name="Classic Assistant",
+            instructions="Be helpful",
+            description="",
+            class_id=1,
+            interaction_mode=schemas.InteractionMode.CHAT,
+            model="gpt-4o-mini",
+            tools="[]",
+            version=2,
+        )
+        session.add_all([class_, assistant])
+        await session.commit()
+
+    response = api.post(
+        f"/api/v1/class/{class_.id}/thread",
+        json={
+            "assistant_id": 1,
+            "message": "hello",
+            "run_settings_overrides": {
+                "instructions": "Respond only in rhyme",
+                "model": "gpt-4o",
+            },
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert response.status_code == 400
+    assert (
+        response.json()["detail"]
+        == "Setting overrides are not supported for this assistant."
+    )
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_participate", "thread:1"),
+        ("user:123", "can_view", "assistant:1"),
+        ("user:123", "can_edit", "assistant:1"),
+    ]
+)
+async def test_send_message_overrides_rejected_on_non_test_thread(
+    api, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        assistant = models.Assistant(
+            id=1,
+            name="Chat Assistant",
+            instructions="Be helpful",
+            description="",
+            class_id=1,
+            interaction_mode=schemas.InteractionMode.CHAT,
+            model="gpt-4o-mini",
+            tools="[]",
+            version=3,
+        )
+        thread = models.Thread(
+            id=1,
+            name="Regular Thread",
+            class_id=1,
+            assistant_id=1,
+            interaction_mode=schemas.InteractionMode.CHAT,
+            instructions="Be helpful",
+            version=3,
+            is_test=False,
+            tools_available="[]",
+        )
+        run = models.Run(
+            id=1,
+            thread_id=1,
+            assistant_id=1,
+            creator_id=123,
+            status=schemas.RunStatus.COMPLETED,
+            model="gpt-4o-mini",
+        )
+        session.add_all([class_, assistant, thread, run])
+        await session.commit()
+
+    response = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread.id}",
+        json={
+            "message": "hello",
+            "run_settings_overrides": {
+                "instructions": "Respond only in rhyme",
+                "model": "gpt-4o",
+            },
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert response.status_code == 400
+    assert (
+        response.json()["detail"]
+        == "Setting overrides are only supported in test conversations."
+    )
+
+
+async def test_thread_get_all_excludes_test_threads(db):
+    async with db.async_session() as session:
+        class_ = models.Class(id=1, name="Test Class", api_key="test-key")
+        regular = models.Thread(
+            id=1,
+            name="Regular Thread",
+            class_id=1,
+            version=3,
+            is_test=False,
+            last_activity=datetime.now(),
+        )
+        test_thread = models.Thread(
+            id=2,
+            name="Test Thread",
+            class_id=1,
+            version=3,
+            is_test=True,
+            last_activity=datetime.now(),
+        )
+        session.add_all([class_, regular, test_thread])
+        await session.commit()
+
+    async with db.async_session() as session:
+        default_ids = [
+            t.id async for t in models.Thread.get_all(session, class_id=1)
+        ]
+        included_ids = [
+            t.id
+            async for t in models.Thread.get_all(
+                session, class_id=1, include_test=True
+            )
+        ]
+
+    assert default_ids == [1]
+    assert sorted(included_ids) == [1, 2]

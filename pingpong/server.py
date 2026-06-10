@@ -403,6 +403,37 @@ def _build_run_instructions(
     return thread.instructions
 
 
+async def _require_run_settings_overrides_allowed(
+    request: "StateRequest",
+    assistant: models.Assistant,
+) -> None:
+    """Ensure the caller may run an assistant with modified settings.
+
+    Test threads and per-run setting overrides are reserved for users who can
+    edit the assistant, since overrides allow running arbitrary instructions
+    and models against the class's API key.
+    """
+    if request.state["is_anonymous"] or request.state["session"].user is None:
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have permission to test this assistant.",
+        )
+    allowed = await request.state["authz"].check(
+        [
+            (
+                request.state["auth_user"],
+                "can_edit",
+                f"assistant:{assistant.id}",
+            )
+        ]
+    )
+    if not allowed[0]:
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have permission to test this assistant.",
+        )
+
+
 def _effective_thread_instructions(
     thread: models.Thread,
     assistant: models.Assistant | None,
@@ -7915,6 +7946,15 @@ async def create_thread(
             detail="This assistant requires a dedicated thread creation endpoint.",
         )
 
+    is_test_thread = req.is_test or req.run_settings_overrides is not None
+    if is_test_thread:
+        await _require_run_settings_overrides_allowed(request, assistant)
+    if req.run_settings_overrides is not None and assistant.version != 3:
+        raise HTTPException(
+            status_code=400,
+            detail="Setting overrides are not supported for this assistant.",
+        )
+
     if assistant.assistant_should_message_first and req.message:
         raise HTTPException(
             status_code=400,
@@ -8130,6 +8170,7 @@ async def create_thread(
         "name": thread_name,
         "class_id": int(class_id),
         "private": True if all_parties else False,
+        "is_test": is_test_thread,
         "users": all_parties,
         "thread_id": thread.id if thread else None,
         "anonymous_sessions": [anonymous_session] if anonymous_session else [],
@@ -8170,7 +8211,9 @@ async def create_thread(
 
         if assistant.version == 3:
             thread_db_record.instructions = format_instructions(
-                assistant.instructions,
+                req.run_settings_overrides.instructions
+                if req.run_settings_overrides is not None
+                else assistant.instructions,
                 assistant.use_latex,
                 assistant.use_image_descriptions,
                 disable_prompt_randomization=assistant.disable_prompt_randomization,
@@ -8246,15 +8289,20 @@ async def create_thread(
                     )
                 )
 
+            overrides = req.run_settings_overrides
             run = models.Run(
                 status=schemas.RunStatus.PENDING,
                 thread_id=thread_db_record.id,
                 creator_id=request.state["session"].user.id,
                 assistant_id=assistant.id,
-                model=assistant.model,
-                verbosity=assistant.verbosity,
-                reasoning_effort=assistant.reasoning_effort,
-                temperature=assistant.temperature,
+                model=overrides.model if overrides else assistant.model,
+                verbosity=overrides.verbosity if overrides else assistant.verbosity,
+                reasoning_effort=overrides.reasoning_effort
+                if overrides
+                else assistant.reasoning_effort,
+                temperature=overrides.temperature
+                if overrides
+                else assistant.temperature,
                 tools_available=thread_db_record.tools_available,
                 instructions=thread_db_record.instructions,
                 messages=run_messages,
@@ -8739,6 +8787,16 @@ async def send_message(
                 status_code=403,
                 detail="You can't upload photos with this assistant. Remove the photos and try again.",
             )
+
+        run_overrides = data.run_settings_overrides
+        if run_overrides is not None:
+            if thread.version != 3 or not thread.is_test:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Setting overrides are only supported in test conversations.",
+                )
+            await _require_run_settings_overrides_allowed(request, asst)
+
         lecture_chat_prep: Any | None = None
 
         # When we reach 3 user messages, or if we failed to generate a title before, generate a new one. Only use the first 100 words of each user and assistant message to maintain a low token count.
@@ -9083,19 +9141,36 @@ async def send_message(
                 )
             )
 
+            if run_overrides is not None:
+                # Keep the thread's stored instructions in sync with the most
+                # recently tested prompt so follow-up runs without overrides
+                # (and prompt inspection) reflect what was actually used.
+                thread.instructions = format_instructions(
+                    run_overrides.instructions,
+                    asst.use_latex,
+                    asst.use_image_descriptions,
+                    disable_prompt_randomization=asst.disable_prompt_randomization,
+                    thread_id=thread.id,
+                    user_id=request.state["session"].user.id,
+                )
+
             run_to_complete = models.Run(
                 status=schemas.RunStatus.PENDING,
                 thread_id=thread.id,
                 creator_id=request.state["session"].user.id,
                 assistant_id=asst.id,
-                model=asst.model,
-                reasoning_effort=asst.reasoning_effort,
-                temperature=asst.temperature,
+                model=run_overrides.model if run_overrides else asst.model,
+                reasoning_effort=run_overrides.reasoning_effort
+                if run_overrides
+                else asst.reasoning_effort,
+                temperature=run_overrides.temperature
+                if run_overrides
+                else asst.temperature,
                 tools_available=thread.tools_available,
                 instructions=_build_run_instructions(
                     thread, asst, request.state["session"].user.id
                 ),
-                verbosity=asst.verbosity,
+                verbosity=run_overrides.verbosity if run_overrides else asst.verbosity,
                 messages=run_messages,
             )
 

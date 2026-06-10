@@ -8541,6 +8541,9 @@ class Thread(Base):
     instructions = Column(String, nullable=True)
     timezone = Column(String, nullable=True)
     private = Column(Boolean)
+    # Test threads are created from the assistant editor's test panel and are
+    # excluded from thread listings.
+    is_test = Column(Boolean, server_default="false", nullable=False)
     user_message_ct = Column(Integer, server_default="1")
     users = relationship(
         "User",
@@ -9014,10 +9017,13 @@ class Thread(Base):
         before: datetime | None = None,
         class_id: int | None = None,
         private: bool | None = None,
+        include_test: bool = False,
     ) -> AsyncGenerator["Thread", None]:
         """Get a number of threads optionally filtered by some criteria.
 
         Might not return exactly the number of threads requested.
+        Test threads (from the assistant editor's test panel) are excluded
+        unless `include_test` is set.
         """
         if ids is not None and not ids:
             return
@@ -9031,6 +9037,8 @@ class Thread(Base):
             conditions.append(Thread.class_id == int(class_id))
         if private is not None:
             conditions.append(Thread.private == private)
+        if not include_test:
+            conditions.append(Thread.is_test.is_not(True))
 
         condition = and_(True, *conditions)
 

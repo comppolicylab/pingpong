@@ -1958,6 +1958,7 @@ class Thread(BaseModel):
     assistant_names: dict[int, str] = {}
     assistant_id: int | None = None
     private: bool
+    is_test: bool = False
     tools_available: str | None
     user_names: list[str] = []
     created: datetime
@@ -2001,6 +2002,21 @@ class ImageProxy(BaseModel):
     complements: str | None = None
 
 
+class RunSettingsOverrides(BaseModel):
+    """Assistant settings used for a run in place of the saved assistant settings.
+
+    Used by the assistant editor's test panel so editors can try out prompt and
+    model changes without saving the assistant. Only allowed for users who can
+    edit the assistant, and only on test threads.
+    """
+
+    instructions: str = Field(..., min_length=3)
+    model: str = Field(..., min_length=2)
+    temperature: float | None = Field(None, ge=0.0, le=2.0)
+    reasoning_effort: int | None = Field(None, ge=-1, le=2)
+    verbosity: int | None = Field(None, ge=0, le=2)
+
+
 class CreateThread(BaseModel):
     parties: list[int] = []
     message: str | None = None
@@ -2012,6 +2028,8 @@ class CreateThread(BaseModel):
     assistant_id: int
     timezone: str | None = None
     conversation_id: str | None = None
+    is_test: bool = False
+    run_settings_overrides: RunSettingsOverrides | None = None
 
     _file_check = model_validator(mode="after")(file_validator)
 
@@ -2170,6 +2188,7 @@ class NewThreadMessage(BaseModel):
     timezone: str | None = None
     generate_speech: bool | None = None
     lecture_video_playback_position_ms: int | None = None
+    run_settings_overrides: RunSettingsOverrides | None = None
 
     _file_check = model_validator(mode="after")(file_validator)
 

@@ -3626,6 +3626,20 @@ export const exportThreads = async (
 /**
  * Parameters for creating a new thread.
  */
+/**
+ * Assistant settings to use for runs in place of the saved assistant settings.
+ *
+ * Used by the assistant editor's test panel to try out unsaved changes.
+ * Only allowed for users who can edit the assistant, and only on test threads.
+ */
+export type RunSettingsOverrides = {
+	instructions: string;
+	model: string;
+	temperature?: number | null;
+	reasoning_effort?: number | null;
+	verbosity?: number | null;
+};
+
 export type CreateThreadRequest = {
 	assistant_id: number;
 	parties?: number[];
@@ -3637,6 +3651,8 @@ export type CreateThreadRequest = {
 	vision_image_descriptions?: ImageProxy[];
 	timezone?: string | null;
 	conversation_id?: string | null;
+	is_test?: boolean;
+	run_settings_overrides?: RunSettingsOverrides | null;
 };
 
 export type CreateAudioThreadRequest = {
@@ -3731,6 +3747,7 @@ export type Thread = {
 	assistant_names?: Record<number, string> | null;
 	assistant_id: number;
 	private: boolean;
+	is_test?: boolean;
 	tools_available: string | null;
 	user_names?: string[];
 	created: string;
@@ -4232,6 +4249,7 @@ export type NewThreadMessageRequest = {
 	timezone?: string;
 	generate_speech?: boolean;
 	lecture_video_playback_position_ms?: number;
+	run_settings_overrides?: RunSettingsOverrides | null;
 };
 
 /**
