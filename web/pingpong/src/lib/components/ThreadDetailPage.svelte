@@ -16,11 +16,8 @@
 	import { computeLatestIncidentTimestamps, filterLatestIncidentUpdates } from '$lib/statusUpdates';
 	import { blur } from 'svelte/transition';
 	import {
-		Accordion,
-		AccordionItem,
 		Avatar,
 		Button,
-		Card,
 		Dropdown,
 		DropdownDivider,
 		DropdownItem,
@@ -39,8 +36,6 @@
 	import ChatDropOverlay from '$lib/components/ChatDropOverlay.svelte';
 	import {
 		RefreshOutline,
-		CodeOutline,
-		ImageSolid,
 		CogOutline,
 		EyeOutline,
 		EyeSlashOutline,
@@ -53,11 +48,10 @@
 		ServerOutline,
 		MicrophoneSlashOutline,
 		UsersSolid,
-		LinkOutline,
-		TerminalOutline
+		LinkOutline
 	} from 'flowbite-svelte-icons';
 
-	import { parseTextContent } from '$lib/content';
+	import { groupMessageContent, parseTextContent } from '$lib/content';
 	import { ThreadManager, type Message } from '$lib/stores/thread';
 	import AttachmentDeletedPlaceholder from '$lib/components/AttachmentDeletedPlaceholder.svelte';
 	import FilePlaceholder from '$lib/components/FilePlaceholder.svelte';
@@ -78,6 +72,7 @@
 	import FileCitation from './FileCitation.svelte';
 	import StatusErrors from './StatusErrors.svelte';
 	import FileSearchCallItem from './FileSearchCallItem.svelte';
+	import CodeInterpreterGroup from './CodeInterpreterGroup.svelte';
 	import MCPListToolsCallItem from './MCPListToolsCallItem.svelte';
 	import MCPServerCallItem from './MCPServerCallItem.svelte';
 	import ReasoningCallItem from './ReasoningCallItem.svelte';
@@ -338,6 +333,11 @@
 	}
 	$: loading = threadMgr.loading;
 	$: canFetchMore = threadMgr.canFetchMore;
+
+	// The latest assistant message is the one actively streaming while a run is in flight.
+	$: latestMessageId = $messages.length ? $messages[$messages.length - 1].data.id : null;
+	const isStreamingMessage = (message: Message) =>
+		message.streamedInSession && message.data.id === latestMessageId && ($submitting || $waiting);
 	$: supportsFileSearch = data.availableTools.includes('file_search') || false;
 	$: supportsCodeInterpreter = data.availableTools.includes('code_interpreter') || false;
 	$: supportsWebSearch = data.availableTools.includes('web_search') || false;
@@ -561,61 +561,6 @@
 		}).format(new Date(timestamp * 1000));
 	};
 
-	type MCPContent = api.MCPServerCallItem | api.MCPListToolsCallItem;
-	type ContentBlock =
-		| { type: 'content'; key: string; content: api.Content }
-		| { type: 'mcp_group'; key: string; serverLabel: string; items: MCPContent[] };
-
-	const isMCPContent = (content: api.Content): content is MCPContent => {
-		return content.type === 'mcp_server_call' || content.type === 'mcp_list_tools_call';
-	};
-
-	const getMCPServerKey = (content: MCPContent) => {
-		return content.server_label || content.server_name || 'mcp';
-	};
-
-	const groupMessageContent = (contents: api.Content[]): ContentBlock[] => {
-		const blocks: ContentBlock[] = [];
-		let index = 0;
-
-		while (index < contents.length) {
-			const content = contents[index];
-			if (!isMCPContent(content)) {
-				blocks.push({ type: 'content', key: `content-${index}`, content });
-				index += 1;
-				continue;
-			}
-
-			const serverKey = getMCPServerKey(content);
-			const items: MCPContent[] = [content];
-			let cursor = index + 1;
-			while (cursor < contents.length) {
-				const next = contents[cursor];
-				if (!isMCPContent(next) || getMCPServerKey(next) !== serverKey) {
-					break;
-				}
-				items.push(next);
-				cursor += 1;
-			}
-
-			if (items.length > 1) {
-				const label = items[0].server_name || items[0].server_label || 'MCP server';
-				blocks.push({
-					type: 'mcp_group',
-					key: `mcp-group-${serverKey}-${index}`,
-					serverLabel: label,
-					items
-				});
-			} else {
-				blocks.push({ type: 'content', key: `content-${index}`, content });
-			}
-
-			index = cursor;
-		}
-
-		return blocks;
-	};
-
 	let currentMessageAttachments: api.ServerFile[] = [];
 	// Get the name of the participant in the chat thread.
 	const getName = (message: api.OpenAIMessage) => {
@@ -698,19 +643,37 @@
 		}
 	};
 
-	// Fetch a singular code interpreter step result
-	const fetchCodeInterpreterResult = async (content: api.Content) => {
-		if (content.type !== 'code_interpreter_call_placeholder') {
-			sadToast('Invalid code interpreter request.');
-			return;
-		}
+	// Fetch a singular code interpreter step result, triggered when its analysis block is opened.
+	const fetchCodeInterpreterResult = async (run_id: string, step_id: string) => {
 		try {
-			await threadMgr.fetchCodeInterpreterResult(content.run_id, content.step_id);
+			await threadMgr.fetchCodeInterpreterResult(run_id, step_id);
 		} catch (e) {
 			sadToast(
 				`Failed to load code interpreter results. Error: ${errorMessage(e, "We're facing an unknown error. Check PingPong's status page for updates if this persists.")}`
 			);
+			// Re-throw so the analysis block resets its loading state and re-enables retry.
+			throw e;
 		}
+	};
+
+	const loadCodeInterpreterResultsForPrint = async () => {
+		const placeholders = get(messages)
+			.flatMap((message) => message.data.content)
+			.filter(
+				(content): content is api.CodeInterpreterCallPlaceholder =>
+					content.type === 'code_interpreter_call_placeholder'
+			);
+		const uniquePlaceholders = new Map(
+			placeholders.map((placeholder) => [
+				`${placeholder.run_id}:${placeholder.step_id}`,
+				placeholder
+			])
+		);
+		await Promise.allSettled(
+			Array.from(uniquePlaceholders.values()).map((placeholder) =>
+				fetchCodeInterpreterResult(placeholder.run_id, placeholder.step_id)
+			)
+		);
 	};
 
 	const getThreadImageUrl = (fileId: string) =>
@@ -1056,6 +1019,7 @@
 		printingThread = true;
 		try {
 			await loadEntireThreadForPrint();
+			await loadCodeInterpreterResultsForPrint();
 			await tick();
 
 			if (typeof window === 'undefined') {
@@ -1764,6 +1728,7 @@
 								participants={$participants}
 								mimeType={data.uploadInfo.mimeType}
 								{fetchMoreMessages}
+								{fetchCodeInterpreterResult}
 								onsubmit={handleLectureChatSubmit}
 								ondismisserror={handleLectureChatDismissError}
 								oncontinuewatching={handleLectureChatContinueWatching}
@@ -1870,6 +1835,7 @@
 							participants={$participants}
 							mimeType={data.uploadInfo.mimeType}
 							{fetchMoreMessages}
+							{fetchCodeInterpreterResult}
 							onsubmit={handleLectureSlideChatSubmit}
 							ondismisserror={handleLectureChatDismissError}
 							oncontinuewatching={handleLectureChatContinueWatching}
@@ -1970,6 +1936,15 @@
 										{/each}
 									</div>
 								</div>
+							{:else if block.type === 'ci_group'}
+								<CodeInterpreterGroup
+									stateKey={`${message.data.run_id ?? message.data.id}:${block.key}`}
+									items={block.items}
+									streaming={isStreamingMessage(message) && block.isLast}
+									forceOpen={printingThread}
+									imageUrl={(fileId) => getCodeInterpreterImageUrl(message.data, fileId)}
+									onFetch={fetchCodeInterpreterResult}
+								/>
 							{:else}
 								{@const content = block.content}
 								{#if content.type === 'text'}
@@ -2016,53 +1991,6 @@
 											{/each}
 										</div>
 									{/if}
-								{:else if content.type === 'code'}
-									{#if printingThread}
-										<div class="w-full leading-6">
-											<div class="mb-2 flex flex-row items-center space-x-2">
-												<div><CodeOutline size="lg" /></div>
-												<div>Code Interpreter Code</div>
-											</div>
-											<pre style="white-space: pre-wrap;" class="text-black">{content.code}</pre>
-										</div>
-									{:else}
-										<div class="w-full leading-6">
-											<Accordion flush>
-												<AccordionItem>
-													<span slot="header"
-														><div class="flex flex-row items-center space-x-2">
-															<div><CodeOutline size="lg" /></div>
-															<div>Code Interpreter Code</div>
-														</div></span
-													>
-													<pre
-														style="white-space: pre-wrap;"
-														class="text-black">{content.code}</pre>
-												</AccordionItem>
-											</Accordion>
-										</div>
-									{/if}
-								{:else if content.type === 'code_interpreter_call_placeholder'}
-									<Card padding="md" class="flex max-w-full flex-row items-center justify-between">
-										<div class="flex flex-row items-center space-x-2">
-											<div><CodeOutline size="lg" /></div>
-											<div>Code Interpreter</div>
-										</div>
-
-										<div class="flex flex-wrap items-center gap-2">
-											<Button
-												outline
-												disabled={$loading || $submitting || $waiting}
-												pill
-												size="xs"
-												color="alternative"
-												onclick={() => fetchCodeInterpreterResult(content)}
-												ontouchstart={() => fetchCodeInterpreterResult(content)}
-											>
-												Load Code Interpreter Results
-											</Button>
-										</div></Card
-									>
 								{:else if content.type === 'file_search_call'}
 									<FileSearchCallItem {content} forceOpen={printingThread} />
 								{:else if content.type === 'web_search_call'}
@@ -2077,105 +2005,6 @@
 									<MCPListToolsCallItem {content} forceOpen={printingThread} />
 								{:else if content.type === 'reasoning'}
 									<ReasoningCallItem {content} forceOpen={printingThread} />
-								{:else if content.type === 'code_output_image_file'}
-									{#if printingThread}
-										<div class="w-full leading-6">
-											<div class="mb-2 flex flex-row items-center space-x-2">
-												<div><ImageSolid size="lg" /></div>
-												<div>Output Image</div>
-											</div>
-											<div class="w-full leading-6">
-												<img
-													class="img-attachment m-auto"
-													src={getCodeInterpreterImageUrl(message.data, content.image_file.file_id)}
-													alt="Attachment generated by the assistant"
-												/>
-											</div>
-										</div>
-									{:else}
-										<Accordion flush>
-											<AccordionItem>
-												<span slot="header"
-													><div class="flex flex-row items-center space-x-2">
-														<div><ImageSolid size="lg" /></div>
-														<div>Output Image</div>
-													</div></span
-												>
-												<div class="w-full leading-6">
-													<img
-														class="img-attachment m-auto"
-														src={getCodeInterpreterImageUrl(
-															message.data,
-															content.image_file.file_id
-														)}
-														alt="Attachment generated by the assistant"
-													/>
-												</div>
-											</AccordionItem>
-										</Accordion>
-									{/if}
-								{:else if content.type === 'code_output_image_url'}
-									{#if printingThread}
-										<div class="w-full leading-6">
-											<div class="mb-2 flex flex-row items-center space-x-2">
-												<div><ImageSolid size="lg" /></div>
-												<div>Output Image</div>
-											</div>
-											<div class="w-full leading-6">
-												<img
-													class="img-attachment m-auto"
-													src={content.url}
-													alt="Attachment generated by the assistant"
-												/>
-											</div>
-										</div>
-									{:else}
-										<Accordion flush>
-											<AccordionItem>
-												<span slot="header"
-													><div class="flex flex-row items-center space-x-2">
-														<div><ImageSolid size="lg" /></div>
-														<div>Output Image</div>
-													</div></span
-												>
-												<div class="w-full leading-6">
-													<img
-														class="img-attachment m-auto"
-														src={content.url}
-														alt="Attachment generated by the assistant"
-													/>
-												</div>
-											</AccordionItem>
-										</Accordion>
-									{/if}
-								{:else if content.type === 'code_output_logs'}
-									{#if printingThread}
-										<div class="w-full leading-6">
-											<div class="mb-2 flex flex-row items-center space-x-2">
-												<div><TerminalOutline size="lg" /></div>
-												<div>Output Logs</div>
-											</div>
-											<div class="w-full leading-6">
-												<pre style="white-space: pre-wrap;" class="text-black">{content.logs}</pre>
-											</div>
-										</div>
-									{:else}
-										<Accordion flush>
-											<AccordionItem>
-												<span slot="header"
-													><div class="flex flex-row items-center space-x-2">
-														<div><TerminalOutline size="lg" /></div>
-														<div>Output Logs</div>
-													</div></span
-												>
-												<div class="w-full leading-6">
-													<pre
-														style="white-space: pre-wrap;"
-														class="text-black">{content.logs}</pre>
-												</div>
-											</AccordionItem>
-										</Accordion>
-									{/if}
 								{:else if content.type === 'image_file'}
 									{@const optimisticVisionFile =
 										!message.persisted && $version === 3
