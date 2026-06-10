@@ -669,7 +669,7 @@
 				placeholder
 			])
 		);
-		await Promise.all(
+		await Promise.allSettled(
 			Array.from(uniquePlaceholders.values()).map((placeholder) =>
 				fetchCodeInterpreterResult(placeholder.run_id, placeholder.step_id)
 			)
