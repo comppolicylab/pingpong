@@ -13930,8 +13930,6 @@ def _is_image_content_type(content_type: str | None) -> bool:
 
 
 def _assistants_api_message_references_image(message: Any, file_id: str) -> bool:
-    if getattr(message, "role", None) != "user":
-        return False
     for content in getattr(message, "content", None) or []:
         if getattr(content, "type", None) != "image_file":
             continue

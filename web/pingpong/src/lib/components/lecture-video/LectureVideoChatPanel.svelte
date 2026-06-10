@@ -204,12 +204,19 @@
 	const getMessageImageUrl = (messageId: string, fileId: string) =>
 		api.fullPath(`/class/${classId}/thread/${threadId}/message/${messageId}/image/${fileId}`);
 
-	const getCodeInterpreterImageUrl = (message: api.OpenAIMessage, fileId: string) => {
-		const ciCallId = message.metadata?.['ci_call_id'];
+	const getCodeInterpreterImageUrl = (
+		message: api.OpenAIMessage,
+		item: api.MessageContentCodeOutputImageFile
+	) => {
+		const fileId = item.image_file.file_id;
+		const ciCallId = item.ci_call_id ?? message.metadata?.['ci_call_id'];
 		if (version <= 2 && typeof ciCallId === 'string' && ciCallId.length > 0) {
 			return api.fullPath(
 				`/class/${classId}/thread/${threadId}/ci_call/${ciCallId}/image/${fileId}`
 			);
+		}
+		if (version <= 2) {
+			return null;
 		}
 		return getThreadImageUrl(fileId);
 	};
@@ -473,7 +480,7 @@
 								streaming={isLatestStreamedAssistantResponse(message) &&
 									(submitting || waiting) &&
 									block.isLast}
-								imageUrl={(fileId) => getCodeInterpreterImageUrl(message.data, fileId)}
+								imageUrl={(item) => getCodeInterpreterImageUrl(message.data, item)}
 								onFetch={fetchCodeInterpreterResult}
 							/>
 						{:else}

@@ -161,7 +161,7 @@ async def test_get_message_image_v2_rejects_file_from_different_message(
 
 @with_user(123)
 @with_authz(grants=[("user:123", "can_view", "thread:52")])
-async def test_get_message_image_v2_rejects_assistant_message_images(
+async def test_get_message_image_v2_allows_assistant_message_images(
     api, db, valid_user_token, monkeypatch
 ):
     async with db.async_session() as session:
@@ -180,7 +180,16 @@ async def test_get_message_image_v2_rejects_assistant_message_images(
     target_message = _make_v2_image_message(
         "msg_target", "file-allowed", role="assistant"
     )
-    retrieve_content = AsyncMock()
+    retrieve_content = AsyncMock(
+        return_value=SimpleNamespace(
+            status_code=200,
+            headers={
+                "content-type": "image/png",
+                "content-disposition": "inline; filename=generated.png",
+            },
+            content=b"generated-png-bytes",
+        )
+    )
     openai_client = _make_openai_client(
         message_retrieve=AsyncMock(return_value=target_message),
         retrieve_content=retrieve_content,
@@ -201,8 +210,9 @@ async def test_get_message_image_v2_rejects_assistant_message_images(
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
 
-    assert response.status_code == 404
-    retrieve_content.assert_not_awaited()
+    assert response.status_code == 200
+    assert response.content == b"generated-png-bytes"
+    assert response.headers["content-disposition"] == "inline; filename=generated.png"
 
 
 @with_user(123)

@@ -3895,6 +3895,7 @@ export type Text = {
 
 export type ContentSource = {
 	source_message_id?: string;
+	ci_call_id?: string;
 };
 
 export type MessageContentText = ContentSource & {

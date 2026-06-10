@@ -107,11 +107,13 @@ const compareApiMessagesDesc = (a: api.OpenAIMessage, b: api.OpenAIMessage) => {
 };
 
 function withSourceMessageId(message: api.OpenAIMessage): api.OpenAIMessage {
+	const ciCallId = message.metadata?.ci_call_id;
 	return {
 		...message,
 		content: (message.content || []).map((content) => ({
 			...content,
-			source_message_id: message.id
+			source_message_id: message.id,
+			...(typeof ciCallId === 'string' && ciCallId.length > 0 ? { ci_call_id: ciCallId } : {})
 		}))
 	};
 }

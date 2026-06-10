@@ -176,7 +176,12 @@ from openai.types.beta.threads.runs import ToolCallsStepDetails, CodeInterpreter
 from openai.types.beta.threads.text_content_block import TextContentBlock
 from pingpong.now import NowFn, utcnow
 from pingpong.ai_error import get_details_from_api_error
-from pingpong.schemas import CodeInterpreterMessage, DownloadExport
+from pingpong.schemas import (
+    CodeInterpreterMessage,
+    DownloadExport,
+    ImageFile as SchemaImageFile,
+    MessageContentCodeOutputImageFile,
+)
 from pingpong.config import config
 from typing import Any, Dict, Literal, Union, overload
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -545,10 +550,10 @@ async def get_ci_messages_from_step(
             for output in tool_call.code_interpreter.outputs:
                 if output.type == "image":
                     new_message.content.append(
-                        {
-                            "image_file": {"file_id": output.image.file_id},
-                            "type": "code_output_image_file",
-                        }
+                        MessageContentCodeOutputImageFile(
+                            image_file=SchemaImageFile(file_id=output.image.file_id),
+                            type="code_output_image_file",
+                        )
                     )
             messages.append(new_message)
     return messages

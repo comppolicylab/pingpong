@@ -122,6 +122,40 @@ describe('ThreadManager', () => {
 		expect(parsed.content).not.toContain('/message/1/file/file-UTjpmNMy2UTjLgg1V8PYBS');
 	});
 
+	it('preserves code interpreter call ids on grouped output image content', () => {
+		const threadData = makeThreadData();
+		threadData.ci_messages = [
+			{
+				id: 'ci-message-1',
+				assistant_id: 'asst_SiulxBT6Y6bxpzDqJnQB9Vpp',
+				content: [
+					{
+						type: 'code_output_image_file',
+						image_file: { file_id: 'file-ci-image' }
+					}
+				],
+				created_at: 1773127553,
+				metadata: {
+					ci_call_id: '6'
+				},
+				object: 'thread.message',
+				message_type: 'code_interpreter_call',
+				role: 'assistant',
+				run_id: 'run_a5OTi6XDw5tlAH0ZgeJGfvIW',
+				attachments: []
+			}
+		];
+
+		const manager = new ThreadManager(vi.fn() as unknown as Fetcher, 1, 181, threadData, 'voice');
+		const [mergedMessage] = get(manager.messages);
+		const imageContent = mergedMessage.data.content.find(
+			(content) => content.type === 'code_output_image_file'
+		);
+
+		expect(imageContent?.ci_call_id).toBe('6');
+		expect(imageContent?.source_message_id).toBe('ci-message-1');
+	});
+
 	it('only sends generate_speech for lecture video threads', async () => {
 		const stream = new ReadableStream<object>({
 			start(controller) {
