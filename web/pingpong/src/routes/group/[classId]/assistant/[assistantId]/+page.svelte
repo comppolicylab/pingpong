@@ -2758,6 +2758,23 @@
 		return tools;
 	};
 
+	// Settings the test panel cannot apply per-run: tools, files, and MCP
+	// servers only affect test conversations after the assistant is saved.
+	$: testPanelHasUnsavedSettings =
+		fileSearchToolSelect !== initialTools.includes('file_search') ||
+		codeInterpreterToolSelect !== initialTools.includes('code_interpreter') ||
+		webSearchToolSelect !== initialTools.includes('web_search') ||
+		mcpServerToolSelect !== initialTools.includes('mcp_server') ||
+		!setsEqual(
+			new Set($selectedFileSearchFiles),
+			new Set(data.selectedFileSearchFiles.map((f) => f.file_id))
+		) ||
+		!setsEqual(
+			new Set($selectedCodeInterpreterFiles),
+			new Set(data.selectedCodeInterpreterFiles.map((f) => f.file_id))
+		) ||
+		!areMcpServersEqual(mcpServersLocal, data.mcpServers || []);
+
 	const parseFormData = (form: HTMLFormElement): AssistantFormRequest => {
 		const formData = new FormData(form);
 		const body = Object.fromEntries(formData.entries());
@@ -6878,6 +6895,7 @@
 				{useLatex}
 				getRunSettingsOverrides={getTestRunSettingsOverrides}
 				getToolsAvailable={getTestToolsAvailable}
+				showUnsavedSettingsBanner={testPanelHasUnsavedSettings}
 				on:close={() => (testPanelOpen = false)}
 			/>
 		</div>

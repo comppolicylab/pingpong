@@ -3,6 +3,7 @@
 	import { CloseOutline, RefreshOutline } from 'flowbite-svelte-icons';
 	import { DoubleBounce } from 'svelte-loading-spinners';
 	import { createEventDispatcher } from 'svelte';
+	import { slide } from 'svelte/transition';
 	import * as api from '$lib/api';
 	import { errorMessage } from '$lib/errors';
 	import { scroll } from '$lib/actions/scroll';
@@ -34,6 +35,11 @@
 	 * the test conversation starts; restart the conversation to change them.
 	 */
 	export let getToolsAvailable: () => api.Tool[];
+	/**
+	 * Whether the editor has unsaved changes (files, tools, MCP servers) that
+	 * test conversations cannot pick up until the assistant is saved.
+	 */
+	export let showUnsavedSettingsBanner = false;
 
 	let threadMgr: ThreadManager | null = null;
 	let threadId: number | null = null;
@@ -143,7 +149,7 @@
 					Restart
 				</Button>
 				<Tooltip triggeredBy="#test-panel-restart"
-					>Start over with the latest settings (including tool changes)</Tooltip
+					>Start over with the latest saved settings (including tool and file changes)</Tooltip
 				>
 			{/if}
 			<Button size="xs" color="alternative" onclick={() => dispatcher('close')}>
@@ -152,6 +158,15 @@
 			</Button>
 		</div>
 	</div>
+
+	{#if showUnsavedSettingsBanner}
+		<div
+			transition:slide={{ duration: 150 }}
+			class="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800"
+		>
+			Save the assistant to test this change.
+		</div>
+	{/if}
 
 	{#if threadMgr && threadId !== null}
 		<div
@@ -236,8 +251,8 @@
 				<Logo size={10} />
 				<div class="text-sm font-medium text-blue-dark-40">Try out your assistant</div>
 				<div class="text-xs text-gray-500">
-					Send a message to test the assistant with the settings currently in the editor — no need
-					to save first. Edit the prompt or model between messages to compare responses.
+					Send a message to test changes to your instructions and model settings. If you change
+					files or assistant tools, please save the assistant for them to take effect.
 				</div>
 			{/if}
 		</div>
