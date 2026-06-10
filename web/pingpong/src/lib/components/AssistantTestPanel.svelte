@@ -36,10 +36,19 @@
 	 */
 	export let getToolsAvailable: () => api.Tool[];
 	/**
-	 * Whether the editor has unsaved changes (files, tools, MCP servers) that
-	 * test conversations cannot pick up until the assistant is saved.
+	 * Categories of unsaved editor changes (e.g. "files", "tool settings",
+	 * "MCP servers") that test conversations cannot pick up until the
+	 * assistant is saved. The banner is shown when non-empty.
 	 */
-	export let showUnsavedSettingsBanner = false;
+	export let unsavedSettings: string[] = [];
+	/**
+	 * Saves the assistant without leaving the editor, so the unsaved settings
+	 * above can be picked up by test conversations. Returns whether the save
+	 * succeeded.
+	 */
+	export let onSaveAssistant: (() => Promise<boolean>) | null = null;
+
+	const listFormat = new Intl.ListFormat('en', { style: 'long', type: 'conjunction' });
 
 	let threadMgr: ThreadManager | null = null;
 	let threadId: number | null = null;
@@ -54,7 +63,24 @@
 	$: waiting = threadMgr?.waiting ?? notBusy;
 	$: submitting = threadMgr?.submitting ?? notBusy;
 	$: managerError = threadMgr?.error ?? noError;
-	$: busy = creating || $waiting || $submitting;
+	let savingSettings = false;
+	$: busy = creating || savingSettings || $waiting || $submitting;
+
+	const saveAndRestart = async () => {
+		if (!onSaveAssistant || busy) {
+			return;
+		}
+		savingSettings = true;
+		try {
+			// Restart so the next message starts a conversation with the newly
+			// saved tools and files.
+			if (await onSaveAssistant()) {
+				restart();
+			}
+		} finally {
+			savingSettings = false;
+		}
+	};
 
 	const validateOverrides = (overrides: api.RunSettingsOverrides): string | null => {
 		if (!overrides.instructions || overrides.instructions.trim().length < 3) {
@@ -159,12 +185,32 @@
 		</div>
 	</div>
 
-	{#if showUnsavedSettingsBanner}
+	{#if unsavedSettings.length > 0}
 		<div
 			transition:slide={{ duration: 150 }}
-			class="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800"
+			class="flex items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800"
 		>
-			Save the assistant to test this change.
+			<span>
+				Please save your assistant to reflect your changes to {listFormat.format(unsavedSettings)}.
+			</span>
+			{#if onSaveAssistant}
+				<Button
+					id="test-panel-save"
+					size="xs"
+					color="alternative"
+					class="shrink-0"
+					disabled={busy}
+					onclick={saveAndRestart}
+				>
+					{#if savingSettings}
+						<Spinner size="3" class="me-1" />
+					{/if}
+					Save &amp; refresh
+				</Button>
+				<Tooltip triggeredBy="#test-panel-save"
+					>Save the assistant and restart the test conversation with the new settings</Tooltip
+				>
+			{/if}
 		</div>
 	{/if}
 

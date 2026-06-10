@@ -27,7 +27,7 @@
 		MCPAuthType,
 		LectureVideoAssistantEditorPolicy as LectureVideoEditorPolicy
 	} from '$lib/api';
-	import { beforeNavigate, goto, invalidate } from '$app/navigation';
+	import { beforeNavigate, goto, invalidate, invalidateAll } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { browser } from '$app/environment';
 	import * as api from '$lib/api';
@@ -2758,22 +2758,45 @@
 		return tools;
 	};
 
+	/**
+	 * Save the assistant on behalf of the test panel, staying in the editor.
+	 */
+	const saveFromTestPanel = async (): Promise<boolean> => {
+		if (!assistantForm || $loading) {
+			return false;
+		}
+		return await saveAssistant(assistantForm, { redirect: false });
+	};
+
 	// Settings the test panel cannot apply per-run: tools, files, and MCP
 	// servers only affect test conversations after the assistant is saved.
-	$: testPanelHasUnsavedSettings =
-		fileSearchToolSelect !== initialTools.includes('file_search') ||
-		codeInterpreterToolSelect !== initialTools.includes('code_interpreter') ||
-		webSearchToolSelect !== initialTools.includes('web_search') ||
-		mcpServerToolSelect !== initialTools.includes('mcp_server') ||
-		!setsEqual(
-			new Set($selectedFileSearchFiles),
-			new Set(data.selectedFileSearchFiles.map((f) => f.file_id))
-		) ||
-		!setsEqual(
-			new Set($selectedCodeInterpreterFiles),
-			new Set(data.selectedCodeInterpreterFiles.map((f) => f.file_id))
-		) ||
-		!areMcpServersEqual(mcpServersLocal, data.mcpServers || []);
+	$: testPanelUnsavedSettings = (() => {
+		const changes: string[] = [];
+		if (
+			fileSearchToolSelect !== initialTools.includes('file_search') ||
+			codeInterpreterToolSelect !== initialTools.includes('code_interpreter') ||
+			webSearchToolSelect !== initialTools.includes('web_search') ||
+			mcpServerToolSelect !== initialTools.includes('mcp_server')
+		) {
+			changes.push('tool settings');
+		}
+		if (
+			!setsEqual(
+				new Set($selectedFileSearchFiles),
+				new Set(data.selectedFileSearchFiles.map((f) => f.file_id))
+			) ||
+			!setsEqual(
+				new Set($selectedCodeInterpreterFiles),
+				new Set(data.selectedCodeInterpreterFiles.map((f) => f.file_id))
+			)
+		) {
+			changes.push('files');
+		}
+		if (!areMcpServersEqual(mcpServersLocal, data.mcpServers || [])) {
+			changes.push('MCP servers');
+		}
+		return changes;
+	})();
 
 	const parseFormData = (form: HTMLFormElement): AssistantFormRequest => {
 		const formData = new FormData(form);
@@ -3467,10 +3490,21 @@
 	 */
 	const submitForm = async (evt: SubmitEvent) => {
 		evt.preventDefault();
+		await saveAssistant(evt.target as HTMLFormElement);
+	};
+
+	/**
+	 * Validate and save the assistant. Returns whether the save succeeded.
+	 * With redirect: false, stays in the editor and refreshes page data
+	 * instead of returning to the assistant list.
+	 */
+	const saveAssistant = async (
+		form: HTMLFormElement,
+		{ redirect = true } = {}
+	): Promise<boolean> => {
 		$loadingMessage = 'Saving assistant...';
 		$loading = true;
 
-		const form = evt.target as HTMLFormElement;
 		const params = parseFormData(form);
 
 		if (preventEdits && data.assistantId) {
@@ -3484,14 +3518,14 @@
 				$loading = false;
 				$loadingMessage = '';
 				sadToast(`Could not update the assistant:\n${expanded.error.detail || 'Unknown error'}`);
-				return;
+				return false;
 			} else {
 				$loading = false;
 				$loadingMessage = '';
 				happyToast('Assistant saved.');
 				checkForChanges = false;
 				await goto(resolve(`/group/${data.class.id}/assistant`), { invalidateAll: true });
-				return;
+				return true;
 			}
 		}
 
@@ -3500,7 +3534,7 @@
 				sadToast('Please wait for the lecture video upload to finish before saving.');
 				$loading = false;
 				$loadingMessage = '';
-				return;
+				return false;
 			}
 
 			const selectedLectureVideoId = selectedLectureVideo?.id ?? null;
@@ -3508,13 +3542,13 @@
 				sadToast('Please upload a lecture video before saving.');
 				$loading = false;
 				$loadingMessage = '';
-				return;
+				return false;
 			}
 			if (!canGenerateLectureVideoManifest && !overwriteManifest) {
 				sadToast('Please provide a lecture video manifest before saving.');
 				$loading = false;
 				$loadingMessage = '';
-				return;
+				return false;
 			}
 
 			const parsedManifest = overwriteManifest
@@ -3524,7 +3558,7 @@
 				sadToast(parsedManifest.error || 'Lecture video manifest is invalid.');
 				$loading = false;
 				$loadingMessage = '';
-				return;
+				return false;
 			}
 
 			const trimmedVoiceId = voiceId.trim();
@@ -3532,13 +3566,13 @@
 				sadToast('Please provide a voice ID before saving.');
 				$loading = false;
 				$loadingMessage = '';
-				return;
+				return false;
 			}
 			if (trimmedVoiceId !== currentVoiceId.trim() && trimmedVoiceId !== lastValidatedVoiceId) {
 				sadToast('Please validate the changed voice ID before saving.');
 				$loading = false;
 				$loadingMessage = '';
-				return;
+				return false;
 			}
 
 			const overwriteManifestChanged = overwriteManifest !== originalOverwriteManifest;
@@ -3585,7 +3619,7 @@
 				sadToast('Please wait for the lecture slide upload to finish before saving.');
 				$loading = false;
 				$loadingMessage = '';
-				return;
+				return false;
 			}
 
 			const selectedLectureSlideDeckId = selectedLectureSlideDeck?.id ?? null;
@@ -3593,7 +3627,7 @@
 				sadToast('Please upload lecture slides before saving.');
 				$loading = false;
 				$loadingMessage = '';
-				return;
+				return false;
 			}
 
 			const trimmedVoiceId = voiceId.trim();
@@ -3601,13 +3635,13 @@
 				sadToast('Please provide a voice ID before saving.');
 				$loading = false;
 				$loadingMessage = '';
-				return;
+				return false;
 			}
 			if (trimmedVoiceId !== currentVoiceId.trim() && trimmedVoiceId !== lastValidatedVoiceId) {
 				sadToast('Please validate the changed voice ID before saving.');
 				$loading = false;
 				$loadingMessage = '';
-				return;
+				return false;
 			}
 			const lectureSlideQuestionError = validateLectureSlideQuestionDrafts(
 				lectureSlideQuestionDrafts
@@ -3616,7 +3650,7 @@
 				sadToast(lectureSlideQuestionError);
 				$loading = false;
 				$loadingMessage = '';
-				return;
+				return false;
 			}
 
 			const lectureSlideFieldsChanged =
@@ -3665,7 +3699,7 @@
 			sadToast(`You can only select up to ${fileSearchMetadata.max_count} files for File Search.`);
 			$loading = false;
 			$loadingMessage = '';
-			return;
+			return false;
 		}
 
 		if (params.code_interpreter_file_ids.length > codeInterpreterMetadata.max_count) {
@@ -3674,7 +3708,7 @@
 			);
 			$loading = false;
 			$loadingMessage = '';
-			return;
+			return false;
 		}
 
 		const result = !data.assistantId
@@ -3686,18 +3720,32 @@
 			$loading = false;
 			$loadingMessage = '';
 			sadToast(`Could not save your response:\n${expanded.error.detail || 'Unknown error'}`);
-		} else {
-			if (params.interaction_mode !== 'lecture_video' && lectureVideoDraftIds.size > 0) {
-				await cleanupLectureVideoDrafts();
-				selectedLectureVideo = data.isCreating ? null : currentLectureVideo;
-			}
-			$loading = false;
-			$loadingMessage = '';
-			happyToast('Assistant saved');
+			return false;
+		}
+
+		if (params.interaction_mode !== 'lecture_video' && lectureVideoDraftIds.size > 0) {
+			await cleanupLectureVideoDrafts();
+			selectedLectureVideo = data.isCreating ? null : currentLectureVideo;
+		}
+		$loading = false;
+		$loadingMessage = '';
+		happyToast('Assistant saved');
+		if (redirect) {
 			checkForChanges = false;
 			await invalidate(`/group/${$page.params.classId}`);
 			await goto(resolve(`/group/${data.class.id}/assistant`));
+		} else {
+			// Stay in the editor: stop treating the uploaded private files as
+			// session uploads (which get cleaned up on navigation), then refresh
+			// page data so the saved state becomes the new baseline. The session
+			// stores must be cleared first — once the refreshed data lists those
+			// files, holding them in both places renders duplicate file entries.
+			$privateUploadFSFileInfo = [];
+			$privateUploadCIFileInfo = [];
+			$trashPrivateFileIds = [];
+			await invalidateAll();
 		}
+		return true;
 	};
 
 	const switchAssistantVersion = () => {
@@ -6895,7 +6943,8 @@
 				{useLatex}
 				getRunSettingsOverrides={getTestRunSettingsOverrides}
 				getToolsAvailable={getTestToolsAvailable}
-				showUnsavedSettingsBanner={testPanelHasUnsavedSettings}
+				unsavedSettings={testPanelUnsavedSettings}
+				onSaveAssistant={saveFromTestPanel}
 				on:close={() => (testPanelOpen = false)}
 			/>
 		</div>
