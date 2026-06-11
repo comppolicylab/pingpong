@@ -22,7 +22,7 @@
 	const handleClick = () => (open = !open);
 </script>
 
-<div class="my-3">
+<div class="my-2">
 	{#if content.queries && content.queries.length > 0}
 		<div class="flex items-center gap-2">
 			<FileSearchOutline class="h-4 w-4 text-gray-600" />

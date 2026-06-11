@@ -338,7 +338,7 @@
 	// The latest assistant message is the one actively streaming while a run is in flight.
 	$: latestMessageId = $messages.length ? $messages[$messages.length - 1].data.id : null;
 	const isStreamingMessage = (message: Message) =>
-		message.streamedInSession && message.data.id === latestMessageId && ($submitting || $waiting);
+		message.activeInSession && message.data.id === latestMessageId && ($submitting || $waiting);
 	$: supportsFileSearch = data.availableTools.includes('file_search') || false;
 	$: supportsCodeInterpreter = data.availableTools.includes('code_interpreter') || false;
 	$: supportsWebSearch = data.availableTools.includes('web_search') || false;
@@ -1921,7 +1921,7 @@
 						</Tooltip>
 						{#each groupMessageContent(message.data.content) as block (block.key)}
 							{#if block.type === 'mcp_group'}
-								<div class="my-3">
+								<div class="my-2">
 									<div class="flex items-center gap-2 text-gray-600">
 										<ServerOutline class="h-4 w-4 text-gray-600" />
 										<span class="text-xs font-medium tracking-wide uppercase"

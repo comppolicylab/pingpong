@@ -39,7 +39,7 @@
 		content?.action?.type === 'search' ? deduplicateSources(content.action.sources) : [];
 </script>
 
-<div class="my-3">
+<div class="my-2">
 	{#if content.action && content.action.type === 'search' && uniqueSources.length > 0}
 		<div class="flex items-center gap-2">
 			<GlobeOutline class="h-4 w-4 text-gray-600" />

@@ -233,6 +233,8 @@
 		message.streamedInSession === true &&
 		message.data.id === latestMessageId &&
 		message.data.id === latestAssistantMessageId;
+	const isLatestActiveAssistantResponse = (message: Message) =>
+		message.activeInSession === true && message.data.id === latestMessageId;
 
 	const canLatchContinuePromptDecision = (message: Message) =>
 		isLatestStreamedAssistantResponse(message) && !waiting && !submitting;
@@ -437,7 +439,7 @@
 					{/if}
 					{#each groupMessageContent(message.data.content) as block (block.key)}
 						{#if block.type === 'mcp_group'}
-							<div class="my-3">
+							<div class="my-2">
 								<div class="flex items-center gap-2 text-gray-600">
 									<ServerOutline class="h-4 w-4 text-gray-600" />
 									<span class="text-xs font-medium tracking-wide uppercase"
@@ -458,7 +460,7 @@
 							<CodeInterpreterGroup
 								stateKey={`${message.data.run_id ?? message.data.id}:${block.key}`}
 								items={block.items}
-								streaming={isLatestStreamedAssistantResponse(message) &&
+								streaming={isLatestActiveAssistantResponse(message) &&
 									(submitting || waiting) &&
 									block.isLast}
 								imageUrl={(item) =>

@@ -12,6 +12,7 @@ export type ThreadManagerState = {
 	data: (BaseResponse & ThreadWithMeta) | null;
 	error: ErrorWithSent | null;
 	optimistic: api.OpenAIMessage[];
+	activeRunId: string | null;
 	limit: number;
 	canFetchMore: boolean;
 	loading: boolean;
@@ -42,7 +43,15 @@ export type Message = {
 	error: ApiError | null;
 	persisted: boolean;
 	streamedInSession?: boolean;
+	activeInSession?: boolean;
 };
+
+function getActiveRunId(run: api.OpenAIRun | null | undefined): string | null {
+	if (!run || run.status === 'pending' || api.finished(run)) {
+		return null;
+	}
+	return run.id;
+}
 
 function getOutputIndexValue(message: api.OpenAIMessage): number | null {
 	if (typeof message.output_index === 'number' && Number.isFinite(message.output_index)) {
@@ -252,6 +261,7 @@ export class ThreadManager {
 			supportsCodeInterpreter:
 				expanded.data?.thread?.tools_available?.includes('code_interpreter') || false,
 			optimistic: [],
+			activeRunId: getActiveRunId(expanded.data?.run),
 			loading: false,
 			waiting: false,
 			submitting: false,
@@ -270,48 +280,38 @@ export class ThreadManager {
 			if (!$data) {
 				return [];
 			}
-			const realMessages = ($data.data?.messages || []).map((message) => ({
-				data: withSourceMessageId(message),
-				error: null,
-				persisted: true,
-				streamedInSession: this.#streamedMessageIds.has(message.id)
-			}));
-			const ci_messages = ($data.data?.ci_messages || []).map((message) => ({
-				data: withSourceMessageId(message),
-				error: null,
-				persisted: true,
-				streamedInSession: this.#streamedMessageIds.has(message.id)
-			}));
-			const fs_messages = ($data.data?.fs_messages || []).map((message) => ({
-				data: withSourceMessageId(message),
-				error: null,
-				persisted: true,
-				streamedInSession: this.#streamedMessageIds.has(message.id)
-			}));
-			const ws_messages = ($data.data?.ws_messages || []).map((message) => ({
-				data: withSourceMessageId(message),
-				error: null,
-				persisted: true,
-				streamedInSession: this.#streamedMessageIds.has(message.id)
-			}));
-			const mcp_messages = ($data.data?.mcp_messages || []).map((message) => ({
-				data: withSourceMessageId(message),
-				error: null,
-				persisted: true,
-				streamedInSession: this.#streamedMessageIds.has(message.id)
-			}));
-			const reasoning_messages = ($data.data?.reasoning_messages || []).map((message) => ({
-				data: withSourceMessageId(message),
-				error: null,
-				persisted: true,
-				streamedInSession: this.#streamedMessageIds.has(message.id)
-			}));
-			const optimisticMessages = $data.optimistic.map((message) => ({
-				data: withSourceMessageId(message),
-				error: null,
-				persisted: false,
-				streamedInSession: false
-			}));
+			const toMessage = (message: api.OpenAIMessage, persisted: boolean): Message => {
+				const streamedInSession = this.#streamedMessageIds.has(message.id);
+				const activeInSession =
+					streamedInSession ||
+					(message.run_id !== null &&
+						$data.activeRunId !== null &&
+						message.run_id === $data.activeRunId);
+				return {
+					data: withSourceMessageId(message),
+					error: null,
+					persisted,
+					streamedInSession,
+					activeInSession
+				};
+			};
+			const realMessages = ($data.data?.messages || []).map((message) => toMessage(message, true));
+			const ci_messages = ($data.data?.ci_messages || []).map((message) =>
+				toMessage(message, true)
+			);
+			const fs_messages = ($data.data?.fs_messages || []).map((message) =>
+				toMessage(message, true)
+			);
+			const ws_messages = ($data.data?.ws_messages || []).map((message) =>
+				toMessage(message, true)
+			);
+			const mcp_messages = ($data.data?.mcp_messages || []).map((message) =>
+				toMessage(message, true)
+			);
+			const reasoning_messages = ($data.data?.reasoning_messages || []).map((message) =>
+				toMessage(message, true)
+			);
+			const optimisticMessages = $data.optimistic.map((message) => toMessage(message, false));
 
 			const allMessages = realMessages
 				.concat(ci_messages)
@@ -359,6 +359,7 @@ export class ThreadManager {
 					const merged: Message = {
 						...base,
 						streamedInSession: group.some((message) => message.streamedInSession),
+						activeInSession: group.some((message) => message.activeInSession),
 						data: {
 							...base.data,
 							content: mergedContent
@@ -451,7 +452,7 @@ export class ThreadManager {
 			return;
 		}
 
-		this.#data.update((d) => ({ ...d, submitting: true }));
+		this.#data.update((d) => ({ ...d, submitting: true, activeRunId: null }));
 		try {
 			const chunks = await api.createThreadRun(this.#fetcher, this.classId, this.threadId, {
 				timezone: this.timezone
@@ -462,24 +463,28 @@ export class ThreadManager {
 				this.#data.update((d) => ({
 					...d,
 					error: { detail: e.message, wasSent: true },
+					activeRunId: null,
 					submitting: false
 				}));
 			} else if (e instanceof api.PresendError) {
 				this.#data.update((d) => ({
 					...d,
 					error: { detail: e.message, wasSent: false },
+					activeRunId: null,
 					submitting: false
 				}));
 			} else if (e instanceof api.RunActiveError) {
 				this.#data.update((d) => ({
 					...d,
 					error: { detail: e.message, wasSent: false },
+					activeRunId: null,
 					submitting: false
 				}));
 			} else {
 				this.#data.update((d) => ({
 					...d,
 					error: { detail: errorMessage(e, 'Unknown error'), wasSent: true },
+					activeRunId: null,
 					submitting: false
 				}));
 			}
@@ -490,7 +495,11 @@ export class ThreadManager {
 	 * Poll the thread until the run is finished.
 	 */
 	async #pollThread(timeout: number = 120_000) {
-		this.#data.update((d) => ({ ...d, waiting: true }));
+		this.#data.update((d) => ({
+			...d,
+			activeRunId: getActiveRunId(d.data?.run),
+			waiting: true
+		}));
 
 		const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 		const t0 = Date.now();
@@ -503,6 +512,7 @@ export class ThreadManager {
 						detail: 'The thread run took too long to complete.',
 						wasSent: true
 					},
+					activeRunId: null,
 					waiting: false
 				}));
 				throw new Error('The thread run took too long to complete.');
@@ -524,6 +534,7 @@ export class ThreadManager {
 				this.#data.update((d) => ({
 					...d,
 					error: { detail, wasSent: true },
+					activeRunId: null,
 					waiting: false
 				}));
 				throw new Error(detail);
@@ -534,9 +545,20 @@ export class ThreadManager {
 					...d,
 					data: expanded.data,
 					error: null,
+					activeRunId: null,
 					waiting: false
 				}));
 				return;
+			}
+
+			if (expanded.data) {
+				this.#data.update((d) => ({
+					...d,
+					data: expanded.data,
+					error: null,
+					activeRunId: getActiveRunId(expanded.data.run),
+					waiting: true
+				}));
 			}
 
 			await sleep(5000);
@@ -860,6 +882,7 @@ export class ThreadManager {
 				optimistic,
 				...(optimisticAssistant ? [optimisticAssistant] : [])
 			],
+			activeRunId: null,
 			submitting: true,
 			attachments: {
 				...d.attachments,
@@ -897,6 +920,7 @@ export class ThreadManager {
 						(msg) => msg.id !== optimisticMsgId && msg.id !== optimisticAssistantMsgId
 					),
 					error: { detail: e.message, wasSent: false },
+					activeRunId: null,
 					attachments: Object.keys(d.attachments).reduce(
 						(acc: Record<string, api.ServerFile>, key: string) => {
 							if (!attachments?.find((file) => file.file_id === key)) {
@@ -914,13 +938,15 @@ export class ThreadManager {
 				this.#data.update((d) => ({
 					...d,
 					optimistic: d.optimistic.filter((msg) => msg.id !== optimisticAssistantMsgId),
-					error: { detail: e.message, wasSent: true }
+					error: { detail: e.message, wasSent: true },
+					activeRunId: null
 				}));
 			} else {
 				this.#data.update((d) => ({
 					...d,
 					optimistic: d.optimistic.filter((msg) => msg.id !== optimisticAssistantMsgId),
-					error: { detail: errorMessage(e, 'Unknown error'), wasSent: true }
+					error: { detail: errorMessage(e, 'Unknown error'), wasSent: true },
+					activeRunId: null
 				}));
 			}
 		}
@@ -948,12 +974,14 @@ export class ThreadManager {
 			this.interruptTts().catch(() => {});
 			this.#data.update((d) => ({
 				...d,
+				activeRunId: null,
 				waiting: false
 			}));
 			throw e;
 		} finally {
 			this.#data.update((d) => ({
 				...d,
+				activeRunId: null,
 				waiting: false
 			}));
 		}
@@ -1030,6 +1058,8 @@ export class ThreadManager {
 					}
 					return {
 						...d,
+						activeRunId:
+							message.role === 'assistant' && message.run_id ? message.run_id : d.activeRunId,
 						optimistic: d.optimistic.filter((m) => m.metadata?.lecture_context_pending !== true),
 						data: {
 							...d.data!,
@@ -1427,13 +1457,15 @@ export class ThreadManager {
 			}
 
 			if (
-				lastMessage.data.role !== 'assistant' &&
+				(lastMessage.data.role !== 'assistant' || !lastMessage.persisted) &&
 				(call.type === 'code_interpreter' ||
 					call.type === 'file_search' ||
 					call.type === 'web_search' ||
 					call.type === 'mcp_call' ||
 					call.type === 'mcp_list_tools')
 			) {
+				const messageId = `optimistic-${(Math.random() + 1).toString(36).substring(2)}`;
+				this.#streamedMessageIds.add(messageId);
 				const version = get(this.version);
 				const callOutputIndex =
 					call.output_index ??
@@ -1443,7 +1475,7 @@ export class ThreadManager {
 					role: 'assistant',
 					content: [],
 					created_at: Date.now() / 1000,
-					id: `optimistic-${(Math.random() + 1).toString(36).substring(2)}`,
+					id: messageId,
 					assistant_id: '',
 					metadata: {},
 					file_search_file_ids: [],
@@ -1454,7 +1486,7 @@ export class ThreadManager {
 					output_index: callOutputIndex
 				});
 			}
-			return { ...d };
+			return { ...d, activeRunId: call.run_id ?? d.activeRunId };
 		});
 	}
 
@@ -1673,7 +1705,7 @@ export class ThreadManager {
 					});
 				}
 			}
-			return { ...d };
+			return { ...d, activeRunId: chunk.run_id ?? d.activeRunId };
 		});
 	}
 
