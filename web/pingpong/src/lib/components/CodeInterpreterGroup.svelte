@@ -92,7 +92,7 @@
 			return `${item.type}:${item.run_id}:${item.step_id}`;
 		}
 		if (item.type === 'code_output_image_file') {
-			return `${item.type}:${item.image_file.file_id}:${item.source_message_id ?? i}`;
+			return `${item.type}:${item.run_id ?? ''}:${item.step_id ?? ''}:${item.image_file.file_id}:${item.source_message_id ?? i}`;
 		}
 		if (item.type === 'code_output_image_url') {
 			return `${item.type}:${item.url}:${item.source_message_id ?? i}`;

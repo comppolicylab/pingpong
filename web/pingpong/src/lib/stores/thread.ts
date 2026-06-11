@@ -1480,7 +1480,9 @@ export class ThreadManager {
 							case 'image':
 								lastMessage.content.push({
 									type: 'code_output_image_file',
-									image_file: output.image
+									image_file: output.image,
+									run_id: chunk.run_id,
+									step_id: chunk.step_id
 								});
 								break;
 							case 'code_output_logs':

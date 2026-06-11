@@ -15,7 +15,7 @@ from pingpong.ai_models import (
     supports_temperature_for_reasoning,
 )
 from pingpong.animal_hash import name as user_display_name
-from pingpong.auth import encode_auth_token
+from pingpong.auth import encode_auth_token, encode_streamed_message_image_proof
 from pingpong.authz.base import AuthzClient
 from pingpong.db import db_session_handler
 from pingpong.files import (
@@ -560,10 +560,24 @@ async def get_ci_messages_from_step(
 
 
 class BufferedStreamHandler(openai.AsyncAssistantEventHandler):
-    def __init__(self, file_names: dict[str, str], *args, **kwargs):
+    def __init__(
+        self,
+        class_id: int,
+        thread_id: str,
+        local_thread_id: int,
+        file_names: dict[str, str],
+        user_auth: str | None = None,
+        anonymous_user_auth: str | None = None,
+        *args,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
         self.__buffer = io.BytesIO()
+        self.class_id = class_id
+        self.thread_id = thread_id
+        self.local_thread_id = local_thread_id
         self.file_names = file_names
+        self.viewer_auth = anonymous_user_auth or user_auth
 
     def enqueue(self, data: Dict) -> None:
         self.__buffer.write(orjson.dumps(data))
@@ -574,6 +588,13 @@ class BufferedStreamHandler(openai.AsyncAssistantEventHandler):
         self.__buffer.truncate(0)
         self.__buffer.seek(0)
         return value
+
+    def _with_current_run_step(self, data: dict) -> dict:
+        run_step = self.current_run_step_snapshot
+        if run_step:
+            data["run_id"] = run_step.run_id
+            data["step_id"] = run_step.id
+        return data
 
     async def on_image_file_done(self, image_file: ImageFile) -> None:
         self.enqueue(
@@ -601,6 +622,16 @@ class BufferedStreamHandler(openai.AsyncAssistantEventHandler):
                         annotation["file_citation"]["file_name"] = self.file_names.get(
                             annotation["file_citation"]["file_id"], ""
                         )
+            elif content.get("type") == "image_file" and self.viewer_auth:
+                content["image_proof"] = encode_streamed_message_image_proof(
+                    class_id=self.class_id,
+                    thread_id=self.local_thread_id,
+                    openai_thread_id=self.thread_id,
+                    message_id=snapshot.id,
+                    run_id=snapshot.run_id,
+                    file_id=content["image_file"]["file_id"],
+                    viewer_auth=self.viewer_auth,
+                )
         self.enqueue(
             {
                 "type": "message_delta",
@@ -619,10 +650,12 @@ class BufferedStreamHandler(openai.AsyncAssistantEventHandler):
         )
 
     async def on_tool_call_delta(self, delta, snapshot) -> None:
+        delta_data = self._with_current_run_step(delta.model_dump())
+
         self.enqueue(
             {
                 "type": "tool_call_delta",
-                "delta": delta.model_dump(),
+                "delta": delta_data,
             }
         )
 
@@ -4622,6 +4655,7 @@ async def run_thread(
     *,
     class_id: str,
     thread_id: str,
+    local_thread_id: int,
     assistant_id: int,
     message: list[MessageContentPartParam],
     file_names: dict[str, str] = {},
@@ -4630,6 +4664,8 @@ async def run_thread(
     file_search_file_ids: list[str] | None = None,
     code_interpreter_file_ids: list[str] | None = None,
     instructions: str | None = None,
+    user_auth: str | None = None,
+    anonymous_user_auth: str | None = None,
 ):
     try:
         if message:
@@ -4670,7 +4706,14 @@ async def run_thread(
                         for file_id in file_search_file_ids
                     ]
                 )
-        handler = BufferedStreamHandler(file_names=file_names)
+        handler = BufferedStreamHandler(
+            class_id=int(class_id),
+            thread_id=thread_id,
+            local_thread_id=local_thread_id,
+            file_names=file_names,
+            user_auth=user_auth,
+            anonymous_user_auth=anonymous_user_auth,
+        )
         async with cli.beta.threads.runs.stream(
             thread_id=thread_id,
             assistant_id=assistant_id,

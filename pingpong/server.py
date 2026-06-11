@@ -160,6 +160,7 @@ from .auth import (
     TimeException,
     authn_method_for_email,
     decode_auth_token,
+    decode_streamed_message_image_proof,
     generate_auth_link,
     redirect_with_session,
 )
@@ -8575,6 +8576,7 @@ async def create_run(
                 openai_client,
                 class_id=class_id,
                 thread_id=thread.thread_id,
+                local_thread_id=thread.id,
                 assistant_id=asst.assistant_id,
                 message=[],
                 file_names=file_names,
@@ -8582,6 +8584,8 @@ async def create_run(
                 instructions=inject_timestamp_to_instructions(
                     thread.instructions, req.timezone if req else thread.timezone
                 ),
+                user_auth=request.state["auth_user"],
+                anonymous_user_auth=request.state["anonymous_session_token_auth"],
             )
         except Exception as e:
             logger.exception("Error running thread")
@@ -8881,6 +8885,7 @@ async def send_message(
                 openai_client,
                 class_id=class_id,
                 thread_id=thread.thread_id,
+                local_thread_id=thread.id,
                 assistant_id=asst.assistant_id,
                 message=messageContent,
                 metadata=metadata,
@@ -13794,19 +13799,42 @@ async def get_message_image(
     file_id: str,
     request: StateRequest,
     openai_client: OpenAIClient,
+    proof: str | None = None,
 ):
     thread = await models.Thread.get_by_id(request.state["db"], int(thread_id))
 
     if not thread or thread.class_id != int(class_id) or thread.version > 2:
         raise HTTPException(status_code=404, detail="Image not found")
 
-    message = await _get_assistants_api_message_by_id(
-        openai_client,
-        thread.thread_id,
-        message_id,
-    )
-    if not message or not _assistants_api_message_references_image(message, file_id):
-        raise HTTPException(status_code=404, detail="Image not found")
+    if proof:
+        try:
+            proof_claims = decode_streamed_message_image_proof(proof)
+        except Exception:
+            raise HTTPException(status_code=404, detail="Image not found")
+        if (
+            not proof_claims
+            or proof_claims.get("class_id") != class_id
+            or proof_claims.get("thread_id") != thread_id
+            or proof_claims.get("message_id") != message_id
+            or proof_claims.get("file_id") != file_id
+            or proof_claims.get("viewer_auth")
+            != (
+                request.state["anonymous_session_token_auth"]
+                or request.state["auth_user"]
+            )
+        ):
+            raise HTTPException(status_code=404, detail="Image not found")
+
+    else:
+        message = await _get_assistants_api_message_by_id(
+            openai_client,
+            thread.thread_id,
+            message_id,
+        )
+        if not message or not _assistants_api_message_references_image(
+            message, file_id
+        ):
+            raise HTTPException(status_code=404, detail="Image not found")
 
     return await _proxy_openai_file_response(
         openai_client, file_id, detail="An error occurred fetching the requested image"
@@ -13851,6 +13879,38 @@ async def get_ci_call_image(
         thread.thread_id,
         ci_call.run_id,
         ci_call.step_id,
+        file_id,
+    ):
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    return await _proxy_openai_file_response(
+        openai_client, file_id, detail="An error occurred fetching the requested image"
+    )
+
+
+@v1.get(
+    "/class/{class_id}/thread/{thread_id}/run/{run_id}/step/{step_id}/image/{file_id}",
+    dependencies=[Depends(Authz("can_view", "thread:{thread_id}"))],
+)
+async def get_ci_call_image_by_step_id(
+    class_id: str,
+    thread_id: str,
+    run_id: str,
+    step_id: str,
+    file_id: str,
+    request: StateRequest,
+    openai_client: OpenAIClient,
+):
+    thread = await models.Thread.get_by_id(request.state["db"], int(thread_id))
+
+    if not thread or thread.class_id != int(class_id) or thread.version > 2:
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    if not await _assistants_api_ci_call_references_image(
+        openai_client,
+        thread.thread_id,
+        run_id,
+        step_id,
         file_id,
     ):
         raise HTTPException(status_code=404, detail="Image not found")

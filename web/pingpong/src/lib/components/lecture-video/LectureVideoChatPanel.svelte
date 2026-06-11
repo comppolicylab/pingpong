@@ -201,14 +201,28 @@
 	const getThreadImageUrl = (fileId: string) =>
 		api.fullPath(`/class/${classId}/thread/${threadId}/image/${fileId}`);
 
-	const getMessageImageUrl = (messageId: string, fileId: string) =>
+	const getMessageImageUrl = (messageId: string, fileId: string, imageProof: string | null) => {
+		if (imageProof) {
+			return api.fullPath(
+				`/class/${classId}/thread/${threadId}/message/${messageId}/image/${fileId}?proof=${imageProof}`
+			);
+		}
 		api.fullPath(`/class/${classId}/thread/${threadId}/message/${messageId}/image/${fileId}`);
-
+	};
 	const getCodeInterpreterImageUrl = (
 		message: api.OpenAIMessage,
 		item: api.MessageContentCodeOutputImageFile
 	) => {
 		const fileId = item.image_file.file_id;
+		const runId = item.run_id;
+		const stepId = item.step_id;
+
+		if (version <= 2 && runId && stepId) {
+			return api.fullPath(
+				`/class/${classId}/thread/${threadId}/run/${runId}/step/${stepId}/image/${fileId}`
+			);
+		}
+
 		const ciCallId = item.ci_call_id ?? message.metadata?.['ci_call_id'];
 		if (version <= 2 && typeof ciCallId === 'string' && ciCallId.length > 0) {
 			return api.fullPath(
@@ -543,7 +557,8 @@
 										src={version <= 2
 											? getMessageImageUrl(
 													content.source_message_id || message.data.id,
-													content.image_file.file_id
+													content.image_file.file_id,
+													content.image_proof ?? null
 												)
 											: getThreadImageUrl(content.image_file.file_id)}
 										alt="Conversation attachment"
