@@ -1,5 +1,26 @@
 import * as api from '$lib/api';
 
+export function getMessageImageUrl({
+	classId,
+	threadId,
+	messageId,
+	fileId,
+	imageProof
+}: {
+	classId: number;
+	threadId: number;
+	messageId: string;
+	fileId: string;
+	imageProof: string | null;
+}) {
+	if (imageProof) {
+		return api.fullPath(
+			`/class/${classId}/thread/${threadId}/message/${messageId}/image/${fileId}?proof=${imageProof}`
+		);
+	}
+	return api.fullPath(`/class/${classId}/thread/${threadId}/message/${messageId}/image/${fileId}`);
+}
+
 export function getCodeInterpreterImageUrl({
 	classId,
 	threadId,
