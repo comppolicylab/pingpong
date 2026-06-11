@@ -625,15 +625,14 @@ class BufferedStreamHandler(openai.AsyncAssistantEventHandler):
     def _redacted_code_interpreter_output(
         self, output: dict[str, Any]
     ) -> dict[str, Any]:
-        match output.get("type"):
-            case "image":
-                return {**output, "image": {"file_id": ""}}
-            case "code_output_image_url":
-                return {**output, "url": ""}
-            case "code_output_logs" | "logs":
-                return {**output, "logs": ""}
-            case _:
-                return output
+        output_type = output.get("type")
+        if output_type == "image":
+            return {**output, "image": {"file_id": ""}}
+        if output_type == "code_output_image_url":
+            return {**output, "url": ""}
+        if output_type in {"code_output_logs", "logs"}:
+            return {**output, "logs": ""}
+        return output
 
     async def on_image_file_done(self, image_file: ImageFile) -> None:
         self.enqueue(
