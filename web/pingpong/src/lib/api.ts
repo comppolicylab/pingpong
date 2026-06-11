@@ -3914,6 +3914,7 @@ export type ImageFile = {
 export type MessageContentImageFile = ContentSource & {
 	image_file: ImageFile;
 	type: 'image_file';
+	image_proof?: string | null;
 };
 
 export type MessageContentCodeOutputImageURL = ContentSource & {
@@ -3923,6 +3924,9 @@ export type MessageContentCodeOutputImageURL = ContentSource & {
 
 export type MessageContentCodeOutputImageFile = ContentSource & {
 	image_file: ImageFile;
+	run_id?: string | null;
+	step_id?: string | null;
+	ci_call_id?: string;
 	type: 'code_output_image_file';
 };
 
@@ -4283,6 +4287,7 @@ export type ToolCallIO = {
 
 export type CodeInterpreterCall = {
 	code_interpreter: ToolCallIO;
+	step_id?: string | null;
 	id: string;
 	index: number;
 	output_index?: number;

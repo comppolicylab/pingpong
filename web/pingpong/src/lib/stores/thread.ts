@@ -107,12 +107,26 @@ const compareApiMessagesDesc = (a: api.OpenAIMessage, b: api.OpenAIMessage) => {
 };
 
 function withSourceMessageId(message: api.OpenAIMessage): api.OpenAIMessage {
+	const ciCallId = message.metadata?.ci_call_id;
 	return {
 		...message,
-		content: (message.content || []).map((content) => ({
-			...content,
-			source_message_id: message.id
-		}))
+		content: (message.content || []).map((content) => {
+			const sourcedContent = {
+				...content,
+				source_message_id: message.id
+			};
+			if (
+				content.type === 'code_output_image_file' &&
+				typeof ciCallId === 'string' &&
+				ciCallId.length > 0
+			) {
+				return {
+					...sourcedContent,
+					ci_call_id: ciCallId
+				};
+			}
+			return sourcedContent;
+		})
 	};
 }
 
@@ -1478,7 +1492,9 @@ export class ThreadManager {
 							case 'image':
 								lastMessage.content.push({
 									type: 'code_output_image_file',
-									image_file: output.image
+									image_file: output.image,
+									run_id: chunk.run_id,
+									step_id: chunk.step_id
 								});
 								break;
 							case 'code_output_logs':

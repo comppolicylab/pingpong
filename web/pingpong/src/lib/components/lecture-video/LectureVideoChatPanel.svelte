@@ -26,6 +26,7 @@
 	import ReasoningCallItem from '$lib/components/ReasoningCallItem.svelte';
 	import WebSearchCallItem from '$lib/components/WebSearchCallItem.svelte';
 	import { scroll } from '$lib/actions/scroll';
+	import { getCodeInterpreterImageUrl, getMessageImageUrl } from '$lib/codeInterpreterImages';
 	import type { Message } from '$lib/stores/thread';
 	import { tick } from 'svelte';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
@@ -200,19 +201,6 @@
 
 	const getThreadImageUrl = (fileId: string) =>
 		api.fullPath(`/class/${classId}/thread/${threadId}/image/${fileId}`);
-
-	const getMessageImageUrl = (messageId: string, fileId: string) =>
-		api.fullPath(`/class/${classId}/thread/${threadId}/message/${messageId}/image/${fileId}`);
-
-	const getCodeInterpreterImageUrl = (message: api.OpenAIMessage, fileId: string) => {
-		const ciCallId = message.metadata?.['ci_call_id'];
-		if (version <= 2 && typeof ciCallId === 'string' && ciCallId.length > 0) {
-			return api.fullPath(
-				`/class/${classId}/thread/${threadId}/ci_call/${ciCallId}/image/${fileId}`
-			);
-		}
-		return getThreadImageUrl(fileId);
-	};
 
 	const messageHasVisibleText = (message: api.OpenAIMessage) =>
 		message.content.some(
@@ -473,7 +461,14 @@
 								streaming={isLatestStreamedAssistantResponse(message) &&
 									(submitting || waiting) &&
 									block.isLast}
-								imageUrl={(fileId) => getCodeInterpreterImageUrl(message.data, fileId)}
+								imageUrl={(item) =>
+									getCodeInterpreterImageUrl({
+										classId,
+										threadId,
+										version,
+										message: message.data,
+										item
+									})}
 								onFetch={fetchCodeInterpreterResult}
 							/>
 						{:else}
@@ -534,10 +529,13 @@
 									<img
 										class="img-attachment m-auto"
 										src={version <= 2
-											? getMessageImageUrl(
-													content.source_message_id || message.data.id,
-													content.image_file.file_id
-												)
+											? getMessageImageUrl({
+													classId,
+													threadId,
+													messageId: content.source_message_id || message.data.id,
+													fileId: content.image_file.file_id,
+													imageProof: content.image_proof ?? null
+												})
 											: getThreadImageUrl(content.image_file.file_id)}
 										alt="Conversation attachment"
 									/>

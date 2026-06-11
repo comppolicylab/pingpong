@@ -1,5 +1,5 @@
 from datetime import timedelta
-from typing import cast
+from typing import Any, cast
 import re
 
 from fastapi.responses import RedirectResponse
@@ -9,6 +9,10 @@ from jwt.exceptions import PyJWTError
 from .config import config, AuthnSettings
 from .now import NowFn, utcnow
 from .schemas import AuthToken, SessionToken
+
+
+STREAMED_MESSAGE_IMAGE_PROOF_PURPOSE = "streamed_message_image"
+STREAMED_MESSAGE_IMAGE_PROOF_TTL_SECONDS = 15 * 60
 
 
 def encode_session_token(
@@ -80,6 +84,88 @@ def encode_auth_token(
             algorithm=secret.algorithm,
         ),
     )
+
+
+def encode_signed_claims(
+    claims: dict,
+    *,
+    expiry: int = 600,
+    nowfn: NowFn = utcnow,
+) -> str:
+    now = nowfn()
+    exp = now + timedelta(seconds=expiry)
+    secret = config.auth.secret_keys[0]
+
+    return cast(
+        str,
+        jwt.encode(
+            {
+                **claims,
+                "iat": int(now.timestamp()),
+                "exp": int(exp.timestamp()),
+            },
+            secret.key,
+            algorithm=secret.algorithm,
+        ),
+    )
+
+
+def decode_signed_claims(token: str) -> dict:
+    exc: PyJWTError | TimeException | None = None
+
+    for secret in config.auth.secret_keys:
+        try:
+            return jwt.decode(
+                token,
+                secret.key,
+                algorithms=[secret.algorithm],
+            )
+        except (TimeException, PyJWTError) as e:
+            exc = e
+            continue
+
+    if exc is not None:
+        raise exc
+
+    raise ValueError("invalid token")
+
+
+def encode_streamed_message_image_proof(
+    *,
+    class_id: str | int,
+    thread_id: str | int,
+    openai_thread_id: str,
+    message_id: str,
+    run_id: str | None,
+    file_id: str,
+    viewer_auth: str,
+    expiry: int = STREAMED_MESSAGE_IMAGE_PROOF_TTL_SECONDS,
+) -> str:
+    return encode_signed_claims(
+        {
+            "purpose": STREAMED_MESSAGE_IMAGE_PROOF_PURPOSE,
+            "class_id": str(class_id),
+            "thread_id": str(thread_id),
+            "openai_thread_id": openai_thread_id,
+            "message_id": message_id,
+            "run_id": run_id,
+            "file_id": file_id,
+            "viewer_auth": viewer_auth,
+        },
+        expiry=expiry,
+    )
+
+
+def decode_streamed_message_image_proof(token: str) -> dict[str, Any] | None:
+    try:
+        claims = decode_signed_claims(token)
+    except jwt.exceptions.PyJWTError:
+        return None
+
+    if claims.get("purpose") != STREAMED_MESSAGE_IMAGE_PROOF_PURPOSE:
+        return None
+
+    return claims
 
 
 class TimeException(Exception):
