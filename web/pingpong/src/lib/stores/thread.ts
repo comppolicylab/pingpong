@@ -283,10 +283,7 @@ export class ThreadManager {
 			const toMessage = (message: api.OpenAIMessage, persisted: boolean): Message => {
 				const streamedInSession = this.#streamedMessageIds.has(message.id);
 				const activeInSession =
-					streamedInSession ||
-					(message.run_id !== null &&
-						$data.activeRunId !== null &&
-						message.run_id === $data.activeRunId);
+					streamedInSession || ($data.activeRunId !== null && message.run_id === $data.activeRunId);
 				return {
 					data: withSourceMessageId(message),
 					error: null,
@@ -1059,7 +1056,7 @@ export class ThreadManager {
 					return {
 						...d,
 						activeRunId:
-							message.role === 'assistant' && message.run_id ? message.run_id : d.activeRunId,
+							message.role === 'assistant' ? (message.run_id ?? d.activeRunId) : d.activeRunId,
 						optimistic: d.optimistic.filter((m) => m.metadata?.lecture_context_pending !== true),
 						data: {
 							...d.data!,
