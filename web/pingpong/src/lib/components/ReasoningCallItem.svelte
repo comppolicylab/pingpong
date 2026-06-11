@@ -46,7 +46,7 @@
 				: 'text-sm font-medium text-gray-600';
 </script>
 
-<div class="my-3">
+<div class="my-2">
 	<div class="flex items-center gap-2">
 		<BrainOutline class="h-4 w-4 text-gray-600" />
 		<button

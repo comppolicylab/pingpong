@@ -113,12 +113,12 @@
 	const getItemLabel = (item: api.Content) => {
 		switch (item.type) {
 			case 'code':
-				return 'Ran Code Interpreter code';
+				return 'Ran code';
 			case 'code_output_logs':
-				return 'Returned Code Interpreter logs';
+				return 'Returned output logs';
 			case 'code_output_image_file':
 			case 'code_output_image_url':
-				return 'Generated image';
+				return 'Generated an image';
 			default:
 				return 'Ran analysis';
 		}
@@ -229,30 +229,24 @@
 </script>
 
 <div class="my-2">
-	{#if hasDropdown}
-		<button type="button" class="flex flex-row items-center gap-1" onclick={toggle}>
-			<span class="inline-flex text-gray-600">
-				<CodeOutline class="h-4 w-4" />
-			</span>
-			{#if streaming}
-				<span class="shimmer text-sm font-medium">{title}</span>
-			{:else}
-				<span class="text-sm font-medium text-gray-600">{title}</span>
-			{/if}
-			{#if $groupState.loading}
-				<Spinner color="gray" size="4" />
-			{/if}
-			<ChevronDownOutline class="text-gray-600 {open ? 'rotate-180 transform' : ''}" />
-		</button>
-	{:else}
-		<div class="flex flex-row items-center gap-1">
-			<span class="inline-flex text-gray-600">
-				<CodeOutline class="h-4 w-4" />
-			</span>
+	<div class="flex items-center gap-2">
+		<CodeOutline class="h-4 w-4 text-gray-600" />
+		{#if hasDropdown}
+			<button type="button" class="flex flex-row items-center gap-1" onclick={toggle}>
+				{#if streaming}
+					<span class="shimmer text-sm font-medium">{title}</span>
+				{:else}
+					<span class="text-sm font-medium text-gray-600">{title}</span>
+				{/if}
+				{#if $groupState.loading}
+					<Spinner color="gray" size="4" />
+				{/if}
+				<ChevronDownOutline class="text-gray-600 {open ? 'rotate-180 transform' : ''}" />
+			</button>
+		{:else}
 			<span class="text-sm font-medium text-gray-600">{title}</span>
-		</div>
-	{/if}
-
+		{/if}
+	</div>
 	{#if open && hasSteps}
 		<div class="mt-2 ml-2 border-l border-gray-200 pl-4" transition:slide={{ duration: 250 }}>
 			{#each stepItems as item, i (contentKey(item, i))}
