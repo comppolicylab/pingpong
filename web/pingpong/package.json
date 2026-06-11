@@ -1,6 +1,6 @@
 {
 	"name": "pingpong",
-	"version": "7.58.2",
+	"version": "7.59.0",
 	"private": true,
 	"packageManager": "pnpm@10.33.0",
 	"scripts": {
