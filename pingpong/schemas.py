@@ -1444,6 +1444,8 @@ class Assistant(BaseModel):
     hide_file_search_queries: bool | None = None
     hide_web_search_sources: bool | None = None
     hide_web_search_actions: bool | None = None
+    hide_code_interpreter_code: bool | None = None
+    hide_code_interpreter_output: bool | None = None
     hide_mcp_server_call_details: bool | None = None
     use_latex: bool | None
     use_image_descriptions: bool | None
@@ -1800,6 +1802,8 @@ class CreateAssistant(BaseModel):
     hide_file_search_queries: bool = True
     hide_web_search_sources: bool = False
     hide_web_search_actions: bool = False
+    hide_code_interpreter_code: bool = False
+    hide_code_interpreter_output: bool = False
     hide_mcp_server_call_details: bool = True
     deleted_private_files: list[int] = []
     create_classic_assistant: bool = False
@@ -1910,6 +1914,8 @@ class UpdateAssistant(BaseModel):
     hide_file_search_queries: bool | None = None
     hide_web_search_sources: bool | None = None
     hide_web_search_actions: bool | None = None
+    hide_code_interpreter_code: bool | None = None
+    hide_code_interpreter_output: bool | None = None
     hide_mcp_server_call_details: bool | None = None
     use_image_descriptions: bool | None = None
     convert_to_next_gen: bool | None = None

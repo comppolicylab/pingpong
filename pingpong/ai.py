@@ -179,8 +179,6 @@ from pingpong.ai_error import get_details_from_api_error
 from pingpong.schemas import (
     CodeInterpreterMessage,
     DownloadExport,
-    ImageFile as SchemaImageFile,
-    MessageContentCodeOutputImageFile,
 )
 from pingpong.config import config
 from typing import Any, Dict, Literal, Union, overload
@@ -508,7 +506,13 @@ async def validate_api_key(
 
 
 async def get_ci_messages_from_step(
-    cli: openai.AsyncClient, thread_id: str, run_id: str, step_id: str
+    cli: openai.AsyncClient,
+    thread_id: str,
+    run_id: str,
+    step_id: str,
+    *,
+    show_code_interpreter_code: bool = True,
+    show_code_interpreter_output: bool = True,
 ) -> list[CodeInterpreterMessage]:
     """
     Get code interpreter messages from a thread run step.
@@ -527,17 +531,43 @@ async def get_ci_messages_from_step(
     messages: list[CodeInterpreterMessage] = []
     for tool_call in run_step.step_details.tool_calls:
         if tool_call.type == "code_interpreter":
+            content: list[dict[str, Any]] = []
+            if tool_call.code_interpreter.input:
+                content.append(
+                    {
+                        "code": tool_call.code_interpreter.input
+                        if show_code_interpreter_code
+                        else "",
+                        "type": "code",
+                    }
+                )
+            for output in tool_call.code_interpreter.outputs:
+                if output.type == "image":
+                    content.append(
+                        {
+                            "image_file": {
+                                "file_id": output.image.file_id
+                                if show_code_interpreter_output
+                                else ""
+                            },
+                            "type": "code_output_image_file",
+                        }
+                    )
+                elif output.type == "logs":
+                    content.append(
+                        {
+                            "logs": output.logs if show_code_interpreter_output else "",
+                            "type": "code_output_logs",
+                        }
+                    )
+            if not content:
+                content.append({"code": "", "type": "code"})
             new_message = CodeInterpreterMessage.model_validate(
                 {
                     "id": tool_call.id,
                     "assistant_id": run_step.assistant_id,
                     "created_at": run_step.created_at,
-                    "content": [
-                        {
-                            "code": tool_call.code_interpreter.input,
-                            "type": "code",
-                        }
-                    ],
+                    "content": content,
                     "file_search_file_ids": [],
                     "code_interpreter": [],
                     "metadata": {},
@@ -547,14 +577,6 @@ async def get_ci_messages_from_step(
                     "thread_id": run_step.thread_id,
                 }
             )
-            for output in tool_call.code_interpreter.outputs:
-                if output.type == "image":
-                    new_message.content.append(
-                        MessageContentCodeOutputImageFile(
-                            image_file=SchemaImageFile(file_id=output.image.file_id),
-                            type="code_output_image_file",
-                        )
-                    )
             messages.append(new_message)
     return messages
 
@@ -568,6 +590,8 @@ class BufferedStreamHandler(openai.AsyncAssistantEventHandler):
         file_names: dict[str, str],
         user_auth: str | None = None,
         anonymous_user_auth: str | None = None,
+        show_code_interpreter_code: bool = True,
+        show_code_interpreter_output: bool = True,
         *args,
         **kwargs,
     ):
@@ -578,6 +602,8 @@ class BufferedStreamHandler(openai.AsyncAssistantEventHandler):
         self.local_thread_id = local_thread_id
         self.file_names = file_names
         self.viewer_auth = anonymous_user_auth or user_auth
+        self.show_code_interpreter_code = show_code_interpreter_code
+        self.show_code_interpreter_output = show_code_interpreter_output
 
     def enqueue(self, data: Dict) -> None:
         self.__buffer.write(orjson.dumps(data))
@@ -595,6 +621,18 @@ class BufferedStreamHandler(openai.AsyncAssistantEventHandler):
             data["run_id"] = run_step.run_id
             data["step_id"] = run_step.id
         return data
+
+    def _redacted_code_interpreter_output(
+        self, output: dict[str, Any]
+    ) -> dict[str, Any]:
+        output_type = output.get("type")
+        if output_type == "image":
+            return {**output, "image": {"file_id": ""}}
+        if output_type == "code_output_image_url":
+            return {**output, "url": ""}
+        if output_type in {"code_output_logs", "logs"}:
+            return {**output, "logs": ""}
+        return output
 
     async def on_image_file_done(self, image_file: ImageFile) -> None:
         self.enqueue(
@@ -640,18 +678,42 @@ class BufferedStreamHandler(openai.AsyncAssistantEventHandler):
         )
 
     async def on_tool_call_created(self, tool_call) -> None:
+        tool_call_data = (
+            tool_call if isinstance(tool_call, Dict) else tool_call.model_dump()
+        )
+        if tool_call_data.get("type") == "code_interpreter":
+            tool_call_data = dict(tool_call_data)
+            code_interpreter = dict(tool_call_data.get("code_interpreter") or {})
+            if not self.show_code_interpreter_code:
+                code_interpreter["input"] = ""
+            tool_call_data["code_interpreter"] = code_interpreter
         self.enqueue(
             {
                 "type": "tool_call_created",
-                "tool_call": tool_call
-                if isinstance(tool_call, Dict)
-                else tool_call.model_dump(),
+                "tool_call": tool_call_data,
             }
         )
 
     async def on_tool_call_delta(self, delta, snapshot) -> None:
         delta_data = self._with_current_run_step(delta.model_dump())
 
+        if delta_data.get("type") == "code_interpreter":
+            delta_data = dict(delta_data)
+            code_interpreter = dict(delta_data.get("code_interpreter") or {})
+            if not self.show_code_interpreter_code:
+                code_interpreter["input"] = None
+            if not self.show_code_interpreter_output and code_interpreter.get(
+                "outputs"
+            ):
+                code_interpreter["outputs"] = [
+                    self._redacted_code_interpreter_output(output)
+                    for output in code_interpreter["outputs"]
+                ]
+            delta_data["code_interpreter"] = code_interpreter
+            if not code_interpreter.get("input") and not code_interpreter.get(
+                "outputs"
+            ):
+                return
         self.enqueue(
             {
                 "type": "tool_call_delta",
@@ -1242,6 +1304,8 @@ class BufferedResponseStreamHandler:
         show_web_search_sources: bool | None = None,
         show_web_search_actions: bool | None = None,
         show_reasoning_summaries: bool | None = None,
+        show_code_interpreter_code: bool | None = None,
+        show_code_interpreter_output: bool | None = None,
         show_mcp_server_call_details: bool | None = None,
         *args,
         lecture_video_dual_text_mode: bool = False,
@@ -1305,6 +1369,16 @@ class BufferedResponseStreamHandler:
         )
         self.show_web_search_actions = (
             show_web_search_actions if show_web_search_actions is not None else True
+        )
+        self.show_code_interpreter_code = (
+            show_code_interpreter_code
+            if show_code_interpreter_code is not None
+            else True
+        )
+        self.show_code_interpreter_output = (
+            show_code_interpreter_output
+            if show_code_interpreter_output is not None
+            else True
         )
         self.show_mcp_server_call_details = (
             show_mcp_server_call_details
@@ -1989,7 +2063,12 @@ class BufferedResponseStreamHandler:
                     "index": tool_call_cache.output_index,
                     "output_index": tool_call_cache.output_index,
                     "type": "code_interpreter",
-                    "code_interpreter": {"input": data.code or "", "outputs": None},
+                    "code_interpreter": {
+                        "input": (data.code or "")
+                        if self.show_code_interpreter_code
+                        else "",
+                        "outputs": None,
+                    },
                     "status": data.status,
                     "run_id": str(self.run_id),
                 },
@@ -2042,17 +2121,18 @@ class BufferedResponseStreamHandler:
 
         await add_cached_tool_call_on_code_interpreter_tool_call_in_progress()
 
-        self.enqueue(
-            {
-                "type": "tool_call_delta",
-                "delta": {
-                    "index": data.output_index,
-                    "type": "code_interpreter",
-                    "id": data.item_id,
-                    "code_interpreter": {"input": data.delta, "outputs": None},
-                },
-            }
-        )
+        if self.show_code_interpreter_code:
+            self.enqueue(
+                {
+                    "type": "tool_call_delta",
+                    "delta": {
+                        "index": data.output_index,
+                        "type": "code_interpreter",
+                        "id": data.item_id,
+                        "code_interpreter": {"input": data.delta, "outputs": None},
+                    },
+                }
+            )
 
     async def on_code_interpreter_tool_call_interpreting(
         self, data: ResponseCodeInterpreterCallInterpretingEvent
@@ -2153,7 +2233,9 @@ class BufferedResponseStreamHandler:
                                         "outputs": [
                                             {
                                                 "type": "code_output_image_url",
-                                                "url": output.url,
+                                                "url": output.url
+                                                if self.show_code_interpreter_output
+                                                else "",
                                             }
                                         ],
                                     },
@@ -2181,7 +2263,9 @@ class BufferedResponseStreamHandler:
                                         "outputs": [
                                             {
                                                 "type": "code_output_logs",
-                                                "logs": output.logs,
+                                                "logs": output.logs
+                                                if self.show_code_interpreter_output
+                                                else "",
                                             }
                                         ],
                                     },
@@ -3733,6 +3817,8 @@ async def run_response(
     show_web_search_sources: bool | None = None,
     show_web_search_actions: bool | None = None,
     show_reasoning_summaries: bool | None = None,
+    show_code_interpreter_code: bool | None = None,
+    show_code_interpreter_output: bool | None = None,
     show_mcp_server_call_details: bool | None = None,
     user_auth: str | None = None,
     anonymous_link_auth: str | None = None,
@@ -4063,6 +4149,8 @@ async def run_response(
                     show_web_search_sources=show_web_search_sources,
                     show_web_search_actions=show_web_search_actions,
                     show_reasoning_summaries=show_reasoning_summaries,
+                    show_code_interpreter_code=show_code_interpreter_code,
+                    show_code_interpreter_output=show_code_interpreter_output,
                     show_mcp_server_call_details=show_mcp_server_call_details,
                     user_id=run.creator_id,
                     user_auth=user_auth,
@@ -4666,6 +4754,8 @@ async def run_thread(
     instructions: str | None = None,
     user_auth: str | None = None,
     anonymous_user_auth: str | None = None,
+    show_code_interpreter_code: bool = True,
+    show_code_interpreter_output: bool = True,
 ):
     try:
         if message:
@@ -4713,6 +4803,8 @@ async def run_thread(
             file_names=file_names,
             user_auth=user_auth,
             anonymous_user_auth=anonymous_user_auth,
+            show_code_interpreter_code=show_code_interpreter_code,
+            show_code_interpreter_output=show_code_interpreter_output,
         )
         async with cli.beta.threads.runs.stream(
             thread_id=thread_id,

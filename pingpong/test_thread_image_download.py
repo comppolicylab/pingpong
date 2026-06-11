@@ -376,7 +376,13 @@ async def test_get_ci_messages_v2_includes_ci_call_id_metadata(
         return openai_client
 
     async def fake_get_ci_messages_from_step(
-        _cli, _thread_id: str, _run_id: str, _step_id: str
+        _cli,
+        _thread_id: str,
+        _run_id: str,
+        _step_id: str,
+        *,
+        show_code_interpreter_code: bool = True,
+        show_code_interpreter_output: bool = True,
     ):
         return [
             schemas.CodeInterpreterMessage.model_validate(
