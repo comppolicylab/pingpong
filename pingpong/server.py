@@ -3999,6 +3999,44 @@ async def audio_stream(
     await browser_realtime_websocket(websocket, class_id, thread_id)
 
 
+def _code_interpreter_content_from_tool_call(
+    tool_call: models.ToolCall,
+    *,
+    show_code: bool,
+    show_output: bool,
+) -> list[schemas.CodeInterpreterMessageContent]:
+    tool_content: list[schemas.CodeInterpreterMessageContent] = []
+
+    if tool_call.code:
+        tool_content.append(
+            schemas.MessageContentCode(
+                code=tool_call.code if show_code else "",
+                type="code",
+            )
+        )
+
+    for output in tool_call.outputs:
+        if output.output_type == schemas.CodeInterpreterOutputType.IMAGE:
+            tool_content.append(
+                schemas.MessageContentCodeOutputImageURL(
+                    url=output.url if show_output else "",
+                    type="code_output_image_url",
+                )
+            )
+        elif output.output_type == schemas.CodeInterpreterOutputType.LOGS:
+            tool_content.append(
+                schemas.MessageContentCodeOutputLogs(
+                    logs=output.logs if show_output else "",
+                    type="code_output_logs",
+                )
+            )
+
+    if not tool_content:
+        tool_content.append(schemas.MessageContentCode(code="", type="code"))
+
+    return tool_content
+
+
 @v1.get(
     "/class/{class_id}/thread/{thread_id}",
     dependencies=[
@@ -4275,7 +4313,12 @@ async def get_thread(
         show_mcp_server_call_details = is_supervisor or (
             assistant and not assistant.hide_mcp_server_call_details
         )
-
+        show_code_interpreter_code = is_supervisor or (
+            assistant is not None and not assistant.hide_code_interpreter_code
+        )
+        show_code_interpreter_output = is_supervisor or (
+            assistant is not None and not assistant.hide_code_interpreter_output
+        )
         thread_messages: list[schemas.ThreadMessage] = []
         placeholder_ci_calls = []
         file_search_calls: list[schemas.FileSearchMessage] = []
@@ -4285,26 +4328,11 @@ async def get_thread(
         reasoning_messages: list[schemas.ReasoningMessage] = []
         for tool_call in tool_calls_v3:
             if tool_call.type == schemas.ToolCallType.CODE_INTERPRETER:
-                tool_content: list[schemas.CodeInterpreterMessageContent] = []
-
-                if tool_call.code:
-                    tool_content.append(
-                        schemas.MessageContentCode(code=tool_call.code, type="code")
-                    )
-
-                for output in tool_call.outputs:
-                    if output.output_type == schemas.CodeInterpreterOutputType.IMAGE:
-                        tool_content.append(
-                            schemas.MessageContentCodeOutputImageURL(
-                                url=output.url, type="code_output_image_url"
-                            )
-                        )
-                    elif output.output_type == schemas.CodeInterpreterOutputType.LOGS:
-                        tool_content.append(
-                            schemas.MessageContentCodeOutputLogs(
-                                logs=output.logs, type="code_output_logs"
-                            )
-                        )
+                tool_content = _code_interpreter_content_from_tool_call(
+                    tool_call,
+                    show_code=show_code_interpreter_code,
+                    show_output=show_code_interpreter_output,
+                )
 
                 placeholder_ci_calls.append(
                     schemas.CodeInterpreterMessage(
@@ -6133,9 +6161,33 @@ async def get_ci_messages(
     thread = await models.Thread.get_by_id(request.state["db"], int(thread_id))
     if not thread or thread.class_id != int(class_id):
         raise HTTPException(status_code=404, detail="Thread not found")
+    assistant, is_supervisor_check = await asyncio.gather(
+        models.Assistant.get_by_id(request.state["db"], thread.assistant_id),
+        request.state["authz"].check(
+            [
+                (
+                    f"user:{request.state['session'].user.id}",
+                    "supervisor",
+                    f"class:{class_id}",
+                ),
+            ]
+        ),
+    )
+    is_supervisor = is_supervisor_check[0]
+    show_code_interpreter_code = is_supervisor or (
+        assistant is not None and not assistant.hide_code_interpreter_code
+    )
+    show_code_interpreter_output = is_supervisor or (
+        assistant is not None and not assistant.hide_code_interpreter_output
+    )
     if thread.version <= 2:
         messages = await get_ci_messages_from_step(
-            openai_client, thread.thread_id, run_id, step_id
+            openai_client,
+            thread.thread_id,
+            run_id,
+            step_id,
+            show_code_interpreter_code=show_code_interpreter_code,
+            show_code_interpreter_output=show_code_interpreter_output,
         )
         ci_call = await models.CodeInterpreterCall.get_by_step_id(
             request.state["db"], thread.id, step_id
@@ -6588,6 +6640,12 @@ async def list_thread_messages(
         show_mcp_server_call_details = is_supervisor or (
             assistant and not assistant.hide_mcp_server_call_details
         )
+        show_code_interpreter_code = is_supervisor or (
+            assistant is not None and not assistant.hide_code_interpreter_code
+        )
+        show_code_interpreter_output = is_supervisor or (
+            assistant is not None and not assistant.hide_code_interpreter_output
+        )
 
         thread_messages: list[schemas.ThreadMessage] = []
         placeholder_ci_calls = []
@@ -6598,26 +6656,11 @@ async def list_thread_messages(
         mcp_messages: list[schemas.MCPMessage] = []
         for tool_call in tool_calls_v3:
             if tool_call.type == schemas.ToolCallType.CODE_INTERPRETER:
-                tool_content: list[schemas.CodeInterpreterMessageContent] = []
-
-                if tool_call.code:
-                    tool_content.append(
-                        schemas.MessageContentCode(code=tool_call.code, type="code")
-                    )
-
-                for output in tool_call.outputs:
-                    if output.output_type == schemas.CodeInterpreterOutputType.IMAGE:
-                        tool_content.append(
-                            schemas.MessageContentCodeOutputImageURL(
-                                url=output.url, type="code_output_image_url"
-                            )
-                        )
-                    elif output.output_type == schemas.CodeInterpreterOutputType.LOGS:
-                        tool_content.append(
-                            schemas.MessageContentCodeOutputLogs(
-                                logs=output.logs, type="code_output_logs"
-                            )
-                        )
+                tool_content = _code_interpreter_content_from_tool_call(
+                    tool_call,
+                    show_code=show_code_interpreter_code,
+                    show_output=show_code_interpreter_output,
+                )
 
                 placeholder_ci_calls.append(
                     schemas.CodeInterpreterMessage(
@@ -8530,6 +8573,10 @@ async def create_run(
                 or not asst.hide_web_search_sources,
                 show_web_search_actions=is_supervisor
                 or not asst.hide_web_search_actions,
+                show_code_interpreter_code=is_supervisor
+                or not asst.hide_code_interpreter_code,
+                show_code_interpreter_output=is_supervisor
+                or not asst.hide_code_interpreter_output,
                 show_mcp_server_call_details=is_supervisor
                 or not asst.hide_mcp_server_call_details,
                 lecture_video_dual_text_mode=_lecture_lesson_dual_text_enabled(thread),
@@ -8553,6 +8600,16 @@ async def create_run(
                 if thread.vector_store_id
                 else None
             )
+            is_supervisor_check = await request.state["authz"].check(
+                [
+                    (
+                        f"user:{request.state['session'].user.id}",
+                        "supervisor",
+                        f"class:{class_id}",
+                    )
+                ]
+            )
+            is_supervisor = is_supervisor_check[0]
 
             # One-time migration for threads that don't have instructions set
             if not thread.instructions:
@@ -8586,6 +8643,10 @@ async def create_run(
                 ),
                 user_auth=request.state["auth_user"],
                 anonymous_user_auth=request.state["anonymous_session_token_auth"],
+                show_code_interpreter_code=is_supervisor
+                or not asst.hide_code_interpreter_code,
+                show_code_interpreter_output=is_supervisor
+                or not asst.hide_code_interpreter_output,
             )
         except Exception as e:
             logger.exception("Error running thread")
@@ -8871,6 +8932,16 @@ async def send_message(
         )
 
         if thread.version <= 2:
+            is_supervisor_check = await request.state["authz"].check(
+                [
+                    (
+                        f"user:{request.state['session'].user.id}",
+                        "supervisor",
+                        f"class:{class_id}",
+                    )
+                ]
+            )
+            is_supervisor = is_supervisor_check[0]
             metadata: dict[str, str | int] = {
                 "user_id": str(request.state["session"].user.id),
             }
@@ -8897,6 +8968,12 @@ async def send_message(
                     thread.instructions,
                     data.timezone if data.timezone else thread.timezone,
                 ),
+                user_auth=request.state["auth_user"],
+                anonymous_user_auth=request.state["anonymous_session_token_auth"],
+                show_code_interpreter_code=is_supervisor
+                or not asst.hide_code_interpreter_code,
+                show_code_interpreter_output=is_supervisor
+                or not asst.hide_code_interpreter_output,
             )
         elif thread.version == 3:
             tasks_to_run = []
@@ -9142,6 +9219,10 @@ async def send_message(
                 show_file_search_document_names=show_file_search_document_names,
                 show_web_search_sources=show_web_search_sources,
                 show_web_search_actions=show_web_search_actions,
+                show_code_interpreter_code=is_supervisor
+                or not asst.hide_code_interpreter_code,
+                show_code_interpreter_output=is_supervisor
+                or not asst.hide_code_interpreter_output,
                 show_mcp_server_call_details=show_mcp_server_call_details,
                 user_auth=request.state["auth_user"],
                 anonymous_user_auth=request.state["anonymous_session_token_auth"],
@@ -12894,6 +12975,18 @@ async def update_assistant(
         and req.hide_mcp_server_call_details is not None
     ):
         asst.hide_mcp_server_call_details = req.hide_mcp_server_call_details
+
+    if (
+        "hide_code_interpreter_code" in req.model_fields_set
+        and req.hide_code_interpreter_code is not None
+    ):
+        asst.hide_code_interpreter_code = req.hide_code_interpreter_code
+
+    if (
+        "hide_code_interpreter_output" in req.model_fields_set
+        and req.hide_code_interpreter_output is not None
+    ):
+        asst.hide_code_interpreter_output = req.hide_code_interpreter_output
 
     if (
         "hide_web_search_sources" in req.model_fields_set

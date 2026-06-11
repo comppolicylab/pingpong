@@ -1483,6 +1483,8 @@ export class ThreadManager {
 						// Merge code into existing chunk
 						lastChunk.code += chunk.code_interpreter.input;
 					}
+				} else if (!chunk.code_interpreter.outputs && !lastChunk) {
+					lastMessage.content.push({ type: 'code', code: '' });
 				}
 
 				// Add outputs to the last message

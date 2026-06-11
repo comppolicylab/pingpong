@@ -81,6 +81,10 @@
 			item.type === 'code_interpreter_call_placeholder'
 	);
 	$: hasPlaceholders = placeholders.length > 0;
+	$: stepItems = items.filter((item) => item.type !== 'code_interpreter_call_placeholder');
+	$: hasSteps = stepItems.length > 0;
+	$: hasDropdown = hasPlaceholders || hasSteps;
+	$: title = streaming ? 'Analyzing...' : 'Ran analysis';
 
 	// Delay the spinner for quick cached responses; once visible, keep it long enough to read.
 	const LOADING_INDICATOR_DELAY_MS = 150;
@@ -104,6 +108,35 @@
 			return `${item.type}:${item.source_message_id ?? ''}:${item.logs}`;
 		}
 		return `${item.type}:${item.source_message_id ?? i}`;
+	};
+
+	const getItemLabel = (item: api.Content) => {
+		switch (item.type) {
+			case 'code':
+				return 'Ran Code Interpreter code';
+			case 'code_output_logs':
+				return 'Returned Code Interpreter logs';
+			case 'code_output_image_file':
+			case 'code_output_image_url':
+				return 'Generated image';
+			default:
+				return 'Ran analysis';
+		}
+	};
+
+	const hasVisibleContent = (item: api.Content) => {
+		switch (item.type) {
+			case 'code':
+				return item.code.trim().length > 0;
+			case 'code_output_logs':
+				return item.logs.trim().length > 0;
+			case 'code_output_image_file':
+				return item.image_file.file_id.trim().length > 0 && imageUrl(item) !== null;
+			case 'code_output_image_url':
+				return item.url.trim().length > 0;
+			default:
+				return false;
+		}
 	};
 
 	const requestResults = async () => {
@@ -168,6 +201,9 @@
 			requestResults();
 			return;
 		}
+		if (!hasSteps) {
+			return;
+		}
 		groupState.update((state) => ({ ...state, open: !state.open }));
 	};
 
@@ -193,63 +229,98 @@
 </script>
 
 <div class="my-2">
-	<button type="button" class="flex flex-row items-center gap-1" onclick={toggle}>
-		<span class="inline-flex text-gray-600">
-			<CodeOutline class="h-4 w-4" />
-		</span>
-		{#if streaming}
-			<span class="shimmer text-sm font-medium">Analyzing...</span>
-		{:else}
-			<span class="text-sm font-medium text-gray-600">Ran analysis</span>
-		{/if}
-		{#if $groupState.loading}
-			<Spinner color="gray" size="4" />
-		{/if}
-		<ChevronDownOutline class="text-gray-600 {open ? 'rotate-180 transform' : ''}" />
-	</button>
+	{#if hasDropdown}
+		<button type="button" class="flex flex-row items-center gap-1" onclick={toggle}>
+			<span class="inline-flex text-gray-600">
+				<CodeOutline class="h-4 w-4" />
+			</span>
+			{#if streaming}
+				<span class="shimmer text-sm font-medium">{title}</span>
+			{:else}
+				<span class="text-sm font-medium text-gray-600">{title}</span>
+			{/if}
+			{#if $groupState.loading}
+				<Spinner color="gray" size="4" />
+			{/if}
+			<ChevronDownOutline class="text-gray-600 {open ? 'rotate-180 transform' : ''}" />
+		</button>
+	{:else}
+		<div class="flex flex-row items-center gap-1">
+			<span class="inline-flex text-gray-600">
+				<CodeOutline class="h-4 w-4" />
+			</span>
+			<span class="text-sm font-medium text-gray-600">{title}</span>
+		</div>
+	{/if}
 
-	{#if open}
+	{#if open && hasSteps}
 		<div class="mt-2 ml-2 border-l border-gray-200 pl-4" transition:slide={{ duration: 250 }}>
-			{#each items as item, i (contentKey(item, i))}
+			{#each stepItems as item, i (contentKey(item, i))}
 				{#if item.type === 'code'}
-					<CodeInterpreterCallItem label="Ran Code Interpreter code" icon="code" {forceOpen}>
-						<pre class="font-mono text-xs whitespace-pre-wrap text-gray-700">{item.code}</pre>
-					</CodeInterpreterCallItem>
+					{#if hasVisibleContent(item)}
+						<CodeInterpreterCallItem label={getItemLabel(item)} icon="code" {forceOpen}>
+							<pre class="font-mono text-xs whitespace-pre-wrap text-gray-700">{item.code}</pre>
+						</CodeInterpreterCallItem>
+					{:else}
+						<CodeInterpreterCallItem
+							label={getItemLabel(item)}
+							icon="code"
+							forceOpen={false}
+							hasContent={false}
+						/>
+					{/if}
 				{:else if item.type === 'code_output_logs'}
-					<CodeInterpreterCallItem label="Returned Code Interpreter logs" icon="logs" {forceOpen}>
-						<pre class="font-mono text-xs whitespace-pre-wrap text-gray-700">{item.logs}</pre>
-					</CodeInterpreterCallItem>
+					{#if hasVisibleContent(item)}
+						<CodeInterpreterCallItem label={getItemLabel(item)} icon="logs" {forceOpen}>
+							<pre class="font-mono text-xs whitespace-pre-wrap text-gray-700">{item.logs}</pre>
+						</CodeInterpreterCallItem>
+					{:else}
+						<CodeInterpreterCallItem
+							label={getItemLabel(item)}
+							icon="logs"
+							forceOpen={false}
+							hasContent={false}
+						/>
+					{/if}
 				{:else if item.type === 'code_output_image_file'}
-					<CodeInterpreterCallItem label="Generated output image" icon="image" {forceOpen}>
-						{@const url = imageUrl(item)}
-						{#if url}
+					{#if hasVisibleContent(item)}
+						<CodeInterpreterCallItem label={getItemLabel(item)} icon="image" {forceOpen}>
+							{@const url = imageUrl(item)}
+							{#if url}
+								<img
+									class="img-attachment m-auto"
+									src={url}
+									alt="Attachment generated by the assistant"
+								/>
+							{/if}
+						</CodeInterpreterCallItem>
+					{:else}
+						<CodeInterpreterCallItem
+							label={getItemLabel(item)}
+							icon="image"
+							forceOpen={false}
+							hasContent={false}
+						/>
+					{/if}
+				{:else if item.type === 'code_output_image_url'}
+					{#if hasVisibleContent(item)}
+						<CodeInterpreterCallItem label={getItemLabel(item)} icon="image" {forceOpen}>
 							<img
 								class="img-attachment m-auto"
-								src={url}
+								src={item.url}
 								alt="Attachment generated by the assistant"
 							/>
-						{/if}
-					</CodeInterpreterCallItem>
-				{:else if item.type === 'code_output_image_url'}
-					<CodeInterpreterCallItem label="Generated output image" icon="image" {forceOpen}>
-						<img
-							class="img-attachment m-auto"
-							src={item.url}
-							alt="Attachment generated by the assistant"
+						</CodeInterpreterCallItem>
+					{:else}
+						<CodeInterpreterCallItem
+							label={getItemLabel(item)}
+							icon="image"
+							forceOpen={false}
+							hasContent={false}
 						/>
-					</CodeInterpreterCallItem>
+					{/if}
 				{/if}
 			{/each}
-
-			{#if hasPlaceholders && !$groupState.loading}
-				<button
-					type="button"
-					class="my-2 text-sm font-medium text-gray-500 underline hover:text-gray-700"
-					onclick={requestResults}
-				>
-					Load results
-				</button>
-			{/if}
 		</div>
 	{/if}
 </div>

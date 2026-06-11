@@ -2147,6 +2147,28 @@
 		hideFileSearchResultQuotes = true;
 	}
 
+	let hideCodeInterpreterCode = false;
+	let hasSetHideCodeInterpreterCode = false;
+	$: if (
+		assistant?.hide_code_interpreter_code !== undefined &&
+		assistant?.hide_code_interpreter_code !== null &&
+		!hasSetHideCodeInterpreterCode
+	) {
+		hideCodeInterpreterCode = assistant?.hide_code_interpreter_code;
+		hasSetHideCodeInterpreterCode = true;
+	}
+
+	let hideCodeInterpreterOutput = false;
+	let hasSetHideCodeInterpreterOutput = false;
+	$: if (
+		assistant?.hide_code_interpreter_output !== undefined &&
+		assistant?.hide_code_interpreter_output !== null &&
+		!hasSetHideCodeInterpreterOutput
+	) {
+		hideCodeInterpreterOutput = assistant?.hide_code_interpreter_output;
+		hasSetHideCodeInterpreterOutput = true;
+	}
+
 	let hasSetHideMCPServerCallDetails = false;
 	let hideMCPServerCallDetails = true;
 	$: if (
@@ -2893,6 +2915,8 @@
 			hide_file_search_queries: hideFileSearchQueries,
 			hide_web_search_sources: hideWebSearchActions ? true : hideWebSearchSources,
 			hide_web_search_actions: hideWebSearchActions,
+			hide_code_interpreter_code: hideCodeInterpreterCode,
+			hide_code_interpreter_output: hideCodeInterpreterOutput,
 			mcp_servers: mcpServersForRequest,
 			hide_mcp_server_call_details: hideMCPServerCallDetails,
 			convert_to_next_gen:
@@ -6526,6 +6550,70 @@
 										>This setting will only apply to Chat Mode models with File Search enabled.</b
 									></Helper
 								>
+							</div>
+
+							<hr />
+							<div class="col-span-2 mb-1">
+								<Checkbox
+									id="hide_code_interpreter_code"
+									name="hide_code_interpreter_code"
+									disabled={preventEdits}
+									bind:checked={hideCodeInterpreterCode}
+									><div class="flex flex-row gap-1">
+										<div>Hide Code Interpreter Code from Members</div>
+									</div></Checkbox
+								>
+								<Helper
+									>Control whether members can see the code the assistant runs in Code Interpreter.
+									Depending on your prompt, this code may reveal answers, solution logic, or
+									assessment details. When checked, members will not see Code Interpreter code.
+									Moderators can always review Code Interpreter code. <b
+										>This setting will only apply to Chat Mode models with Code Interpreter enabled.</b
+									></Helper
+								>
+							</div>
+
+							<div class="col-span-2 mb-1">
+								<Checkbox
+									id="hide_code_interpreter_output"
+									name="hide_code_interpreter_output"
+									disabled={preventEdits}
+									bind:checked={hideCodeInterpreterOutput}
+									><div class="flex flex-row gap-1">
+										<div>Hide Code Interpreter Output from Members</div>
+									</div></Checkbox
+								>
+								<Helper
+									>Control whether members can see output logs and generated images returned by Code
+									Interpreter. In some cases, this output may contain answers or verification
+									details for practice and quiz problems. When checked, members will not see Code
+									Interpreter output. However, note that assistants may still refer to the output in
+									their responses. Moderators can always review Code Interpreter output. <b
+										>This setting will only apply to Chat Mode models with Code Interpreter enabled.</b
+									></Helper
+								>
+							</div>
+
+							<div class="col-span-2 mb-1">
+								<div
+									class="rounded-lg border border-blue-400 bg-gradient-to-b from-blue-50 to-blue-100 p-3 text-blue-800"
+								>
+									<div class="flex flex-row items-center gap-x-3">
+										<LightbulbSolid size="md" class="shrink-0" />
+										<div class="flex flex-col text-xs">
+											<span class="font-bold"
+												>Assistant responses may show and allow members to download files and images
+												generated with Code Interpreter</span
+											>
+											<span
+												>When Code Interpreter is enabled, the assistant may show and allow members
+												to download files and images generated with Code Interpreter. Images
+												generated with Code Interpreter may also appear in assistant messages. You
+												may be able to control this behavior in your assistant's instructions.</span
+											>
+										</div>
+									</div>
+								</div>
 							</div>
 
 							<hr />

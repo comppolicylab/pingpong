@@ -2834,6 +2834,8 @@ export type Assistant = {
 	hide_file_search_queries: boolean | null;
 	hide_web_search_sources: boolean | null;
 	hide_web_search_actions: boolean | null;
+	hide_code_interpreter_code: boolean | null;
+	hide_code_interpreter_output: boolean | null;
 	hide_mcp_server_call_details: boolean | null;
 	endorsed: boolean | null;
 	lecture_video?: LectureVideoSummary | null;
@@ -3001,6 +3003,8 @@ export type CreateAssistantRequest = {
 	hide_file_search_queries?: boolean;
 	hide_web_search_sources?: boolean;
 	hide_web_search_actions?: boolean;
+	hide_code_interpreter_code?: boolean;
+	hide_code_interpreter_output?: boolean;
 	hide_mcp_server_call_details?: boolean;
 	mcp_servers?: MCPServerToolInput[];
 };
@@ -3072,6 +3076,8 @@ export type UpdateAssistantRequest = {
 	hide_file_search_queries?: boolean;
 	hide_web_search_sources?: boolean;
 	hide_web_search_actions?: boolean;
+	hide_code_interpreter_code?: boolean;
+	hide_code_interpreter_output?: boolean;
 	hide_mcp_server_call_details?: boolean;
 	mcp_servers?: MCPServerToolInput[];
 	convert_to_next_gen?: boolean;

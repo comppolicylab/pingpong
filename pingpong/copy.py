@@ -458,6 +458,8 @@ async def copy_assistant(
         hide_file_search_queries=assistant.hide_file_search_queries,
         hide_web_search_sources=assistant.hide_web_search_sources,
         hide_web_search_actions=assistant.hide_web_search_actions,
+        hide_code_interpreter_code=assistant.hide_code_interpreter_code,
+        hide_code_interpreter_output=assistant.hide_code_interpreter_output,
         hide_mcp_server_call_details=assistant.hide_mcp_server_call_details,
     )
 

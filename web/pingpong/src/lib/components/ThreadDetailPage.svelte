@@ -432,6 +432,8 @@
 			const hideWebSearchSources = assistant.hide_web_search_sources === true;
 			const hideWebSearchActions = assistant.hide_web_search_actions === true;
 			const hideReasoningSummaries = assistant.hide_reasoning_summaries === true;
+			const hideCodeInterpreterCode = assistant.hide_code_interpreter_code === true;
+			const hideCodeInterpreterOutput = assistant.hide_code_interpreter_output === true;
 			const hideMCPServerCallDetails = assistant.hide_mcp_server_call_details === true;
 
 			if (supportsFileSearch) {
@@ -481,6 +483,28 @@
 							description: hideWebSearchActions
 								? 'Members can see that the assistant is searching the web without revealing specific details.'
 								: 'Members can see the specific web search actions such as queries, clicks, and extraction.'
+						}
+					]
+				});
+			}
+			if (supportsCodeInterpreter) {
+				nextBypassedSettingsSections.push({
+					id: 'code-interpreter',
+					title: 'Code Interpreter',
+					items: [
+						{
+							label: 'Code',
+							hidden: hideCodeInterpreterCode,
+							description: hideCodeInterpreterCode
+								? 'Members cannot see the code the assistant runs in Code Interpreter.'
+								: 'Members can see the code the assistant runs in Code Interpreter.'
+						},
+						{
+							label: 'Output',
+							hidden: hideCodeInterpreterOutput,
+							description: hideCodeInterpreterOutput
+								? 'Members cannot see logs or generated images returned by Code Interpreter.'
+								: 'Members can see logs and generated images returned by Code Interpreter.'
 						}
 					]
 				});
