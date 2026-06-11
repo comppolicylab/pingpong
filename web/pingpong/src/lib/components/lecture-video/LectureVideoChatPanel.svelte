@@ -26,6 +26,7 @@
 	import ReasoningCallItem from '$lib/components/ReasoningCallItem.svelte';
 	import WebSearchCallItem from '$lib/components/WebSearchCallItem.svelte';
 	import { scroll } from '$lib/actions/scroll';
+	import { getCodeInterpreterImageUrl } from '$lib/codeInterpreterImages';
 	import type { Message } from '$lib/stores/thread';
 	import { tick } from 'svelte';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
@@ -209,32 +210,6 @@
 		}
 		api.fullPath(`/class/${classId}/thread/${threadId}/message/${messageId}/image/${fileId}`);
 	};
-	const getCodeInterpreterImageUrl = (
-		message: api.OpenAIMessage,
-		item: api.MessageContentCodeOutputImageFile
-	) => {
-		const fileId = item.image_file.file_id;
-		const runId = item.run_id;
-		const stepId = item.step_id;
-
-		if (version <= 2 && runId && stepId) {
-			return api.fullPath(
-				`/class/${classId}/thread/${threadId}/run/${runId}/step/${stepId}/image/${fileId}`
-			);
-		}
-
-		const ciCallId = item.ci_call_id ?? message.metadata?.['ci_call_id'];
-		if (version <= 2 && typeof ciCallId === 'string' && ciCallId.length > 0) {
-			return api.fullPath(
-				`/class/${classId}/thread/${threadId}/ci_call/${ciCallId}/image/${fileId}`
-			);
-		}
-		if (version <= 2) {
-			return null;
-		}
-		return getThreadImageUrl(fileId);
-	};
-
 	const messageHasVisibleText = (message: api.OpenAIMessage) =>
 		message.content.some(
 			(content) => content.type === 'text' && content.text.value.trim().length > 0
@@ -494,7 +469,14 @@
 								streaming={isLatestStreamedAssistantResponse(message) &&
 									(submitting || waiting) &&
 									block.isLast}
-								imageUrl={(item) => getCodeInterpreterImageUrl(message.data, item)}
+								imageUrl={(item) =>
+									getCodeInterpreterImageUrl({
+										classId,
+										threadId,
+										version,
+										message: message.data,
+										item
+									})}
 								onFetch={fetchCodeInterpreterResult}
 							/>
 						{:else}

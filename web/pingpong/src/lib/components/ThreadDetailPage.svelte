@@ -14,6 +14,7 @@
 	import { errorMessage } from '$lib/errors';
 	import { scroll } from '$lib/actions/scroll';
 	import { computeLatestIncidentTimestamps, filterLatestIncidentUpdates } from '$lib/statusUpdates';
+	import { getCodeInterpreterImageUrl } from '$lib/codeInterpreterImages';
 	import { blur } from 'svelte/transition';
 	import {
 		Avatar,
@@ -688,32 +689,6 @@
 		return api.fullPath(
 			`/class/${classId}/thread/${threadId}/message/${messageId}/image/${fileId}`
 		);
-	};
-
-	const getCodeInterpreterImageUrl = (
-		message: api.OpenAIMessage,
-		item: api.MessageContentCodeOutputImageFile
-	) => {
-		const fileId = item.image_file.file_id;
-		const runId = item.run_id;
-		const stepId = item.step_id;
-
-		if ($version <= 2 && runId && stepId) {
-			return api.fullPath(
-				`/class/${classId}/thread/${threadId}/run/${runId}/step/${stepId}/image/${fileId}`
-			);
-		}
-
-		const ciCallId = item.ci_call_id ?? message.metadata?.['ci_call_id'];
-		if ($version <= 2 && typeof ciCallId === 'string' && ciCallId.length > 0) {
-			return api.fullPath(
-				`/class/${classId}/thread/${threadId}/ci_call/${ciCallId}/image/${fileId}`
-			);
-		}
-		if ($version <= 2) {
-			return null;
-		}
-		return getThreadImageUrl(fileId);
 	};
 
 	const getOptimisticVisionFile = (
@@ -1966,7 +1941,14 @@
 									items={block.items}
 									streaming={isStreamingMessage(message) && block.isLast}
 									forceOpen={printingThread}
-									imageUrl={(item) => getCodeInterpreterImageUrl(message.data, item)}
+									imageUrl={(item) =>
+										getCodeInterpreterImageUrl({
+											classId,
+											threadId,
+											version: $version,
+											message: message.data,
+											item
+										})}
 									onFetch={fetchCodeInterpreterResult}
 								/>
 							{:else}

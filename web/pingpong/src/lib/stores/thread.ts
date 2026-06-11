@@ -110,11 +110,23 @@ function withSourceMessageId(message: api.OpenAIMessage): api.OpenAIMessage {
 	const ciCallId = message.metadata?.ci_call_id;
 	return {
 		...message,
-		content: (message.content || []).map((content) => ({
-			...content,
-			source_message_id: message.id,
-			...(typeof ciCallId === 'string' && ciCallId.length > 0 ? { ci_call_id: ciCallId } : {})
-		}))
+		content: (message.content || []).map((content) => {
+			const sourcedContent = {
+				...content,
+				source_message_id: message.id
+			};
+			if (
+				content.type === 'code_output_image_file' &&
+				typeof ciCallId === 'string' &&
+				ciCallId.length > 0
+			) {
+				return {
+					...sourcedContent,
+					ci_call_id: ciCallId
+				};
+			}
+			return sourcedContent;
+		})
 	};
 }
 

@@ -3895,7 +3895,6 @@ export type Text = {
 
 export type ContentSource = {
 	source_message_id?: string;
-	ci_call_id?: string;
 };
 
 export type MessageContentText = ContentSource & {
@@ -3927,6 +3926,7 @@ export type MessageContentCodeOutputImageFile = ContentSource & {
 	image_file: ImageFile;
 	run_id?: string | null;
 	step_id?: string | null;
+	ci_call_id?: string;
 	type: 'code_output_image_file';
 };
 

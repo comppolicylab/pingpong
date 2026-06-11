@@ -132,6 +132,10 @@ describe('ThreadManager', () => {
 					{
 						type: 'code_output_image_file',
 						image_file: { file_id: 'file-ci-image' }
+					},
+					{
+						type: 'code_output_logs',
+						logs: 'plot saved'
 					}
 				],
 				created_at: 1773127553,
@@ -151,9 +155,14 @@ describe('ThreadManager', () => {
 		const imageContent = mergedMessage.data.content.find(
 			(content) => content.type === 'code_output_image_file'
 		);
+		const logsContent = mergedMessage.data.content.find(
+			(content) => content.type === 'code_output_logs'
+		);
 
 		expect(imageContent?.ci_call_id).toBe('6');
 		expect(imageContent?.source_message_id).toBe('ci-message-1');
+		expect(logsContent).not.toHaveProperty('ci_call_id');
+		expect(logsContent?.source_message_id).toBe('ci-message-1');
 	});
 
 	it('only sends generate_speech for lecture video threads', async () => {
