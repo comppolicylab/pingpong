@@ -952,6 +952,10 @@ async def test_prepare_lecture_slide_chat_turn_uses_video_context_shape(
     assert prep.user_output_index == 11
     assert prep.user_assistant_messages_only is True
     assert prep.include_developer_messages is True
+    assert prep.user_message_metadata == {
+        schemas.MESSAGE_METADATA_LECTURE_PLAYBACK_POSITION_MS_V1: 2_000,
+        schemas.MESSAGE_METADATA_LECTURE_SLIDE_NUMBER_V1: 1,
+    }
     assert lesson_context_message.is_hidden is True
     assert lesson_context_message.role == schemas.MessageRole.DEVELOPER
     assert "## Lecture Slide Narrations" in lesson_context_text
@@ -1031,6 +1035,10 @@ async def test_prepare_lecture_slide_chat_turn_uses_v5_compact_context(db, insti
 
     assert prep.user_output_index == 9
     assert prep.include_developer_messages is False
+    assert prep.user_message_metadata == {
+        schemas.MESSAGE_METADATA_LECTURE_PLAYBACK_POSITION_MS_V1: 42_000,
+        schemas.MESSAGE_METADATA_LECTURE_SLIDE_NUMBER_V1: 2,
+    }
     assert [message.role for message in prep.prepended_messages] == [
         schemas.MessageRole.DEVELOPER,
     ]

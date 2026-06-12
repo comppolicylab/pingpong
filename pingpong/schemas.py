@@ -46,6 +46,7 @@ from .gravatar import get_email_hash, get_gravatar_image
 
 LECTURE_MESSAGE_POSITION_HEADING = "## Lecture Message Position"
 MESSAGE_METADATA_LECTURE_PLAYBACK_POSITION_MS_V1 = "lecture_playback_position_ms_v1"
+MESSAGE_METADATA_LECTURE_SLIDE_NUMBER_V1 = "lecture_slide_number_v1"
 
 
 class Statistics(BaseModel):
