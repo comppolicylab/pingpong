@@ -27,6 +27,7 @@ vi.mock('$lib/wavtools/index', async (importOriginal) => {
 
 describe('ThreadManager', () => {
 	afterEach(() => {
+		vi.useRealTimers();
 		vi.restoreAllMocks();
 		ttsMocks.unlockSharedAudioContext.mockClear();
 		ttsMocks.getSharedAudioContext.mockClear();
@@ -282,6 +283,8 @@ describe('ThreadManager', () => {
 	});
 
 	it('keeps streaming text when the TTS player never finishes connecting', async () => {
+		vi.useFakeTimers();
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 		const player = makeFakePlayer(() => new Promise<true>(() => {}));
 		ttsMocks.createPlayer.mockReturnValue(player);
 		vi.spyOn(api, 'postMessage').mockResolvedValue(
@@ -320,6 +323,9 @@ describe('ThreadManager', () => {
 		}
 		expect(textContent.text.value).toBe('Hello world');
 		expect(player.add16BitPCM).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(2100);
+		expect(warn).toHaveBeenCalledWith('TTS: AudioWorklet connect failed', expect.any(Error));
+		expect(player.close).toHaveBeenCalledTimes(1);
 	});
 
 	it('flushes audio buffered while the TTS player was connecting', async () => {
@@ -355,6 +361,133 @@ describe('ThreadManager', () => {
 			expect(player.finish).toHaveBeenCalledTimes(1);
 		});
 		expect(player.setVolume).toHaveBeenCalled();
+	});
+
+	it('disposes a player that finishes connecting after interruption', async () => {
+		let resolveConnect!: (value: true) => void;
+		const player = makeFakePlayer(
+			() =>
+				new Promise<true>((resolve) => {
+					resolveConnect = resolve;
+				})
+		);
+		ttsMocks.createPlayer.mockReturnValue(player);
+		vi.spyOn(api, 'postMessage').mockResolvedValue(
+			makeChunks([
+				{
+					type: 'message_created',
+					role: 'assistant',
+					message: makeAssistantMessage('msg_tts_interrupt')
+				} as unknown as api.ThreadStreamChunk,
+				{ type: 'audio_started' } as api.ThreadStreamChunk,
+				{ type: 'done' } as api.ThreadStreamChunk
+			])
+		);
+
+		const manager = new ThreadManager(
+			vi.fn() as unknown as Fetcher,
+			1,
+			181,
+			makeThreadData('lecture_video'),
+			'lecture_video'
+		);
+		await manager.postMessage(123, 'Hi', vi.fn());
+		await manager.interruptTts();
+		resolveConnect(true);
+
+		await vi.waitFor(() => {
+			expect(player.close).toHaveBeenCalledTimes(1);
+		});
+		expect(player.add16BitPCM).not.toHaveBeenCalled();
+	});
+
+	it('clears pending audio when the stream reports an audio error', async () => {
+		let resolveConnect!: (value: true) => void;
+		const player = makeFakePlayer(
+			() =>
+				new Promise<true>((resolve) => {
+					resolveConnect = resolve;
+				})
+		);
+		ttsMocks.createPlayer.mockReturnValue(player);
+		vi.spyOn(api, 'postMessage').mockResolvedValue(
+			makeChunks([
+				{
+					type: 'message_created',
+					role: 'assistant',
+					message: makeAssistantMessage('msg_tts_error')
+				} as unknown as api.ThreadStreamChunk,
+				{ type: 'audio_started' } as api.ThreadStreamChunk,
+				{ type: 'audio_delta', audio: 'AAAA' } as api.ThreadStreamChunk,
+				{ type: 'audio_error' } as api.ThreadStreamChunk,
+				{ type: 'audio_done' } as api.ThreadStreamChunk,
+				{ type: 'done' } as api.ThreadStreamChunk
+			])
+		);
+
+		const manager = new ThreadManager(
+			vi.fn() as unknown as Fetcher,
+			1,
+			181,
+			makeThreadData('lecture_video'),
+			'lecture_video'
+		);
+		await manager.postMessage(123, 'Hi', vi.fn());
+		resolveConnect(true);
+
+		await vi.waitFor(() => {
+			expect(player.close).toHaveBeenCalledTimes(1);
+		});
+		expect(player.add16BitPCM).not.toHaveBeenCalled();
+		expect(player.finish).not.toHaveBeenCalled();
+	});
+
+	it('ignores audio_done that arrives after TTS was interrupted', async () => {
+		const player = makeFakePlayer(() => Promise.resolve(true as const));
+		ttsMocks.createPlayer.mockReturnValue(player);
+		let continueStream!: () => void;
+		const streamCanFinish = new Promise<void>((resolve) => {
+			continueStream = resolve;
+		});
+		vi.spyOn(api, 'postMessage').mockResolvedValue({
+			stream: new ReadableStream<object>({
+				start(controller) {
+					controller.close();
+				}
+			}),
+			reader: new ReadableStream<object>().getReader(),
+			async *[Symbol.asyncIterator]() {
+				yield {
+					type: 'message_created',
+					role: 'assistant',
+					message: makeAssistantMessage('msg_tts_done_after_interrupt')
+				} as unknown as api.ThreadStreamChunk;
+				yield { type: 'audio_started' } as api.ThreadStreamChunk;
+				await streamCanFinish;
+				yield { type: 'audio_done' } as api.ThreadStreamChunk;
+				yield { type: 'done' } as api.ThreadStreamChunk;
+			}
+		} as Awaited<ReturnType<typeof api.postMessage>>);
+
+		const manager = new ThreadManager(
+			vi.fn() as unknown as Fetcher,
+			1,
+			181,
+			makeThreadData('lecture_video'),
+			'lecture_video'
+		);
+		const postPromise = manager.postMessage(123, 'Hi', vi.fn());
+
+		await vi.waitFor(() => {
+			expect(manager.getTtsPlayer()).toBe(player);
+		});
+		await manager.interruptTts();
+		continueStream();
+		await postPromise;
+
+		expect(player.interrupt).toHaveBeenCalledTimes(1);
+		expect(player.close).toHaveBeenCalledTimes(1);
+		expect(player.finish).not.toHaveBeenCalled();
 	});
 
 	it('does not unlock the audio context when voice is muted or outside lessons', async () => {

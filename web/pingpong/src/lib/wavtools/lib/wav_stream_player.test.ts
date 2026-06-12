@@ -102,6 +102,7 @@ describe('WavStreamPlayer', () => {
 	});
 
 	it('creates and closes its own context when the provided sample rate differs', async () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 		const instances = stubWebAudioGlobals();
 		const mismatched = new FakeAudioContext({ sampleRate: 48000 });
 		const player = new WavStreamPlayer({
@@ -114,6 +115,9 @@ describe('WavStreamPlayer', () => {
 		expect(instances).toHaveLength(1);
 		expect(instances[0].sampleRate).toBe(24000);
 		expect(mismatched.resume).not.toHaveBeenCalled();
+		expect(warn).toHaveBeenCalledWith(
+			'Provided AudioContext sample rate 48000 does not match 24000; creating a dedicated context.'
+		);
 
 		await player.close();
 		expect(instances[0].close).toHaveBeenCalledTimes(1);

@@ -1,6 +1,8 @@
 import { StreamProcessorSrc } from './worklets/stream_processor';
 import { isAudioWorkletSupported } from './audio_support';
 
+// Long-lived contexts are intentional. TTS currently uses one sample rate, but
+// closed entries are pruned below so future rates do not accumulate stale refs.
 const contextsBySampleRate = new Map<number, AudioContext>();
 const workletLoads = new WeakMap<AudioContext, Promise<void>>();
 
@@ -18,6 +20,7 @@ export function getSharedAudioContext(sampleRate: number): AudioContext | null {
 	}
 	let context = contextsBySampleRate.get(sampleRate) ?? null;
 	if (context && context.state === 'closed') {
+		contextsBySampleRate.delete(sampleRate);
 		context = null;
 	}
 	if (!context) {

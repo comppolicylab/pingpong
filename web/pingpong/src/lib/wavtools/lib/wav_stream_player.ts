@@ -133,6 +133,15 @@ export class WavStreamPlayer {
 			this.context = this.providedContext;
 			this.ownsContext = false;
 		} else {
+			if (
+				this.providedContext &&
+				this.providedContext.state !== 'closed' &&
+				this.providedContext.sampleRate !== this.sampleRate
+			) {
+				console.warn(
+					`Provided AudioContext sample rate ${this.providedContext.sampleRate} does not match ${this.sampleRate}; creating a dedicated context.`
+				);
+			}
 			this.context = new AudioContext({ sampleRate: this.sampleRate });
 			this.ownsContext = true;
 		}

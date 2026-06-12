@@ -22,6 +22,7 @@ const TTS_SAMPLE_RATE = 24000;
  * policies block the context, and the chunk stream must keep flowing.
  */
 const TTS_CONNECT_TIMEOUT_MS = 2000;
+const MAX_PENDING_TTS_AUDIO_CHARS = 256 * 1024;
 
 /**
  * Audio chunks received while the TTS player is still connecting.
@@ -29,6 +30,8 @@ const TTS_CONNECT_TIMEOUT_MS = 2000;
 type PendingTtsAudio = {
 	deltas: string[];
 	done: boolean;
+	bufferedChars: number;
+	dropped: boolean;
 };
 
 /**
@@ -1191,7 +1194,14 @@ export class ThreadManager {
 
 	#handleTtsStarted() {
 		const generation = ++this.#ttsGeneration;
-		const pending: PendingTtsAudio = { deltas: [], done: false };
+		const stalePlayer = this.#ttsPlayer;
+		if (stalePlayer) {
+			this.#ttsPlayer = null;
+			this.#ttsTrackId = null;
+			this.#ttsPlaying.set(false);
+			this.#disposeTtsPlayer(stalePlayer).catch(() => {});
+		}
+		const pending: PendingTtsAudio = { deltas: [], done: false, bufferedChars: 0, dropped: false };
 		this.#ttsPendingAudio = pending;
 		void this.#startTtsPlayer(generation, pending);
 	}
@@ -1199,6 +1209,7 @@ export class ThreadManager {
 	async #startTtsPlayer(generation: number, pending: PendingTtsAudio) {
 		let player: WavStreamPlayer | null = null;
 		let connectPromise: Promise<true> | null = null;
+		let timeoutId: ReturnType<typeof setTimeout> | null = null;
 		try {
 			player = new WavStreamPlayer({
 				sampleRate: TTS_SAMPLE_RATE,
@@ -1215,18 +1226,25 @@ export class ThreadManager {
 				}
 			});
 			connectPromise = player.connect();
-			await Promise.race([
-				connectPromise,
-				new Promise<never>((_, reject) =>
-					setTimeout(
-						() =>
-							reject(
-								new Error(`TTS: AudioContext connect timed out after ${TTS_CONNECT_TIMEOUT_MS}ms`)
-							),
-						TTS_CONNECT_TIMEOUT_MS
-					)
-				)
-			]);
+			try {
+				await Promise.race([
+					connectPromise,
+					new Promise<never>((_, reject) => {
+						timeoutId = setTimeout(
+							() =>
+								reject(
+									new Error(`TTS: AudioContext connect timed out after ${TTS_CONNECT_TIMEOUT_MS}ms`)
+								),
+							TTS_CONNECT_TIMEOUT_MS
+						);
+					})
+				]);
+			} finally {
+				if (timeoutId) {
+					clearTimeout(timeoutId);
+					timeoutId = null;
+				}
+			}
 			if (generation !== this.#ttsGeneration) {
 				// Interrupted or superseded while connecting.
 				this.#disposeTtsPlayer(player).catch(() => {});
@@ -1251,16 +1269,9 @@ export class ThreadManager {
 				this.#ttsPendingAudio = null;
 			}
 			const failedPlayer = player;
-			if (failedPlayer && connectPromise) {
-				// connect() may still settle after the timeout; only then is it
-				// safe to tear the player down.
-				connectPromise
-					.catch(() => {})
-					.finally(() => {
-						this.#disposeTtsPlayer(failedPlayer).catch(() => {});
-					});
-			} else if (failedPlayer) {
+			if (failedPlayer) {
 				this.#disposeTtsPlayer(failedPlayer).catch(() => {});
+				connectPromise?.catch(() => {});
 			}
 		}
 	}
@@ -1278,6 +1289,14 @@ export class ThreadManager {
 		if (this.#ttsPlayer && this.#ttsTrackId) {
 			this.#writeTtsAudio(chunk.audio);
 		} else if (this.#ttsPendingAudio) {
+			if (this.#ttsPendingAudio.bufferedChars + chunk.audio.length > MAX_PENDING_TTS_AUDIO_CHARS) {
+				if (!this.#ttsPendingAudio.dropped) {
+					this.#ttsPendingAudio.dropped = true;
+					console.warn('TTS: dropping buffered audio while player is still connecting');
+				}
+				return;
+			}
+			this.#ttsPendingAudio.bufferedChars += chunk.audio.length;
 			this.#ttsPendingAudio.deltas.push(chunk.audio);
 		}
 	}
