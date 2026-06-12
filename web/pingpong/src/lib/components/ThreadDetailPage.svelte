@@ -216,8 +216,10 @@
 	function lectureSlidePageIndex(page: api.LectureSlidePage): number {
 		return lectureSlidePages.findIndex((item: api.LectureSlidePage) => item.id === page.id);
 	}
-	function handleLectureSlideImageLoad(event: Event) {
+	function handleLectureSlideImageLoad(event: Event, expectedImageUrl: string) {
 		const image = event.currentTarget as HTMLImageElement;
+
+		if (!image.isConnected || image.getAttribute('src') !== expectedImageUrl) return;
 
 		if (image.naturalWidth > 0 && image.naturalHeight > 0) {
 			lectureSlideMediaAspectRatio = image.naturalWidth / image.naturalHeight;
@@ -1797,7 +1799,7 @@
 									src={slideImageUrl}
 									alt={`Slide ${visiblePageIndex + 1}`}
 									class="h-full w-full object-contain"
-									onload={handleLectureSlideImageLoad}
+									onload={(event) => handleLectureSlideImageLoad(event, slideImageUrl)}
 								/>
 							{:else}
 								<div

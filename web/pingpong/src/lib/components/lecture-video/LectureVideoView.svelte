@@ -48,6 +48,7 @@
 	const ACTIVE_PAGE_RECOVERY_DEBOUNCE_MS = 150;
 	const COMPLETED_SEEK_TOLERANCE_MS = 2_000;
 	const DEFAULT_MEDIA_ASPECT_RATIO = 16 / 9;
+	const PLAYER_FRAME_CHROME_WIDTH = '1.625rem';
 	type InitErrorAction = 'refresh' | null;
 	type InitErrorState = {
 		detail: string;
@@ -148,11 +149,13 @@
 	let historyInteractions: LectureVideoInteractionHistoryItem[] = $state([]);
 	let initError = $state<InitErrorState | null>(null);
 	let sessionCleanupInFlight = false;
-	let playerMediaAspectRatio: number | null = $derived(
+	let inputMediaAspectRatio = $derived(
 		mediaAspectRatio && Number.isFinite(mediaAspectRatio) && mediaAspectRatio > 0
 			? mediaAspectRatio
 			: null
 	);
+	// Writable derived resets from slide-provided props and still accepts video metadata writes.
+	let playerMediaAspectRatio: number | null = $derived(inputMediaAspectRatio);
 
 	// Tracks which question we have already posted question_presented for
 	// to avoid duplicate posts.
@@ -197,12 +200,10 @@
 	let activePageRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
 	let initErrorCanRefresh = $derived(showRefreshAction && initError?.action === 'refresh');
 	let narrationVolume = $derived(playerVolume * LECTURE_NARRATION_VOLUME_SCALE);
-	let safePlayerMediaAspectRatio = $derived(
-		playerMediaAspectRatio && Number.isFinite(playerMediaAspectRatio) && playerMediaAspectRatio > 0
-			? playerMediaAspectRatio
-			: DEFAULT_MEDIA_ASPECT_RATIO
+	let safePlayerMediaAspectRatio = $derived(playerMediaAspectRatio ?? DEFAULT_MEDIA_ASPECT_RATIO);
+	let playerFrameStyle = $derived(
+		`--lecture-media-aspect-ratio: ${safePlayerMediaAspectRatio}; --lecture-player-frame-chrome: ${PLAYER_FRAME_CHROME_WIDTH};`
 	);
-	let playerFrameStyle = $derived(`--lecture-media-aspect-ratio: ${safePlayerMediaAspectRatio};`);
 	function shouldShowContinuePrompt(): boolean {
 		return (
 			(sessionState === 'awaiting_post_answer_resume' &&
@@ -2118,7 +2119,7 @@
 					/>
 				{:else if !isCompleted || canParticipate}
 					<div
-						class="mx-auto min-h-0 w-full max-w-[calc((40dvh-4rem)*var(--lecture-media-aspect-ratio)+1.625rem)] shrink-0 overflow-hidden rounded-3xl border border-slate-200 bg-white p-3 shadow-xl xl:max-w-[calc((50cqh-1.625rem)*var(--lecture-media-aspect-ratio)+1.625rem)]"
+						class="mx-auto min-h-0 w-full max-w-[calc((40dvh_-_4rem)_*_var(--lecture-media-aspect-ratio)_+_var(--lecture-player-frame-chrome))] shrink-0 overflow-hidden rounded-3xl border border-slate-200 bg-white p-3 shadow-xl xl:max-w-[calc((50cqh_-_var(--lecture-player-frame-chrome))_*_var(--lecture-media-aspect-ratio)_+_var(--lecture-player-frame-chrome))]"
 						style={playerFrameStyle}
 					>
 						<LectureVideoPlayer

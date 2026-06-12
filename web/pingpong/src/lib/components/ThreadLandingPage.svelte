@@ -181,14 +181,35 @@
 			lessonThumbnailAspectRatio = '';
 		}
 	}
-	function handleLessonThumbnailLoad(event: Event) {
+	function handleLessonThumbnailLoad(event: Event, expectedThumbnailUrl: string) {
 		const image = event.currentTarget as HTMLImageElement;
+
+		if (
+			!image.isConnected ||
+			image.getAttribute('src') !== expectedThumbnailUrl ||
+			expectedThumbnailUrl !== lessonThumbnailUrl
+		) {
+			return;
+		}
 
 		if (image.naturalWidth > 0 && image.naturalHeight > 0) {
 			lessonThumbnailAspectRatio = `${image.naturalWidth} / ${image.naturalHeight}`;
 		}
 
 		lessonThumbnailLoaded = true;
+	}
+	function handleLessonThumbnailError(event: Event, expectedThumbnailUrl: string) {
+		const image = event.currentTarget as HTMLImageElement;
+
+		if (
+			!image.isConnected ||
+			image.getAttribute('src') !== expectedThumbnailUrl ||
+			expectedThumbnailUrl !== lessonThumbnailUrl
+		) {
+			return;
+		}
+
+		lessonThumbnailFailed = true;
 	}
 	// Whether billing is set up for the class (which controls everything).
 	$: hasVisibleAssistants = assistants.length > 0;
@@ -926,8 +947,8 @@
 								alt=""
 								class="absolute inset-0 h-full w-full object-cover transition-opacity"
 								class:opacity-0={!lessonThumbnailLoaded}
-								onload={handleLessonThumbnailLoad}
-								onerror={() => (lessonThumbnailFailed = true)}
+								onload={(event) => handleLessonThumbnailLoad(event, lessonThumbnailUrl)}
+								onerror={(event) => handleLessonThumbnailError(event, lessonThumbnailUrl)}
 							/>
 						</div>
 					{:else}
