@@ -41,7 +41,7 @@ ELEVENLABS_VOICE_VALIDATION_SAMPLE_TEXT = (
 ELEVENLABS_VOICE_VALIDATION_OUTPUT_FORMAT = "opus_48000_32"
 ELEVENLABS_VOICE_VALIDATION_CONTENT_TYPE = "audio/ogg"
 ELEVENLABS_VOICE_SAMPLE_TEXT_HEADER = "X-PingPong-Voice-Sample-Text"
-ELEVENLABS_TTS_MODEL = "eleven_flash_v2_5"
+ELEVENLABS_TTS_MODEL = "eleven_v3"
 ELEVENLABS_TTS_VOICE_SETTINGS: Final[Mapping[str, Any]] = MappingProxyType(
     {
         "stability": DEFAULT_ELEVENLABS_STABILITY,
@@ -302,7 +302,7 @@ async def validate_elevenlabs_api_key(api_key: str) -> bool:
 # Streaming TTS via ElevenLabs WebSocket API
 # ---------------------------------------------------------------------------
 
-ELEVENLABS_STREAMING_TTS_MODEL = ELEVENLABS_TTS_MODEL
+ELEVENLABS_STREAMING_TTS_MODEL = "eleven_flash_v2_5"
 ELEVENLABS_STREAMING_TTS_OUTPUT_FORMAT = "pcm_24000"
 ELEVENLABS_STREAMING_TTS_CHUNK_LENGTH_SCHEDULE = [50]
 
