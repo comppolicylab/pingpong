@@ -8164,7 +8164,7 @@ class Run(Base):
     __tablename__ = "runs"
 
     id = Column(Integer, primary_key=True)
-    run_id = Column(String, unique=True, nullable=True, comment="OpenAI object id")
+    run_id = Column(String, unique=True, nullable=True)
 
     status = Column(SQLEnum(schemas.RunStatus), nullable=False)
     messages = relationship(
