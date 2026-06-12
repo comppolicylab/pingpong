@@ -30,6 +30,7 @@ class LectureSlideChatTurnPreparation:
     user_output_index: int
     user_assistant_messages_only: bool = True
     include_developer_messages: bool = True
+    user_message_metadata: dict[str, Any] | None = None
 
 
 def _words_from_transcript_data(
@@ -327,7 +328,6 @@ async def _build_initial_lecture_file_message(
                 part_index=0,
                 type=schemas.MessagePartType.INPUT_FILE,
                 input_file_object_id=input_file.id,
-                input_file=input_file,
             ),
             models.MessagePart(
                 part_index=1,

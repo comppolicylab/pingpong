@@ -913,6 +913,7 @@ async def test_prepare_lecture_slide_chat_turn_uses_video_context_shape(
         )
         session.add(input_file)
         await session.flush()
+        input_file_id = input_file.id
         assert deck.source_stored_object is not None
         deck.source_stored_object.openai_file_object_id = input_file.id
         page = models.LectureSlidePage(
@@ -961,8 +962,7 @@ async def test_prepare_lecture_slide_chat_turn_uses_video_context_shape(
     assert file_message.is_hidden is True
     assert file_message.role == schemas.MessageRole.USER
     assert file_message.content[0].type == schemas.MessagePartType.INPUT_FILE
-    assert file_message.content[0].input_file is not None
-    assert file_message.content[0].input_file.file_id == "pdf-file-id"
+    assert file_message.content[0].input_file_object_id == input_file_id
     assert "visual source of truth" in file_note
     assert context_message.is_hidden is True
     assert "## Lecture Context" in context_text
