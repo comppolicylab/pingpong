@@ -3,7 +3,36 @@ import type { Writable, Readable } from 'svelte/store';
 import * as api from '$lib/api';
 import type { ThreadWithMeta, Error as ApiError, BaseResponse } from '$lib/api';
 import { errorMessage } from '$lib/errors';
-import { WavStreamPlayer, base64ToArrayBuffer } from '$lib/wavtools/index';
+import {
+	WavStreamPlayer,
+	base64ToArrayBuffer,
+	getSharedAudioContext,
+	unlockSharedAudioContext
+} from '$lib/wavtools/index';
+
+/**
+ * Sample rate of the PCM16 audio chunks streamed by the TTS backend. The
+ * AudioContext used for playback must run at this rate.
+ */
+const TTS_SAMPLE_RATE = 24000;
+
+/**
+ * How long to wait for the TTS AudioContext to connect before giving up on
+ * audio for the response. Connecting can stall indefinitely when autoplay
+ * policies block the context, and the chunk stream must keep flowing.
+ */
+const TTS_CONNECT_TIMEOUT_MS = 2000;
+const MAX_PENDING_TTS_AUDIO_CHARS = 256 * 1024;
+
+/**
+ * Audio chunks received while the TTS player is still connecting.
+ */
+type PendingTtsAudio = {
+	deltas: string[];
+	done: boolean;
+	bufferedChars: number;
+	dropped: boolean;
+};
 
 /**
  * State for the thread manager.
@@ -225,6 +254,10 @@ export class ThreadManager {
 	#ttsVolume = 1;
 	#ttsMuted: Writable<boolean> = writable(false);
 	#ttsPlaying: Writable<boolean> = writable(false);
+	#ttsPendingAudio: PendingTtsAudio | null = null;
+	// Invalidates an in-flight TTS player setup when the response is
+	// interrupted or superseded before the player finishes connecting.
+	#ttsGeneration = 0;
 
 	/**
 	 * Whether TTS audio is currently playing/streaming.
@@ -801,6 +834,14 @@ export class ThreadManager {
 		const isLessonThread =
 			currentState?.data?.thread?.interaction_mode === 'lecture_video' ||
 			currentState?.data?.thread?.interaction_mode === 'lecture_slides';
+		if (isLessonThread && !get(this.#ttsMuted)) {
+			// Unlock the playback AudioContext synchronously while the user's
+			// send gesture is still live. Creating or resuming it later — when
+			// the audio_started chunk arrives off the network — is blocked by
+			// autoplay policies (Safari, embedded LTI iframes), which leaves
+			// resume() pending forever.
+			unlockSharedAudioContext(TTS_SAMPLE_RATE);
+		}
 		const optimisticOutputIndex =
 			threadVersion === 3 ? this.#getNextOutputIndex(currentState) : undefined;
 		const optimisticAssistantMsgId = isLessonThread
@@ -1120,7 +1161,10 @@ export class ThreadManager {
 				this.#completeReasoningStep(chunk);
 				break;
 			case 'audio_started':
-				await this.#handleTtsStarted();
+				// Deliberately not awaited: player setup can be slow (or hang
+				// entirely under autoplay policies) and must never block text
+				// deltas. Audio chunks are buffered until the player is ready.
+				this.#handleTtsStarted();
 				break;
 			case 'audio_delta':
 				this.#handleTtsDelta(chunk);
@@ -1148,10 +1192,28 @@ export class ThreadManager {
 		}
 	}
 
-	async #handleTtsStarted() {
+	#handleTtsStarted() {
+		const generation = ++this.#ttsGeneration;
+		const stalePlayer = this.#ttsPlayer;
+		if (stalePlayer) {
+			this.#ttsPlayer = null;
+			this.#ttsTrackId = null;
+			this.#ttsPlaying.set(false);
+			this.#disposeTtsPlayer(stalePlayer).catch(() => {});
+		}
+		const pending: PendingTtsAudio = { deltas: [], done: false, bufferedChars: 0, dropped: false };
+		this.#ttsPendingAudio = pending;
+		void this.#startTtsPlayer(generation, pending);
+	}
+
+	async #startTtsPlayer(generation: number, pending: PendingTtsAudio) {
+		let player: WavStreamPlayer | null = null;
+		let connectPromise: Promise<true> | null = null;
+		let timeoutId: ReturnType<typeof setTimeout> | null = null;
 		try {
-			const player = new WavStreamPlayer({
-				sampleRate: 24000,
+			player = new WavStreamPlayer({
+				sampleRate: TTS_SAMPLE_RATE,
+				context: getSharedAudioContext(TTS_SAMPLE_RATE) ?? undefined,
 				stopOnEmptyBuffer: false,
 				onPlaybackStopped: () => {
 					if (this.#ttsPlayer !== player) {
@@ -1163,34 +1225,96 @@ export class ThreadManager {
 					this.#disposeTtsPlayer(player).catch(() => {});
 				}
 			});
-			await player.connect();
+			connectPromise = player.connect();
+			try {
+				await Promise.race([
+					connectPromise,
+					new Promise<never>((_, reject) => {
+						timeoutId = setTimeout(
+							() =>
+								reject(
+									new Error(`TTS: AudioContext connect timed out after ${TTS_CONNECT_TIMEOUT_MS}ms`)
+								),
+							TTS_CONNECT_TIMEOUT_MS
+						);
+					})
+				]);
+			} finally {
+				if (timeoutId) {
+					clearTimeout(timeoutId);
+					timeoutId = null;
+				}
+			}
+			if (generation !== this.#ttsGeneration) {
+				// Interrupted or superseded while connecting.
+				this.#disposeTtsPlayer(player).catch(() => {});
+				return;
+			}
 			player.setVolume(get(this.#ttsMuted) ? 0 : this.#ttsVolume);
 			this.#ttsPlayer = player;
 			this.#ttsTrackId = crypto.randomUUID();
 			this.#ttsPlaying.set(true);
+			// Flush audio that streamed in while the player was connecting.
+			this.#ttsPendingAudio = null;
+			for (const audio of pending.deltas) {
+				this.#writeTtsAudio(audio);
+			}
+			pending.deltas.length = 0;
+			if (pending.done) {
+				this.#handleTtsDone();
+			}
 		} catch (err) {
 			console.warn('TTS: AudioWorklet connect failed', err);
-			this.#ttsPlayer = null;
-			this.#ttsTrackId = null;
+			if (this.#ttsPendingAudio === pending) {
+				this.#ttsPendingAudio = null;
+			}
+			const failedPlayer = player;
+			if (failedPlayer) {
+				this.#disposeTtsPlayer(failedPlayer).catch(() => {});
+				connectPromise?.catch(() => {});
+			}
 		}
 	}
 
-	#handleTtsDelta(chunk: api.ThreadStreamAudioDeltaChunk) {
+	#writeTtsAudio(audio: string) {
 		if (!this.#ttsPlayer || !this.#ttsTrackId) return;
 		try {
-			this.#ttsPlayer.add16BitPCM(base64ToArrayBuffer(chunk.audio), this.#ttsTrackId);
+			this.#ttsPlayer.add16BitPCM(base64ToArrayBuffer(audio), this.#ttsTrackId);
 		} catch (err) {
 			console.warn('TTS: add16BitPCM failed', err);
 		}
 	}
 
+	#handleTtsDelta(chunk: api.ThreadStreamAudioDeltaChunk) {
+		if (this.#ttsPlayer && this.#ttsTrackId) {
+			this.#writeTtsAudio(chunk.audio);
+		} else if (this.#ttsPendingAudio) {
+			if (this.#ttsPendingAudio.bufferedChars + chunk.audio.length > MAX_PENDING_TTS_AUDIO_CHARS) {
+				if (!this.#ttsPendingAudio.dropped) {
+					this.#ttsPendingAudio.dropped = true;
+					console.warn('TTS: dropping buffered audio while player is still connecting');
+				}
+				return;
+			}
+			this.#ttsPendingAudio.bufferedChars += chunk.audio.length;
+			this.#ttsPendingAudio.deltas.push(chunk.audio);
+		}
+	}
+
 	#handleTtsDone() {
+		if (this.#ttsPendingAudio) {
+			// Player still connecting; finish once buffered audio is flushed.
+			this.#ttsPendingAudio.done = true;
+			return;
+		}
 		// Keep the speaker control visible until buffered audio fully drains.
 		this.#ttsPlayer?.finish();
 		this.#ttsTrackId = null;
 	}
 
 	#handleTtsError() {
+		this.#ttsGeneration += 1;
+		this.#ttsPendingAudio = null;
 		const player = this.#ttsPlayer;
 		this.#ttsPlayer = null;
 		this.#ttsTrackId = null;
@@ -1205,6 +1329,8 @@ export class ThreadManager {
 	 * Interrupt any active TTS playback.
 	 */
 	async interruptTts() {
+		this.#ttsGeneration += 1;
+		this.#ttsPendingAudio = null;
 		const player = this.#ttsPlayer;
 		if (player) {
 			this.#ttsPlayer = null;

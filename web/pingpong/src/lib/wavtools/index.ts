@@ -32,6 +32,7 @@ import { AudioAnalysis } from './lib/analysis/audio_analysis';
 import { WavStreamPlayer } from './lib/wav_stream_player';
 import { WavRecorder } from './lib/wav_recorder';
 import { AUDIO_WORKLET_UNSUPPORTED_MESSAGE } from './lib/audio_support';
+import { getSharedAudioContext, unlockSharedAudioContext } from './lib/shared_audio_context';
 import { base64ToArrayBuffer } from './utils';
 
 export {
@@ -40,5 +41,7 @@ export {
 	WavStreamPlayer,
 	WavRecorder,
 	AUDIO_WORKLET_UNSUPPORTED_MESSAGE,
+	getSharedAudioContext,
+	unlockSharedAudioContext,
 	base64ToArrayBuffer
 };
