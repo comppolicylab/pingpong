@@ -90,39 +90,11 @@ OptionalSlideQuestionPauseOffsets = SlideQuestionPauseOffsets | None
 
 
 LECTURE_SLIDES_CONTENT_SECTION = """### Context Provided
-At the start of a lecture slide chat, the learner's first question may be preceded by developer message **hidden from the learner** and titled **"## Lecture Slide Lesson Context"**. Carefully use it as the source for the generated slide narration.
-
-The structure within the "Lecture Slide Lesson Context" matches this format:
-
------BEGIN LECTURE SLIDE LESSON CONTEXT-----
-
-## Lecture Slide Lesson Context
-
-### Lecture Slide Narrations
-
-### Slide 1
-The generated narration for slide 1.
-
-### Slide 2
-
-The generated narration for slide 2.
-
-...
-
------END LECTURE SLIDE LESSON CONTEXT-----
-
-# Source PDF Slide Deck
-If available, the source PDF slide deck is attached in a user message **hidden from the learner** after the hidden developer message titled "## Lecture Slide Lesson Context" as the visual source of truth for the lecture conversation. Use it to ground answers about slide visuals, text, diagrams, equations, and layout.
-
-Each turn, the learner's question is preceded by a developer message **hidden from the learner** and titled **"## Lecture Context"**. Carefully read the entire message before answering, as it presents the latest state and history of the learning session.
+The conversation always begins with a developer message **hidden from the learner** and titled **"## Lecture Context"**. It is refreshed each turn to reflect the learner's latest position in the lesson. Carefully read the entire message before answering, as it presents the latest state and history of the learning session.
 
 The structure within the "Lecture Context" matches this format:
 
 -----BEGIN LECTURE CONTEXT-----
-
-## Lecture Slide Lesson Context
-
-### Lecture Slide Narrations
 
 ## Lecture Context
 - **Status:** Indicates the learner’s present activity. One of:
@@ -130,8 +102,28 @@ The structure within the "Lecture Context" matches this format:
     - *Answering Knowledge Check #{n}*
     - *Just answered Knowledge Check #{n}*
     - *Finished the lecture slides*
-- **Current offset:** How far into the video the learner is currently, in milliseconds.
-- **Furthest watched offset:** How far into the video the learner has watched so far, in milliseconds. The learner may have paused or rewound the video.
+- **Current offset:** How far into the narrated slide lesson the learner is currently, in milliseconds.
+- **Furthest watched offset:** How far into the narrated slide lesson the learner has progressed so far, in milliseconds. The learner may have paused or rewound the lesson.
+- **Current slide:** The slide currently on the learner's screen (e.g., *Slide 3*).
+- **Furthest reached slide:** The furthest slide the learner has reached so far.
+
+### Lecture Summary So Far
+A cumulative natural-language summary of the concepts, explanations, and main points already introduced, from the start of the lesson through the learner's furthest watched offset and slide.
+
+### Current Moment Context
+- **Before this moment:** What the narration covered just prior to the current point.
+- **At this moment:** What the narration is presenting at the present offset—focus carefully on this segment when answering.
+- **After this moment:** What the narration will cover next—but you must avoid using or revealing this information unless acknowledging that it is coming (without explaining its substance).
+
+### Current Slide
+Details of the slide currently on the learner's screen—use this as the source of truth for answers about slide visuals, text, diagrams, equations, and layout:
+- The slide number and title.
+- **Visible text:** Important readable text on the slide.
+- **Visual context:** The slide's layout, images, charts, code, or other visual elements.
+- **Narration summary:** A summary of the narration spoken over this slide.
+- **Key points:** Concise concept bullets from the slide.
+- **Diagrams:** Notable diagrams on the slide.
+- **Equations or symbols:** Notable equations and symbols on the slide.
 
 ### Current Knowledge Check
 If the learner is currently working on a Knowledge Check, this section lists:
@@ -153,7 +145,7 @@ Chronological list of previous Knowledge Check interactions, each showing:
 
 -----END LECTURE CONTEXT-----
 
-The learner's own question immediately follows this developer message.
+The previous conversation messages between you and the learner follow this developer message, ending with the learner's newest question.
 """
 
 
@@ -162,9 +154,9 @@ DEFAULT_LECTURE_SLIDE_INSTRUCTIONS = DEFAULT_LECTURE_INSTRUCTIONS.safe_substitut
         "lecture_type": "slides",
         "activity_lesson": "narrating the slides",
         "context_provided_text": LECTURE_SLIDES_CONTENT_SECTION,
-        "context_array_scope": "'Current Knowledge Check', or past 'Knowledge Checks Answered'",
-        "content_array_scope_2": "'Upcoming Knowledge Check'",
-        "notes_text": "Under no circumstances should you provide or explain information from 'Upcoming Knowledge Check' until it has actually appeared in a past Knowledge Check.",
+        "context_array_scope": "'Lecture Summary So Far', 'Before this moment', 'At this moment', 'Current Slide', 'Current Knowledge Check', or past 'Knowledge Checks Answered'",
+        "content_array_scope_2": "'After this moment' or 'Upcoming Knowledge Check'",
+        "notes_text": "Under no circumstances should you provide or explain information from 'After this moment' or 'Upcoming Knowledge Check' until it has actually become part of the 'Lecture Summary So Far' or appeared in a past Knowledge Check.",
     }
 )
 
