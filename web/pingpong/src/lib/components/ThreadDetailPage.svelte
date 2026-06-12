@@ -171,9 +171,15 @@
 	$: lectureSlideCaptionsSrc = threadLectureSlideCaptionsAvailable
 		? api.getLectureSlideCaptionsUrl(classId, threadId)
 		: null;
+	let lectureSlideMediaAspectRatio: number | null = null;
+	let lectureSlideMediaAspectRatioDeckId: number | null = null;
 	$: lectureSlidePages = ((lectureSlideDeck?.pages ?? []) as api.LectureSlidePage[])
 		.slice()
 		.sort((a: api.LectureSlidePage, b: api.LectureSlidePage) => a.position - b.position);
+	$: if ((lectureSlideDeck?.id ?? null) !== lectureSlideMediaAspectRatioDeckId) {
+		lectureSlideMediaAspectRatioDeckId = lectureSlideDeck?.id ?? null;
+		lectureSlideMediaAspectRatio = null;
+	}
 	$: lectureSlideDurationMs = (() => {
 		if (lectureSlideDeck?.total_duration_ms && lectureSlideDeck.total_duration_ms > 0) {
 			return lectureSlideDeck.total_duration_ms;
@@ -209,6 +215,13 @@
 	}
 	function lectureSlidePageIndex(page: api.LectureSlidePage): number {
 		return lectureSlidePages.findIndex((item: api.LectureSlidePage) => item.id === page.id);
+	}
+	function handleLectureSlideImageLoad(event: Event) {
+		const image = event.currentTarget as HTMLImageElement;
+
+		if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+			lectureSlideMediaAspectRatio = image.naturalWidth / image.naturalHeight;
+		}
 	}
 	let runtimeLectureVideoAssistantMismatch = false;
 	let runtimeLectureVideoAssistantMismatchKey: string | null = null;
@@ -1769,6 +1782,7 @@
 				lessonMode="lecture_slides"
 				mediaKind="audio"
 				durationMsOverride={lectureSlideDurationMs}
+				mediaAspectRatio={lectureSlideMediaAspectRatio}
 				on:sessionchange={handleLectureSlideSessionChange}
 				on:playbackresumed={handleLecturePlaybackResumed}
 			>
@@ -1783,6 +1797,7 @@
 									src={slideImageUrl}
 									alt={`Slide ${visiblePageIndex + 1}`}
 									class="h-full w-full object-contain"
+									onload={handleLectureSlideImageLoad}
 								/>
 							{:else}
 								<div
@@ -1806,13 +1821,6 @@
 								</div>
 							</div>
 						{/if}
-						<div
-							class="absolute top-4 left-4 rounded-full bg-black/60 px-3 py-1 text-xs font-medium text-white"
-						>
-							{visiblePageIndex >= 0
-								? `Slide ${visiblePageIndex + 1} of ${lectureSlidePages.length}`
-								: 'Lecture Slides'}
-						</div>
 					</div>
 				{/snippet}
 				{#snippet chat(lectureSlideAtEnd = false)}

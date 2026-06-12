@@ -47,6 +47,7 @@
 	const CONTROL_RECOVERY_GRACE_MS = 1_000;
 	const ACTIVE_PAGE_RECOVERY_DEBOUNCE_MS = 150;
 	const COMPLETED_SEEK_TOLERANCE_MS = 2_000;
+	const DEFAULT_MEDIA_ASPECT_RATIO = 16 / 9;
 	type InitErrorAction = 'refresh' | null;
 	type InitErrorState = {
 		detail: string;
@@ -76,6 +77,7 @@
 		lessonMode = 'lecture_video',
 		mediaKind = 'video',
 		durationMsOverride = null,
+		mediaAspectRatio = null,
 		visual = undefined
 	}: {
 		classId: number;
@@ -92,6 +94,7 @@
 		lessonMode?: LessonMode;
 		mediaKind?: 'video' | 'audio';
 		durationMsOverride?: number | null;
+		mediaAspectRatio?: number | null;
 		visual?: Snippet<[number]>;
 	} = $props();
 	const dispatch = createEventDispatcher<{
@@ -145,6 +148,11 @@
 	let historyInteractions: LectureVideoInteractionHistoryItem[] = $state([]);
 	let initError = $state<InitErrorState | null>(null);
 	let sessionCleanupInFlight = false;
+	let playerMediaAspectRatio: number | null = $derived(
+		mediaAspectRatio && Number.isFinite(mediaAspectRatio) && mediaAspectRatio > 0
+			? mediaAspectRatio
+			: null
+	);
 
 	// Tracks which question we have already posted question_presented for
 	// to avoid duplicate posts.
@@ -189,6 +197,12 @@
 	let activePageRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
 	let initErrorCanRefresh = $derived(showRefreshAction && initError?.action === 'refresh');
 	let narrationVolume = $derived(playerVolume * LECTURE_NARRATION_VOLUME_SCALE);
+	let safePlayerMediaAspectRatio = $derived(
+		playerMediaAspectRatio && Number.isFinite(playerMediaAspectRatio) && playerMediaAspectRatio > 0
+			? playerMediaAspectRatio
+			: DEFAULT_MEDIA_ASPECT_RATIO
+	);
+	let playerFrameStyle = $derived(`--lecture-media-aspect-ratio: ${safePlayerMediaAspectRatio};`);
 	function shouldShowContinuePrompt(): boolean {
 		return (
 			(sessionState === 'awaiting_post_answer_resume' &&
@@ -2086,7 +2100,7 @@
 			class="mx-auto flex h-full w-full max-w-screen-2xl flex-col gap-6 px-4 py-4 lg:px-6 xl:grid xl:grid-cols-5 xl:items-stretch xl:justify-center xl:gap-8 xl:py-6"
 		>
 			<div
-				class="col-span-3 flex max-h-[40%] min-h-0 min-w-0 shrink-0 flex-col gap-4 xl:h-full xl:max-h-none xl:shrink"
+				class="col-span-3 flex max-h-[40%] min-h-0 min-w-0 shrink-0 flex-col gap-4 xl:h-full xl:max-h-none xl:shrink xl:[container-type:size]"
 			>
 				{#if !canParticipate}
 					<div
@@ -2104,7 +2118,8 @@
 					/>
 				{:else if !isCompleted || canParticipate}
 					<div
-						class="mx-auto min-h-0 w-full max-w-[calc((40dvh-4rem)*16/9)] shrink-0 overflow-hidden rounded-3xl border border-slate-200 bg-white p-3 shadow-xl xl:max-h-[50%] xl:w-fit xl:max-w-none"
+						class="mx-auto min-h-0 w-full max-w-[calc((40dvh-4rem)*var(--lecture-media-aspect-ratio)+1.625rem)] shrink-0 overflow-hidden rounded-3xl border border-slate-200 bg-white p-3 shadow-xl xl:max-w-[calc((50cqh-1.625rem)*var(--lecture-media-aspect-ratio)+1.625rem)]"
+						style={playerFrameStyle}
 					>
 						<LectureVideoPlayer
 							src={lectureVideoSrc}
@@ -2112,6 +2127,7 @@
 							{mediaKind}
 							{durationMsOverride}
 							{visual}
+							bind:mediaAspectRatio={playerMediaAspectRatio}
 							displayTitle={sessionState === 'awaiting_answer'
 								? 'Answer the comprehension check to continue'
 								: title}

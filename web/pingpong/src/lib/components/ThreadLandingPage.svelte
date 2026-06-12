@@ -164,6 +164,7 @@
 	$: assistantMeta = getAssistantMetadata(assistant);
 	let lessonThumbnailFailed = false;
 	let lessonThumbnailLoaded = false;
+	let lessonThumbnailAspectRatio = '';
 	let lessonThumbnailAssistantId: number | undefined;
 	$: lessonThumbnailUrl =
 		assistant.interaction_mode === 'lecture_video' && data?.class?.id && assistant.id
@@ -177,7 +178,17 @@
 			lessonThumbnailAssistantId = assistant.id;
 			lessonThumbnailFailed = false;
 			lessonThumbnailLoaded = false;
+			lessonThumbnailAspectRatio = '';
 		}
+	}
+	function handleLessonThumbnailLoad(event: Event) {
+		const image = event.currentTarget as HTMLImageElement;
+
+		if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+			lessonThumbnailAspectRatio = `${image.naturalWidth} / ${image.naturalHeight}`;
+		}
+
+		lessonThumbnailLoaded = true;
 	}
 	// Whether billing is set up for the class (which controls everything).
 	$: hasVisibleAssistants = assistants.length > 0;
@@ -896,7 +907,11 @@
 				{:else if assistant.interaction_mode === 'lecture_video' || assistant.interaction_mode === 'lecture_slides'}
 					<div class="h-[5%] max-h-8"></div>
 					{#if lessonThumbnailUrl && !lessonThumbnailFailed}
-						<div class="relative aspect-video w-full max-w-md overflow-hidden rounded-lg shadow-lg">
+						<div
+							class="relative w-full max-w-md overflow-hidden rounded-lg shadow-lg"
+							class:aspect-video={!lessonThumbnailAspectRatio}
+							style:aspect-ratio={lessonThumbnailAspectRatio || undefined}
+						>
 							{#if !lessonThumbnailLoaded}
 								<div class="flex h-full w-full items-center justify-center bg-blue-light-50">
 									{#if assistant.interaction_mode === 'lecture_slides'}
@@ -911,7 +926,7 @@
 								alt=""
 								class="absolute inset-0 h-full w-full object-cover transition-opacity"
 								class:opacity-0={!lessonThumbnailLoaded}
-								onload={() => (lessonThumbnailLoaded = true)}
+								onload={handleLessonThumbnailLoad}
 								onerror={() => (lessonThumbnailFailed = true)}
 							/>
 						</div>
