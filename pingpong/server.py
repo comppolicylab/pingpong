@@ -9159,6 +9159,11 @@ async def send_message(
                     role=schemas.MessageRole.USER,
                     is_hidden=False,
                     user_id=request.state["session"].user.id,
+                    message_metadata=(
+                        lecture_chat_prep.user_message_metadata
+                        if lecture_chat_prep is not None
+                        else None
+                    ),
                     content=messageContentParts,
                     file_search_attachments=file_search_files,
                     code_interpreter_attachments=code_interpreter_files,

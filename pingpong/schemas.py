@@ -44,6 +44,10 @@ from pingpong.elevenlabs_defaults import (
 from .gravatar import get_email_hash, get_gravatar_image
 
 
+LECTURE_MESSAGE_POSITION_HEADING = "## Lecture Message Position"
+MESSAGE_METADATA_LECTURE_PLAYBACK_POSITION_MS_V1 = "lecture_playback_position_ms_v1"
+
+
 class Statistics(BaseModel):
     """Statistics about the system."""
 
@@ -3398,7 +3402,7 @@ class ThreadMessage(OpenAIMessage):
     content: list[ThreadMessageContent]
     """The content of the message in array of text and/or images."""
 
-    metadata: dict[str, str | bool] | None = None
+    metadata: dict[str, Any] | None = None
     """Set of 16 key-value pairs that can be attached to an object.
 
     This can be useful for storing additional information about the object in a
@@ -3407,8 +3411,8 @@ class ThreadMessage(OpenAIMessage):
     Keys are strings with a maximum length of 64 characters. Values are strings with
     a maximum length of 512 characters.
 
-    **Departure from OpenAI API:** This field can also include boolean values, in addition
-    to strings.
+    **Departure from OpenAI API:** This field can also include typed local metadata
+    values, including booleans and integers, in addition to strings.
     """
 
 

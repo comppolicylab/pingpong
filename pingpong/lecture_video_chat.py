@@ -48,6 +48,7 @@ class LectureChatTurnPreparation:
     prepended_messages: list[models.Message]
     user_output_index: int
     user_assistant_messages_only: bool = False
+    user_message_metadata: dict[str, object] | None = None
 
 
 def _apply_lecture_video_chat_metadata(thread: models.Thread) -> None:
@@ -1011,8 +1012,18 @@ async def prepare_lecture_chat_turn(
         )
         next_output_index += 1
 
+    playback_position_ms = (
+        lecture_video_playback_position_ms
+        if lecture_video_playback_position_ms is not None
+        else context_result.current_offset_ms
+    )
     return LectureChatTurnPreparation(
         prepended_messages=prepended_messages,
         user_output_index=next_output_index,
         user_assistant_messages_only=context_result.user_assistant_messages_only,
+        user_message_metadata={
+            schemas.MESSAGE_METADATA_LECTURE_PLAYBACK_POSITION_MS_V1: (
+                playback_position_ms
+            ),
+        },
     )

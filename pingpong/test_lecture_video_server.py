@@ -1439,6 +1439,9 @@ async def test_send_message_creates_lecture_chat_run_with_hidden_context(
     ]
     assert ordered_messages[0].content[0].text.startswith("Lecture chat context")
     assert ordered_messages[1].content[0].type == schemas.MessagePartType.INPUT_IMAGE
+    assert ordered_messages[2].message_metadata == {
+        schemas.MESSAGE_METADATA_LECTURE_PLAYBACK_POSITION_MS_V1: 4321,
+    }
     assert ordered_messages[2].content[0].text == "Why does latency matter more here?"
     assert ordered_messages[3].content[0].type == schemas.MessagePartType.OUTPUT_TEXT
     assert ordered_messages[3].content[0].text == VISIBLE_ASSISTANT_REPLY_TEXT
@@ -1457,6 +1460,9 @@ async def test_send_message_creates_lecture_chat_run_with_hidden_context(
         message["content"][0]["text"]["value"]
         for message in thread_response.json()["messages"]
     ] == ["Why does latency matter more here?", VISIBLE_ASSISTANT_REPLY_TEXT]
+    assert schemas.MESSAGE_METADATA_LECTURE_PLAYBACK_POSITION_MS_V1 not in (
+        thread_response.json()["messages"][0].get("metadata") or {}
+    )
     assert thread_response.json()["thread"]["is_current_user_participant"] is True
 
     second_response = api.post(
@@ -1823,11 +1829,22 @@ async def test_send_message_allows_lecture_chat_while_awaiting_answer(
         schemas.MessageRole.USER,
         schemas.MessageRole.ASSISTANT,
     ]
-    assert [message.is_hidden for message in ordered_messages] == [True, False, False]
+    assert [message.is_hidden for message in ordered_messages] == [
+        True,
+        False,
+        False,
+    ]
 
     hidden_context_text = ordered_messages[0].content[0].text
     assert hidden_context_text is not None
     assert "Status: Answering Knowledge Check #1" in hidden_context_text
+    assert ordered_messages[1].message_metadata is not None
+    assert isinstance(
+        ordered_messages[1].message_metadata[
+            schemas.MESSAGE_METADATA_LECTURE_PLAYBACK_POSITION_MS_V1
+        ],
+        int,
+    )
     assert (
         "### Current Knowledge Check\n\n"
         "Knowledge Check #1: What is the right answer?\n\n"
@@ -1952,6 +1969,9 @@ async def test_list_thread_messages_hides_lecture_chat_context_messages(
         message["content"][0]["text"]["value"]
         for message in messages_response.json()["messages"]
     ] == ["Why does latency matter more here?", VISIBLE_ASSISTANT_REPLY_TEXT]
+    assert schemas.MESSAGE_METADATA_LECTURE_PLAYBACK_POSITION_MS_V1 not in (
+        messages_response.json()["messages"][0].get("metadata") or {}
+    )
     assert messages_response.json()["has_more"] is False
 
 

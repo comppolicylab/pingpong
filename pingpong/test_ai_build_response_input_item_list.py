@@ -1361,6 +1361,25 @@ async def test_build_response_input_item_list_can_build_user_assistant_messages_
             ],
             created=utcnow() - timedelta(minutes=3),
         )
+        prior_user_message = models.Message(
+            message_status=schemas.MessageStatus.COMPLETED,
+            run_id=prior_run.id,
+            thread_id=thread.id,
+            output_index=1,
+            role=schemas.MessageRole.USER,
+            is_hidden=False,
+            message_metadata={
+                schemas.MESSAGE_METADATA_LECTURE_PLAYBACK_POSITION_MS_V1: 1000,
+            },
+            content=[
+                models.MessagePart(
+                    part_index=0,
+                    type=schemas.MessagePartType.INPUT_TEXT,
+                    text="Earlier question?",
+                )
+            ],
+            created=utcnow() - timedelta(minutes=2, seconds=45),
+        )
         current_developer_message = models.Message(
             message_status=schemas.MessageStatus.COMPLETED,
             run_id=current_run.id,
@@ -1399,6 +1418,9 @@ async def test_build_response_input_item_list_can_build_user_assistant_messages_
             thread_id=thread.id,
             output_index=6,
             role=schemas.MessageRole.USER,
+            message_metadata={
+                schemas.MESSAGE_METADATA_LECTURE_PLAYBACK_POSITION_MS_V1: 2000,
+            },
             content=[
                 models.MessagePart(
                     part_index=0,
@@ -1411,6 +1433,7 @@ async def test_build_response_input_item_list_can_build_user_assistant_messages_
         session.add_all(
             [
                 prior_developer_message,
+                prior_user_message,
                 current_developer_message,
                 prior_hidden_image_message,
                 user_message,
@@ -1429,10 +1452,20 @@ async def test_build_response_input_item_list_can_build_user_assistant_messages_
             user_assistant_messages_only=True,
         )
 
-    assert [item["role"] for item in items] == ["developer", "user", "user"]
+    assert [item["role"] for item in items] == [
+        "developer",
+        "developer",
+        "user",
+        "user",
+        "developer",
+        "user",
+    ]
     assert items[0]["content"][0]["text"] == "Dynamic lecture context"
-    assert items[1]["content"][0]["type"] == "input_image"
-    assert items[2]["content"][0]["text"] == "What is happening here?"
+    assert items[1]["content"].endswith("playback_position_ms: 1000ms")
+    assert items[2]["content"][0]["text"] == "Earlier question?"
+    assert items[3]["content"][0]["type"] == "input_image"
+    assert items[4]["content"].endswith("playback_position_ms: 2000ms")
+    assert items[5]["content"][0]["text"] == "What is happening here?"
 
     async with db.async_session() as session:
         items = await build_response_input_item_list(
@@ -1445,14 +1478,20 @@ async def test_build_response_input_item_list_can_build_user_assistant_messages_
 
     assert [item["role"] for item in items] == [
         "developer",
+        "developer",
         "user",
+        "user",
+        "developer",
         "developer",
         "user",
     ]
     assert items[0]["content"][0]["text"] == "Stable lesson context"
-    assert items[1]["content"][0]["type"] == "input_image"
-    assert items[2]["content"][0]["text"] == "Dynamic lecture context"
-    assert items[3]["content"][0]["text"] == "What is happening here?"
+    assert items[1]["content"].endswith("playback_position_ms: 1000ms")
+    assert items[2]["content"][0]["text"] == "Earlier question?"
+    assert items[3]["content"][0]["type"] == "input_image"
+    assert items[4]["content"][0]["text"] == "Dynamic lecture context"
+    assert items[5]["content"].endswith("playback_position_ms: 2000ms")
+    assert items[6]["content"][0]["text"] == "What is happening here?"
 
 
 def test_get_known_response_message_phase_returns_known_phase_only():

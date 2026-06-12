@@ -45,6 +45,8 @@ from pingpong.schemas import (
     CodeInterpreterOutputType,
     FileSearchToolAnnotationResult,
     InteractionMode,
+    LECTURE_MESSAGE_POSITION_HEADING,
+    MESSAGE_METADATA_LECTURE_PLAYBACK_POSITION_MS_V1,
     MessagePhase,
     MessagePartType,
     MessageRole,
@@ -951,6 +953,27 @@ async def build_response_input_item_list(
                 assistant_response_message["phase"] = phase
             response_item = assistant_response_message
 
+        message_metadata = message.message_metadata or {}
+        if message.role == MessageRole.USER:
+            playback_position_ms = message_metadata.get(
+                MESSAGE_METADATA_LECTURE_PLAYBACK_POSITION_MS_V1
+            )
+            if isinstance(playback_position_ms, int):
+                response_input_items_with_time.append(
+                    (
+                        message.created,
+                        message.output_index,
+                        "lecture_playback_position",
+                        EasyInputMessageParam(
+                            role=MessageRole.DEVELOPER,
+                            content=(
+                                f"{LECTURE_MESSAGE_POSITION_HEADING}\n\n"
+                                f"playback_position_ms: {playback_position_ms}ms"
+                            ),
+                        ),
+                    )
+                )
+
         response_input_items_with_time.append(
             (
                 message.created,
@@ -1190,7 +1213,7 @@ async def build_response_input_item_list(
 
     def input_item_sort_key(
         entry: tuple[datetime, int, str, ResponseInputItemParam],
-    ) -> tuple[int, int, datetime]:
+    ) -> tuple[int, int, int, datetime]:
         created, output_index, item_type, item = entry
         if (
             user_assistant_messages_only
@@ -1199,8 +1222,9 @@ async def build_response_input_item_list(
             and item_type == "message"
             and item.get("role") == MessageRole.DEVELOPER
         ):
-            return (0, 0, created)
-        return (1, output_index, created)
+            return (0, 0, 0, created)
+        item_priority = 0 if item_type == "lecture_playback_position" else 1
+        return (1, output_index, item_priority, created)
 
     # Sort by output index, falling back to created time for ties.
     response_input_items_with_time.sort(key=input_item_sort_key)
@@ -1224,7 +1248,9 @@ async def build_response_input_item_list(
     # Use output_index ordering to walk back through contiguous reasoning items.
     items_by_output = response_input_items_with_time
     output_index_positions = {
-        output_index: idx for idx, (_, output_index, _, _) in enumerate(items_by_output)
+        output_index: idx
+        for idx, (_, output_index, item_type, _) in enumerate(items_by_output)
+        if item_type == "code_interpreter_call"
     }
 
     expired_ci_output_indices: set[int] = set()
@@ -5153,6 +5179,14 @@ def format_instructions(
     if lecture_video_mode:
         instructions += (
             "\n\n"
+            "---Context: Lecture Message Positions---\n"
+            "Developer messages the user can't see may appear before student "
+            "messages with `playback_position_ms`. Use these values to "
+            "understand when each student message was sent in the lecture "
+            "timeline, including whether the student has moved on or is asking "
+            "a follow-up question about the same part of the lecture or "
+            "your previous answer. Do not mention the developer message "
+            "or its syntax to the user.\n\n"
             "---Formatting: Lecture Follow-ups---\n"
             "At the very end of your final answer, you may emit follow-up "
             "responses that the student can select to continue the chat. Three "
