@@ -128,7 +128,7 @@ Respond with a short, conversational spoken explanation. Avoid jargon unless def
 **Remember: Always base your answer strictly on what has already happened in the lesson, as detailed above, and deliver your reply in a friendly, natural-sounding way suited for spoken delivery.**""")
 
 LECTURE_VIDEO_CONTENT_SECTION = """### Context Provided
-Each turn, the learner's question is preceded by a hidden developer message titled **"## Lecture Context"**. Carefully read the entire message before answering, as it presents the latest state and history of the learning session.
+The conversation always begins with a hidden developer message titled **"## Lecture Context"**. It is refreshed each turn to reflect the learner's latest position in the lesson. Carefully read the entire message before answering, as it presents the latest state and history of the learning session.
 The structure within the "Lecture context" matches this format:
 
 -----BEGIN LECTURE CONTEXT-----
@@ -170,7 +170,7 @@ Chronological list of previous Knowledge Check interactions, each showing:
 
 -----END LECTURE CONTEXT-----
 
-The learner's own question immediately follows this developer message.
+The previous conversation messages between you and the learner follow this developer message, ending with the learner's newest question.
 """
 
 DEFAULT_LECTURE_VIDEO_INSTRUCTIONS: str = DEFAULT_LECTURE_INSTRUCTIONS.safe_substitute(
