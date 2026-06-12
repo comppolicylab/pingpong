@@ -687,9 +687,11 @@ async def prepare_lecture_chat_turn(
             status_code=409,
             detail=LECTURE_SLIDE_CHAT_UNAVAILABLE_NOTE,
         ) from exc
-    if transcript is None or (
-        deck is not None and deck.context_version == 5 and context_v5 is None
-    ):
+    if deck is not None and deck.context_version == 5:
+        context_available = context_v5 is not None
+    else:
+        context_available = transcript is not None
+    if not context_available:
         raise HTTPException(
             status_code=409,
             detail=LECTURE_SLIDE_CHAT_UNAVAILABLE_NOTE,
@@ -770,5 +772,5 @@ async def prepare_lecture_chat_turn(
         prepended_messages=prepended_messages,
         user_output_index=prev_output_sequence + 1 + len(prepended_messages),
         user_assistant_messages_only=True,
-        include_developer_messages=True,
+        include_developer_messages=context_v5 is None,
     )

@@ -951,6 +951,7 @@ async def test_prepare_lecture_slide_chat_turn_uses_video_context_shape(
 
     assert prep.user_output_index == 11
     assert prep.user_assistant_messages_only is True
+    assert prep.include_developer_messages is True
     assert lesson_context_message.is_hidden is True
     assert lesson_context_message.role == schemas.MessageRole.DEVELOPER
     assert "## Lecture Slide Narrations" in lesson_context_text
@@ -1029,9 +1030,11 @@ async def test_prepare_lecture_slide_chat_turn_uses_v5_compact_context(db, insti
         context_text = context_message.content[0].text
 
     assert prep.user_output_index == 9
+    assert prep.include_developer_messages is False
     assert [message.role for message in prep.prepended_messages] == [
         schemas.MessageRole.DEVELOPER,
     ]
+    assert context_message.output_index == 8
     assert context_message.is_hidden is True
     assert context_text.startswith("## Lecture Context")
     assert "## Lecture Slide Lesson Context" not in context_text
@@ -1054,6 +1057,67 @@ async def test_prepare_lecture_slide_chat_turn_uses_v5_compact_context(db, insti
         "Diagrams:\n- A callout box connects the term to the example." in context_text
     )
     assert "Equations or symbols:\n- x -> y" in context_text
+
+
+@with_institution(11, "Test Institution")
+async def test_prepare_lecture_slide_chat_turn_accepts_v5_context_without_transcript(
+    db, institution
+):
+    async with db.async_session() as session:
+        (
+            class_,
+            deck,
+            assistant,
+            thread,
+            questions,
+        ) = await _create_slide_runtime_fixture(session, institution)
+        thread.interaction_mode = schemas.InteractionMode.LECTURE_SLIDES
+        assistant.interaction_mode = schemas.InteractionMode.LECTURE_SLIDES
+        deck.transcript_data = None
+        deck.context_data = _slide_context_data_v5()
+        deck.context_version = 5
+        deck.lecture_slide_chat_available = True
+        pages = [
+            models.LectureSlidePage(
+                lecture_slide_deck=deck,
+                position=0,
+                start_offset_ms=0,
+                end_offset_ms=30_000,
+            ),
+            models.LectureSlidePage(
+                lecture_slide_deck=deck,
+                position=1,
+                start_offset_ms=30_000,
+                end_offset_ms=60_000,
+            ),
+        ]
+        state = models.LectureSlideThreadState(
+            thread=thread,
+            state=schemas.InteractiveLessonSessionState.PLAYING,
+            current_question=questions[0],
+            last_known_offset_ms=42_000,
+            furthest_offset_ms=52_000,
+            version=1,
+        )
+        session.add_all([*pages, state])
+        await session.flush()
+
+        prep = await lecture_slide_chat.prepare_lecture_chat_turn(
+            request=_server_request(session),
+            class_id=str(class_.id),
+            thread=thread,
+            user_id=123,
+            prev_output_sequence=7,
+            lecture_video_playback_position_ms=42_000,
+        )
+
+    assert prep.user_output_index == 9
+    assert prep.include_developer_messages is False
+    assert [message.role for message in prep.prepended_messages] == [
+        schemas.MessageRole.DEVELOPER,
+    ]
+    assert prep.prepended_messages[0].output_index == 8
+    assert "### Current Slide" in prep.prepended_messages[0].content[0].text
 
 
 @with_institution(11, "Test Institution")
@@ -1105,6 +1169,7 @@ async def test_prepare_lecture_slide_chat_turn_skips_initial_file_message_withou
         )
 
     assert prep.user_output_index == 2
+    assert prep.include_developer_messages is True
     assert [message.role for message in prep.prepended_messages] == [
         schemas.MessageRole.DEVELOPER,
         schemas.MessageRole.DEVELOPER,
@@ -1240,6 +1305,7 @@ async def test_prepare_lecture_slide_chat_turn_adds_dynamic_context_without_recr
         context_text = context_message.content[0].text
 
     assert prep.user_output_index == 22
+    assert prep.include_developer_messages is True
     assert [message.role for message in prep.prepended_messages] == [
         schemas.MessageRole.DEVELOPER,
     ]
