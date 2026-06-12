@@ -47,6 +47,7 @@ from pingpong.schemas import (
     InteractionMode,
     LECTURE_MESSAGE_POSITION_HEADING,
     MESSAGE_METADATA_LECTURE_PLAYBACK_POSITION_MS_V1,
+    MESSAGE_METADATA_LECTURE_SLIDE_NUMBER_V1,
     MessagePhase,
     MessagePartType,
     MessageRole,
@@ -963,6 +964,20 @@ async def build_response_input_item_list(
                 and not isinstance(playback_position_ms, bool)
                 and playback_position_ms >= 0
             ):
+                position_lines = [
+                    LECTURE_MESSAGE_POSITION_HEADING,
+                    "",
+                    f"playback_position_ms: {playback_position_ms}ms",
+                ]
+                slide_number = message_metadata.get(
+                    MESSAGE_METADATA_LECTURE_SLIDE_NUMBER_V1
+                )
+                if (
+                    isinstance(slide_number, int)
+                    and not isinstance(slide_number, bool)
+                    and slide_number >= 1
+                ):
+                    position_lines.append(f"slide_number: {slide_number}")
                 response_input_items_with_time.append(
                     (
                         message.created,
@@ -970,10 +985,7 @@ async def build_response_input_item_list(
                         "lecture_playback_position",
                         EasyInputMessageParam(
                             role=MessageRole.DEVELOPER,
-                            content=(
-                                f"{LECTURE_MESSAGE_POSITION_HEADING}\n\n"
-                                f"playback_position_ms: {playback_position_ms}ms"
-                            ),
+                            content="\n".join(position_lines),
                         ),
                     )
                 )
@@ -4959,9 +4971,14 @@ def format_instructions(
     disable_prompt_randomization: bool = False,
     thread_id: str | None = None,
     user_id: int | None = None,
-    lecture_video_mode: bool = False,
+    interaction_mode: InteractionMode | None = None,
 ) -> str:
     """Format instructions for a prompt."""
+
+    lecture_lesson_mode = interaction_mode in {
+        InteractionMode.LECTURE_VIDEO,
+        InteractionMode.LECTURE_SLIDES,
+    }
 
     if use_latex:
         diagram_formatting_instructions = (
@@ -4988,7 +5005,7 @@ def format_instructions(
             "foreignObject, or external assets inside SVG. Prefer simple inline "
             "styles or attributes and include a viewBox."
         )
-        if lecture_video_mode:
+        if lecture_lesson_mode:
             instructions += (
                 "\n\n"
                 "---Formatting: Lecture Dual Speech/Display Blocks---\n"
@@ -5180,17 +5197,33 @@ def format_instructions(
             """
         )
 
-    if lecture_video_mode:
+    if lecture_lesson_mode:
+        if interaction_mode == InteractionMode.LECTURE_SLIDES:
+            lecture_message_positions_instructions = (
+                "Developer messages the user can't see may appear before "
+                "student messages with `playback_position_ms` and "
+                "`slide_number`. Use these values to understand when each "
+                "student message was sent in the lecture timeline and which "
+                "slide was on screen, including whether the student has moved "
+                "on or is asking a follow-up question about the same part of "
+                "the lecture or your previous answer. Do not mention the "
+                "developer message or its syntax to the user."
+            )
+        else:
+            lecture_message_positions_instructions = (
+                "Developer messages the user can't see may appear before "
+                "student messages with `playback_position_ms`. Use these "
+                "values to understand when each student message was sent in "
+                "the lecture timeline, including whether the student has moved "
+                "on or is asking a follow-up question about the same part of "
+                "the lecture or your previous answer. Do not mention the "
+                "developer message or its syntax to the user."
+            )
         instructions += (
             "\n\n"
             "---Context: Lecture Message Positions---\n"
-            "Developer messages the user can't see may appear before student "
-            "messages with `playback_position_ms`. Use these values to "
-            "understand when each student message was sent in the lecture "
-            "timeline, including whether the student has moved on or is asking "
-            "a follow-up question about the same part of the lecture or "
-            "your previous answer. Do not mention the developer message "
-            "or its syntax to the user.\n\n"
+            + lecture_message_positions_instructions
+            + "\n\n"
             "---Formatting: Lecture Follow-ups---\n"
             "At the very end of your final answer, you may emit follow-up "
             "responses that the student can select to continue the chat. Three "

@@ -399,7 +399,7 @@ def _build_run_instructions(
             disable_prompt_randomization=asst.disable_prompt_randomization,
             thread_id=str(thread.id),
             user_id=user_id,
-            lecture_video_mode=True,
+            interaction_mode=thread.interaction_mode,
         )
     return thread.instructions
 
@@ -11468,7 +11468,7 @@ async def preview_assistant_instructions(
             disable_prompt_randomization=req.disable_prompt_randomization,
             user_id=request.state["session"].user.id,
             thread_id=f"preview_{uuid.uuid4()}",
-            lecture_video_mode=_is_lecture_lesson_mode(req.interaction_mode),
+            interaction_mode=req.interaction_mode,
         )
     }
 

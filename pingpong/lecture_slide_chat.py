@@ -768,9 +768,21 @@ async def prepare_lecture_chat_turn(
     slide_state.last_chat_context_end_ms = playback_position_ms
     request.state["db"].add(slide_state)
 
+    user_message_metadata: dict[str, Any] = {
+        schemas.MESSAGE_METADATA_LECTURE_PLAYBACK_POSITION_MS_V1: playback_position_ms,
+    }
+    current_slide = (
+        _slide_at_offset(deck, playback_position_ms) if deck is not None else None
+    )
+    if current_slide is not None:
+        user_message_metadata[schemas.MESSAGE_METADATA_LECTURE_SLIDE_NUMBER_V1] = (
+            current_slide.position + 1
+        )
+
     return LectureSlideChatTurnPreparation(
         prepended_messages=prepended_messages,
         user_output_index=prev_output_sequence + 1 + len(prepended_messages),
         user_assistant_messages_only=True,
         include_developer_messages=context_v5 is None,
+        user_message_metadata=user_message_metadata,
     )

@@ -1399,6 +1399,78 @@ async def test_build_response_input_item_list_skips_invalid_lecture_position_met
 
 
 @pytest.mark.asyncio
+async def test_build_response_input_item_list_includes_lecture_slide_number(db):
+    async with db.async_session() as session:
+        thread = models.Thread(thread_id="thread_lecture_slide_number", version=3)
+        session.add(thread)
+        await session.flush()
+
+        run = models.Run(status=schemas.RunStatus.COMPLETED, thread_id=thread.id)
+        session.add(run)
+        await session.flush()
+
+        session.add_all(
+            [
+                models.Message(
+                    message_status=schemas.MessageStatus.COMPLETED,
+                    run_id=run.id,
+                    thread_id=thread.id,
+                    output_index=1,
+                    role=schemas.MessageRole.USER,
+                    is_hidden=False,
+                    message_metadata={
+                        schemas.MESSAGE_METADATA_LECTURE_PLAYBACK_POSITION_MS_V1: 1000,
+                        schemas.MESSAGE_METADATA_LECTURE_SLIDE_NUMBER_V1: 3,
+                    },
+                    content=[
+                        models.MessagePart(
+                            part_index=0,
+                            type=schemas.MessagePartType.INPUT_TEXT,
+                            text="What does this slide mean?",
+                        )
+                    ],
+                ),
+                models.Message(
+                    message_status=schemas.MessageStatus.COMPLETED,
+                    run_id=run.id,
+                    thread_id=thread.id,
+                    output_index=2,
+                    role=schemas.MessageRole.USER,
+                    is_hidden=False,
+                    message_metadata={
+                        schemas.MESSAGE_METADATA_LECTURE_PLAYBACK_POSITION_MS_V1: 2000,
+                        schemas.MESSAGE_METADATA_LECTURE_SLIDE_NUMBER_V1: 0,
+                    },
+                    content=[
+                        models.MessagePart(
+                            part_index=0,
+                            type=schemas.MessagePartType.INPUT_TEXT,
+                            text="And this one?",
+                        )
+                    ],
+                ),
+            ]
+        )
+        await session.commit()
+        thread_id = thread.id
+
+    async with db.async_session() as session:
+        items = await build_response_input_item_list(session, thread_id=thread_id)
+
+    assert [item["role"] for item in items] == [
+        "developer",
+        "user",
+        "developer",
+        "user",
+    ]
+    # Valid slide number is appended to the position developer message.
+    assert items[0]["content"].endswith("playback_position_ms: 1000ms\nslide_number: 3")
+    # Invalid slide number (< 1) is omitted, position is still emitted.
+    assert items[2]["content"].endswith("playback_position_ms: 2000ms")
+    assert "slide_number" not in items[2]["content"]
+
+
+@pytest.mark.asyncio
 async def test_build_response_input_item_list_can_build_user_assistant_messages_only(
     db,
 ):

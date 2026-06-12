@@ -1,6 +1,7 @@
 import json
 import logging
 
+from pingpong import schemas
 from pingpong.ai import format_instructions
 from pingpong.say_transform import (
     PuaStreamTransformer,
@@ -37,7 +38,7 @@ def test_format_instructions_adds_block_contract_for_lecture_video_latex_only():
     instructions = format_instructions(
         "Be helpful.",
         use_latex=True,
-        lecture_video_mode=True,
+        interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
     )
 
     assert "---Formatting: Lecture Dual Speech/Display Blocks---" in instructions
@@ -96,7 +97,7 @@ def test_format_instructions_does_not_add_block_contract_for_normal_latex_chat()
     instructions = format_instructions(
         "Be helpful.",
         use_latex=True,
-        lecture_video_mode=False,
+        interaction_mode=None,
     )
 
     assert "---Formatting: LaTeX---" in instructions
@@ -109,7 +110,7 @@ def test_format_instructions_does_not_add_block_contract_without_latex():
     instructions = format_instructions(
         "Be helpful.",
         use_latex=False,
-        lecture_video_mode=True,
+        interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
     )
 
     assert "---Formatting: LaTeX---" not in instructions
@@ -117,6 +118,31 @@ def test_format_instructions_does_not_add_block_contract_without_latex():
     assert "---Context: Lecture Message Positions---" in instructions
     assert "`playback_position_ms`" in instructions
     assert "---Formatting: Lecture Follow-ups---" in instructions
+
+
+def test_format_instructions_omits_slide_number_for_lecture_video_positions():
+    instructions = format_instructions(
+        "Be helpful.",
+        use_latex=True,
+        interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+    )
+
+    assert "---Context: Lecture Message Positions---" in instructions
+    assert "`playback_position_ms`" in instructions
+    assert "`slide_number`" not in instructions
+
+
+def test_format_instructions_mentions_slide_number_for_lecture_slide_positions():
+    instructions = format_instructions(
+        "Be helpful.",
+        use_latex=True,
+        interaction_mode=schemas.InteractionMode.LECTURE_SLIDES,
+    )
+
+    assert "---Context: Lecture Message Positions---" in instructions
+    assert "`playback_position_ms`" in instructions
+    assert "`slide_number`" in instructions
+    assert "which slide was on screen" in instructions
 
 
 def test_transform_returns_body_for_display():
