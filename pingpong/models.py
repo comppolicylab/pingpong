@@ -8164,7 +8164,7 @@ class Run(Base):
     __tablename__ = "runs"
 
     id = Column(Integer, primary_key=True)
-    run_id = Column(String, unique=True, nullable=True)
+    run_id = Column(String, unique=True, nullable=True, comment="OpenAI object id")
 
     status = Column(SQLEnum(schemas.RunStatus), nullable=False)
     messages = relationship(
@@ -8681,6 +8681,22 @@ class Thread(Base):
         thread = result.scalars().first()
 
         return thread
+
+    @classmethod
+    async def get_all_by_version_and_interaction_mode(
+        cls,
+        session: AsyncSession,
+        version_lte: int,
+        interaction_mode: "schemas.InteractionMode",
+    ) -> AsyncGenerator["Thread", None]:
+        """Get all threads by version (lte) and interaction mode."""
+        stmt = select(Thread).where(
+            Thread.version <= version_lte,
+            Thread.interaction_mode == interaction_mode,
+        )
+        result = await session.stream_scalars(stmt)
+        async for thread in result:
+            yield thread
 
     @classmethod
     async def get_by_id(

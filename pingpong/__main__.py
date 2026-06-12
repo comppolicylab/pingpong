@@ -75,6 +75,9 @@ from pingpong.migrations.m11_move_lecture_slide_questions_to_slide_ends import (
 from pingpong.migrations.m12_upload_lecture_slide_sources_to_openai import (
     upload_lecture_slide_sources_to_openai,
 )
+from pingpong.migrations.m13_migrate_threads_to_v3 import (
+    migrate_threads_and_messages_to_v3,
+)
 from pingpong.now import _get_next_run_time, croner, utcnow
 from pingpong.schemas import LMSType, RunStatus
 from pingpong.lti.course_bridge import course_bridge_sync_all
@@ -1137,6 +1140,18 @@ def m12_upload_lecture_slide_sources_to_openai() -> None:
             )
 
     asyncio.run(_m12_upload_lecture_slide_sources_to_openai())
+
+
+@db.command("m13_migrate_threads_to_v3")
+def m13_migrate_threads_to_v3() -> None:
+    async def _m13_migrate_threads_to_v3() -> None:
+        async with config.db.driver.async_session() as session:
+            logger.info("Migrating threads to next-gen...")
+            await migrate_threads_and_messages_to_v3(session)
+            await session.commit()
+            logger.info("Done!")
+
+    asyncio.run(_m13_migrate_threads_to_v3())
 
 
 @db.command("m02_remove_responses_threads")
