@@ -1460,8 +1460,10 @@ async def test_send_message_creates_lecture_chat_run_with_hidden_context(
         message["content"][0]["text"]["value"]
         for message in thread_response.json()["messages"]
     ] == ["Why does latency matter more here?", VISIBLE_ASSISTANT_REPLY_TEXT]
-    assert schemas.MESSAGE_METADATA_LECTURE_PLAYBACK_POSITION_MS_V1 not in (
-        thread_response.json()["messages"][0].get("metadata") or {}
+    assert all(
+        schemas.MESSAGE_METADATA_LECTURE_PLAYBACK_POSITION_MS_V1
+        not in (message.get("metadata") or {})
+        for message in thread_response.json()["messages"]
     )
     assert thread_response.json()["thread"]["is_current_user_participant"] is True
 
@@ -1969,8 +1971,10 @@ async def test_list_thread_messages_hides_lecture_chat_context_messages(
         message["content"][0]["text"]["value"]
         for message in messages_response.json()["messages"]
     ] == ["Why does latency matter more here?", VISIBLE_ASSISTANT_REPLY_TEXT]
-    assert schemas.MESSAGE_METADATA_LECTURE_PLAYBACK_POSITION_MS_V1 not in (
-        messages_response.json()["messages"][0].get("metadata") or {}
+    assert all(
+        schemas.MESSAGE_METADATA_LECTURE_PLAYBACK_POSITION_MS_V1
+        not in (message.get("metadata") or {})
+        for message in messages_response.json()["messages"]
     )
     assert messages_response.json()["has_more"] is False
 

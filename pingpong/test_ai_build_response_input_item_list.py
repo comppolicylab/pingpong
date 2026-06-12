@@ -1332,6 +1332,73 @@ async def test_build_response_input_item_list_ignores_incomplete_tool_calls_for_
 
 
 @pytest.mark.asyncio
+async def test_build_response_input_item_list_skips_invalid_lecture_position_metadata(
+    db,
+):
+    async with db.async_session() as session:
+        thread = models.Thread(thread_id="thread_invalid_lecture_position", version=3)
+        session.add(thread)
+        await session.flush()
+
+        run = models.Run(status=schemas.RunStatus.COMPLETED, thread_id=thread.id)
+        session.add(run)
+        await session.flush()
+
+        session.add_all(
+            [
+                models.Message(
+                    message_status=schemas.MessageStatus.COMPLETED,
+                    run_id=run.id,
+                    thread_id=thread.id,
+                    output_index=1,
+                    role=schemas.MessageRole.USER,
+                    is_hidden=False,
+                    message_metadata={
+                        schemas.MESSAGE_METADATA_LECTURE_PLAYBACK_POSITION_MS_V1: True,
+                    },
+                    content=[
+                        models.MessagePart(
+                            part_index=0,
+                            type=schemas.MessagePartType.INPUT_TEXT,
+                            text="Boolean position?",
+                        )
+                    ],
+                ),
+                models.Message(
+                    message_status=schemas.MessageStatus.COMPLETED,
+                    run_id=run.id,
+                    thread_id=thread.id,
+                    output_index=2,
+                    role=schemas.MessageRole.USER,
+                    is_hidden=False,
+                    message_metadata={
+                        schemas.MESSAGE_METADATA_LECTURE_PLAYBACK_POSITION_MS_V1: -1,
+                    },
+                    content=[
+                        models.MessagePart(
+                            part_index=0,
+                            type=schemas.MessagePartType.INPUT_TEXT,
+                            text="Negative position?",
+                        )
+                    ],
+                ),
+            ]
+        )
+        await session.commit()
+        thread_id = thread.id
+
+    async with db.async_session() as session:
+        items = await build_response_input_item_list(session, thread_id=thread_id)
+
+    assert [item["role"] for item in items] == ["user", "user"]
+    assert all(
+        "playback_position_ms" not in item["content"]
+        for item in items
+        if isinstance(item.get("content"), str)
+    )
+
+
+@pytest.mark.asyncio
 async def test_build_response_input_item_list_can_build_user_assistant_messages_only(
     db,
 ):

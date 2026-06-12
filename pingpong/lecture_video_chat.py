@@ -48,7 +48,7 @@ class LectureChatTurnPreparation:
     prepended_messages: list[models.Message]
     user_output_index: int
     user_assistant_messages_only: bool = False
-    user_message_metadata: dict[str, object] | None = None
+    user_message_metadata: dict[str, str | bool | int] | None = None
 
 
 def _apply_lecture_video_chat_metadata(thread: models.Thread) -> None:

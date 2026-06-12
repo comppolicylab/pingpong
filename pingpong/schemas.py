@@ -3402,7 +3402,7 @@ class ThreadMessage(OpenAIMessage):
     content: list[ThreadMessageContent]
     """The content of the message in array of text and/or images."""
 
-    metadata: dict[str, Any] | None = None
+    metadata: dict[str, str | bool | int] | None = None
     """Set of 16 key-value pairs that can be attached to an object.
 
     This can be useful for storing additional information about the object in a
@@ -3412,7 +3412,8 @@ class ThreadMessage(OpenAIMessage):
     a maximum length of 512 characters.
 
     **Departure from OpenAI API:** This field can also include typed local metadata
-    values, including booleans and integers, in addition to strings.
+    values, such as integers, in addition to the previously supported strings and
+    booleans.
     """
 
 

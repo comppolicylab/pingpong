@@ -958,7 +958,11 @@ async def build_response_input_item_list(
             playback_position_ms = message_metadata.get(
                 MESSAGE_METADATA_LECTURE_PLAYBACK_POSITION_MS_V1
             )
-            if isinstance(playback_position_ms, int):
+            if (
+                isinstance(playback_position_ms, int)
+                and not isinstance(playback_position_ms, bool)
+                and playback_position_ms >= 0
+            ):
                 response_input_items_with_time.append(
                     (
                         message.created,
@@ -1247,7 +1251,7 @@ async def build_response_input_item_list(
 
     # Use output_index ordering to walk back through contiguous reasoning items.
     items_by_output = response_input_items_with_time
-    output_index_positions = {
+    ci_output_index_positions = {
         output_index: idx
         for idx, (_, output_index, item_type, _) in enumerate(items_by_output)
         if item_type == "code_interpreter_call"
@@ -1266,7 +1270,7 @@ async def build_response_input_item_list(
 
     reasoning_output_indices_to_remove: set[int] = set()
     for ci_output_index in expired_ci_output_indices:
-        position = output_index_positions.get(ci_output_index)
+        position = ci_output_index_positions.get(ci_output_index)
         if position is None:
             continue
         scan_index = position - 1
