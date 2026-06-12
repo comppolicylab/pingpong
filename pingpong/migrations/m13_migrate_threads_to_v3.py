@@ -63,9 +63,9 @@ async def _migrate_thread(
 
     # empty thread, nothing else to migrate
     if not oai_messages:
-        thread.version = 3
-        session.add(thread)
+        thread.version = 2
         await session.flush()
+        session.add(thread)
         return
 
     output_index = -1
@@ -74,7 +74,7 @@ async def _migrate_thread(
             session, openai_client, thread, oai_msg, output_index
         )
 
-    thread.version = 3
+    thread.version = 2
     session.add(thread)
     await session.flush()
 
