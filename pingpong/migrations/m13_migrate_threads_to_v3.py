@@ -72,7 +72,7 @@ async def _migrate_thread(
     output_index = -1
     for oai_msg in oai_messages:
         output_index = await _store_message_and_run(
-            session, thread, oai_msg, output_index
+            session, openai_client, thread, oai_msg, output_index
         )
 
     thread.version = 3
