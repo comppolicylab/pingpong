@@ -30,6 +30,7 @@
 import { StreamProcessorSrc } from './worklets/stream_processor';
 import { AudioAnalysis, type AudioAnalysisOutputType } from './analysis/audio_analysis';
 import { AUDIO_WORKLET_UNSUPPORTED_MESSAGE, isAudioWorkletSupported } from './audio_support';
+import { ensureStreamProcessorModule } from './shared_audio_context';
 
 export type OnAudioPartStartedProcessor = (data: {
 	trackId: string;
@@ -44,6 +45,13 @@ export type OnAudioPartEndedProcessor = (data: {
 export type OnPlaybackStoppedProcessor = () => void;
 interface WavStreamPlayerOptions {
 	sampleRate?: number;
+	/**
+	 * Externally owned AudioContext to play through (e.g. one unlocked during a
+	 * user gesture). Its sampleRate must match `sampleRate`; otherwise the
+	 * player falls back to creating its own context. A provided context is
+	 * never closed by this player.
+	 */
+	context?: AudioContext;
 	stopOnEmptyBuffer?: boolean;
 	onAudioPartStarted?: OnAudioPartStartedProcessor;
 	onAudioPartEnded?: OnAudioPartEndedProcessor;
@@ -66,6 +74,8 @@ const TRACK_SAMPLE_OFFSET_TIMEOUT_MS = 250;
 export class WavStreamPlayer {
 	private scriptSrc: string;
 	private sampleRate: number;
+	private providedContext: AudioContext | null;
+	private ownsContext: boolean;
 	private context: AudioContext | null;
 	private stream: AudioWorkletNode | null;
 	private analyser: AnalyserNode | null;
@@ -84,6 +94,7 @@ export class WavStreamPlayer {
 	 */
 	constructor({
 		sampleRate = 44100,
+		context,
 		stopOnEmptyBuffer = true,
 		onAudioPartStarted,
 		onAudioPartEnded,
@@ -91,6 +102,8 @@ export class WavStreamPlayer {
 	}: WavStreamPlayerOptions = {}) {
 		this.scriptSrc = StreamProcessorSrc;
 		this.sampleRate = sampleRate;
+		this.providedContext = context ?? null;
+		this.ownsContext = true;
 		this.context = null;
 		this.stream = null;
 		this.analyser = null;
@@ -112,12 +125,22 @@ export class WavStreamPlayer {
 			throw new Error(AUDIO_WORKLET_UNSUPPORTED_MESSAGE);
 		}
 
-		this.context = new AudioContext({ sampleRate: this.sampleRate });
+		if (
+			this.providedContext &&
+			this.providedContext.state !== 'closed' &&
+			this.providedContext.sampleRate === this.sampleRate
+		) {
+			this.context = this.providedContext;
+			this.ownsContext = false;
+		} else {
+			this.context = new AudioContext({ sampleRate: this.sampleRate });
+			this.ownsContext = true;
+		}
 		if (this.context.state === 'suspended') {
 			await this.context.resume();
 		}
 		try {
-			await this.context.audioWorklet.addModule(this.scriptSrc);
+			await ensureStreamProcessorModule(this.context);
 		} catch (e) {
 			throw new Error(`Could not add audioWorklet module: ${this.scriptSrc}`, { cause: e });
 		}
@@ -347,7 +370,10 @@ export class WavStreamPlayer {
 		if (this.context) {
 			const context = this.context;
 			this.context = null;
-			await context.close();
+			// A provided (shared) context outlives this player.
+			if (this.ownsContext) {
+				await context.close();
+			}
 		}
 	}
 }

@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { WavStreamPlayer } from './wav_stream_player';
+import { FakeAudioContext, stubWebAudioGlobals } from './fake_audio_context_test_util';
 
 describe('WavStreamPlayer', () => {
 	afterEach(() => {
 		vi.useRealTimers();
+		vi.unstubAllGlobals();
 		vi.restoreAllMocks();
 	});
 
@@ -78,5 +80,43 @@ describe('WavStreamPlayer', () => {
 		player.finish();
 
 		expect(onPlaybackStopped).toHaveBeenCalledTimes(1);
+	});
+
+	it('reuses a provided context with a matching sample rate and never closes it', async () => {
+		const instances = stubWebAudioGlobals();
+		const shared = new FakeAudioContext({ sampleRate: 24000 });
+		const player = new WavStreamPlayer({
+			sampleRate: 24000,
+			context: shared as unknown as AudioContext
+		});
+
+		await player.connect();
+
+		// No context of its own was created.
+		expect(instances).toHaveLength(0);
+		expect(shared.resume).toHaveBeenCalledTimes(1);
+		expect(shared.audioWorklet.addModule).toHaveBeenCalledTimes(1);
+
+		await player.close();
+		expect(shared.close).not.toHaveBeenCalled();
+	});
+
+	it('creates and closes its own context when the provided sample rate differs', async () => {
+		const instances = stubWebAudioGlobals();
+		const mismatched = new FakeAudioContext({ sampleRate: 48000 });
+		const player = new WavStreamPlayer({
+			sampleRate: 24000,
+			context: mismatched as unknown as AudioContext
+		});
+
+		await player.connect();
+
+		expect(instances).toHaveLength(1);
+		expect(instances[0].sampleRate).toBe(24000);
+		expect(mismatched.resume).not.toHaveBeenCalled();
+
+		await player.close();
+		expect(instances[0].close).toHaveBeenCalledTimes(1);
+		expect(mismatched.close).not.toHaveBeenCalled();
 	});
 });
