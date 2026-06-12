@@ -73,7 +73,7 @@ class LectureSlideAdapter:
 
     def lesson_chat_available(self, asset: object) -> bool:
         deck = cast(models.LectureSlideDeck, asset)
-        return deck.context_version == 4 and deck.lecture_slide_chat_available
+        return deck.context_version in {4, 5} and deck.lecture_slide_chat_available
 
     def initial_state_fields(self) -> dict[str, Any]:
         return {"last_chat_context_end_ms": 0}

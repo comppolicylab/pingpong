@@ -87,6 +87,61 @@ def _deck(
     )
 
 
+def _generated_slide_context_kwargs() -> dict:
+    return {
+        "deck_summary": "A compact lesson summary.",
+        "slides": [
+            schemas.LectureSlideContextSlideV5(
+                slide_position=0,
+                title="First",
+                start_offset_ms=0,
+                end_offset_ms=500,
+                visible_text="First slide",
+                visual_context="A simple opening slide.",
+                narration_summary="The narration introduces the topic.",
+                key_points=["The first point matters."],
+                diagrams=[],
+                equations_or_symbols=[],
+            ),
+            schemas.LectureSlideContextSlideV5(
+                slide_position=1,
+                title="Second",
+                start_offset_ms=500,
+                end_offset_ms=1200,
+                visible_text="Second slide",
+                visual_context="A follow-up example.",
+                narration_summary="The narration applies the topic.",
+                key_points=["The example applies the point."],
+                diagrams=[],
+                equations_or_symbols=[],
+            ),
+        ],
+        "summary_checkpoints": [
+            schemas.LectureSlideContextSummaryCheckpointV5(
+                end_offset_ms=500,
+                end_slide_position=0,
+                summary="The topic has been introduced.",
+            ),
+            schemas.LectureSlideContextSummaryCheckpointV5(
+                end_offset_ms=1200,
+                end_slide_position=1,
+                summary="The topic has been introduced and applied.",
+            ),
+        ],
+        "moment_contexts": [
+            schemas.LectureSlideContextMomentV5(
+                start_offset_ms=0,
+                center_offset_ms=500,
+                end_offset_ms=1000,
+                slide_position=0,
+                before="The lesson is beginning.",
+                at="The first point is introduced.",
+                after="The lesson moves to the example.",
+            )
+        ],
+    }
+
+
 async def _create_class_and_deck(
     db, *, deck_id: int = 1, slide_count: int = 1
 ) -> models.LectureSlideDeck:
@@ -800,8 +855,12 @@ async def test_generate_slide_manifest_uses_pdf_and_transcript_not_extracted_tex
     assert "Not every slide needs a question" in instructions
     assert "A question appears between slides" in instructions
     assert "set slide_position to the zero-based slide after which" in instructions
-    assert "summary_checkpoints" not in instructions
-    assert "moment_contexts" not in instructions
+    assert "SLIDE CHAT CONTEXT:" in instructions
+    assert "deck_summary" in instructions
+    assert "summary_checkpoints" in instructions
+    assert "moment_contexts" in instructions
+    assert "visible_text" in instructions
+    assert "visual_context" in instructions
     assert (
         "Each question's options array uses option_text, post_answer_text, and correct"
         in instructions
@@ -933,6 +992,7 @@ async def test_persist_slide_manifest_replaces_existing_questions(db, monkeypatc
         run_id = run.id
 
     manifest = lecture_slide_processing.GeneratedSlideManifest(
+        **_generated_slide_context_kwargs(),
         questions=[
             lecture_slide_processing.GeneratedSlideQuestion(
                 slide_position=0,
@@ -986,8 +1046,12 @@ async def test_persist_slide_manifest_replaces_existing_questions(db, monkeypatc
             session, 1
         )
         assert deck is not None
-        assert deck.context_version == 4
-        assert deck.context_data == {}
+        assert deck.context_version == 5
+        assert deck.context_data is not None
+        assert deck.context_data["version"] == 5
+        assert deck.context_data["deck_summary"] == "A compact lesson summary."
+        assert deck.context_data["slides"][0]["title"] == "First"
+        assert deck.lecture_slide_chat_available is True
         assert deck.transcript_data is not None
         assert len(deck.questions) == 2
         assert deck.questions[0].question_text == "New question?"

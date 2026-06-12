@@ -190,6 +190,57 @@ def _slide_transcript_data() -> dict:
     }
 
 
+def _slide_context_data_v5() -> dict:
+    return {
+        "version": 5,
+        "deck_summary": "A short lesson about using examples to explain an idea.",
+        "slides": [
+            {
+                "slide_position": 0,
+                "title": "Core idea",
+                "start_offset_ms": 0,
+                "end_offset_ms": 30_000,
+                "visible_text": "Core idea",
+                "visual_context": "A title slide with a simple definition.",
+                "narration_summary": "The narration introduces the core idea.",
+                "key_points": ["The idea needs a concrete example."],
+                "diagrams": [],
+                "equations_or_symbols": [],
+            },
+            {
+                "slide_position": 1,
+                "title": "Example",
+                "start_offset_ms": 30_000,
+                "end_offset_ms": 60_000,
+                "visible_text": "Example",
+                "visual_context": "A worked example is shown in a callout.",
+                "narration_summary": "The narration walks through the example.",
+                "key_points": ["Examples make the concept testable."],
+                "diagrams": ["A callout box connects the term to the example."],
+                "equations_or_symbols": ["x -> y"],
+            },
+        ],
+        "summary_checkpoints": [
+            {
+                "end_offset_ms": 39_000,
+                "end_slide_position": 1,
+                "summary": "The lesson has introduced the idea and started the example.",
+            }
+        ],
+        "moment_contexts": [
+            {
+                "start_offset_ms": 36_000,
+                "center_offset_ms": 42_000,
+                "end_offset_ms": 48_000,
+                "slide_position": 1,
+                "before": "The learner has just moved from the definition to the example.",
+                "at": "The example is being connected to the visible callout.",
+                "after": "The narration will finish the example and prepare to continue.",
+            }
+        ],
+    }
+
+
 @with_institution(11, "Test Institution")
 async def test_initialize_thread_state_and_acquire_control_for_lecture_slides(
     db, institution
@@ -819,6 +870,24 @@ async def test_lecture_slide_session_uses_stored_chat_available_flag(db, institu
 
 
 @with_institution(11, "Test Institution")
+async def test_lecture_slide_session_accepts_v5_chat_context(db, institution):
+    async with db.async_session() as session:
+        _, deck, _, thread, _ = await _create_slide_runtime_fixture(
+            session, institution
+        )
+        deck.context_version = 5
+        deck.lecture_slide_chat_available = True
+        lesson_session = await lecture_slide_runtime.get_thread_session(
+            session,
+            thread.id,
+            request_actor_user_id=123,
+        )
+
+    assert lesson_session is not None
+    assert lesson_session.lesson_chat_available is True
+
+
+@with_institution(11, "Test Institution")
 async def test_prepare_lecture_slide_chat_turn_uses_video_context_shape(
     db, institution
 ):
@@ -904,6 +973,87 @@ async def test_prepare_lecture_slide_chat_turn_uses_video_context_shape(
     assert "### Upcoming Knowledge Check" in context_text
     assert "### Current Slide" not in context_text
     assert "Extracted text:" not in context_text
+
+
+@with_institution(11, "Test Institution")
+async def test_prepare_lecture_slide_chat_turn_uses_v5_compact_context(db, institution):
+    async with db.async_session() as session:
+        (
+            class_,
+            deck,
+            assistant,
+            thread,
+            questions,
+        ) = await _create_slide_runtime_fixture(session, institution)
+        thread.interaction_mode = schemas.InteractionMode.LECTURE_SLIDES
+        assistant.interaction_mode = schemas.InteractionMode.LECTURE_SLIDES
+        deck.transcript_data = _slide_transcript_data()
+        deck.context_data = _slide_context_data_v5()
+        deck.context_version = 5
+        deck.lecture_slide_chat_available = True
+        deck.slide_count = 2
+        pages = [
+            models.LectureSlidePage(
+                lecture_slide_deck=deck,
+                position=0,
+                start_offset_ms=0,
+                end_offset_ms=30_000,
+            ),
+            models.LectureSlidePage(
+                lecture_slide_deck=deck,
+                position=1,
+                start_offset_ms=30_000,
+                end_offset_ms=60_000,
+            ),
+        ]
+        state = models.LectureSlideThreadState(
+            thread=thread,
+            state=schemas.InteractiveLessonSessionState.PLAYING,
+            current_question=questions[0],
+            last_known_offset_ms=42_000,
+            furthest_offset_ms=52_000,
+            version=1,
+        )
+        session.add_all([*pages, state])
+        await session.flush()
+
+        prep = await lecture_slide_chat.prepare_lecture_chat_turn(
+            request=_server_request(session),
+            class_id=str(class_.id),
+            thread=thread,
+            user_id=123,
+            prev_output_sequence=7,
+            lecture_video_playback_position_ms=42_000,
+        )
+        context_message = prep.prepended_messages[0]
+        context_text = context_message.content[0].text
+
+    assert prep.user_output_index == 9
+    assert [message.role for message in prep.prepended_messages] == [
+        schemas.MessageRole.DEVELOPER,
+    ]
+    assert context_message.is_hidden is True
+    assert context_text.startswith("## Lecture Context")
+    assert "## Lecture Slide Lesson Context" not in context_text
+    assert "Current offset: 42000ms" in context_text
+    assert "Furthest watched offset: 52000ms" in context_text
+    assert "Current slide: Slide 2" in context_text
+    assert "Furthest reached slide: Slide 2" in context_text
+    assert "### Lecture Summary So Far" in context_text
+    assert "Through 39000ms / Slide 2:" in context_text
+    assert "### Current Moment Context" in context_text
+    assert "Before this moment:" in context_text
+    assert "At this moment:" in context_text
+    assert "After this moment:" in context_text
+    assert "### Current Slide" in context_text
+    assert "Slide 2: Example" in context_text
+    assert "Visible text:\nExample" in context_text
+    assert "Visual context:\nA worked example is shown in a callout." in context_text
+    assert "Key points:\n- Examples make the concept testable." in context_text
+    assert (
+        "Diagrams:\n- A callout box connects the term to the example." in context_text
+    )
+    assert "Equations or symbols:\n- x -> y" in context_text
 
 
 @with_institution(11, "Test Institution")
