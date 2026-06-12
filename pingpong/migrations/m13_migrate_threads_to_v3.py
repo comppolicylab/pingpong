@@ -64,7 +64,6 @@ async def _migrate_thread(
     # empty thread, nothing else to migrate
     if not oai_messages:
         thread.version = 3
-        thread.thread_id = None
         session.add(thread)
         await session.flush()
         return
@@ -76,7 +75,6 @@ async def _migrate_thread(
         )
 
     thread.version = 3
-    thread.thread_id = None
     session.add(thread)
     await session.flush()
 
