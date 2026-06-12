@@ -84,6 +84,9 @@ def test_format_instructions_adds_block_contract_for_lecture_video_latex_only():
     ) in instructions
     assert "A block may not contain another block" in instructions
     assert "Do not place blocks inside markdown links" in instructions
+    assert "---Context: Lecture Message Positions---" in instructions
+    assert "`playback_position_ms`" in instructions
+    assert "whether the student has moved on" in instructions
     assert "---Formatting: Lecture Follow-ups---" in instructions
     assert f"{SAY_MARKER_START}followups{SAY_MARKER_SEPARATOR}" in instructions
     assert '"responses"' in instructions
@@ -98,6 +101,7 @@ def test_format_instructions_does_not_add_block_contract_for_normal_latex_chat()
 
     assert "---Formatting: LaTeX---" in instructions
     assert "---Formatting: Lecture Dual Speech/Display Blocks---" not in instructions
+    assert "---Context: Lecture Message Positions---" not in instructions
     assert "---Formatting: Lecture Follow-ups---" not in instructions
 
 
@@ -110,6 +114,8 @@ def test_format_instructions_does_not_add_block_contract_without_latex():
 
     assert "---Formatting: LaTeX---" not in instructions
     assert "---Formatting: Lecture Dual Speech/Display Blocks---" not in instructions
+    assert "---Context: Lecture Message Positions---" in instructions
+    assert "`playback_position_ms`" in instructions
     assert "---Formatting: Lecture Follow-ups---" in instructions
 
 
