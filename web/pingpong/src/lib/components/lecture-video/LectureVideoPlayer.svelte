@@ -103,6 +103,7 @@
 		paused = $bindable(true),
 		endedPlayback = $bindable(false),
 		effectiveVolume = $bindable(1),
+		mediaAspectRatio = $bindable(null),
 		ontimeupdate,
 		onseek,
 		onended,
@@ -135,6 +136,7 @@
 		paused?: boolean;
 		endedPlayback?: boolean;
 		effectiveVolume?: number;
+		mediaAspectRatio?: number | null;
 		ontimeupdate?: () => void;
 		onseek?: (toOffsetMs: number, fromOffsetMs: number) => void;
 		onended?: () => void;
@@ -307,6 +309,11 @@
 			: '--:-- / --:--'
 	);
 	let titleText = $derived(displayTitle.trim() || 'Lecture Video');
+	let measuredMediaAspectRatio = $derived(
+		mediaAspectRatio && Number.isFinite(mediaAspectRatio) && mediaAspectRatio > 0
+			? mediaAspectRatio
+			: null
+	);
 	let questionControlsLocked = $derived(questionPendingControls && maxSeekOffsetMs == null);
 	let captionsAvailable = $derived(Boolean(captionsSrc));
 	let captionOverlayBottomPx = $derived(
@@ -680,6 +687,13 @@
 	}
 
 	function handleLoadedMetadata() {
+		if (
+			videoElement instanceof HTMLVideoElement &&
+			videoElement.videoWidth > 0 &&
+			videoElement.videoHeight > 0
+		) {
+			mediaAspectRatio = videoElement.videoWidth / videoElement.videoHeight;
+		}
 		setMainVideoCurrentTime(startOffsetMs);
 	}
 
@@ -1313,7 +1327,9 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
 	bind:this={playerContainerElement}
-	class="relative aspect-video overflow-hidden rounded-3xl border border-slate-800/80 bg-black xl:h-full xl:w-full"
+	class="relative overflow-hidden rounded-3xl border border-slate-800/80 bg-black"
+	class:aspect-video={measuredMediaAspectRatio == null}
+	style:aspect-ratio={measuredMediaAspectRatio ? String(measuredMediaAspectRatio) : undefined}
 	onkeydown={handleKeydown}
 	onmousemove={handleMouseMove}
 	onmouseenter={handleMouseEnter}
