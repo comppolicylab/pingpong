@@ -24,7 +24,7 @@ from openai.types import Reasoning
 import uuid_utils as uuid
 from openai.types.audio import TranscriptionWord
 from openai.types.responses.response_input_param import ResponseInputParam
-from pydantic import BaseModel, ConfigDict, Field, create_model
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 from pydub import AudioSegment
 from pypdf import PdfReader
 from sqlalchemy import and_, delete, func, or_, select, update
@@ -270,6 +270,14 @@ class GeneratedSlideQuestion(BaseModel):
 class GeneratedSlideManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    deck_summary: str = ""
+    slides: list[schemas.LectureSlideContextSlideV5] = Field(default_factory=list)
+    summary_checkpoints: list[schemas.LectureSlideContextSummaryCheckpointV5] = Field(
+        default_factory=list
+    )
+    moment_contexts: list[schemas.LectureSlideContextMomentV5] = Field(
+        default_factory=list
+    )
     questions: list[GeneratedSlideQuestion] = Field(default_factory=list)
 
 
@@ -367,7 +375,25 @@ GENERATION GUIDANCE SPECIFIC TO THIS LESSON:
 
 YOUR TASK:
 Create a JSON object with these top-level fields:
+- deck_summary: a compact one-paragraph summary of the full slide lesson.
+- slides: compact per-slide chat context objects.
+- summary_checkpoints: cumulative summaries through increasing timeline offsets.
+- moment_contexts: local before/at/after context windows around important moments.
 - questions: optional multiple-choice comprehension checks placed after selected slides.
+
+SLIDE CHAT CONTEXT:
+- Include one slides entry for each slide in the supplied generation window.
+- slide_position is the zero-based slide number.
+- title should match the slide title when visible; otherwise use a short descriptive title.
+- start_offset_ms and end_offset_ms must come from the timing source row when available.
+- visible_text should compactly capture important readable text on the slide.
+- visual_context should describe diagrams, layout, images, charts, code, symbols, or other visual information needed to answer questions about the slide.
+- narration_summary should summarize what the narration says for this slide.
+- key_points should contain concise concept bullets grounded in the PDF and transcript.
+- diagrams and equations_or_symbols should list notable visual diagrams or equations/symbols, or be empty arrays.
+- For summary_checkpoints, each summary is cumulative from the start of the lesson through end_offset_ms, and end_slide_position is the zero-based slide reached by that offset.
+- For moment_contexts, create useful local windows with start_offset_ms <= center_offset_ms <= end_offset_ms and a zero-based slide_position.
+- If a generation window is provided, create slides, summary_checkpoints, and moment_contexts only for that requested generation window, not the surrounding context overlap.
 
 QUESTIONS:
 - Not every slide needs a question. Add questions only after slides with a clear, useful concept check.
@@ -1029,7 +1055,7 @@ async def process_claimed_run(assignment: RunAssignment) -> None:
 async def _deck_has_slide_manifest(deck_id: int) -> bool:
     async with config.db.driver.async_session() as session:
         deck = await models.LectureSlideDeck.get_by_id(session, deck_id)
-        if deck is None or deck.context_version != 4:
+        if deck is None or deck.context_version not in {4, 5}:
             return False
         question_count = await session.scalar(
             select(func.count(models.LectureSlideQuestion.id)).where(
@@ -2396,6 +2422,15 @@ def _split_slide_manifest_generation_chunk(
     ]
 
 
+def _offset_is_in_window(
+    offset_ms: int, start_offset_ms: int, end_offset_ms: int
+) -> bool:
+    return (
+        (start_offset_ms == 0 and offset_ms >= start_offset_ms)
+        or offset_ms > start_offset_ms
+    ) and offset_ms <= end_offset_ms
+
+
 def _filter_slide_questions_for_window(
     questions: list[GeneratedSlideQuestion],
     *,
@@ -2415,12 +2450,51 @@ def _filter_slide_questions_for_window(
         if pause_offsets is None:
             continue
         stop_offset_ms = pause_offsets["stop_offset_ms"]
-        if (
-            (start_offset_ms == 0 and stop_offset_ms >= start_offset_ms)
-            or stop_offset_ms > start_offset_ms
-        ) and stop_offset_ms <= end_offset_ms:
+        if _offset_is_in_window(stop_offset_ms, start_offset_ms, end_offset_ms):
             filtered.append(question)
     return filtered
+
+
+def _filter_slide_context_for_window(
+    manifest: GeneratedSlideManifest,
+    *,
+    page_ranges: list[SlidePageRange],
+    start_offset_ms: int,
+    end_offset_ms: int,
+) -> GeneratedSlideManifest:
+    window_slide_positions = {
+        int(page_range["slide_position"])
+        for page_range in page_ranges
+        if page_range["start_offset_ms"] is not None
+        and page_range["end_offset_ms"] is not None
+        and _offset_is_in_window(
+            page_range["end_offset_ms"], start_offset_ms, end_offset_ms
+        )
+        and page_range["start_offset_ms"] <= end_offset_ms
+    }
+    return manifest.model_copy(
+        update={
+            "slides": [
+                slide
+                for slide in manifest.slides
+                if slide.slide_position in window_slide_positions
+            ],
+            "summary_checkpoints": [
+                checkpoint
+                for checkpoint in manifest.summary_checkpoints
+                if _offset_is_in_window(
+                    checkpoint.end_offset_ms, start_offset_ms, end_offset_ms
+                )
+            ],
+            "moment_contexts": [
+                moment
+                for moment in manifest.moment_contexts
+                if _offset_is_in_window(
+                    moment.center_offset_ms, start_offset_ms, end_offset_ms
+                )
+            ],
+        }
+    )
 
 
 def _slide_question_pause_offsets(
@@ -2473,6 +2547,39 @@ def _validate_generated_slide_manifest(
             )
         valid_questions.append(question)
     return manifest.model_copy(update={"questions": valid_questions})
+
+
+def _validated_slide_context_v5(
+    manifest: GeneratedSlideManifest,
+) -> schemas.LectureSlideContextV5 | None:
+    if (
+        not manifest.deck_summary.strip()
+        or not manifest.slides
+        or not manifest.summary_checkpoints
+        or not manifest.moment_contexts
+    ):
+        return None
+    return schemas.LectureSlideContextV5.model_validate(
+        {
+            "version": 5,
+            "deck_summary": manifest.deck_summary,
+            "slides": [slide.model_dump() for slide in manifest.slides],
+            "summary_checkpoints": [
+                checkpoint.model_dump() for checkpoint in manifest.summary_checkpoints
+            ],
+            "moment_contexts": [
+                moment.model_dump() for moment in manifest.moment_contexts
+            ],
+        }
+    )
+
+
+def _validated_existing_slide_context_v5(
+    deck: models.LectureSlideDeck,
+) -> schemas.LectureSlideContextV5 | None:
+    if deck.context_version != 5 or deck.context_data is None:
+        return None
+    return schemas.LectureSlideContextV5.model_validate(deck.context_data)
 
 
 def _is_context_limit_error(exc: Exception) -> bool:
@@ -2807,6 +2914,12 @@ async def _generate_slide_manifest_for_window(
                 )
             }
         )
+        manifest = _filter_slide_context_for_window(
+            manifest,
+            page_ranges=page_ranges,
+            start_offset_ms=chunk.generation_start_ms,
+            end_offset_ms=chunk.generation_end_ms,
+        )
     return _validate_generated_slide_manifest(
         manifest,
         page_ranges=page_ranges,
@@ -2817,10 +2930,61 @@ async def _generate_slide_manifest_for_window(
 def _merge_slide_chunk_manifests(
     chunk_manifests: list[GeneratedSlideManifest],
 ) -> GeneratedSlideManifest:
+    def append_unique_summary(parts: list[str], summary: str) -> None:
+        summary = summary.strip()
+        if summary and summary not in parts:
+            parts.append(summary)
+
+    slides = sorted(
+        {
+            slide.slide_position: slide
+            for manifest in chunk_manifests
+            for slide in manifest.slides
+        }.values(),
+        key=lambda item: item.slide_position,
+    )
+    sorted_summary_checkpoints = sorted(
+        {
+            checkpoint.end_offset_ms: checkpoint
+            for manifest in chunk_manifests
+            for checkpoint in manifest.summary_checkpoints
+        }.values(),
+        key=lambda item: item.end_offset_ms,
+    )
+    cumulative_summary_parts: list[str] = []
+    summary_checkpoints = []
+    for checkpoint in sorted_summary_checkpoints:
+        append_unique_summary(cumulative_summary_parts, checkpoint.summary)
+        summary_checkpoints.append(
+            checkpoint.model_copy(
+                update={"summary": " ".join(cumulative_summary_parts)}
+            )
+        )
+    moment_contexts = sorted(
+        {
+            moment.center_offset_ms: moment
+            for manifest in chunk_manifests
+            for moment in manifest.moment_contexts
+        }.values(),
+        key=lambda item: item.center_offset_ms,
+    )
+    deck_summary = (
+        summary_checkpoints[-1].summary
+        if summary_checkpoints
+        else " ".join(
+            manifest.deck_summary.strip()
+            for manifest in chunk_manifests
+            if manifest.deck_summary.strip()
+        )
+    )
     return GeneratedSlideManifest(
+        deck_summary=deck_summary,
+        slides=slides,
+        summary_checkpoints=summary_checkpoints,
+        moment_contexts=moment_contexts,
         questions=[
             question for manifest in chunk_manifests for question in manifest.questions
-        ]
+        ],
     )
 
 
@@ -2910,11 +3074,42 @@ async def _persist_slide_manifest(
             ],
         )
 
-        context_data = dict(deck.context_data or {})
-        context_data.pop(schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY, None)
-        deck.context_data = context_data
-        deck.context_version = 4
-        deck.lecture_slide_chat_available = bool(transcript)
+        try:
+            context_v5 = _validated_slide_context_v5(manifest)
+        except (ValidationError, ValueError):
+            logger.warning(
+                "Generated lecture slide v5 context is invalid. "
+                "lecture_slide_deck_id=%s",
+                deck.id,
+                exc_info=True,
+            )
+            context_v5 = None
+
+        existing_context_v5 = None
+        if context_v5 is None:
+            try:
+                existing_context_v5 = _validated_existing_slide_context_v5(deck)
+            except (ValidationError, ValueError):
+                existing_context_v5 = None
+
+        if context_v5 is not None:
+            deck.context_data = context_v5.model_dump()
+            deck.context_version = 5
+            deck.lecture_slide_chat_available = True
+        elif existing_context_v5 is not None:
+            deck.context_data = existing_context_v5.model_dump()
+            deck.context_version = 5
+            deck.lecture_slide_chat_available = True
+        else:
+            context_data = dict(deck.context_data or {})
+            context_data.pop(schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY, None)
+            deck.context_data = context_data
+            if transcript:
+                deck.context_version = 4
+                deck.lecture_slide_chat_available = True
+            else:
+                deck.context_version = None
+                deck.lecture_slide_chat_available = False
         deck.transcript_data = transcript_data_from_words(transcript)
         await session.commit()
 

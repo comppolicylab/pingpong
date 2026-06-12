@@ -937,6 +937,126 @@ class LectureVideoManifestMomentContextV4(BaseModel):
         return self
 
 
+class LectureSlideContextSlideV5(BaseModel):
+    slide_position: int = Field(..., ge=0)
+    title: str = ""
+    start_offset_ms: int | None = Field(None, ge=0)
+    end_offset_ms: int | None = Field(None, ge=0)
+    visible_text: str = ""
+    visual_context: str = ""
+    narration_summary: str = ""
+    key_points: list[str] = Field(default_factory=list)
+    diagrams: list[str] = Field(default_factory=list)
+    equations_or_symbols: list[str] = Field(default_factory=list)
+
+    @field_validator(
+        "title",
+        "visible_text",
+        "visual_context",
+        "narration_summary",
+        mode="after",
+    )
+    @classmethod
+    def strip_text_field(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("key_points", "diagrams", "equations_or_symbols", mode="after")
+    @classmethod
+    def strip_text_list(cls, value: list[str]) -> list[str]:
+        return [item.strip() for item in value if item.strip()]
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "LectureSlideContextSlideV5":
+        if (
+            self.start_offset_ms is not None
+            and self.end_offset_ms is not None
+            and self.end_offset_ms < self.start_offset_ms
+        ):
+            raise ValueError(
+                "end_offset_ms must be greater than or equal to start_offset_ms"
+            )
+        return self
+
+
+class LectureSlideContextSummaryCheckpointV5(BaseModel):
+    end_offset_ms: int = Field(..., ge=0)
+    end_slide_position: int = Field(..., ge=0)
+    summary: str = Field(..., min_length=1)
+
+    @field_validator("summary")
+    @classmethod
+    def strip_summary(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("summary must not be empty")
+        return value
+
+
+class LectureSlideContextMomentV5(BaseModel):
+    start_offset_ms: int = Field(..., ge=0)
+    center_offset_ms: int = Field(..., ge=0)
+    end_offset_ms: int = Field(..., ge=0)
+    slide_position: int = Field(..., ge=0)
+    before: str = Field(..., min_length=1)
+    at: str = Field(..., min_length=1)
+    after: str = Field(..., min_length=1)
+
+    @field_validator("before", "at", "after")
+    @classmethod
+    def strip_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("context text must not be empty")
+        return value
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "LectureSlideContextMomentV5":
+        if not self.start_offset_ms <= self.center_offset_ms <= self.end_offset_ms:
+            raise ValueError(
+                "start_offset_ms <= center_offset_ms <= end_offset_ms is required"
+            )
+        return self
+
+
+class LectureSlideContextV5(BaseModel):
+    version: Literal[5] = 5
+    deck_summary: str = Field(..., min_length=1)
+    slides: list[LectureSlideContextSlideV5] = Field(..., min_length=1)
+    summary_checkpoints: list[LectureSlideContextSummaryCheckpointV5] = Field(
+        ..., min_length=1
+    )
+    moment_contexts: list[LectureSlideContextMomentV5] = Field(..., min_length=1)
+
+    @field_validator("deck_summary")
+    @classmethod
+    def strip_deck_summary(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("deck_summary must not be empty")
+        return value
+
+    @model_validator(mode="after")
+    def normalize_context_arrays(self) -> "LectureSlideContextV5":
+        self.slides = sorted(
+            {slide.slide_position: slide for slide in self.slides}.values(),
+            key=lambda item: item.slide_position,
+        )
+        self.summary_checkpoints = sorted(
+            {
+                checkpoint.end_offset_ms: checkpoint
+                for checkpoint in self.summary_checkpoints
+            }.values(),
+            key=lambda item: item.end_offset_ms,
+        )
+        self.moment_contexts = sorted(
+            {
+                moment.center_offset_ms: moment for moment in self.moment_contexts
+            }.values(),
+            key=lambda item: item.center_offset_ms,
+        )
+        return self
+
+
 def normalize_lecture_video_manifest_v4_context_arrays(
     summary_checkpoints: list[LectureVideoManifestSummaryCheckpointV4],
     moment_contexts: list[LectureVideoManifestMomentContextV4],

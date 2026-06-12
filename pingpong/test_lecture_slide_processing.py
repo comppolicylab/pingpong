@@ -87,6 +87,139 @@ def _deck(
     )
 
 
+def _generated_slide_context_kwargs() -> dict:
+    return {
+        "deck_summary": "A compact lesson summary.",
+        "slides": [
+            schemas.LectureSlideContextSlideV5(
+                slide_position=0,
+                title="First",
+                start_offset_ms=0,
+                end_offset_ms=500,
+                visible_text="First slide",
+                visual_context="A simple opening slide.",
+                narration_summary="The narration introduces the topic.",
+                key_points=["The first point matters."],
+                diagrams=[],
+                equations_or_symbols=[],
+            ),
+            schemas.LectureSlideContextSlideV5(
+                slide_position=1,
+                title="Second",
+                start_offset_ms=500,
+                end_offset_ms=1200,
+                visible_text="Second slide",
+                visual_context="A follow-up example.",
+                narration_summary="The narration applies the topic.",
+                key_points=["The example applies the point."],
+                diagrams=[],
+                equations_or_symbols=[],
+            ),
+        ],
+        "summary_checkpoints": [
+            schemas.LectureSlideContextSummaryCheckpointV5(
+                end_offset_ms=500,
+                end_slide_position=0,
+                summary="The topic has been introduced.",
+            ),
+            schemas.LectureSlideContextSummaryCheckpointV5(
+                end_offset_ms=1200,
+                end_slide_position=1,
+                summary="The topic has been introduced and applied.",
+            ),
+        ],
+        "moment_contexts": [
+            schemas.LectureSlideContextMomentV5(
+                start_offset_ms=0,
+                center_offset_ms=500,
+                end_offset_ms=1000,
+                slide_position=0,
+                before="The lesson is beginning.",
+                at="The first point is introduced.",
+                after="The lesson moves to the example.",
+            )
+        ],
+    }
+
+
+async def test_offset_is_in_window_keeps_zero_boundary_only_for_first_window():
+    assert lecture_slide_processing._offset_is_in_window(0, 0, 1000)
+    assert not lecture_slide_processing._offset_is_in_window(0, 1, 1000)
+    assert lecture_slide_processing._offset_is_in_window(500, 1, 1000)
+    assert not lecture_slide_processing._offset_is_in_window(1001, 1, 1000)
+
+
+async def test_merge_slide_chunk_manifests_carries_cumulative_summaries_forward():
+    first_manifest = lecture_slide_processing.GeneratedSlideManifest(
+        deck_summary="First chunk summary.",
+        slides=[
+            schemas.LectureSlideContextSlideV5(
+                slide_position=0,
+                title="First",
+                narration_summary="First slide.",
+            )
+        ],
+        summary_checkpoints=[
+            schemas.LectureSlideContextSummaryCheckpointV5(
+                end_offset_ms=1000,
+                end_slide_position=0,
+                summary="First chunk summary.",
+            )
+        ],
+        moment_contexts=[
+            schemas.LectureSlideContextMomentV5(
+                start_offset_ms=0,
+                center_offset_ms=500,
+                end_offset_ms=1000,
+                slide_position=0,
+                before="Before first.",
+                at="At first.",
+                after="After first.",
+            )
+        ],
+    )
+    second_manifest = lecture_slide_processing.GeneratedSlideManifest(
+        deck_summary="Second chunk summary.",
+        slides=[
+            schemas.LectureSlideContextSlideV5(
+                slide_position=1,
+                title="Second",
+                narration_summary="Second slide.",
+            )
+        ],
+        summary_checkpoints=[
+            schemas.LectureSlideContextSummaryCheckpointV5(
+                end_offset_ms=2000,
+                end_slide_position=1,
+                summary="Second chunk summary.",
+            )
+        ],
+        moment_contexts=[
+            schemas.LectureSlideContextMomentV5(
+                start_offset_ms=1000,
+                center_offset_ms=1500,
+                end_offset_ms=2000,
+                slide_position=1,
+                before="Before second.",
+                at="At second.",
+                after="After second.",
+            )
+        ],
+    )
+
+    merged = lecture_slide_processing._merge_slide_chunk_manifests(
+        [first_manifest, second_manifest]
+    )
+
+    assert merged.deck_summary == "First chunk summary. Second chunk summary."
+    assert [slide.slide_position for slide in merged.slides] == [0, 1]
+    assert [checkpoint.summary for checkpoint in merged.summary_checkpoints] == [
+        "First chunk summary.",
+        "First chunk summary. Second chunk summary.",
+    ]
+    assert [moment.center_offset_ms for moment in merged.moment_contexts] == [500, 1500]
+
+
 async def _create_class_and_deck(
     db, *, deck_id: int = 1, slide_count: int = 1
 ) -> models.LectureSlideDeck:
@@ -118,6 +251,36 @@ async def test_queue_lecture_slide_processing_run_reuses_active_run(db):
         assert deck.status == schemas.LectureSlideDeckStatus.PROCESSING
         assert first.stage == schemas.LectureSlideProcessingStage.SLIDE_ASSET_EXTRACTION
         assert first.attempt_number == 1
+
+
+async def test_deck_has_slide_manifest_accepts_v5_context_version(db):
+    await _create_class_and_deck(db)
+    async with db.async_session() as session:
+        deck = await session.get(models.LectureSlideDeck, 1)
+        assert deck is not None
+        deck.context_version = 5
+        question = models.LectureSlideQuestion(
+            lecture_slide_deck_id=1,
+            position=0,
+            slide_position=0,
+            slide_offset_ms=0,
+            stop_offset_ms=1000,
+            question_type=schemas.LectureSlideQuestionType.SINGLE_SELECT,
+            question_text="Question?",
+            intro_text="",
+            options=[
+                models.LectureSlideQuestionOption(
+                    position=0,
+                    option_text="Option",
+                    post_answer_text="",
+                    continue_offset_ms=1000,
+                )
+            ],
+        )
+        session.add(question)
+        await session.commit()
+
+    assert await lecture_slide_processing._deck_has_slide_manifest(1)
 
 
 async def test_claim_next_processing_run_recovers_expired_lease(db):
@@ -800,8 +963,12 @@ async def test_generate_slide_manifest_uses_pdf_and_transcript_not_extracted_tex
     assert "Not every slide needs a question" in instructions
     assert "A question appears between slides" in instructions
     assert "set slide_position to the zero-based slide after which" in instructions
-    assert "summary_checkpoints" not in instructions
-    assert "moment_contexts" not in instructions
+    assert "SLIDE CHAT CONTEXT:" in instructions
+    assert "deck_summary" in instructions
+    assert "summary_checkpoints" in instructions
+    assert "moment_contexts" in instructions
+    assert "visible_text" in instructions
+    assert "visual_context" in instructions
     assert (
         "Each question's options array uses option_text, post_answer_text, and correct"
         in instructions
@@ -933,6 +1100,7 @@ async def test_persist_slide_manifest_replaces_existing_questions(db, monkeypatc
         run_id = run.id
 
     manifest = lecture_slide_processing.GeneratedSlideManifest(
+        **_generated_slide_context_kwargs(),
         questions=[
             lecture_slide_processing.GeneratedSlideQuestion(
                 slide_position=0,
@@ -986,8 +1154,12 @@ async def test_persist_slide_manifest_replaces_existing_questions(db, monkeypatc
             session, 1
         )
         assert deck is not None
-        assert deck.context_version == 4
-        assert deck.context_data == {}
+        assert deck.context_version == 5
+        assert deck.context_data is not None
+        assert deck.context_data["version"] == 5
+        assert deck.context_data["deck_summary"] == "A compact lesson summary."
+        assert deck.context_data["slides"][0]["title"] == "First"
+        assert deck.lecture_slide_chat_available is True
         assert deck.transcript_data is not None
         assert len(deck.questions) == 2
         assert deck.questions[0].question_text == "New question?"
@@ -1019,6 +1191,108 @@ async def test_persist_slide_manifest_replaces_existing_questions(db, monkeypatc
             for question in deck.questions
             for option in question.options
         ] == [500, 500, 1200, 1200]
+
+
+async def test_persist_slide_manifest_preserves_existing_v5_context_on_failure(db):
+    await _create_class_and_deck(db, slide_count=1)
+    async with db.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, 1
+        )
+        assert deck is not None
+        deck.context_version = 5
+        deck.context_data = schemas.LectureSlideContextV5.model_validate(
+            {
+                "version": 5,
+                **_generated_slide_context_kwargs(),
+            }
+        ).model_dump()
+        deck.lecture_slide_chat_available = True
+        page = models.LectureSlidePage(
+            lecture_slide_deck_id=1,
+            position=0,
+            start_offset_ms=0,
+            end_offset_ms=500,
+        )
+        run = models.LectureSlideProcessingRun(
+            lecture_slide_deck_id=1,
+            lecture_slide_deck_id_snapshot=1,
+            class_id=1,
+            stage=schemas.LectureSlideProcessingStage.MANIFEST_GENERATION,
+            attempt_number=1,
+            status=schemas.LectureSlideProcessingRunStatus.RUNNING,
+            lease_token="lease",
+        )
+        session.add_all([page, run])
+        await session.commit()
+        run_id = run.id
+
+    await lecture_slide_processing._persist_slide_manifest(
+        run_id,
+        "lease",
+        1,
+        lecture_slide_processing.GeneratedSlideManifest(questions=[]),
+        [],
+    )
+
+    async with db.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, 1
+        )
+        assert deck is not None
+        assert deck.context_version == 5
+        assert deck.context_data is not None
+        assert deck.context_data["version"] == 5
+        assert deck.context_data["deck_summary"] == "A compact lesson summary."
+        assert deck.lecture_slide_chat_available is True
+
+
+async def test_persist_slide_manifest_falls_back_to_v4_when_v5_context_missing(db):
+    await _create_class_and_deck(db, slide_count=1)
+    async with db.async_session() as session:
+        page = models.LectureSlidePage(
+            lecture_slide_deck_id=1,
+            position=0,
+            start_offset_ms=0,
+            end_offset_ms=500,
+        )
+        run = models.LectureSlideProcessingRun(
+            lecture_slide_deck_id=1,
+            lecture_slide_deck_id_snapshot=1,
+            class_id=1,
+            stage=schemas.LectureSlideProcessingStage.MANIFEST_GENERATION,
+            attempt_number=1,
+            status=schemas.LectureSlideProcessingRunStatus.RUNNING,
+            lease_token="lease",
+        )
+        session.add_all([page, run])
+        await session.commit()
+        run_id = run.id
+    transcript = [
+        schemas.LectureVideoManifestWordV3(
+            id="slide-0-word-0",
+            word="hello",
+            start_offset_ms=0,
+            end_offset_ms=100,
+        )
+    ]
+
+    await lecture_slide_processing._persist_slide_manifest(
+        run_id,
+        "lease",
+        1,
+        lecture_slide_processing.GeneratedSlideManifest(questions=[]),
+        transcript,
+    )
+
+    async with db.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, 1
+        )
+        assert deck is not None
+        assert deck.context_version == 4
+        assert deck.context_data == {}
+        assert deck.lecture_slide_chat_available is True
 
 
 async def test_persist_slide_manifest_includes_manual_questions_from_context(db):
