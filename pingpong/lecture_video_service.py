@@ -1160,17 +1160,14 @@ async def delete_lecture_video(
     lecture_video_id: int,
     authz: AuthzClient | None = None,
 ) -> None:
-    from pingpong import lecture_video_processing
-
-    await lecture_video_processing.cancel_narration_processing_runs(
+    await models.LectureVideoProcessingRun.cancel_active_by_lecture_video_id_snapshot(
         session,
         lecture_video_id,
-        schemas.LectureVideoProcessingCancelReason.LECTURE_VIDEO_DELETED,
-    )
-    await lecture_video_processing.cancel_manifest_generation_processing_runs(
-        session,
-        lecture_video_id,
-        schemas.LectureVideoProcessingCancelReason.LECTURE_VIDEO_DELETED,
+        cancel_reason=schemas.LectureVideoProcessingCancelReason.LECTURE_VIDEO_DELETED,
+        stages=(
+            schemas.LectureVideoProcessingStage.NARRATION,
+            schemas.LectureVideoProcessingStage.MANIFEST_GENERATION,
+        ),
     )
 
     lecture_video = await models.LectureVideo.get_by_id(session, lecture_video_id)

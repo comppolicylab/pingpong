@@ -1,5 +1,3 @@
-import logging
-
 from pingpong.say_transform import (
     FOLLOWUP_MARKER_NAME,
     MAX_FOLLOWUP_SUGGESTIONS,
@@ -15,9 +13,6 @@ __all__ = [
     "extract_followup_suggestions",
     "strip_followup_snippets",
 ]
-
-
-logger = logging.getLogger(__name__)
 
 
 def _is_marker_name_char(ch: str) -> bool:
