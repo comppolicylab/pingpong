@@ -25,9 +25,9 @@ public_url = "http://localhost:5173"
 # Whether the server is running in development mode. Should be `false` in prod.
 development = true
 
-# Human-readable deployment label for logs, traces, and other observability
-# metadata. Use stable values like "development", "staging", or "production".
-deployment_environment = "development"
+# Stable deployment identifier for logs, traces, and other observability
+# metadata. Use values like "development", "staging", or "production".
+deployment_identifier = "development"
 
 [artifact_store]
 # Store for temporarily storing thread exports for download

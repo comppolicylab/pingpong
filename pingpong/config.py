@@ -658,7 +658,7 @@ class Config(BaseSettings):
     reload: int = Field(0)
     public_url: str = Field("http://localhost:8000")
     development: bool = Field(False)
-    deployment_environment: str = Field("unknown")
+    deployment_identifier: str = Field("unknown")
     artifact_store: ArtifactStoreSettings
     file_store: ArtifactStoreSettings
     audio_store: AudioStoreSettings

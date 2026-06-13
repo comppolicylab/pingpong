@@ -19,8 +19,8 @@ from pingpong.config import (
 from pingpong.lti.allowlist import generate_safe_lti_url
 
 
-def test_config_loads_deployment_environment():
-    assert config.deployment_environment == "test"
+def test_config_loads_deployment_identifier():
+    assert config.deployment_identifier == "test"
 
 
 def _s3_store_settings() -> dict[str, dict[str, str]]:
@@ -45,10 +45,10 @@ def _minimal_config_settings() -> dict[str, object]:
     }
 
 
-def test_config_defaults_deployment_environment_to_unknown():
+def test_config_defaults_deployment_identifier_to_unknown():
     cfg = Config.model_validate(_minimal_config_settings())
 
-    assert cfg.deployment_environment == "unknown"
+    assert cfg.deployment_identifier == "unknown"
     assert cfg.lms.lms_instances == []
 
 
