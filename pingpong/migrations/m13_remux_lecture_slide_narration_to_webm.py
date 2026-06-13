@@ -99,9 +99,9 @@ async def remux_lecture_slide_narration_to_webm(
             stored_object.key = new_key
             stored_object.content_type = _TARGET_CONTENT_TYPE
             stored_object.content_length = content_length
-            session.add(stored_object)
-            await session.commit()
+            await session.flush()
             await lecture_slide_processing._delete_audio_key_quietly(old_key)
+            await session.commit()
             remuxed += 1
             logger.info(
                 "Remuxed continuous narration to WebM. deck_id=%s old_key=%s new_key=%s",

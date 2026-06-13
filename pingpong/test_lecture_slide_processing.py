@@ -2074,8 +2074,8 @@ async def test_combine_audio_objects_uses_ffmpeg_stream_copy(monkeypatch):
     assert commands[0][commands[0].index("-c") + 1] == "copy"
     assert commands[0][-1].endswith(".webm")
     assert "file '" in concat_files[0]
-    assert "input-0.ogg" in concat_files[0]
-    assert "input-1.ogg" in concat_files[0]
+    assert "input-0.audio" in concat_files[0]
+    assert "input-1.audio" in concat_files[0]
 
 
 async def test_combine_audio_objects_reencodes_when_stream_copy_fails(monkeypatch):
@@ -2159,6 +2159,35 @@ async def test_combine_audio_objects_reencodes_when_stream_copy_times_out(monkey
     assert len(commands) == 2
     assert commands[0][commands[0].index("-c") + 1] == "copy"
     assert commands[1][commands[1].index("-c:a") + 1] == "libopus"
+
+
+async def test_remux_continuous_narration_to_webm_uses_direct_ffmpeg_input(
+    monkeypatch,
+):
+    commands: list[list[str]] = []
+
+    def fake_run(command, *, capture_output, text, timeout):
+        commands.append(command)
+        assert timeout == lecture_slide_processing.FFMPEG_CONCAT_TIMEOUT_SECONDS
+        Path(command[-1]).write_bytes(b"webm-audio")
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(
+        lecture_slide_processing.shutil, "which", lambda _name: "ffmpeg"
+    )
+    monkeypatch.setattr(lecture_slide_processing.subprocess, "run", fake_run)
+
+    result = await lecture_slide_processing.remux_continuous_narration_to_webm(
+        b"ogg-audio"
+    )
+
+    assert result == b"webm-audio"
+    assert len(commands) == 1
+    assert "-f" not in commands[0]
+    assert commands[0][commands[0].index("-c") + 1] == "copy"
+    input_path = Path(commands[0][commands[0].index("-i") + 1])
+    assert input_path.name == "input.ogg"
+    assert commands[0][-1].endswith(".webm")
 
 
 async def test_total_stored_audio_duration_requires_every_duration():
@@ -2671,7 +2700,7 @@ async def test_transcribe_and_persist_slide_audio_uses_supported_temp_extension(
     assert [Path(path).suffix for path in seen_paths] == [".ogg"]
 
 
-async def test_persist_composite_artifacts_stores_combined_audio_as_ogg(
+async def test_persist_composite_artifacts_stores_combined_audio_as_webm(
     db, monkeypatch
 ):
     await _create_class_and_deck(db, slide_count=2)
@@ -2738,7 +2767,7 @@ async def test_persist_composite_artifacts_stores_combined_audio_as_ogg(
     monkeypatch.setattr(
         lecture_slide_processing,
         "_combine_audio_objects",
-        lambda _stored_objects: _async_value(b"combined-ogg"),
+        lambda _stored_objects: _async_value(b"combined-webm"),
     )
     monkeypatch.setattr(lecture_slide_processing, "_store_audio", fake_store_audio)
     monkeypatch.setattr(
@@ -2897,7 +2926,7 @@ async def test_persist_composite_artifacts_deletes_uploads_when_db_lookup_raises
     monkeypatch.setattr(
         lecture_slide_processing,
         "_combine_audio_objects",
-        lambda _stored_objects: _async_value(b"combined-ogg"),
+        lambda _stored_objects: _async_value(b"combined-webm"),
     )
     monkeypatch.setattr(lecture_slide_processing, "_store_audio", fake_store_audio)
     monkeypatch.setattr(

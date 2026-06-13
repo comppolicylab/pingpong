@@ -5033,7 +5033,7 @@ async def _stream_audio_file_response(
             unexpected_error_log=unexpected_error_log,
         )
     except AudioStoreError as e:
-        if e.detail and "range" in e.detail.lower():
+        if e.code == 416:
             raise HTTPException(
                 status_code=416,
                 detail=e.detail,

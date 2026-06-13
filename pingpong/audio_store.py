@@ -6,7 +6,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import IO, AsyncGenerator, TypedDict
 
-from aiohttp import ClientError
+from botocore.exceptions import ClientError
 
 logger = logging.getLogger(__name__)
 

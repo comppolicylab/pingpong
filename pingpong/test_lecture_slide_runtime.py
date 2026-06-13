@@ -1253,6 +1253,7 @@ async def test_lecture_slide_question_narration_endpoint_streams_allowed_audio(
             assert key == "slides/question.ogg"
             assert start is None
             assert end is None
+            yield b"question-audio"
 
     monkeypatch.setattr(
         config,

@@ -88,7 +88,7 @@ async def test_malformed_range_raises_416():
 async def test_store_range_error_surfaces_as_416():
     class FailingStore:
         async def stream_file_range(self, key, start=None, end=None):
-            raise AudioStoreError(code=416, detail="Range entered is invalid")
+            raise AudioStoreError(code=416, detail="Requested bytes unavailable")
             yield b""  # pragma: no cover - generator marker
 
     with pytest.raises(server_module.HTTPException) as exc:
