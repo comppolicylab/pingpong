@@ -5021,17 +5021,19 @@ async def _stream_audio_file_response(
         ) from e
 
     try:
-        stream = await prefetch_stream(
-            store.stream_file_range(
-                key=key,
-                start=start,
-                end=end,
-            ),
-            store_error=AudioStoreError,
-            logger=logger,
-            store_error_log=store_error_log,
-            unexpected_error_log=unexpected_error_log,
-        )
+        iterator = store.stream_file_range(
+            key=key,
+            start=start,
+            end=end,
+        ).__aiter__()
+        first_chunk = await iterator.__anext__()
+    except StopAsyncIteration:
+
+        async def empty_stream():
+            if False:
+                yield b""
+
+        stream = empty_stream()
     except AudioStoreError as e:
         if e.code == 416:
             raise HTTPException(
@@ -5042,10 +5044,22 @@ async def _stream_audio_file_response(
                     "Content-Range": f"bytes */{total_length}",
                 },
             ) from e
+        status_code = e.code if e.code is not None and 400 <= e.code <= 599 else 400
         raise HTTPException(
-            status_code=400,
-            detail=retrieval_error_detail,
+            status_code=status_code,
+            detail=e.detail or retrieval_error_detail,
         ) from e
+    except Exception as e:
+        logger.exception(unexpected_error_log)
+        raise HTTPException(status_code=500, detail=retrieval_error_detail) from e
+    else:
+
+        async def response_stream():
+            yield first_chunk
+            async for chunk in iterator:
+                yield chunk
+
+        stream = response_stream()
 
     response_headers = {
         "Accept-Ranges": "bytes",

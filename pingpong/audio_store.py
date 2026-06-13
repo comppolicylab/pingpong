@@ -307,20 +307,22 @@ class S3AudioStore(BaseAudioStore):
             except ClientError as e:
                 error_code = e.response.get("Error", {}).get("Code", "")
                 if error_code == "InvalidRange":
-                    raise AudioStoreError(code=416, detail="Range entered is invalid")
+                    raise AudioStoreError(
+                        code=416, detail="Range entered is invalid"
+                    ) from e
                 if error_code == "AccessDenied":
                     raise AudioStoreError(
                         code=403,
                         detail="You don't have the permissions to view the resource",
-                    )
+                    ) from e
                 if error_code == "NoSuchKey":
                     raise AudioStoreError(
                         code=404, detail="The specified key does not exist"
-                    )
+                    ) from e
                 logger.exception(f"Error streaming file {key}: {e}")
                 raise AudioStoreError(
                     code=500, detail=f"Error downloading Voice mode recording: {str(e)}"
-                )
+                ) from e
 
 
 class LocalAudioStore(BaseAudioStore):

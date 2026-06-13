@@ -103,3 +103,47 @@ async def test_store_range_error_surfaces_as_416():
             retrieval_error_detail="z",
         )
     assert exc.value.status_code == 416
+
+
+async def test_store_error_status_is_preserved():
+    class FailingStore:
+        async def stream_file_range(self, key, start=None, end=None):
+            raise AudioStoreError(code=404, detail="Audio missing")
+            yield b""  # pragma: no cover - generator marker
+
+    with pytest.raises(server_module.HTTPException) as exc:
+        await server_module._stream_audio_file_response(
+            store=FailingStore(),
+            key="a.webm",
+            content_length=100,
+            content_type="audio/webm",
+            range_header=None,
+            store_error_log="x",
+            unexpected_error_log="y",
+            retrieval_error_detail="z",
+        )
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "Audio missing"
+
+
+async def test_store_error_after_first_chunk_is_not_silenced():
+    class FailingStore:
+        async def stream_file_range(self, key, start=None, end=None):
+            yield b"first"
+            raise AudioStoreError(code=500, detail="stream failed")
+
+    resp = await server_module._stream_audio_file_response(
+        store=FailingStore(),
+        key="a.webm",
+        content_length=10,
+        content_type="audio/webm",
+        range_header=None,
+        store_error_log="x",
+        unexpected_error_log="y",
+        retrieval_error_detail="z",
+    )
+
+    iterator = resp.body_iterator.__aiter__()
+    assert await iterator.__anext__() == b"first"
+    with pytest.raises(AudioStoreError):
+        await iterator.__anext__()

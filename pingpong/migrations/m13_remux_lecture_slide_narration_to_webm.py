@@ -99,9 +99,22 @@ async def remux_lecture_slide_narration_to_webm(
             stored_object.key = new_key
             stored_object.content_type = _TARGET_CONTENT_TYPE
             stored_object.content_length = content_length
-            await session.flush()
+            try:
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                await lecture_slide_processing._delete_audio_key_quietly(new_key)
+                failed += 1
+                logger.exception(
+                    "Failed to persist remuxed continuous narration metadata. "
+                    "deck_id=%s old_key=%s new_key=%s",
+                    deck.id,
+                    old_key,
+                    new_key,
+                )
+                continue
+
             await lecture_slide_processing._delete_audio_key_quietly(old_key)
-            await session.commit()
             remuxed += 1
             logger.info(
                 "Remuxed continuous narration to WebM. deck_id=%s old_key=%s new_key=%s",
