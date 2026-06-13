@@ -1152,8 +1152,10 @@ async def test_lecture_slide_continuous_narration_endpoint_streams_audio(
     db, institution, monkeypatch
 ):
     class FakeAudioStore:
-        async def get_file(self, key):
+        async def stream_file_range(self, *, key, start=None, end=None):
             assert key == "slides/audio.ogg"
+            assert start is None
+            assert end is None
             yield b"audio"
 
     monkeypatch.setattr(
@@ -1187,7 +1189,59 @@ async def test_lecture_slide_continuous_narration_endpoint_streams_audio(
     chunks = [chunk async for chunk in response.body_iterator]
     assert response.status_code == 200
     assert response.media_type == "audio/ogg"
+    assert response.headers["accept-ranges"] == "bytes"
+    assert response.headers["content-length"] == "5"
     assert b"".join(chunks) == b"audio"
+
+
+@with_institution(11, "Test Institution")
+async def test_lecture_slide_continuous_narration_endpoint_streams_audio_range(
+    db, institution, monkeypatch
+):
+    audio = b"slide-audio"
+
+    class FakeAudioStore:
+        async def stream_file_range(self, *, key, start=None, end=None):
+            assert key == "slides/audio.ogg"
+            assert start == 2
+            assert end == 5
+            yield audio[start : end + 1]
+
+    monkeypatch.setattr(
+        config,
+        "lecture_video_audio_store",
+        SimpleNamespace(store=FakeAudioStore()),
+    )
+
+    async with db.async_session() as session:
+        class_, deck, assistant, thread, _ = await _create_slide_runtime_fixture(
+            session, institution
+        )
+        thread.interaction_mode = schemas.InteractionMode.LECTURE_SLIDES
+        assistant.interaction_mode = schemas.InteractionMode.LECTURE_SLIDES
+        narration = models.LectureSlideNarrationStoredObject(
+            key="slides/audio.ogg",
+            content_type="audio/ogg",
+            content_length=len(audio),
+            duration_ms=10_000,
+        )
+        deck.continuous_narration_stored_object = narration
+        session.add(narration)
+        await session.flush()
+
+        response = await server_module.get_thread_lecture_slide_continuous_narration(
+            str(class_.id),
+            str(thread.id),
+            _server_request(session, headers={"range": "bytes=2-5"}),
+        )
+
+    chunks = [chunk async for chunk in response.body_iterator]
+    assert response.status_code == 206
+    assert response.media_type == "audio/ogg"
+    assert response.headers["accept-ranges"] == "bytes"
+    assert response.headers["content-range"] == f"bytes 2-5/{len(audio)}"
+    assert response.headers["content-length"] == "4"
+    assert b"".join(chunks) == audio[2:6]
 
 
 @with_institution(11, "Test Institution")
@@ -1195,8 +1249,10 @@ async def test_lecture_slide_question_narration_endpoint_streams_allowed_audio(
     db, institution, monkeypatch
 ):
     class FakeAudioStore:
-        async def get_file(self, key):
+        async def stream_file_range(self, *, key, start=None, end=None):
             assert key == "slides/question.ogg"
+            assert start is None
+            assert end is None
             yield b"question-audio"
 
     monkeypatch.setattr(
@@ -1247,7 +1303,53 @@ async def test_lecture_slide_question_narration_endpoint_streams_allowed_audio(
     chunks = [chunk async for chunk in response.body_iterator]
     assert response.status_code == 200
     assert response.media_type == "audio/ogg"
+    assert response.headers["accept-ranges"] == "bytes"
+    assert response.headers["content-length"] == "14"
     assert b"".join(chunks) == b"question-audio"
+
+
+@with_institution(11, "Test Institution")
+async def test_lecture_slide_continuous_narration_endpoint_rejects_invalid_range(
+    db, institution, monkeypatch
+):
+    class FakeAudioStore:
+        async def stream_file_range(self, *, key, start=None, end=None):
+            raise AssertionError("invalid ranges should not reach the store")
+
+    monkeypatch.setattr(
+        config,
+        "lecture_video_audio_store",
+        SimpleNamespace(store=FakeAudioStore()),
+    )
+
+    async with db.async_session() as session:
+        class_, deck, assistant, thread, _ = await _create_slide_runtime_fixture(
+            session, institution
+        )
+        thread.interaction_mode = schemas.InteractionMode.LECTURE_SLIDES
+        assistant.interaction_mode = schemas.InteractionMode.LECTURE_SLIDES
+        narration = models.LectureSlideNarrationStoredObject(
+            key="slides/audio.ogg",
+            content_type="audio/ogg",
+            content_length=5,
+            duration_ms=10_000,
+        )
+        deck.continuous_narration_stored_object = narration
+        session.add(narration)
+        await session.flush()
+
+        with pytest.raises(HTTPException) as exc_info:
+            await server_module.get_thread_lecture_slide_continuous_narration(
+                str(class_.id),
+                str(thread.id),
+                _server_request(session, headers={"range": "bytes=20-30"}),
+            )
+
+    assert exc_info.value.status_code == 416
+    assert exc_info.value.headers == {
+        "Accept-Ranges": "bytes",
+        "Content-Range": "bytes */5",
+    }
 
 
 @with_institution(11, "Test Institution")

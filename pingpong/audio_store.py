@@ -1,11 +1,12 @@
 from pathlib import Path
 import aioboto3
+import inspect
 import logging
 
 from abc import ABC, abstractmethod
 from typing import IO, AsyncGenerator, TypedDict
 
-from aiohttp import ClientError
+from botocore.exceptions import ClientError
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,17 @@ class BaseAudioStore(ABC):
         self, key: str, chunk_size: int = 1024 * 1024
     ) -> AsyncGenerator[bytes, None]:
         """Get a file from the store."""
+        yield b""
+
+    @abstractmethod
+    async def stream_file_range(
+        self,
+        key: str,
+        start: int | None = None,
+        end: int | None = None,
+        chunk_size: int = 1024 * 1024,
+    ) -> AsyncGenerator[bytes, None]:
+        """Get a file or byte range from the store."""
         yield b""
 
 
@@ -256,16 +268,61 @@ class S3AudioStore(BaseAudioStore):
         self, key: str, chunk_size: int = 1024 * 1024
     ) -> AsyncGenerator[bytes, None]:
         """Get a file from S3."""
+        async for chunk in self.stream_file_range(
+            key=key,
+            start=None,
+            end=None,
+            chunk_size=chunk_size,
+        ):
+            yield chunk
+
+    async def stream_file_range(
+        self,
+        key: str,
+        start: int | None = None,
+        end: int | None = None,
+        chunk_size: int = 1024 * 1024,
+    ) -> AsyncGenerator[bytes, None]:
+        """Get a file or byte range from S3."""
         async with aioboto3.Session().client("s3") as s3_client:
             try:
-                s3_object = await s3_client.get_object(Bucket=self.__bucket, Key=key)
-                async for chunk in s3_object["Body"].iter_chunks(chunk_size=chunk_size):
-                    yield chunk
+                params = {
+                    "Bucket": self.__bucket,
+                    "Key": key,
+                }
+                if start is not None or end is not None:
+                    params["Range"] = f"bytes={start or 0}-{'' if end is None else end}"
+
+                s3_object = await s3_client.get_object(**params)
+                body = s3_object["Body"]
+                try:
+                    async for chunk in body.iter_chunks(chunk_size=chunk_size):
+                        yield chunk
+                finally:
+                    close = getattr(body, "close", None)
+                    if callable(close):
+                        close_result = close()
+                        if inspect.isawaitable(close_result):
+                            await close_result
             except ClientError as e:
+                error_code = e.response.get("Error", {}).get("Code", "")
+                if error_code == "InvalidRange":
+                    raise AudioStoreError(
+                        code=416, detail="Range entered is invalid"
+                    ) from e
+                if error_code == "AccessDenied":
+                    raise AudioStoreError(
+                        code=403,
+                        detail="You don't have the permissions to view the resource",
+                    ) from e
+                if error_code == "NoSuchKey":
+                    raise AudioStoreError(
+                        code=404, detail="The specified key does not exist"
+                    ) from e
                 logger.exception(f"Error streaming file {key}: {e}")
                 raise AudioStoreError(
                     code=500, detail=f"Error downloading Voice mode recording: {str(e)}"
-                )
+                ) from e
 
 
 class LocalAudioStore(BaseAudioStore):
@@ -323,14 +380,55 @@ class LocalAudioStore(BaseAudioStore):
         self, key: str, chunk_size: int = 1024 * 1024
     ) -> AsyncGenerator[bytes, None]:
         """Get a file from local storage."""
+        async for chunk in self.stream_file_range(
+            key=key,
+            start=None,
+            end=None,
+            chunk_size=chunk_size,
+        ):
+            yield chunk
+
+    async def stream_file_range(
+        self,
+        key: str,
+        start: int | None = None,
+        end: int | None = None,
+        chunk_size: int = 1024 * 1024,
+    ) -> AsyncGenerator[bytes, None]:
+        """Get a file or byte range from local storage."""
         file_path = self._directory / key
         if not file_path.exists():
             raise AudioStoreError(code=404, detail="File not found")
 
         try:
+            file_size = file_path.stat().st_size
+            if start is not None and (start < 0 or start >= file_size):
+                raise AudioStoreError(code=416, detail="Start range entered is invalid")
+            if end is not None:
+                if end < 0 or end >= file_size:
+                    raise AudioStoreError(
+                        code=416, detail="End range entered is invalid"
+                    )
+                if start is not None and end < start:
+                    raise AudioStoreError(
+                        code=416, detail="Start range entered is after end range"
+                    )
+
+            start_pos = start if start is not None else 0
+            end_pos = end if end is not None else file_size - 1
+
             with open(file_path, "rb") as f:
-                while chunk := f.read(chunk_size):
+                f.seek(start_pos)
+                bytes_to_read = end_pos - start_pos + 1
+                bytes_read = 0
+                while bytes_read < bytes_to_read:
+                    chunk = f.read(min(chunk_size, bytes_to_read - bytes_read))
+                    if not chunk:
+                        break
+                    bytes_read += len(chunk)
                     yield chunk
+        except AudioStoreError:
+            raise
         except Exception as e:
             logger.exception(f"Error reading file {key}: {e}")
             raise AudioStoreError(code=500, detail=f"Error reading file: {str(e)}")

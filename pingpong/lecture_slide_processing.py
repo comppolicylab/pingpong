@@ -187,6 +187,7 @@ RUN_LEASE_DURATION = timedelta(minutes=10)
 RUN_LEASE_HEARTBEAT_INTERVAL = min(timedelta(minutes=1), RUN_LEASE_DURATION / 2)
 UNEXPECTED_WORKER_EXIT_ERROR_MESSAGE = "Lecture slide worker exited unexpectedly."
 LECTURE_SLIDE_AUDIO_CONTENT_TYPE = "audio/ogg"
+LECTURE_SLIDE_CONTINUOUS_AUDIO_CONTENT_TYPE = "audio/webm"
 FFMPEG_CONCAT_TIMEOUT_SECONDS = 300
 MAX_RUN_CREATE_RETRIES = 3
 OPENAI_GENERATION_MAX_ATTEMPTS = 3
@@ -3212,7 +3213,7 @@ async def _persist_composite_artifacts(
         ]
         duration_ms = _total_stored_audio_duration_ms(stored_objects)
     combined_audio = await _combine_audio_objects(stored_objects)
-    content_type = LECTURE_SLIDE_AUDIO_CONTENT_TYPE
+    content_type = LECTURE_SLIDE_CONTINUOUS_AUDIO_CONTENT_TYPE
     audio_key, audio_length = await _store_audio(
         generate_slide_continuous_narration_store_key(),
         content_type,
@@ -3285,7 +3286,7 @@ async def _combine_audio_objects(
         temp_dir = Path(temp_dir_name)
         input_paths: list[Path] = []
         for index, stored_object in enumerate(stored_objects):
-            input_path = temp_dir / f"input-{index}.ogg"
+            input_path = temp_dir / f"input-{index}.audio"
             with input_path.open("wb") as file:
                 async for chunk in config.lecture_video_audio_store.store.get_file(
                     stored_object.key
@@ -3293,7 +3294,7 @@ async def _combine_audio_objects(
                     file.write(chunk)
             input_paths.append(input_path)
 
-        output_path = temp_dir / "combined.ogg"
+        output_path = temp_dir / "combined.webm"
         try:
             await asyncio.to_thread(
                 _run_ffmpeg_concat,
@@ -3311,6 +3312,40 @@ async def _combine_audio_objects(
                 _run_ffmpeg_concat,
                 ffmpeg_path,
                 input_paths,
+                output_path,
+                stream_copy=False,
+            )
+        return output_path.read_bytes()
+
+
+async def remux_continuous_narration_to_webm(ogg_audio: bytes) -> bytes:
+    """Losslessly remux an Opus-in-Ogg continuous narration into WebM."""
+    ffmpeg_path = shutil.which("ffmpeg")
+    if ffmpeg_path is None:
+        raise RuntimeError("ffmpeg is required for lecture slide audio remuxing.")
+
+    with tempfile.TemporaryDirectory() as temp_dir_name:
+        temp_dir = Path(temp_dir_name)
+        input_path = temp_dir / "input.ogg"
+        input_path.write_bytes(ogg_audio)
+        output_path = temp_dir / "combined.webm"
+        try:
+            await asyncio.to_thread(
+                _run_ffmpeg_remux,
+                ffmpeg_path,
+                input_path,
+                output_path,
+                stream_copy=True,
+            )
+        except RuntimeError:
+            logger.warning(
+                "ffmpeg stream-copy remux failed; retrying with Opus re-encode.",
+                exc_info=True,
+            )
+            await asyncio.to_thread(
+                _run_ffmpeg_remux,
+                ffmpeg_path,
+                input_path,
                 output_path,
                 stream_copy=False,
             )
@@ -3383,6 +3418,49 @@ def _run_ffmpeg_concat(
     if completed.returncode != 0:
         stderr = completed.stderr.strip()
         raise RuntimeError(f"ffmpeg concat failed: {stderr or completed.returncode}")
+
+
+def _run_ffmpeg_remux(
+    ffmpeg_path: str,
+    input_path: Path,
+    output_path: Path,
+    *,
+    stream_copy: bool,
+) -> None:
+    """Run ffmpeg for a single-file container remux."""
+    codec_args = (
+        ["-c", "copy"]
+        if stream_copy
+        else ["-c:a", "libopus", "-b:a", "64k", "-application", "voip"]
+    )
+    command = [
+        ffmpeg_path,
+        "-y",
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(input_path),
+        *codec_args,
+        str(output_path),
+    ]
+    try:
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=FFMPEG_CONCAT_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        output = _subprocess_timeout_output(exc)
+        raise RuntimeError(
+            f"ffmpeg remux timed out after {FFMPEG_CONCAT_TIMEOUT_SECONDS} seconds"
+            f"{output}"
+        ) from exc
+    if completed.returncode != 0:
+        stderr = completed.stderr.strip()
+        raise RuntimeError(f"ffmpeg remux failed: {stderr or completed.returncode}")
 
 
 def _subprocess_timeout_output(exc: subprocess.TimeoutExpired) -> str:
@@ -3491,7 +3569,7 @@ def generate_slide_narration_store_key() -> str:
 
 
 def generate_slide_continuous_narration_store_key() -> str:
-    return f"ls_continuous_narration_{uuid.uuid7()}.ogg"
+    return f"ls_continuous_narration_{uuid.uuid7()}.webm"
 
 
 def generate_slide_caption_store_key() -> str:
