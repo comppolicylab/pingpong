@@ -1772,6 +1772,7 @@ export type InteractiveLessonSessionController = {
 export type InteractiveLessonSession = {
 	state: InteractiveLessonSessionState;
 	lesson_chat_available: boolean;
+	timeline_bypass_enabled: boolean;
 	last_known_offset_ms: number | null;
 	furthest_offset_ms: number | null;
 	latest_interaction_at: string | null;
@@ -1978,6 +1979,7 @@ export type LectureVideoSessionController = {
 export type LectureVideoSession = {
 	state: LectureVideoSessionState;
 	lecture_video_chat_available: boolean;
+	timeline_bypass_enabled: boolean;
 	last_known_offset_ms: number | null;
 	furthest_offset_ms: number | null;
 	latest_interaction_at: string | null;
@@ -2824,6 +2826,7 @@ export type Assistant = {
 	hide_prompt: boolean | null;
 	locked: boolean | null;
 	assistant_should_message_first: boolean | null;
+	allow_lesson_timeline_bypass: boolean;
 	should_record_user_information: boolean | null;
 	disable_prompt_randomization: boolean | null;
 	allow_user_file_uploads: boolean | null;
@@ -2993,6 +2996,7 @@ export type CreateAssistantRequest = {
 	hide_prompt?: boolean;
 	deleted_private_files?: number[];
 	assistant_should_message_first?: boolean;
+	allow_lesson_timeline_bypass?: boolean;
 	should_record_user_information?: boolean;
 	disable_prompt_randomization?: boolean;
 	allow_user_file_uploads?: boolean;
@@ -3066,6 +3070,7 @@ export type UpdateAssistantRequest = {
 	hide_prompt?: boolean;
 	deleted_private_files?: number[];
 	assistant_should_message_first?: boolean;
+	allow_lesson_timeline_bypass?: boolean | null;
 	should_record_user_information?: boolean;
 	disable_prompt_randomization?: boolean;
 	allow_user_file_uploads?: boolean;

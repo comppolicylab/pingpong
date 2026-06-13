@@ -3811,6 +3811,18 @@ class LectureSlideInteraction(Base):
         )
         return await session.scalar(stmt)
 
+    @classmethod
+    async def get_answered_question_ids_by_thread_id(
+        cls, session: AsyncSession, thread_id: int
+    ) -> set[int]:
+        stmt = select(distinct(LectureSlideInteraction.question_id)).where(
+            LectureSlideInteraction.thread_id == thread_id,
+            LectureSlideInteraction.question_id.is_not(None),
+            LectureSlideInteraction.event_type
+            == schemas.InteractiveLessonInteractionEventType.ANSWER_SUBMITTED,
+        )
+        return {int(question_id) for question_id in await session.scalars(stmt)}
+
 
 def _lecture_slide_post_narration_loader() -> Load:
     return selectinload(LectureSlideQuestionOption.post_narration).selectinload(
@@ -3846,7 +3858,10 @@ def _thread_lecture_slide_base_loaders() -> tuple[Load, ...]:
             User.email,
         ),
         selectinload(Thread.assistant).load_only(
-            Assistant.id, Assistant.name, Assistant.lecture_slide_deck_id
+            Assistant.id,
+            Assistant.name,
+            Assistant.lecture_slide_deck_id,
+            Assistant.allow_lesson_timeline_bypass,
         ),
         selectinload(Thread.lecture_slide_deck).options(
             undefer(LectureSlideDeck.transcript_data),
@@ -3916,7 +3931,10 @@ def _thread_lecture_video_base_loaders() -> tuple[Load, ...]:
             User.email,
         ),
         selectinload(Thread.assistant).load_only(
-            Assistant.id, Assistant.name, Assistant.lecture_video_id
+            Assistant.id,
+            Assistant.name,
+            Assistant.lecture_video_id,
+            Assistant.allow_lesson_timeline_bypass,
         ),
         selectinload(Thread.lecture_video).options(
             undefer(LectureVideo.manifest_data),
@@ -4206,6 +4224,18 @@ class LectureVideoInteraction(Base):
             .limit(1)
         )
         return await session.scalar(stmt)
+
+    @classmethod
+    async def get_answered_question_ids_by_thread_id(
+        cls, session: AsyncSession, thread_id: int
+    ) -> set[int]:
+        stmt = select(distinct(LectureVideoInteraction.question_id)).where(
+            LectureVideoInteraction.thread_id == thread_id,
+            LectureVideoInteraction.question_id.is_not(None),
+            LectureVideoInteraction.event_type
+            == schemas.LectureVideoInteractionEventType.ANSWER_SUBMITTED,
+        )
+        return {int(question_id) for question_id in await session.scalars(stmt)}
 
 
 class S3File(Base):
@@ -5133,6 +5163,9 @@ class Assistant(Base):
     elevenlabs_style = Column(Float, nullable=True)
     elevenlabs_speed = Column(Float, nullable=True)
     assistant_should_message_first = Column(Boolean, server_default="false")
+    allow_lesson_timeline_bypass = Column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     should_record_user_information = Column(Boolean, server_default="false")
     disable_prompt_randomization = Column(
         Boolean, nullable=False, server_default="false"

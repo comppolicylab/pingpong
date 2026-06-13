@@ -660,6 +660,7 @@ class InteractiveLessonSessionController(BaseModel):
 class InteractiveLessonSession(BaseModel):
     state: InteractiveLessonSessionState
     lesson_chat_available: bool = False
+    timeline_bypass_enabled: bool = False
     last_known_offset_ms: int | None = None
     furthest_offset_ms: int | None = Field(None, ge=0)
     latest_interaction_at: datetime | None = None
@@ -1411,6 +1412,7 @@ class LectureVideoSessionController(BaseModel):
 class LectureVideoSession(BaseModel):
     state: LectureVideoSessionState
     lecture_video_chat_available: bool = False
+    timeline_bypass_enabled: bool = False
     last_known_offset_ms: int | None = None
     furthest_offset_ms: int | None = Field(None, ge=0)
     latest_interaction_at: datetime | None = None
@@ -1559,6 +1561,7 @@ class Assistant(BaseModel):
     creator_id: int
     locked: bool = False
     assistant_should_message_first: bool | None = None
+    allow_lesson_timeline_bypass: bool = False
     should_record_user_information: bool | None = None
     disable_prompt_randomization: bool | None = None
     allow_user_file_uploads: bool | None = None
@@ -1604,6 +1607,13 @@ def lecture_video_validator_create_assistant(self):
         if "overwrite_manifest" in self.model_fields_set
         else False
     )
+    if self.allow_lesson_timeline_bypass and self.interaction_mode not in {
+        InteractionMode.LECTURE_VIDEO,
+        InteractionMode.LECTURE_SLIDES,
+    }:
+        raise ValueError(
+            "allow_lesson_timeline_bypass can only be set for lecture lesson assistants."
+        )
     if self.interaction_mode == InteractionMode.LECTURE_VIDEO:
         if self.lecture_video_id is None:
             raise ValueError(
@@ -1917,6 +1927,7 @@ class CreateAssistant(BaseModel):
     use_image_descriptions: bool = False
     hide_prompt: bool = False
     assistant_should_message_first: bool = False
+    allow_lesson_timeline_bypass: bool = False
     should_record_user_information: bool = False
     disable_prompt_randomization: bool = False
     allow_user_file_uploads: bool = True
@@ -2029,6 +2040,7 @@ class UpdateAssistant(BaseModel):
     use_latex: bool | None = None
     hide_prompt: bool | None = None
     assistant_should_message_first: bool | None = None
+    allow_lesson_timeline_bypass: bool | None = None
     should_record_user_information: bool | None = None
     disable_prompt_randomization: bool | None = None
     allow_user_file_uploads: bool | None = None

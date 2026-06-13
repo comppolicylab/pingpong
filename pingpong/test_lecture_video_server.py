@@ -895,6 +895,7 @@ async def create_ready_lecture_video_assistant(
     lecture_video_id: int = 1,
     video_key: str = "lecture-runtime.mp4",
     manifest: dict | None = None,
+    allow_lesson_timeline_bypass: bool = False,
 ):
     class_ = models.Class(
         id=class_id,
@@ -966,6 +967,7 @@ async def create_ready_lecture_video_assistant(
         use_latex=False,
         use_image_descriptions=False,
         hide_prompt=False,
+        allow_lesson_timeline_bypass=allow_lesson_timeline_bypass,
     )
     session.add(assistant)
     await session.commit()
@@ -3450,6 +3452,90 @@ async def test_lecture_video_interactions_reject_seek_with_forged_from_offset(
         response.json()["detail"]
         == "You cannot jump ahead yet. Continue from where the lesson left off."
     )
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
+    ]
+)
+async def test_lecture_video_timeline_bypass_allows_forward_seek_and_backseek_reactivation(
+    api, authz, config, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+            allow_lesson_timeline_bypass=True,
+        )
+
+    create_response = api.post(
+        f"/api/v1/class/{class_.id}/thread/lecture",
+        json={"assistant_id": 1, "parties": [123]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert create_response.status_code == 200
+    thread_id = create_response.json()["thread"]["id"]
+    await grant_thread_permissions(config, thread_id, 123)
+
+    acquire = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/control/acquire",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert acquire.status_code == 200
+    controller_session_id = acquire.json()["controller_session_id"]
+    acquired_session = acquire.json()["lecture_video_session"]
+    assert acquired_session["timeline_bypass_enabled"] is True
+
+    seek_past_question = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "video_seeked",
+            "controller_session_id": controller_session_id,
+            "expected_state_version": acquired_session["state_version"],
+            "idempotency_key": "timeline-bypass-skip-question",
+            "from_offset_ms": 0,
+            "to_offset_ms": 2_000,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert seek_past_question.status_code == 200
+    skipped_session = seek_past_question.json()["lecture_video_session"]
+    assert skipped_session["last_known_offset_ms"] == 2_000
+    assert skipped_session["furthest_offset_ms"] == 2_000
+    assert skipped_session["current_question"] is None
+
+    seek_back_before_question = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/interactions",
+        json={
+            "type": "video_seeked",
+            "controller_session_id": controller_session_id,
+            "expected_state_version": skipped_session["state_version"],
+            "idempotency_key": "timeline-bypass-reactivate-question",
+            "from_offset_ms": 2_000,
+            "to_offset_ms": 500,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert seek_back_before_question.status_code == 200
+    reactivated_session = seek_back_before_question.json()["lecture_video_session"]
+    assert reactivated_session["current_question"] is not None
+    assert reactivated_session["current_question"]["stop_offset_ms"] == 1_000
+    assert reactivated_session["furthest_offset_ms"] == 2_000
+
+    async with db.async_session() as session:
+        interactions = await models.LectureVideoInteraction.list_by_thread_id(
+            session, thread_id
+        )
+
+    assert [interaction.event_type for interaction in interactions] == [
+        schemas.LectureVideoInteractionEventType.SESSION_INITIALIZED,
+        schemas.LectureVideoInteractionEventType.VIDEO_SEEKED,
+        schemas.LectureVideoInteractionEventType.VIDEO_SEEKED,
+    ]
 
 
 @with_user(123)
@@ -9493,6 +9579,51 @@ async def test_update_assistant_with_same_lecture_video_config_is_a_no_op(
     assert refreshed_video is not None
     assert refreshed_video.voice_id == DEFAULT_LECTURE_VIDEO_VOICE_ID
     assert question == "No-op question?"
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_edit", "assistant:1"),
+        ("user:123", "admin", "class:1"),
+    ]
+)
+async def test_update_assistant_timeline_bypass_does_not_clone_lecture_video(
+    api, db, institution, valid_user_token, monkeypatch
+):
+    patch_lecture_video_model_list(monkeypatch)
+
+    async with db.async_session() as session:
+        class_, lecture_video, assistant = await create_ready_lecture_video_assistant(
+            session,
+            institution,
+        )
+        assistant.creator_id = 123
+        session.add(assistant)
+        await session.commit()
+
+    update_response = api.put(
+        f"/api/v1/class/{class_.id}/assistant/{assistant.id}",
+        json={"allow_lesson_timeline_bypass": True},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["allow_lesson_timeline_bypass"] is True
+    assert update_response.json()["lecture_video"]["id"] == lecture_video.id
+
+    async with db.async_session() as session:
+        refreshed_assistant = await session.get(models.Assistant, assistant.id)
+        lecture_video_count = await session.scalar(
+            select(func.count()).select_from(models.LectureVideo)
+        )
+        refreshed_video = await session.get(models.LectureVideo, lecture_video.id)
+
+    assert refreshed_assistant is not None
+    assert refreshed_assistant.allow_lesson_timeline_bypass is True
+    assert refreshed_assistant.lecture_video_id == lecture_video.id
+    assert lecture_video_count == 1
+    assert refreshed_video is not None
 
 
 @with_user(123)

@@ -75,6 +75,9 @@ class LectureSlideAdapter:
         deck = cast(models.LectureSlideDeck, asset)
         return deck.context_version in {4, 5} and deck.lecture_slide_chat_available
 
+    def timeline_bypass_enabled(self, thread: models.Thread) -> bool:
+        return bool(thread.assistant and thread.assistant.allow_lesson_timeline_bypass)
+
     def initial_state_fields(self) -> dict[str, Any]:
         return {"last_chat_context_end_ms": 0}
 

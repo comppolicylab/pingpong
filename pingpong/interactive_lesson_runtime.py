@@ -78,6 +78,9 @@ class InteractiveLessonAdapter(Protocol):
     def lesson_chat_available(self, asset: object) -> bool:
         pass
 
+    def timeline_bypass_enabled(self, thread: models.Thread) -> bool:
+        pass
+
     def initial_state_fields(self) -> dict[str, Any]:
         pass
 
@@ -266,6 +269,48 @@ def _get_next_question(
     return None
 
 
+def _is_timeline_bypass_enabled(
+    thread: models.Thread, *, adapter: InteractiveLessonAdapter
+) -> bool:
+    return bool(adapter.timeline_bypass_enabled(thread))
+
+
+async def _get_answered_question_ids(
+    session: AsyncSession, state: LessonState, *, adapter: InteractiveLessonAdapter
+) -> set[int]:
+    return await adapter.interaction_model.get_answered_question_ids_by_thread_id(
+        session, state.thread_id
+    )
+
+
+async def _reset_question_queue_for_offset(
+    session: AsyncSession,
+    state: LessonState,
+    offset_ms: int,
+    *,
+    adapter: InteractiveLessonAdapter,
+) -> None:
+    answered_question_ids = await _get_answered_question_ids(
+        session, state, adapter=adapter
+    )
+    next_question = next(
+        (
+            question
+            for question in sorted(
+                adapter.get_questions(state.thread),
+                key=lambda item: item.stop_offset_ms,
+            )
+            if question.stop_offset_ms >= offset_ms
+            and question.id not in answered_question_ids
+        ),
+        None,
+    )
+    state.active_option_id = None
+    state.active_option = None
+    state.current_question_id = next_question.id if next_question is not None else None
+    state.current_question = next_question
+
+
 def _build_continuation(
     thread: models.Thread, state: LessonState, *, adapter: InteractiveLessonAdapter
 ) -> schemas.InteractiveLessonContinuation | None:
@@ -331,6 +376,7 @@ def build_interactive_lesson_session(
         lesson_chat_available=bool(
             asset is not None and adapter.lesson_chat_available(asset)
         ),
+        timeline_bypass_enabled=_is_timeline_bypass_enabled(thread, adapter=adapter),
         last_known_offset_ms=state.last_known_offset_ms,
         furthest_offset_ms=furthest_offset_ms,
         latest_interaction_at=latest_interaction_at,
@@ -876,13 +922,16 @@ async def _handle_question_presented(
             "Question presentation must occur at the configured stop offset."
         )
 
-    plausible_offset_ms = await get_plausible_playback_offset_ms(
-        session, state, adapter=adapter, current_time=current_time
-    )
-    if request.offset_ms > plausible_offset_ms:
-        raise InteractiveLessonValidationError(
-            "Presenting a question past your unlocked progress is not allowed in this lecture video."
+    # With timeline bypass the participant may legitimately reach a checkpoint
+    # right after seeking near it, so plausible watched progress is no gate.
+    if not _is_timeline_bypass_enabled(state.thread, adapter=adapter):
+        plausible_offset_ms = await get_plausible_playback_offset_ms(
+            session, state, adapter=adapter, current_time=current_time
         )
+        if request.offset_ms > plausible_offset_ms:
+            raise InteractiveLessonValidationError(
+                "Presenting a question past your unlocked progress is not allowed in this lecture video."
+            )
 
     state.state = state_enum.AWAITING_ANSWER
     _set_last_known_offset_ms(state, request.offset_ms)
@@ -957,7 +1006,10 @@ async def _handle_resumed(
         plausible_offset_ms = await get_plausible_playback_offset_ms(
             session, state, adapter=adapter, current_time=current_time
         )
-        if request.offset_ms > plausible_offset_ms:
+        timeline_bypass_enabled = _is_timeline_bypass_enabled(
+            state.thread, adapter=adapter
+        )
+        if request.offset_ms > plausible_offset_ms and not timeline_bypass_enabled:
             raise InteractiveLessonValidationError(MSG_SKIP_AHEAD_BLOCKED)
         _set_last_known_offset_ms(state, request.offset_ms)
         await _append_interaction(
@@ -1032,7 +1084,8 @@ async def _handle_paused(
     plausible_offset_ms = await get_plausible_playback_offset_ms(
         session, state, adapter=adapter, current_time=current_time
     )
-    if request.offset_ms > plausible_offset_ms:
+    timeline_bypass_enabled = _is_timeline_bypass_enabled(state.thread, adapter=adapter)
+    if request.offset_ms > plausible_offset_ms and not timeline_bypass_enabled:
         raise InteractiveLessonValidationError(MSG_PAUSE_AHEAD_OF_PROGRESS)
 
     _set_last_known_offset_ms(state, request.offset_ms)
@@ -1057,11 +1110,13 @@ async def _handle_seeked(
     event_type: schemas.InteractiveLessonInteractionEventType,
     current_time: datetime,
 ) -> None:
-    _require_playing_state_for_playback_event(state, adapter=adapter)
+    timeline_bypass_enabled = _is_timeline_bypass_enabled(state.thread, adapter=adapter)
+    if not timeline_bypass_enabled:
+        _require_playing_state_for_playback_event(state, adapter=adapter)
     plausible_offset_ms = await get_plausible_playback_offset_ms(
         session, state, adapter=adapter, current_time=current_time
     )
-    if request.to_offset_ms > plausible_offset_ms:
+    if request.to_offset_ms > plausible_offset_ms and not timeline_bypass_enabled:
         raise InteractiveLessonValidationError(MSG_JUMP_AHEAD_BLOCKED)
 
     _set_seek_offset_ms(
@@ -1070,6 +1125,12 @@ async def _handle_seeked(
         to_offset_ms=request.to_offset_ms,
         plausible_offset_ms=plausible_offset_ms,
     )
+    state_enum = _state_enum(adapter)
+    if timeline_bypass_enabled and state.state != state_enum.COMPLETED:
+        await _reset_question_queue_for_offset(
+            session, state, request.to_offset_ms, adapter=adapter
+        )
+        state.state = state_enum.PLAYING
     await _append_interaction(
         session,
         state,
@@ -1096,10 +1157,15 @@ async def _handle_ended(
     plausible_offset_ms = await get_plausible_playback_offset_ms(
         session, state, adapter=adapter, current_time=current_time
     )
-    if request.offset_ms > plausible_offset_ms:
+    timeline_bypass_enabled = _is_timeline_bypass_enabled(state.thread, adapter=adapter)
+    if request.offset_ms > plausible_offset_ms and not timeline_bypass_enabled:
         raise InteractiveLessonValidationError(MSG_COMPLETE_FROM_SPOT_BLOCKED)
 
     _set_last_known_offset_ms(state, request.offset_ms)
+    if timeline_bypass_enabled and state.state != _state_enum(adapter).COMPLETED:
+        await _reset_question_queue_for_offset(
+            session, state, request.offset_ms, adapter=adapter
+        )
     await _append_interaction(
         session,
         state,

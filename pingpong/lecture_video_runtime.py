@@ -108,6 +108,9 @@ class LectureVideoAdapter:
         lecture_video = cast(models.LectureVideo, asset)
         return lecture_video.lecture_video_chat_available
 
+    def timeline_bypass_enabled(self, thread: models.Thread) -> bool:
+        return bool(thread.assistant and thread.assistant.allow_lesson_timeline_bypass)
+
     def initial_state_fields(self) -> dict[str, Any]:
         return {"last_chat_context_end_ms": 0}
 
