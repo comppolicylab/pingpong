@@ -1,6 +1,7 @@
 log_level = "DEBUG"
 public_url = "http://localhost:5173"
 development = true
+deployment_environment = "test"
 
 [artifact_store]
 type = "local"
