@@ -3815,17 +3815,13 @@ class LectureSlideInteraction(Base):
     async def get_answered_question_ids_by_thread_id(
         cls, session: AsyncSession, thread_id: int
     ) -> set[int]:
-        stmt = select(LectureSlideInteraction.question_id).where(
+        stmt = select(distinct(LectureSlideInteraction.question_id)).where(
             LectureSlideInteraction.thread_id == thread_id,
             LectureSlideInteraction.question_id.is_not(None),
             LectureSlideInteraction.event_type
             == schemas.InteractiveLessonInteractionEventType.ANSWER_SUBMITTED,
         )
-        return {
-            int(question_id)
-            for question_id in await session.scalars(stmt)
-            if question_id is not None
-        }
+        return {int(question_id) for question_id in await session.scalars(stmt)}
 
 
 def _lecture_slide_post_narration_loader() -> Load:
@@ -4233,17 +4229,13 @@ class LectureVideoInteraction(Base):
     async def get_answered_question_ids_by_thread_id(
         cls, session: AsyncSession, thread_id: int
     ) -> set[int]:
-        stmt = select(LectureVideoInteraction.question_id).where(
+        stmt = select(distinct(LectureVideoInteraction.question_id)).where(
             LectureVideoInteraction.thread_id == thread_id,
             LectureVideoInteraction.question_id.is_not(None),
             LectureVideoInteraction.event_type
             == schemas.LectureVideoInteractionEventType.ANSWER_SUBMITTED,
         )
-        return {
-            int(question_id)
-            for question_id in await session.scalars(stmt)
-            if question_id is not None
-        }
+        return {int(question_id) for question_id in await session.scalars(stmt)}
 
 
 class S3File(Base):

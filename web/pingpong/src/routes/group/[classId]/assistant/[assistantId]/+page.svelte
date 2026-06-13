@@ -2917,7 +2917,7 @@
 				? (assistant?.hide_prompt ?? true)
 				: body.hide_prompt?.toString() === 'on',
 			assistant_should_message_first: assistantShouldMessageFirst,
-			allow_lesson_timeline_bypass: isLectureMode ? allowLessonTimelineBypass : false,
+			allow_lesson_timeline_bypass: isLectureMode ? allowLessonTimelineBypass : undefined,
 			create_classic_assistant: createClassicAssistant,
 			deleted_private_files: [...$trashPrivateFileIds, ...fileSearchCodeInterpreterUnusedFiles],
 			should_record_user_information: shouldRecordNameOrVoice,
@@ -5955,10 +5955,10 @@
 									>Allow participants to seek ahead in the lesson timeline. When enabled,
 									participants can skip ahead to any point in the lesson timeline, skipping any
 									knowledge checks in between. Changing this setting will affect existing and future
-									lesson sessions.{#if assistant?.allow_lesson_timeline_bypass}&nbsp;If you disable
-										this setting, participants will no longer be able to seek ahead in existing
-										lesson sessions.{:else}&nbsp;If you enable this setting, participants will be
-										able to seek ahead in existing lesson sessions.{/if}</Helper
+									lesson sessions.{#if allowLessonTimelineBypass}&nbsp;If you disable this setting,
+										participants will no longer be able to seek ahead in existing lesson sessions.{:else}&nbsp;If
+										you enable this setting, participants will be able to seek ahead in existing
+										lesson sessions.{/if}</Helper
 								>
 							</div>
 							<hr />

@@ -12039,6 +12039,15 @@ async def update_assistant(
             status_code=400,
             detail="Lecture video data and lecture slide data cannot be updated together.",
         )
+    if (
+        "allow_lesson_timeline_bypass" in req.model_fields_set
+        and req.allow_lesson_timeline_bypass is True
+        and not is_lesson_mode
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="allow_lesson_timeline_bypass can only be set for lecture lesson assistants.",
+        )
 
     if lecture_video_fields_present:
         if not is_video:

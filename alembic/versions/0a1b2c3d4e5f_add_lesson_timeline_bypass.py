@@ -27,7 +27,7 @@ def upgrade() -> None:
         sa.Column(
             "allow_lesson_timeline_bypass",
             sa.Boolean(),
-            server_default="false",
+            server_default=sa.false(),
             nullable=False,
         ),
     )

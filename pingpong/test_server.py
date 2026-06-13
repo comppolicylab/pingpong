@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import select
 
 from pingpong import models
@@ -48,6 +49,70 @@ def test_lesson_timeline_bypass_schema_defaults():
         ).timeline_bypass_enabled
         is False
     )
+
+
+def test_create_assistant_rejects_timeline_bypass_for_non_lecture_mode():
+    with pytest.raises(
+        ValidationError,
+        match="allow_lesson_timeline_bypass can only be set for lecture lesson assistants",
+    ):
+        schemas.CreateAssistant(
+            name="Timeline Test",
+            instructions="Be helpful",
+            description="Test assistant",
+            model="gpt-4o-mini",
+            interaction_mode=schemas.InteractionMode.CHAT,
+            allow_lesson_timeline_bypass=True,
+        )
+
+
+@with_user(123)
+@with_institution(1, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_edit", "assistant:1"),
+        ("user:123", "admin", "class:1"),
+    ]
+)
+async def test_update_assistant_rejects_timeline_bypass_for_non_lecture_mode(
+    api, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1, name="Test Class", institution_id=institution.id, api_key="test-key"
+        )
+        assistant = models.Assistant(
+            id=1,
+            name="Chat Assistant",
+            instructions="Be helpful",
+            description="original",
+            interaction_mode=schemas.InteractionMode.CHAT,
+            model="gpt-4o-mini",
+            temperature=0.2,
+            class_id=class_.id,
+            tools="[]",
+            creator_id=123,
+            published=None,
+            version=3,
+        )
+        session.add_all([class_, assistant])
+        await session.commit()
+
+    response = api.put(
+        "/api/v1/class/1/assistant/1",
+        json={"allow_lesson_timeline_bypass": True},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert response.status_code == 400
+    assert (
+        response.json()["detail"]
+        == "allow_lesson_timeline_bypass can only be set for lecture lesson assistants."
+    )
+
+    async with db.async_session() as session:
+        saved = await session.get(models.Assistant, 1)
+        assert saved is not None
+        assert saved.allow_lesson_timeline_bypass is False
 
 
 @with_user(123)

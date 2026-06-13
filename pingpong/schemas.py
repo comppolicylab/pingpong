@@ -1607,6 +1607,13 @@ def lecture_video_validator_create_assistant(self):
         if "overwrite_manifest" in self.model_fields_set
         else False
     )
+    if self.allow_lesson_timeline_bypass and self.interaction_mode not in {
+        InteractionMode.LECTURE_VIDEO,
+        InteractionMode.LECTURE_SLIDES,
+    }:
+        raise ValueError(
+            "allow_lesson_timeline_bypass can only be set for lecture lesson assistants."
+        )
     if self.interaction_mode == InteractionMode.LECTURE_VIDEO:
         if self.lecture_video_id is None:
             raise ValueError(

@@ -300,7 +300,7 @@ async def _reset_question_queue_for_offset(
                 adapter.get_questions(state.thread),
                 key=lambda item: item.stop_offset_ms,
             )
-            if question.stop_offset_ms > offset_ms
+            if question.stop_offset_ms >= offset_ms
             and question.id not in answered_question_ids
         ),
         None,
@@ -1162,6 +1162,10 @@ async def _handle_ended(
         raise InteractiveLessonValidationError(MSG_COMPLETE_FROM_SPOT_BLOCKED)
 
     _set_last_known_offset_ms(state, request.offset_ms)
+    if timeline_bypass_enabled and state.state != _state_enum(adapter).COMPLETED:
+        await _reset_question_queue_for_offset(
+            session, state, request.offset_ms, adapter=adapter
+        )
     await _append_interaction(
         session,
         state,

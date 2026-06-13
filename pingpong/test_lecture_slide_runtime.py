@@ -556,6 +556,43 @@ async def test_lecture_slide_timeline_bypass_seek_recomputes_question_queue(
 
 
 @with_institution(11, "Test Institution")
+async def test_lecture_slide_timeline_bypass_seek_to_exact_checkpoint_keeps_question(
+    db, institution
+):
+    async with db.async_session() as session:
+        _, _, _, thread, questions = await _create_slide_runtime_fixture(
+            session, institution, allow_lesson_timeline_bypass=True
+        )
+
+        (
+            controller_session_id,
+            slide_session,
+        ) = await lecture_slide_runtime.acquire_control(
+            session,
+            thread.id,
+            actor_user_id=123,
+        )
+
+        slide_session = await lecture_slide_runtime.process_interaction(
+            session,
+            thread.id,
+            actor_user_id=123,
+            request=schemas.InteractiveLessonSeekedRequest(
+                type="lesson_seeked",
+                controller_session_id=controller_session_id,
+                expected_state_version=slide_session.state_version,
+                idempotency_key="seek-to-first-checkpoint",
+                from_offset_ms=0,
+                to_offset_ms=questions[0].stop_offset_ms,
+            ),
+        )
+
+    assert slide_session.state == schemas.InteractiveLessonSessionState.PLAYING
+    assert slide_session.current_question is not None
+    assert slide_session.current_question.id == questions[0].id
+
+
+@with_institution(11, "Test Institution")
 async def test_lecture_slide_timeline_bypass_seek_clears_pending_question(
     db, institution
 ):
@@ -608,6 +645,78 @@ async def test_lecture_slide_timeline_bypass_seek_clears_pending_question(
     assert slide_session.current_question is not None
     assert slide_session.current_question.id == questions[1].id
     assert slide_session.current_continuation is None
+
+
+@with_institution(11, "Test Institution")
+async def test_lecture_slide_timeline_bypass_seek_clears_post_answer_continuation(
+    db, institution
+):
+    async with db.async_session() as session:
+        _, _, _, thread, questions = await _create_slide_runtime_fixture(
+            session, institution, allow_lesson_timeline_bypass=True
+        )
+
+        (
+            controller_session_id,
+            slide_session,
+        ) = await lecture_slide_runtime.acquire_control(
+            session,
+            thread.id,
+            actor_user_id=123,
+        )
+        first_question = questions[0]
+        first_option = first_question.options[0]
+
+        slide_session = await lecture_slide_runtime.process_interaction(
+            session,
+            thread.id,
+            actor_user_id=123,
+            request=schemas.InteractiveLessonQuestionPresentedRequest(
+                type="question_presented",
+                controller_session_id=controller_session_id,
+                expected_state_version=slide_session.state_version,
+                idempotency_key="present-before-post-answer-seek",
+                question_id=first_question.id,
+                offset_ms=first_question.stop_offset_ms,
+            ),
+        )
+        slide_session = await lecture_slide_runtime.process_interaction(
+            session,
+            thread.id,
+            actor_user_id=123,
+            request=schemas.InteractiveLessonAnswerSubmittedRequest(
+                type="answer_submitted",
+                controller_session_id=controller_session_id,
+                expected_state_version=slide_session.state_version,
+                idempotency_key="answer-before-post-answer-seek",
+                question_id=first_question.id,
+                option_id=first_option.id,
+            ),
+        )
+        assert (
+            slide_session.state
+            == schemas.InteractiveLessonSessionState.AWAITING_POST_ANSWER_RESUME
+        )
+        assert slide_session.current_continuation is not None
+
+        slide_session = await lecture_slide_runtime.process_interaction(
+            session,
+            thread.id,
+            actor_user_id=123,
+            request=schemas.InteractiveLessonSeekedRequest(
+                type="lesson_seeked",
+                controller_session_id=controller_session_id,
+                expected_state_version=slide_session.state_version,
+                idempotency_key="seek-out-of-post-answer",
+                from_offset_ms=first_question.stop_offset_ms,
+                to_offset_ms=2_000,
+            ),
+        )
+
+    assert slide_session.state == schemas.InteractiveLessonSessionState.PLAYING
+    assert slide_session.current_continuation is None
+    assert slide_session.current_question is not None
+    assert slide_session.current_question.id == questions[1].id
 
 
 @with_institution(11, "Test Institution")
@@ -719,6 +828,47 @@ async def test_lecture_slide_timeline_bypass_seek_keeps_completed_state(
     assert slide_session.current_question is None
     assert slide_session.last_known_offset_ms == 1_000
     assert slide_session.furthest_offset_ms == 10_000
+
+
+@with_institution(11, "Test Institution")
+async def test_lecture_slide_timeline_bypass_ended_recomputes_question_queue(
+    db, institution
+):
+    async with db.async_session() as session:
+        _, _, _, thread, _ = await _create_slide_runtime_fixture(
+            session, institution, allow_lesson_timeline_bypass=True
+        )
+
+        (
+            controller_session_id,
+            slide_session,
+        ) = await lecture_slide_runtime.acquire_control(
+            session,
+            thread.id,
+            actor_user_id=123,
+        )
+
+        slide_session = await lecture_slide_runtime.process_interaction(
+            session,
+            thread.id,
+            actor_user_id=123,
+            request=schemas.InteractiveLessonEndedRequest(
+                type="lesson_ended",
+                controller_session_id=controller_session_id,
+                expected_state_version=slide_session.state_version,
+                idempotency_key="complete-after-skip-to-end",
+                offset_ms=10_000,
+            ),
+        )
+        interactions = await _list_slide_interactions(session, thread.id)
+
+    assert slide_session.state == schemas.InteractiveLessonSessionState.COMPLETED
+    assert slide_session.current_question is None
+    assert [interaction.event_type for interaction in interactions] == [
+        schemas.InteractiveLessonInteractionEventType.SESSION_INITIALIZED,
+        schemas.InteractiveLessonInteractionEventType.LESSON_ENDED,
+        schemas.InteractiveLessonInteractionEventType.SESSION_COMPLETED,
+    ]
 
 
 @with_institution(11, "Test Institution")
