@@ -13017,7 +13017,22 @@ async def test_get_thread_lecture_video_narration_streams_audio(
     )
     assert response.status_code == 200
     assert response.content == narration_bytes
+    assert response.headers["accept-ranges"] == "bytes"
+    assert response.headers["content-length"] == str(len(narration_bytes))
     assert response.headers["content-type"].startswith("audio/ogg")
+
+    partial = api.get(
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/narration/{question.intro_narration.id}",
+        headers={
+            "Authorization": f"Bearer {valid_user_token}",
+            "Range": "bytes=2-6",
+        },
+    )
+    assert partial.status_code == 206
+    assert partial.headers["accept-ranges"] == "bytes"
+    assert partial.headers["content-range"] == f"bytes 2-6/{len(narration_bytes)}"
+    assert partial.headers["content-length"] == "5"
+    assert partial.content == narration_bytes[2:7]
 
     missing = api.get(
         f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/narration/99999",

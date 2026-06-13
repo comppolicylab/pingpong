@@ -187,6 +187,7 @@ RUN_LEASE_DURATION = timedelta(minutes=10)
 RUN_LEASE_HEARTBEAT_INTERVAL = min(timedelta(minutes=1), RUN_LEASE_DURATION / 2)
 UNEXPECTED_WORKER_EXIT_ERROR_MESSAGE = "Lecture slide worker exited unexpectedly."
 LECTURE_SLIDE_AUDIO_CONTENT_TYPE = "audio/ogg"
+LECTURE_SLIDE_CONTINUOUS_AUDIO_CONTENT_TYPE = "audio/webm"
 FFMPEG_CONCAT_TIMEOUT_SECONDS = 300
 MAX_RUN_CREATE_RETRIES = 3
 OPENAI_GENERATION_MAX_ATTEMPTS = 3
@@ -3212,7 +3213,7 @@ async def _persist_composite_artifacts(
         ]
         duration_ms = _total_stored_audio_duration_ms(stored_objects)
     combined_audio = await _combine_audio_objects(stored_objects)
-    content_type = LECTURE_SLIDE_AUDIO_CONTENT_TYPE
+    content_type = LECTURE_SLIDE_CONTINUOUS_AUDIO_CONTENT_TYPE
     audio_key, audio_length = await _store_audio(
         generate_slide_continuous_narration_store_key(),
         content_type,
@@ -3293,7 +3294,7 @@ async def _combine_audio_objects(
                     file.write(chunk)
             input_paths.append(input_path)
 
-        output_path = temp_dir / "combined.ogg"
+        output_path = temp_dir / "combined.webm"
         try:
             await asyncio.to_thread(
                 _run_ffmpeg_concat,
@@ -3311,6 +3312,40 @@ async def _combine_audio_objects(
                 _run_ffmpeg_concat,
                 ffmpeg_path,
                 input_paths,
+                output_path,
+                stream_copy=False,
+            )
+        return output_path.read_bytes()
+
+
+async def remux_continuous_narration_to_webm(ogg_audio: bytes) -> bytes:
+    """Losslessly remux an Opus-in-Ogg continuous narration into WebM."""
+    ffmpeg_path = shutil.which("ffmpeg")
+    if ffmpeg_path is None:
+        raise RuntimeError("ffmpeg is required for lecture slide audio remuxing.")
+
+    with tempfile.TemporaryDirectory() as temp_dir_name:
+        temp_dir = Path(temp_dir_name)
+        input_path = temp_dir / "input.ogg"
+        input_path.write_bytes(ogg_audio)
+        output_path = temp_dir / "combined.webm"
+        try:
+            await asyncio.to_thread(
+                _run_ffmpeg_concat,
+                ffmpeg_path,
+                [input_path],
+                output_path,
+                stream_copy=True,
+            )
+        except RuntimeError:
+            logger.warning(
+                "ffmpeg stream-copy remux failed; retrying with Opus re-encode.",
+                exc_info=True,
+            )
+            await asyncio.to_thread(
+                _run_ffmpeg_concat,
+                ffmpeg_path,
+                [input_path],
                 output_path,
                 stream_copy=False,
             )
@@ -3491,7 +3526,7 @@ def generate_slide_narration_store_key() -> str:
 
 
 def generate_slide_continuous_narration_store_key() -> str:
-    return f"ls_continuous_narration_{uuid.uuid7()}.ogg"
+    return f"ls_continuous_narration_{uuid.uuid7()}.webm"
 
 
 def generate_slide_caption_store_key() -> str:

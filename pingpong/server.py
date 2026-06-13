@@ -4996,6 +4996,78 @@ def _parse_single_byte_range(
     return start, min(end, content_length - 1), True
 
 
+async def _stream_audio_file_response(
+    *,
+    store,
+    key: str,
+    content_length: int,
+    content_type: str | None,
+    range_header: str | None,
+    store_error_log: str,
+    unexpected_error_log: str,
+    retrieval_error_detail: str,
+) -> StreamingResponse:
+    total_length = content_length
+    try:
+        start, end, is_partial = _parse_single_byte_range(range_header, total_length)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=416,
+            detail=str(e),
+            headers={
+                "Accept-Ranges": "bytes",
+                "Content-Range": f"bytes */{total_length}",
+            },
+        ) from e
+
+    try:
+        stream = await prefetch_stream(
+            store.stream_file_range(
+                key=key,
+                start=start,
+                end=end,
+            ),
+            store_error=AudioStoreError,
+            logger=logger,
+            store_error_log=store_error_log,
+            unexpected_error_log=unexpected_error_log,
+        )
+    except AudioStoreError as e:
+        if e.detail and "range" in e.detail.lower():
+            raise HTTPException(
+                status_code=416,
+                detail=e.detail,
+                headers={
+                    "Accept-Ranges": "bytes",
+                    "Content-Range": f"bytes */{total_length}",
+                },
+            ) from e
+        raise HTTPException(
+            status_code=400,
+            detail=retrieval_error_detail,
+        ) from e
+
+    response_headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(
+            (end - start + 1)
+            if is_partial and start is not None and end is not None
+            else total_length
+        ),
+    }
+    status_code = 200
+    if is_partial and start is not None and end is not None:
+        response_headers["Content-Range"] = f"bytes {start}-{end}/{total_length}"
+        status_code = 206
+
+    return StreamingResponse(
+        stream,
+        status_code=status_code,
+        media_type=content_type or "application/octet-stream",
+        headers=response_headers,
+    )
+
+
 @v1.get(
     "/class/{class_id}/thread/{thread_id}/video",
     dependencies=[
@@ -5277,18 +5349,18 @@ async def get_thread_lecture_slide_continuous_narration(
         )
 
     try:
-        stream = await prefetch_stream(
-            config.lecture_video_audio_store.store.get_file(narration.key),
-            store_error=AudioStoreError,
-            logger=logger,
+        return await _stream_audio_file_response(
+            store=config.lecture_video_audio_store.store,
+            key=narration.key,
+            content_length=narration.content_length,
+            content_type=narration.content_type,
+            range_header=request.headers.get("range"),
             store_error_log="AudioStoreError while streaming lecture slide narration; aborting stream.",
             unexpected_error_log="Unexpected error while streaming lecture slide narration",
+            retrieval_error_detail="Unable to retrieve the lecture slide narration audio.",
         )
-        return StreamingResponse(
-            stream,
-            media_type=narration.content_type or "application/octet-stream",
-            headers={"Content-Length": str(narration.content_length)},
-        )
+    except HTTPException:
+        raise
     except AudioStoreError as e:
         raise HTTPException(
             status_code=400,
@@ -5512,20 +5584,18 @@ async def get_thread_lecture_slide_narration(
         )
 
     try:
-        stream = await prefetch_stream(
-            config.lecture_video_audio_store.store.get_file(
-                narration.stored_object.key
-            ),
-            store_error=AudioStoreError,
-            logger=logger,
+        return await _stream_audio_file_response(
+            store=config.lecture_video_audio_store.store,
+            key=narration.stored_object.key,
+            content_length=narration.stored_object.content_length,
+            content_type=narration.stored_object.content_type,
+            range_header=request.headers.get("range"),
             store_error_log="AudioStoreError while streaming lecture slide narration; aborting stream.",
             unexpected_error_log="Unexpected error while streaming lecture slide narration",
+            retrieval_error_detail="Unable to retrieve the lecture slide narration audio.",
         )
-        return StreamingResponse(
-            stream,
-            media_type=narration.stored_object.content_type
-            or "application/octet-stream",
-        )
+    except HTTPException:
+        raise
     except AudioStoreError as e:
         raise HTTPException(
             status_code=400,
@@ -5602,20 +5672,18 @@ async def get_thread_lecture_video_narration(
         )
 
     try:
-        stream = await prefetch_stream(
-            config.lecture_video_audio_store.store.get_file(
-                narration.stored_object.key
-            ),
-            store_error=AudioStoreError,
-            logger=logger,
+        return await _stream_audio_file_response(
+            store=config.lecture_video_audio_store.store,
+            key=narration.stored_object.key,
+            content_length=narration.stored_object.content_length,
+            content_type=narration.stored_object.content_type,
+            range_header=request.headers.get("range"),
             store_error_log="AudioStoreError while streaming lecture narration; aborting stream.",
             unexpected_error_log="Unexpected error while streaming lecture narration",
+            retrieval_error_detail="Unable to retrieve the lecture narration audio.",
         )
-        return StreamingResponse(
-            stream,
-            media_type=narration.stored_object.content_type
-            or "application/octet-stream",
-        )
+    except HTTPException:
+        raise
     except AudioStoreError as e:
         raise HTTPException(
             status_code=400,

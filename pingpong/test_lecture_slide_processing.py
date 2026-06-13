@@ -2072,6 +2072,7 @@ async def test_combine_audio_objects_uses_ffmpeg_stream_copy(monkeypatch):
     assert downloaded_keys == ["first.ogg", "second.ogg"]
     assert len(commands) == 1
     assert commands[0][commands[0].index("-c") + 1] == "copy"
+    assert commands[0][-1].endswith(".webm")
     assert "file '" in concat_files[0]
     assert "input-0.ogg" in concat_files[0]
     assert "input-1.ogg" in concat_files[0]
@@ -2755,14 +2756,14 @@ async def test_persist_composite_artifacts_stores_combined_audio_as_ogg(
         ],
     )
 
-    assert stored_content_types == ["audio/ogg"]
+    assert stored_content_types == ["audio/webm"]
     async with db.async_session() as session:
         deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
             session, 1
         )
         assert deck is not None
         assert deck.continuous_narration_stored_object is not None
-        assert deck.continuous_narration_stored_object.content_type == "audio/ogg"
+        assert deck.continuous_narration_stored_object.content_type == "audio/webm"
         assert deck.continuous_narration_stored_object.duration_ms == 200
 
 
