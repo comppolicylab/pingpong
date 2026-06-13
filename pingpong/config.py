@@ -2,6 +2,7 @@ import base64
 import logging
 import os
 import tomllib
+from collections.abc import Iterable
 from functools import cached_property
 from pathlib import Path
 from typing import Any, Literal, Union
@@ -210,7 +211,7 @@ LMSInstance = Union[CanvasSettings]
 class LMSSettings(BaseSettings):
     """LMS connection settings."""
 
-    lms_instances: list[LMSInstance]
+    lms_instances: list[LMSInstance] = Field([])
 
 
 class InitSettings(BaseSettings):
@@ -239,7 +240,11 @@ class S3StoreSettings(BaseSettings):
         return S3ArtifactStore(self.save_target)
 
 
-class LocalStoreSettings(BaseSettings):
+class LocalDiskBackedSettings(BaseSettings):
+    """Marker for settings that write app-managed data to local disk."""
+
+
+class LocalStoreSettings(LocalDiskBackedSettings):
     """Settings for local storage."""
 
     type: Literal["local"] = "local"
@@ -266,7 +271,7 @@ class S3VideoStoreSettings(BaseSettings):
         return S3VideoStore(bucket=self.save_target, allow_unsigned=self.allow_unsigned)
 
 
-class LocalVideoStoreSettings(BaseSettings):
+class LocalVideoStoreSettings(LocalDiskBackedSettings):
     """Settings for Local Video Store"""
 
     type: Literal["local"] = "local"
@@ -291,7 +296,7 @@ class S3AudioStoreSettings(BaseSettings):
         return S3AudioStore(self.save_target)
 
 
-class LocalAudioStoreSettings(BaseSettings):
+class LocalAudioStoreSettings(LocalDiskBackedSettings):
     """Settings for local storage."""
 
     type: Literal["local"] = "local"
@@ -317,7 +322,7 @@ class AWSLTIKeyStoreSettings(BaseSettings):
         return LTIKeyManager(key_store)
 
 
-class LocalLTIKeyStoreSettings(BaseSettings):
+class LocalLTIKeyStoreSettings(LocalDiskBackedSettings):
     """Settings for local LTI key store."""
 
     type: Literal["local"] = "local"
@@ -653,30 +658,115 @@ class Config(BaseSettings):
     reload: int = Field(0)
     public_url: str = Field("http://localhost:8000")
     development: bool = Field(False)
-    artifact_store: ArtifactStoreSettings = LocalStoreSettings(
-        save_target="local_exports/thread_exports"
-    )
-    file_store: ArtifactStoreSettings = LocalStoreSettings(
-        save_target="local_exports/files"
-    )
-    audio_store: AudioStoreSettings = LocalAudioStoreSettings(
-        save_target="local_exports/voice_mode_recordings"
-    )
-    lecture_video_audio_store: AudioStoreSettings = LocalAudioStoreSettings(
-        save_target="local_exports/lecture_video_narrations"
-    )
+    deployment_identifier: str = Field("unknown")
+    artifact_store: ArtifactStoreSettings
+    file_store: ArtifactStoreSettings
+    audio_store: AudioStoreSettings
+    lecture_video_audio_store: AudioStoreSettings
     video_store: VideoStoreSettings | None = Field(None)
     db: DbSettings
     auth: AuthSettings
     authz: AuthzSettings
     email: EmailSettings
-    lms: LMSSettings
+    lms: LMSSettings = Field(LMSSettings())
     lti: LTISettings | None = Field(None)
     sentry: SentrySettings = Field(SentrySettings())
     metrics: MetricsSettings = Field(MetricsSettings())
     init: InitSettings = Field(InitSettings())
     support: SupportSettings = Field(NoSupportSettings())
     upload: UploadSettings = Field(UploadSettings())
+
+    @staticmethod
+    def _development_enabled(data: dict[str, Any]) -> bool:
+        raw_development = data.get("development", False)
+        if isinstance(raw_development, bool):
+            return raw_development
+        if isinstance(raw_development, str):
+            return raw_development.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(raw_development)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _add_development_store_defaults(cls, data: object) -> object:
+        if not isinstance(data, dict) or not cls._development_enabled(data):
+            return data
+
+        mapped_data = dict(data)
+        mapped_data.setdefault(
+            "artifact_store",
+            {
+                "type": "local",
+                "save_target": "local_exports/thread_exports",
+            },
+        )
+        mapped_data.setdefault(
+            "file_store",
+            {
+                "type": "local",
+                "save_target": "local_exports/files",
+            },
+        )
+        mapped_data.setdefault(
+            "audio_store",
+            {
+                "type": "local",
+                "save_target": "local_exports/voice_mode_recordings",
+            },
+        )
+        mapped_data.setdefault(
+            "lecture_video_audio_store",
+            {
+                "type": "local",
+                "save_target": "local_exports/lecture_video_narrations",
+            },
+        )
+        return mapped_data
+
+    @classmethod
+    def _iter_local_disk_backed_paths(cls, value: object, path: str) -> Iterable[str]:
+        if isinstance(value, LocalDiskBackedSettings):
+            yield path
+            return
+
+        if isinstance(value, BaseSettings):
+            for field_name in type(value).model_fields:
+                child_path = f"{path}.{field_name}" if path else field_name
+                yield from cls._iter_local_disk_backed_paths(
+                    getattr(value, field_name), child_path
+                )
+            return
+
+        if isinstance(value, (list, tuple)):
+            for index, item in enumerate(value):
+                yield from cls._iter_local_disk_backed_paths(item, f"{path}[{index}]")
+            return
+
+        if isinstance(value, dict):
+            for key, item in value.items():
+                child_path = f"{path}.{key}" if path else str(key)
+                yield from cls._iter_local_disk_backed_paths(item, child_path)
+
+    @model_validator(mode="after")
+    def _reject_local_disk_stores_outside_development(self):
+        if self.development:
+            return self
+
+        local_paths = sorted(
+            self._iter_local_disk_backed_paths(
+                {
+                    field_name: getattr(self, field_name)
+                    for field_name in type(self).model_fields
+                },
+                "",
+            )
+        )
+        if local_paths:
+            raise ValueError(
+                "Local disk-backed stores are only allowed when development is true. "
+                f"Configure non-local stores for: {', '.join(local_paths)}"
+            )
+
+        return self
 
     def url(self, path: str | None) -> str:
         """Return a URL relative to the public URL."""

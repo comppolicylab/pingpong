@@ -25,6 +25,10 @@ public_url = "http://localhost:5173"
 # Whether the server is running in development mode. Should be `false` in prod.
 development = true
 
+# Stable deployment identifier for logs, traces, and other observability
+# metadata. Use values like "development", "staging", or "production".
+deployment_identifier = "development"
+
 [artifact_store]
 # Store for temporarily storing thread exports for download
 # accepts `s3` and `local`
@@ -58,6 +62,15 @@ type = "s3"
 # IF `s3`, set the s3 bucket to save exports to
 # e.g. save_target = "your-bucket-here"
 # IF `local`, set the directory to save exports to
+save_target = "/your/path/here"
+
+[lecture_video_audio_store]
+# Store for storing lecture video and lecture slide narrations
+# accepts `s3` and `local`
+type = "s3"
+# IF `s3`, set the s3 bucket to save narrations to
+# e.g. save_target = "your-bucket-here"
+# IF `local`, set the directory to save narrations to
 save_target = "/your/path/here"
 
 [db]

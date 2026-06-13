@@ -1,10 +1,152 @@
+import inspect
 import logging
 
 import pytest
 from pydantic import ValidationError
+from pydantic_settings import BaseSettings
 
-from pingpong.config import LEGACY_OPENID_CONFIGURATION_PATHS_DEFAULTS, LTISettings
+from pingpong.config import (
+    Config,
+    LEGACY_OPENID_CONFIGURATION_PATHS_DEFAULTS,
+    LocalAudioStoreSettings,
+    LocalDiskBackedSettings,
+    LocalStoreSettings,
+    LTISettings,
+    SqliteSettings,
+    config,
+)
 from pingpong.lti.allowlist import generate_safe_lti_url
+
+
+def test_config_loads_deployment_identifier():
+    assert config.deployment_identifier == "test"
+
+
+def _s3_store_settings() -> dict[str, dict[str, str]]:
+    return {
+        "artifact_store": {"type": "s3", "save_target": "artifact-bucket"},
+        "file_store": {"type": "s3", "save_target": "file-bucket"},
+        "audio_store": {"type": "s3", "save_target": "audio-bucket"},
+        "lecture_video_audio_store": {
+            "type": "s3",
+            "save_target": "lecture-audio-bucket",
+        },
+    }
+
+
+def _minimal_config_settings() -> dict[str, object]:
+    return {
+        **_s3_store_settings(),
+        "db": SqliteSettings(path=":memory:"),
+        "auth": {"authn_methods": [], "secret_keys": [{"key": "secret"}]},
+        "authz": {"type": "openfga"},
+        "email": {"type": "mock"},
+    }
+
+
+def test_config_defaults_deployment_identifier_to_unknown():
+    cfg = Config.model_validate(_minimal_config_settings())
+
+    assert cfg.deployment_identifier == "unknown"
+    assert cfg.lms.lms_instances == []
+
+
+def test_config_injects_local_store_defaults_in_development():
+    cfg = Config.model_validate(
+        {
+            "development": True,
+            "db": SqliteSettings(path=":memory:"),
+            "auth": {"authn_methods": [], "secret_keys": [{"key": "secret"}]},
+            "authz": {"type": "openfga"},
+            "email": {"type": "mock"},
+        }
+    )
+
+    assert isinstance(cfg.artifact_store, LocalStoreSettings)
+    assert cfg.artifact_store.save_target == "local_exports/thread_exports"
+    assert isinstance(cfg.file_store, LocalStoreSettings)
+    assert cfg.file_store.save_target == "local_exports/files"
+    assert isinstance(cfg.audio_store, LocalAudioStoreSettings)
+    assert cfg.audio_store.save_target == "local_exports/voice_mode_recordings"
+    assert isinstance(cfg.lecture_video_audio_store, LocalAudioStoreSettings)
+    assert (
+        cfg.lecture_video_audio_store.save_target
+        == "local_exports/lecture_video_narrations"
+    )
+
+
+def test_config_requires_explicit_stores_outside_development():
+    with pytest.raises(ValidationError) as excinfo:
+        Config.model_validate(
+            {
+                "db": SqliteSettings(path=":memory:"),
+                "auth": {"authn_methods": [], "secret_keys": [{"key": "secret"}]},
+                "authz": {"type": "openfga"},
+                "email": {"type": "mock"},
+            }
+        )
+
+    error_text = str(excinfo.value)
+    assert "artifact_store" in error_text
+    assert "file_store" in error_text
+    assert "audio_store" in error_text
+    assert "lecture_video_audio_store" in error_text
+
+
+def test_config_rejects_local_disk_store_outside_development():
+    settings = {
+        **_minimal_config_settings(),
+        "artifact_store": {
+            "type": "local",
+            "save_target": "local_exports/thread_exports",
+        },
+    }
+
+    with pytest.raises(ValidationError) as excinfo:
+        Config.model_validate(settings)
+
+    error_text = str(excinfo.value)
+    assert (
+        "Local disk-backed stores are only allowed when development is true"
+        in error_text
+    )
+    assert "artifact_store" in error_text
+
+
+def test_config_rejects_local_nested_store_outside_development():
+    settings = {
+        **_minimal_config_settings(),
+        "lti": {"key_store": {"type": "local", "directory": "local_exports/lti_keys"}},
+    }
+
+    with pytest.raises(ValidationError) as excinfo:
+        Config.model_validate(settings)
+
+    error_text = str(excinfo.value)
+    assert (
+        "Local disk-backed stores are only allowed when development is true"
+        in error_text
+    )
+    assert "lti.key_store" in error_text
+
+
+def test_local_type_settings_are_marked_disk_backed():
+    local_type_settings_classes = []
+    settings_classes = [BaseSettings]
+    while settings_classes:
+        cls = settings_classes.pop()
+        settings_classes.extend(cls.__subclasses__())
+        if not inspect.isclass(cls) or cls.__module__ != Config.__module__:
+            continue
+
+        type_field = cls.model_fields.get("type")
+        if type_field is not None and type_field.default == "local":
+            local_type_settings_classes.append(cls)
+
+    assert local_type_settings_classes
+    assert all(
+        issubclass(cls, LocalDiskBackedSettings) for cls in local_type_settings_classes
+    )
 
 
 def _base_lti_settings() -> dict[str, object]:
