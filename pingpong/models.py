@@ -2781,6 +2781,40 @@ class LectureVideoProcessingRun(Base):
         )
         return (await session.scalars(stmt)).one_or_none()
 
+    @classmethod
+    async def cancel_active_by_lecture_video_id_snapshot(
+        cls,
+        session: AsyncSession,
+        lecture_video_id_snapshot: int,
+        *,
+        cancel_reason: schemas.LectureVideoProcessingCancelReason,
+        stages: Sequence[schemas.LectureVideoProcessingStage],
+    ) -> bool:
+        result = await session.execute(
+            update(LectureVideoProcessingRun)
+            .where(
+                LectureVideoProcessingRun.lecture_video_id_snapshot
+                == lecture_video_id_snapshot,
+                LectureVideoProcessingRun.stage.in_(stages),
+                LectureVideoProcessingRun.status.in_(
+                    (
+                        schemas.LectureVideoProcessingRunStatus.QUEUED,
+                        schemas.LectureVideoProcessingRunStatus.RUNNING,
+                    )
+                ),
+            )
+            .values(
+                status=schemas.LectureVideoProcessingRunStatus.CANCELLED,
+                cancel_reason=cancel_reason,
+                finished_at=func.now(),
+                lease_token=None,
+                leased_by=None,
+                lease_expires_at=None,
+            )
+        )
+        await session.flush()
+        return bool(result.rowcount)
+
 
 class LectureVideoQuestion(Base):
     __tablename__ = "lecture_video_questions"

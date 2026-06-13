@@ -327,8 +327,8 @@ export class WavStreamPlayer {
 			requestId
 		});
 		const timeoutAt = Date.now() + TRACK_SAMPLE_OFFSET_TIMEOUT_MS;
-		let trackSampleOffset: TrackSampleOffset | null = null;
-		while (!trackSampleOffset) {
+		let trackSampleOffset: TrackSampleOffset | null;
+		while (true) {
 			trackSampleOffset = this.trackSampleOffsets[requestId];
 			if (trackSampleOffset) {
 				break;

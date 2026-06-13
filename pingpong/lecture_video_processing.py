@@ -23,7 +23,6 @@ from pingpong import (
     gemini,
     lecture_video_manifest_generation,
     lecture_video_poster,
-    lecture_video_service,
 )
 from pingpong.ai import get_openai_client_by_class_id
 from pingpong.audio_store import AudioStoreError
@@ -589,6 +588,8 @@ async def _await_with_run_lease_heartbeat(
 def _existing_manifest_transcript(
     lecture_video: models.LectureVideo,
 ) -> list[schemas.LectureVideoManifestWordV3] | None:
+    from pingpong import lecture_video_service
+
     transcript_data = lecture_video.transcript_data
     if transcript_data is not None and (
         not isinstance(transcript_data, dict)
@@ -624,6 +625,8 @@ async def _complete_manifest_generation_run(
     lease_token: str,
     manifest: schemas.LectureVideoManifestV4,
 ) -> None:
+    from pingpong import lecture_video_service
+
     async with config.db.driver.async_session() as session:
         run = await models.LectureVideoProcessingRun.get_by_id(session, run_id)
         if run is None:

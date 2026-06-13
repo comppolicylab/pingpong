@@ -56,10 +56,6 @@ _VIDEO_EVENT_TO_STORAGE = {
         schemas.LectureVideoInteractionEventType.SESSION_COMPLETED
     ),
 }
-_VIDEO_STORAGE_TO_EVENT = {
-    storage_event: lesson_event
-    for lesson_event, storage_event in _VIDEO_EVENT_TO_STORAGE.items()
-}
 
 
 class LectureVideoAdapter:

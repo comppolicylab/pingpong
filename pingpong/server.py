@@ -7948,8 +7948,8 @@ async def create_lecture_thread(
                     request.state["db"], result.id
                 )
         except lecture_slide_runtime.LectureSlideRuntimeError as err:
-            _raise_lecture_slide_runtime_http_error(err)
-        except lecture_video_runtime.LectureVideoRuntimeError as err:
+            if is_slide_lesson:
+                _raise_lecture_slide_runtime_http_error(err)
             _raise_lecture_video_runtime_http_error(err)
         await request.state["db"].refresh(result)
 
@@ -12481,8 +12481,6 @@ async def update_assistant(
                     else "You cannot use tools when the reasoning effort is set to 'Minimal'. Please select a higher reasoning effort level."
                 ),
             )
-        if model_record:
-            reasoning_effort_map = get_reasoning_effort_map(model_record.id)
 
     if (
         model_record
