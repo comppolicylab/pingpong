@@ -120,6 +120,7 @@ from pingpong.video_store import VideoStoreError
 
 from . import (
     assistant_service,
+    interactive_lesson_runtime,
     lecture_slide_chat,
     lecture_slide_processing,
     lecture_slide_runtime,
@@ -7947,7 +7948,7 @@ async def create_lecture_thread(
                 await lecture_video_runtime.initialize_thread_state(
                     request.state["db"], result.id
                 )
-        except lecture_slide_runtime.LectureSlideRuntimeError as err:
+        except interactive_lesson_runtime.InteractiveLessonRuntimeError as err:
             if is_slide_lesson:
                 _raise_lecture_slide_runtime_http_error(err)
             _raise_lecture_video_runtime_http_error(err)
