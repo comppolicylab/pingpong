@@ -49,6 +49,15 @@ ConversationRole = Literal["user", "assistant"]
 UNSET_PREVIOUS_ITEM_ID = "__UNSET_PREVIOUS_ITEM_ID__"
 
 
+def _serialize_realtime_error(error) -> dict[str, str | None]:
+    return {
+        "type": "invalid_request_error",
+        "code": "openai_realtime_session",
+        "message": "We were unable to start the voice session.",
+        "param": None,
+    }
+
+
 def _has_non_empty_transcript(transcript_text: str | None) -> bool:
     if transcript_text is None:
         return False
@@ -978,7 +987,15 @@ async def handle_openai_events(
                         }
                     )
                 case "session.error" | "error":
-                    openai_connection_logger.exception(f"Session error: {event.error}")
+                    openai_connection_logger.error("Session error: %s", event.error)
+                    await browser_connection.send_json(
+                        {
+                            "type": "error",
+                            "error": _serialize_realtime_error(event.error),
+                        }
+                    )
+                    await browser_connection.close()
+                    return
                 case "session.ended":
                     openai_connection_logger.debug(f"Session ended: {event.session}")
                     await browser_connection.send_json(

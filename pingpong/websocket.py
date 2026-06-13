@@ -1,6 +1,12 @@
-from functools import wraps
+from functools import cache, wraps
 import logging
+import os
+import re
+import subprocess
+import tomllib
 from typing import Any, cast
+from pathlib import Path
+from urllib.parse import urlparse
 
 from sqlalchemy import select
 
@@ -8,6 +14,7 @@ from pingpong import models, schemas
 from pingpong.ai_models import get_reasoning_effort_map
 from pingpong.ai import (
     OpenAIClientType,
+    build_openai_safety_identifier,
     get_openai_client_by_class_id,
     inject_timestamp_to_instructions,
 )
@@ -51,8 +58,124 @@ def build_realtime_reasoning(assistant: models.Assistant) -> dict[str, str] | No
     return {"effort": reasoning_effort_map[reasoning_effort]}
 
 
+REALTIME_TRACE_WORKFLOW_NAME = "PingPong Voice Mode"
+REALTIME_TRACE_METADATA_VERSION = "1"
+REALTIME_TRACE_GROUP_ID_DISALLOWED_PATTERN = re.compile(r"[^A-Za-z0-9_-]+")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _stringify_trace_metadata(value: Any) -> str | None:
+    if value is None:
+        return None
+    if hasattr(value, "value"):
+        value = value.value
+    text = str(value).strip()
+    return text or None
+
+
+def _add_trace_metadata(metadata: dict[str, str], key: str, value: Any) -> None:
+    text = _stringify_trace_metadata(value)
+    if text is not None:
+        metadata[key] = text
+
+
+def _sanitize_trace_group_id_part(value: Any) -> str:
+    text = _stringify_trace_metadata(value) or "unknown"
+    sanitized = REALTIME_TRACE_GROUP_ID_DISALLOWED_PATTERN.sub("_", text).strip("_-")
+    return sanitized or "unknown"
+
+
+def _get_pyproject_version() -> str | None:
+    try:
+        pyproject = tomllib.loads(
+            (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        )
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+
+    project = pyproject.get("project")
+    if not isinstance(project, dict):
+        return None
+    return _stringify_trace_metadata(project.get("version"))
+
+
+def _run_git_command(*args: str) -> str | None:
+    try:
+        output = subprocess.check_output(
+            ["git", *args],
+            cwd=PROJECT_ROOT,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=1,
+        )
+    except (
+        OSError,
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+    ):
+        return None
+    return _stringify_trace_metadata(output)
+
+
+def _get_local_dev_version_suffix() -> str:
+    short_sha = _run_git_command("rev-parse", "--short", "HEAD")
+    if short_sha is None:
+        return "dev"
+
+    suffix = f"dev.{short_sha}"
+    if _run_git_command("status", "--short"):
+        suffix += ".dirty"
+    return suffix
+
+
+@cache
+def _get_pingpong_version() -> str | None:
+    sentry_release = _stringify_trace_metadata(os.environ.get("SENTRY_RELEASE"))
+    if sentry_release is not None:
+        return sentry_release
+
+    pyproject_version = _get_pyproject_version()
+    if pyproject_version is None:
+        return None
+    return f"pingpong@{pyproject_version}+{_get_local_dev_version_suffix()}"
+
+
+def build_realtime_tracing_config(
+    thread: models.Thread,
+    assistant: models.Assistant,
+    class_id: str,
+    safety_identifier: str | None = None,
+) -> dict[str, Any]:
+    deployment_identifier = config.deployment_identifier
+    group_deployment_identifier = _sanitize_trace_group_id_part(deployment_identifier)
+    group_assistant_identifier = _sanitize_trace_group_id_part(
+        getattr(assistant, "id", None)
+    )
+    deployment_hostname = urlparse(config.public_url).hostname
+
+    metadata = {
+        "metadata_version": REALTIME_TRACE_METADATA_VERSION,
+        "deployment_identifier": deployment_identifier,
+    }
+    _add_trace_metadata(metadata, "pingpong_version", _get_pingpong_version())
+    _add_trace_metadata(metadata, "deployment_url", deployment_hostname)
+    _add_trace_metadata(metadata, "class", class_id)
+    _add_trace_metadata(metadata, "assistant", getattr(assistant, "id", None))
+    _add_trace_metadata(metadata, "thread", getattr(thread, "id", None))
+    _add_trace_metadata(metadata, "model", assistant.model)
+    _add_trace_metadata(metadata, "safety_identifier", safety_identifier)
+
+    return {
+        "workflow_name": REALTIME_TRACE_WORKFLOW_NAME,
+        "group_id": f"pp_{group_deployment_identifier}_assistant_{group_assistant_identifier}",
+        "metadata": metadata,
+    }
+
+
 def build_realtime_session(
-    assistant: models.Assistant, conversation_instructions: str
+    assistant: models.Assistant,
+    conversation_instructions: str,
+    tracing_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     realtime_vad_mode = _coerce_realtime_enum(
         schemas.RealtimeVadMode,
@@ -137,17 +260,16 @@ def build_realtime_session(
     reasoning = build_realtime_reasoning(assistant)
     if reasoning is not None:
         session["reasoning"] = reasoning
+    if tracing_config is not None:
+        session["tracing"] = tracing_config
 
     return session
 
 
 def build_realtime_extra_headers(
-    browser_connection: StateWebSocket,
+    safety_identifier: str | None,
 ) -> dict[str, str]:
-    safety_identifier = getattr(
-        browser_connection.state, "response_safety_identifier", None
-    )
-    if not isinstance(safety_identifier, str) or not safety_identifier:
+    if safety_identifier is None:
         return {}
 
     return {"OpenAI-Safety-Identifier": safety_identifier}
@@ -406,14 +528,42 @@ def ws_with_single_realtime_session(func):
 
 def ws_with_realtime_connection(func):
     @wraps(func)
-    async def wrapper(browser_connection: StateWebSocket, *args, **kwargs):
+    async def wrapper(
+        browser_connection: StateWebSocket,
+        class_id: str,
+        thread_id: str,
+        *args,
+        **kwargs,
+    ):
         openai_client: OpenAIClientType = browser_connection.state["openai_client"]
         assistant: models.Assistant = browser_connection.state["assistant"]
+        thread: models.Thread = browser_connection.state["thread"]
         conversation_instructions: str = browser_connection.state[
             "conversation_instructions"
         ]
-        session = build_realtime_session(assistant, conversation_instructions)
-        extra_headers = build_realtime_extra_headers(browser_connection)
+        response_safety_identifier = getattr(
+            browser_connection.state, "response_safety_identifier", None
+        )
+        if not (
+            isinstance(response_safety_identifier, str) and response_safety_identifier
+        ):
+            safety_identifier = None
+        else:
+            safety_identifier = build_openai_safety_identifier(
+                response_safety_identifier
+            )
+        tracing_config = build_realtime_tracing_config(
+            thread,
+            assistant,
+            class_id,
+            safety_identifier,
+        )
+        session = build_realtime_session(
+            assistant,
+            conversation_instructions,
+            tracing_config,
+        )
+        extra_headers = build_realtime_extra_headers(safety_identifier)
         try:
             async with openai_client.realtime.connect(
                 model=assistant.model,
@@ -423,7 +573,7 @@ def ws_with_realtime_connection(func):
                 await realtime_connection.session.update(session=session)
                 if assistant.assistant_should_message_first:
                     await realtime_connection.response.create()
-                await func(browser_connection, *args, **kwargs)
+                await func(browser_connection, class_id, thread_id, *args, **kwargs)
         except Exception as e:
             openai_connection_logger.exception(f"Error in Realtime connection: {e}")
             await browser_connection.send_json(
