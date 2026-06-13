@@ -5,7 +5,6 @@ import pytest
 from pydantic import ValidationError
 from pydantic_settings import BaseSettings
 
-import pingpong.config as config_module
 from pingpong.config import (
     Config,
     LEGACY_OPENID_CONFIGURATION_PATHS_DEFAULTS,
@@ -133,8 +132,11 @@ def test_config_rejects_local_nested_store_outside_development():
 
 def test_local_type_settings_are_marked_disk_backed():
     local_type_settings_classes = []
-    for cls in vars(config_module).values():
-        if not inspect.isclass(cls) or not issubclass(cls, BaseSettings):
+    settings_classes = [BaseSettings]
+    while settings_classes:
+        cls = settings_classes.pop()
+        settings_classes.extend(cls.__subclasses__())
+        if not inspect.isclass(cls) or cls.__module__ != Config.__module__:
             continue
 
         type_field = cls.model_fields.get("type")
