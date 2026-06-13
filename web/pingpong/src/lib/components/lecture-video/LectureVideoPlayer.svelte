@@ -314,7 +314,9 @@
 			? mediaAspectRatio
 			: null
 	);
-	let questionControlsLocked = $derived(questionPendingControls && maxSeekOffsetMs == null);
+	let questionControlsLocked = $derived(
+		questionPendingControls && maxSeekOffsetMs == null && !allowFullSeek
+	);
 	let captionsAvailable = $derived(Boolean(captionsSrc));
 	let captionOverlayBottomPx = $derived(
 		visibleControls ? controlsOverlayHeight + CAPTION_CONTROL_GAP_PX : 20

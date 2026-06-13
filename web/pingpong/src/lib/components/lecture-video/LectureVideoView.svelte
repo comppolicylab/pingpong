@@ -136,6 +136,7 @@
 	let questionPlaybackLocked: boolean = $state(false);
 	let questionPresentationVersion: number = $state(0);
 	let furthestOffsetMs: number = $state(0);
+	let timelineBypassEnabled: boolean = $state(false);
 	let initialStartOffsetMs: number = $state(0);
 	let videoReadyForPlayback: boolean = $state(false);
 	let introNarrationPending: boolean = $state(false);
@@ -160,6 +161,10 @@
 	// Tracks which question we have already posted question_presented for
 	// to avoid duplicate posts.
 	let questionPresentedForId: number | null = $state(null);
+
+	// While a seek interaction is awaiting the server, the local playhead and
+	// currentQuestion disagree; suppress checkpoint auto-pause until it settles.
+	let seekInteractionsInFlight = $state(0);
 
 	// When resuming mid-session, seek video to this offset once it can play.
 	let resumeOffsetOnCanPlay: number | null = $state(null);
@@ -295,7 +300,9 @@
 	);
 	let questionReviewSeekLimitMs = $derived.by(() => {
 		const question: LessonQuestionPrompt | null = currentQuestion;
-		return questionReviewPlaybackAllowed && question ? question.stop_offset_ms : null;
+		return questionReviewPlaybackAllowed && question && !timelineBypassEnabled
+			? question.stop_offset_ms
+			: null;
 	});
 	let playerInteractionDisabled = $derived(
 		!canParticipate || (playbackLocked && !questionReviewPlaybackAllowed)
@@ -533,6 +540,7 @@
 		playerDisabled = false;
 		questionPlaybackLocked = false;
 		furthestOffsetMs = 0;
+		timelineBypassEnabled = false;
 		initialStartOffsetMs = 0;
 		videoReadyForPlayback = false;
 		introNarrationPending = false;
@@ -542,6 +550,7 @@
 		historyInteractions = [];
 		initError = null;
 		questionPresentedForId = null;
+		seekInteractionsInFlight = 0;
 		resumeOffsetOnCanPlay = null;
 		suppressPauseInteraction = false;
 		suppressPlayInteraction = false;
@@ -1388,8 +1397,16 @@
 			autoContinueFailed = false;
 		}
 		furthestOffsetMs = session.furthest_offset_ms ?? 0;
+		timelineBypassEnabled = session.timeline_bypass_enabled;
 		questionPlaybackLocked =
 			session.state === 'awaiting_answer' || session.state === 'awaiting_post_answer_resume';
+		if (
+			session.state === 'playing' &&
+			session.current_question &&
+			currentTimeMs < session.current_question.stop_offset_ms
+		) {
+			questionPresentedForId = null;
+		}
 
 		trackQuestion(session.current_question);
 		trackQuestion(session.current_continuation?.next_question ?? null);
@@ -1497,6 +1514,9 @@
 	}
 
 	function handleTimeUpdate() {
+		// The playhead already moved but currentQuestion still reflects the
+		// pre-seek session; acting now would auto-present the wrong question.
+		if (seekInteractionsInFlight > 0) return;
 		if (questionReviewPlaybackAllowed && currentQuestion) {
 			if (currentTimeMs >= currentQuestion.stop_offset_ms) {
 				if (!videoElement?.paused) {
@@ -1581,7 +1601,8 @@
 
 	async function handleSeek(toOffsetMs: number, fromOffsetMs: number) {
 		const seekControllerSessionId = controllerSessionId;
-		if (!seekControllerSessionId || !videoElement || playbackLocked) return;
+		if (!seekControllerSessionId || !videoElement || (playbackLocked && !timelineBypassEnabled))
+			return;
 		if (toOffsetMs === fromOffsetMs) return;
 
 		const payload = {
@@ -1598,6 +1619,8 @@
 				toOffsetMs < currentQuestion.stop_offset_ms ? null : questionPresentedForId;
 		}
 
+		const wasInQuestionState = hasVisibleQuestionPrompt(sessionState);
+		seekInteractionsInFlight += 1;
 		try {
 			const expanded = await postLessonInteraction(payload);
 			if (controllerSessionId !== seekControllerSessionId) {
@@ -1614,6 +1637,15 @@
 					)
 				) {
 					setVideoPosition(fromOffsetMs);
+					return;
+				}
+				if (wasInQuestionState && sessionState === 'playing') {
+					cancelPendingNarration();
+					subtitleText = null;
+					playerDisabled = false;
+					introNarrationPending = false;
+					postAnswerNarrationPending = false;
+					setVideoPosition(toOffsetMs);
 				}
 				return;
 			}
@@ -1632,6 +1664,8 @@
 			}
 			setVideoPosition(fromOffsetMs);
 			failClosedControl(error instanceof Error ? error.message : String(error));
+		} finally {
+			seekInteractionsInFlight = Math.max(0, seekInteractionsInFlight - 1);
 		}
 	}
 
@@ -2139,7 +2173,8 @@
 							{activeQuestionIds}
 							{questionPresentationVersion}
 							{furthestOffsetMs}
-							allowFullSeek={isCompleted && canParticipate && completedPlaybackReachedEnd}
+							allowFullSeek={timelineBypassEnabled ||
+								(isCompleted && canParticipate && completedPlaybackReachedEnd)}
 							maxSeekOffsetMs={questionReviewSeekLimitMs}
 							manualPlaybackPrompt={playbackRequiresManualStart}
 							bind:videoElement

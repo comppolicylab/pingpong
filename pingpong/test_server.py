@@ -21,6 +21,35 @@ async def _async_return(value):
     return value
 
 
+def test_lesson_timeline_bypass_schema_defaults():
+    create_request = schemas.CreateAssistant(
+        name="Timeline Test",
+        instructions="Be helpful",
+        description="Test assistant",
+        model="gpt-4o-mini",
+    )
+    update_request = schemas.UpdateAssistant()
+
+    assert create_request.allow_lesson_timeline_bypass is False
+    assert update_request.allow_lesson_timeline_bypass is None
+    assert (
+        schemas.InteractiveLessonSession(
+            state=schemas.InteractiveLessonSessionState.PLAYING,
+            state_version=1,
+            controller=schemas.InteractiveLessonSessionController(),
+        ).timeline_bypass_enabled
+        is False
+    )
+    assert (
+        schemas.LectureVideoSession(
+            state=schemas.LectureVideoSessionState.PLAYING,
+            state_version=1,
+            controller=schemas.LectureVideoSessionController(),
+        ).timeline_bypass_enabled
+        is False
+    )
+
+
 @with_user(123)
 @with_institution(11, "Harvard Kennedy School")
 @with_authz(grants=[])
@@ -1755,6 +1784,7 @@ async def test_copy_assistant_within_class(
             creator_id=123,
             published=None,
             version=3,
+            allow_lesson_timeline_bypass=True,
         )
         session.add_all([class_, assistant])
         await session.commit()
@@ -1774,11 +1804,13 @@ async def test_copy_assistant_within_class(
     assert data["name"].endswith(" (Copy)")
     assert len(data["name"]) == 100
     assert data["published"] is None
+    assert data["allow_lesson_timeline_bypass"] is True
 
     async with db.async_session() as session:
         saved = await models.Assistant.get_by_id(session, data["id"])
         assert saved.instructions == original_instructions
         assert saved.creator_id == creator_id
+        assert saved.allow_lesson_timeline_bypass is True
 
     assert await authz.get_all_calls() == [
         ("grant", f"class:{class_id}", "parent", f"assistant:{data['id']}"),

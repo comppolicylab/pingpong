@@ -443,6 +443,7 @@ async def copy_assistant(
         elevenlabs_style=assistant.elevenlabs_style,
         elevenlabs_speed=assistant.elevenlabs_speed,
         assistant_should_message_first=assistant.assistant_should_message_first,
+        allow_lesson_timeline_bypass=assistant.allow_lesson_timeline_bypass,
         class_id=target_class_id,
         vector_store_id=new_vector_store_id,
         lecture_video_id=new_lecture_video_id,

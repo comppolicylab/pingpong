@@ -12918,6 +12918,12 @@ async def update_assistant(
         asst.should_record_user_information = req.should_record_user_information
 
     if (
+        "allow_lesson_timeline_bypass" in req.model_fields_set
+        and req.allow_lesson_timeline_bypass is not None
+    ):
+        asst.allow_lesson_timeline_bypass = req.allow_lesson_timeline_bypass
+
+    if (
         "allow_user_file_uploads" in req.model_fields_set
         and req.allow_user_file_uploads is not None
     ):

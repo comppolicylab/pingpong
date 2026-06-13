@@ -1957,6 +1957,16 @@
 		assistantShouldMessageFirst = assistant?.assistant_should_message_first;
 		hasSetAssistantShouldMessageFirst = true;
 	}
+	let allowLessonTimelineBypass = false;
+	let hasSetAllowLessonTimelineBypass = false;
+	$: if (
+		assistant?.allow_lesson_timeline_bypass !== undefined &&
+		assistant?.allow_lesson_timeline_bypass !== null &&
+		!hasSetAllowLessonTimelineBypass
+	) {
+		allowLessonTimelineBypass = assistant.allow_lesson_timeline_bypass;
+		hasSetAllowLessonTimelineBypass = true;
+	}
 	const realtimeEagernessOptions: { value: api.RealtimeEagerness; label: string }[] = [
 		{ value: 'auto', label: 'Auto' },
 		{ value: 'low', label: 'Low' },
@@ -2691,6 +2701,12 @@
 		if (voiceId.trim() !== currentVoiceId.trim()) {
 			modifiedFields.push('voice id');
 		}
+		if (
+			isLectureMode &&
+			allowLessonTimelineBypass !== (assistant?.allow_lesson_timeline_bypass ?? false)
+		) {
+			modifiedFields.push('timeline bypass');
+		}
 		const selectedLectureSlideDeckId = selectedLectureSlideDeck?.id ?? null;
 		const currentLectureSlideDeckId = currentLectureSlideDeck?.id ?? null;
 		if (selectedLectureSlideDeckId !== currentLectureSlideDeckId) {
@@ -2901,6 +2917,7 @@
 				? (assistant?.hide_prompt ?? true)
 				: body.hide_prompt?.toString() === 'on',
 			assistant_should_message_first: assistantShouldMessageFirst,
+			allow_lesson_timeline_bypass: isLectureMode ? allowLessonTimelineBypass : false,
 			create_classic_assistant: createClassicAssistant,
 			deleted_private_files: [...$trashPrivateFileIds, ...fileSearchCodeInterpreterUnusedFiles],
 			should_record_user_information: shouldRecordNameOrVoice,
@@ -5927,6 +5944,23 @@
 							>
 						</div>
 						{#if isLectureMode}
+							<div class="col-span-2 mb-1">
+								<Checkbox
+									id="allow_lesson_timeline_bypass"
+									name="allow_lesson_timeline_bypass"
+									disabled={preventEdits}
+									bind:checked={allowLessonTimelineBypass}>Allow Timeline Bypass</Checkbox
+								>
+								<Helper
+									>Allow participants to seek ahead in the lesson timeline. When enabled,
+									participants can skip ahead to any point in the lesson timeline, skipping any
+									knowledge checks in between. Changing this setting will affect existing and future
+									lesson sessions.{#if assistant?.allow_lesson_timeline_bypass}&nbsp;If you disable
+										this setting, participants will no longer be able to seek ahead in existing
+										lesson sessions.{:else}&nbsp;If you enable this setting, participants will be
+										able to seek ahead in existing lesson sessions.{/if}</Helper
+								>
+							</div>
 							<hr />
 						{:else}
 							<div class="col-span-2 mb-1">
