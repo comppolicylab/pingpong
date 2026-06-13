@@ -58,6 +58,11 @@ def _serialize_realtime_error(error) -> dict[str, str | None]:
     }
 
 
+def _is_realtime_session_update_error(error) -> bool:
+    param = getattr(error, "param", None)
+    return isinstance(param, str) and param.startswith("session.")
+
+
 def _has_non_empty_transcript(transcript_text: str | None) -> bool:
     if transcript_text is None:
         return False
@@ -987,15 +992,16 @@ async def handle_openai_events(
                         }
                     )
                 case "session.error" | "error":
-                    openai_connection_logger.error("Session error: %s", event.error)
-                    await browser_connection.send_json(
-                        {
-                            "type": "error",
-                            "error": _serialize_realtime_error(event.error),
-                        }
-                    )
-                    await browser_connection.close()
-                    return
+                    openai_connection_logger.exception(f"Session error: {event.error}")
+                    if _is_realtime_session_update_error(event.error):
+                        await browser_connection.send_json(
+                            {
+                                "type": "error",
+                                "error": _serialize_realtime_error(event.error),
+                            }
+                        )
+                        await browser_connection.close()
+                        return
                 case "session.ended":
                     openai_connection_logger.debug(f"Session ended: {event.session}")
                     await browser_connection.send_json(

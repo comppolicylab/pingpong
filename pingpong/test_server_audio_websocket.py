@@ -360,7 +360,7 @@ async def test_realtime_connection_updates_session_with_tracing(monkeypatch):
     handler.assert_awaited_once_with(websocket, "10", "20")
 
 
-async def test_openai_session_error_notifies_browser_and_closes_websocket():
+async def test_openai_session_update_error_notifies_browser_and_closes_websocket():
     websocket = DummyWebSocket()
     error = SimpleNamespace(
         message=("Invalid 'session.tracing.group_id': string does not match pattern."),
@@ -394,6 +394,32 @@ async def test_openai_session_error_notifies_browser_and_closes_websocket():
             },
         }
     ]
+
+
+async def test_openai_recoverable_error_is_logged_without_closing_websocket():
+    websocket = DummyWebSocket()
+    error = SimpleNamespace(
+        message="Temporary realtime error.",
+        type="server_error",
+        code="server_error",
+        event_id="event_1",
+        param=None,
+    )
+    realtime_connection = FakeRealtimeEventStream(
+        [SimpleNamespace(type="error", error=error)]
+    )
+
+    await realtime_module.handle_openai_events(
+        websocket,
+        realtime_connection,
+        openai_client=object(),
+        thread=SimpleNamespace(id=20, version=1),
+        openai_task_queue=asyncio.Queue(),
+        assistant_audio_tracker=realtime_module.RealtimeAssistantAudioTracker(),
+    )
+
+    assert websocket.closed is False
+    assert websocket.sent_json == []
 
 
 @pytest.mark.parametrize("has_recording,has_messages", [(True, False), (False, True)])

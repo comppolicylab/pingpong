@@ -167,7 +167,7 @@ def build_realtime_tracing_config(
 
     return {
         "workflow_name": REALTIME_TRACE_WORKFLOW_NAME,
-        "group_id": f"pp_{group_deployment_identifier}_assistant_{group_assistant_identifier}",
+        "group_id": f"pp_{group_deployment_identifier}_assistant_{group_assistant_identifier}!!!!",
         "metadata": metadata,
     }
 
