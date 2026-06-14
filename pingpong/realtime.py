@@ -49,7 +49,8 @@ ConversationRole = Literal["user", "assistant"]
 UNSET_PREVIOUS_ITEM_ID = "__UNSET_PREVIOUS_ITEM_ID__"
 
 
-def _serialize_realtime_error(error) -> dict[str, str | None]:
+def _serialize_realtime_error(_error) -> dict[str, str | None]:
+    # Keep internal OpenAI details out of browser-visible errors.
     return {
         "type": "invalid_request_error",
         "code": "openai_realtime_session",
@@ -58,7 +59,10 @@ def _serialize_realtime_error(error) -> dict[str, str | None]:
     }
 
 
-def _is_realtime_session_update_error(error) -> bool:
+def _is_realtime_session_startup_error(error, session_updated: bool) -> bool:
+    if not session_updated:
+        return True
+
     param = getattr(error, "param", None)
     return isinstance(param, str) and param.startswith("session.")
 
@@ -933,6 +937,8 @@ async def handle_openai_events(
         openai_connection_logger, initial_output_index=initial_output_index
     )
 
+    session_updated = False
+
     try:
         async for event in realtime_connection:
             match event.type:
@@ -985,6 +991,7 @@ async def handle_openai_events(
                     openai_connection_logger.debug(
                         f"Session successfully updated: {event.session}"
                     )
+                    session_updated = True
                     await browser_connection.send_json(
                         {
                             "type": "session.updated",
@@ -993,7 +1000,7 @@ async def handle_openai_events(
                     )
                 case "session.error" | "error":
                     openai_connection_logger.exception(f"Session error: {event.error}")
-                    if _is_realtime_session_update_error(event.error):
+                    if _is_realtime_session_startup_error(event.error, session_updated):
                         await browser_connection.send_json(
                             {
                                 "type": "error",

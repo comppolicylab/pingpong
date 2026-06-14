@@ -751,7 +751,7 @@ class Config(BaseSettings):
     @model_validator(mode="after")
     def _validate_deployment_identifier(self):
         deployment_identifier = self.deployment_identifier.strip()
-        if deployment_identifier == "":
+        if not self.development and deployment_identifier == "":
             raise ValueError(
                 "deployment_identifier must be set when development is false."
             )

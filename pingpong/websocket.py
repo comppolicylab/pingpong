@@ -134,6 +134,12 @@ def _get_pingpong_version() -> str | None:
     if sentry_release is not None:
         return sentry_release
 
+    if not config.development:
+        openai_connection_logger.warning(
+            "SENTRY_RELEASE is not set; realtime trace versions will use the "
+            "local development fallback."
+        )
+
     pyproject_version = _get_pyproject_version()
     if pyproject_version is None:
         return None
@@ -148,9 +154,7 @@ def build_realtime_tracing_config(
 ) -> dict[str, Any]:
     deployment_identifier = config.deployment_identifier
     group_deployment_identifier = _sanitize_trace_group_id_part(deployment_identifier)
-    group_assistant_identifier = _sanitize_trace_group_id_part(
-        getattr(assistant, "id", None)
-    )
+    group_assistant_identifier = _sanitize_trace_group_id_part(assistant.id)
     deployment_hostname = urlparse(config.public_url).hostname
 
     metadata = {
@@ -160,8 +164,8 @@ def build_realtime_tracing_config(
     _add_trace_metadata(metadata, "pingpong_version", _get_pingpong_version())
     _add_trace_metadata(metadata, "deployment_url", deployment_hostname)
     _add_trace_metadata(metadata, "class", class_id)
-    _add_trace_metadata(metadata, "assistant", getattr(assistant, "id", None))
-    _add_trace_metadata(metadata, "thread", getattr(thread, "id", None))
+    _add_trace_metadata(metadata, "assistant", assistant.id)
+    _add_trace_metadata(metadata, "thread", thread.id)
     _add_trace_metadata(metadata, "model", assistant.model)
     _add_trace_metadata(metadata, "safety_identifier", safety_identifier)
 

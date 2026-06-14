@@ -1,5 +1,6 @@
 import asyncio
 import importlib
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -175,6 +176,7 @@ def test_realtime_pingpong_version_falls_back_to_local_dev_version(
     monkeypatch, tmp_path
 ):
     monkeypatch.delenv("SENTRY_RELEASE", raising=False)
+    monkeypatch.setattr(websocket_module.config, "development", True)
     monkeypatch.setattr(websocket_module, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(
         websocket_module, "_get_local_dev_version_suffix", lambda: "dev.abc123.dirty"
@@ -192,6 +194,30 @@ def test_realtime_pingpong_version_falls_back_to_local_dev_version(
         )
     finally:
         websocket_module._get_pingpong_version.cache_clear()
+
+
+def test_realtime_pingpong_version_warns_without_release_outside_development(
+    monkeypatch, tmp_path, caplog
+):
+    monkeypatch.delenv("SENTRY_RELEASE", raising=False)
+    monkeypatch.setattr(websocket_module.config, "development", False)
+    monkeypatch.setattr(websocket_module, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        websocket_module, "_get_local_dev_version_suffix", lambda: "dev"
+    )
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "pingpong"\nversion = "7.61.0"\n',
+        encoding="utf-8",
+    )
+    websocket_module._get_pingpong_version.cache_clear()
+
+    try:
+        with caplog.at_level(logging.WARNING, logger="realtime_openai"):
+            assert websocket_module._get_pingpong_version() == "pingpong@7.61.0+dev"
+    finally:
+        websocket_module._get_pingpong_version.cache_clear()
+
+    assert "SENTRY_RELEASE is not set" in caplog.text
 
 
 def test_realtime_tracing_config_includes_stable_filter_metadata(monkeypatch):
@@ -396,12 +422,12 @@ async def test_openai_session_update_error_notifies_browser_and_closes_websocket
     ]
 
 
-async def test_openai_recoverable_error_is_logged_without_closing_websocket():
+async def test_openai_startup_error_without_param_notifies_browser_and_closes_websocket():
     websocket = DummyWebSocket()
     error = SimpleNamespace(
-        message="Temporary realtime error.",
-        type="server_error",
-        code="server_error",
+        message="Model is unavailable.",
+        type="invalid_request_error",
+        code="model_unavailable",
         event_id="event_1",
         param=None,
     )
@@ -418,8 +444,52 @@ async def test_openai_recoverable_error_is_logged_without_closing_websocket():
         assistant_audio_tracker=realtime_module.RealtimeAssistantAudioTracker(),
     )
 
+    assert websocket.closed is True
+    assert websocket.sent_json == [
+        {
+            "type": "error",
+            "error": {
+                "type": "invalid_request_error",
+                "code": "openai_realtime_session",
+                "message": "We were unable to start the voice session.",
+                "param": None,
+            },
+        }
+    ]
+
+
+async def test_openai_recoverable_error_is_logged_without_closing_websocket():
+    websocket = DummyWebSocket()
+    error = SimpleNamespace(
+        message="Temporary realtime error.",
+        type="server_error",
+        code="server_error",
+        event_id="event_1",
+        param=None,
+    )
+    realtime_connection = FakeRealtimeEventStream(
+        [
+            SimpleNamespace(type="session.updated", session=SimpleNamespace()),
+            SimpleNamespace(type="error", error=error),
+        ]
+    )
+
+    await realtime_module.handle_openai_events(
+        websocket,
+        realtime_connection,
+        openai_client=object(),
+        thread=SimpleNamespace(id=20, version=1),
+        openai_task_queue=asyncio.Queue(),
+        assistant_audio_tracker=realtime_module.RealtimeAssistantAudioTracker(),
+    )
+
     assert websocket.closed is False
-    assert websocket.sent_json == []
+    assert websocket.sent_json == [
+        {
+            "type": "session.updated",
+            "message": "Connected to OpenAI.",
+        }
+    ]
 
 
 @pytest.mark.parametrize("has_recording,has_messages", [(True, False), (False, True)])
