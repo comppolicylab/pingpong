@@ -337,6 +337,88 @@ async def test_generate_slide_context_v5_uses_context_only_response_model(monkey
     assert "questions" not in captured["response_model"].model_fields
 
 
+async def test_generate_slide_context_v5_chunks_skips_empty_filtered_context(
+    monkeypatch,
+):
+    async def fake_parse_responses_output(
+        openai_client,
+        *,
+        model,
+        instructions,
+        response_model,
+        input_messages,
+    ):
+        return response_model(
+            deck_summary="Outside chunk summary.",
+            slides=[
+                schemas.LectureSlideContextSlideV5(
+                    slide_position=1,
+                    title="Outside",
+                    start_offset_ms=1000,
+                    end_offset_ms=2000,
+                    visible_text="Outside slide",
+                    visual_context="The next chunk slide.",
+                    narration_summary="The next chunk narration.",
+                    key_points=["Outside point"],
+                    diagrams=[],
+                    equations_or_symbols=[],
+                )
+            ],
+            summary_checkpoints=[
+                schemas.LectureSlideContextSummaryCheckpointV5(
+                    end_offset_ms=2000,
+                    end_slide_position=1,
+                    summary="Outside checkpoint.",
+                )
+            ],
+            moment_contexts=[
+                schemas.LectureSlideContextMomentV5(
+                    start_offset_ms=1000,
+                    center_offset_ms=1500,
+                    end_offset_ms=2000,
+                    slide_position=1,
+                    before="Before outside.",
+                    at="At outside.",
+                    after="After outside.",
+                )
+            ],
+        )
+
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "_parse_responses_output",
+        fake_parse_responses_output,
+    )
+
+    contexts = await lecture_slide_processing._generate_slide_context_v5_chunks(
+        openai_client=SimpleNamespace(),
+        model="gpt-test",
+        file_id="file-test",
+        generation_prompt="Focus on the lesson.",
+        page_ranges=[
+            {"slide_position": 0, "start_offset_ms": 0, "end_offset_ms": 1000},
+            {"slide_position": 1, "start_offset_ms": 1000, "end_offset_ms": 2000},
+        ],
+        transcript=[
+            schemas.LectureVideoManifestWordV3(
+                id="word-0",
+                word="hello",
+                start_offset_ms=0,
+                end_offset_ms=100,
+            )
+        ],
+        total_duration_ms=2000,
+        chunk=lecture_slide_processing.SlideManifestGenerationChunk(
+            generation_start_ms=0,
+            generation_end_ms=1000,
+            context_start_ms=0,
+            context_end_ms=2000,
+        ),
+    )
+
+    assert contexts == []
+
+
 async def test_claim_next_processing_run_recovers_expired_lease(db):
     await _create_class_and_deck(db)
     async with db.async_session() as session:

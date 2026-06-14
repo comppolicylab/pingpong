@@ -1,6 +1,7 @@
 import logging
 from dataclasses import dataclass
 
+import openai
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, undefer
@@ -57,15 +58,35 @@ async def _read_source_bytes(source: models.LectureSlideSourceStoredObject) -> b
     return bytes(buffer)
 
 
+async def _cached_openai_file_exists(openai_client, file_id: str) -> bool:
+    try:
+        await openai_client.files.retrieve(file_id)
+    except openai.NotFoundError:
+        return False
+    return True
+
+
 async def _get_or_upload_source_file_id(
     session: AsyncSession,
     deck: models.LectureSlideDeck,
+    openai_client,
 ) -> str:
     source = deck.source_stored_object
     if source is None:
         raise RuntimeError("Lecture slide source object is not loaded.")
     if source.openai_file is not None and source.openai_file.file_id:
-        return str(source.openai_file.file_id)
+        file_id = str(source.openai_file.file_id)
+        if await _cached_openai_file_exists(openai_client, file_id):
+            return file_id
+        logger.warning(
+            "Cached lecture slide source OpenAI file is missing; re-uploading. "
+            "source_id=%s file_id=%s",
+            source.id,
+            file_id,
+        )
+        source.openai_file_object_id = None
+        source.openai_file = None
+        await session.flush()
 
     source_bytes = await _read_source_bytes(source)
     file = await lecture_slide_service.upload_lecture_slide_source_to_openai(
@@ -93,6 +114,27 @@ async def _get_responses_model_for_deck(
     return str(model) if model else None
 
 
+async def _load_migration_deck(
+    session: AsyncSession,
+    deck_id: int,
+) -> models.LectureSlideDeck | None:
+    return await session.scalar(
+        select(models.LectureSlideDeck)
+        .where(models.LectureSlideDeck.id == deck_id)
+        .where(models.LectureSlideDeck.context_version == 4)
+        .where(models.LectureSlideDeck.lecture_slide_chat_available.is_(True))
+        .options(undefer(models.LectureSlideDeck.generation_prompt))
+        .options(undefer(models.LectureSlideDeck.transcript_data))
+        .options(undefer(models.LectureSlideDeck.context_data))
+        .options(
+            selectinload(models.LectureSlideDeck.source_stored_object).selectinload(
+                models.LectureSlideSourceStoredObject.openai_file
+            )
+        )
+        .options(selectinload(models.LectureSlideDeck.pages))
+    )
+
+
 async def migrate_lecture_slide_v4_context_to_v5(
     session: AsyncSession,
     *,
@@ -112,45 +154,49 @@ async def migrate_lecture_slide_v4_context_to_v5(
         if limit is not None:
             page_size = min(page_size, limit - seen)
 
-        result = await session.execute(
-            select(models.LectureSlideDeck)
-            .where(models.LectureSlideDeck.context_version == 4)
-            .where(models.LectureSlideDeck.lecture_slide_chat_available.is_(True))
-            .where(models.LectureSlideDeck.id > last_processed_id)
-            .order_by(models.LectureSlideDeck.id.asc())
-            .options(undefer(models.LectureSlideDeck.generation_prompt))
-            .options(undefer(models.LectureSlideDeck.transcript_data))
-            .options(undefer(models.LectureSlideDeck.context_data))
-            .options(
-                selectinload(models.LectureSlideDeck.source_stored_object).selectinload(
-                    models.LectureSlideSourceStoredObject.openai_file
-                )
+        deck_ids = (
+            await session.scalars(
+                select(models.LectureSlideDeck.id)
+                .where(models.LectureSlideDeck.context_version == 4)
+                .where(models.LectureSlideDeck.lecture_slide_chat_available.is_(True))
+                .where(models.LectureSlideDeck.id > last_processed_id)
+                .order_by(models.LectureSlideDeck.id.asc())
+                .limit(page_size)
             )
-            .options(selectinload(models.LectureSlideDeck.pages))
-            .limit(page_size)
-        )
-        decks = result.scalars().unique().all()
-        if not decks:
+        ).all()
+        if not deck_ids:
             break
 
-        for deck in decks:
-            last_processed_id = deck.id
+        for deck_id in deck_ids:
+            last_processed_id = deck_id
             seen += 1
-            if limit is not None and seen > limit:
-                break
 
-            deck_id = deck.id
             try:
+                deck = await _load_migration_deck(session, deck_id)
+                if deck is None:
+                    skipped += 1
+                    logger.info(
+                        "Skipping lecture slide v4 context migration; deck no "
+                        "longer eligible. deck_id=%s",
+                        deck_id,
+                    )
+                    continue
                 class_id = deck.class_id
                 generation_prompt = deck.generation_prompt
                 total_duration_ms = deck.total_duration_ms
                 transcript = _transcript_words_from_deck(deck)
                 page_ranges = _page_ranges_from_deck(deck)
-                if transcript is None or not page_ranges:
+                timed_page_ranges = [
+                    page_range
+                    for page_range in page_ranges
+                    if page_range["start_offset_ms"] is not None
+                    and page_range["end_offset_ms"] is not None
+                ]
+                if transcript is None or not timed_page_ranges:
                     skipped += 1
                     logger.info(
                         "Skipping lecture slide v4 context migration without "
-                        "transcript/pages. deck_id=%s",
+                        "transcript/timed pages. deck_id=%s",
                         deck_id,
                     )
                     continue
@@ -165,14 +211,16 @@ async def migrate_lecture_slide_v4_context_to_v5(
                     )
                     continue
 
-                file_id = await _get_or_upload_source_file_id(session, deck)
                 openai_client = await get_openai_client_by_class_id(session, class_id)
+                file_id = await _get_or_upload_source_file_id(
+                    session, deck, openai_client
+                )
                 context = await lecture_slide_processing.generate_slide_context_v5(
                     openai_client=openai_client,
                     model=responses_model,
                     file_id=file_id,
                     generation_prompt=generation_prompt,
-                    page_ranges=page_ranges,
+                    page_ranges=timed_page_ranges,
                     transcript=transcript,
                     total_duration_ms=total_duration_ms,
                 )
@@ -192,6 +240,8 @@ async def migrate_lecture_slide_v4_context_to_v5(
                     "Failed to migrate lecture slide v4 context to v5. deck_id=%s",
                     deck_id,
                 )
+            finally:
+                session.expunge_all()
 
     return MigrateLectureSlideV4ContextToV5Result(
         updated=updated,

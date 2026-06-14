@@ -2810,7 +2810,7 @@ async def _generate_slide_context_v5_with_optional_chunks(
     total_duration_ms: int | None,
 ) -> GeneratedSlideContext:
     if total_duration_ms is None:
-        return await _generate_slide_context_v5_for_window(
+        context = await _generate_slide_context_v5_for_window(
             openai_client=openai_client,
             model=model,
             file_id=file_id,
@@ -2819,6 +2819,9 @@ async def _generate_slide_context_v5_with_optional_chunks(
             transcript=transcript,
             total_duration_ms=None,
         )
+        if context is None:
+            raise ValueError("Generated full lecture slide v5 context was empty.")
+        return context
     chunks = _plan_slide_manifest_generation_chunks(
         total_duration_ms,
         generation_prompt=generation_prompt,
@@ -2829,7 +2832,7 @@ async def _generate_slide_context_v5_with_optional_chunks(
     )
     if len(chunks) == 1:
         try:
-            return await _generate_slide_context_v5_for_window(
+            context = await _generate_slide_context_v5_for_window(
                 openai_client=openai_client,
                 model=model,
                 file_id=file_id,
@@ -2838,6 +2841,9 @@ async def _generate_slide_context_v5_with_optional_chunks(
                 transcript=transcript,
                 total_duration_ms=total_duration_ms,
             )
+            if context is None:
+                raise ValueError("Generated full lecture slide v5 context was empty.")
+            return context
         except Exception as exc:
             if (
                 not _is_context_limit_error(exc)
@@ -2897,7 +2903,7 @@ async def _generate_slide_context_v5_chunks(
             total_duration_ms=total_duration_ms,
             chunk=chunk,
         )
-        return [context]
+        return [context] if context is not None else []
     except Exception as exc:
         if (
             not _is_context_limit_error(exc)
@@ -3091,7 +3097,7 @@ async def _generate_slide_context_v5_for_window(
     transcript: list[schemas.LectureVideoManifestWordV3],
     total_duration_ms: int | None,
     chunk: SlideManifestGenerationChunk | None = None,
-) -> GeneratedSlideContext:
+) -> GeneratedSlideContext | None:
     chunk_transcript = transcript
     chunk_page_ranges = page_ranges
     generation_start_ms = None
@@ -3162,6 +3168,18 @@ async def _generate_slide_context_v5_for_window(
             start_offset_ms=chunk.generation_start_ms,
             end_offset_ms=chunk.generation_end_ms,
         )
+        if (
+            not manifest.slides
+            or not manifest.summary_checkpoints
+            or not manifest.moment_contexts
+        ):
+            logger.warning(
+                "Skipping empty filtered lecture slide v5 context chunk. "
+                "generation_start_ms=%s generation_end_ms=%s",
+                chunk.generation_start_ms,
+                chunk.generation_end_ms,
+            )
+            return None
         return GeneratedSlideContext(
             deck_summary=manifest.deck_summary,
             slides=manifest.slides,
@@ -3286,6 +3304,8 @@ async def _generate_slide_manifest_for_window(
 def _merge_slide_context_chunks(
     chunk_contexts: list[GeneratedSlideContext],
 ) -> GeneratedSlideContext:
+    if not chunk_contexts:
+        raise ValueError("Generated slide context chunks were empty.")
     merged_manifest = _merge_slide_chunk_manifests(
         [
             GeneratedSlideManifest(
