@@ -1,4 +1,6 @@
+import asyncio
 import importlib
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -8,6 +10,7 @@ from starlette.datastructures import State
 
 from pingpong import ai_models
 from pingpong import models
+from pingpong import realtime as realtime_module
 from pingpong import schemas
 from pingpong import websocket as websocket_module
 
@@ -49,6 +52,8 @@ async def test_audio_stream_uses_lti_session_when_cookie_missing(monkeypatch):
 
 def realtime_assistant(**overrides):
     defaults = {
+        "id": 30,
+        "assistant_id": "asst_30",
         "model": "gpt-4o-realtime-preview",
         "assistant_should_message_first": False,
         "reasoning_effort": None,
@@ -65,6 +70,58 @@ def realtime_assistant(**overrides):
     }
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
+
+
+class FakeRealtimeSession:
+    def __init__(self):
+        self.updated_sessions: list[dict] = []
+
+    async def update(self, *, session: dict) -> None:
+        self.updated_sessions.append(session)
+
+
+class FakeRealtimeResponse:
+    def __init__(self):
+        self.create_call_count = 0
+
+    async def create(self) -> None:
+        self.create_call_count += 1
+
+
+class FakeRealtimeConnection:
+    def __init__(self):
+        self.session = FakeRealtimeSession()
+        self.response = FakeRealtimeResponse()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_value, traceback):
+        return False
+
+
+class FakeRealtimeClient:
+    def __init__(self, connection: FakeRealtimeConnection):
+        self.connection = connection
+        self.connect_kwargs: dict | None = None
+
+    def connect(self, **kwargs):
+        self.connect_kwargs = kwargs
+        return self.connection
+
+
+class FakeOpenAIClient:
+    def __init__(self, connection: FakeRealtimeConnection):
+        self.realtime = FakeRealtimeClient(connection)
+
+
+class FakeRealtimeEventStream:
+    def __init__(self, events):
+        self.events = events
+
+    async def __aiter__(self):
+        for event in self.events:
+            yield event
 
 
 def test_realtime_session_uses_create_defaults_for_null_fields():
@@ -87,6 +144,153 @@ def test_realtime_session_uses_create_defaults_for_null_fields():
         "interrupt_response": True,
         "eagerness": "auto",
     }
+
+
+def test_realtime_session_includes_tracing_config():
+    tracing_config = {
+        "workflow_name": "PingPong Voice Mode",
+        "group_id": "pp_test_assistant_30",
+        "metadata": {"deployment_identifier": "test"},
+    }
+
+    session = websocket_module.build_realtime_session(
+        realtime_assistant(),
+        "Speak clearly.",
+        tracing_config,
+    )
+
+    assert session["tracing"] == tracing_config
+
+
+def test_realtime_pingpong_version_uses_sentry_release(monkeypatch):
+    monkeypatch.setenv("SENTRY_RELEASE", "pingpong@7.60.0+123")
+    websocket_module._get_pingpong_version.cache_clear()
+
+    try:
+        assert websocket_module._get_pingpong_version() == "pingpong@7.60.0+123"
+    finally:
+        websocket_module._get_pingpong_version.cache_clear()
+
+
+def test_realtime_pingpong_version_falls_back_to_local_dev_version(
+    monkeypatch, tmp_path
+):
+    monkeypatch.delenv("SENTRY_RELEASE", raising=False)
+    monkeypatch.setattr(websocket_module.config, "development", True)
+    monkeypatch.setattr(websocket_module, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        websocket_module, "_get_local_dev_version_suffix", lambda: "dev.abc123.dirty"
+    )
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "pingpong"\nversion = "7.61.0"\n',
+        encoding="utf-8",
+    )
+    websocket_module._get_pingpong_version.cache_clear()
+
+    try:
+        assert (
+            websocket_module._get_pingpong_version()
+            == "pingpong@7.61.0+dev.abc123.dirty"
+        )
+    finally:
+        websocket_module._get_pingpong_version.cache_clear()
+
+
+def test_realtime_pingpong_version_warns_without_release_outside_development(
+    monkeypatch, tmp_path, caplog
+):
+    monkeypatch.delenv("SENTRY_RELEASE", raising=False)
+    monkeypatch.setattr(websocket_module.config, "development", False)
+    monkeypatch.setattr(websocket_module, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        websocket_module, "_get_local_dev_version_suffix", lambda: "dev"
+    )
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "pingpong"\nversion = "7.61.0"\n',
+        encoding="utf-8",
+    )
+    websocket_module._get_pingpong_version.cache_clear()
+
+    try:
+        with caplog.at_level(logging.WARNING, logger="realtime_openai"):
+            assert websocket_module._get_pingpong_version() == "pingpong@7.61.0+dev"
+    finally:
+        websocket_module._get_pingpong_version.cache_clear()
+
+    assert "SENTRY_RELEASE is not set" in caplog.text
+
+
+def test_realtime_tracing_config_includes_stable_filter_metadata(monkeypatch):
+    monkeypatch.setattr(websocket_module.config, "deployment_identifier", "staging")
+    monkeypatch.setattr(
+        websocket_module.config, "public_url", "https://example.edu/app"
+    )
+    monkeypatch.setattr(websocket_module, "_get_pingpong_version", lambda: "7.60.0")
+    thread = SimpleNamespace(
+        id=20,
+        thread_id="thread_20",
+        interaction_mode=schemas.InteractionMode.VOICE,
+    )
+    assistant = realtime_assistant(
+        id=30,
+        assistant_id="asst_30",
+        model="gpt-realtime-2",
+    )
+
+    tracing_config = websocket_module.build_realtime_tracing_config(
+        thread,
+        assistant,
+        "10",
+        "safety-id",
+    )
+
+    assert tracing_config == {
+        "workflow_name": "PingPong Voice Mode",
+        "group_id": "pp_staging_assistant_30",
+        "metadata": {
+            "metadata_version": "1",
+            "deployment_identifier": "staging",
+            "pingpong_version": "7.60.0",
+            "deployment_url": "example.edu",
+            "class": "10",
+            "assistant": "30",
+            "thread": "20",
+            "model": "gpt-realtime-2",
+            "safety_identifier": "safety-id",
+        },
+    }
+
+
+def test_realtime_tracing_config_omits_unavailable_pingpong_version(monkeypatch):
+    monkeypatch.setattr(websocket_module.config, "deployment_identifier", "staging")
+    monkeypatch.setattr(websocket_module, "_get_pingpong_version", lambda: None)
+    thread = SimpleNamespace(id=20, thread_id="thread_20")
+
+    tracing_config = websocket_module.build_realtime_tracing_config(
+        thread,
+        realtime_assistant(model="gpt-realtime-2"),
+        "10",
+    )
+
+    assert tracing_config["metadata"]["metadata_version"] == "1"
+    assert "pingpong_version" not in tracing_config["metadata"]
+
+
+def test_realtime_tracing_config_sanitizes_group_id(monkeypatch):
+    monkeypatch.setattr(
+        websocket_module.config, "deployment_identifier", "staging:blue/green"
+    )
+
+    tracing_config = websocket_module.build_realtime_tracing_config(
+        SimpleNamespace(id="thread:20/voice"),
+        realtime_assistant(id="assistant:30/voice", model="gpt-realtime-2"),
+        "10",
+    )
+
+    assert (
+        tracing_config["group_id"]
+        == "pp_staging_blue_green_assistant_assistant_30_voice"
+    )
 
 
 def test_realtime_session_adds_low_reasoning_by_default_for_gpt_realtime_2():
@@ -122,18 +326,170 @@ def test_realtime_session_uses_selected_transcription_model():
 
 
 def test_realtime_extra_headers_include_safety_identifier():
-    websocket = DummyWebSocket()
-    websocket.state["response_safety_identifier"] = "safety-id"
-
-    assert websocket_module.build_realtime_extra_headers(websocket) == {
-        "OpenAI-Safety-Identifier": "safety-id"
+    assert websocket_module.build_realtime_extra_headers("pp:v1:safety-id") == {
+        "OpenAI-Safety-Identifier": "pp:v1:safety-id",
     }
 
 
 def test_realtime_extra_headers_omit_missing_safety_identifier():
-    websocket = DummyWebSocket()
+    assert websocket_module.build_realtime_extra_headers(None) == {}
 
-    assert websocket_module.build_realtime_extra_headers(websocket) == {}
+
+async def test_realtime_connection_updates_session_with_tracing(monkeypatch):
+    monkeypatch.setattr(websocket_module.config, "deployment_identifier", "staging")
+    monkeypatch.setattr(
+        websocket_module.config, "public_url", "https://example.edu/app"
+    )
+    monkeypatch.setattr(websocket_module, "_get_pingpong_version", lambda: "7.60.0")
+    connection = FakeRealtimeConnection()
+    openai_client = FakeOpenAIClient(connection)
+    websocket = DummyWebSocket()
+    websocket.state["response_safety_identifier"] = "safety-id"
+    websocket.state["openai_client"] = openai_client
+    websocket.state["assistant"] = realtime_assistant(
+        id=30,
+        assistant_id="asst_30",
+        model="gpt-realtime-2",
+    )
+    websocket.state["thread"] = SimpleNamespace(
+        id=20,
+        thread_id="thread_20",
+        interaction_mode=schemas.InteractionMode.VOICE,
+    )
+    websocket.state["conversation_instructions"] = "Speak clearly."
+    handler = AsyncMock()
+    wrapped = websocket_module.ws_with_realtime_connection(handler)
+
+    await wrapped(websocket, "10", "20")
+
+    assert openai_client.realtime.connect_kwargs == {
+        "model": "gpt-realtime-2",
+        "extra_headers": {
+            "OpenAI-Safety-Identifier": "pp:v1:safety-id",
+        },
+    }
+    assert connection.session.updated_sessions[0]["tracing"] == {
+        "workflow_name": "PingPong Voice Mode",
+        "group_id": "pp_staging_assistant_30",
+        "metadata": {
+            "metadata_version": "1",
+            "deployment_identifier": "staging",
+            "pingpong_version": "7.60.0",
+            "deployment_url": "example.edu",
+            "class": "10",
+            "assistant": "30",
+            "thread": "20",
+            "model": "gpt-realtime-2",
+            "safety_identifier": "pp:v1:safety-id",
+        },
+    }
+    handler.assert_awaited_once_with(websocket, "10", "20")
+
+
+async def test_openai_session_update_error_notifies_browser_and_closes_websocket():
+    websocket = DummyWebSocket()
+    error = SimpleNamespace(
+        message=("Invalid 'session.tracing.group_id': string does not match pattern."),
+        type="invalid_request_error",
+        code="invalid_value",
+        event_id=None,
+        param="session.tracing.group_id",
+    )
+    realtime_connection = FakeRealtimeEventStream(
+        [SimpleNamespace(type="error", error=error)]
+    )
+
+    await realtime_module.handle_openai_events(
+        websocket,
+        realtime_connection,
+        openai_client=object(),
+        thread=SimpleNamespace(id=20, version=1),
+        openai_task_queue=asyncio.Queue(),
+        assistant_audio_tracker=realtime_module.RealtimeAssistantAudioTracker(),
+    )
+
+    assert websocket.closed is True
+    assert websocket.sent_json == [
+        {
+            "type": "error",
+            "error": {
+                "type": "invalid_request_error",
+                "code": "openai_realtime_session",
+                "message": "We were unable to start the voice session.",
+                "param": None,
+            },
+        }
+    ]
+
+
+async def test_openai_startup_error_without_param_notifies_browser_and_closes_websocket():
+    websocket = DummyWebSocket()
+    error = SimpleNamespace(
+        message="Model is unavailable.",
+        type="invalid_request_error",
+        code="model_unavailable",
+        event_id="event_1",
+        param=None,
+    )
+    realtime_connection = FakeRealtimeEventStream(
+        [SimpleNamespace(type="error", error=error)]
+    )
+
+    await realtime_module.handle_openai_events(
+        websocket,
+        realtime_connection,
+        openai_client=object(),
+        thread=SimpleNamespace(id=20, version=1),
+        openai_task_queue=asyncio.Queue(),
+        assistant_audio_tracker=realtime_module.RealtimeAssistantAudioTracker(),
+    )
+
+    assert websocket.closed is True
+    assert websocket.sent_json == [
+        {
+            "type": "error",
+            "error": {
+                "type": "invalid_request_error",
+                "code": "openai_realtime_session",
+                "message": "We were unable to start the voice session.",
+                "param": None,
+            },
+        }
+    ]
+
+
+async def test_openai_recoverable_error_is_logged_without_closing_websocket():
+    websocket = DummyWebSocket()
+    error = SimpleNamespace(
+        message="Temporary realtime error.",
+        type="server_error",
+        code="server_error",
+        event_id="event_1",
+        param=None,
+    )
+    realtime_connection = FakeRealtimeEventStream(
+        [
+            SimpleNamespace(type="session.updated", session=SimpleNamespace()),
+            SimpleNamespace(type="error", error=error),
+        ]
+    )
+
+    await realtime_module.handle_openai_events(
+        websocket,
+        realtime_connection,
+        openai_client=object(),
+        thread=SimpleNamespace(id=20, version=1),
+        openai_task_queue=asyncio.Queue(),
+        assistant_audio_tracker=realtime_module.RealtimeAssistantAudioTracker(),
+    )
+
+    assert websocket.closed is False
+    assert websocket.sent_json == [
+        {
+            "type": "session.updated",
+            "message": "Connected to OpenAI.",
+        }
+    ]
 
 
 @pytest.mark.parametrize("has_recording,has_messages", [(True, False), (False, True)])

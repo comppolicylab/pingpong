@@ -658,7 +658,7 @@ class Config(BaseSettings):
     reload: int = Field(0)
     public_url: str = Field("http://localhost:8000")
     development: bool = Field(False)
-    deployment_identifier: str = Field("unknown")
+    deployment_identifier: str = Field("")
     artifact_store: ArtifactStoreSettings
     file_store: ArtifactStoreSettings
     audio_store: AudioStoreSettings
@@ -692,6 +692,8 @@ class Config(BaseSettings):
             return data
 
         mapped_data = dict(data)
+        if not str(mapped_data.get("deployment_identifier", "")).strip():
+            mapped_data["deployment_identifier"] = "dev"
         mapped_data.setdefault(
             "artifact_store",
             {
@@ -745,6 +747,17 @@ class Config(BaseSettings):
             for key, item in value.items():
                 child_path = f"{path}.{key}" if path else str(key)
                 yield from cls._iter_local_disk_backed_paths(item, child_path)
+
+    @model_validator(mode="after")
+    def _validate_deployment_identifier(self):
+        deployment_identifier = self.deployment_identifier.strip()
+        if not self.development and deployment_identifier == "":
+            raise ValueError(
+                "deployment_identifier must be set when development is false."
+            )
+
+        self.deployment_identifier = deployment_identifier
+        return self
 
     @model_validator(mode="after")
     def _reject_local_disk_stores_outside_development(self):

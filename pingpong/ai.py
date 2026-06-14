@@ -3842,6 +3842,14 @@ async def poll_vector_store_files(
         )
 
 
+def build_openai_safety_identifier(
+    response_safety_identifier: str | None,
+) -> str | None:
+    if not response_safety_identifier:
+        return None
+    return f"pp:v1:{response_safety_identifier}"
+
+
 async def run_response(
     cli: openai.AsyncClient,
     *,
@@ -3992,10 +4000,11 @@ async def run_response(
                 )
                 include_with.append("code_interpreter_call.outputs")
 
+            safety_identifier = build_openai_safety_identifier(
+                response_safety_identifier
+            )
             safety_identifier_setting: str | openai.NotGiven = (
-                f"pp:v1:{response_safety_identifier}"
-                if response_safety_identifier
-                else openai.NOT_GIVEN
+                safety_identifier if safety_identifier is not None else openai.NOT_GIVEN
             )
 
             # Make cleanup safe even when the OpenAI stream fails before TTS setup runs.

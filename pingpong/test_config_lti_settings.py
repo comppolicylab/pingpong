@@ -44,11 +44,38 @@ def _minimal_config_settings() -> dict[str, object]:
     }
 
 
-def test_config_defaults_deployment_identifier_to_unknown():
-    cfg = Config.model_validate(_minimal_config_settings())
+def test_config_requires_deployment_identifier_outside_development():
+    with pytest.raises(ValidationError) as e:
+        Config.model_validate(_minimal_config_settings())
 
-    assert cfg.deployment_identifier == "unknown"
+    assert "deployment_identifier must be set when development is false" in str(e.value)
+
+
+def test_config_loads_explicit_deployment_identifier_outside_development():
+    cfg = Config.model_validate(
+        {**_minimal_config_settings(), "deployment_identifier": "production"}
+    )
+
+    assert cfg.deployment_identifier == "production"
     assert cfg.lms.lms_instances == []
+
+
+def test_config_defaults_deployment_identifier_to_dev_in_development():
+    cfg = Config.model_validate({**_minimal_config_settings(), "development": True})
+
+    assert cfg.deployment_identifier == "dev"
+
+
+def test_config_defaults_blank_deployment_identifier_to_dev_in_development():
+    cfg = Config.model_validate(
+        {
+            **_minimal_config_settings(),
+            "development": True,
+            "deployment_identifier": "  ",
+        }
+    )
+
+    assert cfg.deployment_identifier == "dev"
 
 
 def test_config_injects_local_store_defaults_in_development():
@@ -96,6 +123,7 @@ def test_config_requires_explicit_stores_outside_development():
 def test_config_rejects_local_disk_store_outside_development():
     settings = {
         **_minimal_config_settings(),
+        "deployment_identifier": "production",
         "artifact_store": {
             "type": "local",
             "save_target": "local_exports/thread_exports",
@@ -116,6 +144,7 @@ def test_config_rejects_local_disk_store_outside_development():
 def test_config_rejects_local_nested_store_outside_development():
     settings = {
         **_minimal_config_settings(),
+        "deployment_identifier": "production",
         "lti": {"key_store": {"type": "local", "directory": "local_exports/lti_keys"}},
     }
 
