@@ -274,6 +274,19 @@ class GeneratedSlideManifest(BaseModel):
     questions: list[GeneratedSlideQuestion] = Field(default_factory=list)
 
 
+class GeneratedSlideContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    deck_summary: str = Field(..., min_length=1)
+    slides: list[schemas.LectureSlideContextSlideV5] = Field(..., min_length=1)
+    summary_checkpoints: list[schemas.LectureSlideContextSummaryCheckpointV5] = Field(
+        ..., min_length=1
+    )
+    moment_contexts: list[schemas.LectureSlideContextMomentV5] = Field(
+        ..., min_length=1
+    )
+
+
 def _build_slide_manifest_generation_instructions(
     content_section: str,
     *,
@@ -408,6 +421,84 @@ Return a single JSON object matching the requested schema. Do not include any te
 """
 
 
+def _build_slide_context_generation_instructions(
+    content_section: str,
+    *,
+    total_duration_ms: int | None,
+    generation_start_ms: int | None = None,
+    generation_end_ms: int | None = None,
+    context_start_ms: int | None = None,
+    context_end_ms: int | None = None,
+) -> str:
+    duration_text = (
+        f"\nThe combined slide narration duration is {total_duration_ms} milliseconds."
+        if total_duration_ms is not None
+        else ""
+    )
+    generation_window_text = ""
+    if generation_start_ms is not None and generation_end_ms is not None:
+        generation_window_interval_text = (
+            f"offsets greater than {generation_start_ms}ms and less than or equal "
+            f"to {generation_end_ms}ms"
+        )
+        if generation_start_ms == 0:
+            generation_window_interval_text = (
+                f"offsets from 0ms through {generation_end_ms}ms"
+            )
+        context_range_text = (
+            f" The supplied context covers offsets {context_start_ms}ms through "
+            f"{context_end_ms}ms."
+            if context_start_ms is not None and context_end_ms is not None
+            else ""
+        )
+        generation_window_text = f"""
+
+GENERATION WINDOW:
+This is one chunk from a longer slide lesson.{context_range_text}
+Create context only for {generation_window_interval_text}.
+Use surrounding context to avoid boundary artifacts, but keep generated offsets inside the requested generation window.
+"""
+
+    return f"""You are an expert educational content designer creating chat context for an interactive slide lesson from a PDF deck.
+
+You will be given the PDF, slide timing source data, and word-level narration transcript source data.{duration_text}
+{generation_window_text}
+
+Use the PDF, slide timing source data, and transcript together. The PDF is the visual source of truth; the transcript is the spoken narration timeline.
+
+GENERATION GUIDANCE SPECIFIC TO THIS LESSON:
+{content_section.strip() or DEFAULT_GENERATION_PROMPT_CONTENT}
+
+YOUR TASK:
+Create a JSON object with these top-level fields:
+- deck_summary: a compact one-paragraph summary of the full slide lesson.
+- slides: compact per-slide chat context objects.
+- summary_checkpoints: cumulative summaries through increasing timeline offsets.
+- moment_contexts: local before/at/after context windows around important moments.
+
+SLIDE CHAT CONTEXT:
+- Include one slides entry for each slide in the supplied generation window.
+- slide_position is the zero-based slide number.
+- title should match the slide title when visible; otherwise use a short descriptive title.
+- start_offset_ms and end_offset_ms must come from the timing source row when available.
+- visible_text should compactly capture important readable text on the slide.
+- visual_context should describe diagrams, layout, images, charts, code, symbols, or other visual information needed to answer questions about the slide.
+- narration_summary should summarize what the narration says for this slide.
+- key_points should contain concise concept bullets grounded in the PDF and transcript.
+- diagrams and equations_or_symbols should list notable visual diagrams or equations/symbols, or be empty arrays.
+- For summary_checkpoints, each summary is cumulative from the start of the lesson through end_offset_ms, and end_slide_position is the zero-based slide reached by that offset.
+- For moment_contexts, create useful local windows with start_offset_ms <= center_offset_ms <= end_offset_ms and a zero-based slide_position.
+- If a generation window is provided, create slides, summary_checkpoints, and moment_contexts only for that requested generation window, not the surrounding context overlap.
+
+Do not create, rewrite, summarize, or include knowledge-check questions. Existing questions are managed separately and are out of scope for this task.
+
+Use concrete evidence from the PDF and transcript. Do not invent unsupported facts.
+
+OUTPUT FORMAT:
+Return a single JSON object matching the requested schema. Do not include any text outside the JSON.
+"""
+
+
 def _slide_timing_source_text(page_ranges: list[SlidePageRange]) -> str:
     return (
         "SLIDE TIMING SOURCE DATA:\n"
@@ -422,6 +513,14 @@ def _slide_generation_final_task_text() -> str:
         "Based on the PDF, slide timing source data, and word-level transcript "
         "source data above, generate the interactive slide lesson manifest now. "
         "Follow the instructions and return only the schema-valid JSON object."
+    )
+
+
+def _slide_context_generation_final_task_text() -> str:
+    return (
+        "Based on the PDF, slide timing source data, and word-level transcript "
+        "source data above, generate the slide lesson chat context now. Follow "
+        "the instructions and return only the schema-valid JSON object."
     )
 
 
@@ -2660,6 +2759,186 @@ async def _generate_slide_manifest(
     )
 
 
+async def generate_slide_context_v5(
+    *,
+    openai_client: openai.AsyncClient | openai.AsyncAzureOpenAI,
+    model: str,
+    file_id: str,
+    generation_prompt: str | None,
+    page_ranges: list[SlidePageRange],
+    transcript: list[schemas.LectureVideoManifestWordV3],
+    total_duration_ms: int | None,
+) -> schemas.LectureSlideContextV5:
+    prompt = generation_prompt or DEFAULT_GENERATION_PROMPT_CONTENT
+    resolved_total_duration_ms = _slide_manifest_total_duration_ms(
+        deck_total_duration_ms=total_duration_ms,
+        page_ranges=page_ranges,
+        transcript=transcript,
+    )
+    context = await _generate_slide_context_v5_with_optional_chunks(
+        openai_client=openai_client,
+        model=model,
+        file_id=file_id,
+        generation_prompt=prompt,
+        page_ranges=page_ranges,
+        transcript=transcript,
+        total_duration_ms=resolved_total_duration_ms,
+    )
+    return schemas.LectureSlideContextV5.model_validate(
+        {
+            "version": 5,
+            "deck_summary": context.deck_summary,
+            "slides": [slide.model_dump() for slide in context.slides],
+            "summary_checkpoints": [
+                checkpoint.model_dump() for checkpoint in context.summary_checkpoints
+            ],
+            "moment_contexts": [
+                moment.model_dump() for moment in context.moment_contexts
+            ],
+        }
+    )
+
+
+async def _generate_slide_context_v5_with_optional_chunks(
+    *,
+    openai_client: openai.AsyncClient | openai.AsyncAzureOpenAI,
+    model: str,
+    file_id: str,
+    generation_prompt: str,
+    page_ranges: list[SlidePageRange],
+    transcript: list[schemas.LectureVideoManifestWordV3],
+    total_duration_ms: int | None,
+) -> GeneratedSlideContext:
+    if total_duration_ms is None:
+        context = await _generate_slide_context_v5_for_window(
+            openai_client=openai_client,
+            model=model,
+            file_id=file_id,
+            generation_prompt=generation_prompt,
+            page_ranges=page_ranges,
+            transcript=transcript,
+            total_duration_ms=None,
+        )
+        if context is None:
+            raise ValueError("Generated full lecture slide v5 context was empty.")
+        return context
+    chunks = _plan_slide_manifest_generation_chunks(
+        total_duration_ms,
+        generation_prompt=generation_prompt,
+        page_ranges=page_ranges,
+        transcript=transcript,
+        manual_questions=[],
+        question_requests=[],
+    )
+    if len(chunks) == 1:
+        try:
+            context = await _generate_slide_context_v5_for_window(
+                openai_client=openai_client,
+                model=model,
+                file_id=file_id,
+                generation_prompt=generation_prompt,
+                page_ranges=page_ranges,
+                transcript=transcript,
+                total_duration_ms=total_duration_ms,
+            )
+            if context is None:
+                raise ValueError("Generated full lecture slide v5 context was empty.")
+            return context
+        except Exception as exc:
+            if (
+                not _is_context_limit_error(exc)
+                or chunks[0].generation_duration_ms <= SLIDE_MANIFEST_CHUNK_MIN_SPLIT_MS
+            ):
+                raise
+            chunks = _split_slide_manifest_generation_chunk(
+                chunks[0],
+                total_duration_ms=total_duration_ms,
+                transcript=transcript,
+            )
+    if len(chunks) == 1:
+        raise RuntimeError("Slide context chunk planning did not split.")
+
+    logger.info(
+        "Generating lecture slide v5 context in chunks. total_duration_ms=%s "
+        "chunk_count=%s",
+        total_duration_ms,
+        len(chunks),
+    )
+    chunk_contexts: list[GeneratedSlideContext] = []
+    for chunk in chunks:
+        chunk_contexts.extend(
+            await _generate_slide_context_v5_chunks(
+                openai_client=openai_client,
+                model=model,
+                file_id=file_id,
+                generation_prompt=generation_prompt,
+                page_ranges=page_ranges,
+                transcript=transcript,
+                total_duration_ms=total_duration_ms,
+                chunk=chunk,
+            )
+        )
+    return _merge_slide_context_chunks(chunk_contexts)
+
+
+async def _generate_slide_context_v5_chunks(
+    *,
+    openai_client: openai.AsyncClient | openai.AsyncAzureOpenAI,
+    model: str,
+    file_id: str,
+    generation_prompt: str,
+    page_ranges: list[SlidePageRange],
+    transcript: list[schemas.LectureVideoManifestWordV3],
+    total_duration_ms: int,
+    chunk: SlideManifestGenerationChunk,
+) -> list[GeneratedSlideContext]:
+    try:
+        context = await _generate_slide_context_v5_for_window(
+            openai_client=openai_client,
+            model=model,
+            file_id=file_id,
+            generation_prompt=generation_prompt,
+            page_ranges=page_ranges,
+            transcript=transcript,
+            total_duration_ms=total_duration_ms,
+            chunk=chunk,
+        )
+        return [context] if context is not None else []
+    except Exception as exc:
+        if (
+            not _is_context_limit_error(exc)
+            or chunk.generation_duration_ms <= SLIDE_MANIFEST_CHUNK_MIN_SPLIT_MS
+        ):
+            raise
+        child_chunks = _split_slide_manifest_generation_chunk(
+            chunk,
+            total_duration_ms=total_duration_ms,
+            transcript=transcript,
+        )
+        logger.info(
+            "Splitting lecture slide v5 context chunk after context limit. "
+            "generation_start_ms=%s generation_end_ms=%s split_ms=%s",
+            chunk.generation_start_ms,
+            chunk.generation_end_ms,
+            child_chunks[0].generation_end_ms,
+        )
+        contexts: list[GeneratedSlideContext] = []
+        for child_chunk in child_chunks:
+            contexts.extend(
+                await _generate_slide_context_v5_chunks(
+                    openai_client=openai_client,
+                    model=model,
+                    file_id=file_id,
+                    generation_prompt=generation_prompt,
+                    page_ranges=page_ranges,
+                    transcript=transcript,
+                    total_duration_ms=total_duration_ms,
+                    chunk=child_chunk,
+                )
+            )
+        return contexts
+
+
 async def _generate_slide_manifest_with_optional_chunks(
     *,
     openai_client: openai.AsyncClient | openai.AsyncAzureOpenAI,
@@ -2808,6 +3087,108 @@ async def _generate_slide_manifest_chunks(
         return manifests
 
 
+async def _generate_slide_context_v5_for_window(
+    *,
+    openai_client: openai.AsyncClient | openai.AsyncAzureOpenAI,
+    model: str,
+    file_id: str,
+    generation_prompt: str,
+    page_ranges: list[SlidePageRange],
+    transcript: list[schemas.LectureVideoManifestWordV3],
+    total_duration_ms: int | None,
+    chunk: SlideManifestGenerationChunk | None = None,
+) -> GeneratedSlideContext | None:
+    chunk_transcript = transcript
+    chunk_page_ranges = page_ranges
+    generation_start_ms = None
+    generation_end_ms = None
+    context_start_ms = None
+    context_end_ms = None
+    if chunk is not None:
+        generation_start_ms = chunk.generation_start_ms
+        generation_end_ms = chunk.generation_end_ms
+        context_start_ms = chunk.context_start_ms
+        context_end_ms = chunk.context_end_ms
+        chunk_transcript = _transcript_for_slide_window(
+            transcript,
+            start_offset_ms=chunk.context_start_ms,
+            end_offset_ms=chunk.context_end_ms,
+        )
+        chunk_page_ranges = _page_ranges_for_slide_window(
+            page_ranges,
+            start_offset_ms=chunk.context_start_ms,
+            end_offset_ms=chunk.context_end_ms,
+        )
+    chunk_page_ranges = _timed_slide_page_ranges(chunk_page_ranges)
+    context = await _parse_responses_output(
+        openai_client,
+        model=model,
+        instructions=_build_slide_context_generation_instructions(
+            generation_prompt,
+            total_duration_ms=total_duration_ms,
+            generation_start_ms=generation_start_ms,
+            generation_end_ms=generation_end_ms,
+            context_start_ms=context_start_ms,
+            context_end_ms=context_end_ms,
+        ),
+        response_model=GeneratedSlideContext,
+        input_messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_file", "file_id": file_id},
+                    {
+                        "type": "input_text",
+                        "text": _slide_timing_source_text(chunk_page_ranges),
+                    },
+                    {
+                        "type": "input_text",
+                        "text": _generation_transcript_source_text(
+                            chunk_transcript,
+                            compact=False,
+                        ),
+                    },
+                    {
+                        "type": "input_text",
+                        "text": _slide_context_generation_final_task_text(),
+                    },
+                ],
+            }
+        ],
+    )
+    if chunk is not None:
+        manifest = _filter_slide_context_for_window(
+            GeneratedSlideManifest(
+                deck_summary=context.deck_summary,
+                slides=context.slides,
+                summary_checkpoints=context.summary_checkpoints,
+                moment_contexts=context.moment_contexts,
+            ),
+            page_ranges=page_ranges,
+            start_offset_ms=chunk.generation_start_ms,
+            end_offset_ms=chunk.generation_end_ms,
+        )
+        if (
+            not manifest.slides
+            or not manifest.summary_checkpoints
+            or not manifest.moment_contexts
+        ):
+            logger.warning(
+                "Skipping empty filtered lecture slide v5 context chunk. "
+                "generation_start_ms=%s generation_end_ms=%s",
+                chunk.generation_start_ms,
+                chunk.generation_end_ms,
+            )
+            return None
+        return GeneratedSlideContext(
+            deck_summary=manifest.deck_summary,
+            slides=manifest.slides,
+            summary_checkpoints=manifest.summary_checkpoints,
+            moment_contexts=manifest.moment_contexts,
+        )
+    return context
+
+
 async def _generate_slide_manifest_for_window(
     *,
     openai_client: openai.AsyncClient | openai.AsyncAzureOpenAI,
@@ -2917,6 +3298,30 @@ async def _generate_slide_manifest_for_window(
         manifest,
         page_ranges=page_ranges,
         total_duration_ms=total_duration_ms,
+    )
+
+
+def _merge_slide_context_chunks(
+    chunk_contexts: list[GeneratedSlideContext],
+) -> GeneratedSlideContext:
+    if not chunk_contexts:
+        raise ValueError("Generated slide context chunks were empty.")
+    merged_manifest = _merge_slide_chunk_manifests(
+        [
+            GeneratedSlideManifest(
+                deck_summary=context.deck_summary,
+                slides=context.slides,
+                summary_checkpoints=context.summary_checkpoints,
+                moment_contexts=context.moment_contexts,
+            )
+            for context in chunk_contexts
+        ]
+    )
+    return GeneratedSlideContext(
+        deck_summary=merged_manifest.deck_summary,
+        slides=merged_manifest.slides,
+        summary_checkpoints=merged_manifest.summary_checkpoints,
+        moment_contexts=merged_manifest.moment_contexts,
     )
 
 
