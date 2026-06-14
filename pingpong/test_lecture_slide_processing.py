@@ -283,6 +283,60 @@ async def test_deck_has_slide_manifest_accepts_v5_context_version(db):
     assert await lecture_slide_processing._deck_has_slide_manifest(1)
 
 
+async def test_generate_slide_context_v5_uses_context_only_response_model(monkeypatch):
+    captured = {}
+
+    async def fake_parse_responses_output(
+        openai_client,
+        *,
+        model,
+        instructions,
+        response_model,
+        input_messages,
+    ):
+        captured["model"] = model
+        captured["instructions"] = instructions
+        captured["response_model"] = response_model
+        captured["input_messages"] = input_messages
+        return response_model(**_generated_slide_context_kwargs())
+
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "_parse_responses_output",
+        fake_parse_responses_output,
+    )
+
+    context = await lecture_slide_processing.generate_slide_context_v5(
+        openai_client=SimpleNamespace(),
+        model="gpt-test",
+        file_id="file-test",
+        generation_prompt="Focus on the lesson.",
+        page_ranges=[
+            {"slide_position": 0, "start_offset_ms": 0, "end_offset_ms": 500},
+            {"slide_position": 1, "start_offset_ms": 500, "end_offset_ms": 1200},
+        ],
+        transcript=[
+            schemas.LectureVideoManifestWordV3(
+                id="word-0",
+                word="hello",
+                start_offset_ms=0,
+                end_offset_ms=100,
+            )
+        ],
+        total_duration_ms=1200,
+    )
+
+    assert context.version == 5
+    assert context.deck_summary == "A compact lesson summary."
+    assert captured["model"] == "gpt-test"
+    assert captured["response_model"] is lecture_slide_processing.GeneratedSlideContext
+    assert (
+        "Do not create, rewrite, summarize, or include knowledge-check questions."
+        in (captured["instructions"])
+    )
+    assert "questions" not in captured["response_model"].model_fields
+
+
 async def test_claim_next_processing_run_recovers_expired_lease(db):
     await _create_class_and_deck(db)
     async with db.async_session() as session:

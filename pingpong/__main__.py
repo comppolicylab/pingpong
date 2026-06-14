@@ -78,6 +78,9 @@ from pingpong.migrations.m12_upload_lecture_slide_sources_to_openai import (
 from pingpong.migrations.m13_remux_lecture_slide_narration_to_webm import (
     remux_lecture_slide_narration_to_webm,
 )
+from pingpong.migrations.m14_migrate_lecture_slide_v4_context_to_v5 import (
+    migrate_lecture_slide_v4_context_to_v5,
+)
 from pingpong.now import _get_next_run_time, croner, utcnow
 from pingpong.schemas import LMSType, RunStatus
 from pingpong.lti.course_bridge import course_bridge_sync_all
@@ -1156,6 +1159,31 @@ def m13_remux_lecture_slide_narration_to_webm() -> None:
             )
 
     asyncio.run(_m13_remux_lecture_slide_narration_to_webm())
+
+
+@db.command("m14_migrate_lecture_slide_v4_context_to_v5")
+@click.option("--batch-size", default=10, show_default=True, type=int)
+@click.option("--limit", default=None, type=int)
+def m14_migrate_lecture_slide_v4_context_to_v5(
+    batch_size: int,
+    limit: int | None,
+) -> None:
+    async def _m14_migrate_lecture_slide_v4_context_to_v5() -> None:
+        async with config.db.driver.async_session() as session:
+            logger.info("Migrating lecture slide v4 context to v5...")
+            result = await migrate_lecture_slide_v4_context_to_v5(
+                session,
+                batch_size=batch_size,
+                limit=limit,
+            )
+            logger.info(
+                "Done! updated=%s skipped=%s failed=%s",
+                result.updated,
+                result.skipped,
+                result.failed,
+            )
+
+    asyncio.run(_m14_migrate_lecture_slide_v4_context_to_v5())
 
 
 @db.command("m02_remove_responses_threads")
