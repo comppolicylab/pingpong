@@ -12,7 +12,7 @@ from pingpong.ai import (
 )
 from pingpong.schemas import (
     MessageRole,
-    MessageStatus,
+    RunStatus,
 )
 from pingpong.server import OpenAIClient
 
@@ -32,7 +32,7 @@ something can get
 
 """
 
-
+# TODO: rename
 async def migrate_threads_and_messages_to_v3(
     session: AsyncSession, authz_client: OpenFgaAuthzClient
 ) -> None:
@@ -64,74 +64,112 @@ async def _migrate_thread(
     thread: models.Thread,
     assistant: models.Assistant,
 ) -> None:
-    run_id_map: dict[str, models.Run] = {}
-
-    (
-        openai_messages_by_run,
-        openai_orphan_messages,
-    ) = await _fetch_openai_messages_in_thread(openai_client, thread.thread_id)
-
+    openai_messages = await _fetch_openai_messages_in_thread(
+        openai_client, thread.thread_id
+    )
     # empty thread, nothing else to do
-    if not openai_messages_by_run:
+    if not openai_messages:
         return
 
+    # User messages seen since the last assistant block, awaiting a run.
+    pending_user_messages: list[Message] = []
+    idx = 0
     prev_output_index = -1
-    for openai_run_id, openai_messages in openai_messages_by_run.items():
-        local_run = await _get_or_create_run(
-            session, openai_client, thread, assistant, openai_run_id, run_id_map
-        )
+    total = len(openai_messages)
 
-        for openai_message in openai_messages:
-            await _store_message(
+    while idx < len(openai_messages):
+        openai_message = openai_messages[idx]
+        if openai_message.role != "assistant":
+            pending_user_messages.append(openai_message)
+            idx += 1
+            continue
+
+        # find block of consecutive assistant messages and assign them all
+        # the same run, which gets its data from the run of the last assistant message
+        # but with the start time of the first user message.
+
+        consecutive_assistant_messages: list[Message] = []
+        runs_in_assistant_block: list[Run] = []
+        while idx < total and openai_messages[idx].role == "assistant":
+            block_message = openai_messages[idx]
+            consecutive_assistant_messages.append(block_message)
+            if block_message.run_id is not None:
+                runs_in_assistant_block.append(
+                    await openai_client.beta.threads.runs.retrieve(
+                        block_message.run_id, thread_id=thread.thread_id
+                    )
+                )
+            idx += 1
+
+        if runs_in_assistant_block:
+            local_run = await _get_or_create_collapsed_run(
+                session, thread, assistant, runs_in_assistant_block
+            )
+        else:
+            # should never happen?
+            logger.warning(
+                f"Assistant block in thread {thread.id} had no run_id; "
+                "using a dummy incomplete run"
+            )
+            # store with created ts from the first assistant message in the block
+            local_run = await _store_dummy_run(
+                session, thread, assistant, consecutive_assistant_messages[0]
+            )
+
+        if pending_user_messages:
+            # all user messages that don't have an assistant response immediately after
+            # get assigned a dummy run. last user message gets the real run form the
+            # assistant response
+            final_user_message = pending_user_messages[-1]
+            for orphan in pending_user_messages[:-1]:
+                prev_output_index = await _store_message_with_dummy_run(
+                    session, thread, assistant, orphan, prev_output_index
+                )
+            prev_output_index = await _store_message(
                 session,
-                authz_client,
-                openai_client,
                 thread,
                 assistant,
-                openai_message,
+                final_user_message,
+                local_run,
+                prev_output_index,
+            )
+            pending_user_messages = []
+
+        for block_message in consecutive_assistant_messages:
+            prev_output_index = await _store_message(
+                session,
+                thread,
+                assistant,
+                block_message,
                 local_run,
                 prev_output_index,
             )
 
-    for openai_message in openai_orphan_messages:
-        await _store_message(
-            session,
-            authz_client,
-            openai_client,
-            thread,
-            assistant,
-            openai_message,
-            local_run,
-            prev_output_index,
+    # user messages with no assistant response at the end also get dummy runs
+    for orphan in pending_user_messages:
+        prev_output_index = await _store_message_with_dummy_run(
+            session, thread, assistant, orphan, prev_output_index
         )
 
     session.add(thread)
     await session.flush()
 
 
-async def _get_or_create_run(
+async def _get_or_create_collapsed_run(
     session: AsyncSession,
-    openai_client: OpenAIClient,
     thread: models.Thread,
     assistant: models.Assistant,
-    openai_run_id: str,
-    run_id_map: dict[str, models.Run],
+    runs_in_assistant_block: list[Run],
 ) -> models.Run:
-    cached = run_id_map.get(openai_run_id)
-    if cached:
-        return cached
+    last_run = runs_in_assistant_block[-1]
 
-    existing = await models.Run.get_by_run_id(session, openai_run_id)
+    # check if local run exists (for some reason) before creating to avoid duplicates
+    existing = await models.Run.get_by_run_id(session, last_run.id)
     if existing:
-        run_id_map[openai_run_id] = existing
         return existing
 
-    openai_run = await openai_client.beta.threads.runs.retrieve(
-        openai_run_id, thread_id=thread.thread_id
-    )
-    run = await _store_run(session, thread, assistant, openai_run)
-    run_id_map[openai_run_id] = run
-    return run
+    created = datetime.fromtimestamp(runs_in_assistant_block[0].created_at)
+    return await _store_run(session, thread, assistant, last_run, created)
 
 
 async def _store_run(
@@ -139,12 +177,13 @@ async def _store_run(
     thread: models.Thread,
     assistant: models.Assistant,
     openai_run: Run,
+    created: datetime,
 ) -> models.Run:
     run = models.Run(
         run_id=openai_run.id,
         thread_id=thread.id,
         assistant_id=assistant.id,
-        creator_id=None,
+        creator_id=assistant.creator_id,
         status=openai_run.status,
         error_code=openai_run.last_error and openai_run.last_error.code,
         error_message=openai_run.last_error and openai_run.last_error.message,
@@ -154,14 +193,13 @@ async def _store_run(
         model=assistant.model,
         temperature=assistant.temperature,
         instructions=thread.instructions,
-        created=datetime.fromtimestamp(openai_run.created_at),
+        created=created,
         completed=(
             openai_run.completed_at and datetime.fromtimestamp(openai_run.completed_at)
         ),
         tools_available=thread.tools_available,
         reasoning_effort=assistant.reasoning_effort,
         verbosity=assistant.verbosity,
-        messages=[],  # gets filled in later
     )
     session.add(run)
     await session.flush()
@@ -170,58 +208,94 @@ async def _store_run(
     return run
 
 
+async def _store_dummy_run(
+    session: AsyncSession,
+    thread: models.Thread,
+    assistant: models.Assistant,
+    openai_message: Message,
+) -> models.Run:
+    run = models.Run(
+        run_id=None,
+        thread_id=thread.id,
+        assistant_id=assistant.id,
+        creator_id=assistant.creator_id,
+        status=RunStatus.INCOMPLETE,
+        model=assistant.model,
+        temperature=assistant.temperature,
+        instructions=thread.instructions,
+        created=datetime.fromtimestamp(openai_message.created_at, tz=timezone.utc),
+        completed=None,
+        tools_available=thread.tools_available,
+        reasoning_effort=assistant.reasoning_effort,
+        verbosity=assistant.verbosity,
+    )
+    session.add(run)
+    await session.flush()
+    await session.refresh(run)
+
+    return run
+
+
+async def _store_message_with_dummy_run(
+    session: AsyncSession,
+    thread: models.Thread,
+    assistant: models.Assistant,
+    openai_message: Message,
+    prev_output_index: int,
+) -> int:
+    dummy_run = await _store_dummy_run(session, thread, assistant, openai_message)
+    return await _store_message(
+        session, thread, assistant, openai_message, dummy_run, prev_output_index
+    )
+
+
 async def _fetch_openai_messages_in_thread(
     openai_client: OpenAIClient, openai_thread_id: str
-) -> tuple[dict[str, list[Message]], list[Message]]:
-    messages_by_run_id: dict[str, list[Message]] = {}
+) -> list[Message]:
+    messages: list[Message] = []
     after: str | Omit = omit
-    message_stack: list[Message] = []
 
     while True:
         response = await openai_client.beta.threads.messages.list(
             thread_id=openai_thread_id, order="asc", after=after
         )
-
-        for message in response.data:
-            if message.run_id is not None:
-                messages_by_run_id.setdefault(message.run_id, []).extend(
-                    message_stack[:] + [message]
-                )
-                message_stack = []
-            else:
-                message_stack.append(message)
-
+        messages.extend(response.data)
         if not response.has_more or not response.data:
             break
-
         after = response.data[-1].id
 
-    return messages_by_run_id, message_stack
+    return messages
 
 async def _store_message(
     session: AsyncSession,
-    authz_client: OpenFgaAuthzClient,
-    openai_client: OpenAIClient,
     thread: models.Thread,
     assistant: models.Assistant,
     openai_message: Message,
     local_run: models.Run,
     prev_output_index: int,
 ) -> int:
+    # Check if there's a local copy of the message before creating it
     existing_local_message = await models.Message.get_by_message_id(
         session, openai_message.id
     )
     if existing_local_message:
-        return existing_local_message.output_index
+        return prev_output_index
 
     # TODO: store tool calls
+    # TODO: for next time: only attachments and message parts. put message parts inline with the models.Message as a field in there
+
+    # no need to re-upload user created images to AWS bc they're lost forever
+    # message part type -> input text or input image or output text
+    # input image file id -> we can fetch these from open ai and upload them to s3
+
+    user_id = _maybe_extract_user_id(openai_message)
 
     prev_output_index += 1
     await models.Message.create(
         session,
         {
             "message_id": openai_message.id,
-            "message_status": MessageStatus.COMPLETED,
+            "message_status": openai_message.status,
             "role": MessageRole(openai_message.role),
             "created": datetime.fromtimestamp(
                 openai_message.created_at, tz=timezone.utc
@@ -230,12 +304,33 @@ async def _store_message(
             and datetime.fromtimestamp(openai_message.completed_at, tz=timezone.utc),
             "thread_id": thread.id,
             "run_id": local_run.id,
-            "assistant_id": thread.assistant_id,
-            "user_id": assistant.creator_id,
+            "assistant_id": thread.assistant_id
+            if openai_message.role == "assistant"
+            else None,
+            "user_id": user_id,
             "output_index": prev_output_index,  # TODO: needs to be consistent with ToolCall
+            # TODO: fill message parts
         },
     )
 
-    # TODO: store message call
+    # TODO-later: annotations
 
     return prev_output_index
+
+def _maybe_extract_user_id(openai_message: Message) -> int | None:
+    if openai_message.role != "user":
+        return None
+    metadata = openai_message.metadata or {}
+    raw_user_id = metadata.get("user_id")
+    if raw_user_id is None:
+        logger.warning(
+            f"Couldn't get user_id from OpenAI message with id {openai_message.id}"
+        )
+        return None
+    try:
+        return int(raw_user_id)
+    except (ValueError, TypeError):
+        logger.warning(
+            f"Couldn't get user_id from OpenAI message with id {openai_message.id}"
+        )
+        return None
