@@ -426,9 +426,9 @@ class VectorStoreType(Enum):
 
 class InteractionMode(StrEnum):
     CHAT = "chat"
-    VOICE = "voice"
-    LECTURE_VIDEO = "lecture_video"
-    LECTURE_SLIDES = "lecture_slides"
+    VOICE = "voice"  # TODO: we need to do this too
+    LECTURE_VIDEO = "lecture_video"  # NOTE: doesn't exist on v2
+    LECTURE_SLIDES = "lecture_slides"  # NOTE: doesn't exist on v2
 
 
 class RealtimeEagerness(StrEnum):
@@ -3793,6 +3793,9 @@ class UpdateAgreementPolicyRequest(BaseModel):
 class AnnotationType(StrEnum):
     FILE_PATH = "file_path"
     URL_CITATION = "url_citation"
+    # NOTE: array of things where it says "from here to here there is text and you
+    # need to replace it with the following thing" aka where to put thitngs when we
+    # render the messages
     FILE_CITATION = "file_citation"
     CONTAINER_FILE_CITATION = "container_file_citation"
 

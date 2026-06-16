@@ -644,6 +644,8 @@ async def handle_multimodal_upload(
     )
 
 
+# NOTE: good thing to check, just copy the same pattern EXCEPT we do want to match exactyl what we do with responses
+# get data string rather than data upload
 async def handle_create_file(
     session: AsyncSession,
     authz: AuthzClient,

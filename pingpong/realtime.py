@@ -509,6 +509,7 @@ class ConversationItemOrderingBuffer:
         return True
 
 
+# NOTE: knowing what we do for creating messages in v3
 async def add_message_to_thread(
     openai_client: OpenAIClientType,
     browser_connection: StateWebSocket,

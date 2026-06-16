@@ -1145,11 +1145,13 @@ def m12_upload_lecture_slide_sources_to_openai() -> None:
 @db.command("m13_migrate_threads_to_v3")
 def m13_migrate_threads_to_v3() -> None:
     async def _m13_migrate_threads_to_v3() -> None:
+        await config.authz.driver.init()
         async with config.db.driver.async_session() as session:
-            logger.info("Migrating threads to next-gen...")
-            await migrate_threads_and_messages_to_v3(session)
-            await session.commit()
-            logger.info("Done!")
+            async with config.authz.driver.get_client() as authz_client:
+                logger.info("Migrating threads to v3...")
+                await migrate_threads_and_messages_to_v3(session, authz_client)
+                await session.commit()
+                logger.info("Done!")
 
     asyncio.run(_m13_migrate_threads_to_v3())
 
@@ -1159,6 +1161,7 @@ def m02_remove_responses_threads() -> None:
     async def _remove_responses_threads() -> None:
         await config.authz.driver.init()
         async with config.db.driver.async_session() as session:
+            # NOTE: auth client
             async with config.authz.driver.get_client() as c:
                 logger.info("Removing threads...")
                 await remove_responses_threads(session, c)

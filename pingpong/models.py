@@ -4207,7 +4207,7 @@ class LectureVideoInteraction(Base):
         )
         return await session.scalar(stmt)
 
-
+# NOTE: look here
 class S3File(Base):
     __tablename__ = "s3_files"
 
@@ -7502,7 +7502,7 @@ class ToolCall(Base):
     results = relationship("FileSearchCallResult", back_populates="tool_call")
 
     # Code Interpreter specific fields
-    code = Column(String, nullable=True)
+    code = Column(String, nullable=True)  # NOTE: instead of input
     container_id = Column(String, nullable=True)
     outputs = relationship(
         "CodeInterpreterCallOutput",
@@ -7561,6 +7561,13 @@ class ToolCall(Base):
         session.add(tool_call)
         await session.flush()
         return tool_call
+
+    @classmethod
+    async def get_by_tool_call_id(
+        cls, session: AsyncSession, tool_call_id: str
+    ) -> "ToolCall | None":
+        stmt = select(ToolCall).where(ToolCall.tool_call_id == tool_call_id)
+        return await session.scalar(stmt)
 
     @classmethod
     async def update_status(
@@ -7725,6 +7732,7 @@ class ReasoningContentPart(Base):
 
 
 class ReasoningStep(Base):
+    # NOTE: no need to recreate for m13
     __tablename__ = "reasoning_steps"
 
     id = Column(Integer, primary_key=True)
@@ -7982,6 +7990,13 @@ class Message(Base):
     completed = Column(DateTime(timezone=True), nullable=True)
 
     @classmethod
+    async def get_by_message_id(
+        cls, session: AsyncSession, message_id: str
+    ) -> "Message | None":
+        stmt = select(Message).where(Message.message_id == message_id)
+        return await session.scalar(stmt)
+
+    @classmethod
     async def get_messages_by_thread_id(
         cls, session: AsyncSession, thread_id: int
     ) -> AsyncGenerator["Message", None]:
@@ -8214,6 +8229,13 @@ class Run(Base):
         onupdate=func.now(),
     )
     completed = Column(DateTime(timezone=True), nullable=True)
+
+    @classmethod
+    async def get_by_run_id(
+        cls, session: AsyncSession, run_id: str
+    ) -> "Run | None":
+        stmt = select(Run).where(Run.run_id == run_id)
+        return await session.scalar(stmt)
 
     @classmethod
     async def get_file_search_files_from_messages(

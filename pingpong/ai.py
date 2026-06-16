@@ -1278,7 +1278,6 @@ async def build_response_input_item_list(
     response_input_items.extend(item for _, _, _, item in filtered_items)
     return response_input_items
 
-
 class BufferedResponseStreamHandler:
     def __init__(
         self,
@@ -1644,6 +1643,8 @@ class BufferedResponseStreamHandler:
         )
         self.enqueue_message_text_delta(display_delta)
 
+    # NOTE: example of downloading then uploading to S3
+    # used on handler.on_output_text_container_file_citation_added
     async def on_output_text_container_file_citation_added(
         self, data: AnnotationContainerFileCitation, annotation_index: int | None = None
     ):
@@ -1671,6 +1672,7 @@ class BufferedResponseStreamHandler:
         async def create_file_on_output_text_container_file_citation_added(
             session_: AsyncSession,
         ):
+            # NOTE: this process will create the files to open ai AND send them to s3
             file = await handle_create_file(
                 session=session_,
                 authz=self.auth,
@@ -1732,11 +1734,12 @@ class BufferedResponseStreamHandler:
             )
             return
 
+        # NOTE:
         annotation_data = {
             "type": AnnotationType.CONTAINER_FILE_CITATION,
             "file_id": data["file_id"],
             "file_object_id": file.id if not file.vision_file_id else None,
-            "vision_file_id": file.vision_file_id,
+            "vision_file_id": file.vision_file_id,  # NOTE: this is NOT the same as the traditional File ID that you see in other places
             "vision_file_object_id": file.id if file.vision_file_id else None,
             "filename": file.name,
             "container_id": data["container_id"],
@@ -2185,6 +2188,7 @@ class BufferedResponseStreamHandler:
 
         await add_cached_tool_call_on_code_interpreter_tool_call_completed()
 
+    # NOTE: xcxc reference for S3
     async def on_code_interpreter_tool_call_done(
         self, data: ResponseCodeInterpreterToolCall
     ):
@@ -2221,6 +2225,8 @@ class BufferedResponseStreamHandler:
                             "created": utcnow(),
                         }
                         await add_code_interpreter_call_output(image_data)
+                        # enqueing is converting to make it so that the UI can render
+                        # focus more on things that we're putting in the database
                         self.enqueue(
                             {
                                 "type": "tool_call_delta",
@@ -3061,6 +3067,7 @@ class BufferedResponseStreamHandler:
         async def add_cached_tool_call_on_file_search_call_created(
             session_: AsyncSession,
         ):
+            # NOTE: file search tool call creation
             tool_call = await models.ToolCall.create(session_, tool_call_data)
             await session_.commit()
             return tool_call
@@ -3189,6 +3196,7 @@ class BufferedResponseStreamHandler:
 
         for result in data.results:
             if result.file_id:
+                # TODO: what do I do with this?
                 if self.file_search_results.get(result.file_id):
                     self.file_search_results[result.file_id].text += (
                         "\n\n <hr/> \n\n" + result.text
