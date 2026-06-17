@@ -35,7 +35,7 @@ ARG host=0.0.0.0
 ARG port=3000
 ARG ssl_port=3001
 
-RUN openssl req -trustout -x509 -newkey rsa:4096 -sha256 -nodes \
+RUN openssl req -x509 -newkey rsa:4096 -sha256 -nodes \
     -keyout /etc/ssl/private/pingpong-self-signed.key \
     -out /etc/ssl/certs/pingpong-self-signed.crt \
     -days 3650 \
