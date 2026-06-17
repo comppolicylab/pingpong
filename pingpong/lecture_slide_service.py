@@ -1,10 +1,12 @@
 import contextlib
+import io
 import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
 import humanize
+import openai
 import uuid_utils as uuid
 from fastapi import HTTPException, UploadFile
 from pypdf import PdfReader
@@ -17,6 +19,7 @@ import pingpong.models as models
 import pingpong.schemas as schemas
 from pingpong.ai import get_openai_client_by_class_id
 from pingpong.config import config
+from pingpong.files import FILE_TYPES
 from pingpong.lecture_video_service import get_original_filename, get_upload_size
 from pingpong.video_store import VideoStoreError
 
@@ -26,6 +29,10 @@ LECTURE_SLIDE_DECK_ALREADY_ASSIGNED_DETAIL = (
     "This lecture slide deck is already attached to another assistant. "
     "Upload a new deck or copy the assistant instead."
 )
+OPENAI_INPUT_FILE_MAX_BYTES = 50 * 1024 * 1024
+OPENAI_INPUT_FILE_MIME_TYPES = {
+    file_type.mime_type.lower() for file_type in FILE_TYPES if file_type.input_file
+}
 
 
 @dataclass(frozen=True)
@@ -62,6 +69,42 @@ def _uploaded_openai_file_id(uploaded_file: object) -> str:
     if not file_id:
         raise RuntimeError("OpenAI did not return a file id for lecture slide PDF.")
     return str(file_id)
+
+
+def lecture_slide_context_file_summary_from_model(
+    context_file: models.LectureSlideAdditionalContextFile,
+) -> schemas.LectureSlideAdditionalContextFileSummary:
+    return schemas.LectureSlideAdditionalContextFileSummary(
+        id=context_file.id,
+        filename=context_file.original_filename,
+        size=context_file.content_length,
+        content_type=context_file.content_type,
+        file_object_id=context_file.file_object_id,
+    )
+
+
+def _normalize_content_type(content_type: str | None) -> str:
+    return (content_type or "").split(";", 1)[0].strip().lower()
+
+
+def _is_openai_input_file_supported(upload: UploadFile) -> bool:
+    return _normalize_content_type(upload.content_type) in OPENAI_INPUT_FILE_MIME_TYPES
+
+
+def _validate_openai_input_file_upload(upload: UploadFile, upload_size: int) -> None:
+    if upload_size >= OPENAI_INPUT_FILE_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                "File too large. "
+                f"Each OpenAI input file must be under {humanize.naturalsize(OPENAI_INPUT_FILE_MAX_BYTES)}."
+            ),
+        )
+    if not _is_openai_input_file_supported(upload):
+        raise HTTPException(
+            status_code=400,
+            detail="File type not supported as an OpenAI input file.",
+        )
 
 
 async def upload_lecture_slide_source_to_openai(
@@ -103,6 +146,77 @@ async def upload_lecture_slide_source_to_openai(
         raise
 
 
+async def create_lecture_slide_additional_context_file(
+    session: AsyncSession,
+    class_id: int,
+    uploader_id: int,
+    upload: UploadFile,
+) -> models.LectureSlideAdditionalContextFile:
+    upload_size = get_upload_size(upload)
+    _validate_openai_input_file_upload(upload, upload_size)
+    if not config.file_store:
+        raise HTTPException(
+            status_code=503, detail="File store not configured or unavailable."
+        )
+
+    filename = get_original_filename(upload, f"lecture_slide_context_{uuid.uuid7()}")
+    content_type = (
+        _normalize_content_type(upload.content_type) or "application/octet-stream"
+    )
+    openai_client = await get_openai_client_by_class_id(session, class_id)
+    await upload.seek(0)
+    upload_bytes = await upload.read()
+    await upload.seek(0)
+    try:
+        uploaded_file = await openai_client.files.create(
+            file=(filename, upload_bytes, content_type),
+            purpose="user_data",
+        )
+    except openai.BadRequestError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="OpenAI rejected this context file.",
+        ) from exc
+    file_id = _uploaded_openai_file_id(uploaded_file)
+    store_key: str | None = None
+    try:
+        file = await models.File.create(
+            session,
+            {
+                "file_id": file_id,
+                "private": True,
+                "uploader_id": uploader_id,
+                "name": filename,
+                "content_type": content_type,
+            },
+            class_id=class_id,
+        )
+        suffix = Path(filename).suffix.lower()
+        store_key = f"file_{uuid.uuid4()}{suffix}"
+        await config.file_store.store.put(
+            store_key, io.BytesIO(upload_bytes), content_type
+        )
+        await models.S3File.create(session, key=store_key, file_obj_ids=[file.id])
+        return await models.LectureSlideAdditionalContextFile.create(
+            session,
+            lecture_slide_deck_id=None,
+            file_object_id=file.id,
+            class_id=class_id,
+            uploader_id=uploader_id,
+            position=0,
+            original_filename=filename,
+            content_type=content_type,
+            content_length=upload_size,
+        )
+    except BaseException:
+        with contextlib.suppress(Exception):
+            await openai_client.files.delete(file_id)
+        if store_key is not None:
+            with contextlib.suppress(Exception):
+                await config.file_store.store.delete(store_key)
+        raise
+
+
 async def lecture_slide_summary_from_model(
     deck: models.LectureSlideDeck | None,
 ) -> schemas.LectureSlideSummary | None:
@@ -124,6 +238,12 @@ async def lecture_slide_summary_from_model(
         status=schemas.LectureSlideDeckStatus(deck.status),
         error_message=deck.error_message,
         slide_count=deck.slide_count,
+        additional_context_files=[
+            lecture_slide_context_file_summary_from_model(context_file)
+            for context_file in sorted(
+                deck.additional_context_files, key=lambda item: item.position
+            )
+        ],
     )
 
 
@@ -139,12 +259,12 @@ async def create_lecture_slide_deck(
         )
 
     upload_size = get_upload_size(upload)
-    if upload_size > config.upload.lecture_video_max_size:
+    if upload_size >= OPENAI_INPUT_FILE_MAX_BYTES:
         raise HTTPException(
             status_code=413,
             detail=(
                 "File too large. "
-                f"Max size is {humanize.naturalsize(config.upload.lecture_video_max_size)}."
+                f"Lecture slide PDFs must be under {humanize.naturalsize(OPENAI_INPUT_FILE_MAX_BYTES)}."
             ),
         )
 
@@ -254,6 +374,142 @@ async def ensure_lecture_slide_deck_is_unassigned(
             status_code=400,
             detail=LECTURE_SLIDE_DECK_ALREADY_ASSIGNED_DETAIL,
         )
+
+
+async def apply_lecture_slide_additional_context_files(
+    session: AsyncSession,
+    deck: models.LectureSlideDeck,
+    context_file_ids: Iterable[int],
+    *,
+    uploader_id: int,
+) -> bool:
+    requested_ids = list(dict.fromkeys(int(file_id) for file_id in context_file_ids))
+    requested_files = (
+        list(
+            (
+                await session.scalars(
+                    select(models.LectureSlideAdditionalContextFile)
+                    .where(
+                        models.LectureSlideAdditionalContextFile.id.in_(requested_ids)
+                    )
+                    .options(
+                        selectinload(models.LectureSlideAdditionalContextFile.file)
+                    )
+                )
+            ).all()
+        )
+        if requested_ids
+        else []
+    )
+    requested_by_id = {
+        context_file.id: context_file for context_file in requested_files
+    }
+    missing_ids = [
+        context_file_id
+        for context_file_id in requested_ids
+        if context_file_id not in requested_by_id
+    ]
+    if missing_ids:
+        raise HTTPException(
+            status_code=404,
+            detail="Could not find one or more lecture slide context files.",
+        )
+
+    for context_file in requested_files:
+        if context_file.class_id != deck.class_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Lecture slide context files must belong to the same class as the deck.",
+            )
+        if (
+            context_file.lecture_slide_deck_id is None
+            and context_file.uploader_id != uploader_id
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="Only the user who uploaded a lecture slide context file can attach it.",
+            )
+        if (
+            context_file.lecture_slide_deck_id is not None
+            and context_file.lecture_slide_deck_id != deck.id
+            and context_file.lecture_slide_deck_id
+            != deck.source_lecture_slide_deck_id_snapshot
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="Lecture slide context files cannot be reused from another deck.",
+            )
+
+    source_size = (
+        deck.source_stored_object.content_length if deck.source_stored_object else 0
+    )
+    total_size = source_size + sum(file.content_length for file in requested_files)
+    if total_size >= OPENAI_INPUT_FILE_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                "Lecture slide files are too large. The slide PDF plus all additional "
+                f"context files must be under {humanize.naturalsize(OPENAI_INPUT_FILE_MAX_BYTES)}."
+            ),
+        )
+
+    existing_files = list(
+        (
+            await session.scalars(
+                select(models.LectureSlideAdditionalContextFile)
+                .where(
+                    models.LectureSlideAdditionalContextFile.lecture_slide_deck_id
+                    == deck.id
+                )
+                .options(selectinload(models.LectureSlideAdditionalContextFile.file))
+            )
+        ).all()
+    )
+    existing_by_file_object_id = {
+        context_file.file_object_id: context_file for context_file in existing_files
+    }
+    desired_file_object_ids = [file.file_object_id for file in requested_files]
+    desired_file_object_id_set = set(desired_file_object_ids)
+    changed = False
+
+    for existing_file in existing_files:
+        if existing_file.file_object_id not in desired_file_object_id_set:
+            await session.delete(existing_file)
+            changed = True
+
+    for position, requested_file in enumerate(requested_files):
+        existing_file = existing_by_file_object_id.get(requested_file.file_object_id)
+        if existing_file is not None:
+            if existing_file.position != position:
+                existing_file.position = position
+                session.add(existing_file)
+                changed = True
+            if requested_file.lecture_slide_deck_id is None:
+                await session.delete(requested_file)
+                changed = True
+            continue
+        if requested_file.lecture_slide_deck_id is None:
+            requested_file.lecture_slide_deck_id = deck.id
+            requested_file.position = position
+            session.add(requested_file)
+            changed = True
+            continue
+        await models.LectureSlideAdditionalContextFile.create(
+            session,
+            lecture_slide_deck_id=deck.id,
+            file_object_id=requested_file.file_object_id,
+            class_id=deck.class_id,
+            uploader_id=requested_file.uploader_id,
+            position=position,
+            original_filename=requested_file.original_filename,
+            content_type=requested_file.content_type,
+            content_length=requested_file.content_length,
+        )
+        changed = True
+
+    if changed:
+        await session.flush()
+    return changed
 
 
 def raise_if_lecture_slide_assignment_conflict(exc: IntegrityError) -> None:
@@ -1151,6 +1407,19 @@ async def clone_lecture_slide_deck_snapshot(
                 end_offset_ms=page.end_offset_ms,
             )
         )
+    for context_file in deck.additional_context_files:
+        session.add(
+            models.LectureSlideAdditionalContextFile(
+                lecture_slide_deck_id=cloned_deck.id,
+                file_object_id=context_file.file_object_id,
+                class_id=context_file.class_id,
+                uploader_id=context_file.uploader_id,
+                position=context_file.position,
+                original_filename=context_file.original_filename,
+                content_type=context_file.content_type,
+                content_length=context_file.content_length,
+            )
+        )
     for question in deck.questions:
         question_row = models.LectureSlideQuestion(
             lecture_slide_deck_id=cloned_deck.id,
@@ -1226,21 +1495,36 @@ async def latest_processing_run_summary(
 async def delete_lecture_slide_deck_if_unused(
     session: AsyncSession,
     deck_id: int,
-) -> None:
+) -> list[int]:
     in_use = await session.scalar(
         select(models.Assistant.id)
         .where(models.Assistant.lecture_slide_deck_id == deck_id)
         .limit(1)
     )
     if in_use is not None:
-        return
+        return []
     thread_in_use = await session.scalar(
         select(models.Thread.id)
         .where(models.Thread.lecture_slide_deck_id == deck_id)
         .limit(1)
     )
     if thread_in_use is not None:
-        return
+        return []
+    additional_context_file_object_ids = list(
+        (
+            await session.scalars(
+                select(models.LectureSlideAdditionalContextFile.file_object_id).where(
+                    models.LectureSlideAdditionalContextFile.lecture_slide_deck_id
+                    == deck_id
+                )
+            )
+        ).all()
+    )
+    await session.execute(
+        delete(models.LectureSlideAdditionalContextFile).where(
+            models.LectureSlideAdditionalContextFile.lecture_slide_deck_id == deck_id
+        )
+    )
     await session.execute(
         update(models.LectureSlideProcessingRun)
         .where(models.LectureSlideProcessingRun.lecture_slide_deck_id == deck_id)
@@ -1325,3 +1609,4 @@ async def delete_lecture_slide_deck_if_unused(
     )
     await session.flush()
     await _delete_lecture_slide_audio_keys_quietly(audio_keys)
+    return additional_context_file_object_ids

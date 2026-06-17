@@ -1,6 +1,7 @@
 import aioboto3
 import logging
 import os
+from pathlib import Path
 
 from abc import ABC, abstractmethod
 from typing import IO, AsyncGenerator
@@ -28,6 +29,11 @@ class BaseArtifactStore(ABC):
     ) -> AsyncGenerator[bytes, None]:
         """Yield chunks of the object in store."""
         yield b""
+
+    @abstractmethod
+    async def delete(self, name: str):
+        """Delete a file from the store."""
+        raise NotImplementedError
 
 
 class S3ArtifactStore(BaseArtifactStore):
@@ -59,6 +65,10 @@ class S3ArtifactStore(BaseArtifactStore):
                 raise ArtifactStoreError(
                     code=500, detail=f"Error downloading thread export: {str(e)}"
                 )
+
+    async def delete(self, name: str):
+        async with aioboto3.Session().client("s3") as s3_client:
+            await s3_client.delete_object(Bucket=self._bucket, Key=name)
 
 
 class LocalArtifactStore(BaseArtifactStore):
@@ -96,3 +106,7 @@ class LocalArtifactStore(BaseArtifactStore):
         except Exception as e:
             logger.exception(f"Error streaming file {name}: {e}")
             raise ArtifactStoreError(code=500, detail=f"Error reading file: {str(e)}")
+
+    async def delete(self, name: str):
+        file_path = Path(self._directory) / name
+        file_path.unlink(missing_ok=True)

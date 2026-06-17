@@ -1223,6 +1223,14 @@ class LectureVideoSummary(BaseModel):
     error_message: str | None = None
 
 
+class LectureSlideAdditionalContextFileSummary(BaseModel):
+    id: int
+    filename: str
+    size: int = Field(..., ge=0)
+    content_type: str
+    file_object_id: int
+
+
 class LectureSlideSummary(BaseModel):
     id: int
     filename: str
@@ -1231,6 +1239,9 @@ class LectureSlideSummary(BaseModel):
     status: LectureSlideDeckStatus
     error_message: str | None = None
     slide_count: int
+    additional_context_files: list[LectureSlideAdditionalContextFileSummary] = Field(
+        default_factory=list
+    )
 
 
 class LectureSlidePageNotes(BaseModel):
@@ -1631,7 +1642,11 @@ def lecture_video_validator_create_assistant(self):
             raise ValueError(
                 "Specifying a voice_id is required for lecture video assistants."
             )
-        if self.lecture_slide_deck_id is not None or self.lecture_slide_questions:
+        if (
+            self.lecture_slide_deck_id is not None
+            or self.lecture_slide_questions
+            or self.lecture_slide_additional_context_file_ids
+        ):
             raise ValueError(
                 "Lecture slide data cannot be set for assistants in Lecture Video mode."
             )
@@ -1660,6 +1675,7 @@ def lecture_video_validator_create_assistant(self):
         or self.lecture_video_manifest is not None
         or self.lecture_slide_deck_id is not None
         or self.lecture_slide_page_notes
+        or self.lecture_slide_additional_context_file_ids
         or self.lecture_slide_questions
         or self.voice_id is not None
         or self.generation_prompt is not None
@@ -1710,6 +1726,9 @@ def lecture_video_validator_update_assistant(self):
     lecture_slide_page_notes_present = (
         "lecture_slide_page_notes" in self.model_fields_set
     )
+    lecture_slide_additional_context_files_present = (
+        "lecture_slide_additional_context_file_ids" in self.model_fields_set
+    )
     lecture_slide_questions_present = "lecture_slide_questions" in self.model_fields_set
     regenerate_narration_requested_present = (
         "regenerate_narration_requested" in self.model_fields_set
@@ -1732,6 +1751,7 @@ def lecture_video_validator_update_assistant(self):
         lecture_slide_deck_id_present
         or narration_prompt_present
         or lecture_slide_page_notes_present
+        or lecture_slide_additional_context_files_present
         or lecture_slide_questions_present
         or regenerate_narration_requested_present
         or regenerate_questions_requested_present
@@ -1912,6 +1932,7 @@ class CreateAssistant(BaseModel):
     lecture_video_manifest: LectureVideoManifest | None = None
     lecture_slide_deck_id: int | None = None
     lecture_slide_page_notes: list[LectureSlidePageNotes] = Field(default_factory=list)
+    lecture_slide_additional_context_file_ids: list[int] = Field(default_factory=list)
     lecture_slide_questions: list[LectureSlideQuestionInput] = Field(
         default_factory=list
     )
@@ -2004,6 +2025,7 @@ class UpdateAssistant(BaseModel):
     lecture_video_manifest: LectureVideoManifest | None = None
     lecture_slide_deck_id: int | None = None
     lecture_slide_page_notes: list[LectureSlidePageNotes] | None = None
+    lecture_slide_additional_context_file_ids: list[int] | None = None
     lecture_slide_questions: list[LectureSlideQuestionInput] | None = None
     voice_id: str | None = None
     generation_prompt: str | None = Field(None, max_length=20000)
@@ -3763,6 +3785,7 @@ class FileTypeInfo(BaseModel):
     file_search: bool
     code_interpreter: bool
     vision: bool
+    input_file: bool = False
     extensions: list[str]
 
 

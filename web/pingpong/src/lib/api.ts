@@ -1869,6 +1869,15 @@ export type LectureSlideSummary = {
 	status: LectureSlideStatus;
 	error_message?: string | null;
 	slide_count: number;
+	additional_context_files: LectureSlideAdditionalContextFileSummary[];
+};
+
+export type LectureSlideAdditionalContextFileSummary = {
+	id: number;
+	filename: string;
+	size: number;
+	content_type: string;
+	file_object_id: number;
 };
 
 export type LectureSlidePageNotes = {
@@ -2226,6 +2235,35 @@ export const uploadAssistantLectureSlides = (
 ) => {
 	const url = fullPath(`class/${classId}/assistant/${assistantId}/lecture-slides/upload`);
 	return _doUpload<LectureSlideSummary>(url, file, opts);
+};
+
+/**
+ * Upload an additional context file for lecture slide generation.
+ */
+export const uploadLectureSlideAdditionalContextFile = (
+	_f: Fetcher,
+	classId: number,
+	file: File,
+	opts?: UploadOptions
+) => {
+	const url = fullPath(`class/${classId}/lecture-slides/additional-context`);
+	return _doUpload<LectureSlideAdditionalContextFileSummary>(url, file, opts);
+};
+
+/**
+ * Upload an additional context file for lecture slide generation while editing an assistant.
+ */
+export const uploadAssistantLectureSlideAdditionalContextFile = (
+	_f: Fetcher,
+	classId: number,
+	assistantId: number,
+	file: File,
+	opts?: UploadOptions
+) => {
+	const url = fullPath(
+		`class/${classId}/assistant/${assistantId}/lecture-slides/additional-context/upload`
+	);
+	return _doUpload<LectureSlideAdditionalContextFileSummary>(url, file, opts);
 };
 
 /**
@@ -2962,6 +3000,7 @@ export type CreateAssistantRequest = {
 	lecture_video_manifest?: LectureVideoManifest | null;
 	lecture_slide_deck_id?: number | null;
 	lecture_slide_page_notes?: LectureSlidePageNotes[];
+	lecture_slide_additional_context_file_ids?: number[];
 	lecture_slide_questions?: LectureSlideQuestionInput[];
 	voice_id?: string | null;
 	generation_prompt?: string | null;
@@ -3032,6 +3071,7 @@ export type UpdateAssistantRequest = {
 	lecture_video_manifest?: LectureVideoManifest | null;
 	lecture_slide_deck_id?: number | null;
 	lecture_slide_page_notes?: LectureSlidePageNotes[] | null;
+	lecture_slide_additional_context_file_ids?: number[] | null;
 	lecture_slide_questions?: LectureSlideQuestionInput[] | null;
 	voice_id?: string | null;
 	generation_prompt?: string | null;
@@ -4914,6 +4954,7 @@ export type FileTypeInfo = {
 	file_search: boolean;
 	code_interpreter: boolean;
 	vision: boolean;
+	input_file: boolean;
 	extensions: string[];
 };
 
@@ -4936,33 +4977,44 @@ type FileContentTypeAcceptFilters = {
 	file_search: boolean;
 	code_interpreter: boolean;
 	vision: boolean;
+	input_file: boolean;
 };
 
 /**
  * Generate the string used for the "accept" attribute in file inputs.
  */
+const _getAcceptStringForTypes = (types: FileTypeInfo[]) => {
+	return types.map((ft) => ft.mime_type).join(',');
+};
+
 const _getAcceptString = (
 	types: FileTypeInfo[],
 	filters: Partial<FileContentTypeAcceptFilters> = {}
 ) => {
-	return types
-		.filter((ft) => {
+	return _getAcceptStringForTypes(
+		types.filter((ft) => {
 			// If file_search is enabled, we can return everything that supports file_search.
 			// If code_interpreter is enabled, we can also return everything that supports code_interpreter.
 			return (
 				(filters.file_search && ft.file_search) ||
 				(filters.code_interpreter && ft.code_interpreter) ||
-				(filters.vision && ft.vision)
+				(filters.vision && ft.vision) ||
+				(filters.input_file && ft.input_file)
 			);
 		})
-		.map((ft) => ft.mime_type)
-		.join(',');
+	);
+};
+
+const _normalizeMimeType = (mime: string) => mime.toLowerCase().split(';')[0].trim();
+
+const _getFileContentType = (file: ServerFile | File) => {
+	return 'content_type' in file ? file.content_type : file.type;
 };
 
 /**
  * Function to filter files based on their content type.
  */
-export type FileSupportFilter = (file: ServerFile) => boolean;
+export type FileSupportFilter = (file: ServerFile | File) => boolean;
 
 /**
  * Function to get a filter for files based on their content type.
@@ -4994,7 +5046,7 @@ export const getClassUploadInfo = async (f: Fetcher, classId: number) => {
 
 	// Lookup function for mime types
 	const mimeType = (mime: string) => {
-		const slug = mime.toLowerCase().split(';')[0].trim();
+		const slug = _normalizeMimeType(mime);
 		return _mimeTypeLookup.get(slug);
 	};
 
@@ -5033,15 +5085,16 @@ export const getClassUploadInfo = async (f: Fetcher, classId: number) => {
 		 * Get a filter function for file support based on capabilities.
 		 */
 		getFileSupportFilter(filters: Partial<FileContentTypeAcceptFilters> = {}) {
-			return (file: ServerFile) => {
-				const support = mimeType(file.content_type);
+			return (file: ServerFile | File) => {
+				const support = mimeType(_getFileContentType(file));
 				if (!support) {
 					return false;
 				}
 				return (
 					(!!filters.file_search && support.file_search) ||
 					(!!filters.code_interpreter && support.code_interpreter) ||
-					(!!filters.vision && support.vision)
+					(!!filters.vision && support.vision) ||
+					(!!filters.input_file && support.input_file)
 				);
 			};
 		}
