@@ -281,6 +281,21 @@ async def test_class_upload_info_marks_openai_input_file_mime_types(
     assert types_by_mime["application/pdf"]["file_search"] is True
     assert types_by_mime["application/pdf"]["input_file"] is True
     assert types_by_mime["text/x-yaml"]["input_file"] is True
+    assert types_by_mime["text/css"]["file_search"] is True
+    assert types_by_mime["text/javascript"]["file_search"] is True
+    assert types_by_mime["application/typescript"]["file_search"] is True
+    assert types_by_mime["application/msword"]["file_search"] is True
+    assert types_by_mime["application/msword"]["code_interpreter"] is True
+    assert types_by_mime["text/x-csharp"]["file_search"] is True
+    assert types_by_mime["text/x-csharp"]["code_interpreter"] is True
+    assert types_by_mime["text/x-golang"]["file_search"] is True
+    assert types_by_mime["text/x-php"]["file_search"] is True
+    assert types_by_mime["text/x-php"]["code_interpreter"] is True
+    assert types_by_mime["application/csv"]["code_interpreter"] is True
+    assert types_by_mime["application/x-sh"]["file_search"] is True
+    assert types_by_mime["application/x-sh"]["code_interpreter"] is True
+    assert types_by_mime["application/octet-stream"]["code_interpreter"] is True
+    assert types_by_mime["image/webp"]["vision"] is True
 
 
 @with_institution(11, "Test Institution")
@@ -350,13 +365,10 @@ async def test_apply_additional_context_files_attaches_to_deck_and_validates_siz
     assert changed is True
     async with db.async_session() as session:
         attached_files = (
-            await session.scalars(
-                select(models.LectureSlideAdditionalContextFile).where(
-                    models.LectureSlideAdditionalContextFile.lecture_slide_deck_id
-                    == deck_id
-                )
+            await models.LectureSlideAdditionalContextFile.get_all_by_deck_id_with_file(
+                session, deck_id
             )
-        ).all()
+        )
         assert len(attached_files) == 1
         assert attached_files[0].id == draft_context_id
         assert attached_files[0].original_filename == "notes.md"
