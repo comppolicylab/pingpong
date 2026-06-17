@@ -15,11 +15,6 @@ updates:
       semver-minor-days: 3
       semver-patch-days: 1
     groups:
-      opentelemetry-pair:
-        dependency-type: "production"
-        patterns:
-          - "opentelemetry-api"
-          - "opentelemetry-sdk"
       uv-prod-minor-patch:
         dependency-type: "production"
         patterns:
@@ -45,6 +40,57 @@ updates:
       prefix: "deps(gha)"
     groups:
       github-actions:
+        patterns:
+          - "*"
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "cron"
+      cronjob: "0 7 * * 1"
+      timezone: "America/New_York"
+    commit-message:
+      prefix: "deps(docker)"
+    cooldown:
+      default-days: 2
+      semver-major-days: 7
+      semver-minor-days: 3
+      semver-patch-days: 1
+    groups:
+      docker-root:
+        patterns:
+          - "*"
+  - package-ecosystem: "docker"
+    directory: "/web"
+    schedule:
+      interval: "cron"
+      cronjob: "0 7 * * 1"
+      timezone: "America/New_York"
+    commit-message:
+      prefix: "deps(docker)"
+    cooldown:
+      default-days: 2
+      semver-major-days: 7
+      semver-minor-days: 3
+      semver-patch-days: 1
+    groups:
+      docker-web:
+        patterns:
+          - "*"
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    schedule:
+      interval: "cron"
+      cronjob: "0 7 * * 1"
+      timezone: "America/New_York"
+    commit-message:
+      prefix: "deps(compose)"
+    cooldown:
+      default-days: 2
+      semver-major-days: 7
+      semver-minor-days: 3
+      semver-patch-days: 1
+    groups:
+      docker-compose:
         patterns:
           - "*"
   - package-ecosystem: "npm"
