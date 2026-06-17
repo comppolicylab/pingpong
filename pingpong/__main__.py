@@ -81,6 +81,9 @@ from pingpong.migrations.m13_remux_lecture_slide_narration_to_webm import (
 from pingpong.migrations.m14_migrate_lecture_slide_v4_context_to_v5 import (
     migrate_lecture_slide_v4_context_to_v5,
 )
+from pingpong.migrations.m15_v3_migrate_threads_and_messages import (
+    migrate_threads_and_messages_to_v3,
+)
 from pingpong.now import _get_next_run_time, croner, utcnow
 from pingpong.schemas import LMSType, RunStatus
 from pingpong.lti.course_bridge import course_bridge_sync_all
@@ -1184,6 +1187,17 @@ def m14_migrate_lecture_slide_v4_context_to_v5(
             )
 
     asyncio.run(_m14_migrate_lecture_slide_v4_context_to_v5())
+
+
+@db.command("m15_v3_migrate_threads_and_messages")
+def m15_v3_migrate_threads_and_messages() -> None:
+    async def _m15_v3_migrate_threads_and_messages() -> None:
+        async with config.db.driver.async_session() as session:
+            logger.info("Migrating threads and messages to v3...")
+            await migrate_threads_and_messages_to_v3(session)
+            logger.info("Done!")
+
+    asyncio.run(_m15_v3_migrate_threads_and_messages())
 
 
 @db.command("m02_remove_responses_threads")

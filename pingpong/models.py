@@ -8343,6 +8343,13 @@ class Message(Base):
         return await session.scalar(stmt)
 
     @classmethod
+    async def get_by_openai_message_id(
+        cls, session: AsyncSession, message_id: str
+    ) -> "Message" | None:
+        stmt = select(Message).where(Message.message_id == message_id)
+        return await session.scalar(stmt)
+
+    @classmethod
     async def contains_file_search_attachment(
         cls, session: AsyncSession, message_id: int, file_id: int
     ) -> bool:
@@ -8590,6 +8597,13 @@ class Run(Base):
         stmt = select(Run).where(Run.id.in_(run_ids))
         result = await session.execute(stmt)
         return {run.id: run for run in result.scalars()}
+
+    @classmethod
+    async def get_by_openai_run_id(
+        cls, session: AsyncSession, openai_run_id: str
+    ) -> "Run" | None:
+        stmt = select(Run).where(Run.run_id == openai_run_id)
+        return await session.scalar(stmt)
 
     @classmethod
     async def count_runs_before_run(
