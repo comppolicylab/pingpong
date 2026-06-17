@@ -8444,7 +8444,9 @@ class Message(Base):
 
     role = Column(SQLEnum(schemas.MessageRole), nullable=False)
     phase = Column(String, nullable=True)
-    message_metadata = Column("metadata", JSON, nullable=True)
+    message_metadata = Column(
+        "metadata", JSON, nullable=True
+    )  # TODO: add field to indicate that it was created from the m15 migration
     user_id = Column(
         Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
