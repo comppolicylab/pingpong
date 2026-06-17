@@ -728,8 +728,7 @@
 				onkeydown={maybeSubmit}
 				oninput={handleTextAreaInput}
 				onpaste={handlePaste}
-				style={`max-height: ${maxHeight}px; font-size: 1rem; line-height: 1.5rem;`}
-			></textarea>
+				style={`max-height: ${maxHeight}px; font-size: 1rem; line-height: 1.5rem;`}></textarea>
 			<textarea
 				bind:this={ref}
 				style="position: absolute; visibility: hidden; height: 0px; left: -1000px; top: -1000px"
