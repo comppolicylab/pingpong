@@ -461,11 +461,13 @@ async def apply_lecture_slide_additional_context_files(
             changed = True
 
     for position, requested_file in enumerate(requested_files):
-        existing_file = existing_by_file_object_id.get(requested_file.file_object_id)
-        if existing_file is not None:
-            if existing_file.position != position:
-                existing_file.position = position
-                session.add(existing_file)
+        matched_existing_file = existing_by_file_object_id.get(
+            requested_file.file_object_id
+        )
+        if matched_existing_file is not None:
+            if matched_existing_file.position != position:
+                matched_existing_file.position = position
+                session.add(matched_existing_file)
                 changed = True
             if requested_file.lecture_slide_deck_id is None:
                 await models.LectureSlideAdditionalContextFile.delete(
