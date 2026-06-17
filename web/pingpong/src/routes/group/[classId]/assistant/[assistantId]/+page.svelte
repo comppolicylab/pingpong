@@ -4163,8 +4163,7 @@
 																			option.client_id,
 																			'post_answer_text',
 																			(event.target as HTMLTextAreaElement).value
-																		)}
-																></textarea>
+																		)}></textarea>
 															</div>
 															<button
 																type="button"
