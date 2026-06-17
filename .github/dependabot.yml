@@ -64,6 +64,9 @@ updates:
       timezone: "America/New_York"
     commit-message:
       prefix: "deps(docker)"
+    ignore:
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
     cooldown:
       default-days: 2
     groups:
@@ -92,6 +95,9 @@ updates:
       timezone: "America/New_York"
     commit-message:
       prefix: "deps(compose)"
+    ignore:
+      - dependency-name: "postgres"
+        update-types: ["version-update:semver-major"]
     cooldown:
       default-days: 2
     groups:
