@@ -21,7 +21,7 @@ services:
   db:
     restart: always
     platform: linux/amd64
-    image: postgres:15.5
+    image: postgres:18.4
     container_name: pingpong-db
     ports: ["5432:5432"]
     command: -c 'max_connections=190'
