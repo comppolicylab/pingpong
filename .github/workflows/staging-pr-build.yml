@@ -19,6 +19,7 @@ on:
         type: choice
         options:
           - all
+          - authz
           - web
           - srv
       force:
@@ -99,11 +100,18 @@ jobs:
           set -euo pipefail
           release_tag="pr_${PR_NUMBER}"
           unique_tag="${release_tag}_${{ steps.validate.outputs.short_sha }}"
+          openfga_version="$(sed -nE 's/^FROM[[:space:]]+openfga\/openfga:([^[:space:]]+).*/\1/p' openfga/Dockerfile | tail -n1)"
+          if [ -z "$openfga_version" ]; then
+            echo "Could not determine OpenFGA version from openfga/Dockerfile." >&2
+            exit 1
+          fi
 
           echo "PR_SHA=${PR_SHA}" >> "$GITHUB_ENV"
           echo "ENVIRONMENT=stage" >> "$GITHUB_ENV"
           echo "STABLE_TAG=${release_tag}" >> "$GITHUB_ENV"
           echo "UNIQUE_TAG=${unique_tag}" >> "$GITHUB_ENV"
+          echo "AUTHZ_VERSION=${openfga_version}" >> "$GITHUB_ENV"
+          echo "AUTHZ_REGISTRY=${{ vars.PINGPONG_REGISTRY_ENDPOINT }}/openfga" >> "$GITHUB_ENV"
           echo "SRV_VERSION=${unique_tag}" >> "$GITHUB_ENV"
           echo "WEB_VERSION=${unique_tag}" >> "$GITHUB_ENV"
 
@@ -133,6 +141,10 @@ jobs:
 
           need_srv='false'
           need_web='false'
+          need_authz='false'
+          if [ "$TARGET" = "all" ] || [ "$TARGET" = "authz" ]; then
+            need_authz='true'
+          fi
           if [ "$TARGET" = "all" ] || [ "$TARGET" = "srv" ]; then
             need_srv='true'
           fi
@@ -142,6 +154,13 @@ jobs:
 
           srv_exists='false'
           web_exists='false'
+          authz_exists='false'
+
+          if [ "$need_authz" = "true" ]; then
+            if aws ecr describe-images --repository-name "openfga" --image-ids imageTag="${AUTHZ_VERSION}" --region "${{ vars.AWS_REGION }}" > /dev/null 2>&1; then
+              authz_exists='true'
+            fi
+          fi
 
           if [ "$need_srv" = "true" ]; then
             srv_repo="${{ vars.PINGPONG_SRV_REGISTRY }}"
@@ -160,6 +179,9 @@ jobs:
           fi
 
           should_skip='true'
+          if [ "$need_authz" = "true" ] && [ "$authz_exists" != "true" ]; then
+            should_skip='false'
+          fi
           if [ "$need_srv" = "true" ] && [ "$srv_exists" != "true" ]; then
             should_skip='false'
           fi
@@ -183,6 +205,21 @@ jobs:
           gh api -X POST -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             -f 'name=Server: Building & Pushing Image on AWS for Testing' \
+            -f 'head_sha=${{ env.PR_SHA }}' \
+            -f 'status=completed' \
+            -f 'conclusion=success' \
+            -f 'output[title]=Staging deploy skipped' \
+            -f 'output[summary]=${{ steps.dedupe.outputs.reason }} Use /test-on-staging --force to redeploy this SHA.' \
+            /repos/${{ github.repository }}/check-runs
+
+      - name: Complete check run for already deployed authz image
+        if: (inputs.target == 'all' || inputs.target == 'authz') && steps.dedupe.outputs.skip == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X POST -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -f 'name=Authz: Building & Pushing Image on AWS for Testing' \
             -f 'head_sha=${{ env.PR_SHA }}' \
             -f 'status=completed' \
             -f 'conclusion=success' \
@@ -214,6 +251,20 @@ jobs:
           check_run_id="$(gh api -X POST -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             -f 'name=Server: Building & Pushing Image on AWS for Testing' \
+            -f 'head_sha=${{ env.PR_SHA }}' \
+            -f 'status=in_progress' \
+            /repos/${{ github.repository }}/check-runs --jq '.id')"
+          echo "check_run_id=${check_run_id}" >> "$GITHUB_OUTPUT"
+
+      - name: Create authz check run
+        id: create_authz_check_run
+        if: (inputs.target == 'all' || inputs.target == 'authz') && steps.dedupe.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          check_run_id="$(gh api -X POST -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -f 'name=Authz: Building & Pushing Image on AWS for Testing' \
             -f 'head_sha=${{ env.PR_SHA }}' \
             -f 'status=in_progress' \
             /repos/${{ github.repository }}/check-runs --jq '.id')"
@@ -267,6 +318,41 @@ jobs:
             -f 'status=completed' \
             -f "conclusion=${conclusion}" \
             /repos/${{ github.repository }}/check-runs/${{ steps.create_server_check_run.outputs.check_run_id }}
+
+      - name: Build authz image for release
+        id: build_authz_image
+        if: (inputs.target == 'all' || inputs.target == 'authz') && steps.dedupe.outputs.skip != 'true'
+        run: |
+          echo "Building Authz image with tag ${AUTHZ_VERSION}"
+          docker compose -f docker-compose.yml -f docker-compose.prod.yml build authz
+
+      - name: Push authz image for release
+        id: push_authz_image
+        if: (inputs.target == 'all' || inputs.target == 'authz') && steps.dedupe.outputs.skip != 'true'
+        run: |
+          aws ecr get-login-password --region "${{ vars.AWS_REGION }}" | docker login --username AWS --password-stdin "${{ vars.PINGPONG_REGISTRY_ENDPOINT }}"
+          docker tag "${AUTHZ_REGISTRY}:${AUTHZ_VERSION}" "${AUTHZ_REGISTRY}:${STABLE_TAG}"
+          docker tag "${AUTHZ_REGISTRY}:${AUTHZ_VERSION}" "${AUTHZ_REGISTRY}:${ENVIRONMENT}"
+          docker push "${AUTHZ_REGISTRY}:${AUTHZ_VERSION}"
+          docker push "${AUTHZ_REGISTRY}:${STABLE_TAG}"
+          docker push "${AUTHZ_REGISTRY}:${ENVIRONMENT}"
+          echo "Built and pushed Authz image (${AUTHZ_VERSION}), stable tag (${STABLE_TAG}), and ${ENVIRONMENT} tag."
+
+      - name: Complete check run (authz image pushed)
+        if: always() && (inputs.target == 'all' || inputs.target == 'authz') && steps.dedupe.outputs.skip != 'true' && steps.create_authz_check_run.outputs.check_run_id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          conclusion='success'
+          if [ '${{ steps.build_authz_image.outcome }}' != 'success' ] || [ '${{ steps.push_authz_image.outcome }}' != 'success' ]; then
+            conclusion='failure'
+          fi
+
+          gh api -X PATCH -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -f 'status=completed' \
+            -f "conclusion=${conclusion}" \
+            /repos/${{ github.repository }}/check-runs/${{ steps.create_authz_check_run.outputs.check_run_id }}
 
       - name: Build web image for release
         id: build_web_image

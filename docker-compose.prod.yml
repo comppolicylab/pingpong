@@ -1,5 +1,8 @@
 services:
 
+  authz:
+    image: 654654251079.dkr.ecr.us-east-1.amazonaws.com/openfga:${AUTHZ_VERSION}
+
   web:
     image: 654654251079.dkr.ecr.us-east-1.amazonaws.com/pingpong-web:${WEB_VERSION}
     build:
