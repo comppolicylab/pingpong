@@ -168,6 +168,26 @@ jobs:
           docker push ${{ env.AUTHZ_REGISTRY }}:${{ env.ENVIRONMENT }}
           echo "Built and pushed Authz Image (${{ env.AUTHZ_VERSION }}) with ${{ env.ENVIRONMENT }} tag"
 
+      - name: Send Authz Image tagged notification
+        if: ${{ env.AUTHZ_IMAGE_STATUS != 'EXISTS_WITH_ENV_TAG' }}
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          GIPHY_API_KEY: ${{ secrets.GIPHY_API_KEY }}
+          ENVIRONMENT: ${{ github.event.release.prerelease && 'stage' || 'prod' }}
+        run: |
+          GIF=$(curl "https://api.giphy.com/v1/gifs/random?api_key=$GIPHY_API_KEY&tag=otter&rating=g" | python -c "import sys,json; print (json.load(sys.stdin)['data']['images']['downsized']['url'])")
+          TAGGED_MSG=":pingpong: *Retagged* existing *OpenFGA Image (${{ env.AUTHZ_VERSION }})* with *${{ env.ENVIRONMENT }}* tag :tada:"
+          BUILT_MSG=":pingpong: *Built* and pushed *OpenFGA Image (${{ env.AUTHZ_VERSION }})* with *${{ env.ENVIRONMENT }}* tag :tada:"
+          if [[ ${{ env.AUTHZ_IMAGE_STATUS }} == 'DOES_NOT_EXIST' ]]; then
+            MSG=$BUILT_MSG
+          else
+            MSG=$TAGGED_MSG
+          fi
+
+          curl -X POST -H 'Content-Type: application/json' \
+            --data "{\"text\": \"$MSG\", \"blocks\": [{\"type\":\"section\", \"text\": {\"type\": \"mrkdwn\", \"text\": \"$MSG\"}}, {\"type\":\"image\",\"image_url\":\"$GIF\", \"alt_text\":\"otter\", \"title\": {\"type\":\"plain_text\", \"text\": \"success otter\"}}]}" \
+            $SLACK_WEBHOOK
+
       - name: Check if Server image exists
         env:
           ENVIRONMENT: ${{ github.event.release.prerelease && 'stage' || 'prod' }}
