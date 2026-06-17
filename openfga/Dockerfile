@@ -1,4 +1,4 @@
-FROM alpine:3.21 AS builder
+FROM alpine:3.24.1 AS builder
 
 RUN [ "apk", "add", "openssl" ]
 RUN [ "mkdir", "/assets" ]
@@ -12,7 +12,7 @@ RUN openssl req -x509 -newkey rsa:4096 -sha256 -nodes \
 
 RUN [ "chmod", "666", "/etc/ssl/pingpong-openfga-self-signed.key" ]
 
-FROM openfga/openfga:v1.8.3
+FROM openfga/openfga:v1.18.0
 
 COPY --from=builder /etc/ssl/pingpong-openfga-self-signed.key /etc/ssl/pingpong-openfga-self-signed.key
 COPY --from=builder /etc/ssl/pingpong-openfga-self-signed.crt /etc/ssl/pingpong-openfga-self-signed.crt
