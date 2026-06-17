@@ -4,7 +4,6 @@ from typing import Union
 import openai
 import logging
 from fastapi import HTTPException, UploadFile
-from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from pathlib import Path
@@ -32,13 +31,7 @@ async def _delete_orphaned_s3_files(
     if not s3_file_ids or not config.file_store:
         return
 
-    orphaned_s3_files = (
-        await session.scalars(
-            select(S3File)
-            .outerjoin(File, S3File.id == File.s3_file_id)
-            .where(S3File.id.in_(s3_file_ids), File.id.is_(None))
-        )
-    ).all()
+    orphaned_s3_files = await S3File.get_orphaned_by_ids(session, s3_file_ids)
     delete_errors: list[Exception] = []
     for s3_file in orphaned_s3_files:
         try:
@@ -52,7 +45,7 @@ async def _delete_orphaned_s3_files(
             )
             delete_errors.append(exc)
             continue
-        await session.delete(s3_file)
+        await S3File.delete_by_ids(session, [s3_file.id])
     if delete_errors:
         raise RuntimeError("Failed to delete one or more orphaned uploaded files.")
 
@@ -798,8 +791,12 @@ async def handle_create_file(
 # FILE_TYPES is the upload capability source of truth.
 # input_file support comes from:
 # https://developers.openai.com/api/docs/guides/file-inputs#full-list-of-accepted-file-types
-# file_search/code_interpreter/vision support preserves the existing OpenAI
-# supported-files capabilities.
+# file_search support information comes from:
+# https://developers.openai.com/api/docs/guides/tools-file-search#supported-files
+# code_interpreter support information comes from:
+# https://developers.openai.com/api/docs/guides/tools-code-interpreter#supported-files
+# vision support information comes from:
+# https://developers.openai.com/api/docs/guides/images-vision#image-input-requirements
 FILE_TYPES = [
     FileTypeInfo(
         mime_type="text/x-c",
@@ -947,7 +944,7 @@ FILE_TYPES = [
     FileTypeInfo(
         mime_type="text/css",
         name="CSS",
-        file_search=False,
+        file_search=True,
         code_interpreter=True,
         vision=False,
         input_file=True,
@@ -964,7 +961,7 @@ FILE_TYPES = [
     FileTypeInfo(
         mime_type="text/javascript",
         name="JavaScript",
-        file_search=False,
+        file_search=True,
         code_interpreter=True,
         vision=False,
         input_file=True,
@@ -1005,7 +1002,7 @@ FILE_TYPES = [
     FileTypeInfo(
         mime_type="application/typescript",
         name="TypeScript",
-        file_search=False,
+        file_search=True,
         code_interpreter=True,
         vision=False,
         input_file=True,
@@ -1049,7 +1046,7 @@ FILE_TYPES = [
         mime_type="application/csv",
         name="CSV",
         file_search=False,
-        code_interpreter=False,
+        code_interpreter=True,
         vision=False,
         input_file=True,
         extensions=["csv"],
@@ -1102,8 +1099,8 @@ FILE_TYPES = [
     FileTypeInfo(
         mime_type="application/msword",
         name="Word Doc",
-        file_search=False,
-        code_interpreter=False,
+        file_search=True,
+        code_interpreter=True,
         vision=False,
         input_file=True,
         extensions=["doc", "dot"],
@@ -1327,7 +1324,7 @@ FILE_TYPES = [
     FileTypeInfo(
         mime_type="text/x-golang",
         name="Go",
-        file_search=False,
+        file_search=True,
         code_interpreter=False,
         vision=False,
         input_file=True,
@@ -1336,8 +1333,8 @@ FILE_TYPES = [
     FileTypeInfo(
         mime_type="text/x-php",
         name="PHP",
-        file_search=False,
-        code_interpreter=False,
+        file_search=True,
+        code_interpreter=True,
         vision=False,
         input_file=True,
         extensions=["php"],
@@ -1379,6 +1376,14 @@ FILE_TYPES = [
         extensions=["sh"],
     ),
     FileTypeInfo(
+        mime_type="application/x-sh",
+        name="Shell Script",
+        file_search=True,
+        code_interpreter=True,
+        vision=False,
+        extensions=["sh"],
+    ),
+    FileTypeInfo(
         mime_type="text/x-bash",
         name="Bash",
         file_search=False,
@@ -1408,8 +1413,8 @@ FILE_TYPES = [
     FileTypeInfo(
         mime_type="text/x-csharp",
         name="C#",
-        file_search=False,
-        code_interpreter=False,
+        file_search=True,
+        code_interpreter=True,
         vision=False,
         input_file=True,
         extensions=["cs"],
@@ -2007,6 +2012,14 @@ FILE_TYPES = [
         vision=False,
         input_file=True,
         extensions=["ics", "ifb"],
+    ),
+    FileTypeInfo(
+        mime_type="application/octet-stream",
+        name="Pickle",
+        file_search=False,
+        code_interpreter=True,
+        vision=False,
+        extensions=["pkl"],
     ),
 ]
 
