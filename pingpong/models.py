@@ -3087,6 +3087,65 @@ class LectureSlideAdditionalContextFile(Base):
         await session.refresh(context_file)
         return context_file
 
+    @classmethod
+    async def get_all_by_ids_with_file(
+        cls, session: AsyncSession, ids: Sequence[int]
+    ) -> list["LectureSlideAdditionalContextFile"]:
+        ids = [int(id_) for id_ in ids]
+        if not ids:
+            return []
+        stmt = (
+            select(LectureSlideAdditionalContextFile)
+            .where(LectureSlideAdditionalContextFile.id.in_(ids))
+            .options(selectinload(LectureSlideAdditionalContextFile.file))
+        )
+        context_files = list((await session.scalars(stmt)).all())
+        context_file_by_id = {
+            context_file.id: context_file for context_file in context_files
+        }
+        return [context_file_by_id[id_] for id_ in ids if id_ in context_file_by_id]
+
+    @classmethod
+    async def get_all_by_deck_id_with_file(
+        cls, session: AsyncSession, lecture_slide_deck_id: int
+    ) -> list["LectureSlideAdditionalContextFile"]:
+        stmt = (
+            select(LectureSlideAdditionalContextFile)
+            .where(
+                LectureSlideAdditionalContextFile.lecture_slide_deck_id
+                == int(lecture_slide_deck_id)
+            )
+            .options(selectinload(LectureSlideAdditionalContextFile.file))
+        )
+        return list((await session.scalars(stmt)).all())
+
+    @classmethod
+    async def get_file_object_ids_by_deck_id(
+        cls, session: AsyncSession, lecture_slide_deck_id: int
+    ) -> list[int]:
+        stmt = select(LectureSlideAdditionalContextFile.file_object_id).where(
+            LectureSlideAdditionalContextFile.lecture_slide_deck_id
+            == int(lecture_slide_deck_id)
+        )
+        return [int(file_object_id) for file_object_id in await session.scalars(stmt)]
+
+    @classmethod
+    async def delete(cls, session: AsyncSession, id_: int) -> None:
+        stmt = delete(LectureSlideAdditionalContextFile).where(
+            LectureSlideAdditionalContextFile.id == int(id_)
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def delete_all_by_deck_id(
+        cls, session: AsyncSession, lecture_slide_deck_id: int
+    ) -> None:
+        stmt = delete(LectureSlideAdditionalContextFile).where(
+            LectureSlideAdditionalContextFile.lecture_slide_deck_id
+            == int(lecture_slide_deck_id)
+        )
+        await session.execute(stmt)
+
 
 class LectureSlideImageStoredObject(Base):
     __tablename__ = "lecture_slide_image_stored_objects"
@@ -4414,6 +4473,28 @@ class S3File(Base):
         result = await session.execute(stmt)
         for row in result:
             yield row.S3File
+
+    @classmethod
+    async def get_orphaned_by_ids(
+        cls, session: AsyncSession, ids: Sequence[int]
+    ) -> list["S3File"]:
+        ids = [int(id_) for id_ in ids]
+        if not ids:
+            return []
+        stmt = (
+            select(S3File)
+            .outerjoin(File, S3File.id == File.s3_file_id)
+            .where(S3File.id.in_(ids), File.id.is_(None))
+        )
+        return list((await session.scalars(stmt)).all())
+
+    @classmethod
+    async def delete_by_ids(cls, session: AsyncSession, ids: Sequence[int]) -> None:
+        ids = [int(id_) for id_ in ids]
+        if not ids:
+            return
+        stmt = delete(S3File).where(S3File.id.in_(ids))
+        await session.execute(stmt)
 
 
 class File(Base):

@@ -385,21 +385,9 @@ async def apply_lecture_slide_additional_context_files(
 ) -> bool:
     requested_ids = list(dict.fromkeys(int(file_id) for file_id in context_file_ids))
     requested_files = (
-        list(
-            (
-                await session.scalars(
-                    select(models.LectureSlideAdditionalContextFile)
-                    .where(
-                        models.LectureSlideAdditionalContextFile.id.in_(requested_ids)
-                    )
-                    .options(
-                        selectinload(models.LectureSlideAdditionalContextFile.file)
-                    )
-                )
-            ).all()
+        await models.LectureSlideAdditionalContextFile.get_all_by_ids_with_file(
+            session, requested_ids
         )
-        if requested_ids
-        else []
     )
     requested_by_id = {
         context_file.id: context_file for context_file in requested_files
@@ -453,17 +441,10 @@ async def apply_lecture_slide_additional_context_files(
             ),
         )
 
-    existing_files = list(
-        (
-            await session.scalars(
-                select(models.LectureSlideAdditionalContextFile)
-                .where(
-                    models.LectureSlideAdditionalContextFile.lecture_slide_deck_id
-                    == deck.id
-                )
-                .options(selectinload(models.LectureSlideAdditionalContextFile.file))
-            )
-        ).all()
+    existing_files = (
+        await models.LectureSlideAdditionalContextFile.get_all_by_deck_id_with_file(
+            session, deck.id
+        )
     )
     existing_by_file_object_id = {
         context_file.file_object_id: context_file for context_file in existing_files
@@ -474,7 +455,9 @@ async def apply_lecture_slide_additional_context_files(
 
     for existing_file in existing_files:
         if existing_file.file_object_id not in desired_file_object_id_set:
-            await session.delete(existing_file)
+            await models.LectureSlideAdditionalContextFile.delete(
+                session, existing_file.id
+            )
             changed = True
 
     for position, requested_file in enumerate(requested_files):
@@ -485,7 +468,9 @@ async def apply_lecture_slide_additional_context_files(
                 session.add(existing_file)
                 changed = True
             if requested_file.lecture_slide_deck_id is None:
-                await session.delete(requested_file)
+                await models.LectureSlideAdditionalContextFile.delete(
+                    session, requested_file.id
+                )
                 changed = True
             continue
         if requested_file.lecture_slide_deck_id is None:
@@ -1510,20 +1495,13 @@ async def delete_lecture_slide_deck_if_unused(
     )
     if thread_in_use is not None:
         return []
-    additional_context_file_object_ids = list(
-        (
-            await session.scalars(
-                select(models.LectureSlideAdditionalContextFile.file_object_id).where(
-                    models.LectureSlideAdditionalContextFile.lecture_slide_deck_id
-                    == deck_id
-                )
-            )
-        ).all()
-    )
-    await session.execute(
-        delete(models.LectureSlideAdditionalContextFile).where(
-            models.LectureSlideAdditionalContextFile.lecture_slide_deck_id == deck_id
+    additional_context_file_object_ids = (
+        await models.LectureSlideAdditionalContextFile.get_file_object_ids_by_deck_id(
+            session, deck_id
         )
+    )
+    await models.LectureSlideAdditionalContextFile.delete_all_by_deck_id(
+        session, deck_id
     )
     await session.execute(
         update(models.LectureSlideProcessingRun)
