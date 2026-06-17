@@ -106,7 +106,7 @@ jobs:
                 contains(fromJson('["opened","edited","labeled","assigned"]'), github.event.action)
               )
             }}
-          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ env.PR_NUMBER }}'
+          prompt: '/code-review:code-review --comment ${{ github.repository }}/pull/${{ env.PR_NUMBER }}'
 
           # Tools based on CLAUDE.md development commands
           # Includes: uv (pytest, alembic, python), pnpm (check, lint, test), and gh CLI
