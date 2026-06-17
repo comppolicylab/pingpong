@@ -1,5 +1,5 @@
 ########## Build pingpong ##########
-FROM node:22.22.3-alpine AS build_pingpong
+FROM node:22.22.3-alpine3.24 AS build_pingpong
 
 RUN npm install -g pnpm@10
 
