@@ -295,8 +295,11 @@ async def test_single_turn_creates_run_and_messages(
         assert asst_msg.role == schemas.MessageRole.ASSISTANT
         assert asst_msg.assistant_id == 1
         assert asst_msg.user_id is None
-        assert user_msg.message_metadata == {"created_by_m15_v3_migration_part_1": True}
-        assert asst_msg.message_metadata == {"created_by_m15_v3_migration_part_1": True}
+        expected_metadata = {
+            "assistants_to_responses_api_thread_migration": {"message": "complete"}
+        }
+        assert user_msg.message_metadata == expected_metadata
+        assert asst_msg.message_metadata == expected_metadata
         assert user_msg.run_id == run.id and asst_msg.run_id == run.id
 
 
@@ -855,6 +858,7 @@ async def test_class_without_openai_client_is_skipped(
     [
         # Pass-through: shares the RunStatus name.
         ("queued", schemas.RunStatus.QUEUED),
+        ("pending", schemas.RunStatus.PENDING),
         ("in_progress", schemas.RunStatus.IN_PROGRESS),
         ("completed", schemas.RunStatus.COMPLETED),
         ("failed", schemas.RunStatus.FAILED),

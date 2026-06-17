@@ -6,7 +6,7 @@ from itertools import groupby
 
 from openai import Omit, omit
 from openai.types.beta.threads import Message, Run
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import pingpong.models as models
@@ -46,6 +46,8 @@ async def migrate_threads_and_messages_to_v3(session: AsyncSession) -> None:
         for assistant in assistants:
             async for thread in _v2_threads_for_assistant(session, assistant.id):
                 await _migrate_thread(session, openai_client, thread, assistant)
+                # NOTE: we deliberately keep thread versions as `2` for now since we
+                # are not ready to have the client interpret these objects as v3 threads
             await session.commit()
 
 
@@ -106,11 +108,11 @@ def _dt_from_ts(timestamp: int | None) -> datetime | None:
 
 
 def _terminal_run_completed_at(openai_run: Run) -> datetime | None:
+    if openai_run.status == "expired":
+        return _dt_from_ts(openai_run.expires_at)
+
     return _dt_from_ts(
-        openai_run.completed_at
-        or openai_run.failed_at
-        or openai_run.cancelled_at
-        or openai_run.expires_at
+        openai_run.completed_at or openai_run.failed_at or openai_run.cancelled_at
     )
 
 
@@ -236,7 +238,12 @@ async def _delete_stale_messages(
     keep_ids = [m.id for m in openai_messages]
     stmt = delete(models.Message).where(models.Message.thread_id == thread.id)
     if keep_ids:
-        stmt = stmt.where(models.Message.message_id.not_in(keep_ids))
+        stmt = stmt.where(
+            or_(
+                models.Message.message_id.is_(None),
+                models.Message.message_id.not_in(keep_ids),
+            )
+        )
     await session.execute(stmt)
     await session.flush()
 
@@ -366,7 +373,11 @@ async def _store_message(
 ) -> int:
     prev_output_index += 1
     fields = {
-        "message_metadata": {"created_by_m15_v3_migration_part_1": True},
+        "message_metadata": {
+            "assistants_to_responses_api_thread_migration": {
+                "message": "complete",
+            }
+        },
         "message_status": MessageStatus(openai_message.status),
         "role": MessageRole(openai_message.role),
         "created": _require_dt(openai_message.created_at),
