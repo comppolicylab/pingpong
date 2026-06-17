@@ -26,7 +26,7 @@ ENV HOST_HEADER=x-forwarded-host
 ENV BODY_SIZE_LIMIT=512000000
 RUN pnpm build -d
 
-########## Final Nginx image with both sites ##########
+########## Final Nginx image ##########
 FROM nginx:1.27.0
 
 RUN apt-get update && apt-get install ca-certificates -y && update-ca-certificates
