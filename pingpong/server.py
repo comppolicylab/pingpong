@@ -9832,6 +9832,73 @@ async def upload_lecture_slide_deck_for_assistant(
     return await lecture_slide_service.lecture_slide_summary_from_model(deck)
 
 
+@v1.post(
+    "/class/{class_id}/lecture-slides/additional-context",
+    dependencies=[Depends(Authz("admin", "class:{class_id}"))],
+    response_model=schemas.LectureSlideAdditionalContextFileSummary,
+)
+async def upload_lecture_slide_additional_context_file(
+    class_id: str,
+    request: StateRequest,
+    upload: UploadFile,
+):
+    return await _create_lecture_slide_additional_context_file_response(
+        class_id, request, upload
+    )
+
+
+@v1.post(
+    "/class/{class_id}/assistant/{assistant_id}/lecture-slides/additional-context/upload",
+    dependencies=[Depends(Authz("can_edit", "assistant:{assistant_id}"))],
+    response_model=schemas.LectureSlideAdditionalContextFileSummary,
+)
+async def upload_lecture_slide_additional_context_file_for_assistant(
+    class_id: str,
+    assistant_id: str,
+    request: StateRequest,
+    upload: UploadFile,
+):
+    await lecture_slide_service.get_lecture_slide_assistant_for_class(
+        request.state["db"], int(assistant_id), int(class_id)
+    )
+    return await _create_lecture_slide_additional_context_file_response(
+        class_id, request, upload
+    )
+
+
+async def _create_lecture_slide_additional_context_file_response(
+    class_id: str,
+    request: StateRequest,
+    upload: UploadFile,
+) -> schemas.LectureSlideAdditionalContextFileSummary:
+    context_file = (
+        await lecture_slide_service.create_lecture_slide_additional_context_file(
+            request.state["db"],
+            class_id=int(class_id),
+            uploader_id=request.state["session"].user.id,
+            upload=upload,
+        )
+    )
+    file_target = f"user_file:{context_file.file_object_id}"
+    try:
+        await request.state["authz"].write(
+            grant=[
+                (f"class:{int(class_id)}", "parent", file_target),
+                (f"user:{request.state['session'].user.id}", "owner", file_target),
+            ]
+        )
+    except Exception:
+        await (
+            lecture_slide_service.cleanup_lecture_slide_additional_context_file_upload(
+                request.state["db"], context_file
+            )
+        )
+        raise
+    return lecture_slide_service.lecture_slide_context_file_summary_from_model(
+        context_file
+    )
+
+
 async def _stream_lecture_slide_source_pdf(
     deck: models.LectureSlideDeck,
 ) -> StreamingResponse:
@@ -11136,6 +11203,9 @@ async def create_assistant(
     lecture_slide_generation_prompt = None
     lecture_slide_narration_prompt = None
     lecture_slide_page_notes = req.lecture_slide_page_notes
+    lecture_slide_additional_context_file_ids = (
+        req.lecture_slide_additional_context_file_ids
+    )
     lecture_slide_questions = req.lecture_slide_questions
 
     if is_video:
@@ -11202,6 +11272,7 @@ async def create_assistant(
         or req.lecture_video_manifest is not None
         or req.lecture_slide_deck_id is not None
         or req.lecture_slide_page_notes
+        or req.lecture_slide_additional_context_file_ids
         or req.lecture_slide_questions
         or req.voice_id is not None
         or req.generation_prompt is not None
@@ -11240,6 +11311,9 @@ async def create_assistant(
         lecture_slide_voice_id = req.voice_id
         lecture_slide_generation_prompt = req.generation_prompt
         lecture_slide_narration_prompt = req.narration_prompt
+        lecture_slide_additional_context_file_ids = (
+            req.lecture_slide_additional_context_file_ids
+        )
         try:
             await validate_lecture_video_voice_id_or_raise(
                 class_id_int,
@@ -11345,6 +11419,7 @@ async def create_assistant(
         del req.lecture_video_manifest
         del req.lecture_slide_deck_id
         del req.lecture_slide_page_notes
+        del req.lecture_slide_additional_context_file_ids
         del req.lecture_slide_questions
         del req.voice_id
         del req.generation_prompt
@@ -11430,6 +11505,12 @@ async def create_assistant(
             lecture_slide_deck.narration_prompt = lecture_slide_narration_prompt
             await lecture_slide_service.apply_lecture_slide_page_notes(
                 request.state["db"], lecture_slide_deck, lecture_slide_page_notes
+            )
+            await lecture_slide_service.apply_lecture_slide_additional_context_files(
+                request.state["db"],
+                lecture_slide_deck,
+                lecture_slide_additional_context_file_ids,
+                uploader_id=request.state["session"].user.id,
             )
             await lecture_slide_service.apply_lecture_slide_question_drafts(
                 request.state["db"], lecture_slide_deck, lecture_slide_questions
@@ -12082,6 +12163,7 @@ async def update_assistant(
     lecture_slide_specific_fields_present = (
         "lecture_slide_deck_id" in req.model_fields_set
         or "lecture_slide_page_notes" in req.model_fields_set
+        or "lecture_slide_additional_context_file_ids" in req.model_fields_set
         or "lecture_slide_questions" in req.model_fields_set
         or "narration_prompt" in req.model_fields_set
         or "regenerate_narration_requested" in req.model_fields_set
@@ -13380,6 +13462,9 @@ async def update_assistant(
             prompt_present = "generation_prompt" in req.model_fields_set
             narration_prompt_present = "narration_prompt" in req.model_fields_set
             notes_present = "lecture_slide_page_notes" in req.model_fields_set
+            context_files_present = (
+                "lecture_slide_additional_context_file_ids" in req.model_fields_set
+            )
             questions_present = "lecture_slide_questions" in req.model_fields_set
             requested_voice_id = lecture_slide_voice_id.strip()
             voice_changed = (
@@ -13404,6 +13489,7 @@ async def update_assistant(
                 or generation_prompt_changed
                 or narration_prompt_changed
                 or notes_present
+                or context_files_present
                 or questions_present
                 or regenerate_narration_requested
                 or regenerate_questions_requested
@@ -13441,6 +13527,7 @@ async def update_assistant(
             narration_text_changed = False
             question_audio_changed = False
             question_generation_requested_by_draft = False
+            additional_context_files_changed = False
             if notes_present:
                 page_update_result = (
                     await lecture_slide_service.apply_lecture_slide_page_notes(
@@ -13451,6 +13538,13 @@ async def update_assistant(
                 )
                 notes_changed = page_update_result.notes_changed
                 narration_text_changed = page_update_result.narration_changed
+            if context_files_present:
+                additional_context_files_changed = await lecture_slide_service.apply_lecture_slide_additional_context_files(
+                    request.state["db"],
+                    target_lecture_slide_deck,
+                    req.lecture_slide_additional_context_file_ids or [],
+                    uploader_id=request.state["session"].user.id,
+                )
             if questions_present:
                 question_update_result = (
                     await lecture_slide_service.apply_lecture_slide_question_drafts(
@@ -13473,11 +13567,13 @@ async def update_assistant(
             needs_narration_text = (
                 regenerate_narration_requested
                 or narration_prompt_changed
+                or additional_context_files_changed
                 or (notes_changed and not narration_text_changed)
             )
             needs_questions = (
                 regenerate_questions_requested
                 or generation_prompt_changed
+                or additional_context_files_changed
                 or question_generation_requested_by_draft
             )
             needs_audio = (
@@ -13519,7 +13615,7 @@ async def update_assistant(
                     request.state["db"].add(target_lecture_slide_deck)
 
             queued_run = None
-            if needs_full_processing:
+            if needs_full_processing or (needs_narration_text and needs_questions):
                 queued_run = (
                     await lecture_slide_processing.queue_lecture_slide_processing_run(
                         request.state["db"],
@@ -13706,9 +13802,25 @@ async def update_assistant(
                 lecture_slide_deck_id_to_delete,
                 schemas.LectureSlideProcessingCancelReason.ASSISTANT_DETACHED,
             )
-            await lecture_slide_service.delete_lecture_slide_deck_if_unused(
+            context_file_ids_to_delete = (
+                await lecture_slide_service.delete_lecture_slide_deck_if_unused(
+                    request.state["db"],
+                    lecture_slide_deck_id_to_delete,
+                )
+            )
+            unused_context_file_ids_to_delete = (
+                await models.File.get_files_not_used_by_assistant(
+                    request.state["db"],
+                    asst.id,
+                    context_file_ids_to_delete,
+                )
+            )
+            await handle_delete_files(
                 request.state["db"],
-                lecture_slide_deck_id_to_delete,
+                request.state["authz"],
+                openai_client,
+                unused_context_file_ids_to_delete,
+                class_id=int(class_id),
             )
         except Exception:
             logger.exception(
@@ -13940,9 +14052,25 @@ async def delete_assistant(
                 lecture_slide_deck_id_to_delete,
                 schemas.LectureSlideProcessingCancelReason.ASSISTANT_DELETED,
             )
-            await lecture_slide_service.delete_lecture_slide_deck_if_unused(
+            context_file_ids_to_delete = (
+                await lecture_slide_service.delete_lecture_slide_deck_if_unused(
+                    request.state["db"],
+                    lecture_slide_deck_id_to_delete,
+                )
+            )
+            unused_context_file_ids_to_delete = (
+                await models.File.get_files_not_used_by_assistant(
+                    request.state["db"],
+                    asst.id,
+                    context_file_ids_to_delete,
+                )
+            )
+            await handle_delete_files(
                 request.state["db"],
-                lecture_slide_deck_id_to_delete,
+                request.state["authz"],
+                openai_client,
+                unused_context_file_ids_to_delete,
+                class_id=int(class_id),
             )
         except Exception:
             logger.exception(

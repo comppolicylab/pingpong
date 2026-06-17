@@ -1,8 +1,11 @@
 from datetime import datetime, timezone
 import importlib
+from types import SimpleNamespace
 
+import pytest
 from sqlalchemy import insert
 
+from pingpong import files
 from pingpong import models
 import pingpong.schemas as schemas
 from pingpong.testutil import with_authz, with_user
@@ -56,6 +59,32 @@ def _fake_class_models_response(
     }
 
 
+class FailingDeleteStore:
+    async def delete(self, key: str) -> None:
+        raise RuntimeError(f"could not delete {key}")
+
+
+@pytest.mark.asyncio
+async def test_delete_orphaned_s3_files_raises_on_store_delete_failure(
+    db, config, monkeypatch
+):
+    monkeypatch.setattr(
+        config, "file_store", SimpleNamespace(store=FailingDeleteStore())
+    )
+
+    async with db.async_session() as session:
+        s3_file = models.S3File(key="generated/orphan.txt")
+        session.add(s3_file)
+        await session.flush()
+        s3_file_id = s3_file.id
+
+        with pytest.raises(RuntimeError, match="orphaned uploaded files"):
+            await files._delete_orphaned_s3_files(session, [s3_file_id])
+
+        assert await session.get(models.S3File, s3_file_id) is not None
+
+
+@pytest.mark.asyncio
 @with_user(123)
 @with_authz(grants=[("user:123", "can_edit", "assistant:11")])
 async def test_update_assistant_rejects_deleting_file_used_by_other_assistant(
@@ -154,6 +183,7 @@ async def test_update_assistant_rejects_deleting_file_used_by_other_assistant(
         assert existing_file is not None
 
 
+@pytest.mark.asyncio
 @with_user(123)
 @with_authz(grants=[("user:123", "can_edit", "assistant:11")])
 async def test_update_assistant_rejects_non_private_deleted_private_file(

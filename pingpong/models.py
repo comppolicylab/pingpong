@@ -3017,6 +3017,155 @@ class LectureSlideSourceStoredObject(Base):
         return stored_object
 
 
+class LectureSlideAdditionalContextFile(Base):
+    __tablename__ = "lecture_slide_additional_context_files"
+    __table_args__ = (
+        UniqueConstraint(
+            "lecture_slide_deck_id",
+            "file_object_id",
+            name="uq_ls_additional_context_deck_file_object",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    lecture_slide_deck_id = Column(
+        Integer,
+        ForeignKey(
+            "lecture_slide_decks.id",
+            name="fk_ls_additional_context_deck_id",
+            ondelete="CASCADE",
+        ),
+        nullable=True,
+        index=True,
+    )
+    lecture_slide_deck = relationship(
+        "LectureSlideDeck", back_populates="additional_context_files"
+    )
+    file_object_id = Column(
+        Integer,
+        ForeignKey(
+            "files.id",
+            name="fk_ls_additional_context_file_object_id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+    file = relationship(
+        "File",
+        back_populates="lecture_slide_additional_context_files",
+        uselist=False,
+    )
+    class_id = Column(Integer, ForeignKey("classes.id"), nullable=False, index=True)
+    uploader_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    position = Column(Integer, nullable=False, server_default="0")
+    original_filename = Column(String, nullable=False)
+    content_type = Column(String, nullable=False)
+    content_length = Column(Integer, nullable=False, server_default="0")
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(DateTime(timezone=True), onupdate=func.now())
+
+    @classmethod
+    async def create(
+        cls,
+        session: AsyncSession,
+        *,
+        lecture_slide_deck_id: int | None,
+        file_object_id: int,
+        class_id: int,
+        uploader_id: int | None,
+        position: int,
+        original_filename: str,
+        content_type: str,
+        content_length: int,
+    ) -> "LectureSlideAdditionalContextFile":
+        context_file = LectureSlideAdditionalContextFile(
+            lecture_slide_deck_id=lecture_slide_deck_id,
+            file_object_id=file_object_id,
+            class_id=class_id,
+            uploader_id=uploader_id,
+            position=position,
+            original_filename=original_filename,
+            content_type=content_type,
+            content_length=content_length,
+        )
+        session.add(context_file)
+        await session.flush()
+        await session.refresh(context_file)
+        return context_file
+
+    @classmethod
+    async def get_all_by_ids_with_file(
+        cls, session: AsyncSession, ids: Sequence[int], *, for_update: bool = False
+    ) -> list["LectureSlideAdditionalContextFile"]:
+        ids = [int(id_) for id_ in ids]
+        if not ids:
+            return []
+        stmt = (
+            select(LectureSlideAdditionalContextFile)
+            .where(LectureSlideAdditionalContextFile.id.in_(ids))
+            .options(selectinload(LectureSlideAdditionalContextFile.file))
+        )
+        if for_update:
+            stmt = stmt.with_for_update()
+        context_files = list((await session.scalars(stmt)).all())
+        context_file_by_id = {
+            context_file.id: context_file for context_file in context_files
+        }
+        return [context_file_by_id[id_] for id_ in ids if id_ in context_file_by_id]
+
+    @classmethod
+    async def get_all_by_deck_id_with_file(
+        cls,
+        session: AsyncSession,
+        lecture_slide_deck_id: int,
+        *,
+        for_update: bool = False,
+    ) -> list["LectureSlideAdditionalContextFile"]:
+        stmt = (
+            select(LectureSlideAdditionalContextFile)
+            .where(
+                LectureSlideAdditionalContextFile.lecture_slide_deck_id
+                == int(lecture_slide_deck_id)
+            )
+            .options(selectinload(LectureSlideAdditionalContextFile.file))
+            .order_by(
+                LectureSlideAdditionalContextFile.position.asc(),
+                LectureSlideAdditionalContextFile.id.asc(),
+            )
+        )
+        if for_update:
+            stmt = stmt.with_for_update()
+        return list((await session.scalars(stmt)).all())
+
+    @classmethod
+    async def get_file_object_ids_by_deck_id(
+        cls, session: AsyncSession, lecture_slide_deck_id: int
+    ) -> list[int]:
+        stmt = select(LectureSlideAdditionalContextFile.file_object_id).where(
+            LectureSlideAdditionalContextFile.lecture_slide_deck_id
+            == int(lecture_slide_deck_id)
+        )
+        return [int(file_object_id) for file_object_id in await session.scalars(stmt)]
+
+    @classmethod
+    async def delete(cls, session: AsyncSession, id_: int) -> None:
+        stmt = delete(LectureSlideAdditionalContextFile).where(
+            LectureSlideAdditionalContextFile.id == int(id_)
+        )
+        await session.execute(stmt)
+
+    @classmethod
+    async def delete_all_by_deck_id(
+        cls, session: AsyncSession, lecture_slide_deck_id: int
+    ) -> None:
+        stmt = delete(LectureSlideAdditionalContextFile).where(
+            LectureSlideAdditionalContextFile.lecture_slide_deck_id
+            == int(lecture_slide_deck_id)
+        )
+        await session.execute(stmt)
+
+
 class LectureSlideImageStoredObject(Base):
     __tablename__ = "lecture_slide_image_stored_objects"
 
@@ -3165,6 +3314,12 @@ class LectureSlideDeck(Base):
         cascade="all, delete-orphan",
         order_by="LectureSlideQuestion.position",
     )
+    additional_context_files = relationship(
+        "LectureSlideAdditionalContextFile",
+        back_populates="lecture_slide_deck",
+        cascade="all, delete-orphan",
+        order_by="LectureSlideAdditionalContextFile.position",
+    )
     display_name = Column(String, nullable=False)
     voice_id = Column(String, nullable=True)
     generation_prompt: Mapped[str | None] = deferred(mapped_column(Text, nullable=True))
@@ -3261,6 +3416,11 @@ class LectureSlideDeck(Base):
             .options(undefer(LectureSlideDeck.narration_prompt))
             .options(undefer(LectureSlideDeck.context_data))
             .options(selectinload(LectureSlideDeck.source_stored_object))
+            .options(
+                selectinload(LectureSlideDeck.additional_context_files).selectinload(
+                    LectureSlideAdditionalContextFile.file
+                )
+            )
         )
         return await session.scalar(stmt)
 
@@ -3280,6 +3440,11 @@ class LectureSlideDeck(Base):
             .options(undefer(LectureSlideDeck.context_data))
             .options(selectinload(LectureSlideDeck.source_stored_object))
             .options(selectinload(LectureSlideDeck.pages))
+            .options(
+                selectinload(LectureSlideDeck.additional_context_files).selectinload(
+                    LectureSlideAdditionalContextFile.file
+                )
+            )
         )
         return await session.scalar(stmt)
 
@@ -3295,6 +3460,11 @@ class LectureSlideDeck(Base):
             .options(undefer(LectureSlideDeck.transcript_data))
             .options(undefer(LectureSlideDeck.context_data))
             .options(selectinload(LectureSlideDeck.source_stored_object))
+            .options(
+                selectinload(LectureSlideDeck.additional_context_files).selectinload(
+                    LectureSlideAdditionalContextFile.file
+                )
+            )
             .options(selectinload(LectureSlideDeck.continuous_narration_stored_object))
             .options(selectinload(LectureSlideDeck.caption_stored_object))
             .options(
@@ -3901,6 +4071,9 @@ def _thread_lecture_slide_base_loaders() -> tuple[Load, ...]:
             undefer(LectureSlideDeck.transcript_data),
             undefer(LectureSlideDeck.context_data),
             selectinload(LectureSlideDeck.source_stored_object),
+            selectinload(LectureSlideDeck.additional_context_files).selectinload(
+                LectureSlideAdditionalContextFile.file
+            ),
             selectinload(LectureSlideDeck.continuous_narration_stored_object),
             selectinload(LectureSlideDeck.caption_stored_object),
             selectinload(LectureSlideDeck.pages).selectinload(
@@ -4289,17 +4462,21 @@ class S3File(Base):
         file_obj_ids: list[int] | None = None,
         file_ids: list[str] | None = None,
     ) -> "S3File":
+        file_obj_ids = file_obj_ids or []
+        file_ids = file_ids or []
         s3_file = S3File(key=key)
         session.add(s3_file)
         await session.flush()
         await session.refresh(s3_file)
 
-        stmt = (
-            update(File)
-            .where(or_(File.id.in_(file_obj_ids), File.file_id.in_(file_ids)))
-            .values(s3_file_id=s3_file.id)
-        )
-        await session.execute(stmt)
+        clauses = []
+        if file_obj_ids:
+            clauses.append(File.id.in_(file_obj_ids))
+        if file_ids:
+            clauses.append(File.file_id.in_(file_ids))
+        if clauses:
+            stmt = update(File).where(or_(*clauses)).values(s3_file_id=s3_file.id)
+            await session.execute(stmt)
         return s3_file
 
     @classmethod
@@ -4315,6 +4492,28 @@ class S3File(Base):
         result = await session.execute(stmt)
         for row in result:
             yield row.S3File
+
+    @classmethod
+    async def get_orphaned_by_ids(
+        cls, session: AsyncSession, ids: Sequence[int]
+    ) -> list["S3File"]:
+        ids = [int(id_) for id_ in ids]
+        if not ids:
+            return []
+        stmt = (
+            select(S3File)
+            .outerjoin(File, S3File.id == File.s3_file_id)
+            .where(S3File.id.in_(ids), File.id.is_(None))
+        )
+        return list((await session.scalars(stmt)).all())
+
+    @classmethod
+    async def delete_by_ids(cls, session: AsyncSession, ids: Sequence[int]) -> None:
+        ids = [int(id_) for id_ in ids]
+        if not ids:
+            return
+        stmt = delete(S3File).where(S3File.id.in_(ids))
+        await session.execute(stmt)
 
 
 class File(Base):
@@ -4371,6 +4570,11 @@ class File(Base):
         "LectureSlideSourceStoredObject",
         back_populates="openai_file",
         foreign_keys="LectureSlideSourceStoredObject.openai_file_object_id",
+    )
+    lecture_slide_additional_context_files = relationship(
+        "LectureSlideAdditionalContextFile",
+        back_populates="file",
+        foreign_keys="LectureSlideAdditionalContextFile.file_object_id",
     )
     message_attachments_file_search = relationship(
         "Message",
@@ -4569,7 +4773,7 @@ class File(Base):
         cls, session: AsyncSession, id_: int, class_id: int
     ) -> int:
         stmt = (
-            select(func.count())
+            select(func.count(distinct(Assistant.id)))
             .select_from(Assistant)
             .join(
                 code_interpreter_file_assistant_association,
@@ -4585,10 +4789,22 @@ class File(Base):
                 file_vector_store_association.c.vector_store_id == VectorStore.id,
                 isouter=True,
             )
+            .join(
+                LectureSlideDeck,
+                Assistant.lecture_slide_deck_id == LectureSlideDeck.id,
+                isouter=True,
+            )
+            .join(
+                LectureSlideAdditionalContextFile,
+                LectureSlideAdditionalContextFile.lecture_slide_deck_id
+                == LectureSlideDeck.id,
+                isouter=True,
+            )
             .where(
                 or_(
                     file_vector_store_association.c.file_id == id_,
                     code_interpreter_file_assistant_association.c.file_id == id_,
+                    LectureSlideAdditionalContextFile.file_object_id == id_,
                 )
             )
             .where(Assistant.class_id == class_id)
@@ -4630,8 +4846,26 @@ class File(Base):
                 Assistant.class_id == class_id,
             )
         )
+        lecture_slide_context_path = (
+            select(
+                LectureSlideAdditionalContextFile.file_object_id.label("file_id"),
+                Assistant.id.label("assistant_id"),
+            )
+            .join(
+                LectureSlideDeck,
+                LectureSlideDeck.id
+                == LectureSlideAdditionalContextFile.lecture_slide_deck_id,
+            )
+            .join(Assistant, Assistant.lecture_slide_deck_id == LectureSlideDeck.id)
+            .where(
+                LectureSlideAdditionalContextFile.file_object_id.in_(ids),
+                Assistant.class_id == class_id,
+            )
+        )
 
-        files_and_assistants = union_all(vs_path, ci_path).subquery()
+        files_and_assistants = union_all(
+            vs_path, ci_path, lecture_slide_context_path
+        ).subquery()
 
         stmt = select(
             files_and_assistants.c.file_id,
@@ -4673,7 +4907,22 @@ class File(Base):
                 code_interpreter_file_assistant_association.c.file_id.in_(file_ids),
             )
         )
-        files_and_assistants = union_all(vs_path, ci_path).subquery()
+        lecture_slide_context_path = (
+            select(LectureSlideAdditionalContextFile.file_object_id.label("file_id"))
+            .join(
+                LectureSlideDeck,
+                LectureSlideDeck.id
+                == LectureSlideAdditionalContextFile.lecture_slide_deck_id,
+            )
+            .join(Assistant, Assistant.lecture_slide_deck_id == LectureSlideDeck.id)
+            .where(
+                Assistant.id == assistant_id,
+                LectureSlideAdditionalContextFile.file_object_id.in_(file_ids),
+            )
+        )
+        files_and_assistants = union_all(
+            vs_path, ci_path, lecture_slide_context_path
+        ).subquery()
 
         # Get the file IDs that ARE used by the assistant
         stmt = select(files_and_assistants.c.file_id).distinct()
@@ -4767,6 +5016,9 @@ class File(Base):
             ),
             select(LectureSlideSourceStoredObject.openai_file_object_id).where(
                 LectureSlideSourceStoredObject.openai_file_object_id == id_
+            ),
+            select(LectureSlideAdditionalContextFile.file_object_id).where(
+                LectureSlideAdditionalContextFile.file_object_id == id_
             ),
         ]
 
@@ -5301,6 +5553,9 @@ class Assistant(Base):
                 undefer(LectureSlideDeck.transcript_data),
                 undefer(LectureSlideDeck.context_data),
                 selectinload(LectureSlideDeck.source_stored_object),
+                selectinload(LectureSlideDeck.additional_context_files).selectinload(
+                    LectureSlideAdditionalContextFile.file
+                ),
                 selectinload(LectureSlideDeck.pages),
                 selectinload(LectureSlideDeck.questions),
             ),
@@ -5333,6 +5588,9 @@ class Assistant(Base):
                     undefer(LectureSlideDeck.generation_prompt),
                     undefer(LectureSlideDeck.narration_prompt),
                     selectinload(LectureSlideDeck.source_stored_object),
+                    selectinload(
+                        LectureSlideDeck.additional_context_files
+                    ).selectinload(LectureSlideAdditionalContextFile.file),
                     selectinload(LectureSlideDeck.pages),
                 ),
             )
@@ -5406,6 +5664,9 @@ class Assistant(Base):
                     undefer(LectureSlideDeck.transcript_data),
                     undefer(LectureSlideDeck.context_data),
                     selectinload(LectureSlideDeck.source_stored_object),
+                    selectinload(
+                        LectureSlideDeck.additional_context_files
+                    ).selectinload(LectureSlideAdditionalContextFile.file),
                     selectinload(LectureSlideDeck.pages),
                     selectinload(LectureSlideDeck.questions).selectinload(
                         LectureSlideQuestion.options
@@ -5455,6 +5716,9 @@ class Assistant(Base):
                     undefer(LectureSlideDeck.generation_prompt),
                     undefer(LectureSlideDeck.narration_prompt),
                     selectinload(LectureSlideDeck.source_stored_object),
+                    selectinload(
+                        LectureSlideDeck.additional_context_files
+                    ).selectinload(LectureSlideAdditionalContextFile.file),
                     selectinload(LectureSlideDeck.pages),
                 ),
             )
@@ -5514,6 +5778,7 @@ class Assistant(Base):
         params.pop("lecture_video_manifest", None)
         params.pop("lecture_slide_deck_id", None)
         params.pop("lecture_slide_page_notes", None)
+        params.pop("lecture_slide_additional_context_file_ids", None)
         params.pop("lecture_slide_questions", None)
         params.pop("narration_prompt", None)
         params.pop("voice_id", None)

@@ -1,14 +1,16 @@
 import io
 from types import SimpleNamespace
 
-from fastapi import UploadFile
+import pytest
+from fastapi import HTTPException, UploadFile
 from pypdf import PdfWriter
 from sqlalchemy import func, select
 
 import pingpong.schemas as schemas
-from pingpong import lecture_slide_service, models
+from pingpong import lecture_slide_processing, lecture_slide_service, models
 from pingpong.models import file_class_association
 from pingpong.config import LocalAudioStoreSettings
+from pingpong.lecture_video_service import get_upload_size
 
 from .testutil import with_authz, with_institution, with_user
 
@@ -50,6 +52,48 @@ def _one_page_pdf_upload(filename: str = "slides.pdf") -> tuple[UploadFile, byte
     )
 
 
+def _text_upload(
+    filename: str = "notes.md",
+    content: bytes = b"# Instructor notes",
+    content_type: str = "text/markdown",
+) -> UploadFile:
+    return UploadFile(
+        file=io.BytesIO(content),
+        filename=filename,
+        size=len(content),
+        headers={"content-type": content_type},
+    )
+
+
+def test_additional_context_generation_payload_is_separate_user_message():
+    messages = lecture_slide_processing._append_additional_context_message(
+        [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_file", "file_id": "file-slides"},
+                    {"type": "input_text", "text": "Generate narration."},
+                ],
+            }
+        ],
+        ["file-context-1", "file-context-2"],
+    )
+
+    assert len(messages) == 2
+    assert messages[0]["content"][0] == {
+        "type": "input_file",
+        "file_id": "file-slides",
+    }
+    assert messages[1]["role"] == "user"
+    assert messages[1]["content"][0]["type"] == "input_text"
+    assert "additional context" in messages[1]["content"][0]["text"]
+    assert messages[1]["content"][1:] == [
+        {"type": "input_file", "file_id": "file-context-1"},
+        {"type": "input_file", "file_id": "file-context-2"},
+    ]
+
+
+@pytest.mark.asyncio
 @with_institution(11, "Test Institution")
 async def test_create_lecture_slide_deck_uploads_source_pdf_to_openai(
     db, config, monkeypatch, institution
@@ -121,6 +165,525 @@ async def test_create_lecture_slide_deck_uploads_source_pdf_to_openai(
         assert [row["class_id"] for row in class_ids] == [1]
 
 
+@pytest.mark.asyncio
+@with_institution(11, "Test Institution")
+async def test_create_lecture_slide_additional_context_file_uploads_as_user_data(
+    db, config, monkeypatch, institution
+):
+    store = FakeLectureSlideStore()
+    files = FakeOpenAIFiles()
+    monkeypatch.setattr(config, "file_store", SimpleNamespace(store=store))
+
+    async def fake_get_openai_client_by_class_id(session, class_id: int):
+        assert class_id == 1
+        return SimpleNamespace(files=files)
+
+    monkeypatch.setattr(
+        lecture_slide_service,
+        "get_openai_client_by_class_id",
+        fake_get_openai_client_by_class_id,
+    )
+    upload = _text_upload()
+
+    async with db.async_session() as session:
+        user = models.User(id=123, email="owner@example.com")
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        session.add_all([user, class_])
+        await session.flush()
+
+        context_file = (
+            await lecture_slide_service.create_lecture_slide_additional_context_file(
+                session,
+                class_id=class_.id,
+                uploader_id=user.id,
+                upload=upload,
+            )
+        )
+        await session.commit()
+        context_file_id = context_file.id
+
+    uploaded_file, purpose = files.created_files[0]
+    assert uploaded_file[0] == "notes.md"
+    assert uploaded_file[1] == b"# Instructor notes"
+    assert uploaded_file[2] == "text/markdown"
+    assert purpose == "user_data"
+    assert list(store.stored_files.values()) == [b"# Instructor notes"]
+
+    async with db.async_session() as session:
+        context_file = await session.get(
+            models.LectureSlideAdditionalContextFile, context_file_id
+        )
+        assert context_file is not None
+        assert context_file.lecture_slide_deck_id is None
+        assert context_file.original_filename == "notes.md"
+        assert context_file.content_length == len(b"# Instructor notes")
+        file = await session.get(models.File, context_file.file_object_id)
+        assert file is not None
+        assert file.file_id == "file-1"
+        assert file.private is True
+        assert file.s3_file_id is not None
+        s3_file = await session.get(models.S3File, file.s3_file_id)
+        assert s3_file is not None
+        assert s3_file.key in store.stored_files
+
+
+def test_lecture_slide_additional_context_file_validation_uses_mime_type():
+    accepted_mime_with_unknown_extension = _text_upload(
+        filename="notes.unknown",
+        content_type="text/markdown",
+    )
+    lecture_slide_service._validate_openai_input_file_upload(
+        accepted_mime_with_unknown_extension,
+        get_upload_size(accepted_mime_with_unknown_extension),
+    )
+
+    unsupported_mime_with_accepted_extension = _text_upload(
+        filename="notes.md",
+        content_type="application/octet-stream",
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        lecture_slide_service._validate_openai_input_file_upload(
+            unsupported_mime_with_accepted_extension,
+            get_upload_size(unsupported_mime_with_accepted_extension),
+        )
+    assert exc_info.value.status_code == 400
+
+
+@pytest.mark.asyncio
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(grants=[("user:123", "can_view", "class:1")])
+async def test_class_upload_info_marks_openai_input_file_mime_types(
+    api, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        session.add(
+            models.Class(
+                id=1,
+                name="Test Class",
+                institution_id=institution.id,
+                api_key="test-key",
+            )
+        )
+        await session.commit()
+
+    response = api.get(
+        "/api/v1/class/1/upload_info",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    types_by_mime = {
+        file_type["mime_type"]: file_type for file_type in response.json()["types"]
+    }
+    assert types_by_mime["application/pdf"]["file_search"] is True
+    assert types_by_mime["application/pdf"]["input_file"] is True
+    assert types_by_mime["text/x-yaml"]["input_file"] is True
+    assert types_by_mime["text/css"]["file_search"] is True
+    assert types_by_mime["text/javascript"]["file_search"] is True
+    assert types_by_mime["application/typescript"]["file_search"] is True
+    assert types_by_mime["application/msword"]["file_search"] is True
+    assert types_by_mime["application/msword"]["code_interpreter"] is True
+    assert types_by_mime["text/x-csharp"]["file_search"] is True
+    assert types_by_mime["text/x-csharp"]["code_interpreter"] is True
+    assert types_by_mime["text/x-golang"]["file_search"] is True
+    assert types_by_mime["text/x-php"]["file_search"] is True
+    assert types_by_mime["text/x-php"]["code_interpreter"] is True
+    assert types_by_mime["application/csv"]["code_interpreter"] is True
+    assert types_by_mime["application/x-sh"]["file_search"] is True
+    assert types_by_mime["application/x-sh"]["code_interpreter"] is True
+    assert types_by_mime["application/octet-stream"]["code_interpreter"] is True
+    assert types_by_mime["image/webp"]["vision"] is True
+
+
+@pytest.mark.asyncio
+@with_institution(11, "Test Institution")
+async def test_apply_additional_context_files_attaches_to_deck_and_validates_size(
+    db, institution
+):
+    async with db.async_session() as session:
+        user = models.User(id=123, email="owner@example.com")
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        session.add_all([user, class_])
+        await session.flush()
+        file = await models.File.create(
+            session,
+            {
+                "file_id": "file-context",
+                "private": True,
+                "uploader_id": user.id,
+                "name": "notes.md",
+                "content_type": "text/markdown",
+            },
+            class_id=1,
+        )
+        source = await models.LectureSlideSourceStoredObject.create(
+            session,
+            key="slides.pdf",
+            original_filename="slides.pdf",
+            content_type="application/pdf",
+            content_length=1024,
+        )
+        deck = await models.LectureSlideDeck.create(
+            session,
+            class_id=class_.id,
+            source_stored_object_id=source.id,
+            uploader_id=user.id,
+            display_name="slides.pdf",
+            slide_count=1,
+        )
+        draft_context = await models.LectureSlideAdditionalContextFile.create(
+            session,
+            lecture_slide_deck_id=None,
+            file_object_id=file.id,
+            class_id=class_.id,
+            uploader_id=user.id,
+            position=0,
+            original_filename="notes.md",
+            content_type="text/markdown",
+            content_length=2048,
+        )
+
+        changed = (
+            await lecture_slide_service.apply_lecture_slide_additional_context_files(
+                session,
+                deck,
+                [draft_context.id],
+                uploader_id=user.id,
+            )
+        )
+        oversized_file = await models.File.create(
+            session,
+            {
+                "file_id": "file-oversized-context",
+                "private": True,
+                "uploader_id": user.id,
+                "name": "large-notes.md",
+                "content_type": "text/markdown",
+            },
+            class_id=1,
+        )
+        oversized_context = await models.LectureSlideAdditionalContextFile.create(
+            session,
+            lecture_slide_deck_id=None,
+            file_object_id=oversized_file.id,
+            class_id=class_.id,
+            uploader_id=user.id,
+            position=1,
+            original_filename="large-notes.md",
+            content_type="text/markdown",
+            content_length=lecture_slide_service.OPENAI_INPUT_FILE_MAX_BYTES,
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            await lecture_slide_service.apply_lecture_slide_additional_context_files(
+                session,
+                deck,
+                [draft_context.id, oversized_context.id],
+                uploader_id=user.id,
+            )
+        assert exc_info.value.status_code == 413
+        await session.commit()
+        deck_id = deck.id
+        draft_context_id = draft_context.id
+
+    assert changed is True
+    async with db.async_session() as session:
+        attached_files = (
+            await models.LectureSlideAdditionalContextFile.get_all_by_deck_id_with_file(
+                session, deck_id
+            )
+        )
+        assert len(attached_files) == 1
+        assert attached_files[0].id == draft_context_id
+        assert attached_files[0].original_filename == "notes.md"
+        assert attached_files[0].lecture_slide_deck_id == deck_id
+
+
+@pytest.mark.asyncio
+@with_institution(11, "Test Institution")
+async def test_assistant_file_usage_counts_lecture_slide_context_files(db, institution):
+    async with db.async_session() as session:
+        user = models.User(id=123, email="owner@example.com")
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        session.add_all([user, class_])
+        await session.flush()
+        file = await models.File.create(
+            session,
+            {
+                "file_id": "file-context",
+                "private": True,
+                "uploader_id": user.id,
+                "name": "notes.md",
+                "content_type": "text/markdown",
+            },
+            class_id=class_.id,
+        )
+        source = await models.LectureSlideSourceStoredObject.create(
+            session,
+            key="slides.pdf",
+            original_filename="slides.pdf",
+            content_type="application/pdf",
+            content_length=1024,
+        )
+        deck = await models.LectureSlideDeck.create(
+            session,
+            class_id=class_.id,
+            source_stored_object_id=source.id,
+            uploader_id=user.id,
+            display_name="slides.pdf",
+            slide_count=1,
+        )
+        await models.LectureSlideAdditionalContextFile.create(
+            session,
+            lecture_slide_deck_id=deck.id,
+            file_object_id=file.id,
+            class_id=class_.id,
+            uploader_id=user.id,
+            position=0,
+            original_filename="notes.md",
+            content_type="text/markdown",
+            content_length=2048,
+        )
+        session.add(
+            models.Assistant(
+                id=1,
+                name="Lecture Slides Assistant",
+                class_id=class_.id,
+                creator_id=user.id,
+                interaction_mode=schemas.InteractionMode.LECTURE_SLIDES,
+                version=3,
+                model="gpt-4o-mini",
+                instructions="Teach the lecture.",
+                tools="[]",
+                lecture_slide_deck_id=deck.id,
+            )
+        )
+        await session.flush()
+
+        usage_rows = await models.File.assistant_count_using_files(
+            session, [file.id], class_.id
+        )
+        usage_count = await models.File.assistant_count_using_file(
+            session, file.id, class_.id
+        )
+
+    assert dict(usage_rows) == {file.id: 1}
+    assert usage_count == 1
+
+
+@pytest.mark.asyncio
+@with_institution(11, "Test Institution")
+async def test_apply_additional_context_files_preserves_existing_files_for_other_editor(
+    db, institution
+):
+    async with db.async_session() as session:
+        owner = models.User(id=123, email="owner@example.com")
+        editor = models.User(id=456, email="editor@example.com")
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        session.add_all([owner, editor, class_])
+        await session.flush()
+        file = await models.File.create(
+            session,
+            {
+                "file_id": "file-context",
+                "private": True,
+                "uploader_id": owner.id,
+                "name": "notes.md",
+                "content_type": "text/markdown",
+            },
+            class_id=class_.id,
+        )
+        source = await models.LectureSlideSourceStoredObject.create(
+            session,
+            key="slides.pdf",
+            original_filename="slides.pdf",
+            content_type="application/pdf",
+            content_length=1024,
+        )
+        deck = await models.LectureSlideDeck.create(
+            session,
+            class_id=class_.id,
+            source_stored_object_id=source.id,
+            uploader_id=owner.id,
+            display_name="slides.pdf",
+            slide_count=1,
+        )
+        context_file = await models.LectureSlideAdditionalContextFile.create(
+            session,
+            lecture_slide_deck_id=deck.id,
+            file_object_id=file.id,
+            class_id=class_.id,
+            uploader_id=owner.id,
+            position=0,
+            original_filename="notes.md",
+            content_type="text/markdown",
+            content_length=2048,
+        )
+
+        changed = (
+            await lecture_slide_service.apply_lecture_slide_additional_context_files(
+                session,
+                deck,
+                [context_file.id],
+                uploader_id=editor.id,
+            )
+        )
+
+    assert changed is False
+
+
+@pytest.mark.asyncio
+@with_institution(11, "Test Institution")
+async def test_delete_lecture_slide_deck_if_unused_removes_context_rows_explicitly(
+    db, institution
+):
+    async with db.async_session() as session:
+        user = models.User(id=123, email="owner@example.com")
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        session.add_all([user, class_])
+        await session.flush()
+        file = await models.File.create(
+            session,
+            {
+                "file_id": "file-context",
+                "private": True,
+                "uploader_id": user.id,
+                "name": "notes.md",
+                "content_type": "text/markdown",
+            },
+            class_id=class_.id,
+        )
+        source = await models.LectureSlideSourceStoredObject.create(
+            session,
+            key="slides.pdf",
+            original_filename="slides.pdf",
+            content_type="application/pdf",
+            content_length=1024,
+        )
+        deck = await models.LectureSlideDeck.create(
+            session,
+            class_id=class_.id,
+            source_stored_object_id=source.id,
+            uploader_id=user.id,
+            display_name="slides.pdf",
+            slide_count=1,
+        )
+        context_file = await models.LectureSlideAdditionalContextFile.create(
+            session,
+            lecture_slide_deck_id=deck.id,
+            file_object_id=file.id,
+            class_id=class_.id,
+            uploader_id=user.id,
+            position=0,
+            original_filename="notes.md",
+            content_type="text/markdown",
+            content_length=2048,
+        )
+
+        file_object_ids = (
+            await lecture_slide_service.delete_lecture_slide_deck_if_unused(
+                session, deck.id
+            )
+        )
+        await session.flush()
+
+        remaining_context = await session.get(
+            models.LectureSlideAdditionalContextFile, context_file.id
+        )
+
+    assert file_object_ids == [file.id]
+    assert remaining_context is None
+
+
+@pytest.mark.asyncio
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(grants=[("user:123", "can_edit", "assistant:1")])
+async def test_upload_assistant_lecture_slide_additional_context_allows_editor(
+    api, db, config, monkeypatch, institution, valid_user_token
+):
+    store = FakeLectureSlideStore()
+    files = FakeOpenAIFiles()
+    monkeypatch.setattr(config, "file_store", SimpleNamespace(store=store))
+
+    async def fake_get_openai_client_by_class_id(session, class_id: int):
+        assert class_id == 1
+        return SimpleNamespace(files=files)
+
+    monkeypatch.setattr(
+        lecture_slide_service,
+        "get_openai_client_by_class_id",
+        fake_get_openai_client_by_class_id,
+    )
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        session.add(class_)
+        await session.flush()
+        session.add(
+            models.Assistant(
+                id=1,
+                name="Lecture Slides Assistant",
+                class_id=class_.id,
+                creator_id=123,
+                interaction_mode=schemas.InteractionMode.LECTURE_SLIDES,
+                version=3,
+                model="gpt-4o-mini",
+                instructions="Teach the lecture.",
+                tools="[]",
+            )
+        )
+        await session.commit()
+
+    response = api.post(
+        "/api/v1/class/1/assistant/1/lecture-slides/additional-context/upload",
+        files={"upload": ("notes.md", b"# Instructor notes", "text/markdown")},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["filename"] == "notes.md"
+    assert body["size"] == len(b"# Instructor notes")
+    assert body["content_type"] == "text/markdown"
+    assert body["file_object_id"]
+    assert files.created_files == [
+        (("notes.md", b"# Instructor notes", "text/markdown"), "user_data")
+    ]
+    assert list(store.stored_files.values()) == [b"# Instructor notes"]
+
+
+@pytest.mark.asyncio
 @with_user(123)
 @with_institution(11, "Test Institution")
 @with_authz(
@@ -224,6 +787,7 @@ async def test_retry_lecture_slide_endpoint_queues_processing_after_failure(
     assert runs[1].attempt_number == 2
 
 
+@pytest.mark.asyncio
 @with_user(123)
 @with_institution(11, "Test Institution")
 @with_authz(
@@ -314,6 +878,7 @@ async def test_lecture_slide_config_returns_pending_question_drafts(
     ]
 
 
+@pytest.mark.asyncio
 @with_institution(11, "Test Institution")
 async def test_apply_lecture_slide_page_notes_handles_unloaded_pages(db, institution):
     async with db.async_session() as session:
@@ -385,6 +950,7 @@ async def test_apply_lecture_slide_page_notes_handles_unloaded_pages(db, institu
     assert page.narration_text == "Narrate this."
 
 
+@pytest.mark.asyncio
 @with_institution(11, "Test Institution")
 async def test_apply_lecture_slide_page_notes_deletes_replaced_narration_audio(
     db, institution, config, monkeypatch, tmp_path
@@ -485,6 +1051,7 @@ async def test_apply_lecture_slide_page_notes_deletes_replaced_narration_audio(
     assert not (narration_dir / "edited-slide.ogg").exists()
 
 
+@pytest.mark.asyncio
 @with_institution(11, "Test Institution")
 async def test_apply_lecture_slide_question_drafts_uses_model_loaded_context_data(
     db, institution
@@ -560,6 +1127,7 @@ async def test_apply_lecture_slide_question_drafts_uses_model_loaded_context_dat
     }
 
 
+@pytest.mark.asyncio
 @with_institution(11, "Test Institution")
 async def test_clone_lecture_slide_deck_snapshot_returns_loaded_context_data(
     db, institution
@@ -604,6 +1172,7 @@ async def test_clone_lecture_slide_deck_snapshot_returns_loaded_context_data(
     assert cloned_deck.context_data == {"manual_questions": []}
 
 
+@pytest.mark.asyncio
 @with_institution(11, "Test Institution")
 async def test_clear_lecture_slide_page_narrations_deletes_unused_audio(
     db, institution, config, monkeypatch, tmp_path
@@ -696,6 +1265,7 @@ async def test_clear_lecture_slide_page_narrations_deletes_unused_audio(
     assert not (narration_dir / "slide-1.ogg").exists()
 
 
+@pytest.mark.asyncio
 @with_institution(11, "Test Institution")
 async def test_clear_lecture_slide_page_narrations_preserves_shared_audio(
     db, institution, config, monkeypatch, tmp_path
@@ -802,6 +1372,7 @@ async def test_clear_lecture_slide_page_narrations_preserves_shared_audio(
     assert (narration_dir / "shared-slide.ogg").exists()
 
 
+@pytest.mark.asyncio
 @with_institution(11, "Test Institution")
 async def test_delete_unused_lecture_slide_deck_deletes_page_narration_audio(
     db, institution, config, monkeypatch, tmp_path

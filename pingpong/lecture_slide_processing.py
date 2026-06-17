@@ -167,7 +167,8 @@ Critical rules:
 - Write narration as if you are speaking live to students while each slide is visible.
 - Teach the material on the slide; do not merely describe the slide's layout.
 - Stay grounded in what appears on the current slide and the necessary connective context from earlier slides.
-- Do not invent facts, examples, equations, citations, or course context that are not supported by the deck.
+- Additional context files may clarify terminology, course emphasis, or background, but the PDF remains the source of truth for what students can see.
+- Do not invent facts, examples, equations, citations, or course context that are not supported by the deck or instructor-provided additional context.
 - Do not mention the PDF, the prompt, the model, schemas, extraction, or any implementation details.
 
 For each slide:
@@ -368,12 +369,12 @@ Do not generate additional unrequested questions after instructor-selected slide
 
     return f"""You are an expert educational content designer creating an interactive slide lesson from a PDF deck.
 
-You will be given the PDF, slide timing source data, and word-level narration transcript source data.{duration_text}
+You will be given the PDF, optional instructor-provided additional context files, slide timing source data, and word-level narration transcript source data.{duration_text}
 {generation_window_text}
 {manual_question_guidance}
 {question_request_guidance}
 
-Use the PDF, slide timing source data, and transcript together. The PDF is the visual source of truth; the transcript is the spoken narration timeline.
+Use the PDF, additional context, slide timing source data, and transcript together. The PDF is the visual source of truth; the transcript is the spoken narration timeline. Additional context may clarify terminology, course emphasis, or background, but it is not slide-visible content unless also supported by the PDF or transcript.
 
 GENERATION GUIDANCE SPECIFIC TO THIS LESSON:
 {content_section.strip() or DEFAULT_GENERATION_PROMPT_CONTENT}
@@ -417,7 +418,7 @@ QUESTIONS:
 - Keep post_answer_text to one or two natural spoken sentences.
 - If a generation window is provided, create questions only after slides whose end_offset_ms is inside that same requested generation window.
 
-- Use concrete evidence from the PDF and transcript. Do not invent unsupported facts.
+- Use concrete evidence from the PDF, transcript, and instructor-provided additional context. Do not invent unsupported facts.
 
 OUTPUT FORMAT:
 Return a single JSON object matching the requested schema. Do not include any text outside the JSON.
@@ -465,10 +466,10 @@ Use surrounding context to avoid boundary artifacts, but keep generated offsets 
 
     return f"""You are an expert educational content designer creating chat context for an interactive slide lesson from a PDF deck.
 
-You will be given the PDF, slide timing source data, and word-level narration transcript source data.{duration_text}
+You will be given the PDF, optional instructor-provided additional context files, slide timing source data, and word-level narration transcript source data.{duration_text}
 {generation_window_text}
 
-Use the PDF, slide timing source data, and transcript together. The PDF is the visual source of truth; the transcript is the spoken narration timeline.
+Use the PDF, additional context, slide timing source data, and transcript together. The PDF is the visual source of truth; the transcript is the spoken narration timeline. Additional context may clarify terminology, course emphasis, or background, but it is not slide-visible content unless also supported by the PDF or transcript.
 
 GENERATION GUIDANCE SPECIFIC TO THIS LESSON:
 {content_section.strip() or DEFAULT_GENERATION_PROMPT_CONTENT}
@@ -496,7 +497,7 @@ SLIDE CHAT CONTEXT:
 
 Do not create, rewrite, summarize, or include knowledge-check questions. Existing questions are managed separately and are out of scope for this task.
 
-Use concrete evidence from the PDF and transcript. Do not invent unsupported facts.
+Use concrete evidence from the PDF, transcript, and instructor-provided additional context. Do not invent unsupported facts.
 
 OUTPUT FORMAT:
 Return a single JSON object matching the requested schema. Do not include any text outside the JSON.
@@ -526,6 +527,44 @@ def _slide_context_generation_final_task_text() -> str:
         "source data above, generate the slide lesson chat context now. Follow "
         "the instructions and return only the schema-valid JSON object."
     )
+
+
+def _additional_context_user_message(
+    additional_context_file_ids: Sequence[str],
+) -> dict[str, object] | None:
+    if not additional_context_file_ids:
+        return None
+    return {
+        "role": "user",
+        "content": [
+            {
+                "type": "input_text",
+                "text": (
+                    "The following files are instructor-provided additional context. "
+                    "Use them only to clarify terminology, course emphasis, or background "
+                    "that helps generate better narration and questions. Do not treat "
+                    "these files as lecture slides, and do not invent slide-visible "
+                    "content from them."
+                ),
+            },
+            *[
+                {"type": "input_file", "file_id": additional_context_file_id}
+                for additional_context_file_id in additional_context_file_ids
+            ],
+        ],
+    }
+
+
+def _append_additional_context_message(
+    input_messages: list[dict[str, object]],
+    additional_context_file_ids: Sequence[str],
+) -> list[dict[str, object]]:
+    additional_context_message = _additional_context_user_message(
+        additional_context_file_ids
+    )
+    if additional_context_message is None:
+        return input_messages
+    return [*input_messages, additional_context_message]
 
 
 def _manual_slide_questions_from_context(
@@ -1794,6 +1833,7 @@ async def _generate_narration_text(
         slide_count = deck.slide_count
         author_comments_guidance = _slide_author_comments_guidance_text(deck.pages)
         response_model = _generated_slide_narration_set_model(slide_count)
+        additional_context_file_ids = _additional_context_file_ids(deck)
 
     return await _await_with_run_lease_heartbeat(
         run_id,
@@ -1803,21 +1843,24 @@ async def _generate_narration_text(
             model=responses_model,
             instructions=prompt,
             response_model=response_model,
-            input_messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "input_file", "file_id": file_id},
-                        {
-                            "type": "input_text",
-                            "text": _build_narration_generation_user_message(
-                                slide_count,
-                                author_comments_guidance,
-                            ),
-                        },
-                    ],
-                }
-            ],
+            input_messages=_append_additional_context_message(
+                [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_file", "file_id": file_id},
+                            {
+                                "type": "input_text",
+                                "text": _build_narration_generation_user_message(
+                                    slide_count,
+                                    author_comments_guidance,
+                                ),
+                            },
+                        ],
+                    }
+                ],
+                additional_context_file_ids,
+            ),
         ),
     )
 
@@ -1846,6 +1889,24 @@ def _slide_author_comments_guidance_text(
         "lecture narration.\n\n"
         f"{json.dumps(comments, indent=2)}"
     )
+
+
+def _additional_context_file_ids(deck: models.LectureSlideDeck) -> list[str]:
+    file_ids: list[str] = []
+    for context_file in sorted(
+        deck.additional_context_files, key=lambda item: item.position
+    ):
+        if context_file.file is None or not context_file.file.file_id:
+            logger.warning(
+                "Skipping lecture slide additional context file without OpenAI file id. "
+                "deck_id=%s context_file_id=%s file_object_id=%s",
+                deck.id,
+                context_file.id,
+                context_file.file_object_id,
+            )
+            continue
+        file_ids.append(str(context_file.file.file_id))
+    return file_ids
 
 
 def _build_narration_generation_user_message(
@@ -2732,6 +2793,7 @@ async def _generate_slide_manifest(
             deck.context_data
         )
         manual_questions = _manual_slide_questions_from_context(deck.context_data)
+        additional_context_file_ids = _additional_context_file_ids(deck)
         page_ranges: list[SlidePageRange] = [
             {
                 "slide_position": page.position,
@@ -2759,6 +2821,7 @@ async def _generate_slide_manifest(
             total_duration_ms=total_duration_ms,
             manual_questions=manual_questions,
             question_requests=question_requests,
+            additional_context_file_ids=additional_context_file_ids,
         ),
     )
 
@@ -2772,6 +2835,7 @@ async def generate_slide_context_v5(
     page_ranges: list[SlidePageRange],
     transcript: list[schemas.LectureVideoManifestWordV3],
     total_duration_ms: int | None,
+    additional_context_file_ids: Sequence[str] = (),
 ) -> schemas.LectureSlideContextV5:
     prompt = generation_prompt or DEFAULT_GENERATION_PROMPT_CONTENT
     resolved_total_duration_ms = _slide_manifest_total_duration_ms(
@@ -2787,6 +2851,7 @@ async def generate_slide_context_v5(
         page_ranges=page_ranges,
         transcript=transcript,
         total_duration_ms=resolved_total_duration_ms,
+        additional_context_file_ids=additional_context_file_ids,
     )
     return schemas.LectureSlideContextV5.model_validate(
         {
@@ -2812,6 +2877,7 @@ async def _generate_slide_context_v5_with_optional_chunks(
     page_ranges: list[SlidePageRange],
     transcript: list[schemas.LectureVideoManifestWordV3],
     total_duration_ms: int | None,
+    additional_context_file_ids: Sequence[str] = (),
 ) -> GeneratedSlideContext:
     if total_duration_ms is None:
         context = await _generate_slide_context_v5_for_window(
@@ -2822,6 +2888,7 @@ async def _generate_slide_context_v5_with_optional_chunks(
             page_ranges=page_ranges,
             transcript=transcript,
             total_duration_ms=None,
+            additional_context_file_ids=additional_context_file_ids,
         )
         if context is None:
             raise ValueError("Generated full lecture slide v5 context was empty.")
@@ -2844,6 +2911,7 @@ async def _generate_slide_context_v5_with_optional_chunks(
                 page_ranges=page_ranges,
                 transcript=transcript,
                 total_duration_ms=total_duration_ms,
+                additional_context_file_ids=additional_context_file_ids,
             )
             if context is None:
                 raise ValueError("Generated full lecture slide v5 context was empty.")
@@ -2880,6 +2948,7 @@ async def _generate_slide_context_v5_with_optional_chunks(
                 transcript=transcript,
                 total_duration_ms=total_duration_ms,
                 chunk=chunk,
+                additional_context_file_ids=additional_context_file_ids,
             )
         )
     return _merge_slide_context_chunks(chunk_contexts)
@@ -2895,6 +2964,7 @@ async def _generate_slide_context_v5_chunks(
     transcript: list[schemas.LectureVideoManifestWordV3],
     total_duration_ms: int,
     chunk: SlideManifestGenerationChunk,
+    additional_context_file_ids: Sequence[str] = (),
 ) -> list[GeneratedSlideContext]:
     try:
         context = await _generate_slide_context_v5_for_window(
@@ -2906,6 +2976,7 @@ async def _generate_slide_context_v5_chunks(
             transcript=transcript,
             total_duration_ms=total_duration_ms,
             chunk=chunk,
+            additional_context_file_ids=additional_context_file_ids,
         )
         return [context] if context is not None else []
     except Exception as exc:
@@ -2938,6 +3009,7 @@ async def _generate_slide_context_v5_chunks(
                     transcript=transcript,
                     total_duration_ms=total_duration_ms,
                     chunk=child_chunk,
+                    additional_context_file_ids=additional_context_file_ids,
                 )
             )
         return contexts
@@ -2954,6 +3026,7 @@ async def _generate_slide_manifest_with_optional_chunks(
     total_duration_ms: int | None,
     manual_questions: list[GeneratedSlideQuestion] | None = None,
     question_requests: list[schemas.LectureSlideQuestionInput] | None = None,
+    additional_context_file_ids: Sequence[str] = (),
 ) -> GeneratedSlideManifest:
     if total_duration_ms is None:
         return await _generate_slide_manifest_for_window(
@@ -2966,6 +3039,7 @@ async def _generate_slide_manifest_with_optional_chunks(
             total_duration_ms=None,
             manual_questions=manual_questions,
             question_requests=question_requests,
+            additional_context_file_ids=additional_context_file_ids,
         )
     chunks = _plan_slide_manifest_generation_chunks(
         total_duration_ms,
@@ -2987,6 +3061,7 @@ async def _generate_slide_manifest_with_optional_chunks(
                 total_duration_ms=total_duration_ms,
                 manual_questions=manual_questions,
                 question_requests=question_requests,
+                additional_context_file_ids=additional_context_file_ids,
             )
         except Exception as exc:
             if (
@@ -3022,6 +3097,7 @@ async def _generate_slide_manifest_with_optional_chunks(
                 chunk=chunk,
                 manual_questions=manual_questions,
                 question_requests=question_requests,
+                additional_context_file_ids=additional_context_file_ids,
             )
         )
     return _merge_slide_chunk_manifests(chunk_manifests)
@@ -3039,6 +3115,7 @@ async def _generate_slide_manifest_chunks(
     chunk: SlideManifestGenerationChunk,
     manual_questions: list[GeneratedSlideQuestion] | None = None,
     question_requests: list[schemas.LectureSlideQuestionInput] | None = None,
+    additional_context_file_ids: Sequence[str] = (),
 ) -> list[GeneratedSlideManifest]:
     try:
         manifest = await _generate_slide_manifest_for_window(
@@ -3052,6 +3129,7 @@ async def _generate_slide_manifest_chunks(
             chunk=chunk,
             manual_questions=manual_questions,
             question_requests=question_requests,
+            additional_context_file_ids=additional_context_file_ids,
         )
         return [manifest]
     except Exception as exc:
@@ -3086,6 +3164,7 @@ async def _generate_slide_manifest_chunks(
                     chunk=child_chunk,
                     manual_questions=manual_questions,
                     question_requests=question_requests,
+                    additional_context_file_ids=additional_context_file_ids,
                 )
             )
         return manifests
@@ -3101,6 +3180,7 @@ async def _generate_slide_context_v5_for_window(
     transcript: list[schemas.LectureVideoManifestWordV3],
     total_duration_ms: int | None,
     chunk: SlideManifestGenerationChunk | None = None,
+    additional_context_file_ids: Sequence[str] = (),
 ) -> GeneratedSlideContext | None:
     chunk_transcript = transcript
     chunk_page_ranges = page_ranges
@@ -3136,29 +3216,32 @@ async def _generate_slide_context_v5_for_window(
             context_end_ms=context_end_ms,
         ),
         response_model=GeneratedSlideContext,
-        input_messages=[
-            {
-                "role": "user",
-                "content": [
-                    {"type": "input_file", "file_id": file_id},
-                    {
-                        "type": "input_text",
-                        "text": _slide_timing_source_text(chunk_page_ranges),
-                    },
-                    {
-                        "type": "input_text",
-                        "text": _generation_transcript_source_text(
-                            chunk_transcript,
-                            compact=False,
-                        ),
-                    },
-                    {
-                        "type": "input_text",
-                        "text": _slide_context_generation_final_task_text(),
-                    },
-                ],
-            }
-        ],
+        input_messages=_append_additional_context_message(
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_file", "file_id": file_id},
+                        {
+                            "type": "input_text",
+                            "text": _slide_timing_source_text(chunk_page_ranges),
+                        },
+                        {
+                            "type": "input_text",
+                            "text": _generation_transcript_source_text(
+                                chunk_transcript,
+                                compact=False,
+                            ),
+                        },
+                        {
+                            "type": "input_text",
+                            "text": _slide_context_generation_final_task_text(),
+                        },
+                    ],
+                }
+            ],
+            additional_context_file_ids,
+        ),
     )
     if chunk is not None:
         manifest = _filter_slide_context_for_window(
@@ -3205,6 +3288,7 @@ async def _generate_slide_manifest_for_window(
     manual_questions: list[GeneratedSlideQuestion] | None = None,
     question_requests: list[schemas.LectureSlideQuestionInput] | None = None,
     chunk: SlideManifestGenerationChunk | None = None,
+    additional_context_file_ids: Sequence[str] = (),
 ) -> GeneratedSlideManifest:
     chunk_transcript = transcript
     chunk_page_ranges = page_ranges
@@ -3242,44 +3326,47 @@ async def _generate_slide_manifest_for_window(
             context_end_ms=context_end_ms,
         ),
         response_model=GeneratedSlideManifest,
-        input_messages=[
-            {
-                "role": "user",
-                "content": [
-                    {"type": "input_file", "file_id": file_id},
-                    {
-                        "type": "input_text",
-                        "text": _slide_timing_source_text(chunk_page_ranges),
-                    },
-                    {
-                        "type": "input_text",
-                        "text": _generation_transcript_source_text(
-                            chunk_transcript,
-                            compact=False,
-                        ),
-                    },
-                    *(
-                        [
-                            {
-                                "type": "input_text",
-                                "text": manual_question_source_text,
-                            }
-                        ]
-                        if (
-                            manual_question_source_text
-                            := _manual_slide_questions_source_text(
-                                manual_questions or [], question_requests
+        input_messages=_append_additional_context_message(
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_file", "file_id": file_id},
+                        {
+                            "type": "input_text",
+                            "text": _slide_timing_source_text(chunk_page_ranges),
+                        },
+                        {
+                            "type": "input_text",
+                            "text": _generation_transcript_source_text(
+                                chunk_transcript,
+                                compact=False,
+                            ),
+                        },
+                        *(
+                            [
+                                {
+                                    "type": "input_text",
+                                    "text": manual_question_source_text,
+                                }
+                            ]
+                            if (
+                                manual_question_source_text
+                                := _manual_slide_questions_source_text(
+                                    manual_questions or [], question_requests
+                                )
                             )
-                        )
-                        else []
-                    ),
-                    {
-                        "type": "input_text",
-                        "text": _slide_generation_final_task_text(),
-                    },
-                ],
-            }
-        ],
+                            else []
+                        ),
+                        {
+                            "type": "input_text",
+                            "text": _slide_generation_final_task_text(),
+                        },
+                    ],
+                }
+            ],
+            additional_context_file_ids,
+        ),
     )
     if chunk is not None:
         manifest = manifest.model_copy(

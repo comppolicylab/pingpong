@@ -34,6 +34,7 @@
 	import { setsEqual } from '$lib/set';
 	import { happyToast, sadToast } from '$lib/toast';
 	import { normalizeNewlines } from '$lib/content.js';
+	import { humanSize } from '$lib/size';
 	import {
 		CloseOutline,
 		ImageOutline,
@@ -449,6 +450,11 @@
 	$: lectureSlideConfigLoadError = isEditingLectureSlideAssistant
 		? (data.lectureSlideConfigLoadError ?? null)
 		: null;
+	$: lectureSlideConfigReady =
+		data.isCreating ||
+		!isEditingLectureSlideAssistant ||
+		data.lectureSlideConfig !== null ||
+		lectureSlideConfigLoadError !== null;
 	$: lectureVideoConfigLoadErrorMessage =
 		lectureVideoConfigLoadError?.detail || 'Could not load lecture video configuration.';
 	$: lectureSlideConfigLoadErrorMessage =
@@ -508,10 +514,26 @@
 	let selectedLectureSlideDeck: api.LectureSlideSummary | null = currentLectureSlideDeck;
 	let lectureSlideDraftIds = new SvelteSet<number>();
 	let uploadingLectureSlides = false;
+	let uploadingLectureSlideContext = false;
+	let lectureSlideContextUploadProgress = 0;
 	let refreshingLectureSlideStatus = false;
 	let canRefreshCurrentLectureSlideStatus = false;
 	let lectureSlideEditorOpen = false;
 	let selectedLectureSlidePosition = 0;
+	let lectureSlideAdditionalContextFiles: api.LectureSlideAdditionalContextFileSummary[] = [
+		...(currentLectureSlideDeck?.additional_context_files || [])
+	];
+	let lectureSlideAdditionalContextUploadedFiles: api.LectureSlideAdditionalContextFileSummary[] =
+		[];
+	let hasSetLectureSlideAdditionalContextFiles = false;
+	const uploadedLectureSlideContextFileObjectIds = () =>
+		new Set(lectureSlideAdditionalContextUploadedFiles.map((file) => file.file_object_id));
+	const lectureSlideOpenAIInputFileMaxBytes = 50 * 1024 * 1024;
+	const lectureSlideOpenAIInputFileMaxLabel = '50 MB';
+	const lectureSlideAdditionalContextAccept = data.uploadInfo.fileTypes({ input_file: true });
+	const lectureSlideAdditionalContextFileFilter = data.uploadInfo.getFileSupportFilter({
+		input_file: true
+	});
 	let lectureSlidePageDrafts: api.LectureSlidePageNotes[] = [];
 	let hasSetLectureSlidePageDrafts = false;
 	let lectureSlideQuestionDrafts: LectureSlideQuestionDraft[] = [];
@@ -1149,12 +1171,45 @@
 			lectureSlideDeckIdChanged ||
 			lectureSlidePagesChanged ||
 			lectureSlideQuestionsChanged ||
+			lectureSlideAdditionalContextFilesChanged ||
 			lectureSlideVoiceChanged ||
 			slideGenerationPromptChanged ||
 			slideNarrationPromptChanged ||
 			regenerateSlideNarrationRequested ||
 			regenerateSlideQuestionsRequested ||
 			regenerateSlideAudioRequested);
+	$: lectureSlideFullProcessingTriggeredByFormChanges =
+		isLectureSlideMode && !data.isCreating && lectureSlideDeckIdChanged;
+	$: lectureSlideNarrationTriggeredByFormChanges =
+		isLectureSlideMode &&
+		!data.isCreating &&
+		(lectureSlideFullProcessingTriggeredByFormChanges ||
+			slideNarrationPromptChanged ||
+			lectureSlideAdditionalContextFilesChanged);
+	$: lectureSlideQuestionsTriggeredByFormChanges =
+		isLectureSlideMode &&
+		!data.isCreating &&
+		(lectureSlideFullProcessingTriggeredByFormChanges ||
+			slideGenerationPromptChanged ||
+			lectureSlideAdditionalContextFilesChanged);
+	$: lectureSlideAudioTriggeredByFormChanges =
+		isLectureSlideMode &&
+		!data.isCreating &&
+		!lectureSlideNarrationTriggeredByFormChanges &&
+		(lectureSlideVoiceChanged || lectureSlidePagesChanged);
+	$: if (
+		(lectureSlideNarrationTriggeredByFormChanges ||
+			lectureSlideFullProcessingTriggeredByFormChanges) &&
+		regenerateSlideAudioRequested
+	) {
+		regenerateSlideAudioRequested = false;
+	}
+	$: lectureSlideAudioRegenerateButtonPressed =
+		regenerateSlideAudioRequested || lectureSlideAudioTriggeredByFormChanges;
+	$: lectureSlideNarrationRegenerateButtonPressed =
+		regenerateSlideNarrationRequested || lectureSlideNarrationTriggeredByFormChanges;
+	$: lectureSlideQuestionsRegenerateButtonPressed =
+		regenerateSlideQuestionsRequested || lectureSlideQuestionsTriggeredByFormChanges;
 	$: saveButtonLabel = isLectureSlideMode
 		? lectureSlideSaveTriggersProcessing
 			? 'Save & generate'
@@ -1196,7 +1251,7 @@
 		voiceId.trim().length > 0 &&
 		voiceId.trim() !== currentVoiceId.trim() &&
 		voiceId.trim() !== lastValidatedVoiceId;
-	$: if (!hasSetLectureSlidePageDrafts && !lectureSlideConfigLoadError) {
+	$: if (!hasSetLectureSlidePageDrafts && lectureSlideConfigReady && !lectureSlideConfigLoadError) {
 		lectureSlidePageDrafts = (data.lectureSlideConfig?.pages || []).map((page) => ({
 			position: page.position,
 			user_notes: page.user_notes || '',
@@ -1204,17 +1259,31 @@
 		}));
 		hasSetLectureSlidePageDrafts = true;
 	}
-	$: if (!hasSetLectureSlideQuestionDrafts && !lectureSlideConfigLoadError) {
+	$: if (
+		!hasSetLectureSlideQuestionDrafts &&
+		lectureSlideConfigReady &&
+		!lectureSlideConfigLoadError
+	) {
 		hydrateLectureSlideQuestionDrafts(
 			currentLectureSlideQuestionDraftInputs(data.lectureSlideConfig)
 		);
 	}
-	$: if (!hasSetSlideGenerationPrompt && !lectureSlideConfigLoadError) {
+	$: if (
+		!hasSetLectureSlideAdditionalContextFiles &&
+		lectureSlideConfigReady &&
+		!lectureSlideConfigLoadError
+	) {
+		lectureSlideAdditionalContextFiles = [
+			...(currentLectureSlideDeck?.additional_context_files || [])
+		];
+		hasSetLectureSlideAdditionalContextFiles = true;
+	}
+	$: if (!hasSetSlideGenerationPrompt && lectureSlideConfigReady && !lectureSlideConfigLoadError) {
 		slideGenerationPrompt =
 			data.lectureSlideConfig?.generation_prompt || lectureSlideDefaultGenerationPrompt;
 		hasSetSlideGenerationPrompt = true;
 	}
-	$: if (!hasSetSlideNarrationPrompt && !lectureSlideConfigLoadError) {
+	$: if (!hasSetSlideNarrationPrompt && lectureSlideConfigReady && !lectureSlideConfigLoadError) {
 		slideNarrationPrompt =
 			data.lectureSlideConfig?.narration_prompt || lectureSlideDefaultNarrationPrompt;
 		hasSetSlideNarrationPrompt = true;
@@ -1246,6 +1315,7 @@
 		}))
 	);
 	$: lectureSlidePagesChanged =
+		hasSetLectureSlidePageDrafts &&
 		JSON.stringify(lectureSlidePageDrafts) !== currentLectureSlidePagesNormalized;
 	$: currentLectureSlideQuestionsNormalized = JSON.stringify(
 		sortLectureSlideQuestionComparables(
@@ -1260,15 +1330,34 @@
 		)
 	);
 	$: lectureSlideQuestionsChanged =
+		hasSetLectureSlideQuestionDrafts &&
 		lectureSlideQuestionsNormalized !== currentLectureSlideQuestionsNormalized;
+	$: currentLectureSlideAdditionalContextFileIds = JSON.stringify(
+		(currentLectureSlideDeck?.additional_context_files || []).map((file) => file.id)
+	);
+	$: lectureSlideAdditionalContextFileIds = JSON.stringify(
+		lectureSlideAdditionalContextFiles.map((file) => file.id)
+	);
+	$: lectureSlideAdditionalContextFilesChanged =
+		hasSetLectureSlideAdditionalContextFiles &&
+		lectureSlideAdditionalContextFileIds !== currentLectureSlideAdditionalContextFileIds;
+	$: lectureSlideAdditionalContextTotalSize =
+		(selectedLectureSlideDeck?.size || 0) +
+		lectureSlideAdditionalContextFiles.reduce((total, file) => total + file.size, 0);
 	$: lectureSlideDeckIdChanged =
 		(selectedLectureSlideDeck?.id ?? null) !== (currentLectureSlideDeck?.id ?? null);
 	$: originalSlideGenerationPrompt =
 		data.lectureSlideConfig?.generation_prompt || lectureSlideDefaultGenerationPrompt;
 	$: originalSlideNarrationPrompt =
 		data.lectureSlideConfig?.narration_prompt || lectureSlideDefaultNarrationPrompt;
-	$: slideGenerationPromptChanged = slideGenerationPrompt !== originalSlideGenerationPrompt;
-	$: slideNarrationPromptChanged = slideNarrationPrompt !== originalSlideNarrationPrompt;
+	$: slideGenerationPromptChanged =
+		hasSetSlideGenerationPrompt && slideGenerationPrompt !== originalSlideGenerationPrompt;
+	$: slideNarrationPromptChanged =
+		hasSetSlideNarrationPrompt && slideNarrationPrompt !== originalSlideNarrationPrompt;
+	$: slideGenerationPromptEditedFromDefault =
+		slideGenerationPrompt !== lectureSlideDefaultGenerationPrompt;
+	$: slideNarrationPromptEditedFromDefault =
+		slideNarrationPrompt !== lectureSlideDefaultNarrationPrompt;
 	$: lectureSlideVoiceChanged = voiceId.trim() !== currentVoiceId.trim();
 	$: lectureSlideSourceUrl =
 		selectedLectureSlideDeck && data.class?.id
@@ -2718,6 +2807,9 @@
 		if (lectureSlideQuestionsChanged) {
 			modifiedFields.push('lecture slide questions');
 		}
+		if (lectureSlideAdditionalContextFilesChanged) {
+			modifiedFields.push('lecture slide context files');
+		}
 		if (slideGenerationPromptChanged) {
 			modifiedFields.push('question generation prompt');
 		}
@@ -2777,6 +2869,17 @@
 		} else {
 			fileSearchCodeInterpreterUnusedFiles.push(...allCIPrivateFiles.map((f) => f.id));
 		}
+		const selectedLectureSlideContextIds = new Set(
+			lectureSlideAdditionalContextFiles.map((file) => file.id)
+		);
+		const removedPersistedLectureSlideContextFiles = isLectureSlideMode
+			? (currentLectureSlideDeck?.additional_context_files || [])
+					.filter((file) => !selectedLectureSlideContextIds.has(file.id))
+					.map((file) => file.file_object_id)
+			: [];
+		const lectureSlideAdditionalContextUnusedFiles = lectureSlideAdditionalContextUploadedFiles
+			.filter((file) => !isLectureSlideMode || !selectedLectureSlideContextIds.has(file.id))
+			.map((file) => file.file_object_id);
 		if (
 			includeTooling &&
 			webSearchToolSelect &&
@@ -2896,6 +2999,9 @@
 				? (selectedLectureSlideDeck?.id ?? undefined)
 				: undefined,
 			lecture_slide_page_notes: isLectureSlideMode ? lectureSlidePageDrafts : undefined,
+			lecture_slide_additional_context_file_ids: isLectureSlideMode
+				? lectureSlideAdditionalContextFiles.map((file) => file.id)
+				: undefined,
 			lecture_slide_questions: isLectureSlideMode
 				? lectureSlideQuestionDrafts.map(lectureSlideQuestionDraftToInput)
 				: undefined,
@@ -2919,7 +3025,14 @@
 			assistant_should_message_first: assistantShouldMessageFirst,
 			allow_lesson_timeline_bypass: isLectureMode ? allowLessonTimelineBypass : undefined,
 			create_classic_assistant: createClassicAssistant,
-			deleted_private_files: [...$trashPrivateFileIds, ...fileSearchCodeInterpreterUnusedFiles],
+			deleted_private_files: [
+				...new Set([
+					...$trashPrivateFileIds,
+					...fileSearchCodeInterpreterUnusedFiles,
+					...removedPersistedLectureSlideContextFiles,
+					...lectureSlideAdditionalContextUnusedFiles
+				])
+			],
 			should_record_user_information: shouldRecordNameOrVoice,
 			disable_prompt_randomization: disablePromptRandomization,
 			allow_user_file_uploads: allowUserFileUploads,
@@ -3111,6 +3224,17 @@
 				})
 			);
 			lectureSlideQuestionDrafts = [];
+			const uploadedContextFileObjectIds = uploadedLectureSlideContextFileObjectIds();
+			const discardedUploadedContextFiles = lectureSlideAdditionalContextFiles.filter((file) =>
+				uploadedContextFileObjectIds.has(file.file_object_id)
+			);
+			if (discardedUploadedContextFiles.length > 0) {
+				$trashPrivateFileIds = [
+					...$trashPrivateFileIds,
+					...discardedUploadedContextFiles.map((file) => file.file_object_id)
+				];
+			}
+			lectureSlideAdditionalContextFiles = [];
 			selectedLectureSlideQuestionClientId = null;
 			hasSetLectureSlideQuestionDrafts = true;
 			selectedLectureSlidePosition = 0;
@@ -3134,6 +3258,113 @@
 		}
 		await uploadLectureSlideDraft(file);
 		target.value = '';
+	};
+
+	const uploadLectureSlideAdditionalContextFiles = async (files: FileList | File[]) => {
+		const selectedFiles = Array.from(files);
+		if (selectedFiles.length === 0) {
+			return;
+		}
+		uploadingLectureSlideContext = true;
+		lectureSlideContextUploadProgress = 0;
+		try {
+			for (const file of selectedFiles) {
+				if (!lectureSlideAdditionalContextFileFilter(file)) {
+					sadToast(`Could not upload ${file.name}:\nFile type is not supported.`);
+					continue;
+				}
+				if (file.size >= lectureSlideOpenAIInputFileMaxBytes) {
+					sadToast(
+						`Could not upload ${file.name}:\nEach file must be under ${lectureSlideOpenAIInputFileMaxLabel}.`
+					);
+					continue;
+				}
+				const currentTotal =
+					(selectedLectureSlideDeck?.size || 0) +
+					lectureSlideAdditionalContextFiles.reduce((total, item) => total + item.size, 0);
+				if (currentTotal + file.size >= lectureSlideOpenAIInputFileMaxBytes) {
+					sadToast(
+						`Could not upload ${file.name}:\nThe slide PDF and additional context files must total under ${lectureSlideOpenAIInputFileMaxLabel}.`
+					);
+					continue;
+				}
+				const uploadInfo =
+					data.isCreating || !data.assistantId
+						? api.uploadLectureSlideAdditionalContextFile(fetch, data.class.id, file, {
+								onProgress: (progress) => {
+									lectureSlideContextUploadProgress = progress;
+								}
+							})
+						: api.uploadAssistantLectureSlideAdditionalContextFile(
+								fetch,
+								data.class.id,
+								data.assistantId,
+								file,
+								{
+									onProgress: (progress) => {
+										lectureSlideContextUploadProgress = progress;
+									}
+								}
+							);
+				let uploadedContextFile;
+				try {
+					uploadedContextFile = await uploadInfo.promise;
+				} catch (error) {
+					const detail =
+						typeof error === 'object' &&
+						error !== null &&
+						'error' in error &&
+						typeof error.error === 'object' &&
+						error.error !== null &&
+						'detail' in error.error &&
+						typeof error.error.detail === 'string'
+							? error.error.detail
+							: error instanceof Error
+								? error.message
+								: 'Unknown error';
+					sadToast(`Could not upload ${file.name}:\n${detail}`);
+					continue;
+				}
+				if ('error' in uploadedContextFile) {
+					sadToast(
+						`Could not upload ${file.name}:\n${uploadedContextFile.error.detail || 'Unknown error'}`
+					);
+					continue;
+				}
+				lectureSlideAdditionalContextFiles = [
+					...lectureSlideAdditionalContextFiles,
+					uploadedContextFile
+				];
+				lectureSlideAdditionalContextUploadedFiles = [
+					...lectureSlideAdditionalContextUploadedFiles,
+					uploadedContextFile
+				];
+			}
+		} finally {
+			uploadingLectureSlideContext = false;
+			lectureSlideContextUploadProgress = 0;
+		}
+	};
+
+	const handleLectureSlideAdditionalContextFileChange = async (event: Event) => {
+		const target = event.target as HTMLInputElement;
+		if (!target.files?.length) {
+			return;
+		}
+		await uploadLectureSlideAdditionalContextFiles(target.files);
+		target.value = '';
+	};
+
+	const removeLectureSlideAdditionalContextFile = (contextFileId: number) => {
+		const contextFile = lectureSlideAdditionalContextFiles.find(
+			(file) => file.id === contextFileId
+		);
+		if (contextFile && uploadedLectureSlideContextFileObjectIds().has(contextFile.file_object_id)) {
+			$trashPrivateFileIds = [...$trashPrivateFileIds, contextFile.file_object_id];
+		}
+		lectureSlideAdditionalContextFiles = lectureSlideAdditionalContextFiles.filter(
+			(file) => file.id !== contextFileId
+		);
 	};
 
 	const updateLectureSlidePageDraft = (
@@ -3565,6 +3796,12 @@
 				$loadingMessage = '';
 				return;
 			}
+			if (uploadingLectureSlideContext) {
+				sadToast('Please wait for lecture slide context uploads to finish before saving.');
+				$loading = false;
+				$loadingMessage = '';
+				return;
+			}
 
 			const selectedLectureSlideDeckId = selectedLectureSlideDeck?.id ?? null;
 			if (!selectedLectureSlideDeckId) {
@@ -3601,6 +3838,7 @@
 				lectureSlideDeckIdChanged ||
 				lectureSlidePagesChanged ||
 				lectureSlideQuestionsChanged ||
+				lectureSlideAdditionalContextFilesChanged ||
 				lectureSlideVoiceChanged ||
 				slideGenerationPromptChanged ||
 				slideNarrationPromptChanged ||
@@ -3613,6 +3851,9 @@
 			if (data.isCreating || lectureSlideFieldsChanged) {
 				params.lecture_slide_deck_id = selectedLectureSlideDeckId;
 				params.lecture_slide_page_notes = lectureSlidePageDrafts;
+				params.lecture_slide_additional_context_file_ids = lectureSlideAdditionalContextFiles.map(
+					(file) => file.id
+				);
 				if (shouldSubmitLectureSlideQuestions) {
 					params.lecture_slide_questions = lectureSlideQuestionDrafts.map(
 						lectureSlideQuestionDraftToInput
@@ -3629,6 +3870,7 @@
 			} else {
 				delete params.lecture_slide_deck_id;
 				delete params.lecture_slide_page_notes;
+				delete params.lecture_slide_additional_context_file_ids;
 				delete params.lecture_slide_questions;
 				delete params.voice_id;
 				delete params.generation_prompt;
@@ -3732,11 +3974,16 @@
 			const filesToDelete = [...$privateUploadFSFileInfo, ...$privateUploadCIFileInfo]
 				.filter((f) => f.state === 'success')
 				.map((f) => f.response as ServerFile);
+			const fileIdsToDelete = [
+				...$trashPrivateFileIds,
+				...filesToDelete.map((file) => file.id),
+				...lectureSlideAdditionalContextUploadedFiles.map((file) => file.file_object_id)
+			];
 
-			if (filesToDelete.length) {
+			if (fileIdsToDelete.length) {
 				$loadingMessage = 'Cleaning up files you uploaded...';
 				$loading = true;
-				await deletePrivateFiles(filesToDelete.map((f) => f.id));
+				await deletePrivateFiles([...new Set(fileIdsToDelete)]);
 				$loading = false;
 				$loadingMessage = '';
 			}
@@ -4834,6 +5081,70 @@
 						{/if}
 					{/if}
 				</div>
+				<div class="col-span-2 mb-4">
+					<div class="flex items-center justify-between gap-3">
+						<div>
+							<Label for="lecture_slide_additional_context_upload">Additional context</Label>
+							<Helper class="pb-1"
+								>Optional files used while generating slide questions, narration, and slide chat
+								answers.</Helper
+							>
+						</div>
+						<div class="text-xs text-gray-500">
+							{humanSize(lectureSlideAdditionalContextTotalSize)} / {lectureSlideOpenAIInputFileMaxLabel}
+						</div>
+					</div>
+					{#if lectureSlideAdditionalContextFiles.length > 0}
+						<div class="mb-3 flex flex-col gap-2">
+							{#each lectureSlideAdditionalContextFiles as contextFile (contextFile.id)}
+								<div
+									class="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2"
+								>
+									<div class="min-w-0">
+										<div class="truncate text-sm font-medium text-gray-900">
+											{contextFile.filename}
+										</div>
+										<div class="text-xs text-gray-500">
+											{humanSize(contextFile.size)} &middot; {contextFile.content_type}
+										</div>
+									</div>
+									<Button
+										type="button"
+										color="light"
+										size="xs"
+										disabled={preventEdits || uploadingLectureSlideContext}
+										aria-label={`Remove ${contextFile.filename}`}
+										title={`Remove ${contextFile.filename}`}
+										onclick={() => removeLectureSlideAdditionalContextFile(contextFile.id)}
+									>
+										<TrashBinOutline class="h-4 w-4" />
+									</Button>
+								</div>
+							{/each}
+						</div>
+					{/if}
+					<ButtonGroup class="w-full md:w-auto">
+						<InputAddon>
+							<FilePdfOutline class="h-6 w-6" />
+						</InputAddon>
+						<Input
+							id="lecture_slide_additional_context_upload"
+							type="file"
+							multiple
+							accept={lectureSlideAdditionalContextAccept}
+							disabled={preventEdits || uploadingLectureSlideContext || !selectedLectureSlideDeck}
+							onchange={handleLectureSlideAdditionalContextFileChange}
+							defaultClass="block w-full disabled:cursor-not-allowed disabled:opacity-50 rtl:text-right"
+						/>
+					</ButtonGroup>
+					{#if uploadingLectureSlideContext}
+						<Helper class="pt-1"
+							>Uploading{lectureSlideContextUploadProgress
+								? ` ${Math.round(lectureSlideContextUploadProgress)}%`
+								: '...'}</Helper
+						>
+					{/if}
+				</div>
 			{/if}
 			<div class="col-span-2 mb-4">
 				<div class="flex items-center gap-2">
@@ -5676,12 +5987,31 @@
 							{#if isLectureSlideMode}
 								<hr />
 								<div class="col-span-2 mb-1">
-									<Label for="slide_generation_prompt" class="mb-0 text-gray-800"
-										>Question Generation Instructions</Label
-									>
-									<Helper class="pb-1"
-										>Used to generate knowledge checks for the slide lesson.</Helper
-									>
+									<div class="flex items-end justify-between gap-3">
+										<div>
+											<div class="flex items-center gap-2">
+												<Label for="slide_generation_prompt" class="mb-0 text-gray-800"
+													><div class="flex flex-row gap-1">
+														<div>Question Generation Instructions</div>
+														{#if slideGenerationPromptEditedFromDefault}<div>&middot;</div>
+															<div class="text-gray-500">Edited from default</div>{/if}
+													</div></Label
+												>
+											</div>
+											<Helper class="pb-1"
+												>Used to generate knowledge checks for the slide lesson.</Helper
+											>
+										</div>
+										<button
+											type="button"
+											class="pb-1 text-xs text-blue-800 hover:underline disabled:cursor-not-allowed disabled:text-gray-400 disabled:no-underline"
+											disabled={preventEdits ||
+												slideGenerationPrompt === lectureSlideDefaultGenerationPrompt}
+											onclick={() => {
+												slideGenerationPrompt = lectureSlideDefaultGenerationPrompt;
+											}}>Reset to default</button
+										>
+									</div>
 									<Textarea
 										id="slide_generation_prompt"
 										name="slide_generation_prompt"
@@ -5692,12 +6022,31 @@
 									/>
 								</div>
 								<div class="col-span-2 mb-1">
-									<Label for="slide_narration_prompt" class="mb-0 text-gray-800"
-										>Narration Instructions</Label
-									>
-									<Helper class="pb-1"
-										>Used to generate narration from each slide and author notes.</Helper
-									>
+									<div class="flex items-end justify-between gap-3">
+										<div>
+											<div class="flex items-center gap-2">
+												<Label for="slide_narration_prompt" class="mb-0 text-gray-800"
+													><div class="flex flex-row gap-1">
+														<div>Narration Instructions</div>
+														{#if slideNarrationPromptEditedFromDefault}<div>&middot;</div>
+															<div class="text-gray-500">Edited from default</div>{/if}
+													</div></Label
+												>
+											</div>
+											<Helper class="pb-1"
+												>Used to generate narration from each slide and author notes.</Helper
+											>
+										</div>
+										<button
+											type="button"
+											class="pb-1 text-xs text-blue-800 hover:underline disabled:cursor-not-allowed disabled:text-gray-400 disabled:no-underline"
+											disabled={preventEdits ||
+												slideNarrationPrompt === lectureSlideDefaultNarrationPrompt}
+											onclick={() => {
+												slideNarrationPrompt = lectureSlideDefaultNarrationPrompt;
+											}}>Reset to default</button
+										>
+									</div>
 									<Textarea
 										id="slide_narration_prompt"
 										name="slide_narration_prompt"
@@ -5712,13 +6061,11 @@
 										<div class="flex flex-wrap items-center gap-3">
 											<button
 												type="button"
-												class={`${regenerateSlideAudioRequested || lectureSlideVoiceChanged || lectureSlidePagesChanged ? 'border-blue-300 bg-blue-100 font-semibold text-blue-800 shadow-inner shadow-blue-200' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'} inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-70`}
+												class={`${lectureSlideAudioRegenerateButtonPressed ? 'border-blue-300 bg-blue-100 font-semibold text-blue-800 shadow-inner shadow-blue-200' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'} inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-70`}
 												disabled={preventEdits ||
-													lectureSlideVoiceChanged ||
-													lectureSlidePagesChanged}
-												aria-pressed={regenerateSlideAudioRequested ||
-													lectureSlideVoiceChanged ||
-													lectureSlidePagesChanged}
+													lectureSlideAudioTriggeredByFormChanges ||
+													lectureSlideNarrationTriggeredByFormChanges}
+												aria-pressed={lectureSlideAudioRegenerateButtonPressed}
 												onclick={() => {
 													regenerateSlideAudioRequested = !regenerateSlideAudioRequested;
 												}}
@@ -5733,10 +6080,9 @@
 										<div class="flex flex-wrap items-center gap-3">
 											<button
 												type="button"
-												class={`${regenerateSlideNarrationRequested || slideNarrationPromptChanged ? 'border-blue-300 bg-blue-100 font-semibold text-blue-800 shadow-inner shadow-blue-200' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'} inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-70`}
-												disabled={preventEdits || slideNarrationPromptChanged}
-												aria-pressed={regenerateSlideNarrationRequested ||
-													slideNarrationPromptChanged}
+												class={`${lectureSlideNarrationRegenerateButtonPressed ? 'border-blue-300 bg-blue-100 font-semibold text-blue-800 shadow-inner shadow-blue-200' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'} inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-70`}
+												disabled={preventEdits || lectureSlideNarrationTriggeredByFormChanges}
+												aria-pressed={lectureSlideNarrationRegenerateButtonPressed}
 												onclick={() => {
 													regenerateSlideNarrationRequested = !regenerateSlideNarrationRequested;
 												}}
@@ -5751,10 +6097,9 @@
 										<div class="flex flex-wrap items-center gap-3">
 											<button
 												type="button"
-												class={`${regenerateSlideQuestionsRequested || slideGenerationPromptChanged ? 'border-blue-300 bg-blue-100 font-semibold text-blue-800 shadow-inner shadow-blue-200' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'} inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-70`}
-												disabled={preventEdits || slideGenerationPromptChanged}
-												aria-pressed={regenerateSlideQuestionsRequested ||
-													slideGenerationPromptChanged}
+												class={`${lectureSlideQuestionsRegenerateButtonPressed ? 'border-blue-300 bg-blue-100 font-semibold text-blue-800 shadow-inner shadow-blue-200' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'} inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-70`}
+												disabled={preventEdits || lectureSlideQuestionsTriggeredByFormChanges}
+												aria-pressed={lectureSlideQuestionsRegenerateButtonPressed}
 												onclick={() => {
 													regenerateSlideQuestionsRequested = !regenerateSlideQuestionsRequested;
 												}}
@@ -6915,11 +7260,20 @@
 				pill
 				class="border border-orange bg-orange text-white hover:bg-orange-dark"
 				type="submit"
-				disabled={$loading || uploadingFSPrivate || uploadingCIPrivate || uploadingLectureVideo}
-				>{saveButtonLabel}</Button
+				disabled={$loading ||
+					uploadingFSPrivate ||
+					uploadingCIPrivate ||
+					uploadingLectureVideo ||
+					uploadingLectureSlides ||
+					uploadingLectureSlideContext}>{saveButtonLabel}</Button
 			>
 			<Button
-				disabled={$loading || uploadingFSPrivate || uploadingCIPrivate || uploadingLectureVideo}
+				disabled={$loading ||
+					uploadingFSPrivate ||
+					uploadingCIPrivate ||
+					uploadingLectureVideo ||
+					uploadingLectureSlides ||
+					uploadingLectureSlideContext}
 				href={`/group/${data.class.id}/assistant`}
 				color="red"
 				pill
