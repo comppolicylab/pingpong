@@ -295,6 +295,8 @@ async def test_single_turn_creates_run_and_messages(
         assert asst_msg.role == schemas.MessageRole.ASSISTANT
         assert asst_msg.assistant_id == 1
         assert asst_msg.user_id is None
+        assert user_msg.message_metadata == {"created_by_m15_v3_migration_part_1": True}
+        assert asst_msg.message_metadata == {"created_by_m15_v3_migration_part_1": True}
         assert user_msg.run_id == run.id and asst_msg.run_id == run.id
 
 
@@ -818,6 +820,7 @@ async def test_non_chat_and_v1_threads_are_skipped(
         assert await _all_messages(session, 1) == []
         assert await _all_messages(session, 2) == []
         # No OpenAI fetch happened at all (no eligible assistants).
+        assert client.message_calls == []
         assert client.retrieved_run_ids == []
 
 

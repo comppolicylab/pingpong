@@ -8345,7 +8345,7 @@ class Message(Base):
     @classmethod
     async def get_by_openai_message_id(
         cls, session: AsyncSession, message_id: str
-    ) -> "Message" | None:
+    ) -> Optional["Message"]:
         stmt = select(Message).where(Message.message_id == message_id)
         return await session.scalar(stmt)
 
@@ -8601,7 +8601,7 @@ class Run(Base):
     @classmethod
     async def get_by_openai_run_id(
         cls, session: AsyncSession, openai_run_id: str
-    ) -> "Run" | None:
+    ) -> Optional["Run"]:
         stmt = select(Run).where(Run.run_id == openai_run_id)
         return await session.scalar(stmt)
 

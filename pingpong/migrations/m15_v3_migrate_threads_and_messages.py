@@ -46,7 +46,6 @@ async def migrate_threads_and_messages_to_v3(session: AsyncSession) -> None:
         for assistant in assistants:
             async for thread in _v2_threads_for_assistant(session, assistant.id):
                 await _migrate_thread(session, openai_client, thread, assistant)
-                await session.flush()
             await session.commit()
 
 
@@ -197,7 +196,6 @@ async def _migrate_thread(
             prev_output_index = await _store_message(
                 session,
                 thread,
-                assistant,
                 message,
                 local_run,
                 prev_output_index,
@@ -268,8 +266,10 @@ async def _store_turn_run(
         placeholder = turn.user_message or turn.assistant_messages[0]
         fields = _placeholder_run_fields(placeholder)
 
-    existing = await _find_existing_turn_run(session, turn)
-    return await _upsert_run(session, thread, assistant, existing, fields)
+    existing_run = await _find_existing_turn_run(session, turn)
+    return await _upsert_run(
+        session, thread, assistant, turn.user_message, existing_run, fields
+    )
 
 
 async def _find_existing_turn_run(
@@ -295,13 +295,14 @@ async def _upsert_run(
     session: AsyncSession,
     thread: models.Thread,
     assistant: models.Assistant,
+    openai_message: Message | None,
     run: models.Run | None,
     fields: dict,
 ) -> models.Run:
     values = dict(
         thread_id=thread.id,
         assistant_id=assistant.id,
-        creator_id=assistant.creator_id,
+        creator_id=_maybe_extract_user_id(openai_message),
         model=assistant.model,
         temperature=assistant.temperature,
         instructions=thread.instructions,
@@ -359,13 +360,13 @@ def _placeholder_run_fields(openai_message: Message) -> dict:
 async def _store_message(
     session: AsyncSession,
     thread: models.Thread,
-    assistant: models.Assistant,
     openai_message: Message,
     local_run: models.Run,
     prev_output_index: int,
 ) -> int:
     prev_output_index += 1
     fields = {
+        "message_metadata": {"created_by_m15_v3_migration_part_1": True},
         "message_status": MessageStatus(openai_message.status),
         "role": MessageRole(openai_message.role),
         "created": _require_dt(openai_message.created_at),
@@ -382,7 +383,11 @@ async def _store_message(
     existing = await models.Message.get_by_openai_message_id(session, openai_message.id)
     if existing is None:
         await models.Message.create(
-            session, {"message_id": openai_message.id, **fields}
+            session,
+            {
+                "message_id": openai_message.id,
+                **fields,
+            },
         )
     else:
         for key, value in fields.items():
@@ -392,8 +397,8 @@ async def _store_message(
     return prev_output_index
 
 
-def _maybe_extract_user_id(openai_message: Message) -> int | None:
-    if openai_message.role != "user":
+def _maybe_extract_user_id(openai_message: Message | None) -> int | None:
+    if not openai_message or openai_message.role != "user":
         return None
     metadata = openai_message.metadata or {}
     raw_user_id = metadata.get("user_id")
@@ -407,6 +412,6 @@ def _maybe_extract_user_id(openai_message: Message) -> int | None:
     except (ValueError, TypeError):
         logger.warning(
             f"Couldn't get user_id from OpenAI message with id {openai_message.id} "
-            "because it is couldn't be converted to an integer"
+            "because it couldn't be converted to an integer"
         )
         return None
