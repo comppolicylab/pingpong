@@ -19,6 +19,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # Resolves CodeQL's py/unused-global-variable
+    _ = revision, down_revision, branch_labels, depends_on
+
     op.create_table(
         "lecture_slide_additional_context_files",
         sa.Column("id", sa.Integer(), nullable=False),
