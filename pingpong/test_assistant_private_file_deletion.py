@@ -64,6 +64,7 @@ class FailingDeleteStore:
         raise RuntimeError(f"could not delete {key}")
 
 
+@pytest.mark.asyncio
 async def test_delete_orphaned_s3_files_raises_on_store_delete_failure(
     db, config, monkeypatch
 ):
@@ -83,6 +84,7 @@ async def test_delete_orphaned_s3_files_raises_on_store_delete_failure(
         assert await session.get(models.S3File, s3_file_id) is not None
 
 
+@pytest.mark.asyncio
 @with_user(123)
 @with_authz(grants=[("user:123", "can_edit", "assistant:11")])
 async def test_update_assistant_rejects_deleting_file_used_by_other_assistant(
@@ -181,6 +183,7 @@ async def test_update_assistant_rejects_deleting_file_used_by_other_assistant(
         assert existing_file is not None
 
 
+@pytest.mark.asyncio
 @with_user(123)
 @with_authz(grants=[("user:123", "can_edit", "assistant:11")])
 async def test_update_assistant_rejects_non_private_deleted_private_file(

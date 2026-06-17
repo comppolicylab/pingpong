@@ -209,12 +209,55 @@ async def create_lecture_slide_additional_context_file(
             content_length=upload_size,
         )
     except BaseException:
-        with contextlib.suppress(Exception):
+        try:
             await openai_client.files.delete(file_id)
+        except Exception:
+            logger.exception(
+                "Failed to rollback OpenAI context file upload. file_id=%s",
+                file_id,
+            )
         if store_key is not None:
-            with contextlib.suppress(Exception):
+            try:
                 await config.file_store.store.delete(store_key)
+            except Exception:
+                logger.exception(
+                    "Failed to rollback stored context file after create failure. key=%s",
+                    store_key,
+                )
         raise
+
+
+async def cleanup_lecture_slide_additional_context_file_upload(
+    session: AsyncSession,
+    context_file: models.LectureSlideAdditionalContextFile,
+) -> None:
+    file = await models.File.get_by_id_with_delete_context(
+        session, context_file.file_object_id
+    )
+    if file is None:
+        return
+
+    try:
+        openai_client = await get_openai_client_by_class_id(
+            session, context_file.class_id
+        )
+        await openai_client.files.delete(file.file_id)
+    except Exception:
+        logger.exception(
+            "Failed to cleanup OpenAI context file after authz failure. file_object_id=%s openai_file_id=%s",
+            file.id,
+            file.file_id,
+        )
+
+    if config.file_store and file.s3_file is not None:
+        try:
+            await config.file_store.store.delete(file.s3_file.key)
+        except Exception:
+            logger.exception(
+                "Failed to cleanup stored context file after authz failure. file_object_id=%s key=%s",
+                file.id,
+                file.s3_file.key,
+            )
 
 
 async def lecture_slide_summary_from_model(
@@ -386,7 +429,7 @@ async def apply_lecture_slide_additional_context_files(
     requested_ids = list(dict.fromkeys(int(file_id) for file_id in context_file_ids))
     requested_files = (
         await models.LectureSlideAdditionalContextFile.get_all_by_ids_with_file(
-            session, requested_ids
+            session, requested_ids, for_update=True
         )
     )
     requested_by_id = {
@@ -443,7 +486,7 @@ async def apply_lecture_slide_additional_context_files(
 
     existing_files = (
         await models.LectureSlideAdditionalContextFile.get_all_by_deck_id_with_file(
-            session, deck.id
+            session, deck.id, for_update=True
         )
     )
     existing_by_file_object_id = {

@@ -108,5 +108,10 @@ class LocalArtifactStore(BaseArtifactStore):
             raise ArtifactStoreError(code=500, detail=f"Error reading file: {str(e)}")
 
     async def delete(self, name: str):
-        file_path = Path(self._directory) / name
+        root = Path(self._directory).resolve()
+        file_path = (root / name).resolve()
+        try:
+            file_path.relative_to(root)
+        except ValueError as exc:
+            raise ArtifactStoreError(code=400, detail="Invalid artifact key") from exc
         file_path.unlink(missing_ok=True)

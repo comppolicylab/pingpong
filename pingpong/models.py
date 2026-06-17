@@ -3019,6 +3019,13 @@ class LectureSlideSourceStoredObject(Base):
 
 class LectureSlideAdditionalContextFile(Base):
     __tablename__ = "lecture_slide_additional_context_files"
+    __table_args__ = (
+        UniqueConstraint(
+            "lecture_slide_deck_id",
+            "file_object_id",
+            name="uq_ls_additional_context_deck_file_object",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     lecture_slide_deck_id = Column(
@@ -3089,7 +3096,7 @@ class LectureSlideAdditionalContextFile(Base):
 
     @classmethod
     async def get_all_by_ids_with_file(
-        cls, session: AsyncSession, ids: Sequence[int]
+        cls, session: AsyncSession, ids: Sequence[int], *, for_update: bool = False
     ) -> list["LectureSlideAdditionalContextFile"]:
         ids = [int(id_) for id_ in ids]
         if not ids:
@@ -3099,6 +3106,8 @@ class LectureSlideAdditionalContextFile(Base):
             .where(LectureSlideAdditionalContextFile.id.in_(ids))
             .options(selectinload(LectureSlideAdditionalContextFile.file))
         )
+        if for_update:
+            stmt = stmt.with_for_update()
         context_files = list((await session.scalars(stmt)).all())
         context_file_by_id = {
             context_file.id: context_file for context_file in context_files
@@ -3107,7 +3116,11 @@ class LectureSlideAdditionalContextFile(Base):
 
     @classmethod
     async def get_all_by_deck_id_with_file(
-        cls, session: AsyncSession, lecture_slide_deck_id: int
+        cls,
+        session: AsyncSession,
+        lecture_slide_deck_id: int,
+        *,
+        for_update: bool = False,
     ) -> list["LectureSlideAdditionalContextFile"]:
         stmt = (
             select(LectureSlideAdditionalContextFile)
@@ -3116,7 +3129,13 @@ class LectureSlideAdditionalContextFile(Base):
                 == int(lecture_slide_deck_id)
             )
             .options(selectinload(LectureSlideAdditionalContextFile.file))
+            .order_by(
+                LectureSlideAdditionalContextFile.position.asc(),
+                LectureSlideAdditionalContextFile.id.asc(),
+            )
         )
+        if for_update:
+            stmt = stmt.with_for_update()
         return list((await session.scalars(stmt)).all())
 
     @classmethod
@@ -4754,7 +4773,7 @@ class File(Base):
         cls, session: AsyncSession, id_: int, class_id: int
     ) -> int:
         stmt = (
-            select(func.count())
+            select(func.count(distinct(Assistant.id)))
             .select_from(Assistant)
             .join(
                 code_interpreter_file_assistant_association,
@@ -4770,10 +4789,22 @@ class File(Base):
                 file_vector_store_association.c.vector_store_id == VectorStore.id,
                 isouter=True,
             )
+            .join(
+                LectureSlideDeck,
+                Assistant.lecture_slide_deck_id == LectureSlideDeck.id,
+                isouter=True,
+            )
+            .join(
+                LectureSlideAdditionalContextFile,
+                LectureSlideAdditionalContextFile.lecture_slide_deck_id
+                == LectureSlideDeck.id,
+                isouter=True,
+            )
             .where(
                 or_(
                     file_vector_store_association.c.file_id == id_,
                     code_interpreter_file_assistant_association.c.file_id == id_,
+                    LectureSlideAdditionalContextFile.file_object_id == id_,
                 )
             )
             .where(Assistant.class_id == class_id)
@@ -5747,6 +5778,7 @@ class Assistant(Base):
         params.pop("lecture_video_manifest", None)
         params.pop("lecture_slide_deck_id", None)
         params.pop("lecture_slide_page_notes", None)
+        params.pop("lecture_slide_additional_context_file_ids", None)
         params.pop("lecture_slide_questions", None)
         params.pop("narration_prompt", None)
         params.pop("voice_id", None)

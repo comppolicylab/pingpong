@@ -526,6 +526,8 @@
 	let lectureSlideAdditionalContextUploadedFiles: api.LectureSlideAdditionalContextFileSummary[] =
 		[];
 	let hasSetLectureSlideAdditionalContextFiles = false;
+	const uploadedLectureSlideContextFileObjectIds = () =>
+		new Set(lectureSlideAdditionalContextUploadedFiles.map((file) => file.file_object_id));
 	const lectureSlideOpenAIInputFileMaxBytes = 50 * 1024 * 1024;
 	const lectureSlideOpenAIInputFileMaxLabel = '50 MB';
 	const lectureSlideAdditionalContextAccept = data.uploadInfo.fileTypes({ input_file: true });
@@ -2870,6 +2872,11 @@
 		const selectedLectureSlideContextIds = new Set(
 			lectureSlideAdditionalContextFiles.map((file) => file.id)
 		);
+		const removedPersistedLectureSlideContextFiles = isLectureSlideMode
+			? (currentLectureSlideDeck?.additional_context_files || [])
+					.filter((file) => !selectedLectureSlideContextIds.has(file.id))
+					.map((file) => file.file_object_id)
+			: [];
 		const lectureSlideAdditionalContextUnusedFiles = lectureSlideAdditionalContextUploadedFiles
 			.filter((file) => !isLectureSlideMode || !selectedLectureSlideContextIds.has(file.id))
 			.map((file) => file.file_object_id);
@@ -3022,6 +3029,7 @@
 				...new Set([
 					...$trashPrivateFileIds,
 					...fileSearchCodeInterpreterUnusedFiles,
+					...removedPersistedLectureSlideContextFiles,
 					...lectureSlideAdditionalContextUnusedFiles
 				])
 			],
@@ -3216,10 +3224,14 @@
 				})
 			);
 			lectureSlideQuestionDrafts = [];
-			if (lectureSlideAdditionalContextFiles.length > 0) {
+			const uploadedContextFileObjectIds = uploadedLectureSlideContextFileObjectIds();
+			const discardedUploadedContextFiles = lectureSlideAdditionalContextFiles.filter((file) =>
+				uploadedContextFileObjectIds.has(file.file_object_id)
+			);
+			if (discardedUploadedContextFiles.length > 0) {
 				$trashPrivateFileIds = [
 					...$trashPrivateFileIds,
-					...lectureSlideAdditionalContextFiles.map((file) => file.file_object_id)
+					...discardedUploadedContextFiles.map((file) => file.file_object_id)
 				];
 			}
 			lectureSlideAdditionalContextFiles = [];
@@ -3347,7 +3359,7 @@
 		const contextFile = lectureSlideAdditionalContextFiles.find(
 			(file) => file.id === contextFileId
 		);
-		if (contextFile) {
+		if (contextFile && uploadedLectureSlideContextFileObjectIds().has(contextFile.file_object_id)) {
 			$trashPrivateFileIds = [...$trashPrivateFileIds, contextFile.file_object_id];
 		}
 		lectureSlideAdditionalContextFiles = lectureSlideAdditionalContextFiles.filter(
@@ -5074,7 +5086,8 @@
 						<div>
 							<Label for="lecture_slide_additional_context_upload">Additional context</Label>
 							<Helper class="pb-1"
-								>Optional files used only while generating slide questions and narration.</Helper
+								>Optional files used while generating slide questions, narration, and slide chat
+								answers.</Helper
 							>
 						</div>
 						<div class="text-xs text-gray-500">
@@ -5100,6 +5113,8 @@
 										color="light"
 										size="xs"
 										disabled={preventEdits || uploadingLectureSlideContext}
+										aria-label={`Remove ${contextFile.filename}`}
+										title={`Remove ${contextFile.filename}`}
 										onclick={() => removeLectureSlideAdditionalContextFile(contextFile.id)}
 									>
 										<TrashBinOutline class="h-4 w-4" />
@@ -7249,6 +7264,7 @@
 					uploadingFSPrivate ||
 					uploadingCIPrivate ||
 					uploadingLectureVideo ||
+					uploadingLectureSlides ||
 					uploadingLectureSlideContext}>{saveButtonLabel}</Button
 			>
 			<Button
@@ -7256,6 +7272,7 @@
 					uploadingFSPrivate ||
 					uploadingCIPrivate ||
 					uploadingLectureVideo ||
+					uploadingLectureSlides ||
 					uploadingLectureSlideContext}
 				href={`/group/${data.class.id}/assistant`}
 				color="red"

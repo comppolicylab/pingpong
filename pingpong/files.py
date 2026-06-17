@@ -215,9 +215,15 @@ async def handle_delete_file(
         if remaining == 0:
             await File.delete(session, int_file_id)
             await oai_client.files.delete(remote_file_id)
-            await _delete_orphaned_s3_files(session, candidate_s3_file_ids)
             # 5) Revoke all grants for this file
             await authz.write_safe(revoke=revoke_grants)
+            try:
+                await _delete_orphaned_s3_files(session, candidate_s3_file_ids)
+            except Exception:
+                logger.exception(
+                    "Failed to delete orphaned stored file after deleting file. file_id=%s",
+                    int_file_id,
+                )
     except Exception:
         # If the delete fails, we need to ensure that the grants are restored
         await authz.write_safe(grant=revoke_class_only_grants + revoke_grants)
@@ -316,7 +322,13 @@ async def handle_delete_files(
         elif isinstance(result, Exception):
             await authz.write_safe(grant=revoked_grants + revoked_grants_class_only)
             raise result
-    await _delete_orphaned_s3_files(session, candidate_s3_file_ids)
+    try:
+        await _delete_orphaned_s3_files(session, candidate_s3_file_ids)
+    except Exception:
+        logger.exception(
+            "Failed to delete orphaned stored files after deleting files. file_ids=%s",
+            sanitize_for_log(",".join(str(file_id) for file_id in file_ids_to_delete)),
+        )
 
     return GenericStatus(status="ok")
 
@@ -1381,6 +1393,7 @@ FILE_TYPES = [
         file_search=True,
         code_interpreter=True,
         vision=False,
+        input_file=True,
         extensions=["sh"],
     ),
     FileTypeInfo(

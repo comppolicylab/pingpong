@@ -93,6 +93,7 @@ def test_additional_context_generation_payload_is_separate_user_message():
     ]
 
 
+@pytest.mark.asyncio
 @with_institution(11, "Test Institution")
 async def test_create_lecture_slide_deck_uploads_source_pdf_to_openai(
     db, config, monkeypatch, institution
@@ -164,6 +165,7 @@ async def test_create_lecture_slide_deck_uploads_source_pdf_to_openai(
         assert [row["class_id"] for row in class_ids] == [1]
 
 
+@pytest.mark.asyncio
 @with_institution(11, "Test Institution")
 async def test_create_lecture_slide_additional_context_file_uploads_as_user_data(
     db, config, monkeypatch, institution
@@ -252,6 +254,7 @@ def test_lecture_slide_additional_context_file_validation_uses_mime_type():
     assert exc_info.value.status_code == 400
 
 
+@pytest.mark.asyncio
 @with_user(123)
 @with_institution(11, "Test Institution")
 @with_authz(grants=[("user:123", "can_view", "class:1")])
@@ -298,6 +301,7 @@ async def test_class_upload_info_marks_openai_input_file_mime_types(
     assert types_by_mime["image/webp"]["vision"] is True
 
 
+@pytest.mark.asyncio
 @with_institution(11, "Test Institution")
 async def test_apply_additional_context_files_attaches_to_deck_and_validates_size(
     db, institution
@@ -358,6 +362,36 @@ async def test_apply_additional_context_files_attaches_to_deck_and_validates_siz
                 uploader_id=user.id,
             )
         )
+        oversized_file = await models.File.create(
+            session,
+            {
+                "file_id": "file-oversized-context",
+                "private": True,
+                "uploader_id": user.id,
+                "name": "large-notes.md",
+                "content_type": "text/markdown",
+            },
+            class_id=1,
+        )
+        oversized_context = await models.LectureSlideAdditionalContextFile.create(
+            session,
+            lecture_slide_deck_id=None,
+            file_object_id=oversized_file.id,
+            class_id=class_.id,
+            uploader_id=user.id,
+            position=1,
+            original_filename="large-notes.md",
+            content_type="text/markdown",
+            content_length=lecture_slide_service.OPENAI_INPUT_FILE_MAX_BYTES,
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            await lecture_slide_service.apply_lecture_slide_additional_context_files(
+                session,
+                deck,
+                [draft_context.id, oversized_context.id],
+                uploader_id=user.id,
+            )
+        assert exc_info.value.status_code == 413
         await session.commit()
         deck_id = deck.id
         draft_context_id = draft_context.id
@@ -375,6 +409,7 @@ async def test_apply_additional_context_files_attaches_to_deck_and_validates_siz
         assert attached_files[0].lecture_slide_deck_id == deck_id
 
 
+@pytest.mark.asyncio
 @with_institution(11, "Test Institution")
 async def test_assistant_file_usage_counts_lecture_slide_context_files(db, institution):
     async with db.async_session() as session:
@@ -443,10 +478,15 @@ async def test_assistant_file_usage_counts_lecture_slide_context_files(db, insti
         usage_rows = await models.File.assistant_count_using_files(
             session, [file.id], class_.id
         )
+        usage_count = await models.File.assistant_count_using_file(
+            session, file.id, class_.id
+        )
 
     assert dict(usage_rows) == {file.id: 1}
+    assert usage_count == 1
 
 
+@pytest.mark.asyncio
 @with_institution(11, "Test Institution")
 async def test_apply_additional_context_files_preserves_existing_files_for_other_editor(
     db, institution
@@ -512,6 +552,7 @@ async def test_apply_additional_context_files_preserves_existing_files_for_other
     assert changed is False
 
 
+@pytest.mark.asyncio
 @with_institution(11, "Test Institution")
 async def test_delete_lecture_slide_deck_if_unused_removes_context_rows_explicitly(
     db, institution
@@ -579,6 +620,7 @@ async def test_delete_lecture_slide_deck_if_unused_removes_context_rows_explicit
     assert remaining_context is None
 
 
+@pytest.mark.asyncio
 @with_user(123)
 @with_institution(11, "Test Institution")
 @with_authz(grants=[("user:123", "can_edit", "assistant:1")])
@@ -641,6 +683,7 @@ async def test_upload_assistant_lecture_slide_additional_context_allows_editor(
     assert list(store.stored_files.values()) == [b"# Instructor notes"]
 
 
+@pytest.mark.asyncio
 @with_user(123)
 @with_institution(11, "Test Institution")
 @with_authz(
@@ -744,6 +787,7 @@ async def test_retry_lecture_slide_endpoint_queues_processing_after_failure(
     assert runs[1].attempt_number == 2
 
 
+@pytest.mark.asyncio
 @with_user(123)
 @with_institution(11, "Test Institution")
 @with_authz(
@@ -834,6 +878,7 @@ async def test_lecture_slide_config_returns_pending_question_drafts(
     ]
 
 
+@pytest.mark.asyncio
 @with_institution(11, "Test Institution")
 async def test_apply_lecture_slide_page_notes_handles_unloaded_pages(db, institution):
     async with db.async_session() as session:
@@ -905,6 +950,7 @@ async def test_apply_lecture_slide_page_notes_handles_unloaded_pages(db, institu
     assert page.narration_text == "Narrate this."
 
 
+@pytest.mark.asyncio
 @with_institution(11, "Test Institution")
 async def test_apply_lecture_slide_page_notes_deletes_replaced_narration_audio(
     db, institution, config, monkeypatch, tmp_path
@@ -1005,6 +1051,7 @@ async def test_apply_lecture_slide_page_notes_deletes_replaced_narration_audio(
     assert not (narration_dir / "edited-slide.ogg").exists()
 
 
+@pytest.mark.asyncio
 @with_institution(11, "Test Institution")
 async def test_apply_lecture_slide_question_drafts_uses_model_loaded_context_data(
     db, institution
@@ -1080,6 +1127,7 @@ async def test_apply_lecture_slide_question_drafts_uses_model_loaded_context_dat
     }
 
 
+@pytest.mark.asyncio
 @with_institution(11, "Test Institution")
 async def test_clone_lecture_slide_deck_snapshot_returns_loaded_context_data(
     db, institution
@@ -1124,6 +1172,7 @@ async def test_clone_lecture_slide_deck_snapshot_returns_loaded_context_data(
     assert cloned_deck.context_data == {"manual_questions": []}
 
 
+@pytest.mark.asyncio
 @with_institution(11, "Test Institution")
 async def test_clear_lecture_slide_page_narrations_deletes_unused_audio(
     db, institution, config, monkeypatch, tmp_path
@@ -1216,6 +1265,7 @@ async def test_clear_lecture_slide_page_narrations_deletes_unused_audio(
     assert not (narration_dir / "slide-1.ogg").exists()
 
 
+@pytest.mark.asyncio
 @with_institution(11, "Test Institution")
 async def test_clear_lecture_slide_page_narrations_preserves_shared_audio(
     db, institution, config, monkeypatch, tmp_path
@@ -1322,6 +1372,7 @@ async def test_clear_lecture_slide_page_narrations_preserves_shared_audio(
     assert (narration_dir / "shared-slide.ogg").exists()
 
 
+@pytest.mark.asyncio
 @with_institution(11, "Test Institution")
 async def test_delete_unused_lecture_slide_deck_deletes_page_narration_audio(
     db, institution, config, monkeypatch, tmp_path

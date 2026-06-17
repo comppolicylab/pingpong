@@ -55,6 +55,11 @@ def upgrade() -> None:
             ["uploader_id"],
             ["users.id"],
         ),
+        sa.UniqueConstraint(
+            "lecture_slide_deck_id",
+            "file_object_id",
+            name="uq_ls_additional_context_deck_file_object",
+        ),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(

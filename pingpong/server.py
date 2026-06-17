@@ -9880,12 +9880,20 @@ async def _create_lecture_slide_additional_context_file_response(
         )
     )
     file_target = f"user_file:{context_file.file_object_id}"
-    await request.state["authz"].write(
-        grant=[
-            (f"class:{int(class_id)}", "parent", file_target),
-            (f"user:{request.state['session'].user.id}", "owner", file_target),
-        ]
-    )
+    try:
+        await request.state["authz"].write(
+            grant=[
+                (f"class:{int(class_id)}", "parent", file_target),
+                (f"user:{request.state['session'].user.id}", "owner", file_target),
+            ]
+        )
+    except Exception:
+        await (
+            lecture_slide_service.cleanup_lecture_slide_additional_context_file_upload(
+                request.state["db"], context_file
+            )
+        )
+        raise
     return lecture_slide_service.lecture_slide_context_file_summary_from_model(
         context_file
     )
@@ -13607,7 +13615,7 @@ async def update_assistant(
                     request.state["db"].add(target_lecture_slide_deck)
 
             queued_run = None
-            if needs_full_processing:
+            if needs_full_processing or (needs_narration_text and needs_questions):
                 queued_run = (
                     await lecture_slide_processing.queue_lecture_slide_processing_run(
                         request.state["db"],
@@ -14050,19 +14058,13 @@ async def delete_assistant(
                     lecture_slide_deck_id_to_delete,
                 )
             )
-            context_file_usage_rows = await models.File.assistant_count_using_files(
-                request.state["db"],
-                context_file_ids_to_delete,
-                int(class_id),
+            unused_context_file_ids_to_delete = (
+                await models.File.get_files_not_used_by_assistant(
+                    request.state["db"],
+                    asst.id,
+                    context_file_ids_to_delete,
+                )
             )
-            context_file_usage_counts = {
-                file_id: count for file_id, count in context_file_usage_rows
-            }
-            unused_context_file_ids_to_delete = [
-                file_id
-                for file_id in context_file_ids_to_delete
-                if context_file_usage_counts.get(file_id, 0) == 0
-            ]
             await handle_delete_files(
                 request.state["db"],
                 request.state["authz"],
