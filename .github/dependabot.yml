@@ -52,9 +52,6 @@ updates:
       prefix: "deps(docker)"
     cooldown:
       default-days: 2
-      semver-major-days: 7
-      semver-minor-days: 3
-      semver-patch-days: 1
     groups:
       docker-root:
         patterns:
@@ -69,9 +66,6 @@ updates:
       prefix: "deps(docker)"
     cooldown:
       default-days: 2
-      semver-major-days: 7
-      semver-minor-days: 3
-      semver-patch-days: 1
     groups:
       docker-web:
         patterns:
@@ -86,9 +80,6 @@ updates:
       prefix: "deps(docker)"
     cooldown:
       default-days: 2
-      semver-major-days: 7
-      semver-minor-days: 3
-      semver-patch-days: 1
     groups:
       docker-openfga:
         patterns:
@@ -103,9 +94,6 @@ updates:
       prefix: "deps(compose)"
     cooldown:
       default-days: 2
-      semver-major-days: 7
-      semver-minor-days: 3
-      semver-patch-days: 1
     groups:
       docker-compose:
         patterns:
