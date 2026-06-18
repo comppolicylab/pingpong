@@ -1,0 +1,194 @@
+# Experimental slim server image for ECR Inspector comparison.
+
+FROM ghcr.io/astral-sh/uv:0.11.21-python3.11-trixie@sha256:189770c55a63083d1213b538c075e859e7467a1c8ef59ca142422b2acb152e83 AS builder
+
+ENV UV_COMPILE_BYTECODE=1 \
+      UV_NO_DEV=1
+
+WORKDIR /code
+
+COPY uv.lock pyproject.toml /code/
+
+RUN uv sync --locked --color never
+
+FROM debian:trixie-slim@sha256:1275c5673a6135ff07b289ddafe4e2270dceb08eda14c0c69bb1b93ee25a9416 AS ffmpeg-builder
+
+ARG FFMPEG_VERSION=8.1.2
+
+RUN apt-get update \
+    && apt-get install -y \
+        build-essential \
+        ca-certificates \
+        curl \
+        libgnutls28-dev \
+        libopus-dev \
+        libwebp-dev \
+        nasm \
+        pkg-config \
+        xz-utils \
+        --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /tmp/ffmpeg
+
+RUN curl -fsSL "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" \
+    | tar -xJ --strip-components=1 \
+    && ./configure \
+        --prefix=/opt/ffmpeg \
+        --disable-debug \
+        --disable-doc \
+        --disable-static \
+        --enable-shared \
+        --enable-gnutls \
+        --enable-libopus \
+        --enable-libwebp \
+    && make -j"$(nproc)" \
+    && make install
+
+FROM debian:trixie-slim@sha256:1275c5673a6135ff07b289ddafe4e2270dceb08eda14c0c69bb1b93ee25a9416 AS poppler-builder
+
+ARG POPPLER_VERSION=26.06.0
+
+RUN apt-get update \
+    && apt-get install -y \
+        build-essential \
+        ca-certificates \
+        cmake \
+        curl \
+        libcairo2-dev \
+        libfontconfig-dev \
+        libjpeg-dev \
+        liblcms2-dev \
+        libopenjp2-7-dev \
+        libpng-dev \
+        ninja-build \
+        pkg-config \
+        xz-utils \
+        --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /tmp/poppler
+
+RUN curl -fsSL "https://poppler.freedesktop.org/poppler-${POPPLER_VERSION}.tar.xz" \
+    | tar -xJ --strip-components=1 \
+    && cmake -S . -B build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/opt/poppler \
+        -DENABLE_UTILS=ON \
+        -DENABLE_CPP=OFF \
+        -DENABLE_GLIB=OFF \
+        -DENABLE_QT5=OFF \
+        -DENABLE_QT6=OFF \
+        -DENABLE_LIBCURL=OFF \
+        -DENABLE_LIBTIFF=OFF \
+        -DENABLE_NSS3=OFF \
+        -DENABLE_GPGME=OFF \
+        -DENABLE_BOOST=OFF \
+        -DBUILD_GTK_TESTS=OFF \
+        -DBUILD_QT5_TESTS=OFF \
+        -DBUILD_QT6_TESTS=OFF \
+        -DBUILD_CPP_TESTS=OFF \
+        -DBUILD_MANUAL_TESTS=OFF \
+    && cmake --build build -j"$(nproc)" \
+    && cmake --install build
+
+FROM debian:trixie-slim@sha256:1275c5673a6135ff07b289ddafe4e2270dceb08eda14c0c69bb1b93ee25a9416 AS expat-builder
+
+ARG EXPAT_VERSION=2.8.1
+ARG EXPAT_RELEASE_TAG=R_2_8_1
+
+RUN apt-get update \
+    && apt-get install -y \
+        build-essential \
+        ca-certificates \
+        cmake \
+        curl \
+        xz-utils \
+        --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /tmp/expat
+
+RUN curl -fsSL "https://github.com/libexpat/libexpat/releases/download/${EXPAT_RELEASE_TAG}/expat-${EXPAT_VERSION}.tar.xz" \
+    | tar -xJ --strip-components=1 \
+    && cmake -S . -B build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/opt/expat \
+        -DEXPAT_BUILD_TOOLS=OFF \
+        -DEXPAT_BUILD_EXAMPLES=OFF \
+        -DEXPAT_BUILD_TESTS=OFF \
+        -DEXPAT_BUILD_DOCS=OFF \
+        -DEXPAT_BUILD_PKGCONFIG=OFF \
+        -DEXPAT_SHARED_LIBS=ON \
+    && cmake --build build -j"$(nproc)" \
+    && cmake --install build
+
+FROM python:3.11-slim-trixie@sha256:a01e48f10f90ac3ee65ef6937b9d7c831a3570c81b98d39a547ff09fb359de7f
+
+RUN apt-get update \
+    && apt-get install -y \
+        ca-certificates \
+        libcairo2 \
+        libfontconfig1 \
+        libgnutls30t64 \
+        libjpeg62-turbo \
+        liblcms2-2 \
+        libopenjp2-7 \
+        libopus0 \
+        libpng16-16t64 \
+        libwebp7 \
+        libwebpdecoder3 \
+        libwebpdemux2 \
+        libwebpmux3 \
+        --no-install-recommends \
+    && update-ca-certificates \
+    && rm -rf \
+        /usr/local/lib/python3.11/site-packages/pip \
+        /usr/local/lib/python3.11/site-packages/pip-*.dist-info \
+        /usr/local/lib/python3.11/site-packages/setuptools \
+        /usr/local/lib/python3.11/site-packages/setuptools-*.dist-info \
+        /usr/local/lib/python3.11/site-packages/wheel \
+        /usr/local/lib/python3.11/site-packages/wheel-*.dist-info \
+    && dpkg --purge --force-depends --force-remove-essential perl-base util-linux \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ffmpeg-builder /opt/ffmpeg /opt/ffmpeg
+COPY --from=poppler-builder /opt/poppler /opt/poppler
+COPY --from=expat-builder /opt/expat /opt/expat
+
+ARG SENTRY_RELEASE=""
+
+ENV PYTHONFAULTHANDLER=1 \
+      PYTHONUNBUFFERED=1 \
+      PYTHONHASHSEED=random \
+      NO_COLOR=1 \
+      LD_LIBRARY_PATH="/opt/expat/lib:/opt/ffmpeg/lib:/opt/poppler/lib" \
+      PATH="/code/.venv/bin:/opt/ffmpeg/bin:/opt/poppler/bin:$PATH" \
+      SENTRY_RELEASE=$SENTRY_RELEASE
+
+WORKDIR /code
+
+RUN useradd --create-home --uid 10001 app
+
+RUN dpkg --purge --force-depends --force-remove-essential --force-remove-protected \
+        bsdutils \
+        libblkid1 \
+        libexpat1 \
+        liblastlog2-2 \
+        libmount1 \
+        libsmartcols1 \
+        libuuid1 \
+        login \
+        mount \
+        util-linux
+
+COPY --from=builder --chown=app:app /code/.venv /code/.venv
+
+# Disable uv's sync lockfile checking,
+# since uv is intentionally not present in the runtime image.
+ENV UV_NO_SYNC=1
+
+COPY --chown=app:app . /code
+USER app
+
+CMD ["fastapi", "run", "pingpong", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
