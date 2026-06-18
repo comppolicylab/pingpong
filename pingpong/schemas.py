@@ -555,6 +555,7 @@ class LectureSlideProcessingCancelReason(StrEnum):
     ASSISTANT_DETACHED = "assistant_detached"
     ASSISTANT_DELETED = "assistant_deleted"
     LECTURE_SLIDE_DECK_DELETED = "lecture_slide_deck_deleted"
+    SUPERSEDED_BY_EARLIER_STAGE = "superseded_by_earlier_stage"
 
 
 class LectureVideoSessionState(StrEnum):
@@ -778,7 +779,7 @@ class LectureSlideQuestionOptionView(BaseModel):
     post_answer_text: str | None = None
     continue_slide_position: int | None = Field(None, ge=0)
     continue_slide_offset_ms: int | None = Field(None, ge=0)
-    continue_offset_ms: int = Field(..., ge=0)
+    continue_offset_ms: int | None = Field(None, ge=0)
     correct: bool = False
 
 

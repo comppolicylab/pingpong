@@ -850,6 +850,7 @@ async def queue_lecture_slide_processing_run(
     stage: schemas.LectureSlideProcessingStage = (
         schemas.LectureSlideProcessingStage.SLIDE_ASSET_EXTRACTION
     ),
+    force_manifest_generation: bool = False,
 ) -> models.LectureSlideProcessingRun | None:
     if deck.status == schemas.LectureSlideDeckStatus.FAILED:
         deck.status = schemas.LectureSlideDeckStatus.PROCESSING
@@ -864,12 +865,26 @@ async def queue_lecture_slide_processing_run(
     }:
         return None
 
+    async def reuse_existing_run(
+        run: models.LectureSlideProcessingRun,
+    ) -> models.LectureSlideProcessingRun:
+        if force_manifest_generation and not run.force_manifest_generation:
+            run.force_manifest_generation = True
+            session.add(run)
+            await session.flush()
+        return run
+
     existing_run = await models.LectureSlideProcessingRun.get_non_terminal_by_snapshot(
         session,
         deck.id,
     )
     if existing_run is not None:
-        return existing_run
+        if existing_run.stage_precedes_current(stage):
+            existing_run.mark_cancelled_for_rewind()
+            session.add(existing_run)
+            await session.flush()
+        else:
+            return await reuse_existing_run(existing_run)
 
     deck.status = schemas.LectureSlideDeckStatus.PROCESSING
     deck.error_message = None
@@ -893,6 +908,7 @@ async def queue_lecture_slide_processing_run(
                     stage=stage,
                     attempt_number=attempt_number,
                     status=schemas.LectureSlideProcessingRunStatus.QUEUED,
+                    force_manifest_generation=force_manifest_generation,
                 )
             except IntegrityError as exc:
                 last_error = exc
@@ -905,7 +921,12 @@ async def queue_lecture_slide_processing_run(
             )
         )
         if existing_run is not None:
-            return existing_run
+            if existing_run.stage_precedes_current(stage):
+                existing_run.mark_cancelled_for_rewind()
+                session.add(existing_run)
+                await session.flush()
+            else:
+                return await reuse_existing_run(existing_run)
         attempt_number = (
             await models.LectureSlideProcessingRun.get_latest_attempt_number(
                 session,
@@ -937,12 +958,14 @@ async def queue_audio_processing_run(
     deck: models.LectureSlideDeck,
     *,
     requested_by_assistant_id: int | None = None,
+    force_manifest_generation: bool = False,
 ) -> models.LectureSlideProcessingRun | None:
     return await queue_lecture_slide_processing_run(
         session,
         deck,
         requested_by_assistant_id=requested_by_assistant_id,
         stage=schemas.LectureSlideProcessingStage.NARRATION_AUDIO,
+        force_manifest_generation=force_manifest_generation,
     )
 
 
@@ -957,6 +980,7 @@ async def queue_manifest_generation_processing_run(
         deck,
         requested_by_assistant_id=requested_by_assistant_id,
         stage=schemas.LectureSlideProcessingStage.MANIFEST_GENERATION,
+        force_manifest_generation=True,
     )
 
 
@@ -1216,14 +1240,19 @@ async def _process_claimed_slide_run(run_id: int, lease_token: str) -> None:
             class_id = run.class_id
             start_stage = schemas.LectureSlideProcessingStage(run.stage)
             original_start_stage = start_stage
+            force_manifest_generation = run.force_manifest_generation
 
         openai_client = None
         with tempfile.TemporaryDirectory(prefix="pingpong_ls_") as temp_dir:
-            needs_pdf = start_stage in {
-                schemas.LectureSlideProcessingStage.SLIDE_ASSET_EXTRACTION,
-                schemas.LectureSlideProcessingStage.NARRATION_TEXT,
-                schemas.LectureSlideProcessingStage.MANIFEST_GENERATION,
-            }
+            needs_pdf = (
+                start_stage
+                in {
+                    schemas.LectureSlideProcessingStage.SLIDE_ASSET_EXTRACTION,
+                    schemas.LectureSlideProcessingStage.NARRATION_TEXT,
+                    schemas.LectureSlideProcessingStage.MANIFEST_GENERATION,
+                }
+                or force_manifest_generation
+            )
             pdf_path = None
             if needs_pdf:
                 pdf_path = await _download_source_pdf(
@@ -1336,6 +1365,7 @@ async def _process_claimed_slide_run(run_id: int, lease_token: str) -> None:
                     if original_start_stage
                     == schemas.LectureSlideProcessingStage.NARRATION_AUDIO
                     and has_manifest
+                    and not force_manifest_generation
                     else schemas.LectureSlideProcessingStage.MANIFEST_GENERATION
                 )
 
@@ -2181,6 +2211,7 @@ async def _transcribe_and_persist_slide_audio(
         deck.total_duration_ms = current_offset_ms
         deck.transcript_data = transcript_data_from_words(words)
         session.add(deck)
+        await models.LectureSlideQuestion.retime_for_deck(session, deck)
         await session.commit()
     return words
 
@@ -3528,38 +3559,14 @@ async def _persist_slide_manifest(
             ],
         ]
 
-        page_ranges: list[SlidePageRange] = [
-            {
-                "slide_position": page.position,
-                "start_offset_ms": page.start_offset_ms,
-                "end_offset_ms": page.end_offset_ms,
-            }
-            for page in sorted(deck.pages, key=lambda item: item.position)
-        ]
-        page_range_by_position = {
-            int(page_range["slide_position"]): page_range for page_range in page_ranges
-        }
-        question_pause_offsets_by_position: list[
-            tuple[GeneratedSlideQuestion, SlideQuestionPauseOffsets]
-        ] = []
-        for question in sorted(
-            manifest_questions,
-            key=lambda item: item.slide_position,
-        ):
-            pause_offsets = _slide_question_pause_offsets(
-                question,
-                page_range_by_position=page_range_by_position,
-            )
-            if pause_offsets is None:
-                continue
-            question_pause_offsets_by_position.append((question, pause_offsets))
-
         await lecture_slide_service.apply_lecture_slide_question_drafts(
             session,
             deck,
             [
                 _generated_slide_question_to_input(question)
-                for question, _pause_offsets in question_pause_offsets_by_position
+                for question in sorted(
+                    manifest_questions, key=lambda item: item.slide_position
+                )
             ],
         )
 
@@ -3702,11 +3709,14 @@ async def _persist_composite_artifacts(
         )
         if deck is None:
             return
-        stored_objects = [
-            page.narration.stored_object
-            for page in sorted(deck.pages, key=lambda item: item.position)
-            if page.narration is not None and page.narration.stored_object is not None
-        ]
+        fingerprint = deck.compute_continuous_narration_fingerprint()
+        if (
+            deck.continuous_narration_fingerprint == fingerprint
+            and deck.continuous_narration_stored_object_id is not None
+            and deck.caption_stored_object_id is not None
+        ):
+            return
+        stored_objects = deck.validated_composite_page_audio_objects()
         duration_ms = _total_stored_audio_duration_ms(stored_objects)
     combined_audio = await _combine_audio_objects(stored_objects)
     content_type = LECTURE_SLIDE_CONTINUOUS_AUDIO_CONTENT_TYPE
@@ -3756,6 +3766,9 @@ async def _persist_composite_artifacts(
             await session.flush()
             deck.continuous_narration_stored_object_id = audio_stored_object.id
             deck.caption_stored_object_id = caption_stored_object.id
+            deck.continuous_narration_fingerprint = (
+                deck.compute_continuous_narration_fingerprint()
+            )
             session.add(deck)
             await session.commit()
     except Exception:

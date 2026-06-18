@@ -253,6 +253,63 @@ async def test_queue_lecture_slide_processing_run_reuses_active_run(db):
         assert first.attempt_number == 1
 
 
+async def test_queue_lecture_slide_processing_run_rewinds_later_active_run(db):
+    await _create_class_and_deck(db)
+    async with db.async_session() as session:
+        deck = await session.get(models.LectureSlideDeck, 1)
+        assert deck is not None
+        deck.status = schemas.LectureSlideDeckStatus.PROCESSING
+        later_run = models.LectureSlideProcessingRun(
+            lecture_slide_deck_id=deck.id,
+            lecture_slide_deck_id_snapshot=deck.id,
+            class_id=deck.class_id,
+            assistant_id_at_start=42,
+            stage=schemas.LectureSlideProcessingStage.COMPOSITE_ARTIFACTS,
+            attempt_number=1,
+            status=schemas.LectureSlideProcessingRunStatus.RUNNING,
+            lease_token="lease",
+            leased_by="worker",
+            lease_expires_at=utcnow() + timedelta(minutes=5),
+        )
+        session.add(later_run)
+        await session.flush()
+        later_run_id = later_run.id
+
+        rewound = await lecture_slide_processing.queue_audio_processing_run(
+            session, deck, requested_by_assistant_id=42
+        )
+        await session.commit()
+
+        assert rewound is not None
+        assert rewound.id != later_run_id
+        assert rewound.stage == schemas.LectureSlideProcessingStage.NARRATION_AUDIO
+        assert rewound.status == schemas.LectureSlideProcessingRunStatus.QUEUED
+        assert rewound.attempt_number == 2
+
+    async with db.async_session() as session:
+        runs = list(
+            (
+                await session.scalars(
+                    select(models.LectureSlideProcessingRun).order_by(
+                        models.LectureSlideProcessingRun.attempt_number
+                    )
+                )
+            ).all()
+        )
+
+    assert [run.status for run in runs] == [
+        schemas.LectureSlideProcessingRunStatus.CANCELLED,
+        schemas.LectureSlideProcessingRunStatus.QUEUED,
+    ]
+    assert (
+        runs[0].cancel_reason
+        == schemas.LectureSlideProcessingCancelReason.SUPERSEDED_BY_EARLIER_STAGE
+    )
+    assert runs[0].lease_token is None
+    assert runs[0].leased_by is None
+    assert runs[0].lease_expires_at is None
+
+
 async def test_deck_has_slide_manifest_accepts_v5_context_version(db):
     await _create_class_and_deck(db)
     async with db.async_session() as session:
@@ -1654,7 +1711,10 @@ async def test_persist_slide_manifest_preserves_unchanged_manual_question_rows(d
         )
 
 
-async def test_apply_question_drafts_requires_generation_when_pages_are_untimed(db):
+async def test_apply_question_drafts_defers_timing_when_pages_are_untimed(db):
+    # A manually-authored (complete) question on an untimed slide must NOT be routed
+    # to LLM regeneration; it is persisted with deferred (NULL) offsets and the
+    # pipeline re-timer fills them once the slide is timed.
     await _create_class_and_deck(db)
     async with db.async_session() as session:
         deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
@@ -1696,40 +1756,27 @@ async def test_apply_question_drafts_requires_generation_when_pages_are_untimed(
             ],
         )
 
-        assert result.requires_question_generation
-        assert result.questions_changed
-        assert deck.context_data == {
-            schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY: [
-                {
-                    "id": None,
-                    "mode": "complete",
-                    "slide_position": 0,
-                    "question_text": "New question?",
-                    "intro_text": "",
-                    "options": [
-                        {
-                            "id": None,
-                            "option_text": "Correct",
-                            "post_answer_text": "",
-                            "correct": True,
-                        },
-                        {
-                            "id": None,
-                            "option_text": "Incorrect",
-                            "post_answer_text": "",
-                            "correct": False,
-                        },
-                    ],
-                }
-            ]
-        }
-        assert (
-            await session.scalar(
-                select(models.LectureSlideQuestion.question_text).where(
-                    models.LectureSlideQuestion.id == old_question.id
-                )
-            )
-        ) == "Old question?"
+        # Manual complete drafts never trigger generation, even when untimed.
+        assert result.requires_question_generation is False
+        assert result.questions_changed is True
+        # ...and they are not stashed for the LLM to re-emit.
+        assert schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY not in (
+            deck.context_data or {}
+        )
+
+        question = await session.scalar(
+            select(models.LectureSlideQuestion)
+            .where(models.LectureSlideQuestion.lecture_slide_deck_id == 1)
+            .options(selectinload(models.LectureSlideQuestion.options))
+        )
+        assert question is not None
+        # The manual edit is persisted (not preserved as the old question)...
+        assert question.question_text == "New question?"
+        # ...with deferred NULL offsets to be filled by the re-timer.
+        assert question.slide_offset_ms is None
+        assert question.stop_offset_ms is None
+        for option in question.options:
+            assert option.continue_offset_ms is None
 
 
 async def test_apply_question_drafts_matches_questions_and_options_by_id(db):
@@ -2846,11 +2893,61 @@ async def test_transcribe_and_persist_slide_audio_uses_supported_temp_extension(
     assert [Path(path).suffix for path in seen_paths] == [".ogg"]
 
 
+async def test_composite_page_audio_validation_rejects_cleared_gapped_timeline():
+    deck = _deck(status=schemas.LectureSlideDeckStatus.READY, slide_count=3)
+    deck.total_duration_ms = 300
+    deck.pages = [
+        models.LectureSlidePage(
+            lecture_slide_deck_id=1,
+            position=0,
+            narration_text="Changed narration.",
+        ),
+        models.LectureSlidePage(
+            lecture_slide_deck_id=1,
+            position=1,
+            narration_text="Surviving narration.",
+            start_offset_ms=100,
+            end_offset_ms=200,
+            narration=models.LectureSlideNarration(
+                status=schemas.LectureSlideNarrationStatus.READY,
+                stored_object=models.LectureSlideNarrationStoredObject(
+                    key="slides/page-1.ogg",
+                    content_type="audio/ogg",
+                    content_length=8,
+                    duration_ms=100,
+                ),
+            ),
+        ),
+        models.LectureSlidePage(
+            lecture_slide_deck_id=1,
+            position=2,
+            narration_text="Final surviving narration.",
+            start_offset_ms=200,
+            end_offset_ms=300,
+            narration=models.LectureSlideNarration(
+                status=schemas.LectureSlideNarrationStatus.READY,
+                stored_object=models.LectureSlideNarrationStoredObject(
+                    key="slides/page-2.ogg",
+                    content_type="audio/ogg",
+                    content_length=8,
+                    duration_ms=100,
+                ),
+            ),
+        ),
+    ]
+
+    with pytest.raises(RuntimeError, match="contiguous ready narration timeline"):
+        deck.validated_composite_page_audio_objects()
+
+
 async def test_persist_composite_artifacts_stores_combined_audio_as_webm(
     db, monkeypatch
 ):
     await _create_class_and_deck(db, slide_count=2)
     async with db.async_session() as session:
+        deck = await session.get(models.LectureSlideDeck, 1)
+        assert deck is not None
+        deck.total_duration_ms = 200
         stored_objects = [
             models.LectureSlideNarrationStoredObject(
                 key="slides/page-1.ogg",
@@ -2869,6 +2966,9 @@ async def test_persist_composite_artifacts_stores_combined_audio_as_webm(
             models.LectureSlidePage(
                 lecture_slide_deck_id=1,
                 position=0,
+                narration_text="First narration.",
+                start_offset_ms=0,
+                end_offset_ms=100,
                 narration=models.LectureSlideNarration(
                     stored_object=stored_objects[0],
                     status=schemas.LectureSlideNarrationStatus.READY,
@@ -2877,6 +2977,9 @@ async def test_persist_composite_artifacts_stores_combined_audio_as_webm(
             models.LectureSlidePage(
                 lecture_slide_deck_id=1,
                 position=1,
+                narration_text="Second narration.",
+                start_offset_ms=100,
+                end_offset_ms=200,
                 narration=models.LectureSlideNarration(
                     stored_object=stored_objects[1],
                     status=schemas.LectureSlideNarrationStatus.READY,
@@ -3020,6 +3123,9 @@ async def test_persist_composite_artifacts_deletes_uploads_when_db_lookup_raises
 ):
     await _create_class_and_deck(db)
     async with db.async_session() as session:
+        deck = await session.get(models.LectureSlideDeck, 1)
+        assert deck is not None
+        deck.total_duration_ms = 100
         stored_object = models.LectureSlideNarrationStoredObject(
             key="slides/page-1.ogg",
             content_type="audio/ogg",
@@ -3029,6 +3135,9 @@ async def test_persist_composite_artifacts_deletes_uploads_when_db_lookup_raises
         page = models.LectureSlidePage(
             lecture_slide_deck_id=1,
             position=0,
+            narration_text="Narration.",
+            start_offset_ms=0,
+            end_offset_ms=100,
             narration=models.LectureSlideNarration(
                 stored_object=stored_object,
                 status=schemas.LectureSlideNarrationStatus.READY,
@@ -3154,3 +3263,357 @@ async def test_claim_next_any_processing_run_returns_video_assignment_for_older_
     assert claimed is not None
     assert claimed.kind == "video"
     assert claimed.run_id == video_run.id
+
+
+# ---------------------------------------------------------------------------
+# Lecture-slide audio/text sync fix: routing, deferred question timing,
+# deterministic re-timer, and fingerprint-gated composite artifacts.
+# ---------------------------------------------------------------------------
+
+
+async def test_queue_audio_run_carries_force_manifest_generation(db):
+    # When a narration edit coincides with a question (re)generation, the audio run
+    # must carry force_manifest_generation so it regenerates the manifest after
+    # re-synthesizing narration audio (rather than dropping audio in a manifest run).
+    await _create_class_and_deck(db)
+    async with db.async_session() as session:
+        deck = await session.get(models.LectureSlideDeck, 1)
+        assert deck is not None
+        deck.status = schemas.LectureSlideDeckStatus.READY
+        run = await lecture_slide_processing.queue_audio_processing_run(
+            session, deck, force_manifest_generation=True
+        )
+        await session.commit()
+
+        assert run is not None
+        assert run.stage == schemas.LectureSlideProcessingStage.NARRATION_AUDIO
+        assert run.force_manifest_generation is True
+
+
+async def test_retime_questions_from_page_offsets(db):
+    # The deterministic re-timer fills question/option offsets from current page
+    # offsets (no LLM); questions on untimed slides keep NULL offsets.
+    await _create_class_and_deck(db, slide_count=2)
+    async with db.async_session() as session:
+        timed_page = models.LectureSlidePage(
+            lecture_slide_deck_id=1,
+            position=0,
+            start_offset_ms=1000,
+            end_offset_ms=1500,
+        )
+        untimed_page = models.LectureSlidePage(lecture_slide_deck_id=1, position=1)
+        timed_question = models.LectureSlideQuestion(
+            lecture_slide_deck_id=1,
+            position=0,
+            slide_position=0,
+            slide_offset_ms=None,
+            stop_offset_ms=None,
+            question_type=schemas.LectureSlideQuestionType.SINGLE_SELECT,
+            question_text="Timed?",
+            intro_text="",
+            options=[
+                models.LectureSlideQuestionOption(
+                    position=0,
+                    option_text="A",
+                    post_answer_text="",
+                    continue_offset_ms=None,
+                )
+            ],
+        )
+        untimed_question = models.LectureSlideQuestion(
+            lecture_slide_deck_id=1,
+            position=1,
+            slide_position=1,
+            slide_offset_ms=42,
+            stop_offset_ms=99,
+            question_type=schemas.LectureSlideQuestionType.SINGLE_SELECT,
+            question_text="Untimed?",
+            intro_text="",
+            options=[
+                models.LectureSlideQuestionOption(
+                    position=0,
+                    option_text="B",
+                    post_answer_text="",
+                    continue_offset_ms=7,
+                )
+            ],
+        )
+        session.add_all([timed_page, untimed_page, timed_question, untimed_question])
+        await session.commit()
+
+    async with db.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, 1
+        )
+        assert deck is not None
+        await models.LectureSlideQuestion.retime_for_deck(session, deck)
+        await session.commit()
+
+    async with db.async_session() as session:
+        questions = {
+            question.slide_position: question
+            for question in (
+                await session.scalars(
+                    select(models.LectureSlideQuestion).options(
+                        selectinload(models.LectureSlideQuestion.options)
+                    )
+                )
+            ).all()
+        }
+        # Timed slide -> derived from page offsets.
+        assert questions[0].slide_offset_ms == 500  # 1500 - 1000
+        assert questions[0].stop_offset_ms == 1500
+        assert questions[0].options[0].continue_offset_ms == 1500
+        assert questions[0].options[0].continue_slide_offset_ms == 500
+        # Untimed slide -> reset to NULL (withheld until timed).
+        assert questions[1].slide_offset_ms is None
+        assert questions[1].stop_offset_ms is None
+        assert questions[1].options[0].continue_offset_ms is None
+
+
+async def test_continuous_narration_fingerprint_tracks_clip_changes():
+    def _deck_with_clip(duration_ms: int) -> models.LectureSlideDeck:
+        deck = _deck()
+        deck.pages = [
+            models.LectureSlidePage(
+                lecture_slide_deck_id=1,
+                position=0,
+                narration_text="Narration.",
+                narration=models.LectureSlideNarration(
+                    status=schemas.LectureSlideNarrationStatus.READY,
+                    stored_object=models.LectureSlideNarrationStoredObject(
+                        key="a.ogg",
+                        content_type="audio/ogg",
+                        content_length=8,
+                        duration_ms=duration_ms,
+                    ),
+                ),
+            ),
+            # A page without narration audio is ignored by the fingerprint.
+            models.LectureSlidePage(lecture_slide_deck_id=1, position=1),
+        ]
+        return deck
+
+    base = _deck_with_clip(100).compute_continuous_narration_fingerprint()
+    same = _deck_with_clip(100).compute_continuous_narration_fingerprint()
+    changed = _deck_with_clip(250).compute_continuous_narration_fingerprint()
+    assert base == same
+    assert base != changed
+
+
+async def test_persist_composite_artifacts_skips_when_fingerprint_unchanged(
+    db, monkeypatch
+):
+    # A question-only edit leaves the narration clips unchanged, so the continuous
+    # track must NOT be re-stitched (no re-upload, no URL churn).
+    await _create_class_and_deck(db, slide_count=1)
+    async with db.async_session() as session:
+        deck = await session.get(models.LectureSlideDeck, 1)
+        assert deck is not None
+        deck.total_duration_ms = 100
+        stored_object = models.LectureSlideNarrationStoredObject(
+            key="slides/page-1.ogg",
+            content_type="audio/ogg",
+            content_length=8,
+            duration_ms=100,
+        )
+        existing_continuous = models.LectureSlideNarrationStoredObject(
+            key="continuous-existing.webm",
+            content_type="audio/webm",
+            content_length=8,
+            duration_ms=100,
+        )
+        existing_caption = models.LectureSlideCaptionStoredObject(
+            key="captions-existing.vtt",
+            content_type="text/vtt",
+            content_length=8,
+        )
+        page = models.LectureSlidePage(
+            lecture_slide_deck_id=1,
+            position=0,
+            narration_text="Narration.",
+            start_offset_ms=0,
+            end_offset_ms=100,
+            narration=models.LectureSlideNarration(
+                stored_object=stored_object,
+                status=schemas.LectureSlideNarrationStatus.READY,
+            ),
+        )
+        run = models.LectureSlideProcessingRun(
+            lecture_slide_deck_id=1,
+            lecture_slide_deck_id_snapshot=1,
+            class_id=1,
+            stage=schemas.LectureSlideProcessingStage.COMPOSITE_ARTIFACTS,
+            attempt_number=1,
+            status=schemas.LectureSlideProcessingRunStatus.RUNNING,
+            lease_token="lease",
+        )
+        session.add_all(
+            [stored_object, existing_continuous, existing_caption, page, run]
+        )
+        await session.flush()
+        deck.continuous_narration_stored_object_id = existing_continuous.id
+        deck.caption_stored_object_id = existing_caption.id
+        await session.commit()
+        run_id = run.id
+
+    # Prime the stored fingerprint to match the current clips.
+    async with db.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, 1
+        )
+        assert deck is not None
+        deck.continuous_narration_fingerprint = (
+            deck.compute_continuous_narration_fingerprint()
+        )
+        session.add(deck)
+        await session.commit()
+
+    def fail_combine(*_args, **_kwargs):
+        pytest.fail("continuous track should not be re-stitched when unchanged")
+
+    def fail_store(*_args, **_kwargs):
+        pytest.fail("continuous track should not be re-uploaded when unchanged")
+
+    monkeypatch.setattr(
+        lecture_slide_processing, "_combine_audio_objects", fail_combine
+    )
+    monkeypatch.setattr(lecture_slide_processing, "_store_audio", fail_store)
+
+    await lecture_slide_processing._persist_composite_artifacts(run_id, "lease", 1, [])
+
+    async with db.async_session() as session:
+        deck = await session.get(models.LectureSlideDeck, 1)
+        assert deck is not None
+        # Pointer unchanged -> no churn.
+        assert deck.continuous_narration_stored_object_id is not None
+
+
+async def test_queue_manifest_run_escalates_force_on_reused_audio_run(db):
+    # A manifest-only request that merges into an in-flight NARRATION_AUDIO run must
+    # escalate force_manifest_generation, or the reused run would take the
+    # post-transcription COMPOSITE shortcut and skip manifest generation entirely.
+    await _create_class_and_deck(db)
+    async with db.async_session() as session:
+        deck = await session.get(models.LectureSlideDeck, 1)
+        assert deck is not None
+        deck.status = schemas.LectureSlideDeckStatus.PROCESSING
+        audio_run = models.LectureSlideProcessingRun(
+            lecture_slide_deck_id=deck.id,
+            lecture_slide_deck_id_snapshot=deck.id,
+            class_id=deck.class_id,
+            assistant_id_at_start=42,
+            stage=schemas.LectureSlideProcessingStage.NARRATION_AUDIO,
+            attempt_number=1,
+            status=schemas.LectureSlideProcessingRunStatus.RUNNING,
+            force_manifest_generation=False,
+            lease_token="lease",
+            leased_by="worker",
+            lease_expires_at=utcnow() + timedelta(minutes=5),
+        )
+        session.add(audio_run)
+        await session.flush()
+        audio_run_id = audio_run.id
+
+        reused = (
+            await lecture_slide_processing.queue_manifest_generation_processing_run(
+                session, deck, requested_by_assistant_id=42
+            )
+        )
+        await session.commit()
+
+        # Reused (manifest stage does not precede audio, so no rewind) and escalated.
+        assert reused is not None
+        assert reused.id == audio_run_id
+        assert reused.stage == schemas.LectureSlideProcessingStage.NARRATION_AUDIO
+        assert reused.force_manifest_generation is True
+
+
+async def test_persist_slide_manifest_defers_untimed_manual_question_rows(db):
+    # Regression: a manually-authored question on an UNTIMED slide must be preserved
+    # with deferred (NULL) offsets across a manifest run, not dropped and then deleted
+    # by the draft applier.
+    await _create_class_and_deck(db)
+    manual_question = {
+        "slide_position": 0,
+        "question_text": "Instructor question?",
+        "intro_text": "",
+        "options": [
+            {"option_text": "Correct", "post_answer_text": "", "correct": True},
+            {"option_text": "Incorrect", "post_answer_text": "", "correct": False},
+        ],
+    }
+    async with db.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, 1
+        )
+        assert deck is not None
+        deck.context_data = {
+            schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY: [manual_question]
+        }
+        # Untimed slide: the page row exists but has no offsets.
+        untimed_page = models.LectureSlidePage(lecture_slide_deck_id=1, position=0)
+        question = models.LectureSlideQuestion(
+            lecture_slide_deck_id=1,
+            position=0,
+            slide_position=0,
+            slide_offset_ms=None,
+            stop_offset_ms=None,
+            question_type=schemas.LectureSlideQuestionType.SINGLE_SELECT,
+            question_text="Instructor question?",
+            intro_text="",
+            options=[
+                models.LectureSlideQuestionOption(
+                    position=0,
+                    option_text="Correct",
+                    post_answer_text="",
+                    continue_offset_ms=None,
+                ),
+                models.LectureSlideQuestionOption(
+                    position=1,
+                    option_text="Incorrect",
+                    post_answer_text="",
+                    continue_offset_ms=None,
+                ),
+            ],
+        )
+        run = models.LectureSlideProcessingRun(
+            lecture_slide_deck_id=1,
+            lecture_slide_deck_id_snapshot=1,
+            class_id=1,
+            stage=schemas.LectureSlideProcessingStage.MANIFEST_GENERATION,
+            attempt_number=1,
+            status=schemas.LectureSlideProcessingRunStatus.RUNNING,
+            lease_token="lease",
+        )
+        session.add_all([deck, untimed_page, question, run])
+        await session.flush()
+        await session.execute(
+            models.lecture_slide_question_single_select_correct_option_association.insert().values(
+                question_id=question.id,
+                option_id=question.options[0].id,
+            )
+        )
+        question_id = question.id
+        run_id = run.id
+        await session.commit()
+
+    await lecture_slide_processing._persist_slide_manifest(
+        run_id,
+        "lease",
+        1,
+        lecture_slide_processing.GeneratedSlideManifest(questions=[]),
+        [],
+    )
+
+    async with db.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, 1
+        )
+        assert deck is not None
+        # The deferred question survived rather than being deleted...
+        assert len(deck.questions) == 1
+        assert deck.questions[0].id == question_id
+        # ...and remains untimed (NULL offsets) for the re-timer to fill.
+        assert deck.questions[0].slide_offset_ms is None
+        assert deck.questions[0].stop_offset_ms is None

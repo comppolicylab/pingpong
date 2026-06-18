@@ -53,7 +53,12 @@ class LectureSlideAdapter:
             return []
         return cast(
             list[interactive_lesson_runtime.LessonQuestion],
-            thread.lecture_slide_deck.questions,
+            [
+                question
+                for question in thread.lecture_slide_deck.questions
+                if question.slide_offset_ms is not None
+                and question.stop_offset_ms is not None
+            ],
         )
 
     def get_state(

@@ -113,7 +113,10 @@ def _get_next_future_question(
     for question in sorted(
         thread.lecture_slide_deck.questions, key=lambda item: item.position
     ):
-        if question.stop_offset_ms > current_offset_ms:
+        if (
+            question.stop_offset_ms is not None
+            and question.stop_offset_ms > current_offset_ms
+        ):
             return question
     return None
 
@@ -214,8 +217,13 @@ async def _build_answered_knowledge_checks_markdown(
         indented_option_lines = "\n".join(
             f"  {line}" for line in option_lines.splitlines()
         )
+        timing_prefix = (
+            f"At {question.stop_offset_ms}ms, "
+            if question.stop_offset_ms is not None
+            else ""
+        )
         answer_lines.append(
-            f"- At {question.stop_offset_ms}ms, {_knowledge_check_label(question)} "
+            f"- {timing_prefix}{_knowledge_check_label(question)} "
             f"was asked: {question.question_text}\n"
             f"  Student selected `{option.option_text}`.\n"
             f"  Options:\n{indented_option_lines}"

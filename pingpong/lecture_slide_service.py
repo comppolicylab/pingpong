@@ -964,32 +964,6 @@ async def apply_lecture_slide_question_drafts(
         if question_inputs
         else {}
     )
-    questions_are_timed = all(
-        (page := pages_by_position.get(question_input.slide_position)) is not None
-        and page.start_offset_ms is not None
-        and page.end_offset_ms is not None
-        for question_input in question_inputs
-    )
-    if not questions_are_timed:
-        context_data = dict(deck.context_data or {})
-        previous_payload = context_data.get(
-            schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY
-        )
-        if manual_question_payload:
-            context_data[schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY] = (
-                manual_question_payload
-            )
-        else:
-            context_data.pop(schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY, None)
-        deck.context_data = context_data
-        session.add(deck)
-        await session.flush()
-        return LectureSlideQuestionUpdateResult(
-            questions_changed=previous_payload != manual_question_payload,
-            audio_changed=False,
-            requires_question_generation=True,
-        )
-
     old_narration_ids: list[int] = []
     old_stored_object_rows: list[tuple[int, str]] = []
     changed = False
@@ -1029,9 +1003,13 @@ async def apply_lecture_slide_question_drafts(
     }
 
     for question_position, question_input in enumerate(complete_question_inputs):
-        page = pages_by_position[question_input.slide_position]
-        slide_offset_ms = (page.end_offset_ms or 0) - (page.start_offset_ms or 0)
-        stop_offset_ms = page.end_offset_ms or 0
+        page = pages_by_position.get(question_input.slide_position)
+        if page is None or page.start_offset_ms is None or page.end_offset_ms is None:
+            slide_offset_ms = None
+            stop_offset_ms = None
+        else:
+            slide_offset_ms = page.end_offset_ms - page.start_offset_ms
+            stop_offset_ms = page.end_offset_ms
         question_text = question_input.question_text.strip()
         intro_text = question_input.intro_text.strip()
         question = (
