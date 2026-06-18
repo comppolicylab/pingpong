@@ -9,6 +9,7 @@ from typing import (
     Collection,
     List,
     Literal,
+    Mapping,
     Optional,
     Sequence,
     Union,
@@ -74,6 +75,7 @@ from sqlalchemy.sql import func
 import pingpong.schemas as schemas
 import logging
 from pingpong.log_utils import sanitize_for_log
+from pingpong.now import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -3344,6 +3346,7 @@ class LectureSlideDeck(Base):
     source_lecture_slide_deck_id_snapshot = Column(Integer, nullable=True)
     slide_count = Column(Integer, nullable=False)
     total_duration_ms = Column(Integer, nullable=True)
+    continuous_narration_fingerprint = Column(String, nullable=True)
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -3517,6 +3520,87 @@ class LectureSlideDeck(Base):
         )
         return await session.scalar(stmt)
 
+    def compute_continuous_narration_fingerprint(self) -> str:
+        parts: list[str] = []
+        for page in sorted(self.pages, key=lambda item: item.position):
+            if page.narration is None or page.narration.stored_object is None:
+                continue
+            stored_object = page.narration.stored_object
+            parts.append(
+                f"{page.position}:{stored_object.id}:{stored_object.duration_ms}"
+            )
+        return "|".join(parts)
+
+    def validated_composite_page_audio_objects(
+        self,
+    ) -> list["LectureSlideNarrationStoredObject"]:
+        expected_start_ms = 0
+        stored_objects: list["LectureSlideNarrationStoredObject"] = []
+        invalid_pages: list[str] = []
+
+        for page in sorted(self.pages, key=lambda item: item.position):
+            has_narration_text = bool((page.narration_text or "").strip())
+            if not has_narration_text and page.narration is None:
+                continue
+            if (
+                page.narration is None
+                or page.narration.status != schemas.LectureSlideNarrationStatus.READY
+                or page.narration.stored_object is None
+            ):
+                if has_narration_text:
+                    invalid_pages.append(
+                        f"position={page.position} missing ready narration"
+                    )
+                continue
+            stored_object = page.narration.stored_object
+            if stored_object.duration_ms is None:
+                invalid_pages.append(f"position={page.position} missing audio duration")
+                continue
+            if page.start_offset_ms is None or page.end_offset_ms is None:
+                invalid_pages.append(f"position={page.position} missing offsets")
+                continue
+            if page.start_offset_ms != expected_start_ms:
+                invalid_pages.append(
+                    "position="
+                    f"{page.position} non-contiguous start={page.start_offset_ms} "
+                    f"expected={expected_start_ms}"
+                )
+                continue
+            expected_end_ms = expected_start_ms + stored_object.duration_ms
+            if page.end_offset_ms != expected_end_ms:
+                invalid_pages.append(
+                    "position="
+                    f"{page.position} end={page.end_offset_ms} expected={expected_end_ms}"
+                )
+                continue
+            stored_objects.append(stored_object)
+            expected_start_ms = expected_end_ms
+
+        if self.total_duration_ms != expected_start_ms:
+            invalid_pages.append(
+                f"deck total_duration_ms={self.total_duration_ms} "
+                f"expected={expected_start_ms}"
+            )
+        if invalid_pages:
+            raise RuntimeError(
+                "Lecture slide composite artifacts require a contiguous ready "
+                f"narration timeline before stitching. deck_id={self.id}; "
+                + "; ".join(invalid_pages)
+            )
+        return stored_objects
+
+
+_LECTURE_SLIDE_PROCESSING_STAGE_ORDER: Mapping[
+    schemas.LectureSlideProcessingStage, int
+] = {
+    schemas.LectureSlideProcessingStage.SLIDE_ASSET_EXTRACTION: 0,
+    schemas.LectureSlideProcessingStage.NARRATION_TEXT: 1,
+    schemas.LectureSlideProcessingStage.NARRATION_AUDIO: 2,
+    schemas.LectureSlideProcessingStage.NARRATION_TRANSCRIPTION: 3,
+    schemas.LectureSlideProcessingStage.MANIFEST_GENERATION: 4,
+    schemas.LectureSlideProcessingStage.COMPOSITE_ARTIFACTS: 5,
+}
+
 
 class LectureSlideProcessingRun(Base):
     __tablename__ = "lecture_slide_processing_runs"
@@ -3541,6 +3625,9 @@ class LectureSlideProcessingRun(Base):
         nullable=False,
     )
     attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    force_manifest_generation: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
     status: Mapped[schemas.LectureSlideProcessingRunStatus] = mapped_column(
         SQLEnum(schemas.LectureSlideProcessingRunStatus),
         nullable=False,
@@ -3607,6 +3694,7 @@ class LectureSlideProcessingRun(Base):
         status: schemas.LectureSlideProcessingRunStatus = (
             schemas.LectureSlideProcessingRunStatus.QUEUED
         ),
+        force_manifest_generation: bool = False,
     ) -> "LectureSlideProcessingRun":
         run = LectureSlideProcessingRun(
             lecture_slide_deck_id=lecture_slide_deck_id,
@@ -3616,6 +3704,7 @@ class LectureSlideProcessingRun(Base):
             stage=stage,
             attempt_number=attempt_number,
             status=status,
+            force_manifest_generation=force_manifest_generation,
         )
         session.add(run)
         await session.flush()
@@ -3665,6 +3754,27 @@ class LectureSlideProcessingRun(Base):
             .order_by(LectureSlideProcessingRun.created.asc())
         )
         return (await session.scalars(stmt)).one_or_none()
+
+    def stage_precedes_current(
+        self, requested_stage: schemas.LectureSlideProcessingStage
+    ) -> bool:
+        current_stage = schemas.LectureSlideProcessingStage(self.stage)
+        return (
+            _LECTURE_SLIDE_PROCESSING_STAGE_ORDER[requested_stage]
+            < _LECTURE_SLIDE_PROCESSING_STAGE_ORDER[current_stage]
+        )
+
+    def mark_cancelled_for_rewind(self) -> None:
+        """Cancel this in-flight run because a request needs an earlier stage; a fresh
+        run will be created at the requested stage."""
+        self.status = schemas.LectureSlideProcessingRunStatus.CANCELLED
+        self.cancel_reason = (
+            schemas.LectureSlideProcessingCancelReason.SUPERSEDED_BY_EARLIER_STAGE
+        )
+        self.finished_at = utcnow()
+        self.lease_token = None
+        self.leased_by = None
+        self.lease_expires_at = None
 
 
 class LectureSlidePage(Base):
@@ -3732,8 +3842,8 @@ class LectureSlideQuestion(Base):
     lecture_slide_deck = relationship("LectureSlideDeck", back_populates="questions")
     position = Column(Integer, nullable=False)
     slide_position = Column(Integer, nullable=False)
-    slide_offset_ms = Column(Integer, nullable=False)
-    stop_offset_ms = Column(Integer, nullable=False)
+    slide_offset_ms = Column(Integer, nullable=True)
+    stop_offset_ms = Column(Integer, nullable=True)
     question_type = Column(SQLEnum(schemas.LectureSlideQuestionType), nullable=False)
     question_text = Column(String, nullable=False)
     intro_text = Column(String, nullable=False)
@@ -3773,6 +3883,40 @@ class LectureSlideQuestion(Base):
         ),
     )
 
+    @classmethod
+    async def retime_for_deck(
+        cls, session: AsyncSession, deck: "LectureSlideDeck"
+    ) -> None:
+        page_offsets = {
+            page.position: (page.start_offset_ms, page.end_offset_ms)
+            for page in deck.pages
+        }
+        questions = (
+            await session.scalars(
+                select(LectureSlideQuestion)
+                .where(LectureSlideQuestion.lecture_slide_deck_id == deck.id)
+                .options(selectinload(LectureSlideQuestion.options))
+            )
+        ).all()
+        for question in questions:
+            start_offset_ms, end_offset_ms = page_offsets.get(
+                question.slide_position, (None, None)
+            )
+            if start_offset_ms is None or end_offset_ms is None:
+                slide_offset_ms: int | None = None
+                stop_offset_ms: int | None = None
+            else:
+                slide_offset_ms = end_offset_ms - start_offset_ms
+                stop_offset_ms = end_offset_ms
+            question.slide_offset_ms = slide_offset_ms
+            question.stop_offset_ms = stop_offset_ms
+            session.add(question)
+            for option in question.options:
+                option.continue_slide_position = question.slide_position
+                option.continue_slide_offset_ms = slide_offset_ms
+                option.continue_offset_ms = stop_offset_ms
+                session.add(option)
+
 
 class LectureSlideQuestionOption(Base):
     __tablename__ = "lecture_slide_question_options"
@@ -3788,7 +3932,7 @@ class LectureSlideQuestionOption(Base):
     post_answer_text = Column(String, nullable=False)
     continue_slide_position = Column(Integer, nullable=True)
     continue_slide_offset_ms = Column(Integer, nullable=True)
-    continue_offset_ms = Column(Integer, nullable=False)
+    continue_offset_ms = Column(Integer, nullable=True)
     post_narration_id = Column(
         Integer,
         ForeignKey(

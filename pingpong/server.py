@@ -10431,6 +10431,8 @@ async def get_assistant_lecture_slide_config(
     ]
     questions = []
     for question in sorted(deck.questions, key=lambda item: item.position):
+        if question.slide_offset_ms is None or question.stop_offset_ms is None:
+            continue
         correct_option_id = (
             question.correct_option.id if question.correct_option is not None else None
         )
@@ -10481,12 +10483,19 @@ async def get_assistant_lecture_slide_config(
                         id=option.id,
                         option_text=option.option_text,
                         post_answer_text=option.post_answer_text,
-                        correct=option.correct,
+                        correct=option.id
+                        == (
+                            question.correct_option.id
+                            if question.correct_option is not None
+                            else None
+                        ),
                     )
-                    for option in question.options
+                    for option in sorted(
+                        question.options, key=lambda item: item.position
+                    )
                 ],
             )
-            for question in questions
+            for question in sorted(deck.questions, key=lambda item: item.position)
         ]
     )
     return schemas.LectureSlideConfigResponse(
@@ -13631,14 +13640,15 @@ async def update_assistant(
                         requested_by_assistant_id=asst.id,
                     )
                 )
-            elif needs_questions:
-                queued_run = await lecture_slide_processing.queue_manifest_generation_processing_run(
+            elif needs_audio:
+                queued_run = await lecture_slide_processing.queue_audio_processing_run(
                     request.state["db"],
                     target_lecture_slide_deck,
                     requested_by_assistant_id=asst.id,
+                    force_manifest_generation=needs_questions,
                 )
-            elif needs_audio:
-                queued_run = await lecture_slide_processing.queue_audio_processing_run(
+            elif needs_questions:
+                queued_run = await lecture_slide_processing.queue_manifest_generation_processing_run(
                     request.state["db"],
                     target_lecture_slide_deck,
                     requested_by_assistant_id=asst.id,
