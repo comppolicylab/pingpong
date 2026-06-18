@@ -19,6 +19,18 @@ def test_normalize_upload_content_type_uses_known_extension_for_generic_mime():
     assert _normalize_upload_content_type(upload) == "text/markdown"
 
 
+def test_normalize_upload_content_type_uses_known_extension_for_text_plain_mime():
+    upload = _upload("notes.md", "text/plain")
+
+    assert _normalize_upload_content_type(upload) == "text/markdown"
+
+
+def test_normalize_upload_content_type_uses_leading_dot_filename_extension():
+    upload = _upload(".md", "application/x-unknown")
+
+    assert _normalize_upload_content_type(upload) == "text/markdown"
+
+
 def test_normalize_upload_content_type_keeps_matching_generic_extension():
     upload = _upload("model.pkl", "application/octet-stream")
 

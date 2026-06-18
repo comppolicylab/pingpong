@@ -2076,11 +2076,19 @@ def file_extension_to_mime_type(extension: str) -> str | None:
     return None
 
 
+def _filename_extension(filename: str | None) -> str:
+    """Return the final filename segment after a dot, including leading-dot names."""
+    name = Path(filename or "").name.lower()
+    if "." not in name:
+        return ""
+    return name.rsplit(".", 1)[1]
+
+
 def _normalize_upload_content_type(upload: UploadFile) -> str:
     """Normalize browser-provided upload MIME types using known extensions."""
     reported_content_type = (upload.content_type or "").lower().split(";")[0].strip()
     inferred_content_type = file_extension_to_mime_type(
-        Path(upload.filename or "").suffix
+        _filename_extension(upload.filename)
     )
 
     if inferred_content_type and (
