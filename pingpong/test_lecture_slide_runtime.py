@@ -426,6 +426,7 @@ async def test_process_lecture_slide_question_answer_and_resume(db, institution)
 
 @with_institution(11, "Test Institution")
 async def test_lecture_slide_seek_rejects_forward_jump_without_bypass(db, institution):
+    fixed_now = datetime(2026, 6, 18, 12, 0, tzinfo=timezone.utc)
     async with db.async_session() as session:
         _, _, _, thread, _ = await _create_slide_runtime_fixture(session, institution)
 
@@ -436,6 +437,7 @@ async def test_lecture_slide_seek_rejects_forward_jump_without_bypass(db, instit
             session,
             thread.id,
             actor_user_id=123,
+            nowfn=lambda: fixed_now,
         )
 
         with pytest.raises(lecture_slide_runtime.LectureSlideValidationError) as exc:
@@ -451,6 +453,7 @@ async def test_lecture_slide_seek_rejects_forward_jump_without_bypass(db, instit
                     from_offset_ms=0,
                     to_offset_ms=3_000,
                 ),
+                nowfn=lambda: fixed_now,
             )
 
     assert (
