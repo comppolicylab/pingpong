@@ -379,7 +379,12 @@ async def create_lecture_slide_deck(
             uploader_id=uploader_id,
             source_bytes=source_bytes,
         )
-        return deck
+        loaded_deck = await models.LectureSlideDeck.get_by_id_for_summary(
+            session, deck.id
+        )
+        if loaded_deck is None:
+            raise RuntimeError(f"Created lecture slide deck {deck.id} was not found.")
+        return loaded_deck
     except Exception as exc:
         try:
             await config.video_store.store.delete(store_key)

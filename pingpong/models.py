@@ -3425,6 +3425,22 @@ class LectureSlideDeck(Base):
         return await session.scalar(stmt)
 
     @classmethod
+    async def get_by_id_for_summary(
+        cls, session: AsyncSession, id_: int
+    ) -> Optional["LectureSlideDeck"]:
+        stmt = (
+            select(LectureSlideDeck)
+            .where(LectureSlideDeck.id == int(id_))
+            .options(selectinload(LectureSlideDeck.source_stored_object))
+            .options(
+                selectinload(LectureSlideDeck.additional_context_files).selectinload(
+                    LectureSlideAdditionalContextFile.file
+                )
+            )
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
     async def get_by_id_for_class(
         cls, session: AsyncSession, id_: int, class_id: int
     ) -> Optional["LectureSlideDeck"]:
