@@ -71,7 +71,7 @@
 			"cookie": "^0.7.0",
 			"yaml": "^2.8.3",
 			"esbuild": "^0.28.1",
-			"dompurify": "^3.4.7"
+			"dompurify": "^3.4.11"
 		}
 	}
 }
