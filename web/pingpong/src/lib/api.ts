@@ -4961,7 +4961,7 @@ export type FileTypeInfo = {
 /**
  * Lookup function for file types.
  */
-export type MimeTypeLookupFn = (t: string) => FileTypeInfo | undefined;
+export type MimeTypeLookupFn = (t: string, filename?: string) => FileTypeInfo | undefined;
 
 /**
  * Information about upload support.
@@ -4984,7 +4984,9 @@ type FileContentTypeAcceptFilters = {
  * Generate the string used for the "accept" attribute in file inputs.
  */
 const _getAcceptStringForTypes = (types: FileTypeInfo[]) => {
-	return types.map((ft) => ft.mime_type).join(',');
+	return types
+		.flatMap((ft) => [ft.mime_type, ...ft.extensions.map((extension) => `.${extension}`)])
+		.join(',');
 };
 
 const _getAcceptString = (
@@ -5007,8 +5009,17 @@ const _getAcceptString = (
 
 const _normalizeMimeType = (mime: string) => mime.toLowerCase().split(';')[0].trim();
 
+const _genericFileContentTypes = new Set(['', 'application/octet-stream', 'text/plain']);
+
 const _getFileContentType = (file: ServerFile | File) => {
 	return 'content_type' in file ? file.content_type : file.type;
+};
+
+const _getFileName = (file: ServerFile | File) => file.name;
+
+const _getFileExtension = (filename?: string) => {
+	const extension = filename?.toLowerCase().split('.').pop();
+	return extension && extension !== filename?.toLowerCase() ? extension : undefined;
 };
 
 /**
@@ -5040,14 +5051,23 @@ export const getClassUploadInfo = async (f: Fetcher, classId: number) => {
 
 	// Create a lookup table for mime types.
 	const _mimeTypeLookup = new Map<string, FileTypeInfo>();
+	const _extensionLookup = new Map<string, FileTypeInfo>();
 	info.types.forEach((ft) => {
 		_mimeTypeLookup.set(ft.mime_type.toLowerCase(), ft);
+		ft.extensions.forEach((extension) => {
+			_extensionLookup.set(extension.toLowerCase(), ft);
+		});
 	});
 
 	// Lookup function for mime types
-	const mimeType = (mime: string) => {
+	const mimeType = (mime: string, filename?: string) => {
 		const slug = _normalizeMimeType(mime);
-		return _mimeTypeLookup.get(slug);
+		const support = _mimeTypeLookup.get(slug);
+		const extensionSupport = _extensionLookup.get(_getFileExtension(filename) || '');
+		if (extensionSupport && (!support || _genericFileContentTypes.has(slug))) {
+			return extensionSupport;
+		}
+		return support;
 	};
 
 	return {
@@ -5086,7 +5106,7 @@ export const getClassUploadInfo = async (f: Fetcher, classId: number) => {
 		 */
 		getFileSupportFilter(filters: Partial<FileContentTypeAcceptFilters> = {}) {
 			return (file: ServerFile | File) => {
-				const support = mimeType(_getFileContentType(file));
+				const support = mimeType(_getFileContentType(file), _getFileName(file));
 				if (!support) {
 					return false;
 				}

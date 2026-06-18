@@ -32,14 +32,14 @@
 	const dispatch = createEventDispatcher();
 
 	// Look up info about the file type.
-	const nameForMimeType = (type: string) => {
-		const mime = mimeType(type);
+	const nameForMimeType = (type: string, filename?: string) => {
+		const mime = mimeType(type, filename);
 		return mime?.name || 'Unsupported!';
 	};
 
 	$: progress = info.progress;
-	$: type = nameForMimeType(info.file.type);
 	$: name = info.file.name;
+	$: type = nameForMimeType(info.file.type, name);
 	$: state = info.state;
 	$: error = info.state === 'error' ? (info.response as FileUploadFailure).error : '';
 

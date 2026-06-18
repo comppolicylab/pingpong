@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { expandResponse, getThread, type Fetcher } from '$lib/api';
+import { expandResponse, getClassUploadInfo, getThread, type Fetcher } from '$lib/api';
 import { resetAnonymousShareToken, setAnonymousShareToken } from '$lib/stores/anonymous';
 
 describe('getThread', () => {
@@ -50,5 +50,51 @@ describe('expandResponse', () => {
 			detail: 'This page was inactive for too long. Refresh the lesson to continue.',
 			error_code: 'controller_lease_expired'
 		});
+	});
+});
+
+describe('getClassUploadInfo', () => {
+	it('falls back to known extensions for generic browser MIME types', async () => {
+		const fetcher = vi.fn().mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					types: [
+						{
+							name: 'Markdown',
+							mime_type: 'text/markdown',
+							file_search: true,
+							code_interpreter: true,
+							vision: false,
+							input_file: true,
+							extensions: ['md', 'markdown']
+						},
+						{
+							name: 'Pickle',
+							mime_type: 'application/octet-stream',
+							file_search: false,
+							code_interpreter: true,
+							vision: false,
+							input_file: false,
+							extensions: ['pkl']
+						}
+					],
+					allow_private: true,
+					private_file_max_size: 1,
+					class_file_max_size: 1
+				}),
+				{ status: 200, headers: { 'content-type': 'application/json' } }
+			)
+		) as unknown as Fetcher;
+
+		const uploadInfo = await getClassUploadInfo(fetcher, 1);
+
+		expect(uploadInfo.mimeType('application/octet-stream', 'notes.md')?.name).toBe('Markdown');
+		expect(uploadInfo.mimeType('application/octet-stream', 'model.pkl')?.name).toBe('Pickle');
+		expect(
+			uploadInfo.getFileSupportFilter({ file_search: true })(
+				new File(['# Notes'], 'notes.md', { type: 'application/octet-stream' })
+			)
+		).toBe(true);
+		expect(uploadInfo.fileTypes({ file_search: true })).toContain('.md');
 	});
 });
