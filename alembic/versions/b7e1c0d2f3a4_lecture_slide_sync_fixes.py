@@ -18,10 +18,6 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-# M4: add SUPERSEDED_BY_EARLIER_STAGE to the lecture-slide cancel_reason enum.
-# Postgres native enums can't drop a value, so we swap the column through a temp
-# type (the established pattern in this codebase, e.g.
-# c1e4f3a8b9d2_add_manual_manifest_replaced_cancel_reason).
 _cancel_enum_name = "lectureslideprocessingcancelreason"
 _temp_cancel_enum_name = f"temp_{_cancel_enum_name}"
 _old_cancel_values = (
