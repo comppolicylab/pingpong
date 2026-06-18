@@ -96,9 +96,7 @@ def downgrade() -> None:
     bind = op.get_bind()
     op.execute(
         _processing_runs_table.update()
-        .where(
-            _processing_runs_table.c.cancel_reason == "SUPERSEDED_BY_EARLIER_STAGE"
-        )
+        .where(_processing_runs_table.c.cancel_reason == "SUPERSEDED_BY_EARLIER_STAGE")
         .values(cancel_reason=None)
     )
     _temp_cancel_type.create(bind, checkfirst=False)
