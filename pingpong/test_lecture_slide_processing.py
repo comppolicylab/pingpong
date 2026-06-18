@@ -3489,6 +3489,133 @@ async def test_persist_composite_artifacts_skips_when_fingerprint_unchanged(
         assert deck.continuous_narration_stored_object_id is not None
 
 
+async def test_process_audio_run_rereads_force_manifest_generation(db, monkeypatch):
+    await _create_class_and_deck(db)
+    async with db.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, 1
+        )
+        assert deck is not None
+        deck.status = schemas.LectureSlideDeckStatus.PROCESSING
+        deck.context_version = 5
+        deck.transcript_data = {
+            "words": [
+                {
+                    "id": "w1",
+                    "word": "hello",
+                    "start_offset_ms": 0,
+                    "end_offset_ms": 100,
+                }
+            ]
+        }
+        page = models.LectureSlidePage(
+            lecture_slide_deck_id=1,
+            position=0,
+            start_offset_ms=0,
+            end_offset_ms=100,
+            narration_text="Narration.",
+        )
+        question = models.LectureSlideQuestion(
+            lecture_slide_deck_id=1,
+            position=0,
+            slide_position=0,
+            slide_offset_ms=0,
+            stop_offset_ms=100,
+            question_type=schemas.LectureSlideQuestionType.SINGLE_SELECT,
+            question_text="Question?",
+            intro_text="",
+        )
+        run = models.LectureSlideProcessingRun(
+            lecture_slide_deck_id=1,
+            lecture_slide_deck_id_snapshot=1,
+            class_id=1,
+            stage=schemas.LectureSlideProcessingStage.NARRATION_AUDIO,
+            attempt_number=1,
+            status=schemas.LectureSlideProcessingRunStatus.RUNNING,
+            lease_token="lease",
+            force_manifest_generation=False,
+        )
+        session.add_all([page, question, run])
+        await session.commit()
+        run_id = run.id
+
+    async def fake_transcribe_and_persist(*_args):
+        async with db.async_session() as session:
+            run = await session.get(models.LectureSlideProcessingRun, run_id)
+            assert run is not None
+            run.force_manifest_generation = True
+            session.add(run)
+            await session.commit()
+        return [
+            schemas.LectureVideoManifestWordV3(
+                id="w1", word="hello", start_offset_ms=0, end_offset_ms=100
+            )
+        ]
+
+    manifest_generated = False
+
+    async def fake_generate_slide_manifest(*_args):
+        nonlocal manifest_generated
+        manifest_generated = True
+        return lecture_slide_processing.GeneratedSlideManifest(questions=[])
+
+    async def fake_persist_slide_manifest(*_args):
+        return None
+
+    async def fake_persist_composite_artifacts(*_args):
+        assert manifest_generated is True
+
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "get_openai_client_by_class_id",
+        lambda _session, _class_id: _async_value(SimpleNamespace()),
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "_get_responses_model_for_run",
+        lambda *_args: _async_value("gpt-test"),
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "_download_source_pdf",
+        lambda *_args: _async_value("/tmp/slides.pdf"),
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "_synthesize_slide_audio",
+        lambda *_args: _async_value([SimpleNamespace(page_id=1)]),
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "_transcribe_and_persist_slide_audio",
+        fake_transcribe_and_persist,
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "_get_or_upload_openai_input_pdf",
+        lambda *_args: _async_value("file-test"),
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "_generate_slide_manifest",
+        fake_generate_slide_manifest,
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "_persist_slide_manifest",
+        fake_persist_slide_manifest,
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "_persist_composite_artifacts",
+        fake_persist_composite_artifacts,
+    )
+
+    await lecture_slide_processing._process_claimed_slide_run(run_id, "lease")
+
+    assert manifest_generated is True
+
+
 async def test_queue_manifest_run_escalates_force_on_reused_audio_run(db):
     # A manifest-only request that merges into an in-flight NARRATION_AUDIO run must
     # escalate force_manifest_generation, or the reused run would take the
@@ -3527,6 +3654,104 @@ async def test_queue_manifest_run_escalates_force_on_reused_audio_run(db):
         assert reused.id == audio_run_id
         assert reused.stage == schemas.LectureSlideProcessingStage.NARRATION_AUDIO
         assert reused.force_manifest_generation is True
+
+
+async def test_persist_composite_artifacts_discards_uploads_when_fingerprint_changes(
+    db, monkeypatch
+):
+    await _create_class_and_deck(db, slide_count=1)
+    async with db.async_session() as session:
+        deck = await session.get(models.LectureSlideDeck, 1)
+        assert deck is not None
+        deck.total_duration_ms = 100
+        stored_object = models.LectureSlideNarrationStoredObject(
+            key="slides/page-1.ogg",
+            content_type="audio/ogg",
+            content_length=8,
+            duration_ms=100,
+        )
+        page = models.LectureSlidePage(
+            lecture_slide_deck_id=1,
+            position=0,
+            narration_text="Narration.",
+            start_offset_ms=0,
+            end_offset_ms=100,
+            narration=models.LectureSlideNarration(
+                stored_object=stored_object,
+                status=schemas.LectureSlideNarrationStatus.READY,
+            ),
+        )
+        run = models.LectureSlideProcessingRun(
+            lecture_slide_deck_id=1,
+            lecture_slide_deck_id_snapshot=1,
+            class_id=1,
+            stage=schemas.LectureSlideProcessingStage.COMPOSITE_ARTIFACTS,
+            attempt_number=1,
+            status=schemas.LectureSlideProcessingRunStatus.RUNNING,
+            lease_token="lease",
+        )
+        session.add_all([stored_object, page, run])
+        await session.commit()
+        run_id = run.id
+        stored_object_id = stored_object.id
+
+    class FakeVideoStore:
+        async def put(self, key, _body, _content_type):
+            caption_keys.append(key)
+
+        async def delete(self, key):
+            deleted_caption_keys.append(key)
+
+    audio_keys: list[str] = []
+    caption_keys: list[str] = []
+    deleted_audio_keys: list[str] = []
+    deleted_caption_keys: list[str] = []
+
+    async def fake_store_audio(store_key, _content_type, _audio):
+        audio_keys.append(store_key)
+        async with db.async_session() as session:
+            stored_object = await session.get(
+                models.LectureSlideNarrationStoredObject, stored_object_id
+            )
+            assert stored_object is not None
+            stored_object.duration_ms = 250
+            session.add(stored_object)
+            await session.commit()
+        return store_key, 12
+
+    async def fake_delete_audio_key(key):
+        deleted_audio_keys.append(key)
+
+    monkeypatch.setattr(config, "video_store", SimpleNamespace(store=FakeVideoStore()))
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "_combine_audio_objects",
+        lambda _stored_objects: _async_value(b"combined-webm"),
+    )
+    monkeypatch.setattr(lecture_slide_processing, "_store_audio", fake_store_audio)
+    monkeypatch.setattr(
+        lecture_slide_processing, "_delete_audio_key_quietly", fake_delete_audio_key
+    )
+
+    await lecture_slide_processing._persist_composite_artifacts(
+        run_id,
+        "lease",
+        1,
+        [
+            schemas.LectureVideoManifestWordV3(
+                id="w1", word="hello", start_offset_ms=0, end_offset_ms=100
+            )
+        ],
+    )
+
+    assert deleted_audio_keys == audio_keys
+    assert deleted_caption_keys == caption_keys
+    async with db.async_session() as session:
+        deck = await session.get(models.LectureSlideDeck, 1)
+        assert deck is not None
+        assert deck.continuous_narration_stored_object_id is None
+        assert deck.caption_stored_object_id is None
+        assert deck.continuous_narration_fingerprint is None
 
 
 async def test_persist_slide_manifest_defers_untimed_manual_question_rows(db):

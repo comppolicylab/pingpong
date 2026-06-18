@@ -121,6 +121,18 @@ def downgrade() -> None:
     _temp_cancel_type.drop(bind, checkfirst=False)
 
     op.drop_column("lecture_slide_decks", "continuous_narration_fingerprint")
+    op.execute(
+        "UPDATE lecture_slide_question_options "
+        "SET continue_offset_ms = 0 WHERE continue_offset_ms IS NULL"
+    )
+    op.execute(
+        "UPDATE lecture_slide_questions "
+        "SET stop_offset_ms = 0 WHERE stop_offset_ms IS NULL"
+    )
+    op.execute(
+        "UPDATE lecture_slide_questions "
+        "SET slide_offset_ms = 0 WHERE slide_offset_ms IS NULL"
+    )
     with op.batch_alter_table("lecture_slide_question_options") as batch_op:
         batch_op.alter_column(
             "continue_offset_ms", existing_type=sa.Integer(), nullable=False

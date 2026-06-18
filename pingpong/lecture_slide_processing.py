@@ -1359,6 +1359,27 @@ async def _process_claimed_slide_run(run_id: int, lease_token: str) -> None:
                 )
                 if transcript is None:
                     return
+                async with config.db.driver.async_session() as session:
+                    current_run = await models.LectureSlideProcessingRun.get_by_id(
+                        session, run_id
+                    )
+                    if (
+                        current_run is None
+                        or current_run.status
+                        != schemas.LectureSlideProcessingRunStatus.RUNNING
+                        or current_run.lease_token != lease_token
+                    ):
+                        return
+                    force_manifest_generation = (
+                        force_manifest_generation
+                        or current_run.force_manifest_generation
+                    )
+                if force_manifest_generation and pdf_path is None:
+                    pdf_path = await _download_source_pdf(
+                        run_id, lease_token, deck_id, temp_dir
+                    )
+                    if pdf_path is None:
+                        return
                 has_manifest = await _deck_has_slide_manifest(deck_id)
                 start_stage = (
                     schemas.LectureSlideProcessingStage.COMPOSITE_ARTIFACTS
@@ -3751,6 +3772,13 @@ async def _persist_composite_artifacts(
                     with contextlib.suppress(Exception):
                         await config.video_store.store.delete(caption_key)
                 return
+            current_fingerprint = deck.compute_continuous_narration_fingerprint()
+            if current_fingerprint != fingerprint:
+                await _delete_audio_key_quietly(audio_key)
+                if config.video_store:
+                    with contextlib.suppress(Exception):
+                        await config.video_store.store.delete(caption_key)
+                return
             audio_stored_object = models.LectureSlideNarrationStoredObject(
                 key=audio_key,
                 content_type=content_type,
@@ -3766,9 +3794,7 @@ async def _persist_composite_artifacts(
             await session.flush()
             deck.continuous_narration_stored_object_id = audio_stored_object.id
             deck.caption_stored_object_id = caption_stored_object.id
-            deck.continuous_narration_fingerprint = (
-                deck.compute_continuous_narration_fingerprint()
-            )
+            deck.continuous_narration_fingerprint = fingerprint
             session.add(deck)
             await session.commit()
     except Exception:
