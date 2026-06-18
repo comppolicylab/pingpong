@@ -34,6 +34,7 @@ async def migrate_threads_and_messages_to_v3(session: AsyncSession) -> None:
     for assistant in await _assistants_with_v2_threads(session):
         assistants_by_class.setdefault(assistant.class_id, []).append(assistant)
 
+    failed_threads: list[str] = []
     for class_id, assistants in assistants_by_class.items():
         try:
             openai_client = await get_openai_client_by_class_id(session, class_id)
@@ -45,10 +46,35 @@ async def migrate_threads_and_messages_to_v3(session: AsyncSession) -> None:
 
         for assistant in assistants:
             async for thread in _v2_threads_for_assistant(session, assistant.id):
-                await _migrate_thread(session, openai_client, thread, assistant)
-                # NOTE: we deliberately keep thread versions as `2` for now since we
-                # are not ready to have the client interpret these objects as v3 threads
+                # Keep each OpenAI-backed thread sync isolated. _migrate_thread may
+                # flush several local rows before a later OpenAI request fails, so the
+                # savepoint lets us undo only this thread's partial work.
+                async with session.begin_nested() as savepoint:
+                    try:
+                        await _migrate_thread(session, openai_client, thread, assistant)
+                        # NOTE: we deliberately keep thread versions as `2` for now since
+                        # we are not ready to have the client interpret these objects as v3
+                        # threads
+                    except Exception:
+                        await savepoint.rollback()
+                        logger.exception(
+                            f"Could not migrate thread {thread.id} "
+                            f"for assistant {assistant.id}"
+                        )
+                        failed_threads.append(
+                            f"class {class_id} assistant {assistant.id} thread {thread.id}"
+                        )
+            # Commit the successful threads for this assistant even if another thread
+            # failed and was rolled back to its savepoint.
             await session.commit()
+
+    if failed_threads:
+        # Surface the incomplete migration to the operator after preserving all
+        # successful thread work. The migration is rerunnable, so failed thread IDs can
+        # be retried after the underlying OpenAI/API issue is fixed.
+        raise RuntimeError(
+            f"Failed to migrate {len(failed_threads)} thread(s): {failed_threads}"
+        )
 
 
 async def _assistants_with_v2_threads(

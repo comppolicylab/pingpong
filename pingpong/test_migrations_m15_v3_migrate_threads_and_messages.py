@@ -94,10 +94,14 @@ def _generate_openai_run(
 
 class _FakeOpenAIMessages:
     def __init__(
-        self, messages: list[Message], pages: list[list[Message]] | None = None
+        self,
+        messages: list[Message],
+        pages: list[list[Message]] | None = None,
+        fail_thread_ids: set[str] | None = None,
     ) -> None:
         self._messages = messages
         self._pages = pages
+        self._fail_thread_ids = fail_thread_ids or set()
         self.calls: list[SimpleNamespace] = []
 
     async def list(
@@ -106,6 +110,8 @@ class _FakeOpenAIMessages:
         self.calls.append(
             SimpleNamespace(thread_id=thread_id, order=order, after=after)
         )
+        if thread_id in self._fail_thread_ids:
+            raise RuntimeError(f"failed to fetch messages for thread {thread_id}")
         if self._pages is not None:
             index = len(self.calls) - 1
             return SimpleNamespace(
@@ -132,10 +138,13 @@ class FakeOpenAIClient:
         runs: dict[str, Run],
         *,
         message_pages: list[list[Message]] | None = None,
+        fail_thread_ids: set[str] | None = None,
     ) -> None:
         self.beta = SimpleNamespace(
             threads=SimpleNamespace(
-                messages=_FakeOpenAIMessages(messages, pages=message_pages),
+                messages=_FakeOpenAIMessages(
+                    messages, pages=message_pages, fail_thread_ids=fail_thread_ids
+                ),
                 runs=_FakeOpenAIRuns(runs),
             )
         )
@@ -851,6 +860,40 @@ async def test_class_without_openai_client_is_skipped(
     async with db.async_session() as session:
         assert await _all_messages(session, 1) == []
         assert await _all_runs(session, 1) == []
+
+
+async def test_failed_thread_rolls_back_and_successful_threads_commit(
+    db: DbDriver, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    messages = [
+        _generate_openai_message("msg_user", role="user", created_at=100, user_id=7),
+        _generate_openai_message(
+            "msg_asst", role="assistant", created_at=110, run_id="run_1"
+        ),
+    ]
+    runs = {"run_1": _generate_openai_run("run_1", completed_at=120)}
+    client = FakeOpenAIClient(messages, runs, fail_thread_ids={"thread_fail"})
+    _patch_client(monkeypatch, client)
+
+    async with db.async_session() as session:
+        await _generate_local_thread(session, thread_pk=1, openai_thread_id="thread_ok")
+        await _generate_local_thread(
+            session, thread_pk=2, openai_thread_id="thread_fail"
+        )
+        await session.commit()
+
+    async with db.async_session() as session:
+        with pytest.raises(RuntimeError, match="Failed to migrate 1 thread"):
+            await migration.migrate_threads_and_messages_to_v3(session)
+
+    async with db.async_session() as session:
+        assert [m.message_id for m in await _all_messages(session, 1)] == [
+            "msg_user",
+            "msg_asst",
+        ]
+        assert len(await _all_runs(session, 1)) == 1
+        assert await _all_messages(session, 2) == []
+        assert await _all_runs(session, 2) == []
 
 
 @pytest.mark.parametrize(
