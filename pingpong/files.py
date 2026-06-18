@@ -433,7 +433,7 @@ async def handle_create_single_purpose_file(
             # undocumented way to specify name, content, and content_type which
             # we use here to force correctness.
             # https://github.com/stanford-policylab/pingpong/issues/147
-            file=(upload.filename.lower(), upload.file, upload.content_type),
+            file=(upload.filename.lower(), upload.file, content_type),
             purpose=openai_file_purpose,
         )
     except openai.BadRequestError as e:
@@ -712,7 +712,7 @@ async def handle_create_file(
     - If the purpose contains “multimodal”, then delegates to handle_multimodal_upload.
     - Otherwise, creates a file using handle_create_single_purpose_file.
     """
-    content_type = upload.content_type.lower()
+    content_type = _normalize_upload_content_type(upload)
     if not _is_supported(content_type):
         raise HTTPException(
             status_code=403, detail="File type not supported by OpenAI!"
@@ -767,7 +767,7 @@ async def handle_create_file(
 
     suffix = Path(upload.filename).suffix.lower()
     upload_filename = f"file_{uuid.uuid4()}{suffix}"
-    await config.file_store.store.put(upload_filename, upload.file, upload.content_type)
+    await config.file_store.store.put(upload_filename, upload.file, content_type)
 
     added_file_ids = list(
         filter(
@@ -2038,6 +2038,8 @@ FILE_TYPES = [
 
 _SUPPORTED_TYPE = {ft.mime_type.lower() for ft in FILE_TYPES}
 
+_GENERIC_UPLOAD_CONTENT_TYPES = {"", "application/octet-stream", "text/plain"}
+
 _IMG_SUPPORTED_TYPE = {ft.mime_type.lower() for ft in FILE_TYPES if ft.vision}
 
 _FS_SUPPORTED_TYPE = {ft.mime_type.lower() for ft in FILE_TYPES if ft.file_search}
@@ -2067,10 +2069,35 @@ def _is_ci_supported(content_type: str) -> bool:
 
 def file_extension_to_mime_type(extension: str) -> str | None:
     """Convert a file extension to its corresponding MIME type."""
+    extension = extension.lower().lstrip(".")
     for file_type in FILE_TYPES:
         if extension in file_type.extensions:
             return file_type.mime_type
     return None
+
+
+def _filename_extension(filename: str | None) -> str:
+    """Return the final filename segment after a dot, including leading-dot names."""
+    name = Path(filename or "").name.lower()
+    if "." not in name:
+        return ""
+    return name.rsplit(".", 1)[1]
+
+
+def _normalize_upload_content_type(upload: UploadFile) -> str:
+    """Normalize browser-provided upload MIME types using known extensions."""
+    reported_content_type = (upload.content_type or "").lower().split(";")[0].strip()
+    inferred_content_type = file_extension_to_mime_type(
+        _filename_extension(upload.filename)
+    )
+
+    if inferred_content_type and (
+        reported_content_type in _GENERIC_UPLOAD_CONTENT_TYPES
+        or not _is_supported(reported_content_type)
+    ):
+        return inferred_content_type.lower()
+
+    return reported_content_type
 
 
 IMAGE_DESCRIPTION_PROMPT = """
