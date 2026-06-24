@@ -363,7 +363,7 @@ async def test_migrate_message_parts_reuses_existing_local_file(db):
     async with db.async_session() as session:
         message = await _load_single_message(session)
         await migration._migrate_message_parts(
-            session, FakeAuthzClient(), fake_client, message
+            session, FakeAuthzClient(), fake_client, message, []
         )
         await session.commit()
 
@@ -446,7 +446,7 @@ async def test_migrate_message_parts_backfills_missing_s3_file(db, monkeypatch):
     async with db.async_session() as session:
         message = await _load_single_message(session)
         await migration._migrate_message_parts(
-            session, FakeAuthzClient(), fake_client, message
+            session, FakeAuthzClient(), fake_client, message, []
         )
         await session.commit()
 
@@ -512,7 +512,7 @@ async def test_migrate_message_parts_skips_existing_s3_file_backfill(db, monkeyp
     async with db.async_session() as session:
         message = await _load_single_message(session)
         await migration._migrate_message_parts(
-            session, FakeAuthzClient(), fake_client, message
+            session, FakeAuthzClient(), fake_client, message, []
         )
         await session.commit()
 
@@ -572,7 +572,7 @@ async def test_migrate_message_parts_continues_when_s3_backfill_fails(db, monkey
     async with db.async_session() as session:
         message = await _load_single_message(session)
         await migration._migrate_message_parts(
-            session, FakeAuthzClient(), fake_client, message
+            session, FakeAuthzClient(), fake_client, message, []
         )
         await session.commit()
 
@@ -586,6 +586,71 @@ async def test_migrate_message_parts_continues_when_s3_backfill_fails(db, monkey
         assert annotation.file_object_id == 50
 
     assert len(parts) == 1
+
+
+async def test_migrate_message_parts_revokes_grants_on_failure(db, monkeypatch):
+    """If a message fails after a new File (and its authz grant) is created, the
+    savepoint rollback removes the File row, so the grant must be revoked too —
+    otherwise it dangles, pointing at a File that no longer exists."""
+
+    async with db.async_session() as session:
+        await _seed_thread(session, class_id=1, assistant_id=10, thread_id=100)
+        await _seed_message(
+            session,
+            id_=1001,
+            thread_id=100,
+            run_id=100,
+            openai_message_id="msg-fails-after-grant",
+            output_index=0,
+            metadata=MIGRATION_METADATA,
+        )
+        await session.commit()
+
+    # The image references a brand-new file (so a grant is written), then a second
+    # file_path annotation references a file whose retrieve raises, failing the
+    # message after the grant was written.
+    fake_client = _fake_openai_client(
+        {
+            "thread-100": [
+                _openai_message(
+                    "msg-fails-after-grant",
+                    [
+                        _image_content("file-new"),
+                        _text_content("path", [_file_path("file-explodes")]),
+                    ],
+                )
+            ],
+        }
+    )
+
+    async def fake_retrieve(file_id):
+        if file_id == "file-explodes":
+            raise RuntimeError("retrieve failure")
+        return SimpleNamespace(filename="new.txt", created_at=0)
+
+    fake_client.files.retrieve = fake_retrieve
+
+    async def fake_get_openai_client_by_class_id(_session, class_id):
+        return fake_client
+
+    monkeypatch.setattr(
+        migration, "get_openai_client_by_class_id", fake_get_openai_client_by_class_id
+    )
+
+    authz = FakeAuthzClient()
+    async with db.async_session() as session:
+        await migration.migrate_message_parts(session, authz)
+
+    # The grant written for the new file must have been revoked on rollback...
+    assert authz.grants
+    assert sorted(authz.revokes) == sorted(authz.grants)
+
+    # ...and nothing was persisted for the failed message.
+    async with db.async_session() as session:
+        parts = await _all(session, models.MessagePart)
+        files = await _all(session, models.File)
+    assert parts == []
+    assert files == []
 
 
 async def _seed_user(session, *, id_: int, anonymous_link_id: int | None = None):

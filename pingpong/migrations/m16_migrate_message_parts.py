@@ -26,7 +26,7 @@ from sqlalchemy.orm.attributes import flag_modified
 import pingpong.models as models
 import pingpong.schemas as schemas
 from pingpong.ai import get_openai_client_by_class_id
-from pingpong.authz.base import AuthzClient
+from pingpong.authz.base import AuthzClient, Relation
 from pingpong.config import config
 from pingpong.files import _file_grants, _is_ci_supported, file_extension_to_mime_type
 from pingpong.server import OpenAIClient
@@ -77,10 +77,17 @@ async def migrate_message_parts(
             continue
 
         for local_message in local_messages:
+            # Authz grants are written separately from DB sessions, so we need to keep
+            # track of those writes so we can revoke if the nested session fails
+            written_grants: list[Relation] = []
             async with session.begin_nested() as savepoint:
                 try:
                     await _migrate_message_parts(
-                        session, authz_client, openai_client, local_message
+                        session,
+                        authz_client,
+                        openai_client,
+                        local_message,
+                        written_grants,
                     )
                     local_message.message_metadata[
                         "assistants_to_responses_api_thread_migration"
@@ -90,6 +97,7 @@ async def migrate_message_parts(
                     flag_modified(local_message, "message_metadata")
                 except Exception:
                     await savepoint.rollback()
+                    await authz_client.write(revoke=written_grants)
                     logger.exception(
                         f"Unexpected error backfilling message parts. "
                         f"thread_id={local_message.thread_id} "
@@ -153,6 +161,7 @@ async def _migrate_message_parts(
     authz_client: AuthzClient,
     openai_client: OpenAIClient,
     local_message: models.Message,
+    written_grants: list[Relation],
 ) -> None:
     openai_message = await openai_client.beta.threads.messages.retrieve(
         message_id=local_message.message_id,
@@ -166,6 +175,7 @@ async def _migrate_message_parts(
         openai_client,
         openai_message,
         local_message,
+        written_grants,
     )
     await session.flush()
 
@@ -176,10 +186,17 @@ async def _persist_message_parts(
     openai_client: OpenAIClient,
     openai_message: OpenAIMessage,
     local_message: models.Message,
+    written_grants: list[Relation],
 ) -> None:
     for part_index, content in enumerate(openai_message.content):
         part_data = await _create_message_part_data(
-            session, authz_client, openai_client, content, local_message, part_index
+            session,
+            authz_client,
+            openai_client,
+            content,
+            local_message,
+            part_index,
+            written_grants,
         )
         if part_data is None:
             logger.warning(
@@ -203,6 +220,7 @@ async def _persist_message_parts(
                 local_message,
                 message_part.id,
                 annotation_index,
+                written_grants,
             )
             if annotation_data is None:
                 logger.warning(
@@ -222,6 +240,7 @@ async def _create_message_part_data(
     openai_message_content: MessageContent,
     local_message: models.Message,
     part_index: int,
+    written_grants: list[Relation],
 ) -> dict[str, object] | None:
     message_part_data: dict[str, object] = {
         "message_id": local_message.id,
@@ -245,6 +264,7 @@ async def _create_message_part_data(
             local_message.thread,
             local_message,
             openai_message_content.image_file.file_id,
+            written_grants,
         )
         if local_message.role == schemas.MessageRole.USER:
             await _backfill_s3_file(session, openai_client, local_file)
@@ -265,6 +285,7 @@ async def _create_annotation_data_and_persist_file(
     local_message: models.Message,
     message_part_id: int,
     annotation_index: int,
+    written_grants: list[Relation],
 ) -> dict[str, object] | None:
     data: dict[str, object] = {
         "message_part_id": message_part_id,
@@ -294,6 +315,7 @@ async def _create_annotation_data_and_persist_file(
             local_thread,
             local_message,
             annotation.file_path.file_id,
+            written_grants,
         )
         await _backfill_s3_file(session, openai_client, local_file)
         data.update(
@@ -328,13 +350,17 @@ async def _fetch_or_create_local_file(
     local_thread: models.Thread,
     local_message: models.Message,
     openai_file_id: str,
+    written_grants: list[Relation],
 ) -> models.File:
     maybe_local_file = await _fetch_local_file(session, openai_file_id)
     if maybe_local_file:
         return maybe_local_file
 
     openai_file = await openai_client.files.retrieve(openai_file_id)
-    content_type = file_extension_to_mime_type(openai_file.filename.split(".")[-1])
+    filename_parts = openai_file.filename.split(".")
+    content_type = (
+        file_extension_to_mime_type(filename_parts[-1]) if filename_parts else None
+    )
     uploader = await _get_anonymous_user_fields(session, local_thread, local_message)
 
     # used for updated too since that's not given by OpenAI
@@ -356,15 +382,17 @@ async def _fetch_or_create_local_file(
         class_id=local_thread.class_id,
     )
 
-    await authz_client.write(
-        grant=_file_grants(
-            local_file,
-            local_thread.class_id,
-            uploader.user_auth,
-            uploader.anonymous_link_auth,
-            uploader.anonymous_user_auth,
-        )
+    grants = _file_grants(
+        local_file,
+        local_thread.class_id,
+        uploader.user_auth,
+        uploader.anonymous_link_auth,
+        uploader.anonymous_user_auth,
     )
+    await authz_client.write(grant=grants)
+    # Record so the caller can revoke these if the savepoint rolls back (the authz
+    # write above is not covered by the DB transaction).
+    written_grants.extend(grants)
 
     if _is_ci_supported(local_file.content_type):
         await models.Thread.add_code_interpreter_files(
