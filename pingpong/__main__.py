@@ -84,6 +84,9 @@ from pingpong.migrations.m14_migrate_lecture_slide_v4_context_to_v5 import (
 from pingpong.migrations.m15_v3_migrate_threads_and_messages import (
     migrate_threads_and_messages_to_v3,
 )
+from pingpong.migrations.m16_migrate_message_parts import (
+    migrate_message_parts,
+)
 from pingpong.now import _get_next_run_time, croner, utcnow
 from pingpong.schemas import LMSType, RunStatus
 from pingpong.lti.course_bridge import course_bridge_sync_all
@@ -1198,6 +1201,17 @@ def m15_v3_migrate_threads_and_messages() -> None:
             logger.info("Done!")
 
     asyncio.run(_m15_v3_migrate_threads_and_messages())
+
+
+@db.command("m16_migrate_message_parts")
+def m16_migrate_message_parts() -> None:
+    async def _m16_migrate_message_parts() -> None:
+        async with config.db.driver.async_session() as session:
+            logger.info("Backfilling message parts and annotations...")
+            await migrate_message_parts(session)
+            logger.info("Done!")
+
+    asyncio.run(_m16_migrate_message_parts())
 
 
 @db.command("m02_remove_responses_threads")

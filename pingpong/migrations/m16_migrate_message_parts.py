@@ -19,13 +19,13 @@ from openai.types.beta.threads import (
 from openai.types.beta.threads.message_content import MessageContent
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import contains_eager, defaultload, selectinload
+from sqlalchemy.orm import contains_eager, selectinload
 
 import pingpong.models as models
 import pingpong.schemas as schemas
 from pingpong.ai import get_openai_client_by_class_id
 from pingpong.config import config
-from pingpong.files import file_extension_to_mime_type
+from pingpong.files import file_extension_to_mime_type, _is_ci_supported
 from pingpong.server import OpenAIClient
 
 logger = logging.getLogger(__name__)
@@ -87,16 +87,21 @@ async def _fetch_message_fields(
     Selects messages whose metadata marks the m15 migration as "complete" and that
     have an upstream OpenAI message_id, while excluding any message that already has
     a MessagePart, so the backfill is idempotent.
-    Messages are ordered by class, assistant, thread, and output index to keep related
+    Messages are ordered by class, thread, and output index to keep related
     messages grouped, and OpenAI clients can be reused per class. The thread (with its
-    assistant and anonymous sessions) and run are fetched in advance.
+    anonymous sessions) and run are fetched in advance.
+
+    `group_by` combines message rows into one row per group, but we need every
+    individual message row to back-fill its parts, so grouping would get rid of the rows
+    we're trying to iterate over.
+
+    The options for pre-loading threads, anonymous sessions, and runs are necessary
+    because SQLAlchemy doesn't lazily load those fields in an async context.
     """
 
     stmt = (
         select(models.Message)
-        .select_from(models.Thread)
-        .join(models.Message, models.Message.thread_id == models.Thread.id)
-        .join(models.Assistant, models.Thread.assistant_id == models.Assistant.id)
+        .join(models.Thread, models.Message.thread_id == models.Thread.id)
         .outerjoin(
             models.MessagePart, models.MessagePart.message_id == models.Message.id
         )
@@ -109,16 +114,12 @@ async def _fetch_message_fields(
             models.MessagePart.id.is_(None),
         )
         .order_by(
-            models.Assistant.class_id.asc(),
-            models.Assistant.id.asc(),
+            models.Thread.class_id.asc(),
             models.Thread.id.asc(),
             models.Message.output_index.asc(),
         )
         .options(
-            contains_eager(models.Message.thread).contains_eager(
-                models.Thread.assistant
-            ),
-            defaultload(models.Message.thread).selectinload(
+            contains_eager(models.Message.thread).selectinload(
                 models.Thread.anonymous_sessions
             ),
             selectinload(models.Message.run),
@@ -137,18 +138,14 @@ async def _migrate_message_parts(
         message_id=local_message.message_id,
         thread_id=local_message.thread.thread_id,
     )
-    try:
-        await _persist_message_parts(
-            session,
-            openai_client,
-            openai_message,
-            local_message,
-        )
-    except Exception:
-        logger.exception(
-            f"Could not backfill message parts. message_id={local_message.id} "
-            f"openai_message_id={openai_message.id}",
-        )
+    # Exception is handled by caller so that we can rollback if there's an error. So
+    # no try-catch
+    await _persist_message_parts(
+        session,
+        openai_client,
+        openai_message,
+        local_message,
+    )
 
     await session.flush()
 
@@ -225,6 +222,8 @@ async def _create_message_part_data(
             local_message,
             openai_message_content.image_file.file_id,
         )
+        if local_message.role == schemas.MessageRole.USER:
+            await _backfill_s3_file(session, openai_client, local_file)
         message_part_data["type"] = schemas.MessagePartType.INPUT_IMAGE
         message_part_data["input_image_file_id"] = local_file.file_id
         message_part_data["input_image_file_object_id"] = local_file.id
@@ -257,8 +256,6 @@ async def _create_annotation_data_and_persist_file(
                 "type": schemas.AnnotationType.FILE_CITATION,
                 "file_id": annotation.file_citation.file_id,
                 "file_object_id": local_file.id if local_file else None,
-                "vision_file_id": annotation.file_citation.file_id,
-                "vision_file_object_id": local_file.id if local_file else None,
                 "filename": local_file.name if local_file else None,
             }
         )
@@ -281,6 +278,10 @@ async def _create_annotation_data_and_persist_file(
                 "filename": local_file.name if local_file else None,
             }
         )
+        # NOTE: ideally we'd also upload the file to OpenAI so it can access it, but
+        # that would incur a lot of extra complexity since we'd have to trace the
+        # context (i.e., tool call, container, etc.) in which it was created. If the
+        # user needs it they can ask for it to be re-generated.
         return data
 
     return None
@@ -332,6 +333,13 @@ async def _fetch_or_create_local_file(
         class_id=local_thread.class_id,
     )
 
+    if _is_ci_supported(local_file.content_type):
+        await models.Thread.add_code_interpreter_files(
+            session=session,
+            thread_id=local_thread.thread_id,
+            file_ids=[openai_file_id],
+        )
+
     return local_file
 
 
@@ -341,6 +349,12 @@ async def _get_anonymous_user_fields(
     local_message: models.Message,
 ) -> tuple[int | None, int | None, int | None]:
     uploader_id = local_message.user_id
+
+    if uploader_id is None and len(local_thread.users) > 0:
+        for user in local_thread.users:
+            if user.anonymous_link_id is None:
+                uploader_id = user.id
+
     if uploader_id is None and local_message.run is not None:
         uploader_id = local_message.run.creator_id
 
@@ -385,17 +399,25 @@ async def _backfill_s3_file(
                 f"(id: {local_file.id})"
             )
             return
+    except Exception:
+        logger.exception(
+            "Could not fetch file from OpenAI during message part migration. "
+            f"file_id={local_file.file_id} file_object_id={local_file.id}",
+        )
+        return
 
-        # filename generation taken from `pingpong.files.handle_create_file`
-        suffix = Path(local_file.name or "").suffix.lower()
-        store_key = f"file_{uuid.uuid4()}{suffix}"
-        content_type = local_file.content_type
+    # filename generation taken from `pingpong.files.handle_create_file`
+    suffix = Path(local_file.name or "").suffix.lower()
+    store_key = f"file_{uuid.uuid4()}{suffix}"
+    content_type = local_file.content_type
+
+    try:
         await config.file_store.store.put(
             store_key, io.BytesIO(response.content), content_type
         )
     except Exception:
         logger.exception(
-            "Could not backfill S3 file during message part migration. "
+            "Could not store file in S3 during message part migration. "
             f"file_id={local_file.file_id} file_object_id={local_file.id}",
         )
         return
