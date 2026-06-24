@@ -1,5 +1,6 @@
 import io
 import logging
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,15 +18,17 @@ from openai.types.beta.threads import (
     Message as OpenAIMessage,
 )
 from openai.types.beta.threads.message_content import MessageContent
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import contains_eager, selectinload
+from sqlalchemy.orm import selectinload
+from sqlalchemy.orm.attributes import flag_modified
 
 import pingpong.models as models
 import pingpong.schemas as schemas
 from pingpong.ai import get_openai_client_by_class_id
+from pingpong.authz.base import AuthzClient
 from pingpong.config import config
-from pingpong.files import file_extension_to_mime_type, _is_ci_supported
+from pingpong.files import _file_grants, _is_ci_supported, file_extension_to_mime_type
 from pingpong.server import OpenAIClient
 
 logger = logging.getLogger(__name__)
@@ -37,47 +40,63 @@ class ThreadMessages:
     messages: list[models.Message]
 
 
+@dataclass(frozen=True)
+class UploaderFields:
+    uploader_id: int | None
+    anonymous_session_id: int | None
+    anonymous_link_id: int | None
+    user_auth: str | None
+    anonymous_user_auth: str | None
+    anonymous_link_auth: str | None
+
+
 async def migrate_message_parts(
-    session: AsyncSession,
+    session: AsyncSession, authz_client: AuthzClient
 ) -> None:
     """Backfill MessageParts/Annotations for messages created by m15. This migration
     fetches those same upstream messages (from m15) and stores their parts and
     annotations locally.
     """
 
+    messages_by_class_id: dict[int, list[models.Message]] = defaultdict(list)
+
     openai_clients_by_class_id: dict[int, OpenAIClient] = {}
-    failed_class_ids: set[int] = set()
 
     for local_message in await _fetch_message_fields(session):
-        class_id = local_message.thread.class_id
-        if class_id in failed_class_ids:
+        messages_by_class_id[local_message.thread.class_id].append(local_message)
+
+    for class_id, local_messages in messages_by_class_id.items():
+        try:
+            openai_client = await get_openai_client_by_class_id(session, class_id)
+            openai_clients_by_class_id[class_id] = openai_client
+        except Exception:
+            logger.exception(
+                "Could not get OpenAI client during message part "
+                f"backfill. class_id={class_id}",
+            )
             continue
 
-        openai_client = openai_clients_by_class_id.get(class_id)
-        if openai_client is None:
-            try:
-                openai_client = await get_openai_client_by_class_id(session, class_id)
-                openai_clients_by_class_id[class_id] = openai_client
-            except Exception:
-                logger.exception(
-                    "Could not get OpenAI client for class during message part "
-                    f"backfill. class_id={class_id}",
-                )
-                failed_class_ids.add(class_id)
-                continue
+        for local_message in local_messages:
+            async with session.begin_nested() as savepoint:
+                try:
+                    await _migrate_message_parts(
+                        session, authz_client, openai_client, local_message
+                    )
+                    local_message.message_metadata[
+                        "assistants_to_responses_api_thread_migration"
+                    ]["message_parts"] = "complete"
+                    # Notifies SQLAlchemy that `message_metadata` changed (since it's JSON it
+                    # wouldn't be detected otherwise)
+                    flag_modified(local_message, "message_metadata")
+                except Exception:
+                    await savepoint.rollback()
+                    logger.exception(
+                        f"Unexpected error backfilling message parts. "
+                        f"thread_id={local_message.thread_id} "
+                        f"openai_thread_id={local_message.thread.thread_id}"
+                    )
 
-        async with session.begin_nested() as savepoint:
-            try:
-                await _migrate_message_parts(session, openai_client, local_message)
-            except Exception:
-                await savepoint.rollback()
-                logger.exception(
-                    f"Unexpected error backfilling message parts. "
-                    f"thread_id={local_message.thread_id} "
-                    f"openai_thread_id={local_message.thread.thread_id}"
-                )
-
-        await session.commit()
+            await session.commit()
 
 
 async def _fetch_message_fields(
@@ -86,18 +105,19 @@ async def _fetch_message_fields(
     """
     Selects messages whose metadata marks the m15 migration as "complete" and that
     have an upstream OpenAI message_id, while excluding any message that already has
-    a MessagePart, so the backfill is idempotent.
-    Messages are ordered by class, thread, and output index to keep related
-    messages grouped, and OpenAI clients can be reused per class. The thread (with its
-    anonymous sessions) and run are fetched in advance.
+    a MessagePart or whose `message_parts` migration state is already "complete", so
+    the backfill is idempotent. The thread (with its anonymous sessions and users)
+    and run are fetched in advance.
 
-    `group_by` combines message rows into one row per group, but we need every
-    individual message row to back-fill its parts, so grouping would get rid of the rows
-    we're trying to iterate over.
-
-    The options for pre-loading threads, anonymous sessions, and runs are necessary
-    because SQLAlchemy doesn't lazily load those fields in an async context.
+    The options for pre-loading threads, anonymous sessions, users, and runs are
+    necessary because SQLAlchemy doesn't lazily load those fields in an async context.
     """
+
+    migration_metadata = models.Message.message_metadata[
+        "assistants_to_responses_api_thread_migration"
+    ]
+    message_state = migration_metadata["message"].as_string()
+    message_parts_state = migration_metadata["message_parts"].as_string()
 
     stmt = (
         select(models.Message)
@@ -106,22 +126,21 @@ async def _fetch_message_fields(
             models.MessagePart, models.MessagePart.message_id == models.Message.id
         )
         .where(
-            models.Message.message_metadata[
-                "assistants_to_responses_api_thread_migration"
-            ]["message"].as_string()
-            == "complete",
+            message_state == "complete",
             models.Message.message_id.is_not(None),
+            or_(
+                message_parts_state.is_(None),
+                message_parts_state != "complete",
+            ),
             models.MessagePart.id.is_(None),
         )
-        .order_by(
-            models.Thread.class_id.asc(),
-            models.Thread.id.asc(),
-            models.Message.output_index.asc(),
-        )
         .options(
-            contains_eager(models.Message.thread).selectinload(
+            selectinload(models.Message.thread).selectinload(
                 models.Thread.anonymous_sessions
             ),
+            selectinload(models.Message.thread)
+            .selectinload(models.Thread.users)
+            .selectinload(models.User.anonymous_link),
             selectinload(models.Message.run),
         )
     )
@@ -131,6 +150,7 @@ async def _fetch_message_fields(
 
 async def _migrate_message_parts(
     session: AsyncSession,
+    authz_client: AuthzClient,
     openai_client: OpenAIClient,
     local_message: models.Message,
 ) -> None:
@@ -139,26 +159,27 @@ async def _migrate_message_parts(
         thread_id=local_message.thread.thread_id,
     )
     # Exception is handled by caller so that we can rollback if there's an error. So
-    # no try-catch
+    # no try-except
     await _persist_message_parts(
         session,
+        authz_client,
         openai_client,
         openai_message,
         local_message,
     )
-
     await session.flush()
 
 
 async def _persist_message_parts(
     session: AsyncSession,
+    authz_client: AuthzClient,
     openai_client: OpenAIClient,
     openai_message: OpenAIMessage,
     local_message: models.Message,
 ) -> None:
     for part_index, content in enumerate(openai_message.content):
         part_data = await _create_message_part_data(
-            session, openai_client, content, local_message, part_index
+            session, authz_client, openai_client, content, local_message, part_index
         )
         if part_data is None:
             logger.warning(
@@ -175,6 +196,7 @@ async def _persist_message_parts(
         ):
             annotation_data = await _create_annotation_data_and_persist_file(
                 session,
+                authz_client,
                 openai_client,
                 annotation,
                 local_message.thread,
@@ -195,6 +217,7 @@ async def _persist_message_parts(
 
 async def _create_message_part_data(
     session: AsyncSession,
+    authz_client: AuthzClient,
     openai_client: OpenAIClient,
     openai_message_content: MessageContent,
     local_message: models.Message,
@@ -217,6 +240,7 @@ async def _create_message_part_data(
     if _is_image_file_content(openai_message_content):
         local_file = await _fetch_or_create_local_file(
             session,
+            authz_client,
             openai_client,
             local_message.thread,
             local_message,
@@ -234,6 +258,7 @@ async def _create_message_part_data(
 
 async def _create_annotation_data_and_persist_file(
     session: AsyncSession,
+    authz_client: AuthzClient,
     openai_client: OpenAIClient,
     annotation: OpenAIAnnotation,
     local_thread: models.Thread,
@@ -264,6 +289,7 @@ async def _create_annotation_data_and_persist_file(
     if annotation.type == schemas.AnnotationType.FILE_PATH:
         local_file = await _fetch_or_create_local_file(
             session,
+            authz_client,
             openai_client,
             local_thread,
             local_message,
@@ -297,6 +323,7 @@ async def _fetch_local_file(
 
 async def _fetch_or_create_local_file(
     session: AsyncSession,
+    authz_client: AuthzClient,
     openai_client: OpenAIClient,
     local_thread: models.Thread,
     local_message: models.Message,
@@ -308,11 +335,7 @@ async def _fetch_or_create_local_file(
 
     openai_file = await openai_client.files.retrieve(openai_file_id)
     content_type = file_extension_to_mime_type(openai_file.filename.split(".")[-1])
-    (
-        uploader_id,
-        anonymous_session_id,
-        anonymous_link_id,
-    ) = await _get_anonymous_user_fields(session, local_thread, local_message)
+    uploader = await _get_anonymous_user_fields(session, local_thread, local_message)
 
     # used for updated too since that's not given by OpenAI
     created_dt = _require_dt(openai_file.created_at)
@@ -324,13 +347,23 @@ async def _fetch_or_create_local_file(
             "private": local_thread.private,
             "name": openai_file.filename,
             "content_type": content_type,
-            "anonymous_session_id": anonymous_session_id,
-            "anonymous_link_id": anonymous_link_id,
-            "uploader_id": uploader_id,
+            "anonymous_session_id": uploader.anonymous_session_id,
+            "anonymous_link_id": uploader.anonymous_link_id,
+            "uploader_id": uploader.uploader_id,
             "created": created_dt,
             "updated": created_dt,
         },
         class_id=local_thread.class_id,
+    )
+
+    await authz_client.write(
+        grant=_file_grants(
+            local_file,
+            local_thread.class_id,
+            uploader.user_auth,
+            uploader.anonymous_link_auth,
+            uploader.anonymous_user_auth,
+        )
     )
 
     if _is_ci_supported(local_file.content_type):
@@ -347,38 +380,68 @@ async def _get_anonymous_user_fields(
     session: AsyncSession,
     local_thread: models.Thread,
     local_message: models.Message,
-) -> tuple[int | None, int | None, int | None]:
+) -> UploaderFields:
     uploader_id = local_message.user_id
+    uploader: models.User | None = None
 
     if uploader_id is None and len(local_thread.users) > 0:
-        for user in local_thread.users:
-            if user.anonymous_link_id is None:
-                uploader_id = user.id
+        for thread_user_member in local_thread.users:
+            if thread_user_member.anonymous_link_id is None:
+                uploader_id = thread_user_member.id
+                uploader = thread_user_member
 
     if uploader_id is None and local_message.run is not None:
         uploader_id = local_message.run.creator_id
 
     if uploader_id is None:
-        return None, None, None
+        return UploaderFields(None, None, None, None, None, None)
 
-    user = await models.User.get_by_id(session, uploader_id)
-    if user is None:
-        return uploader_id, None, None
+    # Replicating auth string in `pingpong.files._file_grants_revoke`
+    user_auth = f"user:{uploader_id}"
+
+    if uploader is None:
+        uploader = await _fetch_full_user(session, uploader_id)
+
+    if uploader is None:
+        return UploaderFields(uploader_id, None, None, user_auth, None, None)
 
     anonymous_session_id = None
+    anonymous_session_token = None
     for anonymous_session in local_thread.anonymous_sessions:
         if anonymous_session.user_id == uploader_id:
             anonymous_session_id = anonymous_session.id
+            anonymous_session_token = anonymous_session.session_token
             break
 
-    if anonymous_session_id is None:
-        stmt = select(models.AnonymousSession.id).where(
-            models.AnonymousSession.thread_id == local_thread.id,
-            models.AnonymousSession.user_id == uploader_id,
-        )
-        anonymous_session_id = await session.scalar(stmt)
+    # Replicating auth strings in `pingpong.files._file_grants_revoke`
+    anonymous_link_auth = (
+        f"anonymous_link:{uploader.anonymous_link.share_token}"
+        if uploader.anonymous_link
+        else None
+    )
+    anonymous_user_auth = (
+        f"anonymous_user:{anonymous_session_token}" if anonymous_session_token else None
+    )
 
-    return uploader_id, anonymous_session_id, user.anonymous_link_id
+    return UploaderFields(
+        uploader_id=uploader_id,
+        anonymous_session_id=anonymous_session_id,
+        anonymous_link_id=uploader.anonymous_link_id,
+        user_auth=user_auth,
+        anonymous_user_auth=anonymous_user_auth,
+        anonymous_link_auth=anonymous_link_auth,
+    )
+
+
+async def _fetch_full_user(
+    session: AsyncSession, uploader_id: int
+) -> models.User | None:
+    """To get the anonymous fields on User"""
+    return await session.scalar(
+        select(models.User)
+        .where(models.User.id == uploader_id)
+        .options(selectinload(models.User.anonymous_link))
+    )
 
 
 async def _backfill_s3_file(

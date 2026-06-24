@@ -52,18 +52,25 @@ def _openai_message(message_id: str, content):
     return SimpleNamespace(id=message_id, content=content)
 
 
+class FakeAuthzClient:
+    """Records grant/revoke writes so tests can assert the OpenFGA tuples the
+    migration emits, without standing up a real authz backend."""
+
+    def __init__(self):
+        self.grants: list = []
+        self.revokes: list = []
+
+    async def write(self, grant=None, revoke=None):
+        if grant:
+            self.grants.extend(grant)
+        if revoke:
+            self.revokes.extend(revoke)
+
+
 class FakeMessagesClient:
     def __init__(self, messages_by_thread):
         self.messages_by_thread = messages_by_thread
-        self.calls = []
         self.retrieve_calls = []
-
-    async def list(self, *, thread_id, order, after):
-        self.calls.append((thread_id, order, after))
-        response = self.messages_by_thread[thread_id]
-        if isinstance(response, Exception):
-            raise response
-        return SimpleNamespace(data=response, has_more=False)
 
     async def retrieve(self, *, thread_id, message_id):
         self.retrieve_calls.append((thread_id, message_id))
@@ -102,17 +109,16 @@ class FakeFileStore:
 
 
 def _fake_openai_client(messages_by_thread, *, file_responses=None):
-    messages_client = FakeMessagesClient(messages_by_thread)
-    files_client = FakeFilesWithRawResponse(file_responses)
-    client = SimpleNamespace(
+    return SimpleNamespace(
         beta=SimpleNamespace(
             threads=SimpleNamespace(
-                messages=messages_client,
+                messages=FakeMessagesClient(messages_by_thread),
             )
         ),
-        files=SimpleNamespace(with_raw_response=files_client),
+        files=SimpleNamespace(
+            with_raw_response=FakeFilesWithRawResponse(file_responses)
+        ),
     )
-    return client, messages_client
 
 
 async def _seed_thread(session, *, class_id: int, assistant_id: int, thread_id: int):
@@ -160,6 +166,7 @@ async def _seed_message(
     output_index: int,
     role: schemas.MessageRole = schemas.MessageRole.ASSISTANT,
     metadata=None,
+    user_id: int | None = None,
 ):
     message = models.Message(
         id=id_,
@@ -170,10 +177,19 @@ async def _seed_message(
         output_index=output_index,
         role=role,
         message_metadata=metadata,
+        user_id=user_id,
     )
     session.add(message)
     await session.flush()
     return message
+
+
+async def _all(session, model, order_by=None):
+    """Fetch all rows of a model, optionally ordered."""
+    stmt = select(model)
+    if order_by is not None:
+        stmt = stmt.order_by(order_by)
+    return list((await session.scalars(stmt)).all())
 
 
 async def _load_single_message(session) -> models.Message:
@@ -274,7 +290,7 @@ async def test_migrate_message_parts_continues_after_message_failure(db, monkeyp
         )
         await session.commit()
 
-    fake_client, _messages_client = _fake_openai_client(
+    fake_client = _fake_openai_client(
         {
             "thread-100": RuntimeError("upstream failure"),
             "thread-200": [
@@ -292,16 +308,10 @@ async def test_migrate_message_parts_continues_after_message_failure(db, monkeyp
     )
 
     async with db.async_session() as session:
-        await migration.migrate_message_parts(session)
+        await migration.migrate_message_parts(session, FakeAuthzClient())
 
     async with db.async_session() as session:
-        parts = list(
-            (
-                await session.execute(
-                    select(models.MessagePart).order_by(models.MessagePart.message_id)
-                )
-            ).scalars()
-        )
+        parts = await _all(session, models.MessagePart, models.MessagePart.message_id)
 
     assert [(part.message_id, part.text) for part in parts] == [(2001, "backfilled")]
 
@@ -330,7 +340,7 @@ async def test_migrate_message_parts_reuses_existing_local_file(db):
         session.add(file)
         await session.commit()
 
-    fake_client, messages_client = _fake_openai_client(
+    fake_client = _fake_openai_client(
         {
             "thread-100": [
                 _openai_message(
@@ -352,31 +362,22 @@ async def test_migrate_message_parts_reuses_existing_local_file(db):
 
     async with db.async_session() as session:
         message = await _load_single_message(session)
-        await migration._migrate_message_parts(session, fake_client, message)
+        await migration._migrate_message_parts(
+            session, FakeAuthzClient(), fake_client, message
+        )
         await session.commit()
 
-    assert messages_client.calls == []
-    assert messages_client.retrieve_calls == [("thread-100", "msg-with-file")]
+    assert fake_client.beta.threads.messages.retrieve_calls == [
+        ("thread-100", "msg-with-file")
+    ]
     # The local file (and its S3File) already exist, so neither a new file
     # fetch nor an S3 backfill should be triggered.
     assert fake_client.files.with_raw_response.calls == []
 
     async with db.async_session() as session:
-        parts = list(
-            (
-                await session.execute(
-                    select(models.MessagePart).order_by(models.MessagePart.part_index)
-                )
-            ).scalars()
-        )
-        annotations = list(
-            (
-                await session.execute(
-                    select(models.Annotation).order_by(
-                        models.Annotation.annotation_index
-                    )
-                )
-            ).scalars()
+        parts = await _all(session, models.MessagePart, models.MessagePart.part_index)
+        annotations = await _all(
+            session, models.Annotation, models.Annotation.annotation_index
         )
 
     assert [part.type for part in parts] == [
@@ -419,7 +420,7 @@ async def test_migrate_message_parts_backfills_missing_s3_file(db, monkeypatch):
     monkeypatch.setattr(
         migration.config, "file_store", SimpleNamespace(store=fake_store)
     )
-    fake_client, _messages_client = _fake_openai_client(
+    fake_client = _fake_openai_client(
         {
             "thread-100": [
                 _openai_message(
@@ -444,15 +445,17 @@ async def test_migrate_message_parts_backfills_missing_s3_file(db, monkeypatch):
 
     async with db.async_session() as session:
         message = await _load_single_message(session)
-        await migration._migrate_message_parts(session, fake_client, message)
+        await migration._migrate_message_parts(
+            session, FakeAuthzClient(), fake_client, message
+        )
         await session.commit()
 
     assert fake_client.files.with_raw_response.calls == ["file-needs-s3"]
     assert list(fake_store.stored_files.values()) == [(b"stored bytes", "text/plain")]
 
     async with db.async_session() as session:
-        parts = list((await session.execute(select(models.MessagePart))).scalars())
-        annotations = list((await session.execute(select(models.Annotation))).scalars())
+        parts = await _all(session, models.MessagePart)
+        annotations = await _all(session, models.Annotation)
         file = await session.get(models.File, 50)
         assert file is not None
         assert file.s3_file_id is not None
@@ -492,7 +495,7 @@ async def test_migrate_message_parts_skips_existing_s3_file_backfill(db, monkeyp
     monkeypatch.setattr(
         migration.config, "file_store", SimpleNamespace(store=fake_store)
     )
-    fake_client, _messages_client = _fake_openai_client(
+    fake_client = _fake_openai_client(
         {
             "thread-100": [
                 _openai_message(
@@ -508,14 +511,16 @@ async def test_migrate_message_parts_skips_existing_s3_file_backfill(db, monkeyp
 
     async with db.async_session() as session:
         message = await _load_single_message(session)
-        await migration._migrate_message_parts(session, fake_client, message)
+        await migration._migrate_message_parts(
+            session, FakeAuthzClient(), fake_client, message
+        )
         await session.commit()
 
     assert fake_client.files.with_raw_response.calls == []
     assert fake_store.stored_files == {}
 
     async with db.async_session() as session:
-        parts = list((await session.execute(select(models.MessagePart))).scalars())
+        parts = await _all(session, models.MessagePart)
     assert len(parts) == 1
 
 
@@ -547,7 +552,7 @@ async def test_migrate_message_parts_continues_when_s3_backfill_fails(db, monkey
         "file_store",
         SimpleNamespace(store=FakeFileStore(fail=True)),
     )
-    fake_client, _messages_client = _fake_openai_client(
+    fake_client = _fake_openai_client(
         {
             "thread-100": [
                 _openai_message(
@@ -566,11 +571,13 @@ async def test_migrate_message_parts_continues_when_s3_backfill_fails(db, monkey
 
     async with db.async_session() as session:
         message = await _load_single_message(session)
-        await migration._migrate_message_parts(session, fake_client, message)
+        await migration._migrate_message_parts(
+            session, FakeAuthzClient(), fake_client, message
+        )
         await session.commit()
 
     async with db.async_session() as session:
-        parts = list((await session.execute(select(models.MessagePart))).scalars())
+        parts = await _all(session, models.MessagePart)
         file = await session.get(models.File, 50)
         assert file is not None
         assert file.s3_file_id is None
@@ -579,3 +586,198 @@ async def test_migrate_message_parts_continues_when_s3_backfill_fails(db, monkey
         assert annotation.file_object_id == 50
 
     assert len(parts) == 1
+
+
+async def _seed_user(session, *, id_: int, anonymous_link_id: int | None = None):
+    user = models.User(id=id_, anonymous_link_id=anonymous_link_id)
+    session.add(user)
+    await session.flush()
+    return user
+
+
+async def test_get_anonymous_user_fields_for_logged_in_user(db):
+    async with db.async_session() as session:
+        await _seed_thread(session, class_id=1, assistant_id=10, thread_id=100)
+        await _seed_user(session, id_=500)
+        await _seed_message(
+            session,
+            id_=1001,
+            thread_id=100,
+            run_id=100,
+            openai_message_id="msg",
+            output_index=0,
+            metadata=MIGRATION_METADATA,
+            user_id=500,
+        )
+        await session.commit()
+
+    async with db.async_session() as session:
+        message = await _load_single_message(session)
+        uploader = await migration._get_anonymous_user_fields(
+            session, message.thread, message
+        )
+
+    assert uploader.uploader_id == 500
+    assert uploader.user_auth == "user:500"
+    assert uploader.anonymous_user_auth is None
+    assert uploader.anonymous_link_auth is None
+
+
+async def test_get_anonymous_user_fields_for_anonymous_session_and_link(db):
+    async with db.async_session() as session:
+        await _seed_thread(session, class_id=1, assistant_id=10, thread_id=100)
+        link = models.AnonymousLink(id=42, share_token="share-tok")
+        session.add(link)
+        await session.flush()
+        await _seed_user(session, id_=500, anonymous_link_id=42)
+        session.add(
+            models.AnonymousSession(
+                id=7,
+                session_token="sess-tok",
+                thread_id=100,
+                user_id=500,
+            )
+        )
+        await _seed_message(
+            session,
+            id_=1001,
+            thread_id=100,
+            run_id=100,
+            openai_message_id="msg",
+            output_index=0,
+            metadata=MIGRATION_METADATA,
+            user_id=500,
+        )
+        await session.commit()
+
+    async with db.async_session() as session:
+        message = await _load_single_message(session)
+        uploader = await migration._get_anonymous_user_fields(
+            session, message.thread, message
+        )
+
+    assert uploader.uploader_id == 500
+    assert uploader.anonymous_session_id == 7
+    assert uploader.anonymous_link_id == 42
+    assert uploader.user_auth == "user:500"
+    assert uploader.anonymous_user_auth == "anonymous_user:sess-tok"
+    assert uploader.anonymous_link_auth == "anonymous_link:share-tok"
+
+
+async def test_get_anonymous_user_fields_falls_back_to_thread_users(db):
+    """When the message has no `user_id`, the uploader is resolved from the
+    thread's associated users, skipping anonymous-link users in favor of a real
+    one."""
+    async with db.async_session() as session:
+        await _seed_thread(session, class_id=1, assistant_id=10, thread_id=100)
+        # An anonymous-link user is skipped in favor of the real user.
+        session.add(models.AnonymousLink(id=99, share_token="fallback-share-tok"))
+        await session.flush()
+        await _seed_user(session, id_=400, anonymous_link_id=99)
+        await _seed_user(session, id_=500)
+        await session.execute(
+            models.user_thread_association.insert(),
+            [
+                {"user_id": 400, "thread_id": 100},
+                {"user_id": 500, "thread_id": 100},
+            ],
+        )
+        await _seed_message(
+            session,
+            id_=1001,
+            thread_id=100,
+            run_id=100,
+            openai_message_id="msg",
+            output_index=0,
+            metadata=MIGRATION_METADATA,
+        )
+        # Leave message.user_id unset so the thread-users branch is taken.
+        await session.commit()
+
+    async with db.async_session() as session:
+        message = await _load_single_message(session)
+        uploader = await migration._get_anonymous_user_fields(
+            session, message.thread, message
+        )
+
+    assert uploader.uploader_id == 500
+    assert uploader.user_auth == "user:500"
+
+
+async def test_get_anonymous_user_fields_falls_back_to_run_creator(db):
+    """With no message `user_id` and no thread users, the uploader falls back to
+    the run's creator."""
+    async with db.async_session() as session:
+        await _seed_thread(session, class_id=1, assistant_id=10, thread_id=100)
+        await _seed_user(session, id_=500)
+        run = await session.get(models.Run, 100)
+        run.creator_id = 500
+        await _seed_message(
+            session,
+            id_=1001,
+            thread_id=100,
+            run_id=100,
+            openai_message_id="msg",
+            output_index=0,
+            metadata=MIGRATION_METADATA,
+        )
+        await session.commit()
+
+    async with db.async_session() as session:
+        message = await _load_single_message(session)
+        assert list(message.thread.users) == []
+        uploader = await migration._get_anonymous_user_fields(
+            session, message.thread, message
+        )
+
+    assert uploader.uploader_id == 500
+    assert uploader.user_auth == "user:500"
+
+
+async def test_get_anonymous_user_fields_grants_match_file_grants(db):
+    """The derived auth strings, fed to `_file_grants`, produce the same tuples
+    request-driven uploads would for a private file."""
+    async with db.async_session() as session:
+        await _seed_thread(session, class_id=1, assistant_id=10, thread_id=100)
+        link = models.AnonymousLink(id=42, share_token="share-tok")
+        session.add(link)
+        await session.flush()
+        await _seed_user(session, id_=500, anonymous_link_id=42)
+        session.add(
+            models.AnonymousSession(
+                id=7, session_token="sess-tok", thread_id=100, user_id=500
+            )
+        )
+        await _seed_message(
+            session,
+            id_=1001,
+            thread_id=100,
+            run_id=100,
+            openai_message_id="msg",
+            output_index=0,
+            metadata=MIGRATION_METADATA,
+            user_id=500,
+        )
+        await session.commit()
+
+    async with db.async_session() as session:
+        message = await _load_single_message(session)
+        uploader = await migration._get_anonymous_user_fields(
+            session, message.thread, message
+        )
+
+    private_file = SimpleNamespace(id=99, private=True, uploader_id=500)
+    grants = migration._file_grants(
+        private_file,
+        1,
+        uploader.user_auth,
+        uploader.anonymous_link_auth,
+        uploader.anonymous_user_auth,
+    )
+
+    assert set(grants) == {
+        ("class:1", "parent", "user_file:99"),
+        ("user:500", "owner", "user_file:99"),
+        ("anonymous_user:sess-tok", "owner", "user_file:99"),
+        ("anonymous_link:share-tok", "can_delete", "user_file:99"),
+    }

@@ -1206,10 +1206,12 @@ def m15_v3_migrate_threads_and_messages() -> None:
 @db.command("m16_migrate_message_parts")
 def m16_migrate_message_parts() -> None:
     async def _m16_migrate_message_parts() -> None:
+        await config.authz.driver.init()
         async with config.db.driver.async_session() as session:
-            logger.info("Backfilling message parts and annotations...")
-            await migrate_message_parts(session)
-            logger.info("Done!")
+            async with config.authz.driver.get_client() as authz_client:
+                logger.info("Backfilling message parts and annotations...")
+                await migrate_message_parts(session, authz_client)
+                logger.info("Done!")
 
     asyncio.run(_m16_migrate_message_parts())
 
