@@ -524,7 +524,7 @@ async def test_migrate_message_parts_skips_existing_s3_file_backfill(db, monkeyp
     assert len(parts) == 1
 
 
-async def test_migrate_message_parts_continues_when_s3_backfill_fails(db, monkeypatch):
+async def test_migrate_message_parts_raises_when_s3_backfill_fails(db, monkeypatch):
     async with db.async_session() as session:
         await _seed_thread(session, class_id=1, assistant_id=10, thread_id=100)
         await _seed_message(
@@ -571,21 +571,10 @@ async def test_migrate_message_parts_continues_when_s3_backfill_fails(db, monkey
 
     async with db.async_session() as session:
         message = await _load_single_message(session)
-        await migration._migrate_message_parts(
-            session, FakeAuthzClient(), fake_client, message, []
-        )
-        await session.commit()
-
-    async with db.async_session() as session:
-        parts = await _all(session, models.MessagePart)
-        file = await session.get(models.File, 50)
-        assert file is not None
-        assert file.s3_file_id is None
-        annotation = await session.scalar(select(models.Annotation))
-        assert annotation is not None
-        assert annotation.file_object_id == 50
-
-    assert len(parts) == 1
+        with pytest.raises(RuntimeError, match="store failure"):
+            await migration._migrate_message_parts(
+                session, FakeAuthzClient(), fake_client, message, []
+            )
 
 
 async def test_migrate_message_parts_revokes_grants_on_failure(db, monkeypatch):

@@ -477,41 +477,32 @@ async def _backfill_s3_file(
     openai_client: OpenAIClient,
     local_file: models.File,
 ) -> None:
+    """
+    If anything fails in this function, we let the exception bubble up to the DB
+    transaction savepoint so that we can rollback our changes if we're unable to
+    fetch the content of the files from OpenAI.
+    """
     if local_file.s3_file_id is not None:
         return
 
-    try:
-        response = await openai_client.files.with_raw_response.retrieve_content(
-            local_file.file_id
+    response = await openai_client.files.with_raw_response.retrieve_content(
+        local_file.file_id
+    )
+
+    if response.status_code != 200:
+        raise RuntimeError(
+            f"OpenAI returned {response.status_code} while fetching file "
+            f"during message part migration (id: {local_file.id})"
         )
-        if response.status_code != 200:
-            logger.exception(
-                f"OpenAI returned {response.status_code} while fetching file "
-                f"(id: {local_file.id})"
-            )
-            return
-    except Exception:
-        logger.exception(
-            "Could not fetch file from OpenAI during message part migration. "
-            f"file_id={local_file.file_id} file_object_id={local_file.id}",
-        )
-        return
 
     # filename generation taken from `pingpong.files.handle_create_file`
     suffix = Path(local_file.name or "").suffix.lower()
     store_key = f"file_{uuid.uuid4()}{suffix}"
     content_type = local_file.content_type
 
-    try:
-        await config.file_store.store.put(
-            store_key, io.BytesIO(response.content), content_type
-        )
-    except Exception:
-        logger.exception(
-            "Could not store file in S3 during message part migration. "
-            f"file_id={local_file.file_id} file_object_id={local_file.id}",
-        )
-        return
+    await config.file_store.store.put(
+        store_key, io.BytesIO(response.content), content_type
+    )
 
     await models.S3File.create(
         session,
