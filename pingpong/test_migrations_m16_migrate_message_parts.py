@@ -445,6 +445,9 @@ async def test_migrate_message_parts_backfills_missing_s3_file(db, monkeypatch):
         s3_file = await session.get(models.S3File, file.s3_file_id)
         assert s3_file is not None
         assert s3_file.key in fake_store.stored_files
+        thread = await session.get(models.Thread, 100)
+        ci_files = await thread.awaitable_attrs.code_interpreter_files
+        assert [ci_file.id for ci_file in ci_files] == [50]
 
     assert len(parts) == 2
     assert len(annotations) == 1
@@ -504,6 +507,9 @@ async def test_migrate_message_parts_skips_existing_s3_file_backfill(db, monkeyp
 
     async with db.async_session() as session:
         parts = await _all(session, models.MessagePart)
+        thread = await session.get(models.Thread, 100)
+        ci_files = await thread.awaitable_attrs.code_interpreter_files
+        assert [ci_file.id for ci_file in ci_files] == [50]
     assert len(parts) == 1
 
 

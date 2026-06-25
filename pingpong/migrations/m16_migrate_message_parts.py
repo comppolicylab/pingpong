@@ -324,7 +324,7 @@ async def _create_annotation_data_and_persist_file(
         if _is_ci_supported(local_file.content_type):
             await models.Thread.add_code_interpreter_files(
                 session=session,
-                thread_id=local_thread.thread_id,
+                thread_id=local_thread.id,
                 file_ids=[local_file.file_id],
             )
 
