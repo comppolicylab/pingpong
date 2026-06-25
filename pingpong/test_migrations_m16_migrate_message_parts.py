@@ -222,23 +222,6 @@ async def test_fetch_message_fields_returns_only_migrated_messages_needing_parts
             output_index=1,
             metadata={},
         )
-        message_with_part = await _seed_message(
-            session,
-            id_=1003,
-            thread_id=100,
-            run_id=100,
-            openai_message_id="msg-has-part",
-            output_index=2,
-            metadata=MIGRATION_METADATA,
-        )
-        session.add(
-            models.MessagePart(
-                message_id=message_with_part.id,
-                type=schemas.MessagePartType.OUTPUT_TEXT,
-                part_index=0,
-                text="already migrated",
-            )
-        )
         await _seed_message(
             session,
             id_=2001,

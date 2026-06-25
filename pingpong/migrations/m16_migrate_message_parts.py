@@ -129,10 +129,6 @@ async def _fetch_message_fields(
 
     stmt = (
         select(models.Message)
-        .join(models.Thread, models.Message.thread_id == models.Thread.id)
-        .outerjoin(
-            models.MessagePart, models.MessagePart.message_id == models.Message.id
-        )
         .where(
             message_state == "complete",
             models.Message.message_id.is_not(None),
@@ -140,7 +136,6 @@ async def _fetch_message_fields(
                 message_parts_state.is_(None),
                 message_parts_state != "complete",
             ),
-            models.MessagePart.id.is_(None),
         )
         .options(
             selectinload(models.Message.thread).selectinload(
@@ -266,8 +261,7 @@ async def _create_message_part_data(
             openai_message_content.image_file.file_id,
             written_grants,
         )
-        if local_message.role == schemas.MessageRole.USER:
-            await _backfill_s3_file(session, openai_client, local_file)
+        await _backfill_s3_file(session, openai_client, local_file)
         message_part_data["type"] = schemas.MessagePartType.INPUT_IMAGE
         message_part_data["input_image_file_id"] = local_file.file_id
         message_part_data["input_image_file_object_id"] = local_file.id
@@ -326,6 +320,14 @@ async def _create_annotation_data_and_persist_file(
                 "filename": local_file.name if local_file else None,
             }
         )
+
+        if _is_ci_supported(local_file.content_type):
+            await models.Thread.add_code_interpreter_files(
+                session=session,
+                thread_id=local_thread.thread_id,
+                file_ids=[local_file.file_id],
+            )
+
         # NOTE: ideally we'd also upload the file to OpenAI so it can access it, but
         # that would incur a lot of extra complexity since we'd have to trace the
         # context (i.e., tool call, container, etc.) in which it was created. If the
@@ -393,13 +395,6 @@ async def _fetch_or_create_local_file(
     # Record so the caller can revoke these if the savepoint rolls back (the authz
     # write above is not covered by the DB transaction).
     written_grants.extend(grants)
-
-    if _is_ci_supported(local_file.content_type):
-        await models.Thread.add_code_interpreter_files(
-            session=session,
-            thread_id=local_thread.thread_id,
-            file_ids=[openai_file_id],
-        )
 
     return local_file
 
