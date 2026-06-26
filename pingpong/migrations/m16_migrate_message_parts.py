@@ -1,6 +1,6 @@
 import io
 import logging
-from collections import defaultdict
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,7 +18,7 @@ from openai.types.beta.threads import (
     Message as OpenAIMessage,
 )
 from openai.types.beta.threads.message_content import MessageContent
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -32,6 +32,8 @@ from pingpong.files import _file_grants, _is_ci_supported, file_extension_to_mim
 from pingpong.server import OpenAIClient
 
 logger = logging.getLogger(__name__)
+
+LOCAL_BATCH_SIZE = 100
 
 
 @dataclass(frozen=True)
@@ -50,6 +52,14 @@ class UploaderFields:
     anonymous_link_auth: str | None
 
 
+@dataclass
+class MessagePartMigrationStats:
+    parts_created: int = 0
+    annotations_created: int = 0
+    files_created: int = 0
+    files_reused: int = 0
+
+
 async def migrate_message_parts(
     session: AsyncSession, authz_client: AuthzClient
 ) -> None:
@@ -58,17 +68,15 @@ async def migrate_message_parts(
     annotations locally.
     """
 
-    messages_by_class_id: dict[int, list[models.Message]] = defaultdict(list)
+    logger.info(
+        "m16 starting message part migration. classes=%s messages=%s",
+        await _count_message_field_classes(session),
+        await _count_message_fields(session),
+    )
 
-    openai_clients_by_class_id: dict[int, OpenAIClient] = {}
-
-    for local_message in await _fetch_message_fields(session):
-        messages_by_class_id[local_message.thread.class_id].append(local_message)
-
-    for class_id, local_messages in messages_by_class_id.items():
+    async for class_id in _message_field_class_ids(session):
         try:
             openai_client = await get_openai_client_by_class_id(session, class_id)
-            openai_clients_by_class_id[class_id] = openai_client
         except Exception:
             logger.exception(
                 "Could not get OpenAI client during message part "
@@ -76,39 +84,124 @@ async def migrate_message_parts(
             )
             continue
 
-        for local_message in local_messages:
-            # Authz grants are written separately from DB sessions, so we need to keep
-            # track of those writes so we can revoke if the nested session fails
-            written_grants: list[Relation] = []
-            async with session.begin_nested() as savepoint:
-                try:
-                    await _migrate_message_parts(
-                        session,
-                        authz_client,
-                        openai_client,
-                        local_message,
-                        written_grants,
-                    )
-                    local_message.message_metadata[
-                        "assistants_to_responses_api_thread_migration"
-                    ]["message_parts"] = "complete"
-                    # Notifies SQLAlchemy that `message_metadata` changed (since it's JSON it
-                    # wouldn't be detected otherwise)
-                    flag_modified(local_message, "message_metadata")
-                except Exception:
-                    await savepoint.rollback()
-                    await authz_client.write_safe(revoke=written_grants)
-                    logger.exception(
-                        f"Unexpected error backfilling message parts. "
-                        f"thread_id={local_message.thread_id} "
-                        f"openai_thread_id={local_message.thread.thread_id}"
-                    )
+        last_message_id = 0
+        while True:
+            local_messages = await _fetch_message_fields(
+                session,
+                class_id=class_id,
+                after_id=last_message_id,
+                limit=LOCAL_BATCH_SIZE,
+            )
+            if not local_messages:
+                break
 
-            await session.commit()
+            logger.info(
+                "m16 processing message batch. class_id=%s messages=%s first_id=%s "
+                "last_id=%s",
+                class_id,
+                len(local_messages),
+                local_messages[0].id,
+                local_messages[-1].id,
+            )
+
+            for local_message in local_messages:
+                # Authz grants are written separately from DB sessions, so we need to keep
+                # track of those writes so we can revoke if the nested session fails
+                written_grants: list[Relation] = []
+                async with session.begin_nested() as savepoint:
+                    try:
+                        await _migrate_message_parts(
+                            session,
+                            authz_client,
+                            openai_client,
+                            local_message,
+                            written_grants,
+                        )
+                        local_message.message_metadata[
+                            "assistants_to_responses_api_thread_migration"
+                        ]["message_parts"] = "complete"
+                        # Notifies SQLAlchemy that `message_metadata` changed (since it's JSON it
+                        # wouldn't be detected otherwise)
+                        flag_modified(local_message, "message_metadata")
+                    except Exception:
+                        await savepoint.rollback()
+                        await authz_client.write_safe(revoke=written_grants)
+                        logger.exception(
+                            f"Unexpected error backfilling message parts. "
+                            f"thread_id={local_message.thread_id} "
+                            f"openai_thread_id={local_message.thread.thread_id}"
+                        )
+
+                await session.commit()
+
+            last_message_id = local_messages[-1].id
+
+
+def _message_fields_filters():
+    migration_metadata = models.Message.message_metadata[
+        "assistants_to_responses_api_thread_migration"
+    ]
+    message_state = migration_metadata["message"].as_string()
+    message_parts_state = migration_metadata["message_parts"].as_string()
+    return (
+        message_state == "complete",
+        models.Message.message_id.is_not(None),
+        or_(
+            message_parts_state.is_(None),
+            message_parts_state != "complete",
+        ),
+    )
+
+
+async def _count_message_fields(session: AsyncSession) -> int:
+    stmt = (
+        select(func.count())
+        .select_from(models.Message)
+        .where(*_message_fields_filters())
+    )
+    return await session.scalar(stmt) or 0
+
+
+async def _count_message_field_classes(session: AsyncSession) -> int:
+    class_ids = (
+        select(models.Thread.class_id)
+        .join(models.Message, models.Message.thread_id == models.Thread.id)
+        .where(*_message_fields_filters())
+        .distinct()
+        .subquery()
+    )
+    return await session.scalar(select(func.count()).select_from(class_ids)) or 0
+
+
+async def _message_field_class_ids(session: AsyncSession) -> AsyncIterator[int]:
+    last_class_id = 0
+    while True:
+        stmt = (
+            select(models.Thread.class_id)
+            .join(models.Message, models.Message.thread_id == models.Thread.id)
+            .where(
+                *_message_fields_filters(),
+                models.Thread.class_id > last_class_id,
+            )
+            .distinct()
+            .order_by(models.Thread.class_id)
+            .limit(LOCAL_BATCH_SIZE)
+        )
+        result = await session.execute(stmt)
+        class_ids = list(result.scalars())
+        if not class_ids:
+            break
+        for class_id in class_ids:
+            last_class_id = class_id
+            yield class_id
 
 
 async def _fetch_message_fields(
     session: AsyncSession,
+    *,
+    class_id: int | None = None,
+    after_id: int | None = None,
+    limit: int | None = None,
 ) -> list[models.Message]:
     """
     Selects messages whose metadata marks the m15 migration as "complete" and that
@@ -121,30 +214,21 @@ async def _fetch_message_fields(
     because SQLAlchemy doesn't lazily load those fields in an async context.
     """
 
-    migration_metadata = models.Message.message_metadata[
-        "assistants_to_responses_api_thread_migration"
-    ]
-    message_state = migration_metadata["message"].as_string()
-    message_parts_state = migration_metadata["message_parts"].as_string()
-
-    stmt = (
-        select(models.Message)
-        .where(
-            message_state == "complete",
-            models.Message.message_id.is_not(None),
-            or_(
-                message_parts_state.is_(None),
-                message_parts_state != "complete",
-            ),
-        )
-        .options(
-            selectinload(models.Message.thread)
-            .selectinload(models.Thread.anonymous_sessions)
-            .selectinload(models.AnonymousSession.user)
-            .selectinload(models.User.anonymous_link),
-            selectinload(models.Message.run),
-        )
+    stmt = select(models.Message).where(*_message_fields_filters())
+    if class_id is not None:
+        stmt = stmt.join(models.Thread, models.Message.thread_id == models.Thread.id)
+        stmt = stmt.where(models.Thread.class_id == class_id)
+    if after_id is not None:
+        stmt = stmt.where(models.Message.id > after_id)
+    stmt = stmt.order_by(models.Message.id).options(
+        selectinload(models.Message.thread)
+        .selectinload(models.Thread.anonymous_sessions)
+        .selectinload(models.AnonymousSession.user)
+        .selectinload(models.User.anonymous_link),
+        selectinload(models.Message.run),
     )
+    if limit is not None:
+        stmt = stmt.limit(limit)
     result = await session.execute(stmt)
     return list(result.scalars())
 
@@ -155,7 +239,8 @@ async def _migrate_message_parts(
     openai_client: OpenAIClient,
     local_message: models.Message,
     written_grants: list[Relation],
-) -> None:
+) -> MessagePartMigrationStats:
+    stats = MessagePartMigrationStats()
     openai_message = await openai_client.beta.threads.messages.retrieve(
         message_id=local_message.message_id,
         thread_id=local_message.thread.thread_id,
@@ -169,8 +254,22 @@ async def _migrate_message_parts(
         openai_message,
         local_message,
         written_grants,
+        stats,
     )
     await session.flush()
+    logger.info(
+        "m16 migrated message parts. message_pk=%s openai_message_id=%s "
+        "thread_id=%s parts_created=%s annotations_created=%s files_created=%s "
+        "files_reused=%s",
+        local_message.id,
+        local_message.message_id,
+        local_message.thread_id,
+        stats.parts_created,
+        stats.annotations_created,
+        stats.files_created,
+        stats.files_reused,
+    )
+    return stats
 
 
 async def _persist_message_parts(
@@ -180,6 +279,7 @@ async def _persist_message_parts(
     openai_message: OpenAIMessage,
     local_message: models.Message,
     written_grants: list[Relation],
+    stats: MessagePartMigrationStats,
 ) -> None:
     for part_index, content in enumerate(openai_message.content):
         part_data = await _create_message_part_data(
@@ -190,6 +290,7 @@ async def _persist_message_parts(
             local_message,
             part_index,
             written_grants,
+            stats,
         )
         if part_data is None:
             logger.warning(
@@ -200,6 +301,7 @@ async def _persist_message_parts(
             continue
 
         message_part = await models.MessagePart.create(session, part_data)
+        stats.parts_created += 1
 
         for annotation_index, annotation in enumerate(
             _get_annotations_for_content(content)
@@ -214,6 +316,7 @@ async def _persist_message_parts(
                 message_part.id,
                 annotation_index,
                 written_grants,
+                stats,
             )
             if annotation_data is None:
                 logger.warning(
@@ -224,6 +327,7 @@ async def _persist_message_parts(
                 continue
 
             await models.Annotation.create(session, annotation_data)
+            stats.annotations_created += 1
 
 
 async def _create_message_part_data(
@@ -234,6 +338,7 @@ async def _create_message_part_data(
     local_message: models.Message,
     part_index: int,
     written_grants: list[Relation],
+    stats: MessagePartMigrationStats,
 ) -> dict[str, object] | None:
     message_part_data: dict[str, object] = {
         "message_id": local_message.id,
@@ -259,6 +364,8 @@ async def _create_message_part_data(
             openai_message_content.image_file.file_id,
             written_grants,
             include_anonymous_context=True,
+            source="image_file",
+            stats=stats,
         )
         await _backfill_s3_file(session, openai_client, local_file)
         message_part_data["type"] = schemas.MessagePartType.INPUT_IMAGE
@@ -279,6 +386,7 @@ async def _create_annotation_data_and_persist_file(
     message_part_id: int,
     annotation_index: int,
     written_grants: list[Relation],
+    stats: MessagePartMigrationStats,
 ) -> dict[str, object] | None:
     data: dict[str, object] = {
         "message_part_id": message_part_id,
@@ -290,6 +398,14 @@ async def _create_annotation_data_and_persist_file(
 
     if annotation.type == schemas.AnnotationType.FILE_CITATION:
         local_file = await _fetch_local_file(session, annotation.file_citation.file_id)
+        if local_file is not None:
+            stats.files_reused += 1
+            logger.info(
+                "m16 reused local file. openai_file_id=%s local_file_id=%s "
+                "source=file_citation",
+                annotation.file_citation.file_id,
+                local_file.id,
+            )
         data.update(
             {
                 "type": schemas.AnnotationType.FILE_CITATION,
@@ -310,6 +426,8 @@ async def _create_annotation_data_and_persist_file(
             annotation.file_path.file_id,
             written_grants,
             include_anonymous_context=False,
+            source="file_path",
+            stats=stats,
         )
         await _backfill_s3_file(session, openai_client, local_file)
         data.update(
@@ -326,6 +444,14 @@ async def _create_annotation_data_and_persist_file(
                 session=session,
                 thread_id=local_thread.id,
                 file_ids=[local_file.file_id],
+            )
+            logger.info(
+                "m16 added file_path output to thread code interpreter files. "
+                "thread_id=%s local_file_id=%s openai_file_id=%s content_type=%s",
+                local_thread.id,
+                local_file.id,
+                local_file.file_id,
+                local_file.content_type,
             )
 
         # The OpenAI file id is already usable by the next Responses request once it
@@ -354,9 +480,18 @@ async def _fetch_or_create_local_file(
     written_grants: list[Relation],
     *,
     include_anonymous_context: bool,
+    source: str,
+    stats: MessagePartMigrationStats,
 ) -> models.File:
     maybe_local_file = await _fetch_local_file(session, openai_file_id)
     if maybe_local_file:
+        stats.files_reused += 1
+        logger.info(
+            "m16 reused local file. openai_file_id=%s local_file_id=%s source=%s",
+            openai_file_id,
+            maybe_local_file.id,
+            source,
+        )
         return maybe_local_file
 
     openai_file = await openai_client.files.retrieve(openai_file_id)
@@ -398,6 +533,29 @@ async def _fetch_or_create_local_file(
         uploader.anonymous_user_auth,
     )
     await authz_client.write_safe(grant=grants)
+    stats.files_created += 1
+    logger.info(
+        "m16 created local file. openai_file_id=%s local_file_id=%s source=%s "
+        "filename=%s content_type=%s uploader_id=%s include_anonymous_context=%s "
+        "anonymous_session_id=%s anonymous_link_id=%s",
+        openai_file_id,
+        local_file.id,
+        source,
+        openai_file.filename,
+        content_type,
+        uploader.uploader_id,
+        include_anonymous_context,
+        uploader.anonymous_session_id,
+        uploader.anonymous_link_id,
+    )
+    logger.info(
+        "m16 wrote file grants. local_file_id=%s openai_file_id=%s grant_count=%s "
+        "include_anonymous_context=%s",
+        local_file.id,
+        openai_file_id,
+        len(grants),
+        include_anonymous_context,
+    )
     # Record so the caller can revoke these if the savepoint rolls back (the authz
     # write above is not covered by the DB transaction).
     written_grants.extend(grants)
@@ -505,13 +663,19 @@ async def _backfill_s3_file(
         store_key, io.BytesIO(response.content), content_type
     )
 
-    await models.S3File.create(
+    s3_file = await models.S3File.create(
         session,
         key=store_key,
         file_obj_ids=[local_file.id],
         file_ids=[local_file.file_id],
     )
     await session.refresh(local_file)
+    logger.info(
+        "m16 backfilled file content. local_file_id=%s openai_file_id=%s s3_file_id=%s",
+        local_file.id,
+        local_file.file_id,
+        s3_file.id,
+    )
 
 
 def _get_annotations_for_content(content: MessageContent) -> list[OpenAIAnnotation]:

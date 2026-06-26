@@ -6,7 +6,7 @@ from itertools import groupby
 
 from openai import Omit, omit
 from openai.types.beta.threads import Message, Run
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import pingpong.models as models
@@ -15,6 +15,8 @@ from pingpong.schemas import InteractionMode, MessageRole, MessageStatus, RunSta
 from pingpong.server import OpenAIClient
 
 logger = logging.getLogger(__name__)
+
+LOCAL_BATCH_SIZE = 100
 
 
 async def migrate_threads_and_messages_to_v3(session: AsyncSession) -> None:
@@ -28,14 +30,14 @@ async def migrate_threads_and_messages_to_v3(session: AsyncSession) -> None:
     and `models.Message`. Future migrations will handle creation message parts,
     attachments, tool calls, and annotations.
     """
-    # Drive off assistants that own a v2 chat thread (any assistant version), so
-    # the OpenAI client is resolved once per class, not once per thread.
-    assistants_by_class: dict[int, list[models.Assistant]] = {}
-    for assistant in await _assistants_with_v2_threads(session):
-        assistants_by_class.setdefault(assistant.class_id, []).append(assistant)
+    logger.info(
+        "m15 starting thread/message migration. classes=%s assistants=%s",
+        await _count_v2_thread_classes(session),
+        await _count_assistants_with_v2_threads(session),
+    )
 
     failed_threads: list[str] = []
-    for class_id, assistants in assistants_by_class.items():
+    async for class_id in _v2_thread_class_ids(session):
         try:
             openai_client = await get_openai_client_by_class_id(session, class_id)
         except Exception as e:
@@ -44,7 +46,7 @@ async def migrate_threads_and_messages_to_v3(session: AsyncSession) -> None:
             )
             continue
 
-        for assistant in assistants:
+        async for assistant in _assistants_with_v2_threads(session, class_id):
             async for thread in _v2_threads_for_assistant(session, assistant.id):
                 # Keep each OpenAI-backed thread sync isolated. _migrate_thread may
                 # flush several local rows before a later OpenAI request fails, so the
@@ -77,18 +79,99 @@ async def migrate_threads_and_messages_to_v3(session: AsyncSession) -> None:
         )
 
 
-async def _assistants_with_v2_threads(
-    session: AsyncSession,
-) -> list[models.Assistant]:
-    # Any assistant (any version) owning a v2 chat thread; distinct per assistant.
-    stmt = (
-        select(models.Assistant)
+async def _count_v2_thread_classes(session: AsyncSession) -> int:
+    class_ids = (
+        select(models.Assistant.class_id)
         .join(models.Thread, models.Thread.assistant_id == models.Assistant.id)
         .where(
             models.Thread.version == 2,
             models.Thread.interaction_mode == InteractionMode.CHAT,
         )
         .distinct()
+        .subquery()
+    )
+    return await session.scalar(select(func.count()).select_from(class_ids)) or 0
+
+
+async def _count_assistants_with_v2_threads(session: AsyncSession) -> int:
+    assistant_ids = (
+        select(models.Assistant.id)
+        .join(models.Thread, models.Thread.assistant_id == models.Assistant.id)
+        .where(
+            models.Thread.version == 2,
+            models.Thread.interaction_mode == InteractionMode.CHAT,
+        )
+        .distinct()
+        .subquery()
+    )
+    return await session.scalar(select(func.count()).select_from(assistant_ids)) or 0
+
+
+async def _v2_thread_class_ids(session: AsyncSession) -> AsyncIterator[int]:
+    last_class_id = 0
+    while True:
+        stmt = (
+            select(models.Assistant.class_id)
+            .join(models.Thread, models.Thread.assistant_id == models.Assistant.id)
+            .where(
+                models.Thread.version == 2,
+                models.Thread.interaction_mode == InteractionMode.CHAT,
+                models.Assistant.class_id > last_class_id,
+            )
+            .distinct()
+            .order_by(models.Assistant.class_id)
+            .limit(LOCAL_BATCH_SIZE)
+        )
+        result = await session.execute(stmt)
+        class_ids = list(result.scalars())
+        if not class_ids:
+            break
+        for class_id in class_ids:
+            last_class_id = class_id
+            yield class_id
+
+
+async def _assistants_with_v2_threads(
+    session: AsyncSession, class_id: int
+) -> AsyncIterator[models.Assistant]:
+    last_assistant_id = 0
+    while True:
+        # Any assistant (any version) owning a v2 chat thread; distinct per assistant.
+        stmt = (
+            select(models.Assistant)
+            .join(models.Thread, models.Thread.assistant_id == models.Assistant.id)
+            .where(
+                models.Assistant.id > last_assistant_id,
+                models.Assistant.class_id == class_id,
+                models.Thread.version == 2,
+                models.Thread.interaction_mode == InteractionMode.CHAT,
+            )
+            .distinct()
+            .order_by(models.Assistant.id)
+            .limit(LOCAL_BATCH_SIZE)
+        )
+        result = await session.execute(stmt)
+        assistants = list(result.scalars())
+        if not assistants:
+            break
+        for assistant in assistants:
+            last_assistant_id = assistant.id
+            yield assistant
+
+
+async def _fetch_threads_for_assistant_batch(
+    session: AsyncSession, assistant_id: int, after_id: int
+) -> list[models.Thread]:
+    stmt = (
+        select(models.Thread)
+        .where(
+            models.Thread.id > after_id,
+            models.Thread.assistant_id == assistant_id,
+            models.Thread.version == 2,
+            models.Thread.interaction_mode == InteractionMode.CHAT,
+        )
+        .order_by(models.Thread.id)
+        .limit(LOCAL_BATCH_SIZE)
     )
     result = await session.execute(stmt)
     return list(result.scalars())
@@ -97,14 +180,16 @@ async def _assistants_with_v2_threads(
 async def _v2_threads_for_assistant(
     session: AsyncSession, assistant_id: int
 ) -> AsyncIterator[models.Thread]:
-    stmt = select(models.Thread).where(
-        models.Thread.assistant_id == assistant_id,
-        models.Thread.version == 2,
-        models.Thread.interaction_mode == InteractionMode.CHAT,
-    )
-    result = await session.execute(stmt)
-    for thread in result.scalars():
-        yield thread
+    last_thread_id = 0
+    while True:
+        threads = await _fetch_threads_for_assistant_batch(
+            session, assistant_id, last_thread_id
+        )
+        if not threads:
+            break
+        for thread in threads:
+            last_thread_id = thread.id
+            yield thread
 
 
 @dataclass
@@ -215,6 +300,15 @@ async def _migrate_thread(
         openai_client,
         thread.thread_id,
     )
+    logger.info(
+        "m15 fetched thread messages. class_id=%s assistant_id=%s thread_id=%s "
+        "openai_thread_id=%s openai_message_count=%s",
+        thread.class_id,
+        assistant.id,
+        thread.id,
+        thread.thread_id,
+        len(openai_messages),
+    )
 
     prev_output_index = -1
 
@@ -229,8 +323,17 @@ async def _migrate_thread(
                 prev_output_index,
             )
 
-    await _delete_stale_messages(session, thread, openai_messages)
-    await _prune_orphan_runs(session, thread)
+    deleted_stale_messages = await _delete_stale_messages(
+        session, thread, openai_messages
+    )
+    pruned_orphan_runs = await _prune_orphan_runs(session, thread)
+    logger.info(
+        "m15 cleaned thread. thread_id=%s stale_messages_deleted=%s "
+        "orphan_runs_deleted=%s",
+        thread.id,
+        deleted_stale_messages,
+        pruned_orphan_runs,
+    )
 
     session.add(thread)
     await session.flush()
@@ -259,7 +362,7 @@ async def _delete_stale_messages(
     session: AsyncSession,
     thread: models.Thread,
     openai_messages: list[Message],
-) -> None:
+) -> int:
     """Delete local messages no longer present upstream (empty fetch clears all)."""
     keep_ids = [m.id for m in openai_messages]
     stmt = delete(models.Message).where(models.Message.thread_id == thread.id)
@@ -270,19 +373,29 @@ async def _delete_stale_messages(
                 models.Message.message_id.not_in(keep_ids),
             )
         )
-    await session.execute(stmt)
+    result = await session.execute(stmt)
     await session.flush()
+    return _rowcount(result.rowcount)
 
 
-async def _prune_orphan_runs(session: AsyncSession, thread: models.Thread) -> None:
+async def _prune_orphan_runs(session: AsyncSession, thread: models.Thread) -> int:
     """Delete runs in this thread no message points to (placeholder/duplicate debris)."""
     orphan_run_ids = (
         select(models.Run.id)
         .outerjoin(models.Message, models.Message.run_id == models.Run.id)
         .where(models.Run.thread_id == thread.id, models.Message.id.is_(None))
     )
-    await session.execute(delete(models.Run).where(models.Run.id.in_(orphan_run_ids)))
+    result = await session.execute(
+        delete(models.Run).where(models.Run.id.in_(orphan_run_ids))
+    )
     await session.flush()
+    return _rowcount(result.rowcount)
+
+
+def _rowcount(rowcount: int | None) -> int:
+    if rowcount is None or rowcount < 0:
+        return 0
+    return rowcount
 
 
 async def _store_turn_run(
@@ -301,7 +414,13 @@ async def _store_turn_run(
 
     existing_run = await _find_existing_turn_run(session, turn)
     return await _upsert_run(
-        session, thread, assistant, turn.user_message, existing_run, fields
+        session,
+        thread,
+        assistant,
+        turn.user_message,
+        existing_run,
+        fields,
+        turn_message_count=sum(1 for _ in turn.messages()),
     )
 
 
@@ -331,6 +450,8 @@ async def _upsert_run(
     openai_message: Message | None,
     run: models.Run | None,
     fields: dict,
+    *,
+    turn_message_count: int,
 ) -> models.Run:
     values = dict(
         thread_id=thread.id,
@@ -345,13 +466,26 @@ async def _upsert_run(
         **fields,
     )
     if run is None:
+        action = "created"
         run = models.Run(**values)
         session.add(run)
     else:
+        action = "updated"
         for key, value in values.items():
             setattr(run, key, value)
     await session.flush()
     await session.refresh(run)
+    logger.info(
+        "m15 stored run. thread_id=%s run_pk=%s openai_run_id=%s action=%s "
+        "status=%s creator_id=%s turn_messages=%s",
+        thread.id,
+        run.id,
+        run.run_id,
+        action,
+        run.status,
+        run.creator_id,
+        turn_message_count,
+    )
     return run
 
 
@@ -426,7 +560,8 @@ async def _store_message(
 
     existing = await models.Message.get_by_openai_message_id(session, openai_message.id)
     if existing is None:
-        await models.Message.create(
+        action = "created"
+        local_message = await models.Message.create(
             session,
             {
                 "message_id": openai_message.id,
@@ -434,9 +569,24 @@ async def _store_message(
             },
         )
     else:
+        action = "updated"
         for key, value in fields.items():
             setattr(existing, key, value)
         await session.flush()
+        local_message = existing
+    logger.info(
+        "m15 stored message. message_pk=%s openai_message_id=%s thread_id=%s "
+        "run_pk=%s action=%s role=%s user_id=%s output_index=%s status=%s",
+        local_message.id,
+        openai_message.id,
+        thread.id,
+        local_run.id,
+        action,
+        local_message.role,
+        local_message.user_id,
+        local_message.output_index,
+        local_message.message_status,
+    )
 
     return prev_output_index
 
