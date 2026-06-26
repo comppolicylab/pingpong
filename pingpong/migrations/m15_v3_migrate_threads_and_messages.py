@@ -6,7 +6,7 @@ from itertools import groupby
 
 from openai import Omit, omit
 from openai.types.beta.threads import Message, Run
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import pingpong.models as models
@@ -15,6 +15,8 @@ from pingpong.schemas import InteractionMode, MessageRole, MessageStatus, RunSta
 from pingpong.server import OpenAIClient
 
 logger = logging.getLogger(__name__)
+
+LOCAL_BATCH_SIZE = 100
 
 
 async def migrate_threads_and_messages_to_v3(session: AsyncSession) -> None:
@@ -28,19 +30,14 @@ async def migrate_threads_and_messages_to_v3(session: AsyncSession) -> None:
     and `models.Message`. Future migrations will handle creation message parts,
     attachments, tool calls, and annotations.
     """
-    # Drive off assistants that own a v2 chat thread (any assistant version), so
-    # the OpenAI client is resolved once per class, not once per thread.
-    assistants_by_class: dict[int, list[models.Assistant]] = {}
-    for assistant in await _assistants_with_v2_threads(session):
-        assistants_by_class.setdefault(assistant.class_id, []).append(assistant)
     logger.info(
         "m15 starting thread/message migration. classes=%s assistants=%s",
-        len(assistants_by_class),
-        sum(len(assistants) for assistants in assistants_by_class.values()),
+        await _count_v2_thread_classes(session),
+        await _count_assistants_with_v2_threads(session),
     )
 
     failed_threads: list[str] = []
-    for class_id, assistants in assistants_by_class.items():
+    async for class_id in _v2_thread_class_ids(session):
         try:
             openai_client = await get_openai_client_by_class_id(session, class_id)
         except Exception as e:
@@ -49,7 +46,7 @@ async def migrate_threads_and_messages_to_v3(session: AsyncSession) -> None:
             )
             continue
 
-        for assistant in assistants:
+        async for assistant in _assistants_with_v2_threads(session, class_id):
             async for thread in _v2_threads_for_assistant(session, assistant.id):
                 # Keep each OpenAI-backed thread sync isolated. _migrate_thread may
                 # flush several local rows before a later OpenAI request fails, so the
@@ -82,18 +79,97 @@ async def migrate_threads_and_messages_to_v3(session: AsyncSession) -> None:
         )
 
 
-async def _assistants_with_v2_threads(
-    session: AsyncSession,
-) -> list[models.Assistant]:
-    # Any assistant (any version) owning a v2 chat thread; distinct per assistant.
-    stmt = (
-        select(models.Assistant)
+async def _count_v2_thread_classes(session: AsyncSession) -> int:
+    class_ids = (
+        select(models.Thread.class_id)
+        .where(
+            models.Thread.version == 2,
+            models.Thread.interaction_mode == InteractionMode.CHAT,
+        )
+        .distinct()
+        .subquery()
+    )
+    return await session.scalar(select(func.count()).select_from(class_ids)) or 0
+
+
+async def _count_assistants_with_v2_threads(session: AsyncSession) -> int:
+    assistant_ids = (
+        select(models.Assistant.id)
         .join(models.Thread, models.Thread.assistant_id == models.Assistant.id)
         .where(
             models.Thread.version == 2,
             models.Thread.interaction_mode == InteractionMode.CHAT,
         )
         .distinct()
+        .subquery()
+    )
+    return await session.scalar(select(func.count()).select_from(assistant_ids)) or 0
+
+
+async def _v2_thread_class_ids(session: AsyncSession) -> AsyncIterator[int]:
+    last_class_id = 0
+    while True:
+        stmt = (
+            select(models.Thread.class_id)
+            .where(
+                models.Thread.version == 2,
+                models.Thread.interaction_mode == InteractionMode.CHAT,
+                models.Thread.class_id > last_class_id,
+            )
+            .distinct()
+            .order_by(models.Thread.class_id)
+            .limit(LOCAL_BATCH_SIZE)
+        )
+        result = await session.execute(stmt)
+        class_ids = list(result.scalars())
+        if not class_ids:
+            break
+        for class_id in class_ids:
+            last_class_id = class_id
+            yield class_id
+
+
+async def _assistants_with_v2_threads(
+    session: AsyncSession, class_id: int
+) -> AsyncIterator[models.Assistant]:
+    last_assistant_id = 0
+    while True:
+        # Any assistant (any version) owning a v2 chat thread; distinct per assistant.
+        stmt = (
+            select(models.Assistant)
+            .join(models.Thread, models.Thread.assistant_id == models.Assistant.id)
+            .where(
+                models.Assistant.id > last_assistant_id,
+                models.Assistant.class_id == class_id,
+                models.Thread.version == 2,
+                models.Thread.interaction_mode == InteractionMode.CHAT,
+            )
+            .distinct()
+            .order_by(models.Assistant.id)
+            .limit(LOCAL_BATCH_SIZE)
+        )
+        result = await session.execute(stmt)
+        assistants = list(result.scalars())
+        if not assistants:
+            break
+        for assistant in assistants:
+            last_assistant_id = assistant.id
+            yield assistant
+
+
+async def _fetch_threads_for_assistant_batch(
+    session: AsyncSession, assistant_id: int, after_id: int
+) -> list[models.Thread]:
+    stmt = (
+        select(models.Thread)
+        .where(
+            models.Thread.id > after_id,
+            models.Thread.assistant_id == assistant_id,
+            models.Thread.version == 2,
+            models.Thread.interaction_mode == InteractionMode.CHAT,
+        )
+        .order_by(models.Thread.id)
+        .limit(LOCAL_BATCH_SIZE)
     )
     result = await session.execute(stmt)
     return list(result.scalars())
@@ -102,14 +178,16 @@ async def _assistants_with_v2_threads(
 async def _v2_threads_for_assistant(
     session: AsyncSession, assistant_id: int
 ) -> AsyncIterator[models.Thread]:
-    stmt = select(models.Thread).where(
-        models.Thread.assistant_id == assistant_id,
-        models.Thread.version == 2,
-        models.Thread.interaction_mode == InteractionMode.CHAT,
-    )
-    result = await session.execute(stmt)
-    for thread in result.scalars():
-        yield thread
+    last_thread_id = 0
+    while True:
+        threads = await _fetch_threads_for_assistant_batch(
+            session, assistant_id, last_thread_id
+        )
+        if not threads:
+            break
+        for thread in threads:
+            last_thread_id = thread.id
+            yield thread
 
 
 @dataclass

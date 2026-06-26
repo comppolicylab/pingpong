@@ -1,6 +1,6 @@
 import io
 import logging
-from collections import defaultdict
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,7 +18,7 @@ from openai.types.beta.threads import (
     Message as OpenAIMessage,
 )
 from openai.types.beta.threads.message_content import MessageContent
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -32,6 +32,8 @@ from pingpong.files import _file_grants, _is_ci_supported, file_extension_to_mim
 from pingpong.server import OpenAIClient
 
 logger = logging.getLogger(__name__)
+
+LOCAL_BATCH_SIZE = 100
 
 
 @dataclass(frozen=True)
@@ -66,23 +68,15 @@ async def migrate_message_parts(
     annotations locally.
     """
 
-    messages_by_class_id: dict[int, list[models.Message]] = defaultdict(list)
-
-    openai_clients_by_class_id: dict[int, OpenAIClient] = {}
-
-    local_messages_to_process = await _fetch_message_fields(session)
-    for local_message in local_messages_to_process:
-        messages_by_class_id[local_message.thread.class_id].append(local_message)
     logger.info(
         "m16 starting message part migration. classes=%s messages=%s",
-        len(messages_by_class_id),
-        len(local_messages_to_process),
+        await _count_message_field_classes(session),
+        await _count_message_fields(session),
     )
 
-    for class_id, local_messages in messages_by_class_id.items():
+    async for class_id in _message_field_class_ids(session):
         try:
             openai_client = await get_openai_client_by_class_id(session, class_id)
-            openai_clients_by_class_id[class_id] = openai_client
         except Exception:
             logger.exception(
                 "Could not get OpenAI client during message part "
@@ -90,39 +84,124 @@ async def migrate_message_parts(
             )
             continue
 
-        for local_message in local_messages:
-            # Authz grants are written separately from DB sessions, so we need to keep
-            # track of those writes so we can revoke if the nested session fails
-            written_grants: list[Relation] = []
-            async with session.begin_nested() as savepoint:
-                try:
-                    await _migrate_message_parts(
-                        session,
-                        authz_client,
-                        openai_client,
-                        local_message,
-                        written_grants,
-                    )
-                    local_message.message_metadata[
-                        "assistants_to_responses_api_thread_migration"
-                    ]["message_parts"] = "complete"
-                    # Notifies SQLAlchemy that `message_metadata` changed (since it's JSON it
-                    # wouldn't be detected otherwise)
-                    flag_modified(local_message, "message_metadata")
-                except Exception:
-                    await savepoint.rollback()
-                    await authz_client.write_safe(revoke=written_grants)
-                    logger.exception(
-                        f"Unexpected error backfilling message parts. "
-                        f"thread_id={local_message.thread_id} "
-                        f"openai_thread_id={local_message.thread.thread_id}"
-                    )
+        last_message_id = 0
+        while True:
+            local_messages = await _fetch_message_fields(
+                session,
+                class_id=class_id,
+                after_id=last_message_id,
+                limit=LOCAL_BATCH_SIZE,
+            )
+            if not local_messages:
+                break
 
-            await session.commit()
+            logger.info(
+                "m16 processing message batch. class_id=%s messages=%s first_id=%s "
+                "last_id=%s",
+                class_id,
+                len(local_messages),
+                local_messages[0].id,
+                local_messages[-1].id,
+            )
+
+            for local_message in local_messages:
+                # Authz grants are written separately from DB sessions, so we need to keep
+                # track of those writes so we can revoke if the nested session fails
+                written_grants: list[Relation] = []
+                async with session.begin_nested() as savepoint:
+                    try:
+                        await _migrate_message_parts(
+                            session,
+                            authz_client,
+                            openai_client,
+                            local_message,
+                            written_grants,
+                        )
+                        local_message.message_metadata[
+                            "assistants_to_responses_api_thread_migration"
+                        ]["message_parts"] = "complete"
+                        # Notifies SQLAlchemy that `message_metadata` changed (since it's JSON it
+                        # wouldn't be detected otherwise)
+                        flag_modified(local_message, "message_metadata")
+                    except Exception:
+                        await savepoint.rollback()
+                        await authz_client.write_safe(revoke=written_grants)
+                        logger.exception(
+                            f"Unexpected error backfilling message parts. "
+                            f"thread_id={local_message.thread_id} "
+                            f"openai_thread_id={local_message.thread.thread_id}"
+                        )
+
+                await session.commit()
+
+            last_message_id = local_messages[-1].id
+
+
+def _message_fields_filters():
+    migration_metadata = models.Message.message_metadata[
+        "assistants_to_responses_api_thread_migration"
+    ]
+    message_state = migration_metadata["message"].as_string()
+    message_parts_state = migration_metadata["message_parts"].as_string()
+    return (
+        message_state == "complete",
+        models.Message.message_id.is_not(None),
+        or_(
+            message_parts_state.is_(None),
+            message_parts_state != "complete",
+        ),
+    )
+
+
+async def _count_message_fields(session: AsyncSession) -> int:
+    stmt = (
+        select(func.count())
+        .select_from(models.Message)
+        .where(*_message_fields_filters())
+    )
+    return await session.scalar(stmt) or 0
+
+
+async def _count_message_field_classes(session: AsyncSession) -> int:
+    class_ids = (
+        select(models.Thread.class_id)
+        .join(models.Message, models.Message.thread_id == models.Thread.id)
+        .where(*_message_fields_filters())
+        .distinct()
+        .subquery()
+    )
+    return await session.scalar(select(func.count()).select_from(class_ids)) or 0
+
+
+async def _message_field_class_ids(session: AsyncSession) -> AsyncIterator[int]:
+    last_class_id = 0
+    while True:
+        stmt = (
+            select(models.Thread.class_id)
+            .join(models.Message, models.Message.thread_id == models.Thread.id)
+            .where(
+                *_message_fields_filters(),
+                models.Thread.class_id > last_class_id,
+            )
+            .distinct()
+            .order_by(models.Thread.class_id)
+            .limit(LOCAL_BATCH_SIZE)
+        )
+        result = await session.execute(stmt)
+        class_ids = list(result.scalars())
+        if not class_ids:
+            break
+        for class_id in class_ids:
+            last_class_id = class_id
+            yield class_id
 
 
 async def _fetch_message_fields(
     session: AsyncSession,
+    *,
+    class_id: int | None = None,
+    after_id: int | None = None,
+    limit: int | None = None,
 ) -> list[models.Message]:
     """
     Selects messages whose metadata marks the m15 migration as "complete" and that
@@ -135,30 +214,21 @@ async def _fetch_message_fields(
     because SQLAlchemy doesn't lazily load those fields in an async context.
     """
 
-    migration_metadata = models.Message.message_metadata[
-        "assistants_to_responses_api_thread_migration"
-    ]
-    message_state = migration_metadata["message"].as_string()
-    message_parts_state = migration_metadata["message_parts"].as_string()
-
-    stmt = (
-        select(models.Message)
-        .where(
-            message_state == "complete",
-            models.Message.message_id.is_not(None),
-            or_(
-                message_parts_state.is_(None),
-                message_parts_state != "complete",
-            ),
-        )
-        .options(
-            selectinload(models.Message.thread)
-            .selectinload(models.Thread.anonymous_sessions)
-            .selectinload(models.AnonymousSession.user)
-            .selectinload(models.User.anonymous_link),
-            selectinload(models.Message.run),
-        )
+    stmt = select(models.Message).where(*_message_fields_filters())
+    if class_id is not None:
+        stmt = stmt.join(models.Thread, models.Message.thread_id == models.Thread.id)
+        stmt = stmt.where(models.Thread.class_id == class_id)
+    if after_id is not None:
+        stmt = stmt.where(models.Message.id > after_id)
+    stmt = stmt.order_by(models.Message.id).options(
+        selectinload(models.Message.thread)
+        .selectinload(models.Thread.anonymous_sessions)
+        .selectinload(models.AnonymousSession.user)
+        .selectinload(models.User.anonymous_link),
+        selectinload(models.Message.run),
     )
+    if limit is not None:
+        stmt = stmt.limit(limit)
     result = await session.execute(stmt)
     return list(result.scalars())
 
