@@ -119,6 +119,11 @@ async def _seed_thread(
 
 
 async def _seed_vector_store(session, *, id_: int, class_id: int):
+    class_ = await session.get(models.Class, class_id)
+    if class_ is None:
+        session.add(models.Class(id=class_id, name=f"Class {class_id}"))
+        await session.flush()
+
     vector_store = models.VectorStore(
         id=id_,
         vector_store_id=f"vs-{id_}",
