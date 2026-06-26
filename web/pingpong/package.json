@@ -21,7 +21,6 @@
 		"@sveltejs/kit": "^2.65.1",
 		"@sveltejs/vite-plugin-svelte": "^7.1.2",
 		"@tailwindcss/vite": "^4.3.1",
-		"@types/katex": "^0.16.8",
 		"@types/node": "^25.9.3",
 		"@typescript-eslint/eslint-plugin": "^8.61.1",
 		"@typescript-eslint/parser": "^8.61.1",
@@ -65,13 +64,5 @@
 		"pdfjs-dist": "^6.0.227",
 		"svelte-copy": "^2.0.0",
 		"tldts": "^7.4.3"
-	},
-	"pnpm": {
-		"overrides": {
-			"cookie": "^0.7.0",
-			"yaml": "^2.8.3",
-			"esbuild": "^0.28.1",
-			"dompurify": "^3.4.11"
-		}
 	}
 }
