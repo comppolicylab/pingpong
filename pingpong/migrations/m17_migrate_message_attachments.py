@@ -77,6 +77,7 @@ async def _fetch_messages(
                 attachments_state.is_(None),
                 attachments_state != "complete",
             ),
+            models.Message.role == MessageRole.USER
         )
         .options(selectinload(models.Message.thread))
     )
