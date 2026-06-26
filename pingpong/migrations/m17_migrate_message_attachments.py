@@ -122,7 +122,9 @@ async def _persist_message_attachments(
             )
             continue
 
-        local_file = await _fetch_local_file(session, attachment.file_id)
+        local_file = await _fetch_local_file(
+            session, local_message.thread.class_id, attachment.file_id
+        )
         if local_file is None:
             # Skip missing file that should've been created by m16
             logger.warning(
@@ -142,7 +144,7 @@ async def _persist_message_attachments(
         if "code_interpreter" in tool_types:
             await _attach_file(
                 session,
-                models.models.code_interpreter_attachment_association,
+                models.code_interpreter_attachment_association,
                 local_message.id,
                 local_file.id,
             )
@@ -164,7 +166,10 @@ async def _attach_file(
 
 async def _fetch_local_file(
     session: AsyncSession,
+    class_id: str,
     openai_file_id: str,
 ) -> models.File | None:
-    stmt = select(models.File).where(models.File.file_id == openai_file_id)
+    stmt = select(models.File).where(
+        models.File.file_id == openai_file_id, models.File.class_id == class_id
+    )
     return await session.scalar(stmt)

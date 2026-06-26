@@ -264,10 +264,10 @@ async def test_migrate_attaches_files_by_tool_type(db, monkeypatch):
 
     async with db.async_session() as session:
         file_search = await _attachment_pairs(
-            session, migration.file_search_attachment_association
+            session, migration.models.file_search_attachment_association
         )
         code_interpreter = await _attachment_pairs(
-            session, migration.code_interpreter_attachment_association
+            session, migration.models.code_interpreter_attachment_association
         )
         message = await session.get(models.Message, 1001)
 
@@ -315,10 +315,10 @@ async def test_migrate_skips_attachment_when_local_file_missing(db, monkeypatch)
 
     async with db.async_session() as session:
         file_search = await _attachment_pairs(
-            session, migration.file_search_attachment_association
+            session, migration.models.file_search_attachment_association
         )
         code_interpreter = await _attachment_pairs(
-            session, migration.code_interpreter_attachment_association
+            session, migration.models.code_interpreter_attachment_association
         )
         files = await _all(session, models.File)
         message = await session.get(models.Message, 1001)
@@ -377,7 +377,7 @@ async def test_migrate_message_attachments_continues_after_message_failure(
 
     async with db.async_session() as session:
         file_search = await _attachment_pairs(
-            session, migration.file_search_attachment_association
+            session, migration.models.file_search_attachment_association
         )
         failed_message = await session.get(models.Message, 1001)
         ok_message = await session.get(models.Message, 2001)
@@ -430,7 +430,7 @@ async def test_migrate_is_idempotent(db, monkeypatch):
 
     async with db.async_session() as session:
         file_search = await _attachment_pairs(
-            session, migration.file_search_attachment_association
+            session, migration.models.file_search_attachment_association
         )
     assert file_search == [(1001, 50)]
 
@@ -468,10 +468,10 @@ async def test_migrate_skips_attachment_without_tools(db, monkeypatch):
 
     async with db.async_session() as session:
         file_search = await _attachment_pairs(
-            session, migration.file_search_attachment_association
+            session, migration.models.file_search_attachment_association
         )
         code_interpreter = await _attachment_pairs(
-            session, migration.code_interpreter_attachment_association
+            session, migration.models.code_interpreter_attachment_association
         )
         message = await session.get(models.Message, 1001)
 
