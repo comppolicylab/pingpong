@@ -328,10 +328,9 @@ async def _create_annotation_data_and_persist_file(
                 file_ids=[local_file.file_id],
             )
 
-        # NOTE: ideally we'd also upload the file to OpenAI so it can access it, but
-        # that would incur a lot of extra complexity since we'd have to trace the
-        # context (i.e., tool call, container, etc.) in which it was created. If the
-        # user needs it they can ask for it to be re-generated.
+        # The OpenAI file id is already usable by the next Responses request once it
+        # is attached to the thread. The S3 backfill keeps a local copy available for
+        # providers that cannot reuse OpenAI-hosted assistant output files.
         return data
 
     return None
