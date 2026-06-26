@@ -1,5 +1,5 @@
 ########## Build pingpong ##########
-FROM node:22.22.3-alpine3.24 AS build_pingpong
+FROM node:22.23.1-alpine3.24 AS build_pingpong
 
 RUN npm install -g pnpm@10
 
@@ -27,7 +27,7 @@ ENV BODY_SIZE_LIMIT=512000000
 RUN pnpm build -d
 
 ########## Final Nginx image ##########
-FROM nginx:1.31.1
+FROM nginx:1.31.2
 
 RUN apt-get update && apt-get install ca-certificates -y && update-ca-certificates
 
