@@ -1,5 +1,6 @@
 import logging
 from collections import defaultdict
+from typing import Any
 
 from openai.types.beta.threads import (
     Message as OpenAIMessage,
@@ -11,6 +12,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 import pingpong.models as models
 from pingpong.ai import get_openai_client_by_class_id
+from pingpong.schemas import MessageRole
 from pingpong.server import OpenAIClient
 
 logger = logging.getLogger(__name__)
@@ -77,7 +79,7 @@ async def _fetch_messages(
                 attachments_state.is_(None),
                 attachments_state != "complete",
             ),
-            models.Message.role == MessageRole.USER
+            models.Message.role == MessageRole.USER,
         )
         .options(selectinload(models.Message.thread))
     )
@@ -124,7 +126,7 @@ async def _persist_message_attachments(
             continue
 
         local_file = await _fetch_local_file(
-            session, local_message.thread.class_id, attachment.file_id
+            session, local_message, attachment.file_id, tool_types
         )
         if local_file is None:
             # Skip missing file that should've been created by m16
@@ -167,10 +169,34 @@ async def _attach_file(
 
 async def _fetch_local_file(
     session: AsyncSession,
-    class_id: str,
+    local_message: models.Message,
     openai_file_id: str,
+    tool_types: set[str],
 ) -> models.File | None:
+    file_available_to_thread: list[Any] = []
+    if "code_interpreter" in tool_types:
+        file_available_to_thread.append(
+            models.File.id.in_(
+                select(models.code_interpreter_file_thread_association.c.file_id).where(
+                    models.code_interpreter_file_thread_association.c.thread_id
+                    == local_message.thread_id
+                )
+            )
+        )
+    if "file_search" in tool_types and local_message.thread.vector_store_id is not None:
+        file_available_to_thread.append(
+            models.File.id.in_(
+                select(models.file_vector_store_association.c.file_id).where(
+                    models.file_vector_store_association.c.vector_store_id
+                    == local_message.thread.vector_store_id
+                )
+            )
+        )
+
+    if not file_available_to_thread:
+        return None
+
     stmt = select(models.File).where(
-        models.File.file_id == openai_file_id, models.File.class_id == class_id
+        models.File.file_id == openai_file_id, or_(*file_available_to_thread)
     )
     return await session.scalar(stmt)

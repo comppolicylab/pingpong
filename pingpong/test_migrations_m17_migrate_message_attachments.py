@@ -75,7 +75,14 @@ def _fake_openai_client(messages_by_thread):
     )
 
 
-async def _seed_thread(session, *, class_id: int, assistant_id: int, thread_id: int):
+async def _seed_thread(
+    session,
+    *,
+    class_id: int,
+    assistant_id: int,
+    thread_id: int,
+    vector_store_id: int | None = None,
+):
     class_ = await session.get(models.Class, class_id)
     if class_ is None:
         session.add(models.Class(id=class_id, name=f"Class {class_id}"))
@@ -97,6 +104,7 @@ async def _seed_thread(session, *, class_id: int, assistant_id: int, thread_id: 
         thread_id=f"thread-{thread_id}",
         class_id=class_id,
         assistant_id=assistant_id,
+        vector_store_id=vector_store_id,
     )
     run = models.Run(
         id=thread_id,
@@ -108,6 +116,18 @@ async def _seed_thread(session, *, class_id: int, assistant_id: int, thread_id: 
     session.add_all([thread, run])
     await session.flush()
     return thread, run
+
+
+async def _seed_vector_store(session, *, id_: int, class_id: int):
+    vector_store = models.VectorStore(
+        id=id_,
+        vector_store_id=f"vs-{id_}",
+        type=schemas.VectorStoreType.THREAD,
+        class_id=class_id,
+    )
+    session.add(vector_store)
+    await session.flush()
+    return vector_store
 
 
 async def _seed_message(
@@ -138,13 +158,35 @@ async def _seed_message(
     return message
 
 
-async def _seed_file(session, *, id_: int, file_id: str, class_id: int):
+async def _seed_file(session, *, id_: int, file_id: str, class_id: int | None = None):
     file = models.File(
         id=id_, file_id=file_id, name=f"{file_id}.txt", class_id=class_id
     )
     session.add(file)
     await session.flush()
     return file
+
+
+async def _add_code_interpreter_file_to_thread(
+    session, *, file_object_id: int, thread_id: int
+):
+    await session.execute(
+        models.code_interpreter_file_thread_association.insert().values(
+            file_id=file_object_id,
+            thread_id=thread_id,
+        )
+    )
+
+
+async def _add_file_to_vector_store(
+    session, *, file_object_id: int, vector_store_id: int
+):
+    await session.execute(
+        models.file_vector_store_association.insert().values(
+            file_id=file_object_id,
+            vector_store_id=vector_store_id,
+        )
+    )
 
 
 async def _all(session, model, order_by=None):
@@ -229,7 +271,14 @@ async def test_fetch_messages_returns_only_migrated_messages_needing_attachments
 async def test_migrate_attaches_files_by_tool_type(db, monkeypatch):
     """A single attachment can carry both tools; each maps to its own association."""
     async with db.async_session() as session:
-        await _seed_thread(session, class_id=1, assistant_id=10, thread_id=100)
+        await _seed_vector_store(session, id_=500, class_id=1)
+        await _seed_thread(
+            session,
+            class_id=1,
+            assistant_id=10,
+            thread_id=100,
+            vector_store_id=500,
+        )
         await _seed_message(
             session,
             id_=1001,
@@ -239,8 +288,13 @@ async def test_migrate_attaches_files_by_tool_type(db, monkeypatch):
             output_index=0,
             metadata=_migration_metadata(),
         )
-        await _seed_file(session, id_=50, file_id="file-search", class_id=1)
-        await _seed_file(session, id_=51, file_id="file-both", class_id=1)
+        await _seed_file(session, id_=50, file_id="file-search")
+        await _seed_file(session, id_=51, file_id="file-both")
+        await _add_file_to_vector_store(session, file_object_id=50, vector_store_id=500)
+        await _add_file_to_vector_store(session, file_object_id=51, vector_store_id=500)
+        await _add_code_interpreter_file_to_thread(
+            session, file_object_id=51, thread_id=100
+        )
         await session.commit()
 
     fake_client = _fake_openai_client(
@@ -280,7 +334,14 @@ async def test_migrate_skips_attachment_when_local_file_missing(db, monkeypatch)
     """A referenced File that doesn't exist locally is skipped (not created), and the
     message is still marked complete."""
     async with db.async_session() as session:
-        await _seed_thread(session, class_id=1, assistant_id=10, thread_id=100)
+        await _seed_vector_store(session, id_=500, class_id=1)
+        await _seed_thread(
+            session,
+            class_id=1,
+            assistant_id=10,
+            thread_id=100,
+            vector_store_id=500,
+        )
         await _seed_message(
             session,
             id_=1001,
@@ -291,7 +352,8 @@ async def test_migrate_skips_attachment_when_local_file_missing(db, monkeypatch)
             metadata=_migration_metadata(),
         )
         # Only one of the two referenced files exists locally.
-        await _seed_file(session, id_=50, file_id="file-present", class_id=1)
+        await _seed_file(session, id_=50, file_id="file-present")
+        await _add_file_to_vector_store(session, file_object_id=50, vector_store_id=500)
         await session.commit()
 
     fake_client = _fake_openai_client(
@@ -331,12 +393,75 @@ async def test_migrate_skips_attachment_when_local_file_missing(db, monkeypatch)
     assert _attachments_migration_state(message) == "complete"
 
 
+async def test_migrate_skips_file_not_available_to_thread_tool(db, monkeypatch):
+    async with db.async_session() as session:
+        await _seed_vector_store(session, id_=500, class_id=1)
+        await _seed_thread(
+            session,
+            class_id=1,
+            assistant_id=10,
+            thread_id=100,
+            vector_store_id=500,
+        )
+        await _seed_message(
+            session,
+            id_=1001,
+            thread_id=100,
+            run_id=100,
+            openai_message_id="msg-unavailable-file",
+            output_index=0,
+            metadata=_migration_metadata(),
+        )
+        await _seed_file(session, id_=50, file_id="file-search", class_id=1)
+        await _seed_file(session, id_=51, file_id="file-ci", class_id=1)
+        await session.commit()
+
+    fake_client = _fake_openai_client(
+        {
+            "thread-100": [
+                _openai_message(
+                    "msg-unavailable-file",
+                    [
+                        _attachment("file-search", ["file_search"]),
+                        _attachment("file-ci", ["code_interpreter"]),
+                    ],
+                )
+            ],
+        }
+    )
+
+    _patch_openai_client(monkeypatch, fake_client)
+
+    async with db.async_session() as session:
+        await migration.migrate_message_attachments(session)
+
+    async with db.async_session() as session:
+        file_search = await _attachment_pairs(
+            session, migration.models.file_search_attachment_association
+        )
+        code_interpreter = await _attachment_pairs(
+            session, migration.models.code_interpreter_attachment_association
+        )
+        message = await session.get(models.Message, 1001)
+
+    assert file_search == []
+    assert code_interpreter == []
+    assert _attachments_migration_state(message) == "complete"
+
+
 async def test_migrate_message_attachments_continues_after_message_failure(
     db, monkeypatch
 ):
     async with db.async_session() as session:
         await _seed_thread(session, class_id=1, assistant_id=10, thread_id=100)
-        await _seed_thread(session, class_id=1, assistant_id=10, thread_id=200)
+        await _seed_vector_store(session, id_=500, class_id=1)
+        await _seed_thread(
+            session,
+            class_id=1,
+            assistant_id=10,
+            thread_id=200,
+            vector_store_id=500,
+        )
         await _seed_message(
             session,
             id_=1001,
@@ -355,7 +480,8 @@ async def test_migrate_message_attachments_continues_after_message_failure(
             output_index=0,
             metadata=_migration_metadata(),
         )
-        await _seed_file(session, id_=50, file_id="file-ok", class_id=1)
+        await _seed_file(session, id_=50, file_id="file-ok")
+        await _add_file_to_vector_store(session, file_object_id=50, vector_store_id=500)
         await session.commit()
 
     fake_client = _fake_openai_client(
@@ -390,7 +516,14 @@ async def test_migrate_message_attachments_continues_after_message_failure(
 
 async def test_migrate_is_idempotent(db, monkeypatch):
     async with db.async_session() as session:
-        await _seed_thread(session, class_id=1, assistant_id=10, thread_id=100)
+        await _seed_vector_store(session, id_=500, class_id=1)
+        await _seed_thread(
+            session,
+            class_id=1,
+            assistant_id=10,
+            thread_id=100,
+            vector_store_id=500,
+        )
         await _seed_message(
             session,
             id_=1001,
@@ -400,7 +533,8 @@ async def test_migrate_is_idempotent(db, monkeypatch):
             output_index=0,
             metadata=_migration_metadata(),
         )
-        await _seed_file(session, id_=50, file_id="file-search", class_id=1)
+        await _seed_file(session, id_=50, file_id="file-search")
+        await _add_file_to_vector_store(session, file_object_id=50, vector_store_id=500)
         await session.commit()
 
     fake_client = _fake_openai_client(
