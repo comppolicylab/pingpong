@@ -367,6 +367,13 @@ def _map_run_status(openai_status: str) -> RunStatus:
     return RunStatus(openai_status)
 
 
+def _map_message_status(openai_status: str | None) -> MessageStatus:
+    if openai_status is None:
+        return MessageStatus.COMPLETED
+
+    return MessageStatus(openai_status)
+
+
 def _openai_run_fields(openai_run: Run, *, created: datetime) -> dict:
     return dict(
         run_id=openai_run.id,
@@ -404,7 +411,7 @@ async def _store_message(
                 "message": "complete",
             }
         },
-        "message_status": MessageStatus(openai_message.status),
+        "message_status": _map_message_status(openai_message.status),
         "role": MessageRole(openai_message.role),
         "created": _require_dt(openai_message.created_at),
         "completed": _dt_from_ts(openai_message.completed_at),

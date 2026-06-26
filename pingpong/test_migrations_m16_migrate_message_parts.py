@@ -66,6 +66,9 @@ class FakeAuthzClient:
         if revoke:
             self.revokes.extend(revoke)
 
+    async def write_safe(self, grant=None, revoke=None):
+        await self.write(grant=grant, revoke=revoke)
+
 
 class FakeMessagesClient:
     def __init__(self, messages_by_thread):

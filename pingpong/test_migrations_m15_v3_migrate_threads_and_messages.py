@@ -21,7 +21,7 @@ def _generate_openai_message(
     role: Literal["user", "assistant"],
     created_at: int,
     run_id: str | None = None,
-    status: Literal["in_progress", "incomplete", "completed"] = "completed",
+    status: Literal["in_progress", "incomplete", "completed"] | None = "completed",
     completed_at: int | None = None,
     user_id: str | int | None = None,
     metadata: dict | None = None,
@@ -579,6 +579,42 @@ async def test_existing_rows_are_updated_on_rerun(
             schemas.MessageStatus.COMPLETED
         }
         assert [m.completed for m in msgs_local] == [_naive_dt(101), _naive_dt(111)]
+
+
+async def test_none_message_status_defaults_to_completed(
+    db: DbDriver, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    messages = [
+        _generate_openai_message(
+            "msg_user", role="user", created_at=100, status=None, user_id=7
+        ),
+        _generate_openai_message(
+            "msg_asst",
+            role="assistant",
+            created_at=110,
+            run_id="run_1",
+            status=None,
+        ),
+    ]
+    client = FakeOpenAIClient(
+        messages,
+        {"run_1": _generate_openai_run("run_1", status="completed", completed_at=120)},
+    )
+    _patch_client(monkeypatch, client)
+
+    async with db.async_session() as session:
+        await _generate_local_thread(session)
+        await session.commit()
+
+    async with db.async_session() as session:
+        await migration.migrate_threads_and_messages_to_v3(session)
+
+    async with db.async_session() as session:
+        msgs_local = await _all_messages(session, 1)
+        assert [m.message_status for m in msgs_local] == [
+            schemas.MessageStatus.COMPLETED,
+            schemas.MessageStatus.COMPLETED,
+        ]
 
 
 async def test_stale_local_message_is_deleted(
