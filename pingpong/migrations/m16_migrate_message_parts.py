@@ -114,11 +114,11 @@ async def _fetch_message_fields(
     Selects messages whose metadata marks the m15 migration as "complete" and that
     have an upstream OpenAI message_id, while excluding any message that already has
     a MessagePart or whose `message_parts` migration state is already "complete", so
-    the backfill is idempotent. The thread (with its anonymous sessions and users)
-    and run are fetched in advance.
+    the backfill is idempotent. The thread (with its anonymous sessions) and run
+    are fetched in advance.
 
-    The options for pre-loading threads, anonymous sessions, users, and runs are
-    necessary because SQLAlchemy doesn't lazily load those fields in an async context.
+    The options for pre-loading threads, anonymous sessions, and runs are necessary
+    because SQLAlchemy doesn't lazily load those fields in an async context.
     """
 
     migration_metadata = models.Message.message_metadata[
@@ -138,11 +138,9 @@ async def _fetch_message_fields(
             ),
         )
         .options(
-            selectinload(models.Message.thread).selectinload(
-                models.Thread.anonymous_sessions
-            ),
             selectinload(models.Message.thread)
-            .selectinload(models.Thread.users)
+            .selectinload(models.Thread.anonymous_sessions)
+            .selectinload(models.AnonymousSession.user)
             .selectinload(models.User.anonymous_link),
             selectinload(models.Message.run),
         )
@@ -260,6 +258,7 @@ async def _create_message_part_data(
             local_message,
             openai_message_content.image_file.file_id,
             written_grants,
+            include_anonymous_context=True,
         )
         await _backfill_s3_file(session, openai_client, local_file)
         message_part_data["type"] = schemas.MessagePartType.INPUT_IMAGE
@@ -310,6 +309,7 @@ async def _create_annotation_data_and_persist_file(
             local_message,
             annotation.file_path.file_id,
             written_grants,
+            include_anonymous_context=False,
         )
         await _backfill_s3_file(session, openai_client, local_file)
         data.update(
@@ -353,6 +353,8 @@ async def _fetch_or_create_local_file(
     local_message: models.Message,
     openai_file_id: str,
     written_grants: list[Relation],
+    *,
+    include_anonymous_context: bool,
 ) -> models.File:
     maybe_local_file = await _fetch_local_file(session, openai_file_id)
     if maybe_local_file:
@@ -363,7 +365,12 @@ async def _fetch_or_create_local_file(
     content_type = (
         file_extension_to_mime_type(filename_parts[-1]) if filename_parts else None
     )
-    uploader = await _get_anonymous_user_fields(session, local_thread, local_message)
+    uploader = await _get_anonymous_user_fields(
+        session,
+        local_thread,
+        local_message,
+        include_anonymous_context=include_anonymous_context,
+    )
 
     # used for updated too since that's not given by OpenAI
     created_dt = _require_dt(openai_file.created_at)
@@ -403,15 +410,10 @@ async def _get_anonymous_user_fields(
     session: AsyncSession,
     local_thread: models.Thread,
     local_message: models.Message,
+    *,
+    include_anonymous_context: bool,
 ) -> UploaderFields:
     uploader_id = local_message.user_id
-    uploader: models.User | None = None
-
-    if uploader_id is None and len(local_thread.users) > 0:
-        for thread_user_member in local_thread.users:
-            if thread_user_member.anonymous_link_id is None:
-                uploader_id = thread_user_member.id
-                uploader = thread_user_member
 
     if uploader_id is None and local_message.run is not None:
         uploader_id = local_message.run.creator_id
@@ -422,26 +424,31 @@ async def _get_anonymous_user_fields(
     # Replicating auth string in `pingpong.files._file_grants_revoke`
     user_auth = f"user:{uploader_id}"
 
-    if uploader is None:
-        uploader = await _fetch_full_user(session, uploader_id)
-
-    if uploader is None:
-        return UploaderFields(uploader_id, None, None, user_auth, None, None)
-
     anonymous_session_id = None
     anonymous_session_token = None
-    for anonymous_session in local_thread.anonymous_sessions:
-        if anonymous_session.user_id == uploader_id:
+    anonymous_link_id = None
+    anonymous_link_auth = None
+
+    if include_anonymous_context:
+        anonymous_session = next(iter(local_thread.anonymous_sessions), None)
+        if anonymous_session is not None:
             anonymous_session_id = anonymous_session.id
             anonymous_session_token = anonymous_session.session_token
-            break
+
+            anonymous_user = anonymous_session.user
+            if anonymous_user is None and anonymous_session.user_id is not None:
+                anonymous_user = await _fetch_full_user(
+                    session, anonymous_session.user_id
+                )
+
+            if anonymous_user is not None:
+                anonymous_link_id = anonymous_user.anonymous_link_id
+                if anonymous_user.anonymous_link is not None:
+                    anonymous_link_auth = (
+                        f"anonymous_link:{anonymous_user.anonymous_link.share_token}"
+                    )
 
     # Replicating auth strings in `pingpong.files._file_grants_revoke`
-    anonymous_link_auth = (
-        f"anonymous_link:{uploader.anonymous_link.share_token}"
-        if uploader.anonymous_link
-        else None
-    )
     anonymous_user_auth = (
         f"anonymous_user:{anonymous_session_token}" if anonymous_session_token else None
     )
@@ -449,7 +456,7 @@ async def _get_anonymous_user_fields(
     return UploaderFields(
         uploader_id=uploader_id,
         anonymous_session_id=anonymous_session_id,
-        anonymous_link_id=uploader.anonymous_link_id,
+        anonymous_link_id=anonymous_link_id,
         user_auth=user_auth,
         anonymous_user_auth=anonymous_user_auth,
         anonymous_link_auth=anonymous_link_auth,

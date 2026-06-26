@@ -513,6 +513,155 @@ async def test_migrate_message_parts_skips_existing_s3_file_backfill(db, monkeyp
     assert len(parts) == 1
 
 
+async def test_migrate_message_parts_preserves_anonymous_context_for_image_file(
+    db, monkeypatch
+):
+    async with db.async_session() as session:
+        thread, run = await _seed_thread(
+            session, class_id=1, assistant_id=10, thread_id=100
+        )
+        thread.private = True
+        run.creator_id = 1
+        await _seed_user(session, id_=1)
+        link = models.AnonymousLink(id=42, share_token="share-tok")
+        session.add(link)
+        await session.flush()
+        await _seed_user(session, id_=23, anonymous_link_id=42)
+        session.add(
+            models.AnonymousSession(
+                id=7, session_token="sess-tok", thread_id=100, user_id=23
+            )
+        )
+        await _seed_message(
+            session,
+            id_=1001,
+            thread_id=100,
+            run_id=100,
+            openai_message_id="msg-with-image",
+            output_index=0,
+            metadata=MIGRATION_METADATA,
+        )
+        await session.commit()
+
+    fake_store = FakeFileStore()
+    monkeypatch.setattr(
+        migration.config, "file_store", SimpleNamespace(store=fake_store)
+    )
+    fake_client = _fake_openai_client(
+        {
+            "thread-100": [
+                _openai_message("msg-with-image", [_image_content("file-image")])
+            ],
+        },
+        file_responses={
+            "file-image": SimpleNamespace(status_code=200, content=b"image bytes")
+        },
+    )
+
+    async def fake_retrieve_image(_file_id):
+        return SimpleNamespace(filename="generated.png", created_at=0)
+
+    fake_client.files.retrieve = fake_retrieve_image
+    authz = FakeAuthzClient()
+
+    async with db.async_session() as session:
+        message = await _load_single_message(session)
+        await migration._migrate_message_parts(session, authz, fake_client, message, [])
+        await session.commit()
+
+    async with db.async_session() as session:
+        file = await session.scalar(
+            select(models.File).where(models.File.file_id == "file-image")
+        )
+
+    assert file.uploader_id == 1
+    assert file.anonymous_session_id == 7
+    assert file.anonymous_link_id == 42
+    assert sorted(authz.grants) == sorted(
+        [
+            ("class:1", "parent", f"user_file:{file.id}"),
+            ("user:1", "owner", f"user_file:{file.id}"),
+            ("anonymous_user:sess-tok", "owner", f"user_file:{file.id}"),
+            ("anonymous_link:share-tok", "can_delete", f"user_file:{file.id}"),
+        ]
+    )
+
+
+async def test_migrate_message_parts_strips_anonymous_context_for_file_path(
+    db, monkeypatch
+):
+    async with db.async_session() as session:
+        thread, run = await _seed_thread(
+            session, class_id=1, assistant_id=10, thread_id=100
+        )
+        thread.private = True
+        run.creator_id = 1
+        await _seed_user(session, id_=1)
+        link = models.AnonymousLink(id=42, share_token="share-tok")
+        session.add(link)
+        await session.flush()
+        await _seed_user(session, id_=23, anonymous_link_id=42)
+        session.add(
+            models.AnonymousSession(
+                id=7, session_token="sess-tok", thread_id=100, user_id=23
+            )
+        )
+        await _seed_message(
+            session,
+            id_=1001,
+            thread_id=100,
+            run_id=100,
+            openai_message_id="msg-with-file-path",
+            output_index=0,
+            metadata=MIGRATION_METADATA,
+        )
+        await session.commit()
+
+    fake_store = FakeFileStore()
+    monkeypatch.setattr(
+        migration.config, "file_store", SimpleNamespace(store=fake_store)
+    )
+    fake_client = _fake_openai_client(
+        {
+            "thread-100": [
+                _openai_message(
+                    "msg-with-file-path",
+                    [_text_content("path", [_file_path("file-output")])],
+                )
+            ],
+        },
+        file_responses={
+            "file-output": SimpleNamespace(status_code=200, content=b"output bytes")
+        },
+    )
+
+    async def fake_retrieve_output(_file_id):
+        return SimpleNamespace(filename="output.txt", created_at=0)
+
+    fake_client.files.retrieve = fake_retrieve_output
+    authz = FakeAuthzClient()
+
+    async with db.async_session() as session:
+        message = await _load_single_message(session)
+        await migration._migrate_message_parts(session, authz, fake_client, message, [])
+        await session.commit()
+
+    async with db.async_session() as session:
+        file = await session.scalar(
+            select(models.File).where(models.File.file_id == "file-output")
+        )
+
+    assert file.uploader_id == 1
+    assert file.anonymous_session_id is None
+    assert file.anonymous_link_id is None
+    assert sorted(authz.grants) == sorted(
+        [
+            ("class:1", "parent", f"user_file:{file.id}"),
+            ("user:1", "owner", f"user_file:{file.id}"),
+        ]
+    )
+
+
 async def test_migrate_message_parts_raises_when_s3_backfill_fails(db, monkeypatch):
     async with db.async_session() as session:
         await _seed_thread(session, class_id=1, assistant_id=10, thread_id=100)
@@ -657,7 +806,7 @@ async def test_get_anonymous_user_fields_for_logged_in_user(db):
     async with db.async_session() as session:
         message = await _load_single_message(session)
         uploader = await migration._get_anonymous_user_fields(
-            session, message.thread, message
+            session, message.thread, message, include_anonymous_context=True
         )
 
     assert uploader.uploader_id == 500
@@ -696,7 +845,7 @@ async def test_get_anonymous_user_fields_for_anonymous_session_and_link(db):
     async with db.async_session() as session:
         message = await _load_single_message(session)
         uploader = await migration._get_anonymous_user_fields(
-            session, message.thread, message
+            session, message.thread, message, include_anonymous_context=True
         )
 
     assert uploader.uploader_id == 500
@@ -707,13 +856,10 @@ async def test_get_anonymous_user_fields_for_anonymous_session_and_link(db):
     assert uploader.anonymous_link_auth == "anonymous_link:share-tok"
 
 
-async def test_get_anonymous_user_fields_falls_back_to_thread_users(db):
-    """When the message has no `user_id`, the uploader is resolved from the
-    thread's associated users, skipping anonymous-link users in favor of a real
-    one."""
+async def test_get_anonymous_user_fields_does_not_infer_from_thread_users(db):
+    """Uploader identity comes from m15's message/run rows, not thread parties."""
     async with db.async_session() as session:
         await _seed_thread(session, class_id=1, assistant_id=10, thread_id=100)
-        # An anonymous-link user is skipped in favor of the real user.
         session.add(models.AnonymousLink(id=99, share_token="fallback-share-tok"))
         await session.flush()
         await _seed_user(session, id_=400, anonymous_link_id=99)
@@ -734,17 +880,17 @@ async def test_get_anonymous_user_fields_falls_back_to_thread_users(db):
             output_index=0,
             metadata=MIGRATION_METADATA,
         )
-        # Leave message.user_id unset so the thread-users branch is taken.
+        # Leave message.user_id/run.creator_id unset so thread users are ignored.
         await session.commit()
 
     async with db.async_session() as session:
         message = await _load_single_message(session)
         uploader = await migration._get_anonymous_user_fields(
-            session, message.thread, message
+            session, message.thread, message, include_anonymous_context=True
         )
 
-    assert uploader.uploader_id == 500
-    assert uploader.user_auth == "user:500"
+    assert uploader.uploader_id is None
+    assert uploader.user_auth is None
 
 
 async def test_get_anonymous_user_fields_falls_back_to_run_creator(db):
@@ -768,13 +914,90 @@ async def test_get_anonymous_user_fields_falls_back_to_run_creator(db):
 
     async with db.async_session() as session:
         message = await _load_single_message(session)
-        assert list(message.thread.users) == []
         uploader = await migration._get_anonymous_user_fields(
-            session, message.thread, message
+            session, message.thread, message, include_anonymous_context=False
         )
 
     assert uploader.uploader_id == 500
     assert uploader.user_auth == "user:500"
+
+
+async def test_get_anonymous_user_fields_tracks_logged_in_anonymous_session(db):
+    async with db.async_session() as session:
+        await _seed_thread(session, class_id=1, assistant_id=10, thread_id=100)
+        await _seed_user(session, id_=1)
+        link = models.AnonymousLink(id=42, share_token="share-tok")
+        session.add(link)
+        await session.flush()
+        await _seed_user(session, id_=23, anonymous_link_id=42)
+        session.add(
+            models.AnonymousSession(
+                id=7, session_token="sess-tok", thread_id=100, user_id=23
+            )
+        )
+        run = await session.get(models.Run, 100)
+        run.creator_id = 1
+        await _seed_message(
+            session,
+            id_=1001,
+            thread_id=100,
+            run_id=100,
+            openai_message_id="msg",
+            output_index=0,
+            metadata=MIGRATION_METADATA,
+        )
+        await session.commit()
+
+    async with db.async_session() as session:
+        message = await _load_single_message(session)
+        uploader = await migration._get_anonymous_user_fields(
+            session, message.thread, message, include_anonymous_context=True
+        )
+
+    assert uploader.uploader_id == 1
+    assert uploader.anonymous_session_id == 7
+    assert uploader.anonymous_link_id == 42
+    assert uploader.user_auth == "user:1"
+    assert uploader.anonymous_user_auth == "anonymous_user:sess-tok"
+    assert uploader.anonymous_link_auth == "anonymous_link:share-tok"
+
+
+async def test_get_anonymous_user_fields_strips_anonymous_context_when_requested(db):
+    async with db.async_session() as session:
+        await _seed_thread(session, class_id=1, assistant_id=10, thread_id=100)
+        link = models.AnonymousLink(id=42, share_token="share-tok")
+        session.add(link)
+        await session.flush()
+        await _seed_user(session, id_=500, anonymous_link_id=42)
+        session.add(
+            models.AnonymousSession(
+                id=7, session_token="sess-tok", thread_id=100, user_id=500
+            )
+        )
+        await _seed_message(
+            session,
+            id_=1001,
+            thread_id=100,
+            run_id=100,
+            openai_message_id="msg",
+            output_index=0,
+            metadata=MIGRATION_METADATA,
+            user_id=500,
+        )
+        await session.commit()
+
+    async with db.async_session() as session:
+        message = await _load_single_message(session)
+        uploader = await migration._get_anonymous_user_fields(
+            session, message.thread, message, include_anonymous_context=False
+        )
+
+    assert uploader.uploader_id == 500
+    assert uploader.user_auth == "user:500"
+    assert uploader.anonymous_session_id is None
+    assert uploader.anonymous_link_id is None
+    assert uploader.anonymous_user_auth is None
+    assert uploader.anonymous_link_auth is None
 
 
 async def test_get_anonymous_user_fields_grants_match_file_grants(db):
@@ -806,7 +1029,7 @@ async def test_get_anonymous_user_fields_grants_match_file_grants(db):
     async with db.async_session() as session:
         message = await _load_single_message(session)
         uploader = await migration._get_anonymous_user_fields(
-            session, message.thread, message
+            session, message.thread, message, include_anonymous_context=True
         )
 
     private_file = SimpleNamespace(id=99, private=True, uploader_id=500)
