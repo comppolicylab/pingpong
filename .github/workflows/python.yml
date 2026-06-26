@@ -19,7 +19,7 @@ jobs:
       wd: ./
     steps:
       - name: Check out code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Setup uv
         id: setup-uv
