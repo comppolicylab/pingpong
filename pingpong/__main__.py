@@ -87,6 +87,9 @@ from pingpong.migrations.m15_v3_migrate_threads_and_messages import (
 from pingpong.migrations.m16_migrate_message_parts import (
     migrate_message_parts,
 )
+from pingpong.migrations.m17_migrate_message_attachments import (
+    migrate_message_attachments,
+)
 from pingpong.now import _get_next_run_time, croner, utcnow
 from pingpong.schemas import LMSType, RunStatus
 from pingpong.lti.course_bridge import course_bridge_sync_all
@@ -1214,6 +1217,17 @@ def m16_migrate_message_parts() -> None:
                 logger.info("Done!")
 
     asyncio.run(_m16_migrate_message_parts())
+
+
+@db.command("m17_migrate_message_attachments")
+def m17_migrate_message_attachments() -> None:
+    async def _m17_migrate_message_attachments() -> None:
+        async with config.db.driver.async_session() as session:
+            logger.info("Backfilling message attachments...")
+            await migrate_message_attachments(session)
+            logger.info("Done!")
+
+    asyncio.run(_m17_migrate_message_attachments())
 
 
 @db.command("m02_remove_responses_threads")
