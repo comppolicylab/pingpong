@@ -11,11 +11,6 @@ from sqlalchemy.orm.attributes import flag_modified
 
 import pingpong.models as models
 from pingpong.ai import get_openai_client_by_class_id
-from pingpong.models import (
-    _get_upsert_stmt,
-    code_interpreter_attachment_association,
-    file_search_attachment_association,
-)
 from pingpong.server import OpenAIClient
 
 logger = logging.getLogger(__name__)
@@ -140,14 +135,14 @@ async def _persist_message_attachments(
         if "file_search" in tool_types:
             await _attach_file(
                 session,
-                file_search_attachment_association,
+                models.file_search_attachment_association,
                 local_message.id,
                 local_file.id,
             )
         if "code_interpreter" in tool_types:
             await _attach_file(
                 session,
-                code_interpreter_attachment_association,
+                models.models.code_interpreter_attachment_association,
                 local_message.id,
                 local_file.id,
             )
@@ -160,7 +155,7 @@ async def _attach_file(
     file_object_id: int,
 ) -> None:
     stmt = (
-        _get_upsert_stmt(session)(association_table)
+        models._get_upsert_stmt(session)(association_table)
         .values(message_id=message_id, file_id=file_object_id)
         .on_conflict_do_nothing(index_elements=["message_id", "file_id"])
     )
