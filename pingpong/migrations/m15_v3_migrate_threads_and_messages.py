@@ -81,7 +81,8 @@ async def migrate_threads_and_messages_to_v3(session: AsyncSession) -> None:
 
 async def _count_v2_thread_classes(session: AsyncSession) -> int:
     class_ids = (
-        select(models.Thread.class_id)
+        select(models.Assistant.class_id)
+        .join(models.Thread, models.Thread.assistant_id == models.Assistant.id)
         .where(
             models.Thread.version == 2,
             models.Thread.interaction_mode == InteractionMode.CHAT,
@@ -110,14 +111,15 @@ async def _v2_thread_class_ids(session: AsyncSession) -> AsyncIterator[int]:
     last_class_id = 0
     while True:
         stmt = (
-            select(models.Thread.class_id)
+            select(models.Assistant.class_id)
+            .join(models.Thread, models.Thread.assistant_id == models.Assistant.id)
             .where(
                 models.Thread.version == 2,
                 models.Thread.interaction_mode == InteractionMode.CHAT,
-                models.Thread.class_id > last_class_id,
+                models.Assistant.class_id > last_class_id,
             )
             .distinct()
-            .order_by(models.Thread.class_id)
+            .order_by(models.Assistant.class_id)
             .limit(LOCAL_BATCH_SIZE)
         )
         result = await session.execute(stmt)
