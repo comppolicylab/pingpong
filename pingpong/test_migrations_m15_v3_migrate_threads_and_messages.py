@@ -1,6 +1,6 @@
 from datetime import datetime
 from types import SimpleNamespace
-from typing import Literal
+from typing import Any, Literal
 
 import pytest
 from glowplug import DbDriver
@@ -30,22 +30,25 @@ def _generate_openai_message(
         metadata = {}
         if user_id is not None:
             metadata["user_id"] = str(user_id)
-    return Message(
-        id=msg_id,
-        object="thread.message",
-        thread_id="sample_openai_thread_id",
-        role=role,
-        status=status,
-        created_at=created_at,
-        completed_at=completed_at,
-        run_id=run_id,
-        assistant_id=None,
-        attachments=None,
-        content=[],
-        incomplete_at=None,
-        incomplete_details=None,
-        metadata=metadata,
-    )
+    data: dict[str, Any] = {
+        "id": msg_id,
+        "object": "thread.message",
+        "thread_id": "sample_openai_thread_id",
+        "role": role,
+        "status": status,
+        "created_at": created_at,
+        "completed_at": completed_at,
+        "run_id": run_id,
+        "assistant_id": None,
+        "attachments": None,
+        "content": [],
+        "incomplete_at": None,
+        "incomplete_details": None,
+        "metadata": metadata,
+    }
+    if status is None:
+        return Message.model_construct(**data)
+    return Message(**data)
 
 
 def _generate_openai_run(
