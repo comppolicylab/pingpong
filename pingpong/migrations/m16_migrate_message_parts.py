@@ -97,7 +97,7 @@ async def migrate_message_parts(
                     flag_modified(local_message, "message_metadata")
                 except Exception:
                     await savepoint.rollback()
-                    await authz_client.write(revoke=written_grants)
+                    await authz_client.write_safe(revoke=written_grants)
                     logger.exception(
                         f"Unexpected error backfilling message parts. "
                         f"thread_id={local_message.thread_id} "
@@ -398,7 +398,7 @@ async def _fetch_or_create_local_file(
         uploader.anonymous_link_auth,
         uploader.anonymous_user_auth,
     )
-    await authz_client.write(grant=grants)
+    await authz_client.write_safe(grant=grants)
     # Record so the caller can revoke these if the savepoint rolls back (the authz
     # write above is not covered by the DB transaction).
     written_grants.extend(grants)
