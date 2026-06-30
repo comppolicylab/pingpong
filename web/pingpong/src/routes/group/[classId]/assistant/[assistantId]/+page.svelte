@@ -1756,6 +1756,7 @@
 		return cleaned;
 	};
 
+	let enforceClassicAssistantsForVoice = false;
 	let createClassicAssistantByProviderOrUser = false;
 	let hasSetCreateClassicAssistant = false;
 	$: if (
@@ -1768,10 +1769,12 @@
 	}
 	$: createClassicAssistant = isLectureMode
 		? false
-		: createClassicAssistantByProviderOrUser || interactionMode === 'voice';
+		: createClassicAssistantByProviderOrUser ||
+			(interactionMode === 'voice' && enforceClassicAssistantsForVoice);
 	$: isClassicRequired = isLectureMode
 		? false
-		: data?.enforceClassicAssistants || interactionMode === 'voice';
+		: data?.enforceClassicAssistants ||
+			(interactionMode === 'voice' && enforceClassicAssistantsForVoice);
 
 	$: chatModelCount = data.models.filter((model) => model.type === 'chat').length;
 	$: audioModelCount = data.models.filter((model) => model.type === 'voice').length;
@@ -1806,12 +1809,14 @@
 		is_new: model.is_new,
 		highlight: model.highlight
 	});
+	let allowSwitchingAssistantVersion = false;
 	let convertToNextGen: boolean | null = null;
 	$: canSwitchAssistantVersion =
 		!data.isCreating &&
 		interactionMode === 'voice' &&
 		!data?.enforceClassicAssistants &&
-		!isLectureMode;
+		!isLectureMode &&
+		allowSwitchingAssistantVersion;
 	$: if (convertToNextGen !== null && !canSwitchAssistantVersion) {
 		convertToNextGen = null;
 		forcedAssistantVersion = null;
@@ -2403,7 +2408,7 @@
 		const target = evt.target as HTMLInputElement;
 		const mode = target.value as api.InteractionMode;
 		if (mode === 'voice') {
-			forcedAssistantVersion = 2;
+			forcedAssistantVersion = null;
 		} else if (mode === 'lecture_video' || mode === 'lecture_slides') {
 			forcedAssistantVersion = 3;
 			convertToNextGen = null;
@@ -7205,7 +7210,8 @@
 									</div>
 								{/if}
 							</div>
-						{:else}
+							<hr />
+						{:else if canSwitchAssistantVersion}
 							<div class="col-span-2 mb-1">
 								<Checkbox
 									id="create_classic_assistant"
@@ -7221,7 +7227,9 @@
 										<div>Create Classic Assistant</div>
 										{#if data?.enforceClassicAssistants}<div>&middot;</div>
 											<div>Next-Gen Assistants unavailable for your AI Provider</div>{/if}
-										{#if interactionMode === 'voice'}<div>&middot;</div>
+										{#if interactionMode === 'voice' && enforceClassicAssistantsForVoice}<div>
+												&middot;
+											</div>
 											<div>Voice Mode requires Classic Assistants</div>{/if}
 									</div></Checkbox
 								>
@@ -7235,9 +7243,9 @@
 									Next-Gen in the future so you can take advantage of the latest improvements.</Helper
 								>
 							</div>
-						{/if}
 
-						<hr />
+							<hr />
+						{/if}
 
 						<div class="col-span-2 mb-1">
 							<Label for="notes">Notes</Label>

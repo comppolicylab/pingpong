@@ -11112,10 +11112,7 @@ async def create_assistant(
                 ),
             )
 
-    if req.interaction_mode == schemas.InteractionMode.VOICE:
-        # Voice mode assistants are only supported in version 2
-        assistant_version = 2
-    elif req.interaction_mode in {
+    if req.interaction_mode in {
         schemas.InteractionMode.LECTURE_VIDEO,
         schemas.InteractionMode.LECTURE_SLIDES,
     }:
@@ -12356,28 +12353,12 @@ async def update_assistant(
         )
 
     # Reinforce assistant version defaults:
-    # 1. Azure OpenAI only supports classic assistants (v2).
-    # 2. Existing classic assistants remain classic by default.
-    # 3. Assistant version changes only happen when explicitly requested.
-    if isinstance(openai_client, openai.AsyncAzureOpenAI):
-        if convert_to_next_gen:
-            raise HTTPException(
-                status_code=400,
-                detail="Next-Gen assistants are not available for your AI Provider.",
-            )
-        asst.version = 2
-    elif is_video or is_slides:
+    # 1. Existing classic assistants remain classic by default.
+    # 2. Assistant version changes only happen when explicitly requested.
+    if is_video or is_slides:
         asst.version = 3
     else:
-        has_openai_key = bool(
-            class_.api_key_obj and class_.api_key_obj.provider == "openai"
-        ) or bool(not class_.api_key_obj and class_.api_key)
         if convert_to_next_gen:
-            if not has_openai_key:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Next-Gen assistants are not available for your AI Provider.",
-                )
             asst.version = 3
         elif convert_to_next_gen_requested:
             asst.version = 2
