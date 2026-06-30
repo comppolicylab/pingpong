@@ -1791,13 +1791,17 @@
 	}, {});
 	let forcedAssistantVersion: number | null = null;
 	$: assistantVersion = forcedAssistantVersion || assistant?.version || null;
+	$: isUsingClassicAssistantVersion =
+		(data.isCreating && createClassicAssistant) || (!data.isCreating && assistantVersion !== 3);
 	const buildModelOption = (model: api.AssistantModel): api.AssistantModelOptions => ({
 		value: model.id,
 		name: model.name,
 		description: model.description,
 		supports_vision:
 			model.supports_vision &&
-			(model.vision_support_override === undefined || model.vision_support_override),
+			(!isUsingClassicAssistantVersion ||
+				model.vision_support_override === undefined ||
+				model.vision_support_override),
 		supports_reasoning: model.supports_reasoning,
 		is_new: model.is_new,
 		highlight: model.highlight
@@ -1834,15 +1838,13 @@
 	);
 	let selectableModels: api.AssistantModel[] = [];
 	$: {
-		const usesClassicAssistantVersion =
-			(data.isCreating && createClassicAssistant) || (!data.isCreating && assistantVersion !== 3);
 		const selectedAssistantModel = assistant?.model;
 
 		selectableModels =
 			data.models.filter(
 				(model) =>
 					model.type === modelInteractionMode &&
-					(usesClassicAssistantVersion
+					(isUsingClassicAssistantVersion
 						? model.supports_classic_assistants
 						: model.supports_next_gen_assistants) &&
 					(!(model.hide_in_model_selector ?? false) ||
@@ -1968,7 +1970,10 @@
 	$: visionSupportOverride = data.models.find(
 		(model) => model.id === selectedModel
 	)?.vision_support_override;
-	$: finalVisionSupport = visionSupportOverride ?? supportsVision;
+	$: effectiveVisionSupportOverride = isUsingClassicAssistantVersion
+		? visionSupportOverride
+		: undefined;
+	$: finalVisionSupport = effectiveVisionSupportOverride ?? supportsVision;
 	let allowVisionUpload = true;
 	$: asstFSFiles = [...data.files, ...allFSPrivateFiles];
 	$: asstCIFiles = [...data.files, ...allCIPrivateFiles];
@@ -3018,7 +3023,7 @@
 			use_latex: isLectureMode ? true : body.use_latex?.toString() === 'on',
 			use_image_descriptions: isLectureMode
 				? (assistant?.use_image_descriptions ?? false)
-				: body.use_image_descriptions?.toString() === 'on',
+				: isUsingClassicAssistantVersion && body.use_image_descriptions?.toString() === 'on',
 			hide_prompt: isLectureMode
 				? (assistant?.hide_prompt ?? true)
 				: body.hide_prompt?.toString() === 'on',
@@ -4784,7 +4789,7 @@
 						</div>
 					</div>
 				{/if}
-				{#if supportsVision && visionSupportOverride === false}
+				{#if supportsVision && effectiveVisionSupportOverride === false}
 					<div
 						class="mb-2 flex flex-row items-center gap-4 rounded-lg border border-amber-400 bg-gradient-to-b from-amber-50 to-amber-100 p-4 py-2 text-amber-800"
 					>
@@ -5695,7 +5700,7 @@
 			{/if}
 		</div>
 
-		{#if visionSupportOverride === false && !isLectureMode}
+		{#if effectiveVisionSupportOverride === false && !isLectureMode}
 			<div class="col-span-2 mb-4">
 				<Checkbox
 					id="use_image_descriptions"
@@ -6855,7 +6860,7 @@
 									>Control whether users can upload their own images when interacting with this
 									assistant. When unchecked, users will not be able to attach their own images to
 									messages, even if the assistant's model has Vision capabilities. <b
-										>This setting will only apply to Chat Mode models with Vision capabilities{visionSupportOverride ===
+										>This setting will only apply to Chat Mode models with Vision capabilities{effectiveVisionSupportOverride ===
 										false
 											? ', or when you enable Vision capabilities through Image Descriptions.'
 											: '.'}</b

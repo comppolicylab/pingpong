@@ -3801,54 +3801,64 @@ async def list_class_models(
             ),
         )
 
-    filtered = [
-        {
-            "id": m.id,
-            "created": datetime.fromtimestamp(m.created or m.created_at or 0),
-            "owner": m.owned_by or "",
-            "default_prompt_id": KNOWN_MODELS[m.id].get("default_prompt_id"),
-            "name": KNOWN_MODELS[m.id]["name"],
-            "sort_order": KNOWN_MODELS[m.id]["sort_order"],
-            "type": KNOWN_MODELS[m.id]["type"],
-            "description": KNOWN_MODELS[m.id]["description"],
-            "is_latest": KNOWN_MODELS[m.id]["is_latest"],
-            "is_new": KNOWN_MODELS[m.id]["is_new"],
-            "highlight": KNOWN_MODELS[m.id]["highlight"],
-            "supports_vision": KNOWN_MODELS[m.id]["supports_vision"],
-            "supports_file_search": KNOWN_MODELS[m.id]["supports_file_search"],
-            "supports_code_interpreter": KNOWN_MODELS[m.id][
-                "supports_code_interpreter"
-            ],
-            "supports_classic_assistants": KNOWN_MODELS[m.id][
-                "supports_classic_assistants"
-            ],
-            "supports_next_gen_assistants": KNOWN_MODELS[m.id][
-                "supports_next_gen_assistants"
-            ],
-            "supports_minimal_reasoning_effort": KNOWN_MODELS[m.id][
-                "supports_minimal_reasoning_effort"
-            ],
-            "supports_none_reasoning_effort": KNOWN_MODELS[m.id][
-                "supports_none_reasoning_effort"
-            ],
-            "supports_tools_with_none_reasoning_effort": KNOWN_MODELS[m.id].get(
-                "supports_tools_with_none_reasoning_effort", False
-            ),
-            "supports_verbosity": KNOWN_MODELS[m.id]["supports_verbosity"],
-            "supports_web_search": KNOWN_MODELS[m.id]["supports_web_search"],
-            "supports_mcp_server": KNOWN_MODELS[m.id]["supports_mcp_server"],
-            "supports_temperature": KNOWN_MODELS[m.id]["supports_temperature"],
-            "supports_temperature_with_reasoning_none": KNOWN_MODELS[m.id].get(
-                "supports_temperature_with_reasoning_none", False
-            ),
-            "supports_reasoning": KNOWN_MODELS[m.id]["supports_reasoning"],
-            "reasoning_effort_levels": KNOWN_MODELS[m.id].get(
-                "reasoning_effort_levels"
-            ),
-        }
-        for m in all_models.data
-        if m.id in KNOWN_MODELS.keys()
-    ]
+    filtered: list[dict[str, Any]] = []
+    included_model_ids = set()
+    for m in all_models.data:
+        model_id = (
+            get_original_model_name_by_azure_equivalent(m.id)
+            if isinstance(openai_client, openai.AsyncAzureOpenAI)
+            else m.id
+        )
+        if model_id not in KNOWN_MODELS or model_id in included_model_ids:
+            continue
+
+        included_model_ids.add(model_id)
+        filtered.append(
+            {
+                "id": model_id,
+                "created": datetime.fromtimestamp(m.created or m.created_at or 0),
+                "owner": m.owned_by or "",
+                "default_prompt_id": KNOWN_MODELS[model_id].get("default_prompt_id"),
+                "name": KNOWN_MODELS[model_id]["name"],
+                "sort_order": KNOWN_MODELS[model_id]["sort_order"],
+                "type": KNOWN_MODELS[model_id]["type"],
+                "description": KNOWN_MODELS[model_id]["description"],
+                "is_latest": KNOWN_MODELS[model_id]["is_latest"],
+                "is_new": KNOWN_MODELS[model_id]["is_new"],
+                "highlight": KNOWN_MODELS[model_id]["highlight"],
+                "supports_vision": KNOWN_MODELS[model_id]["supports_vision"],
+                "supports_file_search": KNOWN_MODELS[model_id]["supports_file_search"],
+                "supports_code_interpreter": KNOWN_MODELS[model_id][
+                    "supports_code_interpreter"
+                ],
+                "supports_classic_assistants": KNOWN_MODELS[model_id][
+                    "supports_classic_assistants"
+                ],
+                "supports_next_gen_assistants": KNOWN_MODELS[model_id][
+                    "supports_next_gen_assistants"
+                ],
+                "supports_minimal_reasoning_effort": KNOWN_MODELS[model_id][
+                    "supports_minimal_reasoning_effort"
+                ],
+                "supports_none_reasoning_effort": KNOWN_MODELS[model_id][
+                    "supports_none_reasoning_effort"
+                ],
+                "supports_tools_with_none_reasoning_effort": KNOWN_MODELS[model_id].get(
+                    "supports_tools_with_none_reasoning_effort", False
+                ),
+                "supports_verbosity": KNOWN_MODELS[model_id]["supports_verbosity"],
+                "supports_web_search": KNOWN_MODELS[model_id]["supports_web_search"],
+                "supports_mcp_server": KNOWN_MODELS[model_id]["supports_mcp_server"],
+                "supports_temperature": KNOWN_MODELS[model_id]["supports_temperature"],
+                "supports_temperature_with_reasoning_none": KNOWN_MODELS[model_id].get(
+                    "supports_temperature_with_reasoning_none", False
+                ),
+                "supports_reasoning": KNOWN_MODELS[model_id]["supports_reasoning"],
+                "reasoning_effort_levels": KNOWN_MODELS[model_id].get(
+                    "reasoning_effort_levels"
+                ),
+            }
+        )
     if isinstance(openai_client, openai.AsyncAzureOpenAI) and any(
         m.id == "gpt-4-turbo-2024-04-09" for m in all_models.data
     ):
@@ -3973,9 +3983,7 @@ async def list_class_models(
     return {
         "models": filtered,
         "default_prompts": default_prompts,
-        "enforce_classic_assistants": isinstance(
-            openai_client, openai.AsyncAzureOpenAI
-        ),
+        "enforce_classic_assistants": False,
         "lecture_video_defaults": lecture_video_defaults,
     }
 
@@ -11108,15 +11116,7 @@ async def create_assistant(
         # Lecture lesson assistants require Version 3
         assistant_version = 3
     else:
-        if (
-            class_.api_key_obj
-            and class_.api_key_obj.provider == "openai"
-            and not req.create_classic_assistant
-        ) or (
-            not class_.api_key_obj
-            and class_.api_key
-            and not req.create_classic_assistant
-        ):
+        if not req.create_classic_assistant:
             assistant_version = 3
         else:
             assistant_version = 2
