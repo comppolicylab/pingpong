@@ -90,6 +90,7 @@ from pingpong.migrations.m16_migrate_message_parts import (
 from pingpong.migrations.m17_migrate_message_attachments import (
     migrate_message_attachments,
 )
+from pingpong.migrations.m19_migrate_all_to_next_gen import migrate_all_to_next_gen
 from pingpong.now import _get_next_run_time, croner, utcnow
 from pingpong.schemas import LMSType, RunStatus
 from pingpong.lti.course_bridge import course_bridge_sync_all
@@ -1228,6 +1229,17 @@ def m17_migrate_message_attachments() -> None:
             logger.info("Done!")
 
     asyncio.run(_m17_migrate_message_attachments())
+
+
+@db.command("m19_migrate_all_to_next_gen")
+def m19_migrate_all_to_next_gen() -> None:
+    async def _m19_migrate_all_to_next_gen() -> None:
+        async with config.db.driver.async_session() as session:
+            logger.info("Migrating all assistants to next-gen...")
+            await migrate_all_to_next_gen(session)
+            logger.info("Done!")
+
+    asyncio.run(_m19_migrate_all_to_next_gen())
 
 
 @db.command("m02_remove_responses_threads")

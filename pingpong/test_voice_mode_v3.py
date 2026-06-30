@@ -1049,7 +1049,7 @@ async def test_update_assistant_keeps_classic_v2_by_default(
 
 @with_user(123)
 @with_authz(grants=[("user:123", "can_edit", "assistant:11")])
-async def test_update_assistant_converts_to_next_gen_when_requested(
+async def test_update_assistant_ignores_next_gen_conversion_request(
     api, db, valid_user_token, monkeypatch
 ):
     async def fake_list_class_models(class_id: str, request, openai_client):  # type: ignore[no-untyped-def]
@@ -1090,16 +1090,16 @@ async def test_update_assistant_converts_to_next_gen_when_requested(
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 200
-    assert response.json()["version"] == 3
+    assert response.json()["version"] == 2
 
     async with db.async_session() as session:
         updated = await models.Assistant.get_by_id(session, 11)
-        assert updated.version == 3
+        assert updated.version == 2
 
 
 @with_user(123)
 @with_authz(grants=[("user:123", "can_edit", "assistant:11")])
-async def test_update_voice_assistant_converts_to_next_gen_when_requested(
+async def test_update_voice_assistant_ignores_next_gen_conversion_request(
     api, db, valid_user_token, monkeypatch
 ):
     async def fake_list_class_models(class_id: str, request, openai_client):  # type: ignore[no-untyped-def]
@@ -1140,16 +1140,16 @@ async def test_update_voice_assistant_converts_to_next_gen_when_requested(
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 200
-    assert response.json()["version"] == 3
+    assert response.json()["version"] == 2
 
     async with db.async_session() as session:
         updated = await models.Assistant.get_by_id(session, 11)
-        assert updated.version == 3
+        assert updated.version == 2
 
 
 @with_user(123)
 @with_authz(grants=[("user:123", "can_edit", "assistant:11")])
-async def test_update_voice_assistant_switches_back_to_classic_when_requested(
+async def test_update_voice_assistant_ignores_classic_conversion_request(
     api, db, valid_user_token, monkeypatch
 ):
     async def fake_list_class_models(class_id: str, request, openai_client):  # type: ignore[no-untyped-def]
@@ -1190,11 +1190,11 @@ async def test_update_voice_assistant_switches_back_to_classic_when_requested(
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 200
-    assert response.json()["version"] == 2
+    assert response.json()["version"] == 3
 
     async with db.async_session() as session:
         updated = await models.Assistant.get_by_id(session, 11)
-        assert updated.version == 2
+        assert updated.version == 3
 
 
 @with_user(123)
