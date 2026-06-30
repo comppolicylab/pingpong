@@ -8796,6 +8796,22 @@ async def send_message(
                 detail="You do not have permission to interact with this assistant.",
             )
 
+        asst = await models.Assistant.get_by_id(
+            request.state["db"], thread.assistant_id
+        )
+
+        if not asst or asst.class_id != int(class_id):
+            raise HTTPException(
+                status_code=404,
+                detail="The assistant for this thread no longer exists.",
+            )
+
+        if asst.version is not None and thread.version < asst.version:
+            raise HTTPException(
+                status_code=409,
+                detail="You are using an older version of this assistant. Start a new chat to continue.",
+            )
+
         if thread.version <= 2:
             last_runs_result = await openai_client.beta.threads.runs.list(
                 thread.thread_id, limit=1, order="desc"
@@ -8863,16 +8879,6 @@ async def send_message(
         )
 
     try:
-        asst = await models.Assistant.get_by_id(
-            request.state["db"], thread.assistant_id
-        )
-
-        if not asst or asst.class_id != int(class_id):
-            raise HTTPException(
-                status_code=404,
-                detail="The assistant for this thread no longer exists.",
-            )
-
         # Check if user file uploads are allowed for this assistant
         if not asst.allow_user_file_uploads and (
             data.file_search_file_ids or data.code_interpreter_file_ids

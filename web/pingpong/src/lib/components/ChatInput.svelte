@@ -109,6 +109,10 @@
 
 	export let assistantVersion: number | null = null;
 	export let threadVersion: number | null = null;
+	const olderAssistantVersionMessage =
+		'You are using an older version of this assistant. Start a new chat to continue.';
+	$: isUsingOlderAssistantVersion =
+		assistantVersion !== null && threadVersion !== null && assistantVersion > threadVersion;
 
 	/**
 	 * Files to accept for file search. If null, file search is disabled.
@@ -180,7 +184,13 @@
 	// The list of files being uploaded.
 	let allFiles = writable<FileUploadInfo[]>([]);
 	$: uploading = $allFiles.some((f) => f.state === 'pending');
-	$: canUploadFiles = !!upload && !loading && !disabled && !tooManyFiles && !uploading;
+	$: canUploadFiles =
+		!!upload &&
+		!loading &&
+		!disabled &&
+		!tooManyFiles &&
+		!uploading &&
+		!isUsingOlderAssistantVersion;
 	let purpose: FileUploadPurpose | null = null;
 	$: purpose =
 		codeInterpreterAcceptedFiles && fileSearchAcceptedFiles && finalVisionAcceptedFiles
@@ -422,6 +432,10 @@
 		if (!ref.value || disabled) {
 			return;
 		}
+		if (isUsingOlderAssistantVersion) {
+			errorMessage = olderAssistantVersionMessage;
+			return;
+		}
 		errorMessage = null;
 		const message = ref.value;
 		const realMessage = realRef.value;
@@ -475,7 +489,14 @@
 	const maybeSubmit = (e: KeyboardEvent) => {
 		if (e.key === 'Enter' && !e.shiftKey) {
 			e.preventDefault();
-			if (!disabled && canSubmit && !assistantDeleted && canViewAssistant && !loading) {
+			if (
+				!disabled &&
+				canSubmit &&
+				!assistantDeleted &&
+				canViewAssistant &&
+				!loading &&
+				!isUsingOlderAssistantVersion
+			) {
 				submit();
 			}
 		}
@@ -599,7 +620,7 @@
 	<input type="hidden" name="code_interpreter_file_ids" value={codeInterpreterFileIds} />
 	<div class="flex flex-col px-1 md:px-2">
 		<div style="opacity: 1; height: auto;">
-			{#if canSubmit && assistantVersion !== null && threadVersion !== null && assistantVersion > threadVersion}
+			{#if canSubmit && isUsingOlderAssistantVersion}
 				<div
 					class="relative -mb-4 flex flex-wrap gap-2 rounded-t-2xl border border-b-0 border-gray-300 bg-gray-50 px-3.5 pt-2.5 pb-6"
 					use:fixFileListHeight={$allFiles}
@@ -612,9 +633,8 @@
 									<InfoCircleOutline />
 									<div>
 										<div class="text-sm">
-											You are using an older version of this assistant, which relies on an OpenAI
-											service that may be slower or less reliable. To get the best experience, start
-											a new chat.
+											This chat was created with an older version of this assistant, and relies on a
+											retired OpenAI service. To continue the conversation, start a new chat.
 										</div>
 									</div>
 								</div>
@@ -717,14 +737,19 @@
 				name="message"
 				class="mt-1 w-full resize-none border-none bg-transparent p-0 !outline-hidden focus:ring-0"
 				placeholder={canSubmit
-					? placeholderMessage
+					? isUsingOlderAssistantVersion
+						? 'Start a new chat to continue.'
+						: placeholderMessage
 					: assistantDeleted
 						? 'Read-only thread: the assistant associated with this thread is deleted.'
 						: canViewAssistant
 							? "You can't reply in this thread."
 							: 'Read-only thread: You no longer have permissions to interact with this assistant.'}
 				class:text-gray-700={disabled}
-				disabled={!canSubmit || assistantDeleted || !canViewAssistant}
+				disabled={!canSubmit ||
+					assistantDeleted ||
+					!canViewAssistant ||
+					isUsingOlderAssistantVersion}
 				onkeydown={maybeSubmit}
 				oninput={handleTextAreaInput}
 				onpaste={handlePaste}
@@ -835,7 +860,7 @@
 						ontouchstart={submit}
 						onkeydown={maybeSubmit}
 						class={`${loading ? 'animate-pulse cursor-progress' : ''} h-8 w-8 bg-orange p-1 hover:bg-orange-dark `}
-						disabled={uploading || loading || disabled}
+						disabled={uploading || loading || disabled || isUsingOlderAssistantVersion}
 					>
 						<ArrowUpOutline class="h-6 w-6" />
 					</Button>

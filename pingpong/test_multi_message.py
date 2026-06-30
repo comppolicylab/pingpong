@@ -1957,6 +1957,55 @@ async def test_list_thread_messages_includes_reasoning_messages(
     assert actual_summary == expected_summary
 
 
+@with_user(887)
+@with_authz(
+    grants=[
+        ("user:887", "can_participate", "thread:8071"),
+        ("user:887", "can_view", "assistant:8072"),
+    ]
+)
+async def test_send_message_rejects_older_thread_version_for_upgraded_assistant(
+    api, db, valid_user_token
+):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=8070, name="Upgraded Assistant Class", api_key="sk-test"
+        )
+        assistant = models.Assistant(
+            id=8072,
+            name="Upgraded Assistant",
+            class_id=class_.id,
+            assistant_id="asst-upgraded",
+            model="gpt-4o-mini",
+            creator_id=887,
+            version=3,
+        )
+        thread = models.Thread(
+            id=8071,
+            thread_id="thread-older-version",
+            class_id=class_.id,
+            assistant_id=assistant.id,
+            version=2,
+            tools_available="",
+            private=False,
+            instructions="Existing instructions",
+        )
+        session.add_all([class_, assistant, thread])
+        await session.commit()
+
+    response = api.post(
+        "/api/v1/class/8070/thread/8071",
+        json={"message": "Can I keep chatting here?"},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "You are using an older version of this assistant. "
+        "Start a new chat to continue."
+    )
+
+
 @with_user(888)
 @with_authz(grants=[("user:888", "can_participate", "thread:8101")])
 async def test_create_run_locks_thread_before_checking_latest_run(
