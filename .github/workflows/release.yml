@@ -106,7 +106,7 @@ jobs:
           echo "Computed AUTHZ_VERSION=${AUTHZ_VERSION}"
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@e8614cfbf058de4c6c685b317488ecdec92a4305
+        uses: aws-actions/configure-aws-credentials@6686d5a051b738567412c0e0fc38a15ce7062000
         with:
           aws-access-key-id: ${{ secrets.PINGPONG_AWS_ACCESS_KEY }}
           aws-secret-access-key: ${{ secrets.PINGPONG_AWS_SECRET_ACCESS_KEY }}
