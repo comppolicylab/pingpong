@@ -1428,7 +1428,6 @@ AZURE_UNAVAILABLE_MODELS = [
     "gpt-5.2-2025-12-11",
     "gpt-5.2-chat-latest",
     "gpt-5.3-chat-latest",
-    "gpt-5.4",
     "gpt-5.4-2026-03-05",
     "gpt-5-2025-08-07",
     "gpt-5-mini",

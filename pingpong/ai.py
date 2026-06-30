@@ -333,6 +333,8 @@ def get_original_model_name_by_azure_equivalent(model_name: str) -> str:
     :return: Original model name
     """
     match model_name:
+        case "gpt-5.4-2026-03-05":
+            return "gpt-5.4"
         case "gpt-4-turbo-2024-04-09":
             return "gpt-4-turbo"
         case "gpt-4-0125-Preview":
