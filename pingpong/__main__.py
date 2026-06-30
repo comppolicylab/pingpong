@@ -91,6 +91,9 @@ from pingpong.migrations.m17_migrate_message_attachments import (
     migrate_message_attachments,
 )
 from pingpong.migrations.m19_migrate_all_to_next_gen import migrate_all_to_next_gen
+from pingpong.migrations.m20_migrate_voice_mode_threads_to_v3 import (
+    migrate_voice_mode_threads_to_v3,
+)
 from pingpong.now import _get_next_run_time, croner, utcnow
 from pingpong.schemas import LMSType, RunStatus
 from pingpong.lti.course_bridge import course_bridge_sync_all
@@ -1241,6 +1244,17 @@ def m19_migrate_all_to_next_gen() -> None:
             logger.info("Done!")
 
     asyncio.run(_m19_migrate_all_to_next_gen())
+
+
+@db.command("m20_migrate_voice_mode_threads_to_v3")
+def m20_migrate_voice_mode_threads_to_v3() -> None:
+    async def _m20_migrate_voice_mode_threads_to_v3() -> None:
+        async with config.db.driver.async_session() as session:
+            logger.info("Migrating v2 voice mode threads to v3...")
+            await migrate_voice_mode_threads_to_v3(session)
+            logger.info("Done!")
+
+    asyncio.run(_m20_migrate_voice_mode_threads_to_v3())
 
 
 @db.command("m02_remove_responses_threads")
