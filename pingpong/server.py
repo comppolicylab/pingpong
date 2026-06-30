@@ -11112,17 +11112,22 @@ async def create_assistant(
                 ),
             )
 
-    if req.interaction_mode in {
-        schemas.InteractionMode.LECTURE_VIDEO,
-        schemas.InteractionMode.LECTURE_SLIDES,
-    }:
-        # Lecture lesson assistants require Version 3
-        assistant_version = 3
-    else:
-        if not req.create_classic_assistant:
-            assistant_version = 3
-        else:
-            assistant_version = 2
+    # Update (June 2026): Ignore assistant version change requests.
+    # Support for Classic Assistants and Threads is deprecated,
+    # as the OpenAI Assistants API service is shutting down on August 26, 2026.
+    # It will be removed in PingPong 8.0.
+    assistant_version = 3
+    # if req.interaction_mode in {
+    #     schemas.InteractionMode.LECTURE_VIDEO,
+    #     schemas.InteractionMode.LECTURE_SLIDES,
+    # }:
+    #     # Lecture lesson assistants require Version 3
+    #     assistant_version = 3
+    # else:
+    #     if not req.create_classic_assistant:
+    #         assistant_version = 3
+    #     else:
+    #         assistant_version = 2
     del req.create_classic_assistant
 
     # Check that the class is not private if user information should be recorded
@@ -12335,35 +12340,42 @@ async def update_assistant(
             ClassCredentialValidationUnavailableError,
         ) as exc:
             _raise_http_for_lecture_video_voice_validation_error(exc)
-    convert_to_next_gen_requested = (
-        "convert_to_next_gen" in req.model_fields_set
-        and req.convert_to_next_gen is not None
-    )
-    convert_to_next_gen = (
-        "convert_to_next_gen" in req.model_fields_set
-        and req.convert_to_next_gen is True
-    )
-    if convert_to_next_gen_requested and interaction_mode in {
-        schemas.InteractionMode.LECTURE_VIDEO,
-        schemas.InteractionMode.LECTURE_SLIDES,
-    }:
-        raise HTTPException(
-            status_code=400,
-            detail="Assistant version conversions are not supported in lecture lesson modes.",
-        )
 
+    # Update (June 2026): Ignore assistant version change requests.
+    # Support for Classic Assistants and Threads is deprecated,
+    # as the OpenAI Assistants API service is shutting down on August 26, 2026.
+    # It will be removed in PingPong 8.0.
+    #
+    # Previously:
+    # convert_to_next_gen_requested = (
+    #     "convert_to_next_gen" in req.model_fields_set
+    #     and req.convert_to_next_gen is not None
+    # )
+    # convert_to_next_gen = (
+    #     "convert_to_next_gen" in req.model_fields_set
+    #     and req.convert_to_next_gen is True
+    # )
+    # if convert_to_next_gen_requested and interaction_mode in {
+    #     schemas.InteractionMode.LECTURE_VIDEO,
+    #     schemas.InteractionMode.LECTURE_SLIDES,
+    # }:
+    #     raise HTTPException(
+    #         status_code=400,
+    #         detail="Assistant version conversions are not supported in lecture lesson modes.",
+    #     )
+    #
     # Reinforce assistant version defaults:
     # 1. Existing classic assistants remain classic by default.
     # 2. Assistant version changes only happen when explicitly requested.
-    if is_video or is_slides:
-        asst.version = 3
-    else:
-        if convert_to_next_gen:
-            asst.version = 3
-        elif convert_to_next_gen_requested:
-            asst.version = 2
-        else:
-            asst.version = 3 if asst.version == 3 else 2
+    # if is_video or is_slides:
+    #     asst.version = 3
+    # else:
+    #     if convert_to_next_gen:
+    #         asst.version = 3
+    #     elif convert_to_next_gen_requested:
+    #         asst.version = 2
+    #     else:
+    #         asst.version = 3 if asst.version == 3 else 2
 
     # If the interaction mode is changing, and the user did not specify a
     # temperature, set a default temperature based on the interaction mode
