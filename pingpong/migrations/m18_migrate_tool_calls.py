@@ -33,9 +33,8 @@ logger = logging.getLogger(__name__)
 LOCAL_BATCH_SIZE = 100
 
 
-ThreadTurnCache = dict[
-    int, dict[str, list[str]]
-]  # {last_openai_run_id: [all_openai_run_ids_in_that_turn]}
+# {thread_id: {last_openai_run_id: [(openai_run_id, openai_message_id), ...]}}
+ThreadTurnCache = dict[int, dict[str, list[tuple[str, str | None]]]]
 
 
 async def migrate_tool_calls(session: AsyncSession) -> None:
@@ -148,10 +147,12 @@ def _tool_call_filters():
     migration_metadata = models.Message.message_metadata[
         "assistants_to_responses_api_thread_migration"
     ]
-    attachments_state = migration_metadata["attachments"].as_string()
+    # Using m16's `message_parts` because m17's `attachments` are only relevant to
+    # user messages, which is too strict for tool calls.
+    message_parts_state = migration_metadata["message_parts"].as_string()
     tool_calls_state = migration_metadata["tool_calls"].as_string()
     return (
-        attachments_state == "complete",
+        message_parts_state == "complete",
         models.Message.message_id.is_not(None),
         or_(
             tool_calls_state.is_(None),
@@ -218,15 +219,16 @@ async def _migrate_message_tool_calls(
     if local_run.id in processed_run_ids:
         return
 
-    openai_run_ids = await _turn_openai_run_ids(
+    openai_runs = await _turn_openai_runs(
         openai_client, local_message.thread, local_run, thread_cache
     )
 
-    insertion_index = await _tool_call_insertion_index(session, local_run)
-
-    output_index = insertion_index - 1
     tool_calls_created = 0
-    for openai_run_id in openai_run_ids:
+    for openai_run_id, openai_message_id in openai_runs:
+        insertion_index = await _tool_call_insertion_index(
+            session, local_run, openai_message_id
+        )
+        output_index = insertion_index - 1
         for run_step in await _list_run_steps(
             openai_client, local_message.thread.thread_id, openai_run_id
         ):
@@ -239,28 +241,42 @@ async def _migrate_message_tool_calls(
             )
             tool_calls_created += created
 
-    processed_run_ids.add(local_run.id)
     await session.flush()
+    processed_run_ids.add(local_run.id)
     logger.info(
-        "m18 backfilled run tool calls. run_id_local=%s openai_run_ids=%s "
-        "tool_calls_created=%s insertion_index=%s message_id_local=%s",
+        "m18 backfilled run tool calls. run_id_local=%s openai_runs=%s "
+        "tool_calls_created=%s message_id_local=%s",
         local_run.id,
-        openai_run_ids,
+        openai_runs,
         tool_calls_created,
-        insertion_index,
         local_message.id,
     )
 
 
 async def _tool_call_insertion_index(
-    session: AsyncSession, local_run: models.Run
+    session: AsyncSession,
+    local_run: models.Run,
+    openai_message_id: str | None = None,
 ) -> int:
-    """Where in the thread's output_index sequence this run's tool calls belong.
+    """Where in the thread's output_index sequence a run's tool calls belong.
 
     Tool calls precede the assistant's reply, so we target the output_index of the
-    run's first assistant message. If the run has no assistant message (e.g. an
-    orphan/user-only turn) we plan to put it at the end.
+    assistant message the run produced. When `openai_message_id` is given we target that
+    local message (the per-run case for a collapsed turn); otherwise we fall
+    back to the run's first assistant message. If no such message exists (e.g., an
+    orphan/user-only turn) we plan to put the tool calls at the end.
     """
+    if openai_message_id is not None:
+        target_index = await session.scalar(
+            select(models.Message.output_index).where(
+                models.Message.run_id == local_run.id,
+                models.Message.message_id == openai_message_id,
+                models.Message.role == schemas.MessageRole.ASSISTANT,
+            )
+        )
+        if target_index is not None:
+            return target_index
+
     first_assistant_index = await session.scalar(
         select(func.min(models.Message.output_index)).where(
             models.Message.run_id == local_run.id,
@@ -312,13 +328,14 @@ async def _shift_output_indexes_for_tool_calls(
     await session.flush()
 
 
-async def _turn_openai_run_ids(
+async def _turn_openai_runs(
     openai_client: OpenAIClient,
     thread: models.Thread,
     local_run: models.Run,
     thread_cache: ThreadTurnCache,
-) -> list[str]:
-    """Re-fetch OpenAI run ids that the local Run's collapsed.
+) -> list[tuple[str, str | None]]:
+    """Re-fetch the OpenAI runs the local Run collapsed, each paired with the OpenAI
+    message id it produced.
 
     m15 grouped a thread's OpenAI messages into turns and stored only each turn's last
     OpenAI run id on the local Run. We rebuild those same turns and cache per thread.
@@ -329,22 +346,28 @@ async def _turn_openai_run_ids(
         thread_cache[thread.id] = await _build_turn_run_id_map(openai_client, thread)
 
     # Fall back to the single known id if the turn can't be reconstructed (I don't
-    # think this should happen?)
-    return thread_cache[thread.id].get(local_run.run_id, [local_run.run_id])
+    # think this should happen?). We don't know its message id, so leave it None.
+    return thread_cache[thread.id].get(local_run.run_id, [(local_run.run_id, None)])
 
 
 async def _build_turn_run_id_map(
     openai_client: OpenAIClient, thread: models.Thread
-) -> dict[str, list[str]]:
+) -> dict[str, list[tuple[str, str | None]]]:
     openai_messages = await _fetch_openai_messages_in_thread(
         openai_client, thread.thread_id
     )
-    turn_run_id_map: dict[str, list[str]] = {}
+    # OpenAI run id -> [(local run id, local message id), ...]
+    turn_run_id_map: dict[str, list[tuple[str, str | None]]] = {}
     async for turn in _iter_migration_turns(openai_client, thread, openai_messages):
         if not turn.openai_runs:
             continue
-        run_ids = [run.id for run in turn.openai_runs]
-        turn_run_id_map[run_ids[-1]] = run_ids
+        message_id_by_run = {
+            m.run_id: m.id for m in turn.assistant_messages if m.run_id is not None
+        }
+        run_pairs = [
+            (run.id, message_id_by_run.get(run.id)) for run in turn.openai_runs
+        ]
+        turn_run_id_map[turn.openai_runs[-1].id] = run_pairs
     return turn_run_id_map
 
 
@@ -401,7 +424,9 @@ async def _persist_run_step_tool_calls(
         if isinstance(tool_call, (CodeInterpreterToolCall, FileSearchToolCall)):
             # Always advance output_index if valid tool call, even if already exists
             output_index += 1
-            if await _does_tool_call_exist(session, local_run.id, tool_call.id):
+            if await _tool_call_exists_at_index(
+                session, local_run.id, tool_call.id, output_index
+            ):
                 logger.info(
                     "m18 skipping already-persisted tool call. run_id_local=%s "
                     "tool_call_id=%s",
@@ -448,14 +473,33 @@ async def _persist_run_step_tool_calls(
     return output_index, created_count
 
 
-async def _does_tool_call_exist(
-    session: AsyncSession, local_run_id: int, tool_call_id: str
+async def _tool_call_exists_at_index(
+    session: AsyncSession,
+    local_run_id: int,
+    tool_call_id: str,
+    expected_output_index: int,
 ) -> bool:
-    stmt = select(models.ToolCall.id).where(
-        models.ToolCall.run_id == local_run_id,
-        models.ToolCall.tool_call_id == tool_call_id,
+    existing_output_index = await session.scalar(
+        select(models.ToolCall.output_index).where(
+            models.ToolCall.run_id == local_run_id,
+            models.ToolCall.tool_call_id == tool_call_id,
+        )
     )
-    return await session.scalar(stmt) is not None
+    if existing_output_index is None:
+        return False
+
+    if existing_output_index != expected_output_index:
+        logger.warning(
+            "m18 already-persisted tool call has unexpected output_index. "
+            "run_id_local=%s tool_call_id=%s expected_output_index=%s "
+            "existing_output_index=%s",
+            local_run_id,
+            tool_call_id,
+            expected_output_index,
+            existing_output_index,
+        )
+
+    return True
 
 
 async def _persist_code_interpreter_tool_call(

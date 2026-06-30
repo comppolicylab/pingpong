@@ -14,7 +14,7 @@ MIGRATION_KEY = "assistants_to_responses_api_thread_migration"
 
 
 def _migration_metadata(*, tool_calls_complete: bool = False):
-    metadata = {MIGRATION_KEY: {"attachments": "complete"}}
+    metadata = {MIGRATION_KEY: {"message_parts": "complete", "attachments": "complete"}}
     if tool_calls_complete:
         metadata[MIGRATION_KEY]["tool_calls"] = "complete"
     return metadata
@@ -1043,3 +1043,131 @@ async def test_continues_after_image_fetch_failure(db, monkeypatch):
     assert [tc.tool_call_id for tc in tool_calls] == ["tc-B"]
     assert _tool_calls_migration_state(failed_message) is None
     assert _tool_calls_migration_state(ok_message) == "complete"
+
+
+async def test_multi_run_turn_inserts_each_run_before_its_own_message(db, monkeypatch):
+    async with db.async_session() as session:
+        await _seed_thread(
+            session,
+            class_id=1,
+            assistant_id=10,
+            thread_id=100,
+            run_pk=100,
+            openai_run_id="run-B",
+        )
+        await _seed_message(
+            session,
+            id_=1001,
+            thread_id=100,
+            run_id=100,
+            openai_message_id="msg-user",
+            output_index=0,
+            role=schemas.MessageRole.USER,
+            metadata=_migration_metadata(),
+        )
+        await _seed_message(
+            session,
+            id_=1002,
+            thread_id=100,
+            run_id=100,
+            openai_message_id="msg-A",
+            output_index=1,
+            metadata=_migration_metadata(),
+        )
+        await _seed_message(
+            session,
+            id_=1003,
+            thread_id=100,
+            run_id=100,
+            openai_message_id="msg-B",
+            output_index=2,
+            metadata=_migration_metadata(),
+        )
+        await session.commit()
+
+    fake_client = _fake_openai_client(
+        messages_by_thread={
+            "thread-100": [
+                _openai_message("msg-A", "assistant", "run-A"),
+                _openai_message("msg-B", "assistant", "run-B"),
+            ]
+        },
+        runs_by_id={"run-A": _openai_run("run-A"), "run-B": _openai_run("run-B")},
+        steps_by_run={
+            "run-A": [
+                _tool_calls_step(
+                    "step-A", [_ci_tool_call("tc-A", "a()", [_ci_logs("a")])]
+                )
+            ],
+            "run-B": [
+                _tool_calls_step(
+                    "step-B", [_ci_tool_call("tc-B", "b()", [_ci_logs("b")])]
+                )
+            ],
+        },
+    )
+    _patch_openai_client(monkeypatch, fake_client)
+
+    async with db.async_session() as session:
+        await migration.migrate_tool_calls(session)
+
+    async with db.async_session() as session:
+        tool_calls = await _all(session, models.ToolCall, models.ToolCall.output_index)
+        user = await session.get(models.Message, 1001)
+        asst_a = await session.get(models.Message, 1002)
+        asst_b = await session.get(models.Message, 1003)
+
+    assert user.output_index == 0
+    assert {tc.tool_call_id: tc.output_index for tc in tool_calls} == {
+        "tc-A": 1,
+        "tc-B": 3,
+    }
+    assert asst_a.output_index == 2
+    assert asst_b.output_index == 4
+
+
+async def test_assistant_only_turn_is_backfilled(db, monkeypatch):
+    async with db.async_session() as session:
+        await _seed_thread(
+            session,
+            class_id=1,
+            assistant_id=10,
+            thread_id=100,
+            run_pk=100,
+            openai_run_id="run-A",
+        )
+        await _seed_message(
+            session,
+            id_=1001,
+            thread_id=100,
+            run_id=100,
+            openai_message_id="msg-assistant",
+            output_index=0,
+            metadata={MIGRATION_KEY: {"message_parts": "complete"}},
+        )
+        await session.commit()
+
+    fake_client = _fake_openai_client(
+        messages_by_thread={
+            "thread-100": [_openai_message("msg-assistant", "assistant", "run-A")]
+        },
+        runs_by_id={"run-A": _openai_run("run-A")},
+        steps_by_run={
+            "run-A": [
+                _tool_calls_step(
+                    "step-1", [_ci_tool_call("tc-1", "x()", [_ci_logs("x")])]
+                )
+            ]
+        },
+    )
+    _patch_openai_client(monkeypatch, fake_client)
+
+    async with db.async_session() as session:
+        await migration.migrate_tool_calls(session)
+
+    async with db.async_session() as session:
+        tool_calls = await _all(session, models.ToolCall)
+        message = await session.get(models.Message, 1001)
+
+    assert [tc.tool_call_id for tc in tool_calls] == ["tc-1"]
+    assert _tool_calls_migration_state(message) == "complete"
