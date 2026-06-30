@@ -1237,6 +1237,7 @@ def m19_migrate_all_to_next_gen() -> None:
         async with config.db.driver.async_session() as session:
             logger.info("Migrating all assistants to next-gen...")
             await migrate_all_to_next_gen(session)
+            await session.commit()
             logger.info("Done!")
 
     asyncio.run(_m19_migrate_all_to_next_gen())
