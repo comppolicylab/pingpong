@@ -353,7 +353,7 @@ export class ThreadManager {
 				.sort(compareMessageDataAsc);
 
 			const finalMessages: Message[] = [];
-			for (let i = 0; i < allMessages.length; ) {
+			for (let i = 0; i < allMessages.length;) {
 				const current = allMessages[i];
 
 				if (current.data.role !== 'assistant') {

@@ -1563,8 +1563,7 @@ export type UpdateApiKeyRequest = {
 export type ClassCredentialProvider = 'gemini' | 'elevenlabs';
 
 export type ClassCredentialPurpose =
-	| 'lecture_video_narration_tts'
-	| 'lecture_video_manifest_generation';
+	'lecture_video_narration_tts' | 'lecture_video_manifest_generation';
 
 export type CreateClassCredentialRequest = {
 	api_key?: string;
@@ -1675,10 +1674,7 @@ export type LectureVideoManifestV4 = {
 };
 
 export type LectureVideoManifest =
-	| LectureVideoManifestV1
-	| LectureVideoManifestV2
-	| LectureVideoManifestV3
-	| LectureVideoManifestV4;
+	LectureVideoManifestV1 | LectureVideoManifestV2 | LectureVideoManifestV3 | LectureVideoManifestV4;
 
 export type LectureVideoConfigResponse = {
 	lecture_video: LectureVideoSummary;
@@ -1717,19 +1713,13 @@ export type ValidateLectureVideoVoiceResponse = {
 };
 
 export type LectureVideoSessionState =
-	| 'playing'
-	| 'awaiting_answer'
-	| 'awaiting_post_answer_resume'
-	| 'completed';
+	'playing' | 'awaiting_answer' | 'awaiting_post_answer_resume' | 'completed';
 
 export type AssistantInteractionMode = 'chat' | 'voice' | 'lecture_video';
 export type InteractionMode = AssistantInteractionMode | 'lecture_slides';
 
 export type InteractiveLessonSessionState =
-	| 'playing'
-	| 'awaiting_answer'
-	| 'awaiting_post_answer_resume'
-	| 'completed';
+	'playing' | 'awaiting_answer' | 'awaiting_post_answer_resume' | 'completed';
 
 export type InteractiveLessonOptionPrompt = {
 	id: number;
@@ -2949,16 +2939,7 @@ export type RealtimeVadMode = 'semantic_vad' | 'server_vad';
 export type RealtimeNoiseReduction = 'near_field' | 'far_field' | 'none';
 export type RealtimeTranscriptionModel = 'whisper-1' | 'gpt-realtime-whisper';
 export type RealtimeVoice =
-	| 'alloy'
-	| 'ash'
-	| 'ballad'
-	| 'coral'
-	| 'echo'
-	| 'sage'
-	| 'shimmer'
-	| 'verse'
-	| 'marin'
-	| 'cedar';
+	'alloy' | 'ash' | 'ballad' | 'coral' | 'echo' | 'sage' | 'shimmer' | 'verse' | 'marin' | 'cedar';
 
 /**
  * MCP Server authentication type.
@@ -3276,11 +3257,7 @@ export interface UploadOptions {
 }
 
 export type FileUploadPurpose =
-	| 'assistants'
-	| 'vision'
-	| 'fs_ci_multimodal'
-	| 'fs_multimodal'
-	| 'ci_multimodal';
+	'assistants' | 'vision' | 'fs_ci_multimodal' | 'fs_multimodal' | 'ci_multimodal';
 
 /**
  * Upload a file to a class.
@@ -3935,9 +3912,7 @@ export type TextAnnotationURLCitation = {
 };
 
 export type TextAnnotation =
-	| TextAnnotationFilePath
-	| TextAnnotationFileCitation
-	| TextAnnotationURLCitation;
+	TextAnnotationFilePath | TextAnnotationFileCitation | TextAnnotationURLCitation;
 
 export type Text = {
 	annotations: TextAnnotation[];
@@ -4327,9 +4302,7 @@ export type ToolImageOutput = {
 };
 
 export type ToolOutput =
-	| ToolImageOutput
-	| MessageContentCodeOutputImageURL
-	| MessageContentCodeOutputLogs;
+	ToolImageOutput | MessageContentCodeOutputImageURL | MessageContentCodeOutputLogs;
 
 export type ToolCallIO = {
 	input: string | null;
@@ -4438,11 +4411,7 @@ export type ReasoningCall = {
 
 // TODO(jnu): support function calling, updates for v2
 export type ToolCallDelta =
-	| CodeInterpreterCall
-	| FileSearchCall
-	| WebSearchCall
-	| McpCall
-	| McpListToolsCall;
+	CodeInterpreterCall | FileSearchCall | WebSearchCall | McpCall | McpListToolsCall;
 
 export type ThreadStreamToolCallCreatedChunk = {
 	type: 'tool_call_created';
