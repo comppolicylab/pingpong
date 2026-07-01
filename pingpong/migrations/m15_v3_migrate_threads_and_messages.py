@@ -18,11 +18,18 @@ from openai.types.beta.threads.runs import (
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from pingpong.files import file_extension_to_mime_type
 import pingpong.models as models
-import pingpong.schemas as schemas
 from pingpong.ai import get_openai_client_by_class_id
-from pingpong.schemas import InteractionMode, MessageRole, MessageStatus, RunStatus
+from pingpong.files import file_extension_to_mime_type
+from pingpong.schemas import (
+    CodeInterpreterOutputType,
+    InteractionMode,
+    MessageRole,
+    MessageStatus,
+    RunStatus,
+    ToolCallStatus,
+    ToolCallType,
+)
 from pingpong.server import OpenAIClient
 
 logger = logging.getLogger(__name__)
@@ -323,6 +330,7 @@ async def _migrate_thread(
     )
 
     prev_output_index = -1
+    seen_tool_call_ids: set[str] = set()
 
     async for turn in _iter_migration_turns(openai_client, thread, openai_messages):
         local_run = await _store_turn_run(session, thread, assistant, turn)
@@ -339,18 +347,28 @@ async def _migrate_thread(
 
         # then store tool calls + assistant messages in the proper order
         prev_output_index = await _store_assistant_messages_and_tool_calls(
-            session, openai_client, thread, local_run, turn, prev_output_index
+            session,
+            openai_client,
+            thread,
+            local_run,
+            turn,
+            prev_output_index,
+            seen_tool_call_ids,
         )
 
     deleted_stale_messages = await _delete_stale_messages(
         session, thread, openai_messages
     )
+    deleted_stale_tool_calls = await _delete_stale_tool_calls(
+        session, thread, seen_tool_call_ids
+    )
     pruned_orphan_runs = await _prune_orphan_runs(session, thread)
     logger.info(
         "m15 cleaned thread. thread_id=%s stale_messages_deleted=%s "
-        "orphan_runs_deleted=%s",
+        "stale_tool_calls_deleted=%s orphan_runs_deleted=%s",
         thread.id,
         deleted_stale_messages,
+        deleted_stale_tool_calls,
         pruned_orphan_runs,
     )
 
@@ -392,6 +410,20 @@ async def _delete_stale_messages(
                 models.Message.message_id.not_in(keep_ids),
             )
         )
+    result = await session.execute(stmt)
+    await session.flush()
+    return _rowcount(result.rowcount)
+
+
+async def _delete_stale_tool_calls(
+    session: AsyncSession,
+    thread: models.Thread,
+    seen_tool_call_ids: set[str],
+) -> int:
+    """Delete local tool calls no longer present upstream (empty set clears all)."""
+    stmt = delete(models.ToolCall).where(models.ToolCall.thread_id == thread.id)
+    if seen_tool_call_ids:
+        stmt = stmt.where(models.ToolCall.tool_call_id.not_in(seen_tool_call_ids))
     result = await session.execute(stmt)
     await session.flush()
     return _rowcount(result.rowcount)
@@ -637,6 +669,7 @@ async def _store_assistant_messages_and_tool_calls(
     local_run: models.Run,
     turn: MigrationTurn,
     prev_output_index: int,
+    seen_tool_call_ids: set[str],
 ) -> int:
     """Store the assistant messages and tool calls this turn collapsed onto the single
     local Run, interleaved in OpenAI's chronological run-step order. Also updates
@@ -671,6 +704,7 @@ async def _store_assistant_messages_and_tool_calls(
                     local_run,
                     run_step,
                     prev_output_index,
+                    seen_tool_call_ids,
                 )
                 tool_calls_created += created
 
@@ -727,8 +761,11 @@ async def _store_run_step_tool_calls(
     local_run: models.Run,
     run_step: RunStep,
     prev_output_index: int,
+    seen_tool_call_ids: set[str],
 ) -> tuple[int, int]:
-    """Returns the updated output_index and the number of tool calls created."""
+    """Returns the updated output_index and the number of tool calls created. Records the
+    OpenAI id of every persisted tool call in `seen_tool_call_ids` so stale local tool
+    calls can be pruned afterward."""
     if not isinstance(run_step.step_details, ToolCallsStepDetails):
         return prev_output_index, 0
 
@@ -755,6 +792,7 @@ async def _store_run_step_tool_calls(
                 created,
                 completed,
             )
+            seen_tool_call_ids.add(tool_call.id)
             created_count += 1
         elif isinstance(tool_call, FileSearchToolCall):
             prev_output_index += 1
@@ -767,6 +805,7 @@ async def _store_run_step_tool_calls(
                 created,
                 completed,
             )
+            seen_tool_call_ids.add(tool_call.id)
             created_count += 1
         else:
             # No support for function tool calls, so this should never be executed?
@@ -783,8 +822,8 @@ async def _upsert_tool_call(
     session: AsyncSession,
     local_run: models.Run,
     tool_call: CodeInterpreterToolCall | FileSearchToolCall,
-    tool_call_type: schemas.ToolCallType,
-    status: schemas.ToolCallStatus,
+    tool_call_type: ToolCallType,
+    status: ToolCallStatus,
     output_index: int,
     created: datetime,
     completed: datetime | None,
@@ -839,7 +878,7 @@ async def _persist_code_interpreter_tool_call(
     openai_client: OpenAIClient,
     local_run: models.Run,
     tool_call: CodeInterpreterToolCall,
-    status: schemas.ToolCallStatus,
+    status: ToolCallStatus,
     output_index: int,
     created: datetime,
     completed: datetime | None,
@@ -848,7 +887,7 @@ async def _persist_code_interpreter_tool_call(
         session,
         local_run,
         tool_call,
-        schemas.ToolCallType.CODE_INTERPRETER,
+        ToolCallType.CODE_INTERPRETER,
         status,
         output_index,
         created,
@@ -865,7 +904,7 @@ async def _persist_code_interpreter_tool_call(
                 session,
                 {
                     "tool_call_id": local_tool_call.id,
-                    "output_type": schemas.CodeInterpreterOutputType.LOGS,
+                    "output_type": CodeInterpreterOutputType.LOGS,
                     "logs": output.logs,
                     "created": created,
                 },
@@ -896,7 +935,7 @@ async def _persist_code_interpreter_tool_call(
                 session,
                 {
                     "tool_call_id": local_tool_call.id,
-                    "output_type": schemas.CodeInterpreterOutputType.IMAGE,
+                    "output_type": CodeInterpreterOutputType.IMAGE,
                     "url": data_url,
                     "created": created,
                 },
@@ -907,7 +946,7 @@ async def _persist_file_search_tool_call(
     session: AsyncSession,
     local_run: models.Run,
     tool_call: FileSearchToolCall,
-    status: schemas.ToolCallStatus,
+    status: ToolCallStatus,
     output_index: int,
     created: datetime,
     completed: datetime | None,
@@ -916,7 +955,7 @@ async def _persist_file_search_tool_call(
         session,
         local_run,
         tool_call,
-        schemas.ToolCallType.FILE_SEARCH,
+        ToolCallType.FILE_SEARCH,
         status,
         output_index,
         created,
@@ -973,8 +1012,8 @@ async def _image_output_to_data_url(
     return f"data:{content_type};base64,{b64}"
 
 
-def _map_run_step_status(run_step_status: str) -> schemas.ToolCallStatus:
+def _map_run_step_status(run_step_status: str) -> ToolCallStatus:
     """`cancelled`, `expired`, or any other unexpected value get assigned INCOMPLETE"""
-    if run_step_status not in schemas.ToolCallStatus.__members__.values():
-        return schemas.ToolCallStatus.INCOMPLETE
-    return schemas.ToolCallStatus(run_step_status)
+    if run_step_status not in ToolCallStatus.__members__.values():
+        return ToolCallStatus.INCOMPLETE
+    return ToolCallStatus(run_step_status)

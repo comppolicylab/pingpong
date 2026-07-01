@@ -1454,6 +1454,87 @@ async def test_rerun_does_not_duplicate_tool_calls(
     assert len(fs_results) == 1
 
 
+async def test_stale_local_tool_call_is_deleted(
+    db: DbDriver, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    messages = _single_turn_messages()
+    runs = {"run_1": _generate_openai_run("run_1", completed_at=120)}
+    client = FakeOpenAIClient(
+        messages,
+        runs,
+        steps_by_run={
+            "run_1": [
+                _tool_calls_step(
+                    "step-1", [_ci_tool_call("tc-live", "print(1)", [_ci_logs("1\n")])]
+                )
+            ]
+        },
+    )
+    _patch_client(monkeypatch, client)
+
+    async with db.async_session() as session:
+        thread = await _generate_local_thread(session)
+        stale_run = models.Run(
+            thread_id=thread.id,
+            assistant_id=1,
+            status=schemas.RunStatus.COMPLETED,
+        )
+        session.add(stale_run)
+        await session.flush()
+        session.add(
+            models.ToolCall(
+                tool_call_id="tc-gone",
+                thread_id=thread.id,
+                run_id=stale_run.id,
+                type=schemas.ToolCallType.CODE_INTERPRETER,
+                status=schemas.ToolCallStatus.COMPLETED,
+                output_index=0,
+            )
+        )
+        await session.commit()
+
+    async with db.async_session() as session:
+        await migration.migrate_threads_and_messages_to_v3(session)
+
+    async with db.async_session() as session:
+        tool_calls = await _all_tool_calls(session, 1)
+        assert [tc.tool_call_id for tc in tool_calls] == ["tc-live"]
+
+
+async def test_empty_openai_fetch_deletes_all_local_tool_calls(
+    db: DbDriver, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = FakeOpenAIClient([], {})
+    _patch_client(monkeypatch, client)
+
+    async with db.async_session() as session:
+        thread = await _generate_local_thread(session)
+        stale_run = models.Run(
+            thread_id=thread.id,
+            assistant_id=1,
+            status=schemas.RunStatus.COMPLETED,
+        )
+        session.add(stale_run)
+        await session.flush()
+        session.add(
+            models.ToolCall(
+                tool_call_id="tc-gone",
+                thread_id=thread.id,
+                run_id=stale_run.id,
+                type=schemas.ToolCallType.CODE_INTERPRETER,
+                status=schemas.ToolCallStatus.COMPLETED,
+                output_index=0,
+            )
+        )
+        await session.commit()
+
+    async with db.async_session() as session:
+        await migration.migrate_threads_and_messages_to_v3(session)
+
+    async with db.async_session() as session:
+        assert await _all_tool_calls(session, 1) == []
+
+
 async def test_tool_calls_inserted_before_assistant_message(
     db: DbDriver, monkeypatch: pytest.MonkeyPatch
 ) -> None:
