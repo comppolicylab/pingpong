@@ -4,7 +4,7 @@ FROM node:22.23.1-alpine3.24 AS build_pingpong
 RUN npm install -g pnpm@10
 
 WORKDIR /app/pingpong
-COPY pingpong/package.json pingpong/pnpm-lock.yaml ./
+COPY pingpong/package.json pingpong/pnpm-lock.yaml pingpong/pnpm-workspace.yaml ./
 
 RUN pnpm install --frozen-lockfile
 
