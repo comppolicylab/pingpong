@@ -5335,21 +5335,22 @@ def generate_user_hash(class_: models.Class, user: models.User) -> str:
 def export_user_identifier(thread: models.Thread, class_: models.Class) -> str:
     """Return a comma-separated identifier for users in an exported thread.
 
-    When user info can be shown, this returns display names. Otherwise it returns
-    deterministic hashes. If there are no users, it returns "Unknown user".
+    When user info can be shown, this returns display names for non-anonymous
+    users. Otherwise it returns deterministic hashes. If there are no users, it
+    returns "Unknown user".
     """
 
     can_show_names = thread.display_user_info and not class_.private
-    if can_show_names:
-        user_names = [user_display_name(user) for user in thread.users] or [
-            "Unknown user"
-        ]
-        return ", ".join(user_names)
+    user_identifiers = []
+    for user in thread.users:
+        if can_show_names and not user.anonymous_link_id:
+            user_identifiers.append(
+                user_display_name(user) or generate_user_hash(class_, user)
+            )
+        else:
+            user_identifiers.append(generate_user_hash(class_, user))
 
-    user_hashes = [generate_user_hash(class_, user) for user in thread.users] or [
-        "Unknown user"
-    ]
-    return ", ".join(user_hashes)
+    return ", ".join(user_identifiers or ["Unknown user"])
 
 
 def redact_share_token(share_token: str) -> str:
@@ -5496,7 +5497,7 @@ async def export_threads_multiple_classes(
                     )
 
                     user_hashes_str = ""
-                    if thread.conversation_id:
+                    if thread.conversation_id and thread.conversation_id.strip():
                         user_hashes_str = thread.conversation_id
                     else:
                         user_hashes_str = export_user_identifier(thread, class_)
@@ -5731,7 +5732,7 @@ async def export_class_threads(
                 assistant_name = assistant.name if assistant else "Deleted Assistant"
 
                 user_hashes_str = ""
-                if thread.conversation_id:
+                if thread.conversation_id and thread.conversation_id.strip():
                     user_hashes_str = thread.conversation_id
                 else:
                     user_hashes_str = export_user_identifier(thread, class_)

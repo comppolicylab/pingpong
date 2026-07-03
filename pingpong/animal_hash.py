@@ -48,7 +48,7 @@ def process_threads(
     return threads
 
 
-def name(user: User) -> str:
+def name(user: User) -> str | None:
     """Return some kind of name for the user."""
     if user.display_name:
         return user.display_name

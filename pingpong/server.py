@@ -4790,13 +4790,17 @@ async def get_thread(
                 else:
                     _message.metadata["name"] = "Unknown User"
             else:
-                _message.metadata["name"] = (
-                    name(users[str(message.user_id)])
-                    if thread.display_user_info and is_supervisor
-                    else "Anonymous User"
-                    if thread.private
-                    else pseudonym(thread, users[str(message.user_id)])
-                )
+                message_user = users[str(message.user_id)]
+                if (
+                    thread.display_user_info
+                    and is_supervisor
+                    and not message_user.anonymous_link_id
+                ):
+                    _message.metadata["name"] = name(message_user) or "Unknown User"
+                elif thread.private:
+                    _message.metadata["name"] = "Anonymous User"
+                else:
+                    _message.metadata["name"] = pseudonym(thread, message_user)
             thread_messages.append(_message)
 
         if assistant:
@@ -7205,13 +7209,17 @@ async def list_thread_messages(
                 else:
                     _message.metadata["name"] = "Unknown User"
             else:
-                _message.metadata["name"] = (
-                    name(users[str(message.user_id)])
-                    if thread.display_user_info and is_supervisor
-                    else "Anonymous User"
-                    if thread.private
-                    else pseudonym(thread, users[str(message.user_id)])
-                )
+                message_user = users[str(message.user_id)]
+                if (
+                    thread.display_user_info
+                    and is_supervisor
+                    and not message_user.anonymous_link_id
+                ):
+                    _message.metadata["name"] = name(message_user) or "Unknown User"
+                elif thread.private:
+                    _message.metadata["name"] = "Anonymous User"
+                else:
+                    _message.metadata["name"] = pseudonym(thread, message_user)
             thread_messages.append(_message)
 
         return {
