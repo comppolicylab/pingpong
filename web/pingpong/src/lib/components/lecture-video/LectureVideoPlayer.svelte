@@ -1,11 +1,9 @@
 <script lang="ts">
 	import {
-		BackwardStepSolid,
 		CaptionOutline,
 		CaptionSolid,
 		CheckOutline,
 		CloseOutline,
-		ForwardStepSolid,
 		PauseSolid,
 		PlaySolid,
 		RefreshOutline,
@@ -13,6 +11,8 @@
 		VolumeUpSolid,
 		VolumeMuteSolid
 	} from 'flowbite-svelte-icons';
+	import SkipForwardIcon from '$lib/assets/icons/SkipForwardIcon.svelte';
+	import SkipBackwardIcon from '$lib/assets/icons/SkipBackwardIcon.svelte';
 	import type { Snippet } from 'svelte';
 	import { fade } from 'svelte/transition';
 
@@ -1378,9 +1378,9 @@
 				{:else if keyboardActionIndicator === 'mute'}
 					<VolumeMuteSolid class="size-12 text-white" />
 				{:else if keyboardActionIndicator === 'skipForward'}
-					<ForwardStepSolid class="size-12 text-white" />
+					<SkipForwardIcon class="size-12" />
 				{:else if keyboardActionIndicator === 'skipBackward'}
-					<BackwardStepSolid class="size-12 text-white" />
+					<SkipBackwardIcon class="size-12" />
 				{:else}
 					<VolumeUpSolid class="size-12 text-white" />
 				{/if}
