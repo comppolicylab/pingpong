@@ -12,7 +12,7 @@ RUN openssl req -x509 -newkey rsa:4096 -sha256 -nodes \
 
 RUN [ "chmod", "666", "/etc/ssl/pingpong-openfga-self-signed.key" ]
 
-FROM openfga/openfga:v1.18.0
+FROM openfga/openfga:v1.18.1
 
 COPY --from=builder /etc/ssl/pingpong-openfga-self-signed.key /etc/ssl/pingpong-openfga-self-signed.key
 COPY --from=builder /etc/ssl/pingpong-openfga-self-signed.crt /etc/ssl/pingpong-openfga-self-signed.crt
