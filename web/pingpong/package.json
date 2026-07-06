@@ -50,7 +50,7 @@
 	},
 	"type": "module",
 	"dependencies": {
-		"@sentry/sveltekit": "^10.62.0",
+		"@sentry/sveltekit": "^10.63.0",
 		"@zerodevx/svelte-toast": "^0.9.6",
 		"dayjs": "^1.11.21",
 		"dotenv": "^17.4.2",
@@ -63,6 +63,6 @@
 		"mermaid": "^11.16.0",
 		"pdfjs-dist": "^6.1.200",
 		"svelte-copy": "^2.0.0",
-		"tldts": "^7.4.5"
+		"tldts": "^7.4.6"
 	}
 }
